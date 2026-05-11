@@ -1,6 +1,6 @@
 use crate::loader::reader::{ByteReader, Endian};
 use crate::loader::types::{
-    DataBuffer, FunctionInfo, LoadedBinary, LoadedBinaryBuilder, SectionInfo, extract_cstring,
+    extract_cstring, DataBuffer, FunctionInfo, LoadedBinary, LoadedBinaryBuilder, SectionInfo,
 };
 use crate::prelude::*;
 use fission_core::architecture::select_elf_load_spec;
@@ -29,7 +29,12 @@ const STT_OBJECT: u8 = 1;
 const STT_FUNC: u8 = 2;
 const STB_GLOBAL: u8 = 1;
 const STB_WEAK: u8 = 2;
+const EM_ARM: u16 = 40;
 const EM_RISCV: u16 = 243;
+const R_ARM_PC24: u32 = 1;
+const R_ARM_ABS32: u32 = 2;
+const R_ARM_CALL: u32 = 28;
+const R_ARM_JUMP24: u32 = 29;
 const R_RISCV_HI20: u32 = 26;
 const R_RISCV_LO12_I: u32 = 27;
 const R_RISCV_LO12_S: u32 = 28;
@@ -234,7 +239,7 @@ impl ElfLoader {
             .build()
     }
 
-    fn parse_32(data: DataBuffer, path: String, endian: Endian) -> Result<LoadedBinary> {
+    fn parse_32(mut data: DataBuffer, path: String, endian: Endian) -> Result<LoadedBinary> {
         let bytes = data.as_slice();
         let reader = ByteReader::new(bytes, endian);
         // Read Header
@@ -346,6 +351,10 @@ impl ElfLoader {
                 &mut relocation_symbols,
                 endian,
             );
+            if is_relocatable && header.machine == EM_ARM {
+                let patches = arm_relocation_patches_32(bytes, &shdrs, &section_addresses, endian);
+                apply_u32_relocation_patches(&mut data, patches, endian);
+            }
         } else if !is_relocatable {
             sections_info.extend(load_segments_as_sections_32(&phdrs));
         }
@@ -840,6 +849,136 @@ fn apply_riscv_relocation_to_word(
     }
 }
 
+fn arm_relocation_patches_32(
+    full_data: &[u8],
+    shdrs: &[Elf32Shdr],
+    section_addresses: &[u64],
+    endian: Endian,
+) -> Vec<(usize, u32)> {
+    let reader = ByteReader::new(full_data, endian);
+    let mut patches = Vec::new();
+    for shdr in shdrs
+        .iter()
+        .filter(|shdr| matches!(shdr.sh_type, SHT_REL | SHT_RELA))
+    {
+        let Some(target_section) = shdrs.get(shdr.sh_info as usize) else {
+            continue;
+        };
+        let Some(target_base) = section_addresses.get(shdr.sh_info as usize).copied() else {
+            continue;
+        };
+        let Some(symtab) = shdrs.get(shdr.sh_link as usize) else {
+            continue;
+        };
+        let entry_size = if shdr.sh_entsize > 0 {
+            shdr.sh_entsize as usize
+        } else if shdr.sh_type == SHT_RELA {
+            12
+        } else {
+            8
+        };
+        let count = (shdr.sh_size as usize).checked_div(entry_size).unwrap_or(0);
+        let start = shdr.sh_offset as usize;
+        for index in 0..count {
+            let offset = start + index * entry_size;
+            if offset + entry_size > full_data.len() {
+                break;
+            }
+            let Ok(r_offset) = reader.u32(offset) else {
+                break;
+            };
+            let Ok(r_info) = reader.u32(offset + 4) else {
+                break;
+            };
+            let reloc_type = r_info & 0xff;
+            let symbol_index = (r_info >> 8) as usize;
+            let Some(symbol_value) =
+                symbol_value_32(full_data, symtab, section_addresses, symbol_index, endian)
+            else {
+                continue;
+            };
+            let patch_offset = target_section
+                .sh_offset
+                .checked_add(r_offset)
+                .and_then(|value| usize::try_from(value).ok());
+            let Some(patch_offset) = patch_offset else {
+                continue;
+            };
+            let Ok(word) = reader.u32(patch_offset) else {
+                continue;
+            };
+            let place = target_base.saturating_add(r_offset as u64);
+            let explicit_addend = if shdr.sh_type == SHT_RELA {
+                reader.i32(offset + 8).ok().map(i64::from)
+            } else {
+                None
+            };
+            if let Some(patched) =
+                apply_arm_relocation_to_word(word, reloc_type, symbol_value, place, explicit_addend)
+            {
+                patches.push((patch_offset, patched));
+            }
+        }
+    }
+    patches
+}
+
+fn symbol_value_32(
+    full_data: &[u8],
+    symtab: &Elf32Shdr,
+    section_addresses: &[u64],
+    symbol_index: usize,
+    endian: Endian,
+) -> Option<u64> {
+    let entry_size = if symtab.sh_entsize > 0 {
+        symtab.sh_entsize as usize
+    } else {
+        Elf32Sym::SIZE
+    };
+    let offset = (symtab.sh_offset as usize).checked_add(symbol_index.checked_mul(entry_size)?)?;
+    if offset + entry_size > full_data.len() {
+        return None;
+    }
+    let reader = ByteReader::new(full_data, endian);
+    let symbol = Elf32Sym::parse(&reader, offset).ok()?;
+    if symbol.st_shndx == SHN_UNDEF {
+        return None;
+    }
+    let base = section_addresses.get(symbol.st_shndx as usize).copied()?;
+    Some(base.saturating_add(symbol.st_value as u64))
+}
+
+fn apply_arm_relocation_to_word(
+    word: u32,
+    reloc_type: u32,
+    symbol_value: u64,
+    place: u64,
+    explicit_addend: Option<i64>,
+) -> Option<u32> {
+    match reloc_type {
+        R_ARM_ABS32 => {
+            let addend = explicit_addend.unwrap_or(word as i32 as i64);
+            let value = (symbol_value as i128).wrapping_add(addend as i128) as u32;
+            Some(value)
+        }
+        R_ARM_PC24 | R_ARM_CALL | R_ARM_JUMP24 => {
+            let addend = explicit_addend.unwrap_or_else(|| arm_branch_addend(word));
+            let value = (symbol_value as i128)
+                .wrapping_add(addend as i128)
+                .wrapping_sub(place as i128);
+            let encoded = ((value >> 2) as i32 as u32) & 0x00ff_ffff;
+            Some((word & 0xff00_0000) | encoded)
+        }
+        _ => None,
+    }
+}
+
+fn arm_branch_addend(word: u32) -> i64 {
+    let imm24 = word & 0x00ff_ffff;
+    let signed = ((imm24 << 8) as i32) >> 6;
+    i64::from(signed)
+}
+
 fn apply_u32_relocation_patches(
     data: &mut DataBuffer,
     patches: impl IntoIterator<Item = (usize, u32)>,
@@ -1147,6 +1286,42 @@ mod tests {
             apply_riscv_relocation_to_word(sd_a4_a5_zero, R_RISCV_LO12_S, 0x1000a0, 0)
                 .expect("LO12_S patch"),
             0x0ae7_b023
+        );
+    }
+
+    #[test]
+    fn arm_call_relocation_patch_encodes_pc_relative_branch_field() {
+        let bl_self_loop = 0xebff_fffe;
+
+        assert_eq!(
+            arm_branch_addend(bl_self_loop),
+            -8,
+            "REL addend is encoded in the ARM branch immediate"
+        );
+        assert_eq!(
+            apply_arm_relocation_to_word(bl_self_loop, R_ARM_CALL, 0x100000, 0x100018, None)
+                .expect("ARM CALL patch"),
+            0xebff_fff8
+        );
+    }
+
+    #[test]
+    fn elf32_arm_relocatable_call_relocations_patch_loaded_image() {
+        let fixture = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../benchmark/binary/ARM4t_be/baremetal/small/binary/c/function_calls.o");
+        if !fixture.exists() {
+            eprintln!("skip: ARM4t function_calls fixture missing");
+            return;
+        }
+
+        let binary = LoadedBinary::from_file(&fixture).expect("load ARM4t relocatable object");
+        let call = binary
+            .view_bytes(0x100018, 4)
+            .expect("recursive_fib call bytes");
+        assert_eq!(
+            call,
+            [0xeb, 0xff, 0xff, 0xf8],
+            "R_ARM_CALL should retarget recursive_fib BL to 0x100000"
         );
     }
 }
