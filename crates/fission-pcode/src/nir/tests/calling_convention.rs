@@ -128,6 +128,17 @@ fn aarch64_x0_to_x7_are_params() {
 }
 
 #[test]
+fn aarch64_compact_x0_offset_is_param() {
+    let (name, idx) = register_name_with_param(0x00, 8, CallingConvention::AArch64).unwrap();
+    assert_eq!(name, "param_1");
+    assert_eq!(idx, Some(0));
+
+    let (name, idx) = register_name_with_param(0x00, 4, CallingConvention::AArch64).unwrap();
+    assert_eq!(name, "param_1");
+    assert_eq!(idx, Some(0));
+}
+
+#[test]
 fn aarch64_subregister_aliases_map_to_param_slots() {
     let abi = AbiState::new(CallingConvention::AArch64, true, 8, 0);
     assert_eq!(abi.param_slot_for_name("x0"), Some(0));
@@ -902,7 +913,9 @@ fn rax_is_never_a_param() {
         CallingConvention::AArch64,
     ] {
         if abi == CallingConvention::AArch64 {
-            assert!(register_name_with_param(0x00, 8, abi).is_none());
+            let (name, idx) = register_name_with_param(0x00, 8, abi).unwrap();
+            assert_eq!(name, "param_1");
+            assert_eq!(idx, Some(0));
         } else {
             let (name, idx) = register_name_with_param(0x00, 8, abi).unwrap();
             assert_eq!(name, "rax", "rax should stay 'rax' in {abi:?}");

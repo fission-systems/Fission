@@ -463,15 +463,28 @@ pub(crate) fn register_name_with_param(
     abi: CallingConvention,
 ) -> Option<(&'static str, Option<usize>)> {
     let hw_name = match abi {
+        CallingConvention::AArch64 if offset == 0x00 => match _size {
+            4 => "w0",
+            _ => "x0",
+        },
         CallingConvention::AArch64 => aarch64_ghidra_reg_name(offset, _size)?,
         CallingConvention::WindowsX64 | CallingConvention::SystemVAmd64 => {
             x64_ghidra_reg_name(offset)?
         }
     };
-    let param_idx = abi
-        .param_offsets()
-        .iter()
-        .position(|&param_offset| param_offset == offset);
+    let param_idx = match abi {
+        CallingConvention::AArch64 => aarch64_gpr_family_index(hw_name).and_then(|name_family| {
+            abi.param_offsets().iter().position(|&param_offset| {
+                aarch64_ghidra_reg_name(param_offset, 8)
+                    .and_then(aarch64_gpr_family_index)
+                    .is_some_and(|family| family == name_family)
+            })
+        }),
+        CallingConvention::WindowsX64 | CallingConvention::SystemVAmd64 => abi
+            .param_offsets()
+            .iter()
+            .position(|&param_offset| param_offset == offset),
+    };
     match param_idx {
         Some(idx) => Some((PARAM_NAMES[idx], Some(idx))),
         None => Some((hw_name, None)),
