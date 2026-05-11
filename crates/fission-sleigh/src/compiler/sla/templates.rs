@@ -887,6 +887,7 @@ fn map_pcode_opcode(code: u32) -> CompiledOpTplOpcode {
         PcodeOpcode::IntRem => CompiledOpTplOpcode::IntRem,
         PcodeOpcode::IntSRem => CompiledOpTplOpcode::IntSRem,
         PcodeOpcode::BoolNegate => CompiledOpTplOpcode::BoolNegate,
+        PcodeOpcode::BoolXor => CompiledOpTplOpcode::BoolXor,
         PcodeOpcode::BoolAnd => CompiledOpTplOpcode::BoolAnd,
         PcodeOpcode::BoolOr => CompiledOpTplOpcode::BoolOr,
         PcodeOpcode::MultiEqual => CompiledOpTplOpcode::Build,

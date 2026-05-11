@@ -562,6 +562,7 @@ impl<'c> CompiledTableEmitter<'c> {
             | CompiledOpTplOpcode::IntLessEqual
             | CompiledOpTplOpcode::IntSLess
             | CompiledOpTplOpcode::IntSLessEqual
+            | CompiledOpTplOpcode::BoolXor
             | CompiledOpTplOpcode::BoolAnd
             | CompiledOpTplOpcode::BoolOr => {
                 let out_tpl = op
@@ -1487,6 +1488,7 @@ impl<'c> CompiledTableEmitter<'c> {
             CompiledOpTplOpcode::IntLessEqual => PcodeOpcode::IntLessEqual,
             CompiledOpTplOpcode::IntSLess => PcodeOpcode::IntSLess,
             CompiledOpTplOpcode::IntSLessEqual => PcodeOpcode::IntSLessEqual,
+            CompiledOpTplOpcode::BoolXor => PcodeOpcode::BoolXor,
             CompiledOpTplOpcode::BoolAnd => PcodeOpcode::BoolAnd,
             CompiledOpTplOpcode::BoolOr => PcodeOpcode::BoolOr,
             CompiledOpTplOpcode::Piece => PcodeOpcode::Piece,

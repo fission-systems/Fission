@@ -693,6 +693,30 @@ fn generated_runtime_preserves_arm_conditional_execution_wrapper_pcode() {
 }
 
 #[test]
+fn generated_runtime_executes_arm_bool_xor_template_opcode() {
+    require_packaged_ghidra_sla!();
+    let arm_spec = spec_root_for_arch("ARM").join("ARM4_le.slaspec");
+    let compiled = compile_frontend_for_entry_spec(&arm_spec).expect("compile ARM4_le");
+    let bytes = [0x00, 0x30, 0xcc, 0xe2]; // sbc r3,r12,#0
+
+    let decoded = decode_instruction(&compiled, None, &bytes, 0x100048).expect("decode sbc");
+    assert_eq!(decoded.length, bytes.len());
+    assert_eq!(decoded.mnemonic, "sbc");
+
+    let (ops, length, details) = decode_and_lift_with_details(&compiled, None, &bytes, 0x100048)
+        .expect("lift ARM sbc with BOOL_XOR template opcode");
+    assert_eq!(length as usize, bytes.len());
+    assert_eq!(
+        details.template_source,
+        Some(CompiledTemplateSource::SpecDerived)
+    );
+    assert!(
+        ops.iter().any(|op| op.opcode == PcodeOpcode::BoolXor),
+        "expected ARM sbc template to emit BOOL_XOR; ops={ops:?}"
+    );
+}
+
+#[test]
 fn compiled_table_policy_symbols_stay_architecture_neutral() {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let disabled_branch = ["if", "false"].join(" ");
