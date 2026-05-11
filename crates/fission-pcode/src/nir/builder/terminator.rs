@@ -3353,6 +3353,7 @@ mod tests {
         let options = MlilPreviewOptions {
             pe_x64_only: false,
             is_64bit: true,
+            is_big_endian: false,
             pointer_size: 8,
             format: "ELF64".to_string(),
             image_base: 0,
@@ -3435,6 +3436,7 @@ mod tests {
         let options = MlilPreviewOptions {
             pe_x64_only: false,
             is_64bit: false,
+            is_big_endian: false,
             pointer_size: 4,
             format: "ELF32".to_string(),
             image_base: 0,

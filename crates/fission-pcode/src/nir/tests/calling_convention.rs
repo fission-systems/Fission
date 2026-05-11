@@ -189,6 +189,90 @@ fn aarch64_return_register_is_named_and_recognized() {
     assert!(!is_primary_return_register(&x0));
 }
 
+#[test]
+fn aarch64_be_unique_subrange_projection_uses_low_value_view() {
+    let mut options = preview_options();
+    options.calling_convention = CallingConvention::AArch64;
+    options.format = "ELF64".to_string();
+    options.pe_x64_only = false;
+    options.is_big_endian = true;
+
+    let param = reg(0x4004, 4);
+    let mixed = uniq(0x100, 8);
+    let shifted = uniq(0x110, 8);
+    let shifted_low_be = Varnode {
+        offset: 0x114,
+        size: 4,
+        ..shifted.clone()
+    };
+    let x9 = reg(0x4048, 8);
+    let w0_be = reg(0x4004, 4);
+    let ret_target = reg(0, 8);
+    let x30 = reg(0x40f0, 8);
+    let func = PcodeFunction {
+        blocks: vec![PcodeBasicBlock {
+            index: 0,
+            start_address: 0x1000,
+            successors: vec![],
+            ops: vec![
+                PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::Piece,
+                    address: 0x1000,
+                    output: Some(mixed.clone()),
+                    inputs: vec![param.clone(), param],
+                    asm_mnemonic: None,
+                },
+                PcodeOp {
+                    seq_num: 1,
+                    opcode: PcodeOpcode::IntRight,
+                    address: 0x1004,
+                    output: Some(shifted.clone()),
+                    inputs: vec![mixed, cst(27, 4)],
+                    asm_mnemonic: None,
+                },
+                PcodeOp {
+                    seq_num: 2,
+                    opcode: PcodeOpcode::IntZExt,
+                    address: 0x1008,
+                    output: Some(x9.clone()),
+                    inputs: vec![shifted_low_be],
+                    asm_mnemonic: None,
+                },
+                PcodeOp {
+                    seq_num: 3,
+                    opcode: PcodeOpcode::Copy,
+                    address: 0x100c,
+                    output: Some(w0_be),
+                    inputs: vec![x9],
+                    asm_mnemonic: None,
+                },
+                PcodeOp {
+                    seq_num: 4,
+                    opcode: PcodeOpcode::Copy,
+                    address: 0x1010,
+                    output: Some(ret_target),
+                    inputs: vec![x30.clone()],
+                    asm_mnemonic: None,
+                },
+                PcodeOp {
+                    seq_num: 5,
+                    opcode: PcodeOpcode::Return,
+                    address: 0x1010,
+                    output: None,
+                    inputs: vec![x30],
+                    asm_mnemonic: None,
+                },
+            ],
+        }],
+    };
+
+    let code = render_mlil_preview(&func, "be_unique_low_view", 0x1000, &options)
+        .expect("preview render");
+    assert!(code.contains("/ 134217728"), "{code}");
+    assert!(!code.contains(">> 32"), "{code}");
+}
+
 // ── ARM32 PCS ─────────────────────────────────────────────────────────────────
 
 #[test]

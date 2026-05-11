@@ -1822,6 +1822,8 @@ pub enum HirBinaryOp {
 pub struct NirRenderOptions {
     pub pe_x64_only: bool,
     pub is_64bit: bool,
+    #[serde(default)]
+    pub is_big_endian: bool,
     pub pointer_size: u32,
     pub format: String,
     pub image_base: u64,
@@ -2068,6 +2070,10 @@ impl NirRenderOptions {
         Self {
             pe_x64_only: true,
             is_64bit: binary.is_64bit,
+            is_big_endian: binary
+                .sleigh_language_id()
+                .unwrap_or(&binary.arch_spec)
+                .contains(":BE:"),
             pointer_size: if binary.is_64bit { 8 } else { 4 },
             format: binary.format.clone(),
             image_base: inner.image_base,

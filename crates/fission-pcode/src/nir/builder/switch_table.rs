@@ -396,6 +396,7 @@ mod tests {
         NirRenderOptions {
             pe_x64_only: false,
             is_64bit: true,
+            is_big_endian: false,
             pointer_size: 8,
             format: "PE64".to_owned(),
             image_base: 0x400000,

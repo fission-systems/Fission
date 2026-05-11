@@ -875,6 +875,7 @@ pub(crate) fn promote_single_entry_guarded_tail_regions_for_test(
     let options = MlilPreviewOptions {
         pe_x64_only: true,
         is_64bit: true,
+        is_big_endian: false,
         pointer_size: 8,
         format: "PE".to_string(),
         image_base: 0,
@@ -902,6 +903,7 @@ pub(crate) fn discover_guarded_tail_candidates_for_stats(body: &[HirStmt]) -> Pr
     let options = MlilPreviewOptions {
         pe_x64_only: true,
         is_64bit: true,
+        is_big_endian: false,
         pointer_size: 8,
         format: "PE".to_string(),
         image_base: 0,
@@ -978,6 +980,7 @@ mod tests {
         let options = Box::leak(Box::new(MlilPreviewOptions {
             pe_x64_only: true,
             is_64bit: true,
+            is_big_endian: false,
             pointer_size: 8,
             format: "PE".to_string(),
             image_base: 0,

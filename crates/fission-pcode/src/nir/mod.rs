@@ -608,6 +608,7 @@ mod global_decl_tests {
         MlilPreviewOptions {
             pe_x64_only: false,
             is_64bit: true,
+            is_big_endian: false,
             pointer_size: 8,
             format: "ELF64".to_string(),
             image_base: 0,

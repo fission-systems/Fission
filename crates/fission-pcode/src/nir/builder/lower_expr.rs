@@ -395,7 +395,7 @@ impl<'a> PreviewBuilder<'a> {
         if !Self::varnode_covers(output, requested) {
             return expr;
         }
-        let byte_offset = requested.offset.saturating_sub(output.offset);
+        let byte_offset = self.projection_shift_bytes(output, requested);
         let shifted = if byte_offset == 0 {
             expr
         } else {
@@ -416,6 +416,15 @@ impl<'a> PreviewBuilder<'a> {
             ty: type_from_size(requested.size, false),
             expr: Box::new(shifted),
         }
+    }
+
+    fn projection_shift_bytes(&self, output: &Varnode, requested: &Varnode) -> u64 {
+        if self.options.is_big_endian {
+            let output_end = output.offset.saturating_add(u64::from(output.size));
+            let requested_end = requested.offset.saturating_add(u64::from(requested.size));
+            return output_end.saturating_sub(requested_end);
+        }
+        requested.offset.saturating_sub(output.offset)
     }
 
     fn aarch64_gpr_low_view_alias(&self, output: &Varnode, requested: &Varnode) -> bool {

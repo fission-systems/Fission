@@ -233,6 +233,7 @@ mod tests {
         MlilPreviewOptions {
             pe_x64_only: true,
             is_64bit: true,
+            is_big_endian: false,
             pointer_size: 8,
             format: "PE".to_string(),
             image_base: 0,

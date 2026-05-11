@@ -52,6 +52,7 @@ fn preview_options() -> MlilPreviewOptions {
     MlilPreviewOptions {
         pe_x64_only: true,
         is_64bit: true,
+        is_big_endian: false,
         pointer_size: 8,
         format: "PE".to_string(),
         image_base: 0x1400_0000,
@@ -70,6 +71,7 @@ fn preview_options_x86() -> MlilPreviewOptions {
     MlilPreviewOptions {
         pe_x64_only: true,
         is_64bit: false,
+        is_big_endian: false,
         pointer_size: 4,
         format: "PE".to_string(),
         image_base: 0x400000,
