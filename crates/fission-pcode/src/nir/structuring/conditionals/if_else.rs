@@ -36,7 +36,7 @@ impl<'a> PreviewBuilder<'a> {
             let Some(then_idx) = self.forward_join_idx_from_address(idx, true_target) else {
                 return Ok(None);
             };
-            (negate_expr(cond), then_idx, next_idx)
+            (negate_expr(cond), next_idx, then_idx)
         } else {
             return Ok(None);
         };
@@ -119,7 +119,7 @@ impl<'a> PreviewBuilder<'a> {
             let Some(then_idx) = self.forward_join_idx_from_address(idx, true_target) else {
                 return Ok(None);
             };
-            (negate_expr(cond), then_idx, next_idx)
+            (negate_expr(cond), next_idx, then_idx)
         } else {
             return Ok(None);
         };

@@ -328,7 +328,15 @@ impl<'a> PreviewBuilder<'a> {
             self.output_replacement_is_complete(block, op_idx, output, &rhs);
         let replacement_plan =
             self.build_replacement_value_plan(block, op_idx, terminator_index, output, &rhs);
-        if replacement_plan.is_complete() && loop_carried_lhs_name.is_none() {
+        let merge_lhs_name = if loop_carried_lhs_name.is_none() {
+            self.merge_binding_name_for_materialized_output(block, op_idx, output, &rhs)
+        } else {
+            None
+        };
+        if replacement_plan.is_complete()
+            && loop_carried_lhs_name.is_none()
+            && merge_lhs_name.is_none()
+        {
             self.trace_materialization_plan(
                 block_addr,
                 op,
@@ -391,7 +399,7 @@ impl<'a> PreviewBuilder<'a> {
                     &rhs,
                     suppression_enabled,
                 );
-                if suppression_enabled {
+                if suppression_enabled && merge_lhs_name.is_none() {
                     self.trace_no_consumer_suppressed(block_addr, op.seq_num, output, &rhs);
                     return Ok(None);
                 }
@@ -448,9 +456,7 @@ impl<'a> PreviewBuilder<'a> {
                 preserve_materialization,
             );
             name
-        } else if let Some(name) =
-            self.merge_binding_name_for_materialized_output(block, op_idx, output, &rhs)
-        {
+        } else if let Some(name) = merge_lhs_name {
             self.bind_materialized_output_to_existing_name(
                 op,
                 output,
@@ -1336,5 +1342,138 @@ mod tests {
         assert!(code.contains("if ("), "{code}");
         assert!(code.contains(" / "), "{code}");
         assert!(code.contains(" + 5"), "{code}");
+    }
+
+    #[test]
+    fn duplicate_start_join_preserves_register_addend_after_zero_extend() {
+        fn op_at(
+            seq_num: u32,
+            address: u64,
+            opcode: PcodeOpcode,
+            output: Option<Varnode>,
+            inputs: Vec<Varnode>,
+        ) -> PcodeOp {
+            PcodeOp {
+                seq_num,
+                opcode,
+                address,
+                output,
+                inputs,
+                asm_mnemonic: None,
+            }
+        }
+
+        let merge = register(RUST_SLEIGH_UNIQUE_SPACE_ID, 0x82b00, 4);
+        let cond = register(RUST_SLEIGH_UNIQUE_SPACE_ID, 0x82c00, 1);
+        let dividend = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0x4048, 4);
+        let denom = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0x4040, 4);
+        let param = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0x4000, 4);
+        let factor = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0x4050, 4);
+        let w8 = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0x4040, 4);
+        let x8 = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0x4040, 8);
+        let product = register(RUST_SLEIGH_UNIQUE_SPACE_ID, 0x51200, 4);
+        let madd_sum = register(RUST_SLEIGH_UNIQUE_SPACE_ID, 0x51400, 4);
+        let ret = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0x4000, 4);
+        let x30 = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0x40f0, 8);
+        let ret_target = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0, 8);
+        let pcode = pcode_function(vec![
+            PcodeBasicBlock {
+                index: 0,
+                start_address: 0x1000,
+                successors: vec![2, 1],
+                ops: vec![
+                    op_at(
+                        0,
+                        0x1000,
+                        PcodeOpcode::Copy,
+                        Some(merge.clone()),
+                        vec![Varnode::constant(0, 4)],
+                    ),
+                    op_at(
+                        2,
+                        0x1010,
+                        PcodeOpcode::CBranch,
+                        None,
+                        vec![Varnode::constant(2, 8), cond],
+                    ),
+                ],
+            },
+            PcodeBasicBlock {
+                index: 1,
+                start_address: 0x1010,
+                successors: vec![2],
+                ops: vec![op_at(
+                    3,
+                    0x1010,
+                    PcodeOpcode::IntDiv,
+                    Some(merge.clone()),
+                    vec![dividend, denom],
+                )],
+            },
+            PcodeBasicBlock {
+                index: 2,
+                start_address: 0x1010,
+                successors: Vec::new(),
+                ops: vec![
+                    op_at(
+                        4,
+                        0x1010,
+                        PcodeOpcode::IntZExt,
+                        Some(x8.clone()),
+                        vec![merge],
+                    ),
+                    op_at(
+                        5,
+                        0x1014,
+                        PcodeOpcode::IntMult,
+                        Some(product.clone()),
+                        vec![param.clone(), factor],
+                    ),
+                    op_at(
+                        6,
+                        0x1014,
+                        PcodeOpcode::IntAdd,
+                        Some(madd_sum.clone()),
+                        vec![w8, product],
+                    ),
+                    op_at(
+                        7,
+                        0x1014,
+                        PcodeOpcode::IntZExt,
+                        Some(x8),
+                        vec![madd_sum],
+                    ),
+                    op_at(
+                        8,
+                        0x1018,
+                        PcodeOpcode::IntXor,
+                        Some(ret),
+                        vec![param, register(RUST_SLEIGH_REGISTER_SPACE_ID, 0x4040, 4)],
+                    ),
+                    op_at(
+                        9,
+                        0x101c,
+                        PcodeOpcode::Copy,
+                        Some(ret_target),
+                        vec![x30.clone()],
+                    ),
+                    op_at(10, 0x101c, PcodeOpcode::Return, None, vec![x30]),
+                ],
+            },
+        ]);
+        let mut options = crate::nir::builder::materialize::test_support::test_options();
+        options.calling_convention = CallingConvention::AArch64;
+        options.format = "ELF64".to_string();
+        options.pe_x64_only = false;
+
+        let code = render_mlil_preview(&pcode, "madd_addend", 0x1000, &options).expect("render");
+        let then_body = code
+            .split("if (!tmp_82c00) {")
+            .nth(1)
+            .and_then(|suffix| suffix.split("} else {").next())
+            .expect("negated fallthrough arm");
+        assert!(then_body.contains(" / "), "{code}");
+        assert!(code.contains(" * "), "{code}");
+        assert!(code.contains(" + "), "{code}");
     }
 }
