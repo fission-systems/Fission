@@ -1,6 +1,6 @@
 use crate::loader::reader::{ByteReader, Endian};
 use crate::loader::types::{
-    extract_cstring, DataBuffer, FunctionInfo, LoadedBinary, LoadedBinaryBuilder, SectionInfo,
+    DataBuffer, FunctionInfo, LoadedBinary, LoadedBinaryBuilder, SectionInfo, extract_cstring,
 };
 use crate::prelude::*;
 use fission_core::architecture::select_elf_load_spec;
@@ -29,6 +29,11 @@ const STT_OBJECT: u8 = 1;
 const STT_FUNC: u8 = 2;
 const STB_GLOBAL: u8 = 1;
 const STB_WEAK: u8 = 2;
+const EM_RISCV: u16 = 243;
+const R_RISCV_HI20: u32 = 26;
+const R_RISCV_LO12_I: u32 = 27;
+const R_RISCV_LO12_S: u32 = 28;
+const R_RISCV_RELAX: u32 = 51;
 const RELOCATABLE_IMAGE_BASE: u64 = 0x100000;
 const ELF_EXTERNAL_IMAGE_BASE: u64 = 0xffff_2000_0000_0000;
 
@@ -64,7 +69,7 @@ impl ElfLoader {
         }
     }
 
-    fn parse_64(data: DataBuffer, path: String, endian: Endian) -> Result<LoadedBinary> {
+    fn parse_64(mut data: DataBuffer, path: String, endian: Endian) -> Result<LoadedBinary> {
         let bytes = data.as_slice();
         let reader = ByteReader::new(bytes, endian);
         // Read Header
@@ -177,6 +182,11 @@ impl ElfLoader {
                 &mut relocation_symbols,
                 endian,
             );
+            if is_relocatable && header.machine == EM_RISCV {
+                let patches =
+                    riscv_relocation_patches_64(bytes, &shdrs, &section_addresses, endian);
+                apply_u32_relocation_patches(&mut data, patches, endian);
+            }
         } else if !is_relocatable {
             sections_info.extend(load_segments_as_sections_64(&phdrs));
         }
@@ -711,6 +721,143 @@ fn parse_relocation_symbols_64(
     }
 }
 
+fn riscv_relocation_patches_64(
+    full_data: &[u8],
+    shdrs: &[Elf64Shdr],
+    section_addresses: &[u64],
+    endian: Endian,
+) -> Vec<(usize, u32)> {
+    let reader = ByteReader::new(full_data, endian);
+    let mut patches = Vec::new();
+    for shdr in shdrs.iter().filter(|shdr| shdr.sh_type == SHT_RELA) {
+        let Some(target_section) = shdrs.get(shdr.sh_info as usize) else {
+            continue;
+        };
+        let Some(symtab) = shdrs.get(shdr.sh_link as usize) else {
+            continue;
+        };
+        let entry_size = if shdr.sh_entsize > 0 {
+            shdr.sh_entsize as usize
+        } else {
+            24
+        };
+        let count = (shdr.sh_size as usize).checked_div(entry_size).unwrap_or(0);
+        let start = shdr.sh_offset as usize;
+        for index in 0..count {
+            let offset = start + index * entry_size;
+            if offset + entry_size > full_data.len() {
+                break;
+            }
+            let Ok(r_offset) = reader.u64(offset) else {
+                break;
+            };
+            let Ok(r_info) = reader.u64(offset + 8) else {
+                break;
+            };
+            let Ok(addend) = reader.u64(offset + 16) else {
+                break;
+            };
+            let reloc_type = (r_info & 0xffff_ffff) as u32;
+            if reloc_type == R_RISCV_RELAX {
+                continue;
+            }
+            let symbol_index = (r_info >> 32) as usize;
+            let Some(symbol_value) =
+                symbol_value_64(full_data, symtab, section_addresses, symbol_index, endian)
+            else {
+                continue;
+            };
+            let patch_offset = target_section
+                .sh_offset
+                .checked_add(r_offset)
+                .and_then(|value| usize::try_from(value).ok());
+            let Some(patch_offset) = patch_offset else {
+                continue;
+            };
+            let Ok(word) = reader.u32(patch_offset) else {
+                continue;
+            };
+            if let Some(patched) =
+                apply_riscv_relocation_to_word(word, reloc_type, symbol_value, addend as i64)
+            {
+                patches.push((patch_offset, patched));
+            }
+        }
+    }
+    patches
+}
+
+fn symbol_value_64(
+    full_data: &[u8],
+    symtab: &Elf64Shdr,
+    section_addresses: &[u64],
+    symbol_index: usize,
+    endian: Endian,
+) -> Option<u64> {
+    let entry_size = if symtab.sh_entsize > 0 {
+        symtab.sh_entsize as usize
+    } else {
+        std::mem::size_of::<Elf64Sym>()
+    };
+    let offset = (symtab.sh_offset as usize).checked_add(symbol_index.checked_mul(entry_size)?)?;
+    if offset + entry_size > full_data.len() {
+        return None;
+    }
+    let reader = ByteReader::new(full_data, endian);
+    let symbol = Elf64Sym::parse(&reader, offset).ok()?;
+    if symbol.st_shndx == SHN_UNDEF {
+        return None;
+    }
+    let base = section_addresses.get(symbol.st_shndx as usize).copied()?;
+    Some(base.saturating_add(symbol.st_value))
+}
+
+fn apply_riscv_relocation_to_word(
+    word: u32,
+    reloc_type: u32,
+    symbol_value: u64,
+    addend: i64,
+) -> Option<u32> {
+    let value = (symbol_value as i128).wrapping_add(addend as i128);
+    match reloc_type {
+        R_RISCV_HI20 => {
+            let imm20 = ((value + 0x800) >> 12) as u32 & 0x000f_ffff;
+            Some((word & 0x0000_0fff) | (imm20 << 12))
+        }
+        R_RISCV_LO12_I => {
+            let imm12 = value as u32 & 0x0000_0fff;
+            Some((word & !(0x0000_0fff << 20)) | (imm12 << 20))
+        }
+        R_RISCV_LO12_S => {
+            let imm12 = value as u32 & 0x0000_0fff;
+            Some(
+                (word & !((0x7f << 25) | (0x1f << 7)))
+                    | ((imm12 >> 5) << 25)
+                    | ((imm12 & 0x1f) << 7),
+            )
+        }
+        _ => None,
+    }
+}
+
+fn apply_u32_relocation_patches(
+    data: &mut DataBuffer,
+    patches: impl IntoIterator<Item = (usize, u32)>,
+    endian: Endian,
+) {
+    let bytes = data.to_mut_vec();
+    for (offset, value) in patches {
+        let Some(dst) = bytes.get_mut(offset..offset.saturating_add(4)) else {
+            continue;
+        };
+        let raw = match endian {
+            Endian::Little => value.to_le_bytes(),
+            Endian::Big => value.to_be_bytes(),
+        };
+        dst.copy_from_slice(&raw);
+    }
+}
+
 fn parse_relocation_symbols_32(
     full_data: &[u8],
     shdrs: &[Elf32Shdr],
@@ -974,4 +1121,32 @@ fn align_up(value: u64, alignment: u64) -> u64 {
         return value;
     }
     (value + alignment - 1) & !(alignment - 1)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn riscv_relocation_patch_encodes_hi20_and_lo12_fields() {
+        let lui_a4_zero = 0x0000_0737;
+        let ld_a4_a4_zero = 0x0007_3703;
+        let sd_a4_a5_zero = 0x00e7_b023;
+
+        assert_eq!(
+            apply_riscv_relocation_to_word(lui_a4_zero, R_RISCV_HI20, 0x100098, 0)
+                .expect("HI20 patch"),
+            0x0010_0737
+        );
+        assert_eq!(
+            apply_riscv_relocation_to_word(ld_a4_a4_zero, R_RISCV_LO12_I, 0x100098, 0)
+                .expect("LO12_I patch"),
+            0x0987_3703
+        );
+        assert_eq!(
+            apply_riscv_relocation_to_word(sd_a4_a5_zero, R_RISCV_LO12_S, 0x1000a0, 0)
+                .expect("LO12_S patch"),
+            0x0ae7_b023
+        );
+    }
 }
