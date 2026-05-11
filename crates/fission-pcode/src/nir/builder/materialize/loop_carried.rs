@@ -46,15 +46,12 @@ impl<'a> PreviewBuilder<'a> {
         let input_key = VarnodeKey::from(input);
         let output_key = VarnodeKey::from(output);
         let block_idx = self.address_to_index.get(&block.start_address).copied()?;
-        let input_def_idx = block
-            .ops
-            .iter()
-            .take(op_idx)
-            .position(|candidate| {
-                candidate.output.as_ref().is_some_and(|candidate_output| {
-                    VarnodeKey::from(candidate_output) == input_key
-                })
-            })?;
+        let input_def_idx = block.ops.iter().take(op_idx).position(|candidate| {
+            candidate
+                .output
+                .as_ref()
+                .is_some_and(|candidate_output| VarnodeKey::from(candidate_output) == input_key)
+        })?;
         let input_def = block.ops.get(input_def_idx)?;
         if !Self::op_reads_varnode_key(input_def, &output_key) {
             return None;
@@ -717,6 +714,25 @@ mod tests {
         }
     }
 
+    fn expr_contains_shr(expr: &HirExpr) -> bool {
+        match expr {
+            HirExpr::Binary {
+                op: HirBinaryOp::Shr,
+                ..
+            } => true,
+            HirExpr::Binary { lhs, rhs, .. } => expr_contains_shr(lhs) || expr_contains_shr(rhs),
+            HirExpr::Unary { expr, .. } | HirExpr::Cast { expr, .. } => expr_contains_shr(expr),
+            HirExpr::Call { args, .. } => args.iter().any(expr_contains_shr),
+            HirExpr::Load { ptr, .. } => expr_contains_shr(ptr),
+            HirExpr::PtrOffset { base, .. } => expr_contains_shr(base),
+            HirExpr::Index { base, index, .. } => {
+                expr_contains_shr(base) || expr_contains_shr(index)
+            }
+            HirExpr::AggregateCopy { src, .. } => expr_contains_shr(src),
+            HirExpr::Var(_) | HirExpr::Const(_, _) => false,
+        }
+    }
+
     #[test]
     fn loop_carried_register_update_reuses_prior_binding_and_param() {
         let rax = reg(0x00, 8);
@@ -951,12 +967,7 @@ mod tests {
                         Some(shifted.clone()),
                         vec![w1.clone(), constant(1)],
                     ),
-                    op(
-                        3,
-                        PcodeOpcode::IntZExt,
-                        Some(x1.clone()),
-                        vec![shifted],
-                    ),
+                    op(3, PcodeOpcode::IntZExt, Some(x1.clone()), vec![shifted]),
                     op(
                         4,
                         PcodeOpcode::IntNotEqual,
@@ -1002,14 +1013,24 @@ mod tests {
             block_at(
                 0x1000,
                 0,
-                vec![op(0, PcodeOpcode::CBranch, None, vec![constant(0x1020), constant(1)])],
+                vec![op(
+                    0,
+                    PcodeOpcode::CBranch,
+                    None,
+                    vec![constant(0x1020), constant(1)],
+                )],
             ),
             block_at(
                 0x1010,
                 1,
                 vec![
                     op(1, PcodeOpcode::Copy, Some(zero.clone()), vec![constant(0)]),
-                    op(2, PcodeOpcode::IntZExt, Some(x20.clone()), vec![zero.clone()]),
+                    op(
+                        2,
+                        PcodeOpcode::IntZExt,
+                        Some(x20.clone()),
+                        vec![zero.clone()],
+                    ),
                     op(3, PcodeOpcode::Branch, None, vec![constant(0x1030)]),
                 ],
             ),
@@ -1026,7 +1047,12 @@ mod tests {
                         vec![w20.clone(), constant(1)],
                     ),
                     op(7, PcodeOpcode::IntZExt, Some(x20.clone()), vec![sum]),
-                    op(8, PcodeOpcode::CBranch, None, vec![constant(0x1020), constant(1)]),
+                    op(
+                        8,
+                        PcodeOpcode::CBranch,
+                        None,
+                        vec![constant(0x1020), constant(1)],
+                    ),
                 ],
             ),
             block_at(
@@ -1074,6 +1100,102 @@ mod tests {
                 .and_then(|binding| binding.initializer.as_ref())
                 .is_some_and(|initializer| matches!(initializer, HirExpr::Const(0, _))),
             "loop-carried exit binding should be initialized for the bypass path"
+        );
+    }
+
+    #[test]
+    fn aarch64_be_loop_exit_register_read_uses_low_w_view_of_x_binding() {
+        let x20 = reg(0x40a0, 8);
+        let w20_be = reg(0x40a4, 4);
+        let zero = varnode(0x10);
+        let sum = varnode(0x20);
+        let out = varnode(0x30);
+        let mut blocks = vec![
+            block_at(
+                0x1000,
+                0,
+                vec![op(
+                    0,
+                    PcodeOpcode::CBranch,
+                    None,
+                    vec![constant(0x1020), constant(1)],
+                )],
+            ),
+            block_at(
+                0x1010,
+                1,
+                vec![
+                    op(1, PcodeOpcode::Copy, Some(zero.clone()), vec![constant(0)]),
+                    op(
+                        2,
+                        PcodeOpcode::IntZExt,
+                        Some(x20.clone()),
+                        vec![zero.clone()],
+                    ),
+                    op(3, PcodeOpcode::Branch, None, vec![constant(0x1030)]),
+                ],
+            ),
+            block_at(
+                0x1020,
+                2,
+                vec![
+                    op(4, PcodeOpcode::Copy, Some(zero.clone()), vec![constant(0)]),
+                    op(5, PcodeOpcode::IntZExt, Some(x20.clone()), vec![zero]),
+                    op(
+                        6,
+                        PcodeOpcode::IntAdd,
+                        Some(sum.clone()),
+                        vec![w20_be.clone(), constant(1)],
+                    ),
+                    op(7, PcodeOpcode::IntZExt, Some(x20.clone()), vec![sum]),
+                    op(
+                        8,
+                        PcodeOpcode::CBranch,
+                        None,
+                        vec![constant(0x1020), constant(1)],
+                    ),
+                ],
+            ),
+            block_at(
+                0x1030,
+                3,
+                vec![op(9, PcodeOpcode::Copy, Some(out), vec![w20_be.clone()])],
+            ),
+        ];
+        blocks[0].successors = vec![2, 1];
+        blocks[1].successors = vec![3];
+        blocks[2].successors = vec![2, 3];
+        let pcode = pcode_function(blocks);
+        let mut options = test_options();
+        options.calling_convention = CallingConvention::AArch64;
+        let mut builder = PreviewBuilder::new(&pcode, &options, None);
+
+        builder
+            .lower_block_stmts(&pcode.blocks[1])
+            .expect("bypass lowering");
+        let loop_body = builder
+            .lower_block_stmts(&pcode.blocks[2])
+            .expect("loop lowering");
+        let carried_name = loop_body
+            .iter()
+            .filter_map(lhs_var)
+            .last()
+            .expect("loop-carried binding")
+            .to_string();
+
+        builder.current_lowering_site = Some(LoweringSite {
+            block_idx: 3,
+            op_idx: 0,
+        });
+        let mut visiting = std::collections::HashSet::new();
+        let resolved = builder
+            .lower_varnode(&w20_be, &mut visiting)
+            .expect("exit register lowering");
+
+        assert_eq!(expr_var(&resolved), Some(carried_name.as_str()));
+        assert!(
+            !expr_contains_shr(&resolved),
+            "AArch64 W-register projection must not read the high half of its X-register family: {resolved:?}"
         );
     }
 
@@ -1150,7 +1272,12 @@ mod tests {
             block_at(
                 0x1000,
                 0,
-                vec![op(0, PcodeOpcode::CBranch, None, vec![constant(0x1010), constant(1)])],
+                vec![op(
+                    0,
+                    PcodeOpcode::CBranch,
+                    None,
+                    vec![constant(0x1010), constant(1)],
+                )],
             ),
             block_at(
                 0x1010,

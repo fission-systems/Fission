@@ -386,6 +386,12 @@ impl<'a> PreviewBuilder<'a> {
                 expr: Box::new(expr),
             };
         }
+        if self.aarch64_gpr_low_view_alias(output, requested) {
+            return HirExpr::Cast {
+                ty: type_from_size(requested.size, false),
+                expr: Box::new(expr),
+            };
+        }
         if !Self::varnode_covers(output, requested) {
             return expr;
         }
@@ -412,6 +418,23 @@ impl<'a> PreviewBuilder<'a> {
         }
     }
 
+    fn aarch64_gpr_low_view_alias(&self, output: &Varnode, requested: &Varnode) -> bool {
+        self.options.calling_convention == CallingConvention::AArch64
+            && !output.is_constant
+            && !requested.is_constant
+            && output.space_id == requested.space_id
+            && is_register_space_id(output.space_id)
+            && output.size == 8
+            && requested.size == 4
+            && aarch64_ghidra_reg_name(output.offset, output.size)
+                .and_then(aarch64_gpr_family_index)
+                .is_some_and(|output_family| {
+                    aarch64_ghidra_reg_name(requested.offset, requested.size)
+                        .and_then(aarch64_gpr_family_index)
+                        == Some(output_family)
+                })
+    }
+
     fn loop_exit_materialized_register_binding(&mut self, vn: &Varnode) -> Option<HirExpr> {
         if vn.is_constant || !is_register_space_id(vn.space_id) || vn.size < 4 {
             return None;
@@ -430,8 +453,7 @@ impl<'a> PreviewBuilder<'a> {
             let term_idx = self
                 .block_terminator_index(pred_block)
                 .unwrap_or(pred_block.ops.len());
-            let (_, pred_op) =
-                self.last_register_redefinition_before(pred_block, term_idx, vn)?;
+            let (_, pred_op) = self.last_register_redefinition_before(pred_block, term_idx, vn)?;
             if self.register_redefinition_is_zero(pred_block, term_idx, pred_op) {
                 zero_incoming = true;
                 continue;
@@ -445,9 +467,11 @@ impl<'a> PreviewBuilder<'a> {
                 match &materialized_name {
                     Some(existing) if existing != &name => return None,
                     None => {
-                        materialized_expr = Some(
-                            self.project_alias_def_expr(vn, pred_op, HirExpr::Var(name.clone())),
-                        );
+                        materialized_expr = Some(self.project_alias_def_expr(
+                            vn,
+                            pred_op,
+                            HirExpr::Var(name.clone()),
+                        ));
                         materialized_name = Some(name);
                     }
                     _ => {}
