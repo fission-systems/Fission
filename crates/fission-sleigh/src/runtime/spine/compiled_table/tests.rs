@@ -16,35 +16,6 @@ macro_rules! require_packaged_ghidra_sla {
     };
 }
 
-fn assert_spec_derived_lift_or_typed_unsupported(
-    compiled: &CompiledFrontend,
-    bytes: &[u8],
-    address: u64,
-) {
-    match decode_and_lift_with_details(compiled, None, bytes, address) {
-        Ok((ops, length, details)) => {
-            assert_eq!(length as usize, bytes.len());
-            assert!(
-                details.template_source == Some(CompiledTemplateSource::SpecDerived),
-                "expected SpecDerived, got {:?}",
-                details.template_source
-            );
-            assert!(!ops.is_empty(), "spec-derived template emitted no p-code");
-        }
-        Err(err) => {
-            let rendered = err.to_string();
-            assert!(
-                rendered.contains("UnsupportedPcodeTemplate"),
-                "unsupported raw p-code must be typed: {rendered}"
-            );
-            assert!(
-                !rendered.contains("compatibility_lowered_template_not_canonical"),
-                "x86-64 generated rows should now resolve to .sla templates: {rendered}"
-            );
-        }
-    }
-}
-
 fn assert_spec_derived_lift(
     compiled: &CompiledFrontend,
     bytes: &[u8],
@@ -88,7 +59,8 @@ fn generated_runtime_decodes_ret_with_spec_derived_lift() {
     let decoded = decode_instruction(&compiled, None, &[0xC3], 0x1000).expect("generated ret");
     assert_eq!(decoded.length, 1);
     assert!(matches!(decoded.flow_kind, DecodedFlowKind::Return));
-    assert_spec_derived_lift_or_typed_unsupported(&compiled, &[0xC3], 0x1000);
+    let ops = assert_spec_derived_lift(&compiled, &[0xC3], 0x1000);
+    assert!(ops.iter().any(|op| op.opcode == PcodeOpcode::Return));
 }
 
 #[test]
@@ -99,7 +71,8 @@ fn generated_runtime_decodes_mov_imm64_without_compatibility_lift() {
     let decoded = decode_instruction(&compiled, None, &bytes, 0x1000).expect("generated mov");
     assert_eq!(decoded.length, bytes.len());
     assert_eq!(decoded.mnemonic, "mov");
-    assert_spec_derived_lift_or_typed_unsupported(&compiled, &bytes, 0x1000);
+    let ops = assert_spec_derived_lift(&compiled, &bytes, 0x1000);
+    assert!(ops.iter().any(|op| op.opcode == PcodeOpcode::Copy));
 }
 
 #[test]
@@ -114,7 +87,8 @@ fn generated_runtime_decodes_jcc_rel8_without_compatibility_lift() {
         decoded.flow_kind,
         DecodedFlowKind::ConditionalJump
     ));
-    assert_spec_derived_lift_or_typed_unsupported(&compiled, &[0x75, 0x05], 0x1000);
+    let ops = assert_spec_derived_lift(&compiled, &[0x75, 0x05], 0x1000);
+    assert!(ops.iter().any(|op| op.opcode == PcodeOpcode::CBranch));
 }
 
 #[test]
@@ -129,7 +103,8 @@ fn generated_runtime_renders_jle_condition_mnemonic_display_only() {
         decoded.flow_kind,
         DecodedFlowKind::ConditionalJump
     ));
-    assert_spec_derived_lift_or_typed_unsupported(&compiled, &[0x7e, 0x05], 0x1000);
+    let ops = assert_spec_derived_lift(&compiled, &[0x7e, 0x05], 0x1000);
+    assert!(ops.iter().any(|op| op.opcode == PcodeOpcode::CBranch));
 }
 
 #[test]
@@ -165,7 +140,8 @@ fn generated_runtime_decodes_startup_sub_rsp_imm8_without_compatibility_lift() {
         decode_instruction(&compiled, None, &bytes, 0x1000).expect("generated sub rsp, imm8");
     assert_eq!(decoded.length, bytes.len());
     assert_eq!(decoded.mnemonic, "sub");
-    assert_spec_derived_lift_or_typed_unsupported(&compiled, &bytes, 0x1000);
+    let ops = assert_spec_derived_lift(&compiled, &bytes, 0x1000);
+    assert!(ops.iter().any(|op| op.opcode == PcodeOpcode::IntSub));
 }
 
 #[test]
@@ -178,7 +154,6 @@ fn generated_runtime_decodes_startup_rip_relative_load_without_compatibility_lif
         decode_instruction(&compiled, None, &bytes, address).expect("generated rip-relative mov");
     assert_eq!(decoded.length, bytes.len());
     assert_eq!(decoded.mnemonic, "mov");
-    assert_spec_derived_lift_or_typed_unsupported(&compiled, &bytes, address);
     let (ops, length, details) = decode_and_lift_with_details(&compiled, None, &bytes, address)
         .expect("lift rip-relative mov");
     assert_eq!(length as usize, bytes.len());
@@ -205,7 +180,8 @@ fn generated_runtime_decodes_startup_call_rel32_without_compatibility_lift() {
         decode_instruction(&compiled, None, &bytes, 0x1400_013ef).expect("generated call rel32");
     assert_eq!(decoded.length, bytes.len());
     assert!(matches!(decoded.flow_kind, DecodedFlowKind::Call));
-    assert_spec_derived_lift_or_typed_unsupported(&compiled, &bytes, 0x1400_013ef);
+    let ops = assert_spec_derived_lift(&compiled, &bytes, 0x1400_013ef);
+    assert!(ops.iter().any(|op| op.opcode == PcodeOpcode::Call));
 }
 
 #[test]
@@ -290,7 +266,6 @@ fn generated_runtime_decodes_reg32_lea_without_decode_no_match_or_compatibility_
     let decoded = decode_instruction(&compiled, None, &bytes, 0x1400_1450).expect("generated lea");
     assert_eq!(decoded.length, bytes.len());
     assert_eq!(decoded.mnemonic, "lea");
-    assert_spec_derived_lift_or_typed_unsupported(&compiled, &bytes, 0x1400_1450);
     let (ops, length, details) =
         decode_and_lift_with_details(&compiled, None, &bytes, 0x1400_1450).expect("lift lea");
     assert_eq!(length as usize, bytes.len());
@@ -396,7 +371,8 @@ fn generated_runtime_decodes_movsxd_without_decode_no_match_or_compatibility_lif
         decode_instruction(&compiled, None, &bytes, 0x1400_2600).expect("generated movsxd");
     assert_eq!(decoded.length, bytes.len());
     assert_eq!(decoded.mnemonic, "movsxd");
-    assert_spec_derived_lift_or_typed_unsupported(&compiled, &bytes, 0x1400_2600);
+    let ops = assert_spec_derived_lift(&compiled, &bytes, 0x1400_2600);
+    assert!(ops.iter().any(|op| op.opcode == PcodeOpcode::IntSExt));
 }
 
 #[test]
@@ -408,7 +384,8 @@ fn generated_runtime_zero_extends_reg32_decode_without_compatibility_lift() {
         decode_instruction(&compiled, None, &bytes, 0x1400_19e0).expect("generated xor eax, eax");
     assert_eq!(decoded.length, bytes.len());
     assert_eq!(decoded.mnemonic, "xor");
-    assert_spec_derived_lift_or_typed_unsupported(&compiled, &bytes, 0x1400_19e0);
+    let ops = assert_spec_derived_lift(&compiled, &bytes, 0x1400_19e0);
+    assert!(ops.iter().any(|op| op.opcode == PcodeOpcode::IntXor));
 }
 
 #[test]
@@ -428,7 +405,9 @@ fn generated_runtime_lifts_fninit_without_compatibility_emitter() {
     require_packaged_ghidra_sla!();
     let compiled = compile_x86_64_frontend().expect("compile frontend");
     let bytes = [0xdb, 0xe3];
-    assert_spec_derived_lift_or_typed_unsupported(&compiled, &bytes, 0x1400_25c0);
+    let ops = assert_spec_derived_lift(&compiled, &bytes, 0x1400_25c0);
+    assert!(ops.iter().all(|op| op.opcode == PcodeOpcode::Copy));
+    assert_eq!(ops.len(), 10);
 }
 
 #[test]
