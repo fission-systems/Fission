@@ -98,10 +98,22 @@ CALL_EXCLUDE = CONTROL_WORDS | {
 
 INTEGRAL_WORDS = {
     "int",
+    "i8",
+    "i16",
     "i32",
+    "i64",
     "u32",
+    "u64",
     "usize",
     "isize",
+    "int8_t",
+    "int16_t",
+    "int32_t",
+    "int64_t",
+    "uint8_t",
+    "uint16_t",
+    "uint32_t",
+    "uint64_t",
     "uint",
     "unsigned",
     "signed",
@@ -116,6 +128,10 @@ UNSIGNED_INTEGRAL_WORDS = {
     "u16",
     "u32",
     "u64",
+    "uint8_t",
+    "uint16_t",
+    "uint32_t",
+    "uint64_t",
     "uint",
     "usize",
     "unsigned",
@@ -690,6 +706,30 @@ def match_function(source: SourceFunction, funcs: list[FissionFunction]) -> tupl
     if len(suffix) > 1:
         return "ambiguous", None, [f"{f.address}:{f.name}" for f in suffix[:8]]
     return "unmapped", None, []
+
+
+def select_source_functions(
+    source_functions: list[SourceFunction],
+    fission_funcs: list[FissionFunction],
+    limit: int | None,
+    fission_error: str | None = None,
+) -> list[SourceFunction]:
+    if limit is None:
+        return source_functions
+    if limit <= 0:
+        return []
+    if fission_error or not fission_funcs:
+        return source_functions[:limit]
+
+    matched: list[SourceFunction] = []
+    fallback: list[SourceFunction] = []
+    for func in source_functions:
+        status, matched_func, _ = match_function(func, fission_funcs)
+        if status == "matched" and matched_func is not None:
+            matched.append(func)
+        else:
+            fallback.append(func)
+    return (matched + fallback)[:limit]
 
 
 def parse_json_loose(text: str) -> Any:
@@ -2622,14 +2662,18 @@ def run_benchmark(args: argparse.Namespace) -> int:
     list_cache_initial_entry_count = len(list_cache)
     for entry in entries:
         source_functions = extract_source_functions(entry.source_path, entry.language)
-        if args.limit_functions is not None:
-            source_functions = source_functions[: args.limit_functions]
         fission_funcs, fission_error = run_fission_list_cached(
             entry.binary_path,
             fission_bin,
             args.timeout_sec,
             list_cache,
             list_cache_stats,
+        )
+        source_functions = select_source_functions(
+            source_functions,
+            fission_funcs,
+            args.limit_functions,
+            fission_error,
         )
         if jobs == 1 or len(source_functions) <= 1:
             for func in source_functions:
@@ -2809,6 +2853,33 @@ int max(int a, int b) { if (a > b) return a; return b; }
         assert matched is not None
         assert matched.address == "0x2000"
         assert candidates == []
+        limited = select_source_functions(
+            [
+                SourceFunction(
+                    name="helper",
+                    signature="static int helper(int x)",
+                    body="return x + 1;",
+                    return_kind="int",
+                    param_kinds=["int"],
+                    param_names=["x"],
+                    line=1,
+                ),
+                SourceFunction(
+                    name="entry",
+                    signature="int entry(int x)",
+                    body="return helper(x);",
+                    return_kind="int",
+                    param_kinds=["int"],
+                    param_names=["x"],
+                    line=2,
+                ),
+            ],
+            [FissionFunction("0x3000", "entry")],
+            1,
+        )
+        assert [func.name for func in limited] == ["entry"]
+        assert classify_return("u64 wide(unsigned int seed)", "wide", "unsigned int seed", "c") == "int"
+        assert classify_return("uint64_t wide(unsigned int seed)", "wide", "unsigned int seed", "c") == "int"
         void_func = SourceFunction(
             name="touch",
             signature="void touch(unsigned int seed)",
