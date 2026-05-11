@@ -522,6 +522,192 @@ fn arm32_direct_call_materializes_r0_result() {
 }
 
 #[test]
+fn arm32_r1_r0_pair_materializes_u64_return() {
+    let mut options = preview_options();
+    options.calling_convention = CallingConvention::Arm32;
+    options.format = "ELF32".to_string();
+    options.pe_x64_only = false;
+    options.pointer_size = 4;
+    options.is_64bit = false;
+
+    let r0 = Varnode {
+        space_id: RUST_SLEIGH_REGISTER_SPACE_ID,
+        offset: 0x20,
+        size: 4,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let r1 = Varnode {
+        space_id: RUST_SLEIGH_REGISTER_SPACE_ID,
+        offset: 0x24,
+        size: 4,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let lr = Varnode {
+        space_id: RUST_SLEIGH_REGISTER_SPACE_ID,
+        offset: 0x58,
+        size: 4,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let ret_target = uniq(0x2000, 4);
+    let func = PcodeFunction {
+        blocks: vec![PcodeBasicBlock {
+            index: 0,
+            start_address: 0x100040,
+            successors: vec![],
+            ops: vec![
+                PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::IntAdd,
+                    address: 0x100040,
+                    output: Some(r0.clone()),
+                    inputs: vec![r0.clone(), cst(1, 4)],
+                    asm_mnemonic: None,
+                },
+                PcodeOp {
+                    seq_num: 1,
+                    opcode: PcodeOpcode::IntAdd,
+                    address: 0x100044,
+                    output: Some(r1.clone()),
+                    inputs: vec![r1, cst(2, 4)],
+                    asm_mnemonic: None,
+                },
+                PcodeOp {
+                    seq_num: 2,
+                    opcode: PcodeOpcode::IntAnd,
+                    address: 0x100048,
+                    output: Some(ret_target.clone()),
+                    inputs: vec![lr, cst(0xffff_fffe, 4)],
+                    asm_mnemonic: None,
+                },
+                PcodeOp {
+                    seq_num: 3,
+                    opcode: PcodeOpcode::Call,
+                    address: 0x100048,
+                    output: None,
+                    inputs: vec![ret_target.clone()],
+                    asm_mnemonic: None,
+                },
+                PcodeOp {
+                    seq_num: 4,
+                    opcode: PcodeOpcode::Return,
+                    address: 0x100048,
+                    output: None,
+                    inputs: vec![ret_target],
+                    asm_mnemonic: None,
+                },
+            ],
+        }],
+    };
+
+    let code = render_mlil_preview(&func, "u64_pair", 0x100040, &options).expect("preview render");
+    assert!(
+        code.contains("ulonglong u64_pair(uint param_1, uint param_2)"),
+        "{code}"
+    );
+    assert!(
+        code.contains("return (ulonglong)(param_2 + 2) << 32 | (ulonglong)(param_1 + 1);"),
+        "{code}"
+    );
+}
+
+#[test]
+fn arm32_address_in_r1_does_not_force_u64_return() {
+    let mut options = preview_options();
+    options.calling_convention = CallingConvention::Arm32;
+    options.format = "ELF32".to_string();
+    options.pe_x64_only = false;
+    options.pointer_size = 4;
+    options.is_64bit = false;
+    options
+        .relocation_names
+        .insert(0x100044, "math_sink".to_string());
+
+    let r0 = Varnode {
+        space_id: RUST_SLEIGH_REGISTER_SPACE_ID,
+        offset: 0x20,
+        size: 4,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let r1 = Varnode {
+        space_id: RUST_SLEIGH_REGISTER_SPACE_ID,
+        offset: 0x24,
+        size: 4,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let lr = Varnode {
+        space_id: RUST_SLEIGH_REGISTER_SPACE_ID,
+        offset: 0x58,
+        size: 4,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let ret_target = uniq(0x2000, 4);
+    let func = PcodeFunction {
+        blocks: vec![PcodeBasicBlock {
+            index: 0,
+            start_address: 0x100040,
+            successors: vec![],
+            ops: vec![
+                PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::IntAdd,
+                    address: 0x100040,
+                    output: Some(r0.clone()),
+                    inputs: vec![r0.clone(), cst(1, 4)],
+                    asm_mnemonic: None,
+                },
+                PcodeOp {
+                    seq_num: 1,
+                    opcode: PcodeOpcode::Load,
+                    address: 0x100044,
+                    output: Some(r1),
+                    inputs: vec![cst(0, 4), cst(0x2000, 4)],
+                    asm_mnemonic: None,
+                },
+                PcodeOp {
+                    seq_num: 2,
+                    opcode: PcodeOpcode::IntAnd,
+                    address: 0x100048,
+                    output: Some(ret_target.clone()),
+                    inputs: vec![lr, cst(0xffff_fffe, 4)],
+                    asm_mnemonic: None,
+                },
+                PcodeOp {
+                    seq_num: 3,
+                    opcode: PcodeOpcode::Call,
+                    address: 0x100048,
+                    output: None,
+                    inputs: vec![ret_target.clone()],
+                    asm_mnemonic: None,
+                },
+                PcodeOp {
+                    seq_num: 4,
+                    opcode: PcodeOpcode::Return,
+                    address: 0x100048,
+                    output: None,
+                    inputs: vec![ret_target],
+                    asm_mnemonic: None,
+                },
+            ],
+        }],
+    };
+
+    let code = render_mlil_preview(&func, "math_like", 0x100040, &options).expect("preview render");
+    assert!(code.contains("uint math_like(uint param_1)"), "{code}");
+    assert!(code.contains("return param_1 + 1;"), "{code}");
+    assert!(!code.contains("ulonglong math_like"), "{code}");
+    assert!(
+        !code.contains("return (ulonglong)&math_sink << 32"),
+        "{code}"
+    );
+}
+
+#[test]
 fn arm32_branchind_tail_call_recovers_function_pointer_call() {
     let mut options = preview_options();
     options.calling_convention = CallingConvention::Arm32;

@@ -237,6 +237,163 @@ impl<'a> PreviewBuilder<'a> {
             })
     }
 
+    fn arm32_return_pair_def_after_barrier(
+        &self,
+        block: &crate::pcode::PcodeBasicBlock,
+        term_idx: usize,
+    ) -> Option<((usize, Varnode), (usize, Varnode))> {
+        if self.options.calling_convention != CallingConvention::Arm32 {
+            return None;
+        }
+        let start = block
+            .ops
+            .iter()
+            .enumerate()
+            .take(term_idx)
+            .rposition(|(idx, op)| {
+                matches!(
+                    op.opcode,
+                    PcodeOpcode::Call | PcodeOpcode::CallInd | PcodeOpcode::CallOther
+                ) && !self.call_is_return_target_artifact(block, idx)
+            })
+            .map_or(0, |idx| idx + 1);
+        let mut low = None;
+        let mut high = None;
+        for (op_idx, op) in block
+            .ops
+            .iter()
+            .enumerate()
+            .take(term_idx)
+            .skip(start)
+            .rev()
+        {
+            let Some(output) = op.output.as_ref() else {
+                continue;
+            };
+            if !is_register_space_id(output.space_id) || output.size != 4 {
+                continue;
+            }
+            match output.offset {
+                0x20 if low.is_none() && !self.is_return_target_copy(op, output) => {
+                    if self.arm32_return_pair_def_materializes_address(op) {
+                        return None;
+                    }
+                    low = Some((op_idx, output.clone()));
+                }
+                0x24 if high.is_none() => {
+                    if self.arm32_return_pair_def_materializes_address(op) {
+                        return None;
+                    }
+                    high = Some((op_idx, output.clone()));
+                }
+                _ => {}
+            }
+            if low.is_some() && high.is_some() {
+                break;
+            }
+        }
+        Some((low?, high?))
+    }
+
+    fn arm32_return_pair_def_materializes_address(&self, op: &PcodeOp) -> bool {
+        if self.options.relocation_names.contains_key(&op.address) {
+            return true;
+        }
+        if op.opcode != PcodeOpcode::Load || op.inputs.len() < 2 {
+            return false;
+        }
+        self.resolve_global_address(&op.inputs[1], 8)
+            .is_some_and(|address| {
+                self.options.relocation_names.contains_key(&address)
+                    || self.options.global_names.contains_key(&address)
+            })
+    }
+
+    fn compose_arm32_return_pair(&self, low: HirExpr, high: HirExpr) -> HirExpr {
+        let u64_ty = NirType::Int {
+            bits: 64,
+            signed: false,
+        };
+        let shifted_high = HirExpr::Binary {
+            op: HirBinaryOp::Shl,
+            lhs: Box::new(HirExpr::Cast {
+                ty: u64_ty.clone(),
+                expr: Box::new(high),
+            }),
+            rhs: Box::new(HirExpr::Const(32, u64_ty.clone())),
+            ty: u64_ty.clone(),
+        };
+        HirExpr::Binary {
+            op: HirBinaryOp::Or,
+            lhs: Box::new(shifted_high),
+            rhs: Box::new(HirExpr::Cast {
+                ty: u64_ty.clone(),
+                expr: Box::new(low),
+            }),
+            ty: u64_ty,
+        }
+    }
+
+    fn arm32_return_pair_part_is_address_like(&self, expr: &HirExpr) -> bool {
+        match expr {
+            HirExpr::AddressOfGlobal(_) | HirExpr::PtrOffset { .. } | HirExpr::Index { .. } => true,
+            HirExpr::Cast { expr, .. } | HirExpr::Unary { expr, .. } => {
+                self.arm32_return_pair_part_is_address_like(expr)
+            }
+            HirExpr::Binary { lhs, rhs, .. } => {
+                self.arm32_return_pair_part_is_address_like(lhs)
+                    || self.arm32_return_pair_part_is_address_like(rhs)
+            }
+            HirExpr::Load { ptr, ty } => {
+                matches!(ty, NirType::Ptr(_)) || self.arm32_return_pair_part_is_address_like(ptr)
+            }
+            HirExpr::Call { ty, .. } => matches!(ty, NirType::Ptr(_)),
+            HirExpr::AggregateCopy { src, .. } => self.arm32_return_pair_part_is_address_like(src),
+            HirExpr::Var(name) => {
+                self.options
+                    .global_names
+                    .values()
+                    .any(|global| global == name)
+                    || self
+                        .options
+                        .relocation_names
+                        .values()
+                        .any(|global| global == name)
+            }
+            HirExpr::Const(_, _) => false,
+        }
+    }
+
+    fn lower_arm32_return_pair_expr_from_block(
+        &mut self,
+        block_idx: usize,
+        block: &crate::pcode::PcodeBasicBlock,
+        term_idx: usize,
+    ) -> Result<Option<HirExpr>, MlilPreviewError> {
+        let Some(((_low_op_idx, low_vn), (_high_op_idx, high_vn))) =
+            self.arm32_return_pair_def_after_barrier(block, term_idx)
+        else {
+            return Ok(None);
+        };
+        self.with_lowering_site(
+            LoweringSite {
+                block_idx,
+                op_idx: term_idx,
+            },
+            |this| {
+                let low = this.lower_wrapped_varnode(&low_vn, &mut HashSet::new())?;
+                let high = this.lower_wrapped_varnode(&high_vn, &mut HashSet::new())?;
+                if this.arm32_return_pair_part_is_address_like(&high) {
+                    return Ok(None);
+                }
+                if this.arm32_return_pair_part_is_address_like(&low) {
+                    return Ok(None);
+                }
+                Ok(Some(this.compose_arm32_return_pair(low, high)))
+            },
+        )
+    }
+
     fn uses_primary_return_registers(&self) -> bool {
         self.options.is_64bit || self.options.calling_convention == CallingConvention::Arm32
     }
@@ -256,6 +413,11 @@ impl<'a> PreviewBuilder<'a> {
         block: &crate::pcode::PcodeBasicBlock,
         term_idx: usize,
     ) -> Result<Option<HirExpr>, MlilPreviewError> {
+        if let Some(expr) =
+            self.lower_arm32_return_pair_expr_from_block(block_idx, block, term_idx)?
+        {
+            return Ok(Some(expr));
+        }
         let Some((_ret_op_idx, ret_vn)) =
             self.last_primary_return_def_after_barrier(block, term_idx)
         else {
@@ -516,6 +678,12 @@ impl<'a> PreviewBuilder<'a> {
         block: &crate::pcode::PcodeBasicBlock,
         term_idx: usize,
     ) -> Result<Option<HirExpr>, MlilPreviewError> {
+        if self.uses_primary_return_registers()
+            && let Some(expr) =
+                self.lower_arm32_return_pair_expr_from_block(idx, block, term_idx)?
+        {
+            return Ok(Some(expr));
+        }
         if self.uses_primary_return_registers()
             && let Some((_ret_op_idx, ret_vn)) =
                 self.last_primary_return_def_after_barrier(block, term_idx)
