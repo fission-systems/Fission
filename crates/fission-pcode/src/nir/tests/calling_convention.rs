@@ -139,6 +139,29 @@ fn aarch64_compact_x0_offset_is_param() {
 }
 
 #[test]
+fn aarch64_big_endian_w_register_halves_are_params() {
+    let (name, idx) = register_name_with_param(0x4004, 4, CallingConvention::AArch64).unwrap();
+    assert_eq!(name, "param_1");
+    assert_eq!(idx, Some(0));
+
+    let (name, idx) = register_name_with_param(0x400c, 4, CallingConvention::AArch64).unwrap();
+    assert_eq!(name, "param_2");
+    assert_eq!(idx, Some(1));
+
+    let ret = Varnode {
+        space_id: REGISTER_SPACE_ID,
+        offset: 0x4004,
+        size: 4,
+        is_constant: false,
+        constant_val: 0,
+    };
+    assert!(is_primary_return_register_for_abi(
+        &ret,
+        CallingConvention::AArch64
+    ));
+}
+
+#[test]
 fn aarch64_subregister_aliases_map_to_param_slots() {
     let abi = AbiState::new(CallingConvention::AArch64, true, 8, 0);
     assert_eq!(abi.param_slot_for_name("x0"), Some(0));

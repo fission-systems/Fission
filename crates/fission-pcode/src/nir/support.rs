@@ -445,14 +445,24 @@ pub(crate) fn aarch64_ghidra_reg_name(offset: u64, size: u32) -> Option<&'static
     if offset == 0x08 && size == 8 {
         return Some("sp");
     }
-    if !(0x4000..=0x40f8).contains(&offset) || (offset - 0x4000) % 8 != 0 {
-        return None;
-    }
-    let idx = ((offset - 0x4000) / 8) as usize;
     match size {
-        4 => W_REGS.get(idx).copied(),
-        8 => X_REGS.get(idx).copied(),
-        _ => X_REGS.get(idx).copied(),
+        4 if (0x4000..=0x40f8).contains(&offset) && (offset - 0x4000) % 8 == 0 => {
+            let idx = ((offset - 0x4000) / 8) as usize;
+            W_REGS.get(idx).copied()
+        }
+        4 if (0x4004..=0x40fc).contains(&offset) && (offset - 0x4004) % 8 == 0 => {
+            let idx = ((offset - 0x4004) / 8) as usize;
+            W_REGS.get(idx).copied()
+        }
+        8 if (0x4000..=0x40f8).contains(&offset) && (offset - 0x4000) % 8 == 0 => {
+            let idx = ((offset - 0x4000) / 8) as usize;
+            X_REGS.get(idx).copied()
+        }
+        _ if (0x4000..=0x40f8).contains(&offset) && (offset - 0x4000) % 8 == 0 => {
+            let idx = ((offset - 0x4000) / 8) as usize;
+            X_REGS.get(idx).copied()
+        }
+        _ => None,
     }
 }
 
@@ -573,7 +583,9 @@ pub(crate) fn is_primary_return_register_for_abi(vn: &Varnode, abi: CallingConve
     match abi {
         CallingConvention::AArch64 => {
             (vn.space_id == REGISTER_SPACE_ID || vn.space_id == RUST_SLEIGH_REGISTER_SPACE_ID)
-                && vn.offset == 0x4000
+                && aarch64_ghidra_reg_name(vn.offset, vn.size)
+                    .and_then(aarch64_gpr_family_index)
+                    == Some(0)
         }
         CallingConvention::Arm32 => {
             (vn.space_id == REGISTER_SPACE_ID || vn.space_id == RUST_SLEIGH_REGISTER_SPACE_ID)
@@ -590,7 +602,11 @@ pub(crate) fn is_return_target_register_for_abi(vn: &Varnode, abi: CallingConven
         return false;
     }
     match abi {
-        CallingConvention::AArch64 => vn.offset == 0x40f0,
+        CallingConvention::AArch64 => {
+            aarch64_ghidra_reg_name(vn.offset, vn.size)
+                .and_then(aarch64_gpr_family_index)
+                == Some(30)
+        }
         CallingConvention::Arm32 => vn.offset == 0x58,
         CallingConvention::WindowsX64 | CallingConvention::SystemVAmd64 => false,
     }
