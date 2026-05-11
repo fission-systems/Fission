@@ -45,6 +45,7 @@ pub(crate) fn pure_expr_key(expr: &HirExpr) -> Option<PureExprKey> {
         HirExpr::Load { .. }
         | HirExpr::Call { .. }
         | HirExpr::AggregateCopy { .. }
+        | HirExpr::Select { .. }
         | HirExpr::Index { .. } => None,
     }
 }

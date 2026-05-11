@@ -349,6 +349,16 @@ fn collect_constraints_expr(
             collect_constraints_expr(base, return_type, known_binding_types, out);
             collect_constraints_expr(index, return_type, known_binding_types, out);
         }
+        HirExpr::Select {
+            cond,
+            then_expr,
+            else_expr,
+            ..
+        } => {
+            collect_constraints_expr(cond, return_type, known_binding_types, out);
+            collect_constraints_expr(then_expr, return_type, known_binding_types, out);
+            collect_constraints_expr(else_expr, return_type, known_binding_types, out);
+        }
         HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) | HirExpr::Const(_, _) => {}
     }
 }
@@ -398,7 +408,8 @@ fn expr_int_bits(expr: &HirExpr, known_binding_types: &HashMap<String, NirType>)
         | HirExpr::Call { ty, .. }
         | HirExpr::Load { ty, .. }
         | HirExpr::Index { elem_ty: ty, .. }
-        | HirExpr::Cast { ty, .. } => nir_type_bits(ty),
+        | HirExpr::Cast { ty, .. }
+        | HirExpr::Select { ty, .. } => nir_type_bits(ty),
         HirExpr::Binary { ty, .. } => nir_type_bits(ty),
         HirExpr::PtrOffset { .. } | HirExpr::AggregateCopy { .. } => None,
     }
@@ -552,6 +563,16 @@ fn count_var_uses_expr(expr: &HirExpr, out: &mut HashMap<String, usize>) {
             count_var_uses_expr(base, out);
             count_var_uses_expr(index, out);
         }
+        HirExpr::Select {
+            cond,
+            then_expr,
+            else_expr,
+            ..
+        } => {
+            count_var_uses_expr(cond, out);
+            count_var_uses_expr(then_expr, out);
+            count_var_uses_expr(else_expr, out);
+        }
     }
 }
 
@@ -667,6 +688,7 @@ fn collect_wrapping_narrow_return_vars(
         | HirExpr::Load { .. }
         | HirExpr::PtrOffset { .. }
         | HirExpr::Index { .. }
+        | HirExpr::Select { .. }
         | HirExpr::AggregateCopy { .. } => {}
     }
 }

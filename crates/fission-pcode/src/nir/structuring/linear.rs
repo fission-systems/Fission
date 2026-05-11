@@ -1703,6 +1703,16 @@ impl<'a> PreviewBuilder<'a> {
                 Self::expr_has_call(base) || Self::expr_has_call(index)
             }
             HirExpr::AggregateCopy { src, .. } => Self::expr_has_call(src),
+            HirExpr::Select {
+                cond,
+                then_expr,
+                else_expr,
+                ..
+            } => {
+                Self::expr_has_call(cond)
+                    || Self::expr_has_call(then_expr)
+                    || Self::expr_has_call(else_expr)
+            }
             HirExpr::Var(_, ..) | HirExpr::AddressOfGlobal(_) | HirExpr::Const(_, ..) => false,
         }
     }

@@ -961,6 +961,16 @@ fn expr_has_memory_surface_interest(expr: &HirExpr) -> bool {
             expr_has_memory_surface_interest(lhs) || expr_has_memory_surface_interest(rhs)
         }
         HirExpr::Call { args, .. } => args.iter().any(expr_has_memory_surface_interest),
+        HirExpr::Select {
+            cond,
+            then_expr,
+            else_expr,
+            ..
+        } => {
+            expr_has_memory_surface_interest(cond)
+                || expr_has_memory_surface_interest(then_expr)
+                || expr_has_memory_surface_interest(else_expr)
+        }
     }
 }
 
@@ -977,6 +987,16 @@ fn expr_contains_const(expr: &HirExpr) -> bool {
         HirExpr::Call { args, .. } => args.iter().any(expr_contains_const),
         HirExpr::Index { base, index, .. } => {
             expr_contains_const(base) || expr_contains_const(index)
+        }
+        HirExpr::Select {
+            cond,
+            then_expr,
+            else_expr,
+            ..
+        } => {
+            expr_contains_const(cond)
+                || expr_contains_const(then_expr)
+                || expr_contains_const(else_expr)
         }
     }
 }
@@ -1866,6 +1886,16 @@ pub(crate) fn normalize_expr(expr: &mut HirExpr) {
             normalize_expr(index);
         }
         HirExpr::AggregateCopy { src, .. } => normalize_expr(src),
+        HirExpr::Select {
+            cond,
+            then_expr,
+            else_expr,
+            ..
+        } => {
+            normalize_expr(cond);
+            normalize_expr(then_expr);
+            normalize_expr(else_expr);
+        }
         HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) | HirExpr::Const(_, _) => {}
     }
 

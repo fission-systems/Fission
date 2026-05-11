@@ -532,6 +532,16 @@ fn count_uses_in_expr(expr: &HirExpr, uses: &mut HashMap<String, usize>) {
             count_uses_in_expr(base, uses);
             count_uses_in_expr(index, uses);
         }
+        HirExpr::Select {
+            cond,
+            then_expr,
+            else_expr,
+            ..
+        } => {
+            count_uses_in_expr(cond, uses);
+            count_uses_in_expr(then_expr, uses);
+            count_uses_in_expr(else_expr, uses);
+        }
     }
 }
 

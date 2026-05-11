@@ -569,6 +569,16 @@ fn rewrite_memory_slot_expr(
             changed |= rewrite_memory_slot_expr(base, aliases);
             changed |= rewrite_memory_slot_expr(index, aliases);
         }
+        HirExpr::Select {
+            cond,
+            then_expr,
+            else_expr,
+            ..
+        } => {
+            changed |= rewrite_memory_slot_expr(cond, aliases);
+            changed |= rewrite_memory_slot_expr(then_expr, aliases);
+            changed |= rewrite_memory_slot_expr(else_expr, aliases);
+        }
         HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) | HirExpr::Const(_, _) => {}
     }
     changed

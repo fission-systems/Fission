@@ -160,6 +160,16 @@ impl DefUseMap {
                 self.count_expr(base);
                 self.count_expr(index);
             }
+            HirExpr::Select {
+                cond,
+                then_expr,
+                else_expr,
+                ..
+            } => {
+                self.count_expr(cond);
+                self.count_expr(then_expr);
+                self.count_expr(else_expr);
+            }
         }
     }
 }
@@ -287,6 +297,16 @@ fn fold_expr(expr: &mut HirExpr) -> bool {
                 changed |= fold_expr(a);
             }
         }
+        HirExpr::Select {
+            cond,
+            then_expr,
+            else_expr,
+            ..
+        } => {
+            changed |= fold_expr(cond);
+            changed |= fold_expr(then_expr);
+            changed |= fold_expr(else_expr);
+        }
         HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) | HirExpr::Const(_, _) => {}
     }
     // Try to fold this node.
@@ -337,6 +357,7 @@ pub(crate) fn eval_hir_expr_with_const_env(
         | HirExpr::Call { .. }
         | HirExpr::PtrOffset { .. }
         | HirExpr::Index { .. }
+        | HirExpr::Select { .. }
         | HirExpr::AggregateCopy { .. } => None,
     }
 }
@@ -937,6 +958,16 @@ fn count_mention_expr(expr: &HirExpr, name: &str) -> usize {
         HirExpr::Index { base, index, .. } => {
             count_mention_expr(base, name) + count_mention_expr(index, name)
         }
+        HirExpr::Select {
+            cond,
+            then_expr,
+            else_expr,
+            ..
+        } => {
+            count_mention_expr(cond, name)
+                + count_mention_expr(then_expr, name)
+                + count_mention_expr(else_expr, name)
+        }
     }
 }
 
@@ -1127,6 +1158,16 @@ fn collect_repeated_pure_exprs(
             collect_repeated_pure_exprs(base, counts);
             collect_repeated_pure_exprs(index, counts);
         }
+        HirExpr::Select {
+            cond,
+            then_expr,
+            else_expr,
+            ..
+        } => {
+            collect_repeated_pure_exprs(cond, counts);
+            collect_repeated_pure_exprs(then_expr, counts);
+            collect_repeated_pure_exprs(else_expr, counts);
+        }
     }
 }
 
@@ -1185,6 +1226,17 @@ fn replace_matching_pure_expr(expr: &HirExpr, needle: &HirExpr, replacement: &Hi
             index: Box::new(replace_matching_pure_expr(index, needle, replacement)),
             elem_ty: elem_ty.clone(),
         },
+        HirExpr::Select {
+            cond,
+            then_expr,
+            else_expr,
+            ty,
+        } => HirExpr::Select {
+            cond: Box::new(replace_matching_pure_expr(cond, needle, replacement)),
+            then_expr: Box::new(replace_matching_pure_expr(then_expr, needle, replacement)),
+            else_expr: Box::new(replace_matching_pure_expr(else_expr, needle, replacement)),
+            ty: ty.clone(),
+        },
     }
 }
 
@@ -1228,6 +1280,16 @@ fn count_nonconst_leaf_inputs(expr: &HirExpr) -> usize {
         HirExpr::Index { base, index, .. } => {
             count_nonconst_leaf_inputs(base) + count_nonconst_leaf_inputs(index)
         }
+        HirExpr::Select {
+            cond,
+            then_expr,
+            else_expr,
+            ..
+        } => {
+            count_nonconst_leaf_inputs(cond)
+                + count_nonconst_leaf_inputs(then_expr)
+                + count_nonconst_leaf_inputs(else_expr)
+        }
     }
 }
 
@@ -1242,6 +1304,12 @@ fn expr_node_count(expr: &HirExpr) -> usize {
         HirExpr::Binary { lhs, rhs, .. } => 1 + expr_node_count(lhs) + expr_node_count(rhs),
         HirExpr::Call { args, .. } => 1 + args.iter().map(expr_node_count).sum::<usize>(),
         HirExpr::Index { base, index, .. } => 1 + expr_node_count(base) + expr_node_count(index),
+        HirExpr::Select {
+            cond,
+            then_expr,
+            else_expr,
+            ..
+        } => 1 + expr_node_count(cond) + expr_node_count(then_expr) + expr_node_count(else_expr),
     }
 }
 

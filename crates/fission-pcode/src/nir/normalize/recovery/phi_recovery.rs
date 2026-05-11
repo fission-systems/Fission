@@ -426,6 +426,16 @@ fn collect_vars_in_expr(expr: &HirExpr, out: &mut HashSet<String>) {
             collect_vars_in_expr(base, out);
             collect_vars_in_expr(index, out);
         }
+        HirExpr::Select {
+            cond,
+            then_expr,
+            else_expr,
+            ..
+        } => {
+            collect_vars_in_expr(cond, out);
+            collect_vars_in_expr(then_expr, out);
+            collect_vars_in_expr(else_expr, out);
+        }
     }
 }
 
@@ -621,6 +631,16 @@ fn substitute_copies_expr(
         HirExpr::Index { base, index, .. } => {
             substitute_copies_expr(base, copy_map, changed);
             substitute_copies_expr(index, copy_map, changed);
+        }
+        HirExpr::Select {
+            cond,
+            then_expr,
+            else_expr,
+            ..
+        } => {
+            substitute_copies_expr(cond, copy_map, changed);
+            substitute_copies_expr(then_expr, copy_map, changed);
+            substitute_copies_expr(else_expr, copy_map, changed);
         }
     }
 }
@@ -870,6 +890,16 @@ fn count_var_in_expr(expr: &HirExpr, name: &str) -> usize {
         HirExpr::Index { base, index, .. } => {
             count_var_in_expr(base, name) + count_var_in_expr(index, name)
         }
+        HirExpr::Select {
+            cond,
+            then_expr,
+            else_expr,
+            ..
+        } => {
+            count_var_in_expr(cond, name)
+                + count_var_in_expr(then_expr, name)
+                + count_var_in_expr(else_expr, name)
+        }
     }
 }
 
@@ -1014,6 +1044,16 @@ fn apply_join_renames_expr(
         HirExpr::Index { base, index, .. } => {
             apply_join_renames_expr(base, rename_map, changed);
             apply_join_renames_expr(index, rename_map, changed);
+        }
+        HirExpr::Select {
+            cond,
+            then_expr,
+            else_expr,
+            ..
+        } => {
+            apply_join_renames_expr(cond, rename_map, changed);
+            apply_join_renames_expr(then_expr, rename_map, changed);
+            apply_join_renames_expr(else_expr, rename_map, changed);
         }
     }
 }

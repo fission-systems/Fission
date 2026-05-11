@@ -418,6 +418,16 @@ fn recover_in_expr(expr: &mut HirExpr, binding_types: &HashMap<String, NirType>)
         HirExpr::AggregateCopy { src, .. } => {
             changed |= recover_in_expr(src, binding_types);
         }
+        HirExpr::Select {
+            cond,
+            then_expr,
+            else_expr,
+            ..
+        } => {
+            changed |= recover_in_expr(cond, binding_types);
+            changed |= recover_in_expr(then_expr, binding_types);
+            changed |= recover_in_expr(else_expr, binding_types);
+        }
         HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) | HirExpr::Const(_, _) => {}
     }
     changed

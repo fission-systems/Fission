@@ -66,6 +66,16 @@ fn rename_var_in_expr(expr: &mut HirExpr, renames: &[(String, String)]) {
             rename_var_in_expr(lhs, renames);
             rename_var_in_expr(rhs, renames);
         }
+        HirExpr::Select {
+            cond,
+            then_expr,
+            else_expr,
+            ..
+        } => {
+            rename_var_in_expr(cond, renames);
+            rename_var_in_expr(then_expr, renames);
+            rename_var_in_expr(else_expr, renames);
+        }
         HirExpr::Call { args, .. } => {
             for arg in args {
                 rename_var_in_expr(arg, renames);

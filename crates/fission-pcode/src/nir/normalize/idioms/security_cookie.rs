@@ -18,6 +18,16 @@ fn expr_uses_var(expr: &HirExpr, name: &str) -> bool {
         HirExpr::Index { base, index, .. } => {
             expr_uses_var(base, name) || expr_uses_var(index, name)
         }
+        HirExpr::Select {
+            cond,
+            then_expr,
+            else_expr,
+            ..
+        } => {
+            expr_uses_var(cond, name)
+                || expr_uses_var(then_expr, name)
+                || expr_uses_var(else_expr, name)
+        }
         HirExpr::Const(_, _) => false,
     }
 }

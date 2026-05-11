@@ -332,6 +332,16 @@ fn count_ptr_in_expr(expr: &HirExpr, name: &str) -> usize {
         HirExpr::Index { base, index, .. } => {
             count_ptr_in_expr(base, name) + count_ptr_in_expr(index, name)
         }
+        HirExpr::Select {
+            cond,
+            then_expr,
+            else_expr,
+            ..
+        } => {
+            count_ptr_in_expr(cond, name)
+                + count_ptr_in_expr(then_expr, name)
+                + count_ptr_in_expr(else_expr, name)
+        }
     }
 }
 

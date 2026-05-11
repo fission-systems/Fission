@@ -689,6 +689,7 @@ pub(crate) fn expr_type(expr: &HirExpr) -> NirType {
         HirExpr::Const(_, ty)
         | HirExpr::Unary { ty, .. }
         | HirExpr::Binary { ty, .. }
+        | HirExpr::Select { ty, .. }
         | HirExpr::Call { ty, .. }
         | HirExpr::Load { ty, .. }
         | HirExpr::Index { elem_ty: ty, .. } => ty.clone(),

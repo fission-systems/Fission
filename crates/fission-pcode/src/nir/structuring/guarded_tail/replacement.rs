@@ -23,6 +23,16 @@ impl<'a> PreviewBuilder<'a> {
             HirExpr::Index { base, index, .. } => {
                 Self::expr_contains_var(base, name) || Self::expr_contains_var(index, name)
             }
+            HirExpr::Select {
+                cond,
+                then_expr,
+                else_expr,
+                ..
+            } => {
+                Self::expr_contains_var(cond, name)
+                    || Self::expr_contains_var(then_expr, name)
+                    || Self::expr_contains_var(else_expr, name)
+            }
         }
     }
 
@@ -59,6 +69,16 @@ impl<'a> PreviewBuilder<'a> {
             HirExpr::Index { base, index, .. } => {
                 Self::replace_var_in_expr(base, name, replacement);
                 Self::replace_var_in_expr(index, name, replacement);
+            }
+            HirExpr::Select {
+                cond,
+                then_expr,
+                else_expr,
+                ..
+            } => {
+                Self::replace_var_in_expr(cond, name, replacement);
+                Self::replace_var_in_expr(then_expr, name, replacement);
+                Self::replace_var_in_expr(else_expr, name, replacement);
             }
         }
     }
@@ -224,6 +244,16 @@ impl<'a> PreviewBuilder<'a> {
                 .sum(),
             HirExpr::Index { base, index, .. } => {
                 Self::count_var_reads_expr(base, name) + Self::count_var_reads_expr(index, name)
+            }
+            HirExpr::Select {
+                cond,
+                then_expr,
+                else_expr,
+                ..
+            } => {
+                Self::count_var_reads_expr(cond, name)
+                    + Self::count_var_reads_expr(then_expr, name)
+                    + Self::count_var_reads_expr(else_expr, name)
             }
         }
     }

@@ -1191,6 +1191,7 @@ fn expr_prefers_stable_materialization(expr: &HirExpr) -> bool {
         | HirExpr::Load { .. }
         | HirExpr::PtrOffset { .. }
         | HirExpr::Index { .. }
+        | HirExpr::Select { .. }
         | HirExpr::AggregateCopy { .. }
         | HirExpr::Call { .. } => true,
         HirExpr::Binary { op, .. } => matches!(
@@ -1341,6 +1342,16 @@ fn expr_contains_var(expr: &HirExpr, name: &str) -> bool {
         HirExpr::Index { base, index, .. } => {
             expr_contains_var(base, name) || expr_contains_var(index, name)
         }
+        HirExpr::Select {
+            cond,
+            then_expr,
+            else_expr,
+            ..
+        } => {
+            expr_contains_var(cond, name)
+                || expr_contains_var(then_expr, name)
+                || expr_contains_var(else_expr, name)
+        }
     }
 }
 
@@ -1375,6 +1386,16 @@ fn count_var_uses(expr: &HirExpr, name: &str) -> usize {
             count_var_uses(base, name) + count_var_uses(index, name)
         }
         HirExpr::AggregateCopy { src, .. } => count_var_uses(src, name),
+        HirExpr::Select {
+            cond,
+            then_expr,
+            else_expr,
+            ..
+        } => {
+            count_var_uses(cond, name)
+                + count_var_uses(then_expr, name)
+                + count_var_uses(else_expr, name)
+        }
     }
 }
 
@@ -1391,6 +1412,16 @@ pub(crate) fn expr_has_side_effects(expr: &HirExpr) -> bool {
         }
         HirExpr::Index { base, index, .. } => {
             expr_has_side_effects(base) || expr_has_side_effects(index)
+        }
+        HirExpr::Select {
+            cond,
+            then_expr,
+            else_expr,
+            ..
+        } => {
+            expr_has_side_effects(cond)
+                || expr_has_side_effects(then_expr)
+                || expr_has_side_effects(else_expr)
         }
         HirExpr::Call { target, args, .. } => {
             if is_pure_intrinsic_call(target) {
@@ -1520,6 +1551,16 @@ fn replace_var_in_expr(expr: &mut HirExpr, name: &str, replacement: &HirExpr) {
             replace_var_in_expr(index, name, replacement);
         }
         HirExpr::AggregateCopy { src, .. } => replace_var_in_expr(src, name, replacement),
+        HirExpr::Select {
+            cond,
+            then_expr,
+            else_expr,
+            ..
+        } => {
+            replace_var_in_expr(cond, name, replacement);
+            replace_var_in_expr(then_expr, name, replacement);
+            replace_var_in_expr(else_expr, name, replacement);
+        }
     }
 }
 

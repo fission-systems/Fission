@@ -250,7 +250,10 @@ fn is_pure_and_invariant(expr: &HirExpr, loop_defs: &HashSet<String>) -> bool {
         }
         HirExpr::PtrOffset { base, .. } => is_pure_and_invariant(base, loop_defs),
         // Loads, calls, aggregate copies are never considered pure/invariant.
-        HirExpr::Load { .. } | HirExpr::Call { .. } | HirExpr::AggregateCopy { .. } => false,
+        HirExpr::Load { .. }
+        | HirExpr::Call { .. }
+        | HirExpr::AggregateCopy { .. }
+        | HirExpr::Select { .. } => false,
         HirExpr::Index { base, index, .. } => {
             // Array index expression can be invariant if both parts are.
             // We are conservative: only hoist if both are pure & invariant.

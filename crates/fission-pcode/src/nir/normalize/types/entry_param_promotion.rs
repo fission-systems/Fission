@@ -102,6 +102,16 @@ fn expr_contains_var(expr: &HirExpr, target: &str) -> bool {
         HirExpr::Index { base, index, .. } => {
             expr_contains_var(base, target) || expr_contains_var(index, target)
         }
+        HirExpr::Select {
+            cond,
+            then_expr,
+            else_expr,
+            ..
+        } => {
+            expr_contains_var(cond, target)
+                || expr_contains_var(then_expr, target)
+                || expr_contains_var(else_expr, target)
+        }
         HirExpr::Const(_, _) => false,
     }
 }

@@ -41,6 +41,16 @@ fn expr_uses_home_slot(expr: &HirExpr, home_slots: &HashMap<String, i64>) -> boo
             expr_uses_home_slot(base, home_slots) || expr_uses_home_slot(index, home_slots)
         }
         HirExpr::AggregateCopy { src, .. } => expr_uses_home_slot(src, home_slots),
+        HirExpr::Select {
+            cond,
+            then_expr,
+            else_expr,
+            ..
+        } => {
+            expr_uses_home_slot(cond, home_slots)
+                || expr_uses_home_slot(then_expr, home_slots)
+                || expr_uses_home_slot(else_expr, home_slots)
+        }
         HirExpr::Const(_, _) => false,
     }
 }

@@ -419,6 +419,17 @@ impl MirProjector {
                 self.push_memory_region(StorageClass::Aggregate, false);
                 self.push_value(MirValueKind::Expr)
             }
+            HirExpr::Select {
+                cond,
+                then_expr,
+                else_expr,
+                ..
+            } => {
+                self.project_expr(cond);
+                self.project_expr(then_expr);
+                self.project_expr(else_expr);
+                self.push_value(MirValueKind::Expr)
+            }
         }
     }
 

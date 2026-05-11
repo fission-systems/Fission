@@ -6,6 +6,7 @@ impl<'a> PreviewBuilder<'a> {
         match expr {
             HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) | HirExpr::Const(..) => false,
             HirExpr::Cast { expr, .. } => Self::should_preserve_materialized_expr(expr),
+            HirExpr::Select { .. } => true,
             HirExpr::Unary { .. }
             | HirExpr::Binary { .. }
             | HirExpr::Call { .. }
@@ -38,6 +39,16 @@ impl<'a> PreviewBuilder<'a> {
             }
             HirExpr::AggregateCopy { src, .. } => {
                 Self::expr_is_side_effectful_for_materialization_trace(src)
+            }
+            HirExpr::Select {
+                cond,
+                then_expr,
+                else_expr,
+                ..
+            } => {
+                Self::expr_is_side_effectful_for_materialization_trace(cond)
+                    || Self::expr_is_side_effectful_for_materialization_trace(then_expr)
+                    || Self::expr_is_side_effectful_for_materialization_trace(else_expr)
             }
             HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) | HirExpr::Const(..) => false,
         }
@@ -257,6 +268,18 @@ impl<'a> PreviewBuilder<'a> {
                 Self::classify_address_stable_required_base_kind(base),
                 Self::classify_address_stable_required_base_kind(index),
             ),
+            HirExpr::Select {
+                cond,
+                then_expr,
+                else_expr,
+                ..
+            } => merge_base_kinds(
+                Self::classify_address_stable_required_base_kind(cond),
+                merge_base_kinds(
+                    Self::classify_address_stable_required_base_kind(then_expr),
+                    Self::classify_address_stable_required_base_kind(else_expr),
+                ),
+            ),
         }
     }
 
@@ -299,6 +322,18 @@ impl<'a> PreviewBuilder<'a> {
             HirExpr::Index { base, index, .. } => merge_expr_kinds(
                 Self::classify_address_stable_required_expr_kind(base),
                 Self::classify_address_stable_required_expr_kind(index),
+            ),
+            HirExpr::Select {
+                cond,
+                then_expr,
+                else_expr,
+                ..
+            } => merge_expr_kinds(
+                Self::classify_address_stable_required_expr_kind(cond),
+                merge_expr_kinds(
+                    Self::classify_address_stable_required_expr_kind(then_expr),
+                    Self::classify_address_stable_required_expr_kind(else_expr),
+                ),
             ),
         }
     }
@@ -408,6 +443,18 @@ impl<'a> PreviewBuilder<'a> {
                 Self::classify_stack_address_base_reg(base),
                 Self::classify_stack_address_base_reg(index),
             ),
+            HirExpr::Select {
+                cond,
+                then_expr,
+                else_expr,
+                ..
+            } => merge_base_regs(
+                Self::classify_stack_address_base_reg(cond),
+                merge_base_regs(
+                    Self::classify_stack_address_base_reg(then_expr),
+                    Self::classify_stack_address_base_reg(else_expr),
+                ),
+            ),
         }
     }
 
@@ -423,6 +470,7 @@ impl<'a> PreviewBuilder<'a> {
             | HirExpr::Call { .. }
             | HirExpr::Load { .. }
             | HirExpr::Index { .. }
+            | HirExpr::Select { .. }
             | HirExpr::AggregateCopy { .. } => None,
             HirExpr::Cast { expr, .. } => Self::extract_stack_address_offset(expr),
             HirExpr::PtrOffset { base, offset } => is_stack_base(base).then_some(*offset),
@@ -969,6 +1017,16 @@ impl<'a> PreviewBuilder<'a> {
                     || Self::materialize_expr_contains_load(index)
             }
             HirExpr::AggregateCopy { src, .. } => Self::materialize_expr_contains_load(src),
+            HirExpr::Select {
+                cond,
+                then_expr,
+                else_expr,
+                ..
+            } => {
+                Self::materialize_expr_contains_load(cond)
+                    || Self::materialize_expr_contains_load(then_expr)
+                    || Self::materialize_expr_contains_load(else_expr)
+            }
             HirExpr::Call { .. }
             | HirExpr::Var(_)
             | HirExpr::AddressOfGlobal(_)
@@ -993,6 +1051,16 @@ impl<'a> PreviewBuilder<'a> {
                     || Self::materialize_expr_contains_call(index)
             }
             HirExpr::AggregateCopy { src, .. } => Self::materialize_expr_contains_call(src),
+            HirExpr::Select {
+                cond,
+                then_expr,
+                else_expr,
+                ..
+            } => {
+                Self::materialize_expr_contains_call(cond)
+                    || Self::materialize_expr_contains_call(then_expr)
+                    || Self::materialize_expr_contains_call(else_expr)
+            }
             HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) | HirExpr::Const(_, _) => false,
         }
     }
@@ -1012,6 +1080,14 @@ impl<'a> PreviewBuilder<'a> {
             HirExpr::Index { base, index, .. } => Self::first_call_expr_in_materialize_expr(base)
                 .or_else(|| Self::first_call_expr_in_materialize_expr(index)),
             HirExpr::AggregateCopy { src, .. } => Self::first_call_expr_in_materialize_expr(src),
+            HirExpr::Select {
+                cond,
+                then_expr,
+                else_expr,
+                ..
+            } => Self::first_call_expr_in_materialize_expr(cond)
+                .or_else(|| Self::first_call_expr_in_materialize_expr(then_expr))
+                .or_else(|| Self::first_call_expr_in_materialize_expr(else_expr)),
             HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) | HirExpr::Const(_, _) => None,
         }
     }
@@ -1028,6 +1104,14 @@ impl<'a> PreviewBuilder<'a> {
             HirExpr::Index { base, index, .. } => Self::first_load_expr_in_materialize_expr(base)
                 .or_else(|| Self::first_load_expr_in_materialize_expr(index)),
             HirExpr::AggregateCopy { src, .. } => Self::first_load_expr_in_materialize_expr(src),
+            HirExpr::Select {
+                cond,
+                then_expr,
+                else_expr,
+                ..
+            } => Self::first_load_expr_in_materialize_expr(cond)
+                .or_else(|| Self::first_load_expr_in_materialize_expr(then_expr))
+                .or_else(|| Self::first_load_expr_in_materialize_expr(else_expr)),
             HirExpr::Call { .. }
             | HirExpr::Var(_)
             | HirExpr::AddressOfGlobal(_)
@@ -1077,6 +1161,7 @@ impl<'a> PreviewBuilder<'a> {
             HirExpr::Call { .. } => DisallowedSingleConsumerRhsKind::CallLike,
             HirExpr::Cast { expr, .. } => Self::classify_disallowed_single_consumer_rhs_kind(expr),
             HirExpr::Unary { .. } => DisallowedSingleConsumerRhsKind::Other,
+            HirExpr::Select { .. } => DisallowedSingleConsumerRhsKind::Other,
         }
     }
 
@@ -1413,6 +1498,7 @@ impl<'a> PreviewBuilder<'a> {
             | HirExpr::PtrOffset { .. }
             | HirExpr::Index { .. }
             | HirExpr::AggregateCopy { .. }
+            | HirExpr::Select { .. }
             | HirExpr::Const(_, _) => SingleConsumerPredicateFamily::UnknownPredicate,
         }
     }
@@ -1605,6 +1691,9 @@ impl<'a> PreviewBuilder<'a> {
             HirExpr::Call { ty, .. } | HirExpr::Load { ty, .. } => {
                 matches!(ty, NirType::Bool) || matches!(ty, NirType::Int { bits, .. } if *bits == 1)
             }
+            HirExpr::Select { ty, .. } => {
+                matches!(ty, NirType::Bool) || matches!(ty, NirType::Int { bits, .. } if *bits == 1)
+            }
             HirExpr::PtrOffset { .. }
             | HirExpr::Index { .. }
             | HirExpr::AggregateCopy { .. }
@@ -1648,6 +1737,7 @@ impl<'a> PreviewBuilder<'a> {
             }
             HirExpr::Call { .. } => LowBitMaskInputOriginKind::Call,
             HirExpr::AggregateCopy { .. }
+            | HirExpr::Select { .. }
             | HirExpr::Var(_)
             | HirExpr::AddressOfGlobal(_)
             | HirExpr::Const(_, _) => LowBitMaskInputOriginKind::Unknown,
@@ -2943,6 +3033,7 @@ impl<'a> PreviewBuilder<'a> {
                 ) && Self::expr_is_low_cost_builder_inline_candidate(lhs)
                     && Self::expr_is_low_cost_builder_inline_candidate(rhs)
             }
+            HirExpr::Select { .. } => false,
             HirExpr::Call { .. } => false,
         }
     }
@@ -3019,6 +3110,7 @@ impl<'a> PreviewBuilder<'a> {
                     | HirBinaryOp::SLt
                     | HirBinaryOp::SLe
             ),
+            HirExpr::Select { .. } => true,
             HirExpr::Call { .. } => true,
         }
     }

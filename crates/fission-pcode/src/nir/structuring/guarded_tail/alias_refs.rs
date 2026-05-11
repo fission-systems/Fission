@@ -41,6 +41,16 @@ impl<'a> PreviewBuilder<'a> {
                 Self::expr_is_pure_value(base) && Self::expr_is_pure_value(index)
             }
             HirExpr::AggregateCopy { src, .. } => Self::expr_is_pure_value(src),
+            HirExpr::Select {
+                cond,
+                then_expr,
+                else_expr,
+                ..
+            } => {
+                Self::expr_is_pure_value(cond)
+                    && Self::expr_is_pure_value(then_expr)
+                    && Self::expr_is_pure_value(else_expr)
+            }
             HirExpr::Call { target, args, .. } => {
                 guarded_tail_call_target_is_known_pure_helper(target)
                     && args.iter().all(Self::expr_is_pure_value)

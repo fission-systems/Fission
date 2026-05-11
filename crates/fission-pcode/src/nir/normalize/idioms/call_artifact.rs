@@ -24,6 +24,16 @@ fn count_mentions_in_expr(expr: &HirExpr, name: &str) -> usize {
         HirExpr::Index { base, index, .. } => {
             count_mentions_in_expr(base, name) + count_mentions_in_expr(index, name)
         }
+        HirExpr::Select {
+            cond,
+            then_expr,
+            else_expr,
+            ..
+        } => {
+            count_mentions_in_expr(cond, name)
+                + count_mentions_in_expr(then_expr, name)
+                + count_mentions_in_expr(else_expr, name)
+        }
         HirExpr::Const(_, _) => 0,
     }
 }
@@ -115,6 +125,16 @@ fn substitute_var_in_expr(expr: &mut HirExpr, name: &str, replacement: &HirExpr)
         HirExpr::Index { base, index, .. } => {
             substitute_var_in_expr(base, name, replacement)
                 | substitute_var_in_expr(index, name, replacement)
+        }
+        HirExpr::Select {
+            cond,
+            then_expr,
+            else_expr,
+            ..
+        } => {
+            substitute_var_in_expr(cond, name, replacement)
+                | substitute_var_in_expr(then_expr, name, replacement)
+                | substitute_var_in_expr(else_expr, name, replacement)
         }
         HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) | HirExpr::Const(_, _) => false,
     }

@@ -164,6 +164,16 @@ fn stabilize_expr(expr: &mut HirExpr, reps: &PureExprMap) -> bool {
             changed |= stabilize_expr(base, reps);
             changed |= stabilize_expr(index, reps);
         }
+        HirExpr::Select {
+            cond,
+            then_expr,
+            else_expr,
+            ..
+        } => {
+            changed |= stabilize_expr(cond, reps);
+            changed |= stabilize_expr(then_expr, reps);
+            changed |= stabilize_expr(else_expr, reps);
+        }
         HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) | HirExpr::Const(_, _) => {}
     }
     changed

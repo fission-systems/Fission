@@ -312,6 +312,16 @@ fn expr_vars(expr: &HirExpr, out: &mut HashSet<String>) {
             }
         }
         HirExpr::AggregateCopy { src, .. } => expr_vars(src, out),
+        HirExpr::Select {
+            cond,
+            then_expr,
+            else_expr,
+            ..
+        } => {
+            expr_vars(cond, out);
+            expr_vars(then_expr, out);
+            expr_vars(else_expr, out);
+        }
         HirExpr::Const(_, _) => {}
     }
 }

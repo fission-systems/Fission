@@ -386,6 +386,18 @@ fn print_expr_prec(expr: &HirExpr, parent_prec: u8, depth: usize) -> String {
                 )
             }
         }
+        HirExpr::Select {
+            cond,
+            then_expr,
+            else_expr,
+            ..
+        } => {
+            let prec = 20;
+            let cond = print_expr_prec(cond, prec, depth + 1);
+            let then_expr = print_expr_prec(then_expr, prec, depth + 1);
+            let else_expr = print_expr_prec(else_expr, prec, depth + 1);
+            (format!("{cond} ? {then_expr} : {else_expr}"), prec)
+        }
         HirExpr::Call { target, args, .. } => {
             let args = args
                 .iter()
@@ -589,6 +601,18 @@ fn print_expr_prec_ctx(
             let rhs_parent_prec = binary_rhs_parent_precedence(*op, rhs, prec + 1);
             let rhs = print_expr_prec_ctx(rhs, rhs_parent_prec, depth + 1, ctx);
             (format!("{lhs} {} {rhs}", print_binary_op(*op)), prec)
+        }
+        HirExpr::Select {
+            cond,
+            then_expr,
+            else_expr,
+            ..
+        } => {
+            let prec = 20;
+            let cond = print_expr_prec_ctx(cond, prec, depth + 1, ctx);
+            let then_expr = print_expr_prec_ctx(then_expr, prec, depth + 1, ctx);
+            let else_expr = print_expr_prec_ctx(else_expr, prec, depth + 1, ctx);
+            (format!("{cond} ? {then_expr} : {else_expr}"), prec)
         }
         HirExpr::Call { target, args, .. } => {
             let args = args

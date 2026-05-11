@@ -181,6 +181,16 @@ fn rewrite_loads_in_expr(expr: &mut HirExpr, cache: &LoadCache, changed: &mut bo
             rewrite_loads_in_expr(index.as_mut(), cache, changed);
         }
         HirExpr::AggregateCopy { src, .. } => rewrite_loads_in_expr(src.as_mut(), cache, changed),
+        HirExpr::Select {
+            cond,
+            then_expr,
+            else_expr,
+            ..
+        } => {
+            rewrite_loads_in_expr(cond.as_mut(), cache, changed);
+            rewrite_loads_in_expr(then_expr.as_mut(), cache, changed);
+            rewrite_loads_in_expr(else_expr.as_mut(), cache, changed);
+        }
         HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) | HirExpr::Const(_, _) => {}
     }
 }

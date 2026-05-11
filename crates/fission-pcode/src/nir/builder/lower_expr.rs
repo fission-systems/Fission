@@ -1119,6 +1119,9 @@ impl<'a> PreviewBuilder<'a> {
         if let Some(expr) = self.loop_exit_materialized_register_binding(vn) {
             return Ok(expr);
         }
+        if let Some(expr) = self.try_lower_diamond_select_for_varnode(vn, visiting)? {
+            return Ok(expr);
+        }
         if def_site.is_none() {
             if let Some(param) = self.register_param(vn) {
                 return Ok(HirExpr::Var(param));
@@ -1262,6 +1265,146 @@ impl<'a> PreviewBuilder<'a> {
         };
         visiting.remove(&key);
         result
+    }
+
+    fn try_lower_diamond_select_for_varnode(
+        &mut self,
+        vn: &Varnode,
+        visiting: &mut HashSet<VarnodeKey>,
+    ) -> Result<Option<HirExpr>, MlilPreviewError> {
+        if !is_register_space_id(vn.space_id) {
+            return Ok(None);
+        }
+        let Some(site) = self.current_lowering_site else {
+            return Ok(None);
+        };
+        let Some(preds) = self.predecessors.get(site.block_idx).cloned() else {
+            return Ok(None);
+        };
+        let [pred_a, pred_b] = preds.as_slice() else {
+            return Ok(None);
+        };
+        let Some((branch_idx, branch_term_idx)) =
+            self.find_diamond_branch_for_predecessors(*pred_a, *pred_b)
+        else {
+            return Ok(None);
+        };
+        let branch_block = self.pcode.blocks[branch_idx].clone();
+        let branch_op = branch_block.ops[branch_term_idx].clone();
+        if branch_op.opcode != PcodeOpcode::CBranch {
+            return Ok(None);
+        }
+        let Some(cond_vn) = branch_op.inputs.last().cloned() else {
+            return Ok(None);
+        };
+        let Some(target_vn) = branch_op.inputs.first() else {
+            return Ok(None);
+        };
+        let Some(true_succ_idx) = resolve_branch_target_index(
+            self.pcode,
+            &self.address_to_index,
+            branch_idx,
+            &branch_op,
+            target_vn,
+        ) else {
+            return Ok(None);
+        };
+        let false_succ_idx = if true_succ_idx == *pred_a {
+            *pred_b
+        } else if true_succ_idx == *pred_b {
+            *pred_a
+        } else {
+            return Ok(None);
+        };
+        let Some(true_expr) = self.lower_predecessor_incoming_value(true_succ_idx, vn, visiting)?
+        else {
+            return Ok(None);
+        };
+        let Some(false_expr) =
+            self.lower_predecessor_incoming_value(false_succ_idx, vn, visiting)?
+        else {
+            return Ok(None);
+        };
+        if strip_casts(&true_expr) == strip_casts(&false_expr) {
+            return Ok(Some(true_expr));
+        }
+        let cond = self.with_lowering_site(
+            LoweringSite {
+                block_idx: branch_idx,
+                op_idx: branch_term_idx,
+            },
+            |this| this.lower_varnode(&cond_vn, visiting),
+        )?;
+        Ok(Some(HirExpr::Select {
+            cond: Box::new(cond),
+            then_expr: Box::new(true_expr),
+            else_expr: Box::new(false_expr),
+            ty: type_from_size(vn.size, false),
+        }))
+    }
+
+    fn find_diamond_branch_for_predecessors(
+        &self,
+        pred_a: usize,
+        pred_b: usize,
+    ) -> Option<(usize, usize)> {
+        for (block_idx, succs) in self.successors.iter().enumerate() {
+            if succs.len() != 2 || !succs.contains(&pred_a) || !succs.contains(&pred_b) {
+                continue;
+            }
+            let block = self.pcode.blocks.get(block_idx)?;
+            let term_idx = self.block_terminator_index(block)?;
+            if block.ops.get(term_idx)?.opcode == PcodeOpcode::CBranch {
+                return Some((block_idx, term_idx));
+            }
+        }
+        None
+    }
+
+    fn lower_predecessor_incoming_value(
+        &mut self,
+        pred_idx: usize,
+        vn: &Varnode,
+        visiting: &mut HashSet<VarnodeKey>,
+    ) -> Result<Option<HirExpr>, MlilPreviewError> {
+        let Some(pred_block) = self.pcode.blocks.get(pred_idx).cloned() else {
+            return Ok(None);
+        };
+        let term_idx = self
+            .block_terminator_index(&pred_block)
+            .unwrap_or(pred_block.ops.len());
+        let Some(def_idx) = self.last_alias_def_in_block(&pred_block, term_idx, vn) else {
+            return Ok(None);
+        };
+        let op = pred_block.ops[def_idx].clone();
+        let expr = self.with_lowering_site(
+            LoweringSite {
+                block_idx: pred_idx,
+                op_idx: def_idx,
+            },
+            |this| this.lower_def_op(&op, visiting),
+        )?;
+        Ok(Some(self.project_alias_def_expr(vn, &op, expr)))
+    }
+
+    fn last_alias_def_in_block(
+        &self,
+        block: &crate::pcode::PcodeBasicBlock,
+        term_idx: usize,
+        vn: &Varnode,
+    ) -> Option<usize> {
+        block
+            .ops
+            .iter()
+            .enumerate()
+            .take(term_idx)
+            .rev()
+            .find_map(|(op_idx, op)| {
+                op.output
+                    .as_ref()
+                    .is_some_and(|output| self.varnode_aliases_value(output, vn))
+                    .then_some(op_idx)
+            })
     }
 
     fn classify_varnode_lowering_error(
@@ -1590,5 +1733,131 @@ impl<'a> PreviewBuilder<'a> {
             rhs: Box::new(rhs),
             ty,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::nir::render_mlil_preview;
+
+    fn varnode(offset: u64) -> Varnode {
+        Varnode {
+            space_id: UNIQUE_SPACE_ID,
+            offset,
+            size: 8,
+            is_constant: false,
+            constant_val: 0,
+        }
+    }
+
+    fn register(offset: u64, size: u32) -> Varnode {
+        Varnode {
+            space_id: RUST_SLEIGH_REGISTER_SPACE_ID,
+            offset,
+            size,
+            is_constant: false,
+            constant_val: 0,
+        }
+    }
+
+    fn constant(value: i64) -> Varnode {
+        Varnode::constant(value, 8)
+    }
+
+    fn op(
+        seq_num: u32,
+        opcode: PcodeOpcode,
+        output: Option<Varnode>,
+        inputs: Vec<Varnode>,
+    ) -> PcodeOp {
+        PcodeOp {
+            seq_num,
+            opcode,
+            address: 0x1000 + u64::from(seq_num),
+            output,
+            inputs,
+            asm_mnemonic: None,
+        }
+    }
+
+    fn block_at(
+        start_address: u64,
+        index: u32,
+        ops: Vec<PcodeOp>,
+    ) -> crate::pcode::PcodeBasicBlock {
+        crate::pcode::PcodeBasicBlock {
+            index,
+            start_address,
+            successors: Vec::new(),
+            ops,
+        }
+    }
+
+    fn pcode_function(blocks: Vec<crate::pcode::PcodeBasicBlock>) -> crate::pcode::PcodeFunction {
+        crate::pcode::PcodeFunction { blocks }
+    }
+
+    fn test_options() -> MlilPreviewOptions {
+        MlilPreviewOptions {
+            pe_x64_only: true,
+            is_64bit: true,
+            is_big_endian: false,
+            pointer_size: 8,
+            format: "PE".to_string(),
+            image_base: 0x1400_0000,
+            sections: vec![(0x1400_1000, 0x1400_2000)],
+            region_linearize_structuring: false,
+            force_linear_structuring: false,
+            conservative_irreducible_fallback: false,
+            structuring_engine: StructuringEngineKind::GraphCollapseV1,
+            global_names: Default::default(),
+            global_sizes: Default::default(),
+            relocation_names: Default::default(),
+            calling_convention: Default::default(),
+        }
+    }
+
+    #[test]
+    fn diamond_join_lowers_branch_local_register_defs_as_select() {
+        let cond = varnode(0x80);
+        let rax = register(0, 8);
+        let pcode = pcode_function(vec![
+            block_at(
+                0x1000,
+                0,
+                vec![op(
+                    1,
+                    PcodeOpcode::CBranch,
+                    None,
+                    vec![constant(0x1020), cond],
+                )],
+            ),
+            block_at(
+                0x1010,
+                1,
+                vec![
+                    op(2, PcodeOpcode::Copy, Some(rax.clone()), vec![constant(10)]),
+                    op(3, PcodeOpcode::Branch, None, vec![constant(0x1030)]),
+                ],
+            ),
+            block_at(
+                0x1020,
+                2,
+                vec![
+                    op(4, PcodeOpcode::Copy, Some(rax.clone()), vec![constant(20)]),
+                    op(5, PcodeOpcode::Branch, None, vec![constant(0x1030)]),
+                ],
+            ),
+            block_at(0x1030, 3, vec![op(6, PcodeOpcode::Return, None, vec![rax])]),
+        ]);
+        let options = test_options();
+
+        let code = render_mlil_preview(&pcode, "diamond_select", 0x1000, &options).expect("render");
+
+        assert!(
+            code.contains("return tmp_80 ? 20 : 10;"),
+            "expected branch-target arm to be the true select arm:\n{code}"
+        );
     }
 }

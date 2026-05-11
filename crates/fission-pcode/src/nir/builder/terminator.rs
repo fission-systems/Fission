@@ -349,6 +349,16 @@ impl<'a> PreviewBuilder<'a> {
             }
             HirExpr::Call { ty, .. } => matches!(ty, NirType::Ptr(_)),
             HirExpr::AggregateCopy { src, .. } => self.arm32_return_pair_part_is_address_like(src),
+            HirExpr::Select {
+                cond,
+                then_expr,
+                else_expr,
+                ..
+            } => {
+                self.arm32_return_pair_part_is_address_like(cond)
+                    || self.arm32_return_pair_part_is_address_like(then_expr)
+                    || self.arm32_return_pair_part_is_address_like(else_expr)
+            }
             HirExpr::Var(name) => {
                 self.options
                     .global_names
@@ -1726,6 +1736,16 @@ impl<'a> PreviewBuilder<'a> {
             HirExpr::Index { base, index, .. } => {
                 Self::expr_contains_call(base) || Self::expr_contains_call(index)
             }
+            HirExpr::Select {
+                cond,
+                then_expr,
+                else_expr,
+                ..
+            } => {
+                Self::expr_contains_call(cond)
+                    || Self::expr_contains_call(then_expr)
+                    || Self::expr_contains_call(else_expr)
+            }
         }
     }
 
@@ -1743,6 +1763,16 @@ impl<'a> PreviewBuilder<'a> {
             HirExpr::Call { args, .. } => 1 + args.iter().map(Self::expr_node_count).sum::<usize>(),
             HirExpr::Index { base, index, .. } => {
                 1 + Self::expr_node_count(base) + Self::expr_node_count(index)
+            }
+            HirExpr::Select {
+                cond,
+                then_expr,
+                else_expr,
+                ..
+            } => {
+                1 + Self::expr_node_count(cond)
+                    + Self::expr_node_count(then_expr)
+                    + Self::expr_node_count(else_expr)
             }
         }
     }
@@ -2256,6 +2286,7 @@ impl<'a> PreviewBuilder<'a> {
             HirExpr::PtrOffset { .. } => None,
             HirExpr::AggregateCopy { size, .. } => Some(*size * 8),
             HirExpr::Index { elem_ty, .. } => Self::nir_type_width(elem_ty),
+            HirExpr::Select { ty, .. } => Self::nir_type_width(ty),
         }
     }
 
@@ -2287,6 +2318,16 @@ impl<'a> PreviewBuilder<'a> {
             HirExpr::Index { base, index, .. } => {
                 Self::selector_expr_is_side_effect_free(base)
                     && Self::selector_expr_is_side_effect_free(index)
+            }
+            HirExpr::Select {
+                cond,
+                then_expr,
+                else_expr,
+                ..
+            } => {
+                Self::selector_expr_is_side_effect_free(cond)
+                    && Self::selector_expr_is_side_effect_free(then_expr)
+                    && Self::selector_expr_is_side_effect_free(else_expr)
             }
             HirExpr::Call { .. } => false,
         }

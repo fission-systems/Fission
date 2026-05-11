@@ -27,6 +27,16 @@ impl<'a> PreviewBuilder<'a> {
             HirExpr::Binary { lhs, rhs, .. } => {
                 Self::no_consumer_flag_rhs_is_pure(lhs) && Self::no_consumer_flag_rhs_is_pure(rhs)
             }
+            HirExpr::Select {
+                cond,
+                then_expr,
+                else_expr,
+                ..
+            } => {
+                Self::no_consumer_flag_rhs_is_pure(cond)
+                    && Self::no_consumer_flag_rhs_is_pure(then_expr)
+                    && Self::no_consumer_flag_rhs_is_pure(else_expr)
+            }
             HirExpr::Call { .. }
             | HirExpr::Load { .. }
             | HirExpr::PtrOffset { .. }
@@ -143,6 +153,7 @@ impl<'a> PreviewBuilder<'a> {
             HirExpr::AggregateCopy { .. } => NoConsumerSuppressionRhsKind::Aggregate,
             HirExpr::PtrOffset { .. } => NoConsumerSuppressionRhsKind::PtrOffset,
             HirExpr::Index { .. } => NoConsumerSuppressionRhsKind::Index,
+            HirExpr::Select { .. } => NoConsumerSuppressionRhsKind::Select,
         }
     }
 

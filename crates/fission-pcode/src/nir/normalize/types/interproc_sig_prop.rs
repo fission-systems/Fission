@@ -190,6 +190,16 @@ fn scan_expr(
             scan_expr(base, arity_map, summary_map);
             scan_expr(index, arity_map, summary_map);
         }
+        HirExpr::Select {
+            cond,
+            then_expr,
+            else_expr,
+            ..
+        } => {
+            scan_expr(cond, arity_map, summary_map);
+            scan_expr(then_expr, arity_map, summary_map);
+            scan_expr(else_expr, arity_map, summary_map);
+        }
         HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) | HirExpr::Const(_, _) => {}
     }
 }

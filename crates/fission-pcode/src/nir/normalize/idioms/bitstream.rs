@@ -331,6 +331,14 @@ fn infer_state_from_expr(
         }
         HirExpr::Index { base, index, .. } => infer_state_from_expr(base, state_roots)
             .or_else(|| infer_state_from_expr(index, state_roots)),
+        HirExpr::Select {
+            cond,
+            then_expr,
+            else_expr,
+            ..
+        } => infer_state_from_expr(cond, state_roots)
+            .or_else(|| infer_state_from_expr(then_expr, state_roots))
+            .or_else(|| infer_state_from_expr(else_expr, state_roots)),
         HirExpr::Const(_, _) => None,
     }
 }

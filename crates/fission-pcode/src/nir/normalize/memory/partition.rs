@@ -178,6 +178,16 @@ fn collect_accesses_from_expr(expr: &HirExpr, accesses: &mut Vec<PartitionedMemo
             collect_accesses_from_expr(base, accesses);
             collect_accesses_from_expr(index, accesses);
         }
+        HirExpr::Select {
+            cond,
+            then_expr,
+            else_expr,
+            ..
+        } => {
+            collect_accesses_from_expr(cond, accesses);
+            collect_accesses_from_expr(then_expr, accesses);
+            collect_accesses_from_expr(else_expr, accesses);
+        }
         HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) | HirExpr::Const(_, _) => {}
     }
 }

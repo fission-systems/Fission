@@ -729,6 +729,16 @@ mod tests {
                 expr_contains_shr(base) || expr_contains_shr(index)
             }
             HirExpr::AggregateCopy { src, .. } => expr_contains_shr(src),
+            HirExpr::Select {
+                cond,
+                then_expr,
+                else_expr,
+                ..
+            } => {
+                expr_contains_shr(cond)
+                    || expr_contains_shr(then_expr)
+                    || expr_contains_shr(else_expr)
+            }
             HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) | HirExpr::Const(_, _) => false,
         }
     }

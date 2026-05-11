@@ -227,6 +227,16 @@ impl<'a> PreviewBuilder<'a> {
             HirExpr::Index { base, index, .. } => {
                 Self::expr_contains_load(base) || Self::expr_contains_load(index)
             }
+            HirExpr::Select {
+                cond,
+                then_expr,
+                else_expr,
+                ..
+            } => {
+                Self::expr_contains_load(cond)
+                    || Self::expr_contains_load(then_expr)
+                    || Self::expr_contains_load(else_expr)
+            }
             HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) | HirExpr::Const(_, _) => false,
         }
     }
@@ -245,6 +255,16 @@ impl<'a> PreviewBuilder<'a> {
             }
             HirExpr::Index { base, index, .. } => {
                 Self::suffix_expr_contains_call(base) || Self::suffix_expr_contains_call(index)
+            }
+            HirExpr::Select {
+                cond,
+                then_expr,
+                else_expr,
+                ..
+            } => {
+                Self::suffix_expr_contains_call(cond)
+                    || Self::suffix_expr_contains_call(then_expr)
+                    || Self::suffix_expr_contains_call(else_expr)
             }
             HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) | HirExpr::Const(_, _) => false,
         }

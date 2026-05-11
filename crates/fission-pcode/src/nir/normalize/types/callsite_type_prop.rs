@@ -449,6 +449,16 @@ fn rewrite_call_targets_expr(expr: &mut HirExpr, rewrites: &HashMap<String, Stri
             changed |= rewrite_call_targets_expr(base, rewrites);
             changed |= rewrite_call_targets_expr(index, rewrites);
         }
+        HirExpr::Select {
+            cond,
+            then_expr,
+            else_expr,
+            ..
+        } => {
+            changed |= rewrite_call_targets_expr(cond, rewrites);
+            changed |= rewrite_call_targets_expr(then_expr, rewrites);
+            changed |= rewrite_call_targets_expr(else_expr, rewrites);
+        }
         HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) | HirExpr::Const(_, _) => {}
     }
     changed
@@ -716,6 +726,16 @@ fn prune_known_api_call_args_expr(
             pruned += prune_known_api_call_args_expr(base, summaries);
             pruned += prune_known_api_call_args_expr(index, summaries);
         }
+        HirExpr::Select {
+            cond,
+            then_expr,
+            else_expr,
+            ..
+        } => {
+            pruned += prune_known_api_call_args_expr(cond, summaries);
+            pruned += prune_known_api_call_args_expr(then_expr, summaries);
+            pruned += prune_known_api_call_args_expr(else_expr, summaries);
+        }
         HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) | HirExpr::Const(_, _) => {}
     }
     pruned
@@ -794,6 +814,16 @@ fn prune_self_call_args_expr(expr: &mut HirExpr, func_name: &str, arity: usize) 
         HirExpr::Index { base, index, .. } => {
             pruned += prune_self_call_args_expr(base, func_name, arity);
             pruned += prune_self_call_args_expr(index, func_name, arity);
+        }
+        HirExpr::Select {
+            cond,
+            then_expr,
+            else_expr,
+            ..
+        } => {
+            pruned += prune_self_call_args_expr(cond, func_name, arity);
+            pruned += prune_self_call_args_expr(then_expr, func_name, arity);
+            pruned += prune_self_call_args_expr(else_expr, func_name, arity);
         }
         HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) | HirExpr::Const(_, _) => {}
     }

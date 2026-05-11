@@ -1286,6 +1286,7 @@ pub(super) enum NoConsumerSuppressionRhsKind {
     Aggregate,
     PtrOffset,
     Index,
+    Select,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

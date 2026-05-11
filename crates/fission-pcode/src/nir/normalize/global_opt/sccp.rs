@@ -181,6 +181,16 @@ fn sccp_subst_expr(expr: &mut HirExpr, env: &ConstEnv) -> bool {
             }
         }
         HirExpr::AggregateCopy { src, .. } => changed |= sccp_subst_expr(src, env),
+        HirExpr::Select {
+            cond,
+            then_expr,
+            else_expr,
+            ..
+        } => {
+            changed |= sccp_subst_expr(cond, env);
+            changed |= sccp_subst_expr(then_expr, env);
+            changed |= sccp_subst_expr(else_expr, env);
+        }
         HirExpr::Const(_, _) => {}
     }
     changed

@@ -693,6 +693,34 @@ fn collect_global_decls_from_expr(
                 decls,
             );
         }
+        HirExpr::Select {
+            cond,
+            then_expr,
+            else_expr,
+            ..
+        } => {
+            collect_global_decls_from_expr(
+                cond,
+                global_names,
+                global_decl_types,
+                binding_types,
+                decls,
+            );
+            collect_global_decls_from_expr(
+                then_expr,
+                global_names,
+                global_decl_types,
+                binding_types,
+                decls,
+            );
+            collect_global_decls_from_expr(
+                else_expr,
+                global_names,
+                global_decl_types,
+                binding_types,
+                decls,
+            );
+        }
         HirExpr::Call { args, .. } => {
             for arg in args {
                 collect_global_decls_from_expr(
@@ -729,6 +757,7 @@ fn infer_global_decl_expr_type(
         HirExpr::Cast { ty, .. }
         | HirExpr::Unary { ty, .. }
         | HirExpr::Binary { ty, .. }
+        | HirExpr::Select { ty, .. }
         | HirExpr::Call { ty, .. }
         | HirExpr::Load { ty, .. } => ty.clone(),
         HirExpr::Index { elem_ty, .. } => elem_ty.clone(),

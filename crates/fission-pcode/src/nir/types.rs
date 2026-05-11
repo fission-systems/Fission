@@ -1765,6 +1765,12 @@ pub enum HirExpr {
         rhs: Box<HirExpr>,
         ty: NirType,
     },
+    Select {
+        cond: Box<HirExpr>,
+        then_expr: Box<HirExpr>,
+        else_expr: Box<HirExpr>,
+        ty: NirType,
+    },
     Call {
         target: String,
         args: Vec<HirExpr>,

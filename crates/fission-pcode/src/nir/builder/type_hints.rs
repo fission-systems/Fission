@@ -419,6 +419,16 @@ fn collect_call_hints_from_expr(
             collect_call_hints_from_expr(base, context, pointer_hints);
             collect_call_hints_from_expr(index, context, pointer_hints);
         }
+        HirExpr::Select {
+            cond,
+            then_expr,
+            else_expr,
+            ..
+        } => {
+            collect_call_hints_from_expr(cond, context, pointer_hints);
+            collect_call_hints_from_expr(then_expr, context, pointer_hints);
+            collect_call_hints_from_expr(else_expr, context, pointer_hints);
+        }
         HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) | HirExpr::Const(_, _) => {}
     }
 }
