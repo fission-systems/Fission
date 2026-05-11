@@ -76,17 +76,18 @@ impl<'a> PreviewBuilder<'a> {
         if ret_regs.is_empty() {
             return false;
         }
-        let keys = ret_regs.iter().map(VarnodeKey::from).collect::<Vec<_>>();
         for candidate in block.ops.iter().skip(op_idx + 1) {
-            if candidate
-                .inputs
-                .iter()
-                .any(|input| keys.iter().any(|key| VarnodeKey::from(input) == *key))
-            {
+            if candidate.inputs.iter().any(|input| {
+                ret_regs
+                    .iter()
+                    .any(|ret_reg| self.varnode_aliases_value(ret_reg, input))
+            }) {
                 return true;
             }
             if let Some(output) = candidate.output.as_ref()
-                && keys.iter().any(|key| VarnodeKey::from(output) == *key)
+                && ret_regs
+                    .iter()
+                    .any(|ret_reg| self.varnode_aliases_value(ret_reg, output))
             {
                 return false;
             }
@@ -292,8 +293,9 @@ impl<'a> PreviewBuilder<'a> {
         {
             return Ok(None);
         }
-        let loop_carried_lhs_name =
-            self.loop_carried_output_binding_name(block, op_idx, op, output).or_else(|| {
+        let loop_carried_lhs_name = self
+            .loop_carried_output_binding_name(block, op_idx, op, output)
+            .or_else(|| {
                 self.loop_carried_passthrough_output_binding_name(block, op_idx, op, output)
             });
         if loop_carried_lhs_name.is_none()
@@ -923,5 +925,98 @@ impl<'a> PreviewBuilder<'a> {
                     | PcodeOpcode::Return
             )
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::nir::builder::materialize::test_support::{block, constant, op, pcode_function};
+
+    fn register(space_id: u64, offset: u64, size: u32) -> Varnode {
+        Varnode {
+            space_id,
+            offset,
+            size,
+            is_constant: false,
+            constant_val: 0,
+        }
+    }
+
+    #[test]
+    fn call_result_observation_accepts_partial_return_register_reads() {
+        let ret_eax = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0, 4);
+        let ebx = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0x0c, 4);
+        let out = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0x100, 4);
+        let block = block(vec![
+            op(1, PcodeOpcode::Call, None, vec![constant(0x2000)]),
+            op(2, PcodeOpcode::IntAdd, Some(out), vec![ebx, ret_eax]),
+        ]);
+        let pcode = pcode_function(vec![block.clone()]);
+        let options = crate::nir::builder::materialize::test_support::test_options();
+        let builder = PreviewBuilder::new(&pcode, &options, None);
+
+        assert!(builder.call_result_is_observed(&block, 0));
+    }
+
+    #[test]
+    fn call_result_observation_stops_at_partial_return_register_clobber() {
+        let ret_eax = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0, 4);
+        let out = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0x100, 4);
+        let block = block(vec![
+            op(1, PcodeOpcode::Call, None, vec![constant(0x2000)]),
+            op(
+                2,
+                PcodeOpcode::Copy,
+                Some(ret_eax.clone()),
+                vec![constant(1)],
+            ),
+            op(
+                3,
+                PcodeOpcode::IntAdd,
+                Some(out),
+                vec![ret_eax, constant(2)],
+            ),
+        ]);
+        let pcode = pcode_function(vec![block.clone()]);
+        let options = crate::nir::builder::materialize::test_support::test_options();
+        let builder = PreviewBuilder::new(&pcode, &options, None);
+
+        assert!(!builder.call_result_is_observed(&block, 0));
+    }
+
+    #[test]
+    fn partial_return_register_reads_resolve_to_live_call_result_binding() {
+        let ret_eax = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0, 4);
+        let ebx = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0x0c, 4);
+        let out = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0x100, 4);
+        let block = block(vec![
+            op(1, PcodeOpcode::Call, None, vec![constant(0x2000)]),
+            op(
+                2,
+                PcodeOpcode::IntAdd,
+                Some(out),
+                vec![ebx, ret_eax.clone()],
+            ),
+        ]);
+        let pcode = pcode_function(vec![block]);
+        let options = crate::nir::builder::materialize::test_support::test_options();
+        let mut builder = PreviewBuilder::new(&pcode, &options, None);
+        builder.call_result_bindings.insert(
+            LoweringSite {
+                block_idx: 0,
+                op_idx: 0,
+            },
+            "xVarCall".to_string(),
+        );
+        builder.current_lowering_site = Some(LoweringSite {
+            block_idx: 0,
+            op_idx: 1,
+        });
+
+        assert_eq!(
+            builder.live_call_result_binding_for_return_register(&ret_eax),
+            Some("xVarCall".to_string())
+        );
     }
 }

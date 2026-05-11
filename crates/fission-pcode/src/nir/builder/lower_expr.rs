@@ -23,6 +23,38 @@ impl<'a> PreviewBuilder<'a> {
         }
     }
 
+    pub(in crate::nir::builder) fn live_call_result_binding_for_return_register(
+        &self,
+        vn: &Varnode,
+    ) -> Option<String> {
+        if !is_primary_return_register_for_abi(vn, self.options.calling_convention) {
+            return None;
+        }
+        let site = self.current_lowering_site?;
+        let block = self.pcode.blocks.get(site.block_idx)?;
+        for (prior_idx, op) in block.ops.iter().enumerate().take(site.op_idx).rev() {
+            let prior_site = LoweringSite {
+                block_idx: site.block_idx,
+                op_idx: prior_idx,
+            };
+            if op.output.is_none()
+                && matches!(
+                    op.opcode,
+                    PcodeOpcode::Call | PcodeOpcode::CallInd | PcodeOpcode::CallOther
+                )
+                && let Some(name) = self.call_result_bindings.get(&prior_site)
+            {
+                return Some(name.clone());
+            }
+            if let Some(output) = op.output.as_ref()
+                && self.varnode_aliases_value(output, vn)
+            {
+                return None;
+            }
+        }
+        None
+    }
+
     fn debug_preview_log(&self, message: &str) {
         if std::env::var_os("FISSION_PREVIEW_DEBUG").is_none() {
             return;
@@ -276,7 +308,11 @@ impl<'a> PreviewBuilder<'a> {
         Self::register_key_covers(&VarnodeKey::from(candidate), &VarnodeKey::from(requested))
     }
 
-    fn varnode_aliases_value(&self, candidate: &Varnode, requested: &Varnode) -> bool {
+    pub(in crate::nir::builder) fn varnode_aliases_value(
+        &self,
+        candidate: &Varnode,
+        requested: &Varnode,
+    ) -> bool {
         let candidate_key = VarnodeKey::from(candidate);
         let requested_key = VarnodeKey::from(requested);
         Self::varnode_covers(candidate, requested)
@@ -881,6 +917,9 @@ impl<'a> PreviewBuilder<'a> {
             && matches!(name, "rsp" | "esp" | "sp")
         {
             return Ok(HirExpr::Var(name.to_string()));
+        }
+        if let Some(name) = self.live_call_result_binding_for_return_register(vn) {
+            return Ok(HirExpr::Var(name));
         }
         if let Some((_, op)) = def_site {
             if op.output.is_none()
