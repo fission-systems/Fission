@@ -906,6 +906,14 @@ impl<'a> PreviewBuilder<'a> {
             );
         }
         if let Some((use_idx, use_op)) = uses.first().copied() {
+            if terminator_index.is_some_and(|term_idx| use_idx > term_idx) {
+                return AliasUnsafeHazard::new(
+                    AliasUnsafeHazardKind::UnknownConsumerAfterTerminator,
+                    Some(use_idx),
+                    Some(use_idx),
+                    Some(use_op.opcode),
+                );
+            }
             let passthrough_required = Self::expr_requires_passthrough_single_use_inline(rhs);
             let consumer_allows_inline = if passthrough_required {
                 Self::use_opcode_allows_passthrough_single_use_builder_inline(use_op.opcode)
@@ -914,9 +922,7 @@ impl<'a> PreviewBuilder<'a> {
             };
             if !Self::expr_is_low_cost_builder_inline_candidate(rhs) || !consumer_allows_inline {
                 return AliasUnsafeHazard::new(
-                    if terminator_index.is_some_and(|term_idx| use_idx > term_idx) {
-                        AliasUnsafeHazardKind::UnknownConsumerAfterTerminator
-                    } else if consumer_allows_inline {
+                    if consumer_allows_inline {
                         AliasUnsafeHazardKind::UnknownUnhandledConsumerKind
                     } else {
                         AliasUnsafeHazardKind::DisallowedSingleConsumer
@@ -3421,9 +3427,9 @@ mod tests {
             ),
             op(
                 1,
-                PcodeOpcode::IntEqual,
-                Some(varnode(0x20)),
-                vec![output.clone(), constant(0)],
+                PcodeOpcode::BranchInd,
+                None,
+                vec![output.clone()],
             ),
         ]);
 
@@ -3438,7 +3444,7 @@ mod tests {
         assert_eq!(hazard.kind, AliasUnsafeHazardKind::DisallowedSingleConsumer);
         assert_eq!(hazard.use_stmt_idx, Some(1));
         assert_eq!(hazard.hazard_stmt_idx, Some(1));
-        assert_eq!(hazard.hazard_opcode, Some(PcodeOpcode::IntEqual));
+        assert_eq!(hazard.hazard_opcode, Some(PcodeOpcode::BranchInd));
     }
 
     #[test]

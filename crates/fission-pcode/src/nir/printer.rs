@@ -376,7 +376,8 @@ fn print_expr_prec(expr: &HirExpr, parent_prec: u8, depth: usize) -> String {
                 (format!("{lhs_out} >> {rhs_str}"), prec)
             } else {
                 let lhs_str = print_expr_prec(lhs, prec, depth + 1);
-                let rhs_str = print_expr_prec(rhs, prec + 1, depth + 1);
+                let rhs_parent_prec = binary_rhs_parent_precedence(*op, rhs, prec + 1);
+                let rhs_str = print_expr_prec(rhs, rhs_parent_prec, depth + 1);
                 (
                     format!("{lhs_str} {} {rhs_str}", print_binary_op(*op)),
                     prec,
@@ -462,6 +463,21 @@ fn binary_precedence(op: HirBinaryOp) -> u8 {
         HirBinaryOp::Add | HirBinaryOp::Sub => 90,
         HirBinaryOp::Mul | HirBinaryOp::Div | HirBinaryOp::Mod => 100,
     }
+}
+
+fn binary_rhs_parent_precedence(parent_op: HirBinaryOp, rhs: &HirExpr, fallback: u8) -> u8 {
+    let HirExpr::Binary { op: rhs_op, .. } = rhs else {
+        return fallback;
+    };
+    if matches!(parent_op, HirBinaryOp::Eq | HirBinaryOp::Ne)
+        && matches!(
+            rhs_op,
+            HirBinaryOp::Lt | HirBinaryOp::Le | HirBinaryOp::SLt | HirBinaryOp::SLe
+        )
+    {
+        return binary_precedence(*rhs_op) + 1;
+    }
+    fallback
 }
 
 fn print_binary_op(op: HirBinaryOp) -> &'static str {
@@ -567,7 +583,8 @@ fn print_expr_prec_ctx(
         HirExpr::Binary { op, lhs, rhs, .. } => {
             let prec = binary_precedence(*op);
             let lhs = print_expr_prec_ctx(lhs, prec, depth + 1, ctx);
-            let rhs = print_expr_prec_ctx(rhs, prec + 1, depth + 1, ctx);
+            let rhs_parent_prec = binary_rhs_parent_precedence(*op, rhs, prec + 1);
+            let rhs = print_expr_prec_ctx(rhs, rhs_parent_prec, depth + 1, ctx);
             (format!("{lhs} {} {rhs}", print_binary_op(*op)), prec)
         }
         HirExpr::Call { target, args, .. } => {
