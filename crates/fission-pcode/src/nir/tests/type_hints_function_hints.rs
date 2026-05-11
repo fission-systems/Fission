@@ -40,6 +40,7 @@ fn preview_type_hints_rename_params_from_function_hints() {
         iat_target_refs: HashMap::new(),
         ambiguous_call_targets: Default::default(),
         call_effect_summaries: HashMap::new(),
+        call_prototype_summaries: HashMap::new(),
         call_param_rules: Vec::new(),
         function_hints: Some(PreviewFunctionHints {
             param_names: vec!["hwnd".to_string(), "lpRect".to_string()],
@@ -99,6 +100,7 @@ fn preview_type_hints_rename_stack_locals_from_function_hints() {
         iat_target_refs: HashMap::new(),
         ambiguous_call_targets: Default::default(),
         call_effect_summaries: HashMap::new(),
+        call_prototype_summaries: HashMap::new(),
         call_param_rules: Vec::new(),
         function_hints: Some(PreviewFunctionHints {
             param_names: Vec::new(),
@@ -156,6 +158,7 @@ fn preview_type_hints_surface_param_types_from_function_hints() {
         iat_target_refs: HashMap::new(),
         ambiguous_call_targets: Default::default(),
         call_effect_summaries: HashMap::new(),
+        call_prototype_summaries: HashMap::new(),
         call_param_rules: Vec::new(),
         function_hints: Some(PreviewFunctionHints {
             param_names: Vec::new(),
@@ -205,6 +208,7 @@ fn preview_type_hints_surface_stack_local_types_from_function_hints() {
         iat_target_refs: HashMap::new(),
         ambiguous_call_targets: Default::default(),
         call_effect_summaries: HashMap::new(),
+        call_prototype_summaries: HashMap::new(),
         call_param_rules: Vec::new(),
         function_hints: Some(PreviewFunctionHints {
             param_names: Vec::new(),
@@ -241,6 +245,7 @@ fn preview_type_hints_surface_return_type_from_function_hints() {
         iat_target_refs: HashMap::new(),
         ambiguous_call_targets: Default::default(),
         call_effect_summaries: HashMap::new(),
+        call_prototype_summaries: HashMap::new(),
         call_param_rules: Vec::new(),
         function_hints: Some(PreviewFunctionHints {
             param_names: Vec::new(),
@@ -311,6 +316,7 @@ fn preview_type_hints_elide_surface_implied_return_cast() {
         iat_target_refs: HashMap::new(),
         ambiguous_call_targets: Default::default(),
         call_effect_summaries: HashMap::new(),
+        call_prototype_summaries: HashMap::new(),
         call_param_rules: Vec::new(),
         function_hints: Some(PreviewFunctionHints {
             param_names: vec!["a".to_string(), "b".to_string()],
@@ -346,6 +352,7 @@ fn preview_type_hints_create_missing_surface_params_from_function_hints() {
         iat_target_refs: HashMap::new(),
         ambiguous_call_targets: Default::default(),
         call_effect_summaries: HashMap::new(),
+        call_prototype_summaries: HashMap::new(),
         call_param_rules: Vec::new(),
         function_hints: Some(PreviewFunctionHints {
             param_names: vec!["param_1".to_string()],

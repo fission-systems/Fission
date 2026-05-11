@@ -66,8 +66,84 @@ impl<'a> PreviewBuilder<'a> {
         if let Some(name) = self.options.relocation_names.get(&op.address) {
             return Some(name.clone());
         }
+        if let Some(name) = self.resolve_relocated_pointer_symbol(ptr, 16) {
+            return Some(name);
+        }
         let addr = self.resolve_global_address(ptr, 16)?;
         self.options.global_names.get(&addr).cloned()
+    }
+
+    fn resolve_relocated_pointer_symbol(&self, ptr: &Varnode, budget: usize) -> Option<String> {
+        if budget == 0 {
+            return None;
+        }
+        if ptr.is_constant
+            && let Some(name) = self.options.relocation_names.get(&ptr.offset)
+        {
+            return Some(name.clone());
+        }
+        let (_, op) = self.lookup_def_site(ptr)?;
+        match op.opcode {
+            PcodeOpcode::Copy | PcodeOpcode::Cast | PcodeOpcode::IntZExt | PcodeOpcode::IntSExt => {
+                self.resolve_relocated_pointer_symbol(op.inputs.first()?, budget - 1)
+            }
+            PcodeOpcode::Load => {
+                if let Some(name) = self.options.relocation_names.get(&op.address) {
+                    return Some(name.clone());
+                }
+                let literal_addr = self.resolve_global_address(op.inputs.get(1)?, budget - 1)?;
+                if let Some(name) = self.options.relocation_names.get(&literal_addr) {
+                    return Some(name.clone());
+                }
+                let target_addr = self.read_pointer_from_binary(literal_addr)?;
+                self.options.global_names.get(&target_addr).cloned()
+            }
+            PcodeOpcode::IntAdd | PcodeOpcode::PtrSub => {
+                if const_offset(op.inputs.get(1)?)? == 0 {
+                    self.resolve_relocated_pointer_symbol(op.inputs.first()?, budget - 1)
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        }
+    }
+
+    fn read_pointer_from_binary(&self, address: u64) -> Option<u64> {
+        let binary = self.binary?;
+        let pointer_size = self.options.pointer_size as usize;
+        let section = binary.inner().sections.iter().find(|section| {
+            let start = section.virtual_address;
+            start
+                .checked_add(section.file_size.min(section.virtual_size))
+                .is_some_and(|end| (start..end).contains(&address))
+        })?;
+        let offset_in_section = address.checked_sub(section.virtual_address)?;
+        let file_offset = section.file_offset.checked_add(offset_in_section)? as usize;
+        let bytes = binary.inner().data.as_slice();
+        let raw = bytes.get(file_offset..file_offset.checked_add(pointer_size)?)?;
+        let is_big_endian = binary
+            .sleigh_language_id()
+            .is_some_and(|language_id| language_id.contains(":BE:"));
+        match pointer_size {
+            4 => {
+                let arr: [u8; 4] = raw.try_into().ok()?;
+                Some(if is_big_endian {
+                    u32::from_be_bytes(arr)
+                } else {
+                    u32::from_le_bytes(arr)
+                } as u64)
+            }
+            8 => {
+                let arr: [u8; 8] = raw.try_into().ok()?;
+                Some(if is_big_endian {
+                    u64::from_be_bytes(arr)
+                } else {
+                    u64::from_le_bytes(arr)
+                })
+            }
+            _ => None,
+        }
     }
 
     fn resolve_global_address(&self, ptr: &Varnode, budget: usize) -> Option<u64> {
@@ -140,12 +216,25 @@ impl<'a> PreviewBuilder<'a> {
         visiting: &mut HashSet<VarnodeKey>,
     ) -> Option<(StackBase, i64)> {
         if is_register_space_id(ptr.space_id) {
-            return match ptr.offset {
-                0x20 => Some((StackBase::Rsp, 0)),
-                0x28 => Some((StackBase::Rbp, 0)),
-                0x10 if !self.options.is_64bit => Some((StackBase::Rsp, 0)),
-                0x14 if !self.options.is_64bit => Some((StackBase::Rbp, 0)),
-                _ => None,
+            return match self.options.calling_convention {
+                CallingConvention::Arm32 => match ptr.offset {
+                    0x54 => Some((StackBase::Rsp, 0)),
+                    0x4c => Some((StackBase::Rbp, 0)),
+                    _ => None,
+                },
+                CallingConvention::AArch64 => match ptr.offset {
+                    0x08 => Some((StackBase::Rsp, 0)),
+                    0x40e8 => Some((StackBase::Rbp, 0)),
+                    _ => None,
+                },
+                CallingConvention::WindowsX64 | CallingConvention::SystemVAmd64 => match ptr.offset
+                {
+                    0x20 => Some((StackBase::Rsp, 0)),
+                    0x28 => Some((StackBase::Rbp, 0)),
+                    0x10 if !self.options.is_64bit => Some((StackBase::Rsp, 0)),
+                    0x14 if !self.options.is_64bit => Some((StackBase::Rbp, 0)),
+                    _ => None,
+                },
             };
         }
         if ptr.space_id == UNIQUE_SPACE_ID

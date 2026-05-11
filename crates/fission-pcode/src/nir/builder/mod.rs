@@ -34,6 +34,52 @@ pub(super) fn apply_preview_type_hints(
     type_hints::apply_preview_type_hints(func, context)
 }
 
+fn seed_callee_summaries_from_type_context(
+    context: &PreviewTypeContext,
+) -> IndexMap<String, CallSummary> {
+    let mut summaries = IndexMap::new();
+    for (symbol, prototype) in &context.call_prototype_summaries {
+        let target = context
+            .call_target_refs
+            .values()
+            .chain(context.iat_target_refs.values())
+            .find(|target| target.symbol == *symbol)
+            .cloned()
+            .unwrap_or_else(|| CallTargetRef {
+                address: None,
+                symbol: symbol.clone(),
+                provenance: CallTargetProvenance::Reference,
+                edge_kind: CallEdgeKind::Reference,
+                confidence: 128,
+            });
+        let effect = context.call_effect_summaries.get(symbol);
+        summaries.insert(
+            symbol.clone(),
+            CallSummary {
+                target,
+                prototype: PrototypeSummary {
+                    min_arity: prototype.min_arity,
+                    max_arity: prototype.max_arity,
+                    locked_exact_arity: prototype.locked_exact_arity,
+                    return_lattice: NirType::Unknown,
+                    param_lattices: vec![NirType::Unknown; prototype.max_arity],
+                    soundness: SummarySoundness::Optimistic,
+                },
+                effect_summary: CallEffectSummary {
+                    reads_memory: effect.and_then(|summary| summary.reads_memory),
+                    writes_memory: effect.and_then(|summary| summary.writes_memory),
+                    escapes_args: effect.and_then(|summary| summary.escapes_args),
+                    regions: Vec::new(),
+                    wrapper_class: WrapperClass::None,
+                    wrapper_of: None,
+                    confidence: 160,
+                },
+            },
+        );
+    }
+    summaries
+}
+
 #[cfg(test)]
 pub(super) fn collect_local_surface_hints(
     body: &[HirStmt],
@@ -245,6 +291,11 @@ impl<'a> PreviewBuilder<'a> {
 
         self.trace_materialize_owner_repartition_summary();
 
+        let callee_summaries = self
+            .type_context
+            .map(seed_callee_summaries_from_type_context)
+            .unwrap_or_default();
+
         Ok(HirFunction {
             name: name.to_string(),
             params: self.params.values().cloned().collect(),
@@ -275,7 +326,7 @@ impl<'a> PreviewBuilder<'a> {
             is_64bit: self.options.is_64bit,
             suppress_entry_register_params: self.suppress_entry_register_params,
             callee_observed_max_arity: IndexMap::new(),
-            callee_summaries: IndexMap::new(),
+            callee_summaries,
         })
     }
 

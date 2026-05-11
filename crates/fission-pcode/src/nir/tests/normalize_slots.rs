@@ -684,6 +684,7 @@ fn preview_type_hints_apply_stack_local_type_to_surfaced_slot_alias() {
         iat_target_refs: HashMap::new(),
         ambiguous_call_targets: Default::default(),
         call_effect_summaries: HashMap::new(),
+        call_prototype_summaries: HashMap::new(),
         call_param_rules: Vec::new(),
         function_hints: Some(PreviewFunctionHints {
             param_names: Vec::new(),

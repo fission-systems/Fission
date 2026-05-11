@@ -1,8 +1,8 @@
 use crate::decode_rust_sleigh_pcode;
 use crate::{
     CallEdgeKind, CallEffectSummarySource, CallTargetProvenance, CallTargetRef,
-    NirCallEffectSummary, NirCallParamRule, NirFunctionHints, NirTypeContext, PcodeFunction,
-    PcodeOpcode,
+    NirCallEffectSummary, NirCallParamRule, NirCallPrototypeSummary, NirFunctionHints,
+    NirRenderOptions, NirTypeContext, PcodeFunction, PcodeOpcode, infer_entry_register_param_arity,
 };
 use fission_core::{normalize_named_type_identity, sanitize_symbol_name};
 use fission_loader::loader::LoadedBinary;
@@ -92,6 +92,7 @@ pub(crate) fn build_nir_type_context(
         iat_target_refs: iat_target_refs.clone(),
         ambiguous_call_targets: resolved_index.ambiguous_call_targets,
         call_effect_summaries: build_nir_call_effect_summaries(&all_target_refs),
+        call_prototype_summaries: HashMap::new(),
         call_param_rules: build_nir_call_param_rules(&all_target_refs),
         function_hints: build_nir_function_hints(fact_store, address),
     }
@@ -270,14 +271,19 @@ pub(crate) fn refine_nir_type_context_with_callee_effect_summaries(
         if matches!(target_ref.provenance, CallTargetProvenance::Import) {
             continue;
         }
-        let Some(summary) =
-            build_preview_callee_effect_summary(binary, target_addr, &target_ref.symbol)
+        let Some((effect_summary, prototype_summary)) =
+            build_preview_callee_summaries(binary, target_addr, &target_ref.symbol)
         else {
             continue;
         };
         type_context
             .call_effect_summaries
-            .insert(target_ref.symbol.clone(), summary);
+            .insert(target_ref.symbol.clone(), effect_summary);
+        if let Some(prototype_summary) = prototype_summary {
+            type_context
+                .call_prototype_summaries
+                .insert(target_ref.symbol.clone(), prototype_summary);
+        }
     }
 }
 
@@ -291,7 +297,7 @@ fn collect_direct_internal_callee_targets(pcode: &PcodeFunction) -> BTreeSet<u64
             let Some(target) = op.inputs.first() else {
                 continue;
             };
-            if !target.is_constant {
+            if target.offset == 0 {
                 continue;
             }
             callees.insert(target.offset);
@@ -300,11 +306,11 @@ fn collect_direct_internal_callee_targets(pcode: &PcodeFunction) -> BTreeSet<u64
     callees
 }
 
-fn build_preview_callee_effect_summary(
+fn build_preview_callee_summaries(
     binary: &LoadedBinary,
     target_addr: u64,
     target_name: &str,
-) -> Option<NirCallEffectSummary> {
+) -> Option<(NirCallEffectSummary, Option<NirCallPrototypeSummary>)> {
     let function = binary.function_at_exact(target_addr)?;
     if function.is_import {
         return None;
@@ -333,7 +339,15 @@ fn build_preview_callee_effect_summary(
         &pcode,
         &detail,
     );
-    Some(summary)
+    let calling_convention = NirRenderOptions::from_loaded_binary(binary).calling_convention;
+    let prototype = infer_entry_register_param_arity(&pcode, calling_convention).map(|arity| {
+        NirCallPrototypeSummary {
+            min_arity: arity,
+            max_arity: arity,
+            locked_exact_arity: Some(arity),
+        }
+    });
+    Some((summary, prototype))
 }
 
 fn direct_callee_max_bytes(binary: &LoadedBinary, target_addr: u64) -> Option<usize> {

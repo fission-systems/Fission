@@ -360,6 +360,13 @@ pub struct NirCallEffectSummary {
     pub source: Option<CallEffectSummarySource>,
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct NirCallPrototypeSummary {
+    pub min_arity: usize,
+    pub max_arity: usize,
+    pub locked_exact_arity: Option<usize>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CallEffectSummary {
     pub reads_memory: Option<bool>,
@@ -1980,6 +1987,8 @@ pub struct NirTypeContext {
     #[serde(default)]
     pub ambiguous_call_targets: HashSet<u64>,
     pub call_effect_summaries: HashMap<String, NirCallEffectSummary>,
+    #[serde(default)]
+    pub call_prototype_summaries: HashMap<String, NirCallPrototypeSummary>,
     pub call_param_rules: Vec<NirCallParamRule>,
     pub function_hints: Option<NirFunctionHints>,
 }

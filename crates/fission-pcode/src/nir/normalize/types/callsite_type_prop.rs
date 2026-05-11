@@ -612,14 +612,26 @@ pub(crate) fn apply_callsite_type_prop_pass(func: &mut HirFunction) -> bool {
     changed
 }
 
-fn exact_api_arity_for_target(
+fn exact_arity_for_target(
     target: &str,
     summaries: &indexmap::IndexMap<String, CallSummary>,
 ) -> Option<usize> {
     let resolved_target = resolve_call_target_symbol(target, summaries);
-    api_signature_via_import_aliases(resolved_target)
-        .or_else(|| api_signature_via_import_aliases(target))
-        .map(|sig| sig.params.len())
+    if resolved_target != target {
+        return api_signature_via_import_aliases(resolved_target)
+            .map(|sig| sig.params.len())
+            .or_else(|| {
+                summaries
+                    .get(resolved_target)
+                    .and_then(|summary| summary.prototype.locked_exact_arity)
+            })
+            .or_else(|| api_signature_via_import_aliases(target).map(|sig| sig.params.len()));
+    }
+    summaries
+        .get(target)
+        .and_then(|summary| summary.prototype.locked_exact_arity)
+        .or_else(|| api_signature_via_import_aliases(resolved_target).map(|sig| sig.params.len()))
+        .or_else(|| api_signature_via_import_aliases(target).map(|sig| sig.params.len()))
 }
 
 fn prune_known_api_call_args_stmts(
@@ -681,7 +693,7 @@ fn prune_known_api_call_args_expr(
             for arg in args.iter_mut() {
                 pruned += prune_known_api_call_args_expr(arg, summaries);
             }
-            if let Some(exact_arity) = exact_api_arity_for_target(target, summaries)
+            if let Some(exact_arity) = exact_arity_for_target(target, summaries)
                 && args.len() > exact_arity
             {
                 let removed = args.len() - exact_arity;
@@ -1196,6 +1208,68 @@ mod tests {
                 assert_eq!(target, "MessageBoxA");
                 assert_eq!(args.len(), 4);
             }
+            other => panic!("unexpected stmt: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn callsite_type_prop_prunes_locked_internal_callee_arity() {
+        reset_normalize_wave_stats();
+        let mut func = HirFunction {
+            name: "caller".to_string(),
+            params: vec![],
+            locals: vec![],
+            return_type: NirType::Unknown,
+            surface_return_type_name: None,
+            body: vec![HirStmt::Expr(HirExpr::Call {
+                target: "recursive_fib".to_string(),
+                args: vec![
+                    HirExpr::Const(0, NirType::Unknown),
+                    HirExpr::Const(1, NirType::Unknown),
+                    HirExpr::Const(2, NirType::Unknown),
+                ],
+                ty: NirType::Unknown,
+            })],
+            calling_convention: CallingConvention::default(),
+            is_64bit: true,
+            suppress_entry_register_params: false,
+            callee_observed_max_arity: Default::default(),
+            callee_summaries: indexmap::IndexMap::from([(
+                "recursive_fib".to_string(),
+                CallSummary {
+                    target: CallTargetRef {
+                        address: Some(0x100000),
+                        symbol: "recursive_fib".to_string(),
+                        provenance: CallTargetProvenance::Direct,
+                        edge_kind: CallEdgeKind::Direct,
+                        confidence: 224,
+                    },
+                    prototype: PrototypeSummary {
+                        min_arity: 1,
+                        max_arity: 1,
+                        locked_exact_arity: Some(1),
+                        return_lattice: NirType::Unknown,
+                        param_lattices: vec![NirType::Unknown],
+                        soundness: SummarySoundness::Optimistic,
+                    },
+                    effect_summary: CallEffectSummary {
+                        reads_memory: None,
+                        writes_memory: None,
+                        escapes_args: None,
+                        regions: vec![],
+                        wrapper_class: WrapperClass::None,
+                        wrapper_of: None,
+                        confidence: 160,
+                    },
+                },
+            )]),
+        };
+
+        assert!(apply_callsite_type_prop_pass(&mut func));
+        let stats = take_normalize_wave_stats();
+        assert_eq!(stats.call_prototype_exact_api_arity_pruned_count, 2);
+        match &func.body[0] {
+            HirStmt::Expr(HirExpr::Call { args, .. }) => assert_eq!(args.len(), 1),
             other => panic!("unexpected stmt: {other:?}"),
         }
     }
