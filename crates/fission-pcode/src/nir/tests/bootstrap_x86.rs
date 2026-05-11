@@ -1559,6 +1559,281 @@ fn preview_recovers_cross_block_rust_sleigh_register_call_arg() {
 }
 
 #[test]
+fn preview_recovers_win64_stack_args_when_unique_address_scratch_is_reused() {
+    let addr_tmp = uniq(0x9d00, 8);
+    let value_tmp = uniq(0xd400, 4);
+    let func = PcodeFunction {
+        blocks: vec![PcodeBasicBlock {
+            index: 0,
+            start_address: 0x140006200,
+            successors: vec![],
+            ops: vec![
+                PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::Copy,
+                    address: 0x140006200,
+                    output: Some(reg(0x08, 8)),
+                    inputs: vec![cst(0x140004000, 8)],
+                    asm_mnemonic: Some("LEA RCX,[fmt]".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 1,
+                    opcode: PcodeOpcode::Copy,
+                    address: 0x140006207,
+                    output: Some(reg(0x10, 8)),
+                    inputs: vec![cst(15, 8)],
+                    asm_mnemonic: Some("MOV EDX,0xf".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 2,
+                    opcode: PcodeOpcode::Copy,
+                    address: 0x14000620c,
+                    output: Some(reg(0x80, 8)),
+                    inputs: vec![cst(10, 8)],
+                    asm_mnemonic: Some("MOV R8D,0xa".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 3,
+                    opcode: PcodeOpcode::Copy,
+                    address: 0x140006212,
+                    output: Some(reg(0x88, 8)),
+                    inputs: vec![cst(55, 8)],
+                    asm_mnemonic: Some("MOV R9D,0x37".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 4,
+                    opcode: PcodeOpcode::IntAdd,
+                    address: 0x140006218,
+                    output: Some(addr_tmp.clone()),
+                    inputs: vec![cst(0x28, 8), reg(0x20, 8)],
+                    asm_mnemonic: Some("MOV dword ptr [RSP + 0x28],0x14".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 5,
+                    opcode: PcodeOpcode::Copy,
+                    address: 0x140006218,
+                    output: Some(value_tmp.clone()),
+                    inputs: vec![cst(20, 4)],
+                    asm_mnemonic: Some("MOV dword ptr [RSP + 0x28],0x14".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 6,
+                    opcode: PcodeOpcode::Store,
+                    address: 0x140006218,
+                    output: None,
+                    inputs: vec![cst(3, 4), addr_tmp.clone(), value_tmp.clone()],
+                    asm_mnemonic: None,
+                },
+                PcodeOp {
+                    seq_num: 7,
+                    opcode: PcodeOpcode::IntAdd,
+                    address: 0x140006220,
+                    output: Some(addr_tmp.clone()),
+                    inputs: vec![cst(0x20, 8), reg(0x20, 8)],
+                    asm_mnemonic: Some("MOV dword ptr [RSP + 0x20],0xf".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 8,
+                    opcode: PcodeOpcode::Copy,
+                    address: 0x140006220,
+                    output: Some(value_tmp.clone()),
+                    inputs: vec![cst(15, 4)],
+                    asm_mnemonic: Some("MOV dword ptr [RSP + 0x20],0xf".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 9,
+                    opcode: PcodeOpcode::Store,
+                    address: 0x140006220,
+                    output: None,
+                    inputs: vec![cst(3, 4), addr_tmp, value_tmp],
+                    asm_mnemonic: None,
+                },
+                PcodeOp {
+                    seq_num: 10,
+                    opcode: PcodeOpcode::Call,
+                    address: 0x140006228,
+                    output: None,
+                    inputs: vec![cst(0x140007000, 8)],
+                    asm_mnemonic: Some("CALL printf".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 11,
+                    opcode: PcodeOpcode::Return,
+                    address: 0x14000622d,
+                    output: None,
+                    inputs: vec![cst(0, 8)],
+                    asm_mnemonic: Some("RET".to_string()),
+                },
+            ],
+        }],
+    };
+    let mut context = PreviewTypeContext::default();
+    context.call_target_refs.insert(
+        0x140004000,
+        CallTargetRef {
+            address: Some(0x140004000),
+            symbol: "fmt".to_string(),
+            provenance: CallTargetProvenance::Direct,
+            edge_kind: CallEdgeKind::Reference,
+            confidence: 100,
+        },
+    );
+    context.call_target_refs.insert(
+        0x140007000,
+        CallTargetRef {
+            address: Some(0x140007000),
+            symbol: "printf".to_string(),
+            provenance: CallTargetProvenance::Direct,
+            edge_kind: CallEdgeKind::Direct,
+            confidence: 100,
+        },
+    );
+
+    let code = render_mlil_preview_with_context(
+        &func,
+        "x64_reused_unique_stack_args",
+        0x140006200,
+        &preview_options(),
+        Some(&context),
+    )
+    .expect("preview render");
+    assert!(
+        code.contains("printf(5368725504, 15, 10, 55, 15, 20);"),
+        "{code}"
+    );
+}
+
+#[test]
+fn preview_recovers_win64_register_arg_from_live_call_result() {
+    let func = PcodeFunction {
+        blocks: vec![PcodeBasicBlock {
+            index: 0,
+            start_address: 0x140006300,
+            successors: vec![],
+            ops: vec![
+                PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::Copy,
+                    address: 0x140006300,
+                    output: Some(reg(0x08, 8)),
+                    inputs: vec![cst(10, 8)],
+                    asm_mnemonic: Some("MOV RCX,0xa".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 1,
+                    opcode: PcodeOpcode::Call,
+                    address: 0x140006305,
+                    output: None,
+                    inputs: vec![cst(0x140007100, 8)],
+                    asm_mnemonic: Some("CALL fibonacci".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 2,
+                    opcode: PcodeOpcode::Copy,
+                    address: 0x14000630a,
+                    output: Some(reg(0x08, 8)),
+                    inputs: vec![cst(0x140004000, 8)],
+                    asm_mnemonic: Some("LEA RCX,[fmt]".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 3,
+                    opcode: PcodeOpcode::Copy,
+                    address: 0x140006311,
+                    output: Some(reg(0x10, 8)),
+                    inputs: vec![cst(15, 8)],
+                    asm_mnemonic: Some("MOV RDX,0xf".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 4,
+                    opcode: PcodeOpcode::Copy,
+                    address: 0x140006316,
+                    output: Some(reg(0x80, 8)),
+                    inputs: vec![cst(10, 8)],
+                    asm_mnemonic: Some("MOV R8,0xa".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 5,
+                    opcode: PcodeOpcode::Copy,
+                    address: 0x14000631c,
+                    output: Some(reg(0x88, 4)),
+                    inputs: vec![reg(0x00, 4)],
+                    asm_mnemonic: Some("MOV R9D,EAX".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 6,
+                    opcode: PcodeOpcode::IntZExt,
+                    address: 0x14000631c,
+                    output: Some(reg(0x88, 8)),
+                    inputs: vec![reg(0x88, 4)],
+                    asm_mnemonic: Some("MOV R9D,EAX".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 7,
+                    opcode: PcodeOpcode::Call,
+                    address: 0x14000631f,
+                    output: None,
+                    inputs: vec![cst(0x140007000, 8)],
+                    asm_mnemonic: Some("CALL printf".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 8,
+                    opcode: PcodeOpcode::Return,
+                    address: 0x140006324,
+                    output: None,
+                    inputs: vec![cst(0, 8)],
+                    asm_mnemonic: Some("RET".to_string()),
+                },
+            ],
+        }],
+    };
+    let mut context = PreviewTypeContext::default();
+    context.call_target_refs.insert(
+        0x140004000,
+        CallTargetRef {
+            address: Some(0x140004000),
+            symbol: "fmt".to_string(),
+            provenance: CallTargetProvenance::Direct,
+            edge_kind: CallEdgeKind::Reference,
+            confidence: 100,
+        },
+    );
+    context.call_target_refs.insert(
+        0x140007000,
+        CallTargetRef {
+            address: Some(0x140007000),
+            symbol: "printf".to_string(),
+            provenance: CallTargetProvenance::Direct,
+            edge_kind: CallEdgeKind::Direct,
+            confidence: 100,
+        },
+    );
+    context.call_target_refs.insert(
+        0x140007100,
+        CallTargetRef {
+            address: Some(0x140007100),
+            symbol: "fibonacci".to_string(),
+            provenance: CallTargetProvenance::Direct,
+            edge_kind: CallEdgeKind::Direct,
+            confidence: 100,
+        },
+    );
+
+    let code = render_mlil_preview_with_context(
+        &func,
+        "x64_live_call_result_arg",
+        0x140006300,
+        &preview_options(),
+        Some(&context),
+    )
+    .expect("preview render");
+    assert!(
+        code.contains("printf(5368725504, 15, 10, (ulonglong)fibonacci(10));"),
+        "{code}"
+    );
+    assert!(!code.contains("(ulonglong)rax"), "{code}");
+}
+
+#[test]
 fn preview_unresolved_direct_branch_with_single_successor_uses_successor_target() {
     let func = PcodeFunction {
         blocks: vec![

@@ -138,10 +138,15 @@ impl<'a> PreviewBuilder<'a> {
             if prev.opcode != PcodeOpcode::Store || prev.inputs.len() < 3 {
                 continue;
             }
-            let Some((StackBase::Rsp, offset)) = self
-                .resolve_stack_address_from_memory_op(prev)
-                .or_else(|| self.resolve_stack_address(&prev.inputs[1]))
-            else {
+            let site = LoweringSite {
+                block_idx: block.index as usize,
+                op_idx: prev_idx,
+            };
+            let stack_address = self.with_lowering_site(site, |this| {
+                this.resolve_stack_address_from_memory_op(prev)
+                    .or_else(|| this.resolve_stack_address(&prev.inputs[1]))
+            });
+            let Some((StackBase::Rsp, offset)) = stack_address else {
                 continue;
             };
             let Some(stack_index) = abi.stack_argument_index(offset) else {
@@ -150,8 +155,9 @@ impl<'a> PreviewBuilder<'a> {
             if recovered.contains_key(&stack_index) {
                 continue;
             }
-            let value =
-                self.lower_varnode(prev.inputs.last().expect("store rhs"), &mut HashSet::new())?;
+            let value = self.with_lowering_site(site, |this| {
+                this.lower_varnode(prev.inputs.last().expect("store rhs"), &mut HashSet::new())
+            })?;
             recovered.insert(stack_index, value);
         }
 

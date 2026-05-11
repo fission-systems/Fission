@@ -838,6 +838,9 @@ impl<'a> PreviewBuilder<'a> {
         visiting: &mut HashSet<VarnodeKey>,
     ) -> Result<HirExpr, MlilPreviewError> {
         if vn.is_constant {
+            if let Some(name) = self.options.global_names.get(&(vn.constant_val as u64)) {
+                return Ok(HirExpr::Var(name.clone()));
+            }
             return Ok(HirExpr::Const(
                 vn.constant_val,
                 type_from_size(vn.size, false),
@@ -892,6 +895,9 @@ impl<'a> PreviewBuilder<'a> {
             }
         }
         let def_site = self.lookup_def_site(vn);
+        if let Some(name) = self.live_call_result_binding_for_return_register(vn) {
+            return Ok(HirExpr::Var(name));
+        }
         if def_site.is_none() {
             if let Some(param) = self.register_param(vn) {
                 return Ok(HirExpr::Var(param));
@@ -923,9 +929,6 @@ impl<'a> PreviewBuilder<'a> {
             && matches!(name, "rsp" | "esp" | "sp")
         {
             return Ok(HirExpr::Var(name.to_string()));
-        }
-        if let Some(name) = self.live_call_result_binding_for_return_register(vn) {
-            return Ok(HirExpr::Var(name));
         }
         if let Some((_, op)) = def_site {
             if op.output.is_none()

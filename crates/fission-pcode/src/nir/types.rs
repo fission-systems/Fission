@@ -2034,6 +2034,11 @@ impl NirRenderOptions {
         for (addr, name) in &inner.global_symbols {
             global_names.entry(*addr).or_insert_with(|| name.clone());
         }
+        for (addr, value) in &inner.string_map {
+            global_names
+                .entry(*addr)
+                .or_insert_with(|| format!("\"{}\"", value.escape_default()));
+        }
 
         // Detect calling convention from the selected SLEIGH language first, then format.
         let fmt_upper = binary.format.to_ascii_uppercase();
