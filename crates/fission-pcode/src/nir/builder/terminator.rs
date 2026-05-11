@@ -209,6 +209,43 @@ impl<'a> PreviewBuilder<'a> {
         })
     }
 
+    fn return_join_source_register(&self, return_idx: usize) -> Option<Varnode> {
+        let pcode_idx = self.pcode_block_idx(return_idx);
+        let block = self.pcode.blocks.get(pcode_idx)?;
+        let term_idx = self.block_terminator_index(block)?;
+        if block.ops[term_idx].opcode != PcodeOpcode::Return {
+            return None;
+        }
+        let (mut cursor_idx, mut cursor_vn) =
+            self.last_primary_return_def_after_barrier(block, term_idx)?;
+        for (op_idx, op) in block.ops.iter().enumerate().take(cursor_idx).rev() {
+            let Some(output) = op.output.as_ref() else {
+                continue;
+            };
+            if !self.varnode_aliases_value(output, &cursor_vn) {
+                continue;
+            }
+            let Some(input) = op.inputs.first() else {
+                return None;
+            };
+            if op.inputs.len() != 1
+                || !matches!(
+                    op.opcode,
+                    PcodeOpcode::Copy | PcodeOpcode::IntZExt | PcodeOpcode::IntSExt
+                )
+                || !is_register_space_id(input.space_id)
+            {
+                return None;
+            }
+            if !is_primary_return_register_for_abi(input, self.options.calling_convention) {
+                return Some(input.clone());
+            }
+            cursor_idx = op_idx;
+            cursor_vn = input.clone();
+        }
+        None
+    }
+
     fn return_join_has_primary_return_evidence(&self, return_idx: usize) -> bool {
         self.predecessors
             .get(return_idx)
@@ -222,6 +259,26 @@ impl<'a> PreviewBuilder<'a> {
         pred_idx: usize,
         return_idx: usize,
     ) -> Result<Option<HirExpr>, MlilPreviewError> {
+        if self.options.is_64bit
+            && let Some(source_vn) = self.return_join_source_register(return_idx)
+        {
+            let pred_pcode_idx = self.pcode_block_idx(pred_idx);
+            let Some(pred_block) = self.pcode.blocks.get(pred_pcode_idx).cloned() else {
+                return Ok(None);
+            };
+            let pred_term_idx = self
+                .block_terminator_index(&pred_block)
+                .unwrap_or(pred_block.ops.len());
+            return self
+                .with_lowering_site(
+                    LoweringSite {
+                        block_idx: pred_pcode_idx,
+                        op_idx: pred_term_idx,
+                    },
+                    |this| this.lower_wrapped_varnode(&source_vn, &mut HashSet::new()),
+                )
+                .map(Some);
+        }
         if !self.options.is_64bit
             || !self.is_pure_return_join_block(return_idx)
             || !self.return_join_has_primary_return_evidence(return_idx)

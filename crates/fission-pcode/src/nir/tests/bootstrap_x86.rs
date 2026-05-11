@@ -95,6 +95,81 @@ fn preview_supports_pe_x86_multiblock_direct_target_branch() {
 }
 
 #[test]
+fn preview_lowers_x64_return_join_through_non_return_register_source() {
+    let edi = reg(0x38, 4);
+    let eax = reg(0x00, 4);
+    let rax = reg(0x00, 8);
+    let func = PcodeFunction {
+        blocks: vec![
+            PcodeBasicBlock {
+                index: 0,
+                start_address: 0x140001000,
+                successors: vec![1],
+                ops: vec![
+                    PcodeOp {
+                        seq_num: 0,
+                        opcode: PcodeOpcode::Copy,
+                        address: 0x140001000,
+                        output: Some(edi.clone()),
+                        inputs: vec![cst(5, 4)],
+                        asm_mnemonic: Some("LEA EDI,[RBP + 1]".to_string()),
+                    },
+                    PcodeOp {
+                        seq_num: 1,
+                        opcode: PcodeOpcode::Branch,
+                        address: 0x140001004,
+                        output: None,
+                        inputs: vec![Varnode {
+                            space_id: REGISTER_SPACE_ID,
+                            offset: 0x140001010,
+                            size: 8,
+                            is_constant: false,
+                            constant_val: 0,
+                        }],
+                        asm_mnemonic: Some("JMP 0x140001010".to_string()),
+                    },
+                ],
+            },
+            PcodeBasicBlock {
+                index: 1,
+                start_address: 0x140001010,
+                successors: vec![],
+                ops: vec![
+                    PcodeOp {
+                        seq_num: 0,
+                        opcode: PcodeOpcode::Copy,
+                        address: 0x140001010,
+                        output: Some(eax.clone()),
+                        inputs: vec![edi],
+                        asm_mnemonic: Some("MOV EAX,EDI".to_string()),
+                    },
+                    PcodeOp {
+                        seq_num: 1,
+                        opcode: PcodeOpcode::IntZExt,
+                        address: 0x140001010,
+                        output: Some(rax),
+                        inputs: vec![eax],
+                        asm_mnemonic: Some("MOV EAX,EDI".to_string()),
+                    },
+                    PcodeOp {
+                        seq_num: 2,
+                        opcode: PcodeOpcode::Return,
+                        address: 0x140001012,
+                        output: None,
+                        inputs: vec![cst(0, 8)],
+                        asm_mnemonic: Some("RET".to_string()),
+                    },
+                ],
+            },
+        ],
+    };
+
+    let code = render_mlil_preview(&func, "x64_return_join", 0x140001000, &preview_options())
+        .expect("preview render");
+    assert!(code.contains("return 5;"), "{code}");
+}
+
+#[test]
 fn preview_names_x86_general_purpose_registers() {
     let func = PcodeFunction {
         blocks: vec![PcodeBasicBlock {
