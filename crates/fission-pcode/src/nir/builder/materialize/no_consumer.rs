@@ -20,7 +20,7 @@ impl<'a> PreviewBuilder<'a> {
 
     fn no_consumer_flag_rhs_is_pure(expr: &HirExpr) -> bool {
         match expr {
-            HirExpr::Var(_) | HirExpr::Const(..) => true,
+            HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) | HirExpr::Const(..) => true,
             HirExpr::Cast { expr, .. } | HirExpr::Unary { expr, .. } => {
                 Self::no_consumer_flag_rhs_is_pure(expr)
             }
@@ -133,7 +133,7 @@ impl<'a> PreviewBuilder<'a> {
         rhs: &HirExpr,
     ) -> NoConsumerSuppressionRhsKind {
         match rhs {
-            HirExpr::Var(_) => NoConsumerSuppressionRhsKind::Var,
+            HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) => NoConsumerSuppressionRhsKind::Var,
             HirExpr::Const(..) => NoConsumerSuppressionRhsKind::Const,
             HirExpr::Cast { .. } => NoConsumerSuppressionRhsKind::Cast,
             HirExpr::Unary { .. } => NoConsumerSuppressionRhsKind::Unary,

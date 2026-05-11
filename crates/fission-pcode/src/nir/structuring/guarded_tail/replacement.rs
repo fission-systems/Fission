@@ -9,7 +9,7 @@ pub(super) struct ConditionAssumption {
 impl<'a> PreviewBuilder<'a> {
     pub(super) fn expr_contains_var(expr: &HirExpr, name: &str) -> bool {
         match expr {
-            HirExpr::Var(var) => var == name,
+            HirExpr::Var(var) | HirExpr::AddressOfGlobal(var) => var == name,
             HirExpr::Const(_, _) => false,
             HirExpr::Cast { expr, .. }
             | HirExpr::Unary { expr, .. }
@@ -39,7 +39,7 @@ impl<'a> PreviewBuilder<'a> {
     pub(super) fn replace_var_in_expr(expr: &mut HirExpr, name: &str, replacement: &HirExpr) {
         match expr {
             HirExpr::Var(var) if var == name => *expr = replacement.clone(),
-            HirExpr::Var(_) | HirExpr::Const(_, _) => {}
+            HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) | HirExpr::Const(_, _) => {}
             HirExpr::Cast { expr, .. }
             | HirExpr::Unary { expr, .. }
             | HirExpr::Load { ptr: expr, .. }
@@ -208,7 +208,7 @@ impl<'a> PreviewBuilder<'a> {
 
     fn count_var_reads_expr(expr: &HirExpr, name: &str) -> usize {
         match expr {
-            HirExpr::Var(var) => usize::from(var == name),
+            HirExpr::Var(var) | HirExpr::AddressOfGlobal(var) => usize::from(var == name),
             HirExpr::Const(_, _) => 0,
             HirExpr::Cast { expr, .. }
             | HirExpr::Unary { expr, .. }

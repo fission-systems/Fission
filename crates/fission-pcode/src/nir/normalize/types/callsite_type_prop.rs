@@ -449,7 +449,7 @@ fn rewrite_call_targets_expr(expr: &mut HirExpr, rewrites: &HashMap<String, Stri
             changed |= rewrite_call_targets_expr(base, rewrites);
             changed |= rewrite_call_targets_expr(index, rewrites);
         }
-        HirExpr::Var(_) | HirExpr::Const(_, _) => {}
+        HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) | HirExpr::Const(_, _) => {}
     }
     changed
 }
@@ -716,7 +716,7 @@ fn prune_known_api_call_args_expr(
             pruned += prune_known_api_call_args_expr(base, summaries);
             pruned += prune_known_api_call_args_expr(index, summaries);
         }
-        HirExpr::Var(_) | HirExpr::Const(_, _) => {}
+        HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) | HirExpr::Const(_, _) => {}
     }
     pruned
 }
@@ -795,7 +795,7 @@ fn prune_self_call_args_expr(expr: &mut HirExpr, func_name: &str, arity: usize) 
             pruned += prune_self_call_args_expr(base, func_name, arity);
             pruned += prune_self_call_args_expr(index, func_name, arity);
         }
-        HirExpr::Var(_) | HirExpr::Const(_, _) => {}
+        HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) | HirExpr::Const(_, _) => {}
     }
     pruned
 }
@@ -811,7 +811,7 @@ fn binding_by_name_mut<'a>(
 /// `Var(x)` or `Cast(_, Var(x))`).  Returns `None` for complex expressions.
 fn arg_var_name(expr: &HirExpr) -> Option<String> {
     match expr {
-        HirExpr::Var(name) => Some(name.clone()),
+        HirExpr::Var(name) | HirExpr::AddressOfGlobal(name) => Some(name.clone()),
         HirExpr::Cast { expr: inner, .. } => arg_var_name(inner),
         _ => None,
     }

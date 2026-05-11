@@ -57,7 +57,7 @@ fn rename_var_in_lvalue(lvalue: &mut HirLValue, renames: &[(String, String)]) {
 
 fn rename_var_in_expr(expr: &mut HirExpr, renames: &[(String, String)]) {
     match expr {
-        HirExpr::Var(name) => rename_var_name(name, renames),
+        HirExpr::Var(name) | HirExpr::AddressOfGlobal(name) => rename_var_name(name, renames),
         HirExpr::Cast { expr, .. }
         | HirExpr::Unary { expr, .. }
         | HirExpr::Load { ptr: expr, .. }

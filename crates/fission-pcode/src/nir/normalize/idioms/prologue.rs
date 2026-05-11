@@ -56,7 +56,7 @@ fn looks_like_stack_scaffold_name(name: &str) -> bool {
 
 fn stack_scaffold_ptr_expr(expr: &HirExpr) -> bool {
     match expr {
-        HirExpr::Var(name) => looks_like_stack_scaffold_name(name),
+        HirExpr::Var(name) | HirExpr::AddressOfGlobal(name) => looks_like_stack_scaffold_name(name),
         HirExpr::PtrOffset { base, .. }
         | HirExpr::Cast { expr: base, .. }
         | HirExpr::Unary { expr: base, .. } => stack_scaffold_ptr_expr(base),
@@ -98,7 +98,7 @@ fn looks_like_stack_slot_name(name: &str) -> bool {
 
 fn var_name_through_cast(expr: &HirExpr) -> Option<&str> {
     match expr {
-        HirExpr::Var(name) => Some(name.as_str()),
+        HirExpr::Var(name) | HirExpr::AddressOfGlobal(name) => Some(name.as_str()),
         HirExpr::Cast { expr, .. } => var_name_through_cast(expr),
         _ => None,
     }
@@ -318,7 +318,7 @@ fn count_ptr_in_stmt(stmt: &HirStmt, name: &str) -> usize {
 
 fn count_ptr_in_expr(expr: &HirExpr, name: &str) -> usize {
     match expr {
-        HirExpr::Var(v) => usize::from(v == name),
+        HirExpr::Var(v) | HirExpr::AddressOfGlobal(v) => usize::from(v == name),
         HirExpr::Const(_, _) => 0,
         HirExpr::Cast { expr: inner, .. }
         | HirExpr::Unary { expr: inner, .. }

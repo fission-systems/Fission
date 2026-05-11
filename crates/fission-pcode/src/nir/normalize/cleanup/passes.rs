@@ -1148,7 +1148,7 @@ fn is_trivial_temp_name(name: &str) -> bool {
 
 fn expr_is_low_cost_inline_candidate(expr: &HirExpr) -> bool {
     match expr {
-        HirExpr::Var(_) | HirExpr::Const(_, _) => true,
+        HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) | HirExpr::Const(_, _) => true,
         HirExpr::Call { target, args, .. } if is_low_cost_flag_intrinsic(target) => {
             args.iter().all(expr_is_low_cost_inline_candidate)
         }
@@ -1182,7 +1182,7 @@ fn expr_is_low_cost_inline_candidate(expr: &HirExpr) -> bool {
 
 fn expr_prefers_stable_materialization(expr: &HirExpr) -> bool {
     match expr {
-        HirExpr::Var(_) | HirExpr::Const(_, _) => false,
+        HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) | HirExpr::Const(_, _) => false,
         HirExpr::Cast { expr, .. } => expr_prefers_stable_materialization(expr),
         HirExpr::Call { target, args, .. } if is_low_cost_flag_intrinsic(target) => {
             args.iter().any(expr_prefers_stable_materialization)
@@ -1327,7 +1327,7 @@ fn count_var_uses_in_stmt(stmt: &HirStmt, name: &str) -> usize {
 
 fn expr_contains_var(expr: &HirExpr, name: &str) -> bool {
     match expr {
-        HirExpr::Var(var) => var == name,
+        HirExpr::Var(var) | HirExpr::AddressOfGlobal(var) => var == name,
         HirExpr::Const(_, _) => false,
         HirExpr::Cast { expr, .. }
         | HirExpr::Unary { expr, .. }
@@ -1363,7 +1363,7 @@ fn count_var_uses_in_lvalue(lhs: &HirLValue, name: &str) -> usize {
 
 fn count_var_uses(expr: &HirExpr, name: &str) -> usize {
     match expr {
-        HirExpr::Var(var) => usize::from(var == name),
+        HirExpr::Var(var) | HirExpr::AddressOfGlobal(var) => usize::from(var == name),
         HirExpr::Const(_, _) => 0,
         HirExpr::Cast { expr, .. } => count_var_uses(expr, name),
         HirExpr::Unary { expr, .. } => count_var_uses(expr, name),
@@ -1380,7 +1380,7 @@ fn count_var_uses(expr: &HirExpr, name: &str) -> usize {
 
 pub(crate) fn expr_has_side_effects(expr: &HirExpr) -> bool {
     match expr {
-        HirExpr::Var(_) | HirExpr::Const(_, _) => false,
+        HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) | HirExpr::Const(_, _) => false,
         HirExpr::Cast { expr, .. }
         | HirExpr::Unary { expr, .. }
         | HirExpr::Load { ptr: expr, .. }
@@ -1501,7 +1501,7 @@ fn replace_var_in_lvalue(lhs: &mut HirLValue, name: &str, replacement: &HirExpr)
 fn replace_var_in_expr(expr: &mut HirExpr, name: &str, replacement: &HirExpr) {
     match expr {
         HirExpr::Var(var) if var == name => *expr = replacement.clone(),
-        HirExpr::Var(_) | HirExpr::Const(_, _) => {}
+        HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) | HirExpr::Const(_, _) => {}
         HirExpr::Cast { expr, .. } => replace_var_in_expr(expr, name, replacement),
         HirExpr::Unary { expr, .. } => replace_var_in_expr(expr, name, replacement),
         HirExpr::Binary { lhs, rhs, .. } => {

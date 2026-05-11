@@ -31,7 +31,9 @@ pub(crate) fn summarize_wrapper_hir_function(func: &HirFunction) -> Option<Proce
             let forwarded = args
                 .iter()
                 .map(|arg| match arg {
-                    HirExpr::Var(name) => func.params.iter().position(|param| param.name == *name),
+                    HirExpr::Var(name) | HirExpr::AddressOfGlobal(name) => {
+                        func.params.iter().position(|param| param.name == *name)
+                    }
                     _ => None,
                 })
                 .collect::<Option<Vec<_>>>()?;
@@ -52,7 +54,9 @@ pub(crate) fn summarize_wrapper_hir_function(func: &HirFunction) -> Option<Proce
             let forwarded = args
                 .iter()
                 .map(|arg| match arg {
-                    HirExpr::Var(name) => func.params.iter().position(|param| param.name == *name),
+                    HirExpr::Var(name) | HirExpr::AddressOfGlobal(name) => {
+                        func.params.iter().position(|param| param.name == *name)
+                    }
                     _ => None,
                 })
                 .collect::<Option<Vec<_>>>()?;

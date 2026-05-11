@@ -210,7 +210,7 @@ fn collect_return_types_stmt(
     match stmt {
         HirStmt::Return(Some(expr)) => {
             let ty = match expr {
-                HirExpr::Var(name) => {
+                HirExpr::Var(name) | HirExpr::AddressOfGlobal(name) => {
                     let mut visited = HashSet::new();
                     infer_type_for_binding(name, defs, known_binding_types, &mut visited)
                 }
@@ -294,7 +294,7 @@ fn zero_extended_return_candidate_type(
                 return None;
             };
             let inner_ty = match inner.as_ref() {
-                HirExpr::Var(name) => {
+                HirExpr::Var(name) | HirExpr::AddressOfGlobal(name) => {
                     let mut visited = HashSet::new();
                     infer_type_for_binding(name, defs, known_binding_types, &mut visited)
                 }
@@ -307,7 +307,7 @@ fn zero_extended_return_candidate_type(
                 _ => None,
             }
         }
-        HirExpr::Var(name) => {
+        HirExpr::Var(name) | HirExpr::AddressOfGlobal(name) => {
             let mut visited = HashSet::new();
             let ty = infer_type_for_binding(name, defs, known_binding_types, &mut visited);
             match ty {

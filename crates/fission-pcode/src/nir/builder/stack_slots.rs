@@ -1,5 +1,11 @@
 use super::*;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct ResolvedGlobalPointer {
+    pub name: String,
+    pub byte_offset: i64,
+}
+
 impl<'a> PreviewBuilder<'a> {
     fn classify_stack_slot_origin(&self, base: StackBase, offset: i64) -> NirBindingOrigin {
         self.abi_state().classify_stack_slot_origin(base, offset)
@@ -73,40 +79,141 @@ impl<'a> PreviewBuilder<'a> {
         self.options.global_names.get(&addr).cloned()
     }
 
+    pub(super) fn try_global_memory_lvalue(
+        &self,
+        op: &PcodeOp,
+        ptr: &Varnode,
+        ty: NirType,
+    ) -> Option<HirLValue> {
+        if let Some(name) = self.options.relocation_names.get(&op.address) {
+            return Some(HirLValue::Var(name.clone()));
+        }
+        if let Some(global) = self.resolve_relocated_pointer(ptr, 16) {
+            return Some(if global.byte_offset == 0 {
+                HirLValue::Var(global.name)
+            } else {
+                HirLValue::Deref {
+                    ptr: Box::new(HirExpr::PtrOffset {
+                        base: Box::new(HirExpr::AddressOfGlobal(global.name)),
+                        offset: global.byte_offset,
+                    }),
+                    ty,
+                }
+            });
+        }
+        let addr = self.resolve_global_address(ptr, 16)?;
+        self.options
+            .global_names
+            .get(&addr)
+            .cloned()
+            .map(HirLValue::Var)
+    }
+
     fn resolve_relocated_pointer_symbol(&self, ptr: &Varnode, budget: usize) -> Option<String> {
+        self.resolve_relocated_pointer(ptr, budget)
+            .filter(|global| global.byte_offset == 0)
+            .map(|global| global.name)
+    }
+
+    fn resolve_relocated_pointer(
+        &self,
+        ptr: &Varnode,
+        budget: usize,
+    ) -> Option<ResolvedGlobalPointer> {
         if budget == 0 {
             return None;
         }
         if ptr.is_constant
             && let Some(name) = self.options.relocation_names.get(&ptr.offset)
         {
-            return Some(name.clone());
+            return Some(ResolvedGlobalPointer {
+                name: name.clone(),
+                byte_offset: 0,
+            });
         }
         let (_, op) = self.lookup_def_site(ptr)?;
         match op.opcode {
             PcodeOpcode::Copy | PcodeOpcode::Cast | PcodeOpcode::IntZExt | PcodeOpcode::IntSExt => {
-                self.resolve_relocated_pointer_symbol(op.inputs.first()?, budget - 1)
+                self.resolve_relocated_pointer(op.inputs.first()?, budget - 1)
             }
-            PcodeOpcode::Load => {
-                if let Some(name) = self.options.relocation_names.get(&op.address) {
-                    return Some(name.clone());
-                }
-                let literal_addr = self.resolve_global_address(op.inputs.get(1)?, budget - 1)?;
-                if let Some(name) = self.options.relocation_names.get(&literal_addr) {
-                    return Some(name.clone());
-                }
-                let target_addr = self.read_pointer_from_binary(literal_addr)?;
-                self.options.global_names.get(&target_addr).cloned()
-            }
+            PcodeOpcode::Load => self.resolve_relocated_load_pointer(op, budget - 1),
             PcodeOpcode::IntAdd | PcodeOpcode::PtrSub => {
-                if const_offset(op.inputs.get(1)?)? == 0 {
-                    self.resolve_relocated_pointer_symbol(op.inputs.first()?, budget - 1)
+                let mut base = self.resolve_relocated_pointer(op.inputs.first()?, budget - 1)?;
+                let delta = const_offset(op.inputs.get(1)?)?;
+                base.byte_offset = base.byte_offset.checked_add(delta)?;
+                Some(base)
+            }
+            PcodeOpcode::IntSub => {
+                let mut base = self.resolve_relocated_pointer(op.inputs.first()?, budget - 1)?;
+                let delta = const_offset(op.inputs.get(1)?)?;
+                base.byte_offset = base.byte_offset.checked_sub(delta)?;
+                Some(base)
+            }
+            PcodeOpcode::PtrAdd => {
+                let mut base = self.resolve_relocated_pointer(op.inputs.first()?, budget - 1)?;
+                let index = const_offset(op.inputs.get(1)?)?;
+                let scale = const_offset(op.inputs.get(2)?)?;
+                let delta = index.checked_mul(scale)?;
+                base.byte_offset = base.byte_offset.checked_add(delta)?;
+                Some(base)
+            }
+            _ => {
+                let addr = self.resolve_global_address(ptr, budget)?;
+                let (&base_addr, name) = self
+                    .options
+                    .global_names
+                    .iter()
+                    .filter(|(base_addr, _)| **base_addr <= addr)
+                    .max_by_key(|(base_addr, _)| **base_addr)?;
+                let size = self
+                    .options
+                    .global_sizes
+                    .get(&base_addr)
+                    .copied()
+                    .unwrap_or(0);
+                let byte_offset = addr.checked_sub(base_addr)?;
+                if size != 0 && byte_offset < size {
+                    Some(ResolvedGlobalPointer {
+                        name: name.clone(),
+                        byte_offset: i64::try_from(byte_offset).ok()?,
+                    })
                 } else {
                     None
                 }
             }
-            _ => None,
         }
+    }
+
+    pub(super) fn resolve_relocated_load_pointer(
+        &self,
+        op: &PcodeOp,
+        budget: usize,
+    ) -> Option<ResolvedGlobalPointer> {
+        if op.opcode != PcodeOpcode::Load || op.inputs.len() < 2 {
+            return None;
+        }
+        if let Some(name) = self.options.relocation_names.get(&op.address) {
+            return Some(ResolvedGlobalPointer {
+                name: name.clone(),
+                byte_offset: 0,
+            });
+        }
+        let literal_addr = self.resolve_global_address(op.inputs.get(1)?, budget)?;
+        if let Some(name) = self.options.relocation_names.get(&literal_addr) {
+            return Some(ResolvedGlobalPointer {
+                name: name.clone(),
+                byte_offset: 0,
+            });
+        }
+        let target_addr = self.read_pointer_from_binary(literal_addr)?;
+        self.options
+            .global_names
+            .get(&target_addr)
+            .cloned()
+            .map(|name| ResolvedGlobalPointer {
+                name,
+                byte_offset: 0,
+            })
     }
 
     pub(super) fn read_readonly_scalar_from_binary(&self, address: u64, size: u32) -> Option<u64> {

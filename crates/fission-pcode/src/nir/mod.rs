@@ -393,6 +393,17 @@ fn collect_referenced_global_decls(
         return BTreeMap::new();
     }
 
+    let global_decl_types = options
+        .global_names
+        .iter()
+        .filter_map(|(addr, name)| {
+            options
+                .global_sizes
+                .get(addr)
+                .and_then(|size| global_decl_type_from_size(*size))
+                .map(|ty| (name.clone(), ty))
+        })
+        .collect::<HashMap<_, _>>();
     let binding_types = hir
         .params
         .iter()
@@ -400,13 +411,20 @@ fn collect_referenced_global_decls(
         .map(|binding| (binding.name.clone(), binding.ty.clone()))
         .collect::<HashMap<_, _>>();
     let mut decls = BTreeMap::new();
-    collect_global_decls_from_stmts(&hir.body, &global_names, &binding_types, &mut decls);
+    collect_global_decls_from_stmts(
+        &hir.body,
+        &global_names,
+        &global_decl_types,
+        &binding_types,
+        &mut decls,
+    );
     decls
 }
 
 fn collect_global_decls_from_stmts(
     stmts: &[HirStmt],
     global_names: &HashSet<String>,
+    global_decl_types: &HashMap<String, NirType>,
     binding_types: &HashMap<String, NirType>,
     decls: &mut BTreeMap<String, NirType>,
 ) {
@@ -417,52 +435,132 @@ fn collect_global_decls_from_stmts(
                     lhs,
                     Some(infer_global_decl_expr_type(rhs, binding_types)),
                     global_names,
+                    global_decl_types,
                     binding_types,
                     decls,
                 );
-                collect_global_decls_from_expr(rhs, global_names, binding_types, decls);
+                collect_global_decls_from_expr(
+                    rhs,
+                    global_names,
+                    global_decl_types,
+                    binding_types,
+                    decls,
+                );
             }
             HirStmt::Expr(expr) | HirStmt::Return(Some(expr)) => {
-                collect_global_decls_from_expr(expr, global_names, binding_types, decls);
+                collect_global_decls_from_expr(
+                    expr,
+                    global_names,
+                    global_decl_types,
+                    binding_types,
+                    decls,
+                );
             }
             HirStmt::VaStart { va_list, .. } => {
-                collect_global_decls_from_expr(va_list, global_names, binding_types, decls);
+                collect_global_decls_from_expr(
+                    va_list,
+                    global_names,
+                    global_decl_types,
+                    binding_types,
+                    decls,
+                );
             }
             HirStmt::Block(body) => {
-                collect_global_decls_from_stmts(body, global_names, binding_types, decls);
+                collect_global_decls_from_stmts(
+                    body,
+                    global_names,
+                    global_decl_types,
+                    binding_types,
+                    decls,
+                );
             }
             HirStmt::While { cond, body } => {
-                collect_global_decls_from_expr(cond, global_names, binding_types, decls);
-                collect_global_decls_from_stmts(body, global_names, binding_types, decls);
+                collect_global_decls_from_expr(
+                    cond,
+                    global_names,
+                    global_decl_types,
+                    binding_types,
+                    decls,
+                );
+                collect_global_decls_from_stmts(
+                    body,
+                    global_names,
+                    global_decl_types,
+                    binding_types,
+                    decls,
+                );
             }
             HirStmt::DoWhile { body, cond } => {
-                collect_global_decls_from_stmts(body, global_names, binding_types, decls);
-                collect_global_decls_from_expr(cond, global_names, binding_types, decls);
+                collect_global_decls_from_stmts(
+                    body,
+                    global_names,
+                    global_decl_types,
+                    binding_types,
+                    decls,
+                );
+                collect_global_decls_from_expr(
+                    cond,
+                    global_names,
+                    global_decl_types,
+                    binding_types,
+                    decls,
+                );
             }
             HirStmt::Switch {
                 expr,
                 cases,
                 default,
             } => {
-                collect_global_decls_from_expr(expr, global_names, binding_types, decls);
+                collect_global_decls_from_expr(
+                    expr,
+                    global_names,
+                    global_decl_types,
+                    binding_types,
+                    decls,
+                );
                 for case in cases {
                     collect_global_decls_from_stmts(
                         &case.body,
                         global_names,
+                        global_decl_types,
                         binding_types,
                         decls,
                     );
                 }
-                collect_global_decls_from_stmts(default, global_names, binding_types, decls);
+                collect_global_decls_from_stmts(
+                    default,
+                    global_names,
+                    global_decl_types,
+                    binding_types,
+                    decls,
+                );
             }
             HirStmt::If {
                 cond,
                 then_body,
                 else_body,
             } => {
-                collect_global_decls_from_expr(cond, global_names, binding_types, decls);
-                collect_global_decls_from_stmts(then_body, global_names, binding_types, decls);
-                collect_global_decls_from_stmts(else_body, global_names, binding_types, decls);
+                collect_global_decls_from_expr(
+                    cond,
+                    global_names,
+                    global_decl_types,
+                    binding_types,
+                    decls,
+                );
+                collect_global_decls_from_stmts(
+                    then_body,
+                    global_names,
+                    global_decl_types,
+                    binding_types,
+                    decls,
+                );
+                collect_global_decls_from_stmts(
+                    else_body,
+                    global_names,
+                    global_decl_types,
+                    binding_types,
+                    decls,
+                );
             }
             HirStmt::For {
                 init, cond, update, ..
@@ -471,17 +569,25 @@ fn collect_global_decls_from_stmts(
                     collect_global_decls_from_stmts(
                         std::slice::from_ref(init.as_ref()),
                         global_names,
+                        global_decl_types,
                         binding_types,
                         decls,
                     );
                 }
                 if let Some(cond) = cond {
-                    collect_global_decls_from_expr(cond, global_names, binding_types, decls);
+                    collect_global_decls_from_expr(
+                        cond,
+                        global_names,
+                        global_decl_types,
+                        binding_types,
+                        decls,
+                    );
                 }
                 if let Some(update) = update {
                     collect_global_decls_from_stmts(
                         std::slice::from_ref(update.as_ref()),
                         global_names,
+                        global_decl_types,
                         binding_types,
                         decls,
                     );
@@ -500,20 +606,41 @@ fn collect_global_decls_from_lvalue(
     lhs: &HirLValue,
     assigned_ty: Option<NirType>,
     global_names: &HashSet<String>,
+    global_decl_types: &HashMap<String, NirType>,
     binding_types: &HashMap<String, NirType>,
     decls: &mut BTreeMap<String, NirType>,
 ) {
     match lhs {
         HirLValue::Var(name) if global_names.contains(name) => {
-            let ty = assigned_ty.unwrap_or(NirType::Unknown);
+            let ty = global_decl_types
+                .get(name)
+                .cloned()
+                .or(assigned_ty)
+                .unwrap_or(NirType::Unknown);
             merge_global_decl_type(decls, name, ty);
         }
-        HirLValue::Deref { ptr, .. } => {
-            collect_global_decls_from_expr(ptr, global_names, binding_types, decls)
-        }
+        HirLValue::Deref { ptr, .. } => collect_global_decls_from_expr(
+            ptr,
+            global_names,
+            global_decl_types,
+            binding_types,
+            decls,
+        ),
         HirLValue::Index { base, index, .. } => {
-            collect_global_decls_from_expr(base, global_names, binding_types, decls);
-            collect_global_decls_from_expr(index, global_names, binding_types, decls);
+            collect_global_decls_from_expr(
+                base,
+                global_names,
+                global_decl_types,
+                binding_types,
+                decls,
+            );
+            collect_global_decls_from_expr(
+                index,
+                global_names,
+                global_decl_types,
+                binding_types,
+                decls,
+            );
         }
         HirLValue::Var(_) => {}
     }
@@ -522,17 +649,28 @@ fn collect_global_decls_from_lvalue(
 fn collect_global_decls_from_expr(
     expr: &HirExpr,
     global_names: &HashSet<String>,
+    global_decl_types: &HashMap<String, NirType>,
     binding_types: &HashMap<String, NirType>,
     decls: &mut BTreeMap<String, NirType>,
 ) {
     match expr {
-        HirExpr::Var(name) if global_names.contains(name) => {
-            merge_global_decl_type(decls, name, infer_global_decl_expr_type(expr, binding_types));
+        HirExpr::Var(name) | HirExpr::AddressOfGlobal(name) if global_names.contains(name) => {
+            let ty = global_decl_types
+                .get(name)
+                .cloned()
+                .unwrap_or_else(|| infer_global_decl_expr_type(expr, binding_types));
+            merge_global_decl_type(decls, name, ty);
         }
         HirExpr::Cast { expr, .. }
         | HirExpr::Unary { expr, .. }
         | HirExpr::Load { ptr: expr, .. } => {
-            collect_global_decls_from_expr(expr, global_names, binding_types, decls);
+            collect_global_decls_from_expr(
+                expr,
+                global_names,
+                global_decl_types,
+                binding_types,
+                decls,
+            );
         }
         HirExpr::Binary { lhs, rhs, .. }
         | HirExpr::Index {
@@ -540,24 +678,51 @@ fn collect_global_decls_from_expr(
             index: rhs,
             ..
         } => {
-            collect_global_decls_from_expr(lhs, global_names, binding_types, decls);
-            collect_global_decls_from_expr(rhs, global_names, binding_types, decls);
+            collect_global_decls_from_expr(
+                lhs,
+                global_names,
+                global_decl_types,
+                binding_types,
+                decls,
+            );
+            collect_global_decls_from_expr(
+                rhs,
+                global_names,
+                global_decl_types,
+                binding_types,
+                decls,
+            );
         }
         HirExpr::Call { args, .. } => {
             for arg in args {
-                collect_global_decls_from_expr(arg, global_names, binding_types, decls);
+                collect_global_decls_from_expr(
+                    arg,
+                    global_names,
+                    global_decl_types,
+                    binding_types,
+                    decls,
+                );
             }
         }
         HirExpr::PtrOffset { base, .. } | HirExpr::AggregateCopy { src: base, .. } => {
-            collect_global_decls_from_expr(base, global_names, binding_types, decls);
+            collect_global_decls_from_expr(
+                base,
+                global_names,
+                global_decl_types,
+                binding_types,
+                decls,
+            );
         }
-        HirExpr::Var(_) | HirExpr::Const(_, _) => {}
+        HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) | HirExpr::Const(_, _) => {}
     }
 }
 
-fn infer_global_decl_expr_type(expr: &HirExpr, binding_types: &HashMap<String, NirType>) -> NirType {
+fn infer_global_decl_expr_type(
+    expr: &HirExpr,
+    binding_types: &HashMap<String, NirType>,
+) -> NirType {
     match expr {
-        HirExpr::Var(name) => binding_types
+        HirExpr::Var(name) | HirExpr::AddressOfGlobal(name) => binding_types
             .get(name)
             .cloned()
             .unwrap_or_else(|| expr_type(expr)),
@@ -573,6 +738,32 @@ fn infer_global_decl_expr_type(expr: &HirExpr, binding_types: &HashMap<String, N
             size: *size,
             fields: Vec::new(),
         },
+    }
+}
+
+fn global_decl_type_from_size(size: u64) -> Option<NirType> {
+    match size {
+        1 => Some(NirType::Int {
+            bits: 8,
+            signed: false,
+        }),
+        2 => Some(NirType::Int {
+            bits: 16,
+            signed: false,
+        }),
+        4 => Some(NirType::Int {
+            bits: 32,
+            signed: false,
+        }),
+        8 => Some(NirType::Int {
+            bits: 64,
+            signed: false,
+        }),
+        size if size <= u64::from(u32::MAX) => Some(NirType::Aggregate {
+            size: size as u32,
+            fields: Vec::new(),
+        }),
+        _ => None,
     }
 }
 
@@ -618,6 +809,7 @@ mod global_decl_tests {
             structuring_engine: StructuringEngineKind::GraphCollapseV1,
             conservative_irreducible_fallback: false,
             global_names,
+            global_sizes: HashMap::new(),
             relocation_names: HashMap::new(),
             calling_convention: CallingConvention::AArch64,
         }

@@ -419,7 +419,7 @@ fn collect_call_hints_from_expr(
             collect_call_hints_from_expr(base, context, pointer_hints);
             collect_call_hints_from_expr(index, context, pointer_hints);
         }
-        HirExpr::Var(_) | HirExpr::Const(_, _) => {}
+        HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) | HirExpr::Const(_, _) => {}
     }
 }
 
@@ -525,7 +525,7 @@ pub(super) fn collect_local_surface_hints(
 
 fn peel_surface_var_name_from_expr(expr: &HirExpr) -> Option<&str> {
     match expr {
-        HirExpr::Var(name) => Some(name),
+        HirExpr::Var(name) | HirExpr::AddressOfGlobal(name) => Some(name),
         HirExpr::Cast { expr, .. }
         | HirExpr::Load { ptr: expr, .. }
         | HirExpr::AggregateCopy { src: expr, .. } => peel_surface_var_name_from_expr(expr),
@@ -541,7 +541,7 @@ fn peel_surface_var_name_from_expr(expr: &HirExpr) -> Option<&str> {
 
 fn peel_local_surface_name(expr: &HirExpr) -> Option<&str> {
     match expr {
-        HirExpr::Var(name) => Some(name),
+        HirExpr::Var(name) | HirExpr::AddressOfGlobal(name) => Some(name),
         HirExpr::Cast { expr, .. } | HirExpr::AggregateCopy { src: expr, .. } => {
             peel_local_surface_name(expr)
         }

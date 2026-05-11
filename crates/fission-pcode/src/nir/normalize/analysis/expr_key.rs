@@ -15,6 +15,7 @@ pub(crate) fn pure_expr_key(expr: &HirExpr) -> Option<PureExprKey> {
     match expr {
         HirExpr::Const(v, ty) => Some(format!("K({},{})", v, type_key(ty))),
         HirExpr::Var(name) => Some(format!("V({})", name)),
+        HirExpr::AddressOfGlobal(name) => Some(format!("A({})", name)),
         HirExpr::Cast { ty, expr: inner } => {
             let ik = pure_expr_key(inner)?;
             Some(format!("C({},{})", type_key(ty), ik))

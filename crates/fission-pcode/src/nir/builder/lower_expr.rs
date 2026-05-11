@@ -1343,6 +1343,15 @@ impl<'a> PreviewBuilder<'a> {
                     type_from_size(out.size, false),
                 ) {
                     Ok(HirExpr::Var(slot_name))
+                } else if let Some(global) = self.resolve_relocated_load_pointer(op, 16) {
+                    Ok(if global.byte_offset == 0 {
+                        HirExpr::AddressOfGlobal(global.name)
+                    } else {
+                        HirExpr::PtrOffset {
+                            base: Box::new(HirExpr::AddressOfGlobal(global.name)),
+                            offset: global.byte_offset,
+                        }
+                    })
                 } else if let Some(addr) = self.resolve_global_address(&op.inputs[1], 16)
                     && let Some(value) = self.read_readonly_scalar_from_binary(addr, out.size)
                 {

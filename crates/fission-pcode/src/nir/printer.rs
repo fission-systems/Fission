@@ -55,6 +55,7 @@ impl<'a> PrintCtx<'a> {
 
     fn expr_is_pointer(&self, expr: &HirExpr) -> bool {
         match expr {
+            HirExpr::AddressOfGlobal(_) => true,
             HirExpr::Var(name) => self
                 .var_types
                 .get(name.as_str())
@@ -323,7 +324,7 @@ fn print_lvalue(lhs: &HirLValue, depth: usize) -> String {
             let inner = print_expr_prec(base, 0, depth + 1);
             let index = print_expr_prec(index, 0, depth + 1);
             match base.as_ref() {
-                HirExpr::Var(name) => format!("{name}[{index}]"),
+                HirExpr::Var(name) | HirExpr::AddressOfGlobal(name) => format!("{name}[{index}]"),
                 _ => format!("(({} *)({inner}))[{index}]", print_type(elem_ty)),
             }
         }
@@ -339,6 +340,7 @@ fn print_expr_prec(expr: &HirExpr, parent_prec: u8, depth: usize) -> String {
         return "0 /* [FISSION] RECURSION TOO DEEP (expression printer guard) */".to_string();
     }
     let (text, prec) = match expr {
+        HirExpr::AddressOfGlobal(name) => (format!("&{name}"), 110),
         HirExpr::Var(name) => (name.clone(), 120),
         HirExpr::Const(value, _) => (value.to_string(), 120),
         HirExpr::Cast { ty, expr } => {
@@ -419,7 +421,7 @@ fn print_expr_prec(expr: &HirExpr, parent_prec: u8, depth: usize) -> String {
             let inner = print_expr_prec(base, 0, depth + 1);
             let index = print_expr_prec(index, 0, depth + 1);
             let text = match base.as_ref() {
-                HirExpr::Var(name) => format!("{name}[{index}]"),
+                HirExpr::Var(name) | HirExpr::AddressOfGlobal(name) => format!("{name}[{index}]"),
                 _ => format!("(({} *)({inner}))[{index}]", print_type(elem_ty)),
             };
             (text, 120)
@@ -439,7 +441,7 @@ fn print_expr_prec(expr: &HirExpr, parent_prec: u8, depth: usize) -> String {
 
 fn peel_simple_deref_target(expr: &HirExpr) -> Option<&str> {
     match expr {
-        HirExpr::Var(name) => Some(name),
+        HirExpr::Var(name) | HirExpr::AddressOfGlobal(name) => Some(name),
         HirExpr::Cast { expr, .. } => peel_simple_deref_target(expr),
         HirExpr::PtrOffset { base, offset } if *offset == 0 => peel_simple_deref_target(base),
         _ => None,
@@ -562,6 +564,7 @@ fn print_expr_prec_ctx(
             };
             (text, 60)
         }
+        HirExpr::AddressOfGlobal(name) => (format!("&{name}"), 110),
         HirExpr::Var(name) => (name.clone(), 120),
         HirExpr::Const(value, _) => (value.to_string(), 120),
         HirExpr::Cast { ty, expr } => {
@@ -619,7 +622,7 @@ fn print_expr_prec_ctx(
             let inner = print_expr_prec_ctx(base, 0, depth + 1, ctx);
             let index = print_expr_prec_ctx(index, 0, depth + 1, ctx);
             let text = match base.as_ref() {
-                HirExpr::Var(name) => format!("{name}[{index}]"),
+                HirExpr::Var(name) | HirExpr::AddressOfGlobal(name) => format!("{name}[{index}]"),
                 _ => format!("(({} *)({inner}))[{index}]", print_type(elem_ty)),
             };
             (text, 120)
@@ -698,7 +701,7 @@ fn print_lvalue_ctx(lhs: &HirLValue, depth: usize, ctx: &PrintCtx<'_>) -> String
             let inner = print_expr_prec_ctx(base, 0, depth + 1, ctx);
             let index = print_expr_prec_ctx(index, 0, depth + 1, ctx);
             match base.as_ref() {
-                HirExpr::Var(name) => format!("{name}[{index}]"),
+                HirExpr::Var(name) | HirExpr::AddressOfGlobal(name) => format!("{name}[{index}]"),
                 _ => format!("(({} *)({inner}))[{index}]", print_type(elem_ty)),
             }
         }

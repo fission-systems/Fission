@@ -138,7 +138,7 @@ impl DefUseMap {
 
     fn count_expr(&mut self, expr: &HirExpr) {
         match expr {
-            HirExpr::Var(name) => {
+            HirExpr::Var(name) | HirExpr::AddressOfGlobal(name) => {
                 *self.use_count.entry(name.clone()).or_default() += 1;
             }
             HirExpr::Const(_, _) => {}
@@ -287,7 +287,7 @@ fn fold_expr(expr: &mut HirExpr) -> bool {
                 changed |= fold_expr(a);
             }
         }
-        HirExpr::Var(_) | HirExpr::Const(_, _) => {}
+        HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) | HirExpr::Const(_, _) => {}
     }
     // Try to fold this node.
     if let Some(folded) = try_fold(expr) {
@@ -332,7 +332,8 @@ pub(crate) fn eval_hir_expr_with_const_env(
             let result = truncate_const(a, ty)?;
             Some((result, ty.clone()))
         }
-        HirExpr::Load { .. }
+        HirExpr::AddressOfGlobal(_)
+        | HirExpr::Load { .. }
         | HirExpr::Call { .. }
         | HirExpr::PtrOffset { .. }
         | HirExpr::Index { .. }
@@ -922,7 +923,7 @@ fn count_mention_lhs(lhs: &HirLValue, name: &str) -> usize {
 
 fn count_mention_expr(expr: &HirExpr, name: &str) -> usize {
     match expr {
-        HirExpr::Var(n) => usize::from(n.as_str() == name),
+        HirExpr::Var(n) | HirExpr::AddressOfGlobal(n) => usize::from(n.as_str() == name),
         HirExpr::Const(_, _) => 0,
         HirExpr::Cast { expr, .. }
         | HirExpr::Unary { expr, .. }
@@ -1107,7 +1108,7 @@ fn collect_repeated_pure_exprs(
     }
 
     match expr {
-        HirExpr::Const(_, _) | HirExpr::Var(_) => {}
+        HirExpr::Const(_, _) | HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) => {}
         HirExpr::Cast { expr, .. }
         | HirExpr::Unary { expr, .. }
         | HirExpr::Load { ptr: expr, .. }
@@ -1135,7 +1136,7 @@ fn replace_matching_pure_expr(expr: &HirExpr, needle: &HirExpr, replacement: &Hi
     }
 
     match expr {
-        HirExpr::Const(_, _) | HirExpr::Var(_) => expr.clone(),
+        HirExpr::Const(_, _) | HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) => expr.clone(),
         HirExpr::Cast { ty, expr: inner } => HirExpr::Cast {
             ty: ty.clone(),
             expr: Box::new(replace_matching_pure_expr(inner, needle, replacement)),
@@ -1214,7 +1215,7 @@ fn is_stabilization_candidate_expr(expr: &HirExpr) -> bool {
 fn count_nonconst_leaf_inputs(expr: &HirExpr) -> usize {
     match expr {
         HirExpr::Const(_, _) => 0,
-        HirExpr::Var(_) => 1,
+        HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) => 1,
         HirExpr::Cast { expr, .. }
         | HirExpr::Unary { expr, .. }
         | HirExpr::Load { ptr: expr, .. }
@@ -1232,7 +1233,7 @@ fn count_nonconst_leaf_inputs(expr: &HirExpr) -> usize {
 
 fn expr_node_count(expr: &HirExpr) -> usize {
     match expr {
-        HirExpr::Const(_, _) | HirExpr::Var(_) => 1,
+        HirExpr::Const(_, _) | HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) => 1,
         HirExpr::Cast { expr, .. }
         | HirExpr::Unary { expr, .. }
         | HirExpr::Load { ptr: expr, .. }

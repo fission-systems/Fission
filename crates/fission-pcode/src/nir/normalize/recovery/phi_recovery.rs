@@ -404,7 +404,7 @@ fn collect_predicate_vars_in_stmt(stmt: &HirStmt, out: &mut HashSet<String>) {
 
 fn collect_vars_in_expr(expr: &HirExpr, out: &mut HashSet<String>) {
     match expr {
-        HirExpr::Var(name) => {
+        HirExpr::Var(name) | HirExpr::AddressOfGlobal(name) => {
             out.insert(name.clone());
         }
         HirExpr::Const(_, _) => {}
@@ -595,7 +595,7 @@ fn substitute_copies_expr(
     changed: &mut bool,
 ) {
     match expr {
-        HirExpr::Var(name) => {
+        HirExpr::Var(name) | HirExpr::AddressOfGlobal(name) => {
             if let Some(src) = copy_map.get(name.as_str()) {
                 *name = src.clone();
                 *changed = true;
@@ -776,7 +776,7 @@ fn last_assigns(stmts: &[HirStmt], temp_names: &HashSet<String>) -> Vec<(String,
 fn type_repr(expr: &HirExpr) -> String {
     match expr {
         HirExpr::Const(_, ty) | HirExpr::Cast { ty, .. } => format!("{ty:?}"),
-        HirExpr::Var(_) => "var".to_string(),
+        HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) => "var".to_string(),
         HirExpr::Binary { ty, .. } | HirExpr::Unary { ty, .. } => format!("{ty:?}"),
         HirExpr::Load { ty, .. } => format!("load_{ty:?}"),
         _ => "other".to_string(),
@@ -856,7 +856,7 @@ fn count_uses_in_stmt_flat(stmt: &HirStmt, name: &str) -> usize {
 
 fn count_var_in_expr(expr: &HirExpr, name: &str) -> usize {
     match expr {
-        HirExpr::Var(n) => usize::from(n.as_str() == name),
+        HirExpr::Var(n) | HirExpr::AddressOfGlobal(n) => usize::from(n.as_str() == name),
         HirExpr::Const(_, _) => 0,
         HirExpr::Cast { expr, .. }
         | HirExpr::Unary { expr, .. }
@@ -988,7 +988,7 @@ fn apply_join_renames_expr(
     changed: &mut bool,
 ) {
     match expr {
-        HirExpr::Var(name) => {
+        HirExpr::Var(name) | HirExpr::AddressOfGlobal(name) => {
             if let Some(canonical) = rename_map.get(name.as_str()) {
                 *name = canonical.clone();
                 *changed = true;

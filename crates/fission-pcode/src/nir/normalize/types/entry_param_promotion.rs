@@ -89,7 +89,7 @@ fn stmt_contains_rhs_var(stmt: &HirStmt, target: &str) -> bool {
 
 fn expr_contains_var(expr: &HirExpr, target: &str) -> bool {
     match expr {
-        HirExpr::Var(name) => name == target,
+        HirExpr::Var(name) | HirExpr::AddressOfGlobal(name) => name == target,
         HirExpr::Cast { expr, .. }
         | HirExpr::Unary { expr, .. }
         | HirExpr::Load { ptr: expr, .. }
@@ -350,7 +350,7 @@ pub(crate) fn apply_entry_param_promotion_pass(func: &mut HirFunction) -> bool {
             continue;
         }
         let ty = match rhs {
-            HirExpr::Var(_) => NirType::Int {
+            HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) => NirType::Int {
                 bits: 64,
                 signed: true,
             },

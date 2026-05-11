@@ -8,7 +8,7 @@ fn is_weak_call_target(target: &str) -> bool {
 
 fn count_mentions_in_expr(expr: &HirExpr, name: &str) -> usize {
     match expr {
-        HirExpr::Var(var) => usize::from(var == name),
+        HirExpr::Var(var) | HirExpr::AddressOfGlobal(var) => usize::from(var == name),
         HirExpr::Cast { expr, .. }
         | HirExpr::Unary { expr, .. }
         | HirExpr::Load { ptr: expr, .. }
@@ -116,7 +116,7 @@ fn substitute_var_in_expr(expr: &mut HirExpr, name: &str, replacement: &HirExpr)
             substitute_var_in_expr(base, name, replacement)
                 | substitute_var_in_expr(index, name, replacement)
         }
-        HirExpr::Var(_) | HirExpr::Const(_, _) => false,
+        HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) | HirExpr::Const(_, _) => false,
     }
 }
 

@@ -1,6 +1,6 @@
 use crate::loader::reader::{ByteReader, Endian};
 use crate::loader::types::{
-    extract_cstring, DataBuffer, FunctionInfo, LoadedBinary, LoadedBinaryBuilder, SectionInfo,
+    DataBuffer, FunctionInfo, LoadedBinary, LoadedBinaryBuilder, SectionInfo, extract_cstring,
 };
 use crate::prelude::*;
 use fission_core::architecture::select_elf_load_spec;
@@ -87,6 +87,7 @@ impl ElfLoader {
         let mut sections_info = Vec::new();
         let mut functions_info = Vec::new();
         let mut global_symbols = HashMap::new();
+        let mut global_symbol_sizes = HashMap::new();
         let mut relocation_symbols = HashMap::new();
         let phdrs = read_program_headers_64(bytes, &header, endian);
         let mut image_base = if !is_relocatable {
@@ -175,6 +176,7 @@ impl ElfLoader {
                         shdr.sh_type == SHT_DYNSYM,
                         &mut functions_info,
                         &mut global_symbols,
+                        &mut global_symbol_sizes,
                         endian,
                     );
                 }
@@ -235,6 +237,7 @@ impl ElfLoader {
             .add_sections(sections_info)
             .add_functions(functions_info)
             .add_global_symbols(global_symbols)
+            .add_global_symbol_sizes(global_symbol_sizes)
             .add_relocation_symbols(relocation_symbols)
             .build()
     }
@@ -252,6 +255,7 @@ impl ElfLoader {
         let mut sections_info = Vec::new();
         let mut functions_info = Vec::new();
         let mut global_symbols = HashMap::new();
+        let mut global_symbol_sizes = HashMap::new();
         let mut relocation_symbols = HashMap::new();
         let phdrs = read_program_headers_32(bytes, &header, endian);
         let mut image_base = if !is_relocatable {
@@ -339,6 +343,7 @@ impl ElfLoader {
                         shdr.sh_type == SHT_DYNSYM,
                         &mut functions_info,
                         &mut global_symbols,
+                        &mut global_symbol_sizes,
                         endian,
                     );
                 }
@@ -398,6 +403,7 @@ impl ElfLoader {
             .add_sections(sections_info)
             .add_functions(functions_info)
             .add_global_symbols(global_symbols)
+            .add_global_symbol_sizes(global_symbol_sizes)
             .add_relocation_symbols(relocation_symbols)
             .build()
     }
@@ -415,6 +421,7 @@ impl ElfLoader {
         is_dynamic_table: bool,
         out_funcs: &mut Vec<FunctionInfo>,
         out_globals: &mut HashMap<u64, String>,
+        out_global_sizes: &mut HashMap<u64, u64>,
         endian: Endian,
     ) {
         // Resolve the symbol string table from the linked section header
@@ -507,6 +514,9 @@ impl ElfLoader {
 
             if sym_type == STT_OBJECT {
                 out_globals.entry(address).or_insert(name);
+                if sym.st_size != 0 {
+                    out_global_sizes.entry(address).or_insert(sym.st_size);
+                }
                 continue;
             }
 
@@ -553,6 +563,7 @@ impl ElfLoader {
         is_dynamic_table: bool,
         out_funcs: &mut Vec<FunctionInfo>,
         out_globals: &mut HashMap<u64, String>,
+        out_global_sizes: &mut HashMap<u64, u64>,
         endian: Endian,
     ) {
         let strtab = if strtab_shndx < shdrs.len() {
@@ -645,6 +656,11 @@ impl ElfLoader {
 
             if sym_type == STT_OBJECT {
                 out_globals.entry(address).or_insert(name);
+                if sym.st_size != 0 {
+                    out_global_sizes
+                        .entry(address)
+                        .or_insert(u64::from(sym.st_size));
+                }
                 continue;
             }
 

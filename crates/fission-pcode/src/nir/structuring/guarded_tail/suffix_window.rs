@@ -227,7 +227,7 @@ impl<'a> PreviewBuilder<'a> {
             HirExpr::Index { base, index, .. } => {
                 Self::expr_contains_load(base) || Self::expr_contains_load(index)
             }
-            HirExpr::Var(_) | HirExpr::Const(_, _) => false,
+            HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) | HirExpr::Const(_, _) => false,
         }
     }
 
@@ -246,7 +246,7 @@ impl<'a> PreviewBuilder<'a> {
             HirExpr::Index { base, index, .. } => {
                 Self::suffix_expr_contains_call(base) || Self::suffix_expr_contains_call(index)
             }
-            HirExpr::Var(_) | HirExpr::Const(_, _) => false,
+            HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) | HirExpr::Const(_, _) => false,
         }
     }
 
@@ -266,7 +266,9 @@ impl<'a> PreviewBuilder<'a> {
                 lhs: HirLValue::Var(_),
                 rhs,
             } if Self::expr_is_pure_value(rhs) => match rhs {
-                HirExpr::Var(_) => SuffixSideEffectShapeKind::PureTempAssign,
+                HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) => {
+                    SuffixSideEffectShapeKind::PureTempAssign
+                }
                 _ => SuffixSideEffectShapeKind::PureRegisterAssign,
             },
             HirStmt::Assign {

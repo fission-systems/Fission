@@ -4,7 +4,7 @@ use super::*;
 impl<'a> PreviewBuilder<'a> {
     pub(super) fn should_preserve_materialized_expr(expr: &HirExpr) -> bool {
         match expr {
-            HirExpr::Var(_) | HirExpr::Const(..) => false,
+            HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) | HirExpr::Const(..) => false,
             HirExpr::Cast { expr, .. } => Self::should_preserve_materialized_expr(expr),
             HirExpr::Unary { .. }
             | HirExpr::Binary { .. }
@@ -39,7 +39,7 @@ impl<'a> PreviewBuilder<'a> {
             HirExpr::AggregateCopy { src, .. } => {
                 Self::expr_is_side_effectful_for_materialization_trace(src)
             }
-            HirExpr::Var(_) | HirExpr::Const(..) => false,
+            HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) | HirExpr::Const(..) => false,
         }
     }
 
@@ -237,7 +237,7 @@ impl<'a> PreviewBuilder<'a> {
         }
 
         match rhs {
-            HirExpr::Var(name) => classify_var_name(name),
+            HirExpr::Var(name) | HirExpr::AddressOfGlobal(name) => classify_var_name(name),
             HirExpr::Const(..) => AddressStableRequiredBaseKind::UnknownBase,
             HirExpr::Cast { expr, .. }
             | HirExpr::Unary { expr, .. }
@@ -279,7 +279,9 @@ impl<'a> PreviewBuilder<'a> {
         }
 
         match rhs {
-            HirExpr::Var(_) | HirExpr::Const(..) => AddressStableRequiredExprKind::PureArithmetic,
+            HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) | HirExpr::Const(..) => {
+                AddressStableRequiredExprKind::PureArithmetic
+            }
             HirExpr::Cast { expr, .. } | HirExpr::Unary { expr, .. } => {
                 Self::classify_address_stable_required_expr_kind(expr)
             }
@@ -389,7 +391,7 @@ impl<'a> PreviewBuilder<'a> {
         }
 
         match rhs {
-            HirExpr::Var(name) => classify_var_name(name),
+            HirExpr::Var(name) | HirExpr::AddressOfGlobal(name) => classify_var_name(name),
             HirExpr::Const(..) | HirExpr::Call { .. } => StackAddressBaseReg::Unknown,
             HirExpr::Cast { expr, .. }
             | HirExpr::Unary { expr, .. }
@@ -415,7 +417,7 @@ impl<'a> PreviewBuilder<'a> {
         }
 
         match rhs {
-            HirExpr::Var(_) => is_stack_base(rhs).then_some(0),
+            HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) => is_stack_base(rhs).then_some(0),
             HirExpr::Const(..)
             | HirExpr::Unary { .. }
             | HirExpr::Call { .. }
@@ -442,7 +444,7 @@ impl<'a> PreviewBuilder<'a> {
     fn stack_address_frame_relative_candidate(rhs: &HirExpr) -> bool {
         fn is_simple_frame_relative_expr(expr: &HirExpr) -> bool {
             match expr {
-                HirExpr::Var(_) => true,
+                HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) => true,
                 HirExpr::Cast { expr, .. } => is_simple_frame_relative_expr(expr),
                 HirExpr::PtrOffset { base, .. } => is_simple_frame_relative_expr(base),
                 HirExpr::Binary { op, lhs, rhs, .. } => {
@@ -967,7 +969,10 @@ impl<'a> PreviewBuilder<'a> {
                     || Self::materialize_expr_contains_load(index)
             }
             HirExpr::AggregateCopy { src, .. } => Self::materialize_expr_contains_load(src),
-            HirExpr::Call { .. } | HirExpr::Var(_) | HirExpr::Const(_, _) => false,
+            HirExpr::Call { .. }
+            | HirExpr::Var(_)
+            | HirExpr::AddressOfGlobal(_)
+            | HirExpr::Const(_, _) => false,
         }
     }
 
@@ -988,7 +993,7 @@ impl<'a> PreviewBuilder<'a> {
                     || Self::materialize_expr_contains_call(index)
             }
             HirExpr::AggregateCopy { src, .. } => Self::materialize_expr_contains_call(src),
-            HirExpr::Var(_) | HirExpr::Const(_, _) => false,
+            HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) | HirExpr::Const(_, _) => false,
         }
     }
 
@@ -1007,7 +1012,7 @@ impl<'a> PreviewBuilder<'a> {
             HirExpr::Index { base, index, .. } => Self::first_call_expr_in_materialize_expr(base)
                 .or_else(|| Self::first_call_expr_in_materialize_expr(index)),
             HirExpr::AggregateCopy { src, .. } => Self::first_call_expr_in_materialize_expr(src),
-            HirExpr::Var(_) | HirExpr::Const(_, _) => None,
+            HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) | HirExpr::Const(_, _) => None,
         }
     }
 
@@ -1023,7 +1028,10 @@ impl<'a> PreviewBuilder<'a> {
             HirExpr::Index { base, index, .. } => Self::first_load_expr_in_materialize_expr(base)
                 .or_else(|| Self::first_load_expr_in_materialize_expr(index)),
             HirExpr::AggregateCopy { src, .. } => Self::first_load_expr_in_materialize_expr(src),
-            HirExpr::Call { .. } | HirExpr::Var(_) | HirExpr::Const(_, _) => None,
+            HirExpr::Call { .. }
+            | HirExpr::Var(_)
+            | HirExpr::AddressOfGlobal(_)
+            | HirExpr::Const(_, _) => None,
         }
     }
 
@@ -1039,7 +1047,9 @@ impl<'a> PreviewBuilder<'a> {
         rhs: &HirExpr,
     ) -> DisallowedSingleConsumerRhsKind {
         match rhs {
-            HirExpr::Var(_) | HirExpr::Const(_, _) => DisallowedSingleConsumerRhsKind::VarOrConst,
+            HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) | HirExpr::Const(_, _) => {
+                DisallowedSingleConsumerRhsKind::VarOrConst
+            }
             HirExpr::Unary {
                 op: HirUnaryOp::Not,
                 ..
@@ -1354,7 +1364,9 @@ impl<'a> PreviewBuilder<'a> {
 
     fn classify_single_consumer_predicate_family(expr: &HirExpr) -> SingleConsumerPredicateFamily {
         match expr {
-            HirExpr::Var(_) => SingleConsumerPredicateFamily::DirectFlag,
+            HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) => {
+                SingleConsumerPredicateFamily::DirectFlag
+            }
             HirExpr::Cast { expr, .. } => Self::classify_single_consumer_predicate_family(expr),
             HirExpr::Unary {
                 op: HirUnaryOp::Not,
@@ -1596,7 +1608,8 @@ impl<'a> PreviewBuilder<'a> {
             HirExpr::PtrOffset { .. }
             | HirExpr::Index { .. }
             | HirExpr::AggregateCopy { .. }
-            | HirExpr::Var(_) => false,
+            | HirExpr::Var(_)
+            | HirExpr::AddressOfGlobal(_) => false,
         }
     }
 
@@ -1634,9 +1647,10 @@ impl<'a> PreviewBuilder<'a> {
                 LowBitMaskInputOriginKind::Load
             }
             HirExpr::Call { .. } => LowBitMaskInputOriginKind::Call,
-            HirExpr::AggregateCopy { .. } | HirExpr::Var(_) | HirExpr::Const(_, _) => {
-                LowBitMaskInputOriginKind::Unknown
-            }
+            HirExpr::AggregateCopy { .. }
+            | HirExpr::Var(_)
+            | HirExpr::AddressOfGlobal(_)
+            | HirExpr::Const(_, _) => LowBitMaskInputOriginKind::Unknown,
         }
     }
 
@@ -2100,13 +2114,17 @@ impl<'a> PreviewBuilder<'a> {
                 {
                     SingleConsumerLoadAliasClass::ReadOnlyLocalLoad
                 }
-                HirExpr::Var(_) => SingleConsumerLoadAliasClass::GlobalOrExternalLoad,
+                HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) => {
+                    SingleConsumerLoadAliasClass::GlobalOrExternalLoad
+                }
                 HirExpr::Call { .. } | HirExpr::Load { .. } => {
                     SingleConsumerLoadAliasClass::VolatileOrUnknownLoad
                 }
                 _ => SingleConsumerLoadAliasClass::UnknownLoad,
             },
-            HirExpr::Var(_) => SingleConsumerLoadAliasClass::GlobalOrExternalLoad,
+            HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) => {
+                SingleConsumerLoadAliasClass::GlobalOrExternalLoad
+            }
             HirExpr::Call { .. } | HirExpr::Load { .. } => {
                 SingleConsumerLoadAliasClass::VolatileOrUnknownLoad
             }
@@ -2891,7 +2909,7 @@ impl<'a> PreviewBuilder<'a> {
 
     pub(super) fn expr_is_low_cost_builder_inline_candidate(expr: &HirExpr) -> bool {
         match expr {
-            HirExpr::Var(_) | HirExpr::Const(_, _) => true,
+            HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) | HirExpr::Const(_, _) => true,
             HirExpr::Cast { expr, .. } | HirExpr::Unary { expr, .. } => {
                 Self::expr_is_low_cost_builder_inline_candidate(expr)
             }
@@ -2980,7 +2998,7 @@ impl<'a> PreviewBuilder<'a> {
 
     pub(super) fn expr_requires_passthrough_single_use_inline(expr: &HirExpr) -> bool {
         match expr {
-            HirExpr::Var(_) | HirExpr::Const(_, _) => false,
+            HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) | HirExpr::Const(_, _) => false,
             HirExpr::Cast { expr, .. } => Self::expr_requires_passthrough_single_use_inline(expr),
             HirExpr::Unary { op, expr, .. } => {
                 matches!(op, HirUnaryOp::Not)
@@ -3425,12 +3443,7 @@ mod tests {
                 Some(output.clone()),
                 vec![constant(1)],
             ),
-            op(
-                1,
-                PcodeOpcode::BranchInd,
-                None,
-                vec![output.clone()],
-            ),
+            op(1, PcodeOpcode::BranchInd, None, vec![output.clone()]),
         ]);
 
         let hazard = PreviewBuilder::classify_alias_unsafe_hazard(

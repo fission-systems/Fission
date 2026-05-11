@@ -7,7 +7,7 @@ fn is_stack_pointer_name(name: &str) -> bool {
 
 fn expr_uses_var(expr: &HirExpr, name: &str) -> bool {
     match expr {
-        HirExpr::Var(var) => var == name,
+        HirExpr::Var(var) | HirExpr::AddressOfGlobal(var) => var == name,
         HirExpr::Cast { expr, .. }
         | HirExpr::Unary { expr, .. }
         | HirExpr::Load { ptr: expr, .. }

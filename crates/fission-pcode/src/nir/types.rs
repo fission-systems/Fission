@@ -1748,6 +1748,7 @@ pub enum HirLValue {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum HirExpr {
     Var(String),
+    AddressOfGlobal(String),
     Const(i64, NirType),
     Cast {
         ty: NirType,
@@ -1838,6 +1839,9 @@ pub struct NirRenderOptions {
     /// Used to replace `DAT_<addr>` with the actual symbol name in decompiled output.
     #[serde(default)]
     pub global_names: HashMap<u64, String>,
+    /// Address → global data object byte size when loader metadata provides it.
+    #[serde(default)]
+    pub global_sizes: HashMap<u64, u64>,
     /// Relocation use-site address → referenced symbol name.
     #[serde(default)]
     pub relocation_names: HashMap<u64, String>,
@@ -2083,6 +2087,7 @@ impl NirRenderOptions {
             structuring_engine: StructuringEngineKind::GraphCollapseV1,
             conservative_irreducible_fallback: false,
             global_names,
+            global_sizes: inner.global_symbol_sizes.clone(),
             relocation_names: inner.relocation_symbols.clone(),
             calling_convention,
         }

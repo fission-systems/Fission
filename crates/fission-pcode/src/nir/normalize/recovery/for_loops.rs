@@ -173,7 +173,7 @@ fn stmt_list_contains_continue(stmts: &[HirStmt]) -> bool {
 
 fn collect_cond_vars(expr: &HirExpr, vars: &mut HashSet<String>) {
     match expr {
-        HirExpr::Var(name) => {
+        HirExpr::Var(name) | HirExpr::AddressOfGlobal(name) => {
             vars.insert(name.clone());
         }
         HirExpr::Cast { expr, .. }

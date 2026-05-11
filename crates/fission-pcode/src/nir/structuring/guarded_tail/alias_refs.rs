@@ -30,7 +30,7 @@ impl<'a> PreviewBuilder<'a> {
 
     pub(super) fn expr_is_pure_value(expr: &HirExpr) -> bool {
         match expr {
-            HirExpr::Var(_) | HirExpr::Const(_, _) => true,
+            HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) | HirExpr::Const(_, _) => true,
             HirExpr::Cast { expr, .. } => Self::expr_is_pure_value(expr),
             HirExpr::Unary { expr, .. } => Self::expr_is_pure_value(expr),
             HirExpr::Binary { lhs, rhs, .. } => {

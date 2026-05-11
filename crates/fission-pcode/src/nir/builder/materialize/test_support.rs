@@ -79,6 +79,7 @@ pub(super) fn test_options() -> MlilPreviewOptions {
         conservative_irreducible_fallback: false,
         structuring_engine: StructuringEngineKind::GraphCollapseV1,
         global_names: Default::default(),
+        global_sizes: Default::default(),
         relocation_names: Default::default(),
         calling_convention: Default::default(),
     }

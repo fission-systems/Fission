@@ -708,7 +708,7 @@ mod tests {
 
     fn expr_var(expr: &HirExpr) -> Option<&str> {
         match expr {
-            HirExpr::Var(name) => Some(name.as_str()),
+            HirExpr::Var(name) | HirExpr::AddressOfGlobal(name) => Some(name.as_str()),
             HirExpr::Cast { expr, .. } => expr_var(expr),
             _ => None,
         }
@@ -729,7 +729,7 @@ mod tests {
                 expr_contains_shr(base) || expr_contains_shr(index)
             }
             HirExpr::AggregateCopy { src, .. } => expr_contains_shr(src),
-            HirExpr::Var(_) | HirExpr::Const(_, _) => false,
+            HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) | HirExpr::Const(_, _) => false,
         }
     }
 

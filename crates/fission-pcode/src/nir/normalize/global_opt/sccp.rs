@@ -157,7 +157,7 @@ fn loop_variant_stmt(stmt: &HirStmt, out: &mut HashSet<String>) {
 fn sccp_subst_expr(expr: &mut HirExpr, env: &ConstEnv) -> bool {
     let mut changed = false;
     match expr {
-        HirExpr::Var(name) => {
+        HirExpr::Var(name) | HirExpr::AddressOfGlobal(name) => {
             if let Some((v, ty)) = env.get(name) {
                 *expr = HirExpr::Const(*v, ty.clone());
                 changed = true;

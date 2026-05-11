@@ -106,13 +106,15 @@ fn typed_pointer_base(
     binding_types: &HashMap<String, NirType>,
 ) -> Option<(HirExpr, NirType, bool)> {
     match expr {
-        HirExpr::Var(name) => binding_types.get(name.as_str()).and_then(|ty| {
-            if matches!(ty, NirType::Ptr(_)) {
-                Some((expr.clone(), ty.clone(), false))
-            } else {
-                None
-            }
-        }),
+        HirExpr::Var(name) | HirExpr::AddressOfGlobal(name) => {
+            binding_types.get(name.as_str()).and_then(|ty| {
+                if matches!(ty, NirType::Ptr(_)) {
+                    Some((expr.clone(), ty.clone(), false))
+                } else {
+                    None
+                }
+            })
+        }
         HirExpr::Cast {
             ty: NirType::Ptr(pointee),
             expr: inner,
@@ -325,13 +327,15 @@ fn try_recover_index_access(
         return None;
     };
     let ptr_ty = match lhs.as_ref() {
-        HirExpr::Var(name) => binding_types.get(name.as_str()).and_then(|t| {
-            if matches!(t, NirType::Ptr(_)) {
-                Some(t)
-            } else {
-                None
-            }
-        })?,
+        HirExpr::Var(name) | HirExpr::AddressOfGlobal(name) => {
+            binding_types.get(name.as_str()).and_then(|t| {
+                if matches!(t, NirType::Ptr(_)) {
+                    Some(t)
+                } else {
+                    None
+                }
+            })?
+        }
         _ => return None,
     };
     let elem_ty = pointee_ty(ptr_ty)
@@ -414,7 +418,7 @@ fn recover_in_expr(expr: &mut HirExpr, binding_types: &HashMap<String, NirType>)
         HirExpr::AggregateCopy { src, .. } => {
             changed |= recover_in_expr(src, binding_types);
         }
-        HirExpr::Var(_) | HirExpr::Const(_, _) => {}
+        HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) | HirExpr::Const(_, _) => {}
     }
     changed
 }

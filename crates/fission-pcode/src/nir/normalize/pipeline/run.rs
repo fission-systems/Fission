@@ -941,7 +941,7 @@ fn lvalue_has_memory_surface_interest(lhs: &HirLValue) -> bool {
 
 fn expr_has_memory_surface_interest(expr: &HirExpr) -> bool {
     match expr {
-        HirExpr::Const(_, _) | HirExpr::Var(_) => false,
+        HirExpr::Const(_, _) | HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) => false,
         HirExpr::Load { ptr, .. } => {
             let _ = ptr;
             true
@@ -967,7 +967,7 @@ fn expr_has_memory_surface_interest(expr: &HirExpr) -> bool {
 fn expr_contains_const(expr: &HirExpr) -> bool {
     match expr {
         HirExpr::Const(_, _) => true,
-        HirExpr::Var(_) => false,
+        HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) => false,
         HirExpr::Cast { expr, .. }
         | HirExpr::Unary { expr, .. }
         | HirExpr::Load { ptr: expr, .. }
@@ -1866,7 +1866,7 @@ pub(crate) fn normalize_expr(expr: &mut HirExpr) {
             normalize_expr(index);
         }
         HirExpr::AggregateCopy { src, .. } => normalize_expr(src),
-        HirExpr::Var(_) | HirExpr::Const(_, _) => {}
+        HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) | HirExpr::Const(_, _) => {}
     }
 
     let mut current = expr.clone();

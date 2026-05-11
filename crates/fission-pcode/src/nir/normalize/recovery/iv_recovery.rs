@@ -292,7 +292,7 @@ fn apply_break_continue_in_stmts(
 /// Collect all variable names mentioned in an expression.
 fn expr_vars(expr: &HirExpr, out: &mut HashSet<String>) {
     match expr {
-        HirExpr::Var(name) => {
+        HirExpr::Var(name) | HirExpr::AddressOfGlobal(name) => {
             out.insert(name.clone());
         }
         HirExpr::Cast { expr, .. } | HirExpr::Unary { expr, .. } => expr_vars(expr, out),

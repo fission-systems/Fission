@@ -17,7 +17,7 @@ pub(crate) fn eval_expr(expr: &HirExpr, env: &RangeEnv) -> CircleRange {
             let bits = nir_bits(ty).unwrap_or(64);
             CircleRange::singleton(*value as u64, bits)
         }
-        HirExpr::Var(name) => env
+        HirExpr::Var(name) | HirExpr::AddressOfGlobal(name) => env
             .get(name.as_str())
             .copied()
             .unwrap_or_else(|| CircleRange::top(64)),

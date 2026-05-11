@@ -588,8 +588,7 @@ pub(crate) fn is_primary_return_register_for_abi(vn: &Varnode, abi: CallingConve
     match abi {
         CallingConvention::AArch64 => {
             (vn.space_id == REGISTER_SPACE_ID || vn.space_id == RUST_SLEIGH_REGISTER_SPACE_ID)
-                && aarch64_ghidra_reg_name(vn.offset, vn.size)
-                    .and_then(aarch64_gpr_family_index)
+                && aarch64_ghidra_reg_name(vn.offset, vn.size).and_then(aarch64_gpr_family_index)
                     == Some(0)
         }
         CallingConvention::Arm32 => {
@@ -608,8 +607,7 @@ pub(crate) fn is_return_target_register_for_abi(vn: &Varnode, abi: CallingConven
     }
     match abi {
         CallingConvention::AArch64 => {
-            aarch64_ghidra_reg_name(vn.offset, vn.size)
-                .and_then(aarch64_gpr_family_index)
+            aarch64_ghidra_reg_name(vn.offset, vn.size).and_then(aarch64_gpr_family_index)
                 == Some(30)
         }
         CallingConvention::Arm32 => vn.offset == 0x58,
@@ -686,6 +684,7 @@ pub(crate) fn register_name_32(offset: u64, size: u32) -> Option<&'static str> {
 
 pub(crate) fn expr_type(expr: &HirExpr) -> NirType {
     match expr {
+        HirExpr::AddressOfGlobal(_) => NirType::Ptr(Box::new(NirType::Unknown)),
         HirExpr::Var(_) => NirType::Unknown,
         HirExpr::Const(_, ty)
         | HirExpr::Unary { ty, .. }

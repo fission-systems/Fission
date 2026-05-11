@@ -229,7 +229,9 @@ impl<'a> PreviewBuilder<'a> {
             } else {
                 output
             };
-            let expr = if prefer_source_values && let Some(name) = self.surface_call_carrier_name(source) {
+            let expr = if prefer_source_values
+                && let Some(name) = self.surface_call_carrier_name(source)
+            {
                 HirExpr::Var(name)
             } else {
                 match self.lower_varnode(source, &mut HashSet::new()) {

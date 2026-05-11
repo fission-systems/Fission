@@ -166,17 +166,18 @@ impl<'a> PreviewBuilder<'a> {
                             {
                                 return Ok(None);
                             }
+                            let store_ty = type_from_size(op.inputs[2].size, false);
                             let lhs = if let Some((slot_name, _slot_ty)) = this
                                 .try_stack_slot_lvalue_for_memory_op(
                                     op,
                                     &op.inputs[1],
-                                    type_from_size(op.inputs[2].size, false),
+                                    store_ty.clone(),
                                 ) {
                                 HirLValue::Var(slot_name)
-                            } else if let Some(global_name) =
-                                this.try_global_lvalue(op, &op.inputs[1])
+                            } else if let Some(global_lvalue) =
+                                this.try_global_memory_lvalue(op, &op.inputs[1], store_ty.clone())
                             {
-                                HirLValue::Var(global_name)
+                                global_lvalue
                             } else {
                                 HirLValue::Deref {
                                     ptr: Box::new(
@@ -192,7 +193,7 @@ impl<'a> PreviewBuilder<'a> {
                                                 err
                                             })?,
                                     ),
-                                    ty: type_from_size(op.inputs[2].size, false),
+                                    ty: store_ty,
                                 }
                             };
                             let rhs = if let Some(expr) = this
@@ -1068,11 +1069,11 @@ impl<'a> PreviewBuilder<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::PcodeBasicBlock;
     use crate::nir::builder::materialize::test_support::{
         block, block_at, constant, op, pcode_function,
     };
     use crate::nir::render_mlil_preview;
-    use crate::PcodeBasicBlock;
 
     fn register(space_id: u64, offset: u64, size: u32) -> Varnode {
         Varnode {
@@ -1436,13 +1437,7 @@ mod tests {
                         Some(madd_sum.clone()),
                         vec![w8, product],
                     ),
-                    op_at(
-                        7,
-                        0x1014,
-                        PcodeOpcode::IntZExt,
-                        Some(x8),
-                        vec![madd_sum],
-                    ),
+                    op_at(7, 0x1014, PcodeOpcode::IntZExt, Some(x8), vec![madd_sum]),
                     op_at(
                         8,
                         0x1018,

@@ -24,6 +24,7 @@ impl LoadedBinaryBuilder {
             format: "unknown".to_string(),
             iat_symbols: std::collections::HashMap::new(),
             global_symbols: std::collections::HashMap::new(),
+            global_symbol_sizes: std::collections::HashMap::new(),
             relocation_symbols: std::collections::HashMap::new(),
             pdb_debug_info: None,
         }
@@ -118,6 +119,11 @@ impl LoadedBinaryBuilder {
         self
     }
 
+    pub fn add_global_symbol_sizes(mut self, sizes: std::collections::HashMap<u64, u64>) -> Self {
+        self.global_symbol_sizes.extend(sizes);
+        self
+    }
+
     pub fn add_relocation_symbols(
         mut self,
         symbols: std::collections::HashMap<u64, String>,
@@ -193,6 +199,7 @@ impl LoadedBinaryBuilder {
             format: self.format,
             iat_symbols,
             global_symbols,
+            global_symbol_sizes: self.global_symbol_sizes,
             relocation_symbols,
             function_addr_index,
             function_name_index,

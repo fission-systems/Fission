@@ -267,8 +267,8 @@ fn aarch64_be_unique_subrange_projection_uses_low_value_view() {
         }],
     };
 
-    let code = render_mlil_preview(&func, "be_unique_low_view", 0x1000, &options)
-        .expect("preview render");
+    let code =
+        render_mlil_preview(&func, "be_unique_low_view", 0x1000, &options).expect("preview render");
     assert!(code.contains("/ 134217728"), "{code}");
     assert!(!code.contains(">> 32"), "{code}");
 }

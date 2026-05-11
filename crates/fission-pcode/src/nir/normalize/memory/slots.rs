@@ -300,7 +300,9 @@ fn resolve_slot_alias_base(
     }
 
     match base {
-        HirExpr::Var(name) => resolve_var(func, alias_defs, name, 0),
+        HirExpr::Var(name) | HirExpr::AddressOfGlobal(name) => {
+            resolve_var(func, alias_defs, name, 0)
+        }
         HirExpr::Cast { ty, expr } => HirExpr::Cast {
             ty: ty.clone(),
             expr: Box::new(resolve_slot_alias_base(func, alias_defs, expr)),
@@ -315,7 +317,7 @@ fn resolve_slot_alias_base(
 
 fn derive_slot_alias_origin(func: &HirFunction, base: &HirExpr) -> Option<NirBindingOrigin> {
     match base {
-        HirExpr::Var(name) => func
+        HirExpr::Var(name) | HirExpr::AddressOfGlobal(name) => func
             .params
             .iter()
             .chain(func.locals.iter())
@@ -343,7 +345,7 @@ fn is_surface_stable_slot_display_base(
         return true;
     }
     match base {
-        HirExpr::Var(name) => {
+        HirExpr::Var(name) | HirExpr::AddressOfGlobal(name) => {
             if is_cheap_slot_base(base) || slot_surface_type_name(base, func, inventory).is_some() {
                 return true;
             }
@@ -390,7 +392,7 @@ fn is_cheap_slot_candidate(candidate: &MemorySlotCandidate) -> bool {
 
 fn is_cheap_slot_base(expr: &HirExpr) -> bool {
     match expr {
-        HirExpr::Var(name) => {
+        HirExpr::Var(name) | HirExpr::AddressOfGlobal(name) => {
             matches!(
                 name.as_str(),
                 "esp" | "ebp" | "rsp" | "rbp" | "eax" | "ecx" | "edx" | "ebx" | "esi" | "edi"
@@ -567,7 +569,7 @@ fn rewrite_memory_slot_expr(
             changed |= rewrite_memory_slot_expr(base, aliases);
             changed |= rewrite_memory_slot_expr(index, aliases);
         }
-        HirExpr::Var(_) | HirExpr::Const(_, _) => {}
+        HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) | HirExpr::Const(_, _) => {}
     }
     changed
 }

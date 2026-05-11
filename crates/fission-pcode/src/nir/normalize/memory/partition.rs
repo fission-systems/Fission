@@ -178,7 +178,7 @@ fn collect_accesses_from_expr(expr: &HirExpr, accesses: &mut Vec<PartitionedMemo
             collect_accesses_from_expr(base, accesses);
             collect_accesses_from_expr(index, accesses);
         }
-        HirExpr::Var(_) | HirExpr::Const(_, _) => {}
+        HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) | HirExpr::Const(_, _) => {}
     }
 }
 
@@ -217,7 +217,7 @@ fn parse_partitioned_access(
 
 fn classify_base_object(base: &HirExpr) -> MemoryAccessClass {
     match base {
-        HirExpr::Var(name) => {
+        HirExpr::Var(name) | HirExpr::AddressOfGlobal(name) => {
             if name.starts_with("stack_")
                 || name.starts_with("local_")
                 || name.starts_with("home_")

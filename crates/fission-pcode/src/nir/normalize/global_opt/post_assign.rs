@@ -164,13 +164,16 @@ fn stabilize_expr(expr: &mut HirExpr, reps: &PureExprMap) -> bool {
             changed |= stabilize_expr(base, reps);
             changed |= stabilize_expr(index, reps);
         }
-        HirExpr::Var(_) | HirExpr::Const(_, _) => {}
+        HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) | HirExpr::Const(_, _) => {}
     }
     changed
 }
 
 fn is_representable_expr(expr: &HirExpr) -> bool {
-    !matches!(expr, HirExpr::Var(_) | HirExpr::Const(_, _)) && pure_expr_key(expr).is_some()
+    !matches!(
+        expr,
+        HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) | HirExpr::Const(_, _)
+    ) && pure_expr_key(expr).is_some()
 }
 
 #[cfg(test)]

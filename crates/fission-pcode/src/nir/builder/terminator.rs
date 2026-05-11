@@ -1546,7 +1546,7 @@ impl<'a> PreviewBuilder<'a> {
     fn expr_contains_call(expr: &HirExpr) -> bool {
         match expr {
             HirExpr::Call { .. } => true,
-            HirExpr::Const(_, _) | HirExpr::Var(_) => false,
+            HirExpr::Const(_, _) | HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) => false,
             HirExpr::Cast { expr, .. }
             | HirExpr::Unary { expr, .. }
             | HirExpr::Load { ptr: expr, .. }
@@ -1563,7 +1563,7 @@ impl<'a> PreviewBuilder<'a> {
 
     fn expr_node_count(expr: &HirExpr) -> usize {
         match expr {
-            HirExpr::Const(_, _) | HirExpr::Var(_) => 1,
+            HirExpr::Const(_, _) | HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) => 1,
             HirExpr::Cast { expr, .. }
             | HirExpr::Unary { expr, .. }
             | HirExpr::Load { ptr: expr, .. }
@@ -2083,7 +2083,7 @@ impl<'a> PreviewBuilder<'a> {
             | HirExpr::Cast { ty, .. }
             | HirExpr::Unary { ty, .. }
             | HirExpr::Binary { ty, .. } => Self::nir_type_width(ty),
-            HirExpr::Var(_) => None,
+            HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) => None,
             HirExpr::Call { ty, .. } => Self::nir_type_width(ty),
             HirExpr::PtrOffset { .. } => None,
             HirExpr::AggregateCopy { size, .. } => Some(*size * 8),
@@ -2104,7 +2104,7 @@ impl<'a> PreviewBuilder<'a> {
 
     fn selector_expr_is_side_effect_free(expr: &HirExpr) -> bool {
         match expr {
-            HirExpr::Const(_, _) | HirExpr::Var(_) => true,
+            HirExpr::Const(_, _) | HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) => true,
             HirExpr::Cast { expr, .. }
             | HirExpr::Unary { expr, .. }
             | HirExpr::Load { ptr: expr, .. }
@@ -3363,6 +3363,7 @@ mod tests {
             conservative_irreducible_fallback: false,
             structuring_engine: StructuringEngineKind::GraphCollapseV1,
             global_names: Default::default(),
+            global_sizes: Default::default(),
             relocation_names: Default::default(),
             calling_convention: CallingConvention::AArch64,
         };
@@ -3446,6 +3447,7 @@ mod tests {
             conservative_irreducible_fallback: false,
             structuring_engine: StructuringEngineKind::GraphCollapseV1,
             global_names: Default::default(),
+            global_sizes: Default::default(),
             relocation_names: Default::default(),
             calling_convention: CallingConvention::Arm32,
         };

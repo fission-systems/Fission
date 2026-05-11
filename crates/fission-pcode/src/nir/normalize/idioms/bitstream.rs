@@ -35,7 +35,7 @@ fn peel_state_root_expr(expr: &HirExpr) -> Option<HirExpr> {
     match expr {
         HirExpr::Cast { expr, .. } => peel_state_root_expr(expr),
         HirExpr::PtrOffset { base, .. } => Some((**base).clone()),
-        HirExpr::Var(_) => Some(expr.clone()),
+        HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) => Some(expr.clone()),
         _ => None,
     }
 }
@@ -313,7 +313,7 @@ fn infer_state_from_expr(
     state_roots: &HashMap<String, HirExpr>,
 ) -> Option<HirExpr> {
     match expr {
-        HirExpr::Var(var) => state_roots.get(var).cloned(),
+        HirExpr::Var(var) | HirExpr::AddressOfGlobal(var) => state_roots.get(var).cloned(),
         HirExpr::Cast { expr, .. }
         | HirExpr::Unary { expr, .. }
         | HirExpr::Load { ptr: expr, .. }
@@ -462,7 +462,7 @@ fn lvalue_location_key(lhs: &HirLValue) -> Option<String> {
 
 fn expr_location_key(expr: &HirExpr) -> Option<String> {
     match expr {
-        HirExpr::Var(name) => Some(name.clone()),
+        HirExpr::Var(name) | HirExpr::AddressOfGlobal(name) => Some(name.clone()),
         HirExpr::Index { base, index, .. } => {
             Some(format!("{}[{}]", print_expr(base), print_expr(index)))
         }

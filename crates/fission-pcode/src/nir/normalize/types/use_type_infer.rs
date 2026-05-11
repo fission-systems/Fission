@@ -177,7 +177,7 @@ fn collect_pointer_assignment_base_constraints(
         return;
     };
     match rhs {
-        HirExpr::Var(name) => {
+        HirExpr::Var(name) | HirExpr::AddressOfGlobal(name) => {
             out.entry(name.clone())
                 .or_default()
                 .push(UseConstraint::Ptr(pointee.as_ref().clone()));
@@ -349,7 +349,7 @@ fn collect_constraints_expr(
             collect_constraints_expr(base, return_type, known_binding_types, out);
             collect_constraints_expr(index, return_type, known_binding_types, out);
         }
-        HirExpr::Var(_) | HirExpr::Const(_, _) => {}
+        HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) | HirExpr::Const(_, _) => {}
     }
 }
 
@@ -390,7 +390,9 @@ fn compare_constraint(bits: u32, signed: bool) -> UseConstraint {
 
 fn expr_int_bits(expr: &HirExpr, known_binding_types: &HashMap<String, NirType>) -> Option<u32> {
     match expr {
-        HirExpr::Var(name) => known_binding_types.get(name).and_then(nir_type_bits),
+        HirExpr::Var(name) | HirExpr::AddressOfGlobal(name) => {
+            known_binding_types.get(name).and_then(nir_type_bits)
+        }
         HirExpr::Const(_, ty)
         | HirExpr::Unary { ty, .. }
         | HirExpr::Call { ty, .. }
@@ -426,7 +428,9 @@ fn return_expr_type(
     known_binding_types: &HashMap<String, NirType>,
 ) -> Option<NirType> {
     match expr {
-        HirExpr::Var(name) => known_binding_types.get(name).cloned(),
+        HirExpr::Var(name) | HirExpr::AddressOfGlobal(name) => {
+            known_binding_types.get(name).cloned()
+        }
         other => {
             let ty = expr_type(other);
             (ty != NirType::Unknown).then_some(ty)
@@ -526,7 +530,7 @@ fn promote_return_signedness_from_returns(func: &mut HirFunction) -> bool {
 
 fn count_var_uses_expr(expr: &HirExpr, out: &mut HashMap<String, usize>) {
     match expr {
-        HirExpr::Var(name) => {
+        HirExpr::Var(name) | HirExpr::AddressOfGlobal(name) => {
             *out.entry(name.clone()).or_default() += 1;
         }
         HirExpr::Const(_, _) => {}
@@ -640,7 +644,7 @@ fn collect_wrapping_narrow_return_vars(
     out: &mut HashMap<String, usize>,
 ) {
     match expr {
-        HirExpr::Var(name) => {
+        HirExpr::Var(name) | HirExpr::AddressOfGlobal(name) => {
             *out.entry(name.clone()).or_default() += 1;
         }
         HirExpr::Cast { ty, expr } => {

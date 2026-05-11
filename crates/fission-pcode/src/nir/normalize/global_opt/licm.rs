@@ -242,7 +242,7 @@ fn is_invariant_stmt(stmt: &HirStmt, loop_defs: &HashSet<String>) -> bool {
 fn is_pure_and_invariant(expr: &HirExpr, loop_defs: &HashSet<String>) -> bool {
     match expr {
         HirExpr::Const(_, _) => true,
-        HirExpr::Var(name) => !loop_defs.contains(name.as_str()),
+        HirExpr::Var(name) | HirExpr::AddressOfGlobal(name) => !loop_defs.contains(name.as_str()),
         HirExpr::Cast { expr: inner, .. } => is_pure_and_invariant(inner, loop_defs),
         HirExpr::Unary { expr: inner, .. } => is_pure_and_invariant(inner, loop_defs),
         HirExpr::Binary { lhs, rhs, .. } => {

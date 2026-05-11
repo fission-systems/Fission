@@ -1703,7 +1703,7 @@ impl<'a> PreviewBuilder<'a> {
                 Self::expr_has_call(base) || Self::expr_has_call(index)
             }
             HirExpr::AggregateCopy { src, .. } => Self::expr_has_call(src),
-            HirExpr::Var(_, ..) | HirExpr::Const(_, ..) => false,
+            HirExpr::Var(_, ..) | HirExpr::AddressOfGlobal(_) | HirExpr::Const(_, ..) => false,
         }
     }
 
@@ -1803,6 +1803,7 @@ mod tests {
             conservative_irreducible_fallback: false,
             structuring_engine: StructuringEngineKind::GraphCollapseV1,
             global_names: Default::default(),
+            global_sizes: Default::default(),
             relocation_names: Default::default(),
             calling_convention: Default::default(),
         }

@@ -510,7 +510,7 @@ fn count_uses_in_stmt(stmt: &HirStmt, uses: &mut HashMap<String, usize>) {
 
 fn count_uses_in_expr(expr: &HirExpr, uses: &mut HashMap<String, usize>) {
     match expr {
-        HirExpr::Var(name) => {
+        HirExpr::Var(name) | HirExpr::AddressOfGlobal(name) => {
             *uses.entry(name.clone()).or_default() += 1;
         }
         HirExpr::Const(_, _) => {}
@@ -607,7 +607,7 @@ fn remove_dead_flags_in_nested(
 /// or a simple arithmetic expression with no observable side effects.
 fn expr_has_flag_side_effects(expr: &HirExpr) -> bool {
     match expr {
-        HirExpr::Var(_) | HirExpr::Const(_, _) => false,
+        HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) | HirExpr::Const(_, _) => false,
         HirExpr::Cast { expr: inner, .. } | HirExpr::Unary { expr: inner, .. } => {
             expr_has_flag_side_effects(inner)
         }

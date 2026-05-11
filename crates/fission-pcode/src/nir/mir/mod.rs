@@ -380,7 +380,9 @@ impl MirProjector {
 
     fn project_expr(&mut self, expr: &HirExpr) -> MirValueId {
         match expr {
-            HirExpr::Var(name) => self.push_value(MirValueKind::Binding(name.clone())),
+            HirExpr::Var(name) | HirExpr::AddressOfGlobal(name) => {
+                self.push_value(MirValueKind::Binding(name.clone()))
+            }
             HirExpr::Const(..) => self.push_value(MirValueKind::Const),
             HirExpr::Cast { expr, .. } | HirExpr::Unary { expr, .. } => {
                 self.project_expr(expr);
