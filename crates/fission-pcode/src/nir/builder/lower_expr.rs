@@ -11,7 +11,10 @@ enum CallTargetConstReject {
 }
 
 impl<'a> PreviewBuilder<'a> {
-    fn stack_pointer_register_name(&self, vn: &Varnode) -> Option<&'static str> {
+    pub(in crate::nir::builder) fn stack_pointer_register_name(
+        &self,
+        vn: &Varnode,
+    ) -> Option<&'static str> {
         match vn.space_id {
             UNIQUE_SPACE_ID => unique_register_name(vn.offset, vn.size),
             space_id if is_register_space_id(space_id) => {
@@ -905,10 +908,13 @@ impl<'a> PreviewBuilder<'a> {
                 return Ok(HirExpr::Var(name.to_string()));
             }
             if is_register_space_id(vn.space_id) {
-                let name =
+                let name = if self.suppress_entry_register_params {
+                    register_name(vn.offset, vn.size)
+                } else {
                     register_name_with_param(vn.offset, vn.size, self.options.calling_convention)
                         .map(|(name, _)| name)
-                        .unwrap_or_else(|| register_name(vn.offset, vn.size));
+                        .unwrap_or_else(|| register_name(vn.offset, vn.size))
+                };
                 return Ok(HirExpr::Var(name.to_string()));
             }
         }

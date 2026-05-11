@@ -285,6 +285,10 @@ impl<'a> PreviewBuilder<'a> {
         let Some(output) = &op.output else {
             return Ok(None);
         };
+        if self.output_used_only_as_stack_return_target(block, op_idx, terminator_index, op, output)
+        {
+            return Ok(None);
+        }
         if self.output_used_only_by_single_store(block, op_idx, output) {
             return Ok(None);
         }
@@ -436,6 +440,37 @@ impl<'a> PreviewBuilder<'a> {
         };
         let lhs = HirLValue::Var(lhs_name);
         Ok(Some(HirStmt::Assign { lhs, rhs }))
+    }
+
+    fn output_used_only_as_stack_return_target(
+        &self,
+        block: &crate::pcode::PcodeBasicBlock,
+        op_idx: usize,
+        terminator_index: Option<usize>,
+        op: &PcodeOp,
+        output: &Varnode,
+    ) -> bool {
+        if op.opcode != PcodeOpcode::Load || op.inputs.len() < 2 {
+            return false;
+        }
+        if !self
+            .stack_pointer_register_name(&op.inputs[1])
+            .is_some_and(|name| matches!(name, "rsp" | "esp" | "sp"))
+        {
+            return false;
+        }
+        let Some(term_idx) = terminator_index else {
+            return false;
+        };
+        let Some(term) = block.ops.get(term_idx) else {
+            return false;
+        };
+        term.opcode == PcodeOpcode::Return
+            && term.inputs.last().is_some_and(|input| input == output)
+            && self
+                .output_use_sites_in_block(block, op_idx, output)
+                .into_iter()
+                .all(|(use_idx, _)| use_idx == term_idx)
     }
 
     fn is_predicate_passthrough_to_terminator(op: &PcodeOp) -> bool {

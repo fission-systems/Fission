@@ -176,10 +176,7 @@ impl<'a> PreviewBuilder<'a> {
         .map(Some)
     }
 
-    fn block_has_primary_return_def_before_terminator(
-        &self,
-        idx: usize,
-    ) -> bool {
+    fn block_has_primary_return_def_before_terminator(&self, idx: usize) -> bool {
         let pcode_idx = self.pcode_block_idx(idx);
         let Some(block) = self.pcode.blocks.get(pcode_idx) else {
             return false;
@@ -247,11 +244,11 @@ impl<'a> PreviewBuilder<'a> {
     }
 
     fn return_join_has_primary_return_evidence(&self, return_idx: usize) -> bool {
-        self.predecessors
-            .get(return_idx)
-            .is_some_and(|preds| preds.iter().any(|pred| {
+        self.predecessors.get(return_idx).is_some_and(|preds| {
+            preds.iter().any(|pred| {
                 *pred != return_idx && self.block_has_primary_return_def_before_terminator(*pred)
-            }))
+            })
+        })
     }
 
     pub(in crate::nir) fn lower_return_join_expr_for_predecessor(
@@ -297,12 +294,10 @@ impl<'a> PreviewBuilder<'a> {
         {
             return Ok(Some(expr));
         }
-        let Some(ret_vn) = primary_return_registers(
-            self.options.pointer_size,
-            self.options.calling_convention,
-        )
-        .into_iter()
-        .next()
+        let Some(ret_vn) =
+            primary_return_registers(self.options.pointer_size, self.options.calling_convention)
+                .into_iter()
+                .next()
         else {
             return Ok(None);
         };
@@ -439,6 +434,14 @@ impl<'a> PreviewBuilder<'a> {
         {
             return Ok(Some(expr));
         }
+        if self.options.is_64bit
+            && let Some(input) = block.ops[term_idx].inputs.last()
+            && !self.return_input_is_stack_target(input)
+        {
+            return self
+                .lower_wrapped_varnode(input, &mut HashSet::new())
+                .map(Some);
+        }
         if self.options.is_64bit && self.unsupported_indirect_control_count == 0 {
             return Ok(None);
         }
@@ -448,6 +451,17 @@ impl<'a> PreviewBuilder<'a> {
             .last()
             .map(|input| self.lower_wrapped_varnode(input, &mut HashSet::new()))
             .transpose()
+    }
+
+    fn return_input_is_stack_target(&self, input: &Varnode) -> bool {
+        let Some((_, op)) = self.lookup_def_site(input) else {
+            return false;
+        };
+        if op.opcode != PcodeOpcode::Load || op.inputs.len() < 2 {
+            return false;
+        }
+        self.stack_pointer_register_name(&op.inputs[1])
+            .is_some_and(|name| matches!(name, "rsp" | "esp" | "sp"))
     }
 
     pub(in crate::nir) fn try_lower_intra_instruction_conditional_return(

@@ -273,6 +273,7 @@ impl<'a> PreviewBuilder<'a> {
             body,
             calling_convention: self.options.calling_convention,
             is_64bit: self.options.is_64bit,
+            suppress_entry_register_params: self.suppress_entry_register_params,
             callee_observed_max_arity: IndexMap::new(),
             callee_summaries: IndexMap::new(),
         })

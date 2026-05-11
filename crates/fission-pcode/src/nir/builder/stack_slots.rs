@@ -10,12 +10,10 @@ impl<'a> PreviewBuilder<'a> {
             return None;
         }
         if self.suppress_entry_register_params {
-            if vn.space_id != REGISTER_SPACE_ID {
+            if !is_register_space_id(vn.space_id) {
                 return None;
             }
-            let (name, _) =
-                register_name_with_param(vn.offset, vn.size, self.options.calling_convention)?;
-            return Some(name.to_string());
+            return Some(register_name(vn.offset, vn.size).to_string());
         }
         let abi = self.abi_state();
         if is_register_varnode(vn)

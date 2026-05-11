@@ -873,6 +873,7 @@ mod tests {
             body,
             calling_convention: Default::default(),
             is_64bit: true,
+            suppress_entry_register_params: false,
             callee_observed_max_arity: Default::default(),
             callee_summaries: Default::default(),
         }

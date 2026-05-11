@@ -223,7 +223,7 @@ fn preview_x64_ret_stack_target_is_not_return_value() {
 
     let code = render_mlil_preview(&func, "x64_void_ret", 0x140002000, &preview_options())
         .expect("preview render");
-    assert!(code.contains("void x64_void_ret()"), "{code}");
+    assert!(code.contains("void x64_void_ret(void)"), "{code}");
     assert!(code.contains("return;"), "{code}");
     assert!(!code.contains("return *"), "{code}");
     assert!(!code.contains("var_"), "{code}");
@@ -1127,7 +1127,7 @@ fn preview_suppresses_entrypoint_register_alias_params() {
         None,
     )
     .expect("preview render");
-    assert!(code.contains("entrypoint()"), "{code}");
+    assert!(code.contains("entrypoint(void)"), "{code}");
     assert!(!code.contains("param_1"), "{code}");
 }
 

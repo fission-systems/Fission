@@ -641,6 +641,8 @@ pub struct HirFunction {
     pub calling_convention: CallingConvention,
     /// When false, x64-only normalize passes (entry param promotion, etc.) are skipped.
     pub is_64bit: bool,
+    /// When true, entry-register reads should stay as hardware registers rather than ABI params.
+    pub suppress_entry_register_params: bool,
     /// Per-callee symbol: maximum argument count observed at direct call sites in this function.
     /// Downstream pipelines may merge this across functions for interprocedural arity bounds.
     /// [`IndexMap`] preserves insertion order for deterministic iteration / dumps.
@@ -660,6 +662,7 @@ impl Default for HirFunction {
             body: Vec::new(),
             calling_convention: CallingConvention::default(),
             is_64bit: true,
+            suppress_entry_register_params: false,
             callee_observed_max_arity: IndexMap::new(),
             callee_summaries: IndexMap::new(),
         }

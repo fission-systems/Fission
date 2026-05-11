@@ -320,7 +320,7 @@ fn remove_redundant_param_hw_copies(body: &mut Vec<HirStmt>, abi: CallingConvent
 }
 
 pub(crate) fn apply_entry_param_promotion_pass(func: &mut HirFunction) -> bool {
-    if !func.is_64bit {
+    if !func.is_64bit || func.suppress_entry_register_params {
         return false;
     }
     let abi = func.calling_convention;

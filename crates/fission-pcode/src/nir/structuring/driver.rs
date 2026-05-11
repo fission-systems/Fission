@@ -922,14 +922,14 @@ pub(crate) fn discover_guarded_tail_candidates_for_stats(body: &[HirStmt]) -> Pr
 #[cfg(test)]
 mod tests {
     use super::{
-        apply_mir_blockgraph_admission_gate, decide_structuring_admission, PreviewBuilder,
-        StructuringAdmissionInput, StructuringAdmissionReason,
+        PreviewBuilder, StructuringAdmissionInput, StructuringAdmissionReason,
+        apply_mir_blockgraph_admission_gate, decide_structuring_admission,
     };
+    use crate::PcodeFunction;
     use crate::nir::types::{
         HirExpr, HirStmt, HirSwitchCase, MlilPreviewOptions, NirType, StructuringEngineKind,
     };
     use crate::nir::{CollapseCandidate, CollapseRule, RegionKind, RegionProof, StructureNode};
-    use crate::PcodeFunction;
 
     fn const_expr(value: i64) -> HirExpr {
         HirExpr::Const(
