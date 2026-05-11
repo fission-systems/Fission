@@ -152,7 +152,7 @@ mod tests {
     use std::path::Path;
 
     #[test]
-    fn retries_strict_indirect_stop_when_jump_table_data_fails_decode() {
+    fn decomp_lift_does_not_fallthrough_into_jump_table_data() {
         if !discovery::ghidra_packaged_sla_available() {
             eprintln!("skip: packaged Ghidra .sla not available for ARM strict retry check");
             return;
@@ -168,11 +168,63 @@ mod tests {
         let binary = LoadedBinary::from_file(fixture).expect("load ARM4_be control_flow fixture");
         let (pcode, diag) =
             decode_rust_sleigh_pcode(&binary, "run_control_flow", 0x100150, 616, 512, true, true)
-                .expect("strict indirect retry should avoid decoding inline jump-table data");
+                .expect("indirect branch should not fall through into inline jump-table data");
 
-        assert_eq!(diag.attempts, 2);
-        assert_eq!(diag.stop_reason, "success_after_strict_indirect_retry");
+        assert_eq!(diag.attempts, 1);
+        assert_eq!(diag.stop_reason, "success_first_lift");
         assert!(!pcode.blocks.is_empty());
+        assert!(
+            !pcode
+                .blocks
+                .iter()
+                .any(|block| (0x1002a8..0x1002c8).contains(&block.start_address)),
+            "{:?}",
+            pcode
+                .blocks
+                .iter()
+                .map(|block| block.start_address)
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn conditional_return_keeps_fallthrough_without_decoding_jump_table_data() {
+        if !discovery::ghidra_packaged_sla_available() {
+            eprintln!("skip: packaged Ghidra .sla not available for ARM conditional return check");
+            return;
+        }
+
+        let fixture =
+            Path::new("../../benchmark/binary/ARM5_be/baremetal/small/binary/c/control_flow.o");
+        if !fixture.exists() {
+            eprintln!("skip: benchmark fixture not found: {}", fixture.display());
+            return;
+        }
+
+        let binary = LoadedBinary::from_file(fixture).expect("load ARM5_be control_flow fixture");
+        let (pcode, diag) =
+            decode_rust_sleigh_pcode(&binary, "test_switch", 0x100000, 92, 512, true, true)
+                .expect("conditional bx return should not end the function early");
+
+        assert_eq!(diag.attempts, 1);
+        assert!(
+            pcode
+                .blocks
+                .iter()
+                .any(|block| block.start_address == 0x10001c)
+        );
+        assert!(
+            !pcode
+                .blocks
+                .iter()
+                .any(|block| (0x100024..0x100034).contains(&block.start_address)),
+            "{:?}",
+            pcode
+                .blocks
+                .iter()
+                .map(|block| block.start_address)
+                .collect::<Vec<_>>()
+        );
     }
 }
 

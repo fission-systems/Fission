@@ -29,6 +29,51 @@ fn direct_pcode_branch_target(op: &PcodeOp) -> Option<u64> {
     }
 }
 
+fn relative_pcode_target_seq(op: &PcodeOp, vn: &Varnode) -> Option<u32> {
+    if vn.space_id != 0 || !vn.is_constant {
+        return None;
+    }
+    let raw = if vn.offset != 0 {
+        vn.offset as u32
+    } else {
+        vn.constant_val as u32
+    };
+    let delta = i32::from_le_bytes(raw.to_le_bytes());
+    if delta == 0 {
+        return None;
+    }
+    if delta > 0 {
+        op.seq_num.checked_add(delta as u32)
+    } else {
+        op.seq_num.checked_sub(delta.unsigned_abs())
+    }
+}
+
+fn instruction_cbranch_exits_to_fallthrough(ops: &[PcodeOp], fallthrough: u64) -> bool {
+    let Some(last) = ops.last() else {
+        return false;
+    };
+    if !matches!(last.opcode, PcodeOpcode::Return | PcodeOpcode::BranchInd) {
+        return false;
+    }
+    ops.iter()
+        .take(ops.len().saturating_sub(1))
+        .filter(|op| op.opcode == PcodeOpcode::CBranch)
+        .any(|op| {
+            if direct_pcode_branch_target(op) == Some(fallthrough) {
+                return true;
+            }
+            let Some(target) = op.inputs.first() else {
+                return false;
+            };
+            let Some(target_seq) = relative_pcode_target_seq(op, target) else {
+                return false;
+            };
+            !ops.iter()
+                .any(|candidate| candidate.address == op.address && candidate.seq_num == target_seq)
+        })
+}
+
 fn enqueue_internal_target(
     queue: &mut VecDeque<u64>,
     entry_address: u64,
@@ -38,6 +83,70 @@ fn enqueue_internal_target(
     if internal_byte_offset(entry_address, bytes_len, target).is_some() && !queue.contains(&target)
     {
         queue.push_back(target);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn var(offset: u64, size: u32) -> Varnode {
+        Varnode {
+            space_id: 1,
+            offset,
+            size,
+            is_constant: false,
+            constant_val: 0,
+        }
+    }
+
+    fn op(
+        seq_num: u32,
+        address: u64,
+        opcode: PcodeOpcode,
+        output: Option<Varnode>,
+        inputs: Vec<Varnode>,
+    ) -> PcodeOp {
+        PcodeOp {
+            seq_num,
+            opcode,
+            address,
+            output,
+            inputs,
+            asm_mnemonic: None,
+        }
+    }
+
+    #[test]
+    fn conditional_terminal_instruction_preserves_instruction_fallthrough() {
+        let ops = vec![
+            op(
+                0,
+                0x1000,
+                PcodeOpcode::CBranch,
+                None,
+                vec![Varnode::constant(2, 8), var(0x20, 1)],
+            ),
+            op(1, 0x1000, PcodeOpcode::Return, None, vec![var(0x10, 4)]),
+        ];
+
+        assert!(instruction_cbranch_exits_to_fallthrough(&ops, 0x1004));
+    }
+
+    #[test]
+    fn conditional_terminal_instruction_keeps_internal_branch_local() {
+        let ops = vec![
+            op(
+                0,
+                0x1000,
+                PcodeOpcode::CBranch,
+                None,
+                vec![Varnode::constant(1, 8), var(0x20, 1)],
+            ),
+            op(1, 0x1000, PcodeOpcode::Return, None, vec![var(0x10, 4)]),
+        ];
+
+        assert!(!instruction_cbranch_exits_to_fallthrough(&ops, 0x1004));
     }
 }
 
@@ -123,6 +232,9 @@ impl RuntimeSleighFrontend {
             let direct_target = ins_ops.last().and_then(direct_pcode_branch_target);
             let fallthrough = checked_instruction_fallthrough(current, decoded_len)?;
 
+            let cbranch_exits_to_fallthrough =
+                instruction_cbranch_exits_to_fallthrough(&ins_ops, fallthrough);
+
             match last_opcode {
                 Some(PcodeOpcode::Branch) => {
                     if let Some(target) = direct_target {
@@ -136,10 +248,30 @@ impl RuntimeSleighFrontend {
                     enqueue_internal_target(&mut queue, entry_address, bytes.len(), fallthrough);
                 }
                 Some(PcodeOpcode::Return) => {
-                    stop_reason = DecodeStopReason::TerminalControlFlow;
+                    if cbranch_exits_to_fallthrough {
+                        enqueue_internal_target(
+                            &mut queue,
+                            entry_address,
+                            bytes.len(),
+                            fallthrough,
+                        );
+                    } else {
+                        stop_reason = DecodeStopReason::TerminalControlFlow;
+                    }
                 }
-                Some(PcodeOpcode::BranchInd) if contract.stop_at_indirect_branch => {
-                    stop_reason = DecodeStopReason::TerminalControlFlow;
+                Some(PcodeOpcode::BranchInd) => {
+                    if contract.stop_at_indirect_branch {
+                        if cbranch_exits_to_fallthrough {
+                            enqueue_internal_target(
+                                &mut queue,
+                                entry_address,
+                                bytes.len(),
+                                fallthrough,
+                            );
+                        } else {
+                            stop_reason = DecodeStopReason::TerminalControlFlow;
+                        }
+                    }
                 }
                 _ if !terminal => {
                     enqueue_internal_target(&mut queue, entry_address, bytes.len(), fallthrough);
