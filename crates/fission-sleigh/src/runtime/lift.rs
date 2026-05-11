@@ -1,5 +1,5 @@
 use super::*;
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::{BTreeMap, HashMap, VecDeque};
 
 fn internal_byte_offset(entry_address: u64, bytes_len: usize, address: u64) -> Option<usize> {
     let rel = address.checked_sub(entry_address)?;
@@ -84,6 +84,287 @@ fn enqueue_internal_target(
     {
         queue.push_back(target);
     }
+}
+
+fn const_value(vn: &Varnode) -> Option<u64> {
+    if !vn.is_constant {
+        return None;
+    }
+    if vn.offset != 0 {
+        return Some(vn.offset);
+    }
+    (vn.constant_val >= 0).then_some(vn.constant_val as u64)
+}
+
+fn clears_only_low_pointer_bit(vn: &Varnode) -> bool {
+    let width_bits = vn.size.saturating_mul(8).min(64);
+    let width_mask = if width_bits == 64 {
+        u64::MAX
+    } else {
+        (1u64 << width_bits) - 1
+    };
+    const_value(vn).is_some_and(|value| (value & width_mask) | 1 == width_mask)
+        || (vn.is_constant && vn.constant_val == -2)
+}
+
+fn collect_defs<'a>(
+    decoded: &'a BTreeMap<u64, Vec<PcodeOp>>,
+    current: &'a [PcodeOp],
+) -> HashMap<Varnode, &'a PcodeOp> {
+    let mut defs = HashMap::new();
+    for op in decoded
+        .values()
+        .flat_map(|ops| ops.iter())
+        .chain(current.iter())
+    {
+        if let Some(output) = &op.output {
+            defs.insert(output.clone(), op);
+        }
+    }
+    defs
+}
+
+fn eval_const_expr(vn: &Varnode, defs: &HashMap<Varnode, &PcodeOp>, depth: usize) -> Option<u64> {
+    if depth > 12 {
+        return None;
+    }
+    if let Some(value) = const_value(vn) {
+        return Some(value);
+    }
+    let op = defs.get(vn)?;
+    match op.opcode {
+        PcodeOpcode::Copy | PcodeOpcode::Cast | PcodeOpcode::IntZExt | PcodeOpcode::IntSExt => {
+            eval_const_expr(op.inputs.first()?, defs, depth + 1)
+        }
+        PcodeOpcode::IntAdd if op.inputs.len() == 2 => eval_const_expr(
+            &op.inputs[0],
+            defs,
+            depth + 1,
+        )?
+        .checked_add(eval_const_expr(&op.inputs[1], defs, depth + 1)?),
+        PcodeOpcode::IntSub if op.inputs.len() == 2 => eval_const_expr(
+            &op.inputs[0],
+            defs,
+            depth + 1,
+        )?
+        .checked_sub(eval_const_expr(&op.inputs[1], defs, depth + 1)?),
+        PcodeOpcode::IntLeft if op.inputs.len() == 2 => {
+            let value = eval_const_expr(&op.inputs[0], defs, depth + 1)?;
+            let shift = u32::try_from(eval_const_expr(&op.inputs[1], defs, depth + 1)?).ok()?;
+            value.checked_shl(shift)
+        }
+        PcodeOpcode::IntMult if op.inputs.len() == 2 => eval_const_expr(
+            &op.inputs[0],
+            defs,
+            depth + 1,
+        )?
+        .checked_mul(eval_const_expr(&op.inputs[1], defs, depth + 1)?),
+        PcodeOpcode::IntAnd if op.inputs.len() == 2 => {
+            eval_const_expr(&op.inputs[0], defs, depth + 1)
+                .zip(eval_const_expr(&op.inputs[1], defs, depth + 1))
+                .map(|(lhs, rhs)| lhs & rhs)
+        }
+        _ => None,
+    }
+}
+
+fn additive_const_component(
+    vn: &Varnode,
+    defs: &HashMap<Varnode, &PcodeOp>,
+    depth: usize,
+) -> Option<u64> {
+    if depth > 12 {
+        return None;
+    }
+    if let Some(value) = eval_const_expr(vn, defs, depth + 1) {
+        return Some(value);
+    }
+    let op = defs.get(vn)?;
+    match op.opcode {
+        PcodeOpcode::Copy | PcodeOpcode::Cast | PcodeOpcode::IntZExt | PcodeOpcode::IntSExt => {
+            additive_const_component(op.inputs.first()?, defs, depth + 1)
+        }
+        PcodeOpcode::IntAdd if op.inputs.len() == 2 => {
+            let lhs = additive_const_component(&op.inputs[0], defs, depth + 1);
+            let rhs = additive_const_component(&op.inputs[1], defs, depth + 1);
+            match (lhs, rhs) {
+                (Some(lhs), Some(rhs)) => lhs.checked_add(rhs),
+                (Some(value), None) | (None, Some(value)) => Some(value),
+                (None, None) => None,
+            }
+        }
+        PcodeOpcode::IntSub if op.inputs.len() == 2 => {
+            let lhs = additive_const_component(&op.inputs[0], defs, depth + 1);
+            let rhs = eval_const_expr(&op.inputs[1], defs, depth + 1);
+            match (lhs, rhs) {
+                (Some(lhs), Some(rhs)) => lhs.checked_sub(rhs),
+                (Some(value), None) => Some(value),
+                _ => None,
+            }
+        }
+        _ => None,
+    }
+}
+
+fn branchind_load_table_base(
+    vn: &Varnode,
+    defs: &HashMap<Varnode, &PcodeOp>,
+    depth: usize,
+) -> Option<(u64, usize)> {
+    if depth > 12 {
+        return None;
+    }
+    let op = defs.get(vn)?;
+    match op.opcode {
+        PcodeOpcode::Copy | PcodeOpcode::Cast | PcodeOpcode::IntZExt | PcodeOpcode::IntSExt => {
+            branchind_load_table_base(op.inputs.first()?, defs, depth + 1)
+        }
+        PcodeOpcode::IntAnd if op.inputs.len() == 2 => {
+            if clears_only_low_pointer_bit(&op.inputs[0]) {
+                return branchind_load_table_base(&op.inputs[1], defs, depth + 1);
+            }
+            if clears_only_low_pointer_bit(&op.inputs[1]) {
+                return branchind_load_table_base(&op.inputs[0], defs, depth + 1);
+            }
+            None
+        }
+        PcodeOpcode::Load if op.inputs.len() == 2 => {
+            let table_base = additive_const_component(&op.inputs[1], defs, depth + 1)?;
+            let width = op.output.as_ref().map_or(vn.size, |out| out.size);
+            Some((table_base, width.clamp(4, 8) as usize))
+        }
+        _ => None,
+    }
+}
+
+fn read_unsigned_entry(bytes: &[u8], little_endian: bool) -> Option<u64> {
+    match bytes.len() {
+        4 => {
+            let raw = [bytes[0], bytes[1], bytes[2], bytes[3]];
+            Some(if little_endian {
+                u32::from_le_bytes(raw) as u64
+            } else {
+                u32::from_be_bytes(raw) as u64
+            })
+        }
+        8 => {
+            let raw = [
+                bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
+            ];
+            Some(if little_endian {
+                u64::from_le_bytes(raw)
+            } else {
+                u64::from_be_bytes(raw)
+            })
+        }
+        _ => None,
+    }
+}
+
+fn read_signed_entry(bytes: &[u8], little_endian: bool) -> Option<i128> {
+    match bytes.len() {
+        4 => {
+            let raw = [bytes[0], bytes[1], bytes[2], bytes[3]];
+            Some(i128::from(if little_endian {
+                i32::from_le_bytes(raw)
+            } else {
+                i32::from_be_bytes(raw)
+            }))
+        }
+        8 => {
+            let raw = [
+                bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
+            ];
+            Some(i128::from(if little_endian {
+                i64::from_le_bytes(raw)
+            } else {
+                i64::from_be_bytes(raw)
+            }))
+        }
+        _ => None,
+    }
+}
+
+fn add_signed_base(base: u64, displacement: i128) -> Option<u64> {
+    let target = i128::from(base) + displacement;
+    (0..=i128::from(u64::MAX))
+        .contains(&target)
+        .then_some(target as u64)
+}
+
+fn infer_branchind_jump_table_targets(
+    branch_target: &Varnode,
+    decoded: &BTreeMap<u64, Vec<PcodeOp>>,
+    current_ops: &[PcodeOp],
+    entry_address: u64,
+    bytes: &[u8],
+    memory_context: &DecodeMemoryContext,
+    little_endian: bool,
+) -> Vec<u64> {
+    const MAX_JUMP_TABLE_CASES: u64 = 256;
+
+    let defs = collect_defs(decoded, current_ops);
+    let Some((table_base, entry_width)) = branchind_load_table_base(branch_target, &defs, 0) else {
+        return Vec::new();
+    };
+    if entry_width != 4 && entry_width != 8 {
+        return Vec::new();
+    }
+    if internal_byte_offset(entry_address, bytes.len(), table_base).is_none() {
+        return Vec::new();
+    }
+
+    let mut mode_targets = Vec::<Vec<u64>>::new();
+    let mut mode_bases = vec![None, Some(table_base)];
+    for base in &memory_context.relative_address_bases {
+        if !mode_bases.contains(&Some(*base)) {
+            mode_bases.push(Some(*base));
+        }
+    }
+
+    for base in mode_bases {
+        let mut targets = Vec::new();
+        for ordinal in 0..MAX_JUMP_TABLE_CASES {
+            let Some(entry_addr) =
+                table_base.checked_add(ordinal.saturating_mul(entry_width as u64))
+            else {
+                break;
+            };
+            let Some(offset) = internal_byte_offset(entry_address, bytes.len(), entry_addr) else {
+                break;
+            };
+            let end = offset.saturating_add(entry_width);
+            if end > bytes.len() {
+                break;
+            }
+            let raw = &bytes[offset..end];
+            let target = if let Some(base) = base {
+                read_signed_entry(raw, little_endian).and_then(|disp| add_signed_base(base, disp))
+            } else {
+                read_unsigned_entry(raw, little_endian)
+            };
+            let Some(target) = target else {
+                break;
+            };
+            if internal_byte_offset(entry_address, bytes.len(), target).is_none() {
+                break;
+            }
+            if (table_base..entry_addr + entry_width as u64).contains(&target) {
+                break;
+            }
+            if !targets.contains(&target) {
+                targets.push(target);
+            }
+        }
+        if targets.len() >= 2 {
+            mode_targets.push(targets);
+        }
+    }
+
+    mode_targets
+        .into_iter()
+        .max_by_key(|targets| targets.len())
+        .unwrap_or_default()
 }
 
 #[cfg(test)]
@@ -184,6 +465,21 @@ impl RuntimeSleighFrontend {
         entry_address: u64,
         contract: DecodeContract,
     ) -> Result<DecodedPcodeFunction> {
+        self.lift_raw_pcode_function_with_decode_contract_and_memory_context(
+            bytes,
+            entry_address,
+            contract,
+            &DecodeMemoryContext::default(),
+        )
+    }
+
+    pub fn lift_raw_pcode_function_with_decode_contract_and_memory_context(
+        &self,
+        bytes: &[u8],
+        entry_address: u64,
+        contract: DecodeContract,
+        memory_context: &DecodeMemoryContext,
+    ) -> Result<DecodedPcodeFunction> {
         if bytes.is_empty() {
             bail!("No function bytes available at 0x{:x}", entry_address);
         }
@@ -234,6 +530,12 @@ impl RuntimeSleighFrontend {
 
             let cbranch_exits_to_fallthrough =
                 instruction_cbranch_exits_to_fallthrough(&ins_ops, fallthrough);
+            let little_endian = !matches!(
+                registry::runtime_variant_for_entry(&self.entry)
+                    .ok()
+                    .map(|variant| variant.endian),
+                Some(RuntimeEndian::Big)
+            );
 
             match last_opcode {
                 Some(PcodeOpcode::Branch) => {
@@ -270,6 +572,20 @@ impl RuntimeSleighFrontend {
                             );
                         } else {
                             stop_reason = DecodeStopReason::TerminalControlFlow;
+                        }
+                    } else if let Some(branch_target) =
+                        ins_ops.last().and_then(|op| op.inputs.first())
+                    {
+                        for target in infer_branchind_jump_table_targets(
+                            branch_target,
+                            &decoded,
+                            &ins_ops,
+                            entry_address,
+                            bytes,
+                            memory_context,
+                            little_endian,
+                        ) {
+                            enqueue_internal_target(&mut queue, entry_address, bytes.len(), target);
                         }
                     }
                 }

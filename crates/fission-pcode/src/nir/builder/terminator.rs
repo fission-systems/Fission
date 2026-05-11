@@ -2142,17 +2142,20 @@ impl<'a> PreviewBuilder<'a> {
                 self.recover_selector_expr_from_predecessors(idx, alias, &mut selector_visiting)
             })
             .unwrap_or_else(|| selector.discriminant.clone());
-        let max_selector = self
-            .infer_branchind_selector_upper_bound(idx, &normalized_selector, selector.min_val)
-            .or_else(|| {
-                selector_alias.and_then(|alias| {
-                    self.infer_branchind_selector_upper_bound_from_alias_family(
-                        idx,
-                        alias,
-                        selector.min_val,
-                    )
-                })
-            })?;
+        let direct_bound =
+            self.infer_branchind_selector_upper_bound(idx, &normalized_selector, selector.min_val);
+        let alias_family_bound = selector_alias.and_then(|alias| {
+            self.infer_branchind_selector_upper_bound_from_alias_family(
+                idx,
+                alias,
+                selector.min_val,
+            )
+        });
+        let max_selector = match (direct_bound, alias_family_bound) {
+            (Some(direct), Some(alias_family)) => direct.max(alias_family),
+            (Some(bound), None) | (None, Some(bound)) => bound,
+            (None, None) => return None,
+        };
         if preview_builder_diag_enabled() {
             eprintln!(
                 "[DIAG] branchind_switch_bound block=0x{:x} normalized_selector={} max_selector={} min={}",
@@ -2162,8 +2165,8 @@ impl<'a> PreviewBuilder<'a> {
                 selector.min_val
             );
         }
-        let case_count = max_selector.saturating_add(1).min(MAX_JUMP_TABLE_CASES);
-        if case_count < 2 || selector.entry_size == 0 {
+        let proven_case_count = max_selector.saturating_add(1).min(MAX_JUMP_TABLE_CASES);
+        if proven_case_count < 2 || selector.entry_size == 0 {
             return None;
         }
 
@@ -2182,19 +2185,25 @@ impl<'a> PreviewBuilder<'a> {
         for (decode_mode, relative_entries, relative_base) in decode_modes {
             let mut recovered_cases = Vec::new();
             let mut unique_targets = Vec::new();
-            for ordinal in 0..case_count {
+            for ordinal in 0..MAX_JUMP_TABLE_CASES {
                 let Some(entry_addr) = selector
                     .table_base
                     .checked_add(ordinal.saturating_mul(selector.entry_size))
                 else {
                     break;
                 };
+                if ordinal >= proven_case_count && self.address_to_index.contains_key(&entry_addr) {
+                    break;
+                }
                 let Some(raw) = binary.get_bytes(entry_addr, entry_width) else {
                     break;
                 };
                 let Some(target_addr) =
                     decode_jump_table_target(&raw, little_endian, relative_entries, relative_base)
                 else {
+                    if ordinal >= proven_case_count {
+                        break;
+                    }
                     continue;
                 };
                 let Some(target_idx) = canonical_block_index_for_address(
@@ -2202,6 +2211,9 @@ impl<'a> PreviewBuilder<'a> {
                     &self.address_to_index,
                     target_addr,
                 ) else {
+                    if ordinal >= proven_case_count {
+                        break;
+                    }
                     continue;
                 };
                 let target = self.block_target_key(target_idx);
@@ -2213,10 +2225,11 @@ impl<'a> PreviewBuilder<'a> {
             if unique_targets.len() < 2 || recovered_cases.len() < 2 {
                 continue;
             }
+            let selector_cardinality = (proven_case_count as usize).max(recovered_cases.len());
             let candidate = InferredJumpTableTargets {
                 unique_targets,
                 recovered_cases,
-                selector_cardinality: case_count as usize,
+                selector_cardinality,
                 decode_mode,
             };
             let replace = best.as_ref().is_none_or(|current| {
@@ -3083,12 +3096,73 @@ fn extract_selector_upper_bound_from_cond(
         HirExpr::Const(value, _) if value >= 0 => Some(value as u64),
         _ => None,
     };
+    let selector_sub_const_eq_zero = |expr: &HirExpr, zero_side: &HirExpr| {
+        if const_u64(zero_side) != Some(0) {
+            return None;
+        }
+        let HirExpr::Binary {
+            op: HirBinaryOp::Sub,
+            lhs,
+            rhs,
+            ..
+        } = strip_casts(expr)
+        else {
+            return None;
+        };
+        selector_match(&lhs).then(|| const_u64(&rhs)).flatten()
+    };
+
+    match op {
+        HirBinaryOp::LogicalAnd | HirBinaryOp::And => {
+            let lhs_bound = extract_selector_upper_bound_from_cond(&lhs, selector, current_on_true);
+            let rhs_bound = extract_selector_upper_bound_from_cond(&rhs, selector, current_on_true);
+            return if current_on_true {
+                match (lhs_bound, rhs_bound) {
+                    (Some(lhs), Some(rhs)) => Some(lhs.min(rhs)),
+                    (Some(bound), None) | (None, Some(bound)) => Some(bound),
+                    (None, None) => None,
+                }
+            } else {
+                match (lhs_bound, rhs_bound) {
+                    (Some(lhs), Some(rhs)) => Some(lhs.max(rhs)),
+                    (Some(bound), None) | (None, Some(bound)) => Some(bound),
+                    (None, None) => None,
+                }
+            };
+        }
+        HirBinaryOp::LogicalOr | HirBinaryOp::Or => {
+            let lhs_bound = extract_selector_upper_bound_from_cond(&lhs, selector, current_on_true);
+            let rhs_bound = extract_selector_upper_bound_from_cond(&rhs, selector, current_on_true);
+            return if current_on_true {
+                match (lhs_bound, rhs_bound) {
+                    (Some(lhs), Some(rhs)) => Some(lhs.max(rhs)),
+                    (Some(bound), None) | (None, Some(bound)) => Some(bound),
+                    (None, None) => None,
+                }
+            } else {
+                match (lhs_bound, rhs_bound) {
+                    (Some(lhs), Some(rhs)) => Some(lhs.min(rhs)),
+                    (Some(bound), None) | (None, Some(bound)) => Some(bound),
+                    (None, None) => None,
+                }
+            };
+        }
+        _ => {}
+    }
 
     match (op, selector_match(&lhs), selector_match(&rhs)) {
         (HirBinaryOp::Eq, true, false) if current_on_true => const_u64(&rhs),
         (HirBinaryOp::Eq, false, true) if current_on_true => const_u64(&lhs),
         (HirBinaryOp::Ne, true, false) if !current_on_true => const_u64(&rhs),
         (HirBinaryOp::Ne, false, true) if !current_on_true => const_u64(&lhs),
+        (HirBinaryOp::Eq, false, false) if current_on_true => {
+            selector_sub_const_eq_zero(&lhs, &rhs)
+                .or_else(|| selector_sub_const_eq_zero(&rhs, &lhs))
+        }
+        (HirBinaryOp::Ne, false, false) if !current_on_true => {
+            selector_sub_const_eq_zero(&lhs, &rhs)
+                .or_else(|| selector_sub_const_eq_zero(&rhs, &lhs))
+        }
         (HirBinaryOp::Le | HirBinaryOp::SLe, true, false) if current_on_true => const_u64(&rhs),
         (HirBinaryOp::Lt | HirBinaryOp::SLt, true, false) if current_on_true => {
             const_u64(&rhs)?.checked_sub(1)
@@ -3105,12 +3179,24 @@ fn extract_selector_upper_bound_from_cond(
 mod tests {
     use crate::nir::render_mlil_preview;
     use crate::nir::support::{CallingConvention, RUST_SLEIGH_REGISTER_SPACE_ID};
-    use crate::nir::types::{MlilPreviewOptions, StructuringEngineKind};
+    use crate::nir::types::{
+        HirBinaryOp, HirExpr, MlilPreviewOptions, NirType, StructuringEngineKind,
+    };
     use crate::pcode::{PcodeBasicBlock, PcodeFunction, PcodeOp, PcodeOpcode, Varnode};
 
     use super::{
-        InferredJumpTableTargets, branchind_decode_modes, merge_inferred_branchind_targets,
+        InferredJumpTableTargets, branchind_decode_modes, extract_selector_upper_bound_from_cond,
+        merge_inferred_branchind_targets,
     };
+
+    fn test_binary(op: HirBinaryOp, lhs: HirExpr, rhs: HirExpr, ty: NirType) -> HirExpr {
+        HirExpr::Binary {
+            op,
+            lhs: Box::new(lhs),
+            rhs: Box::new(rhs),
+            ty,
+        }
+    }
 
     #[test]
     fn branchind_decode_modes_include_image_base_relative_for_absolute_tables() {
@@ -3164,6 +3250,34 @@ mod tests {
         assert_eq!(
             recovered_case_map,
             Some(vec![(0, 0x2000), (1, 0x3000), (2, 0x4000), (3, 0x3000)])
+        );
+    }
+
+    #[test]
+    fn selector_upper_bound_keeps_false_arm_hi_equality_case() {
+        let selector = HirExpr::Var("sel".to_string());
+        let three = HirExpr::Const(3, NirType::Unknown);
+        let zero = HirExpr::Const(0, NirType::Unknown);
+        let cond = test_binary(
+            HirBinaryOp::LogicalAnd,
+            test_binary(
+                HirBinaryOp::Le,
+                three.clone(),
+                selector.clone(),
+                NirType::Bool,
+            ),
+            test_binary(
+                HirBinaryOp::Ne,
+                test_binary(HirBinaryOp::Sub, selector.clone(), three, NirType::Unknown),
+                zero,
+                NirType::Bool,
+            ),
+            NirType::Bool,
+        );
+
+        assert_eq!(
+            extract_selector_upper_bound_from_cond(&cond, &selector, false),
+            Some(3)
         );
     }
 

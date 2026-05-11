@@ -11,13 +11,13 @@ mod spine;
 use std::collections::HashMap;
 use std::fmt;
 
-use anyhow::{anyhow, bail, Result};
+use anyhow::{Result, anyhow, bail};
 use fission_core::architecture::BinaryLoadSpec;
 use fission_pcode::{PcodeBasicBlock, PcodeFunction, PcodeOp, PcodeOpcode, Varnode};
 use serde::{Deserialize, Serialize};
 
 use crate::compiler::{
-    compile_frontend_for_entry_spec, discover_all_entry_specs, CompiledFrontend, EntrySpec,
+    CompiledFrontend, EntrySpec, compile_frontend_for_entry_spec, discover_all_entry_specs,
 };
 pub use function::build_cfg_blocks;
 pub use registry::{
@@ -124,6 +124,11 @@ pub struct DecodedPcodeFunction {
     pub function: PcodeFunction,
     pub decoded_instructions: usize,
     pub stop_reason: DecodeStopReason,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct DecodeMemoryContext {
+    pub relative_address_bases: Vec<u64>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

@@ -1,6 +1,6 @@
 use crate::{PcodeFunction, Varnode};
 use fission_loader::loader::LoadedBinary;
-use fission_sleigh::runtime::{DecodeContract, RuntimeSleighFrontend};
+use fission_sleigh::runtime::{DecodeContract, DecodeMemoryContext, RuntimeSleighFrontend};
 
 #[derive(Debug, Clone)]
 pub(crate) struct DecodeDiag {
@@ -29,6 +29,25 @@ fn extract_safe_bytes_from_decode_error(err: &str, func_addr: u64) -> Option<usi
 
 pub(crate) fn pcode_op_count(pcode: &PcodeFunction) -> usize {
     pcode.blocks.iter().map(|b| b.ops.len()).sum()
+}
+
+fn decode_memory_context(binary: &LoadedBinary, entry_address: u64) -> DecodeMemoryContext {
+    let inner = binary.inner();
+    let mut relative_address_bases = Vec::new();
+    for section in &inner.sections {
+        let start = section.virtual_address;
+        let end = start.saturating_add(section.virtual_size);
+        if entry_address >= start && entry_address < end && !relative_address_bases.contains(&start)
+        {
+            relative_address_bases.push(start);
+        }
+    }
+    if inner.image_base != 0 && !relative_address_bases.contains(&inner.image_base) {
+        relative_address_bases.push(inner.image_base);
+    }
+    DecodeMemoryContext {
+        relative_address_bases,
+    }
 }
 
 pub(crate) fn decode_rust_sleigh_pcode(
@@ -75,8 +94,13 @@ pub(crate) fn decode_rust_sleigh_pcode(
     } else {
         DecodeContract::strict_function(instruction_limit)
     };
-    let result =
-        lifter.lift_raw_pcode_function_with_decode_contract(&bytes, entry_address, lift_contract);
+    let memory_context = decode_memory_context(binary, entry_address);
+    let result = lifter.lift_raw_pcode_function_with_decode_contract_and_memory_context(
+        bytes,
+        entry_address,
+        lift_contract,
+        &memory_context,
+    );
     match result {
         Ok(lifted) => Ok((
             lifted.function,
@@ -106,11 +130,14 @@ pub(crate) fn decode_rust_sleigh_pcode(
                 let err_str = format!("{first_err:#}");
                 if let Some(safe) = extract_safe_bytes_from_decode_error(&err_str, entry_address) {
                     if safe > 0 && safe < bytes.len() {
-                        if let Ok(retry) = lifter.lift_raw_pcode_function_with_decode_contract(
-                            &bytes[..safe],
-                            entry_address,
-                            lift_contract,
-                        ) {
+                        if let Ok(retry) = lifter
+                            .lift_raw_pcode_function_with_decode_contract_and_memory_context(
+                                &bytes[..safe],
+                                entry_address,
+                                lift_contract,
+                                &memory_context,
+                            )
+                        {
                             return Ok((
                                 retry.function,
                                 DecodeDiag {
@@ -213,6 +240,20 @@ mod tests {
                 .iter()
                 .any(|block| block.start_address == 0x10001c)
         );
+        for expected_case in [0x100034, 0x10003c, 0x100048, 0x100050] {
+            assert!(
+                pcode
+                    .blocks
+                    .iter()
+                    .any(|block| block.start_address == expected_case),
+                "missing decoded switch case 0x{expected_case:x}: {:?}",
+                pcode
+                    .blocks
+                    .iter()
+                    .map(|block| block.start_address)
+                    .collect::<Vec<_>>()
+            );
+        }
         assert!(
             !pcode
                 .blocks
