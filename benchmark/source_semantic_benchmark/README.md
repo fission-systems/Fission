@@ -25,6 +25,21 @@ python3 benchmark/source_semantic_benchmark/run_source_semantic_benchmark.py \
 Use `manifests/source_owned_all.json` for the full checked-in source-owned
 corpus.
 
+For AArch64 control-flow/NIR iteration without discovery expanding the corpus,
+use the focused sample manifest:
+
+```bash
+python3 benchmark/source_semantic_benchmark/run_source_semantic_benchmark.py \
+  --manifest benchmark/source_semantic_benchmark/manifests/aarch64_control_flow_small_c.json \
+  --fission-bin target/release/fission_cli \
+  --timeout-sec 45 \
+  --jobs 1 \
+  --no-decomp-cache \
+  --no-list-cache \
+  --include-debug-decomp \
+  --output-dir benchmark/artifacts/source_semantic_benchmark/aarch64-control-flow-small-c-latest
+```
+
 For faster local iteration, run independent source-function rows in parallel
 within each binary entry. The default is half of the detected CPU count; pass
 `--jobs 1` for fully serial execution.
