@@ -144,6 +144,47 @@ fn pointer_const_expr(value: i64, sample: &HirExpr) -> HirExpr {
     }
 }
 
+fn pointer_sized_uint_ty() -> NirType {
+    NirType::Int {
+        bits: 64,
+        signed: false,
+    }
+}
+
+fn cast_pointer_operand_to_uint(
+    expr: &HirExpr,
+    binding_types: &HashMap<String, NirType>,
+) -> Option<HirExpr> {
+    typed_pointer_base(expr, binding_types)?;
+    Some(HirExpr::Cast {
+        ty: pointer_sized_uint_ty(),
+        expr: Box::new(expr.clone()),
+    })
+}
+
+fn cast_pointer_operands_for_integer_arith(
+    expr: &HirExpr,
+    binding_types: &HashMap<String, NirType>,
+) -> Option<HirExpr> {
+    let HirExpr::Binary { op, lhs, rhs, ty } = expr else {
+        return None;
+    };
+    if !matches!(ty, NirType::Int { .. }) || !matches!(op, HirBinaryOp::Add | HirBinaryOp::Sub) {
+        return None;
+    }
+    let new_lhs = cast_pointer_operand_to_uint(lhs, binding_types);
+    let new_rhs = cast_pointer_operand_to_uint(rhs, binding_types);
+    if new_lhs.is_none() && new_rhs.is_none() {
+        return None;
+    }
+    Some(HirExpr::Binary {
+        op: *op,
+        lhs: Box::new(new_lhs.unwrap_or_else(|| lhs.as_ref().clone())),
+        rhs: Box::new(new_rhs.unwrap_or_else(|| rhs.as_ref().clone())),
+        ty: ty.clone(),
+    })
+}
+
 fn recover_const_offset_as_typed_pointer_add(
     ptr_expr: &HirExpr,
     ptr_ty: &NirType,
@@ -185,7 +226,7 @@ fn try_recover_ptr_arith(
     expr: &HirExpr,
     binding_types: &HashMap<String, NirType>,
 ) -> Option<HirExpr> {
-    let HirExpr::Binary { op, lhs, rhs, .. } = expr else {
+    let HirExpr::Binary { op, lhs, rhs, ty } = expr else {
         return None;
     };
 
@@ -197,6 +238,9 @@ fn try_recover_ptr_arith(
 
     let (typed_ptr_expr, ptr_ty, from_byte_cast) = typed_pointer_base(ptr_expr, binding_types)?;
     let elem_ty = pointee_ty(&ptr_ty).cloned().unwrap_or(NirType::Unknown);
+    if matches!(ty, NirType::Ptr(_)) && !from_byte_cast {
+        return None;
+    }
 
     // Pattern 1: Add(ptr, Mul(idx, Const(stride))) → pointer add when stride matches.
     if !neg {
@@ -313,6 +357,10 @@ fn recover_in_expr(expr: &mut HirExpr, binding_types: &HashMap<String, NirType>)
         *expr = new_expr;
         return true;
     }
+    if let Some(new_expr) = cast_pointer_operands_for_integer_arith(expr, binding_types) {
+        *expr = new_expr;
+        return true;
+    }
     // Recurse into children.
     let mut changed = false;
     match expr {
@@ -407,6 +455,9 @@ fn collect_pointer_assignment_types(stmts: &[HirStmt], out: &mut HashMap<String,
 
 fn record_pointer_assignment(out: &mut HashMap<String, Option<NirType>>, name: &str, ty: NirType) {
     if !matches!(ty, NirType::Ptr(_)) {
+        if let Some(slot) = out.get_mut(name) {
+            *slot = None;
+        }
         return;
     }
     match out.get_mut(name) {
@@ -559,12 +610,21 @@ fn recover_in_stmt(stmt: &mut HirStmt, binding_types: &HashMap<String, NirType>)
 ///
 /// Returns `true` if any expression was rewritten.
 pub(crate) fn apply_ptr_arith_recovery_pass(func: &mut HirFunction) -> bool {
-    let binding_types = build_binding_type_map(func);
-    if binding_types.is_empty() {
-        return false;
+    let mut changed = false;
+    for _ in 0..4 {
+        let propagated = propagate_pointer_assignment_types(func);
+        changed |= propagated;
+        let binding_types = build_binding_type_map(func);
+        if binding_types.is_empty() {
+            break;
+        }
+        let recovered = recover_in_stmts(&mut func.body, &binding_types);
+        changed |= recovered;
+        if !propagated && !recovered {
+            break;
+        }
     }
-    let changed = recover_in_stmts(&mut func.body, &binding_types);
-    propagate_pointer_assignment_types(func) || changed
+    changed
 }
 
 #[cfg(test)]
@@ -822,6 +882,105 @@ mod tests {
         assert!(changed);
         if let HirStmt::Assign { rhs, .. } = &func.body[0] {
             assert!(matches!(rhs, HirExpr::Index { .. }));
+        } else {
+            panic!("expected assign");
+        }
+    }
+
+    #[test]
+    fn casts_pointer_rhs_in_integer_subtraction() {
+        let elem_ty = NirType::Int {
+            bits: 32,
+            signed: false,
+        };
+        let p_ty = NirType::Ptr(Box::new(elem_ty));
+        let body = vec![HirStmt::Assign {
+            lhs: HirLValue::Var("diff".to_owned()),
+            rhs: HirExpr::Binary {
+                op: HirBinaryOp::Sub,
+                lhs: Box::new(HirExpr::Var("addr".to_owned())),
+                rhs: Box::new(HirExpr::Var("p".to_owned())),
+                ty: NirType::Int {
+                    bits: 64,
+                    signed: false,
+                },
+            },
+        }];
+        let mut func = make_func(
+            vec![
+                make_binding_with_ty(
+                    "addr",
+                    NirType::Int {
+                        bits: 64,
+                        signed: false,
+                    },
+                ),
+                make_binding_with_ty("p", p_ty),
+            ],
+            body,
+        );
+        let changed = super::apply_ptr_arith_recovery_pass(&mut func);
+        assert!(changed);
+        if let HirStmt::Assign { rhs, .. } = &func.body[0] {
+            assert!(matches!(
+                rhs,
+                HirExpr::Binary {
+                    op: HirBinaryOp::Sub,
+                    lhs,
+                    rhs,
+                    ty: NirType::Int { bits: 64, signed: false },
+                } if matches!(lhs.as_ref(), HirExpr::Var(name) if name == "addr")
+                    && matches!(rhs.as_ref(), HirExpr::Cast {
+                        ty: NirType::Int { bits: 64, signed: false },
+                        expr,
+                    } if matches!(expr.as_ref(), HirExpr::Var(name) if name == "p"))
+            ));
+        } else {
+            panic!("expected assign");
+        }
+    }
+
+    #[test]
+    fn casts_both_pointer_operands_in_integer_subtraction() {
+        let elem_ty = NirType::Int {
+            bits: 32,
+            signed: false,
+        };
+        let p_ty = NirType::Ptr(Box::new(elem_ty));
+        let body = vec![HirStmt::Assign {
+            lhs: HirLValue::Var("diff".to_owned()),
+            rhs: HirExpr::Binary {
+                op: HirBinaryOp::Sub,
+                lhs: Box::new(HirExpr::Var("lhs".to_owned())),
+                rhs: Box::new(HirExpr::Var("rhs".to_owned())),
+                ty: NirType::Int {
+                    bits: 64,
+                    signed: false,
+                },
+            },
+        }];
+        let mut func = make_func(
+            vec![
+                make_binding_with_ty("lhs", p_ty.clone()),
+                make_binding_with_ty("rhs", p_ty),
+            ],
+            body,
+        );
+        let changed = super::apply_ptr_arith_recovery_pass(&mut func);
+        assert!(changed);
+        if let HirStmt::Assign { rhs, .. } = &func.body[0] {
+            assert!(matches!(
+                rhs,
+                HirExpr::Binary {
+                    op: HirBinaryOp::Sub,
+                    lhs,
+                    rhs,
+                    ty: NirType::Int { bits: 64, signed: false },
+                } if matches!(lhs.as_ref(), HirExpr::Cast { expr, .. }
+                        if matches!(expr.as_ref(), HirExpr::Var(name) if name == "lhs"))
+                    && matches!(rhs.as_ref(), HirExpr::Cast { expr, .. }
+                        if matches!(expr.as_ref(), HirExpr::Var(name) if name == "rhs"))
+            ));
         } else {
             panic!("expected assign");
         }
