@@ -891,10 +891,9 @@ impl<'a> PreviewBuilder<'a> {
 
         let pcode_idx = self.pcode_block_idx(idx);
         let block = &self.pcode.blocks[pcode_idx];
-        let lowered =
-            if let Some(term_idx) = self.block_terminator_index(block) {
-                let op = &block.ops[term_idx];
-                self.with_lowering_site(
+        let lowered = if let Some(term_idx) = self.block_terminator_index(block) {
+            let op = &block.ops[term_idx];
+            self.with_lowering_site(
                 LoweringSite {
                     block_idx: pcode_idx,
                     op_idx: term_idx,
@@ -1168,7 +1167,10 @@ impl<'a> PreviewBuilder<'a> {
                             }
                             if targets.is_empty()
                                 && this.options.calling_convention == CallingConvention::Arm32
-                                && this.predecessors.get(idx).is_some_and(|preds| !preds.is_empty())
+                                && this
+                                    .predecessors
+                                    .get(idx)
+                                    .is_some_and(|preds| !preds.is_empty())
                                 && matches!(switch_expr, HirExpr::Var(_))
                             {
                                 this.record_unsupported_inventory_event(
@@ -1288,26 +1290,36 @@ impl<'a> PreviewBuilder<'a> {
                                     );
                                 let dispatcher_recovered =
                                     recovered_selector.is_some() || single_target_dispatcher;
-                                let (expr, min_val) = recovered_selector
-                                    .as_ref()
-                                    .map(|selector| {
-                                        let render_expr = selector_alias
-                                            .as_ref()
-                                            .map(|alias| {
-                                                this.recover_branchind_render_selector_expr(
-                                                    idx,
-                                                    alias,
-                                                    selector.discriminant.clone(),
-                                                    &mut visiting,
-                                                )
-                                            })
-                                            .unwrap_or_else(|| selector.discriminant.clone());
-                                        this.normalize_rendered_selector_expr(
-                                            render_expr,
-                                            selector.min_val,
-                                        )
-                                    })
-                                    .unwrap_or_else(|| (switch_expr.clone(), 0));
+                                let (expr, min_val) =
+                                    recovered_selector
+                                        .as_ref()
+                                        .map(|selector| {
+                                            let render_expr =
+                                                if Self::selector_expr_is_side_effect_free(
+                                                    &selector.discriminant,
+                                                ) {
+                                                    selector.discriminant.clone()
+                                                } else {
+                                                    selector_alias
+                                                        .as_ref()
+                                                        .map(|alias| {
+                                                            this.recover_branchind_render_selector_expr(
+                                                                idx,
+                                                                alias,
+                                                                selector.discriminant.clone(),
+                                                                &mut visiting,
+                                                            )
+                                                        })
+                                                        .unwrap_or_else(|| {
+                                                            selector.discriminant.clone()
+                                                        })
+                                                };
+                                            this.normalize_rendered_selector_expr(
+                                                render_expr,
+                                                selector.min_val,
+                                            )
+                                        })
+                                        .unwrap_or_else(|| (switch_expr.clone(), 0));
                                 let normalization = recovered_selector.as_ref().map(|selector| {
                                     this.selector_normalization_for_branchind(
                                         &expr,
@@ -1443,9 +1455,9 @@ impl<'a> PreviewBuilder<'a> {
                     }
                 },
             )?
-            } else {
-                LoweredTerminator::Fallthrough(self.next_block_address(idx))
-            };
+        } else {
+            LoweredTerminator::Fallthrough(self.next_block_address(idx))
+        };
 
         self.terminator_cache.insert(idx, lowered.clone());
         Ok(lowered)

@@ -367,6 +367,53 @@ fn infer_branchind_jump_table_targets(
         .unwrap_or_default()
 }
 
+fn attach_inferred_indirect_edges(
+    function: &mut PcodeFunction,
+    inferred_edges: &BTreeMap<u64, Vec<u64>>,
+) {
+    if inferred_edges.is_empty() {
+        return;
+    }
+
+    let block_start_to_index = function
+        .blocks
+        .iter()
+        .map(|block| (block.start_address, block.index))
+        .collect::<BTreeMap<_, _>>();
+    let source_to_block_index = function
+        .blocks
+        .iter()
+        .filter(|block| {
+            block
+                .ops
+                .last()
+                .is_some_and(|op| op.opcode == PcodeOpcode::BranchInd)
+        })
+        .flat_map(|block| block.ops.iter().map(move |op| (op.address, block.index)))
+        .collect::<BTreeMap<_, _>>();
+
+    for (source, targets) in inferred_edges {
+        let Some(source_idx) = source_to_block_index.get(source).copied() else {
+            continue;
+        };
+        let Some(block) = function
+            .blocks
+            .iter_mut()
+            .find(|block| block.index == source_idx)
+        else {
+            continue;
+        };
+        for target in targets {
+            let Some(target_idx) = block_start_to_index.get(target).copied() else {
+                continue;
+            };
+            if !block.successors.contains(&target_idx) {
+                block.successors.push(target_idx);
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -488,6 +535,7 @@ impl RuntimeSleighFrontend {
         }
 
         let mut decoded = BTreeMap::<u64, Vec<PcodeOp>>::new();
+        let mut inferred_indirect_edges = BTreeMap::<u64, Vec<u64>>::new();
         let mut queue = VecDeque::from([entry_address]);
         let mut stop_reason = DecodeStopReason::InputExhausted;
 
@@ -576,7 +624,7 @@ impl RuntimeSleighFrontend {
                     } else if let Some(branch_target) =
                         ins_ops.last().and_then(|op| op.inputs.first())
                     {
-                        for target in infer_branchind_jump_table_targets(
+                        let inferred_targets = infer_branchind_jump_table_targets(
                             branch_target,
                             &decoded,
                             &ins_ops,
@@ -584,7 +632,11 @@ impl RuntimeSleighFrontend {
                             bytes,
                             memory_context,
                             little_endian,
-                        ) {
+                        );
+                        if !inferred_targets.is_empty() {
+                            inferred_indirect_edges.insert(current, inferred_targets.clone());
+                        }
+                        for target in inferred_targets {
                             enqueue_internal_target(&mut queue, entry_address, bytes.len(), target);
                         }
                     }
@@ -615,9 +667,10 @@ impl RuntimeSleighFrontend {
             bail!("failed to decode any instruction at 0x{:x}", entry_address);
         }
 
-        let function = PcodeFunction {
+        let mut function = PcodeFunction {
             blocks: build_cfg_blocks(entry_address, ops),
         };
+        attach_inferred_indirect_edges(&mut function, &inferred_indirect_edges);
         function
             .validate()
             .map_err(|err| RuntimeSleighError::InvalidPcodeShape {

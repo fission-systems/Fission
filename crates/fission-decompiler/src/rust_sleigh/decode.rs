@@ -175,6 +175,7 @@ pub(crate) fn decode_rust_sleigh_pcode(
 mod tests {
     use super::*;
     use fission_loader::loader::LoadedBinary;
+    use fission_pcode::PcodeOpcode;
     use fission_sleigh::compiler::discovery;
     use std::path::Path;
 
@@ -254,6 +255,28 @@ mod tests {
                     .collect::<Vec<_>>()
             );
         }
+        let branchind_block = pcode
+            .blocks
+            .iter()
+            .find(|block| {
+                block
+                    .ops
+                    .last()
+                    .is_some_and(|op| op.opcode == PcodeOpcode::BranchInd)
+            })
+            .expect("decoded p-code should retain branch-indirect block");
+        let successor_starts = branchind_block
+            .successors
+            .iter()
+            .filter_map(|succ_idx| pcode.blocks.get(*succ_idx as usize))
+            .map(|block| block.start_address)
+            .collect::<std::collections::BTreeSet<_>>();
+        assert_eq!(
+            successor_starts,
+            [0x100034, 0x10003c, 0x100048, 0x100050]
+                .into_iter()
+                .collect::<std::collections::BTreeSet<_>>()
+        );
         assert!(
             !pcode
                 .blocks

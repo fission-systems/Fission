@@ -6,6 +6,10 @@ impl<'a> PreviewBuilder<'a> {
         &mut self,
         idx: usize,
     ) -> Result<Option<(HirStmt, usize)>, MlilPreviewError> {
+        if let Some(direct) = self.try_lower_direct_dispatcher_switch(idx)? {
+            return Ok(Some(direct));
+        }
+
         let Some(parsed) = self.parse_switch_chain(idx)? else {
             return Ok(None);
         };
@@ -73,6 +77,100 @@ impl<'a> PreviewBuilder<'a> {
                 default: default_body,
             },
             skip_to,
+        )))
+    }
+
+    fn try_lower_direct_dispatcher_switch(
+        &mut self,
+        idx: usize,
+    ) -> Result<Option<(HirStmt, usize)>, MlilPreviewError> {
+        let LoweredTerminator::Switch {
+            expr,
+            targets,
+            default_target,
+            min_val,
+            proof,
+        } = self.lower_block_terminator(idx)?
+        else {
+            return Ok(None);
+        };
+        let emit_ready = EmitReadyDecision::from_dispatcher_proof(proof.as_ref());
+        if !emit_ready.emit_ready {
+            self.switch_emit_ready_failed_count += 1;
+            self.region_proof_candidate_count += 1;
+            self.region_emit_ready_failed_count += 1;
+            return Ok(None);
+        }
+
+        let (case_values, used_proof_payload) =
+            recovered_switch_case_values(&targets, default_target, min_val, proof.as_ref());
+        if case_values.len() < 2 {
+            return Ok(None);
+        }
+
+        let mut seen_case_values = HashSet::new();
+        if !case_values
+            .iter()
+            .all(|(value, _)| seen_case_values.insert(*value))
+        {
+            return Ok(None);
+        }
+
+        let mut cases = Vec::new();
+        let mut max_skip = idx + 1;
+        for (value, target) in case_values {
+            if Some(target) == default_target {
+                continue;
+            }
+            let Some(case_idx) = self.find_block_index_by_address(target) else {
+                return Ok(None);
+            };
+            let case_idx = self.canonicalize_switch_target(case_idx);
+            let Some((case_body, skip_to)) =
+                self.lower_linear_body(case_idx, LinearExit::Return)?
+            else {
+                return Ok(None);
+            };
+            max_skip = max_skip.max(skip_to);
+            cases.push(HirSwitchCase {
+                values: vec![value],
+                body: case_body,
+            });
+        }
+        if cases.len() < 2 {
+            return Ok(None);
+        }
+        merge_equivalent_switch_cases(&mut cases);
+
+        let default = if let Some(default_target) = default_target {
+            let Some(default_idx) = self.find_block_index_by_address(default_target) else {
+                return Ok(None);
+            };
+            let default_idx = self.canonicalize_switch_target(default_idx);
+            let Some((default_body, skip_to)) =
+                self.lower_linear_body(default_idx, LinearExit::Return)?
+            else {
+                return Ok(None);
+            };
+            max_skip = max_skip.max(skip_to);
+            default_body
+        } else {
+            Vec::new()
+        };
+
+        if used_proof_payload {
+            self.proof_payload_direct_emit_count += 1;
+        }
+        wave_stats::add_dispatcher_proof_units(1);
+        wave_stats::add_dispatcher_proof_completed(1);
+        wave_stats::add_dispatcher_shape_recoveries(1);
+        Ok(Some((
+            HirStmt::Switch {
+                expr,
+                cases,
+                default,
+            },
+            max_skip,
         )))
     }
 
