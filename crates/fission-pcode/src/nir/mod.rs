@@ -337,7 +337,7 @@ pub fn render_mlil_preview_with_binary_and_context(
     }
     debug_log("print_start");
     let print_start = Instant::now();
-    let rendered = print_hir_function(&hir);
+    let rendered = render_hir_function_with_global_decls(&hir, options);
     record_ghidra_action_stage(&mut build_stats, GhidraActionConcept::PrintC);
     record_ghidra_clean_room_pipeline_complete(&mut build_stats);
     build_stats.render_duration_ms = print_start.elapsed().as_millis() as usize;
@@ -354,6 +354,315 @@ pub fn render_mlil_preview_with_binary_and_context(
     }
     debug_log("print_done");
     Ok(rendered)
+}
+
+fn render_hir_function_with_global_decls(
+    hir: &HirFunction,
+    options: &MlilPreviewOptions,
+) -> String {
+    let decls = collect_referenced_global_decls(hir, options);
+    if decls.is_empty() {
+        return print_hir_function(hir);
+    }
+
+    let mut rendered = String::new();
+    for (name, ty) in decls {
+        rendered.push_str(&format!("{} {};\n", print_type(&ty), name));
+    }
+    rendered.push('\n');
+    rendered.push_str(&print_hir_function(hir));
+    rendered
+}
+
+fn collect_referenced_global_decls(
+    hir: &HirFunction,
+    options: &MlilPreviewOptions,
+) -> BTreeMap<String, NirType> {
+    let global_names = options
+        .global_names
+        .values()
+        .filter(|name| is_c_identifier(name))
+        .filter(|name| {
+            name.as_str() != hir.name
+                && !hir.params.iter().any(|binding| binding.name == **name)
+                && !hir.locals.iter().any(|binding| binding.name == **name)
+        })
+        .cloned()
+        .collect::<HashSet<_>>();
+    if global_names.is_empty() {
+        return BTreeMap::new();
+    }
+
+    let binding_types = hir
+        .params
+        .iter()
+        .chain(hir.locals.iter())
+        .map(|binding| (binding.name.clone(), binding.ty.clone()))
+        .collect::<HashMap<_, _>>();
+    let mut decls = BTreeMap::new();
+    collect_global_decls_from_stmts(&hir.body, &global_names, &binding_types, &mut decls);
+    decls
+}
+
+fn collect_global_decls_from_stmts(
+    stmts: &[HirStmt],
+    global_names: &HashSet<String>,
+    binding_types: &HashMap<String, NirType>,
+    decls: &mut BTreeMap<String, NirType>,
+) {
+    for stmt in stmts {
+        match stmt {
+            HirStmt::Assign { lhs, rhs } => {
+                collect_global_decls_from_lvalue(
+                    lhs,
+                    Some(infer_global_decl_expr_type(rhs, binding_types)),
+                    global_names,
+                    binding_types,
+                    decls,
+                );
+                collect_global_decls_from_expr(rhs, global_names, binding_types, decls);
+            }
+            HirStmt::Expr(expr) | HirStmt::Return(Some(expr)) => {
+                collect_global_decls_from_expr(expr, global_names, binding_types, decls);
+            }
+            HirStmt::VaStart { va_list, .. } => {
+                collect_global_decls_from_expr(va_list, global_names, binding_types, decls);
+            }
+            HirStmt::Block(body) => {
+                collect_global_decls_from_stmts(body, global_names, binding_types, decls);
+            }
+            HirStmt::While { cond, body } => {
+                collect_global_decls_from_expr(cond, global_names, binding_types, decls);
+                collect_global_decls_from_stmts(body, global_names, binding_types, decls);
+            }
+            HirStmt::DoWhile { body, cond } => {
+                collect_global_decls_from_stmts(body, global_names, binding_types, decls);
+                collect_global_decls_from_expr(cond, global_names, binding_types, decls);
+            }
+            HirStmt::Switch {
+                expr,
+                cases,
+                default,
+            } => {
+                collect_global_decls_from_expr(expr, global_names, binding_types, decls);
+                for case in cases {
+                    collect_global_decls_from_stmts(
+                        &case.body,
+                        global_names,
+                        binding_types,
+                        decls,
+                    );
+                }
+                collect_global_decls_from_stmts(default, global_names, binding_types, decls);
+            }
+            HirStmt::If {
+                cond,
+                then_body,
+                else_body,
+            } => {
+                collect_global_decls_from_expr(cond, global_names, binding_types, decls);
+                collect_global_decls_from_stmts(then_body, global_names, binding_types, decls);
+                collect_global_decls_from_stmts(else_body, global_names, binding_types, decls);
+            }
+            HirStmt::For {
+                init, cond, update, ..
+            } => {
+                if let Some(init) = init {
+                    collect_global_decls_from_stmts(
+                        std::slice::from_ref(init.as_ref()),
+                        global_names,
+                        binding_types,
+                        decls,
+                    );
+                }
+                if let Some(cond) = cond {
+                    collect_global_decls_from_expr(cond, global_names, binding_types, decls);
+                }
+                if let Some(update) = update {
+                    collect_global_decls_from_stmts(
+                        std::slice::from_ref(update.as_ref()),
+                        global_names,
+                        binding_types,
+                        decls,
+                    );
+                }
+            }
+            HirStmt::Return(None)
+            | HirStmt::Label(_)
+            | HirStmt::Goto(_)
+            | HirStmt::Break
+            | HirStmt::Continue => {}
+        }
+    }
+}
+
+fn collect_global_decls_from_lvalue(
+    lhs: &HirLValue,
+    assigned_ty: Option<NirType>,
+    global_names: &HashSet<String>,
+    binding_types: &HashMap<String, NirType>,
+    decls: &mut BTreeMap<String, NirType>,
+) {
+    match lhs {
+        HirLValue::Var(name) if global_names.contains(name) => {
+            let ty = assigned_ty.unwrap_or(NirType::Unknown);
+            merge_global_decl_type(decls, name, ty);
+        }
+        HirLValue::Deref { ptr, .. } => {
+            collect_global_decls_from_expr(ptr, global_names, binding_types, decls)
+        }
+        HirLValue::Index { base, index, .. } => {
+            collect_global_decls_from_expr(base, global_names, binding_types, decls);
+            collect_global_decls_from_expr(index, global_names, binding_types, decls);
+        }
+        HirLValue::Var(_) => {}
+    }
+}
+
+fn collect_global_decls_from_expr(
+    expr: &HirExpr,
+    global_names: &HashSet<String>,
+    binding_types: &HashMap<String, NirType>,
+    decls: &mut BTreeMap<String, NirType>,
+) {
+    match expr {
+        HirExpr::Var(name) if global_names.contains(name) => {
+            merge_global_decl_type(decls, name, infer_global_decl_expr_type(expr, binding_types));
+        }
+        HirExpr::Cast { expr, .. }
+        | HirExpr::Unary { expr, .. }
+        | HirExpr::Load { ptr: expr, .. } => {
+            collect_global_decls_from_expr(expr, global_names, binding_types, decls);
+        }
+        HirExpr::Binary { lhs, rhs, .. }
+        | HirExpr::Index {
+            base: lhs,
+            index: rhs,
+            ..
+        } => {
+            collect_global_decls_from_expr(lhs, global_names, binding_types, decls);
+            collect_global_decls_from_expr(rhs, global_names, binding_types, decls);
+        }
+        HirExpr::Call { args, .. } => {
+            for arg in args {
+                collect_global_decls_from_expr(arg, global_names, binding_types, decls);
+            }
+        }
+        HirExpr::PtrOffset { base, .. } | HirExpr::AggregateCopy { src: base, .. } => {
+            collect_global_decls_from_expr(base, global_names, binding_types, decls);
+        }
+        HirExpr::Var(_) | HirExpr::Const(_, _) => {}
+    }
+}
+
+fn infer_global_decl_expr_type(expr: &HirExpr, binding_types: &HashMap<String, NirType>) -> NirType {
+    match expr {
+        HirExpr::Var(name) => binding_types
+            .get(name)
+            .cloned()
+            .unwrap_or_else(|| expr_type(expr)),
+        HirExpr::Cast { ty, .. }
+        | HirExpr::Unary { ty, .. }
+        | HirExpr::Binary { ty, .. }
+        | HirExpr::Call { ty, .. }
+        | HirExpr::Load { ty, .. } => ty.clone(),
+        HirExpr::Index { elem_ty, .. } => elem_ty.clone(),
+        HirExpr::Const(_, ty) => ty.clone(),
+        HirExpr::PtrOffset { .. } => expr_type(expr),
+        HirExpr::AggregateCopy { size, .. } => NirType::Aggregate {
+            size: *size,
+            fields: Vec::new(),
+        },
+    }
+}
+
+fn merge_global_decl_type(decls: &mut BTreeMap<String, NirType>, name: &str, ty: NirType) {
+    if ty == NirType::Unknown {
+        decls.entry(name.to_string()).or_insert(NirType::Unknown);
+        return;
+    }
+    match decls.get(name) {
+        Some(existing) if *existing != NirType::Unknown => {}
+        _ => {
+            decls.insert(name.to_string(), ty);
+        }
+    }
+}
+
+fn is_c_identifier(name: &str) -> bool {
+    let mut chars = name.chars();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+    (first == '_' || first.is_ascii_alphabetic())
+        && chars.all(|ch| ch == '_' || ch.is_ascii_alphanumeric())
+}
+
+#[cfg(test)]
+mod global_decl_tests {
+    use super::*;
+
+    fn preview_options_with_global(name: &str) -> MlilPreviewOptions {
+        let mut global_names = HashMap::new();
+        global_names.insert(0x2000, name.to_string());
+        MlilPreviewOptions {
+            pe_x64_only: false,
+            is_64bit: true,
+            pointer_size: 8,
+            format: "ELF64".to_string(),
+            image_base: 0,
+            sections: vec![(0x1000, 0x3000)],
+            region_linearize_structuring: false,
+            force_linear_structuring: false,
+            structuring_engine: StructuringEngineKind::GraphCollapseV1,
+            conservative_irreducible_fallback: false,
+            global_names,
+            relocation_names: HashMap::new(),
+            calling_convention: CallingConvention::AArch64,
+        }
+    }
+
+    #[test]
+    fn render_hir_declares_referenced_loader_global() {
+        let hir = HirFunction {
+            name: "store_global".to_string(),
+            params: vec![NirBinding {
+                name: "param_1".to_string(),
+                ty: NirType::Int {
+                    bits: 32,
+                    signed: false,
+                },
+                surface_type_name: None,
+                origin: Some(NirBindingOrigin::ParamIndex(0)),
+                initializer: None,
+            }],
+            return_type: NirType::Unknown,
+            body: vec![HirStmt::Assign {
+                lhs: HirLValue::Var("math_sink".to_string()),
+                rhs: HirExpr::Var("param_1".to_string()),
+            }],
+            ..HirFunction::default()
+        };
+        let rendered =
+            render_hir_function_with_global_decls(&hir, &preview_options_with_global("math_sink"));
+
+        assert!(rendered.starts_with("uint math_sink;\n\n"), "{rendered}");
+        assert!(rendered.contains("math_sink = param_1;"), "{rendered}");
+    }
+
+    #[test]
+    fn render_hir_skips_non_identifier_global_names() {
+        let hir = HirFunction {
+            name: "string_user".to_string(),
+            return_type: NirType::Unknown,
+            body: vec![HirStmt::Expr(HirExpr::Var("\"hello\"".to_string()))],
+            ..HirFunction::default()
+        };
+        let rendered =
+            render_hir_function_with_global_decls(&hir, &preview_options_with_global("\"hello\""));
+
+        assert!(!rendered.starts_with("undefined \"hello\";"), "{rendered}");
+    }
 }
 
 pub fn render_nir_with_context(
