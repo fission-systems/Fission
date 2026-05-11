@@ -403,7 +403,7 @@ impl MachoLoader {
                     let final_name = if extracted_name.is_empty() {
                         format!("sub_{:x}", nlist.n_value)
                     } else {
-                        extracted_name
+                        normalize_macho_symbol_name(&extracted_name)
                     };
 
                     out.push(FunctionInfo {
@@ -538,7 +538,7 @@ impl MachoLoader {
             let final_name = if extracted_name.is_empty() {
                 format!("sub_{:x}", nlist.n_value)
             } else {
-                extracted_name
+                normalize_macho_symbol_name(&extracted_name)
             };
             out.push(FunctionInfo {
                 name: final_name,
@@ -631,7 +631,7 @@ impl MachoLoader {
         if let Ok(nlist) = Nlist64::parse(&reader, sym_off as usize) {
             let str_off = symtab.stroff as usize + nlist.n_strx as usize;
             if str_off < data.len() {
-                return extract_cstring(data, str_off);
+                return normalize_macho_symbol_name(&extract_cstring(data, str_off));
             }
         }
         String::new()
@@ -649,10 +649,44 @@ impl MachoLoader {
         if let Ok(nlist) = Nlist32::parse(&reader, sym_off as usize) {
             let str_off = symtab.stroff as usize + nlist.n_strx as usize;
             if str_off < data.len() {
-                return extract_cstring(data, str_off);
+                return normalize_macho_symbol_name(&extract_cstring(data, str_off));
             }
         }
         String::new()
+    }
+}
+
+fn normalize_macho_symbol_name(name: &str) -> String {
+    if name.starts_with("_Z")
+        || name.starts_with("_R")
+        || name.starts_with("_$")
+        || name.starts_with("__")
+        || name.starts_with("_OBJC_")
+    {
+        return name.to_string();
+    }
+    name.strip_prefix('_').unwrap_or(name).to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::normalize_macho_symbol_name;
+
+    #[test]
+    fn normalize_macho_symbol_name_strips_plain_c_abi_underscore() {
+        assert_eq!(normalize_macho_symbol_name("_op_add"), "op_add");
+        assert_eq!(normalize_macho_symbol_name("_main"), "main");
+    }
+
+    #[test]
+    fn normalize_macho_symbol_name_preserves_mangled_and_runtime_prefixes() {
+        assert_eq!(normalize_macho_symbol_name("_Z3fooi"), "_Z3fooi");
+        assert_eq!(normalize_macho_symbol_name("_$s4main3fooyyF"), "_$s4main3fooyyF");
+        assert_eq!(
+            normalize_macho_symbol_name("_OBJC_CLASS_$_Widget"),
+            "_OBJC_CLASS_$_Widget"
+        );
+        assert_eq!(normalize_macho_symbol_name("__mh_execute_header"), "__mh_execute_header");
     }
 }
 
