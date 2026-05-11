@@ -199,11 +199,10 @@ impl<'a> PreviewBuilder<'a> {
             .enumerate()
             .take(term_idx)
             .rposition(|(idx, op)| {
-                op.opcode == PcodeOpcode::Store
-                    || (matches!(
-                        op.opcode,
-                        PcodeOpcode::Call | PcodeOpcode::CallInd | PcodeOpcode::CallOther
-                    ) && !self.call_is_return_target_artifact(block, idx))
+                matches!(
+                    op.opcode,
+                    PcodeOpcode::Call | PcodeOpcode::CallInd | PcodeOpcode::CallOther
+                ) && !self.call_is_return_target_artifact(block, idx)
             })
             .map_or(0, |idx| idx + 1);
         block
@@ -2945,6 +2944,11 @@ fn extract_selector_upper_bound_from_cond(
 
 #[cfg(test)]
 mod tests {
+    use crate::nir::render_mlil_preview;
+    use crate::nir::support::{CallingConvention, RUST_SLEIGH_REGISTER_SPACE_ID};
+    use crate::nir::types::{MlilPreviewOptions, StructuringEngineKind};
+    use crate::pcode::{PcodeBasicBlock, PcodeFunction, PcodeOp, PcodeOpcode, Varnode};
+
     use super::{
         InferredJumpTableTargets, branchind_decode_modes, merge_inferred_branchind_targets,
     };
@@ -2989,6 +2993,89 @@ mod tests {
             recovered_case_map,
             Some(vec![(0, 0x2000), (1, 0x3000), (2, 0x4000), (3, 0x3000)])
         );
+    }
+
+    #[test]
+    fn return_recovery_keeps_return_register_before_side_effect_store() {
+        let w0 = Varnode {
+            space_id: RUST_SLEIGH_REGISTER_SPACE_ID,
+            offset: 0x4000,
+            size: 4,
+            is_constant: false,
+            constant_val: 0,
+        };
+        let x8 = Varnode {
+            space_id: RUST_SLEIGH_REGISTER_SPACE_ID,
+            offset: 0x4040,
+            size: 8,
+            is_constant: false,
+            constant_val: 0,
+        };
+        let lr = Varnode {
+            space_id: RUST_SLEIGH_REGISTER_SPACE_ID,
+            offset: 0x40f0,
+            size: 8,
+            is_constant: false,
+            constant_val: 0,
+        };
+        let constant = |value, size| Varnode::constant(value, size);
+        let pcode = PcodeFunction {
+            blocks: vec![PcodeBasicBlock {
+                index: 0,
+                start_address: 0x1000,
+                successors: Vec::new(),
+                ops: vec![
+                    PcodeOp {
+                        seq_num: 0,
+                        opcode: PcodeOpcode::Copy,
+                        address: 0x1000,
+                        output: Some(w0.clone()),
+                        inputs: vec![constant(7, 4)],
+                        asm_mnemonic: None,
+                    },
+                    PcodeOp {
+                        seq_num: 1,
+                        opcode: PcodeOpcode::Store,
+                        address: 0x1004,
+                        output: None,
+                        inputs: vec![constant(0, 4), x8, w0],
+                        asm_mnemonic: None,
+                    },
+                    PcodeOp {
+                        seq_num: 2,
+                        opcode: PcodeOpcode::Return,
+                        address: 0x1008,
+                        output: None,
+                        inputs: vec![lr],
+                        asm_mnemonic: None,
+                    },
+                ],
+            }],
+        };
+        let options = MlilPreviewOptions {
+            pe_x64_only: false,
+            is_64bit: true,
+            pointer_size: 8,
+            format: "ELF64".to_string(),
+            image_base: 0,
+            sections: vec![(0x1000, 0x2000)],
+            region_linearize_structuring: false,
+            force_linear_structuring: false,
+            conservative_irreducible_fallback: false,
+            structuring_engine: StructuringEngineKind::GraphCollapseV1,
+            global_names: Default::default(),
+            relocation_names: Default::default(),
+            calling_convention: CallingConvention::AArch64,
+        };
+        let code = render_mlil_preview(&pcode, "store_then_return", 0x1000, &options)
+            .expect("preview render");
+
+        assert!(
+            code.lines()
+                .any(|line| line.contains(" = 7;") && !line.contains("return")),
+            "{code}"
+        );
+        assert!(code.contains("return 7;"), "{code}");
     }
 }
 
