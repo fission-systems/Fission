@@ -1431,7 +1431,9 @@ def candidate_harness(
     candidate_code: str, func: SourceFunction, cases: list[tuple[int, ...]] | list[dict[str, Any]]
 ) -> str:
     calls = "\n".join(render_case_call(func, case, index) for index, case in enumerate(cases))
-    globals_decl = "\n".join(render_candidate_global_decl(spec) for spec in collect_observed_globals(cases))
+    observed_globals = collect_observed_globals(cases)
+    globals_decl = "\n".join(render_candidate_global_decl(spec) for spec in observed_globals)
+    candidate_code = remove_duplicate_candidate_global_decls(candidate_code, observed_globals)
     return f"""
 #include <stdint.h>
 #include <stdbool.h>
@@ -1521,6 +1523,32 @@ def collect_observed_globals(cases: list[tuple[int, ...]] | list[dict[str, Any]]
 
 def render_candidate_global_decl(spec: dict[str, Any]) -> str:
     return f"volatile {spec.get('ctype', 'unsigned int')} {spec['name']} = {int(spec.get('reset', 0))};"
+
+
+def remove_duplicate_candidate_global_decls(candidate_code: str, observed_globals: list[dict[str, Any]]) -> str:
+    names = {
+        spec["name"]
+        for spec in observed_globals
+        if isinstance(spec.get("name"), str) and WORD_BOUNDARY_RE.fullmatch(spec["name"])
+    }
+    if not names:
+        return candidate_code
+
+    def is_duplicate_decl(line: str) -> bool:
+        stripped = line.strip()
+        if not stripped.endswith(";"):
+            return False
+        if "(" in stripped:
+            return False
+        for name in names:
+            if re.fullmatch(
+                rf"(?:extern\s+)?(?:volatile\s+)?[A-Za-z_][A-Za-z0-9_\s\*]*\b{re.escape(name)}\s*(?:=\s*[^;]+)?;",
+                stripped,
+            ):
+                return True
+        return False
+
+    return "\n".join(line for line in candidate_code.splitlines() if not is_duplicate_decl(line))
 
 
 def render_explicit_case_call(func: SourceFunction, case: dict[str, Any], index: int) -> str:
@@ -2802,6 +2830,14 @@ int max(int a, int b) { if (a > b) return a; return b; }
         assert "control_sink = 0;" in rendered
         assert "control_sink=%lld" in rendered
         assert "touch(7);" in rendered
+        deduped_candidate = candidate_harness(
+            "uint control_sink;\nuint math_sink;\nvoid touch(unsigned int seed) { control_sink = seed; }",
+            void_func,
+            global_cases,
+        )
+        assert "volatile unsigned int control_sink = 0;" in deduped_candidate
+        assert "\nuint control_sink;\n" not in deduped_candidate
+        assert "\nuint math_sink;\n" in deduped_candidate
     print("self-test ok")
     return 0
 
