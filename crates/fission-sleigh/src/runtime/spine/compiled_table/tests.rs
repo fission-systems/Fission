@@ -572,6 +572,30 @@ fn generated_runtime_lifts_aarch64_subs_shifted_from_sla_compare_template() {
 }
 
 #[test]
+fn generated_runtime_lifts_aarch64_udiv_from_sla_int_div_template() {
+    require_packaged_ghidra_sla!();
+    let aarch64_spec = spec_root_for_arch("AARCH64").join("AARCH64.slaspec");
+    let compiled = compile_frontend_for_entry_spec(&aarch64_spec).expect("compile aarch64");
+    let bytes = [0x28, 0x09, 0xc8, 0x1a]; // udiv w8, w9, w8
+
+    let decoded = decode_instruction(&compiled, None, &bytes, 0x10002c).expect("decode udiv");
+    assert_eq!(decoded.length, bytes.len());
+    assert_eq!(decoded.mnemonic, "udiv");
+
+    let (ops, length, details) =
+        decode_and_lift_with_details(&compiled, None, &bytes, 0x10002c).expect("lift udiv");
+    assert_eq!(length as usize, bytes.len());
+    assert_eq!(
+        details.template_source,
+        Some(CompiledTemplateSource::SpecDerived)
+    );
+    assert!(
+        ops.iter().any(|op| op.opcode == PcodeOpcode::IntDiv),
+        "expected udiv template to emit INT_DIV; ops={ops:?}"
+    );
+}
+
+#[test]
 fn generated_runtime_lifts_riscv_lui_shift_count_at_sla_const_width() {
     require_packaged_ghidra_sla!();
     let riscv_spec = spec_root_for_arch("RISCV").join("riscv.lp64d.slaspec");

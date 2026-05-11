@@ -549,6 +549,10 @@ impl<'c> CompiledTableEmitter<'c> {
             | CompiledOpTplOpcode::IntOr
             | CompiledOpTplOpcode::IntXor
             | CompiledOpTplOpcode::IntMult
+            | CompiledOpTplOpcode::IntDiv
+            | CompiledOpTplOpcode::IntSDiv
+            | CompiledOpTplOpcode::IntRem
+            | CompiledOpTplOpcode::IntSRem
             | CompiledOpTplOpcode::IntLeft
             | CompiledOpTplOpcode::IntRight
             | CompiledOpTplOpcode::IntSRight
@@ -1470,6 +1474,10 @@ impl<'c> CompiledTableEmitter<'c> {
             CompiledOpTplOpcode::IntOr => PcodeOpcode::IntOr,
             CompiledOpTplOpcode::IntXor => PcodeOpcode::IntXor,
             CompiledOpTplOpcode::IntMult => PcodeOpcode::IntMult,
+            CompiledOpTplOpcode::IntDiv => PcodeOpcode::IntDiv,
+            CompiledOpTplOpcode::IntSDiv => PcodeOpcode::IntSDiv,
+            CompiledOpTplOpcode::IntRem => PcodeOpcode::IntRem,
+            CompiledOpTplOpcode::IntSRem => PcodeOpcode::IntSRem,
             CompiledOpTplOpcode::IntLeft => PcodeOpcode::IntLeft,
             CompiledOpTplOpcode::IntRight => PcodeOpcode::IntRight,
             CompiledOpTplOpcode::IntSRight => PcodeOpcode::IntSRight,
