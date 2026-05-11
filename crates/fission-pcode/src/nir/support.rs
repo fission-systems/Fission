@@ -368,9 +368,9 @@ impl CallingConvention {
         }
     }
 
-    /// Returns the (REGISTER-space offset, 64-bit size) pairs for all integer
-    /// parameter registers in 64-bit mode — used for call argument recovery.
-    pub(crate) fn param_reg_slots_64(self) -> &'static [(u64, u32)] {
+    /// Returns the (REGISTER-space offset, varnode size) pairs for all integer
+    /// parameter registers used by call argument recovery.
+    pub(crate) fn param_reg_slots(self) -> &'static [(u64, u32)] {
         match self {
             Self::WindowsX64 => &[
                 (0x08, 8), // rcx  → param_1
@@ -396,7 +396,12 @@ impl CallingConvention {
                 (0x4030, 8), // x6  → param_7
                 (0x4038, 8), // x7  → param_8
             ],
-            Self::Arm32 => &[],
+            Self::Arm32 => &[
+                (0x20, 4), // r0  → param_1
+                (0x24, 4), // r1  → param_2
+                (0x28, 4), // r2  → param_3
+                (0x2c, 4), // r3  → param_4
+            ],
         }
     }
 }

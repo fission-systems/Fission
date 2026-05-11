@@ -194,12 +194,13 @@ impl<'a> PreviewBuilder<'a> {
         call_idx: usize,
         prefer_source_values: bool,
     ) -> Result<Option<Vec<HirExpr>>, MlilPreviewError> {
-        if !self.options.is_64bit {
+        if !self.options.is_64bit && self.options.calling_convention != CallingConvention::Arm32 {
             return Ok(None);
         }
 
         let abi = self.abi_state();
-        let param_count = self.options.calling_convention.param_reg_slots_64().len();
+        let param_slots = self.options.calling_convention.param_reg_slots();
+        let param_count = param_slots.len();
         let mut recovered: Vec<Option<HirExpr>> = vec![None; param_count];
 
         for prev_idx in (0..call_idx).rev() {
@@ -210,8 +211,7 @@ impl<'a> PreviewBuilder<'a> {
             let Some(output) = &prev.output else {
                 continue;
             };
-            let Some(param_index) = self.param_index_for_varnode(output, prefer_source_values)
-            else {
+            let Some(param_index) = self.param_index_for_varnode(output, true) else {
                 continue;
             };
             if param_index >= recovered.len() || recovered[param_index].is_some() {
@@ -265,7 +265,7 @@ impl<'a> PreviewBuilder<'a> {
             if recovered[param_index].is_some() {
                 continue;
             }
-            let (offset, size) = self.options.calling_convention.param_reg_slots_64()[param_index];
+            let (offset, size) = param_slots[param_index];
 
             let vn = Varnode {
                 space_id: REGISTER_SPACE_ID,

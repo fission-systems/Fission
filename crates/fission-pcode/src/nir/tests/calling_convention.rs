@@ -299,6 +299,61 @@ fn arm32_bx_lr_returns_primary_r0_not_link_target() {
 }
 
 #[test]
+fn arm32_direct_call_recovers_r0_argument() {
+    let mut options = preview_options();
+    options.calling_convention = CallingConvention::Arm32;
+    options.format = "ELF32".to_string();
+    options.pe_x64_only = false;
+    options.pointer_size = 4;
+    options.is_64bit = false;
+
+    let r0 = Varnode {
+        space_id: RUST_SLEIGH_REGISTER_SPACE_ID,
+        offset: 0x20,
+        size: 4,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let func = PcodeFunction {
+        blocks: vec![PcodeBasicBlock {
+            index: 0,
+            start_address: 0x100000,
+            successors: vec![],
+            ops: vec![
+                PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::IntSub,
+                    address: 0x100014,
+                    output: Some(r0.clone()),
+                    inputs: vec![r0.clone(), cst(1, 4)],
+                    asm_mnemonic: None,
+                },
+                PcodeOp {
+                    seq_num: 1,
+                    opcode: PcodeOpcode::Call,
+                    address: 0x100018,
+                    output: None,
+                    inputs: vec![cst(0x100000, 4)],
+                    asm_mnemonic: None,
+                },
+                PcodeOp {
+                    seq_num: 2,
+                    opcode: PcodeOpcode::Return,
+                    address: 0x10001c,
+                    output: None,
+                    inputs: vec![cst(0, 4), r0],
+                    asm_mnemonic: None,
+                },
+            ],
+        }],
+    };
+
+    let code =
+        render_mlil_preview(&func, "recursive_fib", 0x100000, &options).expect("preview render");
+    assert!(code.contains("sub_100000(uVar0);"), "{code}");
+}
+
+#[test]
 fn arm32_link_register_target_without_r0_def_is_void_return() {
     let mut options = preview_options();
     options.calling_convention = CallingConvention::Arm32;
