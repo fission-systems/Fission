@@ -309,7 +309,12 @@ impl<'a> PreviewBuilder<'a> {
             })
     }
 
-    fn compose_arm32_return_pair(&self, low: HirExpr, high: HirExpr) -> HirExpr {
+    fn compose_arm32_return_pair(&self, r0: HirExpr, r1: HirExpr) -> HirExpr {
+        let (low, high) = if self.options.is_big_endian {
+            (r1, r0)
+        } else {
+            (r0, r1)
+        };
         let u64_ty = NirType::Int {
             bits: 64,
             signed: false,
@@ -3665,6 +3670,103 @@ mod tests {
 
         assert!(code.contains("return param_1;"), "{code}");
         assert!(!code.contains("return lr"), "{code}");
+    }
+
+    fn arm32_pair_return_fixture(r0_value: i64, r1_value: i64) -> PcodeFunction {
+        let r0 = Varnode {
+            space_id: RUST_SLEIGH_REGISTER_SPACE_ID,
+            offset: 0x20,
+            size: 4,
+            is_constant: false,
+            constant_val: 0,
+        };
+        let r1 = Varnode {
+            space_id: RUST_SLEIGH_REGISTER_SPACE_ID,
+            offset: 0x24,
+            size: 4,
+            is_constant: false,
+            constant_val: 0,
+        };
+        let lr = Varnode {
+            space_id: RUST_SLEIGH_REGISTER_SPACE_ID,
+            offset: 0x58,
+            size: 4,
+            is_constant: false,
+            constant_val: 0,
+        };
+        PcodeFunction {
+            blocks: vec![PcodeBasicBlock {
+                index: 0,
+                start_address: 0x2000,
+                successors: Vec::new(),
+                ops: vec![
+                    PcodeOp {
+                        seq_num: 0,
+                        opcode: PcodeOpcode::Copy,
+                        address: 0x2000,
+                        output: Some(r0),
+                        inputs: vec![Varnode::constant(r0_value, 4)],
+                        asm_mnemonic: None,
+                    },
+                    PcodeOp {
+                        seq_num: 1,
+                        opcode: PcodeOpcode::Copy,
+                        address: 0x2004,
+                        output: Some(r1),
+                        inputs: vec![Varnode::constant(r1_value, 4)],
+                        asm_mnemonic: None,
+                    },
+                    PcodeOp {
+                        seq_num: 2,
+                        opcode: PcodeOpcode::Return,
+                        address: 0x2008,
+                        output: None,
+                        inputs: vec![lr],
+                        asm_mnemonic: None,
+                    },
+                ],
+            }],
+        }
+    }
+
+    fn arm32_pair_return_options(is_big_endian: bool) -> MlilPreviewOptions {
+        MlilPreviewOptions {
+            pe_x64_only: false,
+            is_64bit: false,
+            is_big_endian,
+            pointer_size: 4,
+            format: "ELF32".to_string(),
+            image_base: 0,
+            sections: vec![(0x2000, 0x3000)],
+            region_linearize_structuring: false,
+            force_linear_structuring: false,
+            conservative_irreducible_fallback: false,
+            structuring_engine: StructuringEngineKind::GraphCollapseV1,
+            global_names: Default::default(),
+            global_sizes: Default::default(),
+            relocation_names: Default::default(),
+            calling_convention: CallingConvention::Arm32,
+        }
+    }
+
+    #[test]
+    fn arm32_little_endian_pair_return_composes_r1_high_r0_low() {
+        let pcode = arm32_pair_return_fixture(0x5566_7788, 0x1122_3344);
+        let options = arm32_pair_return_options(false);
+
+        let code = render_mlil_preview(&pcode, "u64_le", 0x2000, &options).expect("preview render");
+
+        assert!(code.contains("return 1234605616436508552;"), "{code}");
+    }
+
+    #[test]
+    fn arm32_big_endian_pair_return_composes_r0_high_r1_low() {
+        let pcode = arm32_pair_return_fixture(0x1122_3344, 0x5566_7788);
+        let options = arm32_pair_return_options(true);
+
+        let code = render_mlil_preview(&pcode, "u64_be", 0x2000, &options).expect("preview render");
+
+        assert!(code.contains("return 1234605616436508552;"), "{code}");
     }
 }
 
