@@ -90,6 +90,31 @@ impl<'a> PreviewBuilder<'a> {
         })
     }
 
+    fn recover_tail_call_expr_from_callable_target_expr(
+        &mut self,
+        block_idx: usize,
+        block: &crate::pcode::PcodeBasicBlock,
+        term_idx: usize,
+        target_expr: &HirExpr,
+    ) -> HirExpr {
+        let target = if let HirExpr::Var(target_name) = target_expr {
+            self.resolve_address_like_call_target_name(target_name)
+                .unwrap_or_else(|| format!("((code *){})", print_expr(target_expr)))
+        } else {
+            format!("((code *){})", print_expr(target_expr))
+        };
+        let args = if self.pcode.blocks.len() <= 2 {
+            self.recover_tail_call_args(block_idx, block, term_idx)
+        } else {
+            Vec::new()
+        };
+        HirExpr::Call {
+            target,
+            args,
+            ty: NirType::Unknown,
+        }
+    }
+
     fn recover_tail_call_expr_from_branchind_target(
         &mut self,
         block_idx: usize,
@@ -98,18 +123,36 @@ impl<'a> PreviewBuilder<'a> {
         switch_var: &Varnode,
         switch_expr: &HirExpr,
     ) -> Option<HirExpr> {
-        let target_expr = self
-            .recover_arm32_branchind_callable_target(switch_var)
-            .unwrap_or_else(|| switch_expr.clone());
-        self.recover_tail_call_expr_from_target_expr(block_idx, block, term_idx, &target_expr)
+        if let Some(target_expr) =
+            self.recover_branchind_callable_target(block.index as usize, term_idx, switch_var)
+        {
+            return Some(self.recover_tail_call_expr_from_callable_target_expr(
+                block_idx,
+                block,
+                term_idx,
+                &target_expr,
+            ));
+        }
+        self.recover_tail_call_expr_from_target_expr(block_idx, block, term_idx, switch_expr)
     }
 
-    fn recover_arm32_branchind_callable_target(&mut self, switch_var: &Varnode) -> Option<HirExpr> {
-        if self.options.calling_convention != CallingConvention::Arm32 {
+    fn recover_branchind_callable_target(
+        &mut self,
+        block_idx: usize,
+        term_idx: usize,
+        switch_var: &Varnode,
+    ) -> Option<HirExpr> {
+        if !matches!(
+            self.options.calling_convention,
+            CallingConvention::AArch64 | CallingConvention::Arm32
+        ) {
             return None;
         }
         let (_, op) = self.lookup_def_site(switch_var)?;
-        if op.opcode == PcodeOpcode::IntAnd && op.inputs.len() == 2 {
+        if self.options.calling_convention == CallingConvention::Arm32
+            && op.opcode == PcodeOpcode::IntAnd
+            && op.inputs.len() == 2
+        {
             let lhs_mask = const_offset(&op.inputs[0]).is_some_and(is_arm32_callable_mask);
             let rhs_mask = const_offset(&op.inputs[1]).is_some_and(is_arm32_callable_mask);
             let source = match (lhs_mask, rhs_mask) {
@@ -117,27 +160,46 @@ impl<'a> PreviewBuilder<'a> {
                 (false, true) => op.inputs[0].clone(),
                 _ => switch_var.clone(),
             };
-            if let Some(expr) = self.recover_arm32_callable_source_expr(&source) {
+            if let Some(expr) =
+                self.recover_branchind_callable_source_expr(block_idx, term_idx, &source, 0)
+            {
                 return Some(expr);
             }
             return self
                 .lower_wrapped_varnode(&source, &mut HashSet::new())
                 .ok();
         }
-        self.recover_arm32_callable_source_expr(switch_var)
+        self.recover_branchind_callable_source_expr(block_idx, term_idx, switch_var, 0)
     }
 
-    fn recover_arm32_callable_source_expr(&mut self, source: &Varnode) -> Option<HirExpr> {
-        if let Some((_, op)) = self.lookup_def_site(source)
+    fn recover_branchind_callable_source_expr(
+        &mut self,
+        block_idx: usize,
+        before_op_idx: usize,
+        source: &Varnode,
+        depth: usize,
+    ) -> Option<HirExpr> {
+        if depth > 8 {
+            return None;
+        }
+        if let Some((site, op)) = self.lookup_def_site(source)
+            && site.block_idx == block_idx
+            && site.op_idx < before_op_idx
             && matches!(
                 op.opcode,
                 PcodeOpcode::Copy | PcodeOpcode::Cast | PcodeOpcode::IntZExt | PcodeOpcode::IntSExt
             )
             && let Some(input) = op.inputs.first().cloned()
             && is_register_varnode(&input)
-            && let Some(param) = self.register_param(&input)
         {
-            return Some(HirExpr::Var(param));
+            if let Some(expr) = self.recover_branchind_callable_source_expr(
+                block_idx,
+                site.op_idx,
+                &input,
+                depth + 1,
+            ) {
+                return Some(expr);
+            }
         }
         self.register_param(source).map(HirExpr::Var)
     }
@@ -868,6 +930,34 @@ impl<'a> PreviewBuilder<'a> {
             && block.ops[term_idx].address == op.address
     }
 
+    pub(in crate::nir::builder) fn op_is_terminal_branchind_target_artifact(
+        &self,
+        block: &crate::pcode::PcodeBasicBlock,
+        op_idx: usize,
+    ) -> bool {
+        let Some(op) = block.ops.get(op_idx) else {
+            return false;
+        };
+        if !matches!(
+            op.opcode,
+            PcodeOpcode::Copy | PcodeOpcode::Cast | PcodeOpcode::IntZExt | PcodeOpcode::IntSExt
+        ) {
+            return false;
+        }
+        let Some(output) = op.output.as_ref() else {
+            return false;
+        };
+        let Some(term_idx) = self.block_terminator_index(block) else {
+            return false;
+        };
+        term_idx > op_idx
+            && block.ops[term_idx].opcode == PcodeOpcode::BranchInd
+            && block.ops[term_idx]
+                .inputs
+                .first()
+                .is_some_and(|input| input == output)
+    }
+
     fn return_input_is_stack_target(&self, input: &Varnode) -> bool {
         let Some((_, op)) = self.lookup_def_site(input) else {
             return false;
@@ -1373,6 +1463,41 @@ impl<'a> PreviewBuilder<'a> {
                                         signed: false,
                                     },
                                 ))));
+                            }
+                            if targets.is_empty() {
+                                let tail_call_expr = this
+                                    .recover_tail_call_expr_from_branchind_target(
+                                        idx,
+                                        block,
+                                        term_idx,
+                                        switch_var,
+                                        &switch_expr,
+                                    );
+                                if tail_call_expr.is_some() {
+                                    this.record_unsupported_inventory_event(
+                                        "terminator_branchind_tail_call",
+                                        Some(switch_var),
+                                        Some(op),
+                                        Some(op.opcode),
+                                        Some(block.start_address),
+                                        Some(u64::from(op.seq_num)),
+                                        true,
+                                        "branchind_tail_call_recovered",
+                                    );
+                                    let evidence = this.build_unsupported_control_evidence(
+                                        op.opcode,
+                                        Some(block.start_address),
+                                        tail_call_expr.as_ref(),
+                                        Vec::new(),
+                                        UnsupportedControlFamily::MissingTargets,
+                                        IndirectControlSurface::BranchInd,
+                                        32,
+                                    );
+                                    return Ok(LoweredTerminator::Unsupported {
+                                        evidence,
+                                        target_expr: tail_call_expr,
+                                    });
+                                }
                             }
                             if targets.is_empty()
                                 && let Some(inferred_target) =

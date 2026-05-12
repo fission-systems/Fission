@@ -217,6 +217,11 @@ impl<'a> PreviewBuilder<'a> {
             let Some(output) = &prev.output else {
                 continue;
             };
+            if prefer_source_values
+                && self.op_is_terminal_branchind_target_artifact(block, prev_idx)
+            {
+                continue;
+            }
             let Some(param_index) = self.param_index_for_varnode(output, true) else {
                 continue;
             };

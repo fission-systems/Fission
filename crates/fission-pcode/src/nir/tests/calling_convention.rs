@@ -1203,6 +1203,74 @@ fn aarch64_reg(offset: u64, size: u32) -> Varnode {
 }
 
 #[test]
+fn aarch64_branchind_tail_call_recovers_function_pointer_call() {
+    let options = aarch64_preview_options();
+
+    let x0 = aarch64_reg(0x4000, 8);
+    let w0 = aarch64_reg(0x4000, 4);
+    let w1 = aarch64_reg(0x4008, 4);
+    let w2 = aarch64_reg(0x4010, 4);
+    let x3 = aarch64_reg(0x4018, 8);
+    let branch_target = aarch64_reg(0, 8);
+    let func = PcodeFunction {
+        blocks: vec![PcodeBasicBlock {
+            index: 0,
+            start_address: 0x100068,
+            successors: vec![],
+            ops: vec![
+                PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::Copy,
+                    address: 0x100068,
+                    output: Some(x3.clone()),
+                    inputs: vec![x0],
+                    asm_mnemonic: None,
+                },
+                PcodeOp {
+                    seq_num: 1,
+                    opcode: PcodeOpcode::Copy,
+                    address: 0x10006c,
+                    output: Some(w0.clone()),
+                    inputs: vec![w1.clone()],
+                    asm_mnemonic: None,
+                },
+                PcodeOp {
+                    seq_num: 2,
+                    opcode: PcodeOpcode::Copy,
+                    address: 0x100070,
+                    output: Some(w1),
+                    inputs: vec![w2],
+                    asm_mnemonic: None,
+                },
+                PcodeOp {
+                    seq_num: 3,
+                    opcode: PcodeOpcode::Copy,
+                    address: 0x100074,
+                    output: Some(branch_target.clone()),
+                    inputs: vec![x3],
+                    asm_mnemonic: None,
+                },
+                PcodeOp {
+                    seq_num: 4,
+                    opcode: PcodeOpcode::BranchInd,
+                    address: 0x100074,
+                    output: None,
+                    inputs: vec![branch_target],
+                    asm_mnemonic: None,
+                },
+            ],
+        }],
+    };
+
+    let code = render_mlil_preview(&func, "apply_op", 0x100068, &options).expect("preview render");
+    assert!(
+        code.contains("return ((code *)param_1)(param_2, param_3);"),
+        "{code}"
+    );
+    assert!(!code.contains("__fission_branchind"), "{code}");
+}
+
+#[test]
 fn aarch64_same_block_wide_const_copy_overrides_dominating_register_alias() {
     let options = aarch64_preview_options();
 
