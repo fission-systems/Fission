@@ -8,6 +8,9 @@
 
 **Fission** is a high-performance, Rust-native reverse-engineering and decompilation framework designed for precision binary analysis at scale.
 
+> [!TIP]
+> New to the project? Build `fission_cli`, run the `First 10 Minutes` commands, then open the generated source-semantic summary before diving into the full architecture docs.
+
 ## Overview
 
 Fission represents a fundamental rearchitecture of decompilation workflows, placing Rust at the core of:
@@ -45,7 +48,10 @@ flowchart BT
     Signatures --> Static
 ```
 
-The important ownership rule is simple: semantic recovery and structuring belong to the IR layer, while product surfaces consume those results. CLI, GUI, and report writers should not repair or reinterpret decompiler semantics after the fact.
+> [!IMPORTANT]
+> Semantic recovery and structuring belong to the IR layer. CLI, GUI, and report writers consume those results; they should not repair or reinterpret decompiler semantics after the fact.
+
+For deeper visual maps, see [`docs/architecture/DIAGRAMS.md`](./docs/architecture/DIAGRAMS.md).
 
 ### Core Components
 
@@ -70,7 +76,7 @@ Fission maintains comprehensive, role-based documentation:
 | Start here if you want to... | Read |
 |---|---|
 | understand the repository layout | [`docs/PROJECT_MAP.md`](./docs/PROJECT_MAP.md) |
-| understand architecture and ownership rules | [`docs/architecture/ARCHITECTURE.md`](./docs/architecture/ARCHITECTURE.md) |
+| understand architecture and ownership rules | [`docs/architecture/ARCHITECTURE.md`](./docs/architecture/ARCHITECTURE.md) and [`docs/architecture/DIAGRAMS.md`](./docs/architecture/DIAGRAMS.md) |
 | run the CLI as an external evaluator | [`docs/EVALUATION.md`](./docs/EVALUATION.md) and [`docs/CLI.md`](./docs/CLI.md) |
 | run canonical source-vs-Fission quality checks | [`benchmark/source_semantic_benchmark/README.md`](./benchmark/source_semantic_benchmark/README.md) |
 | run focused semantic shape canaries | [`benchmark/source_semantic_benchmark/FEATURE_SHAPE_CANARIES.md`](./benchmark/source_semantic_benchmark/FEATURE_SHAPE_CANARIES.md) |
@@ -120,8 +126,8 @@ Additional references:
 - 🔄 Desktop UI polish and end-user experience
 - 🔄 Additional architecture targets (MIPS, PPC, etc.)
 
-**Technology Notes:**
-PE x64 has the strongest direct NIR coverage. Other architectures and formats exist as development targets and should not be treated as equivalent production-quality claims.
+> [!NOTE]
+> PE x64 has the strongest direct NIR coverage. Other architectures and formats are development targets and should not be treated as equivalent production-quality claims.
 
 ---
 
@@ -363,14 +369,14 @@ shape?" For triage-heavy runs, see
 | `source_owned_all.json` | broad source-owned corpus validation | checked-in source | medium/high |
 | full benchmark | investigating Ghidra reference parity | Ghidra comparison | high |
 
+> [!IMPORTANT]
+> Source semantic benchmark rows compare Fission output against checked-in source-derived fingerprints and behavior harnesses. Ghidra is a reference/comparison lane, not the primary quality oracle.
+
 Canonical benchmark config and artifacts now live under:
 
 - [`benchmark/source_semantic_benchmark/manifests/`](./benchmark/source_semantic_benchmark/manifests/)
 - [`benchmark/artifacts/source_semantic_benchmark/`](./benchmark/artifacts/source_semantic_benchmark/)
 - [`benchmark/artifacts/automation/`](./benchmark/artifacts/automation/)
-
-Rows compare Fission pseudocode with source-derived static fingerprints and
-dynamic behavior harnesses. Ghidra is not used as the baseline.
 
 ### Inspect Quality Reports
 
@@ -384,7 +390,7 @@ benchmark/artifacts/full_benchmark/      # Ghidra reference/comparison runs
 
 ### Extended Architecture
 
-For detailed system design, read [`docs/architecture/ARCHITECTURE.md`](./docs/architecture/ARCHITECTURE.md)
+For detailed system design, read [`docs/architecture/ARCHITECTURE.md`](./docs/architecture/ARCHITECTURE.md) and [`docs/architecture/DIAGRAMS.md`](./docs/architecture/DIAGRAMS.md).
 
 ---
 

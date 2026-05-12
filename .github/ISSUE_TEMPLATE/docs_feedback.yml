@@ -1,0 +1,50 @@
+name: Documentation feedback
+
+description: Report confusing, stale, missing, or hard-to-follow documentation.
+title: "docs: "
+labels:
+  - documentation
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for improving the docs. Please point to the exact file or section so the fix can stay small and reviewable.
+
+  - type: input
+    id: location
+    attributes:
+      label: Document / section
+      placeholder: README.md#quick-start or docs/architecture/ARCHITECTURE.md
+    validations:
+      required: true
+
+  - type: dropdown
+    id: problem_type
+    attributes:
+      label: Problem type
+      options:
+        - unclear explanation
+        - stale command or path
+        - missing workflow
+        - broken link
+        - diagram improvement
+        - typo / wording
+        - other
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What is confusing or wrong?
+      placeholder: Describe what you expected to learn and where you got stuck.
+    validations:
+      required: true
+
+  - type: textarea
+    id: suggestion
+    attributes:
+      label: Suggested improvement
+      description: Optional, but examples or replacement text help a lot.
+    validations:
+      required: false

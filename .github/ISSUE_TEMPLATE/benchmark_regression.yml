@@ -1,0 +1,76 @@
+name: Benchmark regression
+
+description: Report a source-semantic, feature-shape, automation, or full benchmark regression.
+title: "benchmark: "
+labels:
+  - benchmark
+  - regression
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this form when a benchmark metric, row, artifact, or comparison outcome regressed.
+
+        > [!IMPORTANT]
+        > Please attach or link the artifact directory and include the exact command used to generate it.
+
+  - type: dropdown
+    id: suite
+    attributes:
+      label: Benchmark suite
+      options:
+        - source semantic smoke
+        - feature-shape canaries
+        - source-owned-all
+        - full benchmark / Ghidra comparison
+        - automation lane
+        - other
+    validations:
+      required: true
+
+  - type: input
+    id: artifact
+    attributes:
+      label: Artifact path or URL
+      placeholder: benchmark/artifacts/source_semantic_benchmark/feature-shape-canaries-latest
+    validations:
+      required: true
+
+  - type: textarea
+    id: command
+    attributes:
+      label: Reproduction command
+      render: bash
+      placeholder: |
+        python3 benchmark/source_semantic_benchmark/run_source_semantic_benchmark.py \
+          --manifest benchmark/source_semantic_benchmark/manifests/feature_shape_canaries.json \
+          --fission-bin target/release/fission_cli \
+          --timeout-sec 45 \
+          --jobs 1
+    validations:
+      required: true
+
+  - type: textarea
+    id: deltas
+    attributes:
+      label: Metric deltas / failing rows
+      render: text
+      placeholder: |
+        weighted_semantic_similarity: 0.71 -> 0.64
+        behavior_pass_rate: 0.80 -> 0.60
+        comparison_outcome: regressed
+        top row: <entry>::<function>
+    validations:
+      required: true
+
+  - type: textarea
+    id: notes
+    attributes:
+      label: Triage notes
+      description: Include low-score repro commands, debug bundle paths, suspected owner, or related PR/commit.
+      placeholder: |
+        Suspected owner: fission-pcode structuring
+        debug_decomp_bundle: ...
+        Related PR: #...
+    validations:
+      required: false
