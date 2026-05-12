@@ -6,12 +6,21 @@ use crate::loader::types::{
 use crate::prelude::*;
 use fission_core::architecture::select_macho_load_spec;
 use fission_core::constants::binary_format::*;
+use std::collections::HashMap;
 
 pub mod apple;
 pub mod schema;
 use schema::*;
 
 pub struct MachoLoader;
+
+#[derive(Debug, Clone, Copy)]
+struct MachoSectionRelocInfo {
+    virtual_address: u64,
+    virtual_size: u64,
+    reloff: u32,
+    nreloc: u32,
+}
 
 impl MachoLoader {
     pub fn parse(data: DataBuffer, path: String) -> Result<LoadedBinary> {
@@ -56,6 +65,7 @@ impl MachoLoader {
 
         let mut sections_info = Vec::new();
         let mut section_exec_map: Vec<bool> = Vec::new(); // 1-based n_sect -> is_executable
+        let mut section_relocs = Vec::new();
         let mut functions_info = Vec::new();
         let mut image_base = u64::MAX;
         let mut entry_point = 0u64;
@@ -97,6 +107,12 @@ impl MachoLoader {
                     // ownership signal Ghidra's symbol classifiers rely on.
                     let is_executable = macho_section_has_instructions(sect.flags);
                     section_exec_map.push(is_executable);
+                    section_relocs.push(MachoSectionRelocInfo {
+                        virtual_address: sect.addr,
+                        virtual_size: sect.size,
+                        reloff: sect.reloff,
+                        nreloc: sect.nreloc,
+                    });
 
                     sections_info.push(SectionInfo {
                         name: extract_fixed_string(&sect.sectname),
@@ -146,6 +162,8 @@ impl MachoLoader {
 
         // Parse symbols after all sections are collected so n_sect can be filtered
         // against executable sections. This avoids treating data symbols as functions.
+        let mut global_symbols = HashMap::new();
+        let mut relocation_symbols = HashMap::new();
         if let Some(symtab) = symtab_info.as_ref() {
             Self::parse_symbols_64(
                 bytes,
@@ -153,6 +171,14 @@ impl MachoLoader {
                 endian,
                 &section_exec_map,
                 &mut functions_info,
+                &mut global_symbols,
+            );
+            parse_macho_relocation_symbols_64(
+                bytes,
+                symtab,
+                endian,
+                &section_relocs,
+                &mut relocation_symbols,
             );
         }
 
@@ -250,6 +276,8 @@ impl MachoLoader {
             .add_sections(sections_info)
             .add_functions(functions_info)
             .add_iat_symbols(iat_symbols)
+            .add_global_symbols(global_symbols)
+            .add_relocation_symbols(relocation_symbols)
             .build()
     }
 
@@ -262,6 +290,7 @@ impl MachoLoader {
         let cputype = header.cputype;
         let mut sections_info = Vec::new();
         let mut section_exec_map = Vec::new();
+        let mut section_relocs = Vec::new();
         let mut functions_info = Vec::new();
         let mut image_base = u64::MAX;
         let mut entry_point = 0u64;
@@ -287,6 +316,12 @@ impl MachoLoader {
                     section_offset += Section32::SIZE;
                     let is_executable = macho_section_has_instructions(sect.flags);
                     section_exec_map.push(is_executable);
+                    section_relocs.push(MachoSectionRelocInfo {
+                        virtual_address: sect.addr as u64,
+                        virtual_size: sect.size as u64,
+                        reloff: sect.reloff,
+                        nreloc: sect.nreloc,
+                    });
                     sections_info.push(SectionInfo {
                         name: extract_fixed_string(&sect.sectname),
                         virtual_address: sect.addr as u64,
@@ -317,6 +352,8 @@ impl MachoLoader {
             select_macho_load_spec(cputype, header.cpusubtype, is_64bit, image_base)
                 .map_err(|e| err!(loader, "{}", e))?;
 
+        let mut global_symbols = HashMap::new();
+        let mut relocation_symbols = HashMap::new();
         if let Some(symtab) = symtab_info.as_ref() {
             Self::parse_symbols_32(
                 bytes,
@@ -324,6 +361,14 @@ impl MachoLoader {
                 endian,
                 &section_exec_map,
                 &mut functions_info,
+                &mut global_symbols,
+            );
+            parse_macho_relocation_symbols_32(
+                bytes,
+                symtab,
+                endian,
+                &section_relocs,
+                &mut relocation_symbols,
             );
         }
         let mut iat_symbols = std::collections::HashMap::new();
@@ -351,6 +396,8 @@ impl MachoLoader {
             .add_sections(sections_info)
             .add_functions(functions_info)
             .add_iat_symbols(iat_symbols)
+            .add_global_symbols(global_symbols)
+            .add_relocation_symbols(relocation_symbols)
             .build()
     }
 
@@ -360,6 +407,7 @@ impl MachoLoader {
         endian: Endian,
         section_exec_map: &[bool],
         out: &mut Vec<FunctionInfo>,
+        global_symbols: &mut HashMap<u64, String>,
     ) {
         let sym_off = symtab.symoff as u64;
         let str_off = symtab.stroff as u64;
@@ -386,10 +434,6 @@ impl MachoLoader {
                     if sect_index == 0 || sect_index > section_exec_map.len() {
                         continue;
                     }
-                    if !section_exec_map[sect_index - 1] {
-                        continue;
-                    }
-
                     // Extract name using shared utility function
                     // Use checked_add to prevent potential overflow
                     let name_offset = (str_off as usize).checked_add(nlist.n_strx as usize);
@@ -405,19 +449,29 @@ impl MachoLoader {
                         normalize_macho_symbol_name(&extracted_name)
                     };
 
-                    out.push(FunctionInfo {
-                        name: final_name,
-                        address: nlist.n_value,
-                        size: 0,
-                        is_export: true,
-                        is_import: false,
-                        origin: Some("macho-symtab".to_string()),
-                        kind: Some("code".to_string()),
-                        source_section: Some(format!("section_{}", sect_index)),
-                        external_library: None,
-                        is_thunk_like: false,
-                        thunk_target: None,
-                    });
+                    let is_external = (nlist.n_type & 0x01) != 0;
+                    if section_exec_map[sect_index - 1] {
+                        out.push(FunctionInfo {
+                            name: final_name,
+                            address: nlist.n_value,
+                            size: 0,
+                            is_export: true,
+                            is_import: false,
+                            origin: Some("macho-symtab".to_string()),
+                            kind: Some("code".to_string()),
+                            source_section: Some(format!("section_{}", sect_index)),
+                            external_library: None,
+                            is_thunk_like: false,
+                            thunk_target: None,
+                        });
+                    } else if !final_name.is_empty() {
+                        insert_macho_global_symbol(
+                            global_symbols,
+                            nlist.n_value,
+                            final_name,
+                            is_external,
+                        );
+                    }
                 }
             } else {
                 break;
@@ -511,6 +565,7 @@ impl MachoLoader {
         endian: Endian,
         section_exec_map: &[bool],
         out: &mut Vec<FunctionInfo>,
+        global_symbols: &mut HashMap<u64, String>,
     ) {
         let reader = ByteReader::new(data, endian);
         for index in 0..symtab.nsyms {
@@ -526,9 +581,6 @@ impl MachoLoader {
             if sect_index == 0 || sect_index > section_exec_map.len() {
                 continue;
             }
-            if !section_exec_map[sect_index - 1] {
-                continue;
-            }
             let name_offset = (symtab.stroff as usize).checked_add(nlist.n_strx as usize);
             let extracted_name = match name_offset {
                 Some(offset) if offset < data.len() => extract_cstring(data, offset),
@@ -539,19 +591,29 @@ impl MachoLoader {
             } else {
                 normalize_macho_symbol_name(&extracted_name)
             };
-            out.push(FunctionInfo {
-                name: final_name,
-                address: nlist.n_value as u64,
-                size: 0,
-                is_export: true,
-                is_import: false,
-                origin: Some("macho-symtab".to_string()),
-                kind: Some("code".to_string()),
-                source_section: Some(format!("section_{}", sect_index)),
-                external_library: None,
-                is_thunk_like: false,
-                thunk_target: None,
-            });
+            let is_external = (nlist.n_type & 0x01) != 0;
+            if section_exec_map[sect_index - 1] {
+                out.push(FunctionInfo {
+                    name: final_name,
+                    address: nlist.n_value as u64,
+                    size: 0,
+                    is_export: true,
+                    is_import: false,
+                    origin: Some("macho-symtab".to_string()),
+                    kind: Some("code".to_string()),
+                    source_section: Some(format!("section_{}", sect_index)),
+                    external_library: None,
+                    is_thunk_like: false,
+                    thunk_target: None,
+                });
+            } else if !final_name.is_empty() {
+                insert_macho_global_symbol(
+                    global_symbols,
+                    nlist.n_value as u64,
+                    final_name,
+                    is_external,
+                );
+            }
         }
     }
 
@@ -706,15 +768,118 @@ fn section_contains_addr(section: &SectionInfo, address: u64) -> bool {
     address >= section.virtual_address && address < section_end
 }
 
+fn insert_macho_global_symbol(
+    global_symbols: &mut HashMap<u64, String>,
+    address: u64,
+    name: String,
+    is_external: bool,
+) {
+    if is_external {
+        global_symbols.insert(address, name);
+    } else {
+        global_symbols.entry(address).or_insert(name);
+    }
+}
+
+fn parse_macho_relocation_symbols_64(
+    data: &[u8],
+    symtab: &SymtabCommand,
+    endian: Endian,
+    sections: &[MachoSectionRelocInfo],
+    out: &mut HashMap<u64, String>,
+) {
+    parse_macho_relocation_symbols(
+        data,
+        symtab,
+        endian,
+        sections,
+        |data, symtab, idx, endian| MachoLoader::get_symbol_name(data, symtab, idx, endian),
+        out,
+    );
+}
+
+fn parse_macho_relocation_symbols_32(
+    data: &[u8],
+    symtab: &SymtabCommand,
+    endian: Endian,
+    sections: &[MachoSectionRelocInfo],
+    out: &mut HashMap<u64, String>,
+) {
+    parse_macho_relocation_symbols(
+        data,
+        symtab,
+        endian,
+        sections,
+        |data, symtab, idx, endian| MachoLoader::get_symbol_name_32(data, symtab, idx, endian),
+        out,
+    );
+}
+
+fn parse_macho_relocation_symbols<F>(
+    data: &[u8],
+    symtab: &SymtabCommand,
+    endian: Endian,
+    sections: &[MachoSectionRelocInfo],
+    symbol_name: F,
+    out: &mut HashMap<u64, String>,
+) where
+    F: Fn(&[u8], &SymtabCommand, u32, Endian) -> String,
+{
+    let reader = ByteReader::new(data, endian);
+    for section in sections {
+        let reloc_start = section.reloff as usize;
+        let reloc_count = section.nreloc as usize;
+        let Some(reloc_bytes) = reloc_count.checked_mul(8) else {
+            continue;
+        };
+        let Some(reloc_end) = reloc_start.checked_add(reloc_bytes) else {
+            continue;
+        };
+        if reloc_count == 0 || reloc_end > data.len() {
+            continue;
+        }
+        for index in 0..reloc_count {
+            let offset = reloc_start + index * 8;
+            let Ok(r_address) = reader.u32(offset) else {
+                continue;
+            };
+            let Ok(r_info) = reader.u32(offset + 4) else {
+                continue;
+            };
+            let r_symbolnum = r_info & 0x00ff_ffff;
+            let r_extern = ((r_info >> 27) & 1) != 0;
+            if !r_extern || r_symbolnum >= symtab.nsyms {
+                continue;
+            }
+            let name = symbol_name(data, symtab, r_symbolnum, endian);
+            if name.is_empty() {
+                continue;
+            }
+            let reloc_addr = macho_relocation_site(section, u64::from(r_address));
+            out.entry(reloc_addr).or_insert(name);
+        }
+    }
+}
+
+fn macho_relocation_site(section: &MachoSectionRelocInfo, r_address: u64) -> u64 {
+    if r_address < section.virtual_size {
+        section.virtual_address.saturating_add(r_address)
+    } else {
+        r_address
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        MachoLoader, infer_macho_function_sizes, macho_section_has_instructions,
-        normalize_macho_symbol_name,
+        MachoLoader, MachoSectionRelocInfo, infer_macho_function_sizes,
+        macho_section_has_instructions, normalize_macho_symbol_name,
+        parse_macho_relocation_symbols_64,
     };
     use crate::loader::macho::schema::SymtabCommand;
     use crate::loader::reader::Endian;
     use crate::loader::types::{FunctionInfo, SectionInfo};
+    use std::collections::HashMap;
 
     #[test]
     fn normalize_macho_symbol_name_strips_plain_c_abi_underscore() {
@@ -766,6 +931,7 @@ mod tests {
             strsize: (data.len() as u32).saturating_sub(stroff),
         };
         let mut functions = Vec::<FunctionInfo>::new();
+        let mut globals = HashMap::new();
 
         MachoLoader::parse_symbols_64(
             &data,
@@ -773,12 +939,93 @@ mod tests {
             Endian::Little,
             &[true, false],
             &mut functions,
+            &mut globals,
         );
 
         assert_eq!(functions.len(), 1, "{functions:?}");
         assert_eq!(functions[0].name, "llvm_smoke");
         assert_eq!(functions[0].address, 0);
         assert_eq!(functions[0].source_section.as_deref(), Some("section_1"));
+        assert_eq!(
+            globals.get(&0xa0).map(String::as_str),
+            Some("llvm_smoke_sink")
+        );
+    }
+
+    #[test]
+    fn macho_external_data_symbol_overrides_local_label() {
+        let mut data = Vec::new();
+        let symoff = 0u32;
+        let nsyms = 2u32;
+        let stroff = 32u32;
+
+        push_nlist64(&mut data, 1, 0x0e, 2, 0xa0);
+        push_nlist64(&mut data, 8, 0x0f, 2, 0xa0);
+        data.extend_from_slice(b"\0ltmp1\0_llvm_smoke_sink\0");
+
+        let symtab = SymtabCommand {
+            cmd: 0,
+            cmdsize: 0,
+            symoff,
+            nsyms,
+            stroff,
+            strsize: (data.len() as u32).saturating_sub(stroff),
+        };
+        let mut functions = Vec::<FunctionInfo>::new();
+        let mut globals = HashMap::new();
+
+        MachoLoader::parse_symbols_64(
+            &data,
+            &symtab,
+            Endian::Little,
+            &[false, false],
+            &mut functions,
+            &mut globals,
+        );
+
+        assert!(functions.is_empty(), "{functions:?}");
+        assert_eq!(
+            globals.get(&0xa0).map(String::as_str),
+            Some("llvm_smoke_sink")
+        );
+    }
+
+    #[test]
+    fn macho_external_relocations_map_use_site_to_symbol_name() {
+        let mut data = Vec::new();
+        push_nlist64(&mut data, 1, 0x0f, 2, 0xa0);
+        data.extend_from_slice(&0x94u32.to_le_bytes());
+        data.extend_from_slice(&((1u32 << 27) | (4u32 << 28)).to_le_bytes());
+        data.extend_from_slice(b"\0_llvm_smoke_sink\0");
+
+        let symtab = SymtabCommand {
+            cmd: 0,
+            cmdsize: 0,
+            symoff: 0,
+            nsyms: 1,
+            stroff: 24,
+            strsize: (data.len() as u32).saturating_sub(24),
+        };
+        let sections = [MachoSectionRelocInfo {
+            virtual_address: 0,
+            virtual_size: 0x9c,
+            reloff: 16,
+            nreloc: 1,
+        }];
+        let mut relocations = HashMap::new();
+
+        parse_macho_relocation_symbols_64(
+            &data,
+            &symtab,
+            Endian::Little,
+            &sections,
+            &mut relocations,
+        );
+
+        assert_eq!(
+            relocations.get(&0x94).map(String::as_str),
+            Some("llvm_smoke_sink")
+        );
     }
 
     #[test]

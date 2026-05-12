@@ -35,6 +35,38 @@
           }
         ]
       }
+    },
+    {
+      "id": "aarch64-apple-baremetal-small-c-llvm-smoke",
+      "binary_path": "benchmark/binary/AARCH64_AppleSilicon/baremetal/small/binary/c/llvm_smoke.o",
+      "source_path": "benchmark/binary/AARCH64_AppleSilicon/baremetal/small/source/c/llvm_smoke.c",
+      "language": "c",
+      "tags": ["source-owned", "aarch64-apple", "macho", "baremetal", "c", "llvm-smoke"],
+      "weight": 1.0,
+      "behavior_cases": {
+        "llvm_smoke": [
+          {
+            "args": [0],
+            "globals": [{"name": "llvm_smoke_sink", "ctype": "unsigned long long", "reset": 0}]
+          },
+          {
+            "args": [1],
+            "globals": [{"name": "llvm_smoke_sink", "ctype": "unsigned long long", "reset": 0}]
+          },
+          {
+            "args": [2],
+            "globals": [{"name": "llvm_smoke_sink", "ctype": "unsigned long long", "reset": 0}]
+          },
+          {
+            "args": [5],
+            "globals": [{"name": "llvm_smoke_sink", "ctype": "unsigned long long", "reset": 0}]
+          },
+          {
+            "args": [10],
+            "globals": [{"name": "llvm_smoke_sink", "ctype": "unsigned long long", "reset": 0}]
+          }
+        ]
+      }
     }
   ]
 }
