@@ -41,15 +41,25 @@ flowchart BT
     Loader --> Sleigh["fission-sleigh<br/>decode, lift, CFG skeleton"]
     Sleigh --> Pcode["fission-pcode<br/>P-code, NIR, HIR, structuring"]
     Pcode --> Decompiler["fission-decompiler<br/>routing, workers, orchestration"]
-    Decompiler --> CLI["fission-cli<br/>headless workflows"]
-    Decompiler --> GUI["fission-tauri<br/>desktop UI"]
+
     Static["fission-static<br/>facts, xrefs, analysis helpers"] --> Decompiler
     Signatures["fission-signatures<br/>signature datasets"] --> Loader
     Signatures --> Static
+
+    Dynamic["fission-dynamic<br/>runtime/debug analysis support"] --> Decompiler
+    TTD["fission-ttd<br/>time-travel / trace-adjacent support"] --> Dynamic
+    Plugin["fission-plugin<br/>contracts, hooks, runtime"] --> Decompiler
+
+    Decompiler --> CLI["fission-cli<br/>headless workflows"]
+    Decompiler --> GUI["fission-tauri<br/>desktop UI"]
+    CLI --> Debug["debug surfaces<br/>disasm / xrefs / inventory / triage"]
+    GUI --> Debug
+    Plugin --> CLI
+    Plugin --> GUI
 ```
 
 > [!IMPORTANT]
-> Semantic recovery and structuring belong to the IR layer. CLI, GUI, and report writers consume those results; they should not repair or reinterpret decompiler semantics after the fact.
+> Semantic recovery and structuring belong to the IR layer. CLI, GUI, debugger/trace surfaces, plugins, and report writers consume those results; they should not repair or reinterpret decompiler semantics after the fact.
 
 For deeper visual maps, see [`docs/architecture/DIAGRAMS.md`](./docs/architecture/DIAGRAMS.md).
 
@@ -63,6 +73,9 @@ For deeper visual maps, see [`docs/architecture/DIAGRAMS.md`](./docs/architectur
 | **fission-decompiler** | Orchestration, routing/workers, Rust-Sleigh bridge (re-exports `fission_pcode`) | Workflow layer |
 | **fission-loader** | Binary format parsing, symbols, sections, strings | Binary layer |
 | **fission-signatures** | Function signatures, type signatures, identifier data | Data layer |
+| **fission-dynamic** | Dynamic analysis and debugger-adjacent support | Runtime analysis layer |
+| **fission-ttd** | Time-travel / trace-adjacent support | Trace layer |
+| **fission-plugin** | Plugin contracts, hooks, and runtime extension points | Extension layer |
 | **fission-automation** | Quality lanes, regression testing, telemetry reporting | Quality layer |
 | **fission-cli** | Headless CLI (one-shot subcommands), Rhai `script`, operator `inventory` | Product layer |
 | **fission-tauri** | Desktop GUI, interactive analysis, visualization | Product layer |
@@ -123,6 +136,7 @@ Additional references:
 - 🔄 SLEIGH ConstructTpl lift completeness and compatibility-debt removal
 - 🔄 Advanced data abstraction: structures, pointers, arrays, field access, calling convention, parameter, and local recovery
 - 🔄 Rich type inference, FID, signature, and name recovery
+- 🔄 Dynamic/debugger and TTD-adjacent workflows
 - 🔄 Desktop UI polish and end-user experience
 - 🔄 Additional architecture targets (MIPS, PPC, etc.)
 
@@ -149,7 +163,9 @@ Additional references:
 | [`crates/fission-loader`](./crates/fission-loader) | Binary loading, symbol extraction, section parsing |
 | [`crates/fission-signatures`](./crates/fission-signatures) | Function/type signatures, identifier resolution |
 | [`crates/fission-core`](./crates/fission-core) | Core data structures |
-| [`crates/fission-dynamic`](./crates/fission-dynamic) | Dynamic analysis capabilities |
+| [`crates/fission-dynamic`](./crates/fission-dynamic) | Dynamic analysis and debugger-adjacent support |
+| [`crates/fission-ttd`](./crates/fission-ttd) | Time-travel / trace-adjacent support |
+| [`crates/fission-plugin`](./crates/fission-plugin) | Plugin contracts, hooks, and runtime extension points |
 
 ### Product Surfaces
 
@@ -302,6 +318,7 @@ cargo test --all
 | **Type/Data Abstraction** | Structures, pointers, arrays, field access, calling convention, parameter, and local recovery | Q2 2026 |
 | **Large Function Handling** | >10K instruction functions | Q2 2026 |
 | **Name Recovery** | FID, signatures, symbols, and identifier inference | Q3 2026 |
+| **Dynamic / TTD Workflows** | Debugger-adjacent analysis, trace surfaces, plugin-facing runtime hooks | Q3 2026 |
 | **UI/UX Polish** | Desktop workflow optimization | Q3 2026 |
 | **Additional Targets** | MIPS, PPC, additional architectures | Q4 2026 |
 
@@ -311,6 +328,7 @@ cargo test --all
 - Advanced type/data abstraction patterns in progress
 - FID/name recovery is partial, especially packed `.fidb`, exact hash inputs, and broad program seeker coverage
 - Limited cross-architecture coverage (PE x64 is primary target)
+- Dynamic/debugger and TTD-adjacent workflows are under active development
 - Desktop UI is functional but undergoing refinement
 
 ---
@@ -502,10 +520,10 @@ See [`LICENSE`](./LICENSE) for full text
 If you use Fission in academic work, please cite:
 
 ```bibtex
-@software{fission2024,
+@software{fission2026,
   title={Fission: A Rust-Native Decompilation Framework},
   author={Kim, Sung Joo},
-  year={2024},
+  year={2026},
   url={https://github.com/sjkim1127/Fission}
 }
 ```

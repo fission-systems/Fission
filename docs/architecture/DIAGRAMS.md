@@ -11,15 +11,44 @@ flowchart TD
     Decompiler["fission-decompiler<br/>orchestration owner"]
     Static["fission-static<br/>facts and native preparation owner"]
     Loader["fission-loader<br/>format loading and provenance owner"]
-    Printer["printer / CLI / GUI<br/>consume-only surfaces"]
+    Dynamic["fission-dynamic<br/>runtime/debug analysis support"]
+    TTD["fission-ttd<br/>time-travel / trace-adjacent support"]
+    Plugin["fission-plugin<br/>contracts, hooks, runtime"]
+    Surfaces["CLI / GUI / debugger / reports<br/>consume-only surfaces"]
 
     Loader --> Static
     Static --> Decompiler
     Pcode --> Structuring
     Structuring --> Decompiler
-    Decompiler --> Printer
+    Dynamic --> Decompiler
+    TTD --> Dynamic
+    Plugin --> Decompiler
+    Decompiler --> Surfaces
+    Plugin --> Surfaces
 
-    Printer -. "must not reconstruct semantics" .-> Pcode
+    Surfaces -. "must not reconstruct semantics" .-> Pcode
+```
+
+## End-to-End Product Surface Map
+
+```mermaid
+flowchart BT
+    Binary["input binary<br/>PE / ELF / Mach-O"] --> Loader["fission-loader"]
+    Loader --> Sleigh["fission-sleigh"]
+    Sleigh --> Pcode["fission-pcode<br/>P-code / NIR / HIR / structuring"]
+    Pcode --> Decompiler["fission-decompiler"]
+    Static["fission-static<br/>facts / xrefs / helpers"] --> Decompiler
+    Signatures["fission-signatures"] --> Loader
+    Signatures --> Static
+    Dynamic["fission-dynamic"] --> Decompiler
+    TTD["fission-ttd"] --> Dynamic
+    Plugin["fission-plugin"] --> Decompiler
+    Decompiler --> CLI["fission-cli"]
+    Decompiler --> GUI["fission-tauri"]
+    CLI --> Debug["debug surfaces<br/>disasm / xrefs / inventory / triage"]
+    GUI --> Debug
+    Plugin --> CLI
+    Plugin --> GUI
 ```
 
 ## Loader Pipeline
