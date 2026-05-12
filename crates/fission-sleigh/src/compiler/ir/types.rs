@@ -91,8 +91,7 @@ impl CompiledFrontend {
 
     /// Returns the pointer/address size in bytes for the RAM (default data) space.
     /// This is ATTRIB_SIZE in Ghidra (e.g. 4 for 32-bit, 8 for 64-bit).
-    /// Falls back to 8 (64-bit) when the SLA did not encode an address size.
-    pub fn sla_ram_address_size(&self) -> u32 {
+    pub fn sla_ram_address_size(&self) -> anyhow::Result<u32> {
         self.sla_spaces
             .values()
             .find(|s| {
@@ -100,7 +99,7 @@ impl CompiledFrontend {
             })
             .map(|s| s.addr_size)
             .filter(|&sz| sz > 0)
-            .unwrap_or(8)
+            .ok_or_else(|| anyhow::anyhow!("SLA RAM/default address space size is missing"))
     }
 }
 
@@ -827,6 +826,93 @@ pub struct CompiledSpaceRef {
 
 fn default_word_size() -> u32 {
     1
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn minimal_frontend_with_spaces(spaces: BTreeMap<u64, CompiledSpaceRef>) -> CompiledFrontend {
+        CompiledFrontend {
+            arch: "test".to_string(),
+            default_context: 0,
+            default_context_known_mask: 0,
+            entry_spec: "test.slaspec".to_string(),
+            entry_id: "test".to_string(),
+            include_manifest: Vec::new(),
+            defines: Vec::new(),
+            definitions: Vec::new(),
+            macros: Vec::new(),
+            constructors: Vec::new(),
+            subtables: BTreeMap::new(),
+            language_layout: CompiledLanguageLayout {
+                address_spaces: Vec::new(),
+                registers: Vec::new(),
+                token_fields: Vec::new(),
+                context_fields: Vec::new(),
+                subtables: Vec::new(),
+                display_templates: Vec::new(),
+            },
+            construct_templates: Vec::new(),
+            pcode_ops: Vec::new(),
+            pattern_nodes: Vec::new(),
+            sla_spaces: spaces,
+            sla_unique_space_index: 0,
+            sla_register_space_index: 0,
+            sla_uniqbase: 0,
+            sla_uniqmask: default_sla_uniqmask(),
+        }
+    }
+
+    #[test]
+    fn sla_ram_address_size_fails_closed_when_space_metadata_is_missing() {
+        let frontend = minimal_frontend_with_spaces(BTreeMap::new());
+
+        let error = frontend
+            .sla_ram_address_size()
+            .expect_err("missing SLA RAM metadata must fail closed");
+
+        assert!(
+            error
+                .to_string()
+                .contains("SLA RAM/default address space size is missing"),
+            "{error:#}"
+        );
+    }
+
+    #[test]
+    fn sla_ram_address_size_rejects_zero_sized_default_space() {
+        let mut spaces = BTreeMap::new();
+        spaces.insert(
+            1,
+            CompiledSpaceRef {
+                name: "ram".to_string(),
+                index: 1,
+                word_size: 1,
+                addr_size: 0,
+            },
+        );
+        let frontend = minimal_frontend_with_spaces(spaces);
+
+        assert!(frontend.sla_ram_address_size().is_err());
+    }
+
+    #[test]
+    fn sla_ram_address_size_uses_decoded_sla_space_size() {
+        let mut spaces = BTreeMap::new();
+        spaces.insert(
+            1,
+            CompiledSpaceRef {
+                name: "ram".to_string(),
+                index: 1,
+                word_size: 1,
+                addr_size: 4,
+            },
+        );
+        let frontend = minimal_frontend_with_spaces(spaces);
+
+        assert_eq!(frontend.sla_ram_address_size().expect("ram size"), 4);
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

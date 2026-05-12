@@ -267,6 +267,16 @@ fn legacy_operand_lowering_does_not_synthesize_unknown_subtable() {
 }
 
 #[test]
+fn compiled_frontend_space_helpers_do_not_guess_pointer_width() {
+    let types = include_str!("types.rs");
+
+    assert!(
+        !types.contains(".unwrap_or(8)"),
+        "compiled frontend space helpers must use decoded SLA addr_size, not a 64-bit fallback"
+    );
+}
+
+#[test]
 fn compiled_operand_specs_have_no_compat_token_extraction_variant() {
     let types = include_str!("types.rs");
     let lowering = include_str!("lowering.rs");
