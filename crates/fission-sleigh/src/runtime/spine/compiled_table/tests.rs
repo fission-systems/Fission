@@ -840,6 +840,7 @@ fn compiled_table_policy_symbols_stay_architecture_neutral() {
         manifest_dir.join("src/runtime/spine/compiled_table/template_eval.rs"),
         manifest_dir.join("src/runtime/spine/compiled_table/token.rs"),
         manifest_dir.join("src/runtime/spine/decision.rs"),
+        manifest_dir.join("src/runtime/spine/walker.rs"),
     ];
     for file in files {
         let source = std::fs::read_to_string(&file)
