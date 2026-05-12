@@ -1,0 +1,120 @@
+{
+  "name": "source-semantic-feature-shape-canaries",
+  "suite_tier": "source_semantic_smoke",
+  "gate_mode": "advisory",
+  "notes": "Focused source-owned canary suite for semantic feature shapes: pointer/array side effects, matrix writes, swaps, switch/loop control flow, constants, calls, and global sink effects. Ghidra is intentionally not used.",
+  "entries": [
+    {
+      "id": "x86-64-windows-small-c-test-functions-feature-shapes",
+      "binary_path": "benchmark/binary/x86-64/window/small/binary/c/test_functions.exe",
+      "source_path": "benchmark/binary/x86-64/window/small/source/c/test_functions.c",
+      "language": "c",
+      "tags": [
+        "feature-shape",
+        "smoke",
+        "source-owned",
+        "x86-64",
+        "windows",
+        "c",
+        "pointer-array",
+        "matrix-write",
+        "swap"
+      ],
+      "weight": 1.0,
+      "behavior_cases": {
+        "sum_array": [
+          {"args": [{"int_array": [1, 2, 3, 4, 5]}, 5]},
+          {"args": [{"int_array": [9, -2, 7, 0]}, 4]},
+          {"args": [{"int_array": [5, 6, 7]}, 0]}
+        ],
+        "fill_matrix": [
+          {"args": [{"int_array": [0, 0, 0, 0, 0, 0]}, 2, 3, 7]},
+          {"args": [{"int_array": [1, 1, 1, 1]}, 1, 4, -3]},
+          {"args": [{"int_array": [8, 8, 8, 8]}, 0, 2, 5]}
+        ],
+        "swap": [
+          {"args": [{"int_array": [1]}, {"int_array": [2]}]},
+          {"args": [{"int_array": [-3]}, {"int_array": [7]}]},
+          {"args": [{"int_array": [42]}, {"int_array": [-1]}]}
+        ]
+      }
+    },
+    {
+      "id": "aarch64-baremetal-small-c-control-flow-feature-shapes",
+      "binary_path": "benchmark/binary/AARCH64/baremetal/small/binary/c/control_flow.o",
+      "source_path": "benchmark/binary/AARCH64/baremetal/small/source/c/control_flow.c",
+      "language": "c",
+      "tags": [
+        "feature-shape",
+        "source-owned",
+        "aarch64",
+        "baremetal",
+        "c",
+        "control-flow",
+        "switch",
+        "loop",
+        "branch",
+        "global-sink"
+      ],
+      "weight": 1.0,
+      "behavior_cases": {
+        "run_control_flow": [
+          {
+            "args": [0],
+            "globals": [{"name": "control_sink", "ctype": "unsigned int", "reset": 0}]
+          },
+          {
+            "args": [11],
+            "globals": [{"name": "control_sink", "ctype": "unsigned int", "reset": 0}]
+          },
+          {
+            "args": [100],
+            "globals": [{"name": "control_sink", "ctype": "unsigned int", "reset": 0}]
+          }
+        ]
+      }
+    },
+    {
+      "id": "aarch64-apple-baremetal-small-c-llvm-smoke-feature-shapes",
+      "binary_path": "benchmark/binary/AARCH64_AppleSilicon/baremetal/small/binary/c/llvm_smoke.o",
+      "source_path": "benchmark/binary/AARCH64_AppleSilicon/baremetal/small/source/c/llvm_smoke.c",
+      "language": "c",
+      "tags": [
+        "feature-shape",
+        "source-owned",
+        "aarch64-apple",
+        "macho",
+        "baremetal",
+        "c",
+        "llvm-smoke",
+        "global-sink",
+        "constants"
+      ],
+      "weight": 1.0,
+      "behavior_cases": {
+        "llvm_smoke": [
+          {
+            "args": [0],
+            "globals": [{"name": "llvm_smoke_sink", "ctype": "unsigned long long", "reset": 0}]
+          },
+          {
+            "args": [1],
+            "globals": [{"name": "llvm_smoke_sink", "ctype": "unsigned long long", "reset": 0}]
+          },
+          {
+            "args": [2],
+            "globals": [{"name": "llvm_smoke_sink", "ctype": "unsigned long long", "reset": 0}]
+          },
+          {
+            "args": [5],
+            "globals": [{"name": "llvm_smoke_sink", "ctype": "unsigned long long", "reset": 0}]
+          },
+          {
+            "args": [10],
+            "globals": [{"name": "llvm_smoke_sink", "ctype": "unsigned long long", "reset": 0}]
+          }
+        ]
+      }
+    }
+  ]
+}
