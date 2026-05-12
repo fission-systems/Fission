@@ -174,6 +174,10 @@ fn infer_struct_name_from_offsets(
     }
 }
 
+fn allows_ambient_windows_struct_inference(func: &HirFunction) -> bool {
+    func.is_64bit && func.calling_convention == CallingConvention::WindowsX64
+}
+
 pub(super) fn inferred_aggregate_size(accesses: &BTreeMap<u32, TypedAccessFacts>) -> Option<u32> {
     let mut max_end = 0u32;
     for (&offset, facts) in accesses {
@@ -284,12 +288,16 @@ pub(super) fn collect_typed_fact_inventory(
             candidate_struct_name(facts.object.type_hint.as_deref(), &structures)
                 .map(|name| (Some(name), 0usize))
                 .unwrap_or_else(|| {
-                    infer_struct_name_from_offsets(
-                        &facts.accesses,
-                        inferred_size,
-                        func.is_64bit,
-                        &structures,
-                    )
+                    if allows_ambient_windows_struct_inference(func) {
+                        infer_struct_name_from_offsets(
+                            &facts.accesses,
+                            inferred_size,
+                            func.is_64bit,
+                            &structures,
+                        )
+                    } else {
+                        (None, 0)
+                    }
                 });
         facts.resolved_struct_name = resolved_struct_name.0;
         typed_fact_conflicts += resolved_struct_name.1;
@@ -481,5 +489,49 @@ mod tests {
         let facts = inventory.objects.get("param_1").expect("object facts");
         assert_eq!(facts.resolved_struct_name.as_deref(), Some("RECT"));
         assert!(inventory.store.surface_facts.contains_key("param_1"));
+    }
+
+    #[test]
+    fn typed_fact_inventory_does_not_apply_ambient_windows_shapes_to_aarch64() {
+        let func = HirFunction {
+            name: "anonymous_aarch64_shape".to_string(),
+            params: vec![NirBinding {
+                name: "param_1".to_string(),
+                ty: NirType::Ptr(Box::new(NirType::Unknown)),
+                surface_type_name: None,
+                origin: Some(NirBindingOrigin::ParamIndex(0)),
+                initializer: None,
+            }],
+            body: vec![
+                HirStmt::Expr(HirExpr::Load {
+                    ptr: Box::new(HirExpr::PtrOffset {
+                        base: Box::new(HirExpr::Var("param_1".to_string())),
+                        offset: 0,
+                    }),
+                    ty: NirType::Int {
+                        bits: 32,
+                        signed: false,
+                    },
+                }),
+                HirStmt::Expr(HirExpr::Load {
+                    ptr: Box::new(HirExpr::PtrOffset {
+                        base: Box::new(HirExpr::Var("param_1".to_string())),
+                        offset: 12,
+                    }),
+                    ty: NirType::Int {
+                        bits: 32,
+                        signed: false,
+                    },
+                }),
+            ],
+            calling_convention: CallingConvention::AArch64,
+            is_64bit: true,
+            ..Default::default()
+        };
+
+        let inventory = collect_typed_fact_inventory(&func, false);
+        let facts = inventory.objects.get("param_1").expect("object facts");
+        assert_eq!(facts.resolved_struct_name, None);
+        assert!(!inventory.store.surface_facts.contains_key("param_1"));
     }
 }
