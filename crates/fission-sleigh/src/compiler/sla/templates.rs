@@ -138,25 +138,31 @@ pub(super) fn decode_construct_templates(
                 child.id == sla_format::ELEM_CONSTRUCT_TPL
                     && child.attr_unsigned(sla_format::ATTR_SECTION).is_none()
             });
-            let Some(main_tpl) = main_tpl else {
-                if trace_sla_parse {
-                    eprintln!(
-                    "[sla-parse] missing construct_tpl subtable={subtable_name} slot={local_index} attrs={:?}",
-                    constructor.attrs
-                );
-                }
-                return Err("missing_construct_tpl".to_string());
-            };
-
-            let template = match decode_construct_tpl(main_tpl, &spaces) {
-                Ok(template) => template,
-                Err(err) => {
+            let template = match main_tpl {
+                Some(main_tpl) => match decode_construct_tpl(main_tpl, &spaces) {
+                    Ok(template) => template,
+                    Err(err) => {
+                        if trace_sla_parse {
+                            eprintln!(
+                            "[sla-parse] decode_construct_tpl failed subtable={subtable_name} slot={local_index} source_key={source_key} err={err:#}"
+                        );
+                        }
+                        return Err(format!("decode_construct_tpl:{err:#}"));
+                    }
+                },
+                None => {
                     if trace_sla_parse {
                         eprintln!(
-                        "[sla-parse] decode_construct_tpl failed subtable={subtable_name} slot={local_index} source_key={source_key} err={err:#}"
-                    );
+                            "[sla-parse] empty construct_tpl subtable={subtable_name} slot={local_index} source_key={source_key} attrs={:?}",
+                            constructor.attrs
+                        );
                     }
-                    return Err(format!("decode_construct_tpl:{err:#}"));
+                    CompiledConstructTpl {
+                        constructor_hash: 0,
+                        num_labels: 0,
+                        result: None,
+                        ops: Vec::new(),
+                    }
                 }
             };
 
@@ -420,9 +426,6 @@ pub(super) fn decode_construct_templates(
                 .unwrap_or(local_index);
             let template = match parse_constructor(id, &name, child, slot) {
                 Ok(template) => template,
-                Err(reason) if reason == "missing_construct_tpl" => {
-                    unsupported_sla_constructor_template(id, &name, slot, reason)
-                }
                 Err(reason) => return Err(anyhow!(reason)),
             };
             constructors_by_index.insert(slot, template);

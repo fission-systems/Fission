@@ -69,6 +69,42 @@ fn decodes_real_x86_64_sla_construct_templates() {
 }
 
 #[test]
+fn sla_unimpl_constructors_decode_as_empty_runtime_ready_templates() {
+    let Some(path) = packaged_sla_path("AARCH64", "AARCH64.sla") else {
+        return;
+    };
+    if !path.exists() {
+        return;
+    }
+    let library = load_construct_templates_from_sla(path).expect("decode AARCH64.sla");
+    let instruction = library
+        .native
+        .subtables
+        .get("instruction")
+        .expect("native instruction subtable");
+
+    let unimplemented = [
+        ("AARCH64instructions.sinc", 3987),
+        ("AARCH64instructions.sinc", 3991),
+        ("AARCH64instructions.sinc", 3995),
+        ("AARCH64sve.sinc", 5513),
+    ];
+    for (source_file, line) in unimplemented {
+        let constructor = instruction
+            .constructors
+            .iter()
+            .find(|constructor| {
+                constructor.debug_source_file.ends_with(source_file)
+                    && constructor.debug_source_line == line
+            })
+            .unwrap_or_else(|| panic!("missing unimpl constructor at {source_file}:{line}"));
+        assert_eq!(constructor.decode_status, CompiledSlaDecodeStatus::Decoded);
+        assert!(constructor.construct_tpl.result.is_none());
+        assert!(constructor.construct_tpl.ops.is_empty());
+    }
+}
+
+#[test]
 fn sla_template_decoder_does_not_synthesize_unknown_subtables() {
     let templates = include_str!("templates.rs");
     assert!(
@@ -241,9 +277,9 @@ fn sla_constructor_decode_errors_are_not_broadly_downgraded_to_unsupported_templ
         "constructor decode failures must not be broadly downgraded through unwrap_or_else"
     );
     assert!(
-        templates.contains("reason == \"missing_construct_tpl\"")
+        !templates.contains("reason == \"missing_construct_tpl\"")
             && templates.contains("Err(reason) => return Err(anyhow!(reason))"),
-        "only constructors without ConstructTpl may become explicit unsupported inventory"
+        "constructors without p-code bodies must decode as empty templates; malformed constructors must still fail closed"
     );
 }
 
