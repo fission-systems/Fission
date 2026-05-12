@@ -248,6 +248,7 @@ pub(crate) fn is_materializable_output_opcode(opcode: PcodeOpcode) -> bool {
             | PcodeOpcode::IntSCarry
             | PcodeOpcode::IntSBorrow
             | PcodeOpcode::PopCount
+            | PcodeOpcode::LzCount
             | PcodeOpcode::Call
             | PcodeOpcode::CallInd
             | PcodeOpcode::CallOther

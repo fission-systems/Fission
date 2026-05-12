@@ -90,12 +90,13 @@ pub enum PcodeOpcode {
     Insert,
     Extract,
     PopCount,
+    LzCount,
 
     Unknown,
 }
 
 /// Ghidra OpCode (1-based) to PcodeOpcode. Indices 0..=73; CPUI_COPY=1..CPUI_MAX=74.
-/// Slot 45 unused in Ghidra; CPUI_LZCOUNT=73 maps to Unknown.
+/// Slot 45 is unused in Ghidra.
 #[rustfmt::skip]
 fn ghidra_opcode_to_rust(n: u32) -> PcodeOpcode {
     match n {
@@ -134,7 +135,7 @@ fn ghidra_opcode_to_rust(n: u32) -> PcodeOpcode {
         66 => PcodeOpcode::PtrSub, 67 => PcodeOpcode::SegmentOp,
         68 => PcodeOpcode::CPoolRef, 69 => PcodeOpcode::New,
         70 => PcodeOpcode::Insert, 71 => PcodeOpcode::Extract,
-        72 => PcodeOpcode::PopCount,
+        72 => PcodeOpcode::PopCount, 73 => PcodeOpcode::LzCount,
         _ => PcodeOpcode::Unknown,
     }
 }
@@ -178,7 +179,7 @@ fn rust_opcode_to_ghidra(o: PcodeOpcode) -> u32 {
         PcodeOpcode::PtrSub => 66, PcodeOpcode::SegmentOp => 67,
         PcodeOpcode::CPoolRef => 68, PcodeOpcode::New => 69,
         PcodeOpcode::Insert => 70, PcodeOpcode::Extract => 71,
-        PcodeOpcode::PopCount => 72,
+        PcodeOpcode::PopCount => 72, PcodeOpcode::LzCount => 73,
         PcodeOpcode::Unknown => 0,
     }
 }
@@ -299,6 +300,7 @@ impl PcodeOpcode {
             "syscall" => Self::CallOther,
             "SYSCALL" => Self::CallOther,
             "POPCOUNT" => Self::PopCount,
+            "LZCOUNT" => Self::LzCount,
             _ => Self::Unknown,
         }
     }
@@ -631,7 +633,8 @@ impl PcodeOpcode {
             | Self::FloatCeil
             | Self::FloatFloor
             | Self::FloatRound
-            | Self::PopCount => unary_data,
+            | Self::PopCount
+            | Self::LzCount => unary_data,
             Self::IntEqual
             | Self::IntNotEqual
             | Self::IntSLess
@@ -1217,6 +1220,7 @@ mod tests {
         assert_eq!(PcodeOpcode::parse("SUB"), PcodeOpcode::SubPiece);
         assert_eq!(PcodeOpcode::parse("syscall"), PcodeOpcode::CallOther);
         assert_eq!(PcodeOpcode::parse("ZEXT"), PcodeOpcode::IntZExt);
+        assert_eq!(PcodeOpcode::parse("LZCOUNT"), PcodeOpcode::LzCount);
     }
 
     #[test]
@@ -1306,6 +1310,30 @@ mod tests {
                 .unwrap_err(),
             PcodeValidationError::UnknownOpcode { .. }
         ));
+    }
+
+    #[test]
+    fn lzcount_round_trips_ghidra_opcode_and_validates_as_unary_data() {
+        let input = Varnode {
+            space_id: 1,
+            offset: 1,
+            size: 4,
+            is_constant: false,
+            constant_val: 0,
+        };
+        let output = Varnode {
+            space_id: 1,
+            offset: 2,
+            size: 4,
+            is_constant: false,
+            constant_val: 0,
+        };
+
+        assert_eq!(PcodeOpcode::from_flat_u32(73), PcodeOpcode::LzCount);
+        assert_eq!(PcodeOpcode::LzCount.to_flat_u32(), 73);
+        op(PcodeOpcode::LzCount, Some(output), vec![input])
+            .validate_shape()
+            .expect("LZCOUNT is unary data p-code");
     }
 
     #[test]

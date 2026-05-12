@@ -1708,6 +1708,18 @@ impl<'a> PreviewBuilder<'a> {
                     type_from_size(output.size, false),
                 )
             }
+            PcodeOpcode::LzCount => {
+                let output = op
+                    .output
+                    .as_ref()
+                    .ok_or(MlilPreviewError::UnsupportedExprVarnodeLowering)?;
+                self.lower_intrinsic_call(
+                    op,
+                    visiting,
+                    "__lzcnt",
+                    type_from_size(output.size, false),
+                )
+            }
             PcodeOpcode::Call | PcodeOpcode::CallInd | PcodeOpcode::CallOther => {
                 self.lower_call(op, None, visiting)
             }

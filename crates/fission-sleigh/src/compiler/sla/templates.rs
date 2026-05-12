@@ -849,9 +849,6 @@ fn decode_op_tpl(
 }
 
 fn map_pcode_opcode(code: u32) -> Result<CompiledOpTplOpcode> {
-    if code == 73 {
-        return Ok(CompiledOpTplOpcode::Unsupported);
-    }
     match PcodeOpcode::from_flat_u32(code) {
         PcodeOpcode::Copy => Ok(CompiledOpTplOpcode::Copy),
         PcodeOpcode::Load => Ok(CompiledOpTplOpcode::Load),
@@ -900,6 +897,7 @@ fn map_pcode_opcode(code: u32) -> Result<CompiledOpTplOpcode> {
         PcodeOpcode::PtrSub => Ok(CompiledOpTplOpcode::CrossBuild),
         PcodeOpcode::Indirect => Ok(CompiledOpTplOpcode::DelaySlotIndirect),
         PcodeOpcode::PopCount => Ok(CompiledOpTplOpcode::PopCount),
+        PcodeOpcode::LzCount => Ok(CompiledOpTplOpcode::LzCount),
         PcodeOpcode::Unknown => bail!("unknown raw SLA p-code opcode {code}"),
         _ => Ok(CompiledOpTplOpcode::Unsupported),
     }
@@ -958,7 +956,7 @@ mod tests {
 
         let opcode = map_pcode_opcode(73).expect("known LZCOUNT opcode");
 
-        assert_eq!(opcode, CompiledOpTplOpcode::Unsupported);
+        assert_eq!(opcode, CompiledOpTplOpcode::LzCount);
     }
 }
 

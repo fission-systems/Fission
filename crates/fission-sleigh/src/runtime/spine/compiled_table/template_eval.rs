@@ -524,7 +524,8 @@ impl<'c> CompiledTableEmitter<'c> {
             | CompiledOpTplOpcode::Int2Comp
             | CompiledOpTplOpcode::IntNegate
             | CompiledOpTplOpcode::BoolNegate
-            | CompiledOpTplOpcode::PopCount => {
+            | CompiledOpTplOpcode::PopCount
+            | CompiledOpTplOpcode::LzCount => {
                 let out_tpl = op
                     .output
                     .as_ref()
@@ -1460,6 +1461,7 @@ impl<'c> CompiledTableEmitter<'c> {
             CompiledOpTplOpcode::IntNegate => PcodeOpcode::IntNegate,
             CompiledOpTplOpcode::BoolNegate => PcodeOpcode::BoolNegate,
             CompiledOpTplOpcode::PopCount => PcodeOpcode::PopCount,
+            CompiledOpTplOpcode::LzCount => PcodeOpcode::LzCount,
             _ => bail!("unsupported unary compiled opcode {}", opcode.as_str()),
         })
     }
