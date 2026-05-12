@@ -1425,12 +1425,15 @@ impl<'a> PreviewBuilder<'a> {
         let Some(site) = self.current_lowering_site else {
             return Ok(None);
         };
-        let block = &self.pcode.blocks[site.block_idx];
+        let Some(block) = self.pcode.blocks.get(self.pcode_block_idx(site.block_idx)) else {
+            return Ok(None);
+        };
+        let scan_end = site.op_idx.min(block.ops.len());
         let requested_start = vn.offset;
         let requested_end = requested_start.saturating_add(u64::from(vn.size));
         let mut zeroed_ranges = Vec::new();
 
-        for idx in (0..site.op_idx).rev() {
+        for idx in (0..scan_end).rev() {
             let op = &block.ops[idx];
             let Some(output) = op.output.as_ref() else {
                 continue;
@@ -2051,5 +2054,37 @@ mod tests {
             !code.contains("305419896"),
             "stale full-width definition should not feed the return:\n{code}"
         );
+    }
+
+    #[test]
+    fn partial_register_zero_extend_ignores_stale_virtual_lowering_site_bound() {
+        let mut options = test_options();
+        options.calling_convention = CallingConvention::AArch64;
+        options.format = "ELF64".to_string();
+        options.pe_x64_only = false;
+
+        let w0 = register(0x5000, 4);
+        let pcode = pcode_function(vec![block_at(
+            0x1000,
+            0,
+            vec![op(
+                0,
+                PcodeOpcode::Copy,
+                Some(w0.clone()),
+                vec![constant(1)],
+            )],
+        )]);
+        let mut builder = PreviewBuilder::new(&pcode, &options, None);
+        builder.current_lowering_site = Some(LoweringSite {
+            block_idx: 0,
+            op_idx: 12,
+        });
+        let mut visiting = HashSet::new();
+
+        let lowered = builder
+            .try_lower_zero_extended_partial_register(&w0, &mut visiting)
+            .expect("stale lowering-site op index should not panic");
+
+        assert!(lowered.is_none());
     }
 }
