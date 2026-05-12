@@ -134,9 +134,14 @@ impl<'a> PreviewBuilder<'a> {
             if let Some(defs_in_block) = self.block_defs.get(site.block_idx) {
                 for candidate_key in &candidate_keys {
                     if let Some(def_indices) = defs_in_block.get(candidate_key) {
-                        let prior_count = def_indices.partition_point(|idx| *idx < site.op_idx);
-                        if prior_count > 0 {
+                        let mut prior_count = def_indices.partition_point(|idx| *idx < site.op_idx);
+                        while prior_count > 0 {
                             let def_idx = def_indices[prior_count - 1];
+                            let candidate_op = &self.pcode.blocks[site.block_idx].ops[def_idx];
+                            if Self::is_identity_copy_def(candidate_op) {
+                                prior_count -= 1;
+                                continue;
+                            }
                             let candidate = LoweringSite {
                                 block_idx: site.block_idx,
                                 op_idx: def_idx,
@@ -146,6 +151,7 @@ impl<'a> PreviewBuilder<'a> {
                             {
                                 resolved_site = Some(candidate);
                             }
+                            break;
                         }
                     }
                 }
@@ -163,6 +169,11 @@ impl<'a> PreviewBuilder<'a> {
                             block_idx: site.block_idx,
                             op_idx: site.op_idx,
                         };
+                        let candidate_op =
+                            &self.pcode.blocks[candidate.block_idx].ops[candidate.op_idx];
+                        if Self::is_identity_copy_def(candidate_op) {
+                            return None;
+                        }
                         if candidate.block_idx == scope_site.block_idx {
                             return (candidate.op_idx < scope_site.op_idx).then_some((
                                 usize::MAX,
@@ -186,9 +197,13 @@ impl<'a> PreviewBuilder<'a> {
                 resolved_site = candidate_keys
                     .iter()
                     .filter_map(|candidate_key| self.defs.get(candidate_key))
-                    .map(|def| LoweringSite {
-                        block_idx: def.block_idx,
-                        op_idx: def.op_idx,
+                    .filter_map(|def| {
+                        let site = LoweringSite {
+                            block_idx: def.block_idx,
+                            op_idx: def.op_idx,
+                        };
+                        let op = &self.pcode.blocks[site.block_idx].ops[site.op_idx];
+                        (!Self::is_identity_copy_def(op)).then_some(site)
                     })
                     .max_by_key(|site| (site.block_idx, site.op_idx));
             }
@@ -232,6 +247,15 @@ impl<'a> PreviewBuilder<'a> {
             );
         }
         candidates
+    }
+
+    fn is_identity_copy_def(op: &PcodeOp) -> bool {
+        op.opcode == PcodeOpcode::Copy
+            && op.output.as_ref().is_some_and(|output| {
+                op.inputs
+                    .first()
+                    .is_some_and(|input| VarnodeKey::from(output) == VarnodeKey::from(input))
+            })
     }
 
     fn register_key_covers(candidate: &VarnodeKey, requested: &VarnodeKey) -> bool {
@@ -1119,6 +1143,9 @@ impl<'a> PreviewBuilder<'a> {
         if let Some(expr) = self.loop_exit_materialized_register_binding(vn) {
             return Ok(expr);
         }
+        if let Some(expr) = self.try_lower_zero_extended_partial_register(vn, visiting)? {
+            return Ok(expr);
+        }
         if let Some(expr) = self.try_lower_diamond_select_for_varnode(vn, visiting)? {
             return Ok(expr);
         }
@@ -1385,6 +1412,115 @@ impl<'a> PreviewBuilder<'a> {
             |this| this.lower_def_op(&op, visiting),
         )?;
         Ok(Some(self.project_alias_def_expr(vn, &op, expr)))
+    }
+
+    fn try_lower_zero_extended_partial_register(
+        &mut self,
+        vn: &Varnode,
+        visiting: &mut HashSet<VarnodeKey>,
+    ) -> Result<Option<HirExpr>, MlilPreviewError> {
+        if vn.is_constant || !is_register_space_id(vn.space_id) || vn.size <= 1 {
+            return Ok(None);
+        }
+        let Some(site) = self.current_lowering_site else {
+            return Ok(None);
+        };
+        let block = &self.pcode.blocks[site.block_idx];
+        let requested_start = vn.offset;
+        let requested_end = requested_start.saturating_add(u64::from(vn.size));
+        let mut zeroed_ranges = Vec::new();
+
+        for idx in (0..site.op_idx).rev() {
+            let op = &block.ops[idx];
+            let Some(output) = op.output.as_ref() else {
+                continue;
+            };
+            if output.is_constant
+                || output.space_id != vn.space_id
+                || !is_register_space_id(output.space_id)
+                || !Self::varnode_ranges_overlap(output.offset, output.size, vn.offset, vn.size)
+            {
+                continue;
+            }
+
+            if Self::is_zero_copy(op) {
+                zeroed_ranges.push((
+                    output.offset.max(requested_start),
+                    output
+                        .offset
+                        .saturating_add(u64::from(output.size))
+                        .min(requested_end),
+                ));
+                continue;
+            }
+
+            if output.offset == requested_start && output.size < vn.size {
+                let upper_start = requested_start.saturating_add(u64::from(output.size));
+                if !Self::ranges_cover(upper_start, requested_end, &zeroed_ranges) {
+                    return Ok(None);
+                }
+                let expr = self.with_lowering_site(
+                    LoweringSite {
+                        block_idx: site.block_idx,
+                        op_idx: idx,
+                    },
+                    |this| this.lower_def_op(op, visiting),
+                )?;
+                return Ok(Some(HirExpr::Cast {
+                    ty: type_from_size(vn.size, false),
+                    expr: Box::new(expr),
+                }));
+            }
+
+            return Ok(None);
+        }
+
+        Ok(None)
+    }
+
+    fn is_zero_copy(op: &PcodeOp) -> bool {
+        op.opcode == PcodeOpcode::Copy
+            && op
+                .inputs
+                .first()
+                .is_some_and(|input| input.is_constant && input.constant_val == 0)
+    }
+
+    fn varnode_ranges_overlap(
+        lhs_offset: u64,
+        lhs_size: u32,
+        rhs_offset: u64,
+        rhs_size: u32,
+    ) -> bool {
+        let Some(lhs_end) = lhs_offset.checked_add(u64::from(lhs_size)) else {
+            return false;
+        };
+        let Some(rhs_end) = rhs_offset.checked_add(u64::from(rhs_size)) else {
+            return false;
+        };
+        lhs_offset < rhs_end && rhs_offset < lhs_end
+    }
+
+    fn ranges_cover(start: u64, end: u64, ranges: &[(u64, u64)]) -> bool {
+        if start >= end {
+            return true;
+        }
+        let mut covered_until = start;
+        let mut sorted = ranges.to_vec();
+        sorted.sort_unstable();
+        for (range_start, range_end) in sorted {
+            if range_end <= covered_until {
+                continue;
+            }
+            if range_start > covered_until {
+                return false;
+            }
+            covered_until = range_end;
+            if covered_until >= end {
+                return true;
+            }
+        }
+        false
     }
 
     fn last_alias_def_in_block(
@@ -1765,6 +1901,10 @@ mod tests {
         Varnode::constant(value, 8)
     }
 
+    fn constant_sized(value: i64, size: u32) -> Varnode {
+        Varnode::constant(value, size)
+    }
+
     fn op(
         seq_num: u32,
         opcode: PcodeOpcode,
@@ -1858,6 +1998,58 @@ mod tests {
         assert!(
             code.contains("return tmp_80 ? 20 : 10;"),
             "expected branch-target arm to be the true select arm:\n{code}"
+        );
+    }
+
+    #[test]
+    fn same_block_partial_register_write_with_zeroed_upper_replaces_stale_wide_def() {
+        let mut options = test_options();
+        options.calling_convention = CallingConvention::AArch64;
+        options.format = "ELF64".to_string();
+        options.pe_x64_only = false;
+
+        let s0 = register(0x5000, 4);
+        let h0 = register(0x5000, 2);
+        let upper_h0 = register(0x5002, 2);
+        let w8 = register(0x4040, 4);
+        let pcode = pcode_function(vec![block_at(
+            0x1000,
+            0,
+            vec![
+                op(
+                    0,
+                    PcodeOpcode::Copy,
+                    Some(s0.clone()),
+                    vec![constant(0x1234_5678)],
+                ),
+                op(1, PcodeOpcode::Copy, Some(h0.clone()), vec![h0.clone()]),
+                op(
+                    2,
+                    PcodeOpcode::IntAdd,
+                    Some(h0.clone()),
+                    vec![constant_sized(1, 2), constant_sized(2, 2)],
+                ),
+                op(
+                    3,
+                    PcodeOpcode::Copy,
+                    Some(upper_h0),
+                    vec![constant_sized(0, 2)],
+                ),
+                op(4, PcodeOpcode::Copy, Some(w8.clone()), vec![s0]),
+                op(5, PcodeOpcode::Return, None, vec![w8]),
+            ],
+        )]);
+
+        let code = render_mlil_preview(&pcode, "partial_zero_extend", 0x1000, &options)
+            .expect("render partial zero-extend");
+
+        assert!(
+            code.contains("return 3;"),
+            "expected low partial write to replace stale wide definition:\n{code}"
+        );
+        assert!(
+            !code.contains("305419896"),
+            "stale full-width definition should not feed the return:\n{code}"
         );
     }
 }
