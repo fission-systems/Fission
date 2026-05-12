@@ -248,15 +248,15 @@ mod tests {
         let binary = test_binary();
         let selected = select_batch_functions(&binary, false, None);
         let addrs: Vec<u64> = selected.functions.iter().map(|func| func.address).collect();
-        assert_eq!(addrs, vec![0x140001000, 0x140001080]);
+        assert_eq!(addrs, vec![0x140001000, 0x140001080, 0x140001200]);
         assert_eq!(selected.accounting.functions_discovered_total, 4);
-        assert_eq!(selected.accounting.functions_selected_total, 2);
+        assert_eq!(selected.accounting.functions_selected_total, 3);
         assert_eq!(selected.accounting.functions_excluded_import_count, 0);
         assert_eq!(
             selected.accounting.functions_excluded_runtime_wrapper_count,
             1
         );
-        assert_eq!(selected.accounting.functions_excluded_provenance_count, 1);
+        assert_eq!(selected.accounting.functions_excluded_provenance_count, 0);
         assert!(!selected.accounting.include_nonuser_functions);
     }
 

@@ -9,6 +9,7 @@ pub(crate) struct RenderConfig {
     pub debug_decomp: bool,
     pub debug_decomp_bundle: bool,
     pub requested_address: Option<u64>,
+    pub timeout_ms: Option<u64>,
 }
 
 pub(crate) struct CliRustDecompileRecord {

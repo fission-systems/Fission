@@ -35,6 +35,7 @@ pub(crate) struct FunctionRenderResult {
 fn render_with_rust_sleigh(
     binary: &LoadedBinary,
     func: &FunctionInfo,
+    timeout_ms: Option<u64>,
 ) -> Result<
     (
         String,
@@ -46,7 +47,8 @@ fn render_with_rust_sleigh(
     ),
     FissionError,
 > {
-    let config = fission_decompiler::RustSleighDecompileConfig::cli_defaults();
+    let mut config = fission_decompiler::RustSleighDecompileConfig::cli_defaults();
+    config.nir_timeout_ms = timeout_ms;
     let result = fission_decompiler::decompile_with_rust_sleigh(
         binary,
         func.address,
@@ -127,7 +129,7 @@ pub(crate) fn render_one_function_inner(
 ) -> FunctionRenderResult {
     let start = std::time::Instant::now();
 
-    match render_with_rust_sleigh(binary, func) {
+    match render_with_rust_sleigh(binary, func, config.timeout_ms) {
         Ok((mut code, fell_back, fallback_reason, build_stats, hint_stats, pipeline_evidence)) => {
             let decomp_sec = start.elapsed().as_secs_f64();
 
@@ -254,6 +256,7 @@ fn run_with_functions(
         debug_decomp: cli.debug_decomp,
         debug_decomp_bundle: cli.debug_decomp_bundle.is_some(),
         requested_address: cli.address,
+        timeout_ms: cli.timeout_ms,
     };
     let stack_size_bytes = workers::resolve_decomp_stack_size_bytes();
     let available_parallelism = std::thread::available_parallelism()

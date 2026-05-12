@@ -6,6 +6,7 @@ use fission_loader::loader::FunctionInfo;
 use std::cmp::min;
 use std::sync::{Arc, Mutex, mpsc};
 use std::thread;
+use std::time::Duration;
 
 const DEFAULT_DECOMP_STACK_MB: usize = 32;
 
@@ -35,6 +36,10 @@ pub(crate) fn resolve_decomp_stack_size_bytes() -> usize {
     mb * 1024 * 1024
 }
 
+fn render_timeout_message(timeout_ms: u64) -> String {
+    format!("preview_timeout: Rust-Sleigh render timed out after {timeout_ms}ms")
+}
+
 pub(crate) fn render_one_function_on_large_stack(
     binary: Arc<fission_loader::loader::LoadedBinary>,
     func: &FunctionInfo,
@@ -44,22 +49,69 @@ pub(crate) fn render_one_function_on_large_stack(
     let func_owned = func.clone();
     let func_for_error = func.clone();
     let binary_for_thread = Arc::clone(&binary);
+    let (result_tx, result_rx) = mpsc::sync_channel::<FunctionRenderResult>(1);
 
     let spawn = thread::Builder::new()
         .name(format!("fission-rust-decomp-0x{:x}", func.address))
         .stack_size(stack_size_bytes)
-        .spawn(move || render_one_function_inner(binary_for_thread.as_ref(), &func_owned, config));
+        .spawn(move || {
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                render_one_function_inner(binary_for_thread.as_ref(), &func_owned, config)
+            }))
+            .unwrap_or_else(|_| {
+                make_internal_error_result(
+                    binary_for_thread.as_ref(),
+                    &func_owned,
+                    "worker thread panicked while rendering function".to_string(),
+                    config,
+                )
+            });
+            let _ = result_tx.send(result);
+        });
 
     match spawn {
-        Ok(handle) => match handle.join() {
-            Ok(result) => result,
-            Err(_) => make_internal_error_result(
-                binary.as_ref(),
-                &func_for_error,
-                "worker thread panicked while rendering function".to_string(),
-                config,
-            ),
-        },
+        Ok(handle) => {
+            if let Some(timeout_ms) = config.timeout_ms.filter(|timeout_ms| *timeout_ms > 0) {
+                match result_rx.recv_timeout(Duration::from_millis(timeout_ms)) {
+                    Ok(result) => {
+                        let _ = handle.join();
+                        result
+                    }
+                    Err(mpsc::RecvTimeoutError::Timeout) => make_internal_error_result(
+                        binary.as_ref(),
+                        &func_for_error,
+                        render_timeout_message(timeout_ms),
+                        config,
+                    ),
+                    Err(mpsc::RecvTimeoutError::Disconnected) => {
+                        let _ = handle.join();
+                        make_internal_error_result(
+                            binary.as_ref(),
+                            &func_for_error,
+                            "worker thread exited before returning a render result".to_string(),
+                            config,
+                        )
+                    }
+                }
+            } else {
+                match handle.join() {
+                    Ok(()) => result_rx.recv().unwrap_or_else(|_| {
+                        make_internal_error_result(
+                            binary.as_ref(),
+                            &func_for_error,
+                            "worker thread exited before returning a render result".to_string(),
+                            config,
+                        )
+                    }),
+                    Err(_) => make_internal_error_result(
+                        binary.as_ref(),
+                        &func_for_error,
+                        "worker thread panicked while rendering function".to_string(),
+                        config,
+                    ),
+                }
+            }
+        }
         Err(err) => make_internal_error_result(
             binary.as_ref(),
             &func_for_error,
@@ -142,4 +194,17 @@ pub(crate) fn run_worker_fanout_fanin(
     }
 
     outputs
+}
+
+#[cfg(test)]
+mod tests {
+    use super::render_timeout_message;
+
+    #[test]
+    fn render_timeout_message_includes_exact_budget() {
+        assert_eq!(
+            render_timeout_message(37),
+            "preview_timeout: Rust-Sleigh render timed out after 37ms"
+        );
+    }
 }
