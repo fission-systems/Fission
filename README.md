@@ -46,20 +46,23 @@ flowchart BT
     Signatures["fission-signatures<br/>signature datasets"] --> Loader
     Signatures --> Static
 
+    Script["fission-script<br/>Rhai scripting / read-only automation"] --> CLI
+    Script --> Automation["fission-automation<br/>quality lanes / reporting"]
     Dynamic["fission-dynamic<br/>runtime/debug analysis support"] --> Decompiler
     TTD["fission-ttd<br/>time-travel / trace-adjacent support"] --> Dynamic
     Plugin["fission-plugin<br/>contracts, hooks, runtime"] --> Decompiler
 
     Decompiler --> CLI["fission-cli<br/>headless workflows"]
     Decompiler --> GUI["fission-tauri<br/>desktop UI"]
-    CLI --> Debug["debug surfaces<br/>disasm / xrefs / inventory / triage"]
+    Automation --> CLI
+    CLI --> Debug["debug surfaces<br/>script / disasm / xrefs / inventory / triage"]
     GUI --> Debug
     Plugin --> CLI
     Plugin --> GUI
 ```
 
 > [!IMPORTANT]
-> Semantic recovery and structuring belong to the IR layer. CLI, GUI, debugger/trace surfaces, plugins, and report writers consume those results; they should not repair or reinterpret decompiler semantics after the fact.
+> Semantic recovery and structuring belong to the IR layer. CLI, GUI, scripting, debugger/trace surfaces, plugins, and report writers consume those results; they should not repair or reinterpret decompiler semantics after the fact.
 
 For deeper visual maps, see [`docs/architecture/DIAGRAMS.md`](./docs/architecture/DIAGRAMS.md).
 
@@ -73,6 +76,7 @@ For deeper visual maps, see [`docs/architecture/DIAGRAMS.md`](./docs/architectur
 | **fission-decompiler** | Orchestration, routing/workers, Rust-Sleigh bridge (re-exports `fission_pcode`) | Workflow layer |
 | **fission-loader** | Binary format parsing, symbols, sections, strings | Binary layer |
 | **fission-signatures** | Function signatures, type signatures, identifier data | Data layer |
+| **fission-script** | Embedded Rhai scripting for read-only binary automation | Scripting layer |
 | **fission-dynamic** | Dynamic analysis and debugger-adjacent support | Runtime analysis layer |
 | **fission-ttd** | Time-travel / trace-adjacent support | Trace layer |
 | **fission-plugin** | Plugin contracts, hooks, and runtime extension points | Extension layer |
@@ -162,6 +166,7 @@ Additional references:
 |-------|-----------------|
 | [`crates/fission-loader`](./crates/fission-loader) | Binary loading, symbol extraction, section parsing |
 | [`crates/fission-signatures`](./crates/fission-signatures) | Function/type signatures, identifier resolution |
+| [`crates/fission-script`](./crates/fission-script) | Embedded Rhai scripting for read-only binary automation |
 | [`crates/fission-core`](./crates/fission-core) | Core data structures |
 | [`crates/fission-dynamic`](./crates/fission-dynamic) | Dynamic analysis and debugger-adjacent support |
 | [`crates/fission-ttd`](./crates/fission-ttd) | Time-travel / trace-adjacent support |
