@@ -481,6 +481,23 @@ fn narrow_zero_extended_return_width(
     true
 }
 
+fn strip_zero_extended_casts_to_declared_return_width(func: &mut HirFunction) -> bool {
+    if func.surface_return_type_name.is_some() {
+        return false;
+    }
+    let NirType::Int {
+        bits: return_bits, ..
+    } = &func.return_type
+    else {
+        return false;
+    };
+    if *return_bits >= 64 {
+        return false;
+    }
+    let return_type = func.return_type.clone();
+    strip_zero_extended_return_casts(&mut func.body, &return_type)
+}
+
 /// Apply the type inference pass to a function.
 ///
 /// - Updates `NirBinding.ty` for all `locals` and `params` that have
@@ -538,6 +555,7 @@ pub(crate) fn apply_type_inference_pass(func: &mut HirFunction) -> bool {
     changed |= func.return_type != prev_return_type;
 
     changed |= narrow_zero_extended_return_width(func, &defs, &known_binding_types);
+    changed |= strip_zero_extended_casts_to_declared_return_width(func);
 
     changed
 }
@@ -794,6 +812,55 @@ mod tests {
         assert!(matches!(
             &then_body[0],
             HirStmt::Return(Some(HirExpr::Var(name))) if name == "param_2"
+        ));
+    }
+
+    #[test]
+    fn strips_zero_extended_return_cast_when_return_width_is_already_narrow() {
+        let u32_ty = NirType::Int {
+            bits: 32,
+            signed: false,
+        };
+        let u64_ty = NirType::Int {
+            bits: 64,
+            signed: false,
+        };
+        let mut func = HirFunction {
+            name: "test".to_owned(),
+            params: vec![make_param("param_1", u32_ty.clone())],
+            locals: vec![],
+            return_type: u32_ty,
+            surface_return_type_name: None,
+            body: vec![HirStmt::Return(Some(HirExpr::Cast {
+                ty: u64_ty,
+                expr: Box::new(HirExpr::Binary {
+                    op: HirBinaryOp::Add,
+                    lhs: Box::new(HirExpr::Var("param_1".to_owned())),
+                    rhs: Box::new(HirExpr::Const(
+                        10,
+                        NirType::Int {
+                            bits: 32,
+                            signed: true,
+                        },
+                    )),
+                    ty: NirType::Int {
+                        bits: 32,
+                        signed: false,
+                    },
+                }),
+            }))],
+            ..Default::default()
+        };
+
+        let changed = super::apply_type_inference_pass(&mut func);
+
+        assert!(changed);
+        assert!(matches!(
+            &func.body[0],
+            HirStmt::Return(Some(HirExpr::Binary {
+                op: HirBinaryOp::Add,
+                ..
+            }))
         ));
     }
 
