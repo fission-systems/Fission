@@ -629,7 +629,12 @@ impl<'a> PreviewBuilder<'a> {
             | PcodeOpcode::IntRight
             | PcodeOpcode::IntSRight
             | PcodeOpcode::PopCount
-            | PcodeOpcode::LzCount => MergeBindingCandidateIncomingKind::Arithmetic,
+            | PcodeOpcode::LzCount
+            | PcodeOpcode::FloatAdd
+            | PcodeOpcode::FloatDiv
+            | PcodeOpcode::FloatMult
+            | PcodeOpcode::FloatSub
+            | PcodeOpcode::FloatInt2Float => MergeBindingCandidateIncomingKind::Arithmetic,
             _ => MergeBindingCandidateIncomingKind::Unknown,
         }
     }

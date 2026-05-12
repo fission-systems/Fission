@@ -1667,7 +1667,22 @@ impl<'a> PreviewBuilder<'a> {
             | PcodeOpcode::IntSLessEqual
             | PcodeOpcode::BoolAnd
             | PcodeOpcode::BoolOr
-            | PcodeOpcode::BoolXor => self.lower_binary_op(op, visiting),
+            | PcodeOpcode::BoolXor
+            | PcodeOpcode::FloatAdd
+            | PcodeOpcode::FloatDiv
+            | PcodeOpcode::FloatMult
+            | PcodeOpcode::FloatSub => self.lower_binary_op(op, visiting),
+            PcodeOpcode::FloatInt2Float => {
+                let output = op
+                    .output
+                    .as_ref()
+                    .ok_or(MlilPreviewError::UnsupportedExprVarnodeLowering)?;
+                let expr = self.lower_varnode(&op.inputs[0], visiting)?;
+                Ok(HirExpr::Cast {
+                    ty: float_type_from_size(output.size),
+                    expr: Box::new(expr),
+                })
+            }
             PcodeOpcode::IntNegate | PcodeOpcode::BoolNegate | PcodeOpcode::Int2Comp => {
                 let expr = self.lower_varnode(&op.inputs[0], visiting)?;
                 let output = op
@@ -1863,6 +1878,14 @@ impl<'a> PreviewBuilder<'a> {
             .ok_or(MlilPreviewError::UnsupportedExprVarnodeLowering)?;
         let ty = if is_comparison(op.opcode) {
             NirType::Bool
+        } else if matches!(
+            op.opcode,
+            PcodeOpcode::FloatAdd
+                | PcodeOpcode::FloatDiv
+                | PcodeOpcode::FloatMult
+                | PcodeOpcode::FloatSub
+        ) {
+            float_type_from_size(output.size)
         } else {
             type_from_size(
                 output.size,

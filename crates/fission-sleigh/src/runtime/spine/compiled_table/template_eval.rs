@@ -525,7 +525,8 @@ impl<'c> CompiledTableEmitter<'c> {
             | CompiledOpTplOpcode::IntNegate
             | CompiledOpTplOpcode::BoolNegate
             | CompiledOpTplOpcode::PopCount
-            | CompiledOpTplOpcode::LzCount => {
+            | CompiledOpTplOpcode::LzCount
+            | CompiledOpTplOpcode::FloatInt2Float => {
                 let out_tpl = op
                     .output
                     .as_ref()
@@ -565,7 +566,11 @@ impl<'c> CompiledTableEmitter<'c> {
             | CompiledOpTplOpcode::IntSLessEqual
             | CompiledOpTplOpcode::BoolXor
             | CompiledOpTplOpcode::BoolAnd
-            | CompiledOpTplOpcode::BoolOr => {
+            | CompiledOpTplOpcode::BoolOr
+            | CompiledOpTplOpcode::FloatAdd
+            | CompiledOpTplOpcode::FloatDiv
+            | CompiledOpTplOpcode::FloatMult
+            | CompiledOpTplOpcode::FloatSub => {
                 let out_tpl = op
                     .output
                     .as_ref()
@@ -1462,6 +1467,7 @@ impl<'c> CompiledTableEmitter<'c> {
             CompiledOpTplOpcode::BoolNegate => PcodeOpcode::BoolNegate,
             CompiledOpTplOpcode::PopCount => PcodeOpcode::PopCount,
             CompiledOpTplOpcode::LzCount => PcodeOpcode::LzCount,
+            CompiledOpTplOpcode::FloatInt2Float => PcodeOpcode::FloatInt2Float,
             _ => bail!("unsupported unary compiled opcode {}", opcode.as_str()),
         })
     }
@@ -1493,6 +1499,10 @@ impl<'c> CompiledTableEmitter<'c> {
             CompiledOpTplOpcode::BoolXor => PcodeOpcode::BoolXor,
             CompiledOpTplOpcode::BoolAnd => PcodeOpcode::BoolAnd,
             CompiledOpTplOpcode::BoolOr => PcodeOpcode::BoolOr,
+            CompiledOpTplOpcode::FloatAdd => PcodeOpcode::FloatAdd,
+            CompiledOpTplOpcode::FloatDiv => PcodeOpcode::FloatDiv,
+            CompiledOpTplOpcode::FloatMult => PcodeOpcode::FloatMult,
+            CompiledOpTplOpcode::FloatSub => PcodeOpcode::FloatSub,
             CompiledOpTplOpcode::Piece => PcodeOpcode::Piece,
             CompiledOpTplOpcode::Subpiece => PcodeOpcode::SubPiece,
             _ => bail!("unsupported binary compiled opcode {}", opcode.as_str()),

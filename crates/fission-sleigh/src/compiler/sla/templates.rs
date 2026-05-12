@@ -901,6 +901,11 @@ fn map_pcode_opcode(code: u32) -> Result<CompiledOpTplOpcode> {
         PcodeOpcode::Indirect => Ok(CompiledOpTplOpcode::DelaySlotIndirect),
         PcodeOpcode::PopCount => Ok(CompiledOpTplOpcode::PopCount),
         PcodeOpcode::LzCount => Ok(CompiledOpTplOpcode::LzCount),
+        PcodeOpcode::FloatAdd => Ok(CompiledOpTplOpcode::FloatAdd),
+        PcodeOpcode::FloatDiv => Ok(CompiledOpTplOpcode::FloatDiv),
+        PcodeOpcode::FloatMult => Ok(CompiledOpTplOpcode::FloatMult),
+        PcodeOpcode::FloatSub => Ok(CompiledOpTplOpcode::FloatSub),
+        PcodeOpcode::FloatInt2Float => Ok(CompiledOpTplOpcode::FloatInt2Float),
         PcodeOpcode::Unknown => bail!("unknown raw SLA p-code opcode {code}"),
         _ => Ok(CompiledOpTplOpcode::Unsupported),
     }
@@ -953,7 +958,7 @@ mod tests {
 
     #[test]
     fn map_pcode_opcode_preserves_known_unsupported_cutover_boundary() {
-        let opcode = map_pcode_opcode(47).expect("known float opcode");
+        let opcode = map_pcode_opcode(41).expect("known float comparison opcode");
 
         assert_eq!(opcode, CompiledOpTplOpcode::Unsupported);
 

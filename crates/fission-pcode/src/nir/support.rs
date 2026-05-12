@@ -167,15 +167,19 @@ pub(crate) fn is_comparison(opcode: PcodeOpcode) -> bool {
             | PcodeOpcode::IntLessEqual
             | PcodeOpcode::IntSLess
             | PcodeOpcode::IntSLessEqual
+            | PcodeOpcode::FloatEqual
+            | PcodeOpcode::FloatNotEqual
+            | PcodeOpcode::FloatLess
+            | PcodeOpcode::FloatLessEqual
     )
 }
 
 pub(crate) fn map_binary_op(opcode: PcodeOpcode) -> Result<HirBinaryOp, MlilPreviewError> {
     match opcode {
-        PcodeOpcode::IntAdd => Ok(HirBinaryOp::Add),
-        PcodeOpcode::IntSub => Ok(HirBinaryOp::Sub),
-        PcodeOpcode::IntMult => Ok(HirBinaryOp::Mul),
-        PcodeOpcode::IntDiv | PcodeOpcode::IntSDiv => Ok(HirBinaryOp::Div),
+        PcodeOpcode::IntAdd | PcodeOpcode::FloatAdd => Ok(HirBinaryOp::Add),
+        PcodeOpcode::IntSub | PcodeOpcode::FloatSub => Ok(HirBinaryOp::Sub),
+        PcodeOpcode::IntMult | PcodeOpcode::FloatMult => Ok(HirBinaryOp::Mul),
+        PcodeOpcode::IntDiv | PcodeOpcode::IntSDiv | PcodeOpcode::FloatDiv => Ok(HirBinaryOp::Div),
         PcodeOpcode::IntRem | PcodeOpcode::IntSRem => Ok(HirBinaryOp::Mod),
         PcodeOpcode::IntAnd => Ok(HirBinaryOp::And),
         PcodeOpcode::BoolAnd => Ok(HirBinaryOp::LogicalAnd),
@@ -185,10 +189,10 @@ pub(crate) fn map_binary_op(opcode: PcodeOpcode) -> Result<HirBinaryOp, MlilPrev
         PcodeOpcode::IntLeft => Ok(HirBinaryOp::Shl),
         PcodeOpcode::IntRight => Ok(HirBinaryOp::Shr),
         PcodeOpcode::IntSRight => Ok(HirBinaryOp::Sar),
-        PcodeOpcode::IntEqual => Ok(HirBinaryOp::Eq),
-        PcodeOpcode::IntNotEqual => Ok(HirBinaryOp::Ne),
-        PcodeOpcode::IntLess => Ok(HirBinaryOp::Lt),
-        PcodeOpcode::IntLessEqual => Ok(HirBinaryOp::Le),
+        PcodeOpcode::IntEqual | PcodeOpcode::FloatEqual => Ok(HirBinaryOp::Eq),
+        PcodeOpcode::IntNotEqual | PcodeOpcode::FloatNotEqual => Ok(HirBinaryOp::Ne),
+        PcodeOpcode::IntLess | PcodeOpcode::FloatLess => Ok(HirBinaryOp::Lt),
+        PcodeOpcode::IntLessEqual | PcodeOpcode::FloatLessEqual => Ok(HirBinaryOp::Le),
         PcodeOpcode::IntSLess => Ok(HirBinaryOp::SLt),
         PcodeOpcode::IntSLessEqual => Ok(HirBinaryOp::SLe),
         _ => Err(MlilPreviewError::UnsupportedPattern("binary op")),
@@ -205,6 +209,15 @@ pub(crate) fn type_from_size(size: u32, signed: bool) -> NirType {
             size,
             fields: vec![],
         },
+        _ => NirType::Unknown,
+    }
+}
+
+pub(crate) fn float_type_from_size(size: u32) -> NirType {
+    match size {
+        4 => NirType::Float { bits: 32 },
+        8 => NirType::Float { bits: 64 },
+        10 => NirType::Float { bits: 80 },
         _ => NirType::Unknown,
     }
 }
@@ -241,6 +254,11 @@ pub(crate) fn is_materializable_output_opcode(opcode: PcodeOpcode) -> bool {
             | PcodeOpcode::BoolAnd
             | PcodeOpcode::BoolOr
             | PcodeOpcode::BoolXor
+            | PcodeOpcode::FloatAdd
+            | PcodeOpcode::FloatDiv
+            | PcodeOpcode::FloatMult
+            | PcodeOpcode::FloatSub
+            | PcodeOpcode::FloatInt2Float
             | PcodeOpcode::IntNegate
             | PcodeOpcode::BoolNegate
             | PcodeOpcode::Int2Comp

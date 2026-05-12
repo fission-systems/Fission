@@ -441,6 +441,26 @@ fn generated_runtime_lifts_lea_template_without_compatibility() {
 }
 
 #[test]
+fn generated_runtime_lifts_x86_scalar_float_templates_without_unsupported_cutover() {
+    require_packaged_ghidra_sla!();
+    let compiled = compile_x86_64_frontend().expect("compile frontend");
+
+    let mulsd = [0xf2, 0x0f, 0x59, 0x05, 0xc0, 0x37, 0x00, 0x00];
+    let mul_ops = assert_spec_derived_lift(&compiled, &mulsd, 0x1400_1860);
+    assert!(mul_ops.iter().any(|op| op.opcode == PcodeOpcode::FloatMult));
+
+    let cvtsi2sd = [0xf2, 0x0f, 0x2a, 0xca];
+    let convert_ops = assert_spec_derived_lift(&compiled, &cvtsi2sd, 0x1400_18c8);
+    assert!(convert_ops
+        .iter()
+        .any(|op| op.opcode == PcodeOpcode::FloatInt2Float));
+
+    let divsd = [0xf2, 0x0f, 0x5e, 0xc1];
+    let div_ops = assert_spec_derived_lift(&compiled, &divsd, 0x1400_18cc);
+    assert!(div_ops.iter().any(|op| op.opcode == PcodeOpcode::FloatDiv));
+}
+
+#[test]
 fn packed_context_word_write_matches_ghidra_bit_numbering() {
     let mut context = 0u64;
     set_packed_context_word(&mut context, 0, 1u32 << 31, 1u32 << 31).expect("set context word");
