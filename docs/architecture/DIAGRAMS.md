@@ -11,15 +11,17 @@ flowchart TD
     Decompiler["fission-decompiler<br/>orchestration owner"]
     Static["fission-static<br/>facts and native preparation owner"]
     Loader["fission-loader<br/>format loading and provenance owner"]
+    Script["fission-script<br/>Rhai scripting / read-only automation"]
     Dynamic["fission-dynamic<br/>runtime/debug analysis support"]
     TTD["fission-ttd<br/>time-travel / trace-adjacent support"]
     Plugin["fission-plugin<br/>contracts, hooks, runtime"]
-    Surfaces["CLI / GUI / debugger / reports<br/>consume-only surfaces"]
+    Surfaces["CLI / GUI / scripts / debugger / reports<br/>consume-only surfaces"]
 
     Loader --> Static
     Static --> Decompiler
     Pcode --> Structuring
     Structuring --> Decompiler
+    Script --> Surfaces
     Dynamic --> Decompiler
     TTD --> Dynamic
     Plugin --> Decompiler
@@ -40,12 +42,15 @@ flowchart BT
     Static["fission-static<br/>facts / xrefs / helpers"] --> Decompiler
     Signatures["fission-signatures"] --> Loader
     Signatures --> Static
+    Script["fission-script<br/>Rhai / read-only automation"] --> CLI
+    Script --> Automation["fission-automation"]
     Dynamic["fission-dynamic"] --> Decompiler
     TTD["fission-ttd"] --> Dynamic
     Plugin["fission-plugin"] --> Decompiler
     Decompiler --> CLI["fission-cli"]
     Decompiler --> GUI["fission-tauri"]
-    CLI --> Debug["debug surfaces<br/>disasm / xrefs / inventory / triage"]
+    Automation --> CLI
+    CLI --> Debug["debug surfaces<br/>script / disasm / xrefs / inventory / triage"]
     GUI --> Debug
     Plugin --> CLI
     Plugin --> GUI
