@@ -135,7 +135,7 @@ impl<'a> PreviewBuilder<'a> {
             return true;
         }
         self.binary
-            .is_some_and(|binary| binary.entry_point == address)
+            .is_some_and(|binary| binary.entry_point != 0 && binary.entry_point == address)
     }
 
     pub(super) fn build_hir(

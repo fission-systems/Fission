@@ -1132,6 +1132,82 @@ fn preview_suppresses_entrypoint_register_alias_params() {
 }
 
 #[test]
+fn preview_keeps_params_for_zero_entry_relocatable_function() {
+    let mut options = preview_options();
+    options.calling_convention = CallingConvention::AArch64;
+    options.format = "Mach-O 64".to_string();
+    options.pe_x64_only = false;
+    options.is_64bit = true;
+    options.pointer_size = 8;
+
+    let runtime_reg = |offset, size| Varnode {
+        space_id: RUST_SLEIGH_REGISTER_SPACE_ID,
+        offset,
+        size,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let tmp = uniq(0x500, 8);
+    let func = PcodeFunction {
+        blocks: vec![PcodeBasicBlock {
+            index: 0,
+            start_address: 0,
+            successors: vec![],
+            ops: vec![
+                PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::Copy,
+                    address: 0,
+                    output: Some(tmp.clone()),
+                    inputs: vec![runtime_reg(0, 4)],
+                    asm_mnemonic: Some("MOV X8,X0".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 1,
+                    opcode: PcodeOpcode::Return,
+                    address: 4,
+                    output: None,
+                    inputs: vec![runtime_reg(0x40f0, 8), tmp],
+                    asm_mnemonic: None,
+                },
+            ],
+        }],
+    };
+    let binary =
+        LoadedBinaryBuilder::new("llvm_smoke.o".to_string(), DataBuffer::Heap(vec![0; 64]))
+            .format("Mach-O 64")
+            .entry_point(0)
+            .image_base(0)
+            .is_64bit(true)
+            .add_section(SectionInfo {
+                name: "__text".to_string(),
+                virtual_address: 0,
+                virtual_size: 0x40,
+                file_offset: 0,
+                file_size: 0x40,
+                is_executable: true,
+                is_readable: true,
+                is_writable: false,
+            })
+            .build()
+            .expect("test binary builds");
+
+    let code = render_mlil_preview_with_binary_and_context(
+        &func,
+        "llvm_smoke",
+        0,
+        &options,
+        Some(&binary),
+        None,
+    )
+    .expect("preview render");
+
+    assert!(code.contains("llvm_smoke(uint param_1)"), "{code}");
+    assert!(code.contains("return param_1;"), "{code}");
+    assert!(!code.contains("w0"), "{code}");
+}
+
+#[test]
 fn preview_tolerates_branchind_without_targets() {
     let func = PcodeFunction {
         blocks: vec![PcodeBasicBlock {
