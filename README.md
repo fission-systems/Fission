@@ -32,27 +32,20 @@ License: AGPL-3.0-or-later. Contributions welcome under the CLA in [`CLA.md`](./
 
 ## System Architecture
 
+```mermaid
+flowchart BT
+    Binary["Input Binary<br/>PE / ELF / Mach-O"] --> Loader["fission-loader<br/>formats, sections, symbols"]
+    Loader --> Sleigh["fission-sleigh<br/>decode, lift, CFG skeleton"]
+    Sleigh --> Pcode["fission-pcode<br/>P-code, NIR, HIR, structuring"]
+    Pcode --> Decompiler["fission-decompiler<br/>routing, workers, orchestration"]
+    Decompiler --> CLI["fission-cli<br/>headless workflows"]
+    Decompiler --> GUI["fission-tauri<br/>desktop UI"]
+    Static["fission-static<br/>facts, xrefs, analysis helpers"] --> Decompiler
+    Signatures["fission-signatures<br/>signature datasets"] --> Loader
+    Signatures --> Static
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                    Pseudocode Rendering                     │
-│          (Type-aware formatting, symbol resolution)         │
-└─────────────────────────────────────────────────────────────┘
-                              ↑
-┌─────────────────────────────────────────────────────────────┐
-│              Structured IR (NIR/HIR Layers)                 │
-│      (Control-flow recovery, loop/region detection)         │
-└─────────────────────────────────────────────────────────────┘
-                              ↑
-┌─────────────────────────────────────────────────────────────┐
-│        Canonical IR (P-Code Normalization & Semantics)      │
-│     (SSA form, value numbering, dataflow analysis)          │
-└─────────────────────────────────────────────────────────────┘
-                              ↑
-┌─────────────────────────────────────────────────────────────┐
-│   Instruction Semantics & Lifting (Sleigh-based)            │
-│         (Precise CFG skeleton, lift contracts)              │
-└─────────────────────────────────────────────────────────────┘
-```
+
+The important ownership rule is simple: semantic recovery and structuring belong to the IR layer, while product surfaces consume those results. CLI, GUI, and report writers should not repair or reinterpret decompiler semantics after the fact.
 
 ### Core Components
 
@@ -74,30 +67,24 @@ License: AGPL-3.0-or-later. Contributions welcome under the CLA in [`CLA.md`](./
 
 Fission maintains comprehensive, role-based documentation:
 
-### For Researchers & Architects
-- [`docs/PROJECT_MAP.md`](./docs/PROJECT_MAP.md) — One-page repo layout (crates, `benchmark/`, `utils/`, `vendor/`)
-- [`docs/architecture/ARCHITECTURE.md`](./docs/architecture/ARCHITECTURE.md) — Detailed system design and invariants
-- [`AGENTS.md`](./AGENTS.md) — Contributor workflows and conventions
-- [`benchmark/source_semantic_benchmark/README.md`](./benchmark/source_semantic_benchmark/README.md) — Canonical source-vs-Fission semantic benchmark workflow
-- [`benchmark/source_semantic_benchmark/FEATURE_SHAPE_CANARIES.md`](./benchmark/source_semantic_benchmark/FEATURE_SHAPE_CANARIES.md) — Focused semantic feature-shape canary suite
-- [`benchmark/full_benchmark/README.md`](./benchmark/full_benchmark/README.md) — Ghidra reference/comparison benchmark workflow
+| Start here if you want to... | Read |
+|---|---|
+| understand the repository layout | [`docs/PROJECT_MAP.md`](./docs/PROJECT_MAP.md) |
+| understand architecture and ownership rules | [`docs/architecture/ARCHITECTURE.md`](./docs/architecture/ARCHITECTURE.md) |
+| run the CLI as an external evaluator | [`docs/EVALUATION.md`](./docs/EVALUATION.md) and [`docs/CLI.md`](./docs/CLI.md) |
+| run canonical source-vs-Fission quality checks | [`benchmark/source_semantic_benchmark/README.md`](./benchmark/source_semantic_benchmark/README.md) |
+| run focused semantic shape canaries | [`benchmark/source_semantic_benchmark/FEATURE_SHAPE_CANARIES.md`](./benchmark/source_semantic_benchmark/FEATURE_SHAPE_CANARIES.md) |
+| compare against Ghidra reference workflows | [`benchmark/full_benchmark/README.md`](./benchmark/full_benchmark/README.md) |
+| contribute safely | [`CONTRIBUTING.md`](./CONTRIBUTING.md), [`AGENTS.md`](./AGENTS.md), [`CLA.md`](./CLA.md) |
 
-### For Operators & Users
+Additional references:
+
 - [Wiki Home](https://github.com/sjkim1127/Fission/wiki) — Tutorials, guides, FAQ
-- [`wiki/DOCUMENTATION_HUB.md`](./wiki/DOCUMENTATION_HUB.md) — Wiki vs repository doc split (browse in-tree); mirrors [Documentation Hub](https://github.com/sjkim1127/Fission/wiki/DOCUMENTATION_HUB) on GitHub Wiki
-- [Getting Started](https://github.com/sjkim1127/Fission/wiki/Getting-Started) — Installation and first steps
-- [User Guides](https://github.com/sjkim1127/Fission/wiki/User-Guides) — Workflow documentation
-- [`docs/onboarding/FIRST_30_MINUTES.md`](./docs/onboarding/FIRST_30_MINUTES.md) — Contributor-oriented first-session checklist (repository docs)
-- [`docs/EVALUATION.md`](./docs/EVALUATION.md) — External headless evaluation path for CLI-first users
-- [`docs/CLI.md`](./docs/CLI.md) — Detailed `fission_cli` reference and operator workflow guide (runtime bundle: `FISSION_RESOURCE_ROOT`, global `--resource-root`, `resources status`; see § *Runtime resource bundle*)
-
-### Release & Changelog
-- [`docs/VERSIONING.md`](./docs/VERSIONING.md) — SemVer rules and tagging (`v*.*.*`)
-- [`docs/RELEASE.md`](./docs/RELEASE.md) — Maintainer checklist aligned with CD builds
-- [`THIRD_PARTY.md`](./THIRD_PARTY.md) — Vendored upstream provenance (CLA § third-party)
-- [`SECURITY.md`](./SECURITY.md) — Coordinated disclosure and sample-handling expectations
-- [`docs/changelog/Legacy/CHANGELOG.md`](./docs/changelog/Legacy/CHANGELOG.md) — Historical release log
-- [`docs/changelog/Legacy/`](./docs/changelog/Legacy/) — Archived dated development logs (`YYYYMMDD_Changelog.md`) and legacy rollup
+- [`wiki/DOCUMENTATION_HUB.md`](./wiki/DOCUMENTATION_HUB.md) — Wiki vs repository doc split; mirrors the GitHub Wiki documentation hub
+- [`docs/onboarding/FIRST_30_MINUTES.md`](./docs/onboarding/FIRST_30_MINUTES.md) — Contributor-oriented first-session checklist
+- [`docs/VERSIONING.md`](./docs/VERSIONING.md) and [`docs/RELEASE.md`](./docs/RELEASE.md) — Versioning and release process
+- [`THIRD_PARTY.md`](./THIRD_PARTY.md) and [`SECURITY.md`](./SECURITY.md) — Third-party provenance and disclosure/sample-handling expectations
+- [`docs/changelog/Legacy/`](./docs/changelog/Legacy/) — Archived dated development logs and historical release notes
 
 ---
 
@@ -205,6 +192,26 @@ The compiled binary is available at: `target/release/fission_cli`
 ./target/release/fission_cli inventory function-facts <binary> --json
 ```
 
+### First 10 Minutes
+
+After building `fission_cli`, run one manual CLI check and one source-semantic canary:
+
+```bash
+# 1. Inspect a checked-in sample binary
+./target/release/fission_cli info \
+  benchmark/binary/x86-64/window/small/binary/c/test_functions.exe
+
+# 2. Run the focused source-semantic feature-shape canary
+python3 benchmark/source_semantic_benchmark/run_source_semantic_benchmark.py \
+  --manifest benchmark/source_semantic_benchmark/manifests/feature_shape_canaries.json \
+  --fission-bin target/release/fission_cli \
+  --timeout-sec 45 \
+  --jobs 1 \
+  --output-dir benchmark/artifacts/source_semantic_benchmark/feature-shape-canaries-latest
+```
+
+Open `benchmark/artifacts/source_semantic_benchmark/feature-shape-canaries-latest/source_semantic_summary.md` for the first quality snapshot.
+
 Legacy flat invocations still work for one transition period, but canonical
 usage is now subcommand-based.
 
@@ -306,6 +313,20 @@ cargo test --all
 
 ### Source Semantic Benchmark
 
+```mermaid
+flowchart LR
+    Source["Checked-in source"] --> Extract["Source function extraction"]
+    Binary["Checked-in binary"] --> Fission["fission_cli list/decomp"]
+    Extract --> StaticCompare["Static fingerprint comparison"]
+    Fission --> StaticCompare
+    Extract --> Behavior["Dynamic behavior harness"]
+    Fission --> Behavior
+    StaticCompare --> Rows["source_semantic_rows.json"]
+    Behavior --> Rows
+    Rows --> Summary["summary JSON / Markdown"]
+    Summary --> Triage["debug commands<br/>decomp / disasm / xrefs / inventory"]
+```
+
 For canonical decompilation-quality analysis against checked-in original source:
 
 ```bash
@@ -332,6 +353,15 @@ Use the feature-shape canary before the full source-owned corpus when you want a
 fast first-pass answer to: "did this change break a recognizable semantic
 shape?" For triage-heavy runs, see
 [`benchmark/source_semantic_benchmark/FEATURE_SHAPE_CANARIES.md`](./benchmark/source_semantic_benchmark/FEATURE_SHAPE_CANARIES.md).
+
+### Which Benchmark Should I Run?
+
+| Suite | Use when | Oracle | Expected cost |
+|---|---|---|---|
+| `smoke_windows_small_c.json` | fastest source-semantic sanity check | checked-in source | low |
+| `feature_shape_canaries.json` | checking recognizable semantic shapes | checked-in source + behavior cases | low/medium |
+| `source_owned_all.json` | broad source-owned corpus validation | checked-in source | medium/high |
+| full benchmark | investigating Ghidra reference parity | Ghidra comparison | high |
 
 Canonical benchmark config and artifacts now live under:
 
