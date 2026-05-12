@@ -79,6 +79,7 @@ Fission maintains comprehensive, role-based documentation:
 - [`docs/architecture/ARCHITECTURE.md`](./docs/architecture/ARCHITECTURE.md) — Detailed system design and invariants
 - [`AGENTS.md`](./AGENTS.md) — Contributor workflows and conventions
 - [`benchmark/source_semantic_benchmark/README.md`](./benchmark/source_semantic_benchmark/README.md) — Canonical source-vs-Fission semantic benchmark workflow
+- [`benchmark/source_semantic_benchmark/FEATURE_SHAPE_CANARIES.md`](./benchmark/source_semantic_benchmark/FEATURE_SHAPE_CANARIES.md) — Focused semantic feature-shape canary suite
 - [`benchmark/full_benchmark/README.md`](./benchmark/full_benchmark/README.md) — Ghidra reference/comparison benchmark workflow
 
 ### For Operators & Users
@@ -121,6 +122,7 @@ Fission maintains comprehensive, role-based documentation:
 - ✅ Rust-native decompilation pipeline
 - ✅ Quality assurance and regression testing
 - ✅ Automated source-semantic benchmarking against checked-in original source
+- ✅ Focused feature-shape canaries for pointer/array, control-flow, constants, calls, and global side effects
 - ✅ Deterministic, reproducible output
 
 **In Active Development:**
@@ -275,7 +277,7 @@ cargo test --all
 
 - **Decompilation Pipeline**: Full Rust-native NIR/HIR path with deterministic output
 - **Command-Line Interface**: One-shot subcommands with JSON/inventory surfaces and optional Rhai `script` (no interactive REPL or TUI in `fission-cli`)
-- **Quality Assurance**: Integrated regression testing and automated benchmarking
+- **Quality Assurance**: Integrated regression testing, source-semantic benchmarking, and focused feature-shape canaries
 - **Binary Support**: PE x64 (primary), ELF x64/ARM64, Mach-O (experimental)
 - **Telemetry**: Built-in metrics, statistics, and CI/CD reporting
 
@@ -312,6 +314,24 @@ python3 benchmark/source_semantic_benchmark/run_source_semantic_benchmark.py \
   --fission-bin target/release/fission_cli \
   --output-dir benchmark/artifacts/source_semantic_benchmark/smoke-latest
 ```
+
+For a smaller advisory canary that focuses on semantic feature shapes such as
+pointer/array side effects, matrix writes, swaps, switch/loop control flow,
+constants, calls, and global sink behavior:
+
+```bash
+python3 benchmark/source_semantic_benchmark/run_source_semantic_benchmark.py \
+  --manifest benchmark/source_semantic_benchmark/manifests/feature_shape_canaries.json \
+  --fission-bin target/release/fission_cli \
+  --timeout-sec 45 \
+  --jobs 1 \
+  --output-dir benchmark/artifacts/source_semantic_benchmark/feature-shape-canaries-latest
+```
+
+Use the feature-shape canary before the full source-owned corpus when you want a
+fast first-pass answer to: "did this change break a recognizable semantic
+shape?" For triage-heavy runs, see
+[`benchmark/source_semantic_benchmark/FEATURE_SHAPE_CANARIES.md`](./benchmark/source_semantic_benchmark/FEATURE_SHAPE_CANARIES.md).
 
 Canonical benchmark config and artifacts now live under:
 
