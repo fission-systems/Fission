@@ -424,6 +424,63 @@ fn preview_call_target_refs_resolve_direct_symbol_call_target() {
 }
 
 #[test]
+fn preview_call_target_refs_resolve_zero_address_direct_symbol_call_target() {
+    let func = PcodeFunction {
+        blocks: vec![PcodeBasicBlock {
+            index: 0,
+            start_address: 0,
+            successors: vec![],
+            ops: vec![
+                PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::Call,
+                    address: 0x20,
+                    output: None,
+                    inputs: vec![cst(0, 8)],
+                    asm_mnemonic: Some("BL 0x0".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 1,
+                    opcode: PcodeOpcode::Return,
+                    address: 0x24,
+                    output: None,
+                    inputs: vec![cst(1, 8)],
+                    asm_mnemonic: Some("RET".to_string()),
+                },
+            ],
+        }],
+    };
+
+    let mut context = PreviewTypeContext::default();
+    context.call_target_refs.insert(
+        0,
+        CallTargetRef {
+            address: Some(0),
+            symbol: "recursive_fib".to_string(),
+            provenance: CallTargetProvenance::Direct,
+            edge_kind: CallEdgeKind::Direct,
+            confidence: 224,
+        },
+    );
+
+    let rendered = render_mlil_preview_with_context(
+        &func,
+        "recursive_fib",
+        0,
+        &preview_options(),
+        Some(&context),
+    )
+    .expect("preview render should succeed");
+    let stats = take_last_nir_build_stats().expect("build stats");
+
+    assert!(rendered.contains("recursive_fib()"), "{rendered}");
+    assert!(!rendered.contains("sub_0()"), "{rendered}");
+    assert_eq!(stats.call_target_exact_index_hit_count, 1);
+    assert_eq!(stats.call_target_direct_symbol_resolved_count, 1);
+    assert_eq!(stats.call_target_unresolved_sub_fallback_count, 0);
+}
+
+#[test]
 fn preview_call_target_missing_context_keeps_sub_fallback() {
     let func = PcodeFunction {
         blocks: vec![PcodeBasicBlock {

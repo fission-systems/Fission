@@ -9,6 +9,7 @@ use fission_loader::loader::LoadedBinary;
 use fission_loader::loader::types::DwarfLocation;
 use fission_signatures::SIGNATURE_RESOURCES;
 use fission_signatures::win_types::WindowsStructures;
+use fission_static::analysis::decomp::facts::FactProvenance;
 use fission_static::analysis::decomp::facts::FactStore;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
@@ -35,14 +36,17 @@ pub(crate) fn build_nir_type_context(
     }
 
     for (resolved_address, fact) in fact_store.iter_resolved_name_facts() {
-        if resolved_address == 0 || fact.name.is_empty() {
+        if matches!(fact.provenance, FactProvenance::ImportExport) {
+            continue;
+        }
+        if fact.name.is_empty() {
             continue;
         }
         index.add(resolved_address, &fact.name, CandidateClass::Fact);
     }
 
     for func in &binary.functions {
-        if func.address == 0 || func.name.is_empty() {
+        if func.name.is_empty() {
             continue;
         }
         if func.is_import {
@@ -66,7 +70,7 @@ pub(crate) fn build_nir_type_context(
     }
 
     for (resolved_address, name) in &binary.inner().global_symbols {
-        if *resolved_address == 0 || name.is_empty() {
+        if name.is_empty() {
             continue;
         }
         index.add(*resolved_address, name, CandidateClass::Global);
@@ -227,6 +231,7 @@ fn is_generic_loader_symbol(name: &str) -> bool {
     is_generic_symbol_with_prefix(stripped, "sub_")
         || is_generic_symbol_with_prefix(stripped, "FUN_0x")
         || is_generic_symbol_with_prefix(stripped, "FUN_")
+        || is_generic_symbol_with_prefix(stripped, "ltmp")
         || is_generic_symbol_with_prefix(stripped, "tmp_")
 }
 
@@ -297,9 +302,6 @@ fn collect_direct_internal_callee_targets(pcode: &PcodeFunction) -> BTreeSet<u64
             let Some(target) = op.inputs.first() else {
                 continue;
             };
-            if target.offset == 0 {
-                continue;
-            }
             callees.insert(target.offset);
         }
     }

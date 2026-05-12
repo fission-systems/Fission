@@ -801,9 +801,6 @@ impl<'a> PreviewBuilder<'a> {
         } else {
             return None;
         };
-        if addr == 0 {
-            return None;
-        }
         if let Some(name) = self.resolve_call_target_by_address(addr) {
             if matches!(op.opcode, PcodeOpcode::CallInd) {
                 self.call_target_indirect_const_resolved_count += 1;

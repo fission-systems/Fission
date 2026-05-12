@@ -388,6 +388,40 @@ mod tests {
     }
 
     #[test]
+    fn zero_address_internal_function_gets_exact_call_target_identity() {
+        let binary = LoadedBinaryBuilder::new("sample.o".to_string(), DataBuffer::Heap(vec![]))
+            .format("Mach-O 64")
+            .is_64bit(true)
+            .add_function(FunctionInfo {
+                name: "recursive_fib".to_string(),
+                address: 0,
+                is_export: true,
+                is_import: false,
+                ..Default::default()
+            })
+            .add_function(FunctionInfo {
+                name: "ltmp0".to_string(),
+                address: 0,
+                is_export: true,
+                is_import: false,
+                ..Default::default()
+            })
+            .build()
+            .expect("build test binary");
+        let facts = FactStore::from_binary(&binary);
+
+        let context = build_nir_type_context_from_facts(&binary, &facts, 0);
+        let target = context
+            .call_target_refs
+            .get(&0)
+            .expect("zero-address function target ref");
+
+        assert_eq!(target.symbol, "recursive_fib");
+        assert_eq!(target.provenance, CallTargetProvenance::Export);
+        assert_eq!(target.edge_kind, CallEdgeKind::Reference);
+    }
+
+    #[test]
     fn equal_rank_export_thunk_conflict_is_ambiguous() {
         let binary = LoadedBinaryBuilder::new("sample.dll".to_string(), DataBuffer::Heap(vec![]))
             .format("PE")
