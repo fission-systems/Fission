@@ -85,20 +85,17 @@ impl MachoLoader {
                     }
                 }
 
-                // Determine if segment is executable from protection flags
-                // VM_PROT_EXECUTE = 0x04
-                let seg_is_executable = (seg.initprot & 0x04) != 0;
-
                 // Process Sections
                 let mut section_offset = cmd_start + SegmentCommand64::SIZE;
                 for _ in 0..seg.nsects {
                     let sect = Section64::parse(&reader, section_offset)?;
                     section_offset += Section64::SIZE;
 
-                    // S_ATTR_PURE_INSTRUCTIONS = 0x80000000
-                    // S_ATTR_SOME_INSTRUCTIONS = 0x00000400
-                    let sect_has_instructions = (sect.flags & 0x80000400) != 0;
-                    let is_executable = seg_is_executable || sect_has_instructions;
+                    // In relocatable Mach-O objects, the segment can have execute
+                    // protection even when data sections such as __common live in
+                    // the same segment. Section instruction flags are the code
+                    // ownership signal Ghidra's symbol classifiers rely on.
+                    let is_executable = macho_section_has_instructions(sect.flags);
                     section_exec_map.push(is_executable);
 
                     sections_info.push(SectionInfo {
@@ -241,6 +238,8 @@ impl MachoLoader {
             }
         }
 
+        infer_macho_function_sizes(&mut functions_info, &sections_info);
+
         LoadedBinaryBuilder::new(path, data)
             .format("Mach-O 64")
             .architecture(architecture)
@@ -282,13 +281,11 @@ impl MachoLoader {
                     text_segment_vmaddr = seg.vmaddr as u64;
                     image_base = image_base.min(seg.vmaddr as u64);
                 }
-                let seg_is_executable = (seg.initprot & 0x04) != 0;
                 let mut section_offset = cmd_start + SegmentCommand32::SIZE;
                 for _ in 0..seg.nsects {
                     let sect = Section32::parse(&reader, section_offset)?;
                     section_offset += Section32::SIZE;
-                    let sect_has_instructions = (sect.flags & 0x80000400) != 0;
-                    let is_executable = seg_is_executable || sect_has_instructions;
+                    let is_executable = macho_section_has_instructions(sect.flags);
                     section_exec_map.push(is_executable);
                     sections_info.push(SectionInfo {
                         name: extract_fixed_string(&sect.sectname),
@@ -342,6 +339,8 @@ impl MachoLoader {
             );
         }
 
+        infer_macho_function_sizes(&mut functions_info, &sections_info);
+
         LoadedBinaryBuilder::new(path, data)
             .format("Mach-O 32")
             .architecture(architecture)
@@ -380,7 +379,7 @@ impl MachoLoader {
                 // If n_type & N_STAB == 0 && (n_type & N_EXT)
                 // (n_type & N_TYPE) == N_SECT (0x0e)
                 let n_type = nlist.n_type & 0x0e;
-                if n_type == 0x0e && nlist.n_value != 0 {
+                if n_type == 0x0e {
                     // Only keep symbols that belong to executable sections.
                     // n_sect is 1-based across all sections in Mach-O.
                     let sect_index = nlist.n_sect as usize;
@@ -520,7 +519,7 @@ impl MachoLoader {
                 break;
             };
             let n_type = nlist.n_type & 0x0e;
-            if n_type != 0x0e || nlist.n_value == 0 {
+            if n_type != 0x0e {
                 continue;
             }
             let sect_index = nlist.n_sect as usize;
@@ -668,9 +667,54 @@ fn normalize_macho_symbol_name(name: &str) -> String {
     name.strip_prefix('_').unwrap_or(name).to_string()
 }
 
+fn macho_section_has_instructions(flags: u32) -> bool {
+    const S_ATTR_PURE_INSTRUCTIONS: u32 = 0x8000_0000;
+    const S_ATTR_SOME_INSTRUCTIONS: u32 = 0x0000_0400;
+    (flags & (S_ATTR_PURE_INSTRUCTIONS | S_ATTR_SOME_INSTRUCTIONS)) != 0
+}
+
+fn infer_macho_function_sizes(functions: &mut [FunctionInfo], sections: &[SectionInfo]) {
+    let mut code_starts: Vec<u64> = functions
+        .iter()
+        .filter(|function| !function.is_import && function.kind.as_deref() == Some("code"))
+        .map(|function| function.address)
+        .collect();
+    code_starts.sort_unstable();
+    code_starts.dedup();
+
+    for function in functions.iter_mut() {
+        if function.size != 0 || function.is_import || function.kind.as_deref() != Some("code") {
+            continue;
+        }
+        let Some(section) = sections.iter().find(|section| {
+            section.is_executable && section_contains_addr(section, function.address)
+        }) else {
+            continue;
+        };
+        let section_end = section.virtual_address.saturating_add(section.virtual_size);
+        let next_start = code_starts
+            .iter()
+            .copied()
+            .find(|start| *start > function.address && *start < section_end)
+            .unwrap_or(section_end);
+        function.size = next_start.saturating_sub(function.address);
+    }
+}
+
+fn section_contains_addr(section: &SectionInfo, address: u64) -> bool {
+    let section_end = section.virtual_address.saturating_add(section.virtual_size);
+    address >= section.virtual_address && address < section_end
+}
+
 #[cfg(test)]
 mod tests {
-    use super::normalize_macho_symbol_name;
+    use super::{
+        MachoLoader, infer_macho_function_sizes, macho_section_has_instructions,
+        normalize_macho_symbol_name,
+    };
+    use crate::loader::macho::schema::SymtabCommand;
+    use crate::loader::reader::Endian;
+    use crate::loader::types::{FunctionInfo, SectionInfo};
 
     #[test]
     fn normalize_macho_symbol_name_strips_plain_c_abi_underscore() {
@@ -681,12 +725,133 @@ mod tests {
     #[test]
     fn normalize_macho_symbol_name_preserves_mangled_and_runtime_prefixes() {
         assert_eq!(normalize_macho_symbol_name("_Z3fooi"), "_Z3fooi");
-        assert_eq!(normalize_macho_symbol_name("_$s4main3fooyyF"), "_$s4main3fooyyF");
+        assert_eq!(
+            normalize_macho_symbol_name("_$s4main3fooyyF"),
+            "_$s4main3fooyyF"
+        );
         assert_eq!(
             normalize_macho_symbol_name("_OBJC_CLASS_$_Widget"),
             "_OBJC_CLASS_$_Widget"
         );
-        assert_eq!(normalize_macho_symbol_name("__mh_execute_header"), "__mh_execute_header");
+        assert_eq!(
+            normalize_macho_symbol_name("__mh_execute_header"),
+            "__mh_execute_header"
+        );
+    }
+
+    #[test]
+    fn macho_executability_uses_section_instruction_flags_not_segment_protection() {
+        assert!(macho_section_has_instructions(0x8000_0400));
+        assert!(macho_section_has_instructions(0x0000_0400));
+        assert!(!macho_section_has_instructions(0x0000_0001));
+    }
+
+    #[test]
+    fn macho_symtab_keeps_zero_text_symbol_and_rejects_common_data_symbol() {
+        let mut data = Vec::new();
+        let symoff = 0u32;
+        let nsyms = 2u32;
+        let stroff = 32u32;
+
+        push_nlist64(&mut data, 1, 0x0f, 1, 0);
+        push_nlist64(&mut data, 13, 0x0f, 2, 0xa0);
+        data.extend_from_slice(b"\0_llvm_smoke\0_llvm_smoke_sink\0");
+
+        let symtab = SymtabCommand {
+            cmd: 0,
+            cmdsize: 0,
+            symoff,
+            nsyms,
+            stroff,
+            strsize: (data.len() as u32).saturating_sub(stroff),
+        };
+        let mut functions = Vec::<FunctionInfo>::new();
+
+        MachoLoader::parse_symbols_64(
+            &data,
+            &symtab,
+            Endian::Little,
+            &[true, false],
+            &mut functions,
+        );
+
+        assert_eq!(functions.len(), 1, "{functions:?}");
+        assert_eq!(functions[0].name, "llvm_smoke");
+        assert_eq!(functions[0].address, 0);
+        assert_eq!(functions[0].source_section.as_deref(), Some("section_1"));
+    }
+
+    #[test]
+    fn macho_function_sizes_use_next_code_symbol_or_executable_section_end() {
+        let mut functions = vec![
+            function("first", 0x0),
+            function("second", 0x44),
+            FunctionInfo {
+                name: "sink".to_string(),
+                address: 0xa0,
+                size: 0,
+                is_export: true,
+                is_import: false,
+                origin: Some("macho-symtab".to_string()),
+                kind: Some("data".to_string()),
+                source_section: Some("section_2".to_string()),
+                external_library: None,
+                is_thunk_like: false,
+                thunk_target: None,
+            },
+        ];
+        let sections = vec![
+            section("__text", 0x0, 0x9c, true),
+            section("__common", 0xa0, 0x8, false),
+        ];
+
+        infer_macho_function_sizes(&mut functions, &sections);
+
+        assert_eq!(functions[0].size, 0x44);
+        assert_eq!(functions[1].size, 0x58);
+        assert_eq!(functions[2].size, 0);
+    }
+
+    fn push_nlist64(data: &mut Vec<u8>, n_strx: u32, n_type: u8, n_sect: u8, n_value: u64) {
+        data.extend_from_slice(&n_strx.to_le_bytes());
+        data.push(n_type);
+        data.push(n_sect);
+        data.extend_from_slice(&0u16.to_le_bytes());
+        data.extend_from_slice(&n_value.to_le_bytes());
+    }
+
+    fn function(name: &str, address: u64) -> FunctionInfo {
+        FunctionInfo {
+            name: name.to_string(),
+            address,
+            size: 0,
+            is_export: true,
+            is_import: false,
+            origin: Some("macho-symtab".to_string()),
+            kind: Some("code".to_string()),
+            source_section: Some("section_1".to_string()),
+            external_library: None,
+            is_thunk_like: false,
+            thunk_target: None,
+        }
+    }
+
+    fn section(
+        name: &str,
+        virtual_address: u64,
+        virtual_size: u64,
+        is_executable: bool,
+    ) -> SectionInfo {
+        SectionInfo {
+            name: name.to_string(),
+            virtual_address,
+            virtual_size,
+            file_offset: 0,
+            file_size: virtual_size,
+            is_executable,
+            is_readable: true,
+            is_writable: false,
+        }
     }
 }
 
