@@ -815,7 +815,7 @@ fn decode_op_tpl(
     let opcode_code = element
         .attr_unsigned(sla_format::ATTR_CODE)
         .ok_or_else(|| anyhow!("op_tpl missing opcode"))?;
-    let opcode = map_pcode_opcode(opcode_code as u32);
+    let opcode = map_pcode_opcode(opcode_code as u32)?;
     let mut children = element.children.iter();
     let output = match children.next() {
         Some(child) if child.id == sla_format::ELEM_NULL => None,
@@ -848,56 +848,60 @@ fn decode_op_tpl(
     })
 }
 
-fn map_pcode_opcode(code: u32) -> CompiledOpTplOpcode {
+fn map_pcode_opcode(code: u32) -> Result<CompiledOpTplOpcode> {
+    if code == 73 {
+        return Ok(CompiledOpTplOpcode::Unsupported);
+    }
     match PcodeOpcode::from_flat_u32(code) {
-        PcodeOpcode::Copy => CompiledOpTplOpcode::Copy,
-        PcodeOpcode::Load => CompiledOpTplOpcode::Load,
-        PcodeOpcode::Store => CompiledOpTplOpcode::Store,
-        PcodeOpcode::Branch => CompiledOpTplOpcode::Branch,
-        PcodeOpcode::BranchInd => CompiledOpTplOpcode::BranchInd,
-        PcodeOpcode::CBranch => CompiledOpTplOpcode::CBranch,
-        PcodeOpcode::Call => CompiledOpTplOpcode::Call,
-        PcodeOpcode::CallInd => CompiledOpTplOpcode::CallInd,
-        PcodeOpcode::CallOther => CompiledOpTplOpcode::CallOther,
-        PcodeOpcode::Return => CompiledOpTplOpcode::Return,
-        PcodeOpcode::IntEqual => CompiledOpTplOpcode::IntEqual,
-        PcodeOpcode::IntNotEqual => CompiledOpTplOpcode::IntNotEqual,
-        PcodeOpcode::IntSLess => CompiledOpTplOpcode::IntSLess,
-        PcodeOpcode::IntSLessEqual => CompiledOpTplOpcode::IntSLessEqual,
-        PcodeOpcode::IntLess => CompiledOpTplOpcode::IntLess,
-        PcodeOpcode::IntLessEqual => CompiledOpTplOpcode::IntLessEqual,
-        PcodeOpcode::IntZExt => CompiledOpTplOpcode::IntZExt,
-        PcodeOpcode::IntSExt => CompiledOpTplOpcode::IntSExt,
-        PcodeOpcode::IntAdd => CompiledOpTplOpcode::IntAdd,
-        PcodeOpcode::IntSub => CompiledOpTplOpcode::IntSub,
-        PcodeOpcode::IntCarry => CompiledOpTplOpcode::IntCarry,
-        PcodeOpcode::IntSCarry => CompiledOpTplOpcode::IntSCarry,
-        PcodeOpcode::IntSBorrow => CompiledOpTplOpcode::IntSBorrow,
-        PcodeOpcode::Int2Comp => CompiledOpTplOpcode::Int2Comp,
-        PcodeOpcode::IntNegate => CompiledOpTplOpcode::IntNegate,
-        PcodeOpcode::IntXor => CompiledOpTplOpcode::IntXor,
-        PcodeOpcode::IntAnd => CompiledOpTplOpcode::IntAnd,
-        PcodeOpcode::IntOr => CompiledOpTplOpcode::IntOr,
-        PcodeOpcode::IntLeft => CompiledOpTplOpcode::IntLeft,
-        PcodeOpcode::IntRight => CompiledOpTplOpcode::IntRight,
-        PcodeOpcode::IntSRight => CompiledOpTplOpcode::IntSRight,
-        PcodeOpcode::IntMult => CompiledOpTplOpcode::IntMult,
-        PcodeOpcode::IntDiv => CompiledOpTplOpcode::IntDiv,
-        PcodeOpcode::IntSDiv => CompiledOpTplOpcode::IntSDiv,
-        PcodeOpcode::IntRem => CompiledOpTplOpcode::IntRem,
-        PcodeOpcode::IntSRem => CompiledOpTplOpcode::IntSRem,
-        PcodeOpcode::BoolNegate => CompiledOpTplOpcode::BoolNegate,
-        PcodeOpcode::BoolXor => CompiledOpTplOpcode::BoolXor,
-        PcodeOpcode::BoolAnd => CompiledOpTplOpcode::BoolAnd,
-        PcodeOpcode::BoolOr => CompiledOpTplOpcode::BoolOr,
-        PcodeOpcode::MultiEqual => CompiledOpTplOpcode::Build,
-        PcodeOpcode::Piece => CompiledOpTplOpcode::Piece,
-        PcodeOpcode::SubPiece => CompiledOpTplOpcode::Subpiece,
-        PcodeOpcode::PtrAdd => CompiledOpTplOpcode::Label,
-        PcodeOpcode::PtrSub => CompiledOpTplOpcode::CrossBuild,
-        PcodeOpcode::Indirect => CompiledOpTplOpcode::DelaySlotIndirect,
-        PcodeOpcode::PopCount => CompiledOpTplOpcode::PopCount,
-        _ => CompiledOpTplOpcode::Unsupported,
+        PcodeOpcode::Copy => Ok(CompiledOpTplOpcode::Copy),
+        PcodeOpcode::Load => Ok(CompiledOpTplOpcode::Load),
+        PcodeOpcode::Store => Ok(CompiledOpTplOpcode::Store),
+        PcodeOpcode::Branch => Ok(CompiledOpTplOpcode::Branch),
+        PcodeOpcode::BranchInd => Ok(CompiledOpTplOpcode::BranchInd),
+        PcodeOpcode::CBranch => Ok(CompiledOpTplOpcode::CBranch),
+        PcodeOpcode::Call => Ok(CompiledOpTplOpcode::Call),
+        PcodeOpcode::CallInd => Ok(CompiledOpTplOpcode::CallInd),
+        PcodeOpcode::CallOther => Ok(CompiledOpTplOpcode::CallOther),
+        PcodeOpcode::Return => Ok(CompiledOpTplOpcode::Return),
+        PcodeOpcode::IntEqual => Ok(CompiledOpTplOpcode::IntEqual),
+        PcodeOpcode::IntNotEqual => Ok(CompiledOpTplOpcode::IntNotEqual),
+        PcodeOpcode::IntSLess => Ok(CompiledOpTplOpcode::IntSLess),
+        PcodeOpcode::IntSLessEqual => Ok(CompiledOpTplOpcode::IntSLessEqual),
+        PcodeOpcode::IntLess => Ok(CompiledOpTplOpcode::IntLess),
+        PcodeOpcode::IntLessEqual => Ok(CompiledOpTplOpcode::IntLessEqual),
+        PcodeOpcode::IntZExt => Ok(CompiledOpTplOpcode::IntZExt),
+        PcodeOpcode::IntSExt => Ok(CompiledOpTplOpcode::IntSExt),
+        PcodeOpcode::IntAdd => Ok(CompiledOpTplOpcode::IntAdd),
+        PcodeOpcode::IntSub => Ok(CompiledOpTplOpcode::IntSub),
+        PcodeOpcode::IntCarry => Ok(CompiledOpTplOpcode::IntCarry),
+        PcodeOpcode::IntSCarry => Ok(CompiledOpTplOpcode::IntSCarry),
+        PcodeOpcode::IntSBorrow => Ok(CompiledOpTplOpcode::IntSBorrow),
+        PcodeOpcode::Int2Comp => Ok(CompiledOpTplOpcode::Int2Comp),
+        PcodeOpcode::IntNegate => Ok(CompiledOpTplOpcode::IntNegate),
+        PcodeOpcode::IntXor => Ok(CompiledOpTplOpcode::IntXor),
+        PcodeOpcode::IntAnd => Ok(CompiledOpTplOpcode::IntAnd),
+        PcodeOpcode::IntOr => Ok(CompiledOpTplOpcode::IntOr),
+        PcodeOpcode::IntLeft => Ok(CompiledOpTplOpcode::IntLeft),
+        PcodeOpcode::IntRight => Ok(CompiledOpTplOpcode::IntRight),
+        PcodeOpcode::IntSRight => Ok(CompiledOpTplOpcode::IntSRight),
+        PcodeOpcode::IntMult => Ok(CompiledOpTplOpcode::IntMult),
+        PcodeOpcode::IntDiv => Ok(CompiledOpTplOpcode::IntDiv),
+        PcodeOpcode::IntSDiv => Ok(CompiledOpTplOpcode::IntSDiv),
+        PcodeOpcode::IntRem => Ok(CompiledOpTplOpcode::IntRem),
+        PcodeOpcode::IntSRem => Ok(CompiledOpTplOpcode::IntSRem),
+        PcodeOpcode::BoolNegate => Ok(CompiledOpTplOpcode::BoolNegate),
+        PcodeOpcode::BoolXor => Ok(CompiledOpTplOpcode::BoolXor),
+        PcodeOpcode::BoolAnd => Ok(CompiledOpTplOpcode::BoolAnd),
+        PcodeOpcode::BoolOr => Ok(CompiledOpTplOpcode::BoolOr),
+        PcodeOpcode::MultiEqual => Ok(CompiledOpTplOpcode::Build),
+        PcodeOpcode::Piece => Ok(CompiledOpTplOpcode::Piece),
+        PcodeOpcode::SubPiece => Ok(CompiledOpTplOpcode::Subpiece),
+        PcodeOpcode::PtrAdd => Ok(CompiledOpTplOpcode::Label),
+        PcodeOpcode::PtrSub => Ok(CompiledOpTplOpcode::CrossBuild),
+        PcodeOpcode::Indirect => Ok(CompiledOpTplOpcode::DelaySlotIndirect),
+        PcodeOpcode::PopCount => Ok(CompiledOpTplOpcode::PopCount),
+        PcodeOpcode::Unknown => bail!("unknown raw SLA p-code opcode {code}"),
+        _ => Ok(CompiledOpTplOpcode::Unsupported),
     }
 }
 
@@ -929,6 +933,32 @@ fn decode_space_tpl(
         _ => Ok(CompiledSpaceTpl::Const(Box::new(decode_const_tpl(
             element, spaces,
         )?))),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn map_pcode_opcode_fails_closed_on_unknown_raw_opcode() {
+        let err = map_pcode_opcode(0).expect_err("unknown opcode must not compile");
+
+        assert!(
+            err.to_string().contains("unknown raw SLA p-code opcode 0"),
+            "{err:#}"
+        );
+    }
+
+    #[test]
+    fn map_pcode_opcode_preserves_known_unsupported_cutover_boundary() {
+        let opcode = map_pcode_opcode(47).expect("known float opcode");
+
+        assert_eq!(opcode, CompiledOpTplOpcode::Unsupported);
+
+        let opcode = map_pcode_opcode(73).expect("known LZCOUNT opcode");
+
+        assert_eq!(opcode, CompiledOpTplOpcode::Unsupported);
     }
 }
 
