@@ -465,18 +465,30 @@ mod tests {
     }
 
     #[test]
-    fn powerpc_default_variants_remain_compile_only_until_promoted() {
+    fn powerpc_default_runtime_status_tracks_promoted_entries() {
         let registry = CompiledRuntimeRegistry::discover().expect("discover runtime registry");
 
         for (language_id, expected_entry_id) in [
             ("PowerPC:BE:32:default", "ppc_32_be"),
             ("PowerPC:LE:32:default", "ppc_32_le"),
+        ] {
+            let selection = registry
+                .resolve_from_language_pair(language_id, Some("gcc"))
+                .unwrap_or_else(|error| panic!("resolve {language_id:?} failed: {error}"));
+            assert_eq!(selection.entry_id, expected_entry_id);
+            assert_eq!(
+                selection.runtime_status,
+                RuntimeFrontendStatus::ExecutableCandidate
+            );
+        }
+
+        for (language_id, expected_entry_id) in [
             ("PowerPC:BE:64:default", "ppc_64_be"),
             ("PowerPC:LE:64:default", "ppc_64_le"),
         ] {
             let error = registry
                 .resolve_from_language_pair(language_id, Some("gcc"))
-                .expect_err("PowerPC defaults should stay compile-only until runtime promotion");
+                .expect_err("PowerPC64 defaults should stay compile-only until runtime promotion");
             assert!(
                 matches!(
                     error,

@@ -9,8 +9,8 @@
     },
     {
       "path": "utils/sleigh-specs/ghidra_language_manifest.json",
-      "sha256": "14f949f77782f0c37126394099eb667257d6b47a8a0176d1dba90a5b5d601ec5",
-      "size": 142573,
+      "sha256": "5535a09075d1af7ed9db5b864c24862b5b9e8902b2f1af6a4790c4daaa3f4629",
+      "size": 157717,
       "source_path": "crates/fission-sleigh/specs/ghidra_language_manifest.json"
     },
     {

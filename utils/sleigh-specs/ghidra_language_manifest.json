@@ -11,6 +11,7 @@
         "6502:LE:16:default"
       ],
       "endian": "little",
+      "processor_spec": "6502.pspec",
       "variant_class": "default",
       "imported_aux_files": [
         "6502.cspec",
@@ -29,6 +30,7 @@
         "65C02:LE:16:default"
       ],
       "endian": "little",
+      "processor_spec": "6502.pspec",
       "variant_class": "default",
       "imported_aux_files": [
         "6502.cspec",
@@ -47,6 +49,7 @@
         "68000:BE:32:MC68020"
       ],
       "endian": "big",
+      "processor_spec": "68000.pspec",
       "variant_class": "MC68020",
       "imported_aux_files": [
         "68000.cspec",
@@ -69,6 +72,7 @@
         "68000:BE:32:MC68030"
       ],
       "endian": "big",
+      "processor_spec": "68000.pspec",
       "variant_class": "MC68030",
       "imported_aux_files": [
         "68000.cspec",
@@ -91,6 +95,7 @@
         "68000:BE:32:default"
       ],
       "endian": "big",
+      "processor_spec": "68000.pspec",
       "variant_class": "default",
       "imported_aux_files": [
         "68000.cspec",
@@ -113,6 +118,7 @@
         "68000:BE:32:Coldfire"
       ],
       "endian": "big",
+      "processor_spec": "68000.pspec",
       "variant_class": "Coldfire",
       "imported_aux_files": [
         "68000.cspec",
@@ -135,6 +141,7 @@
         "8048:LE:16:default"
       ],
       "endian": "little",
+      "processor_spec": "8048.pspec",
       "variant_class": "default",
       "imported_aux_files": [
         "8048.cspec",
@@ -153,6 +160,7 @@
         "80251:BE:24:default"
       ],
       "endian": "big",
+      "processor_spec": "80251.pspec",
       "variant_class": "default",
       "imported_aux_files": [
         "80251.cspec",
@@ -183,6 +191,7 @@
         "80390:BE:24:default"
       ],
       "endian": "big",
+      "processor_spec": "8051.pspec",
       "variant_class": "default",
       "imported_aux_files": [
         "80251.cspec",
@@ -213,6 +222,7 @@
         "8051:BE:16:default"
       ],
       "endian": "big",
+      "processor_spec": "8051.pspec",
       "variant_class": "default",
       "imported_aux_files": [
         "80251.cspec",
@@ -243,6 +253,7 @@
         "8051:BE:24:mx51"
       ],
       "endian": "big",
+      "processor_spec": "mx51.pspec",
       "variant_class": "mx51",
       "imported_aux_files": [
         "80251.cspec",
@@ -273,6 +284,7 @@
         "8085:LE:16:default"
       ],
       "endian": "little",
+      "processor_spec": "8085.pspec",
       "variant_class": "default",
       "imported_aux_files": [
         "8085.cspec",
@@ -292,6 +304,7 @@
         "AARCH64:LE:32:ilp32"
       ],
       "endian": "little",
+      "processor_spec": "AARCH64.pspec",
       "variant_class": "default",
       "imported_aux_files": [
         "AARCH64.cspec",
@@ -329,6 +342,7 @@
         "AARCH64:BE:32:ilp32"
       ],
       "endian": "big",
+      "processor_spec": "AARCH64.pspec",
       "variant_class": "big_endian_variant",
       "imported_aux_files": [
         "AARCH64.cspec",
@@ -365,6 +379,7 @@
         "AARCH64:LE:64:AppleSilicon"
       ],
       "endian": "little",
+      "processor_spec": "AARCH64.pspec",
       "variant_class": "AppleSilicon",
       "imported_aux_files": [
         "AARCH64.cspec",
@@ -401,6 +416,7 @@
         "ARM:BE:32:v4"
       ],
       "endian": "big",
+      "processor_spec": "ARM_v45.pspec",
       "variant_class": "v4",
       "imported_aux_files": [
         "ARM.cspec",
@@ -443,6 +459,7 @@
         "ARM:LE:32:v4"
       ],
       "endian": "little",
+      "processor_spec": "ARM_v45.pspec",
       "variant_class": "v4",
       "imported_aux_files": [
         "ARM.cspec",
@@ -485,6 +502,7 @@
         "ARM:BE:32:v4t"
       ],
       "endian": "big",
+      "processor_spec": "ARMt_v45.pspec",
       "variant_class": "v4t",
       "imported_aux_files": [
         "ARM.cspec",
@@ -527,6 +545,7 @@
         "ARM:LE:32:v4t"
       ],
       "endian": "little",
+      "processor_spec": "ARMt_v45.pspec",
       "variant_class": "v4t",
       "imported_aux_files": [
         "ARM.cspec",
@@ -569,6 +588,7 @@
         "ARM:BE:32:v5"
       ],
       "endian": "big",
+      "processor_spec": "ARM_v45.pspec",
       "variant_class": "v5",
       "imported_aux_files": [
         "ARM.cspec",
@@ -611,6 +631,7 @@
         "ARM:LE:32:v5"
       ],
       "endian": "little",
+      "processor_spec": "ARM_v45.pspec",
       "variant_class": "v5",
       "imported_aux_files": [
         "ARM.cspec",
@@ -653,6 +674,7 @@
         "ARM:BE:32:v5t"
       ],
       "endian": "big",
+      "processor_spec": "ARMt_v45.pspec",
       "variant_class": "v5t",
       "imported_aux_files": [
         "ARM.cspec",
@@ -695,6 +717,7 @@
         "ARM:LE:32:v5t"
       ],
       "endian": "little",
+      "processor_spec": "ARMt_v45.pspec",
       "variant_class": "v5t",
       "imported_aux_files": [
         "ARM.cspec",
@@ -737,6 +760,7 @@
         "ARM:BE:32:v6"
       ],
       "endian": "big",
+      "processor_spec": "ARMt_v6.pspec",
       "variant_class": "v6",
       "imported_aux_files": [
         "ARM.cspec",
@@ -779,6 +803,7 @@
         "ARM:LE:32:v6"
       ],
       "endian": "little",
+      "processor_spec": "ARMt_v6.pspec",
       "variant_class": "v6",
       "imported_aux_files": [
         "ARM.cspec",
@@ -822,6 +847,7 @@
         "ARM:BE:32:Cortex"
       ],
       "endian": "big",
+      "processor_spec": null,
       "variant_class": "big_endian_variant",
       "imported_aux_files": [
         "ARM.cspec",
@@ -866,6 +892,7 @@
         "ARM:LE:32:Cortex"
       ],
       "endian": "little",
+      "processor_spec": null,
       "variant_class": "little_endian_variant",
       "imported_aux_files": [
         "ARM.cspec",
@@ -909,6 +936,7 @@
         "ARM:BE:32:v8T"
       ],
       "endian": "big",
+      "processor_spec": null,
       "variant_class": "big_endian_variant",
       "imported_aux_files": [
         "ARM.cspec",
@@ -953,6 +981,7 @@
         "ARM:LEBE:32:v8LEInstruction"
       ],
       "endian": "little",
+      "processor_spec": null,
       "variant_class": "little_endian_variant",
       "imported_aux_files": [
         "ARM.cspec",
@@ -995,6 +1024,7 @@
         "ARM:BE:32:v8-m"
       ],
       "endian": "big",
+      "processor_spec": "ARMCortex.pspec",
       "variant_class": "v8-m",
       "imported_aux_files": [
         "ARM.cspec",
@@ -1037,6 +1067,7 @@
         "ARM:LE:32:v8-m"
       ],
       "endian": "little",
+      "processor_spec": "ARMCortex.pspec",
       "variant_class": "v8-m",
       "imported_aux_files": [
         "ARM.cspec",
@@ -1079,6 +1110,7 @@
         "avr32:BE:32:default"
       ],
       "endian": "big",
+      "processor_spec": "avr32a.pspec",
       "variant_class": "default",
       "imported_aux_files": [
         "atmega256.pspec",
@@ -1121,6 +1153,7 @@
         "avr8:LE:16:default"
       ],
       "endian": "little",
+      "processor_spec": "avr8.pspec",
       "variant_class": "default",
       "imported_aux_files": [
         "atmega256.pspec",
@@ -1161,6 +1194,7 @@
       "language_id": null,
       "language_ids": [],
       "endian": null,
+      "processor_spec": null,
       "variant_class": "default",
       "imported_aux_files": [
         "atmega256.pspec",
@@ -1204,6 +1238,7 @@
         "avr8:LE:16:atmega256"
       ],
       "endian": "little",
+      "processor_spec": null,
       "variant_class": "default",
       "imported_aux_files": [
         "atmega256.pspec",
@@ -1246,6 +1281,7 @@
         "avr8:LE:24:xmega"
       ],
       "endian": "little",
+      "processor_spec": "avr8xmega.pspec",
       "variant_class": "Xmega",
       "imported_aux_files": [
         "atmega256.pspec",
@@ -1288,6 +1324,7 @@
         "BPF:LE:32:default"
       ],
       "endian": "little",
+      "processor_spec": "BPF.pspec",
       "variant_class": "default",
       "imported_aux_files": [
         "BPF.cspec",
@@ -1307,6 +1344,7 @@
         "CP1600:BE:16:default"
       ],
       "endian": "big",
+      "processor_spec": "CP1600.pspec",
       "variant_class": "default",
       "imported_aux_files": [
         "CP1600.cspec",
@@ -1326,6 +1364,7 @@
         "CR16AB:LE:16:default"
       ],
       "endian": "little",
+      "processor_spec": "CR16.pspec",
       "variant_class": "default",
       "imported_aux_files": [
         "CR16.cspec",
@@ -1347,6 +1386,7 @@
         "CR16C:LE:16:default"
       ],
       "endian": "little",
+      "processor_spec": "CR16.pspec",
       "variant_class": "default",
       "imported_aux_files": [
         "CR16.cspec",
@@ -1368,6 +1408,7 @@
         "DATA:BE:64:default"
       ],
       "endian": "big",
+      "processor_spec": "data.pspec",
       "variant_class": "default",
       "imported_aux_files": [
         "data-ptr16.cspec",
@@ -1389,6 +1430,7 @@
         "DATA:LE:64:default"
       ],
       "endian": "little",
+      "processor_spec": "data.pspec",
       "variant_class": "default",
       "imported_aux_files": [
         "data-ptr16.cspec",
@@ -1411,6 +1453,7 @@
         "Dalvik:LE:32:DEX_Base"
       ],
       "endian": "little",
+      "processor_spec": "Dalvik_Base.pspec",
       "variant_class": "default",
       "imported_aux_files": [
         "Dalvik.ldefs",
@@ -1456,6 +1499,7 @@
         "Dalvik:LE:32:DEX_Android10"
       ],
       "endian": "little",
+      "processor_spec": "Dalvik_Base.pspec",
       "variant_class": "DEX Android10",
       "imported_aux_files": [
         "Dalvik.ldefs",
@@ -1501,6 +1545,7 @@
         "Dalvik:LE:32:DEX_Android11"
       ],
       "endian": "little",
+      "processor_spec": "Dalvik_Base.pspec",
       "variant_class": "DEX Android11",
       "imported_aux_files": [
         "Dalvik.ldefs",
@@ -1547,6 +1592,7 @@
         "Dalvik:LE:32:DEX_Android13"
       ],
       "endian": "little",
+      "processor_spec": "Dalvik_Base.pspec",
       "variant_class": "default",
       "imported_aux_files": [
         "Dalvik.ldefs",
@@ -1592,6 +1638,7 @@
         "Dalvik:LE:32:DEX_KitKat"
       ],
       "endian": "little",
+      "processor_spec": "Dalvik_Base.pspec",
       "variant_class": "DEX KitKat",
       "imported_aux_files": [
         "Dalvik.ldefs",
@@ -1637,6 +1684,7 @@
         "Dalvik:LE:32:DEX_Lollipop"
       ],
       "endian": "little",
+      "processor_spec": "Dalvik_Base.pspec",
       "variant_class": "DEX Lollipop",
       "imported_aux_files": [
         "Dalvik.ldefs",
@@ -1682,6 +1730,7 @@
         "Dalvik:LE:32:Marshmallow"
       ],
       "endian": "little",
+      "processor_spec": "Dalvik_Base.pspec",
       "variant_class": "DEX Marshmallow",
       "imported_aux_files": [
         "Dalvik.ldefs",
@@ -1727,6 +1776,7 @@
         "Dalvik:LE:32:DEX_Nougat"
       ],
       "endian": "little",
+      "processor_spec": "Dalvik_Base.pspec",
       "variant_class": "DEX Nougat",
       "imported_aux_files": [
         "Dalvik.ldefs",
@@ -1772,6 +1822,7 @@
         "Dalvik:LE:32:DEX_Oreo"
       ],
       "endian": "little",
+      "processor_spec": "Dalvik_Base.pspec",
       "variant_class": "DEX Oreo",
       "imported_aux_files": [
         "Dalvik.ldefs",
@@ -1817,6 +1868,7 @@
         "Dalvik:LE:32:DEX_Pie"
       ],
       "endian": "little",
+      "processor_spec": "Dalvik_Base.pspec",
       "variant_class": "DEX Pie",
       "imported_aux_files": [
         "Dalvik.ldefs",
@@ -1862,6 +1914,7 @@
         "Dalvik:LE:32:ODEX_KitKat"
       ],
       "endian": "little",
+      "processor_spec": "Dalvik_Base.pspec",
       "variant_class": "ODEX KitKat",
       "imported_aux_files": [
         "Dalvik.ldefs",
@@ -1908,6 +1961,7 @@
         "HC05:BE:16:M68HC05TB"
       ],
       "endian": "big",
+      "processor_spec": null,
       "variant_class": "default",
       "imported_aux_files": [
         "HC05-M68HC05TB.pspec",
@@ -1937,6 +1991,7 @@
         "HC08:BE:16:MC68HC908QY4"
       ],
       "endian": "big",
+      "processor_spec": null,
       "variant_class": "default",
       "imported_aux_files": [
         "HC05-M68HC05TB.pspec",
@@ -1966,6 +2021,7 @@
         "HCS08:BE:16:MC9S08GB60"
       ],
       "endian": "big",
+      "processor_spec": null,
       "variant_class": "default",
       "imported_aux_files": [
         "HC05-M68HC05TB.pspec",
@@ -1994,6 +2050,7 @@
         "HC-12:BE:16:default"
       ],
       "endian": "big",
+      "processor_spec": "HC12.pspec",
       "variant_class": "default",
       "imported_aux_files": [
         "HC12.cspec",
@@ -2019,6 +2076,7 @@
         "HCS-12:BE:24:default"
       ],
       "endian": "big",
+      "processor_spec": "HCS12.pspec",
       "variant_class": "default",
       "imported_aux_files": [
         "HC12.cspec",
@@ -2045,6 +2103,7 @@
         "HCS12:BE:24:default"
       ],
       "endian": "big",
+      "processor_spec": "HCS12X.pspec",
       "variant_class": "default",
       "imported_aux_files": [
         "HC12.cspec",
@@ -2070,6 +2129,7 @@
         "JVM:BE:32:default"
       ],
       "endian": "big",
+      "processor_spec": "JVM.pspec",
       "variant_class": "default",
       "imported_aux_files": [
         "JVM.cspec",
@@ -2089,6 +2149,7 @@
         "Loongarch:LE:32:ilp32f"
       ],
       "endian": "little",
+      "processor_spec": "loongarch32.pspec",
       "variant_class": "ilp32f",
       "imported_aux_files": [
         "ilp32d.cspec",
@@ -2121,6 +2182,7 @@
         "Loongarch:LE:32:ilp32d"
       ],
       "endian": "little",
+      "processor_spec": "loongarch32.pspec",
       "variant_class": "ilp32d",
       "imported_aux_files": [
         "ilp32d.cspec",
@@ -2153,6 +2215,7 @@
         "Loongarch:LE:64:lp64f"
       ],
       "endian": "little",
+      "processor_spec": "loongarch64.pspec",
       "variant_class": "lp64f",
       "imported_aux_files": [
         "ilp32d.cspec",
@@ -2185,6 +2248,7 @@
         "Loongarch:LE:64:lp64d"
       ],
       "endian": "little",
+      "processor_spec": "loongarch64.pspec",
       "variant_class": "lp64d",
       "imported_aux_files": [
         "ilp32d.cspec",
@@ -2217,6 +2281,7 @@
         "M16C/60:LE:16:default"
       ],
       "endian": "little",
+      "processor_spec": "M16C_60.pspec",
       "variant_class": "default",
       "imported_aux_files": [
         "M16C_60.cspec",
@@ -2238,6 +2303,7 @@
         "M16C/80:LE:16:default"
       ],
       "endian": "little",
+      "processor_spec": "M16C_80.pspec",
       "variant_class": "default",
       "imported_aux_files": [
         "M16C_60.cspec",
@@ -2259,6 +2325,7 @@
         "M8C:BE:16:default"
       ],
       "endian": "big",
+      "processor_spec": "m8c.pspec",
       "variant_class": "default",
       "imported_aux_files": [
         "m8c.cspec",
@@ -2278,6 +2345,7 @@
         "6805:BE:16:default"
       ],
       "endian": "big",
+      "processor_spec": "6805.pspec",
       "variant_class": "default",
       "imported_aux_files": [
         "6800.ldefs",
@@ -2303,6 +2371,7 @@
         "6809:BE:16:default"
       ],
       "endian": "big",
+      "processor_spec": "6809.pspec",
       "variant_class": "default",
       "imported_aux_files": [
         "6800.ldefs",
@@ -2328,6 +2397,7 @@
         "H6309:BE:16:default"
       ],
       "endian": "big",
+      "processor_spec": "6809.pspec",
       "variant_class": "default",
       "imported_aux_files": [
         "6800.ldefs",
@@ -2353,6 +2423,7 @@
         "MCS96:LE:16:default"
       ],
       "endian": "little",
+      "processor_spec": "MCS96.pspec",
       "variant_class": "default",
       "imported_aux_files": [
         "MCS96.cspec",
@@ -2372,6 +2443,7 @@
         "MIPS:BE:32:R6"
       ],
       "endian": "big",
+      "processor_spec": "mips32R6.pspec",
       "variant_class": "R6",
       "imported_aux_files": [
         "MIPS.opinion",
@@ -2415,6 +2487,7 @@
         "MIPS:LE:32:R6"
       ],
       "endian": "little",
+      "processor_spec": "mips32R6.pspec",
       "variant_class": "R6",
       "imported_aux_files": [
         "MIPS.opinion",
@@ -2459,6 +2532,7 @@
         "MIPS:BE:32:micro"
       ],
       "endian": "big",
+      "processor_spec": null,
       "variant_class": "big_endian_variant",
       "imported_aux_files": [
         "MIPS.opinion",
@@ -2503,6 +2577,7 @@
         "MIPS:LE:32:micro"
       ],
       "endian": "little",
+      "processor_spec": null,
       "variant_class": "little_endian_variant",
       "imported_aux_files": [
         "MIPS.opinion",
@@ -2551,6 +2626,7 @@
         "MIPS:BE:64:64-32R6addr"
       ],
       "endian": "big",
+      "processor_spec": null,
       "variant_class": "big_endian_variant",
       "imported_aux_files": [
         "MIPS.opinion",
@@ -2599,6 +2675,7 @@
         "MIPS:LE:64:64-32R6addr"
       ],
       "endian": "little",
+      "processor_spec": null,
       "variant_class": "little_endian_variant",
       "imported_aux_files": [
         "MIPS.opinion",
@@ -2642,6 +2719,7 @@
         "NDS32:BE:32:default"
       ],
       "endian": "big",
+      "processor_spec": "nds32.pspec",
       "variant_class": "default",
       "imported_aux_files": [
         "lsmw.sinc",
@@ -2664,6 +2742,7 @@
         "NDS32:LE:32:default"
       ],
       "endian": "little",
+      "processor_spec": "nds32.pspec",
       "variant_class": "default",
       "imported_aux_files": [
         "lsmw.sinc",
@@ -2686,6 +2765,7 @@
         "pa-risc:BE:32:default"
       ],
       "endian": "big",
+      "processor_spec": "pa-risc32.pspec",
       "variant_class": "default",
       "imported_aux_files": [
         "pa-risc.ldefs",
@@ -2707,6 +2787,7 @@
         "PIC-24E:LE:24:default"
       ],
       "endian": "little",
+      "processor_spec": "PIC24.pspec",
       "variant_class": "24E",
       "imported_aux_files": [
         "PIC24.cspec",
@@ -2754,6 +2835,7 @@
         "PIC-24F:LE:24:default"
       ],
       "endian": "little",
+      "processor_spec": "PIC24.pspec",
       "variant_class": "24F",
       "imported_aux_files": [
         "PIC24.cspec",
@@ -2801,6 +2883,7 @@
         "PIC-24H:LE:24:default"
       ],
       "endian": "little",
+      "processor_spec": "PIC24.pspec",
       "variant_class": "24H",
       "imported_aux_files": [
         "PIC24.cspec",
@@ -2848,6 +2931,7 @@
         "dsPIC30F:LE:24:default"
       ],
       "endian": "little",
+      "processor_spec": "PIC24.pspec",
       "variant_class": "default",
       "imported_aux_files": [
         "PIC24.cspec",
@@ -2895,6 +2979,7 @@
         "dsPIC33C:LE:24:default"
       ],
       "endian": "little",
+      "processor_spec": "PIC24.pspec",
       "variant_class": "default",
       "imported_aux_files": [
         "PIC24.cspec",
@@ -2942,6 +3027,7 @@
         "dsPIC33E:LE:24:default"
       ],
       "endian": "little",
+      "processor_spec": "PIC24.pspec",
       "variant_class": "default",
       "imported_aux_files": [
         "PIC24.cspec",
@@ -2989,6 +3075,7 @@
         "dsPIC33F:LE:24:default"
       ],
       "endian": "little",
+      "processor_spec": "PIC24.pspec",
       "variant_class": "default",
       "imported_aux_files": [
         "PIC24.cspec",
@@ -3036,6 +3123,7 @@
         "PIC-12:LE:16:PIC-12C5xx"
       ],
       "endian": "little",
+      "processor_spec": "pic12c5xx.pspec",
       "variant_class": "PIC-12C5xx",
       "imported_aux_files": [
         "PIC24.cspec",
@@ -3083,6 +3171,7 @@
         "PIC-16:LE:16:PIC-16"
       ],
       "endian": "little",
+      "processor_spec": "pic16.pspec",
       "variant_class": "PIC-16",
       "imported_aux_files": [
         "PIC24.cspec",
@@ -3130,6 +3219,7 @@
         "PIC-16:LE:16:PIC-16C5x"
       ],
       "endian": "little",
+      "processor_spec": "pic16c5x.pspec",
       "variant_class": "PIC-16C5x",
       "imported_aux_files": [
         "PIC24.cspec",
@@ -3177,6 +3267,7 @@
         "PIC-16:LE:16:PIC-16F"
       ],
       "endian": "little",
+      "processor_spec": "pic16f.pspec",
       "variant_class": "PIC-16F",
       "imported_aux_files": [
         "PIC24.cspec",
@@ -3224,6 +3315,7 @@
         "PIC-17:LE:16:PIC-17C7xx"
       ],
       "endian": "little",
+      "processor_spec": "pic17c7xx.pspec",
       "variant_class": "PIC-17C7xx",
       "imported_aux_files": [
         "PIC24.cspec",
@@ -3271,6 +3363,7 @@
         "PIC-18:LE:24:PIC-18"
       ],
       "endian": "little",
+      "processor_spec": "pic18.pspec",
       "variant_class": "PIC-18",
       "imported_aux_files": [
         "PIC24.cspec",
@@ -3318,6 +3411,7 @@
         "PowerPC:BE:32:4xx"
       ],
       "endian": "big",
+      "processor_spec": "ppc_32.pspec",
       "variant_class": "4xx",
       "imported_aux_files": [
         "4xx.sinc",
@@ -3377,6 +3471,7 @@
         "PowerPC:LE:32:4xx"
       ],
       "endian": "little",
+      "processor_spec": "ppc_32.pspec",
       "variant_class": "4xx",
       "imported_aux_files": [
         "4xx.sinc",
@@ -3436,6 +3531,7 @@
         "PowerPC:BE:32:default"
       ],
       "endian": "big",
+      "processor_spec": "ppc_32.pspec",
       "variant_class": "default",
       "imported_aux_files": [
         "4xx.sinc",
@@ -3481,7 +3577,7 @@
         "stswiInstructions.sinc",
         "vsx.sinc"
       ],
-      "runtime_status": "registered_compile_only",
+      "runtime_status": "executable_candidate",
       "language_aliases": [
         "powerpc"
       ]
@@ -3495,6 +3591,7 @@
         "PowerPC:BE:32:e500"
       ],
       "endian": "big",
+      "processor_spec": "ppc_32.pspec",
       "variant_class": "PowerQUICC-III-e500",
       "imported_aux_files": [
         "4xx.sinc",
@@ -3554,6 +3651,7 @@
         "PowerPC:LE:32:e500"
       ],
       "endian": "little",
+      "processor_spec": "ppc_32.pspec",
       "variant_class": "PowerQUICC-III-e500",
       "imported_aux_files": [
         "4xx.sinc",
@@ -3613,6 +3711,7 @@
         "PowerPC:BE:32:e500mc"
       ],
       "endian": "big",
+      "processor_spec": "ppc_32.pspec",
       "variant_class": "PowerQUICC-III-e500mc",
       "imported_aux_files": [
         "4xx.sinc",
@@ -3672,6 +3771,7 @@
         "PowerPC:LE:32:e500mc"
       ],
       "endian": "little",
+      "processor_spec": "ppc_32.pspec",
       "variant_class": "PowerQUICC-III-e500mc",
       "imported_aux_files": [
         "4xx.sinc",
@@ -3731,6 +3831,7 @@
         "PowerPC:LE:32:default"
       ],
       "endian": "little",
+      "processor_spec": "ppc_32.pspec",
       "variant_class": "default",
       "imported_aux_files": [
         "4xx.sinc",
@@ -3776,7 +3877,7 @@
         "stswiInstructions.sinc",
         "vsx.sinc"
       ],
-      "runtime_status": "registered_compile_only",
+      "runtime_status": "executable_candidate",
       "language_aliases": [
         "powerpc"
       ]
@@ -3791,6 +3892,7 @@
         "PowerPC:BE:32:QUICC"
       ],
       "endian": "big",
+      "processor_spec": null,
       "variant_class": "big_endian_variant",
       "imported_aux_files": [
         "4xx.sinc",
@@ -3850,6 +3952,7 @@
         "PowerPC:LE:32:QUICC"
       ],
       "endian": "little",
+      "processor_spec": "ppc_32.pspec",
       "variant_class": "PowerQUICC-III",
       "imported_aux_files": [
         "4xx.sinc",
@@ -3910,6 +4013,7 @@
         "PowerPC:BE:64:64-32addr"
       ],
       "endian": "big",
+      "processor_spec": "ppc_64.pspec",
       "variant_class": "big_endian_variant",
       "imported_aux_files": [
         "4xx.sinc",
@@ -3970,6 +4074,7 @@
         "PowerPC:BE:64:A2ALT"
       ],
       "endian": "big",
+      "processor_spec": "ppc_64.pspec",
       "variant_class": "big_endian_variant",
       "imported_aux_files": [
         "4xx.sinc",
@@ -4030,6 +4135,7 @@
         "PowerPC:LE:64:A2ALT"
       ],
       "endian": "little",
+      "processor_spec": "ppc_64.pspec",
       "variant_class": "little_endian_variant",
       "imported_aux_files": [
         "4xx.sinc",
@@ -4089,6 +4195,7 @@
         "PowerPC:BE:64:VLEALT-32addr"
       ],
       "endian": "big",
+      "processor_spec": "ppc_64.pspec",
       "variant_class": "PowerISA-VLE-Altivec-64-32addr",
       "imported_aux_files": [
         "4xx.sinc",
@@ -4148,6 +4255,7 @@
         "PowerPC:BE:64:A2-32addr"
       ],
       "endian": "big",
+      "processor_spec": "ppc_64.pspec",
       "variant_class": "PowerISA-64-32addr",
       "imported_aux_files": [
         "4xx.sinc",
@@ -4207,6 +4315,7 @@
         "PowerPC:LE:64:A2-32addr"
       ],
       "endian": "little",
+      "processor_spec": "ppc_64.pspec",
       "variant_class": "PowerISA-64-32addr",
       "imported_aux_files": [
         "4xx.sinc",
@@ -4266,6 +4375,7 @@
         "PowerPC:BE:64:VLE-32addr"
       ],
       "endian": "big",
+      "processor_spec": "ppc_64.pspec",
       "variant_class": "PowerISA-VLE-64-32addr",
       "imported_aux_files": [
         "4xx.sinc",
@@ -4326,6 +4436,7 @@
         "PowerPC:LE:64:default"
       ],
       "endian": "little",
+      "processor_spec": "ppc_64.pspec",
       "variant_class": "little_endian_variant",
       "imported_aux_files": [
         "4xx.sinc",
@@ -4385,6 +4496,7 @@
         "RISCV:LE:32:AndeStar_v5"
       ],
       "endian": "little",
+      "processor_spec": "RV32.pspec",
       "variant_class": "AndeStar_v5",
       "imported_aux_files": [
         "RV32.pspec",
@@ -4442,6 +4554,7 @@
         "RISCV:LE:32:default"
       ],
       "endian": "little",
+      "processor_spec": "RV32.pspec",
       "variant_class": "default",
       "imported_aux_files": [
         "RV32.pspec",
@@ -4499,6 +4612,7 @@
         "RISCV:LE:64:default"
       ],
       "endian": "little",
+      "processor_spec": "RV64.pspec",
       "variant_class": "default",
       "imported_aux_files": [
         "RV32.pspec",
@@ -4556,6 +4670,7 @@
         "sparc:BE:32:default"
       ],
       "endian": "big",
+      "processor_spec": "SparcV9.pspec",
       "variant_class": "default",
       "imported_aux_files": [
         "Sparc.dwarf",
@@ -4579,6 +4694,7 @@
         "sparc:BE:64:default"
       ],
       "endian": "big",
+      "processor_spec": "SparcV9.pspec",
       "variant_class": "default",
       "imported_aux_files": [
         "Sparc.dwarf",
@@ -4602,6 +4718,7 @@
         "SuperH:BE:32:SH-1"
       ],
       "endian": "big",
+      "processor_spec": "superh.pspec",
       "variant_class": "SH-1",
       "imported_aux_files": [
         "superh.cspec",
@@ -4622,6 +4739,7 @@
         "SuperH:BE:32:SH-2"
       ],
       "endian": "big",
+      "processor_spec": "superh.pspec",
       "variant_class": "SH-2",
       "imported_aux_files": [
         "superh.cspec",
@@ -4642,6 +4760,7 @@
         "SuperH:BE:32:SH-2A"
       ],
       "endian": "big",
+      "processor_spec": "superh.pspec",
       "variant_class": "SH-2A",
       "imported_aux_files": [
         "superh.cspec",
@@ -4662,6 +4781,7 @@
         "SuperH4:BE:32:default"
       ],
       "endian": "big",
+      "processor_spec": "SuperH4.pspec",
       "variant_class": "default",
       "imported_aux_files": [
         "SuperH4.ldefs",
@@ -4687,6 +4807,7 @@
         "SuperH4:LE:32:default"
       ],
       "endian": "little",
+      "processor_spec": "SuperH4.pspec",
       "variant_class": "default",
       "imported_aux_files": [
         "SuperH4.ldefs",
@@ -4712,6 +4833,7 @@
         "TI_MSP430:LE:16:default"
       ],
       "endian": "little",
+      "processor_spec": "TI_MSP430.pspec",
       "variant_class": "default",
       "imported_aux_files": [
         "TI430Common.sinc",
@@ -4736,6 +4858,7 @@
         "TI_MSP430X:LE:32:default"
       ],
       "endian": "little",
+      "processor_spec": "TI_MSP430.pspec",
       "variant_class": "default",
       "imported_aux_files": [
         "TI430Common.sinc",
@@ -4760,6 +4883,7 @@
         "Toy:BE:64:default"
       ],
       "endian": "big",
+      "processor_spec": "toy.pspec",
       "variant_class": "default",
       "imported_aux_files": [
         "old/ToyV00BE64.lang",
@@ -4795,6 +4919,7 @@
         "Toy:BE:64:harvard"
       ],
       "endian": "big",
+      "processor_spec": "toy_harvard.pspec",
       "variant_class": "harvard",
       "imported_aux_files": [
         "old/ToyV00BE64.lang",
@@ -4830,6 +4955,7 @@
         "Toy:BE:64:harvard_rev"
       ],
       "endian": "big",
+      "processor_spec": "toy_harvard.pspec",
       "variant_class": "harvard_rev",
       "imported_aux_files": [
         "old/ToyV00BE64.lang",
@@ -4865,6 +4991,7 @@
         "Toy:LE:64:default"
       ],
       "endian": "little",
+      "processor_spec": "toy.pspec",
       "variant_class": "default",
       "imported_aux_files": [
         "old/ToyV00BE64.lang",
@@ -4900,6 +5027,7 @@
         "Toy:BE:32:default"
       ],
       "endian": "big",
+      "processor_spec": "toy.pspec",
       "variant_class": "default",
       "imported_aux_files": [
         "old/ToyV00BE64.lang",
@@ -4935,6 +5063,7 @@
         "Toy:BE:32:posStack"
       ],
       "endian": "big",
+      "processor_spec": "toy.pspec",
       "variant_class": "posStack",
       "imported_aux_files": [
         "old/ToyV00BE64.lang",
@@ -4970,6 +5099,7 @@
         "Toy:BE:32:builder"
       ],
       "endian": "big",
+      "processor_spec": "toy.pspec",
       "variant_class": "builder",
       "imported_aux_files": [
         "old/ToyV00BE64.lang",
@@ -5005,6 +5135,7 @@
         "Toy:BE:32:builder.align2"
       ],
       "endian": "big",
+      "processor_spec": "toy.pspec",
       "variant_class": "builder.align2",
       "imported_aux_files": [
         "old/ToyV00BE64.lang",
@@ -5040,6 +5171,7 @@
         "Toy:LE:32:builder"
       ],
       "endian": "little",
+      "processor_spec": "toy.pspec",
       "variant_class": "builder",
       "imported_aux_files": [
         "old/ToyV00BE64.lang",
@@ -5075,6 +5207,7 @@
         "Toy:LE:32:builder.align2"
       ],
       "endian": "little",
+      "processor_spec": "toy.pspec",
       "variant_class": "builder.align2",
       "imported_aux_files": [
         "old/ToyV00BE64.lang",
@@ -5110,6 +5243,7 @@
         "Toy:LE:32:default"
       ],
       "endian": "little",
+      "processor_spec": "toy.pspec",
       "variant_class": "default",
       "imported_aux_files": [
         "old/ToyV00BE64.lang",
@@ -5145,6 +5279,7 @@
         "Toy:BE:32:wordSize2"
       ],
       "endian": "big",
+      "processor_spec": "toy.pspec",
       "variant_class": "wordSize2",
       "imported_aux_files": [
         "old/ToyV00BE64.lang",
@@ -5180,6 +5315,7 @@
         "Toy:LE:32:wordSize2"
       ],
       "endian": "little",
+      "processor_spec": "toy.pspec",
       "variant_class": "wordSize2",
       "imported_aux_files": [
         "old/ToyV00BE64.lang",
@@ -5215,6 +5351,7 @@
         "V850:LE:32:default"
       ],
       "endian": "little",
+      "processor_spec": "V850.pspec",
       "variant_class": "E1, E2, E2M",
       "imported_aux_files": [
         "Helpers/Conditions.sinc",
@@ -5245,6 +5382,7 @@
         "Xtensa:BE:32:default"
       ],
       "endian": "big",
+      "processor_spec": "xtensa.pspec",
       "variant_class": "default",
       "imported_aux_files": [
         "cust.sinc",
@@ -5271,6 +5409,7 @@
         "Xtensa:LE:32:default"
       ],
       "endian": "little",
+      "processor_spec": "xtensa.pspec",
       "variant_class": "default",
       "imported_aux_files": [
         "cust.sinc",
@@ -5298,6 +5437,7 @@
         "z182:LE:16:default"
       ],
       "endian": "little",
+      "processor_spec": null,
       "variant_class": "default",
       "imported_aux_files": [
         "z180.pspec",
@@ -5320,6 +5460,7 @@
         "z8401x:LE:16:default"
       ],
       "endian": "little",
+      "processor_spec": null,
       "variant_class": "default",
       "imported_aux_files": [
         "z180.pspec",
@@ -5341,6 +5482,7 @@
         "eBPF:BE:64:default"
       ],
       "endian": "big",
+      "processor_spec": "eBPF.pspec",
       "variant_class": "default",
       "imported_aux_files": [
         "eBPF.cspec",
@@ -5362,6 +5504,7 @@
         "eBPF:LE:64:default"
       ],
       "endian": "little",
+      "processor_spec": "eBPF.pspec",
       "variant_class": "default",
       "imported_aux_files": [
         "eBPF.cspec",
@@ -5386,6 +5529,7 @@
         "tricore:LE:32:tc176x"
       ],
       "endian": "little",
+      "processor_spec": null,
       "variant_class": "default",
       "imported_aux_files": [
         "tc172x.pspec",
@@ -5412,6 +5556,7 @@
         "x86:LE:64:compat32"
       ],
       "endian": "little",
+      "processor_spec": null,
       "variant_class": "default",
       "imported_aux_files": [
         "adx.sinc",
@@ -5508,6 +5653,7 @@
         "x86:LE:16:Protected Mode"
       ],
       "endian": "little",
+      "processor_spec": null,
       "variant_class": "default",
       "imported_aux_files": [
         "adx.sinc",
