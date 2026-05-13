@@ -299,7 +299,7 @@ pub(super) fn decode_instruction_length(
         }
         let strategy = RuntimeDecodeStrategy::for_table(compiled, native, "instruction", &ctx);
         match bind_instruction(compiled, strategy, &ctx, selection) {
-            Ok(decoded) => return Ok(decoded.length as u32),
+            Ok(decoded) => return checked_runtime_length_u32(decoded.length, "delay-slot decode"),
             Err(err) => {
                 if first_err.is_none() {
                     first_err = Some(err);
@@ -325,9 +325,7 @@ pub(super) fn try_bind_runtime_state_at(
     context_register: u64,
     context_known_mask: u64,
 ) -> Result<RuntimeConstructState> {
-    let offset = target_address.checked_sub(memory_base).ok_or_else(|| {
-        anyhow!("bind target 0x{target_address:x} precedes memory base 0x{memory_base:x}")
-    })? as usize;
+    let offset = checked_memory_window_offset(memory_base, target_address)?;
     let slice = memory_window.get(offset..).ok_or_else(|| {
         anyhow!(
             "bind target 0x{target_address:x} past memory window (base=0x{memory_base:x}, len={})",
@@ -358,6 +356,24 @@ pub(super) fn try_bind_runtime_state_at(
         .unwrap_or_else(|| anyhow!("decode bind failed at target_address=0x{target_address:x}")))
 }
 
+fn checked_memory_window_offset(memory_base: u64, target_address: u64) -> Result<usize> {
+    let offset = target_address.checked_sub(memory_base).ok_or_else(|| {
+        anyhow!("bind target 0x{target_address:x} precedes memory base 0x{memory_base:x}")
+    })?;
+    usize::try_from(offset).map_err(|_| {
+        anyhow!("bind target offset {offset} does not fit usize for memory window indexing")
+    })
+}
+
+fn checked_runtime_length_u32(length: usize, role: &str) -> Result<u32> {
+    u32::try_from(length).map_err(|_| anyhow!("{role} length {length} exceeds u32"))
+}
+
+fn checked_context_commit_handle_index(hand_index: u32) -> Result<usize> {
+    usize::try_from(hand_index)
+        .map_err(|_| anyhow!("context commit handle index {hand_index} does not fit usize"))
+}
+
 /// Resolved deferred context commit: Ghidra's SleighParserContext.applyCommits().
 ///
 /// Each entry is `(target_address, word_index, mask, context_word_value)`.
@@ -386,7 +402,8 @@ pub(crate) fn apply_context_commits(
                 .checked_add(decoded.length as u64)
                 .ok_or_else(|| anyhow!("context commit InstNext address overflowed"))?,
             CompiledContextCommitTarget::OperandHandle { hand_index } => {
-                let handle = decoded.handles.get(hand_index as usize).ok_or_else(|| {
+                let hand_index = checked_context_commit_handle_index(hand_index)?;
+                let handle = decoded.handles.get(hand_index).ok_or_else(|| {
                     anyhow!("context commit references missing operand handle {hand_index}")
                 })?;
                 // Ghidra SleighParserContext.applyCommits(): context-set addresses

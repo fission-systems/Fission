@@ -33,6 +33,21 @@ fn assert_spec_derived_lift(
 }
 
 #[test]
+fn runtime_window_and_length_helpers_fail_closed_on_invalid_widths() {
+    assert_eq!(checked_memory_window_offset(0x1000, 0x1003).unwrap(), 3);
+    assert!(checked_memory_window_offset(0x1003, 0x1000).is_err());
+    if u64::try_from(usize::MAX) != Ok(u64::MAX) {
+        assert!(checked_memory_window_offset(0, u64::MAX).is_err());
+    }
+
+    assert_eq!(checked_runtime_length_u32(7, "test").unwrap(), 7);
+    if usize::BITS > u32::BITS {
+        assert!(checked_runtime_length_u32(u32::MAX as usize + 1, "test").is_err());
+    }
+    assert_eq!(checked_context_commit_handle_index(3).unwrap(), 3);
+}
+
+#[test]
 fn sla_template_feature_audit_smoke() {
     require_packaged_ghidra_sla!();
     let compiled = compile_x86_64_frontend().expect("compile frontend");
@@ -815,6 +830,12 @@ fn compiled_table_policy_symbols_stay_architecture_neutral() {
         "self.ctx.address.saturating_add(next_offset as u64)";
     let subtable_cursor_saturating_delta = "self.cursor.saturating_sub(self.ctx.cursor)";
     let subtable_decode_address_wrapping = "sub_ctx.address.wrapping_add(sub_ctx.cursor as u64)";
+    let delay_slot_length_lossy_cast =
+        ["Ok(decoded) => return Ok(decoded.length", "as u32)"].join(" ");
+    let bind_target_offset_lossy_cast =
+        ["target_address.checked_sub(memory_base)", "})? as usize"].join("\n");
+    let context_commit_handle_lossy_cast =
+        ["decoded.handles.get(hand_index", "as usize)"].join(" ");
     let template_delay_slot_inst_next_saturating =
         "self.address.saturating_add(inst_length as u64)";
     let template_delay_slot_pc_saturating = "self.address.saturating_add(fall_offset)";
@@ -1146,6 +1167,9 @@ fn compiled_table_policy_symbols_stay_architecture_neutral() {
                 && !source.contains(pattern_inst_next_saturating_address)
                 && !source.contains(subtable_cursor_saturating_delta)
                 && !source.contains(subtable_decode_address_wrapping)
+                && !source.contains(&delay_slot_length_lossy_cast)
+                && !source.contains(&bind_target_offset_lossy_cast)
+                && !source.contains(&context_commit_handle_lossy_cast)
                 && !source.contains(template_delay_slot_inst_next_saturating)
                 && !source.contains(template_delay_slot_pc_saturating)
                 && !source.contains(template_delay_slot_fall_saturating)
