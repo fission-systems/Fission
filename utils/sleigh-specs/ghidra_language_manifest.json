@@ -5350,7 +5350,7 @@
         "eBPF.pspec",
         "eBPF.sinc"
       ],
-      "runtime_status": "registered_compile_only",
+      "runtime_status": "executable_candidate",
       "language_aliases": []
     },
     {
@@ -5371,7 +5371,7 @@
         "eBPF.pspec",
         "eBPF.sinc"
       ],
-      "runtime_status": "registered_compile_only",
+      "runtime_status": "executable_candidate",
       "language_aliases": []
     },
     {

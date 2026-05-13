@@ -40,6 +40,9 @@ const EXECUTABLE_CANDIDATE_ENTRY_IDS: &[&str] = &[
     // RISCV (`andestar_v5` stays compile-only)
     "riscv.ilp32d",
     "riscv.lp64d",
+    // eBPF
+    "eBPF_be",
+    "eBPF_le",
 ];
 
 pub(super) fn runtime_status_for_entry(entry_id: &str) -> Result<String> {

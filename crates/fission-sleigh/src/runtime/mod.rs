@@ -360,7 +360,7 @@ mod tests {
             vec![
                 "AARCH64", "AARCH64", "AARCH64", "ARM", "ARM", "ARM", "ARM", "ARM", "ARM", "ARM",
                 "ARM", "ARM", "ARM", "ARM", "ARM", "ARM", "ARM", "ARM", "ARM", "MIPS", "MIPS",
-                "MIPS", "MIPS", "MIPS", "MIPS", "RISCV", "RISCV", "x86", "x86",
+                "MIPS", "MIPS", "MIPS", "MIPS", "RISCV", "RISCV", "eBPF", "eBPF", "x86", "x86",
             ]
         );
     }
