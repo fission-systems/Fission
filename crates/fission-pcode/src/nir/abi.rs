@@ -1,7 +1,7 @@
 use super::support::{
     StackBase, aarch64_ghidra_reg_name, aarch64_gpr_family_index, arm32_ghidra_reg_name,
-    arm32_gpr_family_index, is_register_varnode, register_name_with_param, unique_register_name,
-    x64_ghidra_reg_name,
+    arm32_gpr_family_index, is_register_varnode, powerpc_ghidra_reg_name, powerpc_gpr_family_index,
+    register_name_with_param, unique_register_name, x64_ghidra_reg_name,
 };
 use super::{CallingConvention, NirBindingOrigin, UNIQUE_SPACE_ID, Varnode};
 
@@ -28,6 +28,19 @@ fn arm32_param_slot_for_name_family(name: &str, abi: CallingConvention) -> Optio
     abi.param_offsets().iter().position(|&off| {
         arm32_ghidra_reg_name(off, 4)
             .and_then(arm32_gpr_family_index)
+            .is_some_and(|family| family == name_family)
+    })
+}
+
+fn powerpc_param_slot_for_name_family(name: &str, abi: CallingConvention) -> Option<usize> {
+    let name_family = powerpc_gpr_family_index(name)?;
+    let slot_size = match abi {
+        CallingConvention::PowerPc64 => 8,
+        _ => 4,
+    };
+    abi.param_offsets().iter().position(|&off| {
+        powerpc_ghidra_reg_name(off, slot_size)
+            .and_then(powerpc_gpr_family_index)
             .is_some_and(|family| family == name_family)
     })
 }
@@ -106,14 +119,24 @@ impl AbiState {
     }
 
     pub(crate) fn param_slot_for_varnode(&self, vn: &Varnode) -> Option<usize> {
-        if !self.is_64bit && self.abi != CallingConvention::Arm32 {
+        if !self.is_64bit
+            && !matches!(
+                self.abi,
+                CallingConvention::Arm32 | CallingConvention::PowerPc32
+            )
+        {
             return None;
         }
         self.provider().param_slot_for_varnode(vn)
     }
 
     pub(crate) fn param_slot_for_name(&self, name: &str) -> Option<usize> {
-        if !self.is_64bit && self.abi != CallingConvention::Arm32 {
+        if !self.is_64bit
+            && !matches!(
+                self.abi,
+                CallingConvention::Arm32 | CallingConvention::PowerPc32
+            )
+        {
             return None;
         }
         self.provider().param_slot_for_name(name)
@@ -332,6 +355,9 @@ impl AbiProvider for GenericAbiProvider {
         match self.abi {
             CallingConvention::AArch64 => aarch64_param_slot_for_name_family(name, self.abi),
             CallingConvention::Arm32 => arm32_param_slot_for_name_family(name, self.abi),
+            CallingConvention::PowerPc32 | CallingConvention::PowerPc64 => {
+                powerpc_param_slot_for_name_family(name, self.abi)
+            }
             CallingConvention::WindowsX64 | CallingConvention::SystemVAmd64 => {
                 x64_param_slot_for_name_family(name, self.abi)
             }
@@ -343,6 +369,8 @@ impl AbiProvider for GenericAbiProvider {
         match self.abi {
             CallingConvention::AArch64 => aarch64_ghidra_reg_name(offset, 8),
             CallingConvention::Arm32 => arm32_ghidra_reg_name(offset, 4),
+            CallingConvention::PowerPc32 => powerpc_ghidra_reg_name(offset, 4),
+            CallingConvention::PowerPc64 => powerpc_ghidra_reg_name(offset, 8),
             CallingConvention::WindowsX64 | CallingConvention::SystemVAmd64 => {
                 x64_ghidra_reg_name(offset)
             }

@@ -369,6 +369,9 @@ impl<'a> PreviewBuilder<'a> {
                 CallingConvention::Arm32 => {
                     arm32_ghidra_reg_name(key.offset, key.size).and_then(arm32_gpr_family_index)
                 }
+                CallingConvention::PowerPc32 | CallingConvention::PowerPc64 => {
+                    powerpc_ghidra_reg_name(key.offset, key.size).and_then(powerpc_gpr_family_index)
+                }
                 CallingConvention::WindowsX64 | CallingConvention::SystemVAmd64 => {
                     x64_ghidra_reg_name(key.offset).and_then(crate::arch::x86::x86_gpr_family_index)
                 }
@@ -1267,18 +1270,27 @@ impl<'a> PreviewBuilder<'a> {
                         .map(|(name, _)| name)
                         .or_else(|| arm32_ghidra_reg_name(vn.offset, vn.size));
                 if let Some(name) = name {
-                    return Ok(HirExpr::Var(name.to_string()));
+                    let name = self.ensure_live_register_binding(name, vn.size);
+                    return Ok(HirExpr::Var(name));
                 }
             }
             if !self.options.is_64bit
                 && is_register_space_id(vn.space_id)
+                && matches!(
+                    self.options.calling_convention,
+                    CallingConvention::WindowsX64 | CallingConvention::SystemVAmd64
+                )
                 && let Some(name) = register_name_32(vn.offset, vn.size)
             {
-                return Ok(HirExpr::Var(name.to_string()));
+                let name = self.ensure_live_register_binding(name, vn.size);
+                return Ok(HirExpr::Var(name));
             }
             if is_register_space_id(vn.space_id) {
                 let name = if (!self.options.is_64bit
-                    && self.options.calling_convention != CallingConvention::Arm32)
+                    && matches!(
+                        self.options.calling_convention,
+                        CallingConvention::WindowsX64 | CallingConvention::SystemVAmd64
+                    ))
                     || self.suppress_entry_register_params
                 {
                     register_name(vn.offset, vn.size)
@@ -1287,7 +1299,8 @@ impl<'a> PreviewBuilder<'a> {
                         .map(|(name, _)| name)
                         .unwrap_or_else(|| register_name(vn.offset, vn.size))
                 };
-                return Ok(HirExpr::Var(name.to_string()));
+                let name = self.ensure_live_register_binding(name, vn.size);
+                return Ok(HirExpr::Var(name));
             }
         }
         let stack_reg_name = self.stack_pointer_register_name(vn);

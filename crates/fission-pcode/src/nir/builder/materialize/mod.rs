@@ -61,7 +61,12 @@ impl<'a> PreviewBuilder<'a> {
     }
 
     fn call_result_registers(&self) -> Vec<Varnode> {
-        if !self.options.is_64bit && self.options.calling_convention != CallingConvention::Arm32 {
+        if !self.options.is_64bit
+            && !matches!(
+                self.options.calling_convention,
+                CallingConvention::Arm32 | CallingConvention::PowerPc32
+            )
+        {
             return Vec::new();
         }
         primary_return_registers(self.options.pointer_size, self.options.calling_convention)

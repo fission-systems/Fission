@@ -576,6 +576,24 @@ impl<'a> PreviewBuilder<'a> {
         self.temps.insert(name, binding.clone());
         binding
     }
+
+    pub(super) fn ensure_live_register_binding(&mut self, name: &str, size: u32) -> String {
+        if self.params.values().any(|binding| binding.name == name)
+            || self.locals.values().any(|slot| slot.name == name)
+        {
+            return name.to_string();
+        }
+        self.temps
+            .entry(name.to_string())
+            .or_insert_with(|| NirBinding {
+                name: name.to_string(),
+                ty: type_from_size(size, false),
+                surface_type_name: None,
+                origin: Some(NirBindingOrigin::TempPreserved),
+                initializer: None,
+            });
+        name.to_string()
+    }
 }
 
 fn is_compiler_runtime_param_suppressed_name(name: &str) -> bool {

@@ -405,6 +405,119 @@ fn arm32_bx_lr_returns_primary_r0_not_link_target() {
     assert!(!code.contains("return lr"), "{code}");
 }
 
+// ── PowerPC ELF ABI ───────────────────────────────────────────────────────────
+
+#[test]
+fn powerpc32_r3_to_r10_are_params() {
+    for slot in 0..8usize {
+        let offset = 0x0c + (slot as u64 * 4);
+        let (name, idx) =
+            register_name_with_param(offset, 4, CallingConvention::PowerPc32).unwrap();
+        assert_eq!(name, format!("param_{}", slot + 1));
+        assert_eq!(idx, Some(slot));
+    }
+}
+
+#[test]
+fn powerpc64_r3_to_r10_are_params() {
+    for slot in 0..8usize {
+        let offset = 0x18 + (slot as u64 * 8);
+        let (name, idx) =
+            register_name_with_param(offset, 8, CallingConvention::PowerPc64).unwrap();
+        assert_eq!(name, format!("param_{}", slot + 1));
+        assert_eq!(idx, Some(slot));
+    }
+}
+
+#[test]
+fn powerpc_non_param_registers_are_named() {
+    let (name, idx) = register_name_with_param(0x04, 4, CallingConvention::PowerPc32).unwrap();
+    assert_eq!(name, "r1");
+    assert_eq!(idx, None);
+    let (name, idx) = register_name_with_param(0x1020, 4, CallingConvention::PowerPc32).unwrap();
+    assert_eq!(name, "LR");
+    assert_eq!(idx, None);
+    assert_eq!(powerpc_ghidra_reg_name(0x400, 1), Some("xer_so"));
+}
+
+#[test]
+fn powerpc_param_slots_work_for_abi_state() {
+    let ppc32 = AbiState::new(CallingConvention::PowerPc32, false, 4, 0);
+    assert_eq!(ppc32.param_slot_for_name("r3"), Some(0));
+    assert_eq!(ppc32.param_slot_for_name("r10"), Some(7));
+    assert_eq!(ppc32.param_slot_for_name("r11"), None);
+
+    let ppc64 = AbiState::new(CallingConvention::PowerPc64, true, 8, 0);
+    assert_eq!(ppc64.param_slot_for_name("r3"), Some(0));
+    assert_eq!(ppc64.param_slot_for_name("r10"), Some(7));
+    assert_eq!(ppc64.param_slot_for_name("r11"), None);
+}
+
+#[test]
+fn powerpc32_blr_returns_primary_r3_not_link_target() {
+    let mut options = preview_options();
+    options.calling_convention = CallingConvention::PowerPc32;
+    options.format = "ELF32".to_string();
+    options.pe_x64_only = false;
+    options.pointer_size = 4;
+    options.is_64bit = false;
+
+    let r3 = Varnode {
+        space_id: RUST_SLEIGH_REGISTER_SPACE_ID,
+        offset: 0x0c,
+        size: 4,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let r4 = Varnode {
+        space_id: RUST_SLEIGH_REGISTER_SPACE_ID,
+        offset: 0x10,
+        size: 4,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let lr = Varnode {
+        space_id: RUST_SLEIGH_REGISTER_SPACE_ID,
+        offset: 0x1020,
+        size: 4,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let func = PcodeFunction {
+        blocks: vec![PcodeBasicBlock {
+            index: 0,
+            start_address: 0x1000,
+            successors: vec![],
+            ops: vec![
+                PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::IntSub,
+                    address: 0x1000,
+                    output: Some(r3.clone()),
+                    inputs: vec![r4, r3],
+                    asm_mnemonic: None,
+                },
+                PcodeOp {
+                    seq_num: 1,
+                    opcode: PcodeOpcode::Return,
+                    address: 0x1004,
+                    output: None,
+                    inputs: vec![lr],
+                    asm_mnemonic: None,
+                },
+            ],
+        }],
+    };
+
+    let code = render_mlil_preview(&func, "op_sub", 0x1000, &options).expect("preview render");
+    assert!(
+        code.contains("uint op_sub(uint param_1, uint param_2)"),
+        "{code}"
+    );
+    assert!(code.contains("return param_2 - param_1;"), "{code}");
+    assert!(!code.contains("return LR"), "{code}");
+}
+
 #[test]
 fn arm32_direct_call_recovers_r0_argument() {
     let mut options = preview_options();

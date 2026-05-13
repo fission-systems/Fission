@@ -12,14 +12,23 @@ impl<'a> PreviewBuilder<'a> {
     }
 
     pub(super) fn register_param(&mut self, vn: &Varnode) -> Option<String> {
-        if !self.options.is_64bit && self.options.calling_convention != CallingConvention::Arm32 {
+        if !self.options.is_64bit
+            && !matches!(
+                self.options.calling_convention,
+                CallingConvention::Arm32 | CallingConvention::PowerPc32
+            )
+        {
             return None;
         }
         if self.suppress_entry_register_params {
             if !is_register_space_id(vn.space_id) {
                 return None;
             }
-            return Some(register_name(vn.offset, vn.size).to_string());
+            return Some(
+                register_hardware_name_for_abi(vn.offset, vn.size, self.options.calling_convention)
+                    .unwrap_or_else(|| register_name(vn.offset, vn.size))
+                    .to_string(),
+            );
         }
         let abi = self.abi_state();
         if is_register_varnode(vn)
@@ -38,12 +47,7 @@ impl<'a> PreviewBuilder<'a> {
             return Some(alias_name);
         }
         let Some(index) = abi.param_slot_for_varnode(vn) else {
-            if vn.space_id != REGISTER_SPACE_ID {
-                return None;
-            }
-            let (name, _) =
-                register_name_with_param(vn.offset, vn.size, self.options.calling_convention)?;
-            return Some(name.to_string());
+            return None;
         };
         let name = abi.param_name(index);
         self.params.entry(index).or_insert_with(|| NirBinding {
@@ -359,6 +363,14 @@ impl<'a> PreviewBuilder<'a> {
                     0x4c => Some((StackBase::Rbp, 0)),
                     _ => None,
                 },
+                CallingConvention::PowerPc32 => match ptr.offset {
+                    0x04 => Some((StackBase::Rsp, 0)),
+                    _ => None,
+                },
+                CallingConvention::PowerPc64 => match ptr.offset {
+                    0x08 => Some((StackBase::Rsp, 0)),
+                    _ => None,
+                },
                 CallingConvention::AArch64 => match ptr.offset {
                     0x08 => Some((StackBase::Rsp, 0)),
                     0x40e8 => Some((StackBase::Rbp, 0)),
@@ -457,15 +469,26 @@ impl<'a> PreviewBuilder<'a> {
             },
         };
 
-        let entry = self.locals.entry(offset).or_insert_with(|| {
-            let id = self.locals_next_id;
-            self.locals_next_id += 1;
-            StackSlot {
-                id,
-                name: kind_name.clone(),
-                ty: ty.clone(),
-                origin,
+        if let Some(entry) = self.locals.get_mut(&offset) {
+            if entry.ty == NirType::Unknown {
+                entry.ty = ty.clone();
             }
+            if matches!(entry.origin, NirBindingOrigin::StackOffset(_))
+                && !matches!(origin, NirBindingOrigin::StackOffset(_))
+            {
+                entry.origin = origin;
+            }
+            return Some((entry.name.clone(), entry.ty.clone()));
+        }
+
+        let id = self.locals_next_id;
+        self.locals_next_id += 1;
+        let name = self.unique_stack_slot_binding_name(&kind_name, id);
+        let entry = self.locals.entry(offset).or_insert_with(|| StackSlot {
+            id,
+            name,
+            ty: ty.clone(),
+            origin,
         });
         if entry.ty == NirType::Unknown {
             entry.ty = ty.clone();
@@ -476,6 +499,25 @@ impl<'a> PreviewBuilder<'a> {
             entry.origin = origin;
         }
         Some((entry.name.clone(), entry.ty.clone()))
+    }
+
+    fn unique_stack_slot_binding_name(&self, base_name: &str, id: StackSlotId) -> String {
+        if !self.binding_name_in_use(base_name) {
+            return base_name.to_string();
+        }
+        let mut candidate = format!("{base_name}_{id}");
+        let mut suffix = id + 1;
+        while self.binding_name_in_use(&candidate) {
+            candidate = format!("{base_name}_{suffix}");
+            suffix += 1;
+        }
+        candidate
+    }
+
+    fn binding_name_in_use(&self, name: &str) -> bool {
+        self.params.values().any(|binding| binding.name == name)
+            || self.locals.values().any(|slot| slot.name == name)
+            || self.temps.contains_key(name)
     }
 
     fn rsp_local_display_offset(&self, offset: i64) -> i64 {

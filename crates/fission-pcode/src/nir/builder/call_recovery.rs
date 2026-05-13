@@ -19,7 +19,11 @@ impl<'a> PreviewBuilder<'a> {
             return unique_register_name(vn.offset, vn.size).map(str::to_string);
         }
         if is_register_varnode(vn) {
-            return Some(register_name(vn.offset, vn.size).to_string());
+            return Some(
+                register_hardware_name_for_abi(vn.offset, vn.size, self.options.calling_convention)
+                    .unwrap_or_else(|| register_name(vn.offset, vn.size))
+                    .to_string(),
+            );
         }
         None
     }
@@ -197,7 +201,12 @@ impl<'a> PreviewBuilder<'a> {
         call_idx: usize,
         prefer_source_values: bool,
     ) -> Result<Option<Vec<HirExpr>>, MlilPreviewError> {
-        if !self.options.is_64bit && self.options.calling_convention != CallingConvention::Arm32 {
+        if !self.options.is_64bit
+            && !matches!(
+                self.options.calling_convention,
+                CallingConvention::Arm32 | CallingConvention::PowerPc32
+            )
+        {
             return Ok(None);
         }
 

@@ -472,7 +472,11 @@ impl<'a> PreviewBuilder<'a> {
     }
 
     fn uses_primary_return_registers(&self) -> bool {
-        self.options.is_64bit || self.options.calling_convention == CallingConvention::Arm32
+        self.options.is_64bit
+            || matches!(
+                self.options.calling_convention,
+                CallingConvention::Arm32 | CallingConvention::PowerPc32
+            )
     }
 
     fn is_return_target_copy(&self, op: &PcodeOp, output: &Varnode) -> bool {
