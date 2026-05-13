@@ -1,3 +1,4 @@
+use super::handles::u64_to_i64_bits;
 use super::*;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -172,8 +173,9 @@ fn token_span_from_sla_field(
 
 pub(super) fn read_uint(bytes: &[u8], offset: usize, size: u32) -> Result<u64> {
     ensure_u64_byte_width(size, "immediate")?;
+    let size = usize::try_from(size).map_err(|_| anyhow!("immediate byte width exceeds usize"))?;
     let end = offset
-        .checked_add(size as usize)
+        .checked_add(size)
         .ok_or_else(|| anyhow!("immediate byte range overflow"))?;
     let slice = bytes
         .get(offset..end)
@@ -198,10 +200,10 @@ pub(super) fn read_sint(bytes: &[u8], offset: usize, size: u32) -> Result<i64> {
         .checked_mul(8)
         .ok_or_else(|| anyhow!("signed immediate bit width overflow"))?;
     if bits == 64 {
-        Ok(i64::from_ne_bytes(value.to_ne_bytes()))
+        Ok(u64_to_i64_bits(value))
     } else {
         let shift = 64 - bits;
-        Ok(((value << shift) as i64) >> shift)
+        Ok(u64_to_i64_bits(value << shift) >> shift)
     }
 }
 
@@ -339,7 +341,9 @@ pub(super) fn read_sla_token_field_at(
             byte_end
                 .checked_sub(idx)
                 .ok_or_else(|| anyhow!("tokenfield byte index underflow"))?
-        } as usize;
+        };
+        let off =
+            usize::try_from(off).map_err(|_| anyhow!("tokenfield byte offset exceeds usize"))?;
         let absolute_off = base_cursor
             .checked_add(off)
             .ok_or_else(|| anyhow!("tokenfield absolute byte offset overflow"))?;
@@ -412,14 +416,17 @@ fn append_tokenfield_byte(value: u64, byte: u8) -> Result<u64> {
 
 fn shifted_sla_token_field(value: u64, shift: i32) -> Result<u64> {
     if shift >= 0 {
+        let shift =
+            u32::try_from(shift).map_err(|_| anyhow!("tokenfield right shift exceeds u32"))?;
         value
-            .checked_shr(shift as u32)
+            .checked_shr(shift)
             .ok_or_else(|| anyhow!("tokenfield right shift {shift} exceeds u64 width"))
     } else {
         let amount = shift
             .checked_neg()
-            .ok_or_else(|| anyhow!("tokenfield shift amount underflow"))?
-            as u32;
+            .ok_or_else(|| anyhow!("tokenfield shift amount underflow"))?;
+        let amount =
+            u32::try_from(amount).map_err(|_| anyhow!("tokenfield left shift exceeds u32"))?;
         value
             .checked_shl(amount)
             .ok_or_else(|| anyhow!("tokenfield left shift {amount} exceeds u64 width"))

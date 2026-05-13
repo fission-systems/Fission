@@ -892,6 +892,9 @@ fn compiled_table_policy_symbols_stay_architecture_neutral() {
     let tokenfield_unchecked_accumulation = "res = (res << 8) | u64::from(byte)";
     let tokenfield_unchecked_right_shift = "res >> (shift as u32)";
     let tokenfield_unchecked_left_shift = "res << ((-shift) as u32)";
+    let tokenfield_offset_lossy_cast = "        } as usize;";
+    let immediate_size_lossy_cast = "let end = offset\n        .checked_add(size as usize)";
+    let signed_immediate_unnamed_cast = "((value << shift) as i64)";
     let empty_or_pattern_length_fallback = [
         ".map(disjoint_pattern_instruction_byte_len)",
         ".max()\n            .unwrap_or(0)",
@@ -1170,6 +1173,13 @@ fn compiled_table_policy_symbols_stay_architecture_neutral() {
             !source.contains(tokenfield_unchecked_right_shift)
                 && !source.contains(tokenfield_unchecked_left_shift),
             "{} still unchecked-shifts SLA tokenfield values",
+            file.display()
+        );
+        assert!(
+            !source.contains(tokenfield_offset_lossy_cast)
+                && !source.contains(immediate_size_lossy_cast)
+                && !source.contains(signed_immediate_unnamed_cast),
+            "{} still uses lossy token/immediate casts",
             file.display()
         );
         assert!(
