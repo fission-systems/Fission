@@ -389,6 +389,7 @@ mod tests {
                 "MIPS",
                 "RISCV",
                 "RISCV",
+                "Sparc",
                 "eBPF",
                 "eBPF",
                 "x86",
@@ -434,6 +435,36 @@ mod tests {
             assert_eq!(length, 4, "{language}");
             assert!(!ops.is_empty(), "{language}");
         }
+    }
+
+    #[test]
+    fn sparc_v9_64_lifts_add_from_spec_template() {
+        if !discovery::ghidra_packaged_sla_available() {
+            eprintln!("skip: packaged Ghidra .sla not available for SPARC ConstructTpl lift");
+            return;
+        }
+
+        let frontend = RuntimeSleighFrontend::new_for_language("sparc:BE:64:default")
+            .expect("SPARC V9 64 runtime");
+        assert_eq!(
+            frontend.status(),
+            RuntimeFrontendStatus::ExecutableCandidate
+        );
+
+        let bytes = [0x90, 0x02, 0x40, 0x08]; // add %o1, %o0, %o0
+        let decoded = frontend
+            .decode_window(&bytes, 0x1000, 1)
+            .expect("SPARC add decode");
+        assert_eq!(
+            decoded.first().map(|instruction| instruction.length),
+            Some(4)
+        );
+
+        let (ops, length) = frontend
+            .decode_and_lift_with_len(&bytes, 0x1000)
+            .expect("SPARC add should lift from .sla ConstructTpl");
+        assert_eq!(length, 4);
+        assert!(!ops.is_empty());
     }
 
     #[test]

@@ -45,6 +45,8 @@ const EXECUTABLE_CANDIDATE_ENTRY_IDS: &[&str] = &[
     "loongarch32_f64",
     "loongarch64_f32",
     "loongarch64_f64",
+    // SPARC
+    "SparcV9_64",
     // eBPF
     "eBPF_be",
     "eBPF_le",
