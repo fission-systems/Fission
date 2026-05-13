@@ -8,6 +8,7 @@ fn collect_function_instructions(
     data: &[u8],
     addr: u64,
 ) -> io::Result<(String, u64, bool, Vec<(u64, String, String)>)> {
+    let frontend = runtime_frontend_for_binary(binary)?;
     let func = binary.function_at(addr).ok_or_else(|| {
         io::Error::new(
             io::ErrorKind::NotFound,
@@ -15,6 +16,8 @@ fn collect_function_instructions(
         )
     })?;
     let func_start = func.address;
+    let address_state = frontend.normalize_low_bit_code_address(func_start);
+    let decode_start = address_state.address;
     let mut func_size = func.size;
     let needs_boundary_detection = func_size == 0;
 
@@ -32,10 +35,10 @@ fn collect_function_instructions(
         }
     }
 
-    let section = binary.section_containing_for_execution(func_start);
+    let section = binary.section_containing_for_execution(decode_start);
 
     let (bytes, base) = if let Some(sec) = section {
-        let offset = (func_start - sec.virtual_address) as usize;
+        let offset = (decode_start - sec.virtual_address) as usize;
         let file_offset = sec.file_offset as usize + offset;
         let remaining = (sec.virtual_size as usize).saturating_sub(offset);
         let len = remaining
@@ -43,25 +46,29 @@ fn collect_function_instructions(
             .min(data.len().saturating_sub(file_offset));
 
         if file_offset + len <= data.len() {
-            (&data[file_offset..file_offset + len], func_start)
+            (&data[file_offset..file_offset + len], decode_start)
         } else {
             return Err(io::Error::new(
                 io::ErrorKind::UnexpectedEof,
-                format!("Function at 0x{func_start:x} is outside file bounds"),
+                format!("Function at 0x{decode_start:x} is outside file bounds"),
             ));
         }
     } else {
         return Err(io::Error::new(
             io::ErrorKind::NotFound,
-            format!("Function at 0x{func_start:x} not in any section"),
+            format!("Function at 0x{decode_start:x} not in any section"),
         ));
     };
 
     let mut instructions = Vec::new();
-    let func_end = func_start + func_size;
-    let frontend = runtime_frontend_for_binary(binary)?;
+    let func_end = decode_start + func_size;
     let decoded = frontend
-        .decode_window(bytes, base, usize::MAX)
+        .decode_window_with_context_override(
+            bytes,
+            base,
+            usize::MAX,
+            address_state.context_override,
+        )
         .map_err(to_io_error)?;
 
     for instr in decoded {
@@ -124,13 +131,16 @@ pub(super) fn disassemble(
     json: bool,
 ) -> io::Result<()> {
     let mut stdout = io::stdout().lock();
+    let frontend = runtime_frontend_for_binary(binary)?;
+    let address_state = frontend.normalize_low_bit_code_address(addr);
+    let decode_addr = address_state.address;
 
     // Find the section containing this address
-    let section = binary.section_containing_for_execution(addr);
+    let section = binary.section_containing_for_execution(decode_addr);
 
     let (bytes, base) = if let Some(sec) = section {
         // Calculate offset within section
-        let offset = (addr - sec.virtual_address) as usize;
+        let offset = (decode_addr - sec.virtual_address) as usize;
         let file_offset = sec.file_offset as usize + offset;
         let remaining = (sec.virtual_size as usize).saturating_sub(offset);
         let len = remaining
@@ -138,19 +148,18 @@ pub(super) fn disassemble(
             .min(data.len().saturating_sub(file_offset));
 
         if file_offset + len <= data.len() {
-            (&data[file_offset..file_offset + len], addr)
+            (&data[file_offset..file_offset + len], decode_addr)
         } else {
-            eprintln!("Error: Address 0x{:x} is outside file bounds", addr);
+            eprintln!("Error: Address 0x{:x} is outside file bounds", decode_addr);
             std::process::exit(1);
         }
     } else {
-        eprintln!("Error: Address 0x{:x} not in any section", addr);
+        eprintln!("Error: Address 0x{:x} not in any section", decode_addr);
         std::process::exit(1);
     };
 
-    let frontend = runtime_frontend_for_binary(binary)?;
     let instructions = frontend
-        .decode_window(bytes, base, count)
+        .decode_window_with_context_override(bytes, base, count, address_state.context_override)
         .map_err(to_io_error)?
         .into_iter()
         .map(|instr| {

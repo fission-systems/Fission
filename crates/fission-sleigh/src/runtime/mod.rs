@@ -679,6 +679,37 @@ mod tests {
     }
 
     #[test]
+    fn arm_low_bit_decode_window_keeps_thumb_context_after_first_instruction() {
+        if !discovery::ghidra_packaged_sla_available() {
+            eprintln!(
+                "skip: packaged Ghidra .sla not available for ARM low-bit decode-window test"
+            );
+            return;
+        }
+        let frontend = RuntimeSleighFrontend::new_for_language("ARM8_le").expect("ARM8 runtime");
+        let address_state = frontend.normalize_low_bit_code_address(0x100001);
+        assert_eq!(address_state.address, 0x100000);
+        assert!(address_state.context_override.is_some());
+
+        let bytes = [0x4c, 0xf6, 0xcd, 0x41, 0xcc, 0xf6, 0xcc, 0x41];
+        let decoded = frontend
+            .decode_window_with_context_override(
+                &bytes,
+                address_state.address,
+                2,
+                address_state.context_override,
+            )
+            .expect("Thumb decode window should keep low-bit context across instructions");
+        assert_eq!(decoded.len(), 2);
+        assert_eq!(decoded[0].address, 0x100000);
+        assert_eq!(decoded[0].length, 4);
+        assert_eq!(decoded[0].mnemonic, "movw");
+        assert_eq!(decoded[1].address, 0x100004);
+        assert_eq!(decoded[1].length, 4);
+        assert_eq!(decoded[1].mnemonic, "movt");
+    }
+
+    #[test]
     fn runtime_frontend_load_spec_matches_entry_id_frontend_for_ret() {
         if !discovery::ghidra_packaged_sla_available() {
             eprintln!("skip: packaged Ghidra .sla not available for ret lift parity check");

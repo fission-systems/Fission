@@ -2,6 +2,17 @@ use super::*;
 use crate::packed_context::packed_context_word_to_u64;
 use anyhow::Context;
 
+fn merge_context_overrides(
+    base: PackedContextOverride,
+    pending: PackedContextOverride,
+) -> PackedContextOverride {
+    let pending_mask = pending.mask_bits();
+    PackedContextOverride::new(
+        (base.context_bits() & !pending_mask) | (pending.context_bits() & pending_mask),
+        base.mask_bits() | pending_mask,
+    )
+}
+
 impl RuntimeSleighFrontend {
     pub fn decode_and_lift(&self, bytes: &[u8], address: u64) -> Result<Vec<PcodeOp>> {
         let (ops, _) = self.decode_and_lift_with_len(bytes, address)?;
@@ -65,6 +76,16 @@ impl RuntimeSleighFrontend {
         address: u64,
         limit: usize,
     ) -> Result<Vec<DecodedInstruction>> {
+        self.decode_window_with_context_override(bytes, address, limit, None)
+    }
+
+    pub fn decode_window_with_context_override(
+        &self,
+        bytes: &[u8],
+        address: u64,
+        limit: usize,
+        initial_context_override: Option<PackedContextOverride>,
+    ) -> Result<Vec<DecodedInstruction>> {
         if limit == 0 || bytes.is_empty() {
             return Ok(Vec::new());
         }
@@ -73,7 +94,6 @@ impl RuntimeSleighFrontend {
         // Populated after each instruction's globalset / ContextCommit ops.
         let mut pending_overrides: std::collections::BTreeMap<u64, PackedContextOverride> =
             std::collections::BTreeMap::new();
-
         let mut decoded = Vec::with_capacity(limit.min(64));
         let mut offset = 0usize;
         let mut current = address;
@@ -81,7 +101,12 @@ impl RuntimeSleighFrontend {
             let remaining = &bytes[offset..];
 
             // Apply any pending ContextCommit overrides for this address.
-            let ctx_override = pending_overrides.get(&current).copied();
+            let ctx_override = match (initial_context_override, pending_overrides.get(&current)) {
+                (Some(base), Some(pending)) => Some(merge_context_overrides(base, *pending)),
+                (Some(base), None) => Some(base),
+                (None, Some(pending)) => Some(*pending),
+                (None, None) => None,
+            };
 
             let instruction = match self.decode_instruction_with_context_override(
                 remaining,
