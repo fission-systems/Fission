@@ -32,6 +32,7 @@ const STB_WEAK: u8 = 2;
 const EM_PPC64: u16 = 21;
 const EM_ARM: u16 = 40;
 const EM_RISCV: u16 = 243;
+const EM_LOONGARCH: u16 = 258;
 const R_ARM_PC24: u32 = 1;
 const R_ARM_ABS32: u32 = 2;
 const R_ARM_CALL: u32 = 28;
@@ -41,6 +42,9 @@ const R_RISCV_HI20: u32 = 26;
 const R_RISCV_LO12_I: u32 = 27;
 const R_RISCV_LO12_S: u32 = 28;
 const R_RISCV_RELAX: u32 = 51;
+const R_LARCH_B16: u32 = 64;
+const R_LARCH_B21: u32 = 65;
+const R_LARCH_B26: u32 = 66;
 const RELOCATABLE_IMAGE_BASE: u64 = 0x100000;
 const ELF_EXTERNAL_IMAGE_BASE: u64 = 0xffff_2000_0000_0000;
 
@@ -207,6 +211,10 @@ impl ElfLoader {
                 let patches =
                     riscv_relocation_patches_64(bytes, &shdrs, &section_addresses, endian);
                 apply_u32_relocation_patches(&mut data, patches, endian);
+            } else if is_relocatable && header.machine == EM_LOONGARCH {
+                let patches =
+                    loongarch_relocation_patches_64(bytes, &shdrs, &section_addresses, endian);
+                apply_u32_relocation_patches(&mut data, patches, endian);
             }
         } else if !is_relocatable {
             sections_info.extend(load_segments_as_sections_64(&phdrs));
@@ -372,6 +380,10 @@ impl ElfLoader {
             );
             if is_relocatable && header.machine == EM_ARM {
                 let patches = arm_relocation_patches_32(bytes, &shdrs, &section_addresses, endian);
+                apply_u32_relocation_patches(&mut data, patches, endian);
+            } else if is_relocatable && header.machine == EM_LOONGARCH {
+                let patches =
+                    loongarch_relocation_patches_32(bytes, &shdrs, &section_addresses, endian);
                 apply_u32_relocation_patches(&mut data, patches, endian);
             }
         } else if !is_relocatable {
@@ -954,6 +966,180 @@ fn apply_riscv_relocation_to_word(
     }
 }
 
+fn loongarch_relocation_patches_64(
+    full_data: &[u8],
+    shdrs: &[Elf64Shdr],
+    section_addresses: &[u64],
+    endian: Endian,
+) -> Vec<(usize, u32)> {
+    let reader = ByteReader::new(full_data, endian);
+    let mut patches = Vec::new();
+    for shdr in shdrs.iter().filter(|shdr| shdr.sh_type == SHT_RELA) {
+        let Some(target_section) = shdrs.get(shdr.sh_info as usize) else {
+            continue;
+        };
+        let Some(target_base) = section_addresses.get(shdr.sh_info as usize).copied() else {
+            continue;
+        };
+        let Some(symtab) = shdrs.get(shdr.sh_link as usize) else {
+            continue;
+        };
+        let entry_size = if shdr.sh_entsize > 0 {
+            shdr.sh_entsize as usize
+        } else {
+            24
+        };
+        let count = (shdr.sh_size as usize).checked_div(entry_size).unwrap_or(0);
+        let start = shdr.sh_offset as usize;
+        for index in 0..count {
+            let offset = start + index * entry_size;
+            if offset + entry_size > full_data.len() {
+                break;
+            }
+            let Ok(r_offset) = reader.u64(offset) else {
+                break;
+            };
+            let Ok(r_info) = reader.u64(offset + 8) else {
+                break;
+            };
+            let Ok(addend_raw) = reader.u64(offset + 16) else {
+                break;
+            };
+            let addend = addend_raw as i64;
+            let reloc_type = (r_info & 0xffff_ffff) as u32;
+            let symbol_index = (r_info >> 32) as usize;
+            let Some(symbol_value) =
+                symbol_value_64(full_data, symtab, section_addresses, symbol_index, endian)
+            else {
+                continue;
+            };
+            let patch_offset = target_section
+                .sh_offset
+                .checked_add(r_offset)
+                .and_then(|value| usize::try_from(value).ok());
+            let Some(patch_offset) = patch_offset else {
+                continue;
+            };
+            let Ok(word) = reader.u32(patch_offset) else {
+                continue;
+            };
+            let place = target_base.saturating_add(r_offset);
+            if let Some(patched) =
+                apply_loongarch_relocation_to_word(word, reloc_type, symbol_value, place, addend)
+            {
+                patches.push((patch_offset, patched));
+            }
+        }
+    }
+    patches
+}
+
+fn loongarch_relocation_patches_32(
+    full_data: &[u8],
+    shdrs: &[Elf32Shdr],
+    section_addresses: &[u64],
+    endian: Endian,
+) -> Vec<(usize, u32)> {
+    let reader = ByteReader::new(full_data, endian);
+    let mut patches = Vec::new();
+    for shdr in shdrs.iter().filter(|shdr| shdr.sh_type == SHT_RELA) {
+        let Some(target_section) = shdrs.get(shdr.sh_info as usize) else {
+            continue;
+        };
+        let Some(target_base) = section_addresses.get(shdr.sh_info as usize).copied() else {
+            continue;
+        };
+        let Some(symtab) = shdrs.get(shdr.sh_link as usize) else {
+            continue;
+        };
+        let entry_size = if shdr.sh_entsize > 0 {
+            shdr.sh_entsize as usize
+        } else {
+            12
+        };
+        let count = (shdr.sh_size as usize).checked_div(entry_size).unwrap_or(0);
+        let start = shdr.sh_offset as usize;
+        for index in 0..count {
+            let offset = start + index * entry_size;
+            if offset + entry_size > full_data.len() {
+                break;
+            }
+            let Ok(r_offset) = reader.u32(offset) else {
+                break;
+            };
+            let Ok(r_info) = reader.u32(offset + 4) else {
+                break;
+            };
+            let Ok(addend) = reader.i32(offset + 8) else {
+                break;
+            };
+            let reloc_type = r_info & 0xff;
+            let symbol_index = (r_info >> 8) as usize;
+            let Some(symbol_value) =
+                symbol_value_32(full_data, symtab, section_addresses, symbol_index, endian)
+            else {
+                continue;
+            };
+            let patch_offset = target_section
+                .sh_offset
+                .checked_add(r_offset)
+                .and_then(|value| usize::try_from(value).ok());
+            let Some(patch_offset) = patch_offset else {
+                continue;
+            };
+            let Ok(word) = reader.u32(patch_offset) else {
+                continue;
+            };
+            let place = target_base.saturating_add(u64::from(r_offset));
+            if let Some(patched) = apply_loongarch_relocation_to_word(
+                word,
+                reloc_type,
+                symbol_value,
+                place,
+                i64::from(addend),
+            ) {
+                patches.push((patch_offset, patched));
+            }
+        }
+    }
+    patches
+}
+
+fn apply_loongarch_relocation_to_word(
+    word: u32,
+    reloc_type: u32,
+    symbol_value: u64,
+    place: u64,
+    addend: i64,
+) -> Option<u32> {
+    let value = (symbol_value as i128)
+        .wrapping_add(addend as i128)
+        .wrapping_sub(place as i128);
+    match reloc_type {
+        R_LARCH_B16 => {
+            let imm16 = ((value >> 2) as u32) & 0xffff;
+            Some((word & !(0xffff << 10)) | (imm16 << 10))
+        }
+        R_LARCH_B21 => {
+            let imm21 = ((value >> 2) as u32) & 0x1f_ffff;
+            Some(
+                (word & !((0x1f << 0) | (0xffff << 10)))
+                    | ((imm21 >> 16) & 0x1f)
+                    | ((imm21 & 0xffff) << 10),
+            )
+        }
+        R_LARCH_B26 => {
+            let imm26 = ((value >> 2) as u32) & 0x03ff_ffff;
+            Some(
+                (word & !((0x03ff << 0) | (0xffff << 10)))
+                    | ((imm26 >> 16) & 0x03ff)
+                    | ((imm26 & 0xffff) << 10),
+            )
+        }
+        _ => None,
+    }
+}
+
 fn arm_relocation_patches_32(
     full_data: &[u8],
     shdrs: &[Elf32Shdr],
@@ -1427,6 +1613,75 @@ mod tests {
             call,
             [0xeb, 0xff, 0xff, 0xf8],
             "R_ARM_CALL should retarget recursive_fib BL to 0x100000"
+        );
+    }
+
+    #[test]
+    fn loongarch_branch_relocation_patch_encodes_split_immediates() {
+        let bltu_a0_a1_self = 0x6800_0085;
+        let bl_self = 0x5400_0000;
+
+        assert_eq!(
+            apply_loongarch_relocation_to_word(bltu_a0_a1_self, R_LARCH_B16, 0x100048, 0x100020, 0)
+                .expect("B16 patch"),
+            0x6800_2885
+        );
+        assert_eq!(
+            apply_loongarch_relocation_to_word(bl_self, R_LARCH_B26, 0x100000, 0x100034, 0)
+                .expect("B26 patch"),
+            0x57ff_cfff
+        );
+    }
+
+    #[test]
+    fn elf64_loongarch_relocatable_branch_relocations_patch_loaded_image() {
+        let fixture = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(
+            "../../benchmark/binary/loongarch64_f64/baremetal/small/binary/c/function_calls.o",
+        );
+        if !fixture.exists() {
+            eprintln!("skip: LoongArch64 function_calls fixture missing");
+            return;
+        }
+
+        let binary =
+            LoadedBinary::from_file(&fixture).expect("load LoongArch64 relocatable object");
+        let first_branch = binary
+            .view_bytes(0x100020, 4)
+            .expect("recursive_fib first branch bytes");
+        let loop_branch = binary
+            .view_bytes(0x100044, 4)
+            .expect("recursive_fib loop branch bytes");
+        assert_eq!(
+            first_branch,
+            [0x85, 0x28, 0x00, 0x68],
+            "R_LARCH_B16 should retarget the base-case branch to 0x100048"
+        );
+        assert_eq!(
+            loop_branch,
+            [0x16, 0xef, 0xff, 0x6b],
+            "R_LARCH_B16 should retarget the loop branch to 0x100030"
+        );
+    }
+
+    #[test]
+    fn elf32_loongarch_relocatable_branch_relocations_patch_loaded_image() {
+        let fixture = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(
+            "../../benchmark/binary/loongarch32_f64/baremetal/small/binary/c/function_calls.o",
+        );
+        if !fixture.exists() {
+            eprintln!("skip: LoongArch32 function_calls fixture missing");
+            return;
+        }
+
+        let binary =
+            LoadedBinary::from_file(&fixture).expect("load LoongArch32 relocatable object");
+        let recursive_call = binary
+            .view_bytes(0x100034, 4)
+            .expect("recursive_fib call bytes");
+        assert_eq!(
+            recursive_call,
+            [0xff, 0xcf, 0xff, 0x57],
+            "R_LARCH_B26 should retarget recursive_fib BL to 0x100000"
         );
     }
 
