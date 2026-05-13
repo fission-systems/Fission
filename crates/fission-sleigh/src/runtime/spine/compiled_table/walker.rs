@@ -135,6 +135,7 @@ fn required_const_tpl_u32(value: Option<u64>, role: &str) -> Result<u32> {
 
 #[cfg(test)]
 mod construct_state_offset_tests {
+    use super::{context_change_expr_word, context_change_mask_word, shifted_context_change_word};
     use crate::compiler::{compile_x86_64_frontend, discovery};
 
     #[test]
@@ -179,6 +180,27 @@ mod construct_state_offset_tests {
                 Some(crate::compiler::CompiledTemplateSource::SpecDerived)
             );
         }
+    }
+
+    #[test]
+    fn context_change_expr_word_fails_closed_on_out_of_range_values() {
+        assert_eq!(context_change_expr_word(0xffff_ffff).unwrap(), u32::MAX);
+        assert!(context_change_expr_word(-1).is_err());
+        assert!(context_change_expr_word(i64::from(u32::MAX) + 1).is_err());
+    }
+
+    #[test]
+    fn context_change_mask_word_fails_closed_above_u32() {
+        assert_eq!(context_change_mask_word(0xffff_ffff).unwrap(), u32::MAX);
+        assert!(context_change_mask_word(u64::from(u32::MAX) + 1).is_err());
+    }
+
+    #[test]
+    fn context_change_shift_fails_closed_above_word_width() {
+        assert_eq!(shifted_context_change_word(1, 31).unwrap(), 1u32 << 31);
+        assert_eq!(shifted_context_change_word(0x8000_0000, -31).unwrap(), 1);
+        assert!(shifted_context_change_word(1, 32).is_err());
+        assert!(shifted_context_change_word(1, -32).is_err());
     }
 }
 
@@ -1030,30 +1052,26 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
     fn apply_context_change(&mut self, change: &crate::compiler::CompiledContextOp) -> Result<()> {
         if let Some(expr) = &change.expr {
             let saved_cursor = self.cursor;
-            let raw = self.eval_pattern_expression(expr)? as u32;
+            let raw = context_change_expr_word(self.eval_pattern_expression(expr)?)?;
             self.cursor = saved_cursor;
-            let value = if change.shift >= 0 {
-                raw << (change.shift as u32)
-            } else {
-                raw >> ((-change.shift) as u32)
-            };
+            let value = shifted_context_change_word(raw, change.shift)?;
             set_packed_context_word(
                 &mut self.context_register,
                 change.word_index,
                 value,
-                change.mask as u32,
+                context_change_mask_word(change.mask)?,
             )?;
             set_packed_context_word(
                 &mut self.context_known_mask,
                 change.word_index,
-                change.mask as u32,
-                change.mask as u32,
+                context_change_mask_word(change.mask)?,
+                context_change_mask_word(change.mask)?,
             )?;
             if crate::runtime::diagnostics::terminal_reselect_trace_enabled() {
                 eprintln!(
                     "[context-change expr] word={} mask=0x{:08x} value=0x{:08x} ctx=0x{:016x} known=0x{:016x}",
                     change.word_index,
-                    change.mask as u32,
+                    context_change_mask_word(change.mask)?,
                     value,
                     self.context_register,
                     self.context_known_mask,
@@ -1062,17 +1080,20 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
             Ok(())
         } else {
             if change.bit_offset >= 64 {
+                let value = u32::try_from(change.value)
+                    .map_err(|_| anyhow!("context word value exceeds u32"))?;
+                let mask = context_change_mask_word(change.mask)?;
                 set_packed_context_word(
                     &mut self.context_register,
                     change.word_index,
-                    change.value as u32,
-                    change.mask as u32,
+                    value,
+                    mask,
                 )?;
                 set_packed_context_word(
                     &mut self.context_known_mask,
                     change.word_index,
-                    change.mask as u32,
-                    change.mask as u32,
+                    mask,
+                    mask,
                 )?;
                 return Ok(());
             }
@@ -1463,4 +1484,28 @@ fn subtable_decode_address(ctx: &CompiledInstructionContext<'_>) -> Result<u64> 
     ctx.address
         .checked_add(ctx.cursor as u64)
         .ok_or_else(|| anyhow!("subtable decode address overflowed"))
+}
+
+fn context_change_expr_word(value: i64) -> Result<u32> {
+    u32::try_from(value).map_err(|_| anyhow!("context expression value {value} exceeds u32"))
+}
+
+fn context_change_mask_word(mask: u64) -> Result<u32> {
+    u32::try_from(mask).map_err(|_| anyhow!("context change mask 0x{mask:x} exceeds u32"))
+}
+
+fn shifted_context_change_word(value: u32, shift: i32) -> Result<u32> {
+    if shift >= 0 {
+        value
+            .checked_shl(shift as u32)
+            .ok_or_else(|| anyhow!("context expression left shift {shift} exceeds u32 width"))
+    } else {
+        let amount = shift
+            .checked_neg()
+            .ok_or_else(|| anyhow!("context expression shift underflow"))?
+            as u32;
+        value
+            .checked_shr(amount)
+            .ok_or_else(|| anyhow!("context expression right shift {amount} exceeds u32 width"))
+    }
 }
