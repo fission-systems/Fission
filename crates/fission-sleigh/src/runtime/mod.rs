@@ -358,11 +358,82 @@ mod tests {
                 .map(|frontend| frontend.processor.as_str())
                 .collect::<Vec<_>>(),
             vec![
-                "AARCH64", "AARCH64", "AARCH64", "ARM", "ARM", "ARM", "ARM", "ARM", "ARM", "ARM",
-                "ARM", "ARM", "ARM", "ARM", "ARM", "ARM", "ARM", "ARM", "ARM", "MIPS", "MIPS",
-                "MIPS", "MIPS", "MIPS", "MIPS", "RISCV", "RISCV", "eBPF", "eBPF", "x86", "x86",
+                "AARCH64",
+                "AARCH64",
+                "AARCH64",
+                "ARM",
+                "ARM",
+                "ARM",
+                "ARM",
+                "ARM",
+                "ARM",
+                "ARM",
+                "ARM",
+                "ARM",
+                "ARM",
+                "ARM",
+                "ARM",
+                "ARM",
+                "ARM",
+                "ARM",
+                "ARM",
+                "Loongarch",
+                "Loongarch",
+                "Loongarch",
+                "Loongarch",
+                "MIPS",
+                "MIPS",
+                "MIPS",
+                "MIPS",
+                "MIPS",
+                "MIPS",
+                "RISCV",
+                "RISCV",
+                "eBPF",
+                "eBPF",
+                "x86",
+                "x86",
             ]
         );
+    }
+
+    #[test]
+    fn loongarch_variants_lift_add_w_from_spec_template() {
+        if !discovery::ghidra_packaged_sla_available() {
+            eprintln!("skip: packaged Ghidra .sla not available for LoongArch ConstructTpl lift");
+            return;
+        }
+
+        for language in [
+            "Loongarch:LE:32:ilp32f",
+            "Loongarch:LE:32:ilp32d",
+            "Loongarch:LE:64:lp64f",
+            "Loongarch:LE:64:lp64d",
+        ] {
+            let frontend =
+                RuntimeSleighFrontend::new_for_language(language).expect("LoongArch runtime");
+            assert_eq!(
+                frontend.status(),
+                RuntimeFrontendStatus::ExecutableCandidate,
+                "{language}"
+            );
+
+            let bytes = [0xa4, 0x10, 0x10, 0x00]; // add.w a0, a1, a0
+            let decoded = frontend
+                .decode_window(&bytes, 0x1000, 1)
+                .expect("LoongArch add.w decode");
+            assert_eq!(
+                decoded.first().map(|instruction| instruction.length),
+                Some(4),
+                "{language}"
+            );
+
+            let (ops, length) = frontend
+                .decode_and_lift_with_len(&bytes, 0x1000)
+                .expect("LoongArch add.w should lift from .sla ConstructTpl");
+            assert_eq!(length, 4, "{language}");
+            assert!(!ops.is_empty(), "{language}");
+        }
     }
 
     #[test]

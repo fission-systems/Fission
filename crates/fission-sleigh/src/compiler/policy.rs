@@ -40,6 +40,11 @@ const EXECUTABLE_CANDIDATE_ENTRY_IDS: &[&str] = &[
     // RISCV (`andestar_v5` stays compile-only)
     "riscv.ilp32d",
     "riscv.lp64d",
+    // LoongArch
+    "loongarch32_f32",
+    "loongarch32_f64",
+    "loongarch64_f32",
+    "loongarch64_f64",
     // eBPF
     "eBPF_be",
     "eBPF_le",
