@@ -804,6 +804,9 @@ fn compiled_table_policy_symbols_stay_architecture_neutral() {
     let token_field_unchecked_end = "token_base + encoded_size as usize";
     let token_read_unchecked_end = "offset + size as usize";
     let token_read_unchecked_absolute = "base_cursor + off";
+    let operand_offset_lossy_signed_add = "base as i64 + i64::from(reloffset)";
+    let subtable_offset_lossy_signed_add = "base as i64 + i64::from(rel)";
+    let relative_offset_lossy_usize_cast = "Ok(offset as usize)";
     let constructor_cursor_unchecked_add = "cursor: ctx.cursor + opcode_len";
     let export_inst_next_saturating = "self.ctx.address.saturating_add(self.minimum_length as u64)";
     let pattern_inst_next_saturating_constructor =
@@ -1127,6 +1130,13 @@ fn compiled_table_policy_symbols_stay_architecture_neutral() {
             !source.contains(token_read_unchecked_end)
                 && !source.contains(token_read_unchecked_absolute),
             "{} still hides malformed SLA token byte read arithmetic",
+            file.display()
+        );
+        assert!(
+            !source.contains(operand_offset_lossy_signed_add)
+                && !source.contains(subtable_offset_lossy_signed_add)
+                && !source.contains(relative_offset_lossy_usize_cast),
+            "{} still computes SLA relative offsets through lossy signed casts",
             file.display()
         );
         assert!(

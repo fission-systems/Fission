@@ -138,7 +138,8 @@ mod construct_state_offset_tests {
     use super::{
         checked_pattern_add, checked_pattern_div, checked_pattern_left_shift, checked_pattern_mul,
         checked_pattern_negate, checked_pattern_right_shift, checked_pattern_sub,
-        context_change_expr_word, context_change_mask_word, shifted_context_change_word,
+        checked_relative_offset, context_change_expr_word, context_change_mask_word,
+        shifted_context_change_word,
     };
     use crate::compiler::{compile_x86_64_frontend, discovery};
 
@@ -232,6 +233,14 @@ mod construct_state_offset_tests {
         assert!(checked_pattern_left_shift(1, 64).is_err());
         assert!(checked_pattern_right_shift(1, -1).is_err());
         assert!(checked_pattern_right_shift(1, 64).is_err());
+    }
+
+    #[test]
+    fn relative_offsets_fail_closed_outside_usize_window() {
+        assert_eq!(checked_relative_offset(10, -3, "test").unwrap(), 7);
+        assert_eq!(checked_relative_offset(10, 3, "test").unwrap(), 13);
+        assert!(checked_relative_offset(0, -1, "test").is_err());
+        assert!(checked_relative_offset(usize::MAX, 1, "test").is_err());
     }
 }
 
@@ -684,11 +693,7 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
             return self.offset_irrelevant_operand_start(spec);
         };
         let base = self.offset_for_operand_base(offsetbase, "operand offset")?;
-        let offset = base as i64 + i64::from(reloffset);
-        if offset < 0 {
-            bail!("operand offset resolved before instruction start: {offset}");
-        }
-        Ok(offset as usize)
+        checked_relative_offset(base, reloffset, "operand offset")
     }
 
     fn offset_irrelevant_operand_start(&self, spec: &CompiledOperandSpec) -> Result<usize> {
@@ -756,11 +761,7 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
         let base_index = offsetbase
             .ok_or_else(|| anyhow!("subtable offset missing base for reloffset {rel}"))?;
         let base = self.offset_for_operand_base(base_index, "subtable offset")?;
-        let offset = base as i64 + i64::from(rel);
-        if offset < 0 {
-            bail!("subtable offset resolved before instruction start: {offset}");
-        }
-        Ok(Some(offset as usize))
+        Ok(Some(checked_relative_offset(base, rel, "subtable offset")?))
     }
 
     fn bind_operand(
@@ -1519,6 +1520,13 @@ fn subtable_decode_address(ctx: &CompiledInstructionContext<'_>) -> Result<u64> 
     ctx.address
         .checked_add(ctx.cursor as u64)
         .ok_or_else(|| anyhow!("subtable decode address overflowed"))
+}
+
+fn checked_relative_offset(base: usize, rel: i32, role: &str) -> Result<usize> {
+    let rel = isize::try_from(rel)
+        .map_err(|_| anyhow!("{role} relative offset {rel} does not fit isize"))?;
+    base.checked_add_signed(rel)
+        .ok_or_else(|| anyhow!("{role} resolved outside addressable decode window"))
 }
 
 fn context_change_expr_word(value: i64) -> Result<u32> {
