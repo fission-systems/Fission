@@ -60,11 +60,12 @@ pub(super) fn packed_context_bytes(
     let mut unused_bytes = 4 - bytesize;
     res <<= byte_offset * 8;
     res >>= unused_bytes * 8;
-    let remaining = bytesize as i32 - 4 + byte_offset as i32;
+    let remaining = cross_word_remainder(bytesize, 4, byte_offset, "packed context byte read")?;
     if remaining > 0 {
         intstart += 1;
         let mut res2 = packed_context_word(context_register, intstart)?;
-        unused_bytes = 4 - remaining as u32;
+        unused_bytes = checked_remainder_u32(remaining, "packed context byte read")?;
+        unused_bytes = 4 - unused_bytes;
         res2 >>= unused_bytes * 8;
         res |= res2;
     }
@@ -88,13 +89,42 @@ pub(super) fn packed_context_bits(
     let mut unused_bits = 32 - bitsize;
     res <<= bit_offset;
     res >>= unused_bits;
-    let remaining = bitsize as i32 - 32 + bit_offset as i32;
+    let remaining = cross_word_remainder(bitsize, 32, bit_offset, "packed context bit read")?;
     if remaining > 0 {
         intstart += 1;
         let mut res2 = packed_context_word(context_register, intstart)?;
-        unused_bits = 32 - remaining as u32;
+        unused_bits = checked_remainder_u32(remaining, "packed context bit read")?;
+        unused_bits = 32 - unused_bits;
         res2 >>= unused_bits;
         res |= res2;
     }
     Ok(res)
+}
+
+fn cross_word_remainder(width: u32, word_width: u32, offset: u32, role: &str) -> Result<i32> {
+    let width = i32::try_from(width).map_err(|_| anyhow!("{role} width exceeds i32"))?;
+    let word_width =
+        i32::try_from(word_width).map_err(|_| anyhow!("{role} word width exceeds i32"))?;
+    let offset = i32::try_from(offset).map_err(|_| anyhow!("{role} offset exceeds i32"))?;
+    width
+        .checked_sub(word_width)
+        .and_then(|value| value.checked_add(offset))
+        .ok_or_else(|| anyhow!("{role} cross-word remainder overflowed"))
+}
+
+fn checked_remainder_u32(remaining: i32, role: &str) -> Result<u32> {
+    u32::try_from(remaining).map_err(|_| anyhow!("{role} remainder {remaining} is negative"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{checked_remainder_u32, cross_word_remainder};
+
+    #[test]
+    fn packed_context_remainder_helpers_are_checked() {
+        assert_eq!(cross_word_remainder(2, 4, 3, "test").unwrap(), 1);
+        assert_eq!(cross_word_remainder(1, 4, 0, "test").unwrap(), -3);
+        assert_eq!(checked_remainder_u32(1, "test").unwrap(), 1);
+        assert!(checked_remainder_u32(-1, "test").is_err());
+    }
 }

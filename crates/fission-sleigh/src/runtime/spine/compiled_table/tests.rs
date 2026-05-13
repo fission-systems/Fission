@@ -881,6 +881,10 @@ fn compiled_table_policy_symbols_stay_architecture_neutral() {
     let context_commit_addr_unit_wrap = "offset.wrapping_mul(addr_unit)";
     let static_handle_addr_unit_wrap = "offset_offset.wrapping_mul(addr_unit)";
     let swallowed_context_word_error = "let _ = set_packed_context_word";
+    let packed_context_byte_remainder_lossy =
+        "let remaining = bytesize as i32 - 4 + byte_offset as i32";
+    let packed_context_bit_remainder_lossy =
+        "let remaining = bitsize as i32 - 32 + bit_offset as i32";
     let decoded_bytes_truncation_fallback = "bytes.get(..length).unwrap_or(bytes)";
     let immediate_byte_unchecked_shift = "u64::from(*byte) << (index * 8)";
     let tokenfield_saturating_range = "byte_end.saturating_sub(byte_start)";
@@ -1133,6 +1137,12 @@ fn compiled_table_policy_symbols_stay_architecture_neutral() {
         assert!(
             !source.contains(swallowed_context_word_error),
             "{} still ignores packed context word errors",
+            file.display()
+        );
+        assert!(
+            !source.contains(packed_context_byte_remainder_lossy)
+                && !source.contains(packed_context_bit_remainder_lossy),
+            "{} still computes packed context cross-word remainders through lossy casts",
             file.display()
         );
         assert!(
