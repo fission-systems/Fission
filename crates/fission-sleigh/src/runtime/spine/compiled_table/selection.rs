@@ -237,6 +237,23 @@ fn decision_probe_value_u8(value: u64, role: &str) -> Result<u8> {
     u8::try_from(value).map_err(|_| anyhow!("{role} decision probe value {value} exceeds u8"))
 }
 
+fn shifted_instruction_constraint_byte(byte: u8, index: usize) -> Result<u64> {
+    let index = u32::try_from(index)
+        .map_err(|_| anyhow!("instruction constraint byte index exceeds u32"))?;
+    let shift = index
+        .checked_mul(8)
+        .ok_or_else(|| anyhow!("instruction constraint byte shift overflowed"))?;
+    u64::from(byte)
+        .checked_shl(shift)
+        .ok_or_else(|| anyhow!("instruction constraint byte shift {shift} exceeds u64 width"))
+}
+
+fn shifted_context_constraint_value(context_register: u64, offset: u32) -> Result<u64> {
+    context_register
+        .checked_shr(offset)
+        .ok_or_else(|| anyhow!("context constraint shift {offset} exceeds u64 width"))
+}
+
 pub(super) fn possible_context_probe_values(
     context_register: u64,
     context_known_mask: u64,
@@ -368,7 +385,7 @@ pub(super) fn constructor_matches(
                             let byte = ctx.bytes.get(absolute).copied().ok_or_else(|| {
                                 anyhow!("instruction bit constraint byte out of range")
                             })?;
-                            inst_val |= u64::from(byte) << (i * 8);
+                            inst_val |= shifted_instruction_constraint_byte(byte, i)?;
                         }
                         if (inst_val & mask) != *value {
                             bail!("instruction bit constraint mismatch");
@@ -379,7 +396,8 @@ pub(super) fn constructor_matches(
                         mask,
                         value,
                     } => {
-                        let val = (ctx.context_register >> offset) & mask;
+                        let val =
+                            shifted_context_constraint_value(ctx.context_register, *offset)? & mask;
                         if val != *value {
                             bail!("context bit constraint mismatch");
                         }
@@ -425,7 +443,8 @@ pub(super) fn pattern_block_byte_len(block: &CompiledPatternBlock) -> Result<usi
 mod tests {
     use super::{
         append_decision_probe_byte, decision_probe_value_u8, ensure_decision_probe_byte_width,
-        ensure_u8_decision_probe_width,
+        ensure_u8_decision_probe_width, shifted_context_constraint_value,
+        shifted_instruction_constraint_byte,
     };
 
     #[test]
@@ -441,5 +460,20 @@ mod tests {
         assert!(ensure_decision_probe_byte_width(8, "test").is_ok());
         assert!(ensure_decision_probe_byte_width(9, "test").is_err());
         assert_eq!(append_decision_probe_byte(0x12, 0x34).unwrap(), 0x1234);
+    }
+
+    #[test]
+    fn bit_constraint_shifts_fail_closed_above_u64_width() {
+        assert_eq!(
+            shifted_instruction_constraint_byte(0x12, 7).unwrap(),
+            0x1200_0000_0000_0000
+        );
+        assert!(shifted_instruction_constraint_byte(0x12, 8).is_err());
+
+        assert_eq!(
+            shifted_context_constraint_value(0x8000_0000_0000_0000, 63).unwrap(),
+            1
+        );
+        assert!(shifted_context_constraint_value(1, 64).is_err());
     }
 }

@@ -905,6 +905,8 @@ fn compiled_table_policy_symbols_stay_architecture_neutral() {
         "packed_context_bits(self.ctx.context_register, start_bit, bit_size)? as u8";
     let decision_probe_lossy_instruction_cast =
         "((word >> shift) & ((1u64 << bit_size) - 1)) as u8";
+    let bit_constraint_unchecked_byte_shift = "inst_val |= u64::from(byte) << (i * 8)";
+    let bit_constraint_unchecked_context_shift = "(ctx.context_register >> offset) & mask";
     let selection_unchecked_ranges = [
         ".get(self.ctx.cursor + usize::from(offset))",
         "self.ctx.cursor + byte_offset as usize + i as usize",
@@ -1204,6 +1206,12 @@ fn compiled_table_policy_symbols_stay_architecture_neutral() {
                 && !source.contains(decision_probe_lossy_context_cast)
                 && !source.contains(decision_probe_lossy_instruction_cast),
             "{} still truncates SLA decision probe or edge values into u8",
+            file.display()
+        );
+        assert!(
+            !source.contains(bit_constraint_unchecked_byte_shift)
+                && !source.contains(bit_constraint_unchecked_context_shift),
+            "{} still unchecked-shifts constructor bit constraints",
             file.display()
         );
         for forbidden in selection_unchecked_ranges {
