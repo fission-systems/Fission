@@ -235,7 +235,7 @@ impl<'a> PreviewBuilder<'a> {
                             proof.as_ref(),
                         );
                         if used_proof_payload {
-                            self.proof_payload_direct_emit_count += 1;
+                            self.telemetry.dispatcher.proof_payload_direct_emit_count += 1;
                         }
                         let cases = case_values
                             .into_iter()
@@ -273,7 +273,8 @@ impl<'a> PreviewBuilder<'a> {
             }
             let structuring_start = std::time::Instant::now();
             body = self.build_multiblock_body()?;
-            self.structuring_duration_ms += structuring_start.elapsed().as_millis() as usize;
+            self.telemetry.core.structuring_duration_ms +=
+                structuring_start.elapsed().as_millis() as usize;
             if preview_builder_diag_enabled() {
                 eprintln!("[DIAG] build_hir multiblock_done: stmts={}", body.len());
             }
@@ -390,15 +391,21 @@ impl<'a> PreviewBuilder<'a> {
     ) -> UnsupportedControlEvidence {
         match surface {
             IndirectControlSurface::CallInd => {
-                self.unsupported_indirect_call_count += 1;
+                self.telemetry
+                    .indirect_control
+                    .unsupported_indirect_call_count += 1;
             }
             IndirectControlSurface::BranchInd | IndirectControlSurface::SwitchLike => {
-                self.unsupported_indirect_control_count += 1;
+                self.telemetry
+                    .indirect_control
+                    .unsupported_indirect_control_count += 1;
             }
             IndirectControlSurface::DispatcherLike => {}
         }
         if matches!(failure_family, UnsupportedControlFamily::ExternalTarget) {
-            self.unsupported_external_target_count += 1;
+            self.telemetry
+                .indirect_control
+                .unsupported_external_target_count += 1;
         }
         UnsupportedControlEvidence {
             opcode: format!("{opcode:?}"),
@@ -450,7 +457,9 @@ impl<'a> PreviewBuilder<'a> {
         let can_preserve =
             target_expr.is_some() || matches!(evidence.surface, IndirectControlSurface::CallInd);
         if can_preserve {
-            self.indirect_surface_preserved_count += 1;
+            self.telemetry
+                .indirect_control
+                .indirect_surface_preserved_count += 1;
             return HirStmt::Expr(HirExpr::Call {
                 target: pseudo_target.to_string(),
                 args: target_expr.into_iter().collect(),
@@ -510,7 +519,9 @@ impl<'a> PreviewBuilder<'a> {
             }
             let binding = binding.clone();
             if stabilized {
-                self.telemetry.materialization_stabilized_count += 1;
+                self.telemetry
+                    .materialization
+                    .materialization_stabilized_count += 1;
             }
             return binding;
         }
@@ -529,7 +540,9 @@ impl<'a> PreviewBuilder<'a> {
             initializer: None,
         };
         if preserve_materialization {
-            self.materialization_stabilized_count += 1;
+            self.telemetry
+                .materialization
+                .materialization_stabilized_count += 1;
         }
         self.materialized_vns.insert(key, name.clone());
         self.invalidate_materialization_dependent_caches();

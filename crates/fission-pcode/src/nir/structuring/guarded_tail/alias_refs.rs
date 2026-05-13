@@ -2,15 +2,21 @@ use super::*;
 
 impl<'a> PreviewBuilder<'a> {
     pub(super) fn mark_alias_nonlocal_external_before(&mut self) {
-        self.canonicalization_failed_alias_has_nonlocal_ref_external_before_count += 1;
+        self.telemetry
+            .structuring
+            .canonicalization_failed_alias_has_nonlocal_ref_external_before_count += 1;
     }
 
     pub(super) fn mark_alias_nonlocal_nested_before(&mut self) {
-        self.canonicalization_failed_alias_has_nonlocal_ref_nested_before_count += 1;
+        self.telemetry
+            .structuring
+            .canonicalization_failed_alias_has_nonlocal_ref_nested_before_count += 1;
     }
 
     pub(super) fn mark_alias_nonlocal_post_segment_ref(&mut self) {
-        self.canonicalization_failed_alias_has_nonlocal_ref_post_segment_ref_count += 1;
+        self.telemetry
+            .structuring
+            .canonicalization_failed_alias_has_nonlocal_ref_post_segment_ref_count += 1;
     }
 
     pub(super) fn mark_alias_nonlocal_from_external_sites(
@@ -639,7 +645,9 @@ impl<'a> PreviewBuilder<'a> {
                 (label_idx + 1..body.len()).find(|pos| matches!(body[*pos], HirStmt::Label(_)));
             let Some(next_label_idx) = next_label_idx else {
                 if rewrites > 0 {
-                    self.canonicalized_guarded_tail_shape_count += rewrites;
+                    self.telemetry
+                        .structuring
+                        .canonicalized_guarded_tail_shape_count += rewrites;
                 }
                 return Some((current, label_idx));
             };
@@ -665,7 +673,9 @@ impl<'a> PreviewBuilder<'a> {
             }
 
             if rewrites > 0 {
-                self.canonicalized_guarded_tail_shape_count += rewrites;
+                self.telemetry
+                    .structuring
+                    .canonicalized_guarded_tail_shape_count += rewrites;
             }
             return Some((current, label_idx));
         }

@@ -388,9 +388,13 @@ impl<'a> PreviewBuilder<'a> {
                 || (effective_top_level_after_label_count > 0
                     && !allow_top_level_after_label_redirect)
             {
-                self.canonicalization_failed_alias_not_fallthrough_top_level_after_label_count +=
+                self.telemetry
+                    .structuring
+                    .canonicalization_failed_alias_not_fallthrough_top_level_after_label_count +=
                     effective_top_level_after_label_count;
-                self.canonicalization_failed_alias_not_fallthrough_nested_after_label_count +=
+                self.telemetry
+                    .structuring
+                    .canonicalization_failed_alias_not_fallthrough_nested_after_label_count +=
                     nested_after_label_count;
                 return Err(GuardedTailCanonicalizationFailure::AliasNotFallthrough);
             }
@@ -594,8 +598,12 @@ impl<'a> PreviewBuilder<'a> {
             return Ok((body.to_vec(), Vec::new()));
         }
 
-        self.canonicalized_interleaved_join_use_count += alias_redirects.len();
-        self.canonicalized_local_nonfallthrough_alias_count += canonicalized_local_nonfallthrough;
+        self.telemetry
+            .structuring
+            .canonicalized_interleaved_join_use_count += alias_redirects.len();
+        self.telemetry
+            .structuring
+            .canonicalized_local_nonfallthrough_alias_count += canonicalized_local_nonfallthrough;
         let external_redirects = external_safe_redirect_labels
             .into_iter()
             .filter_map(|label| {
@@ -764,7 +772,9 @@ impl<'a> PreviewBuilder<'a> {
                         if let Some((next_label, next_idx)) = terminalizable_target {
                             Self::rewrite_goto_label_in_stmts(&mut canonical, label, &next_label);
                             removed_any = true;
-                            self.canonicalized_interleaved_join_use_count += 1;
+                            self.telemetry
+                                .structuring
+                                .canonicalized_interleaved_join_use_count += 1;
                             idx = next_idx;
                             continue;
                         }
@@ -855,7 +865,9 @@ impl<'a> PreviewBuilder<'a> {
             return Err(GuardedTailCanonicalizationFailure::NonterminalJoinLabel);
         }
         if removed_any {
-            self.canonicalized_guarded_tail_shape_count += 1;
+            self.telemetry
+                .structuring
+                .canonicalized_guarded_tail_shape_count += 1;
         }
         Ok((canonical, external_redirects))
     }

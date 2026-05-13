@@ -1047,7 +1047,9 @@ impl<'a> PreviewBuilder<'a> {
                         | SuffixCallEffectShapeKind::UnknownCallEffect
                 ) {
                     if let Some(target) = self.suffix_call_uses_preview_unsafe_callee(stmt) {
-                        self.guarded_tail_rejected_side_effectful_callee_count += 1;
+                        self.telemetry
+                            .structuring
+                            .guarded_tail_rejected_side_effectful_callee_count += 1;
                         eprintln!(
                             "[GT-TRACE] suffix-side-effectful-callee-stop stmt_idx={} target={} source=PreviewCalleeAnalysis",
                             stmt_idx, target

@@ -6,22 +6,30 @@ impl<'a> PreviewBuilder<'a> {
     fn record_region_body_lowering_reject_reason(&mut self, reason: LinearBodyRejectReason) {
         match reason {
             LinearBodyRejectReason::ConditionalTailExitMismatch => {
-                self.region_linearize_rejected_body_lowering_conditional_tail_exit_mismatch_count +=
+                self.telemetry.structuring.region_linearize_rejected_body_lowering_conditional_tail_exit_mismatch_count +=
                     1;
             }
             LinearBodyRejectReason::SuccessorInlineRejected => {
-                self.region_linearize_rejected_body_lowering_successor_inline_rejected_count += 1;
+                self.telemetry
+                    .structuring
+                    .region_linearize_rejected_body_lowering_successor_inline_rejected_count += 1;
             }
             LinearBodyRejectReason::RevisitCycle => {
-                self.region_linearize_rejected_body_lowering_revisit_cycle_count += 1;
+                self.telemetry
+                    .structuring
+                    .region_linearize_rejected_body_lowering_revisit_cycle_count += 1;
             }
             LinearBodyRejectReason::UnsupportedTerminator => {
-                self.region_linearize_rejected_body_lowering_unsupported_terminator_count += 1;
+                self.telemetry
+                    .structuring
+                    .region_linearize_rejected_body_lowering_unsupported_terminator_count += 1;
             }
             LinearBodyRejectReason::TargetIndexMissing
             | LinearBodyRejectReason::ExitMismatch
             | LinearBodyRejectReason::BudgetTripped => {
-                self.region_linearize_rejected_body_lowering_unsupported_terminator_count += 1;
+                self.telemetry
+                    .structuring
+                    .region_linearize_rejected_body_lowering_unsupported_terminator_count += 1;
             }
         }
     }
@@ -78,12 +86,16 @@ impl<'a> PreviewBuilder<'a> {
         if self.options.conservative_irreducible_fallback {
             let scc = self.analyze_cfg_scc();
             if scc.is_irreducible_node(start_idx) {
-                self.region_linearize_rejected_irreducible_cfg_count += 1;
+                self.telemetry
+                    .structuring
+                    .region_linearize_rejected_irreducible_cfg_count += 1;
                 return Ok(None);
             }
         }
         if err.structuring_failure_kind().is_none() {
-            self.region_linearize_rejected_non_structuring_failure_count += 1;
+            self.telemetry
+                .structuring
+                .region_linearize_rejected_non_structuring_failure_count += 1;
             return Ok(None);
         }
 
@@ -95,7 +107,9 @@ impl<'a> PreviewBuilder<'a> {
             Self::push_unique_region_exit(&mut exits, exit);
         }
         if exits.is_empty() {
-            self.region_linearize_rejected_no_exit_count += 1;
+            self.telemetry
+                .structuring
+                .region_linearize_rejected_no_exit_count += 1;
             return Ok(None);
         }
 
@@ -112,11 +126,15 @@ impl<'a> PreviewBuilder<'a> {
             }
         }
         let Some((mut body, skip_to)) = lowered else {
-            self.region_linearize_rejected_body_lowering_failed_count += 1;
+            self.telemetry
+                .structuring
+                .region_linearize_rejected_body_lowering_failed_count += 1;
             return Ok(None);
         };
         if skip_to <= start_idx {
-            self.region_linearize_rejected_non_advancing_count += 1;
+            self.telemetry
+                .structuring
+                .region_linearize_rejected_non_advancing_count += 1;
             return Ok(None);
         }
 
@@ -125,7 +143,9 @@ impl<'a> PreviewBuilder<'a> {
             body.insert(0, HirStmt::Label(block_label(block_key)));
         }
 
-        self.region_linearize_structuring_count += 1;
+        self.telemetry
+            .structuring
+            .region_linearize_structuring_count += 1;
         Ok(Some((cleanup_redundant_labels(body), skip_to)))
     }
 }

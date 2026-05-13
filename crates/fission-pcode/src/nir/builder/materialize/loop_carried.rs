@@ -100,7 +100,9 @@ impl<'a> PreviewBuilder<'a> {
             && binding.is_temp_like()
         {
             binding.origin = Some(NirBindingOrigin::TempPreserved);
-            self.materialization_stabilized_count += 1;
+            self.telemetry
+                .materialization
+                .materialization_stabilized_count += 1;
         }
     }
 

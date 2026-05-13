@@ -117,9 +117,13 @@ impl<'a> PreviewBuilder<'a> {
     }
 
     fn track_loop_control_rewrite_stats(&mut self, stats: LoopControlRewriteStats) {
-        self.loop_control_rewrite_break_count += stats.break_rewrites;
-        self.loop_control_rewrite_continue_count += stats.continue_rewrites;
-        self.loop_control_rewrite_skipped_nested_scope_count += stats.skipped_nested_scope_count;
+        self.telemetry.structuring.loop_control_rewrite_break_count += stats.break_rewrites;
+        self.telemetry
+            .structuring
+            .loop_control_rewrite_continue_count += stats.continue_rewrites;
+        self.telemetry
+            .structuring
+            .loop_control_rewrite_skipped_nested_scope_count += stats.skipped_nested_scope_count;
     }
 
     pub(super) fn try_lower_infloop_with_break(
@@ -161,7 +165,9 @@ impl<'a> PreviewBuilder<'a> {
             then_body: vec![HirStmt::Break],
             else_body: Vec::new(),
         });
-        self.loop_control_explicit_reducer_count += 1;
+        self.telemetry
+            .structuring
+            .loop_control_explicit_reducer_count += 1;
 
         Ok(Some((
             HirStmt::While {
@@ -420,7 +426,7 @@ impl<'a> PreviewBuilder<'a> {
                 return Ok(None);
             };
 
-            self.loop_while_subgraph_lowered_count += 1;
+            self.telemetry.structuring.loop_while_subgraph_lowered_count += 1;
 
             let body = if cond_prefix.is_empty() {
                 lowered_body
@@ -666,7 +672,7 @@ impl<'a> PreviewBuilder<'a> {
         let init_box = Box::new(init_stmts.into_iter().next().unwrap());
         let update_box = Box::new(latch_stmts.into_iter().next().unwrap());
 
-        self.loop_for_lowered_count += 1;
+        self.telemetry.structuring.loop_for_lowered_count += 1;
 
         Ok(Some((
             HirStmt::For {
@@ -781,7 +787,7 @@ impl<'a> PreviewBuilder<'a> {
                 LoweredTerminator::Goto(target) | LoweredTerminator::Fallthrough(Some(target)) => {
                     if Some(target) == break_addr {
                         result_stmts.push(HirStmt::Break);
-                        self.loop_multi_exit_break_count += 1;
+                        self.telemetry.structuring.loop_multi_exit_break_count += 1;
                     } else if target == head_addr {
                         result_stmts.push(HirStmt::Continue);
                     } else if self.next_block_address(idx) != Some(target) {
@@ -808,7 +814,7 @@ impl<'a> PreviewBuilder<'a> {
                             then_body: vec![HirStmt::Break],
                             else_body: Vec::new(),
                         });
-                        self.loop_multi_exit_break_count += 1;
+                        self.telemetry.structuring.loop_multi_exit_break_count += 1;
                     } else if false_is_break && !true_is_break {
                         // `if (!cond) break;` then continue with true arm
                         result_stmts.push(HirStmt::If {
@@ -816,7 +822,7 @@ impl<'a> PreviewBuilder<'a> {
                             then_body: vec![HirStmt::Break],
                             else_body: Vec::new(),
                         });
-                        self.loop_multi_exit_break_count += 1;
+                        self.telemetry.structuring.loop_multi_exit_break_count += 1;
                     } else if true_is_continue && !false_is_continue {
                         result_stmts.push(HirStmt::If {
                             cond,

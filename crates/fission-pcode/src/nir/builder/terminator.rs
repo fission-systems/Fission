@@ -792,7 +792,13 @@ impl<'a> PreviewBuilder<'a> {
                 .lower_wrapped_varnode(input, &mut HashSet::new())
                 .map(Some);
         }
-        if self.uses_primary_return_registers() && self.unsupported_indirect_control_count == 0 {
+        if self.uses_primary_return_registers()
+            && self
+                .telemetry
+                .indirect_control
+                .unsupported_indirect_control_count
+                == 0
+        {
             return Ok(None);
         }
 
@@ -1563,8 +1569,8 @@ impl<'a> PreviewBuilder<'a> {
                                             )
                                         })
                                         .unwrap_or_else(|| switch_expr.clone());
-                                    this.indirect_target_set_refined_count += 1;
-                                    this.dispatcher_shape_recovered_count += 1;
+                                    this.telemetry.indirect_control.indirect_target_set_refined_count += 1;
+                                    this.telemetry.indirect_control.dispatcher_shape_recovered_count += 1;
                                     let evidence = this.build_unsupported_control_evidence(
                                         op.opcode,
                                         Some(block.start_address),
@@ -1724,15 +1730,15 @@ impl<'a> PreviewBuilder<'a> {
                                     proof_complete,
                                     failure_family,
                                 });
-                                this.dispatcher_proof_unit_count += 1;
+                                this.telemetry.dispatcher.dispatcher_proof_unit_count += 1;
                                 if proof_complete {
-                                    this.dispatcher_proof_completed_count += 1;
+                                    this.telemetry.dispatcher.dispatcher_proof_completed_count += 1;
                                 } else {
-                                    this.dispatcher_proof_failed_count += 1;
+                                    this.telemetry.dispatcher.dispatcher_proof_failed_count += 1;
                                 }
-                                this.indirect_target_set_refined_count += 1;
+                                this.telemetry.indirect_control.indirect_target_set_refined_count += 1;
                                 if dispatcher_recovered {
-                                    this.dispatcher_shape_recovered_count += 1;
+                                    this.telemetry.indirect_control.dispatcher_shape_recovered_count += 1;
                                 }
                                 if target_cardinality == 0 || single_target_dispatcher {
                                     let evidence = UnsupportedControlEvidence {

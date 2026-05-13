@@ -156,12 +156,14 @@ impl<'a> PreviewBuilder<'a> {
     }
 
     fn record_region_candidate(&mut self, proof: &RegionProof) {
-        self.region_proof_candidate_count += 1;
+        self.telemetry.structuring.region_proof_candidate_count += 1;
         if proof.proof_complete {
-            self.region_proof_completed_count += 1;
+            self.telemetry.structuring.region_proof_completed_count += 1;
         }
         if matches!(proof.kind, RegionKind::Conditional) {
-            self.conditional_region_candidate_count += 1;
+            self.telemetry
+                .structuring
+                .conditional_region_candidate_count += 1;
         }
     }
 
@@ -170,7 +172,7 @@ impl<'a> PreviewBuilder<'a> {
             node.kind,
             StructureNodeKind::Region(RegionKind::Conditional)
         ) {
-            self.conditional_region_promoted_count += 1;
+            self.telemetry.structuring.conditional_region_promoted_count += 1;
         }
     }
 
@@ -231,23 +233,31 @@ impl<'a> PreviewBuilder<'a> {
                 scc.max_component_size(),
             )
         };
-        self.structuring_scc_component_count += scc_component_count;
-        self.max_structuring_scc_component_size = self
+        self.telemetry.structuring.structuring_scc_component_count += scc_component_count;
+        self.telemetry.core.max_structuring_scc_component_size = self
+            .telemetry
+            .core
             .max_structuring_scc_component_size
             .max(max_scc_component_size);
-        self.structuring_irreducible_scc_count += scc_irreducible_count;
-        self.structuring_irreducible_header_count += scc_irreducible_header_count;
+        self.telemetry.structuring.structuring_irreducible_scc_count += scc_irreducible_count;
+        self.telemetry
+            .structuring
+            .structuring_irreducible_header_count += scc_irreducible_header_count;
         let original_admission =
             self.structuring_admission_reason(scc_irreducible_count, max_scc_component_size);
         let mir_blockgraph_enabled = mir_blockgraph_admission_enabled();
         if mir_blockgraph_enabled {
-            self.mir_blockgraph_admission_enabled_count += 1;
+            self.telemetry.mir.mir_blockgraph_admission_enabled_count += 1;
             match original_admission {
                 StructuringAdmissionReason::IrreducibleBudget => {
-                    self.mir_blockgraph_irreducible_budget_bypass_count += 1;
+                    self.telemetry
+                        .mir
+                        .mir_blockgraph_irreducible_budget_bypass_count += 1;
                 }
                 StructuringAdmissionReason::ExtremeBudget => {
-                    self.mir_blockgraph_extreme_budget_blocked_count += 1;
+                    self.telemetry
+                        .mir
+                        .mir_blockgraph_extreme_budget_blocked_count += 1;
                 }
                 StructuringAdmissionReason::GraphCollapse
                 | StructuringAdmissionReason::ExplicitForceLinear => {}
@@ -268,7 +278,8 @@ impl<'a> PreviewBuilder<'a> {
             mir_blockgraph_irreducible_trial.then(|| self.predecessors.clone());
         let pre_trial_virtual_block_map =
             mir_blockgraph_irreducible_trial.then(|| self.virtual_block_map.clone());
-        let pre_trial_blockgraph_complete_count = self.blockgraph_region_complete_count;
+        let pre_trial_blockgraph_complete_count =
+            self.telemetry.structuring.blockgraph_region_complete_count;
 
         // Node-splitting for irreducible CFGs: when the SCC analysis shows
         // irreducible SCCs, attempt to make the CFG reducible by splitting
@@ -303,16 +314,22 @@ impl<'a> PreviewBuilder<'a> {
             );
         }
         if force_linear {
-            self.forced_linear_structuring_count += 1;
+            self.telemetry.structuring.forced_linear_structuring_count += 1;
             match admission {
                 StructuringAdmissionReason::ExplicitForceLinear => {
-                    self.structuring_force_linear_explicit_count += 1;
+                    self.telemetry
+                        .structuring
+                        .structuring_force_linear_explicit_count += 1;
                 }
                 StructuringAdmissionReason::IrreducibleBudget => {
-                    self.structuring_force_linear_irreducible_budget_count += 1;
+                    self.telemetry
+                        .structuring
+                        .structuring_force_linear_irreducible_budget_count += 1;
                 }
                 StructuringAdmissionReason::ExtremeBudget => {
-                    self.structuring_force_linear_extreme_budget_count += 1;
+                    self.telemetry
+                        .structuring
+                        .structuring_force_linear_extreme_budget_count += 1;
                 }
                 StructuringAdmissionReason::GraphCollapse => {}
             }
@@ -700,7 +717,7 @@ impl<'a> PreviewBuilder<'a> {
                 } => {
                     let cases: Vec<HirSwitchCase> = if let Some(proof) = proof.as_ref() {
                         if EmitReadyDecision::from_dispatcher_proof(Some(proof)).emit_ready {
-                            self.proof_payload_direct_emit_count += 1;
+                            self.telemetry.dispatcher.proof_payload_direct_emit_count += 1;
                             proof
                                 .recovered_cases
                                 .iter()
@@ -790,7 +807,8 @@ impl<'a> PreviewBuilder<'a> {
         while self.promote_single_entry_guarded_tail_regions(&mut body) {}
         self.discover_guarded_tail_candidates(&body);
         if mir_blockgraph_irreducible_trial
-            && self.blockgraph_region_complete_count == pre_trial_blockgraph_complete_count
+            && self.telemetry.structuring.blockgraph_region_complete_count
+                == pre_trial_blockgraph_complete_count
         {
             if let (Some(successors), Some(predecessors), Some(virtual_block_map)) = (
                 pre_trial_successors,
@@ -802,8 +820,10 @@ impl<'a> PreviewBuilder<'a> {
                 self.virtual_block_map = virtual_block_map;
                 self.refresh_cfg_fact_cache();
             }
-            self.forced_linear_structuring_count += 1;
-            self.structuring_force_linear_irreducible_budget_count += 1;
+            self.telemetry.structuring.forced_linear_structuring_count += 1;
+            self.telemetry
+                .structuring
+                .structuring_force_linear_irreducible_budget_count += 1;
             let result = self.build_proof_first_linear_multiblock_body();
             if diag {
                 eprintln!(
@@ -822,12 +842,14 @@ impl<'a> PreviewBuilder<'a> {
             );
             eprintln!(
                 "[DIAG] structuring promotions: candidates={} promoted={}",
-                self.promotion_candidate_count, self.promoted_region_count
+                self.telemetry.structuring.promotion_candidate_count,
+                self.telemetry.structuring.promoted_region_count
             );
         } else if std::env::var_os("FISSION_PREVIEW_DEBUG").is_some() {
             eprintln!(
                 "[mlil-preview] stage=structuring promotions candidates={} promoted={}",
-                self.promotion_candidate_count, self.promoted_region_count
+                self.telemetry.structuring.promotion_candidate_count,
+                self.telemetry.structuring.promoted_region_count
             );
         }
         metrics::histogram!("fission.structuring.total_ms")

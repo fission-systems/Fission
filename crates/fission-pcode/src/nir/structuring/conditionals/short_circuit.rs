@@ -32,12 +32,16 @@ impl<'a> PreviewBuilder<'a> {
             let cond_prefix = self.lower_block_stmts(&cond_block)?;
             if current_idx == idx {
                 if !cond_prefix.iter().all(Self::is_trivial_structuring_stmt) {
-                    self.condition_fold_rejected_side_effect += 1;
+                    self.telemetry
+                        .structuring
+                        .condition_fold_rejected_side_effect += 1;
                     return Ok(None);
                 }
                 first_prefix = cond_prefix;
             } else if !cond_prefix.is_empty() {
-                self.condition_fold_rejected_side_effect += 1;
+                self.telemetry
+                    .structuring
+                    .condition_fold_rejected_side_effect += 1;
                 return Ok(None);
             }
 
@@ -92,7 +96,7 @@ impl<'a> PreviewBuilder<'a> {
                 return Ok(None);
             }
 
-            self.condition_fold_and_count += conds.len() - 1;
+            self.telemetry.structuring.condition_fold_and_count += conds.len() - 1;
 
             let stmt = HirStmt::If {
                 cond: simplify_logical_expr(fold_logical_chain(conds, HirBinaryOp::LogicalAnd)),
@@ -125,12 +129,16 @@ impl<'a> PreviewBuilder<'a> {
             let cond_prefix = self.lower_block_stmts(&cond_block)?;
             if current_idx == idx {
                 if !cond_prefix.iter().all(Self::is_trivial_structuring_stmt) {
-                    self.condition_fold_rejected_side_effect += 1;
+                    self.telemetry
+                        .structuring
+                        .condition_fold_rejected_side_effect += 1;
                     return Ok(None);
                 }
                 first_prefix = cond_prefix;
             } else if !cond_prefix.is_empty() {
-                self.condition_fold_rejected_side_effect += 1;
+                self.telemetry
+                    .structuring
+                    .condition_fold_rejected_side_effect += 1;
                 return Ok(None);
             }
 
@@ -194,7 +202,7 @@ impl<'a> PreviewBuilder<'a> {
                 LinearExit::Join(join_idx) => join_idx,
                 LinearExit::Return | LinearExit::End => then_skip.max(else_skip),
             };
-            self.condition_fold_and_count += conds.len() - 1;
+            self.telemetry.structuring.condition_fold_and_count += conds.len() - 1;
 
             let stmt = HirStmt::If {
                 cond: simplify_logical_expr(fold_logical_chain(conds, HirBinaryOp::LogicalAnd)),
@@ -221,7 +229,9 @@ impl<'a> PreviewBuilder<'a> {
         let first_block = self.pcode_block(idx).clone();
         let first_prefix = self.lower_block_stmts(&first_block)?;
         if !first_prefix.iter().all(Self::is_trivial_structuring_stmt) {
-            self.condition_fold_rejected_side_effect += 1;
+            self.telemetry
+                .structuring
+                .condition_fold_rejected_side_effect += 1;
             return Ok(None);
         }
 
@@ -313,7 +323,7 @@ impl<'a> PreviewBuilder<'a> {
                     LinearExit::Return | LinearExit::End => then_skip.max(false_skip),
                 };
 
-                self.condition_fold_or_count += conds.len() - 1;
+                self.telemetry.structuring.condition_fold_or_count += conds.len() - 1;
                 let stmt = HirStmt::If {
                     cond: simplify_logical_expr(fold_logical_chain(conds, HirBinaryOp::LogicalOr)),
                     then_body,
@@ -332,7 +342,9 @@ impl<'a> PreviewBuilder<'a> {
             let next_block = self.pcode_block(next_idx).clone();
             let next_prefix = self.lower_block_stmts(&next_block)?;
             if !next_prefix.is_empty() {
-                self.condition_fold_rejected_side_effect += 1;
+                self.telemetry
+                    .structuring
+                    .condition_fold_rejected_side_effect += 1;
                 return Ok(None);
             }
 

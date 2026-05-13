@@ -136,43 +136,57 @@ impl<'a> PreviewBuilder<'a> {
     }
 
     fn mark_promotion_shape_rejection(&mut self, reason: PromotionShapeRejection) {
-        self.promotion_rejected_by_shape_count += 1;
+        self.telemetry.structuring.promotion_rejected_by_shape_count += 1;
         match reason {
             PromotionShapeRejection::MissingTerminalJoinTarget => {
-                self.promotion_rejected_by_shape_missing_terminal_join_target_count += 1;
+                self.telemetry
+                    .structuring
+                    .promotion_rejected_by_shape_missing_terminal_join_target_count += 1;
             }
             PromotionShapeRejection::EmptyNonterminalTail => {
-                self.promotion_rejected_by_shape_empty_nonterminal_tail_count += 1;
+                self.telemetry
+                    .structuring
+                    .promotion_rejected_by_shape_empty_nonterminal_tail_count += 1;
             }
         }
     }
 
     pub(super) fn mark_noncanonical_layout_rejection(&mut self) {
-        self.discovery_rejected_noncanonical_layout_count += 1;
-        self.promotion_rejected_by_shape_count += 1;
+        self.telemetry
+            .structuring
+            .discovery_rejected_noncanonical_layout_count += 1;
+        self.telemetry.structuring.promotion_rejected_by_shape_count += 1;
     }
 
     pub(super) fn record_blockgraph_region_proof(&mut self, proof: &BlockGraphRegionProof) {
-        self.blockgraph_region_candidate_count += 1;
+        self.telemetry.structuring.blockgraph_region_candidate_count += 1;
         match proof.legality_reason {
             BlockGraphLegalityReason::Complete => {
-                self.blockgraph_region_complete_count += 1;
+                self.telemetry.structuring.blockgraph_region_complete_count += 1;
             }
             BlockGraphLegalityReason::MissingFollow | BlockGraphLegalityReason::MissingPostdom => {
-                self.blockgraph_region_rejected_missing_follow_count += 1;
+                self.telemetry
+                    .structuring
+                    .blockgraph_region_rejected_missing_follow_count += 1;
             }
             BlockGraphLegalityReason::MustEmitLabelConflict => {
-                self.blockgraph_region_rejected_must_emit_label_count += 1;
+                self.telemetry
+                    .structuring
+                    .blockgraph_region_rejected_must_emit_label_count += 1;
             }
             BlockGraphLegalityReason::IrreducibleScc => {
-                self.blockgraph_region_rejected_irreducible_count += 1;
+                self.telemetry
+                    .structuring
+                    .blockgraph_region_rejected_irreducible_count += 1;
             }
             BlockGraphLegalityReason::SideEntry
             | BlockGraphLegalityReason::SideExit
             | BlockGraphLegalityReason::AliasInterleave
             | BlockGraphLegalityReason::EmitReadyIncomplete
             | BlockGraphLegalityReason::Budget => {
-                self.blockgraph_region_rejected_emit_ready_count += 1;
+                self.telemetry
+                    .structuring
+                    .blockgraph_region_rejected_emit_ready_count += 1;
             }
         }
     }
@@ -201,16 +215,24 @@ impl<'a> PreviewBuilder<'a> {
     fn mark_guarded_tail_witness_rejection(&mut self, reason: GuardedTailWitnessRejection) {
         match reason {
             GuardedTailWitnessRejection::MissingTerminalJoin => {
-                self.guarded_tail_rejected_missing_terminal_join_count += 1;
+                self.telemetry
+                    .structuring
+                    .guarded_tail_rejected_missing_terminal_join_count += 1;
             }
             GuardedTailWitnessRejection::SideEntryConflict => {
-                self.guarded_tail_rejected_side_entry_conflict_count += 1;
+                self.telemetry
+                    .structuring
+                    .guarded_tail_rejected_side_entry_conflict_count += 1;
             }
             GuardedTailWitnessRejection::AliasInterleaveConflict => {
-                self.guarded_tail_rejected_alias_interleave_conflict_count += 1;
+                self.telemetry
+                    .structuring
+                    .guarded_tail_rejected_alias_interleave_conflict_count += 1;
             }
             GuardedTailWitnessRejection::AmbiguousFollow => {
-                self.guarded_tail_rejected_ambiguous_follow_count += 1;
+                self.telemetry
+                    .structuring
+                    .guarded_tail_rejected_ambiguous_follow_count += 1;
             }
             GuardedTailWitnessRejection::NonCanonicalLayout => {}
         }
@@ -225,12 +247,16 @@ impl<'a> PreviewBuilder<'a> {
                 self.mark_guarded_tail_witness_rejection(reason);
             }
             GuardedTailExecutionRejection::ReplacementIncomplete => {
-                self.region_emit_ready_failed_count += 1;
-                self.guarded_tail_replacement_plan_rejected_missing_merge_count += 1;
+                self.telemetry.structuring.region_emit_ready_failed_count += 1;
+                self.telemetry
+                    .structuring
+                    .guarded_tail_replacement_plan_rejected_missing_merge_count += 1;
             }
             GuardedTailExecutionRejection::MustEmitLabelConflict => {
-                self.region_emit_ready_failed_count += 1;
-                self.guarded_tail_replacement_plan_rejected_unstable_read_count += 1;
+                self.telemetry.structuring.region_emit_ready_failed_count += 1;
+                self.telemetry
+                    .structuring
+                    .guarded_tail_replacement_plan_rejected_unstable_read_count += 1;
             }
         }
     }
@@ -249,54 +275,90 @@ impl<'a> PreviewBuilder<'a> {
         self.mark_noncanonical_layout_rejection();
         match reason {
             GuardedTailCanonicalizationFailure::MultiplePayloadEntries => {
-                self.canonicalization_failed_multiple_payload_entries += 1;
+                self.telemetry
+                    .structuring
+                    .canonicalization_failed_multiple_payload_entries += 1;
             }
             GuardedTailCanonicalizationFailure::InterleavedJoinUses => {
-                self.canonicalization_failed_interleaved_join_uses += 1;
+                self.telemetry
+                    .structuring
+                    .canonicalization_failed_interleaved_join_uses += 1;
             }
             GuardedTailCanonicalizationFailure::NonterminalJoinLabel => {
-                self.canonicalization_failed_nonterminal_join_label += 1;
+                self.telemetry
+                    .structuring
+                    .canonicalization_failed_nonterminal_join_label += 1;
             }
             GuardedTailCanonicalizationFailure::NestedTailEscape => {
-                self.canonicalization_failed_nested_tail_escape += 1;
+                self.telemetry
+                    .structuring
+                    .canonicalization_failed_nested_tail_escape += 1;
             }
             GuardedTailCanonicalizationFailure::AliasNotFallthrough => {
-                self.canonicalization_failed_alias_not_fallthrough_count += 1;
+                self.telemetry
+                    .structuring
+                    .canonicalization_failed_alias_not_fallthrough_count += 1;
             }
             GuardedTailCanonicalizationFailure::AliasHasMultipleInternalPredecessors => {
-                self.canonicalization_failed_alias_has_multiple_internal_predecessors_count += 1;
+                self.telemetry
+                    .structuring
+                    .canonicalization_failed_alias_has_multiple_internal_predecessors_count += 1;
             }
             GuardedTailCanonicalizationFailure::AliasHasNonlocalRef => {
-                self.canonicalization_failed_alias_has_nonlocal_ref_count += 1;
+                self.telemetry
+                    .structuring
+                    .canonicalization_failed_alias_has_nonlocal_ref_count += 1;
             }
             GuardedTailCanonicalizationFailure::PayloadCrossesJoin => {
-                self.canonicalization_failed_payload_crosses_join_count += 1;
+                self.telemetry
+                    .structuring
+                    .canonicalization_failed_payload_crosses_join_count += 1;
             }
         }
     }
 
     pub(super) fn mark_promotion_gate_rejection(&mut self, reason: PromotionGateRejection) {
-        self.promotion_rejected_by_gate_count += 1;
+        self.telemetry.structuring.promotion_rejected_by_gate_count += 1;
         match reason {
-            PromotionGateRejection::MustEmitLabel => self.rejected_must_emit_label += 1,
+            PromotionGateRejection::MustEmitLabel => {
+                self.telemetry.structuring.rejected_must_emit_label += 1
+            }
             PromotionGateRejection::MustEmitLabelSurvivingMiddleRef => {
-                self.rejected_must_emit_label += 1;
-                self.rejected_must_emit_label_surviving_middle_ref += 1;
-                self.blockgraph_region_rejected_middle_ref_count += 1;
+                self.telemetry.structuring.rejected_must_emit_label += 1;
+                self.telemetry
+                    .structuring
+                    .rejected_must_emit_label_surviving_middle_ref += 1;
+                self.telemetry
+                    .structuring
+                    .blockgraph_region_rejected_middle_ref_count += 1;
             }
             PromotionGateRejection::MustEmitLabelSurvivingExternalRef => {
-                self.rejected_must_emit_label += 1;
-                self.rejected_must_emit_label_surviving_external_ref += 1;
-                self.blockgraph_region_rejected_external_ref_count += 1;
+                self.telemetry.structuring.rejected_must_emit_label += 1;
+                self.telemetry
+                    .structuring
+                    .rejected_must_emit_label_surviving_external_ref += 1;
+                self.telemetry
+                    .structuring
+                    .blockgraph_region_rejected_external_ref_count += 1;
             }
             PromotionGateRejection::MustEmitLabelOwnerConflict => {
-                self.rejected_must_emit_label += 1;
-                self.rejected_must_emit_label_owner_conflict += 1;
-                self.blockgraph_region_rejected_join_owner_conflict_count += 1;
+                self.telemetry.structuring.rejected_must_emit_label += 1;
+                self.telemetry
+                    .structuring
+                    .rejected_must_emit_label_owner_conflict += 1;
+                self.telemetry
+                    .structuring
+                    .blockgraph_region_rejected_join_owner_conflict_count += 1;
             }
-            PromotionGateRejection::NotSinglePredSucc => self.rejected_not_single_pred_succ += 1,
-            PromotionGateRejection::ExternalEntry => self.rejected_external_entry += 1,
-            PromotionGateRejection::LoopOrSwitchTarget => self.rejected_loop_or_switch_target += 1,
+            PromotionGateRejection::NotSinglePredSucc => {
+                self.telemetry.structuring.rejected_not_single_pred_succ += 1
+            }
+            PromotionGateRejection::ExternalEntry => {
+                self.telemetry.structuring.rejected_external_entry += 1
+            }
+            PromotionGateRejection::LoopOrSwitchTarget => {
+                self.telemetry.structuring.rejected_loop_or_switch_target += 1
+            }
         }
     }
 
@@ -344,9 +406,9 @@ impl<'a> PreviewBuilder<'a> {
                 }
             };
             let legality = trial.witness.region_legality();
-            self.region_proof_candidate_count += 1;
+            self.telemetry.structuring.region_proof_candidate_count += 1;
             if legality.is_complete_for(RegionKind::GuardedTail) {
-                self.region_proof_completed_count += 1;
+                self.telemetry.structuring.region_proof_completed_count += 1;
             }
             let verification = self.verify_guarded_tail_trial(body, idx, &trial);
             if let Some(reason) = verification.rejection_reason {
@@ -355,8 +417,8 @@ impl<'a> PreviewBuilder<'a> {
                 continue;
             }
 
-            self.guarded_tail_candidate_count += 1;
-            self.promotion_candidate_count += 1;
+            self.telemetry.structuring.guarded_tail_candidate_count += 1;
+            self.telemetry.structuring.promotion_candidate_count += 1;
             let plan =
                 match self.build_guarded_tail_execution_plan(body, idx, &trial, &verification) {
                     Ok(plan) => plan,
@@ -384,7 +446,7 @@ impl<'a> PreviewBuilder<'a> {
         skip_to: usize,
         targeted: &HashSet<u64>,
     ) -> bool {
-        self.promotion_candidate_count += 1;
+        self.telemetry.structuring.promotion_candidate_count += 1;
         let accepted = !self.region_has_targeted_internal_entry(start_idx, skip_to, targeted)
             || self
                 .is_minimal_structured_promotion_candidate(start_idx, skip_to, targeted)
@@ -397,7 +459,7 @@ impl<'a> PreviewBuilder<'a> {
             self.mark_promotion_gate_rejection(reason);
         }
         if accepted {
-            self.promoted_region_count += 1;
+            self.telemetry.structuring.promoted_region_count += 1;
         }
         accepted
     }

@@ -95,31 +95,31 @@ impl<'a> PreviewBuilder<'a> {
     ) {
         match subtype {
             ConditionalTailMismatchSubtype::NoCommonFollowInWindow => {
-                self.region_linearize_rejected_body_lowering_conditional_tail_no_common_follow_in_window_count += 1;
+                self.telemetry.structuring.region_linearize_rejected_body_lowering_conditional_tail_no_common_follow_in_window_count += 1;
             }
             ConditionalTailMismatchSubtype::FollowBeyondWindow => {
-                self.region_linearize_rejected_body_lowering_conditional_tail_follow_beyond_window_count += 1;
+                self.telemetry.structuring.region_linearize_rejected_body_lowering_conditional_tail_follow_beyond_window_count += 1;
             }
             ConditionalTailMismatchSubtype::SideEntryOrExit => {
-                self.region_linearize_rejected_body_lowering_conditional_tail_side_entry_or_exit_count += 1;
+                self.telemetry.structuring.region_linearize_rejected_body_lowering_conditional_tail_side_entry_or_exit_count += 1;
             }
             ConditionalTailMismatchSubtype::ComplexArmShape => {
-                self.region_linearize_rejected_body_lowering_conditional_tail_complex_arm_shape_count += 1;
+                self.telemetry.structuring.region_linearize_rejected_body_lowering_conditional_tail_complex_arm_shape_count += 1;
             }
             ConditionalTailMismatchSubtype::DepthOrBudgetExceeded => {
-                self.region_linearize_rejected_body_lowering_conditional_tail_depth_or_budget_exhausted_count += 1;
+                self.telemetry.structuring.region_linearize_rejected_body_lowering_conditional_tail_depth_or_budget_exhausted_count += 1;
             }
             ConditionalTailMismatchSubtype::OneArmBodyLoweringFailed => {
-                self.region_linearize_rejected_body_lowering_conditional_tail_arm_body_lowering_failed_count += 1;
-                self.region_linearize_rejected_body_lowering_conditional_tail_one_arm_body_lowering_failed_count += 1;
+                self.telemetry.structuring.region_linearize_rejected_body_lowering_conditional_tail_arm_body_lowering_failed_count += 1;
+                self.telemetry.structuring.region_linearize_rejected_body_lowering_conditional_tail_one_arm_body_lowering_failed_count += 1;
             }
             ConditionalTailMismatchSubtype::BothArmsBodyLoweringFailed => {
-                self.region_linearize_rejected_body_lowering_conditional_tail_arm_body_lowering_failed_count += 1;
-                self.region_linearize_rejected_body_lowering_conditional_tail_both_arms_body_lowering_failed_count += 1;
+                self.telemetry.structuring.region_linearize_rejected_body_lowering_conditional_tail_arm_body_lowering_failed_count += 1;
+                self.telemetry.structuring.region_linearize_rejected_body_lowering_conditional_tail_both_arms_body_lowering_failed_count += 1;
             }
             ConditionalTailMismatchSubtype::FollowTailLoweringFailed => {
-                self.region_linearize_rejected_body_lowering_conditional_tail_arm_body_lowering_failed_count += 1;
-                self.region_linearize_rejected_body_lowering_conditional_tail_follow_tail_lowering_failed_count += 1;
+                self.telemetry.structuring.region_linearize_rejected_body_lowering_conditional_tail_arm_body_lowering_failed_count += 1;
+                self.telemetry.structuring.region_linearize_rejected_body_lowering_conditional_tail_follow_tail_lowering_failed_count += 1;
             }
         }
     }
@@ -254,7 +254,7 @@ impl<'a> PreviewBuilder<'a> {
                     let cases = if let Some(proof) = proof.as_ref()
                         && EmitReadyDecision::from_dispatcher_proof(Some(proof)).emit_ready
                     {
-                        self.proof_payload_direct_emit_count += 1;
+                        self.telemetry.dispatcher.proof_payload_direct_emit_count += 1;
                         proof
                             .recovered_cases
                             .iter()
@@ -327,7 +327,7 @@ impl<'a> PreviewBuilder<'a> {
         let (recovered_cases, used_proof_payload) =
             recovered_switch_case_values(targets, default_target, min_val, Some(proof));
         if used_proof_payload {
-            self.proof_payload_direct_emit_count += 1;
+            self.telemetry.dispatcher.proof_payload_direct_emit_count += 1;
         }
         for (value, target) in recovered_cases {
             if Some(target) == default_target {
@@ -685,8 +685,10 @@ impl<'a> PreviewBuilder<'a> {
     fn merge_terminal_exits(&mut self, lhs: LinearExit, rhs: LinearExit) -> Option<LinearExit> {
         match (lhs, rhs) {
             (LinearExit::Return, LinearExit::Return) | (LinearExit::End, LinearExit::End) => {
-                self.rule_block_if_no_exit_count += 1;
-                self.rule_block_if_no_exit_accepted_count += 1;
+                self.telemetry.structuring.rule_block_if_no_exit_count += 1;
+                self.telemetry
+                    .structuring
+                    .rule_block_if_no_exit_accepted_count += 1;
                 Some(lhs)
             }
             _ => None,

@@ -15,9 +15,9 @@ impl<'a> PreviewBuilder<'a> {
         };
         let emit_ready = EmitReadyDecision::from_dispatcher_proof(Some(&parsed.proof));
         if !emit_ready.emit_ready {
-            self.switch_emit_ready_failed_count += 1;
-            self.region_proof_candidate_count += 1;
-            self.region_emit_ready_failed_count += 1;
+            self.telemetry.dispatcher.switch_emit_ready_failed_count += 1;
+            self.telemetry.structuring.region_proof_candidate_count += 1;
+            self.telemetry.structuring.region_emit_ready_failed_count += 1;
             return Ok(None);
         }
         if parsed.cases.len() < 2 {
@@ -96,9 +96,9 @@ impl<'a> PreviewBuilder<'a> {
         };
         let emit_ready = EmitReadyDecision::from_dispatcher_proof(proof.as_ref());
         if !emit_ready.emit_ready {
-            self.switch_emit_ready_failed_count += 1;
-            self.region_proof_candidate_count += 1;
-            self.region_emit_ready_failed_count += 1;
+            self.telemetry.dispatcher.switch_emit_ready_failed_count += 1;
+            self.telemetry.structuring.region_proof_candidate_count += 1;
+            self.telemetry.structuring.region_emit_ready_failed_count += 1;
             return Ok(None);
         }
 
@@ -159,7 +159,7 @@ impl<'a> PreviewBuilder<'a> {
         };
 
         if used_proof_payload {
-            self.proof_payload_direct_emit_count += 1;
+            self.telemetry.dispatcher.proof_payload_direct_emit_count += 1;
         }
         wave_stats::add_dispatcher_proof_units(1);
         wave_stats::add_dispatcher_proof_completed(1);

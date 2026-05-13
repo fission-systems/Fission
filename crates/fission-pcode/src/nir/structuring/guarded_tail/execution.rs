@@ -274,11 +274,17 @@ impl<'a> PreviewBuilder<'a> {
             if read_sites.is_empty() {
                 continue;
             }
-            self.guarded_tail_exported_binding_count += 1;
-            self.guarded_tail_replacement_read_count += read_sites.len();
+            self.telemetry
+                .structuring
+                .guarded_tail_exported_binding_count += 1;
+            self.telemetry
+                .structuring
+                .guarded_tail_replacement_read_count += read_sites.len();
 
             if !Self::expr_is_pure_value(rhs) {
-                self.guarded_tail_replacement_read_rejected_nonremovable_op_count +=
+                self.telemetry
+                    .structuring
+                    .guarded_tail_replacement_read_rejected_nonremovable_op_count +=
                     read_sites.len();
                 return Err(GuardedTailExecutionRejection::ReplacementIncomplete);
             }
@@ -288,11 +294,15 @@ impl<'a> PreviewBuilder<'a> {
                 .sum::<usize>()
                 != 1
             {
-                self.guarded_tail_replacement_read_rejected_nondominated_count += read_sites.len();
+                self.telemetry
+                    .structuring
+                    .guarded_tail_replacement_read_rejected_nondominated_count += read_sites.len();
                 return Err(GuardedTailExecutionRejection::ReplacementIncomplete);
             }
             if nondominated_reads > 0 {
-                self.guarded_tail_replacement_read_rejected_nondominated_count +=
+                self.telemetry
+                    .structuring
+                    .guarded_tail_replacement_read_rejected_nondominated_count +=
                     read_sites.len() + nondominated_reads;
                 return Err(GuardedTailExecutionRejection::ReplacementIncomplete);
             }
@@ -652,7 +662,9 @@ impl<'a> PreviewBuilder<'a> {
     ) -> GuardedTailVerification {
         let witness = &trial.witness;
         let legality = witness.region_legality();
-        self.guarded_tail_replacement_plan_candidate_count += 1;
+        self.telemetry
+            .structuring
+            .guarded_tail_replacement_plan_candidate_count += 1;
         let follow_tail = if witness.label_idx + 1 < body.len() {
             &body[witness.label_idx + 1..]
         } else {
@@ -842,7 +854,9 @@ impl<'a> PreviewBuilder<'a> {
                         .is_none()
             })
         {
-            self.guarded_tail_replacement_plan_rejected_missing_merge_count += 1;
+            self.telemetry
+                .structuring
+                .guarded_tail_replacement_plan_rejected_missing_merge_count += 1;
             if Self::guarded_tail_diag_enabled() {
                 let missing = exported_bindings
                     .iter()
@@ -879,7 +893,9 @@ impl<'a> PreviewBuilder<'a> {
         }
 
         if replacement_complete {
-            self.guarded_tail_replacement_plan_completed_count += 1;
+            self.telemetry
+                .structuring
+                .guarded_tail_replacement_plan_completed_count += 1;
             if Self::guarded_tail_diag_enabled() {
                 eprintln!(
                     "[DIAG] guarded-tail verify idx={} label={} replacement_complete exported_bindings={}",
@@ -904,7 +920,9 @@ impl<'a> PreviewBuilder<'a> {
         }
 
         if !removable_ops_legal || effective_middle_refs > 0 {
-            self.guarded_tail_replacement_plan_rejected_unstable_read_count += 1;
+            self.telemetry
+                .structuring
+                .guarded_tail_replacement_plan_rejected_unstable_read_count += 1;
             for binding in &exported_bindings {
                 if binding.read_sites.is_empty() {
                     continue;
@@ -981,7 +999,9 @@ impl<'a> PreviewBuilder<'a> {
             rejection_reason: Some(if !removable_ops_legal {
                 GuardedTailExecutionRejection::MustEmitLabelConflict
             } else {
-                self.guarded_tail_replacement_plan_rejected_missing_merge_count += 1;
+                self.telemetry
+                    .structuring
+                    .guarded_tail_replacement_plan_rejected_missing_merge_count += 1;
                 GuardedTailExecutionRejection::ReplacementIncomplete
             }),
         }
@@ -1036,7 +1056,9 @@ impl<'a> PreviewBuilder<'a> {
             ) {
                 expr
             } else {
-                self.guarded_tail_replacement_plan_rejected_missing_merge_count += 1;
+                self.telemetry
+                    .structuring
+                    .guarded_tail_replacement_plan_rejected_missing_merge_count += 1;
                 return Err(GuardedTailExecutionRejection::ReplacementIncomplete);
             };
 
@@ -1052,7 +1074,9 @@ impl<'a> PreviewBuilder<'a> {
                     initializer: None,
                 },
             );
-            self.guarded_tail_replacement_plan_merge_created_count += 1;
+            self.telemetry
+                .structuring
+                .guarded_tail_replacement_plan_merge_created_count += 1;
             synthetic_merges.push(GuardedTailSyntheticMerge {
                 binding_name,
                 replacement_target,
@@ -1122,12 +1146,14 @@ impl<'a> PreviewBuilder<'a> {
                 let stmt_idx = tail_start + read.stmt_idx;
                 if let Some(stmt) = body.get_mut(stmt_idx) {
                     Self::apply_guarded_tail_replacement_read(stmt, merge);
-                    self.guarded_tail_replacement_read_rewritten_count += 1;
+                    self.telemetry
+                        .structuring
+                        .guarded_tail_replacement_read_rewritten_count += 1;
                 }
             }
         }
-        self.guarded_tail_promoted_count += 1;
-        self.promoted_region_count += 1;
+        self.telemetry.structuring.guarded_tail_promoted_count += 1;
+        self.telemetry.structuring.promoted_region_count += 1;
     }
 
     pub(super) fn discover_guarded_tail_candidates_in_body(&mut self, body: &[HirStmt]) {
@@ -1172,7 +1198,9 @@ impl<'a> PreviewBuilder<'a> {
             let Some(trial) = self.try_build_guarded_tail_trial(body, idx, &referenced) else {
                 continue;
             };
-            self.discovery_seen_guarded_tail_like_shape_count += 1;
+            self.telemetry
+                .structuring
+                .discovery_seen_guarded_tail_like_shape_count += 1;
             let trial = match trial {
                 Ok(trial) => trial,
                 Err(reason) => {
@@ -1199,8 +1227,8 @@ impl<'a> PreviewBuilder<'a> {
                 continue;
             }
 
-            self.guarded_tail_candidate_count += 1;
-            self.promotion_candidate_count += 1;
+            self.telemetry.structuring.guarded_tail_candidate_count += 1;
+            self.telemetry.structuring.promotion_candidate_count += 1;
         }
     }
 }

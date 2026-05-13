@@ -1,7 +1,6 @@
 use super::*;
 use fission_loader::loader::LoadedBinary;
 use std::cell::RefCell;
-use std::ops::{Deref, DerefMut};
 
 pub(super) type BuilderCacheMap<K, V> = rustc_hash::FxHashMap<K, V>;
 pub(super) type BuilderCacheSet<T> = rustc_hash::FxHashSet<T>;
@@ -58,18 +57,4 @@ pub(crate) struct PreviewBuilder<'a> {
     pub(in crate::nir::builder) materialize_owner_repartition:
         RefCell<super::materialize::MaterializeOwnerRepartition>,
     pub(crate) telemetry: super::telemetry::BuilderTelemetry,
-}
-
-impl Deref for PreviewBuilder<'_> {
-    type Target = super::telemetry::BuilderTelemetry;
-
-    fn deref(&self) -> &Self::Target {
-        &self.telemetry
-    }
-}
-
-impl DerefMut for PreviewBuilder<'_> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.telemetry
-    }
 }

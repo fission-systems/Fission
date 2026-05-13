@@ -346,7 +346,9 @@ impl<'a> PreviewBuilder<'a> {
                 replacement_plan,
                 "representative_downgrade",
             );
-            self.representative_downgrade_count += 1;
+            self.telemetry
+                .materialization
+                .representative_downgrade_count += 1;
             return Ok(None);
         }
         let no_consumer_profile =
@@ -429,7 +431,9 @@ impl<'a> PreviewBuilder<'a> {
             }
         }
         if legacy_inline_candidate {
-            self.materialization_inline_suppressed_count += 1;
+            self.telemetry
+                .materialization
+                .materialization_inline_suppressed_count += 1;
             self.trace_materialization_plan(
                 block_addr,
                 op,
@@ -655,7 +659,9 @@ impl<'a> PreviewBuilder<'a> {
         output: &Varnode,
         rhs: &HirExpr,
     ) -> ReplacementValuePlan {
-        self.replacement_plan_candidate_count += 1;
+        self.telemetry
+            .materialization
+            .replacement_plan_candidate_count += 1;
         let legacy_inline_candidate =
             self.output_replacement_is_complete(block, op_idx, output, rhs);
         if Self::parity_chain_materialization_enabled()
@@ -680,7 +686,9 @@ impl<'a> PreviewBuilder<'a> {
                         fallback_plan,
                     );
                     self.trace_parity_chain_materialized(block, op_idx, output, &proof);
-                    self.replacement_plan_completed_count += 1;
+                    self.telemetry
+                        .materialization
+                        .replacement_plan_completed_count += 1;
                     return ReplacementValuePlan::complete(ReplacementReadClass::SameBlockData);
                 }
                 Err(reason) => {
@@ -828,7 +836,9 @@ impl<'a> PreviewBuilder<'a> {
                     proof.redef_dominates_consumer,
                     proof.old_def_has_pre_redef_use,
                 ));
-                self.replacement_plan_completed_count += 1;
+                self.telemetry
+                    .materialization
+                    .replacement_plan_completed_count += 1;
                 return ReplacementValuePlan::complete(ReplacementReadClass::SameBlockData);
             }
         }
@@ -856,7 +866,9 @@ impl<'a> PreviewBuilder<'a> {
                     proof.old_def_has_pre_redef_use,
                     proof.redef_dominates_predicate,
                 ));
-                self.replacement_plan_completed_count += 1;
+                self.telemetry
+                    .materialization
+                    .replacement_plan_completed_count += 1;
                 return ReplacementValuePlan::complete(ReplacementReadClass::PredicateSensitive);
             }
         }
@@ -891,7 +903,9 @@ impl<'a> PreviewBuilder<'a> {
                             false,
                             ExplicitMergeBindingTrialReason::PhiLikeBindingMaterialized,
                         );
-                        self.replacement_plan_completed_count += 1;
+                        self.telemetry
+                            .materialization
+                            .replacement_plan_completed_count += 1;
                         return ReplacementValuePlan::complete(ReplacementReadClass::Merge);
                     }
                     Err(reason) => {
@@ -914,16 +928,24 @@ impl<'a> PreviewBuilder<'a> {
             self.trace_loop_boundary_binding_correlation(block, op_idx, output, rejection_reason);
             match rejection_reason {
                 MaterializationRejectionReason::MissingMergeBinding => {
-                    self.replacement_plan_rejected_missing_merge_count += 1;
+                    self.telemetry
+                        .materialization
+                        .replacement_plan_rejected_missing_merge_count += 1;
                 }
                 MaterializationRejectionReason::RepresentativeRootAttribution => {
-                    self.replacement_plan_rejected_representative_root_attribution_count += 1;
+                    self.telemetry
+                        .materialization
+                        .replacement_plan_rejected_representative_root_attribution_count += 1;
                 }
                 MaterializationRejectionReason::TempOnlyRepresentativeLifecycle => {
-                    self.replacement_plan_rejected_temp_only_representative_lifecycle_count += 1;
+                    self.telemetry
+                        .materialization
+                        .replacement_plan_rejected_temp_only_representative_lifecycle_count += 1;
                 }
                 MaterializationRejectionReason::DeadTempRepresentative => {
-                    self.replacement_plan_rejected_dead_temp_representative_count += 1;
+                    self.telemetry
+                        .materialization
+                        .replacement_plan_rejected_dead_temp_representative_count += 1;
                 }
                 MaterializationRejectionReason::AliasUnsafe
                 | MaterializationRejectionReason::ConsumerRequiresStableRepresentative => {}
@@ -950,13 +972,17 @@ impl<'a> PreviewBuilder<'a> {
                     output,
                     MaterializationRejectionReason::ConsumerRequiresStableRepresentative,
                 );
-                self.replacement_plan_rejected_alias_unsafe_count += 1;
+                self.telemetry
+                    .materialization
+                    .replacement_plan_rejected_alias_unsafe_count += 1;
                 return ReplacementValuePlan::incomplete(
                     read_class,
                     MaterializationRejectionReason::ConsumerRequiresStableRepresentative,
                 );
             }
-            self.replacement_plan_completed_count += 1;
+            self.telemetry
+                .materialization
+                .replacement_plan_completed_count += 1;
             return ReplacementValuePlan::complete(read_class);
         }
         if self.output_replacement_is_complete(block, op_idx, output, rhs) {
@@ -981,7 +1007,9 @@ impl<'a> PreviewBuilder<'a> {
                                 false,
                                 StackAddrFrameStableTrialReason::StackAddrFrameStableReplaced,
                             );
-                            self.replacement_plan_completed_count += 1;
+                            self.telemetry
+                                .materialization
+                                .replacement_plan_completed_count += 1;
                             return ReplacementValuePlan::complete(
                                 ReplacementReadClass::SameBlockData,
                             );
@@ -1024,16 +1052,22 @@ impl<'a> PreviewBuilder<'a> {
                     output,
                     MaterializationRejectionReason::ConsumerRequiresStableRepresentative,
                 );
-                self.replacement_plan_rejected_alias_unsafe_count += 1;
+                self.telemetry
+                    .materialization
+                    .replacement_plan_rejected_alias_unsafe_count += 1;
                 return ReplacementValuePlan::incomplete(
                     ReplacementReadClass::SameBlockData,
                     MaterializationRejectionReason::ConsumerRequiresStableRepresentative,
                 );
             }
-            self.replacement_plan_completed_count += 1;
+            self.telemetry
+                .materialization
+                .replacement_plan_completed_count += 1;
             return ReplacementValuePlan::complete(ReplacementReadClass::SameBlockData);
         }
-        self.replacement_plan_rejected_alias_unsafe_count += 1;
+        self.telemetry
+            .materialization
+            .replacement_plan_rejected_alias_unsafe_count += 1;
         self.record_materialize_rejection_reason(MaterializationRejectionReason::AliasUnsafe);
         let hazard =
             Self::classify_alias_unsafe_hazard(block, op_idx, terminator_index, output, rhs);

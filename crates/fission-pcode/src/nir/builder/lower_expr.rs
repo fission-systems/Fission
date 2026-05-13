@@ -72,45 +72,71 @@ impl<'a> PreviewBuilder<'a> {
 
     fn resolve_call_target_by_address(&mut self, addr: u64) -> Option<String> {
         let Some(ctx) = self.type_context else {
-            self.call_target_context_missing_count += 1;
+            self.telemetry
+                .call_targets
+                .call_target_context_missing_count += 1;
             return None;
         };
         if let Some(target_ref) = ctx.call_target_refs.get(&addr) {
-            self.call_target_exact_index_hit_count += 1;
+            self.telemetry
+                .call_targets
+                .call_target_exact_index_hit_count += 1;
             match target_ref.provenance {
                 CallTargetProvenance::Import => {
-                    self.call_target_import_resolved_count += 1;
+                    self.telemetry
+                        .call_targets
+                        .call_target_import_resolved_count += 1;
                 }
                 CallTargetProvenance::ExportThunkTarget => {
-                    self.call_target_direct_symbol_resolved_count += 1;
-                    self.call_target_export_thunk_target_resolved_count += 1;
+                    self.telemetry
+                        .call_targets
+                        .call_target_direct_symbol_resolved_count += 1;
+                    self.telemetry
+                        .call_targets
+                        .call_target_export_thunk_target_resolved_count += 1;
                 }
                 _ => {
-                    self.call_target_direct_symbol_resolved_count += 1;
+                    self.telemetry
+                        .call_targets
+                        .call_target_direct_symbol_resolved_count += 1;
                 }
             }
             return Some(target_ref.symbol.clone());
         }
         if ctx.ambiguous_call_targets.contains(&addr) {
-            self.call_target_exact_index_ambiguous_count += 1;
+            self.telemetry
+                .call_targets
+                .call_target_exact_index_ambiguous_count += 1;
         } else {
-            self.call_target_unresolved_no_exact_identity_count += 1;
+            self.telemetry
+                .call_targets
+                .call_target_unresolved_no_exact_identity_count += 1;
         }
         None
     }
 
     fn resolve_call_target_by_iat_slot(&mut self, addr: u64) -> Option<String> {
         let Some(ctx) = self.type_context else {
-            self.call_target_context_missing_count += 1;
+            self.telemetry
+                .call_targets
+                .call_target_context_missing_count += 1;
             return None;
         };
         let Some(target_ref) = ctx.iat_target_refs.get(&addr) else {
-            self.call_target_indirect_rejected_non_iat_load_count += 1;
+            self.telemetry
+                .call_targets
+                .call_target_indirect_rejected_non_iat_load_count += 1;
             return None;
         };
-        self.call_target_iat_slot_resolved_count += 1;
-        self.call_target_indirect_load_resolved_count += 1;
-        self.call_target_import_resolved_count += 1;
+        self.telemetry
+            .call_targets
+            .call_target_iat_slot_resolved_count += 1;
+        self.telemetry
+            .call_targets
+            .call_target_indirect_load_resolved_count += 1;
+        self.telemetry
+            .call_targets
+            .call_target_import_resolved_count += 1;
         Some(target_ref.symbol.clone())
     }
 
@@ -646,21 +672,29 @@ impl<'a> PreviewBuilder<'a> {
                         let addr = val as u64;
                         if let Some(name) = self.resolve_call_target_by_address(addr) {
                             if matches!(op.opcode, PcodeOpcode::CallInd) {
-                                self.call_target_indirect_const_resolved_count += 1;
+                                self.telemetry
+                                    .call_targets
+                                    .call_target_indirect_const_resolved_count += 1;
                             }
                             name
                         } else {
-                            self.call_target_unresolved_sub_fallback_count += 1;
+                            self.telemetry
+                                .call_targets
+                                .call_target_unresolved_sub_fallback_count += 1;
                             format!("sub_{addr:x}")
                         }
                     }
                     Ok(HirExpr::Var(name)) if matches!(op.opcode, PcodeOpcode::CallInd) => {
                         if let Some(addr) = self.resolve_copy_only_constant_chain(target) {
                             if let Some(name) = self.resolve_call_target_by_address(addr) {
-                                self.call_target_indirect_const_resolved_count += 1;
+                                self.telemetry
+                                    .call_targets
+                                    .call_target_indirect_const_resolved_count += 1;
                                 name
                             } else {
-                                self.call_target_unresolved_sub_fallback_count += 1;
+                                self.telemetry
+                                    .call_targets
+                                    .call_target_unresolved_sub_fallback_count += 1;
                                 format!("sub_{addr:x}")
                             }
                         } else if let Some(name) = self.resolve_iat_load_call_target(target) {
@@ -675,10 +709,14 @@ impl<'a> PreviewBuilder<'a> {
                     Ok(other) if matches!(op.opcode, PcodeOpcode::CallInd) => {
                         if let Some(addr) = self.resolve_copy_only_constant_chain(target) {
                             if let Some(name) = self.resolve_call_target_by_address(addr) {
-                                self.call_target_indirect_const_resolved_count += 1;
+                                self.telemetry
+                                    .call_targets
+                                    .call_target_indirect_const_resolved_count += 1;
                                 name
                             } else {
-                                self.call_target_unresolved_sub_fallback_count += 1;
+                                self.telemetry
+                                    .call_targets
+                                    .call_target_unresolved_sub_fallback_count += 1;
                                 format!("sub_{addr:x}")
                             }
                         } else if matches!(other, HirExpr::Load { .. }) {
@@ -803,11 +841,15 @@ impl<'a> PreviewBuilder<'a> {
         };
         if let Some(name) = self.resolve_call_target_by_address(addr) {
             if matches!(op.opcode, PcodeOpcode::CallInd) {
-                self.call_target_indirect_const_resolved_count += 1;
+                self.telemetry
+                    .call_targets
+                    .call_target_indirect_const_resolved_count += 1;
             }
             Some(name)
         } else {
-            self.call_target_unresolved_sub_fallback_count += 1;
+            self.telemetry
+                .call_targets
+                .call_target_unresolved_sub_fallback_count += 1;
             Some(format!("sub_{addr:x}"))
         }
     }
@@ -823,7 +865,9 @@ impl<'a> PreviewBuilder<'a> {
         if let Some(name) = self.resolve_call_target_by_address(addr) {
             Some(name)
         } else {
-            self.call_target_unresolved_sub_fallback_count += 1;
+            self.telemetry
+                .call_targets
+                .call_target_unresolved_sub_fallback_count += 1;
             Some(format!("sub_{addr:x}"))
         }
     }
@@ -900,7 +944,9 @@ impl<'a> PreviewBuilder<'a> {
             return None;
         };
         if output.size != self.options.pointer_size {
-            self.call_target_indirect_rejected_width_mismatch_count += 1;
+            self.telemetry
+                .call_targets
+                .call_target_indirect_rejected_width_mismatch_count += 1;
             return None;
         }
         let Some(ptr) = producer.inputs.get(1) else {
@@ -925,7 +971,9 @@ impl<'a> PreviewBuilder<'a> {
                 CALL_TARGET_CONST_FOLD_BUDGET,
             ) {
                 Ok(addr) => {
-                    self.call_target_indirect_ptr_const_folded_count += 1;
+                    self.telemetry
+                        .call_targets
+                        .call_target_indirect_ptr_const_folded_count += 1;
                     addr
                 }
                 Err(reason) => {
@@ -938,19 +986,29 @@ impl<'a> PreviewBuilder<'a> {
     }
 
     fn record_call_target_const_reject(&mut self, reason: CallTargetConstReject) {
-        self.call_target_indirect_rejected_non_const_ptr_count += 1;
+        self.telemetry
+            .call_targets
+            .call_target_indirect_rejected_non_const_ptr_count += 1;
         match reason {
             CallTargetConstReject::UnsupportedOpcode => {
-                self.call_target_indirect_rejected_unsupported_ptr_opcode_count += 1;
+                self.telemetry
+                    .call_targets
+                    .call_target_indirect_rejected_unsupported_ptr_opcode_count += 1;
             }
             CallTargetConstReject::AmbiguousDef => {
-                self.call_target_indirect_rejected_ambiguous_def_count += 1;
+                self.telemetry
+                    .call_targets
+                    .call_target_indirect_rejected_ambiguous_def_count += 1;
             }
             CallTargetConstReject::NonDominatingDef => {
-                self.call_target_indirect_rejected_non_dominating_def_count += 1;
+                self.telemetry
+                    .call_targets
+                    .call_target_indirect_rejected_non_dominating_def_count += 1;
             }
             CallTargetConstReject::NoDef => {
-                self.call_target_indirect_rejected_no_def_count += 1;
+                self.telemetry
+                    .call_targets
+                    .call_target_indirect_rejected_no_def_count += 1;
             }
         }
     }
