@@ -595,11 +595,19 @@ pub(crate) fn normalize_hir_function(func: &mut HirFunction) {
         perf,
         apply_variadic_stack_region_pass,
     );
-    // Aggregate field layout recovery: collect PtrOffset access offsets on
-    // Ptr(Aggregate) variables and annotate the aggregate type with named
-    // StructFields.  Must run after ptr_arith_recovery so PtrOffset nodes exist.
+    // Aggregate field layout recovery: collect partitioned access offsets on
+    // pointer-like objects and annotate Ptr(Aggregate) bindings with named
+    // StructFields.  Re-run pointer arithmetic afterward so newly inferred
+    // aggregate pointers expose field offsets before rendering.
     if memory_fact_prefilter {
-        run_pass_logged(func, "aggregate_fields", perf, apply_aggregate_fields_pass);
+        if run_pass_logged(func, "aggregate_fields", perf, apply_aggregate_fields_pass) {
+            run_pass_logged(
+                func,
+                "ptr_arith_recovery_after_aggregate_fields",
+                perf,
+                apply_ptr_arith_recovery_pass,
+            );
+        }
     } else {
         wave_stats::add_memory_fact_prefilter_skip(1);
         wave_stats::add_aggregate_fields_skipped_by_admission(1);

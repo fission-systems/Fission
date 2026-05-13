@@ -248,7 +248,61 @@ fn normalize_removes_dead_aggregate_temp_after_direct_store_recovery() {
 }
 
 #[test]
+fn normalize_recovers_field_access_after_aggregate_pointer_inference() {
+    let mut func = HirFunction {
+        name: "process_config_like".to_string(),
+        params: vec![NirBinding {
+            name: "param_1".to_string(),
+            ty: NirType::Ptr(Box::new(NirType::Unknown)),
+            surface_type_name: None,
+            origin: Some(NirBindingOrigin::ParamIndex(0)),
+            initializer: None,
+        }],
+        locals: Vec::new(),
+        return_type: NirType::Int {
+            bits: 16,
+            signed: false,
+        },
+        surface_return_type_name: None,
+        body: vec![HirStmt::Return(Some(HirExpr::Load {
+            ptr: Box::new(HirExpr::Cast {
+                ty: NirType::Ptr(Box::new(NirType::Int {
+                    bits: 16,
+                    signed: false,
+                })),
+                expr: Box::new(HirExpr::Binary {
+                    op: HirBinaryOp::Add,
+                    lhs: Box::new(HirExpr::Var("param_1".to_string())),
+                    rhs: Box::new(HirExpr::Const(
+                        8,
+                        NirType::Int {
+                            bits: 64,
+                            signed: false,
+                        },
+                    )),
+                    ty: NirType::Ptr(Box::new(NirType::Unknown)),
+                }),
+            }),
+            ty: NirType::Int {
+                bits: 16,
+                signed: false,
+            },
+        }))],
+        is_64bit: true,
+        ..Default::default()
+    };
 
+    normalize_hir_function(&mut func);
+    let rendered = print_hir_function(&func);
+    assert!(
+        rendered.contains("param_1->field_8"),
+        "rendered:\n{}",
+        rendered
+    );
+    assert!(!rendered.contains("param_1 + 8"), "rendered:\n{}", rendered);
+}
+
+#[test]
 fn preview_type_hints_fold_subpiece_lane_aggregate_store_back_to_local() {
     let func = PcodeFunction {
         blocks: vec![PcodeBasicBlock {

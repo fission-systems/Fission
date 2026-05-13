@@ -240,7 +240,11 @@ fn try_recover_ptr_arith(
 
     let (typed_ptr_expr, ptr_ty, from_byte_cast) = typed_pointer_base(ptr_expr, binding_types)?;
     let elem_ty = pointee_ty(&ptr_ty).cloned().unwrap_or(NirType::Unknown);
-    if matches!(ty, NirType::Ptr(_)) && !from_byte_cast {
+    let pointer_typed_const_byte_offset = matches!(ty, NirType::Ptr(_))
+        && !from_byte_cast
+        && matches!(elem_ty, NirType::Unknown | NirType::Aggregate { .. })
+        && matches!(rhs_expr, HirExpr::Const(_, _));
+    if matches!(ty, NirType::Ptr(_)) && !from_byte_cast && !pointer_typed_const_byte_offset {
         return None;
     }
 
@@ -692,6 +696,41 @@ mod tests {
                     bits: 64,
                     signed: false,
                 },
+            },
+        }];
+        let mut func = make_func(vec![make_binding_with_ty("p", p_ty)], body);
+        let changed = super::apply_ptr_arith_recovery_pass(&mut func);
+        assert!(changed);
+        if let HirStmt::Assign { rhs, .. } = &func.body[0] {
+            assert!(matches!(rhs, HirExpr::PtrOffset { offset: 8, .. }));
+        } else {
+            panic!("expected assign");
+        }
+    }
+
+    /// Pointer-typed Add(Var("p"), Const(8)) where p: Ptr(Aggregate) still
+    /// preserves byte-offset form.  The raw p-code builder may type the address
+    /// expression as a pointer before aggregate fields have been recovered.
+    #[test]
+    fn preserves_pointer_typed_aggregate_add_const_as_ptr_offset() {
+        let elem_ty = NirType::Aggregate {
+            size: 16,
+            fields: vec![],
+        };
+        let p_ty = NirType::Ptr(Box::new(elem_ty.clone()));
+        let body = vec![HirStmt::Assign {
+            lhs: HirLValue::Var("result".to_owned()),
+            rhs: HirExpr::Binary {
+                op: HirBinaryOp::Add,
+                lhs: Box::new(HirExpr::Var("p".to_owned())),
+                rhs: Box::new(HirExpr::Const(
+                    8,
+                    NirType::Int {
+                        bits: 64,
+                        signed: false,
+                    },
+                )),
+                ty: NirType::Ptr(Box::new(elem_ty)),
             },
         }];
         let mut func = make_func(vec![make_binding_with_ty("p", p_ty)], body);
