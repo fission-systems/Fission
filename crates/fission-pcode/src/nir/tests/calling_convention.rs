@@ -430,6 +430,21 @@ fn powerpc64_r3_to_r10_are_params() {
 }
 
 #[test]
+fn powerpc64_32bit_gpr_views_map_to_containing_param_register() {
+    for (offset, expected_name, expected_slot) in [
+        (0x18, "param_1", 0usize),
+        (0x1c, "param_1", 0usize),
+        (0x20, "param_2", 1usize),
+        (0x24, "param_2", 1usize),
+    ] {
+        let (name, idx) =
+            register_name_with_param(offset, 4, CallingConvention::PowerPc64).unwrap();
+        assert_eq!(name, expected_name, "offset=0x{offset:x}");
+        assert_eq!(idx, Some(expected_slot), "offset=0x{offset:x}");
+    }
+}
+
+#[test]
 fn powerpc_non_param_registers_are_named() {
     let (name, idx) = register_name_with_param(0x04, 4, CallingConvention::PowerPc32).unwrap();
     assert_eq!(name, "r1");

@@ -668,6 +668,20 @@ pub(crate) fn powerpc_ghidra_reg_name(offset: u64, size: u32) -> Option<&'static
     }
 }
 
+pub(crate) fn powerpc_ghidra_reg_name_for_abi(
+    offset: u64,
+    size: u32,
+    abi: CallingConvention,
+) -> Option<&'static str> {
+    if abi == CallingConvention::PowerPc64 && size == 4 {
+        let slot_base = offset & !0x7;
+        if offset.checked_add(u64::from(size))? <= slot_base.checked_add(8)? {
+            return powerpc_ghidra_reg_name(slot_base, 8);
+        }
+    }
+    powerpc_ghidra_reg_name(offset, size)
+}
+
 /// Static `param_N` names for up to 8 parameters (enough for AArch64 PCS).
 const PARAM_NAMES: [&str; 8] = [
     "param_1", "param_2", "param_3", "param_4", "param_5", "param_6", "param_7", "param_8",
@@ -690,7 +704,7 @@ pub(crate) fn register_name_with_param(
         CallingConvention::AArch64 => aarch64_ghidra_reg_name(offset, _size)?,
         CallingConvention::Arm32 => arm32_ghidra_reg_name(offset, _size)?,
         CallingConvention::PowerPc32 | CallingConvention::PowerPc64 => {
-            powerpc_ghidra_reg_name(offset, _size)?
+            powerpc_ghidra_reg_name_for_abi(offset, _size, abi)?
         }
         CallingConvention::WindowsX64 | CallingConvention::SystemVAmd64 => {
             x64_ghidra_reg_name(offset)?
@@ -713,8 +727,13 @@ pub(crate) fn register_name_with_param(
         }),
         CallingConvention::PowerPc32 | CallingConvention::PowerPc64 => {
             powerpc_gpr_family_index(hw_name).and_then(|name_family| {
+                let slot_size = if abi == CallingConvention::PowerPc64 {
+                    8
+                } else {
+                    _size
+                };
                 abi.param_offsets().iter().position(|&param_offset| {
-                    powerpc_ghidra_reg_name(param_offset, _size)
+                    powerpc_ghidra_reg_name(param_offset, slot_size)
                         .and_then(powerpc_gpr_family_index)
                         .is_some_and(|family| family == name_family)
                 })
@@ -749,7 +768,7 @@ pub(crate) fn register_hardware_name_for_abi(
         CallingConvention::AArch64 => aarch64_ghidra_reg_name(offset, size),
         CallingConvention::Arm32 => arm32_ghidra_reg_name(offset, size),
         CallingConvention::PowerPc32 | CallingConvention::PowerPc64 => {
-            powerpc_ghidra_reg_name(offset, size)
+            powerpc_ghidra_reg_name_for_abi(offset, size, abi)
         }
         CallingConvention::WindowsX64 | CallingConvention::SystemVAmd64 => {
             x64_ghidra_reg_name(offset)

@@ -370,7 +370,12 @@ impl<'a> PreviewBuilder<'a> {
                     arm32_ghidra_reg_name(key.offset, key.size).and_then(arm32_gpr_family_index)
                 }
                 CallingConvention::PowerPc32 | CallingConvention::PowerPc64 => {
-                    powerpc_ghidra_reg_name(key.offset, key.size).and_then(powerpc_gpr_family_index)
+                    powerpc_ghidra_reg_name_for_abi(
+                        key.offset,
+                        key.size,
+                        self.options.calling_convention,
+                    )
+                    .and_then(powerpc_gpr_family_index)
                 }
                 CallingConvention::WindowsX64 | CallingConvention::SystemVAmd64 => {
                     x64_ghidra_reg_name(key.offset).and_then(crate::arch::x86::x86_gpr_family_index)
