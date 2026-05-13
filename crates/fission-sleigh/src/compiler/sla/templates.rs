@@ -601,6 +601,9 @@ fn decode_decision_node(
         })?;
 
     if bit_size > 0 {
+        if bit_size > 8 {
+            bail!("decision node bit size {bit_size} exceeds u8 branch key width");
+        }
         let probe = if is_context {
             crate::compiler::ir::CompiledDecisionProbe::SlaContextBits {
                 start_bit,
@@ -618,10 +621,12 @@ fn decode_decision_node(
         for child in &element.children {
             if child.id == sla_format::ELEM_DECISION {
                 let child_idx = decode_decision_node(subtable_id, child, nodes)?;
+                let value = u8::try_from(val)
+                    .map_err(|_| anyhow!("decision node branch value {val} exceeds u8"))?;
                 nodes[node_idx]
                     .branches
                     .push(crate::compiler::ir::CompiledDecisionEdge {
-                        value: val as u8,
+                        value,
                         next_node_index: child_idx,
                     });
                 val += 1;

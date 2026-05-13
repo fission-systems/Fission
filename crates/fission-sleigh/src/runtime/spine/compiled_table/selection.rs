@@ -130,15 +130,19 @@ impl DecisionProbeEvaluator for CompiledDecisionProbeEvaluator<'_, '_> {
                 8,
             )?
             .into_iter()
-            .map(|value| ((value & u64::from(mask)) >> shift) as u8)
-            .collect(),
+            .map(|value| {
+                decision_probe_value_u8((value & u64::from(mask)) >> shift, "context bit slice")
+            })
+            .collect::<Result<Vec<_>>>()?,
             CompiledDecisionProbe::SlaInstructionBits {
                 start_bit,
                 bit_size,
             } => {
+                ensure_u8_decision_probe_width(bit_size, "SLA instruction bits")?;
                 let byte_offset = start_bit / 8;
                 let bit_offset = start_bit % 8;
                 let byte_cnt = (bit_offset + bit_size + 7) / 8;
+                ensure_decision_probe_byte_width(byte_cnt, "SLA instruction bits")?;
                 let mut word = 0u64;
                 let start = self
                     .ctx
@@ -152,17 +156,25 @@ impl DecisionProbeEvaluator for CompiledDecisionProbeEvaluator<'_, '_> {
                     let byte = self.ctx.bytes.get(absolute).copied().ok_or_else(|| {
                         anyhow!("instruction bit read out of range at bit {start_bit}")
                     })?;
-                    word <<= 8;
-                    word |= u64::from(byte);
+                    word = append_decision_probe_byte(word, byte)?;
                 }
                 let shift = (8 * byte_cnt) - bit_offset - bit_size;
-                vec![((word >> shift) & ((1u64 << bit_size) - 1)) as u8]
+                let value = (word >> shift) & ((1u64 << bit_size) - 1);
+                vec![decision_probe_value_u8(value, "SLA instruction bits")?]
             }
             CompiledDecisionProbe::SlaContextBits {
                 start_bit,
                 bit_size,
             } => {
-                vec![packed_context_bits(self.ctx.context_register, start_bit, bit_size)? as u8]
+                ensure_u8_decision_probe_width(bit_size, "SLA context bits")?;
+                vec![decision_probe_value_u8(
+                    u64::from(packed_context_bits(
+                        self.ctx.context_register,
+                        start_bit,
+                        bit_size,
+                    )?),
+                    "SLA context bits",
+                )?]
             }
             CompiledDecisionProbe::TerminalPatternCheck => vec![0],
         })
@@ -198,6 +210,31 @@ impl DecisionProbeEvaluator for CompiledDecisionProbeEvaluator<'_, '_> {
         }
         packed_context_bytes(self.ctx.context_register, offset as u32, size)
     }
+}
+
+fn ensure_u8_decision_probe_width(bit_size: u32, role: &str) -> Result<()> {
+    if bit_size > 8 {
+        bail!("{role} decision probe width {bit_size} exceeds u8 branch key width");
+    }
+    Ok(())
+}
+
+fn ensure_decision_probe_byte_width(byte_cnt: u32, role: &str) -> Result<()> {
+    if byte_cnt > 8 {
+        bail!("{role} decision probe byte width {byte_cnt} exceeds u64");
+    }
+    Ok(())
+}
+
+fn append_decision_probe_byte(value: u64, byte: u8) -> Result<u64> {
+    let shifted = value
+        .checked_shl(8)
+        .ok_or_else(|| anyhow!("decision probe byte accumulation exceeds u64 width"))?;
+    Ok(shifted | u64::from(byte))
+}
+
+fn decision_probe_value_u8(value: u64, role: &str) -> Result<u8> {
+    u8::try_from(value).map_err(|_| anyhow!("{role} decision probe value {value} exceeds u8"))
 }
 
 pub(super) fn possible_context_probe_values(
@@ -382,4 +419,27 @@ pub(super) fn pattern_block_byte_len(block: &CompiledPatternBlock) -> Result<usi
         .checked_add(block.nonzero_size)
         .ok_or_else(|| anyhow!("SLA pattern byte length overflow"))?;
     usize::try_from(len).map_err(|_| anyhow!("SLA pattern byte length {len} does not fit usize"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        append_decision_probe_byte, decision_probe_value_u8, ensure_decision_probe_byte_width,
+        ensure_u8_decision_probe_width,
+    };
+
+    #[test]
+    fn decision_probe_values_fail_closed_above_u8_width() {
+        assert!(ensure_u8_decision_probe_width(8, "test").is_ok());
+        assert!(ensure_u8_decision_probe_width(9, "test").is_err());
+        assert_eq!(decision_probe_value_u8(255, "test").unwrap(), u8::MAX);
+        assert!(decision_probe_value_u8(256, "test").is_err());
+    }
+
+    #[test]
+    fn decision_probe_byte_accumulation_fails_closed_above_u64_width() {
+        assert!(ensure_decision_probe_byte_width(8, "test").is_ok());
+        assert!(ensure_decision_probe_byte_width(9, "test").is_err());
+        assert_eq!(append_decision_probe_byte(0x12, 0x34).unwrap(), 0x1234);
+    }
 }
