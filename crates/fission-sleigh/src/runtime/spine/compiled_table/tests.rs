@@ -833,6 +833,9 @@ fn compiled_table_policy_symbols_stay_architecture_neutral() {
         ".unwrap_or(constructor_index)",
     ]
     .join("");
+    let handle_index_lossy_cast = "*handle_index as usize";
+    let build_secnum_lossy_cast = "self.pcode_build_secnum = operand_index as i32";
+    let exported_build_key_lossy_cast = "let handle_key = -((operand_index as i64) + 1)";
     let exported_display_fallbacks = [
         "ExportedDisplayFallback",
         "exported_handle_display_fallback",
@@ -1055,6 +1058,13 @@ fn compiled_table_policy_symbols_stay_architecture_neutral() {
         assert!(
             !source.contains(&missing_sla_identity_slot_fallback),
             "{} still treats missing SLA constructor identity as constructor_index",
+            file.display()
+        );
+        assert!(
+            !source.contains(handle_index_lossy_cast)
+                && !source.contains(build_secnum_lossy_cast)
+                && !source.contains(exported_build_key_lossy_cast),
+            "{} still uses lossy BUILD/handle index casts",
             file.display()
         );
         for fallback in exported_display_fallbacks {

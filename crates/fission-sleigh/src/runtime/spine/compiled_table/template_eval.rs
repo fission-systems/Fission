@@ -919,7 +919,7 @@ impl<'c> CompiledTableEmitter<'c> {
                 // Ghidra PcodeEmit.build(): when the child template is empty (null in Ghidra),
                 // fall back to the parent's named section indexed by the operand number.
                 // Corresponds to: prototype.getNamedTempl(secnum) where secnum = operand_index.
-                self.pcode_build_secnum = operand_index as i32;
+                self.pcode_build_secnum = build_operand_section_index(operand_index)?;
                 if let Some(Some(named_tpl)) = state.named_templates.get(operand_index) {
                     for named_op in &named_tpl.ops {
                         self.emit_op_template(child, named_op)?;
@@ -934,7 +934,7 @@ impl<'c> CompiledTableEmitter<'c> {
             self.built_operands = saved_built;
             if let Some(exported) = child.exported_handle.as_ref() {
                 if let Ok(varnode) = varnode_from_fixed_handle(&exported.fixed) {
-                    let handle_key = -((operand_index as i64) + 1);
+                    let handle_key = exported_build_handle_key(operand_index)?;
                     self.exported_build_varnodes.insert(handle_key, varnode);
                 }
             }
@@ -1377,9 +1377,10 @@ impl<'c> CompiledTableEmitter<'c> {
                 selector,
                 plus,
             } => {
+                let handle_index = checked_handle_index(*handle_index, "template")?;
                 let handle = state
                     .handles
-                    .get(*handle_index as usize)
+                    .get(handle_index)
                     .ok_or_else(|| anyhow!("handle {} is missing or unresolved", handle_index))?;
 
                 if matches!(selector, CompiledHandleSelector::OffsetPlus) {

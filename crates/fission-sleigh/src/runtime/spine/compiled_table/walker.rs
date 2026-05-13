@@ -594,8 +594,9 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                 selector,
                 plus,
             } => {
+                let handle_index = checked_handle_index(*handle_index, "export")?;
                 let handle = handles
-                    .get(*handle_index as usize)
+                    .get(handle_index)
                     .ok_or_else(|| anyhow!("export handle {} is missing", handle_index))?;
                 if matches!(selector, CompiledHandleSelector::OffsetPlus) {
                     let plus =

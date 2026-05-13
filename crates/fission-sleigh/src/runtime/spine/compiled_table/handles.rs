@@ -118,7 +118,7 @@ pub(super) fn handle_selector_index(
     if *selector != expected_selector || plus.is_some() || *handle_index < 0 {
         return None;
     }
-    Some(*handle_index as usize)
+    usize::try_from(*handle_index).ok()
 }
 
 pub(super) fn matches_negative_handle_selector(
@@ -135,4 +135,43 @@ pub(super) fn matches_negative_handle_selector(
         return false;
     };
     *actual_handle_index == handle_index && *selector == expected_selector && plus.is_none()
+}
+
+pub(super) fn checked_handle_index(handle_index: i64, role: &str) -> Result<usize> {
+    if handle_index < 0 {
+        bail!("{role} handle index {handle_index} is negative");
+    }
+    usize::try_from(handle_index)
+        .map_err(|_| anyhow!("{role} handle index {handle_index} does not fit usize"))
+}
+
+pub(super) fn build_operand_section_index(operand_index: usize) -> Result<i32> {
+    i32::try_from(operand_index)
+        .map_err(|_| anyhow!("BUILD operand index {operand_index} exceeds i32"))
+}
+
+pub(super) fn exported_build_handle_key(operand_index: usize) -> Result<i64> {
+    let index = i64::try_from(operand_index)
+        .map_err(|_| anyhow!("BUILD operand index {operand_index} exceeds i64"))?;
+    index
+        .checked_add(1)
+        .and_then(i64::checked_neg)
+        .ok_or_else(|| anyhow!("BUILD operand index {operand_index} cannot form handle key"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{build_operand_section_index, checked_handle_index, exported_build_handle_key};
+
+    #[test]
+    fn handle_index_helpers_fail_closed_on_invalid_values() {
+        assert_eq!(checked_handle_index(3, "test").unwrap(), 3);
+        assert!(checked_handle_index(-1, "test").is_err());
+
+        assert_eq!(build_operand_section_index(7).unwrap(), 7);
+        assert!(build_operand_section_index(i32::MAX as usize + 1).is_err());
+
+        assert_eq!(exported_build_handle_key(0).unwrap(), -1);
+        assert_eq!(exported_build_handle_key(2).unwrap(), -3);
+    }
 }
