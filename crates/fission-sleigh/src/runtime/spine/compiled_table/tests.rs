@@ -851,8 +851,10 @@ fn compiled_table_policy_symbols_stay_architecture_neutral() {
     let static_handle_addr_unit_wrap = "offset_offset.wrapping_mul(addr_unit)";
     let swallowed_context_word_error = "let _ = set_packed_context_word";
     let decoded_bytes_truncation_fallback = "bytes.get(..length).unwrap_or(bytes)";
+    let immediate_byte_unchecked_shift = "u64::from(*byte) << (index * 8)";
     let tokenfield_saturating_range = "byte_end.saturating_sub(byte_start)";
     let tokenfield_saturating_bit_range = "bit_end.saturating_sub(bit_start)";
+    let tokenfield_unchecked_accumulation = "res = (res << 8) | u64::from(byte)";
     let tokenfield_unchecked_right_shift = "res >> (shift as u32)";
     let tokenfield_unchecked_left_shift = "res << ((-shift) as u32)";
     let empty_or_pattern_length_fallback = [
@@ -1082,9 +1084,19 @@ fn compiled_table_policy_symbols_stay_architecture_neutral() {
             file.display()
         );
         assert!(
+            !source.contains(immediate_byte_unchecked_shift),
+            "{} still unchecked-shifts immediate bytes into u64",
+            file.display()
+        );
+        assert!(
             !source.contains(tokenfield_saturating_range)
                 && !source.contains(tokenfield_saturating_bit_range),
             "{} still accepts inverted SLA tokenfield ranges via saturating arithmetic",
+            file.display()
+        );
+        assert!(
+            !source.contains(tokenfield_unchecked_accumulation),
+            "{} still accumulates SLA tokenfield bytes without u64 width checks",
             file.display()
         );
         assert!(

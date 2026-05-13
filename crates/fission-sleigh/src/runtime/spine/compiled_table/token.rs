@@ -171,6 +171,7 @@ fn token_span_from_sla_field(
 }
 
 pub(super) fn read_uint(bytes: &[u8], offset: usize, size: u32) -> Result<u64> {
+    ensure_u64_byte_width(size, "immediate")?;
     let end = offset
         .checked_add(size as usize)
         .ok_or_else(|| anyhow!("immediate byte range overflow"))?;
@@ -179,12 +180,19 @@ pub(super) fn read_uint(bytes: &[u8], offset: usize, size: u32) -> Result<u64> {
         .ok_or_else(|| anyhow!("missing immediate bytes"))?;
     let mut value = 0u64;
     for (index, byte) in slice.iter().enumerate() {
-        value |= u64::from(*byte) << (index * 8);
+        let shift = byte_shift(index, "immediate")?;
+        let shifted = u64::from(*byte)
+            .checked_shl(shift)
+            .ok_or_else(|| anyhow!("immediate byte shift {shift} exceeds u64 width"))?;
+        value |= shifted;
     }
     Ok(value)
 }
 
 pub(super) fn read_sint(bytes: &[u8], offset: usize, size: u32) -> Result<i64> {
+    if size == 0 {
+        bail!("signed immediate byte width must be non-zero");
+    }
     let value = read_uint(bytes, offset, size)?;
     let bits = size
         .checked_mul(8)
@@ -322,6 +330,7 @@ pub(super) fn read_sla_token_field_at(
         .checked_sub(byte_start)
         .and_then(|value| value.checked_add(1))
         .ok_or_else(|| anyhow!("tokenfield byte range overflow: {byte_start}..={byte_end}"))?;
+    ensure_u64_byte_width(size, "tokenfield")?;
     let mut res = 0u64;
     for idx in 0..size {
         let off = if big_endian {
@@ -338,7 +347,7 @@ pub(super) fn read_sla_token_field_at(
             .bytes
             .get(absolute_off)
             .ok_or_else(|| anyhow!("tokenfield byte {} out of range", off))?;
-        res = (res << 8) | u64::from(byte);
+        res = append_tokenfield_byte(res, byte)?;
     }
     let shifted = shifted_sla_token_field(res, shift)?;
     let width = bit_end
@@ -379,6 +388,28 @@ pub(super) fn opcode_len_from_matcher(matcher: &CompiledPatternMatcher) -> Resul
     }
 }
 
+fn ensure_u64_byte_width(size: u32, role: &str) -> Result<()> {
+    if size > 8 {
+        bail!("{role} byte width {size} exceeds u64");
+    }
+    Ok(())
+}
+
+fn byte_shift(index: usize, role: &str) -> Result<u32> {
+    let index = u32::try_from(index)
+        .map_err(|_| anyhow!("{role} byte index exceeds u32 for shift calculation"))?;
+    index
+        .checked_mul(8)
+        .ok_or_else(|| anyhow!("{role} byte shift overflowed"))
+}
+
+fn append_tokenfield_byte(value: u64, byte: u8) -> Result<u64> {
+    let shifted = value
+        .checked_shl(8)
+        .ok_or_else(|| anyhow!("tokenfield byte accumulation exceeds u64 width"))?;
+    Ok(shifted | u64::from(byte))
+}
+
 fn shifted_sla_token_field(value: u64, shift: i32) -> Result<u64> {
     if shift >= 0 {
         value
@@ -406,7 +437,28 @@ pub(super) fn zero_extend_bits(value: u64, bit: u32) -> u64 {
 
 #[cfg(test)]
 mod tests {
-    use super::shifted_sla_token_field;
+    use super::{
+        read_sint, read_sla_token_field_at, read_uint, shifted_sla_token_field,
+        CompiledInstructionContext,
+    };
+
+    #[test]
+    fn immediate_reads_fail_closed_above_u64_width() {
+        let bytes = [0xff; 9];
+
+        assert_eq!(read_uint(&bytes, 0, 8).unwrap(), u64::MAX);
+        assert!(read_uint(&bytes, 0, 9).is_err());
+        assert!(read_sint(&bytes, 0, 0).is_err());
+        assert!(read_sint(&bytes, 0, 9).is_err());
+    }
+
+    #[test]
+    fn tokenfield_reads_fail_closed_above_u64_width() {
+        let bytes = [0xff; 9];
+        let ctx = CompiledInstructionContext::parse(&bytes, 0x1000).expect("context");
+
+        assert!(read_sla_token_field_at(&ctx, 0, true, false, 0, 63, 0, 8, 0).is_err());
+    }
 
     #[test]
     fn tokenfield_shift_fails_closed_on_invalid_amounts() {
