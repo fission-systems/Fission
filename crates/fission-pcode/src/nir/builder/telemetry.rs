@@ -3,8 +3,29 @@
 //! This is intentionally crate-private. The public telemetry contract remains
 //! the flat `NirBuildStats` shape emitted by `builder::stats`.
 
+use std::ops::{Deref, DerefMut};
+
 #[derive(Debug, Default)]
 pub(crate) struct BuilderTelemetry {
+    counters: BuilderTelemetryCounters,
+}
+
+impl Deref for BuilderTelemetry {
+    type Target = BuilderTelemetryCounters;
+
+    fn deref(&self) -> &Self::Target {
+        &self.counters
+    }
+}
+
+impl DerefMut for BuilderTelemetry {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.counters
+    }
+}
+
+#[derive(Debug, Default)]
+pub(crate) struct BuilderTelemetryCounters {
     pub(crate) build_duration_ms: usize,
     pub(crate) normalize_duration_ms: usize,
     pub(crate) structuring_duration_ms: usize,
