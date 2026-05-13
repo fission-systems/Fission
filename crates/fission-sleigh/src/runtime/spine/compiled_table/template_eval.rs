@@ -632,6 +632,25 @@ impl<'c> CompiledTableEmitter<'c> {
                 self.emitter.emit_load(out.clone(), space, ptr, mnemonic)?;
                 self.commit_template_write_target(out_tpl, out, state, mnemonic)
             }
+            CompiledOpTplOpcode::SegmentOp
+            | CompiledOpTplOpcode::CPoolRef
+            | CompiledOpTplOpcode::New
+            | CompiledOpTplOpcode::Insert
+            | CompiledOpTplOpcode::Extract => {
+                let out_tpl = op
+                    .output
+                    .as_ref()
+                    .ok_or_else(|| anyhow!("{} template requires output", mnemonic))?;
+                let mut inputs = Vec::with_capacity(op.inputs.len());
+                for input_tpl in &op.inputs {
+                    inputs.push(self.read_template_varnode(input_tpl, state, 0)?);
+                }
+                let out = self.materialize_write_varnode(out_tpl, state, mnemonic)?;
+                let opcode = self.dataflow_pcode_opcode(op.opcode)?;
+                self.emitter
+                    .append_checked(opcode, Some(out.clone()), inputs, mnemonic)?;
+                self.commit_template_write_target(out_tpl, out, state, mnemonic)
+            }
             CompiledOpTplOpcode::Store => {
                 if op.output.is_some() || op.inputs.len() != 3 {
                     bail!("STORE template requires three inputs and no output");
@@ -1534,6 +1553,17 @@ impl<'c> CompiledTableEmitter<'c> {
             CompiledOpTplOpcode::Piece => PcodeOpcode::Piece,
             CompiledOpTplOpcode::Subpiece => PcodeOpcode::SubPiece,
             _ => bail!("unsupported binary compiled opcode {}", opcode.as_str()),
+        })
+    }
+
+    fn dataflow_pcode_opcode(&self, opcode: CompiledOpTplOpcode) -> Result<PcodeOpcode> {
+        Ok(match opcode {
+            CompiledOpTplOpcode::SegmentOp => PcodeOpcode::SegmentOp,
+            CompiledOpTplOpcode::CPoolRef => PcodeOpcode::CPoolRef,
+            CompiledOpTplOpcode::New => PcodeOpcode::New,
+            CompiledOpTplOpcode::Insert => PcodeOpcode::Insert,
+            CompiledOpTplOpcode::Extract => PcodeOpcode::Extract,
+            _ => bail!("unsupported dataflow compiled opcode {}", opcode.as_str()),
         })
     }
 }

@@ -897,6 +897,11 @@ fn map_pcode_opcode(code: u32) -> Result<CompiledOpTplOpcode> {
         PcodeOpcode::PtrAdd => Ok(CompiledOpTplOpcode::Label),
         PcodeOpcode::PtrSub => Ok(CompiledOpTplOpcode::CrossBuild),
         PcodeOpcode::Indirect => Ok(CompiledOpTplOpcode::DelaySlotIndirect),
+        PcodeOpcode::SegmentOp => Ok(CompiledOpTplOpcode::SegmentOp),
+        PcodeOpcode::CPoolRef => Ok(CompiledOpTplOpcode::CPoolRef),
+        PcodeOpcode::New => Ok(CompiledOpTplOpcode::New),
+        PcodeOpcode::Insert => Ok(CompiledOpTplOpcode::Insert),
+        PcodeOpcode::Extract => Ok(CompiledOpTplOpcode::Extract),
         PcodeOpcode::PopCount => Ok(CompiledOpTplOpcode::PopCount),
         PcodeOpcode::LzCount => Ok(CompiledOpTplOpcode::LzCount),
         PcodeOpcode::FloatAdd => Ok(CompiledOpTplOpcode::FloatAdd),
@@ -913,7 +918,6 @@ fn map_pcode_opcode(code: u32) -> Result<CompiledOpTplOpcode> {
         PcodeOpcode::FloatFloor => Ok(CompiledOpTplOpcode::FloatFloor),
         PcodeOpcode::FloatRound => Ok(CompiledOpTplOpcode::FloatRound),
         PcodeOpcode::Unknown => bail!("unknown raw SLA p-code opcode {code}"),
-        _ => Ok(CompiledOpTplOpcode::Unsupported),
     }
 }
 
@@ -975,6 +979,10 @@ mod tests {
         let opcode = map_pcode_opcode(64).expect("known cast opcode");
 
         assert_eq!(opcode, CompiledOpTplOpcode::Cast);
+
+        let opcode = map_pcode_opcode(70).expect("known insert opcode");
+
+        assert_eq!(opcode, CompiledOpTplOpcode::Insert);
 
         let opcode = map_pcode_opcode(73).expect("known LZCOUNT opcode");
 
