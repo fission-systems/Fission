@@ -262,8 +262,11 @@ fn main() -> Result<()> {
         .ok_or_else(|| anyhow!("loader did not select a load spec"))?;
 
     let frontend_load_started = Instant::now();
-    let frontend = RuntimeSleighFrontend::new_for_load_spec(load_spec)?;
-    let space_map = load_space_map(&frontend);
+    let frontends = RuntimeSleighFrontend::new_candidate_frontends_for_load_spec(load_spec)?;
+    let frontend = frontends
+        .first()
+        .ok_or_else(|| anyhow!("no executable SLEIGH frontend candidates"))?;
+    let space_map = load_space_map(frontend);
     let frontend_load_sec = frontend_load_started.elapsed().as_secs_f64();
 
     let mut instructions = Vec::new();
@@ -299,13 +302,28 @@ fn main() -> Result<()> {
             (None, Some(pending)) => Some(pending),
             (None, None) => None,
         };
-        let decoded = frontend
-            .decode_instruction_with_context_override(bytes, current, context_override)
-            .map(|instruction| vec![instruction]);
-        let lifted =
-            frontend.decode_and_lift_with_context_override(bytes, current, context_override);
+        let mut decoded = None;
+        let mut lifted = None;
+        for candidate in &frontends {
+            let candidate_decoded = candidate
+                .decode_instruction_with_context_override(bytes, current, context_override)
+                .map(|instruction| vec![instruction]);
+            match candidate.decode_and_lift_with_context_override(bytes, current, context_override)
+            {
+                Ok(result) => {
+                    decoded = candidate_decoded.ok();
+                    lifted = Some(Ok(result));
+                    break;
+                }
+                Err(err) => {
+                    if lifted.is_none() {
+                        lifted = Some(Err(err));
+                    }
+                }
+            }
+        }
         decode_lift_sec += decode_lift_started.elapsed().as_secs_f64();
-        match lifted {
+        match lifted.expect("at least one frontend candidate was attempted") {
             Ok((ops, len, details)) => {
                 for (target_addr, word_index, mask, value) in &details.pending_context_commits {
                     let entry = pending_context_overrides.entry(*target_addr).or_default();
@@ -315,7 +333,7 @@ fn main() -> Result<()> {
                     address: current,
                     status: "ok".to_string(),
                     error: None,
-                    decoded: decoded.ok().and_then(|mut window| window.pop()),
+                    decoded: decoded.and_then(|mut window| window.pop()),
                     length: Some(len),
                     template_source: details
                         .template_source
@@ -335,7 +353,7 @@ fn main() -> Result<()> {
                     address: current,
                     status: "error".to_string(),
                     error: Some(err.to_string()),
-                    decoded: decoded.ok().and_then(|mut window| window.pop()),
+                    decoded: decoded.and_then(|mut window| window.pop()),
                     length: None,
                     template_source: None,
                     pcode: Vec::new(),

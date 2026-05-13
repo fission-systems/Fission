@@ -224,6 +224,38 @@ impl CompiledRuntimeRegistry {
         )
     }
 
+    pub fn executable_sibling_entry_ids_for_load_spec(
+        &self,
+        load_spec: &BinaryLoadSpec,
+    ) -> std::result::Result<Vec<String>, RuntimeEntrySelectionError> {
+        let primary = self.resolve_from_load_spec(load_spec)?;
+        let primary_variant = self
+            .variants
+            .iter()
+            .find(|variant| variant.entry_id == primary.entry_id)
+            .ok_or_else(|| RuntimeEntrySelectionError::ExecutableEntryMissing {
+                language_id: load_spec.pair.language_id.as_str().to_string(),
+                compiler_spec_id: Some(load_spec.pair.compiler_spec_id.as_str().to_string()),
+            })?;
+        let Some(primary_facts) = variant_language_facts(primary_variant) else {
+            return Ok(vec![primary.entry_id]);
+        };
+
+        let mut entry_ids = Vec::new();
+        entry_ids.push(primary.entry_id.clone());
+        for variant in &self.variants {
+            if variant.entry_id == primary.entry_id
+                || variant.support_level != RuntimeSupportLevel::ExecutableCandidate
+            {
+                continue;
+            }
+            if variant_language_facts(variant) == Some(primary_facts.clone()) {
+                entry_ids.push(variant.entry_id.clone());
+            }
+        }
+        Ok(entry_ids)
+    }
+
     pub fn resolve_from_language_pair(
         &self,
         language_id: &str,
@@ -279,6 +311,35 @@ impl CompiledRuntimeRegistry {
             }),
         }
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct LanguageIdFacts {
+    processor: String,
+    endian: String,
+    bitness: String,
+}
+
+fn language_id_facts(language_id: &str) -> Option<LanguageIdFacts> {
+    let mut parts = language_id.split(':');
+    let processor = parts.next()?.to_string();
+    let endian = parts.next()?.to_string();
+    let bitness = parts.next()?.to_string();
+    if processor.is_empty() || endian.is_empty() || bitness.is_empty() {
+        return None;
+    }
+    Some(LanguageIdFacts {
+        processor,
+        endian,
+        bitness,
+    })
+}
+
+fn variant_language_facts(variant: &RuntimeVariantDescriptor) -> Option<LanguageIdFacts> {
+    variant
+        .language_ids
+        .iter()
+        .find_map(|language_id| language_id_facts(language_id))
 }
 
 pub fn runtime_variant_for_entry(entry: &EntrySpec) -> Result<RuntimeVariantDescriptor> {
@@ -484,16 +545,37 @@ mod tests {
             );
         }
 
-        let error = registry
-            .resolve_from_language_pair("PowerPC:BE:64:A2-32addr", Some("gcc"))
-            .expect_err("PowerPC64 ISA variants should stay compile-only until promotion");
+        for (language_id, expected_entry_id) in [
+            ("PowerPC:BE:64:A2-32addr", "ppc_64_isa_be"),
+            ("PowerPC:LE:64:A2-32addr", "ppc_64_isa_le"),
+            ("PowerPC:BE:64:A2ALT", "ppc_64_isa_altivec_be"),
+            ("PowerPC:LE:64:A2ALT", "ppc_64_isa_altivec_le"),
+        ] {
+            let selection = registry
+                .resolve_from_language_pair(language_id, Some("gcc"))
+                .unwrap_or_else(|error| panic!("resolve {language_id:?} failed: {error}"));
+            assert_eq!(selection.entry_id, expected_entry_id);
+            assert_eq!(
+                selection.runtime_status,
+                RuntimeFrontendStatus::ExecutableCandidate
+            );
+        }
+    }
+
+    #[test]
+    fn powerpc64_load_spec_exposes_executable_isa_siblings() {
+        let registry = CompiledRuntimeRegistry::discover().expect("discover runtime registry");
+        let load_spec =
+            BinaryLoadSpec::compatibility_from_language_id("ELF", 0, "PowerPC:LE:64:default");
+        let entry_ids = registry
+            .executable_sibling_entry_ids_for_load_spec(&load_spec)
+            .expect("PowerPC64 LE sibling frontends");
+        assert_eq!(entry_ids.first().map(String::as_str), Some("ppc_64_le"));
         assert!(
-            matches!(
-                error,
-                RuntimeEntrySelectionError::CompileOnlySelection { ref entry_id, .. }
-                    if entry_id == "ppc_64_isa_be"
-            ),
-            "unexpected selection error for PowerPC:BE:64:A2-32addr: {error:?}"
+            entry_ids
+                .iter()
+                .any(|entry_id| entry_id == "ppc_64_isa_altivec_le"),
+            "expected PowerISA Altivec LE sibling in {entry_ids:?}"
         );
     }
 }

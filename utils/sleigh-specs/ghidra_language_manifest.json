@@ -4120,7 +4120,7 @@
         "stswiInstructions.sinc",
         "vsx.sinc"
       ],
-      "runtime_status": "registered_compile_only",
+      "runtime_status": "executable_candidate",
       "language_aliases": [
         "powerpc"
       ]
@@ -4181,7 +4181,7 @@
         "stswiInstructions.sinc",
         "vsx.sinc"
       ],
-      "runtime_status": "registered_compile_only",
+      "runtime_status": "executable_candidate",
       "language_aliases": [
         "powerpc"
       ]
@@ -4301,7 +4301,7 @@
         "stswiInstructions.sinc",
         "vsx.sinc"
       ],
-      "runtime_status": "registered_compile_only",
+      "runtime_status": "executable_candidate",
       "language_aliases": [
         "powerpc"
       ]
@@ -4361,7 +4361,7 @@
         "stswiInstructions.sinc",
         "vsx.sinc"
       ],
-      "runtime_status": "registered_compile_only",
+      "runtime_status": "executable_candidate",
       "language_aliases": [
         "powerpc"
       ]

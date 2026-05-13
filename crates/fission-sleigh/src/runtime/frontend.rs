@@ -105,6 +105,18 @@ impl RuntimeSleighFrontend {
         Self::from_entry(entry, selection.entry_id)
     }
 
+    pub fn new_candidate_frontends_for_load_spec(load_spec: &BinaryLoadSpec) -> Result<Vec<Self>> {
+        let registry = CompiledRuntimeRegistry::discover()?;
+        let entry_ids = registry.executable_sibling_entry_ids_for_load_spec(load_spec)?;
+        entry_ids
+            .into_iter()
+            .map(|entry_id| {
+                let entry = Self::exact_entry_for_id(&entry_id)?;
+                Self::from_entry(entry, entry_id)
+            })
+            .collect()
+    }
+
     pub fn new(spec_path: &Path) -> Result<Self> {
         let language = spec_path
             .file_stem()

@@ -395,6 +395,10 @@ mod tests {
                 "PowerPC",
                 "PowerPC",
                 "PowerPC",
+                "PowerPC",
+                "PowerPC",
+                "PowerPC",
+                "PowerPC",
                 "RISCV",
                 "RISCV",
                 "Sparc",
@@ -548,6 +552,49 @@ mod tests {
             let (ops, length) = frontend
                 .decode_and_lift_with_len(&bytes, 0x1000)
                 .expect("PPC64 add should lift from .sla ConstructTpl");
+            assert_eq!(length, 4, "{language}");
+            assert!(!ops.is_empty(), "{language}");
+        }
+    }
+
+    #[test]
+    fn powerpc_64_powerisa_lifts_iselgt_from_spec_template() {
+        if !discovery::ghidra_packaged_sla_available() {
+            eprintln!("skip: packaged Ghidra .sla not available for PowerPC ConstructTpl lift");
+            return;
+        }
+
+        for (language, bytes) in [
+            ("PowerPC:BE:64:A2ALT", [0x7c, 0x66, 0x28, 0x5e]),
+            ("PowerPC:LE:64:A2ALT", [0x5e, 0x28, 0x66, 0x7c]),
+        ] {
+            let frontend =
+                RuntimeSleighFrontend::new_for_language(language).expect("PPC64 PowerISA runtime");
+            assert_eq!(
+                frontend.status(),
+                RuntimeFrontendStatus::ExecutableCandidate,
+                "{language}"
+            );
+
+            let decoded = frontend
+                .decode_window(&bytes, 0x1000, 1)
+                .expect("PPC64 iselgt decode");
+            assert_eq!(
+                decoded.first().map(|instruction| instruction.length),
+                Some(4),
+                "{language}"
+            );
+            assert_eq!(
+                decoded
+                    .first()
+                    .map(|instruction| instruction.mnemonic.as_str()),
+                Some("iselgt"),
+                "{language}"
+            );
+
+            let (ops, length) = frontend
+                .decode_and_lift_with_len(&bytes, 0x1000)
+                .expect("PPC64 iselgt should lift from .sla ConstructTpl");
             assert_eq!(length, 4, "{language}");
             assert!(!ops.is_empty(), "{language}");
         }

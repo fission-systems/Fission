@@ -50,6 +50,10 @@ const EXECUTABLE_CANDIDATE_ENTRY_IDS: &[&str] = &[
     "ppc_32_le",
     "ppc_64_be",
     "ppc_64_le",
+    "ppc_64_isa_be",
+    "ppc_64_isa_le",
+    "ppc_64_isa_altivec_be",
+    "ppc_64_isa_altivec_le",
     // SPARC
     "SparcV9_64",
     // eBPF

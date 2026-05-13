@@ -70,14 +70,26 @@ pub(crate) fn decode_rust_sleigh_pcode(
         },
     })?;
 
-    let lifter =
-        RuntimeSleighFrontend::new_for_load_spec(load_spec).map_err(|e| DecodeFailure {
-            message: format!("rust_sleigh: {e:#}"),
-            diag: DecodeDiag {
-                attempts: 0,
-                stop_reason: "lifter_init_failed".into(),
-            },
+    let lifters =
+        RuntimeSleighFrontend::new_candidate_frontends_for_load_spec(load_spec).map_err(|e| {
+            DecodeFailure {
+                message: format!("rust_sleigh: {e:#}"),
+                diag: DecodeDiag {
+                    attempts: 0,
+                    stop_reason: "lifter_init_failed".into(),
+                },
+            }
         })?;
+    let lifter = lifters.first().ok_or_else(|| DecodeFailure {
+        message: format!(
+            "rust_sleigh: no executable SLEIGH frontend candidates for '{}'",
+            binary.path
+        ),
+        diag: DecodeDiag {
+            attempts: 0,
+            stop_reason: "lifter_init_failed".into(),
+        },
+    })?;
     let address_state = lifter.normalize_low_bit_code_address(entry_address);
     let decode_entry_address = address_state.address;
     let initial_context_override = address_state.context_override;
@@ -116,6 +128,39 @@ pub(crate) fn decode_rust_sleigh_pcode(
         )),
         Err(first_err) => {
             if retry_on_decode_error {
+                for variant_lifter in lifters.iter().skip(1) {
+                    let variant_address_state =
+                        variant_lifter.normalize_low_bit_code_address(entry_address);
+                    let variant_decode_entry_address = variant_address_state.address;
+                    let Some(variant_bytes) =
+                        binary.view_bytes(variant_decode_entry_address, max_bytes)
+                    else {
+                        continue;
+                    };
+                    let variant_memory_context =
+                        decode_memory_context(binary, variant_decode_entry_address);
+                    if let Ok(retry) = variant_lifter
+                        .lift_raw_pcode_function_with_context_and_memory_context(
+                            variant_bytes,
+                            variant_decode_entry_address,
+                            lift_contract,
+                            &variant_memory_context,
+                            variant_address_state.context_override,
+                        )
+                    {
+                        return Ok((
+                            retry.function,
+                            DecodeDiag {
+                                attempts: 2,
+                                stop_reason: format!(
+                                    "success_after_sibling_language_retry:{}",
+                                    variant_lifter.entry().entry_id
+                                ),
+                            },
+                        ));
+                    }
+                }
+
                 if continue_past_indirect_branch {
                     if let Ok(retry) = lifter
                         .lift_raw_pcode_function_with_context_and_memory_context(
