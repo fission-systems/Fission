@@ -604,10 +604,9 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
     ) -> Result<u64> {
         match value {
             CompiledConstTpl::Real { value } => Ok(*value),
-            CompiledConstTpl::Integer { value, .. } if *value >= 0 => Ok(*value as u64),
-            CompiledConstTpl::Integer { value, .. } => {
-                Ok((*value as i128 as u128 & u64::MAX as u128) as u64)
-            }
+            CompiledConstTpl::Integer { value, .. } if *value >= 0 => u64::try_from(*value)
+                .map_err(|_| anyhow!("positive export integer ConstTpl exceeds u64")),
+            CompiledConstTpl::Integer { value, .. } => Ok(i64_to_u64_bits(*value)),
             CompiledConstTpl::SpaceId(space) => Ok(space.index),
             CompiledConstTpl::Handle {
                 handle_index,

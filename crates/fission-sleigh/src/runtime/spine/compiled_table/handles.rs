@@ -26,6 +26,10 @@ pub(super) fn u64_to_i64_bits(value: u64) -> i64 {
     i64::from_ne_bytes(value.to_ne_bytes())
 }
 
+pub(super) fn i64_to_u64_bits(value: i64) -> u64 {
+    u64::from_ne_bytes(value.to_ne_bytes())
+}
+
 pub(super) fn fixed_handle_from_resolved_varnode(
     varnode: &crate::compiler::CompiledResolvedVarnode,
 ) -> RuntimeFixedHandle {
@@ -170,7 +174,7 @@ pub(super) fn exported_build_handle_key(operand_index: usize) -> Result<i64> {
 mod tests {
     use super::{
         build_operand_section_index, checked_handle_index, exported_build_handle_key,
-        u64_to_i64_bits,
+        i64_to_u64_bits, u64_to_i64_bits,
     };
 
     #[test]
@@ -190,5 +194,8 @@ mod tests {
         assert_eq!(u64_to_i64_bits(0), 0);
         assert_eq!(u64_to_i64_bits(u64::MAX), -1);
         assert_eq!(u64_to_i64_bits(0x8000_0000_0000_0000), i64::MIN);
+        assert_eq!(i64_to_u64_bits(0), 0);
+        assert_eq!(i64_to_u64_bits(-1), u64::MAX);
+        assert_eq!(i64_to_u64_bits(i64::MIN), 0x8000_0000_0000_0000);
     }
 }

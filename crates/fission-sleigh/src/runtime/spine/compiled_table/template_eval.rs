@@ -24,7 +24,8 @@ fn resolve_offset_plus(handle: &RuntimeHandle, plus: u64) -> u64 {
     if !is_const_space {
         effective_offset.wrapping_add(plus & 0xFFFF)
     } else {
-        let shift_bits = ((plus >> 16).wrapping_mul(8) & 0x3f) as u32;
+        let shift_bits = u32::try_from(((plus >> 16).wrapping_mul(8)) & 0x3f)
+            .expect("masked Java shift amount fits u32");
         effective_offset >> shift_bits
     }
 }
@@ -127,7 +128,7 @@ pub(super) fn emit_pcode_for_state_with_bytes(
     let details = RuntimeTemplateEvaluator::new(&mut emitter)
         .emit(&compiled.entry_id, decoded)
         .map_err(|err| template_emit_error(compiled, err))?;
-    Ok((emitter.finish(), details))
+    Ok((emitter.finish()?, details))
 }
 
 fn ptrsub_named_section_index(op: &CompiledOpTpl) -> Result<usize> {
@@ -204,14 +205,21 @@ pub(super) fn template_emit_error(
 /// Any branch target constant with value > RELATIVE_LABEL_SENTINEL_THRESHOLD is a sentinel.
 const RELATIVE_LABEL_SENTINEL_THRESHOLD: u64 = u64::MAX - 0x10000;
 
-fn encode_relative_sentinel(label_num: u64) -> u64 {
-    (-(label_num as i64 + 1)) as u64
+fn encode_relative_sentinel(label_num: u64) -> Result<u64> {
+    let label_num = i64::try_from(label_num)
+        .map_err(|_| anyhow!("relative label id {label_num} exceeds i64"))?;
+    let sentinel = label_num
+        .checked_add(1)
+        .and_then(|value| value.checked_neg())
+        .ok_or_else(|| anyhow!("relative label sentinel overflow"))?;
+    Ok(i64_to_u64_bits(sentinel))
 }
 
 fn decode_relative_sentinel(sentinel: u64) -> Option<u64> {
     if sentinel > RELATIVE_LABEL_SENTINEL_THRESHOLD {
-        let label_num = (-(sentinel as i64) - 1) as u64;
-        Some(label_num)
+        let sentinel = u64_to_i64_bits(sentinel);
+        let label_num = sentinel.checked_neg()?.checked_sub(1)?;
+        u64::try_from(label_num).ok()
     } else {
         None
     }
@@ -291,16 +299,22 @@ impl<'c> CompiledTableEmitter<'c> {
     fn precompute_delay_slot_length(&mut self, inst_length: usize) -> Result<()> {
         let inst_next_address = self
             .address
-            .checked_add(inst_length as u64)
+            .checked_add(
+                u64::try_from(inst_length)
+                    .map_err(|_| anyhow!("delay-slot instruction length exceeds u64"))?,
+            )
             .ok_or_else(|| anyhow!("delay-slot InstNext address overflowed"))?;
-        let inst_next_offset = inst_next_address
-            .checked_sub(self.memory_base)
-            .ok_or_else(|| {
-                anyhow!(
+        let inst_next_offset =
+            inst_next_address
+                .checked_sub(self.memory_base)
+                .ok_or_else(|| {
+                    anyhow!(
                     "delay-slot instruction at 0x{inst_next_address:x} precedes memory base 0x{:x}",
                     self.memory_base
                 )
-            })? as usize;
+                })?;
+        let inst_next_offset = usize::try_from(inst_next_offset)
+            .map_err(|_| anyhow!("delay-slot memory offset exceeds usize"))?;
         let len = decode_instruction_length(
             self.compiled,
             self.native,
@@ -361,7 +375,7 @@ impl<'c> CompiledTableEmitter<'c> {
         })
     }
 
-    fn finish(self) -> Vec<PcodeOp> {
+    fn finish(self) -> Result<Vec<PcodeOp>> {
         let label_positions = self.label_positions;
         let mut ops = self.emitter.finish();
         // resolveRelatives: replace sentinel branch targets with actual relative offsets.
@@ -376,20 +390,22 @@ impl<'c> CompiledTableEmitter<'c> {
                 if !target_vn.is_constant {
                     continue;
                 }
-                let raw = target_vn.constant_val as u64;
+                let raw = i64_to_u64_bits(target_vn.constant_val);
                 if let Some(label_num) = decode_relative_sentinel(raw) {
                     if let Some(&label_op_count) = label_positions.get(&label_num) {
                         // Relative offset = label_op_count - (branch_op_index + 1)
                         // Ghidra convention: positive = forward, negative = backward.
-                        let branch_op = i as i64;
-                        let label_pos = label_op_count as i64;
+                        let branch_op =
+                            i64::try_from(i).map_err(|_| anyhow!("branch op index exceeds i64"))?;
+                        let label_pos = i64::try_from(label_op_count)
+                            .map_err(|_| anyhow!("label op index exceeds i64"))?;
                         let relative = label_pos - branch_op;
                         ops[i].inputs[0] = Varnode::constant(relative, 8);
                     }
                 }
             }
         }
-        ops
+        Ok(ops)
     }
 
     fn emit_op_template(
@@ -714,7 +730,7 @@ impl<'c> CompiledTableEmitter<'c> {
                 let operand_index = if let Some(input_tpl) = op.inputs.first() {
                     match input_tpl {
                         CompiledVarnodeTpl::Varnode { offset, .. } => match offset.as_ref() {
-                            CompiledConstTpl::Real { value } => Some(*value as usize),
+                            CompiledConstTpl::Real { value } => usize::try_from(*value).ok(),
                             _ => None,
                         },
                         _ => None,
@@ -822,7 +838,8 @@ impl<'c> CompiledTableEmitter<'c> {
                 let ctx_reg = self.flow.instruction_context_register;
                 let ctx_mask = self.flow.instruction_context_known_mask;
                 let emit_result = (|| -> Result<()> {
-                    let mut fall_offset = state.length as u64;
+                    let mut fall_offset = u64::try_from(state.length)
+                        .map_err(|_| anyhow!("delay slot state length exceeds u64"))?;
                     let mut byte_count: u32 = 0;
                     while byte_count < delay_total {
                         let slot_pc = self
@@ -838,7 +855,8 @@ impl<'c> CompiledTableEmitter<'c> {
                             ctx_reg,
                             ctx_mask,
                         )?;
-                        let slot_len = slot_state.length as u32;
+                        let slot_len = u32::try_from(slot_state.length)
+                            .map_err(|_| anyhow!("delay slot length exceeds u32"))?;
                         if slot_len == 0 {
                             bail!("delay slot decode returned zero length at 0x{slot_pc:x}");
                         }
@@ -1360,10 +1378,10 @@ impl<'c> CompiledTableEmitter<'c> {
     ) -> Result<u64> {
         match template {
             CompiledConstTpl::Real { value } => Ok(*value),
-            CompiledConstTpl::Integer { value, .. } if *value >= 0 => Ok(*value as u64),
-            CompiledConstTpl::Integer { value, .. } => {
-                Ok((*value as i128 as u128 & u64::MAX as u128) as u64)
+            CompiledConstTpl::Integer { value, .. } if *value >= 0 => {
+                u64::try_from(*value).map_err(|_| anyhow!("positive integer ConstTpl exceeds u64"))
             }
+            CompiledConstTpl::Integer { value, .. } => Ok(i64_to_u64_bits(*value)),
             CompiledConstTpl::InstStart => Ok(self.address),
             CompiledConstTpl::InstNext => {
                 let fall_offset = self.inst_next_fall_offset(state)?;
@@ -1400,7 +1418,7 @@ impl<'c> CompiledTableEmitter<'c> {
                 // with the actual relative op offset after all ops are emitted.
                 // Uses Ghidra's convention: -(label_num + 1) so the value is in the
                 // RELATIVE_LABEL_SENTINEL_THRESHOLD range (large unsigned values).
-                Ok(encode_relative_sentinel(*label_num))
+                encode_relative_sentinel(*label_num)
             }
             CompiledConstTpl::InstNext2 => {
                 // Ghidra: inst_next2 = inst_next + delay_slot_instruction_length.
@@ -1409,12 +1427,15 @@ impl<'c> CompiledTableEmitter<'c> {
                 // pre-decoded in `precompute_delay_slot_length`.
                 let inst_next = self
                     .address
-                    .checked_add(state.length as u64)
+                    .checked_add(
+                        u64::try_from(state.length)
+                            .map_err(|_| anyhow!("InstNext2 state length exceeds u64"))?,
+                    )
                     .ok_or_else(|| anyhow!("InstNext2 base address overflowed"))?;
                 let delay_len = self
                     .delay_slot_length
-                    .ok_or_else(|| anyhow!("InstNext2 requires decoded delay-slot length"))?
-                    as u64;
+                    .ok_or_else(|| anyhow!("InstNext2 requires decoded delay-slot length"))?;
+                let delay_len = u64::from(delay_len);
                 inst_next
                     .checked_add(delay_len)
                     .ok_or_else(|| anyhow!("InstNext2 address overflowed"))
@@ -1423,7 +1444,7 @@ impl<'c> CompiledTableEmitter<'c> {
             CompiledConstTpl::CurSpaceSize => self
                 .compiled
                 .sla_default_cur_space_pointer_size()
-                .map(|s| s as u64),
+                .map(u64::from),
             CompiledConstTpl::FlowRef => self
                 .flow
                 .flow_ref_addr
@@ -1438,7 +1459,7 @@ impl<'c> CompiledTableEmitter<'c> {
                 if space.addr_size == 0 {
                     bail!("FlowRefSize space {} has addr_size=0", space.name);
                 }
-                Ok(space.addr_size as u64)
+                Ok(u64::from(space.addr_size))
             }
             CompiledConstTpl::FlowDest => self.flow.flow_dest_addr.ok_or_else(|| {
                 anyhow!("ConstTpl FlowDest requires FlowEmitOptions.flow_dest_addr")
@@ -1453,14 +1474,15 @@ impl<'c> CompiledTableEmitter<'c> {
                 if space.addr_size == 0 {
                     bail!("FlowDestSize space {} has addr_size=0", space.name);
                 }
-                Ok(space.addr_size as u64)
+                Ok(u64::from(space.addr_size))
             }
         }
     }
 
     fn inst_next_fall_offset(&self, state: &RuntimeConstructState) -> Result<u64> {
         if state.length > 0 {
-            return Ok(state.length as u64);
+            return u64::try_from(state.length)
+                .map_err(|_| anyhow!("InstNext state length exceeds u64"));
         }
         self.flow
             .instruction_length
@@ -1504,7 +1526,7 @@ impl<'c> CompiledTableEmitter<'c> {
                     Ok(handle.fixed.offset_offset)
                 }
             }
-            CompiledHandleSelector::Size => Ok(handle.fixed.size as u64),
+            CompiledHandleSelector::Size => Ok(u64::from(handle.fixed.size)),
             CompiledHandleSelector::OffsetPlus => {
                 unreachable!("OffsetPlus is handled before calling resolve_fixed_handle_selector")
             }

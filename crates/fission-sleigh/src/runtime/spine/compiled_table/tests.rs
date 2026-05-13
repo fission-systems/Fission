@@ -846,6 +846,16 @@ fn compiled_table_policy_symbols_stay_architecture_neutral() {
     let template_const_inst_next2_saturating = "inst_next.saturating_add(delay_len)";
     let context_commit_inst_next_saturating =
         "instruction_address.saturating_add(decoded.length as u64)";
+    let template_inst_length_lossy_cast = "checked_add(inst_length as u64)";
+    let template_memory_offset_lossy_cast = "})? as usize";
+    let relative_label_encode_lossy_cast = "label_num as i64";
+    let relative_label_decode_lossy_cast = "sentinel as i64";
+    let build_operand_index_lossy_cast = "Some(*value as usize)";
+    let delay_slot_length_lossy_cast_local = "slot_state.length as u32";
+    let template_positive_int_lossy_cast = "Ok(*value as u64)";
+    let template_state_length_lossy_cast = "state.length as u64";
+    let template_space_size_lossy_cast = "space.addr_size as u64";
+    let handle_size_lossy_cast = "handle.fixed.size as u64";
     let handle_ptr_offset_zero_fallback = [
         ".ptr_offset\n                        .as_ref()",
         ".unwrap_or(0)",
@@ -1213,6 +1223,20 @@ fn compiled_table_policy_symbols_stay_architecture_neutral() {
                 && !source.contains(template_const_inst_next2_saturating)
                 && !source.contains(context_commit_inst_next_saturating),
             "{} still hides malformed SLA parser cursor or InstNext arithmetic",
+            file.display()
+        );
+        assert!(
+            !source.contains(template_inst_length_lossy_cast)
+                && !source.contains(template_memory_offset_lossy_cast)
+                && !source.contains(relative_label_encode_lossy_cast)
+                && !source.contains(relative_label_decode_lossy_cast)
+                && !source.contains(build_operand_index_lossy_cast)
+                && !source.contains(delay_slot_length_lossy_cast_local)
+                && !source.contains(template_positive_int_lossy_cast)
+                && !source.contains(template_state_length_lossy_cast)
+                && !source.contains(template_space_size_lossy_cast)
+                && !source.contains(handle_size_lossy_cast),
+            "{} still uses lossy template evaluator integer casts",
             file.display()
         );
         assert!(
