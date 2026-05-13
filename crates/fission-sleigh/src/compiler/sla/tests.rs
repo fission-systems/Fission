@@ -38,6 +38,84 @@ fn rejects_non_sla_artifact() {
 }
 
 #[test]
+fn packed_parser_rejects_oversized_integer_attributes() {
+    let mut payload = vec![
+        packed::packed::ELEMENT_START | 1,
+        packed::packed::ATTRIBUTE | 1,
+        (packed::packed::TYPECODE_UNSIGNEDINT << packed::packed::TYPECODE_SHIFT) | 10,
+    ];
+    payload.extend([packed::packed::RAWDATA_MASK; 10]);
+    payload.push(packed::packed::ELEMENT_END | 1);
+
+    let mut parser = PackedParser::new(&payload);
+    let err = match parser.parse_root() {
+        Ok(_) => panic!("packed integer wider than u64 must fail"),
+        Err(err) => err,
+    };
+    assert!(err.to_string().contains("packed integer exceeds u64"));
+}
+
+fn packed_attr_payload(attr_type: u8, integer: u64) -> Vec<u8> {
+    let mut groups = Vec::new();
+    let mut seen_nonzero = false;
+    for shift in [63u32, 56, 49, 42, 35, 28, 21, 14, 7, 0] {
+        let group = ((integer >> shift) & u64::from(packed::packed::RAWDATA_MASK)) as u8;
+        if group != 0 || seen_nonzero {
+            groups.push(group);
+            seen_nonzero = true;
+        }
+    }
+    if groups.is_empty() {
+        groups.push(0);
+    }
+    let len = u8::try_from(groups.len()).expect("u64 packed integer uses at most ten groups");
+    let mut payload = vec![
+        packed::packed::ELEMENT_START | 1,
+        packed::packed::ATTRIBUTE | 1,
+        (attr_type << packed::packed::TYPECODE_SHIFT) | len,
+    ];
+    payload.extend(groups);
+    payload.push(packed::packed::ELEMENT_END | 1);
+    payload
+}
+
+#[test]
+fn packed_parser_checks_signed_integer_range() {
+    let payload = packed_attr_payload(packed::packed::TYPECODE_SIGNEDINT_POSITIVE, 1u64 << 63);
+    let mut parser = PackedParser::new(&payload);
+    let err = match parser.parse_root() {
+        Ok(_) => panic!("positive signed integer above i64::MAX must fail"),
+        Err(err) => err,
+    };
+    assert!(err
+        .to_string()
+        .contains("positive signed integer attribute 1 exceeds i64"));
+
+    let payload = packed_attr_payload(packed::packed::TYPECODE_SIGNEDINT_NEGATIVE, 1u64 << 63);
+    let mut parser = PackedParser::new(&payload);
+    let root = parser
+        .parse_root()
+        .expect("negative signed i64::MIN magnitude should decode");
+    assert_eq!(root.attr_signed(1), Some(i64::MIN));
+}
+
+#[test]
+fn packed_parser_does_not_wrap_narrow_attribute_values() {
+    let packed = include_str!("packed.rs");
+    for forbidden in [
+        "self.read_integer(len)? as i64",
+        "-(self.read_integer(len)? as i64)",
+        "self.read_integer(len)? as usize",
+        "self.offset + str_len",
+    ] {
+        assert!(
+            !packed.contains(forbidden),
+            "packed parser must fail closed instead of wrapping attribute values: {forbidden}"
+        );
+    }
+}
+
+#[test]
 fn decodes_real_x86_64_sla_construct_templates() {
     let Some(path) = packaged_sla_path("x86", "x86-64.sla") else {
         return;

@@ -153,17 +153,34 @@ impl<'a> PackedParser<'a> {
         let value = match attr_type {
             packed::TYPECODE_BOOLEAN => PackedAttrValue::Bool(len != 0),
             packed::TYPECODE_SIGNEDINT_POSITIVE => {
-                PackedAttrValue::Signed(self.read_integer(len)? as i64)
+                let value = self.read_integer(len)?;
+                let value = i64::try_from(value)
+                    .map_err(|_| anyhow!("positive signed integer attribute {id} exceeds i64"))?;
+                PackedAttrValue::Signed(value)
             }
             packed::TYPECODE_SIGNEDINT_NEGATIVE => {
-                PackedAttrValue::Signed(-(self.read_integer(len)? as i64))
+                let value = self.read_integer(len)?;
+                let value = if value == (1u64 << 63) {
+                    i64::MIN
+                } else {
+                    let value = i64::try_from(value).map_err(|_| {
+                        anyhow!("negative signed integer attribute {id} magnitude exceeds i64")
+                    })?;
+                    -value
+                };
+                PackedAttrValue::Signed(value)
             }
             packed::TYPECODE_UNSIGNEDINT => PackedAttrValue::Unsigned(self.read_integer(len)?),
             packed::TYPECODE_ADDRESSSPACE => PackedAttrValue::SpaceIndex(self.read_integer(len)?),
             packed::TYPECODE_SPECIALSPACE => PackedAttrValue::SpecialSpace(()),
             packed::TYPECODE_STRING => {
-                let str_len = self.read_integer(len)? as usize;
-                let end = self.offset + str_len;
+                let str_len = self.read_integer(len)?;
+                let str_len = usize::try_from(str_len)
+                    .map_err(|_| anyhow!("string attribute {id} length exceeds usize"))?;
+                let end = self
+                    .offset
+                    .checked_add(str_len)
+                    .ok_or_else(|| anyhow!("string attribute {id} length overflow"))?;
                 if end > self.bytes.len() {
                     bail!("string attribute overflow");
                 }
@@ -198,8 +215,11 @@ impl<'a> PackedParser<'a> {
     fn read_integer(&mut self, len: usize) -> Result<u64> {
         let mut value = 0u64;
         for _ in 0..len {
+            if value > (u64::MAX >> packed::RAWDATA_BITSPERBYTE) {
+                bail!("packed integer exceeds u64");
+            }
             value <<= packed::RAWDATA_BITSPERBYTE;
-            value |= (self.next_byte()? & packed::RAWDATA_MASK) as u64;
+            value |= u64::from(self.next_byte()? & packed::RAWDATA_MASK);
         }
         Ok(value)
     }
