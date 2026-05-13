@@ -13,6 +13,36 @@ use crate::compiler::ir::{
     CompiledSlaDecodeStatus, CompiledSpaceRef, CompiledSpaceTpl, CompiledVarnodeTpl,
 };
 
+fn unsigned_to_u32(value: u64, label: &str) -> Result<u32> {
+    u32::try_from(value).map_err(|_| anyhow!("{label} out of u32 range: {value}"))
+}
+
+fn unsigned_to_usize(value: u64, label: &str) -> Result<usize> {
+    usize::try_from(value).map_err(|_| anyhow!("{label} out of usize range: {value}"))
+}
+
+fn signed_to_i32(value: i64, label: &str) -> Result<i32> {
+    i32::try_from(value).map_err(|_| anyhow!("{label} out of i32 range: {value}"))
+}
+
+fn usize_to_u32(value: usize, label: &str) -> Result<u32> {
+    u32::try_from(value).map_err(|_| anyhow!("{label} out of u32 range: {value}"))
+}
+
+fn required_unsigned_u32(element: &PackedElement, attr: u32, label: &str) -> Result<u32> {
+    let value = element
+        .attr_unsigned(attr)
+        .ok_or_else(|| anyhow!("{label} missing"))?;
+    unsigned_to_u32(value, label)
+}
+
+fn required_signed_i32(element: &PackedElement, attr: u32, label: &str) -> Result<i32> {
+    let value = element
+        .attr_signed(attr)
+        .ok_or_else(|| anyhow!("{label} missing"))?;
+    signed_to_i32(value, label)
+}
+
 pub(super) fn decode_construct_templates(
     artifact: &CompiledSlaArtifact,
 ) -> Result<CompiledSlaTemplateLibrary> {
@@ -54,7 +84,7 @@ pub(super) fn decode_construct_templates(
         for head in &sym_tab.children {
             if let Some(id) = head.attr_unsigned(sla_format::ATTR_ID) {
                 if let Some(name) = head.attr_string(sla_format::ATTR_NAME) {
-                    symbol_names.insert(id as u32, name.to_string());
+                    symbol_names.insert(unsigned_to_u32(id, "symbol table id")?, name.to_string());
                 }
             }
         }
@@ -85,7 +115,8 @@ pub(super) fn decode_construct_templates(
             // ordinal within the subtable, then DecisionNode pair ATTR_ID resolves
             // through sub.getConstructor(id). The constructor element's own ATTR_ID
             // is not the terminal selection index.
-            let id = local_index as u32;
+            let id = usize_to_u32(local_index, "constructor local index")
+                .map_err(|err| err.to_string())?;
             let parent_id = constructor
                 .attr_unsigned(sla_format::ATTR_PARENT)
                 .ok_or_else(|| "constructor_missing_parent".to_string())?;
@@ -174,7 +205,8 @@ pub(super) fn decode_construct_templates(
                 let Some(section_idx) = child.attr_unsigned(sla_format::ATTR_SECTION) else {
                     continue; // main template, already handled
                 };
-                let section_idx = section_idx as usize;
+                let section_idx = unsigned_to_usize(section_idx, "named template section index")
+                    .map_err(|err| err.to_string())?;
                 // Extend vector to fit this section index.
                 while named_templates.len() <= section_idx {
                     named_templates.push(None);
@@ -201,9 +233,7 @@ pub(super) fn decode_construct_templates(
             for child in &constructor.children {
                 match child.id {
                     sla_format::ELEM_OPER => {
-                        let Some(symbol_id) =
-                            child.attr_unsigned(sla_format::ATTR_ID).map(|id| id as u32)
-                        else {
+                        let Some(symbol_id) = child.attr_unsigned(sla_format::ATTR_ID) else {
                             if trace_sla_parse {
                                 eprintln!(
                                 "[sla-parse] oper missing symbol id subtable={subtable_name} slot={local_index} source_key={source_key}"
@@ -211,6 +241,8 @@ pub(super) fn decode_construct_templates(
                             }
                             return Err("oper_missing_symbol_id".to_string());
                         };
+                        let symbol_id = unsigned_to_u32(symbol_id, "oper symbol id")
+                            .map_err(|err| err.to_string())?;
                         let Some(operand_symbol) = operand_symbols.get(&symbol_id) else {
                             if trace_sla_parse {
                                 eprintln!(
@@ -336,19 +368,28 @@ pub(super) fn decode_construct_templates(
             {
                 let symbol_id = child
                     .attr_unsigned(sla_format::ATTR_ID)
-                    .ok_or_else(|| "context_commit_missing_symbol_id".to_string())?
-                    as u32;
+                    .ok_or_else(|| "context_commit_missing_symbol_id".to_string())
+                    .and_then(|value| {
+                        unsigned_to_u32(value, "context commit symbol id")
+                            .map_err(|err| err.to_string())
+                    })?;
                 let word_index = child
                     .attr_unsigned(sla_format::ATTR_NUMBER)
-                    .ok_or_else(|| "context_commit_missing_word_index".to_string())?
-                    as u32;
+                    .ok_or_else(|| "context_commit_missing_word_index".to_string())
+                    .and_then(|value| {
+                        unsigned_to_u32(value, "context commit word index")
+                            .map_err(|err| err.to_string())
+                    })?;
                 let mask = child
                     .attr_unsigned(sla_format::ATTR_MASK)
-                    .ok_or_else(|| "context_commit_missing_mask".to_string())?
-                    as u32;
+                    .ok_or_else(|| "context_commit_missing_mask".to_string())
+                    .and_then(|value| {
+                        unsigned_to_u32(value, "context commit mask").map_err(|err| err.to_string())
+                    })?;
                 let target = if let Some(sym) = operand_symbols.get(&symbol_id) {
                     CompiledContextCommitTarget::OperandHandle {
-                        hand_index: sym.hand_index as u32,
+                        hand_index: usize_to_u32(sym.hand_index, "context commit operand handle")
+                            .map_err(|err| err.to_string())?,
                     }
                 } else {
                     match symbol_names.get(&symbol_id).map(String::as_str) {
@@ -442,21 +483,27 @@ pub(super) fn decode_construct_templates(
             }
         }
 
-        let constructor_count = constructors_by_index
-            .keys()
-            .next_back()
-            .map(|value| value + 1)
-            .unwrap_or(0);
+        let constructor_count = match constructors_by_index.keys().next_back() {
+            Some(value) => {
+                usize_to_u32(*value, "constructor slot")?;
+                value
+                    .checked_add(1)
+                    .ok_or_else(|| anyhow!("constructor count overflow in subtable {name}"))?
+            }
+            None => 0,
+        };
         let mut subtable_constructors = Vec::with_capacity(constructor_count);
         for slot in 0..constructor_count {
-            subtable_constructors.push(constructors_by_index.remove(&slot).unwrap_or_else(|| {
-                unsupported_sla_constructor_template(
+            let template = match constructors_by_index.remove(&slot) {
+                Some(template) => template,
+                None => unsupported_sla_constructor_template(
                     id,
                     &name,
                     slot,
                     "missing_constructor_slot".to_string(),
-                )
-            }));
+                )?,
+            };
+            subtable_constructors.push(template);
         }
 
         for tpl in &subtable_constructors {
@@ -507,9 +554,7 @@ fn decode_subtable_identity(
     element: &PackedElement,
     symbol_names: &BTreeMap<u32, String>,
 ) -> Result<(u32, String)> {
-    let id = element
-        .attr_unsigned(sla_format::ATTR_ID)
-        .ok_or_else(|| anyhow!("subtable_sym missing id"))? as u32;
+    let id = required_unsigned_u32(element, sla_format::ATTR_ID, "subtable_sym id")?;
     let name = element
         .attr_string(sla_format::ATTR_NAME)
         .map(|s| s.to_string())
@@ -523,9 +568,9 @@ fn unsupported_sla_constructor_template(
     subtable_name: &str,
     slot: usize,
     decode_error: String,
-) -> CompiledSlaConstructorTemplate {
-    CompiledSlaConstructorTemplate {
-        id: slot as u32,
+) -> Result<CompiledSlaConstructorTemplate> {
+    Ok(CompiledSlaConstructorTemplate {
+        id: usize_to_u32(slot, "unsupported constructor slot")?,
         subtable_id,
         subtable_name: subtable_name.to_string(),
         constructor_slot: slot,
@@ -550,7 +595,7 @@ fn unsupported_sla_constructor_template(
             ops: Vec::new(),
         },
         named_templates: Vec::new(),
-    }
+    })
 }
 
 pub fn decode_decision_tree(
@@ -643,16 +688,19 @@ fn decode_decision_node(
                         u32::try_from(value)
                             .map_err(|_| anyhow!("decision pair has negative constructor id"))
                     })?;
+                let constructor_index = usize::try_from(constructor_id).map_err(|_| {
+                    anyhow!("decision pair constructor id out of usize range: {constructor_id}")
+                })?;
                 nodes[node_idx]
                     .leaf_constructor_indexes
-                    .push(constructor_id as usize);
+                    .push(constructor_index);
                 let pattern = decode_decision_pair_pattern(child)?;
                 nodes[node_idx]
                     .leaf_entries
                     .push(CompiledDecisionLeafEntry {
                         subtable_id,
-                        constructor_id: constructor_id as u32,
-                        constructor_index: constructor_id as usize,
+                        constructor_id,
+                        constructor_index,
                         pattern,
                     });
             }
@@ -740,28 +788,25 @@ fn decode_pattern_block(element: &PackedElement) -> Result<CompiledPatternBlock>
     if element.id != sla_format::ELEM_PAT_BLOCK {
         bail!("expected pat_block element, got {}", element.id);
     }
-    let offset = element
-        .attr_signed(sla_format::ATTR_OFF)
-        .ok_or_else(|| anyhow!("pat_block missing offset"))? as i32;
-    let nonzero_size = element
-        .attr_signed(sla_format::ATTR_NONZERO)
-        .ok_or_else(|| anyhow!("pat_block missing nonzero size"))? as i32;
+    let offset = required_signed_i32(element, sla_format::ATTR_OFF, "pat_block offset")?;
+    let nonzero_size =
+        required_signed_i32(element, sla_format::ATTR_NONZERO, "pat_block nonzero size")?;
     let mut mask_words = Vec::new();
     let mut value_words = Vec::new();
     for child in &element.children {
         if child.id != sla_format::ELEM_MASK_WORD {
             continue;
         }
-        mask_words.push(
-            child
-                .attr_unsigned(sla_format::ATTR_MASK)
-                .ok_or_else(|| anyhow!("mask_word missing mask"))? as u32,
-        );
-        value_words.push(
-            child
-                .attr_unsigned(sla_format::ATTR_VAL)
-                .ok_or_else(|| anyhow!("mask_word missing value"))? as u32,
-        );
+        mask_words.push(required_unsigned_u32(
+            child,
+            sla_format::ATTR_MASK,
+            "mask_word mask",
+        )?);
+        value_words.push(required_unsigned_u32(
+            child,
+            sla_format::ATTR_VAL,
+            "mask_word value",
+        )?);
     }
     Ok(CompiledPatternBlock {
         offset,
@@ -815,7 +860,8 @@ fn decode_op_tpl(
     let opcode_code = element
         .attr_unsigned(sla_format::ATTR_CODE)
         .ok_or_else(|| anyhow!("op_tpl missing opcode"))?;
-    let opcode = map_pcode_opcode(opcode_code as u32)?;
+    let opcode_code = unsigned_to_u32(opcode_code, "op_tpl opcode")?;
+    let opcode = map_pcode_opcode(opcode_code)?;
     let mut children = element.children.iter();
     let output = match children.next() {
         Some(child) if child.id == sla_format::ELEM_NULL => None,
@@ -834,7 +880,7 @@ fn decode_op_tpl(
         }
     }
     Ok(CompiledOpTpl {
-        sla_raw_pcode_opcode: opcode_code as u32,
+        sla_raw_pcode_opcode: opcode_code,
         opcode,
         output,
         inputs,

@@ -338,6 +338,26 @@ fn sla_construct_tpl_label_count_is_not_clamped() {
 }
 
 #[test]
+fn sla_template_decode_does_not_wrap_narrow_integer_fields() {
+    let templates = include_str!("templates.rs");
+    for forbidden in [
+        "symbol_names.insert(id as u32",
+        "let id = local_index as u32",
+        "let section_idx = section_idx as usize",
+        "child.attr_unsigned(sla_format::ATTR_ID).map(|id| id as u32)",
+        "as u32;",
+        "as usize;",
+        "as i32;",
+        "opcode_code as u32",
+    ] {
+        assert!(
+            !templates.contains(forbidden),
+            "SLA template decode must fail closed instead of wrapping narrow fields: {forbidden}"
+        );
+    }
+}
+
+#[test]
 fn sla_constructor_decode_errors_are_not_broadly_downgraded_to_unsupported_templates() {
     let templates = include_str!("templates.rs");
     assert!(
