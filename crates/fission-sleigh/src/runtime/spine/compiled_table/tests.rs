@@ -867,6 +867,10 @@ fn compiled_table_policy_symbols_stay_architecture_neutral() {
         "handle_tpl_operand_handle_indices",
         "display_operand_from_exported_fixed_handle",
     ];
+    let constant_varnode_lossy_casts = [
+        "Varnode::constant(handle.offset_offset as i64, size)",
+        "Varnode::constant(value as i64, size)",
+    ];
     let subtable_offset_base_fallback = "offsetbase.unwrap_or(-1)";
     let context_commit_temp_offset_target = [
         "let offset = if handle.fixed.offset_space.is_some()",
@@ -1095,6 +1099,13 @@ fn compiled_table_policy_symbols_stay_architecture_neutral() {
             assert!(
                 !source.contains(fallback),
                 "{} still derives exported display values through fallback helper: {fallback}",
+                file.display()
+            );
+        }
+        for forbidden in constant_varnode_lossy_casts {
+            assert!(
+                !source.contains(forbidden),
+                "{} still materializes constant varnodes through unnamed bit-pattern casts",
                 file.display()
             );
         }

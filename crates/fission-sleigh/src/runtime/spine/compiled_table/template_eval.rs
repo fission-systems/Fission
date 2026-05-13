@@ -30,7 +30,7 @@ fn resolve_offset_plus(handle: &RuntimeHandle, plus: u64) -> u64 {
 }
 
 fn const_varnode(value: u64, size: u32) -> Varnode {
-    Varnode::constant(value as i64, size)
+    Varnode::constant(u64_to_i64_bits(value), size)
 }
 
 fn space_id_const_varnode(space: &CompiledSpaceRef, role: &str) -> Result<Varnode> {

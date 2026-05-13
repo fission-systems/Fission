@@ -22,6 +22,10 @@ pub(super) fn fixed_handle_for_const_value(value: u64, size: u32) -> RuntimeFixe
     }
 }
 
+pub(super) fn u64_to_i64_bits(value: u64) -> i64 {
+    i64::from_ne_bytes(value.to_ne_bytes())
+}
+
 pub(super) fn fixed_handle_from_resolved_varnode(
     varnode: &crate::compiler::CompiledResolvedVarnode,
 ) -> RuntimeFixedHandle {
@@ -51,7 +55,10 @@ pub(super) fn varnode_from_fixed_handle(handle: &RuntimeFixedHandle) -> Result<V
         handle.offset_size
     };
     if space.name == "const" {
-        Ok(Varnode::constant(handle.offset_offset as i64, size))
+        Ok(Varnode::constant(
+            u64_to_i64_bits(handle.offset_offset),
+            size,
+        ))
     } else {
         Ok(Varnode {
             space_id: space.index,
@@ -161,7 +168,10 @@ pub(super) fn exported_build_handle_key(operand_index: usize) -> Result<i64> {
 
 #[cfg(test)]
 mod tests {
-    use super::{build_operand_section_index, checked_handle_index, exported_build_handle_key};
+    use super::{
+        build_operand_section_index, checked_handle_index, exported_build_handle_key,
+        u64_to_i64_bits,
+    };
 
     #[test]
     fn handle_index_helpers_fail_closed_on_invalid_values() {
@@ -173,5 +183,12 @@ mod tests {
 
         assert_eq!(exported_build_handle_key(0).unwrap(), -1);
         assert_eq!(exported_build_handle_key(2).unwrap(), -3);
+    }
+
+    #[test]
+    fn constant_conversion_preserves_u64_bit_pattern() {
+        assert_eq!(u64_to_i64_bits(0), 0);
+        assert_eq!(u64_to_i64_bits(u64::MAX), -1);
+        assert_eq!(u64_to_i64_bits(0x8000_0000_0000_0000), i64::MIN);
     }
 }
