@@ -5,6 +5,7 @@ use super::*;
 use crate::compiler::{
     compile_frontend_for_entry_spec, discovery, spec_root_for_arch, x86_64_entry_spec_path,
 };
+use crate::packed_context::packed_context_word;
 
 #[test]
 fn compile_frontend_collects_pcode_ops_and_patterns() {
@@ -61,6 +62,46 @@ fn compile_frontend_collects_pcode_ops_and_patterns() {
             CompiledDecisionProbe::SlaInstructionBits { .. }
                 | CompiledDecisionProbe::SlaContextBits { .. }
         )));
+}
+
+#[test]
+fn arm_frontends_preserve_thumb_context_layout_and_pspec_defaults() {
+    if !discovery::ghidra_packaged_sla_available() {
+        eprintln!("skip: packaged Ghidra .sla not available for ARM context layout check");
+        return;
+    }
+
+    for entry_id in ["ARM8_le", "ARM8m_le", "ARM8m_be"] {
+        let entry_spec = spec_root_for_arch("ARM").join(format!("{entry_id}.slaspec"));
+        let compiled = compile_frontend_for_entry_spec(&entry_spec).expect("compile ARM frontend");
+        for name in ["TMode", "T", "ISA_MODE", "LowBitCodeMode"] {
+            assert!(
+                compiled
+                    .language_layout
+                    .context_fields
+                    .iter()
+                    .any(|field| field.name == name && field.bit_width == 1),
+                "{entry_id} must preserve ARM Thumb context field {name}"
+            );
+        }
+
+        if entry_id.starts_with("ARM8m_") {
+            let low_word =
+                packed_context_word(compiled.default_context, 0).expect("default context low word");
+            assert_ne!(
+                low_word & 0x8000_0000,
+                0,
+                "{entry_id} must apply ARMCortex.pspec TMode=1 default context"
+            );
+            let known_low_word = packed_context_word(compiled.default_context_known_mask, 0)
+                .expect("default context known-mask low word");
+            assert_ne!(
+                known_low_word & 0x8000_0000,
+                0,
+                "{entry_id} must mark ARMCortex.pspec TMode as known"
+            );
+        }
+    }
 }
 
 #[test]

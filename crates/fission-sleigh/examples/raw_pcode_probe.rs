@@ -256,7 +256,9 @@ fn main() -> Result<()> {
     let frontend_load_sec = frontend_load_started.elapsed().as_secs_f64();
 
     let mut instructions = Vec::new();
-    let mut current = args.address;
+    let address_state = frontend.normalize_low_bit_code_address(args.address);
+    let mut current = address_state.address;
+    let context_override = address_state.context_override;
     let mut decode_lift_sec = 0.0f64;
     for _ in 0..args.count {
         let Some(bytes) = binary
@@ -276,8 +278,11 @@ fn main() -> Result<()> {
         };
 
         let decode_lift_started = Instant::now();
-        let decoded = frontend.decode_window(bytes, current, 1);
-        let lifted = frontend.decode_and_lift_with_details(bytes, current);
+        let decoded = frontend
+            .decode_instruction_with_context_override(bytes, current, context_override)
+            .map(|instruction| vec![instruction]);
+        let lifted =
+            frontend.decode_and_lift_with_context_override(bytes, current, context_override);
         decode_lift_sec += decode_lift_started.elapsed().as_secs_f64();
         match lifted {
             Ok((ops, len, details)) => {

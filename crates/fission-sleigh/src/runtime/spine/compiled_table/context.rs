@@ -1,4 +1,7 @@
 use super::*;
+pub(super) use crate::packed_context::{
+    packed_context_word, set_packed_context_bits, set_packed_context_word,
+};
 
 #[derive(Debug, Clone)]
 pub(super) struct CompiledInstructionContext<'a> {
@@ -41,71 +44,6 @@ impl<'a> CompiledInstructionContext<'a> {
             context_known_mask: 0,
         })
     }
-}
-
-pub(super) fn packed_context_word(context_register: u64, index: u32) -> Result<u32> {
-    match index {
-        0 => Ok(context_register as u32),
-        1 => Ok((context_register >> 32) as u32),
-        _ => bail!("packed context word index {index} is out of range"),
-    }
-}
-
-pub(super) fn set_packed_context_word(
-    context_register: &mut u64,
-    index: u32,
-    value: u32,
-    mask: u32,
-) -> Result<()> {
-    let shift = match index {
-        0 => 0,
-        1 => 32,
-        _ => bail!("packed context word index {index} is out of range"),
-    };
-    let shifted_mask = u64::from(mask) << shift;
-    let shifted_value = u64::from(value & mask) << shift;
-    *context_register &= !shifted_mask;
-    *context_register |= shifted_value;
-    Ok(())
-}
-
-pub(super) fn set_packed_context_bits(
-    context_register: &mut u64,
-    startbit: u32,
-    bitsize: u32,
-    value: u64,
-) -> Result<()> {
-    if bitsize == 0 {
-        return Ok(());
-    }
-    if bitsize > 64 {
-        bail!("packed context bit write must be 1..=64 bits, got {bitsize}");
-    }
-
-    let mut remaining = bitsize;
-    let mut word_index = startbit / 32;
-    let mut bit_offset = startbit % 32;
-    while remaining > 0 {
-        let chunk_bits = remaining.min(32 - bit_offset);
-        let chunk_mask = if chunk_bits >= 32 {
-            u32::MAX
-        } else {
-            (1u32 << chunk_bits) - 1
-        };
-        let word_shift = 32 - chunk_bits - bit_offset;
-        let value_shift = remaining - chunk_bits;
-        let chunk_value = ((value >> value_shift) as u32) & chunk_mask;
-        set_packed_context_word(
-            context_register,
-            word_index,
-            chunk_value << word_shift,
-            chunk_mask << word_shift,
-        )?;
-        remaining -= chunk_bits;
-        word_index += 1;
-        bit_offset = 0;
-    }
-    Ok(())
 }
 
 pub(super) fn packed_context_bytes(

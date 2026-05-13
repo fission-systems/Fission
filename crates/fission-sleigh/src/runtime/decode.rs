@@ -1,4 +1,5 @@
 use super::*;
+use crate::packed_context::packed_context_word_to_u64;
 use anyhow::Context;
 
 impl RuntimeSleighFrontend {
@@ -11,6 +12,15 @@ impl RuntimeSleighFrontend {
         &self,
         bytes: &[u8],
         address: u64,
+    ) -> Result<(Vec<PcodeOp>, u64, RuntimeExecutionDetails)> {
+        self.decode_and_lift_with_context_override(bytes, address, None)
+    }
+
+    pub fn decode_and_lift_with_context_override(
+        &self,
+        bytes: &[u8],
+        address: u64,
+        context_override: Option<PackedContextOverride>,
     ) -> Result<(Vec<PcodeOp>, u64, RuntimeExecutionDetails)> {
         if bytes.is_empty() {
             return Err(RuntimeSleighError::DecodeNoMatch {
@@ -35,6 +45,7 @@ impl RuntimeSleighFrontend {
                 self.native_backend.as_ref(),
                 bytes,
                 address,
+                context_override,
             ),
         }
     }
@@ -60,7 +71,7 @@ impl RuntimeSleighFrontend {
 
         // Pending ContextCommit overrides: address → (context_bits, mask).
         // Populated after each instruction's globalset / ContextCommit ops.
-        let mut pending_overrides: std::collections::BTreeMap<u64, (u64, u64)> =
+        let mut pending_overrides: std::collections::BTreeMap<u64, PackedContextOverride> =
             std::collections::BTreeMap::new();
 
         let mut decoded = Vec::with_capacity(limit.min(64));
@@ -98,13 +109,15 @@ impl RuntimeSleighFrontend {
             for (target_addr, word_index, mask_u32, value_u32) in
                 &instruction.pending_context_commits
             {
-                let mask_u64 = packed_context_commit_word_to_u64(*word_index, *mask_u32)
+                let mask_u64 = packed_context_word_to_u64(*word_index, *mask_u32)
                     .with_context(|| "merge pending context commit mask")?;
-                let value_u64 = packed_context_commit_word_to_u64(*word_index, *value_u32)
+                let value_u64 = packed_context_word_to_u64(*word_index, *value_u32)
                     .with_context(|| "merge pending context commit value")?;
-                let entry = pending_overrides.entry(*target_addr).or_insert((0, 0));
-                entry.0 = (entry.0 & !mask_u64) | (value_u64 & mask_u64);
-                entry.1 |= mask_u64;
+                let entry = pending_overrides.entry(*target_addr).or_default();
+                *entry = PackedContextOverride::new(
+                    (entry.context_bits() & !mask_u64) | (value_u64 & mask_u64),
+                    entry.mask_bits() | mask_u64,
+                );
             }
 
             current = checked_instruction_fallthrough(current, step as u64)?;
@@ -147,11 +160,11 @@ impl RuntimeSleighFrontend {
         Ok(targets.into_iter().collect())
     }
 
-    fn decode_instruction_with_context_override(
+    pub fn decode_instruction_with_context_override(
         &self,
         bytes: &[u8],
         address: u64,
-        context_override: Option<(u64, u64)>,
+        context_override: Option<PackedContextOverride>,
     ) -> Result<DecodedInstruction> {
         if bytes.is_empty() {
             return Err(RuntimeSleighError::DecodeNoMatch {
@@ -214,28 +227,18 @@ impl RuntimeSleighFrontend {
     }
 }
 
-fn packed_context_commit_word_to_u64(word_index: u32, value: u32) -> Result<u64> {
-    let shift = word_index
-        .checked_mul(32)
-        .ok_or_else(|| anyhow!("context commit word index {word_index} shift overflows"))?;
-    let shifted = u64::from(value).checked_shl(shift).ok_or_else(|| {
-        anyhow!("context commit word index {word_index} exceeds packed u64 context")
-    })?;
-    Ok(shifted)
-}
-
 #[cfg(test)]
 mod tests {
-    use super::packed_context_commit_word_to_u64;
+    use crate::packed_context::packed_context_word_to_u64;
 
     #[test]
     fn context_commit_word_shift_fails_closed_above_packed_u64() {
         assert_eq!(
-            packed_context_commit_word_to_u64(1, 0x8000_0000).expect("word 1"),
+            packed_context_word_to_u64(1, 0x8000_0000).expect("word 1"),
             0x8000_0000_0000_0000
         );
         assert!(
-            packed_context_commit_word_to_u64(2, 1).is_err(),
+            packed_context_word_to_u64(2, 1).is_err(),
             "word 2 must not wrap or silently clear in the u64 context cache"
         );
     }

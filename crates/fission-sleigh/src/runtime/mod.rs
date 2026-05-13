@@ -1,3 +1,4 @@
+mod address_state;
 mod decode;
 mod diagnostics;
 mod engine;
@@ -11,14 +12,16 @@ mod spine;
 use std::collections::HashMap;
 use std::fmt;
 
-use anyhow::{Result, anyhow, bail};
+use anyhow::{anyhow, bail, Result};
 use fission_core::architecture::BinaryLoadSpec;
 use fission_pcode::{PcodeBasicBlock, PcodeFunction, PcodeOp, PcodeOpcode, Varnode};
 use serde::{Deserialize, Serialize};
 
 use crate::compiler::{
-    CompiledFrontend, EntrySpec, compile_frontend_for_entry_spec, discover_all_entry_specs,
+    compile_frontend_for_entry_spec, discover_all_entry_specs, CompiledFrontend, EntrySpec,
 };
+pub use crate::packed_context::PackedContextOverride;
+pub use address_state::RuntimeAddressState;
 pub use function::build_cfg_blocks;
 pub use registry::{
     CompiledRuntimeRegistry, ExecutionEngineKey, ProcessorDescriptor, RuntimeEntrySelection,
@@ -464,6 +467,31 @@ mod tests {
             selection.runtime_status,
             RuntimeFrontendStatus::ExecutableCandidate
         );
+    }
+
+    #[test]
+    fn arm_low_bit_code_address_seeds_thumb_context_without_address_byte_skew() {
+        if !discovery::ghidra_packaged_sla_available() {
+            eprintln!("skip: packaged Ghidra .sla not available for ARM low-bit context test");
+            return;
+        }
+        let frontend = RuntimeSleighFrontend::new_for_language("ARM8_le").expect("ARM8 runtime");
+        let address_state = frontend.normalize_low_bit_code_address(0x100001);
+        let decode_address = address_state.address;
+        let context_override = address_state.context_override;
+        assert_eq!(decode_address, 0x100000);
+        assert!(context_override.is_some());
+
+        let bytes = [0x4c, 0xf6, 0xcd, 0x41];
+        let (ops, length, details) = frontend
+            .decode_and_lift_with_context_override(&bytes, decode_address, context_override)
+            .expect("Thumb low-bit code pointer should decode from aligned bytes");
+        assert_eq!(length, 4);
+        assert_eq!(
+            details.template_source,
+            Some(crate::compiler::CompiledTemplateSource::SpecDerived)
+        );
+        assert!(ops.iter().any(|op| op.opcode == PcodeOpcode::IntZExt));
     }
 
     #[test]

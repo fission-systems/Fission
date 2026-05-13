@@ -20,7 +20,7 @@ use crate::runtime::spine::{
 };
 use crate::runtime::{
     DecodedFlowKind, DecodedInstruction, DecodedReference, DecodedReferenceKind,
-    RuntimeExecutionDetails, RuntimeSleighError,
+    PackedContextOverride, RuntimeExecutionDetails, RuntimeSleighError,
 };
 
 mod context;
@@ -59,9 +59,22 @@ pub(crate) fn decode_and_lift_with_details(
     bytes: &[u8],
     address: u64,
 ) -> Result<(Vec<PcodeOp>, u64, RuntimeExecutionDetails)> {
+    decode_and_lift_with_context_override(compiled, native, bytes, address, None)
+}
+
+pub(crate) fn decode_and_lift_with_context_override(
+    compiled: &CompiledFrontend,
+    native: Option<&Arc<NativeBackend>>,
+    bytes: &[u8],
+    address: u64,
+    context_override: Option<PackedContextOverride>,
+) -> Result<(Vec<PcodeOp>, u64, RuntimeExecutionDetails)> {
     let mut ctx = CompiledInstructionContext::parse(bytes, address)?;
     ctx.context_register = compiled.default_context;
     ctx.context_known_mask = compiled.default_context_known_mask;
+    if let Some(context_override) = context_override {
+        context_override.apply_to(&mut ctx.context_register, &mut ctx.context_known_mask);
+    }
 
     let strategy = RuntimeDecodeStrategy::for_table(compiled, native, "instruction", &ctx);
     let candidates = candidate_selections(compiled, &strategy, &ctx, address)?;
@@ -128,15 +141,13 @@ pub(crate) fn decode_instruction_with_context(
     native: Option<&Arc<NativeBackend>>,
     bytes: &[u8],
     address: u64,
-    context_override: Option<(u64, u64)>,
+    context_override: Option<PackedContextOverride>,
 ) -> Result<DecodedInstruction> {
     let mut ctx = CompiledInstructionContext::parse(bytes, address)?;
     ctx.context_register = compiled.default_context;
     ctx.context_known_mask = compiled.default_context_known_mask;
-    if let Some((override_ctx, override_mask)) = context_override {
-        ctx.context_register =
-            (ctx.context_register & !override_mask) | (override_ctx & override_mask);
-        ctx.context_known_mask |= override_mask;
+    if let Some(context_override) = context_override {
+        context_override.apply_to(&mut ctx.context_register, &mut ctx.context_known_mask);
     }
     decode_instruction_inner(compiled, native, bytes, address, ctx)
 }

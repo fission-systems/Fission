@@ -69,6 +69,7 @@ pub struct EntrySpec {
     pub entry_id: String,
     pub language_ids: Vec<String>,
     pub language_aliases: Vec<String>,
+    pub processor_spec: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -80,6 +81,7 @@ pub struct GhidraLanguageManifestEntry {
     #[serde(default)]
     pub language_ids: Vec<String>,
     pub endian: Option<String>,
+    pub processor_spec: Option<String>,
     pub variant_class: String,
     #[serde(default)]
     pub imported_aux_files: Vec<String>,
@@ -198,11 +200,18 @@ fn parse_ldefs_language_attrs(contents: &str, key: &str) -> Vec<BTreeMap<String,
     out
 }
 
+#[derive(Debug, Clone, Default)]
+struct LdefsLanguageMetadata {
+    language_ids: Vec<String>,
+    endians: BTreeSet<String>,
+    variants: BTreeSet<String>,
+    processor_specs: BTreeSet<String>,
+}
+
 fn ldefs_metadata_for_processor(
     processor_root: &Path,
-) -> Result<BTreeMap<String, (Vec<String>, BTreeSet<String>, BTreeSet<String>)>> {
-    let mut metadata: BTreeMap<String, (Vec<String>, BTreeSet<String>, BTreeSet<String>)> =
-        BTreeMap::new();
+) -> Result<BTreeMap<String, LdefsLanguageMetadata>> {
+    let mut metadata: BTreeMap<String, LdefsLanguageMetadata> = BTreeMap::new();
     for entry in fs::read_dir(processor_root)
         .with_context(|| format!("read processor root {}", processor_root.display()))?
     {
@@ -235,19 +244,20 @@ fn ldefs_metadata_for_processor(
             if stem.is_empty() {
                 continue;
             }
-            let entry = metadata
-                .entry(stem)
-                .or_insert_with(|| (Vec::new(), BTreeSet::new(), BTreeSet::new()));
+            let entry = metadata.entry(stem).or_default();
             if let Some(language_id) = attrs.get("id") {
-                if !entry.0.contains(language_id) {
-                    entry.0.push(language_id.clone());
+                if !entry.language_ids.contains(language_id) {
+                    entry.language_ids.push(language_id.clone());
                 }
             }
             if let Some(endian) = attrs.get("endian") {
-                entry.1.insert(endian.clone());
+                entry.endians.insert(endian.clone());
             }
             if let Some(variant) = attrs.get("variant") {
-                entry.2.insert(variant.clone());
+                entry.variants.insert(variant.clone());
+            }
+            if let Some(processor_spec) = attrs.get("processorspec") {
+                entry.processor_specs.insert(processor_spec.clone());
             }
         }
     }
@@ -316,25 +326,34 @@ pub fn build_ghidra_language_manifest() -> Result<GhidraLanguageManifest> {
         aux_files.sort();
         for spec in discover_entry_specs_for_arch(processor)? {
             let ldef = metadata.get(&spec.entry_id);
-            let language_ids = ldef.map(|(ids, _, _)| ids.clone()).unwrap_or_default();
+            let language_ids = ldef
+                .map(|metadata| metadata.language_ids.clone())
+                .unwrap_or_default();
             let language_id = if language_ids.len() == 1 {
                 language_ids.first().cloned()
             } else {
                 None
             };
             let endian = ldef
-                .and_then(|(_, endians, _)| {
-                    if endians.len() == 1 {
-                        endians.iter().next().cloned()
+                .and_then(|metadata| {
+                    if metadata.endians.len() == 1 {
+                        metadata.endians.iter().next().cloned()
                     } else {
                         None
                     }
                 })
                 .or_else(|| infer_endian_from_entry_id(&spec.entry_id));
+            let processor_spec = ldef.and_then(|metadata| {
+                if metadata.processor_specs.len() == 1 {
+                    metadata.processor_specs.iter().next().cloned()
+                } else {
+                    None
+                }
+            });
             let variant_class = variant_class_for_entry(
                 &spec.entry_id,
                 &ldef
-                    .map(|(_, _, variants)| variants.clone())
+                    .map(|metadata| metadata.variants.clone())
                     .unwrap_or_default(),
             );
             entries.push(GhidraLanguageManifestEntry {
@@ -344,6 +363,7 @@ pub fn build_ghidra_language_manifest() -> Result<GhidraLanguageManifest> {
                 language_id,
                 language_ids: language_ids.clone(),
                 endian,
+                processor_spec,
                 variant_class,
                 imported_aux_files: aux_files.clone(),
                 runtime_status: if is_executable_candidate_entry(&spec.entry_id)? {
@@ -413,6 +433,7 @@ fn discover_all_entry_specs_from_manifest() -> Result<Option<Vec<EntrySpec>>> {
             entry_id: entry.entry_id,
             language_ids: entry.language_ids,
             language_aliases: entry.language_aliases,
+            processor_spec: entry.processor_spec,
         })
         .collect::<Vec<_>>();
     entries.sort_by(|lhs, rhs| {
@@ -425,6 +446,7 @@ fn discover_all_entry_specs_from_manifest() -> Result<Option<Vec<EntrySpec>>> {
 
 pub fn discover_entry_specs_for_arch(arch: &str) -> Result<Vec<EntrySpec>> {
     let arch_root = spec_root_for_arch(arch);
+    let metadata = ldefs_metadata_for_processor(&arch_root).unwrap_or_default();
     let mut entries = Vec::new();
     for entry in fs::read_dir(&arch_root)
         .with_context(|| format!("read spec arch root {}", arch_root.display()))?
@@ -440,6 +462,12 @@ pub fn discover_entry_specs_for_arch(arch: &str) -> Result<Vec<EntrySpec>> {
         if is_slaspec {
             let mut spec = entry_spec_from_path(path)?;
             spec.language_aliases = language_aliases_for(&spec.arch);
+            if let Some(ldef) = metadata.get(&spec.entry_id) {
+                spec.language_ids = ldef.language_ids.clone();
+                if ldef.processor_specs.len() == 1 {
+                    spec.processor_spec = ldef.processor_specs.iter().next().cloned();
+                }
+            }
             entries.push(spec);
         }
     }
@@ -463,8 +491,15 @@ pub fn compile_frontend_for_entry_spec(entry_spec: &Path) -> Result<CompiledFron
     let expanded = preprocessor::expand_entry_spec(entry_spec)
         .with_context(|| format!("expand entry spec {}", entry_spec.display()))?;
     let ast_result = ast::parse_expanded_spec(&expanded);
-    let mut compiled = ir::compile_frontend(&arch, &expanded, ast_result, entry_spec)
-        .with_context(|| format!("compile frontend {}", entry_spec.display()))?;
+    let processor_spec = processor_spec_for_entry_spec(entry_spec)?;
+    let mut compiled = ir::compile_frontend(
+        &arch,
+        &expanded,
+        ast_result,
+        entry_spec,
+        processor_spec.as_deref(),
+    )
+    .with_context(|| format!("compile frontend {}", entry_spec.display()))?;
     if let Some(sla_path) = packaged_sla_for_entry_spec(entry_spec)? {
         let library = sla::load_construct_templates_from_sla(&sla_path)
             .with_context(|| format!("decode compiled SLEIGH artifact {}", sla_path.display()))?;
@@ -472,6 +507,27 @@ pub fn compile_frontend_for_entry_spec(entry_spec: &Path) -> Result<CompiledFron
             .with_context(|| format!("lower compiled SLEIGH artifact {}", sla_path.display()))?;
     }
     Ok(compiled)
+}
+
+fn processor_spec_for_entry_spec(entry_spec: &Path) -> Result<Option<PathBuf>> {
+    let arch = infer_arch_from_entry_spec(entry_spec)?;
+    let entry_id = entry_id_from_path(entry_spec)?;
+    let arch_root = spec_root_for_arch(&arch);
+    let metadata = ldefs_metadata_for_processor(&arch_root)?;
+    let processor_spec = metadata
+        .get(&entry_id)
+        .and_then(|metadata| {
+            if metadata.processor_specs.len() == 1 {
+                metadata.processor_specs.iter().next().cloned()
+            } else {
+                None
+            }
+        })
+        .map(|name| arch_root.join(name));
+    Ok(processor_spec.or_else(|| {
+        let sibling = entry_spec.with_extension("pspec");
+        sibling.exists().then_some(sibling)
+    }))
 }
 
 fn packaged_sla_for_entry_spec(entry_spec: &Path) -> Result<Option<PathBuf>> {

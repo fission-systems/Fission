@@ -8,12 +8,14 @@ use super::*;
 use crate::compiler::ast::{AstConstructor, AstItem, SpecAst, WithContextFrame};
 use crate::compiler::preprocessor::{ExpandedSpec, PreprocessedLine};
 use crate::compiler::sla::CompiledSlaTemplateLibrary;
+use crate::packed_context::set_packed_context_bits;
 
 pub fn compile_frontend(
     arch: &str,
     expanded: &ExpandedSpec,
     ast_result: Result<SpecAst>,
     entry_spec: &Path,
+    processor_spec: Option<&Path>,
 ) -> Result<CompiledFrontend> {
     let mut collector = Collector {
         definitions: Vec::new(),
@@ -34,7 +36,7 @@ pub fn compile_frontend(
 
     // Infer default context from .pspec if available
     let (default_context, default_context_known_mask) =
-        infer_default_context_from_pspec(entry_spec, &collector.field_info)?;
+        infer_default_context_from_pspec(entry_spec, processor_spec, &collector.field_info)?;
     collector.default_context = default_context;
     eprintln!(
         "Inferred Default Context for {}: 0x{:016x}",
@@ -137,9 +139,12 @@ pub fn compile_frontend(
 
 fn infer_default_context_from_pspec(
     entry_spec: &Path,
+    processor_spec: Option<&Path>,
     field_info: &BTreeMap<String, FieldBitRange>,
 ) -> Result<(u64, u64)> {
-    let pspec_path = entry_spec.with_extension("pspec");
+    let pspec_path = processor_spec
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| entry_spec.with_extension("pspec"));
     if !pspec_path.exists() {
         return Ok((0, 0));
     }
@@ -167,7 +172,10 @@ fn infer_default_context_from_pspec(
                         })?
                     };
 
-                    if let Some(info) = field_info.get(&name) {
+                    if let Some(info) = field_info
+                        .get(&name)
+                        .filter(|info| matches!(info.kind, FieldKind::Context))
+                    {
                         set_packed_context_bits(
                             &mut default_context,
                             info.bit_offset,
@@ -191,65 +199,6 @@ fn infer_default_context_from_pspec(
         }
     }
     Ok((default_context, default_context_known_mask))
-}
-
-fn set_packed_context_bits(
-    context_register: &mut u64,
-    startbit: u32,
-    bitsize: u32,
-    value: u64,
-) -> Result<()> {
-    if bitsize == 0 {
-        return Ok(());
-    }
-    if bitsize > 64 {
-        return Err(anyhow!(
-            "packed context bit write must be 1..=64 bits, got {bitsize}"
-        ));
-    }
-
-    let mut remaining = bitsize;
-    let mut word_index = startbit / 32;
-    let mut bit_offset = startbit % 32;
-    while remaining > 0 {
-        let chunk_bits = remaining.min(32 - bit_offset);
-        let chunk_mask = if chunk_bits >= 32 {
-            u32::MAX
-        } else {
-            (1u32 << chunk_bits) - 1
-        };
-        let word_shift = 32 - chunk_bits - bit_offset;
-        let value_shift = remaining - chunk_bits;
-        let chunk_value = ((value >> value_shift) as u32) & chunk_mask;
-        set_packed_context_word(
-            context_register,
-            word_index,
-            chunk_value << word_shift,
-            chunk_mask << word_shift,
-        )?;
-        remaining -= chunk_bits;
-        word_index += 1;
-        bit_offset = 0;
-    }
-    Ok(())
-}
-
-fn set_packed_context_word(
-    context_register: &mut u64,
-    index: u32,
-    value: u32,
-    mask: u32,
-) -> Result<()> {
-    let shift = match index {
-        0 => 0,
-        1 => 32,
-        _ => return Err(anyhow!("packed context word index {index} is out of range")),
-    };
-    let shifted_mask = u64::from(mask) << shift;
-    let shifted_value = u64::from(value & mask) << shift;
-    *context_register &= !shifted_mask;
-    *context_register |= shifted_value;
-    Ok(())
 }
 
 fn extract_xml_attribute(line: &str, attr: &str) -> Option<String> {
@@ -549,6 +498,30 @@ impl Collector {
                     source: definition.source.clone(),
                 }),
                 _ => {}
+            }
+        }
+        for (name, info) in &self.field_info {
+            match info.kind {
+                FieldKind::Instruction => {
+                    if !token_fields.iter().any(|field| field.name == *name) {
+                        token_fields.push(CompiledTokenField {
+                            name: name.clone(),
+                            bit_offset: info.bit_offset,
+                            bit_width: info.bit_width,
+                            source: "preprocessed_sleigh".to_string(),
+                        });
+                    }
+                }
+                FieldKind::Context => {
+                    if !context_fields.iter().any(|field| field.name == *name) {
+                        context_fields.push(CompiledContextField {
+                            name: name.clone(),
+                            bit_offset: info.bit_offset,
+                            bit_width: info.bit_width,
+                            source: "preprocessed_sleigh".to_string(),
+                        });
+                    }
+                }
             }
         }
         let display_templates = self

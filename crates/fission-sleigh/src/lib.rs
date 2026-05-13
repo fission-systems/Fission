@@ -10,4 +10,5 @@
 #![allow(unused_assignments)]
 
 pub mod compiler;
+pub mod packed_context;
 pub mod runtime;

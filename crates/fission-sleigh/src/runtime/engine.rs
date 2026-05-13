@@ -4,7 +4,8 @@ use fission_pcode::PcodeOp;
 use crate::compiler::{CompiledFrontend, EntrySpec};
 use crate::runtime::spine::compiled_table;
 use crate::runtime::{
-    registry, DecodedInstruction, ExecutionEngineKey, RuntimeExecutionDetails, RuntimeSleighError,
+    registry, DecodedInstruction, ExecutionEngineKey, PackedContextOverride,
+    RuntimeExecutionDetails, RuntimeSleighError,
 };
 
 use crate::runtime::native::NativeBackend;
@@ -16,10 +17,17 @@ pub(crate) fn decode_and_lift_with_details(
     native: Option<&Arc<NativeBackend>>,
     bytes: &[u8],
     address: u64,
+    context_override: Option<PackedContextOverride>,
 ) -> Result<(Vec<PcodeOp>, u64, RuntimeExecutionDetails)> {
     match registry::executable_engine_key_for_entry(entry) {
         Some(ExecutionEngineKey::CompiledTable) => {
-            compiled_table::decode_and_lift_with_details(compiled, native, bytes, address)
+            compiled_table::decode_and_lift_with_context_override(
+                compiled,
+                native,
+                bytes,
+                address,
+                context_override,
+            )
         }
         _ => Err(RuntimeSleighError::UnsupportedPcodeTemplate {
             language: entry.entry_id.clone(),
@@ -60,7 +68,7 @@ pub(crate) fn decode_instruction_with_context(
     native: Option<&Arc<NativeBackend>>,
     bytes: &[u8],
     address: u64,
-    context_override: Option<(u64, u64)>,
+    context_override: Option<PackedContextOverride>,
 ) -> Result<DecodedInstruction> {
     match registry::executable_engine_key_for_entry(entry) {
         Some(ExecutionEngineKey::CompiledTable) => compiled_table::decode_instruction_with_context(

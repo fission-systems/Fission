@@ -58,8 +58,7 @@ fn display_template_rip_relative_memory(state: &RuntimeConstructState) -> Option
         .find_map(|handle| {
             if let Some(
                 operand @ BoundOperand::Memory {
-                    rip_relative: true,
-                    ..
+                    rip_relative: true, ..
                 },
             ) = handle.debug_value.as_ref()
             {

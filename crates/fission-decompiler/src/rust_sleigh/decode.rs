@@ -59,16 +59,6 @@ pub(crate) fn decode_rust_sleigh_pcode(
     continue_past_indirect_branch: bool,
     retry_on_decode_error: bool,
 ) -> Result<(PcodeFunction, DecodeDiag), DecodeFailure> {
-    let bytes = binary
-        .view_bytes(entry_address, max_bytes)
-        .ok_or_else(|| DecodeFailure {
-            message: format!("rust_sleigh: unable to read bytes at 0x{entry_address:x} for {name}"),
-            diag: DecodeDiag {
-                attempts: 0,
-                stop_reason: "view_bytes_unavailable".into(),
-            },
-        })?;
-
     let load_spec = binary.load_spec().ok_or_else(|| DecodeFailure {
         message: format!(
             "rust_sleigh: missing Ghidra load spec for '{}'",
@@ -88,18 +78,33 @@ pub(crate) fn decode_rust_sleigh_pcode(
                 stop_reason: "lifter_init_failed".into(),
             },
         })?;
+    let address_state = lifter.normalize_low_bit_code_address(entry_address);
+    let decode_entry_address = address_state.address;
+    let initial_context_override = address_state.context_override;
+    let bytes = binary
+        .view_bytes(decode_entry_address, max_bytes)
+        .ok_or_else(|| DecodeFailure {
+            message: format!(
+                "rust_sleigh: unable to read bytes at 0x{decode_entry_address:x} for {name}"
+            ),
+            diag: DecodeDiag {
+                attempts: 0,
+                stop_reason: "view_bytes_unavailable".into(),
+            },
+        })?;
 
     let lift_contract = if continue_past_indirect_branch {
         DecodeContract::decomp_function(instruction_limit)
     } else {
         DecodeContract::strict_function(instruction_limit)
     };
-    let memory_context = decode_memory_context(binary, entry_address);
-    let result = lifter.lift_raw_pcode_function_with_decode_contract_and_memory_context(
+    let memory_context = decode_memory_context(binary, decode_entry_address);
+    let result = lifter.lift_raw_pcode_function_with_context_and_memory_context(
         bytes,
-        entry_address,
+        decode_entry_address,
         lift_contract,
         &memory_context,
+        initial_context_override,
     );
     match result {
         Ok(lifted) => Ok((
@@ -112,11 +117,15 @@ pub(crate) fn decode_rust_sleigh_pcode(
         Err(first_err) => {
             if retry_on_decode_error {
                 if continue_past_indirect_branch {
-                    if let Ok(retry) = lifter.lift_raw_pcode_function_with_decode_contract(
-                        &bytes,
-                        entry_address,
-                        DecodeContract::strict_function(instruction_limit),
-                    ) {
+                    if let Ok(retry) = lifter
+                        .lift_raw_pcode_function_with_context_and_memory_context(
+                            &bytes,
+                            decode_entry_address,
+                            DecodeContract::strict_function(instruction_limit),
+                            &memory_context,
+                            initial_context_override,
+                        )
+                    {
                         return Ok((
                             retry.function,
                             DecodeDiag {
@@ -128,14 +137,17 @@ pub(crate) fn decode_rust_sleigh_pcode(
                 }
 
                 let err_str = format!("{first_err:#}");
-                if let Some(safe) = extract_safe_bytes_from_decode_error(&err_str, entry_address) {
+                if let Some(safe) =
+                    extract_safe_bytes_from_decode_error(&err_str, decode_entry_address)
+                {
                     if safe > 0 && safe < bytes.len() {
                         if let Ok(retry) = lifter
-                            .lift_raw_pcode_function_with_decode_contract_and_memory_context(
+                            .lift_raw_pcode_function_with_context_and_memory_context(
                                 &bytes[..safe],
-                                entry_address,
+                                decode_entry_address,
                                 lift_contract,
                                 &memory_context,
+                                initial_context_override,
                             )
                         {
                             return Ok((
