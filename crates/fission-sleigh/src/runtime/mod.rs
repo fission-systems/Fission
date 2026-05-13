@@ -389,6 +389,7 @@ mod tests {
                 "MIPS",
                 "PowerPC",
                 "PowerPC",
+                "PowerPC",
                 "RISCV",
                 "RISCV",
                 "Sparc",
@@ -503,6 +504,38 @@ mod tests {
             assert_eq!(length, 4, "{language}");
             assert!(!ops.is_empty(), "{language}");
         }
+    }
+
+    #[test]
+    fn powerpc_64_little_endian_default_lifts_add_from_spec_template() {
+        if !discovery::ghidra_packaged_sla_available() {
+            eprintln!("skip: packaged Ghidra .sla not available for PowerPC ConstructTpl lift");
+            return;
+        }
+
+        let language = "PowerPC:LE:64:default";
+        let bytes = [0x14, 0x1a, 0x64, 0x7c, 0x20, 0x00, 0x63, 0x78];
+        let frontend = RuntimeSleighFrontend::new_for_language(language).expect("PPC64 runtime");
+        assert_eq!(
+            frontend.status(),
+            RuntimeFrontendStatus::ExecutableCandidate,
+            "{language}"
+        );
+
+        let decoded = frontend
+            .decode_window(&bytes, 0x1000, 2)
+            .expect("PPC64 add decode");
+        assert_eq!(
+            decoded.first().map(|instruction| instruction.length),
+            Some(4),
+            "{language}"
+        );
+
+        let (ops, length) = frontend
+            .decode_and_lift_with_len(&bytes, 0x1000)
+            .expect("PPC64 add should lift from .sla ConstructTpl");
+        assert_eq!(length, 4, "{language}");
+        assert!(!ops.is_empty(), "{language}");
     }
 
     #[test]

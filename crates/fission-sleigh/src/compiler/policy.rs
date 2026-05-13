@@ -48,6 +48,7 @@ const EXECUTABLE_CANDIDATE_ENTRY_IDS: &[&str] = &[
     // PowerPC
     "ppc_32_be",
     "ppc_32_le",
+    "ppc_64_le",
     // SPARC
     "SparcV9_64",
     // eBPF
