@@ -728,6 +728,10 @@ impl<'a> PreviewBuilder<'a> {
                                     .call_target_unresolved_sub_fallback_count += 1;
                                 format!("sub_{addr:x}")
                             }
+                        } else if let Some(name) =
+                            self.resolve_indirect_scalar_call_target_name(target)
+                        {
+                            name
                         } else if let Some(name) = self.resolve_iat_load_call_target(target) {
                             name
                         } else if let Some(name) =
@@ -754,6 +758,10 @@ impl<'a> PreviewBuilder<'a> {
                                     .call_target_unresolved_sub_fallback_count += 1;
                                 format!("sub_{addr:x}")
                             }
+                        } else if let Some(name) =
+                            self.resolve_indirect_scalar_call_target_name(target)
+                        {
+                            name
                         } else if matches!(other, HirExpr::Load { .. }) {
                             if let Some(name) = self.resolve_iat_load_call_target(target) {
                                 name
@@ -941,6 +949,43 @@ impl<'a> PreviewBuilder<'a> {
                 .call_target_unresolved_sub_fallback_count += 1;
             Some(format!("sub_{addr:x}"))
         }
+    }
+
+    fn resolve_indirect_scalar_call_target_name(&mut self, target: &Varnode) -> Option<String> {
+        let scope = self.current_lowering_site?;
+        let addr = self
+            .resolve_exact_scalar_const_for_call_target(
+                target,
+                scope,
+                CALL_TARGET_CONST_FOLD_BUDGET,
+            )
+            .ok()?;
+        if let Some(name) = self.resolve_call_target_by_address(addr) {
+            self.telemetry
+                .call_targets
+                .call_target_indirect_const_resolved_count += 1;
+            return Some(name);
+        }
+        if self.pcode_has_instruction_address(addr)
+            && let Some(name) = self.current_function_name.clone()
+        {
+            self.telemetry
+                .call_targets
+                .call_target_indirect_const_resolved_count += 1;
+            return Some(name);
+        }
+        self.telemetry
+            .call_targets
+            .call_target_unresolved_sub_fallback_count += 1;
+        Some(format!("sub_{addr:x}"))
+    }
+
+    fn pcode_has_instruction_address(&self, addr: u64) -> bool {
+        self.pcode
+            .blocks
+            .iter()
+            .flat_map(|block| block.ops.iter())
+            .any(|op| op.address == addr)
     }
 
     pub(in crate::nir) fn lower_intrinsic_call(
@@ -1260,6 +1305,18 @@ impl<'a> PreviewBuilder<'a> {
             }
             PcodeOpcode::IntAdd => Ok(input_const(0)?.wrapping_add(input_const(1)?)),
             PcodeOpcode::IntSub => Ok(input_const(0)?.wrapping_sub(input_const(1)?)),
+            PcodeOpcode::IntLeft => {
+                let value = input_const(0)?;
+                let shift = u32::try_from(input_const(1)?)
+                    .map_err(|_| CallTargetConstReject::UnsupportedOpcode)?;
+                Ok(value.checked_shl(shift).unwrap_or(0))
+            }
+            PcodeOpcode::IntRight | PcodeOpcode::IntSRight => {
+                let value = input_const(0)?;
+                let shift = u32::try_from(input_const(1)?)
+                    .map_err(|_| CallTargetConstReject::UnsupportedOpcode)?;
+                Ok(value.checked_shr(shift).unwrap_or(0))
+            }
             PcodeOpcode::PtrAdd => {
                 let base = input_const(0)?;
                 let index = input_const(1)?;

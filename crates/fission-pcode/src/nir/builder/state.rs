@@ -11,6 +11,7 @@ pub(crate) struct PreviewBuilder<'a> {
     pub(crate) options: &'a MlilPreviewOptions,
     pub(crate) binary: Option<&'a LoadedBinary>,
     pub(crate) type_context: Option<&'a PreviewTypeContext>,
+    pub(crate) current_function_name: Option<String>,
     pub(crate) defs: HashMap<VarnodeKey, DefSite<'a>>,
     pub(crate) def_sites: HashMap<VarnodeKey, Vec<DefSite<'a>>>,
     pub(crate) block_defs: Vec<HashMap<VarnodeKey, Vec<usize>>>,

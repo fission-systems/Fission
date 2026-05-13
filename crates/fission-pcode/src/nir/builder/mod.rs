@@ -144,6 +144,7 @@ impl<'a> PreviewBuilder<'a> {
         name: &str,
         address: u64,
     ) -> Result<HirFunction, MlilPreviewError> {
+        self.current_function_name = Some(name.to_string());
         let _build = trace_span!(
             "preview_build_hir",
             fn_name = name,

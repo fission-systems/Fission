@@ -858,6 +858,77 @@ fn preview_callind_load_from_add_folded_iat_slot_resolves_exact_import_target() 
 }
 
 #[test]
+fn preview_callind_shift_add_constant_chain_resolves_exact_target() {
+    let target_addr = 0x100034_u64;
+    let func = PcodeFunction {
+        blocks: vec![PcodeBasicBlock {
+            index: 0,
+            start_address: 0x100030,
+            successors: vec![],
+            ops: vec![
+                PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::Copy,
+                    address: 0x100034,
+                    output: Some(reg(0x108, 8)),
+                    inputs: vec![cst(target_addr as i64, 8)],
+                    asm_mnemonic: Some("pcaddu18i ra, 0x100034".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 1,
+                    opcode: PcodeOpcode::IntLeft,
+                    address: 0x100038,
+                    output: Some(uniq(0x300, 8)),
+                    inputs: vec![cst(0, 8), cst(2, 4)],
+                    asm_mnemonic: Some("jirl target shift".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 2,
+                    opcode: PcodeOpcode::IntAdd,
+                    address: 0x100038,
+                    output: Some(uniq(0x340, 8)),
+                    inputs: vec![reg(0x108, 8), uniq(0x300, 8)],
+                    asm_mnemonic: Some("jirl target add".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 3,
+                    opcode: PcodeOpcode::Copy,
+                    address: 0x100038,
+                    output: Some(reg(0x108, 8)),
+                    inputs: vec![cst(0x10003c, 8)],
+                    asm_mnemonic: Some("jirl link".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 4,
+                    opcode: PcodeOpcode::CallInd,
+                    address: 0x100038,
+                    output: None,
+                    inputs: vec![uniq(0x340, 8)],
+                    asm_mnemonic: Some("jirl ra, ra, 0".to_string()),
+                },
+            ],
+        }],
+    };
+
+    let rendered = render_mlil_preview_with_context(
+        &func,
+        "recursive_fib",
+        0x100000,
+        &preview_options(),
+        None,
+    )
+    .expect("preview render should succeed");
+    let stats = take_last_nir_build_stats().expect("build stats");
+
+    assert!(rendered.contains("recursive_fib()"), "{rendered}");
+    assert_eq!(stats.call_target_indirect_const_resolved_count, 1);
+    assert_eq!(
+        stats.call_target_indirect_rejected_unsupported_ptr_opcode_count,
+        0
+    );
+}
+
+#[test]
 fn preview_callind_load_from_unsupported_fold_opcode_keeps_existing_surface() {
     let func = PcodeFunction {
         blocks: vec![PcodeBasicBlock {

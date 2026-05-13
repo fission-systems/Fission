@@ -93,6 +93,7 @@ impl<'a> PreviewBuilder<'a> {
             options,
             binary,
             type_context,
+            current_function_name: None,
             defs,
             def_sites,
             block_defs,
