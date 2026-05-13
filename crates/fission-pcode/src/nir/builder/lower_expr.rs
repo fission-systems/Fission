@@ -2141,6 +2141,48 @@ mod tests {
     }
 
     #[test]
+    fn diamond_join_lowers_copy_through_join_read_as_select() {
+        let cond = varnode(0x80);
+        let rax = register(0, 8);
+        let rcx = register(8, 8);
+        let pcode = pcode_function(vec![
+            block_at(
+                0x1000,
+                0,
+                vec![
+                    op(1, PcodeOpcode::Copy, Some(rax.clone()), vec![constant(10)]),
+                    op(2, PcodeOpcode::CBranch, None, vec![constant(0x1020), cond]),
+                ],
+            ),
+            block_at(
+                0x1010,
+                1,
+                vec![
+                    op(3, PcodeOpcode::Copy, Some(rax.clone()), vec![constant(20)]),
+                    op(4, PcodeOpcode::Branch, None, vec![constant(0x1020)]),
+                ],
+            ),
+            block_at(
+                0x1020,
+                2,
+                vec![
+                    op(5, PcodeOpcode::Copy, Some(rcx.clone()), vec![rax]),
+                    op(6, PcodeOpcode::Return, None, vec![rcx]),
+                ],
+            ),
+        ]);
+        let options = test_options();
+
+        let code =
+            render_mlil_preview(&pcode, "diamond_copy_select", 0x1000, &options).expect("render");
+
+        assert!(
+            code.contains("return tmp_80 ? 10 : 20;"),
+            "expected copy-through join read to use the synthesized select:\n{code}"
+        );
+    }
+
+    #[test]
     fn same_block_partial_register_write_with_zeroed_upper_replaces_stale_wide_def() {
         let mut options = test_options();
         options.calling_convention = CallingConvention::AArch64;

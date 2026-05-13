@@ -1091,13 +1091,11 @@ impl<'a> PreviewBuilder<'a> {
         &mut self,
         block: &crate::pcode::PcodeBasicBlock,
     ) -> Result<Vec<HirStmt>, MlilPreviewError> {
-        if !Self::explicit_merge_binding_enabled() {
-            return Ok(Vec::new());
-        }
         let block_idx = self.lowering_block_index(block);
         let Some(predecessor_idxs) = self.predecessors.get(block_idx).cloned() else {
             return Ok(Vec::new());
         };
+        let allow_fallback_intrinsic = Self::explicit_merge_binding_enabled();
 
         struct PendingMergeBinding {
             output: Varnode,
@@ -1117,8 +1115,13 @@ impl<'a> PreviewBuilder<'a> {
                 let Some(output) = &op.output else {
                     continue;
                 };
-                let Some(rhs) =
-                    self.try_lower_materialized_output_rhs(pred_block.start_address, op)?
+                let Some(rhs) = self.with_lowering_site(
+                    LoweringSite {
+                        block_idx: pred_idx,
+                        op_idx,
+                    },
+                    |this| this.try_lower_materialized_output_rhs(pred_block.start_address, op),
+                )?
                 else {
                     continue;
                 };
@@ -1171,6 +1174,15 @@ impl<'a> PreviewBuilder<'a> {
             if args.len() != 2 {
                 continue;
             }
+            let select_rhs = self.synthesize_explicit_merge_select(
+                block_idx,
+                &pending.predecessor_blocks,
+                &pending.incoming_by_pred,
+                &pending.output,
+            );
+            if select_rhs.is_none() && !allow_fallback_intrinsic {
+                continue;
+            }
             let binding = self.ensure_explicit_merge_binding_for_block(block_idx, &pending.output);
             self.trace_explicit_merge_binding_trial(
                 block.start_address,
@@ -1183,17 +1195,66 @@ impl<'a> PreviewBuilder<'a> {
                 true,
                 ExplicitMergeBindingTrialReason::PhiLikeBindingMaterialized,
             );
+            self.telemetry
+                .materialization
+                .replacement_plan_merge_binding_count += 1;
             stmts.push(HirStmt::Assign {
                 lhs: HirLValue::Var(binding.name),
-                rhs: HirExpr::Call {
+                rhs: select_rhs.unwrap_or_else(|| HirExpr::Call {
                     target: "__fission_merge2".to_string(),
                     args,
                     ty: type_from_size(pending.output.size, false),
-                },
+                }),
             });
         }
 
         Ok(stmts)
+    }
+
+    fn synthesize_explicit_merge_select(
+        &mut self,
+        merge_block_idx: usize,
+        predecessor_blocks: &[u64],
+        incoming_by_pred: &HashMap<u64, HirExpr>,
+        output: &Varnode,
+    ) -> Option<HirExpr> {
+        if predecessor_blocks.len() != 2 {
+            return None;
+        }
+        let merge_target = self.block_target_key(merge_block_idx);
+        let ty = type_from_size(output.size, false);
+        for pred_addr in predecessor_blocks {
+            let pred_idx = *self.address_to_index.get(pred_addr)?;
+            let other_addr = predecessor_blocks
+                .iter()
+                .copied()
+                .find(|candidate| candidate != pred_addr)?;
+            let other_idx = *self.address_to_index.get(&other_addr)?;
+            let other_target = self.block_target_key(other_idx);
+            let false_target = self.next_block_address(pred_idx)?;
+            let (true_target, cond) = self.lower_cbranch_condition_for_block(pred_idx)?;
+            let true_expr = if true_target == merge_target {
+                incoming_by_pred.get(pred_addr)?.clone()
+            } else if true_target == other_target {
+                incoming_by_pred.get(&other_addr)?.clone()
+            } else {
+                continue;
+            };
+            let else_expr = if false_target == merge_target {
+                incoming_by_pred.get(pred_addr)?.clone()
+            } else if false_target == other_target {
+                incoming_by_pred.get(&other_addr)?.clone()
+            } else {
+                continue;
+            };
+            return Some(HirExpr::Select {
+                cond: Box::new(cond),
+                then_expr: Box::new(true_expr),
+                else_expr: Box::new(else_expr),
+                ty,
+            });
+        }
+        None
     }
 
     fn classify_missing_incoming_pred_kind(

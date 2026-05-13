@@ -1777,6 +1777,40 @@ impl<'a> PreviewBuilder<'a> {
         Ok(lowered)
     }
 
+    pub(in crate::nir::builder) fn lower_cbranch_condition_for_block(
+        &mut self,
+        idx: usize,
+    ) -> Option<(u64, HirExpr)> {
+        let block = self.pcode.blocks.get(idx)?;
+        let term_idx = self.block_terminator_index(block)?;
+        let op = block.ops.get(term_idx)?;
+        if op.opcode != PcodeOpcode::CBranch || op.inputs.len() < 2 {
+            return None;
+        }
+        let true_target = self
+            .resolve_branch_target_index_with_recovery(idx, op, &op.inputs[0])
+            .map(|target_idx| self.block_target_key(target_idx))
+            .or_else(|| self.infer_cbranch_true_target_from_successors(idx))?;
+        let cond_input = op.inputs[1].clone();
+        let cond = self
+            .with_lowering_site(
+                LoweringSite {
+                    block_idx: idx,
+                    op_idx: term_idx,
+                },
+                |this| {
+                    let recovered = this
+                        .try_recover_branch_condition(&cond_input)?
+                        .filter(|expr| !Self::branch_cond_too_complex(expr));
+                    recovered.map(Ok).unwrap_or_else(|| {
+                        this.lower_wrapped_varnode(&cond_input, &mut HashSet::new())
+                    })
+                },
+            )
+            .ok()?;
+        Some((true_target, cond))
+    }
+
     fn try_recover_branch_condition(
         &mut self,
         vn: &Varnode,

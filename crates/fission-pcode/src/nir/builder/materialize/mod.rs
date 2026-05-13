@@ -137,9 +137,7 @@ impl<'a> PreviewBuilder<'a> {
         let mut body = Vec::new();
         let terminator_index = self.block_terminator_index(block);
         let block_idx = self.lowering_block_index(block);
-        if Self::explicit_merge_binding_enabled() {
-            body.extend(self.synthesize_explicit_merge_bindings_for_block(block)?);
-        }
+        body.extend(self.synthesize_explicit_merge_bindings_for_block(block)?);
         for (op_idx, op) in block.ops.iter().enumerate() {
             if Some(op_idx) == terminator_index {
                 continue;
