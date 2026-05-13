@@ -21,6 +21,7 @@ mod materialize;
 mod stack_slots;
 mod stats;
 pub(super) mod switch_table;
+mod telemetry;
 mod terminator;
 mod type_hints;
 
@@ -499,14 +500,19 @@ impl<'a> PreviewBuilder<'a> {
         if let Some(name) = self.materialized_vns.get(&key)
             && let Some(binding) = self.temps.get_mut(name)
         {
+            let mut stabilized = false;
             if preserve_materialization
                 && !binding.preserves_materialization()
                 && binding.is_temp_like()
             {
                 binding.origin = Some(NirBindingOrigin::TempPreserved);
-                self.materialization_stabilized_count += 1;
+                stabilized = true;
             }
-            return binding.clone();
+            let binding = binding.clone();
+            if stabilized {
+                self.telemetry.materialization_stabilized_count += 1;
+            }
+            return binding;
         }
 
         let ty = type_from_size(output.size, false);
