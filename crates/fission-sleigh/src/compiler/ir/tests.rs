@@ -147,6 +147,20 @@ fn sla_construct_template_cutover_has_no_source_line_or_opprint_remap_overlay() 
 }
 
 #[test]
+fn compiler_lowering_diagnostics_are_trace_gated() {
+    let lowering = include_str!("lowering.rs");
+    let diagnostic = "Inferred Default Context for";
+    assert!(
+        lowering.contains("FISSION_TRACE_CONTEXT_DEFAULT"),
+        "default context diagnostics must stay available behind an explicit trace flag"
+    );
+    assert!(
+        !lowering.contains(&format!("eprintln!(\n        \"{diagnostic}")),
+        "default context diagnostics must not be emitted unconditionally"
+    );
+}
+
+#[test]
 fn sla_native_runtime_ready_constructors_are_canonical() {
     if !discovery::ghidra_packaged_sla_available() {
         eprintln!("skip: packaged Ghidra .sla not available for runtime-ready constructor check");

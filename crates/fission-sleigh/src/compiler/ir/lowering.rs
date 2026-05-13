@@ -38,10 +38,12 @@ pub fn compile_frontend(
     let (default_context, default_context_known_mask) =
         infer_default_context_from_pspec(entry_spec, processor_spec, &collector.field_info)?;
     collector.default_context = default_context;
-    eprintln!(
-        "Inferred Default Context for {}: 0x{:016x}",
-        arch, collector.default_context
-    );
+    if std::env::var_os("FISSION_TRACE_CONTEXT_DEFAULT").is_some() {
+        eprintln!(
+            "Inferred Default Context for {}: 0x{:016x}",
+            arch, collector.default_context
+        );
+    }
 
     let language_layout = collector.language_layout();
     let construct_templates = collector.construct_templates();
