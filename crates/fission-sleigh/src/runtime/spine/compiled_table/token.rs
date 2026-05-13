@@ -340,11 +340,7 @@ pub(super) fn read_sla_token_field_at(
             .ok_or_else(|| anyhow!("tokenfield byte {} out of range", off))?;
         res = (res << 8) | u64::from(byte);
     }
-    let shifted = if shift >= 0 {
-        res >> (shift as u32)
-    } else {
-        res << ((-shift) as u32)
-    };
+    let shifted = shifted_sla_token_field(res, shift)?;
     let width = bit_end
         .checked_sub(bit_start)
         .and_then(|value| value.checked_add(1))
@@ -383,12 +379,43 @@ pub(super) fn opcode_len_from_matcher(matcher: &CompiledPatternMatcher) -> Resul
     }
 }
 
+fn shifted_sla_token_field(value: u64, shift: i32) -> Result<u64> {
+    if shift >= 0 {
+        value
+            .checked_shr(shift as u32)
+            .ok_or_else(|| anyhow!("tokenfield right shift {shift} exceeds u64 width"))
+    } else {
+        let amount = shift
+            .checked_neg()
+            .ok_or_else(|| anyhow!("tokenfield shift amount underflow"))?
+            as u32;
+        value
+            .checked_shl(amount)
+            .ok_or_else(|| anyhow!("tokenfield left shift {amount} exceeds u64 width"))
+    }
+}
+
 pub(super) fn zero_extend_bits(value: u64, bit: u32) -> u64 {
     if bit >= 64 {
         value
     } else {
         let mask = (1u64 << bit) - 1;
         value & mask
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::shifted_sla_token_field;
+
+    #[test]
+    fn tokenfield_shift_fails_closed_on_invalid_amounts() {
+        assert_eq!(shifted_sla_token_field(0x80, 7).unwrap(), 1);
+        assert_eq!(shifted_sla_token_field(1, -7).unwrap(), 0x80);
+
+        assert!(shifted_sla_token_field(1, 64).is_err());
+        assert!(shifted_sla_token_field(1, -64).is_err());
+        assert!(shifted_sla_token_field(1, i32::MIN).is_err());
     }
 }
 

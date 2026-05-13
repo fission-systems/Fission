@@ -853,6 +853,8 @@ fn compiled_table_policy_symbols_stay_architecture_neutral() {
     let decoded_bytes_truncation_fallback = "bytes.get(..length).unwrap_or(bytes)";
     let tokenfield_saturating_range = "byte_end.saturating_sub(byte_start)";
     let tokenfield_saturating_bit_range = "bit_end.saturating_sub(bit_start)";
+    let tokenfield_unchecked_right_shift = "res >> (shift as u32)";
+    let tokenfield_unchecked_left_shift = "res << ((-shift) as u32)";
     let empty_or_pattern_length_fallback = [
         ".map(disjoint_pattern_instruction_byte_len)",
         ".max()\n            .unwrap_or(0)",
@@ -1083,6 +1085,12 @@ fn compiled_table_policy_symbols_stay_architecture_neutral() {
             !source.contains(tokenfield_saturating_range)
                 && !source.contains(tokenfield_saturating_bit_range),
             "{} still accepts inverted SLA tokenfield ranges via saturating arithmetic",
+            file.display()
+        );
+        assert!(
+            !source.contains(tokenfield_unchecked_right_shift)
+                && !source.contains(tokenfield_unchecked_left_shift),
+            "{} still unchecked-shifts SLA tokenfield values",
             file.display()
         );
         assert!(
