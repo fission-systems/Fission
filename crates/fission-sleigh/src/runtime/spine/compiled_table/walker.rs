@@ -594,11 +594,11 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
         let operand_absolute_offset = self.operand_absolute_offset(&template.spec)?;
         let binding = self.bind_operand(&template, operand_absolute_offset)?;
         let handle_index = operand_index;
-        let operand_relative_length = binding
-            .subtable_state
-            .as_ref()
-            .map(|state| state.relative_length)
-            .unwrap_or(template.minimum_length as usize);
+        let operand_relative_length = match binding.subtable_state.as_ref() {
+            Some(state) => state.relative_length,
+            None => usize::try_from(template.minimum_length)
+                .map_err(|_| anyhow!("operand minimum length exceeds usize"))?,
+        };
         self.walker.record_operand_node(
             operand_index,
             0,

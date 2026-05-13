@@ -798,6 +798,7 @@ fn compiled_table_policy_symbols_stay_architecture_neutral() {
         "self.ctx.cursor + self.selection.constructor.minimum_length as usize";
     let constructor_relative_saturating_length = "length.saturating_sub(absolute_offset)";
     let subtable_relative_saturating_length = "sub_state.length.saturating_sub(self.ctx.cursor)";
+    let operand_subtable_minimum_fallback = ".unwrap_or(template.minimum_length as usize)";
     let token_field_saturating_end = "token_base.saturating_add(encoded_size as usize)";
     let token_field_unchecked_end = "token_base + encoded_size as usize";
     let token_read_unchecked_end = "offset + size as usize";
@@ -815,6 +816,7 @@ fn compiled_table_policy_symbols_stay_architecture_neutral() {
     let template_delay_slot_fall_saturating =
         "fall_offset = fall_offset.saturating_add(u64::from(slot_len))";
     let template_const_inst_next_saturating = "self.address.saturating_add(state.length as u64)";
+    let template_const_inst_next_zero_fallback = "self.flow.instruction_length.unwrap_or(0)";
     let template_const_inst_next2_saturating = "inst_next.saturating_add(delay_len)";
     let context_commit_inst_next_saturating =
         "instruction_address.saturating_add(decoded.length as u64)";
@@ -1007,6 +1009,11 @@ fn compiled_table_policy_symbols_stay_architecture_neutral() {
             file.display()
         );
         assert!(
+            !source.contains(operand_subtable_minimum_fallback),
+            "{} still falls back from missing subtable operand length to SLA minimum_length",
+            file.display()
+        );
+        assert!(
             !source.contains(token_field_saturating_end)
                 && !source.contains(token_field_unchecked_end),
             "{} still hides malformed SLA token-field cursor arithmetic",
@@ -1078,6 +1085,7 @@ fn compiled_table_policy_symbols_stay_architecture_neutral() {
                 && !source.contains(template_delay_slot_pc_saturating)
                 && !source.contains(template_delay_slot_fall_saturating)
                 && !source.contains(template_const_inst_next_saturating)
+                && !source.contains(template_const_inst_next_zero_fallback)
                 && !source.contains(template_const_inst_next2_saturating)
                 && !source.contains(context_commit_inst_next_saturating),
             "{} still hides malformed SLA parser cursor or InstNext arithmetic",

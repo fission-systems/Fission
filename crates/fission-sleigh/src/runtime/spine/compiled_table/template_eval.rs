@@ -1360,11 +1360,7 @@ impl<'c> CompiledTableEmitter<'c> {
             }
             CompiledConstTpl::InstStart => Ok(self.address),
             CompiledConstTpl::InstNext => {
-                let fall_offset = if state.length > 0 {
-                    state.length as u64
-                } else {
-                    self.flow.instruction_length.unwrap_or(0)
-                };
+                let fall_offset = self.inst_next_fall_offset(state)?;
                 self.address
                     .checked_add(fall_offset)
                     .ok_or_else(|| anyhow!("InstNext address overflowed"))
@@ -1453,6 +1449,15 @@ impl<'c> CompiledTableEmitter<'c> {
                 Ok(space.addr_size as u64)
             }
         }
+    }
+
+    fn inst_next_fall_offset(&self, state: &RuntimeConstructState) -> Result<u64> {
+        if state.length > 0 {
+            return Ok(state.length as u64);
+        }
+        self.flow
+            .instruction_length
+            .ok_or_else(|| anyhow!("InstNext requires decoded instruction length"))
     }
 
     fn resolve_fixed_handle_selector(
