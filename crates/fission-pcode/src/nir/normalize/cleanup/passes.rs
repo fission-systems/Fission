@@ -200,6 +200,58 @@ pub(crate) fn simplify_empty_and_constant_ifs(stmts: &mut Vec<HirStmt>) -> bool 
     changed
 }
 
+pub(crate) fn simplify_empty_and_constant_ifs_recursive(stmts: &mut Vec<HirStmt>) -> bool {
+    let mut changed = false;
+    for stmt in stmts.iter_mut() {
+        match stmt {
+            HirStmt::Block(body) | HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
+                changed |= simplify_empty_and_constant_ifs_recursive(body);
+            }
+            HirStmt::For {
+                init, update, body, ..
+            } => {
+                if let Some(init) = init.as_mut()
+                    && let HirStmt::Block(body) = init.as_mut()
+                {
+                    changed |= simplify_empty_and_constant_ifs_recursive(body);
+                }
+                if let Some(update) = update.as_mut()
+                    && let HirStmt::Block(body) = update.as_mut()
+                {
+                    changed |= simplify_empty_and_constant_ifs_recursive(body);
+                }
+                changed |= simplify_empty_and_constant_ifs_recursive(body);
+            }
+            HirStmt::If {
+                then_body,
+                else_body,
+                ..
+            } => {
+                changed |= simplify_empty_and_constant_ifs_recursive(then_body);
+                changed |= simplify_empty_and_constant_ifs_recursive(else_body);
+            }
+            HirStmt::Switch { cases, default, .. } => {
+                for case in cases {
+                    changed |= simplify_empty_and_constant_ifs_recursive(&mut case.body);
+                }
+                changed |= simplify_empty_and_constant_ifs_recursive(default);
+            }
+            HirStmt::Assign { .. }
+            | HirStmt::VaStart { .. }
+            | HirStmt::Expr(_)
+            | HirStmt::Label(_)
+            | HirStmt::Goto(_)
+            | HirStmt::Return(_)
+            | HirStmt::Break
+            | HirStmt::Continue => {}
+        }
+    }
+    changed |= simplify_empty_and_constant_ifs(stmts);
+    let before_len = stmts.len();
+    stmts.retain(|stmt| !matches!(stmt, HirStmt::Block(body) if body.is_empty()));
+    changed | (stmts.len() != before_len)
+}
+
 pub(crate) fn collapse_redundant_conditional_returns(stmts: &mut Vec<HirStmt>) -> bool {
     let mut changed = false;
     let mut rewritten = Vec::with_capacity(stmts.len());
@@ -534,6 +586,39 @@ mod tests {
             origin: Some(NirBindingOrigin::TempPreserved),
             initializer: None,
         }
+    }
+
+    #[test]
+    fn recursive_empty_if_cleanup_prunes_nested_pure_empty_guard() {
+        let mut stmts = vec![HirStmt::Block(vec![HirStmt::If {
+            cond: HirExpr::Var("xVar12".to_string()),
+            then_body: Vec::new(),
+            else_body: Vec::new(),
+        }])];
+
+        assert!(simplify_empty_and_constant_ifs_recursive(&mut stmts));
+        assert!(stmts.is_empty());
+    }
+
+    #[test]
+    fn recursive_empty_if_cleanup_preserves_side_effectful_empty_guard() {
+        let mut stmts = vec![HirStmt::If {
+            cond: HirExpr::Call {
+                target: "unknown_predicate".to_string(),
+                args: Vec::new(),
+                ty: NirType::Bool,
+            },
+            then_body: Vec::new(),
+            else_body: Vec::new(),
+        }];
+
+        assert!(simplify_empty_and_constant_ifs_recursive(&mut stmts));
+        assert!(
+            matches!(
+                &stmts[..],
+                [HirStmt::Expr(HirExpr::Call { target, .. })] if target == "unknown_predicate"
+            )
+        );
     }
 
     #[test]

@@ -18,7 +18,7 @@ use super::super::cleanup::{
     fuse_single_predecessor_boundaries, inline_single_use_temps, promote_guarded_jump_target_tail,
     prune_unused_dead_local_bindings, prune_unused_temp_bindings,
     remove_unreferenced_leading_labels, simplify_empty_and_constant_ifs,
-    simplify_fallthrough_edges,
+    simplify_empty_and_constant_ifs_recursive, simplify_fallthrough_edges,
 };
 use super::super::global_opt::{
     apply_cse_pass, apply_dead_store_elimination, apply_gvn_join_hoist_pass, apply_licm_pass,
@@ -699,6 +699,9 @@ pub(crate) fn normalize_hir_function(func: &mut HirFunction) {
     } else {
         wave_stats::add_pass_rerun_skipped_by_preservation(1);
     }
+    run_pass_logged(func, "cleanup_empty_ifs_final", perf, |f| {
+        simplify_empty_and_constant_ifs_recursive(&mut f.body)
+    });
     if perf {
         let (final_stmts, final_locals) = hir_shape(func);
         eprintln!(

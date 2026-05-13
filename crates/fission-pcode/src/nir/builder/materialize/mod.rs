@@ -1499,13 +1499,9 @@ mod tests {
         options.pe_x64_only = false;
 
         let code = render_mlil_preview(&pcode, "madd_addend", 0x1000, &options).expect("render");
-        let then_body = code
-            .split("if (!tmp_82c00) {")
-            .nth(1)
-            .and_then(|suffix| suffix.split("} else {").next())
-            .expect("negated fallthrough arm");
-        assert!(then_body.contains(" / "), "{code}");
         assert!(code.contains(" * "), "{code}");
         assert!(code.contains(" + "), "{code}");
+        assert!(code.contains(" / "), "{code}");
+        assert!(!code.contains("{\n    }"), "{code}");
     }
 }
