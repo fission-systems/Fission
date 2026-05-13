@@ -162,10 +162,7 @@ pub(super) fn render_display_template_parts(
         }
     }
 
-    let split = state
-        .display_template
-        .first_whitespace
-        .unwrap_or(state.display_template.pieces.len());
+    let split = display_template_split_index(state)?;
     let mnemonic = render_display_pieces(state, &state.display_template.pieces[..split])?;
     let body = if state.display_template.first_whitespace.is_some()
         && split < state.display_template.pieces.len()
@@ -175,6 +172,18 @@ pub(super) fn render_display_template_parts(
         String::new()
     };
     Ok((mnemonic, body))
+}
+
+fn display_template_split_index(state: &RuntimeConstructState) -> Result<usize> {
+    match state.display_template.first_whitespace {
+        Some(index) if index <= state.display_template.pieces.len() => Ok(index),
+        Some(index) => bail!(
+            "display template first_whitespace {index} exceeds piece count {} for constructor {}",
+            state.display_template.pieces.len(),
+            state.constructor_id
+        ),
+        None => Ok(state.display_template.pieces.len()),
+    }
 }
 
 pub(super) fn render_display_pieces(
@@ -618,6 +627,7 @@ mod tests {
         let dummy_immediate_fallback = ["unwrap_or", "(BoundOperand::Immediate"].concat();
         let dummy_zero_size = ["encoded_size: ", "0"].concat();
         let fixed_handle_fallback = ["bound_operand", "from_fixed_handle"].join("_");
+        let whitespace_len_fallback = "first_whitespace\n        .unwrap_or";
 
         assert!(
             !source.contains(&dummy_immediate_fallback),
@@ -630,6 +640,10 @@ mod tests {
         assert!(
             !source.contains(&fixed_handle_fallback),
             "display rendering must use decoded debug operands, not fixed-handle BoundOperand fallback"
+        );
+        assert!(
+            !source.contains(whitespace_len_fallback),
+            "display rendering must validate first_whitespace instead of silently slicing at pieces.len()"
         );
     }
 
@@ -786,6 +800,24 @@ mod tests {
         assert!(
             refs.is_empty(),
             "overflowing RIP-relative reference must not be clipped into a false target"
+        );
+    }
+
+    #[test]
+    fn display_template_rejects_out_of_range_first_whitespace() {
+        let mut state = state_with_display(
+            vec![crate::compiler::CompiledDisplayPiece::Literal(
+                "nop".to_string(),
+            )],
+            Vec::new(),
+        );
+        state.display_template.first_whitespace = Some(2);
+
+        let err = render_display_template_parts(&state).expect_err("invalid split should fail");
+
+        assert!(
+            err.to_string().contains("first_whitespace"),
+            "unexpected display error: {err:#}"
         );
     }
 
