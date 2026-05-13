@@ -1152,20 +1152,20 @@ fn decision_probes_for_constructors(
     constructors: &[CompiledExecutableConstructor],
 ) -> Vec<CompiledDecisionProbe> {
     let mut probes = Vec::new();
-    for offset in 0..4 {
-        for bit in 0..8 {
+    for offset in 0u8..4 {
+        for bit in 0u8..8 {
             probes.push(CompiledDecisionProbe::InstructionBitSlice {
-                offset: offset as u8,
+                offset,
                 mask: 1 << bit,
-                shift: bit as u8,
+                shift: bit,
             });
         }
     }
-    for bit in 0..8 {
+    for bit in 0u8..8 {
         probes.push(CompiledDecisionProbe::ContextBitSlice {
             offset: 0,
             mask: 1 << bit,
-            shift: bit as u8,
+            shift: bit,
         });
     }
     probes
@@ -1251,7 +1251,7 @@ fn decision_feature_values(
             offset,
             mask,
             shift,
-        } => instruction_probe_values(&ctor.matcher, offset as usize)
+        } => instruction_probe_values(&ctor.matcher, usize::from(offset))
             .into_iter()
             .map(|v| (v & mask) >> shift)
             .collect(),
@@ -1259,9 +1259,9 @@ fn decision_feature_values(
             offset,
             mask,
             shift,
-        } => context_probe_values(&ctor.matcher, offset as usize)
+        } => context_probe_values(&ctor.matcher, usize::from(offset))
             .into_iter()
-            .map(|v| ((v & u64::from(mask)) >> shift) as u8)
+            .filter_map(|v| u8::try_from((v & u64::from(mask)) >> shift).ok())
             .collect(),
         CompiledDecisionProbe::SlaInstructionBits { .. }
         | CompiledDecisionProbe::SlaContextBits { .. } => Vec::new(),
@@ -1284,10 +1284,18 @@ fn instruction_probe_values(matcher: &CompiledPatternMatcher, offset: usize) -> 
                     value,
                 } = c
                 {
-                    if offset >= *c_off as usize && offset < *c_off as usize + 8 {
-                        let shift = (offset - *c_off as usize) * 8;
+                    let Ok(constraint_offset) = usize::try_from(*c_off) else {
+                        continue;
+                    };
+                    let Some(constraint_end) = constraint_offset.checked_add(8) else {
+                        continue;
+                    };
+                    if offset >= constraint_offset && offset < constraint_end {
+                        let shift = (offset - constraint_offset) * 8;
                         if (mask >> shift) & 0xff != 0 {
-                            val |= ((value >> shift) & 0xff) as u8;
+                            if let Ok(byte) = u8::try_from((value >> shift) & 0xff) {
+                                val |= byte;
+                            }
                             found = true;
                         }
                     }
@@ -1314,7 +1322,10 @@ fn context_probe_values(matcher: &CompiledPatternMatcher, offset: usize) -> Vec<
                     ..
                 } = c
                 {
-                    if offset == *c_off as usize {
+                    let Ok(constraint_offset) = usize::try_from(*c_off) else {
+                        return None;
+                    };
+                    if offset == constraint_offset {
                         Some(*value)
                     } else {
                         None
@@ -1530,7 +1541,8 @@ fn context_change_ops(info: &FieldBitRange, value: u64) -> Result<Vec<CompiledCo
         value,
         word_index: info.bit_offset / 32,
         mask,
-        shift: info.bit_offset as i32,
+        shift: i32::try_from(info.bit_offset)
+            .map_err(|_| anyhow!("context change bit offset exceeds i32"))?,
         expr: None,
     }])
 }
@@ -1550,14 +1562,16 @@ fn context_change_word_ops(info: &FieldBitRange, value: u64) -> Result<Vec<Compi
         };
         let word_shift = 32 - chunk_bits - bit_offset;
         let value_shift = remaining - chunk_bits;
-        let chunk_value = ((value >> value_shift) as u32) & chunk_mask;
+        let chunk_value = u32::try_from((value >> value_shift) & u64::from(chunk_mask))
+            .map_err(|_| anyhow!("context change chunk value exceeds u32"))?;
         ops.push(CompiledContextOp {
             bit_offset: absolute_bit_offset,
             bit_width: chunk_bits,
             value: u64::from(chunk_value << word_shift),
             word_index,
             mask: u64::from(chunk_mask << word_shift),
-            shift: word_shift as i32,
+            shift: i32::try_from(word_shift)
+                .map_err(|_| anyhow!("context change word shift exceeds i32"))?,
             expr: None,
         });
         remaining -= chunk_bits;

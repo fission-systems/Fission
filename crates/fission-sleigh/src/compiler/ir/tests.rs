@@ -304,6 +304,14 @@ fn legacy_spec_matcher_lowering_does_not_synthesize_zero_on_parse_failure() {
         ".map(|constructor| constructor.subtable_id)\n                    .next()\n                    .unwrap_or(0)",
         ".unwrap_or_else(|| CompiledDecisionTree",
         "score = score.saturating_sub(500)",
+        "offset: offset as u8",
+        "shift: bit as u8",
+        "offset as usize",
+        "*c_off as usize",
+        ">> shift) as u8",
+        "info.bit_offset as i32",
+        "word_shift as i32",
+        "((value >> value_shift) as u32)",
     ] {
         assert!(
             !lowering.contains(forbidden),
