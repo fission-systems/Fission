@@ -1399,12 +1399,12 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
             self.strategy
                 .native_for_table(self.compiled, table_name, &sub_ctx)
         {
+            let decode_no_match_address = subtable_decode_address(&sub_ctx)?;
             let constructor_index = native
                 .decode_match(table_name, self.ctx.bytes, sub_ctx.context_register)?
                 .ok_or_else(|| {
                     anyhow!(
-                        "DecodeNoMatch in subtable {table_name} at 0x{:x}",
-                        sub_ctx.address.wrapping_add(sub_ctx.cursor as u64)
+                        "DecodeNoMatch in subtable {table_name} at 0x{decode_no_match_address:x}"
                     )
                 })?;
             let subtable = self
@@ -1440,11 +1440,9 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                 },
             }
         } else {
+            let decode_no_match_address = subtable_decode_address(&sub_ctx)?;
             select_constructor(self.compiled, table_name, &sub_ctx)?.ok_or_else(|| {
-                anyhow!(
-                    "DecodeNoMatch in subtable {table_name} at 0x{:x}",
-                    sub_ctx.address.wrapping_add(sub_ctx.cursor as u64)
-                )
+                anyhow!("DecodeNoMatch in subtable {table_name} at 0x{decode_no_match_address:x}")
             })?
         };
         if crate::runtime::diagnostics::terminal_reselect_trace_enabled() {
@@ -1459,4 +1457,10 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
 
         bind_instruction(self.compiled, self.strategy, &sub_ctx, selection)
     }
+}
+
+fn subtable_decode_address(ctx: &CompiledInstructionContext<'_>) -> Result<u64> {
+    ctx.address
+        .checked_add(ctx.cursor as u64)
+        .ok_or_else(|| anyhow!("subtable decode address overflowed"))
 }

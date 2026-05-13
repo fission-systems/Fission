@@ -811,6 +811,7 @@ fn compiled_table_policy_symbols_stay_architecture_neutral() {
     let pattern_inst_next_saturating_address =
         "self.ctx.address.saturating_add(next_offset as u64)";
     let subtable_cursor_saturating_delta = "self.cursor.saturating_sub(self.ctx.cursor)";
+    let subtable_decode_address_wrapping = "sub_ctx.address.wrapping_add(sub_ctx.cursor as u64)";
     let template_delay_slot_inst_next_saturating =
         "self.address.saturating_add(inst_length as u64)";
     let template_delay_slot_pc_saturating = "self.address.saturating_add(fall_offset)";
@@ -1084,6 +1085,7 @@ fn compiled_table_policy_symbols_stay_architecture_neutral() {
                 && !source.contains(pattern_inst_next_saturating_constructor)
                 && !source.contains(pattern_inst_next_saturating_address)
                 && !source.contains(subtable_cursor_saturating_delta)
+                && !source.contains(subtable_decode_address_wrapping)
                 && !source.contains(template_delay_slot_inst_next_saturating)
                 && !source.contains(template_delay_slot_pc_saturating)
                 && !source.contains(template_delay_slot_fall_saturating)
