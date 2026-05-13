@@ -221,6 +221,74 @@ fn sla_operand_symbol_shape_fields_are_not_synthesized() {
 }
 
 #[test]
+fn sla_symbol_narrow_integer_fields_fail_closed() {
+    let mut tokenfield = PackedElement {
+        id: sla_format::ELEM_TOKENFIELD,
+        attrs: BTreeMap::new(),
+        children: Vec::new(),
+    };
+    tokenfield
+        .attrs
+        .insert(sla_format::ATTR_BIGENDIAN, PackedAttrValue::Bool(false));
+    tokenfield
+        .attrs
+        .insert(sla_format::ATTR_SIGNBIT, PackedAttrValue::Bool(false));
+    tokenfield
+        .attrs
+        .insert(sla_format::ATTR_STARTBIT, PackedAttrValue::Signed(-1));
+    tokenfield
+        .attrs
+        .insert(sla_format::ATTR_ENDBIT, PackedAttrValue::Signed(0));
+    tokenfield
+        .attrs
+        .insert(sla_format::ATTR_STARTBYTE, PackedAttrValue::Signed(0));
+    tokenfield
+        .attrs
+        .insert(sla_format::ATTR_ENDBYTE, PackedAttrValue::Signed(0));
+    tokenfield
+        .attrs
+        .insert(sla_format::ATTR_SHIFT, PackedAttrValue::Signed(0));
+
+    let err = decode_token_field(&tokenfield).expect_err("negative bit index must fail");
+    assert!(err
+        .to_string()
+        .contains("tokenfield startbit out of u32 range"));
+
+    let mut operand_exp = PackedElement {
+        id: sla_format::ELEM_OPERAND_EXP,
+        attrs: BTreeMap::new(),
+        children: Vec::new(),
+    };
+    operand_exp
+        .attrs
+        .insert(sla_format::ATTR_INDEX, PackedAttrValue::Signed(-1));
+    let err =
+        decode_pattern_expression(&operand_exp).expect_err("negative operand index must fail");
+    assert!(err
+        .to_string()
+        .contains("operand_exp index out of usize range"));
+}
+
+#[test]
+fn sla_symbol_decode_does_not_wrap_narrow_integer_fields() {
+    let symbols = include_str!("symbols.rs");
+    for forbidden in [
+        "attr_unsigned(sla_format::ATTR_WORDSIZE)\n            .map(|v| v as u32)",
+        "ok_or_else(|| anyhow!(\"operand_sym missing id\"))? as u32",
+        "ok_or_else(|| anyhow!(\"operand_sym missing index\"))? as usize",
+        "ok_or_else(|| anyhow!(\"tokenfield missing startbit\"))? as u32",
+        "ok_or_else(|| anyhow!(\"context_op missing word index\"))? as u32",
+        "ok_or_else(|| anyhow!(\"operand_exp missing index\"))? as usize",
+        "ok_or_else(|| anyhow!(\"contextfield missing startbit\"))? as u32",
+    ] {
+        assert!(
+            !symbols.contains(forbidden),
+            "SLA symbol decode must fail closed instead of wrapping narrow fields: {forbidden}"
+        );
+    }
+}
+
+#[test]
 fn sla_space_shape_fields_are_not_synthesized() {
     let symbols = include_str!("symbols.rs");
     for forbidden in [

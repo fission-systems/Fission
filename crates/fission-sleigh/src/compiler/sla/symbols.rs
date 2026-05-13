@@ -6,6 +6,34 @@ use anyhow::{bail, Result};
 use super::*;
 use crate::compiler::ir::*;
 
+fn required_unsigned_u32(element: &PackedElement, attr: u32, label: &str) -> Result<u32> {
+    let value = element
+        .attr_unsigned(attr)
+        .ok_or_else(|| anyhow!("{label} missing"))?;
+    u32::try_from(value).map_err(|_| anyhow!("{label} out of u32 range: {value}"))
+}
+
+fn required_signed_u32(element: &PackedElement, attr: u32, label: &str) -> Result<u32> {
+    let value = element
+        .attr_signed(attr)
+        .ok_or_else(|| anyhow!("{label} missing"))?;
+    u32::try_from(value).map_err(|_| anyhow!("{label} out of u32 range: {value}"))
+}
+
+fn required_signed_i32(element: &PackedElement, attr: u32, label: &str) -> Result<i32> {
+    let value = element
+        .attr_signed(attr)
+        .ok_or_else(|| anyhow!("{label} missing"))?;
+    i32::try_from(value).map_err(|_| anyhow!("{label} out of i32 range: {value}"))
+}
+
+fn required_signed_usize(element: &PackedElement, attr: u32, label: &str) -> Result<usize> {
+    let value = element
+        .attr_signed(attr)
+        .ok_or_else(|| anyhow!("{label} missing"))?;
+    usize::try_from(value).map_err(|_| anyhow!("{label} out of usize range: {value}"))
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CompiledSlaArtifact {
     pub path: PathBuf,
@@ -151,10 +179,11 @@ pub(super) fn decode_spaces(root: &PackedElement) -> Result<SlaSpaceDecodeResult
         // Ghidra: ATTRIB_WORDSIZE is the addressable unit size (1 for byte-addressed spaces).
         // ATTRIB_WORDSIZE is only written to the SLA when > 1; default is 1.
         // ATTRIB_SIZE is the address/pointer size (e.g., 4 for x86-32).
-        let word_size = space
-            .attr_unsigned(sla_format::ATTR_WORDSIZE)
-            .map(|v| v as u32)
-            .unwrap_or(1);
+        let word_size = match space.attr_unsigned(sla_format::ATTR_WORDSIZE) {
+            Some(value) => u32::try_from(value)
+                .map_err(|_| anyhow!("space {name} word size out of u32 range: {value}"))?,
+            None => 1,
+        };
         let addr_size = space
             .attr_signed(sla_format::ATTR_SIZE)
             .ok_or_else(|| anyhow!("space {name} missing address size"))
@@ -212,20 +241,13 @@ pub(super) fn decode_operand_symbols(
 ) -> Result<BTreeMap<u32, DecodedOperandSymbol>> {
     let mut out = BTreeMap::new();
     for operand in root.descendants_with_id(sla_format::ELEM_OPERAND_SYM) {
-        let id = operand
-            .attr_unsigned(sla_format::ATTR_ID)
-            .ok_or_else(|| anyhow!("operand_sym missing id"))? as u32;
-        let hand_index = operand
-            .attr_signed(sla_format::ATTR_INDEX)
-            .ok_or_else(|| anyhow!("operand_sym missing index"))? as usize;
-        let reloffset = operand
-            .attr_signed(sla_format::ATTR_OFF)
-            .ok_or_else(|| anyhow!("operand_sym {id} missing relative offset"))?
-            as i32;
-        let offsetbase = operand
-            .attr_signed(sla_format::ATTR_BASE)
-            .ok_or_else(|| anyhow!("operand_sym {id} missing offset base"))?
-            as i32;
+        let id = required_unsigned_u32(operand, sla_format::ATTR_ID, "operand_sym id")?;
+        let hand_index =
+            required_signed_usize(operand, sla_format::ATTR_INDEX, "operand_sym index")?;
+        let reloffset =
+            required_signed_i32(operand, sla_format::ATTR_OFF, "operand_sym relative offset")?;
+        let offsetbase =
+            required_signed_i32(operand, sla_format::ATTR_BASE, "operand_sym offset base")?;
         let minimum_length = operand
             .attr_signed(sla_format::ATTR_MINLEN)
             .ok_or_else(|| anyhow!("operand_sym {id} missing minimum length"))
@@ -246,8 +268,10 @@ pub(super) fn decode_operand_symbols(
             value_map,
             fixed_varnode,
         ) = if let Some(subsym_id) = operand.attr_unsigned(sla_format::ATTR_SUBSYM) {
+            let subsym_id = u32::try_from(subsym_id)
+                .map_err(|_| anyhow!("operand_sym {id} subsym out of u32 range: {subsym_id}"))?;
             let symbol = display_symbols
-                .get(&(subsym_id as u32))
+                .get(&subsym_id)
                 .ok_or_else(|| anyhow!("operand_sym {id} references unknown subsym {subsym_id}"))?;
             decoded_operand_display_binding(symbol)
         } else {
@@ -386,21 +410,15 @@ pub(super) fn decode_token_field(element: &PackedElement) -> Result<DecodedToken
         sign_bit: element
             .attr_bool_value(sla_format::ATTR_SIGNBIT)
             .ok_or_else(|| anyhow!("tokenfield missing signbit"))?,
-        bit_start: element
-            .attr_signed(sla_format::ATTR_STARTBIT)
-            .ok_or_else(|| anyhow!("tokenfield missing startbit"))? as u32,
-        bit_end: element
-            .attr_signed(sla_format::ATTR_ENDBIT)
-            .ok_or_else(|| anyhow!("tokenfield missing endbit"))? as u32,
-        byte_start: element
-            .attr_signed(sla_format::ATTR_STARTBYTE)
-            .ok_or_else(|| anyhow!("tokenfield missing startbyte"))? as u32,
-        byte_end: element
-            .attr_signed(sla_format::ATTR_ENDBYTE)
-            .ok_or_else(|| anyhow!("tokenfield missing endbyte"))? as u32,
-        shift: element
-            .attr_signed(sla_format::ATTR_SHIFT)
-            .ok_or_else(|| anyhow!("tokenfield missing shift"))? as i32,
+        bit_start: required_signed_u32(element, sla_format::ATTR_STARTBIT, "tokenfield startbit")?,
+        bit_end: required_signed_u32(element, sla_format::ATTR_ENDBIT, "tokenfield endbit")?,
+        byte_start: required_signed_u32(
+            element,
+            sla_format::ATTR_STARTBYTE,
+            "tokenfield startbyte",
+        )?,
+        byte_end: required_signed_u32(element, sla_format::ATTR_ENDBYTE, "tokenfield endbyte")?,
+        shift: required_signed_i32(element, sla_format::ATTR_SHIFT, "tokenfield shift")?,
     })
 }
 
@@ -488,12 +506,8 @@ pub(super) fn compiled_operand_spec_for_symbol(
 }
 
 pub(super) fn decode_context_op(element: &PackedElement) -> Result<CompiledContextOp> {
-    let word_index = element
-        .attr_signed(sla_format::ATTR_I)
-        .ok_or_else(|| anyhow!("context_op missing word index"))? as u32;
-    let shift = element
-        .attr_signed(sla_format::ATTR_SHIFT)
-        .ok_or_else(|| anyhow!("context_op missing shift"))? as i32;
+    let word_index = required_signed_u32(element, sla_format::ATTR_I, "context_op word index")?;
+    let shift = required_signed_i32(element, sla_format::ATTR_SHIFT, "context_op shift")?;
     let mask = element
         .attr_unsigned(sla_format::ATTR_MASK)
         .ok_or_else(|| anyhow!("context_op missing mask"))?;
@@ -502,8 +516,13 @@ pub(super) fn decode_context_op(element: &PackedElement) -> Result<CompiledConte
         .first()
         .map(decode_pattern_expression)
         .transpose()?;
+    let bit_offset = if shift >= 0 {
+        u32::try_from(shift).map_err(|_| anyhow!("context_op shift out of u32 range: {shift}"))?
+    } else {
+        0
+    };
     Ok(CompiledContextOp {
-        bit_offset: shift.max(0) as u32,
+        bit_offset,
         bit_width: mask.count_ones(),
         value: 0,
         word_index,
@@ -562,9 +581,7 @@ pub(super) fn decode_pattern_expression(
             })
         }
         sla_format::ELEM_OPERAND_EXP => Ok(CompiledPatternExpression::OperandValue {
-            index: element
-                .attr_signed(sla_format::ATTR_INDEX)
-                .ok_or_else(|| anyhow!("operand_exp missing index"))? as usize,
+            index: required_signed_usize(element, sla_format::ATTR_INDEX, "operand_exp index")?,
         }),
         sla_format::ELEM_PLUS_EXP => binary(CompiledPatternExpression::Add),
         sla_format::ELEM_SUB_EXP => binary(CompiledPatternExpression::Sub),
@@ -665,21 +682,19 @@ pub(super) fn decode_context_field(element: &PackedElement) -> Result<DecodedCon
         sign_bit: element
             .attr_bool_value(sla_format::ATTR_SIGNBIT)
             .ok_or_else(|| anyhow!("contextfield missing signbit"))?,
-        bit_start: element
-            .attr_signed(sla_format::ATTR_STARTBIT)
-            .ok_or_else(|| anyhow!("contextfield missing startbit"))? as u32,
-        bit_end: element
-            .attr_signed(sla_format::ATTR_ENDBIT)
-            .ok_or_else(|| anyhow!("contextfield missing endbit"))? as u32,
-        byte_start: element
-            .attr_signed(sla_format::ATTR_STARTBYTE)
-            .ok_or_else(|| anyhow!("contextfield missing startbyte"))? as u32,
-        byte_end: element
-            .attr_signed(sla_format::ATTR_ENDBYTE)
-            .ok_or_else(|| anyhow!("contextfield missing endbyte"))? as u32,
-        shift: element
-            .attr_signed(sla_format::ATTR_SHIFT)
-            .ok_or_else(|| anyhow!("contextfield missing shift"))? as i32,
+        bit_start: required_signed_u32(
+            element,
+            sla_format::ATTR_STARTBIT,
+            "contextfield startbit",
+        )?,
+        bit_end: required_signed_u32(element, sla_format::ATTR_ENDBIT, "contextfield endbit")?,
+        byte_start: required_signed_u32(
+            element,
+            sla_format::ATTR_STARTBYTE,
+            "contextfield startbyte",
+        )?,
+        byte_end: required_signed_u32(element, sla_format::ATTR_ENDBYTE, "contextfield endbyte")?,
+        shift: required_signed_i32(element, sla_format::ATTR_SHIFT, "contextfield shift")?,
     })
 }
 
