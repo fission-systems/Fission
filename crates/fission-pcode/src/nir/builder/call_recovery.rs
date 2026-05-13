@@ -137,6 +137,12 @@ impl<'a> PreviewBuilder<'a> {
         for prev_idx in (0..call_idx).rev() {
             let prev = &block.ops[prev_idx];
             if prev.opcode.is_control_flow() {
+                if prev.opcode == PcodeOpcode::CallOther
+                    && prev.output.is_none()
+                    && prev.address == block.ops[call_idx].address
+                {
+                    continue;
+                }
                 if self.call_is_terminal_branchind_artifact(block, prev_idx) {
                     continue;
                 }
@@ -214,10 +220,21 @@ impl<'a> PreviewBuilder<'a> {
         let param_slots = self.options.calling_convention.param_reg_slots();
         let param_count = param_slots.len();
         let mut recovered: Vec<Option<HirExpr>> = vec![None; param_count];
+        let has_same_instruction_callother_marker = block.ops[..call_idx].iter().any(|prev| {
+            prev.opcode == PcodeOpcode::CallOther
+                && prev.output.is_none()
+                && prev.address == block.ops[call_idx].address
+        });
 
         for prev_idx in (0..call_idx).rev() {
             let prev = &block.ops[prev_idx];
             if prev.opcode.is_control_flow() {
+                if prev.opcode == PcodeOpcode::CallOther
+                    && prev.output.is_none()
+                    && prev.address == block.ops[call_idx].address
+                {
+                    continue;
+                }
                 if self.call_is_terminal_branchind_artifact(block, prev_idx) {
                     continue;
                 }
@@ -238,12 +255,22 @@ impl<'a> PreviewBuilder<'a> {
                 continue;
             }
 
+            let direct_rhs = if prefer_source_values
+                || self.options.calling_convention != CallingConvention::Arm32
+                || !has_same_instruction_callother_marker
+            {
+                None
+            } else {
+                self.try_lower_materialized_output_rhs(block.start_address, prev)?
+            };
             let source = if prefer_source_values {
                 prev.inputs.first().unwrap_or(output)
             } else {
                 output
             };
-            let expr = if prefer_source_values
+            let expr = if let Some(expr) = direct_rhs {
+                expr
+            } else if prefer_source_values
                 && let Some(name) = self.surface_call_carrier_name(source)
             {
                 HirExpr::Var(name)

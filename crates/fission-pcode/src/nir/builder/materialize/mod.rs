@@ -72,6 +72,27 @@ impl<'a> PreviewBuilder<'a> {
         primary_return_registers(self.options.pointer_size, self.options.calling_convention)
     }
 
+    fn callother_is_same_instruction_call_marker(
+        &self,
+        block: &crate::pcode::PcodeBasicBlock,
+        op_idx: usize,
+    ) -> bool {
+        let Some(op) = block.ops.get(op_idx) else {
+            return false;
+        };
+        op.opcode == PcodeOpcode::CallOther
+            && op.output.is_none()
+            && op.inputs.len() == 1
+            && block
+                .ops
+                .iter()
+                .skip(op_idx + 1)
+                .take_while(|candidate| candidate.address == op.address)
+                .any(|candidate| {
+                    matches!(candidate.opcode, PcodeOpcode::Call | PcodeOpcode::CallInd)
+                })
+    }
+
     fn call_result_is_observed(
         &self,
         block: &crate::pcode::PcodeBasicBlock,
@@ -224,15 +245,17 @@ impl<'a> PreviewBuilder<'a> {
                         PcodeOpcode::Call | PcodeOpcode::CallInd | PcodeOpcode::CallOther => {
                             if this.call_is_return_target_artifact(block, op_idx)
                                 || this.call_is_terminal_branchind_artifact(block, op_idx)
+                                || this.callother_is_same_instruction_call_marker(block, op_idx)
                             {
                                 return Ok(None);
                             }
                             if op.output.is_none() {
-                                let recovered_args = if op.inputs.len() > 1 {
-                                    None
-                                } else {
-                                    this.recover_call_args_from_block(block, op_idx)?
-                                };
+                                let recovered_args =
+                                    if op.opcode == PcodeOpcode::CallOther || op.inputs.len() > 1 {
+                                        None
+                                    } else {
+                                        this.recover_call_args_from_block(block, op_idx)?
+                                    };
                                 let expr = this
                                     .lower_call(op, recovered_args, &mut visiting)
                                     .map_err(|err| {
@@ -245,7 +268,9 @@ impl<'a> PreviewBuilder<'a> {
                                         );
                                         err
                                     })?;
-                                if this.call_result_is_observed(block, op_idx) {
+                                if op.opcode != PcodeOpcode::CallOther
+                                    && this.call_result_is_observed(block, op_idx)
+                                {
                                     let lhs =
                                         HirLValue::Var(this.ensure_call_result_binding(site, op));
                                     Ok(Some(HirStmt::Assign { lhs, rhs: expr }))
@@ -587,7 +612,7 @@ impl<'a> PreviewBuilder<'a> {
         )
     }
 
-    fn try_lower_materialized_output_rhs(
+    pub(in crate::nir::builder) fn try_lower_materialized_output_rhs(
         &mut self,
         block_addr: u64,
         op: &PcodeOp,
@@ -1196,6 +1221,79 @@ mod tests {
         assert_eq!(
             builder.live_call_result_binding_for_return_register(&ret_eax),
             Some("xVarCall".to_string())
+        );
+    }
+
+    #[test]
+    fn same_instruction_callother_does_not_steal_arm_call_args_or_result() {
+        fn op_at(
+            seq_num: u32,
+            address: u64,
+            opcode: PcodeOpcode,
+            output: Option<Varnode>,
+            inputs: Vec<Varnode>,
+        ) -> PcodeOp {
+            PcodeOp {
+                seq_num,
+                opcode,
+                address,
+                output,
+                inputs,
+                asm_mnemonic: None,
+            }
+        }
+
+        let r0 = register(RUST_SLEIGH_REGISTER_SPACE_ID, 32, 4);
+        let r1 = register(RUST_SLEIGH_REGISTER_SPACE_ID, 36, 4);
+        let out = register(RUST_SLEIGH_UNIQUE_SPACE_ID, 0x4000, 4);
+        let block = block_at(
+            0x1000,
+            0,
+            vec![
+                op_at(
+                    0,
+                    0x1000,
+                    PcodeOpcode::Copy,
+                    Some(r0.clone()),
+                    vec![Varnode::constant(7, 4)],
+                ),
+                op_at(
+                    1,
+                    0x1002,
+                    PcodeOpcode::CallOther,
+                    None,
+                    vec![Varnode::constant(62, 4)],
+                ),
+                op_at(
+                    2,
+                    0x1002,
+                    PcodeOpcode::Call,
+                    None,
+                    vec![Varnode::constant(0x2000, 4)],
+                ),
+                op_at(3, 0x1004, PcodeOpcode::IntAdd, Some(out), vec![r1, r0]),
+            ],
+        );
+        let pcode = pcode_function(vec![block.clone()]);
+        let mut options = crate::nir::builder::materialize::test_support::test_options();
+        options.is_64bit = false;
+        options.pointer_size = 4;
+        options.calling_convention = CallingConvention::Arm32;
+        let mut builder = PreviewBuilder::new(&pcode, &options, None);
+
+        let stmts = builder
+            .lower_block_stmts(&block)
+            .expect("lower ARM call block");
+
+        assert!(
+            matches!(
+                &stmts[0],
+                HirStmt::Assign {
+                    rhs: HirExpr::Call { args, .. },
+                    ..
+                } if matches!(args.as_slice(), [HirExpr::Const(7, _)])
+            ),
+            "{stmts:?}"
         );
     }
 
