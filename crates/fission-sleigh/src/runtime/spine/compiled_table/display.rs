@@ -291,31 +291,37 @@ pub(super) fn format_operand_with_display_kind(
 
 pub(super) fn operand_display_index(operand: &BoundOperand) -> Option<usize> {
     match operand {
-        BoundOperand::Immediate { value, .. } => Some(*value as usize),
-        BoundOperand::Register { index, .. } => Some(*index as usize),
-        BoundOperand::NamedVarnode { display_index, .. } => display_index.map(|idx| idx as usize),
-        BoundOperand::Relative { target } => Some(*target as usize),
+        BoundOperand::Immediate { value, .. } => usize::try_from(*value).ok(),
+        BoundOperand::Register { index, .. } => usize::try_from(*index).ok(),
+        BoundOperand::NamedVarnode { display_index, .. } => {
+            display_index.and_then(|idx| usize::try_from(idx).ok())
+        }
+        BoundOperand::Relative { target } => usize::try_from(*target).ok(),
         BoundOperand::Memory {
             absolute,
             displacement,
             ..
-        } => absolute
-            .map(|value| value as usize)
-            .or_else(|| usize::try_from(*displacement).ok()),
+        } => match absolute {
+            Some(value) => usize::try_from(*value).ok(),
+            None => usize::try_from(*displacement).ok(),
+        },
     }
 }
 
 pub(super) fn operand_display_value(operand: &BoundOperand) -> Option<i64> {
     match operand {
-        BoundOperand::Immediate { value, .. } => Some(*value as i64),
+        BoundOperand::Immediate { value, .. } => i64::try_from(*value).ok(),
         BoundOperand::Register { index, .. } => Some(i64::from(*index)),
         BoundOperand::NamedVarnode { display_index, .. } => display_index.map(i64::from),
-        BoundOperand::Relative { target } => Some(*target as i64),
+        BoundOperand::Relative { target } => i64::try_from(*target).ok(),
         BoundOperand::Memory {
             absolute,
             displacement,
             ..
-        } => absolute.map(|value| value as i64).or(Some(*displacement)),
+        } => match absolute {
+            Some(value) => i64::try_from(*value).ok(),
+            None => Some(*displacement),
+        },
     }
 }
 
@@ -628,6 +634,8 @@ mod tests {
         let dummy_zero_size = ["encoded_size: ", "0"].concat();
         let fixed_handle_fallback = ["bound_operand", "from_fixed_handle"].join("_");
         let whitespace_len_fallback = "first_whitespace\n        .unwrap_or";
+        let lossy_display_index_cast = ["value", "as", "usize"].join(" ");
+        let lossy_display_value_cast = ["value", "as", "i64"].join(" ");
 
         assert!(
             !source.contains(&dummy_immediate_fallback),
@@ -644,6 +652,11 @@ mod tests {
         assert!(
             !source.contains(whitespace_len_fallback),
             "display rendering must validate first_whitespace instead of silently slicing at pieces.len()"
+        );
+        assert!(
+            !source.contains(&lossy_display_index_cast)
+                && !source.contains(&lossy_display_value_cast),
+            "display rendering must not truncate display table indexes or values with lossy casts"
         );
     }
 
@@ -818,6 +831,36 @@ mod tests {
         assert!(
             err.to_string().contains("first_whitespace"),
             "unexpected display error: {err:#}"
+        );
+    }
+
+    #[test]
+    fn display_operand_tables_ignore_overflowing_indexes() {
+        let operand = BoundOperand::Immediate {
+            value: u64::MAX,
+            encoded_size: 8,
+            signed: false,
+        };
+        let kind = crate::compiler::CompiledDisplayOperandKind::NameTable(vec![
+            "truncated-zero".to_string()
+        ]);
+
+        assert_eq!(
+            format_operand_with_display_kind(&operand, Some(&kind)),
+            format_operand(&operand)
+        );
+    }
+
+    #[test]
+    fn display_value_hex_ignores_overflowing_signed_values() {
+        let operand = BoundOperand::Relative {
+            target: i64::MAX as u64 + 1,
+        };
+        let kind = crate::compiler::CompiledDisplayOperandKind::ValueHex;
+
+        assert_eq!(
+            format_operand_with_display_kind(&operand, Some(&kind)),
+            format_operand(&operand)
         );
     }
 
