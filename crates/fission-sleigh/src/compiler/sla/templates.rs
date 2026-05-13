@@ -969,9 +969,10 @@ mod tests {
     #[test]
     fn map_pcode_opcode_has_no_broad_unsupported_fallback() {
         let source = include_str!("templates.rs");
+        let broad_unsupported_fallback = ["_ => Ok(CompiledOpTplOpcode", "::Unsupported)"].join("");
 
         assert!(
-            !source.contains("_ => Ok(CompiledOpTplOpcode::Unsupported)"),
+            !source.contains(&broad_unsupported_fallback),
             "compiled .sla opcode mapping must fail closed or preserve known opcodes, not downgrade through a broad Unsupported fallback"
         );
     }

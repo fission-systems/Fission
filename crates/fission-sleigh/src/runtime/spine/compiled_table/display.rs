@@ -326,6 +326,13 @@ pub(super) fn decoded_references(
 ) -> Vec<DecodedReference> {
     let mut refs = Vec::new();
     for (operand_index, handle) in handles.iter().enumerate() {
+        if let Some(reference) = handle.subtable_state.as_deref().and_then(|state| {
+            reference_from_subtable_state(address, length, flow_kind, operand_index, state)
+                .or_else(|| inst_next_relative_reference_from_handle(operand_index, handle, state))
+        }) {
+            refs.push(reference);
+            continue;
+        }
         let Some(operand) = handle.debug_value.as_ref() else {
             continue;
         };
@@ -421,6 +428,112 @@ pub(super) fn decoded_references(
         }
     }
     refs
+}
+
+fn inst_next_relative_reference_from_handle(
+    operand_index: usize,
+    handle: &RuntimeHandle,
+    state: &RuntimeConstructState,
+) -> Option<DecodedReference> {
+    if !state_uses_inst_next_pattern_expression(state) {
+        return None;
+    }
+    let target = match handle.debug_value.as_ref() {
+        Some(BoundOperand::Immediate { value, .. }) => Some(*value),
+        Some(BoundOperand::Memory { absolute, .. }) => *absolute,
+        _ => handle
+            .fixed
+            .offset_space
+            .is_none()
+            .then_some(handle.fixed.offset_offset),
+    }?;
+    Some(DecodedReference {
+        target,
+        kind: DecodedReferenceKind::RipRelativeAddress,
+        operand_index,
+    })
+}
+
+fn reference_from_subtable_state(
+    address: u64,
+    length: usize,
+    flow_kind: DecodedFlowKind,
+    operand_index: usize,
+    state: &RuntimeConstructState,
+) -> Option<DecodedReference> {
+    if let Some(BoundOperand::Memory {
+        displacement,
+        absolute,
+        ..
+    }) = first_rip_relative_memory(state)
+    {
+        let target = absolute.or_else(|| {
+            address
+                .checked_add(length as u64)
+                .and_then(|base| add_signed(base, *displacement))
+        })?;
+        return Some(DecodedReference {
+            target,
+            kind: DecodedReferenceKind::RipRelativeAddress,
+            operand_index,
+        });
+    }
+
+    let target = first_relative_target(state)?;
+    let kind = match flow_kind {
+        DecodedFlowKind::Call => DecodedReferenceKind::CallTarget,
+        DecodedFlowKind::Jump | DecodedFlowKind::ConditionalJump => {
+            DecodedReferenceKind::BranchTarget
+        }
+        _ => DecodedReferenceKind::RipRelativeAddress,
+    };
+    Some(DecodedReference {
+        target,
+        kind,
+        operand_index,
+    })
+}
+
+fn state_uses_inst_next_pattern_expression(state: &RuntimeConstructState) -> bool {
+    state.handles.iter().any(|handle| {
+        operand_spec_uses_inst_next_pattern_expression(&handle.spec)
+            || handle
+                .subtable_state
+                .as_deref()
+                .is_some_and(state_uses_inst_next_pattern_expression)
+    })
+}
+
+fn operand_spec_uses_inst_next_pattern_expression(spec: &CompiledOperandSpec) -> bool {
+    match spec {
+        CompiledOperandSpec::SlaVarnodeListExpression { expr, .. }
+        | CompiledOperandSpec::SlaValueMapExpression { expr, .. }
+        | CompiledOperandSpec::SlaPatternExpression { expr, .. } => {
+            pattern_expression_uses_inst_next(expr)
+        }
+        _ => false,
+    }
+}
+
+fn pattern_expression_uses_inst_next(expr: &CompiledPatternExpression) -> bool {
+    match expr {
+        CompiledPatternExpression::InstNext => true,
+        CompiledPatternExpression::Add(lhs, rhs)
+        | CompiledPatternExpression::Sub(lhs, rhs)
+        | CompiledPatternExpression::Mul(lhs, rhs)
+        | CompiledPatternExpression::Div(lhs, rhs)
+        | CompiledPatternExpression::LeftShift(lhs, rhs)
+        | CompiledPatternExpression::RightShift(lhs, rhs)
+        | CompiledPatternExpression::And(lhs, rhs)
+        | CompiledPatternExpression::Or(lhs, rhs)
+        | CompiledPatternExpression::Xor(lhs, rhs) => {
+            pattern_expression_uses_inst_next(lhs) || pattern_expression_uses_inst_next(rhs)
+        }
+        CompiledPatternExpression::Negate(inner) | CompiledPatternExpression::Not(inner) => {
+            pattern_expression_uses_inst_next(inner)
+        }
+        _ => false,
+    }
 }
 
 pub(super) fn first_rip_relative_memory(state: &RuntimeConstructState) -> Option<&BoundOperand> {
