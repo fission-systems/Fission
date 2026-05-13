@@ -908,6 +908,10 @@ fn compiled_table_policy_symbols_stay_architecture_neutral() {
     let context_expr_lossy_word_cast = "eval_pattern_expression(expr)? as u32";
     let context_expr_unchecked_left_shift = "raw << (change.shift as u32)";
     let context_expr_unchecked_right_shift = "raw >> ((-change.shift) as u32)";
+    let pattern_token_lossy_i64_cast = ")? as i64)";
+    let pattern_token_at_lossy_i64_cast = ")? as i64),";
+    let pattern_context_lossy_sign_extend = "Ok(((raw << shift) as i64) >> shift)";
+    let pattern_context_lossy_raw_cast = "Ok(raw as i64)";
     let pattern_expr_unchecked_add =
         "eval_pattern_expression(lhs)? + self.eval_pattern_expression(rhs)?";
     let pattern_expr_unchecked_sub =
@@ -1216,6 +1220,14 @@ fn compiled_table_policy_symbols_stay_architecture_neutral() {
                 && !source.contains(context_expr_unchecked_left_shift)
                 && !source.contains(context_expr_unchecked_right_shift),
             "{} still truncates or unchecked-shifts context-change pattern expressions",
+            file.display()
+        );
+        assert!(
+            !source.contains(pattern_token_lossy_i64_cast)
+                && !source.contains(pattern_token_at_lossy_i64_cast)
+                && !source.contains(pattern_context_lossy_sign_extend)
+                && !source.contains(pattern_context_lossy_raw_cast),
+            "{} still uses unnamed token/context pattern value bit casts",
             file.display()
         );
         assert!(

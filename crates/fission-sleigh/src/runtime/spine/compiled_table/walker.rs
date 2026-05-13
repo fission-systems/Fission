@@ -139,7 +139,7 @@ mod construct_state_offset_tests {
         checked_pattern_add, checked_pattern_div, checked_pattern_left_shift, checked_pattern_mul,
         checked_pattern_negate, checked_pattern_right_shift, checked_pattern_sub,
         checked_relative_offset, context_change_expr_word, context_change_mask_word,
-        shifted_context_change_word,
+        pattern_context_bits_i64, shifted_context_change_word,
     };
     use crate::compiler::{compile_x86_64_frontend, discovery};
 
@@ -241,6 +241,17 @@ mod construct_state_offset_tests {
         assert_eq!(checked_relative_offset(10, 3, "test").unwrap(), 13);
         assert!(checked_relative_offset(0, -1, "test").is_err());
         assert!(checked_relative_offset(usize::MAX, 1, "test").is_err());
+    }
+
+    #[test]
+    fn pattern_context_bits_preserve_or_sign_extend_bit_patterns() {
+        assert_eq!(pattern_context_bits_i64(0xff, 8, false).unwrap(), 0xff);
+        assert_eq!(pattern_context_bits_i64(0xff, 8, true).unwrap(), -1);
+        assert_eq!(pattern_context_bits_i64(0x80, 8, true).unwrap(), -128);
+        assert_eq!(
+            pattern_context_bits_i64(0x8000_0000_0000_0000, 64, false).unwrap(),
+            i64::MIN
+        );
     }
 }
 
@@ -963,7 +974,7 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                 } = expr
                 {
                     let token_base = self.token_base_for_sla_field(operand_absolute_offset);
-                    let value = read_sla_token_field_at(
+                    let value = u64_to_i64_bits(read_sla_token_field_at(
                         self.ctx,
                         token_base,
                         *big_endian,
@@ -973,7 +984,7 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                         *byte_start,
                         *byte_end,
                         *shift,
-                    )? as i64;
+                    )?);
                     encoded_size = ((*byte_end - *byte_start) + 1).max(1);
                     self.advance_cursor_past_sla_field(token_base, encoded_size)?;
                     value
@@ -1226,7 +1237,7 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                 byte_start,
                 byte_end,
                 shift,
-            } => Ok(read_sla_token_field(
+            } => Ok(u64_to_i64_bits(read_sla_token_field(
                 self.ctx,
                 *big_endian,
                 *sign_bit,
@@ -1235,7 +1246,7 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                 *byte_start,
                 *byte_end,
                 *shift,
-            )? as i64),
+            )?)),
             CompiledPatternExpression::ContextField {
                 sign_bit,
                 bit_start,
@@ -1253,12 +1264,7 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                     *bit_start,
                     bit_width,
                 )?);
-                if *sign_bit {
-                    let shift = 64 - bit_width;
-                    Ok(((raw << shift) as i64) >> shift)
-                } else {
-                    Ok(raw as i64)
-                }
+                pattern_context_bits_i64(raw, bit_width, *sign_bit)
             }
             CompiledPatternExpression::OperandValue { index } => {
                 self.eval_operand_value_expression(*index)
@@ -1344,7 +1350,7 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                 byte_end,
                 shift,
                 ..
-            } => Ok(read_sla_token_field_at(
+            } => Ok(u64_to_i64_bits(read_sla_token_field_at(
                 self.ctx,
                 operand_absolute_offset,
                 *big_endian,
@@ -1354,7 +1360,7 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                 *byte_start,
                 *byte_end,
                 *shift,
-            )? as i64),
+            )?)),
             CompiledOperandSpec::SlaVarnodeListExpression { expr, .. }
             | CompiledOperandSpec::SlaValueMapExpression { expr, .. }
             | CompiledOperandSpec::SlaPatternExpression { expr, .. } => {
@@ -1370,12 +1376,7 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                     *bit_offset,
                     *bit_width,
                 )?);
-                if *sign_extend {
-                    let shift = 64 - bit_width;
-                    Ok(((raw << shift) as i64) >> shift)
-                } else {
-                    Ok(raw as i64)
-                }
+                pattern_context_bits_i64(raw, *bit_width, *sign_extend)
             }
             CompiledOperandSpec::SlaFixedVarnode { .. }
             | CompiledOperandSpec::SubtableEvaluation { .. } => {
@@ -1591,6 +1592,23 @@ fn checked_pattern_right_shift(lhs: i64, rhs: i64) -> Result<i64> {
         .checked_shr(amount)
         .ok_or_else(|| anyhow!("pattern expression right shift {amount} exceeds i64 width"))?;
     Ok(shifted as i64)
+}
+
+fn pattern_context_bits_i64(raw: u64, bit_width: u32, sign_extend: bool) -> Result<i64> {
+    if bit_width > 64 {
+        bail!("pattern context bit width {bit_width} exceeds i64 width");
+    }
+    if sign_extend {
+        let shift = 64u32
+            .checked_sub(bit_width)
+            .ok_or_else(|| anyhow!("pattern context sign-extension shift underflow"))?;
+        let shifted = raw
+            .checked_shl(shift)
+            .ok_or_else(|| anyhow!("pattern context left shift {shift} exceeds i64 width"))?;
+        Ok(u64_to_i64_bits(shifted) >> shift)
+    } else {
+        Ok(u64_to_i64_bits(raw))
+    }
 }
 
 fn pattern_shift_amount(value: i64) -> Result<u32> {
