@@ -245,8 +245,9 @@ fn generated_runtime_records_decision_trace_for_startup_store() {
     let compiled = compile_x86_64_frontend().expect("compile frontend");
     let ctx = CompiledInstructionContext::parse(&[0xC7, 0x00, 0x01, 0x00, 0x00, 0x00], 0x1000)
         .expect("decode context");
-    let selection =
-        select_constructor(&compiled, "instruction", &ctx).expect("constructor selection");
+    let selection = select_constructor(&compiled, "instruction", &ctx)
+        .expect("constructor selection")
+        .expect("constructor match");
     let strategy = RuntimeDecodeStrategy::for_table(&compiled, None, "instruction", &ctx);
     let state = bind_instruction(&compiled, strategy, &ctx, selection).expect("bind instruction");
     assert_eq!(state.match_trace.root_bucket, "instruction");
@@ -880,6 +881,8 @@ fn compiled_table_policy_symbols_stay_architecture_neutral() {
     let bit_constraint_zero_padding =
         "if let Some(byte) = ctx.bytes.get(ctx.cursor + *offset as usize + i)";
     let matcher_opcode_len_zero_fallback = ".max()\n            .unwrap_or(0)";
+    let token_span_try_from_ok_fallback = "i32::try_from(byte_start).ok()?";
+    let token_span_missing_subtable_none_fallback = "compiled.subtables.get(table_name)?";
     let selection_unchecked_ranges = [
         ".get(self.ctx.cursor + usize::from(offset))",
         "self.ctx.cursor + byte_offset as usize + i as usize",
@@ -1131,6 +1134,12 @@ fn compiled_table_policy_symbols_stay_architecture_neutral() {
         assert!(
             !source.contains(matcher_opcode_len_zero_fallback),
             "{} still treats matchers without instruction bytes as zero-length opcodes",
+            file.display()
+        );
+        assert!(
+            !source.contains(token_span_try_from_ok_fallback)
+                && !source.contains(token_span_missing_subtable_none_fallback),
+            "{} still hides malformed SLA token-span analysis as a non-sequential operand",
             file.display()
         );
         for forbidden in selection_unchecked_ranges {

@@ -7,10 +7,16 @@ struct SlaTokenByteSpan {
 }
 
 impl SlaTokenByteSpan {
-    fn shifted(self, delta: i32) -> Option<Self> {
-        Some(Self {
-            start: self.start.checked_add(delta)?,
-            end: self.end.checked_add(delta)?,
+    fn shifted(self, delta: i32) -> Result<Self> {
+        Ok(Self {
+            start: self
+                .start
+                .checked_add(delta)
+                .ok_or_else(|| anyhow!("SLA token span start overflowed"))?,
+            end: self
+                .end
+                .checked_add(delta)
+                .ok_or_else(|| anyhow!("SLA token span end overflowed"))?,
         })
     }
 
@@ -26,9 +32,9 @@ fn operand_spec_primary_sla_token_span(
     compiled: &CompiledFrontend,
     spec: &CompiledOperandSpec,
     depth: usize,
-) -> Option<SlaTokenByteSpan> {
+) -> Result<Option<SlaTokenByteSpan>> {
     if depth > 8 {
-        return None;
+        bail!("SLA token span recursion limit exceeded");
     }
     match spec {
         CompiledOperandSpec::SlaTokenField {
@@ -51,7 +57,7 @@ fn operand_spec_primary_sla_token_span(
             reloffset,
             offsetbase: _,
             ..
-        } => token_span_from_sla_field(*reloffset, *byte_start, *byte_end),
+        } => token_span_from_sla_field(*reloffset, *byte_start, *byte_end).map(Some),
         CompiledOperandSpec::SlaVarnodeListExpression {
             expr,
             reloffset,
@@ -73,22 +79,23 @@ fn operand_spec_primary_sla_token_span(
             table_name,
             reloffset,
             offsetbase: _,
-        } => subtable_primary_sla_token_span(compiled, table_name, depth + 1)
-            .and_then(|span| span.shifted(*reloffset)),
-        _ => None,
+        } => subtable_primary_sla_token_span(compiled, table_name, depth + 1)?
+            .map(|span| span.shifted(*reloffset))
+            .transpose(),
+        _ => Ok(None),
     }
 }
 
 fn pattern_expression_primary_sla_token_span(
     reloffset: i32,
     expr: &CompiledPatternExpression,
-) -> Option<SlaTokenByteSpan> {
+) -> Result<Option<SlaTokenByteSpan>> {
     match expr {
         CompiledPatternExpression::TokenField {
             byte_start,
             byte_end,
             ..
-        } => token_span_from_sla_field(reloffset, *byte_start, *byte_end),
+        } => token_span_from_sla_field(reloffset, *byte_start, *byte_end).map(Some),
         CompiledPatternExpression::Add(lhs, rhs)
         | CompiledPatternExpression::Sub(lhs, rhs)
         | CompiledPatternExpression::Mul(lhs, rhs)
@@ -98,18 +105,18 @@ fn pattern_expression_primary_sla_token_span(
         | CompiledPatternExpression::And(lhs, rhs)
         | CompiledPatternExpression::Or(lhs, rhs)
         | CompiledPatternExpression::Xor(lhs, rhs) => {
-            let lhs = pattern_expression_primary_sla_token_span(reloffset, lhs);
-            let rhs = pattern_expression_primary_sla_token_span(reloffset, rhs);
-            match (lhs, rhs) {
+            let lhs = pattern_expression_primary_sla_token_span(reloffset, lhs)?;
+            let rhs = pattern_expression_primary_sla_token_span(reloffset, rhs)?;
+            Ok(match (lhs, rhs) {
                 (Some(lhs), Some(rhs)) => Some(lhs.union(rhs)),
                 (Some(span), None) | (None, Some(span)) => Some(span),
                 (None, None) => None,
-            }
+            })
         }
         CompiledPatternExpression::Negate(inner) | CompiledPatternExpression::Not(inner) => {
             pattern_expression_primary_sla_token_span(reloffset, inner)
         }
-        _ => None,
+        _ => Ok(None),
     }
 }
 
@@ -117,38 +124,49 @@ fn subtable_primary_sla_token_span(
     compiled: &CompiledFrontend,
     table_name: &str,
     depth: usize,
-) -> Option<SlaTokenByteSpan> {
+) -> Result<Option<SlaTokenByteSpan>> {
     if depth > 8 {
-        return None;
+        bail!("SLA token span recursion limit exceeded");
     }
-    let subtable = compiled.subtables.get(table_name)?;
-    subtable
-        .constructors
-        .iter()
-        .filter_map(|constructor| {
-            constructor
-                .constructor_template
-                .handles
-                .iter()
-                .find_map(|handle| {
-                    operand_spec_primary_sla_token_span(compiled, &handle.spec, depth + 1)
-                })
-        })
-        .reduce(SlaTokenByteSpan::union)
+    let subtable = compiled
+        .subtables
+        .get(table_name)
+        .ok_or_else(|| anyhow!("missing subtable {table_name} for SLA token span"))?;
+    let mut span: Option<SlaTokenByteSpan> = None;
+    for constructor in &subtable.constructors {
+        for handle in &constructor.constructor_template.handles {
+            if let Some(handle_span) =
+                operand_spec_primary_sla_token_span(compiled, &handle.spec, depth + 1)?
+            {
+                span = Some(match span {
+                    Some(current) => current.union(handle_span),
+                    None => handle_span,
+                });
+                break;
+            }
+        }
+    }
+    Ok(span)
 }
 
 fn token_span_from_sla_field(
     reloffset: i32,
     byte_start: u32,
     byte_end: u32,
-) -> Option<SlaTokenByteSpan> {
-    let start = i32::try_from(byte_start).ok()?;
+) -> Result<SlaTokenByteSpan> {
+    let start =
+        i32::try_from(byte_start).map_err(|_| anyhow!("SLA token byte_start exceeds i32"))?;
     let end = byte_end
         .checked_add(1)
-        .and_then(|end| i32::try_from(end).ok())?;
-    Some(SlaTokenByteSpan {
-        start: reloffset.checked_add(start)?,
-        end: reloffset.checked_add(end)?,
+        .ok_or_else(|| anyhow!("SLA token byte_end overflowed"))?;
+    let end = i32::try_from(end).map_err(|_| anyhow!("SLA token byte_end exceeds i32"))?;
+    Ok(SlaTokenByteSpan {
+        start: reloffset
+            .checked_add(start)
+            .ok_or_else(|| anyhow!("SLA token span start overflowed"))?,
+        end: reloffset
+            .checked_add(end)
+            .ok_or_else(|| anyhow!("SLA token span end overflowed"))?,
     })
 }
 
@@ -182,47 +200,57 @@ pub(super) fn read_sint(bytes: &[u8], offset: usize, size: u32) -> Result<i64> {
 pub(super) fn constructor_consumes_sequential_operand_bytes(
     compiled: &CompiledFrontend,
     constructor: &CompiledExecutableConstructor,
-) -> bool {
-    constructor
-        .constructor_template
-        .handles
-        .iter()
-        .any(|handle| operand_spec_consumes_sequential_bytes(compiled, &handle.spec, 0))
+) -> Result<bool> {
+    for handle in &constructor.constructor_template.handles {
+        if operand_spec_consumes_sequential_bytes(compiled, &handle.spec, 0)? {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 pub(super) fn subtable_consumes_sequential_bytes(
     compiled: &CompiledFrontend,
     table_name: &str,
     depth: usize,
-) -> bool {
+) -> Result<bool> {
     if depth > 8 {
-        return false;
+        bail!("SLA sequential-byte recursion limit exceeded");
     }
-    let Some(subtable) = compiled.subtables.get(table_name) else {
-        return false;
-    };
-    subtable.constructors.iter().any(|constructor| {
-        constructor_consumes_sequential_operand_bytes_with_depth(compiled, constructor, depth + 1)
-    })
+    let subtable = compiled
+        .subtables
+        .get(table_name)
+        .ok_or_else(|| anyhow!("missing subtable {table_name} for sequential-byte analysis"))?;
+    for constructor in &subtable.constructors {
+        if constructor_consumes_sequential_operand_bytes_with_depth(
+            compiled,
+            constructor,
+            depth + 1,
+        )? {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 pub(super) fn constructor_consumes_sequential_operand_bytes_with_depth(
     compiled: &CompiledFrontend,
     constructor: &CompiledExecutableConstructor,
     depth: usize,
-) -> bool {
-    constructor
-        .constructor_template
-        .handles
-        .iter()
-        .any(|handle| operand_spec_consumes_sequential_bytes(compiled, &handle.spec, depth))
+) -> Result<bool> {
+    for handle in &constructor.constructor_template.handles {
+        if operand_spec_consumes_sequential_bytes(compiled, &handle.spec, depth)? {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 pub(super) fn operand_spec_consumes_sequential_bytes(
     compiled: &CompiledFrontend,
     spec: &CompiledOperandSpec,
     depth: usize,
-) -> bool {
+) -> Result<bool> {
     match spec {
         CompiledOperandSpec::SlaTokenField { .. }
         | CompiledOperandSpec::SlaVarnodeList { .. }
@@ -230,15 +258,15 @@ pub(super) fn operand_spec_consumes_sequential_bytes(
         | CompiledOperandSpec::SlaVarnodeListExpression { .. }
         | CompiledOperandSpec::SlaValueMapExpression { .. }
         | CompiledOperandSpec::SlaPatternExpression { .. }
-            if operand_spec_primary_sla_token_span(compiled, spec, depth).is_some() =>
+            if operand_spec_primary_sla_token_span(compiled, spec, depth)?.is_some() =>
         {
-            true
+            Ok(true)
         }
-        CompiledOperandSpec::SlaValueMap { .. } => true,
+        CompiledOperandSpec::SlaValueMap { .. } => Ok(true),
         CompiledOperandSpec::SubtableEvaluation { table_name, .. } => {
             subtable_consumes_sequential_bytes(compiled, table_name, depth + 1)
         }
-        _ => false,
+        _ => Ok(false),
     }
 }
 

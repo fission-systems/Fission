@@ -43,7 +43,7 @@ pub(super) fn candidate_selections<'a>(
             },
         }
     } else {
-        select_constructor(compiled, "instruction", ctx).ok_or_else(|| {
+        select_constructor(compiled, "instruction", ctx)?.ok_or_else(|| {
             RuntimeSleighError::DecodeNoMatch {
                 language: compiled.entry_id.clone(),
                 address,
@@ -73,9 +73,12 @@ pub(super) fn select_constructor<'a>(
     compiled: &'a CompiledFrontend,
     table_name: &str,
     ctx: &CompiledInstructionContext<'_>,
-) -> Option<RuntimeSelection<'a>> {
-    let subtable = compiled.subtables.get(table_name)?;
-    spine::select_constructor(
+) -> Result<Option<RuntimeSelection<'a>>> {
+    let subtable = compiled
+        .subtables
+        .get(table_name)
+        .ok_or_else(|| anyhow!("missing subtable {table_name} for constructor selection"))?;
+    Ok(spine::select_constructor(
         compiled,
         [(
             table_name.to_string(),
@@ -83,7 +86,7 @@ pub(super) fn select_constructor<'a>(
         )],
         || CompiledDecisionProbeEvaluator::new(ctx),
         |constructor| constructor_matches(ctx, constructor),
-    )
+    ))
 }
 
 pub(super) struct CompiledDecisionProbeEvaluator<'a, 'b> {

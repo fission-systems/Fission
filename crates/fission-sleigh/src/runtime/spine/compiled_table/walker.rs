@@ -196,7 +196,7 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
             == CompiledTemplateSource::SpecDerived
         {
             if selection.trace.root_bucket == "instruction"
-                && constructor_consumes_sequential_operand_bytes(compiled, selection.constructor)
+                && constructor_consumes_sequential_operand_bytes(compiled, selection.constructor)?
             {
                 instruction_terminal_pattern_len(&selection)?
             } else if selection.trace.root_bucket == "instruction" {
@@ -986,7 +986,7 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                 if spec_derived_sla_operand {
                     self.minimum_length = self.minimum_length.max(sub_relative_length);
                     self.cursor = cursor_start;
-                } else if !subtable_consumes_sequential_bytes(self.compiled, table_name, 0) {
+                } else if !subtable_consumes_sequential_bytes(self.compiled, table_name, 0)? {
                     self.minimum_length = self.minimum_length.max(sub_relative_length);
                     self.cursor = cursor_start;
                 } else {
@@ -1440,7 +1440,7 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                 },
             }
         } else {
-            select_constructor(self.compiled, table_name, &sub_ctx).ok_or_else(|| {
+            select_constructor(self.compiled, table_name, &sub_ctx)?.ok_or_else(|| {
                 anyhow!(
                     "DecodeNoMatch in subtable {table_name} at 0x{:x}",
                     sub_ctx.address.wrapping_add(sub_ctx.cursor as u64)
