@@ -407,6 +407,16 @@ fn sla_root_unique_base_is_not_synthesized() {
 }
 
 #[test]
+fn sla_constructor_identity_is_not_silently_overwritten() {
+    let templates = include_str!("templates.rs");
+    let forbidden = "constructors_by_index.insert(slot, template);";
+    assert!(
+        !templates.contains(forbidden),
+        "compiled .sla constructor identity must fail closed instead of overwriting duplicate slots: {forbidden}"
+    );
+}
+
+#[test]
 fn decodes_x86_varnode_list_selector_expressions() {
     let Some(path) = packaged_sla_path("x86", "x86-64.sla") else {
         return;

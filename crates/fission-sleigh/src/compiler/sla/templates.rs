@@ -422,13 +422,20 @@ pub(super) fn decode_construct_templates(
             // constructor that the .sla decision tree selected.
             let slot = child
                 .attr_unsigned(sla_format::ATTR_ID)
-                .map(|value| value as usize)
+                .map(|value| {
+                    usize::try_from(value).map_err(|_| {
+                        anyhow!("constructor id {value} in subtable {name} does not fit host usize")
+                    })
+                })
+                .transpose()?
                 .unwrap_or(local_index);
             let template = match parse_constructor(id, &name, child, slot) {
                 Ok(template) => template,
                 Err(reason) => return Err(anyhow!(reason)),
             };
-            constructors_by_index.insert(slot, template);
+            if constructors_by_index.insert(slot, template).is_some() {
+                bail!("duplicate constructor id {slot} in subtable {name}");
+            }
         }
 
         for child in &subtable_sym.children {
