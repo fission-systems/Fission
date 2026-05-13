@@ -135,7 +135,11 @@ fn required_const_tpl_u32(value: Option<u64>, role: &str) -> Result<u32> {
 
 #[cfg(test)]
 mod construct_state_offset_tests {
-    use super::{context_change_expr_word, context_change_mask_word, shifted_context_change_word};
+    use super::{
+        checked_pattern_add, checked_pattern_div, checked_pattern_left_shift, checked_pattern_mul,
+        checked_pattern_negate, checked_pattern_right_shift, checked_pattern_sub,
+        context_change_expr_word, context_change_mask_word, shifted_context_change_word,
+    };
     use crate::compiler::{compile_x86_64_frontend, discovery};
 
     #[test]
@@ -201,6 +205,33 @@ mod construct_state_offset_tests {
         assert_eq!(shifted_context_change_word(0x8000_0000, -31).unwrap(), 1);
         assert!(shifted_context_change_word(1, 32).is_err());
         assert!(shifted_context_change_word(1, -32).is_err());
+    }
+
+    #[test]
+    fn pattern_expression_arithmetic_fails_closed_on_overflow() {
+        assert_eq!(checked_pattern_add(40, 2).unwrap(), 42);
+        assert_eq!(checked_pattern_sub(40, 2).unwrap(), 38);
+        assert_eq!(checked_pattern_mul(6, 7).unwrap(), 42);
+        assert_eq!(checked_pattern_div(84, 2).unwrap(), 42);
+        assert_eq!(checked_pattern_negate(42).unwrap(), -42);
+
+        assert!(checked_pattern_add(i64::MAX, 1).is_err());
+        assert!(checked_pattern_sub(i64::MIN, 1).is_err());
+        assert!(checked_pattern_mul(i64::MAX, 2).is_err());
+        assert!(checked_pattern_div(1, 0).is_err());
+        assert!(checked_pattern_div(i64::MIN, -1).is_err());
+        assert!(checked_pattern_negate(i64::MIN).is_err());
+    }
+
+    #[test]
+    fn pattern_expression_shifts_fail_closed_on_invalid_amounts() {
+        assert_eq!(checked_pattern_left_shift(1, 63).unwrap(), i64::MIN);
+        assert_eq!(checked_pattern_right_shift(-1, 63).unwrap(), 1);
+
+        assert!(checked_pattern_left_shift(1, -1).is_err());
+        assert!(checked_pattern_left_shift(1, 64).is_err());
+        assert!(checked_pattern_right_shift(1, -1).is_err());
+        assert!(checked_pattern_right_shift(1, 64).is_err());
     }
 }
 
@@ -1230,29 +1261,30 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
             CompiledPatternExpression::OperandValue { index } => {
                 self.eval_operand_value_expression(*index)
             }
-            CompiledPatternExpression::Add(lhs, rhs) => {
-                Ok(self.eval_pattern_expression(lhs)? + self.eval_pattern_expression(rhs)?)
-            }
-            CompiledPatternExpression::Sub(lhs, rhs) => {
-                Ok(self.eval_pattern_expression(lhs)? - self.eval_pattern_expression(rhs)?)
-            }
-            CompiledPatternExpression::Mul(lhs, rhs) => {
-                Ok(self.eval_pattern_expression(lhs)? * self.eval_pattern_expression(rhs)?)
-            }
+            CompiledPatternExpression::Add(lhs, rhs) => checked_pattern_add(
+                self.eval_pattern_expression(lhs)?,
+                self.eval_pattern_expression(rhs)?,
+            ),
+            CompiledPatternExpression::Sub(lhs, rhs) => checked_pattern_sub(
+                self.eval_pattern_expression(lhs)?,
+                self.eval_pattern_expression(rhs)?,
+            ),
+            CompiledPatternExpression::Mul(lhs, rhs) => checked_pattern_mul(
+                self.eval_pattern_expression(lhs)?,
+                self.eval_pattern_expression(rhs)?,
+            ),
             CompiledPatternExpression::Div(lhs, rhs) => {
                 let rhs = self.eval_pattern_expression(rhs)?;
-                if rhs == 0 {
-                    bail!("pattern expression divide by zero");
-                }
-                Ok(self.eval_pattern_expression(lhs)? / rhs)
+                checked_pattern_div(self.eval_pattern_expression(lhs)?, rhs)
             }
-            CompiledPatternExpression::LeftShift(lhs, rhs) => Ok(self
-                .eval_pattern_expression(lhs)?
-                << (self.eval_pattern_expression(rhs)? as u32)),
-            CompiledPatternExpression::RightShift(lhs, rhs) => {
-                let lhs = self.eval_pattern_expression(lhs)? as u64;
-                Ok((lhs >> (self.eval_pattern_expression(rhs)? as u32)) as i64)
-            }
+            CompiledPatternExpression::LeftShift(lhs, rhs) => checked_pattern_left_shift(
+                self.eval_pattern_expression(lhs)?,
+                self.eval_pattern_expression(rhs)?,
+            ),
+            CompiledPatternExpression::RightShift(lhs, rhs) => checked_pattern_right_shift(
+                self.eval_pattern_expression(lhs)?,
+                self.eval_pattern_expression(rhs)?,
+            ),
             CompiledPatternExpression::And(lhs, rhs) => {
                 Ok(self.eval_pattern_expression(lhs)? & self.eval_pattern_expression(rhs)?)
             }
@@ -1262,7 +1294,9 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
             CompiledPatternExpression::Xor(lhs, rhs) => {
                 Ok(self.eval_pattern_expression(lhs)? ^ self.eval_pattern_expression(rhs)?)
             }
-            CompiledPatternExpression::Negate(inner) => Ok(-self.eval_pattern_expression(inner)?),
+            CompiledPatternExpression::Negate(inner) => {
+                checked_pattern_negate(self.eval_pattern_expression(inner)?)
+            }
             CompiledPatternExpression::Not(inner) => Ok(!self.eval_pattern_expression(inner)?),
         }
     }
@@ -1508,4 +1542,53 @@ fn shifted_context_change_word(value: u32, shift: i32) -> Result<u32> {
             .checked_shr(amount)
             .ok_or_else(|| anyhow!("context expression right shift {amount} exceeds u32 width"))
     }
+}
+
+fn checked_pattern_add(lhs: i64, rhs: i64) -> Result<i64> {
+    lhs.checked_add(rhs)
+        .ok_or_else(|| anyhow!("pattern expression add overflowed: {lhs} + {rhs}"))
+}
+
+fn checked_pattern_sub(lhs: i64, rhs: i64) -> Result<i64> {
+    lhs.checked_sub(rhs)
+        .ok_or_else(|| anyhow!("pattern expression subtract overflowed: {lhs} - {rhs}"))
+}
+
+fn checked_pattern_mul(lhs: i64, rhs: i64) -> Result<i64> {
+    lhs.checked_mul(rhs)
+        .ok_or_else(|| anyhow!("pattern expression multiply overflowed: {lhs} * {rhs}"))
+}
+
+fn checked_pattern_div(lhs: i64, rhs: i64) -> Result<i64> {
+    lhs.checked_div(rhs)
+        .ok_or_else(|| anyhow!("pattern expression divide overflowed: {lhs} / {rhs}"))
+}
+
+fn checked_pattern_negate(value: i64) -> Result<i64> {
+    value
+        .checked_neg()
+        .ok_or_else(|| anyhow!("pattern expression negate overflowed: -{value}"))
+}
+
+fn checked_pattern_left_shift(lhs: i64, rhs: i64) -> Result<i64> {
+    let amount = pattern_shift_amount(rhs)?;
+    lhs.checked_shl(amount)
+        .ok_or_else(|| anyhow!("pattern expression left shift {amount} exceeds i64 width"))
+}
+
+fn checked_pattern_right_shift(lhs: i64, rhs: i64) -> Result<i64> {
+    let amount = pattern_shift_amount(rhs)?;
+    let shifted = (lhs as u64)
+        .checked_shr(amount)
+        .ok_or_else(|| anyhow!("pattern expression right shift {amount} exceeds i64 width"))?;
+    Ok(shifted as i64)
+}
+
+fn pattern_shift_amount(value: i64) -> Result<u32> {
+    let amount = u32::try_from(value)
+        .map_err(|_| anyhow!("pattern expression shift amount {value} is negative or too large"))?;
+    if amount >= 64 {
+        bail!("pattern expression shift amount {amount} exceeds i64 width");
+    }
+    Ok(amount)
 }

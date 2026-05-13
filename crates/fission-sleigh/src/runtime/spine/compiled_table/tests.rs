@@ -873,6 +873,15 @@ fn compiled_table_policy_symbols_stay_architecture_neutral() {
     let context_expr_lossy_word_cast = "eval_pattern_expression(expr)? as u32";
     let context_expr_unchecked_left_shift = "raw << (change.shift as u32)";
     let context_expr_unchecked_right_shift = "raw >> ((-change.shift) as u32)";
+    let pattern_expr_unchecked_add =
+        "eval_pattern_expression(lhs)? + self.eval_pattern_expression(rhs)?";
+    let pattern_expr_unchecked_sub =
+        "eval_pattern_expression(lhs)? - self.eval_pattern_expression(rhs)?";
+    let pattern_expr_unchecked_mul =
+        "eval_pattern_expression(lhs)? * self.eval_pattern_expression(rhs)?";
+    let pattern_expr_unchecked_left_shift = "<< (self.eval_pattern_expression(rhs)? as u32)";
+    let pattern_expr_unchecked_right_shift = ">> (self.eval_pattern_expression(rhs)? as u32)";
+    let pattern_expr_unchecked_negate = "-self.eval_pattern_expression(inner)?";
     let pattern_value_zero_fallback = [
         "block.value_words.get(index).copied()",
         "unwrap_or_default()",
@@ -1124,6 +1133,16 @@ fn compiled_table_policy_symbols_stay_architecture_neutral() {
                 && !source.contains(context_expr_unchecked_left_shift)
                 && !source.contains(context_expr_unchecked_right_shift),
             "{} still truncates or unchecked-shifts context-change pattern expressions",
+            file.display()
+        );
+        assert!(
+            !source.contains(pattern_expr_unchecked_add)
+                && !source.contains(pattern_expr_unchecked_sub)
+                && !source.contains(pattern_expr_unchecked_mul)
+                && !source.contains(pattern_expr_unchecked_left_shift)
+                && !source.contains(pattern_expr_unchecked_right_shift)
+                && !source.contains(pattern_expr_unchecked_negate),
+            "{} still evaluates pattern-expression arithmetic without checked helpers",
             file.display()
         );
         assert!(
