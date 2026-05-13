@@ -29,12 +29,14 @@ const STT_OBJECT: u8 = 1;
 const STT_FUNC: u8 = 2;
 const STB_GLOBAL: u8 = 1;
 const STB_WEAK: u8 = 2;
+const EM_PPC64: u16 = 21;
 const EM_ARM: u16 = 40;
 const EM_RISCV: u16 = 243;
 const R_ARM_PC24: u32 = 1;
 const R_ARM_ABS32: u32 = 2;
 const R_ARM_CALL: u32 = 28;
 const R_ARM_JUMP24: u32 = 29;
+const R_PPC64_ADDR64: u32 = 38;
 const R_RISCV_HI20: u32 = 26;
 const R_RISCV_LO12_I: u32 = 27;
 const R_RISCV_LO12_S: u32 = 28;
@@ -133,6 +135,17 @@ impl ElfLoader {
                 .iter()
                 .map(|shdr| extract_cstring(&strtab_data, shdr.sh_name as usize))
                 .collect();
+            let ppc64_function_descriptors = if is_relocatable && header.machine == EM_PPC64 {
+                ppc64_function_descriptor_map_64(
+                    bytes,
+                    &shdrs,
+                    &section_addresses,
+                    &section_names,
+                    endian,
+                )
+            } else {
+                HashMap::new()
+            };
 
             for (index, shdr) in shdrs.iter().enumerate() {
                 let virtual_address = section_addresses
@@ -177,6 +190,7 @@ impl ElfLoader {
                         &mut functions_info,
                         &mut global_symbols,
                         &mut global_symbol_sizes,
+                        &ppc64_function_descriptors,
                         endian,
                     );
                 }
@@ -422,6 +436,7 @@ impl ElfLoader {
         out_funcs: &mut Vec<FunctionInfo>,
         out_globals: &mut HashMap<u64, String>,
         out_global_sizes: &mut HashMap<u64, u64>,
+        function_descriptors: &HashMap<u64, u64>,
         endian: Endian,
     ) {
         // Resolve the symbol string table from the linked section header
@@ -502,7 +517,7 @@ impl ElfLoader {
                 .map(|shdr| (shdr.sh_flags & SHF_EXECINSTR) != 0)
                 .unwrap_or(false);
 
-            let address = if is_relocatable {
+            let raw_address = if is_relocatable {
                 section_addresses
                     .get(sym.st_shndx as usize)
                     .copied()
@@ -513,9 +528,9 @@ impl ElfLoader {
             };
 
             if sym_type == STT_OBJECT {
-                out_globals.entry(address).or_insert(name);
+                out_globals.entry(raw_address).or_insert(name);
                 if sym.st_size != 0 {
-                    out_global_sizes.entry(address).or_insert(sym.st_size);
+                    out_global_sizes.entry(raw_address).or_insert(sym.st_size);
                 }
                 continue;
             }
@@ -523,6 +538,10 @@ impl ElfLoader {
             if sym_type != STT_FUNC && !(sym_type == STT_NOTYPE && section_is_exec) {
                 continue;
             }
+            let address = function_descriptors
+                .get(&raw_address)
+                .copied()
+                .unwrap_or(raw_address);
 
             push_unique_function(
                 out_funcs,
@@ -744,6 +763,76 @@ fn parse_relocation_symbols_64(
                 .or_insert(name);
         }
     }
+}
+
+fn ppc64_function_descriptor_map_64(
+    full_data: &[u8],
+    shdrs: &[Elf64Shdr],
+    section_addresses: &[u64],
+    section_names: &[String],
+    endian: Endian,
+) -> HashMap<u64, u64> {
+    let mut descriptors = HashMap::new();
+    let reader = ByteReader::new(full_data, endian);
+    for relocation_section in shdrs
+        .iter()
+        .filter(|shdr| shdr.sh_type == SHT_RELA)
+        .filter(|shdr| {
+            section_names
+                .get(shdr.sh_info as usize)
+                .map(|name| name == ".opd")
+                .unwrap_or(false)
+        })
+    {
+        let Some(opd_base) = section_addresses
+            .get(relocation_section.sh_info as usize)
+            .copied()
+        else {
+            continue;
+        };
+        let Some(symtab) = shdrs.get(relocation_section.sh_link as usize) else {
+            continue;
+        };
+        let entry_size = if relocation_section.sh_entsize > 0 {
+            relocation_section.sh_entsize as usize
+        } else {
+            24
+        };
+        let count = (relocation_section.sh_size as usize)
+            .checked_div(entry_size)
+            .unwrap_or(0);
+        let start = relocation_section.sh_offset as usize;
+        for index in 0..count {
+            let offset = start + index * entry_size;
+            if offset + entry_size > full_data.len() {
+                break;
+            }
+            let Ok(r_offset) = reader.u64(offset) else {
+                break;
+            };
+            let Ok(r_info) = reader.u64(offset + 8) else {
+                break;
+            };
+            let Ok(addend) = reader.u64(offset + 16) else {
+                break;
+            };
+            let reloc_type = (r_info & 0xffff_ffff) as u32;
+            if reloc_type != R_PPC64_ADDR64 {
+                continue;
+            }
+            let symbol_index = (r_info >> 32) as usize;
+            let Some(symbol_value) =
+                symbol_value_64(full_data, symtab, section_addresses, symbol_index, endian)
+            else {
+                continue;
+            };
+            descriptors.insert(
+                opd_base.saturating_add(r_offset),
+                symbol_value.wrapping_add(addend),
+            );
+        }
+    }
+    descriptors
 }
 
 fn riscv_relocation_patches_64(
@@ -1338,6 +1427,31 @@ mod tests {
             call,
             [0xeb, 0xff, 0xff, 0xf8],
             "R_ARM_CALL should retarget recursive_fib BL to 0x100000"
+        );
+    }
+
+    #[test]
+    fn elf64_ppc_be_relocatable_opd_symbols_resolve_to_text_addresses() {
+        let fixture = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../benchmark/binary/ppc_64_be/baremetal/small/binary/c/function_calls.o");
+        if !fixture.exists() {
+            eprintln!("skip: PPC64 BE function_calls fixture missing");
+            return;
+        }
+
+        let binary = LoadedBinary::from_file(&fixture).expect("load PPC64 BE relocatable object");
+        let op_add = binary
+            .functions
+            .iter()
+            .find(|function| function.name == "op_add")
+            .expect("op_add symbol");
+        assert_eq!(
+            op_add.address, 0x100084,
+            "ELFv1 .opd function descriptor must resolve to relocated .text entry"
+        );
+        assert_eq!(
+            binary.view_bytes(op_add.address, 4).expect("op_add bytes"),
+            [0x7c, 0x64, 0x1a, 0x14]
         );
     }
 }

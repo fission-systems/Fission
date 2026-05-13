@@ -471,6 +471,7 @@ mod tests {
         for (language_id, expected_entry_id) in [
             ("PowerPC:BE:32:default", "ppc_32_be"),
             ("PowerPC:LE:32:default", "ppc_32_le"),
+            ("PowerPC:BE:64:default", "ppc_64_be"),
             ("PowerPC:LE:64:default", "ppc_64_le"),
         ] {
             let selection = registry
@@ -483,21 +484,16 @@ mod tests {
             );
         }
 
-        for (language_id, expected_entry_id) in [
-            ("PowerPC:BE:64:default", "ppc_64_be"),
-            ("PowerPC:BE:64:A2-32addr", "ppc_64_isa_be"),
-        ] {
-            let error = registry
-                .resolve_from_language_pair(language_id, Some("gcc"))
-                .expect_err("PowerPC64 BE variants should stay compile-only until promotion");
-            assert!(
-                matches!(
-                    error,
-                    RuntimeEntrySelectionError::CompileOnlySelection { ref entry_id, .. }
-                        if entry_id == expected_entry_id
-                ),
-                "unexpected selection error for {language_id}: {error:?}"
-            );
-        }
+        let error = registry
+            .resolve_from_language_pair("PowerPC:BE:64:A2-32addr", Some("gcc"))
+            .expect_err("PowerPC64 ISA variants should stay compile-only until promotion");
+        assert!(
+            matches!(
+                error,
+                RuntimeEntrySelectionError::CompileOnlySelection { ref entry_id, .. }
+                    if entry_id == "ppc_64_isa_be"
+            ),
+            "unexpected selection error for PowerPC:BE:64:A2-32addr: {error:?}"
+        );
     }
 }
