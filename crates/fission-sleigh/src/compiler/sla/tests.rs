@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 use super::*;
-use crate::compiler::{CompiledOperandSpec, CompiledSlaDecodeStatus};
+use crate::compiler::{CompiledOperandSpec, CompiledSlaDecodeStatus, CompiledSpaceRef};
 use flate2::write::ZlibEncoder;
 use flate2::Compression;
 use std::io::Write;
@@ -322,6 +322,68 @@ fn sla_display_symbol_decode_does_not_synthesize_defaults() {
         display.contains("fn decoded_name_table_entry"),
         "empty name table entries must be represented explicitly, not through broad defaulting"
     );
+}
+
+#[test]
+fn sla_display_symbol_narrow_integer_fields_fail_closed() {
+    let mut spaces = BTreeMap::new();
+    spaces.insert(
+        1,
+        CompiledSpaceRef {
+            name: "register".to_string(),
+            index: 1,
+            word_size: 1,
+            addr_size: 8,
+        },
+    );
+    let mut symbol_names = BTreeMap::new();
+    symbol_names.insert(7, "r0".to_string());
+    let subtable_names = BTreeMap::new();
+
+    let mut root = PackedElement {
+        id: sla_format::ELEM_SLEIGH,
+        attrs: BTreeMap::new(),
+        children: Vec::new(),
+    };
+    let mut varnode = PackedElement {
+        id: sla_format::ELEM_VARNODE_SYM,
+        attrs: BTreeMap::new(),
+        children: Vec::new(),
+    };
+    varnode
+        .attrs
+        .insert(sla_format::ATTR_ID, PackedAttrValue::Unsigned(7));
+    varnode
+        .attrs
+        .insert(sla_format::ATTR_SPACE, PackedAttrValue::Unsigned(1));
+    varnode
+        .attrs
+        .insert(sla_format::ATTR_OFF, PackedAttrValue::Unsigned(0));
+    varnode
+        .attrs
+        .insert(sla_format::ATTR_SIZE, PackedAttrValue::Signed(-1));
+    root.children.push(varnode);
+
+    let err = decode_display_symbols(&root, &spaces, &symbol_names, &subtable_names)
+        .expect_err("negative fixed varnode size must fail");
+    assert!(err
+        .to_string()
+        .contains("varnode_sym size out of u32 range"));
+}
+
+#[test]
+fn sla_display_symbol_decode_does_not_wrap_narrow_integer_fields() {
+    let display = include_str!("display.rs");
+    for forbidden in [
+        ".map(|value| value as u32)",
+        "size.max(0) as u32",
+        "as u32;",
+    ] {
+        assert!(
+            !display.contains(forbidden),
+            "display symbol decode must fail closed instead of wrapping narrow fields: {forbidden}"
+        );
+    }
 }
 
 #[test]

@@ -5,6 +5,20 @@ use anyhow::{anyhow, Result};
 use super::*;
 use crate::compiler::ir::*;
 
+fn required_unsigned_u32(element: &PackedElement, attr: u32, label: &str) -> Result<u32> {
+    let value = element
+        .attr_unsigned(attr)
+        .ok_or_else(|| anyhow!("{label} missing"))?;
+    u32::try_from(value).map_err(|_| anyhow!("{label} out of u32 range: {value}"))
+}
+
+fn required_signed_u32(element: &PackedElement, attr: u32, label: &str) -> Result<u32> {
+    let value = element
+        .attr_signed(attr)
+        .ok_or_else(|| anyhow!("{label} missing"))?;
+    u32::try_from(value).map_err(|_| anyhow!("{label} out of u32 range: {value}"))
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum DecodedDisplaySymbol {
     Subtable(String),
@@ -38,10 +52,7 @@ pub(super) fn decode_display_symbols(
     let mut out = BTreeMap::new();
     let mut fixed_varnodes = BTreeMap::new();
     for symbol in root.descendants_with_id(sla_format::ELEM_VARNODE_SYM) {
-        let id = symbol
-            .attr_unsigned(sla_format::ATTR_ID)
-            .map(|value| value as u32)
-            .ok_or_else(|| anyhow!("varnode_sym missing id"))?;
+        let id = required_unsigned_u32(symbol, sla_format::ATTR_ID, "varnode_sym id")?;
         let space_index = symbol
             .attr_unsigned(sla_format::ATTR_SPACE)
             .ok_or_else(|| anyhow!("varnode_sym {id} missing space"))?;
@@ -56,16 +67,14 @@ pub(super) fn decode_display_symbols(
         let offset = symbol
             .attr_unsigned(sla_format::ATTR_OFF)
             .ok_or_else(|| anyhow!("varnode_sym {id} missing offset"))?;
-        let size = symbol
-            .attr_signed(sla_format::ATTR_SIZE)
-            .ok_or_else(|| anyhow!("varnode_sym {id} missing size"))?;
+        let size = required_signed_u32(symbol, sla_format::ATTR_SIZE, "varnode_sym size")?;
         fixed_varnodes.insert(
             id,
             CompiledResolvedVarnode {
                 name,
                 space,
                 offset,
-                size: size.max(0) as u32,
+                size,
             },
         );
     }
@@ -73,10 +82,7 @@ pub(super) fn decode_display_symbols(
         out.insert(*id, DecodedDisplaySymbol::FixedVarnode(varnode.clone()));
     }
     for subtable in root.descendants_with_id(sla_format::ELEM_SUBTABLE_SYM) {
-        let id = subtable
-            .attr_unsigned(sla_format::ATTR_ID)
-            .map(|value| value as u32)
-            .ok_or_else(|| anyhow!("subtable_sym missing id"))?;
+        let id = required_unsigned_u32(subtable, sla_format::ATTR_ID, "subtable_sym id")?;
         let name = subtable_names_by_id
             .get(&id)
             .cloned()
@@ -84,10 +90,7 @@ pub(super) fn decode_display_symbols(
         out.insert(id, DecodedDisplaySymbol::Subtable(name));
     }
     for symbol in root.descendants_with_id(sla_format::ELEM_VALUE_SYM) {
-        let id = symbol
-            .attr_unsigned(sla_format::ATTR_ID)
-            .map(|value| value as u32)
-            .ok_or_else(|| anyhow!("value_sym missing id"))?;
+        let id = required_unsigned_u32(symbol, sla_format::ATTR_ID, "value_sym id")?;
         let expression = symbol
             .children
             .first()
@@ -96,10 +99,7 @@ pub(super) fn decode_display_symbols(
         out.insert(id, DecodedDisplaySymbol::ValueHex { expression });
     }
     for symbol in root.descendants_with_id(sla_format::ELEM_CONTEXT_SYM) {
-        let id = symbol
-            .attr_unsigned(sla_format::ATTR_ID)
-            .map(|value| value as u32)
-            .ok_or_else(|| anyhow!("context_sym missing id"))?;
+        let id = required_unsigned_u32(symbol, sla_format::ATTR_ID, "context_sym id")?;
         let expression = symbol
             .children
             .first()
@@ -108,10 +108,7 @@ pub(super) fn decode_display_symbols(
         out.insert(id, DecodedDisplaySymbol::ValueHex { expression });
     }
     for symbol in root.descendants_with_id(sla_format::ELEM_NAME_SYM) {
-        let id = symbol
-            .attr_unsigned(sla_format::ATTR_ID)
-            .map(|value| value as u32)
-            .ok_or_else(|| anyhow!("name_sym missing id"))?;
+        let id = required_unsigned_u32(symbol, sla_format::ATTR_ID, "name_sym id")?;
         let token_field = symbol
             .children
             .first()
@@ -135,10 +132,7 @@ pub(super) fn decode_display_symbols(
         );
     }
     for symbol in root.descendants_with_id(sla_format::ELEM_VALUEMAP_SYM) {
-        let id = symbol
-            .attr_unsigned(sla_format::ATTR_ID)
-            .map(|value| value as u32)
-            .ok_or_else(|| anyhow!("valuemap_sym missing id"))?;
+        let id = required_unsigned_u32(symbol, sla_format::ATTR_ID, "valuemap_sym id")?;
         let token_field = symbol
             .children
             .first()
@@ -166,10 +160,7 @@ pub(super) fn decode_display_symbols(
         );
     }
     for symbol in root.descendants_with_id(sla_format::ELEM_VARLIST_SYM) {
-        let id = symbol
-            .attr_unsigned(sla_format::ATTR_ID)
-            .map(|value| value as u32)
-            .ok_or_else(|| anyhow!("varlist_sym missing id"))?;
+        let id = required_unsigned_u32(symbol, sla_format::ATTR_ID, "varlist_sym id")?;
         let token_field = symbol
             .children
             .first()
@@ -182,10 +173,8 @@ pub(super) fn decode_display_symbols(
             .iter()
             .filter(|child| child.id == sla_format::ELEM_VAR)
             .map(|child| {
-                let var_id = child
-                    .attr_unsigned(sla_format::ATTR_ID)
-                    .ok_or_else(|| anyhow!("varlist_sym {id} has var without id"))?
-                    as u32;
+                let var_id = required_unsigned_u32(child, sla_format::ATTR_ID, "var id")
+                    .map_err(|err| anyhow!("varlist_sym {id} has malformed var id: {err}"))?;
                 fixed_varnodes
                     .get(&var_id)
                     .cloned()
