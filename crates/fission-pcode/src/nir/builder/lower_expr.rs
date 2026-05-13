@@ -10,6 +10,17 @@ enum CallTargetConstReject {
     NoDef,
 }
 
+fn callother_index(input: &Varnode) -> Option<u64> {
+    if !input.is_constant {
+        return None;
+    }
+    if input.offset != 0 {
+        Some(input.offset)
+    } else {
+        u64::try_from(input.constant_val).ok()
+    }
+}
+
 impl<'a> PreviewBuilder<'a> {
     pub(in crate::nir::builder) fn stack_pointer_register_name(
         &self,
@@ -661,6 +672,9 @@ impl<'a> PreviewBuilder<'a> {
         recovered_args: Option<Vec<HirExpr>>,
         visiting: &mut HashSet<VarnodeKey>,
     ) -> Result<HirExpr, MlilPreviewError> {
+        if matches!(op.opcode, PcodeOpcode::CallOther) {
+            return self.lower_callother(op, recovered_args, visiting);
+        }
         let target = if let Some(target) = op.inputs.first() {
             if let Some(name) = self.resolve_relocation_call_target_name(op) {
                 name
@@ -797,6 +811,38 @@ impl<'a> PreviewBuilder<'a> {
         } else {
             "callee".to_string()
         };
+        let args = if let Some(recovered_args) = recovered_args {
+            recovered_args
+        } else {
+            op.inputs
+                .iter()
+                .skip(1)
+                .map(|input| self.lower_varnode(input, visiting))
+                .collect::<Result<Vec<_>, _>>()?
+        };
+        Ok(HirExpr::Call {
+            target,
+            args,
+            ty: op
+                .output
+                .as_ref()
+                .map(|out| type_from_size(out.size, false))
+                .unwrap_or(NirType::Unknown),
+        })
+    }
+
+    fn lower_callother(
+        &mut self,
+        op: &PcodeOp,
+        recovered_args: Option<Vec<HirExpr>>,
+        visiting: &mut HashSet<VarnodeKey>,
+    ) -> Result<HirExpr, MlilPreviewError> {
+        let target = op
+            .inputs
+            .first()
+            .and_then(callother_index)
+            .map(|index| format!("__pcodeop_{index}"))
+            .unwrap_or_else(|| "__pcodeop_unknown".to_string());
         let args = if let Some(recovered_args) = recovered_args {
             recovered_args
         } else {

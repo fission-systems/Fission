@@ -1203,6 +1203,44 @@ fn aarch64_reg(offset: u64, size: u32) -> Varnode {
 }
 
 #[test]
+fn callother_uses_userop_intrinsic_target_not_sub_fallback() {
+    let options = aarch64_preview_options();
+    let w0 = aarch64_reg(0x4000, 4);
+    let w1 = aarch64_reg(0x4008, 4);
+    let out = uniq(0x500, 4);
+    let func = PcodeFunction {
+        blocks: vec![PcodeBasicBlock {
+            index: 0,
+            start_address: 0x100068,
+            successors: vec![],
+            ops: vec![
+                PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::CallOther,
+                    address: 0x100068,
+                    output: Some(out.clone()),
+                    inputs: vec![cst(126, 4), w0, w1],
+                    asm_mnemonic: Some("synthetic userop".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 1,
+                    opcode: PcodeOpcode::Return,
+                    address: 0x10006c,
+                    output: None,
+                    inputs: vec![out],
+                    asm_mnemonic: None,
+                },
+            ],
+        }],
+    };
+
+    let code =
+        render_mlil_preview(&func, "userop_expr", 0x100068, &options).expect("preview render");
+    assert!(code.contains("__pcodeop_126(param_1, param_2)"), "{code}");
+    assert!(!code.contains("sub_126"), "{code}");
+}
+
+#[test]
 fn aarch64_branchind_tail_call_recovers_function_pointer_call() {
     let options = aarch64_preview_options();
 

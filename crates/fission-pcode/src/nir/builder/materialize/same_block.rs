@@ -1121,6 +1121,7 @@ impl<'a> PreviewBuilder<'a> {
 
     fn materialize_call_target_is_known_pure_intrinsic(target: &str) -> bool {
         matches!(target, "__popcount" | "__carry" | "__scarry" | "__sborrow")
+            || target.starts_with("__pcodeop_")
     }
 
     fn materialize_call_target_is_carry_like_intrinsic(target: &str) -> bool {
@@ -3034,7 +3035,12 @@ impl<'a> PreviewBuilder<'a> {
                     && Self::expr_is_low_cost_builder_inline_candidate(rhs)
             }
             HirExpr::Select { .. } => false,
-            HirExpr::Call { .. } => false,
+            HirExpr::Call { target, args, .. } => {
+                Self::materialize_call_target_is_known_pure_intrinsic(target)
+                    && args
+                        .iter()
+                        .all(Self::expr_is_low_cost_builder_inline_candidate)
+            }
         }
     }
 
@@ -3249,6 +3255,19 @@ mod tests {
         };
 
         assert!(!PreviewBuilder::expr_is_low_cost_builder_inline_candidate(
+            &expr
+        ));
+    }
+
+    #[test]
+    fn low_cost_builder_inline_accepts_pcodeop_intrinsics() {
+        let expr = HirExpr::Call {
+            target: "__pcodeop_294".to_string(),
+            args: vec![HirExpr::Var("param_1".to_string())],
+            ty: int(32),
+        };
+
+        assert!(PreviewBuilder::expr_is_low_cost_builder_inline_candidate(
             &expr
         ));
     }
