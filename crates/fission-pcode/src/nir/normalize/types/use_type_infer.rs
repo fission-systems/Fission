@@ -539,6 +539,96 @@ fn promote_return_signedness_from_returns(func: &mut HirFunction) -> bool {
     }
 }
 
+fn promote_unknown_call_return_type(func: &mut HirFunction) -> bool {
+    if func.surface_return_type_name.is_some() || func.return_type != NirType::Unknown {
+        return false;
+    }
+    let mut value_return_count = 0usize;
+    let mut unknown_call_return_count = 0usize;
+    collect_unknown_call_returns(
+        &func.body,
+        &mut value_return_count,
+        &mut unknown_call_return_count,
+    );
+    if value_return_count == 0 || value_return_count != unknown_call_return_count {
+        return false;
+    }
+    func.return_type = native_unsigned_word_type(func);
+    true
+}
+
+fn native_unsigned_word_type(func: &HirFunction) -> NirType {
+    NirType::Int {
+        bits: if func.is_64bit { 64 } else { 32 },
+        signed: false,
+    }
+}
+
+fn collect_unknown_call_returns(
+    stmts: &[HirStmt],
+    value_return_count: &mut usize,
+    unknown_call_return_count: &mut usize,
+) {
+    for stmt in stmts {
+        collect_unknown_call_returns_stmt(stmt, value_return_count, unknown_call_return_count);
+    }
+}
+
+fn collect_unknown_call_returns_stmt(
+    stmt: &HirStmt,
+    value_return_count: &mut usize,
+    unknown_call_return_count: &mut usize,
+) {
+    match stmt {
+        HirStmt::Return(Some(expr)) => {
+            *value_return_count += 1;
+            if is_unknown_call_result(expr) {
+                *unknown_call_return_count += 1;
+            }
+        }
+        HirStmt::Block(stmts)
+        | HirStmt::While { body: stmts, .. }
+        | HirStmt::DoWhile { body: stmts, .. }
+        | HirStmt::For { body: stmts, .. } => {
+            collect_unknown_call_returns(stmts, value_return_count, unknown_call_return_count);
+        }
+        HirStmt::If {
+            then_body,
+            else_body,
+            ..
+        } => {
+            collect_unknown_call_returns(then_body, value_return_count, unknown_call_return_count);
+            collect_unknown_call_returns(else_body, value_return_count, unknown_call_return_count);
+        }
+        HirStmt::Switch { cases, default, .. } => {
+            for case in cases {
+                collect_unknown_call_returns(
+                    &case.body,
+                    value_return_count,
+                    unknown_call_return_count,
+                );
+            }
+            collect_unknown_call_returns(default, value_return_count, unknown_call_return_count);
+        }
+        HirStmt::Assign { .. }
+        | HirStmt::VaStart { .. }
+        | HirStmt::Expr(_)
+        | HirStmt::Label(_)
+        | HirStmt::Goto(_)
+        | HirStmt::Return(None)
+        | HirStmt::Break
+        | HirStmt::Continue => {}
+    }
+}
+
+fn is_unknown_call_result(expr: &HirExpr) -> bool {
+    match expr {
+        HirExpr::Call { ty, .. } => *ty == NirType::Unknown,
+        HirExpr::Cast { expr, ty } if *ty == NirType::Unknown => is_unknown_call_result(expr),
+        _ => false,
+    }
+}
+
 fn count_var_uses_expr(expr: &HirExpr, out: &mut HashMap<String, usize>) {
     match expr {
         HirExpr::Var(name) | HirExpr::AddressOfGlobal(name) => {
@@ -895,6 +985,7 @@ pub(crate) fn apply_use_driven_type_infer_pass(func: &mut HirFunction) -> bool {
                 }
             }
         }
+        round_changed |= promote_unknown_call_return_type(func);
         round_changed |= promote_return_signedness_from_returns(func);
         round_changed |= narrow_integer_params_from_wrapping_return_uses(func);
         if !round_changed {
@@ -1028,6 +1119,47 @@ mod tests {
                 signed: true
             }
         );
+    }
+
+    #[test]
+    fn unknown_call_only_value_returns_promote_native_word_return_type() {
+        let body = vec![HirStmt::Return(Some(HirExpr::Call {
+            target: "param_1".to_owned(),
+            args: vec![
+                HirExpr::Var("param_2".to_owned()),
+                HirExpr::Var("param_3".to_owned()),
+            ],
+            ty: NirType::Unknown,
+        }))];
+        let mut func = make_func(Vec::new(), body, NirType::Unknown);
+        func.is_64bit = false;
+
+        assert!(super::apply_use_driven_type_infer_pass(&mut func));
+        assert_eq!(
+            func.return_type,
+            NirType::Int {
+                bits: 32,
+                signed: false
+            }
+        );
+    }
+
+    #[test]
+    fn unknown_call_return_promotion_requires_all_value_returns_to_be_calls() {
+        let body = vec![HirStmt::If {
+            cond: HirExpr::Var("flag".to_owned()),
+            then_body: vec![HirStmt::Return(Some(HirExpr::Call {
+                target: "param_1".to_owned(),
+                args: Vec::new(),
+                ty: NirType::Unknown,
+            }))],
+            else_body: vec![HirStmt::Return(Some(HirExpr::Var("fallback".to_owned())))],
+        }];
+        let mut func = make_func(Vec::new(), body, NirType::Unknown);
+        func.is_64bit = false;
+
+        assert!(!super::apply_use_driven_type_infer_pass(&mut func));
+        assert_eq!(func.return_type, NirType::Unknown);
     }
 
     #[test]

@@ -613,12 +613,10 @@ mod tests {
         }];
 
         assert!(simplify_empty_and_constant_ifs_recursive(&mut stmts));
-        assert!(
-            matches!(
-                &stmts[..],
-                [HirStmt::Expr(HirExpr::Call { target, .. })] if target == "unknown_predicate"
-            )
-        );
+        assert!(matches!(
+            &stmts[..],
+            [HirStmt::Expr(HirExpr::Call { target, .. })] if target == "unknown_predicate"
+        ));
     }
 
     #[test]

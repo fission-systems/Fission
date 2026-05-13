@@ -531,7 +531,10 @@ fn powerpc64_descriptor_callind_recovers_logical_function_pointer_param() {
     let rendered = render_mlil_preview(&func, "apply_op", 0x1000e0, &options)
         .expect("preview render should succeed");
 
-    assert!(rendered.contains("param_1(param_2, param_3);"), "{rendered}");
+    assert!(
+        rendered.contains("param_1(param_2, param_3);"),
+        "{rendered}"
+    );
     assert!(!rendered.contains("xVar"), "{rendered}");
 }
 
@@ -581,7 +584,10 @@ fn powerpc64_direct_callind_recovers_function_pointer_param() {
     let rendered = render_mlil_preview(&func, "apply_op", 0x100100, &options)
         .expect("preview render should succeed");
 
-    assert!(rendered.contains("param_1(param_2, param_3);"), "{rendered}");
+    assert!(
+        rendered.contains("param_1(param_2, param_3);"),
+        "{rendered}"
+    );
     assert!(!rendered.contains("xVar"), "{rendered}");
 }
 
