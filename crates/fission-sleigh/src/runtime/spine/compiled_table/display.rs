@@ -841,6 +841,8 @@ mod tests {
                 .collect(),
             handles,
             exported_handle: None,
+            context_register: 0,
+            context_known_mask: 0,
             absolute_offset: 0,
             relative_length: 0,
             length: 0,

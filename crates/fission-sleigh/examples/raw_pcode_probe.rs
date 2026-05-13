@@ -9,7 +9,7 @@ use fission_pcode::{PcodeOp, PcodeOpcode, Varnode};
 use fission_sleigh::compiler::{
     load_construct_templates_from_sla, resolve_ghidra_install_paths, CompiledSpaceRef,
 };
-use fission_sleigh::runtime::{DecodedInstruction, RuntimeSleighFrontend};
+use fission_sleigh::runtime::{DecodedInstruction, PackedContextOverride, RuntimeSleighFrontend};
 use serde::Serialize;
 
 /// Maps Fission's internal dense `space_id` → Ghidra-native `CompiledSpaceRef`.
@@ -124,6 +124,17 @@ struct SerializableVarnode {
     size: u32,
     is_constant: bool,
     constant_val: i64,
+}
+
+fn merge_context_overrides(
+    base: PackedContextOverride,
+    pending: PackedContextOverride,
+) -> PackedContextOverride {
+    let pending_mask = pending.mask_bits();
+    PackedContextOverride::new(
+        (base.context_bits() & !pending_mask) | (pending.context_bits() & pending_mask),
+        base.mask_bits() | pending_mask,
+    )
 }
 
 impl SerializableVarnode {
@@ -258,7 +269,8 @@ fn main() -> Result<()> {
     let mut instructions = Vec::new();
     let address_state = frontend.normalize_low_bit_code_address(args.address);
     let mut current = address_state.address;
-    let context_override = address_state.context_override;
+    let initial_context_override = address_state.context_override;
+    let mut pending_context_overrides = BTreeMap::<u64, PackedContextOverride>::new();
     let mut decode_lift_sec = 0.0f64;
     for _ in 0..args.count {
         let Some(bytes) = binary
@@ -278,6 +290,15 @@ fn main() -> Result<()> {
         };
 
         let decode_lift_started = Instant::now();
+        let context_override = match (
+            initial_context_override,
+            pending_context_overrides.get(&current).copied(),
+        ) {
+            (Some(base), Some(pending)) => Some(merge_context_overrides(base, pending)),
+            (Some(base), None) => Some(base),
+            (None, Some(pending)) => Some(pending),
+            (None, None) => None,
+        };
         let decoded = frontend
             .decode_instruction_with_context_override(bytes, current, context_override)
             .map(|instruction| vec![instruction]);
@@ -286,6 +307,10 @@ fn main() -> Result<()> {
         decode_lift_sec += decode_lift_started.elapsed().as_secs_f64();
         match lifted {
             Ok((ops, len, details)) => {
+                for (target_addr, word_index, mask, value) in &details.pending_context_commits {
+                    let entry = pending_context_overrides.entry(*target_addr).or_default();
+                    entry.merge_commit_word(*word_index, *mask, *value)?;
+                }
                 instructions.push(InstructionReport {
                     address: current,
                     status: "ok".to_string(),

@@ -732,7 +732,9 @@ fn generated_runtime_reports_thumb_it_context_commits_in_lift_details() {
             details
                 .pending_context_commits
                 .iter()
-                .any(|(target, _, mask, _)| *target == 0x100018 && *mask != 0),
+                .any(|(target, _, mask, value)| {
+                    *target == 0x100018 && *mask != 0 && (*value & *mask) != 0
+                }),
             "{entry_id} IT lift details must expose pending context commits: {details:?}"
         );
     }

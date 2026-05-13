@@ -74,6 +74,8 @@ pub(super) fn emit_pcode_for_state(
 /// Options for pcode template emission (Ghidra `PcodeEmit` parity hooks).
 #[derive(Debug, Clone, Default)]
 pub struct FlowEmitOptions {
+    /// Ghidra `PcodeEmit` fallOffset: decoded instruction length used for `inst_next`.
+    pub instruction_length: Option<u64>,
     /// Context register bits when binding cross-build / delay-slot instructions at another PC.
     pub instruction_context_register: u64,
     pub instruction_context_known_mask: u64,
@@ -1357,10 +1359,16 @@ impl<'c> CompiledTableEmitter<'c> {
                 Ok((*value as i128 as u128 & u64::MAX as u128) as u64)
             }
             CompiledConstTpl::InstStart => Ok(self.address),
-            CompiledConstTpl::InstNext => self
-                .address
-                .checked_add(state.length as u64)
-                .ok_or_else(|| anyhow!("InstNext address overflowed")),
+            CompiledConstTpl::InstNext => {
+                let fall_offset = if state.length > 0 {
+                    state.length as u64
+                } else {
+                    self.flow.instruction_length.unwrap_or(0)
+                };
+                self.address
+                    .checked_add(fall_offset)
+                    .ok_or_else(|| anyhow!("InstNext address overflowed"))
+            }
             CompiledConstTpl::SpaceId(space) => Ok(space.index),
             CompiledConstTpl::Handle {
                 handle_index,

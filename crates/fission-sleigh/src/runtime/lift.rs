@@ -1,6 +1,17 @@
 use super::*;
 use std::collections::{BTreeMap, HashMap, VecDeque};
 
+fn merge_context_overrides(
+    base: PackedContextOverride,
+    pending: PackedContextOverride,
+) -> PackedContextOverride {
+    let pending_mask = pending.mask_bits();
+    PackedContextOverride::new(
+        (base.context_bits() & !pending_mask) | (pending.context_bits() & pending_mask),
+        base.mask_bits() | pending_mask,
+    )
+}
+
 fn internal_byte_offset(entry_address: u64, bytes_len: usize, address: u64) -> Option<usize> {
     let rel = address.checked_sub(entry_address)?;
     let offset = usize::try_from(rel).ok()?;
@@ -618,15 +629,17 @@ impl RuntimeSleighFrontend {
                 continue;
             };
             let remaining = &bytes[offset..];
-            let (mut ins_ops, decoded_len, _) = self
-                .decode_and_lift_with_context_override(
-                    remaining,
-                    current,
-                    context_overrides
-                        .get(&current)
-                        .copied()
-                        .or(base_context_override),
-                )
+            let context_override = match (
+                base_context_override,
+                context_overrides.get(&current).copied(),
+            ) {
+                (Some(base), Some(pending)) => Some(merge_context_overrides(base, pending)),
+                (Some(base), None) => Some(base),
+                (None, Some(pending)) => Some(pending),
+                (None, None) => None,
+            };
+            let (mut ins_ops, decoded_len, details) = self
+                .decode_and_lift_with_context_override(remaining, current, context_override)
                 .map_err(|err| anyhow!("decode failed at 0x{:x}: {:#}", current, err))?;
 
             if decoded_len == 0 {
@@ -658,6 +671,11 @@ impl RuntimeSleighFrontend {
                     .map(|variant| variant.endian),
                 Some(RuntimeEndian::Big)
             );
+
+            for (target_addr, word_index, mask, value) in &details.pending_context_commits {
+                let entry = context_overrides.entry(*target_addr).or_default();
+                entry.merge_commit_word(*word_index, *mask, *value)?;
+            }
 
             match last_opcode {
                 Some(PcodeOpcode::Branch) => {

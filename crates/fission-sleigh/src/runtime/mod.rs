@@ -714,6 +714,68 @@ mod tests {
     }
 
     #[test]
+    fn arm_thumb_it_context_commit_keeps_conditional_bx_fallthrough_reachable() {
+        if !discovery::ghidra_packaged_sla_available() {
+            eprintln!("skip: packaged Ghidra .sla not available for ARM Thumb IT lift test");
+            return;
+        }
+        for (language, bytes) in [
+            (
+                "ARM8_le",
+                [
+                    0x4c, 0xf6, 0xcd, 0x41, // movw r1,#0xcf4c
+                    0xcc, 0xf6, 0xcc, 0x41, // movt r1,#0xcfcc
+                    0xa0, 0xfb, 0x01, 0x12, // umull r1,r2,r0,r1
+                    0x91, 0x08, // lsrs r1,r2,#0x2
+                    0x01, 0xeb, 0x81, 0x01, // add.w r1,r1,r1, lsl #0x2
+                    0x41, 0x1a, // subs r1,r0,r1
+                    0x03, 0x29, // cmp r1,#0x3
+                    0x88, 0xbf, // it hi
+                    0x70, 0x47, // bx lr
+                    0xdf, 0xe8, 0x01, 0xf0, // tbb [pc,r1]
+                ],
+            ),
+            (
+                "ARM8_be",
+                [
+                    0xf6, 0x4c, 0x41, 0xcd, // movw r1,#0xcf4c
+                    0xf6, 0xcc, 0x41, 0xcc, // movt r1,#0xcfcc
+                    0xfb, 0xa0, 0x12, 0x01, // umull r1,r2,r0,r1
+                    0x08, 0x91, // lsrs r1,r2,#0x2
+                    0xeb, 0x01, 0x01, 0x81, // add.w r1,r1,r1, lsl #0x2
+                    0x1a, 0x41, // subs r1,r0,r1
+                    0x29, 0x03, // cmp r1,#0x3
+                    0xbf, 0x88, // it hi
+                    0x47, 0x70, // bx lr
+                    0xe8, 0xdf, 0xf0, 0x01, // tbb [pc,r1]
+                ],
+            ),
+        ] {
+            let frontend = RuntimeSleighFrontend::new_for_language(language).expect("ARM runtime");
+            let address_state = frontend.normalize_low_bit_code_address(0x100001);
+            let lifted = frontend
+                .lift_raw_pcode_function_with_context_and_memory_context(
+                    &bytes,
+                    address_state.address,
+                    DecodeContract::strict_function(32),
+                    &DecodeMemoryContext::default(),
+                    address_state.context_override,
+                )
+                .unwrap_or_else(|err| panic!("{language} Thumb IT function lift: {err:#}"));
+
+            assert!(
+                lifted
+                    .function
+                    .blocks
+                    .iter()
+                    .any(|block| block.start_address == 0x10001a),
+                "{language} TBB fallthrough after conditional bx must remain reachable: {:?}",
+                lifted.function.blocks
+            );
+        }
+    }
+
+    #[test]
     fn runtime_frontend_load_spec_matches_entry_id_frontend_for_ret() {
         if !discovery::ghidra_packaged_sla_available() {
             eprintln!("skip: packaged Ghidra .sla not available for ret lift parity check");

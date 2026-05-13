@@ -101,7 +101,7 @@ pub(crate) fn decode_and_lift_with_context_override(
         };
 
         let pending_context_commits =
-            apply_context_commits(compiled, &decoded, address, ctx.context_register)?;
+            apply_context_commits(compiled, &decoded, address, decoded.context_register)?;
 
         match emit_pcode_for_state_with_bytes(
             compiled,
@@ -111,6 +111,7 @@ pub(crate) fn decode_and_lift_with_context_override(
             address,
             &decoded,
             FlowEmitOptions {
+                instruction_length: Some(decoded.length as u64),
                 instruction_context_register: ctx.context_register,
                 instruction_context_known_mask: ctx.context_known_mask,
                 ..Default::default()
@@ -456,7 +457,7 @@ fn decoded_instruction_from_state(
     let flow_kind = flow_kind_for_state(&decoded);
     let references = decoded_references(address, length, flow_kind, &decoded.handles);
     let pending_context_commits =
-        apply_context_commits(compiled, &decoded, address, ctx.context_register)?;
+        apply_context_commits(compiled, &decoded, address, decoded.context_register)?;
     let instruction_bytes = bytes.get(..length).ok_or_else(|| {
         anyhow!(
             "decoded instruction length {length} exceeds available byte window {}",

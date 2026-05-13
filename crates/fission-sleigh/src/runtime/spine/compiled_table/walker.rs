@@ -332,6 +332,8 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
             handles,
             exported_handle,
             operands,
+            context_register: self.context_register,
+            context_known_mask: self.context_known_mask,
             absolute_offset,
             relative_length,
             length,
