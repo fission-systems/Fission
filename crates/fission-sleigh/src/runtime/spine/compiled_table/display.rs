@@ -386,17 +386,9 @@ pub(super) fn decoded_references(
                 let is_rip_relative = *rip_relative || subtable_relative_target.is_some();
                 let target = if is_rip_relative {
                     subtable_relative_target.or(*absolute).or_else(|| {
-                        Some(add_signed(
-                            address.saturating_add(length as u64),
-                            *displacement,
-                        ))
-                    })
-                } else if *rip_relative {
-                    absolute.or_else(|| {
-                        Some(add_signed(
-                            address.saturating_add(length as u64),
-                            *displacement,
-                        ))
+                        address
+                            .checked_add(length as u64)
+                            .and_then(|base| add_signed(base, *displacement))
                     })
                 } else if *displacement > 0 {
                     Some(*displacement as u64)
@@ -494,11 +486,11 @@ fn first_materialized_address_target(state: &RuntimeConstructState, target: u64)
         })
 }
 
-pub(super) fn add_signed(base: u64, delta: i64) -> u64 {
+pub(super) fn add_signed(base: u64, delta: i64) -> Option<u64> {
     if delta >= 0 {
-        base.saturating_add(delta as u64)
+        base.checked_add(delta as u64)
     } else {
-        base.saturating_sub(delta.unsigned_abs())
+        base.checked_sub(delta.unsigned_abs())
     }
 }
 
@@ -632,6 +624,56 @@ mod tests {
                 ..
             }
         ));
+    }
+
+    #[test]
+    fn rip_relative_reference_uses_checked_instruction_end_address() {
+        let refs = decoded_references(
+            0x1000,
+            4,
+            DecodedFlowKind::None,
+            &[handle(BoundOperand::Memory {
+                base: None,
+                index: None,
+                scale: 1,
+                displacement: -4,
+                rip_relative: true,
+                absolute: None,
+                size: 8,
+            })],
+        );
+
+        assert_eq!(
+            refs,
+            vec![DecodedReference {
+                target: 0x1000,
+                kind: DecodedReferenceKind::RipRelativeAddress,
+                operand_index: 0,
+            }]
+        );
+    }
+
+    #[test]
+    fn rip_relative_reference_does_not_saturate_on_overflow() {
+        let refs = decoded_references(
+            u64::MAX - 1,
+            4,
+            DecodedFlowKind::None,
+            &[handle(BoundOperand::Memory {
+                base: None,
+                index: None,
+                scale: 1,
+                displacement: 8,
+                rip_relative: true,
+                absolute: None,
+                size: 8,
+            })],
+        );
+
+        assert!(
+            refs.is_empty(),
+            "overflowing RIP-relative reference must not be clipped into a false target"
+        );
     }
 
     fn handle(value: BoundOperand) -> RuntimeHandle {
