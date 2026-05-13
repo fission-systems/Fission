@@ -713,6 +713,32 @@ fn generated_runtime_preserves_arm_conditional_execution_wrapper_pcode() {
 }
 
 #[test]
+fn generated_runtime_reports_thumb_it_context_commits_in_lift_details() {
+    require_packaged_ghidra_sla!();
+    for (entry_id, bytes) in [
+        ("ARM8m_le", [0x88, 0xbf]), // it hi
+        ("ARM8m_be", [0xbf, 0x88]), // it hi
+    ] {
+        let arm_spec = spec_root_for_arch("ARM").join(format!("{entry_id}.slaspec"));
+        let compiled = compile_frontend_for_entry_spec(&arm_spec)
+            .unwrap_or_else(|err| panic!("compile {entry_id}: {err:#}"));
+
+        let (_ops, length, details) =
+            decode_and_lift_with_details(&compiled, None, &bytes, 0x100016)
+                .unwrap_or_else(|err| panic!("lift {entry_id} Thumb IT: {err:#}"));
+
+        assert_eq!(length as usize, bytes.len(), "{entry_id} IT length");
+        assert!(
+            details
+                .pending_context_commits
+                .iter()
+                .any(|(target, _, mask, _)| *target == 0x100018 && *mask != 0),
+            "{entry_id} IT lift details must expose pending context commits: {details:?}"
+        );
+    }
+}
+
+#[test]
 fn generated_runtime_executes_arm_bool_xor_template_opcode() {
     require_packaged_ghidra_sla!();
     let arm_spec = spec_root_for_arch("ARM").join("ARM4_le.slaspec");

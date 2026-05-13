@@ -98,9 +98,13 @@ impl fmt::Display for RuntimeSleighError {
 
 impl std::error::Error for RuntimeSleighError {}
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RuntimeExecutionDetails {
     pub template_source: Option<crate::compiler::CompiledTemplateSource>,
+    /// Resolved ContextCommit entries emitted while binding this instruction.
+    /// Each entry: (target_address, word_index, mask, value).
+    #[serde(default)]
+    pub pending_context_commits: Vec<(u64, u32, u32, u32)>,
 }
 
 use crate::runtime::native::NativeBackend;

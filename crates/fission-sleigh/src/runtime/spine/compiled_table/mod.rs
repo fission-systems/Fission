@@ -100,6 +100,9 @@ pub(crate) fn decode_and_lift_with_context_override(
             }
         };
 
+        let pending_context_commits =
+            apply_context_commits(compiled, &decoded, address, ctx.context_register)?;
+
         match emit_pcode_for_state_with_bytes(
             compiled,
             native,
@@ -113,7 +116,10 @@ pub(crate) fn decode_and_lift_with_context_override(
                 ..Default::default()
             },
         ) {
-            Ok((ops, details)) => return Ok((ops, decoded.length as u64, details)),
+            Ok((ops, mut details)) => {
+                details.pending_context_commits = pending_context_commits;
+                return Ok((ops, decoded.length as u64, details));
+            }
             Err(err) => {
                 if first_error.is_none() {
                     first_error = Some(err);
