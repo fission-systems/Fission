@@ -806,6 +806,7 @@ fn compiled_table_policy_symbols_stay_architecture_neutral() {
         "exported_handle_display_fallback",
         "exported_fixed_handle_needs_memory_display_fixup",
         "handle_tpl_operand_handle_indices",
+        "display_operand_from_exported_fixed_handle",
     ];
     let subtable_offset_base_fallback = "offsetbase.unwrap_or(-1)";
     let context_commit_temp_offset_target = [

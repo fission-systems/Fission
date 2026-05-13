@@ -22,19 +22,6 @@ pub(super) fn fixed_handle_for_const_value(value: u64, size: u32) -> RuntimeFixe
     }
 }
 
-pub(super) fn fixed_handle_for_ram_target(target: u64, size: u32) -> RuntimeFixedHandle {
-    RuntimeFixedHandle {
-        space: Some(compiled_space("ram", 3)),
-        size,
-        offset_space: None,
-        offset_offset: target,
-        offset_size: size,
-        temp_space: None,
-        temp_offset: 0,
-        fixable: true,
-    }
-}
-
 pub(super) fn fixed_handle_from_resolved_varnode(
     varnode: &crate::compiler::CompiledResolvedVarnode,
 ) -> RuntimeFixedHandle {
@@ -48,38 +35,6 @@ pub(super) fn fixed_handle_from_resolved_varnode(
         temp_offset: 0,
         fixable: true,
     }
-}
-
-pub(super) fn display_operand_from_exported_fixed_handle(
-    handle: &RuntimeFixedHandle,
-) -> Result<BoundOperand> {
-    let space = handle
-        .space
-        .as_ref()
-        .ok_or_else(|| anyhow!("exported fixed handle missing space"))?;
-    if space.index == 0 || space.name == "const" {
-        return Ok(BoundOperand::Immediate {
-            value: handle.offset_offset,
-            encoded_size: handle.size.max(1),
-            signed: false,
-        });
-    }
-    if space.name == "register" || space.index == 4 {
-        return Ok(BoundOperand::NamedVarnode {
-            name: format!("register_{:x}", handle.offset_offset),
-            display_index: None,
-            size: handle.size,
-        });
-    }
-    Ok(BoundOperand::Memory {
-        base: None,
-        index: None,
-        scale: 1,
-        displacement: handle.offset_offset as i64,
-        rip_relative: false,
-        absolute: Some(handle.offset_offset),
-        size: handle.size,
-    })
 }
 
 pub(super) fn varnode_from_fixed_handle(handle: &RuntimeFixedHandle) -> Result<Varnode> {
