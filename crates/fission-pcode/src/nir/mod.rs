@@ -18,6 +18,7 @@ mod mir;
 mod normalize;
 mod piece;
 mod printer;
+mod stats;
 mod structuring;
 mod support;
 mod telemetry;
@@ -241,61 +242,7 @@ pub fn render_mlil_preview_with_binary_and_context(
     record_ghidra_action_stage(&mut build_stats, GhidraActionConcept::PrototypeTypes);
     build_stats.merge_assign(&normalize::take_normalize_wave_stats());
     let normalized_discovery_stats = discover_guarded_tail_candidates_for_stats(&hir.body);
-    build_stats.promotion_candidate_count += normalized_discovery_stats.promotion_candidate_count;
-    build_stats.promoted_region_count += normalized_discovery_stats.promoted_region_count;
-    build_stats.promotion_rejected_by_shape_count +=
-        normalized_discovery_stats.promotion_rejected_by_shape_count;
-    build_stats.promotion_rejected_by_gate_count +=
-        normalized_discovery_stats.promotion_rejected_by_gate_count;
-    build_stats.discovery_seen_guarded_tail_like_shape_count +=
-        normalized_discovery_stats.discovery_seen_guarded_tail_like_shape_count;
-    build_stats.discovery_rejected_noncanonical_layout_count +=
-        normalized_discovery_stats.discovery_rejected_noncanonical_layout_count;
-    build_stats.canonicalized_guarded_tail_shape_count +=
-        normalized_discovery_stats.canonicalized_guarded_tail_shape_count;
-    build_stats.canonicalization_failed_multiple_payload_entries +=
-        normalized_discovery_stats.canonicalization_failed_multiple_payload_entries;
-    build_stats.canonicalization_failed_interleaved_join_uses +=
-        normalized_discovery_stats.canonicalization_failed_interleaved_join_uses;
-    build_stats.canonicalization_failed_interleaved_join_uses_no_next_label_count +=
-        normalized_discovery_stats
-            .canonicalization_failed_interleaved_join_uses_no_next_label_count;
-    build_stats.canonicalization_failed_interleaved_join_uses_nontrivial_segment_count +=
-        normalized_discovery_stats
-            .canonicalization_failed_interleaved_join_uses_nontrivial_segment_count;
-    build_stats.canonicalization_failed_nonterminal_join_label +=
-        normalized_discovery_stats.canonicalization_failed_nonterminal_join_label;
-    build_stats.canonicalization_failed_nested_tail_escape +=
-        normalized_discovery_stats.canonicalization_failed_nested_tail_escape;
-    build_stats.canonicalized_interleaved_join_use_count +=
-        normalized_discovery_stats.canonicalized_interleaved_join_use_count;
-    build_stats.canonicalized_local_nonfallthrough_alias_count +=
-        normalized_discovery_stats.canonicalized_local_nonfallthrough_alias_count;
-    build_stats.canonicalization_failed_alias_not_fallthrough_count +=
-        normalized_discovery_stats.canonicalization_failed_alias_not_fallthrough_count;
-    build_stats.canonicalization_failed_alias_not_fallthrough_top_level_after_label_count +=
-        normalized_discovery_stats
-            .canonicalization_failed_alias_not_fallthrough_top_level_after_label_count;
-    build_stats.canonicalization_failed_alias_not_fallthrough_nested_after_label_count +=
-        normalized_discovery_stats
-            .canonicalization_failed_alias_not_fallthrough_nested_after_label_count;
-    build_stats.canonicalization_failed_alias_has_multiple_internal_predecessors_count +=
-        normalized_discovery_stats
-            .canonicalization_failed_alias_has_multiple_internal_predecessors_count;
-    build_stats.canonicalization_failed_alias_has_nonlocal_ref_count +=
-        normalized_discovery_stats.canonicalization_failed_alias_has_nonlocal_ref_count;
-    build_stats.canonicalization_failed_alias_body_not_trivial_count +=
-        normalized_discovery_stats.canonicalization_failed_alias_body_not_trivial_count;
-    build_stats.canonicalization_failed_join_has_external_ref_count +=
-        normalized_discovery_stats.canonicalization_failed_join_has_external_ref_count;
-    build_stats.canonicalization_failed_payload_crosses_join_count +=
-        normalized_discovery_stats.canonicalization_failed_payload_crosses_join_count;
-    build_stats.rejected_must_emit_label += normalized_discovery_stats.rejected_must_emit_label;
-    build_stats.rejected_not_single_pred_succ +=
-        normalized_discovery_stats.rejected_not_single_pred_succ;
-    build_stats.rejected_external_entry += normalized_discovery_stats.rejected_external_entry;
-    build_stats.rejected_loop_or_switch_target +=
-        normalized_discovery_stats.rejected_loop_or_switch_target;
+    build_stats.merge_guarded_tail_discovery_assign(&normalized_discovery_stats);
     build_stats.refresh_structuring_reason_families();
     build_stats.build_duration_ms = build_start.elapsed().as_millis() as usize;
     build_stats.normalize_duration_ms = normalize_start.elapsed().as_millis() as usize;
