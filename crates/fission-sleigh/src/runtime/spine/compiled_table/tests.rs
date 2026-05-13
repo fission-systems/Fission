@@ -801,6 +801,12 @@ fn compiled_table_policy_symbols_stay_architecture_neutral() {
         ".unwrap_or(constructor_index)",
     ]
     .join("");
+    let exported_display_fallbacks = [
+        "ExportedDisplayFallback",
+        "exported_handle_display_fallback",
+        "exported_fixed_handle_needs_memory_display_fixup",
+        "handle_tpl_operand_handle_indices",
+    ];
     let subtable_offset_base_fallback = "offsetbase.unwrap_or(-1)";
     let context_commit_temp_offset_target = [
         "let offset = if handle.fixed.offset_space.is_some()",
@@ -987,6 +993,13 @@ fn compiled_table_policy_symbols_stay_architecture_neutral() {
             "{} still treats missing SLA constructor identity as constructor_index",
             file.display()
         );
+        for fallback in exported_display_fallbacks {
+            assert!(
+                !source.contains(fallback),
+                "{} still derives exported display values through fallback helper: {fallback}",
+                file.display()
+            );
+        }
         assert!(
             !source.contains(subtable_offset_base_fallback),
             "{} still treats missing subtable offset base as constructor start",

@@ -133,137 +133,9 @@ fn required_const_tpl_u32(value: Option<u64>, role: &str) -> Result<u32> {
     u32::try_from(value).map_err(|_| anyhow!("{role} value {value} exceeds u32"))
 }
 
-fn exported_fixed_handle_needs_memory_display_fixup(value: &BoundOperand) -> bool {
-    matches!(
-        value,
-        BoundOperand::Memory {
-            base: None,
-            index: None,
-            rip_relative: false,
-            absolute: Some(_),
-            ..
-        }
-    )
-}
-
-enum ExportedDisplayFallback {
-    None,
-    Operand(usize),
-    Fixed,
-}
-
-fn exported_handle_display_fallback(
-    handle_tpl: &CompiledHandleTpl,
-    display_template: &crate::compiler::CompiledDisplayTemplate,
-) -> ExportedDisplayFallback {
-    let Some(mut refs) = handle_tpl_operand_handle_indices(handle_tpl) else {
-        return ExportedDisplayFallback::None;
-    };
-    refs.sort_unstable();
-    refs.dedup();
-    match refs.len() {
-        0 if !display_template_references_operand(display_template) => {
-            ExportedDisplayFallback::Fixed
-        }
-        1 => ExportedDisplayFallback::Operand(refs[0]),
-        _ => ExportedDisplayFallback::None,
-    }
-}
-
-fn display_template_references_operand(
-    template: &crate::compiler::CompiledDisplayTemplate,
-) -> bool {
-    template.flowthru_operand_index.is_some()
-        || template
-            .pieces
-            .iter()
-            .any(|piece| matches!(piece, crate::compiler::CompiledDisplayPiece::OperandRef(_)))
-}
-
-fn handle_tpl_operand_handle_indices(handle_tpl: &CompiledHandleTpl) -> Option<Vec<usize>> {
-    let mut refs = Vec::new();
-    if let Some(space) = &handle_tpl.space {
-        collect_space_tpl_operand_handle_indices(space, &mut refs)?;
-    }
-    if let Some(value) = &handle_tpl.size {
-        collect_const_tpl_operand_handle_indices(value, &mut refs)?;
-    }
-    if let Some(space) = &handle_tpl.ptr_space {
-        collect_space_tpl_operand_handle_indices(space, &mut refs)?;
-    }
-    if let Some(value) = &handle_tpl.ptr_offset {
-        collect_const_tpl_operand_handle_indices(value, &mut refs)?;
-    }
-    if let Some(value) = &handle_tpl.ptr_size {
-        collect_const_tpl_operand_handle_indices(value, &mut refs)?;
-    }
-    if let Some(space) = &handle_tpl.temp_space {
-        collect_space_tpl_operand_handle_indices(space, &mut refs)?;
-    }
-    if let Some(value) = &handle_tpl.temp_offset {
-        collect_const_tpl_operand_handle_indices(value, &mut refs)?;
-    }
-    Some(refs)
-}
-
-fn collect_space_tpl_operand_handle_indices(
-    space_tpl: &CompiledSpaceTpl,
-    refs: &mut Vec<usize>,
-) -> Option<()> {
-    match space_tpl {
-        CompiledSpaceTpl::SpaceRef(_) => {}
-        CompiledSpaceTpl::Const(value) => collect_const_tpl_operand_handle_indices(value, refs)?,
-    }
-    Some(())
-}
-
-fn collect_const_tpl_operand_handle_indices(
-    value: &CompiledConstTpl,
-    refs: &mut Vec<usize>,
-) -> Option<()> {
-    if let CompiledConstTpl::Handle { handle_index, .. } = value {
-        refs.push(usize::try_from(*handle_index).ok()?);
-    }
-    Some(())
-}
-
 #[cfg(test)]
 mod construct_state_offset_tests {
-    use crate::compiler::{
-        compile_x86_64_frontend, discovery, CompiledConstTpl, CompiledDisplayPiece,
-        CompiledDisplayTemplate, CompiledHandleSelector, CompiledHandleTpl, CompiledSpaceRef,
-        CompiledSpaceTpl,
-    };
-
-    use super::{exported_handle_display_fallback, ExportedDisplayFallback};
-
-    fn empty_display_template() -> CompiledDisplayTemplate {
-        CompiledDisplayTemplate {
-            constructor_hash: 0,
-            pieces: Vec::new(),
-            first_whitespace: None,
-            flowthru_operand_index: None,
-            display: String::new(),
-        }
-    }
-
-    fn display_template_with_operand(index: usize) -> CompiledDisplayTemplate {
-        CompiledDisplayTemplate {
-            constructor_hash: 0,
-            pieces: vec![CompiledDisplayPiece::OperandRef(index)],
-            first_whitespace: None,
-            flowthru_operand_index: None,
-            display: String::new(),
-        }
-    }
-
-    fn const_handle(index: i64, selector: CompiledHandleSelector) -> CompiledConstTpl {
-        CompiledConstTpl::Handle {
-            handle_index: index,
-            selector,
-            plus: None,
-        }
-    }
+    use crate::compiler::{compile_x86_64_frontend, discovery};
 
     #[test]
     fn opcode_register_subtable_reads_from_sla_operand_offset() {
@@ -307,75 +179,6 @@ mod construct_state_offset_tests {
                 Some(crate::compiler::CompiledTemplateSource::SpecDerived)
             );
         }
-    }
-
-    #[test]
-    fn exported_display_fallback_uses_unique_export_operand_not_fixed_handle() {
-        let handle = CompiledHandleTpl {
-            space: Some(CompiledSpaceTpl::Const(Box::new(const_handle(
-                1,
-                CompiledHandleSelector::Space,
-            )))),
-            size: Some(const_handle(1, CompiledHandleSelector::Size)),
-            ptr_space: None,
-            ptr_offset: Some(const_handle(1, CompiledHandleSelector::Offset)),
-            ptr_size: None,
-            temp_space: None,
-            temp_offset: None,
-        };
-
-        assert!(matches!(
-            exported_handle_display_fallback(&handle, &display_template_with_operand(0)),
-            ExportedDisplayFallback::Operand(1)
-        ));
-    }
-
-    #[test]
-    fn exported_display_fallback_rejects_ambiguous_multi_operand_exports() {
-        let handle = CompiledHandleTpl {
-            space: Some(CompiledSpaceTpl::Const(Box::new(const_handle(
-                0,
-                CompiledHandleSelector::Space,
-            )))),
-            size: Some(const_handle(1, CompiledHandleSelector::Size)),
-            ptr_space: None,
-            ptr_offset: Some(const_handle(1, CompiledHandleSelector::Offset)),
-            ptr_size: None,
-            temp_space: None,
-            temp_offset: None,
-        };
-
-        assert!(matches!(
-            exported_handle_display_fallback(&handle, &display_template_with_operand(0)),
-            ExportedDisplayFallback::None
-        ));
-    }
-
-    #[test]
-    fn exported_display_fallback_allows_only_displayless_literal_fixed_exports() {
-        let handle = CompiledHandleTpl {
-            space: Some(CompiledSpaceTpl::SpaceRef(CompiledSpaceRef {
-                name: "const".to_string(),
-                index: 0,
-                word_size: 1,
-                addr_size: 0,
-            })),
-            size: Some(CompiledConstTpl::Real { value: 8 }),
-            ptr_space: None,
-            ptr_offset: Some(CompiledConstTpl::Real { value: 0 }),
-            ptr_size: None,
-            temp_space: None,
-            temp_offset: None,
-        };
-
-        assert!(matches!(
-            exported_handle_display_fallback(&handle, &empty_display_template()),
-            ExportedDisplayFallback::Fixed
-        ));
-        assert!(matches!(
-            exported_handle_display_fallback(&handle, &display_template_with_operand(0)),
-            ExportedDisplayFallback::None
-        ));
     }
 }
 
@@ -550,37 +353,9 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
             return Ok(None);
         };
         let fixed = self.fixed_handle_from_handle_tpl(&export_tpl, handles)?;
-        let fixed_value = display_operand_from_exported_fixed_handle(&fixed)?;
-        let value = if exported_fixed_handle_needs_memory_display_fixup(&fixed_value) {
-            fixed_value
-        } else if let Some(display_value) = self
+        let value = self
             .display_operand_from_exported_display_template(handles)
-            .transpose()?
-        {
-            display_value
-        } else {
-            match exported_handle_display_fallback(
-                &export_tpl,
-                &self.selection.constructor.display_template,
-            ) {
-                ExportedDisplayFallback::Operand(index) => handles
-                    .get(index)
-                    .and_then(|handle| handle.debug_value.clone())
-                    .ok_or_else(|| {
-                        anyhow!(
-                            "exported display operand {index} has no .sla debug value for {}",
-                            self.selection.constructor.source
-                        )
-                    })?,
-                ExportedDisplayFallback::Fixed => fixed_value,
-                ExportedDisplayFallback::None => {
-                    bail!(
-                        "exported display value missing .sla display operand for {}",
-                        self.selection.constructor.source
-                    )
-                }
-            }
-        };
+            .transpose()?;
         Ok(Some(RuntimeHandle {
             operand_index: usize::MAX,
             spec: CompiledOperandSpec::SubtableEvaluation {
@@ -589,7 +364,7 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                 offsetbase: -1,
             },
             fixed,
-            debug_value: Some(value),
+            debug_value: value,
             subtable_state: None,
         }))
     }
@@ -1235,9 +1010,13 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                         return Ok(OperandBinding::guard_only(sub_state));
                     }
                 };
-                let value = display_value_for_exported_handle(exported, &sub_state)?;
+                let value = if exported.debug_value.is_some() {
+                    Some(display_value_for_exported_handle(exported, &sub_state)?)
+                } else {
+                    None
+                };
                 Ok(OperandBinding {
-                    debug_value: Some(value),
+                    debug_value: value,
                     fixed: Some(exported.fixed.clone()),
                     subtable_state: Some(sub_state),
                     requires_fixed: true,
