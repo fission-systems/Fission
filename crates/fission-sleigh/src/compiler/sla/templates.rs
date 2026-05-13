@@ -967,6 +967,16 @@ mod tests {
     }
 
     #[test]
+    fn map_pcode_opcode_has_no_broad_unsupported_fallback() {
+        let source = include_str!("templates.rs");
+
+        assert!(
+            !source.contains("_ => Ok(CompiledOpTplOpcode::Unsupported)"),
+            "compiled .sla opcode mapping must fail closed or preserve known opcodes, not downgrade through a broad Unsupported fallback"
+        );
+    }
+
+    #[test]
     fn map_pcode_opcode_preserves_float_and_cast_opcodes() {
         let opcode = map_pcode_opcode(41).expect("known float comparison opcode");
 
