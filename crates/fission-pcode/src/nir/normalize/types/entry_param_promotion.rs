@@ -13,8 +13,21 @@ use std::collections::HashSet;
 
 use super::super::wave_stats::add_entry_param_promotions;
 
-fn param_slot_for_hw_register(reg: &str, abi: CallingConvention) -> Option<usize> {
-    AbiState::new(abi, true, 8, 0).param_slot_for_name(reg)
+fn abi_pointer_size(is_64bit: bool, abi: CallingConvention) -> u32 {
+    if is_64bit
+        || matches!(
+            abi,
+            CallingConvention::LoongArch64 | CallingConvention::PowerPc64
+        )
+    {
+        8
+    } else {
+        4
+    }
+}
+
+fn param_slot_for_hw_register(reg: &str, abi: CallingConvention, is_64bit: bool) -> Option<usize> {
+    AbiState::new(abi, is_64bit, abi_pointer_size(is_64bit, abi), 0).param_slot_for_name(reg)
 }
 
 fn peel_var_name<'a>(expr: &'a HirExpr) -> Option<&'a str> {
@@ -180,6 +193,35 @@ fn detect_variadic_register_save(func: &HirFunction) -> bool {
     func.body.iter().any(stmt_has_variadic_shape)
 }
 
+fn param_ty_for_abi(func: &HirFunction) -> NirType {
+    NirType::Int {
+        bits: abi_pointer_size(func.is_64bit, func.calling_convention) * 8,
+        signed: true,
+    }
+}
+
+fn promote_existing_param_name_reads(func: &mut HirFunction) -> usize {
+    let mut promotions = 0usize;
+    for slot in 0..func.calling_convention.param_offsets().len() {
+        let param_name = format!("param_{}", slot + 1);
+        if !func
+            .body
+            .iter()
+            .any(|stmt| stmt_contains_rhs_var(stmt, &param_name))
+        {
+            continue;
+        }
+        let had_param = func.params.iter().any(|p| p.name == param_name);
+        let had_local = func.locals.iter().any(|b| b.name == param_name);
+        ensure_param_binding(func, slot, param_ty_for_abi(func));
+        remove_local_binding(func, &param_name);
+        if !had_param || had_local {
+            promotions += 1;
+        }
+    }
+    promotions
+}
+
 fn promote_direct_param_register_reads(func: &mut HirFunction) -> usize {
     let abi = func.calling_convention;
     let variadic_evidence =
@@ -202,14 +244,7 @@ fn promote_direct_param_register_reads(func: &mut HirFunction) -> usize {
             continue;
         }
         let param_name = format!("param_{}", slot + 1);
-        ensure_param_binding(
-            func,
-            slot,
-            NirType::Int {
-                bits: 64,
-                signed: true,
-            },
-        );
+        ensure_param_binding(func, slot, param_ty_for_abi(func));
         renames.push((hw.to_string(), param_name));
         promotions += 1;
     }
@@ -274,7 +309,11 @@ fn trim_unused_variadic_tail_params(func: &mut HirFunction) -> bool {
 }
 
 fn hw_name_for_slot(abi: CallingConvention, slot: usize) -> Option<&'static str> {
-    AbiState::new(abi, true, 8, 0).param_hw_name(slot)
+    let is_64bit = !matches!(
+        abi,
+        CallingConvention::Arm32 | CallingConvention::PowerPc32 | CallingConvention::LoongArch32
+    );
+    AbiState::new(abi, is_64bit, abi_pointer_size(is_64bit, abi), 0).param_hw_name(slot)
 }
 
 /// Remove `param_k = <hw>` copies where `<hw>` is the incoming register for slot `k`.
@@ -290,7 +329,16 @@ fn remove_redundant_param_hw_copies(body: &mut Vec<HirStmt>, abi: CallingConvent
                 .map(|n| n.saturating_sub(1))
             {
                 if let Some(hw) = peel_var_name(rhs)
-                    && param_slot_for_hw_register(hw, abi) == Some(slot)
+                    && param_slot_for_hw_register(
+                        hw,
+                        abi,
+                        !matches!(
+                            abi,
+                            CallingConvention::Arm32
+                                | CallingConvention::PowerPc32
+                                | CallingConvention::LoongArch32
+                        ),
+                    ) == Some(slot)
                 {
                     return false;
                 }
@@ -330,10 +378,19 @@ fn remove_redundant_param_hw_copies(body: &mut Vec<HirStmt>, abi: CallingConvent
 }
 
 pub(crate) fn apply_entry_param_promotion_pass(func: &mut HirFunction) -> bool {
-    if !func.is_64bit || func.suppress_entry_register_params {
+    if (!func.is_64bit
+        && !matches!(
+            func.calling_convention,
+            CallingConvention::Arm32
+                | CallingConvention::PowerPc32
+                | CallingConvention::LoongArch32
+        ))
+        || func.suppress_entry_register_params
+    {
         return false;
     }
     let abi = func.calling_convention;
+    let mut promotions = promote_existing_param_name_reads(func);
     let mut prefix = Vec::new();
     collect_entry_linear_prefix(&func.body, &mut prefix);
 
@@ -353,7 +410,7 @@ pub(crate) fn apply_entry_param_promotion_pass(func: &mut HirFunction) -> bool {
         let Some(rhs_name) = peel_var_name(rhs) else {
             continue;
         };
-        let Some(slot) = param_slot_for_hw_register(rhs_name, abi) else {
+        let Some(slot) = param_slot_for_hw_register(rhs_name, abi, func.is_64bit) else {
             continue;
         };
         if !seen_lhs.insert(lhs_name.clone()) {
@@ -381,7 +438,7 @@ pub(crate) fn apply_entry_param_promotion_pass(func: &mut HirFunction) -> bool {
     });
 
     if spill_to_slot.is_empty() {
-        let promotions = promote_direct_param_register_reads(func);
+        promotions += promote_direct_param_register_reads(func);
         if promotions == 0 {
             return trim_unused_variadic_tail_params(func);
         }
@@ -391,7 +448,6 @@ pub(crate) fn apply_entry_param_promotion_pass(func: &mut HirFunction) -> bool {
     }
 
     let mut renames = Vec::new();
-    let mut promotions = 0usize;
     for (local_name, slot, ty) in &spill_to_slot {
         let param_name = format!("param_{}", slot + 1);
         renames.push((local_name.clone(), param_name));

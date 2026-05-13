@@ -2047,3 +2047,35 @@ fn abi_state_recovers_win64_stack_arg_index() {
     assert_eq!(abi.stack_argument_index(0x28), Some(1));
     assert_eq!(abi.stack_argument_index(0x18), None);
 }
+
+#[test]
+fn loongarch32_a_registers_are_param_slots() {
+    let (name, idx) = register_name_with_param(0x110, 4, CallingConvention::LoongArch32).unwrap();
+    assert_eq!(name, "param_1");
+    assert_eq!(idx, Some(0));
+
+    let (name, idx) = register_name_with_param(0x12c, 4, CallingConvention::LoongArch32).unwrap();
+    assert_eq!(name, "param_8");
+    assert_eq!(idx, Some(7));
+
+    let abi = AbiState::new(CallingConvention::LoongArch32, false, 4, 0);
+    assert_eq!(abi.param_slot_for_name("a0"), Some(0));
+    assert_eq!(abi.param_slot_for_name("a7"), Some(7));
+    assert_eq!(abi.param_slot_for_name("sp"), None);
+    assert_eq!(abi.param_slot_for_name("fp"), None);
+}
+
+#[test]
+fn loongarch32_alt_register_space_primary_return_is_a0() {
+    let ret = Varnode {
+        space_id: RUST_SLEIGH_ALT_REGISTER_SPACE_ID,
+        offset: 0x110,
+        size: 4,
+        is_constant: false,
+        constant_val: 0,
+    };
+    assert!(is_primary_return_register_for_abi(
+        &ret,
+        CallingConvention::LoongArch32
+    ));
+}

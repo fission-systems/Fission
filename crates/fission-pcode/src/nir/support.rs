@@ -4,9 +4,12 @@ pub(crate) const UNIQUE_SPACE_ID: u64 = 3;
 pub(crate) const RUST_SLEIGH_UNIQUE_SPACE_ID: u64 = 2;
 pub(crate) const REGISTER_SPACE_ID: u64 = 1;
 pub(crate) const RUST_SLEIGH_REGISTER_SPACE_ID: u64 = 4;
+pub(crate) const RUST_SLEIGH_ALT_REGISTER_SPACE_ID: u64 = 5;
 
 pub(crate) fn is_register_space_id(space_id: u64) -> bool {
-    space_id == REGISTER_SPACE_ID || space_id == RUST_SLEIGH_REGISTER_SPACE_ID
+    space_id == REGISTER_SPACE_ID
+        || space_id == RUST_SLEIGH_REGISTER_SPACE_ID
+        || space_id == RUST_SLEIGH_ALT_REGISTER_SPACE_ID
 }
 
 pub(crate) fn is_unique_space_id(space_id: u64) -> bool {
@@ -351,6 +354,10 @@ pub enum CallingConvention {
     PowerPc32,
     /// PowerPC 64-bit ELF ABI: first eight integer args in r3-r10, return in r3.
     PowerPc64,
+    /// LoongArch 32-bit ELF ABI: first eight integer args in a0-a7, return in a0.
+    LoongArch32,
+    /// LoongArch 64-bit ELF ABI: first eight integer args in a0-a7, return in a0.
+    LoongArch64,
 }
 
 impl Default for CallingConvention {
@@ -413,6 +420,26 @@ impl CallingConvention {
                 0x48, // r9  → param_7
                 0x50, // r10 → param_8
             ],
+            Self::LoongArch32 => &[
+                0x110, // a0 → param_1
+                0x114, // a1 → param_2
+                0x118, // a2 → param_3
+                0x11c, // a3 → param_4
+                0x120, // a4 → param_5
+                0x124, // a5 → param_6
+                0x128, // a6 → param_7
+                0x12c, // a7 → param_8
+            ],
+            Self::LoongArch64 => &[
+                0x120, // a0 → param_1
+                0x128, // a1 → param_2
+                0x130, // a2 → param_3
+                0x138, // a3 → param_4
+                0x140, // a4 → param_5
+                0x148, // a5 → param_6
+                0x150, // a6 → param_7
+                0x158, // a7 → param_8
+            ],
         }
     }
 
@@ -469,6 +496,26 @@ impl CallingConvention {
                 (0x40, 8), // r8
                 (0x48, 8), // r9
                 (0x50, 8), // r10
+            ],
+            Self::LoongArch32 => &[
+                (0x110, 4), // a0
+                (0x114, 4), // a1
+                (0x118, 4), // a2
+                (0x11c, 4), // a3
+                (0x120, 4), // a4
+                (0x124, 4), // a5
+                (0x128, 4), // a6
+                (0x12c, 4), // a7
+            ],
+            Self::LoongArch64 => &[
+                (0x120, 8), // a0
+                (0x128, 8), // a1
+                (0x130, 8), // a2
+                (0x138, 8), // a3
+                (0x140, 8), // a4
+                (0x148, 8), // a5
+                (0x150, 8), // a6
+                (0x158, 8), // a7
             ],
         }
     }
@@ -682,6 +729,59 @@ pub(crate) fn powerpc_ghidra_reg_name_for_abi(
     powerpc_ghidra_reg_name(offset, size)
 }
 
+pub(crate) fn loongarch_gpr_family_index(name: &str) -> Option<usize> {
+    match name {
+        "zero" => Some(0),
+        "ra" => Some(1),
+        "tp" => Some(2),
+        "sp" => Some(3),
+        "fp" => Some(22),
+        _ => {
+            if let Some(rest) = name.strip_prefix('a') {
+                let idx = rest.parse::<usize>().ok()?;
+                return (idx < 8).then_some(4 + idx);
+            }
+            if let Some(rest) = name.strip_prefix('t') {
+                let idx = rest.parse::<usize>().ok()?;
+                return (idx < 9).then_some(12 + idx);
+            }
+            if let Some(rest) = name.strip_prefix('s') {
+                let idx = rest.parse::<usize>().ok()?;
+                return (idx < 9).then_some(23 + idx);
+            }
+            name.strip_prefix('r')?
+                .parse::<usize>()
+                .ok()
+                .filter(|idx| *idx < 32)
+        }
+    }
+}
+
+pub(crate) fn loongarch_ghidra_reg_name_for_abi(
+    offset: u64,
+    size: u32,
+    abi: CallingConvention,
+) -> Option<&'static str> {
+    const GPRS: [&str; 32] = [
+        "zero", "ra", "tp", "sp", "a0", "a1", "a2", "a3", "a4", "a5", "a6", "a7", "t0", "t1", "t2",
+        "t3", "t4", "t5", "t6", "t7", "t8", "r21", "fp", "s0", "s1", "s2", "s3", "s4", "s5", "s6",
+        "s7", "s8",
+    ];
+    let (base, stride, full_size) = match abi {
+        CallingConvention::LoongArch32 => (0x100, 4, 4),
+        CallingConvention::LoongArch64 => (0x100, 8, 8),
+        _ => return None,
+    };
+    if size != full_size {
+        return None;
+    }
+    if offset < base || (offset - base) % stride != 0 {
+        return None;
+    }
+    let idx = ((offset - base) / stride) as usize;
+    GPRS.get(idx).copied()
+}
+
 /// Static `param_N` names for up to 8 parameters (enough for AArch64 PCS).
 const PARAM_NAMES: [&str; 8] = [
     "param_1", "param_2", "param_3", "param_4", "param_5", "param_6", "param_7", "param_8",
@@ -705,6 +805,9 @@ pub(crate) fn register_name_with_param(
         CallingConvention::Arm32 => arm32_ghidra_reg_name(offset, _size)?,
         CallingConvention::PowerPc32 | CallingConvention::PowerPc64 => {
             powerpc_ghidra_reg_name_for_abi(offset, _size, abi)?
+        }
+        CallingConvention::LoongArch32 | CallingConvention::LoongArch64 => {
+            loongarch_ghidra_reg_name_for_abi(offset, _size, abi)?
         }
         CallingConvention::WindowsX64 | CallingConvention::SystemVAmd64 => {
             x64_ghidra_reg_name(offset)?
@@ -739,6 +842,20 @@ pub(crate) fn register_name_with_param(
                 })
             })
         }
+        CallingConvention::LoongArch32 | CallingConvention::LoongArch64 => {
+            loongarch_gpr_family_index(hw_name).and_then(|name_family| {
+                let slot_size = if abi == CallingConvention::LoongArch64 {
+                    8
+                } else {
+                    4
+                };
+                abi.param_offsets().iter().position(|&param_offset| {
+                    loongarch_ghidra_reg_name_for_abi(param_offset, slot_size, abi)
+                        .and_then(loongarch_gpr_family_index)
+                        .is_some_and(|family| family == name_family)
+                })
+            })
+        }
         CallingConvention::WindowsX64 | CallingConvention::SystemVAmd64 => abi
             .param_offsets()
             .iter()
@@ -756,6 +873,8 @@ pub(crate) fn register_name(offset: u64, size: u32) -> &'static str {
         .or_else(|| aarch64_ghidra_reg_name(offset, size))
         .or_else(|| arm32_ghidra_reg_name(offset, size))
         .or_else(|| powerpc_ghidra_reg_name(offset, size))
+        .or_else(|| loongarch_ghidra_reg_name_for_abi(offset, size, CallingConvention::LoongArch64))
+        .or_else(|| loongarch_ghidra_reg_name_for_abi(offset, size, CallingConvention::LoongArch32))
         .unwrap_or("reg")
 }
 
@@ -770,6 +889,9 @@ pub(crate) fn register_hardware_name_for_abi(
         CallingConvention::PowerPc32 | CallingConvention::PowerPc64 => {
             powerpc_ghidra_reg_name_for_abi(offset, size, abi)
         }
+        CallingConvention::LoongArch32 | CallingConvention::LoongArch64 => {
+            loongarch_ghidra_reg_name_for_abi(offset, size, abi)
+        }
         CallingConvention::WindowsX64 | CallingConvention::SystemVAmd64 => {
             x64_ghidra_reg_name(offset)
         }
@@ -781,8 +903,7 @@ pub(crate) fn unique_register_name(offset: u64, size: u32) -> Option<&'static st
 }
 
 pub(crate) fn is_primary_return_register(vn: &Varnode) -> bool {
-    ((vn.space_id == REGISTER_SPACE_ID || vn.space_id == RUST_SLEIGH_REGISTER_SPACE_ID)
-        && vn.offset == 0x00)
+    (is_register_space_id(vn.space_id) && vn.offset == 0x00)
         || (vn.space_id == UNIQUE_SPACE_ID
             && unique_register_name(vn.offset, vn.size) == Some("rax"))
 }
@@ -790,22 +911,15 @@ pub(crate) fn is_primary_return_register(vn: &Varnode) -> bool {
 pub(crate) fn is_primary_return_register_for_abi(vn: &Varnode, abi: CallingConvention) -> bool {
     match abi {
         CallingConvention::AArch64 => {
-            (vn.space_id == REGISTER_SPACE_ID || vn.space_id == RUST_SLEIGH_REGISTER_SPACE_ID)
+            is_register_space_id(vn.space_id)
                 && aarch64_ghidra_reg_name(vn.offset, vn.size).and_then(aarch64_gpr_family_index)
                     == Some(0)
         }
-        CallingConvention::Arm32 => {
-            (vn.space_id == REGISTER_SPACE_ID || vn.space_id == RUST_SLEIGH_REGISTER_SPACE_ID)
-                && vn.offset == 0x20
-        }
-        CallingConvention::PowerPc32 => {
-            (vn.space_id == REGISTER_SPACE_ID || vn.space_id == RUST_SLEIGH_REGISTER_SPACE_ID)
-                && vn.offset == 0x0c
-        }
-        CallingConvention::PowerPc64 => {
-            (vn.space_id == REGISTER_SPACE_ID || vn.space_id == RUST_SLEIGH_REGISTER_SPACE_ID)
-                && vn.offset == 0x18
-        }
+        CallingConvention::Arm32 => is_register_space_id(vn.space_id) && vn.offset == 0x20,
+        CallingConvention::PowerPc32 => is_register_space_id(vn.space_id) && vn.offset == 0x0c,
+        CallingConvention::PowerPc64 => is_register_space_id(vn.space_id) && vn.offset == 0x18,
+        CallingConvention::LoongArch32 => is_register_space_id(vn.space_id) && vn.offset == 0x110,
+        CallingConvention::LoongArch64 => is_register_space_id(vn.space_id) && vn.offset == 0x120,
         CallingConvention::WindowsX64 | CallingConvention::SystemVAmd64 => {
             is_primary_return_register(vn)
         }
@@ -824,6 +938,9 @@ pub(crate) fn is_return_target_register_for_abi(vn: &Varnode, abi: CallingConven
         CallingConvention::Arm32 => vn.offset == 0x58,
         CallingConvention::PowerPc32 | CallingConvention::PowerPc64 => {
             powerpc_ghidra_reg_name(vn.offset, vn.size) == Some("LR")
+        }
+        CallingConvention::LoongArch32 | CallingConvention::LoongArch64 => {
+            loongarch_ghidra_reg_name_for_abi(vn.offset, vn.size, abi) == Some("ra")
         }
         CallingConvention::WindowsX64 | CallingConvention::SystemVAmd64 => false,
     }
@@ -890,6 +1007,52 @@ pub(crate) fn primary_return_registers(pointer_size: u32, abi: CallingConvention
             Varnode {
                 space_id: RUST_SLEIGH_REGISTER_SPACE_ID,
                 offset: 0x18,
+                size: 8,
+                is_constant: false,
+                constant_val: 0,
+            },
+        ],
+        CallingConvention::LoongArch32 => vec![
+            Varnode {
+                space_id: REGISTER_SPACE_ID,
+                offset: 0x110,
+                size: 4,
+                is_constant: false,
+                constant_val: 0,
+            },
+            Varnode {
+                space_id: RUST_SLEIGH_REGISTER_SPACE_ID,
+                offset: 0x110,
+                size: 4,
+                is_constant: false,
+                constant_val: 0,
+            },
+            Varnode {
+                space_id: RUST_SLEIGH_ALT_REGISTER_SPACE_ID,
+                offset: 0x110,
+                size: 4,
+                is_constant: false,
+                constant_val: 0,
+            },
+        ],
+        CallingConvention::LoongArch64 => vec![
+            Varnode {
+                space_id: REGISTER_SPACE_ID,
+                offset: 0x120,
+                size: 8,
+                is_constant: false,
+                constant_val: 0,
+            },
+            Varnode {
+                space_id: RUST_SLEIGH_REGISTER_SPACE_ID,
+                offset: 0x120,
+                size: 8,
+                is_constant: false,
+                constant_val: 0,
+            },
+            Varnode {
+                space_id: RUST_SLEIGH_ALT_REGISTER_SPACE_ID,
+                offset: 0x120,
                 size: 8,
                 is_constant: false,
                 constant_val: 0,

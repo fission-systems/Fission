@@ -125,3 +125,43 @@ fn win64_variadic_shape_trims_unused_tail_params() {
         print_hir_function(&func)
     );
 }
+
+#[test]
+fn loongarch32_existing_param_local_becomes_function_param_before_self_call_prune() {
+    let int32 = NirType::Int {
+        bits: 32,
+        signed: true,
+    };
+    let mut func = HirFunction {
+        name: "recursive_fib".into(),
+        params: vec![],
+        locals: vec![NirBinding {
+            name: "param_1".into(),
+            ty: int32.clone(),
+            surface_type_name: None,
+            origin: Some(NirBindingOrigin::Temp),
+            initializer: None,
+        }],
+        return_type: int32.clone(),
+        surface_return_type_name: None,
+        body: vec![HirStmt::Return(Some(HirExpr::Call {
+            target: "recursive_fib".into(),
+            args: vec![HirExpr::Var("param_1".into())],
+            ty: int32,
+        }))],
+        calling_convention: CallingConvention::LoongArch32,
+        is_64bit: false,
+        ..Default::default()
+    };
+
+    normalize_hir_function(&mut func);
+    let rendered = print_hir_function(&func);
+    assert!(
+        rendered.contains("recursive_fib(int param_1)"),
+        "expected LoongArch32 param_1 to become a function parameter:\n{rendered}"
+    );
+    assert!(
+        rendered.contains("recursive_fib(param_1)"),
+        "expected self-call argument to survive arity pruning:\n{rendered}"
+    );
+}

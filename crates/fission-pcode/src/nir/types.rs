@@ -1684,6 +1684,12 @@ impl NirRenderOptions {
             } else {
                 CallingConvention::PowerPc32
             }
+        } else if lang_upper.starts_with("LOONGARCH:") {
+            if binary.is_64bit {
+                CallingConvention::LoongArch64
+            } else {
+                CallingConvention::LoongArch32
+            }
         } else if fmt_upper.starts_with("ELF") || fmt_upper.starts_with("MACHO") {
             CallingConvention::SystemVAmd64
         } else {

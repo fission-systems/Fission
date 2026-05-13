@@ -378,6 +378,14 @@ impl<'a> PreviewBuilder<'a> {
                     )
                     .and_then(powerpc_gpr_family_index)
                 }
+                CallingConvention::LoongArch32 | CallingConvention::LoongArch64 => {
+                    loongarch_ghidra_reg_name_for_abi(
+                        key.offset,
+                        key.size,
+                        self.options.calling_convention,
+                    )
+                    .and_then(loongarch_gpr_family_index)
+                }
                 CallingConvention::WindowsX64 | CallingConvention::SystemVAmd64 => {
                     x64_ghidra_reg_name(key.offset).and_then(crate::arch::x86::x86_gpr_family_index)
                 }

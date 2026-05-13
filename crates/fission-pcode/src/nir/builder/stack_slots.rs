@@ -371,6 +371,16 @@ impl<'a> PreviewBuilder<'a> {
                     0x08 => Some((StackBase::Rsp, 0)),
                     _ => None,
                 },
+                CallingConvention::LoongArch32 => match ptr.offset {
+                    0x10c => Some((StackBase::Rsp, 0)),
+                    0x158 => Some((StackBase::Rbp, 0)),
+                    _ => None,
+                },
+                CallingConvention::LoongArch64 => match ptr.offset {
+                    0x118 => Some((StackBase::Rsp, 0)),
+                    0x1b0 => Some((StackBase::Rbp, 0)),
+                    _ => None,
+                },
                 CallingConvention::AArch64 => match ptr.offset {
                     0x08 => Some((StackBase::Rsp, 0)),
                     0x40e8 => Some((StackBase::Rbp, 0)),
