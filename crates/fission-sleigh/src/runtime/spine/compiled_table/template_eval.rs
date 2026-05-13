@@ -33,6 +33,12 @@ fn const_varnode(value: u64, size: u32) -> Varnode {
     Varnode::constant(value as i64, size)
 }
 
+fn space_id_const_varnode(space: &CompiledSpaceRef, role: &str) -> Result<Varnode> {
+    let value = i64::try_from(space.index)
+        .map_err(|_| anyhow!("{role} space id {} exceeds i64", space.index))?;
+    Ok(Varnode::constant(value, 4))
+}
+
 fn label_id_from_op_tpl(op: &CompiledOpTpl) -> Result<u64> {
     if op.output.is_some() || op.inputs.len() != 1 {
         bail!("LABEL template shape is unsupported");
@@ -1094,7 +1100,7 @@ impl<'c> CompiledTableEmitter<'c> {
             constant_val: 0,
         };
         Ok(Some(DynamicMemoryTarget {
-            space: Varnode::constant(space.index as i64, 4),
+            space: space_id_const_varnode(space, "dynamic memory target")?,
             ptr,
             temp: Varnode {
                 space_id: temp_space.index,
@@ -1162,7 +1168,7 @@ impl<'c> CompiledTableEmitter<'c> {
         // Ghidra: generateLocation → incache[i] = (temp_space, temp_offset, size)
         //         generatePointer  → dyncache[1] = (offset_space, offset_offset, offset_size)
         //         dump LOAD(ram_id, ptr) → temp
-        let space_id = Varnode::constant(space.index as i64, 4);
+        let space_id = space_id_const_varnode(space, "dynamic memory source")?;
         let ptr = Varnode {
             space_id: offset_space.index,
             offset: handle.fixed.offset_offset,
@@ -1639,11 +1645,30 @@ mod tests {
         let source = include_str!("template_eval.rs");
         let saturating_shift_fallback =
             ["let shift_bits = shift_bytes.", "saturating", "_mul(8);"].concat();
+        let dynamic_space_id_lossy_cast = ["space.index", "as", "i64"].join(" ");
 
         assert!(
             !source.contains(&saturating_shift_fallback),
             "constant-space offset_plus must mirror Ghidra Java long shift masking"
         );
+        assert!(
+            !source.contains(&dynamic_space_id_lossy_cast),
+            "dynamic LOAD/STORE space-id constants must fail closed instead of truncating SLA space ids"
+        );
+    }
+
+    #[test]
+    fn dynamic_space_id_constant_rejects_oversized_metadata() {
+        let space = CompiledSpaceRef {
+            name: "oversized".to_string(),
+            index: i64::MAX as u64 + 1,
+            word_size: 1,
+            addr_size: 8,
+        };
+
+        let err = space_id_const_varnode(&space, "test").expect_err("oversized space id");
+
+        assert!(err.to_string().contains("space id"));
     }
 
     #[test]
