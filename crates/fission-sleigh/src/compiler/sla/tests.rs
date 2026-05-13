@@ -417,6 +417,17 @@ fn sla_constructor_identity_is_not_silently_overwritten() {
 }
 
 #[test]
+fn sla_decode_diagnostics_are_trace_gated() {
+    let templates = include_str!("templates.rs");
+    for forbidden in ["SLA Symbols Found", "'instruction' Root Node"] {
+        assert!(
+            !templates.contains(forbidden),
+            "compiled .sla decode must not emit unconditional diagnostics: {forbidden}"
+        );
+    }
+}
+
+#[test]
 fn decodes_x86_varnode_list_selector_expressions() {
     let Some(path) = packaged_sla_path("x86", "x86-64.sla") else {
         return;

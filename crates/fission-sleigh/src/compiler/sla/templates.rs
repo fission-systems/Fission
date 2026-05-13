@@ -60,8 +60,6 @@ pub(super) fn decode_construct_templates(
         }
     }
 
-    eprintln!("SLA Symbols Found: {} names", symbol_names.len());
-
     let mut constructors_by_source: BTreeMap<String, Vec<CompiledSlaConstructorTemplate>> =
         BTreeMap::new();
     let mut subtables = BTreeMap::new();
@@ -477,19 +475,6 @@ pub(super) fn decode_construct_templates(
                 decision_tree,
             },
         );
-    }
-
-    if let Some(inst_table) = subtables.get_mut("instruction") {
-        if let Some(tree) = &inst_table.decision_tree {
-            if !tree.nodes.is_empty() {
-                let root_node = &tree.nodes[tree.root_node_index];
-                eprintln!(
-                    "'instruction' Root Node: probe={:?}, branches={}",
-                    root_node.probe,
-                    root_node.branches.len()
-                );
-            }
-        }
     }
 
     let mut library = CompiledSlaTemplateLibrary {
