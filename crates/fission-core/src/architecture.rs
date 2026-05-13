@@ -280,6 +280,7 @@ impl OpinionDatabase {
             candidates.retain(|candidate| candidate.preferred);
         }
         dedup_candidates(&mut candidates);
+        prefer_unique_default_variant(&mut candidates);
 
         if candidates.len() != 1 {
             return Err(ArchitectureSelectionError::AmbiguousLoadSpec {
@@ -855,6 +856,29 @@ fn dedup_candidates(candidates: &mut Vec<SelectionCandidate>) {
     });
 }
 
+fn prefer_unique_default_variant(candidates: &mut Vec<SelectionCandidate>) {
+    if candidates.len() <= 1 {
+        return;
+    }
+
+    let default_candidates = candidates
+        .iter()
+        .filter(|candidate| candidate.language.variant == "default")
+        .collect::<Vec<_>>();
+    if default_candidates.len() != 1 {
+        return;
+    }
+
+    let selected_language_id = default_candidates[0].language.id.clone();
+    let selected_compiler_spec_id = default_candidates[0].compiler_spec_id.clone();
+    let selected_preferred = default_candidates[0].preferred;
+    candidates.retain(|candidate| {
+        candidate.language.id == selected_language_id
+            && candidate.compiler_spec_id == selected_compiler_spec_id
+            && candidate.preferred == selected_preferred
+    });
+}
+
 fn normalize_endian(endian: &str) -> String {
     match endian {
         "LE" | "le" | "little" => "little".to_string(),
@@ -933,8 +957,8 @@ mod tests {
     use crate::constants::binary_format::MACHO_CPU_TYPE_ARM64;
     use crate::core_constants::{
         ELFCLASS32, ELFCLASS64, ELFDATA2LSB, ELFDATA2MSB, EM_AARCH64, EM_ARM, EM_LOONGARCH,
-        EM_MIPS, EM_PPC64, EM_RISCV, EM_X86_64, IMAGE_FILE_MACHINE_AMD64, IMAGE_FILE_MACHINE_ARM64,
-        IMAGE_FILE_MACHINE_I386,
+        EM_MIPS, EM_PPC, EM_PPC64, EM_RISCV, EM_X86_64, IMAGE_FILE_MACHINE_AMD64,
+        IMAGE_FILE_MACHINE_ARM64, IMAGE_FILE_MACHINE_I386,
     };
 
     #[test]
@@ -1017,11 +1041,22 @@ mod tests {
     }
 
     #[test]
-    fn ppc64_little_endian_fails_closed_when_opinion_is_ambiguous() {
-        assert!(matches!(
-            select_elf_load_spec(EM_PPC64, ELFCLASS64, ELFDATA2LSB, 0x2, 0),
-            Err(ArchitectureSelectionError::AmbiguousLoadSpec { .. })
-        ));
+    fn selects_elf_powerpc_default_when_opinion_only_constrains_processor_size() {
+        let (_, ppc32_be) = select_elf_load_spec(EM_PPC, ELFCLASS32, ELFDATA2MSB, 0, 0)
+            .expect("select PPC32 BE ELF");
+        assert_eq!(ppc32_be.pair.language_id.as_str(), "PowerPC:BE:32:default");
+
+        let (_, ppc32_le) = select_elf_load_spec(EM_PPC, ELFCLASS32, ELFDATA2LSB, 0, 0)
+            .expect("select PPC32 LE ELF");
+        assert_eq!(ppc32_le.pair.language_id.as_str(), "PowerPC:LE:32:default");
+
+        let (_, ppc64_be) = select_elf_load_spec(EM_PPC64, ELFCLASS64, ELFDATA2MSB, 0, 0)
+            .expect("select PPC64 BE ELF");
+        assert_eq!(ppc64_be.pair.language_id.as_str(), "PowerPC:BE:64:default");
+
+        let (_, ppc64_le) = select_elf_load_spec(EM_PPC64, ELFCLASS64, ELFDATA2LSB, 0x2, 0)
+            .expect("select PPC64 LE ELF");
+        assert_eq!(ppc64_le.pair.language_id.as_str(), "PowerPC:LE:64:default");
     }
 
     #[test]

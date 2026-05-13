@@ -463,4 +463,28 @@ mod tests {
             RuntimeFrontendStatus::ExecutableCandidate
         );
     }
+
+    #[test]
+    fn powerpc_default_variants_remain_compile_only_until_promoted() {
+        let registry = CompiledRuntimeRegistry::discover().expect("discover runtime registry");
+
+        for (language_id, expected_entry_id) in [
+            ("PowerPC:BE:32:default", "ppc_32_be"),
+            ("PowerPC:LE:32:default", "ppc_32_le"),
+            ("PowerPC:BE:64:default", "ppc_64_be"),
+            ("PowerPC:LE:64:default", "ppc_64_le"),
+        ] {
+            let error = registry
+                .resolve_from_language_pair(language_id, Some("gcc"))
+                .expect_err("PowerPC defaults should stay compile-only until runtime promotion");
+            assert!(
+                matches!(
+                    error,
+                    RuntimeEntrySelectionError::CompileOnlySelection { ref entry_id, .. }
+                        if entry_id == expected_entry_id
+                ),
+                "unexpected selection error for {language_id}: {error:?}"
+            );
+        }
+    }
 }
