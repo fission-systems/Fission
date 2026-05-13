@@ -885,9 +885,15 @@ fn map_pcode_opcode(code: u32) -> Result<CompiledOpTplOpcode> {
         PcodeOpcode::BoolXor => Ok(CompiledOpTplOpcode::BoolXor),
         PcodeOpcode::BoolAnd => Ok(CompiledOpTplOpcode::BoolAnd),
         PcodeOpcode::BoolOr => Ok(CompiledOpTplOpcode::BoolOr),
+        PcodeOpcode::FloatEqual => Ok(CompiledOpTplOpcode::FloatEqual),
+        PcodeOpcode::FloatNotEqual => Ok(CompiledOpTplOpcode::FloatNotEqual),
+        PcodeOpcode::FloatLess => Ok(CompiledOpTplOpcode::FloatLess),
+        PcodeOpcode::FloatLessEqual => Ok(CompiledOpTplOpcode::FloatLessEqual),
+        PcodeOpcode::FloatNan => Ok(CompiledOpTplOpcode::FloatNan),
         PcodeOpcode::MultiEqual => Ok(CompiledOpTplOpcode::Build),
         PcodeOpcode::Piece => Ok(CompiledOpTplOpcode::Piece),
         PcodeOpcode::SubPiece => Ok(CompiledOpTplOpcode::Subpiece),
+        PcodeOpcode::Cast => Ok(CompiledOpTplOpcode::Cast),
         PcodeOpcode::PtrAdd => Ok(CompiledOpTplOpcode::Label),
         PcodeOpcode::PtrSub => Ok(CompiledOpTplOpcode::CrossBuild),
         PcodeOpcode::Indirect => Ok(CompiledOpTplOpcode::DelaySlotIndirect),
@@ -897,7 +903,15 @@ fn map_pcode_opcode(code: u32) -> Result<CompiledOpTplOpcode> {
         PcodeOpcode::FloatDiv => Ok(CompiledOpTplOpcode::FloatDiv),
         PcodeOpcode::FloatMult => Ok(CompiledOpTplOpcode::FloatMult),
         PcodeOpcode::FloatSub => Ok(CompiledOpTplOpcode::FloatSub),
+        PcodeOpcode::FloatNeg => Ok(CompiledOpTplOpcode::FloatNeg),
+        PcodeOpcode::FloatAbs => Ok(CompiledOpTplOpcode::FloatAbs),
+        PcodeOpcode::FloatSqrt => Ok(CompiledOpTplOpcode::FloatSqrt),
         PcodeOpcode::FloatInt2Float => Ok(CompiledOpTplOpcode::FloatInt2Float),
+        PcodeOpcode::FloatFloat2Float => Ok(CompiledOpTplOpcode::FloatFloat2Float),
+        PcodeOpcode::FloatTrunc => Ok(CompiledOpTplOpcode::FloatTrunc),
+        PcodeOpcode::FloatCeil => Ok(CompiledOpTplOpcode::FloatCeil),
+        PcodeOpcode::FloatFloor => Ok(CompiledOpTplOpcode::FloatFloor),
+        PcodeOpcode::FloatRound => Ok(CompiledOpTplOpcode::FloatRound),
         PcodeOpcode::Unknown => bail!("unknown raw SLA p-code opcode {code}"),
         _ => Ok(CompiledOpTplOpcode::Unsupported),
     }
@@ -949,10 +963,18 @@ mod tests {
     }
 
     #[test]
-    fn map_pcode_opcode_preserves_known_unsupported_cutover_boundary() {
+    fn map_pcode_opcode_preserves_float_and_cast_opcodes() {
         let opcode = map_pcode_opcode(41).expect("known float comparison opcode");
 
-        assert_eq!(opcode, CompiledOpTplOpcode::Unsupported);
+        assert_eq!(opcode, CompiledOpTplOpcode::FloatEqual);
+
+        let opcode = map_pcode_opcode(55).expect("known float conversion opcode");
+
+        assert_eq!(opcode, CompiledOpTplOpcode::FloatFloat2Float);
+
+        let opcode = map_pcode_opcode(64).expect("known cast opcode");
+
+        assert_eq!(opcode, CompiledOpTplOpcode::Cast);
 
         let opcode = map_pcode_opcode(73).expect("known LZCOUNT opcode");
 

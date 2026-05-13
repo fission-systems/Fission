@@ -526,7 +526,17 @@ impl<'c> CompiledTableEmitter<'c> {
             | CompiledOpTplOpcode::BoolNegate
             | CompiledOpTplOpcode::PopCount
             | CompiledOpTplOpcode::LzCount
-            | CompiledOpTplOpcode::FloatInt2Float => {
+            | CompiledOpTplOpcode::Cast
+            | CompiledOpTplOpcode::FloatNan
+            | CompiledOpTplOpcode::FloatNeg
+            | CompiledOpTplOpcode::FloatAbs
+            | CompiledOpTplOpcode::FloatSqrt
+            | CompiledOpTplOpcode::FloatInt2Float
+            | CompiledOpTplOpcode::FloatFloat2Float
+            | CompiledOpTplOpcode::FloatTrunc
+            | CompiledOpTplOpcode::FloatCeil
+            | CompiledOpTplOpcode::FloatFloor
+            | CompiledOpTplOpcode::FloatRound => {
                 let out_tpl = op
                     .output
                     .as_ref()
@@ -567,6 +577,10 @@ impl<'c> CompiledTableEmitter<'c> {
             | CompiledOpTplOpcode::BoolXor
             | CompiledOpTplOpcode::BoolAnd
             | CompiledOpTplOpcode::BoolOr
+            | CompiledOpTplOpcode::FloatEqual
+            | CompiledOpTplOpcode::FloatNotEqual
+            | CompiledOpTplOpcode::FloatLess
+            | CompiledOpTplOpcode::FloatLessEqual
             | CompiledOpTplOpcode::FloatAdd
             | CompiledOpTplOpcode::FloatDiv
             | CompiledOpTplOpcode::FloatMult
@@ -1467,7 +1481,17 @@ impl<'c> CompiledTableEmitter<'c> {
             CompiledOpTplOpcode::BoolNegate => PcodeOpcode::BoolNegate,
             CompiledOpTplOpcode::PopCount => PcodeOpcode::PopCount,
             CompiledOpTplOpcode::LzCount => PcodeOpcode::LzCount,
+            CompiledOpTplOpcode::Cast => PcodeOpcode::Cast,
+            CompiledOpTplOpcode::FloatNan => PcodeOpcode::FloatNan,
+            CompiledOpTplOpcode::FloatNeg => PcodeOpcode::FloatNeg,
+            CompiledOpTplOpcode::FloatAbs => PcodeOpcode::FloatAbs,
+            CompiledOpTplOpcode::FloatSqrt => PcodeOpcode::FloatSqrt,
             CompiledOpTplOpcode::FloatInt2Float => PcodeOpcode::FloatInt2Float,
+            CompiledOpTplOpcode::FloatFloat2Float => PcodeOpcode::FloatFloat2Float,
+            CompiledOpTplOpcode::FloatTrunc => PcodeOpcode::FloatTrunc,
+            CompiledOpTplOpcode::FloatCeil => PcodeOpcode::FloatCeil,
+            CompiledOpTplOpcode::FloatFloor => PcodeOpcode::FloatFloor,
+            CompiledOpTplOpcode::FloatRound => PcodeOpcode::FloatRound,
             _ => bail!("unsupported unary compiled opcode {}", opcode.as_str()),
         })
     }
@@ -1499,6 +1523,10 @@ impl<'c> CompiledTableEmitter<'c> {
             CompiledOpTplOpcode::BoolXor => PcodeOpcode::BoolXor,
             CompiledOpTplOpcode::BoolAnd => PcodeOpcode::BoolAnd,
             CompiledOpTplOpcode::BoolOr => PcodeOpcode::BoolOr,
+            CompiledOpTplOpcode::FloatEqual => PcodeOpcode::FloatEqual,
+            CompiledOpTplOpcode::FloatNotEqual => PcodeOpcode::FloatNotEqual,
+            CompiledOpTplOpcode::FloatLess => PcodeOpcode::FloatLess,
+            CompiledOpTplOpcode::FloatLessEqual => PcodeOpcode::FloatLessEqual,
             CompiledOpTplOpcode::FloatAdd => PcodeOpcode::FloatAdd,
             CompiledOpTplOpcode::FloatDiv => PcodeOpcode::FloatDiv,
             CompiledOpTplOpcode::FloatMult => PcodeOpcode::FloatMult,
