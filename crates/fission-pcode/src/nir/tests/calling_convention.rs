@@ -469,6 +469,123 @@ fn powerpc_param_slots_work_for_abi_state() {
 }
 
 #[test]
+fn powerpc64_descriptor_callind_recovers_logical_function_pointer_param() {
+    let mut options = preview_options();
+    options.calling_convention = CallingConvention::PowerPc64;
+    options.format = "ELF64".to_string();
+    options.pe_x64_only = false;
+    options.pointer_size = 8;
+    options.is_64bit = true;
+    options.is_big_endian = true;
+
+    let func = PcodeFunction {
+        blocks: vec![PcodeBasicBlock {
+            index: 0,
+            start_address: 0x1000e0,
+            successors: vec![],
+            ops: vec![
+                PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::IntAdd,
+                    address: 0x1000e8,
+                    output: Some(uniq(0x1bd00, 8)),
+                    inputs: vec![reg(0x18, 8), cst(0, 8)],
+                    asm_mnemonic: Some("ld r6,0(r3)".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 1,
+                    opcode: PcodeOpcode::Load,
+                    address: 0x1000e8,
+                    output: Some(reg(0x30, 8)),
+                    inputs: vec![cst(3, 8), uniq(0x1bd00, 8)],
+                    asm_mnemonic: Some("ld r6,0(r3)".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 2,
+                    opcode: PcodeOpcode::Copy,
+                    address: 0x1000f0,
+                    output: Some(reg(0x1048, 8)),
+                    inputs: vec![reg(0x30, 8)],
+                    asm_mnemonic: Some("mtspr CTR,r6".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 3,
+                    opcode: PcodeOpcode::CallInd,
+                    address: 0x1000f8,
+                    output: None,
+                    inputs: vec![reg(0x1048, 8), reg(0x20, 8), reg(0x28, 8)],
+                    asm_mnemonic: Some("bctrl".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 4,
+                    opcode: PcodeOpcode::Return,
+                    address: 0x100100,
+                    output: None,
+                    inputs: vec![reg(0x1040, 8)],
+                    asm_mnemonic: Some("blr".to_string()),
+                },
+            ],
+        }],
+    };
+
+    let rendered = render_mlil_preview(&func, "apply_op", 0x1000e0, &options)
+        .expect("preview render should succeed");
+
+    assert!(rendered.contains("param_1(param_2, param_3);"), "{rendered}");
+    assert!(!rendered.contains("xVar"), "{rendered}");
+}
+
+#[test]
+fn powerpc64_direct_callind_recovers_function_pointer_param() {
+    let mut options = preview_options();
+    options.calling_convention = CallingConvention::PowerPc64;
+    options.format = "ELF64".to_string();
+    options.pe_x64_only = false;
+    options.pointer_size = 8;
+    options.is_64bit = true;
+
+    let func = PcodeFunction {
+        blocks: vec![PcodeBasicBlock {
+            index: 0,
+            start_address: 0x100100,
+            successors: vec![],
+            ops: vec![
+                PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::Copy,
+                    address: 0x100110,
+                    output: Some(reg(0x1048, 8)),
+                    inputs: vec![reg(0x18, 8)],
+                    asm_mnemonic: Some("mtspr CTR,r3".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 1,
+                    opcode: PcodeOpcode::IntOr,
+                    address: 0x100120,
+                    output: Some(reg(0x18, 8)),
+                    inputs: vec![reg(0x20, 8), reg(0x20, 8)],
+                    asm_mnemonic: Some("or r3,r4,r4".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 2,
+                    opcode: PcodeOpcode::CallInd,
+                    address: 0x100128,
+                    output: None,
+                    inputs: vec![reg(0x1048, 8), reg(0x20, 8), reg(0x28, 8)],
+                    asm_mnemonic: Some("bctrl".to_string()),
+                },
+            ],
+        }],
+    };
+
+    let rendered = render_mlil_preview(&func, "apply_op", 0x100100, &options)
+        .expect("preview render should succeed");
+
+    assert!(rendered.contains("param_1(param_2, param_3);"), "{rendered}");
+    assert!(!rendered.contains("xVar"), "{rendered}");
+}
+
+#[test]
 fn powerpc32_blr_returns_primary_r3_not_link_target() {
     let mut options = preview_options();
     options.calling_convention = CallingConvention::PowerPc32;

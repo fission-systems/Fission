@@ -1,6 +1,7 @@
 use super::*;
 
 const CALL_TARGET_CONST_FOLD_BUDGET: usize = 16;
+const CALL_TARGET_DESCRIPTOR_RECOVERY_BUDGET: usize = 16;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum CallTargetConstReject {
@@ -721,6 +722,10 @@ impl<'a> PreviewBuilder<'a> {
                             }
                         } else if let Some(name) = self.resolve_iat_load_call_target(target) {
                             name
+                        } else if let Some(name) =
+                            self.recover_powerpc64_descriptor_call_target(target)
+                        {
+                            name
                         } else {
                             name
                         }
@@ -743,6 +748,10 @@ impl<'a> PreviewBuilder<'a> {
                             }
                         } else if matches!(other, HirExpr::Load { .. }) {
                             if let Some(name) = self.resolve_iat_load_call_target(target) {
+                                name
+                            } else if let Some(name) =
+                                self.recover_powerpc64_descriptor_call_target(target)
+                            {
                                 name
                             } else {
                                 print_expr(&other)
@@ -1037,6 +1046,103 @@ impl<'a> PreviewBuilder<'a> {
             }
         };
         self.resolve_call_target_by_iat_slot(ptr_addr)
+    }
+
+    fn recover_powerpc64_descriptor_call_target(&mut self, target: &Varnode) -> Option<String> {
+        if self.options.calling_convention != CallingConvention::PowerPc64 {
+            return None;
+        }
+        let scope = self.current_lowering_site?;
+        self.debug_callind_target_recovery("powerpc64_descriptor_recovery_attempt");
+        self.recover_powerpc64_descriptor_call_target_at(
+            target,
+            scope,
+            CALL_TARGET_DESCRIPTOR_RECOVERY_BUDGET,
+        )
+    }
+
+    fn recover_powerpc64_descriptor_call_target_at(
+        &mut self,
+        target: &Varnode,
+        scope: LoweringSite,
+        budget: usize,
+    ) -> Option<String> {
+        if budget == 0 {
+            return None;
+        }
+        let site = match self.exact_def_site_for_call_target(target, scope) {
+            Ok(site) => site,
+            Err(_) if is_register_space_id(target.space_id) => {
+                return register_name_with_param(
+                    target.offset,
+                    target.size,
+                    self.options.calling_convention,
+                )
+                .and_then(|(name, param_index)| param_index.map(|_| name.to_string()));
+            }
+            Err(_) => return None,
+        };
+        let producer = self.pcode.blocks[site.block_idx].ops[site.op_idx].clone();
+        match producer.opcode {
+            PcodeOpcode::Copy | PcodeOpcode::Cast | PcodeOpcode::IntZExt | PcodeOpcode::IntSExt => {
+                self.recover_powerpc64_descriptor_call_target_at(
+                    producer.inputs.first()?,
+                    site,
+                    budget - 1,
+                )
+            }
+            PcodeOpcode::Load => {
+                let ptr = producer.inputs.get(1)?;
+                self.recover_zero_offset_param_pointer(ptr, site, budget - 1)
+            }
+            _ => None,
+        }
+    }
+
+    fn recover_zero_offset_param_pointer(
+        &self,
+        ptr: &Varnode,
+        scope: LoweringSite,
+        budget: usize,
+    ) -> Option<String> {
+        if budget == 0 {
+            return None;
+        }
+        if is_register_space_id(ptr.space_id) {
+            return register_name_with_param(ptr.offset, ptr.size, self.options.calling_convention)
+                .and_then(|(name, param_index)| param_index.map(|_| name.to_string()));
+        }
+        if ptr.is_constant {
+            return None;
+        }
+        let site = self.exact_def_site_for_call_target(ptr, scope).ok()?;
+        let producer = &self.pcode.blocks[site.block_idx].ops[site.op_idx];
+        let input = |idx: usize| producer.inputs.get(idx);
+        match producer.opcode {
+            PcodeOpcode::Copy | PcodeOpcode::Cast | PcodeOpcode::IntZExt | PcodeOpcode::IntSExt => {
+                self.recover_zero_offset_param_pointer(input(0)?, site, budget - 1)
+            }
+            PcodeOpcode::IntAdd => {
+                if input(1)?.is_constant && input(1)?.constant_val == 0 {
+                    self.recover_zero_offset_param_pointer(input(0)?, site, budget - 1)
+                } else if input(0)?.is_constant && input(0)?.constant_val == 0 {
+                    self.recover_zero_offset_param_pointer(input(1)?, site, budget - 1)
+                } else {
+                    None
+                }
+            }
+            PcodeOpcode::PtrAdd | PcodeOpcode::PtrSub => {
+                if input(1)?.is_constant
+                    && input(1)?.constant_val == 0
+                    && input(2).is_none_or(|scale| scale.is_constant && scale.constant_val <= 1)
+                {
+                    self.recover_zero_offset_param_pointer(input(0)?, site, budget - 1)
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        }
     }
 
     fn record_call_target_const_reject(&mut self, reason: CallTargetConstReject) {
