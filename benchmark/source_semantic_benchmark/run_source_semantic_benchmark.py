@@ -2373,6 +2373,7 @@ def summarize(rows: list[dict[str, Any]], manifest_name: str, entries: list[Benc
     static_extra_density_values: list[float] = []
     static_score_by_missing_gap_bucket: dict[str, list[float]] = {}
     hard_function_rows: list[dict[str, Any]] = []
+    focus_area_metrics: dict[str, dict[str, Any]] = {}
     by_language: dict[str, dict[str, Any]] = {}
     by_arch: dict[str, dict[str, Any]] = {}
     by_source_return_kind: dict[str, dict[str, Any]] = {}
@@ -2427,6 +2428,116 @@ def summarize(rows: list[dict[str, Any]], manifest_name: str, entries: list[Benc
         if float(row.get("semantic_score", 0.0) or 0.0) < 1.0:
             return "partial_quality"
         return "passing"
+
+    def focus_areas_for(
+        row: dict[str, Any],
+        behavior: dict[str, Any],
+        first_stage: str,
+        preview_stats: dict[str, Any] | None,
+        debug_decomp: dict[str, Any] | None,
+    ) -> set[str]:
+        areas: set[str] = set()
+        behavior_status = str(behavior.get("status", "unknown"))
+        static_components = (
+            row.get("static_similarity_gap_components")
+            if isinstance(row.get("static_similarity_gap_components"), dict)
+            else {}
+        )
+        quality = (
+            debug_decomp.get("quality_evidence")
+            if isinstance(debug_decomp, dict) and isinstance(debug_decomp.get("quality_evidence"), dict)
+            else {}
+        )
+        owner_buckets = {
+            str(bucket)
+            for bucket in (debug_decomp.get("owner_buckets") if isinstance(debug_decomp, dict) else []) or []
+        }
+
+        if row.get("mapping_status") != "matched":
+            areas.add("mapping_name_recovery")
+        if first_stage.startswith("decode:") or first_stage.startswith("raw_pcode:"):
+            areas.add("sleigh_runtime_lift")
+        if any("sleigh" in bucket or "raw_pcode" in bucket or "decode" in bucket for bucket in owner_buckets):
+            areas.add("sleigh_runtime_lift")
+        if first_stage.startswith("nir_build:") or first_stage.startswith("normalize:"):
+            areas.add("nir_builder_dataflow")
+        if isinstance(preview_stats, dict) and any(
+            is_debt_metric_name(key) and value != 0 for key, value in numeric_items(preview_stats)
+        ):
+            areas.add("nir_builder_dataflow")
+        if first_stage.startswith("structuring:") or first_stage.startswith("render:"):
+            areas.add("structuring_render")
+        if any("structuring" in bucket or "region" in bucket for bucket in owner_buckets):
+            areas.add("structuring_render")
+        if any(
+            isinstance(value, int | float) and value != 0
+            for key, value in quality.items()
+            if key.startswith("structuring_") or key.startswith("region_")
+        ):
+            areas.add("structuring_render")
+
+        type_component_missing = 0.0
+        for component in ["memory", "signature", "call"]:
+            details = static_components.get(component)
+            if isinstance(details, dict):
+                type_component_missing += float(details.get("missing_feature_total", 0.0) or 0.0)
+        if type_component_missing > 0.0:
+            areas.add("type_data_abstraction")
+        if any(
+            isinstance(value, int | float) and value != 0
+            for key, value in quality.items()
+            if key.startswith("typed_") or key.startswith("call_") or "prototype" in key
+        ):
+            areas.add("type_data_abstraction")
+
+        if behavior_status in {
+            "candidate_compile_failed",
+            "candidate_compile_timeout",
+            "candidate_run_failed",
+            "candidate_run_timeout",
+            "oracle_compile_failed",
+            "oracle_compile_timeout",
+            "oracle_run_failed",
+            "oracle_run_timeout",
+            "host_execution_unavailable",
+            "unsupported_signature",
+        }:
+            areas.add("behavior_harness_coverage")
+        if behavior_status == "mismatch":
+            areas.add("dynamic_semantics")
+        if not areas and float(row.get("semantic_score", 0.0) or 0.0) < 1.0:
+            areas.add("unclassified_quality_loss")
+        if not areas:
+            areas.add("passing")
+        return areas
+
+    def add_focus_area_row(
+        area: str,
+        row: dict[str, Any],
+        behavior_status: str,
+        first_stage: str,
+        score: float,
+    ) -> None:
+        static_gaps = row.get("static_similarity_gaps") if isinstance(row.get("static_similarity_gaps"), dict) else {}
+        bucket = focus_area_metrics.setdefault(
+            area,
+            {
+                "row_count": 0,
+                "score_sum": 0.0,
+                "lost_score_sum": 0.0,
+                "behavior_status_counts": Counter(),
+                "stage_first_failure_counts": Counter(),
+                "missing_feature_total": 0.0,
+                "top_rows": [],
+            },
+        )
+        bucket["row_count"] += 1
+        bucket["score_sum"] += score
+        bucket["lost_score_sum"] += max(0.0, 1.0 - score)
+        bucket["behavior_status_counts"][behavior_status] += 1
+        bucket["stage_first_failure_counts"][first_stage] += 1
+        bucket["missing_feature_total"] += float(static_gaps.get("missing_feature_total", 0.0) or 0.0)
+        bucket["top_rows"].append(triage_row_summary(row))
 
     def add_axis_row(axis: str, row: dict[str, Any], behavior_status: str, first_stage: str, score: float) -> None:
         static_gaps = row.get("static_similarity_gaps") if isinstance(row.get("static_similarity_gaps"), dict) else {}
@@ -2491,6 +2602,10 @@ def summarize(rows: list[dict[str, Any]], manifest_name: str, entries: list[Benc
         static_score_values.append(static_score)
         first_stage = str(row.get("stage_first_failure") or "none")
         score_loss = round(max(0.0, 1.0 - score), 6)
+        preview_stats = row.get("preview_build_stats")
+        preview_stats_dict = preview_stats if isinstance(preview_stats, dict) else None
+        debug_decomp = row.get("debug_decomp")
+        debug_decomp_dict = debug_decomp if isinstance(debug_decomp, dict) else None
         if score_loss > 0.0:
             loss_reason = row_zero_credit_reason(row) if score == 0.0 else "partial_credit"
             semantic_loss_by_behavior_status[behavior_status] += score_loss
@@ -2512,6 +2627,8 @@ def summarize(rows: list[dict[str, Any]], manifest_name: str, entries: list[Benc
         score_values_by_stage_first_failure.setdefault(first_stage, []).append(score)
         axis = improvement_axis_for(row, behavior, first_stage)
         add_axis_row(axis, row, behavior_status, first_stage, score)
+        for area in focus_areas_for(row, behavior, first_stage, preview_stats_dict, debug_decomp_dict):
+            add_focus_area_row(area, row, behavior_status, first_stage, score)
         source_complexity_value = float(row.get("source_static_feature_count") or 0.0)
         add_complexity_row(complexity_bucket(source_complexity_value), row, score, behavior_status)
         if isinstance(row.get("decomp_wall_sec"), int | float):
@@ -2749,7 +2866,6 @@ def summarize(rows: list[dict[str, Any]], manifest_name: str, entries: list[Benc
         )
         add_bucket(entry_bucket, row)
 
-        debug_decomp = row.get("debug_decomp")
         if isinstance(debug_decomp, dict):
             debug_decomp_row_count += 1
             debug_owner_bucket_counts.update(debug_decomp.get("owner_buckets") or [])
@@ -2800,7 +2916,6 @@ def summarize(rows: list[dict[str, Any]], manifest_name: str, entries: list[Benc
                 if isinstance(value, int | float):
                     debug_template_source_totals[canonical_sleigh_template_source(str(key))] += value
 
-        preview_stats = row.get("preview_build_stats")
         if isinstance(preview_stats, dict):
             nir_build_stats_row_count += 1
             row_debt_total = 0.0
@@ -3078,6 +3193,31 @@ def summarize(rows: list[dict[str, Any]], manifest_name: str, entries: list[Benc
             "stage_first_failure_counts": dict(sorted(metrics.get("stage_first_failure_counts", Counter()).items())),
             "top_rows": top_rows,
         }
+    focus_area_export: dict[str, dict[str, Any]] = {}
+    for area, metrics in sorted(focus_area_metrics.items()):
+        row_count = int(metrics.get("row_count", 0) or 0)
+        top_rows = sorted(
+            metrics.get("top_rows") or [],
+            key=lambda row: (
+                float(row.get("semantic_score_percent") or 0.0),
+                str(row.get("function_name") or ""),
+            ),
+        )[:12]
+        focus_area_export[area] = {
+            "row_count": row_count,
+            "row_rate_total_denominator": round(row_count / total, 6) if total else 0.0,
+            "avg_semantic_score": round(float(metrics.get("score_sum", 0.0) or 0.0) / row_count, 6)
+            if row_count
+            else 0.0,
+            "avg_semantic_score_percent": percent(
+                round(float(metrics.get("score_sum", 0.0) or 0.0) / row_count, 6)
+            ) if row_count else 0.0,
+            "lost_score_sum": round(float(metrics.get("lost_score_sum", 0.0) or 0.0), 6),
+            "missing_feature_total": round(float(metrics.get("missing_feature_total", 0.0) or 0.0), 6),
+            "behavior_status_counts": dict(sorted(metrics.get("behavior_status_counts", Counter()).items())),
+            "stage_first_failure_counts": dict(sorted(metrics.get("stage_first_failure_counts", Counter()).items())),
+            "top_rows": top_rows,
+        }
     complexity_export: dict[str, dict[str, Any]] = {}
     for bucket_name, bucket in sorted(complexity_buckets.items()):
         row_count = int(bucket.get("row_count", 0) or 0)
@@ -3296,6 +3436,7 @@ def summarize(rows: list[dict[str, Any]], manifest_name: str, entries: list[Benc
             "top_lost_score_rows": semantic_loss_hot_rows,
         },
         "improvement_axis_metrics": improvement_axis_export,
+        "focus_area_metrics": focus_area_export,
         "complexity_quality_metrics": {
             "source_feature_bucket_policy": "tiny<=5, small<=15, medium<=40, large>40 source static features",
             "by_source_feature_bucket": complexity_export,
@@ -4562,6 +4703,28 @@ def render_markdown(summary: dict[str, Any], rows: list[dict[str, Any]]) -> str:
                 f"{float(metrics.get('lost_score_sum', 0.0) or 0.0):.6f} | "
                 f"{float(metrics.get('missing_feature_total', 0.0) or 0.0):.0f} |"
             )
+    focus_areas = summary.get("focus_area_metrics")
+    if isinstance(focus_areas, dict) and focus_areas:
+        lines.extend([
+            "",
+            "## Focus Area Metrics",
+            "",
+            "| Focus Area | Rows | Avg Similarity | Lost Score | Missing Features |",
+            "|---|---:|---:|---:|---:|",
+        ])
+        for area, metrics in sorted(
+            focus_areas.items(),
+            key=lambda item: float((item[1] or {}).get("lost_score_sum", 0.0) or 0.0),
+            reverse=True,
+        ):
+            if not isinstance(metrics, dict):
+                continue
+            lines.append(
+                f"| {area} | {metrics.get('row_count', 0)} | "
+                f"{float(metrics.get('avg_semantic_score_percent', 0.0) or 0.0):.3f}% | "
+                f"{float(metrics.get('lost_score_sum', 0.0) or 0.0):.6f} | "
+                f"{float(metrics.get('missing_feature_total', 0.0) or 0.0):.0f} |"
+            )
     complexity_quality = summary.get("complexity_quality_metrics")
     if isinstance(complexity_quality, dict):
         buckets = complexity_quality.get("by_source_feature_bucket")
@@ -5820,6 +5983,8 @@ int max(int a, int b) { if (a > b) return a; return b; }
         assert summary["stage_transition_metrics"]["furthest_ok_stage_counts"]["render"] == 1
         assert summary["behavior_failure_diagnostics"]["owner_counts"]["decomp_failed"] == 1
         assert summary["static_gap_density_metrics"]["gap_bucket_rows"]["missing:small|extra:none"]["row_count"] == 1
+        assert summary["focus_area_metrics"]["nir_builder_dataflow"]["row_count"] == 1
+        assert summary["focus_area_metrics"]["mapping_name_recovery"]["lost_score_sum"] == 1.0
         assert summary["complexity_quality_metrics"]["by_source_feature_bucket"]["tiny"]["row_count"] == 2
         assert "decompile_wall_by_stage_first_failure" in summary["stage_cost_correlation_metrics"]
         assert "score_by_decompile_cost_bucket" in summary["stage_cost_correlation_metrics"]

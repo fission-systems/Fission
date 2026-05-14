@@ -194,6 +194,11 @@ manifest.
   `structuring_render`, `behavior_harness`, `dynamic_semantics`,
   `static_semantic_gaps`, and related buckets), including lost-score totals,
   behavior/stage cross-tabs, missing-feature totals, and representative rows.
+- `focus_area_metrics`: multi-label roadmap-oriented buckets for
+  SLEIGH/runtime lift, NIR builder/dataflow, type/data abstraction,
+  structuring/render, mapping/name recovery, behavior harness coverage,
+  dynamic semantics, and unclassified quality loss. Row counts can exceed the
+  manifest denominator because a row may expose more than one focus area.
 - `admission_gate_metrics`: full-denominator funnel counts/rates for mapping,
   decompile, Rust-SLEIGH stages, candidate compile, behavior pass, static
   perfect rows, and fully perfect semantic rows.
