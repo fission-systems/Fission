@@ -317,16 +317,13 @@ fn render_inventory(compiled: &CompiledFrontend) -> String {
     let executable_lines = all_executables
         .iter()
         .map(|ctor| {
-            let sla_subtable_id = ctor
-                .sla_identity
-                .as_ref()
-                .map(|identity| identity.subtable_id)
-                .unwrap_or(0);
-            let sla_constructor_slot = ctor
-                .sla_identity
-                .as_ref()
-                .map(|identity| identity.constructor_slot)
-                .unwrap_or(0);
+            let sla_subtable_id =
+                render_optional_u32(ctor.sla_identity.as_ref().map(|identity| identity.subtable_id));
+            let sla_constructor_slot = render_optional_usize(
+                ctor.sla_identity
+                    .as_ref()
+                    .map(|identity| identity.constructor_slot),
+            );
             format!(
                 "    {{\"mnemonic\": {}, \"source\": {}, \"display\": {}, \"sla_subtable_id\": {}, \"sla_constructor_id\": {}, \"sla_constructor_slot\": {}, \"signature_hash\": \"{:016x}\", \"minimum_length\": {}, \"matcher\": {}, \"opsize_variants\": {}, \"operand_specs\": {}, \"construct_tpl_kind\": {}, \"constructor_template\": {}, \"runtime_ready\": {}, \"unsupported_template_kind\": {}}}",
                 json_string(&ctor.mnemonic),
@@ -437,6 +434,18 @@ fn render_inventory(compiled: &CompiledFrontend) -> String {
         constructor_lines,
         executable_lines
     )
+}
+
+fn render_optional_u32(value: Option<u32>) -> String {
+    value
+        .map(|value| value.to_string())
+        .unwrap_or_else(|| "null".to_string())
+}
+
+fn render_optional_usize(value: Option<usize>) -> String {
+    value
+        .map(|value| value.to_string())
+        .unwrap_or_else(|| "null".to_string())
 }
 
 fn render_named_sources<'a>(entries: impl Iterator<Item = (&'a String, &'a String)>) -> String {

@@ -442,6 +442,24 @@ fn generated_native_backend_does_not_zero_pad_short_instruction_bytes() {
 }
 
 #[test]
+fn generated_metadata_does_not_synthesize_missing_sla_identity_zeroes() {
+    let codegen = include_str!("../codegen.rs");
+    for forbidden in [
+        ".map(|identity| identity.subtable_id)\n                .unwrap_or(0)",
+        ".map(|identity| identity.constructor_slot)\n                .unwrap_or(0)",
+    ] {
+        assert!(
+            !codegen.contains(forbidden),
+            "generated metadata must preserve missing SLA identity as null: {forbidden}"
+        );
+    }
+    assert!(
+        codegen.contains("unwrap_or_else(|| \"null\".to_string())"),
+        "generated metadata should render optional SLA identity fields as JSON null"
+    );
+}
+
+#[test]
 fn sla_template_parser_does_not_promote_named_sections_to_main() {
     let templates = include_str!("../sla/templates.rs");
     for forbidden in [
