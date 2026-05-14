@@ -52,6 +52,10 @@ pub fn decompile_with_rust_sleigh(
         fallback_default_bytes
     }
     .max(1);
+    let max_bytes = binary
+        .available_execution_bytes(entry_address)
+        .map(|available| max_bytes.min(available).max(1))
+        .unwrap_or(max_bytes);
 
     let default_instruction_limit = if config.continue_past_indirect_branch {
         config

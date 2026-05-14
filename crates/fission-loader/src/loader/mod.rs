@@ -475,6 +475,32 @@ mod tests {
     }
 
     #[test]
+    fn available_execution_bytes_clamps_to_containing_section_extent() {
+        let binary =
+            LoadedBinaryBuilder::new("test.bin".to_string(), DataBuffer::Heap(vec![0x90; 100]))
+                .format("RAW")
+                .entry_point(0x1000)
+                .image_base(0x1000)
+                .is_64bit(true)
+                .add_section(SectionInfo {
+                    name: ".text".to_string(),
+                    virtual_address: 0x1000,
+                    virtual_size: 100,
+                    file_offset: 0,
+                    file_size: 100,
+                    is_executable: true,
+                    is_readable: true,
+                    is_writable: false,
+                })
+                .build()
+                .expect("build");
+
+        assert_eq!(binary.available_execution_bytes(0x1000), Some(100));
+        assert_eq!(binary.available_execution_bytes(0x1060), Some(4));
+        assert_eq!(binary.available_execution_bytes(0x1064), None);
+    }
+
+    #[test]
     fn test_builder_sorts_sections_for_binary_search_lookup() {
         let mut data = vec![0u8; 64];
         data[0..4].copy_from_slice(b"CODE");

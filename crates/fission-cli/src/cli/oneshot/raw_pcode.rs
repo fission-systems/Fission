@@ -18,6 +18,10 @@ pub(super) fn emit_raw_pcode(
     let frontend = runtime_frontend_for_binary(binary)?;
     let address_state = frontend.normalize_low_bit_code_address(addr);
     let decode_addr = address_state.address;
+    let max_bytes = binary
+        .available_execution_bytes(decode_addr)
+        .map(|available| max_bytes.min(available).max(1))
+        .unwrap_or(max_bytes.max(1));
     let bytes = binary.view_bytes(decode_addr, max_bytes).ok_or_else(|| {
         io::Error::new(
             io::ErrorKind::NotFound,

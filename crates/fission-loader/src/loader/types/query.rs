@@ -80,6 +80,30 @@ impl LoadedBinary {
         }
     }
 
+    /// Return how many bytes can be read from the execution section at `address`.
+    pub fn available_execution_bytes(&self, address: u64) -> Option<usize> {
+        let section = self.section_containing_for_execution(address)?;
+        if !section_contains(section, address) {
+            return None;
+        }
+        let offset_in_section = address.checked_sub(section.virtual_address)?;
+        let virtual_size = if section.virtual_size > 0 {
+            section.virtual_size
+        } else {
+            section.file_size
+        };
+        let virtual_remaining = virtual_size.checked_sub(offset_in_section)?;
+        let file_remaining = section.file_size.checked_sub(offset_in_section)?;
+        let file_offset = section.file_offset.checked_add(offset_in_section)?;
+        let data_remaining = u64::try_from(self.data.as_slice().len())
+            .ok()?
+            .checked_sub(file_offset)?;
+        let available = virtual_remaining.min(file_remaining).min(data_remaining);
+        usize::try_from(available)
+            .ok()
+            .filter(|available| *available > 0)
+    }
+
     /// Read a pointer at the given address
     pub fn read_ptr(&self, address: u64) -> Result<u64> {
         let size = if self.is_64bit { 8 } else { 4 };
