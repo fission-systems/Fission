@@ -41,6 +41,7 @@ fn runtime_window_and_length_helpers_fail_closed_on_invalid_widths() {
     }
 
     assert_eq!(checked_runtime_length_u32(7, "test").unwrap(), 7);
+    assert_eq!(checked_runtime_length_u64(7, "test").unwrap(), 7);
     if usize::BITS > u32::BITS {
         assert!(checked_runtime_length_u32(u32::MAX as usize + 1, "test").is_err());
     }
@@ -825,6 +826,7 @@ fn compiled_table_policy_symbols_stay_architecture_neutral() {
     let non_offset_handle_plus_wrapping_fallback = "wrapping_add(*plus)";
     let context_commit_inst_next_saturating =
         "instruction_address.saturating_add(decoded.length as u64)";
+    let decoded_length_lossy_cast = "decoded.length as u64";
     let template_inst_length_lossy_cast = "checked_add(inst_length as u64)";
     let template_memory_offset_lossy_cast = "})? as usize";
     let relative_label_encode_lossy_cast = "label_num as i64";
@@ -1201,7 +1203,8 @@ fn compiled_table_policy_symbols_stay_architecture_neutral() {
                 && !source.contains(template_const_inst_next_zero_fallback)
                 && !source.contains(template_const_inst_next2_saturating)
                 && !source.contains(non_offset_handle_plus_wrapping_fallback)
-                && !source.contains(context_commit_inst_next_saturating),
+                && !source.contains(context_commit_inst_next_saturating)
+                && !source.contains(decoded_length_lossy_cast),
             "{} still hides malformed SLA parser cursor, InstNext arithmetic, or non-offset_plus handle plus",
             file.display()
         );

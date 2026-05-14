@@ -103,6 +103,8 @@ pub(crate) fn decode_and_lift_with_context_override(
         let pending_context_commits =
             apply_context_commits(compiled, &decoded, address, decoded.context_register)?;
 
+        let decoded_length = checked_runtime_length_u64(decoded.length, "decoded instruction")?;
+
         match emit_pcode_for_state_with_bytes(
             compiled,
             native,
@@ -111,7 +113,7 @@ pub(crate) fn decode_and_lift_with_context_override(
             address,
             &decoded,
             FlowEmitOptions {
-                instruction_length: Some(decoded.length as u64),
+                instruction_length: Some(decoded_length),
                 instruction_context_register: ctx.context_register,
                 instruction_context_known_mask: ctx.context_known_mask,
                 ..Default::default()
@@ -119,7 +121,7 @@ pub(crate) fn decode_and_lift_with_context_override(
         ) {
             Ok((ops, mut details)) => {
                 details.pending_context_commits = pending_context_commits;
-                return Ok((ops, decoded.length as u64, details));
+                return Ok((ops, decoded_length, details));
             }
             Err(err) => {
                 if first_error.is_none() {
@@ -369,6 +371,10 @@ fn checked_runtime_length_u32(length: usize, role: &str) -> Result<u32> {
     u32::try_from(length).map_err(|_| anyhow!("{role} length {length} exceeds u32"))
 }
 
+fn checked_runtime_length_u64(length: usize, role: &str) -> Result<u64> {
+    u64::try_from(length).map_err(|_| anyhow!("{role} length {length} exceeds u64"))
+}
+
 fn checked_context_commit_handle_index(hand_index: u32) -> Result<usize> {
     usize::try_from(hand_index)
         .map_err(|_| anyhow!("context commit handle index {hand_index} does not fit usize"))
@@ -398,9 +404,13 @@ pub(crate) fn apply_context_commits(
     for commit in &decoded.context_commits {
         let target_addr = match commit.target {
             CompiledContextCommitTarget::InstStart => instruction_address,
-            CompiledContextCommitTarget::InstNext => instruction_address
-                .checked_add(decoded.length as u64)
-                .ok_or_else(|| anyhow!("context commit InstNext address overflowed"))?,
+            CompiledContextCommitTarget::InstNext => {
+                let decoded_length =
+                    checked_runtime_length_u64(decoded.length, "context commit decoded")?;
+                instruction_address
+                    .checked_add(decoded_length)
+                    .ok_or_else(|| anyhow!("context commit InstNext address overflowed"))?
+            }
             CompiledContextCommitTarget::OperandHandle { hand_index } => {
                 let hand_index = checked_context_commit_handle_index(hand_index)?;
                 let handle = decoded.handles.get(hand_index).ok_or_else(|| {
