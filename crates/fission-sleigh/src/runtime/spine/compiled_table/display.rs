@@ -687,10 +687,8 @@ mod tests {
         let lossy_signed_hex_cast = ["value", "as", "u64"].join(" ");
         let silent_delta_conversion = ["u64::try_from(delta)", ".ok()?"].join("");
         let silent_length_conversion = ["u64::try_from(length)", ".ok()?"].join("");
-        let silent_displacement_conversion =
-            ["u64::try_from(*displacement)", ".ok()"].join("");
-        let silent_nonnegative_conversion =
-            ["u64::try_from(value)", ".ok()"].join("");
+        let silent_displacement_conversion = ["u64::try_from(*displacement)", ".ok()"].join("");
+        let silent_nonnegative_conversion = ["u64::try_from(value)", ".ok()"].join("");
 
         assert!(
             !source.contains(&dummy_immediate_fallback),

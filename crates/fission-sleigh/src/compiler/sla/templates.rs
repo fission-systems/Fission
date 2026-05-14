@@ -86,9 +86,7 @@ pub(super) fn decode_construct_templates(
     let uniqbase = root
         .attr_unsigned(sla_format::ATTR_UNIQBASE)
         .ok_or_else(|| anyhow!("compiled SLEIGH root missing uniqbase"))?;
-    let uniqmask = root
-        .attr_unsigned(sla_format::ATTR_UNIQMASK)
-        .unwrap_or(0);
+    let uniqmask = root.attr_unsigned(sla_format::ATTR_UNIQMASK).unwrap_or(0);
 
     // 1. Pass One: Build a complete symbol ID -> name mapping from the symbol table
     let mut symbol_names = BTreeMap::new();
@@ -169,11 +167,9 @@ pub(super) fn decode_construct_templates(
                     u32::try_from(value)
                         .map_err(|_| "constructor_negative_minimum_length".to_string())
                 })?;
-            let source_index_key = optional_nonnegative_u64(
-                source_index,
-                "constructor source index",
-            )
-            .map_err(|err| err.to_string())?;
+            let source_index_key =
+                optional_nonnegative_u64(source_index, "constructor source index")
+                    .map_err(|err| err.to_string())?;
             let source_file = source_index_key
                 .and_then(|idx| source_files.get(&idx).cloned())
                 .unwrap_or_else(|| format!("<generated:{subtable_name}>"));

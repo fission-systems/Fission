@@ -569,13 +569,8 @@ mod tests {
     #[test]
     fn powerpc64_load_spec_exposes_executable_isa_siblings() {
         let registry = CompiledRuntimeRegistry::discover().expect("discover runtime registry");
-        let load_spec = BinaryLoadSpec::new(
-            "ELF",
-            0,
-            "PowerPC:LE:64:default",
-            "gcc",
-            "registry-test",
-        );
+        let load_spec =
+            BinaryLoadSpec::new("ELF", 0, "PowerPC:LE:64:default", "gcc", "registry-test");
         let entry_ids = registry
             .executable_sibling_entry_ids_for_load_spec(&load_spec)
             .expect("PowerPC64 LE sibling frontends");
@@ -606,13 +601,7 @@ mod tests {
             .expect("ARM8_le frontend");
         assert_eq!(arm8.processor_spec.as_deref(), None);
 
-        let load_spec = BinaryLoadSpec::new(
-            "ELF",
-            0,
-            "ARM:LE:32:v8-m",
-            "gcc",
-            "registry-test",
-        );
+        let load_spec = BinaryLoadSpec::new("ELF", 0, "ARM:LE:32:v8-m", "gcc", "registry-test");
         let selected = registry
             .resolve_from_load_spec(&load_spec)
             .expect("resolve ARM8m from ldefs language id");

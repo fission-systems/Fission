@@ -214,8 +214,7 @@ mod tests {
     #[test]
     fn handle_selector_index_source_has_no_silent_conversion_drop() {
         let source = include_str!("handles.rs");
-        let silent_selector_conversion =
-            ["usize::try_from(*handle_index)", ".ok()"].join("");
+        let silent_selector_conversion = ["usize::try_from(*handle_index)", ".ok()"].join("");
 
         assert!(
             !source.contains(&silent_selector_conversion),

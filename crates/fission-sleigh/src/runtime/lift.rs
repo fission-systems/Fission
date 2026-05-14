@@ -9,8 +9,34 @@ fn template_source_evidence_key(source: crate::compiler::CompiledTemplateSource)
 
 fn internal_byte_offset(entry_address: u64, bytes_len: usize, address: u64) -> Option<usize> {
     let rel = address.checked_sub(entry_address)?;
-    let offset = usize::try_from(rel).ok()?;
+    let offset = usize_from_u64(rel)?;
     (offset < bytes_len).then_some(offset)
+}
+
+fn usize_from_u64(value: u64) -> Option<usize> {
+    match usize::try_from(value) {
+        Ok(value) => Some(value),
+        Err(_) => None,
+    }
+}
+
+fn u64_from_usize(value: usize) -> Option<u64> {
+    match u64::try_from(value) {
+        Ok(value) => Some(value),
+        Err(_) => None,
+    }
+}
+
+fn checked_shift_amount(value: u64) -> Option<u32> {
+    match u32::try_from(value) {
+        Ok(value) => Some(value),
+        Err(_) => None,
+    }
+}
+
+fn checked_slice_end(offset: usize, width: usize, len: usize) -> Option<usize> {
+    let end = offset.checked_add(width)?;
+    (end <= len).then_some(end)
 }
 
 fn direct_pcode_branch_target(op: &PcodeOp) -> Option<u64> {
@@ -156,7 +182,7 @@ fn eval_const_expr(vn: &Varnode, defs: &HashMap<Varnode, &PcodeOp>, depth: usize
         .checked_sub(eval_const_expr(&op.inputs[1], defs, depth + 1)?),
         PcodeOpcode::IntLeft if op.inputs.len() == 2 => {
             let value = eval_const_expr(&op.inputs[0], defs, depth + 1)?;
-            let shift = u32::try_from(eval_const_expr(&op.inputs[1], defs, depth + 1)?).ok()?;
+            let shift = checked_shift_amount(eval_const_expr(&op.inputs[1], defs, depth + 1)?)?;
             value.checked_shl(shift)
         }
         PcodeOpcode::IntMult if op.inputs.len() == 2 => eval_const_expr(
@@ -330,19 +356,22 @@ fn infer_branchind_jump_table_targets(
 
     for base in mode_bases {
         let mut targets = Vec::new();
+        let Some(entry_width_u64) = u64_from_usize(entry_width) else {
+            break;
+        };
         for ordinal in 0..MAX_JUMP_TABLE_CASES {
-            let Some(entry_addr) =
-                table_base.checked_add(ordinal.saturating_mul(entry_width as u64))
-            else {
+            let Some(entry_delta) = ordinal.checked_mul(entry_width_u64) else {
+                break;
+            };
+            let Some(entry_addr) = table_base.checked_add(entry_delta) else {
                 break;
             };
             let Some(offset) = internal_byte_offset(entry_address, bytes.len(), entry_addr) else {
                 break;
             };
-            let end = offset.saturating_add(entry_width);
-            if end > bytes.len() {
+            let Some(end) = checked_slice_end(offset, entry_width, bytes.len()) else {
                 break;
-            }
+            };
             let raw = &bytes[offset..end];
             let target = if let Some(base) = base {
                 read_signed_entry(raw, little_endian).and_then(|disp| add_signed_base(base, disp))
@@ -355,7 +384,10 @@ fn infer_branchind_jump_table_targets(
             if internal_byte_offset(entry_address, bytes.len(), target).is_none() {
                 break;
             }
-            if (table_base..entry_addr + entry_width as u64).contains(&target) {
+            let Some(table_scan_end) = entry_addr.checked_add(entry_width_u64) else {
+                break;
+            };
+            if (table_base..table_scan_end).contains(&target) {
                 break;
             }
             if !targets.contains(&target) {
@@ -534,6 +566,32 @@ mod tests {
             template_source_evidence_key(crate::compiler::CompiledTemplateSource::SpecDerived),
             "sla_construct_tpl"
         );
+    }
+
+    #[test]
+    fn internal_byte_offsets_use_checked_width_conversions() {
+        assert_eq!(internal_byte_offset(0x1000, 4, 0x1002), Some(2));
+        assert_eq!(internal_byte_offset(0x1000, 4, 0x1004), None);
+        assert_eq!(internal_byte_offset(u64::MAX - 1, 4, u64::MAX), Some(1));
+        assert_eq!(checked_slice_end(usize::MAX, 1, usize::MAX), None);
+    }
+
+    #[test]
+    fn const_eval_rejects_oversized_left_shift_counts() {
+        let output = var(0x10, 8);
+        let left_shift = op(
+            0,
+            0x1000,
+            PcodeOpcode::IntLeft,
+            Some(output.clone()),
+            vec![
+                Varnode::constant(1, 8),
+                Varnode::constant(i64::from(u32::MAX) + 1, 8),
+            ],
+        );
+        let defs = HashMap::from([(output.clone(), &left_shift)]);
+
+        assert_eq!(eval_const_expr(&output, &defs, 0), None);
     }
 }
 
