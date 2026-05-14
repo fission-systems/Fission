@@ -2964,6 +2964,11 @@ int max(int a, int b) { if (a > b) return a; return b; }
         assert funcs[0].return_kind == "int"
         assert funcs[0].param_kinds == ["int", "int"]
         assert multiset_jaccard(code_fingerprint(funcs[0].body, funcs[0]), code_fingerprint(funcs[0].body, funcs[0])) == 1.0
+        missing_feature_score = multiset_jaccard(
+            code_fingerprint("if (a > b) return helper(a + b);", funcs[0]),
+            code_fingerprint("return a;", funcs[0]),
+        )
+        assert 0.0 < missing_feature_score < 1.0, missing_feature_score
         status, matched, _ = match_function(funcs[0], [FissionFunction("0x1000", "add [export]")])
         assert status == "matched"
         assert matched is not None
@@ -3013,6 +3018,34 @@ int max(int a, int b) { if (a > b) return a; return b; }
         assert [func.name for func in limited] == ["entry"]
         assert classify_return("u64 wide(unsigned int seed)", "wide", "unsigned int seed", "c") == "int"
         assert classify_return("uint64_t wide(unsigned int seed)", "wide", "unsigned int seed", "c") == "int"
+        summary = summarize(
+            [
+                {
+                    "language": "c",
+                    "tags": [],
+                    "entry_id": "selftest",
+                    "mapping_status": "matched",
+                    "decomp_success": True,
+                    "behavior": {"status": "pass"},
+                    "semantic_score": 1.0,
+                },
+                {
+                    "language": "c",
+                    "tags": [],
+                    "entry_id": "selftest",
+                    "mapping_status": "unmapped",
+                    "decomp_success": False,
+                    "behavior": {"status": "decomp_failed", "score": 0.0},
+                    "semantic_score": 0.0,
+                },
+            ],
+            "selftest",
+            [],
+        )
+        assert summary["row_count"] == 2
+        assert summary["function_mapping_rate"] == 0.5
+        assert summary["decomp_success_rate"] == 0.5
+        assert summary["weighted_semantic_similarity"] == 0.5
         void_func = SourceFunction(
             name="touch",
             signature="void touch(unsigned int seed)",
