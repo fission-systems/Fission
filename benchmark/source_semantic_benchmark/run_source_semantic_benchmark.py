@@ -1943,6 +1943,10 @@ def sleigh_template_source_gate(summary: dict[str, Any], required_source: str) -
         failures.append(
             "SLEIGH template source gate requires debug_template_source_totals; run with --include-debug-decomp"
         )
+    if row_count > 0 and decode_ok != row_count:
+        failures.append(f"SLEIGH decode must be ok for every row ({decode_ok}/{row_count})")
+    if row_count > 0 and raw_pcode_ok != row_count:
+        failures.append(f"SLEIGH raw_pcode must be ok for every row ({raw_pcode_ok}/{row_count})")
     if unexpected_sources:
         failures.append(
             f"SLEIGH template sources must be only {required_source!r} "
@@ -3024,7 +3028,17 @@ int max(int a, int b) { if (a > b) return a; return b; }
             "spec_derived",
         )
         assert gate["status"] == "failed"
-        assert "raw_pcode:failed" in gate["failures"][0]
+        assert any("raw_pcode:failed" in failure for failure in gate["failures"])
+        gate = sleigh_template_source_gate(
+            {
+                "row_count": 2,
+                "debug_stage_status_counts": {"decode:ok": 1, "raw_pcode:ok": 1},
+                "debug_template_source_totals": {"spec_derived": 1},
+            },
+            "spec_derived",
+        )
+        assert gate["status"] == "failed"
+        assert any("decode must be ok for every row (1/2)" in failure for failure in gate["failures"])
         gate = sleigh_template_source_gate(
             {
                 "row_count": 1,
