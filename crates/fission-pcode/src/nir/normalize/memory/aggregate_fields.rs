@@ -28,6 +28,7 @@
 ///
 /// This pass is architecture-agnostic and has no binary-specific thresholds.
 use super::super::*;
+use super::partition::type_byte_size;
 use super::typed_facts::{
     TypedAccessFacts, collect_typed_fact_inventory,
     inferred_aggregate_size as inferred_size_from_facts,
@@ -37,6 +38,7 @@ use crate::nir::normalize::wave_stats::{
     add_object_root_recoveries, add_object_shape_recoveries, add_surface_binding_promotions,
     add_typed_object_shape_refinements,
 };
+use std::collections::{HashMap, HashSet};
 
 fn can_upgrade_binding_to_aggregate(binding: &NirBinding) -> bool {
     matches!(
@@ -179,6 +181,387 @@ pub(crate) fn apply_aggregate_fields_pass(func: &mut HirFunction) -> bool {
         }
     }
 
+    changed
+}
+
+#[derive(Debug, Clone)]
+struct AggregateAlias {
+    root: HirExpr,
+    base_offset: i64,
+    elem_ty: NirType,
+}
+
+pub(crate) fn apply_aggregate_alias_access_rewrite_pass(func: &mut HirFunction) -> bool {
+    let assigned_vars = assigned_var_names(&func.body);
+    let aliases = func
+        .locals
+        .iter()
+        .filter(|binding| !assigned_vars.contains(binding.name.as_str()))
+        .filter_map(|binding| {
+            let initializer = binding.initializer.as_ref()?;
+            let (root, base_offset) = aggregate_alias_root(initializer)?;
+            if !root_is_typed_object_carrier(func, &root) {
+                return None;
+            }
+            let NirType::Ptr(elem_ty) = &binding.ty else {
+                return None;
+            };
+            Some((
+                binding.name.clone(),
+                AggregateAlias {
+                    root,
+                    base_offset,
+                    elem_ty: elem_ty.as_ref().clone(),
+                },
+            ))
+        })
+        .collect::<HashMap<_, _>>();
+    if aliases.is_empty() {
+        return false;
+    }
+    let mut changed = rewrite_alias_stmts(&mut func.body, &aliases);
+    if changed {
+        func.locals.retain(|binding| {
+            let remove = aliases.contains_key(binding.name.as_str())
+                && !stmt_list_uses_var(&func.body, &binding.name);
+            changed |= remove;
+            !remove
+        });
+    }
+    changed
+}
+
+fn assigned_var_names(stmts: &[HirStmt]) -> HashSet<String> {
+    fn visit(stmts: &[HirStmt], out: &mut HashSet<String>) {
+        for stmt in stmts {
+            match stmt {
+                HirStmt::Assign {
+                    lhs: HirLValue::Var(name),
+                    ..
+                } => {
+                    out.insert(name.clone());
+                }
+                HirStmt::Block(body)
+                | HirStmt::While { body, .. }
+                | HirStmt::DoWhile { body, .. } => {
+                    visit(body, out);
+                }
+                HirStmt::If {
+                    then_body,
+                    else_body,
+                    ..
+                } => {
+                    visit(then_body, out);
+                    visit(else_body, out);
+                }
+                HirStmt::For {
+                    init, update, body, ..
+                } => {
+                    if let Some(init) = init.as_deref() {
+                        visit(std::slice::from_ref(init), out);
+                    }
+                    if let Some(update) = update.as_deref() {
+                        visit(std::slice::from_ref(update), out);
+                    }
+                    visit(body, out);
+                }
+                HirStmt::Switch { cases, default, .. } => {
+                    for case in cases {
+                        visit(&case.body, out);
+                    }
+                    visit(default, out);
+                }
+                _ => {}
+            }
+        }
+    }
+
+    let mut out = HashSet::new();
+    visit(stmts, &mut out);
+    out
+}
+
+fn aggregate_alias_root(expr: &HirExpr) -> Option<(HirExpr, i64)> {
+    match expr {
+        HirExpr::Cast { expr, .. } => aggregate_alias_root(expr),
+        HirExpr::PtrOffset { base, offset } => Some(((**base).clone(), *offset)),
+        _ => None,
+    }
+}
+
+fn root_is_typed_object_carrier(func: &HirFunction, root: &HirExpr) -> bool {
+    match root {
+        HirExpr::Var(name) | HirExpr::AddressOfGlobal(name) => func
+            .params
+            .iter()
+            .chain(func.locals.iter())
+            .find(|binding| binding.name == *name)
+            .is_some_and(|binding| {
+                matches!(
+                    binding.origin,
+                    Some(
+                        NirBindingOrigin::ParamIndex(_)
+                            | NirBindingOrigin::StackOffset(_)
+                            | NirBindingOrigin::DerivedFromStackOffset(_)
+                            | NirBindingOrigin::HomeSlot(_)
+                            | NirBindingOrigin::OutgoingArgSlot(_)
+                    )
+                )
+            }),
+        HirExpr::Cast { expr, .. } | HirExpr::PtrOffset { base: expr, .. } => {
+            root_is_typed_object_carrier(func, expr)
+        }
+        _ => false,
+    }
+}
+
+fn stmt_list_uses_var(stmts: &[HirStmt], name: &str) -> bool {
+    stmts.iter().any(|stmt| stmt_uses_var(stmt, name))
+}
+
+fn stmt_uses_var(stmt: &HirStmt, name: &str) -> bool {
+    match stmt {
+        HirStmt::Assign { lhs, rhs } => lvalue_uses_var(lhs, name) || expr_uses_var(rhs, name),
+        HirStmt::Expr(expr) | HirStmt::Return(Some(expr)) => expr_uses_var(expr, name),
+        HirStmt::If {
+            cond,
+            then_body,
+            else_body,
+        } => {
+            expr_uses_var(cond, name)
+                || stmt_list_uses_var(then_body, name)
+                || stmt_list_uses_var(else_body, name)
+        }
+        HirStmt::While { cond, body } | HirStmt::DoWhile { body, cond } => {
+            expr_uses_var(cond, name) || stmt_list_uses_var(body, name)
+        }
+        HirStmt::For {
+            init,
+            cond,
+            update,
+            body,
+        } => {
+            init.as_deref()
+                .is_some_and(|stmt| stmt_uses_var(stmt, name))
+                || cond.as_ref().is_some_and(|expr| expr_uses_var(expr, name))
+                || update
+                    .as_deref()
+                    .is_some_and(|stmt| stmt_uses_var(stmt, name))
+                || stmt_list_uses_var(body, name)
+        }
+        HirStmt::Switch {
+            expr,
+            cases,
+            default,
+        } => {
+            expr_uses_var(expr, name)
+                || cases
+                    .iter()
+                    .any(|case| stmt_list_uses_var(&case.body, name))
+                || stmt_list_uses_var(default, name)
+        }
+        HirStmt::Block(body) => stmt_list_uses_var(body, name),
+        HirStmt::Return(None)
+        | HirStmt::VaStart { .. }
+        | HirStmt::Label(_)
+        | HirStmt::Goto(_)
+        | HirStmt::Break
+        | HirStmt::Continue => false,
+    }
+}
+
+fn lvalue_uses_var(lhs: &HirLValue, name: &str) -> bool {
+    match lhs {
+        HirLValue::Var(var) => var == name,
+        HirLValue::Deref { ptr, .. } => expr_uses_var(ptr, name),
+        HirLValue::Index { base, index, .. } => {
+            expr_uses_var(base, name) || expr_uses_var(index, name)
+        }
+    }
+}
+
+fn expr_uses_var(expr: &HirExpr, name: &str) -> bool {
+    match expr {
+        HirExpr::Var(var) | HirExpr::AddressOfGlobal(var) => var == name,
+        HirExpr::Cast { expr, .. }
+        | HirExpr::Unary { expr, .. }
+        | HirExpr::PtrOffset { base: expr, .. }
+        | HirExpr::AggregateCopy { src: expr, .. }
+        | HirExpr::Load { ptr: expr, .. } => expr_uses_var(expr, name),
+        HirExpr::Binary { lhs, rhs, .. } => expr_uses_var(lhs, name) || expr_uses_var(rhs, name),
+        HirExpr::Select {
+            cond,
+            then_expr,
+            else_expr,
+            ..
+        } => {
+            expr_uses_var(cond, name)
+                || expr_uses_var(then_expr, name)
+                || expr_uses_var(else_expr, name)
+        }
+        HirExpr::Call { args, .. } => args.iter().any(|arg| expr_uses_var(arg, name)),
+        HirExpr::Index { base, index, .. } => {
+            expr_uses_var(base, name) || expr_uses_var(index, name)
+        }
+        HirExpr::Const(_, _) => false,
+    }
+}
+
+fn alias_const_index_offset(alias: &AggregateAlias, index: &HirExpr) -> Option<i64> {
+    let HirExpr::Const(index, _) = index else {
+        return None;
+    };
+    let elem_size = i64::from(type_byte_size(&alias.elem_ty)?);
+    alias.base_offset.checked_add(index.checked_mul(elem_size)?)
+}
+
+fn alias_ptr_offset(alias: &AggregateAlias, offset: i64) -> HirExpr {
+    if offset == 0 {
+        alias.root.clone()
+    } else {
+        HirExpr::PtrOffset {
+            base: Box::new(alias.root.clone()),
+            offset,
+        }
+    }
+}
+
+fn rewrite_alias_stmts(stmts: &mut [HirStmt], aliases: &HashMap<String, AggregateAlias>) -> bool {
+    let mut changed = false;
+    for stmt in stmts {
+        match stmt {
+            HirStmt::Assign { lhs, rhs } => {
+                changed |= rewrite_alias_lvalue(lhs, aliases);
+                changed |= rewrite_alias_expr(rhs, aliases);
+            }
+            HirStmt::Expr(expr) | HirStmt::Return(Some(expr)) => {
+                changed |= rewrite_alias_expr(expr, aliases);
+            }
+            HirStmt::If {
+                cond,
+                then_body,
+                else_body,
+            } => {
+                changed |= rewrite_alias_expr(cond, aliases);
+                changed |= rewrite_alias_stmts(then_body, aliases);
+                changed |= rewrite_alias_stmts(else_body, aliases);
+            }
+            HirStmt::While { cond, body } | HirStmt::DoWhile { body, cond } => {
+                changed |= rewrite_alias_expr(cond, aliases);
+                changed |= rewrite_alias_stmts(body, aliases);
+            }
+            HirStmt::For {
+                init,
+                cond,
+                update,
+                body,
+            } => {
+                if let Some(init) = init.as_deref_mut() {
+                    changed |= rewrite_alias_stmts(std::slice::from_mut(init), aliases);
+                }
+                if let Some(cond) = cond {
+                    changed |= rewrite_alias_expr(cond, aliases);
+                }
+                if let Some(update) = update.as_deref_mut() {
+                    changed |= rewrite_alias_stmts(std::slice::from_mut(update), aliases);
+                }
+                changed |= rewrite_alias_stmts(body, aliases);
+            }
+            HirStmt::Switch {
+                expr,
+                cases,
+                default,
+            } => {
+                changed |= rewrite_alias_expr(expr, aliases);
+                for case in cases {
+                    changed |= rewrite_alias_stmts(&mut case.body, aliases);
+                }
+                changed |= rewrite_alias_stmts(default, aliases);
+            }
+            HirStmt::Block(body) => {
+                changed |= rewrite_alias_stmts(body, aliases);
+            }
+            HirStmt::Return(None)
+            | HirStmt::VaStart { .. }
+            | HirStmt::Label(_)
+            | HirStmt::Goto(_)
+            | HirStmt::Break
+            | HirStmt::Continue => {}
+        }
+    }
+    changed
+}
+
+fn rewrite_alias_lvalue(lhs: &mut HirLValue, aliases: &HashMap<String, AggregateAlias>) -> bool {
+    match lhs {
+        HirLValue::Deref { ptr, .. } => rewrite_alias_expr(ptr, aliases),
+        HirLValue::Index {
+            base,
+            index,
+            elem_ty,
+        } => {
+            let mut changed =
+                rewrite_alias_expr(base, aliases) | rewrite_alias_expr(index, aliases);
+            if let HirExpr::Var(name) = base.as_ref()
+                && let Some(alias) = aliases.get(name)
+                && let Some(offset) = alias_const_index_offset(alias, index)
+            {
+                *lhs = HirLValue::Deref {
+                    ptr: Box::new(alias_ptr_offset(alias, offset)),
+                    ty: elem_ty.clone(),
+                };
+                changed = true;
+            }
+            changed
+        }
+        HirLValue::Var(_) => false,
+    }
+}
+
+fn rewrite_alias_expr(expr: &mut HirExpr, aliases: &HashMap<String, AggregateAlias>) -> bool {
+    let changed = match expr {
+        HirExpr::Cast { expr, .. }
+        | HirExpr::Unary { expr, .. }
+        | HirExpr::PtrOffset { base: expr, .. }
+        | HirExpr::AggregateCopy { src: expr, .. } => rewrite_alias_expr(expr, aliases),
+        HirExpr::Binary { lhs, rhs, .. } => {
+            rewrite_alias_expr(lhs, aliases) | rewrite_alias_expr(rhs, aliases)
+        }
+        HirExpr::Select {
+            cond,
+            then_expr,
+            else_expr,
+            ..
+        } => {
+            rewrite_alias_expr(cond, aliases)
+                | rewrite_alias_expr(then_expr, aliases)
+                | rewrite_alias_expr(else_expr, aliases)
+        }
+        HirExpr::Call { args, .. } => args
+            .iter_mut()
+            .fold(false, |acc, arg| rewrite_alias_expr(arg, aliases) | acc),
+        HirExpr::Load { ptr, .. } => rewrite_alias_expr(ptr, aliases),
+        HirExpr::Index {
+            base,
+            index,
+            elem_ty,
+        } => {
+            let mut changed =
+                rewrite_alias_expr(base, aliases) | rewrite_alias_expr(index, aliases);
+            if let HirExpr::Var(name) = base.as_ref()
+                && let Some(alias) = aliases.get(name)
+                && let Some(offset) = alias_const_index_offset(alias, index)
+            {
+                *expr = HirExpr::Load {
+                    ptr: Box::new(alias_ptr_offset(alias, offset)),
+                    ty: elem_ty.clone(),
+                };
+                changed = true;
+            }
+            changed
+        }
+        HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) | HirExpr::Const(_, _) => false,
+    };
     changed
 }
 

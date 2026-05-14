@@ -30,8 +30,9 @@ use super::super::idioms::{
     remove_entry_stack_scaffold_stores,
 };
 use super::super::memory::{
-    apply_aggregate_fields_pass, apply_memory_slot_surfacing, apply_memory_slot_surfacing_cheap,
-    apply_ptr_arith_recovery_pass, normalize_binding_initializers,
+    apply_aggregate_alias_access_rewrite_pass, apply_aggregate_fields_pass,
+    apply_memory_slot_surfacing, apply_memory_slot_surfacing_cheap, apply_ptr_arith_recovery_pass,
+    normalize_binding_initializers,
 };
 use super::super::recovery::{
     apply_break_continue_pass, apply_flag_recovery_pass, apply_for_loop_folding,
@@ -600,6 +601,20 @@ pub(crate) fn normalize_hir_function(func: &mut HirFunction) {
     // StructFields.  Re-run pointer arithmetic afterward so newly inferred
     // aggregate pointers expose field offsets before rendering.
     if memory_fact_prefilter {
+        if run_pass_logged(
+            func,
+            "aggregate_alias_access_rewrite",
+            perf,
+            apply_aggregate_alias_access_rewrite_pass,
+        ) {
+            run_pass_logged(
+                func,
+                "defuse_dead_assignment_after_aggregate_alias_access",
+                perf,
+                defuse_dead_assignment_pass,
+            );
+            prune_unused_temp_bindings(func);
+        }
         if run_pass_logged(func, "aggregate_fields", perf, apply_aggregate_fields_pass) {
             run_pass_logged(
                 func,

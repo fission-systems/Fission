@@ -303,6 +303,70 @@ fn normalize_recovers_field_access_after_aggregate_pointer_inference() {
 }
 
 #[test]
+fn normalize_rewrites_constant_index_alias_back_to_aggregate_field() {
+    let mut func = HirFunction {
+        name: "process_config_alias".to_string(),
+        params: vec![NirBinding {
+            name: "param_1".to_string(),
+            ty: NirType::Ptr(Box::new(NirType::Unknown)),
+            surface_type_name: None,
+            origin: Some(NirBindingOrigin::ParamIndex(0)),
+            initializer: None,
+        }],
+        locals: vec![NirBinding {
+            name: "slot_4".to_string(),
+            ty: NirType::Ptr(Box::new(NirType::Int {
+                bits: 32,
+                signed: false,
+            })),
+            surface_type_name: None,
+            origin: None,
+            initializer: Some(HirExpr::Cast {
+                ty: NirType::Ptr(Box::new(NirType::Int {
+                    bits: 32,
+                    signed: false,
+                })),
+                expr: Box::new(HirExpr::PtrOffset {
+                    base: Box::new(HirExpr::Var("param_1".to_string())),
+                    offset: 4,
+                }),
+            }),
+        }],
+        return_type: NirType::Int {
+            bits: 32,
+            signed: false,
+        },
+        surface_return_type_name: None,
+        body: vec![HirStmt::Return(Some(HirExpr::Index {
+            base: Box::new(HirExpr::Var("slot_4".to_string())),
+            index: Box::new(HirExpr::Const(
+                0,
+                NirType::Int {
+                    bits: 64,
+                    signed: false,
+                },
+            )),
+            elem_ty: NirType::Int {
+                bits: 32,
+                signed: false,
+            },
+        }))],
+        is_64bit: true,
+        ..Default::default()
+    };
+
+    normalize_hir_function(&mut func);
+    let rendered = print_hir_function(&func);
+    assert!(
+        rendered.contains("param_1->field_4"),
+        "rendered:\n{}",
+        rendered
+    );
+    assert!(!rendered.contains("slot_4[0]"), "rendered:\n{}", rendered);
+    assert!(!rendered.contains("slot_4"), "rendered:\n{}", rendered);
+}
+
+#[test]
 fn preview_type_hints_fold_subpiece_lane_aggregate_store_back_to_local() {
     let func = PcodeFunction {
         blocks: vec![PcodeBasicBlock {
