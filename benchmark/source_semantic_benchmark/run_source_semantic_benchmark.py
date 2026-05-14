@@ -2641,6 +2641,17 @@ def summarize(rows: list[dict[str, Any]], manifest_name: str, entries: list[Benc
     static_component_decomp_feature_values: dict[str, list[float]] = {
         component: [] for component in STATIC_SIMILARITY_COMPONENTS
     }
+    static_component_absence_counts: dict[str, Counter[str]] = {
+        component: Counter() for component in STATIC_SIMILARITY_COMPONENTS
+    }
+    static_component_absence_rows: dict[str, dict[str, list[dict[str, Any]]]] = {
+        component: {
+            "source_only_rows": [],
+            "decomp_only_rows": [],
+            "zero_intersection_rows": [],
+        }
+        for component in STATIC_SIMILARITY_COMPONENTS
+    }
     source_decomp_size_hot_rows: list[dict[str, Any]] = []
     source_feature_rows = 0
     decomp_feature_rows = 0
@@ -3283,12 +3294,60 @@ def summarize(rows: list[dict[str, Any]], manifest_name: str, entries: list[Benc
                 component_source_total = float(details.get("source_feature_total", 0.0) or 0.0)
                 component_decomp_total = float(details.get("decomp_feature_total", 0.0) or 0.0)
                 component_intersection_total = float(details.get("intersection_feature_total", 0.0) or 0.0)
+                component_source_present = component_source_total > 0.0
+                component_decomp_present = component_decomp_total > 0.0
+                component_intersection_present = component_intersection_total > 0.0
                 static_component_source_feature_values[component].append(component_source_total)
                 static_component_decomp_feature_values[component].append(component_decomp_total)
                 static_component_missing_row_counts[component] += int(component_missing_total > 0.0)
                 static_component_zero_similarity_row_counts[component] += int(
                     component_source_total > 0.0 and component_intersection_total == 0.0
                 )
+                absence_counts = static_component_absence_counts[component]
+                absence_counts["observed_row_count"] += 1
+                absence_counts["source_present_row_count"] += int(component_source_present)
+                absence_counts["decomp_present_row_count"] += int(component_decomp_present)
+                absence_counts["intersection_present_row_count"] += int(component_intersection_present)
+                if component_source_present and component_decomp_present:
+                    absence_counts["both_present_row_count"] += 1
+                elif component_source_present:
+                    absence_counts["source_only_row_count"] += 1
+                elif component_decomp_present:
+                    absence_counts["decomp_only_row_count"] += 1
+                else:
+                    absence_counts["both_absent_row_count"] += 1
+                if component_source_present and not component_intersection_present:
+                    absence_counts["zero_intersection_source_present_row_count"] += 1
+                if component_source_present and not component_decomp_present:
+                    static_component_absence_rows[component]["source_only_rows"].append(
+                        {
+                            **triage_row_summary(row),
+                            "component": component,
+                            "component_source_feature_total": component_source_total,
+                            "component_decomp_feature_total": component_decomp_total,
+                            "component_intersection_feature_total": component_intersection_total,
+                        }
+                    )
+                if component_decomp_present and not component_source_present:
+                    static_component_absence_rows[component]["decomp_only_rows"].append(
+                        {
+                            **triage_row_summary(row),
+                            "component": component,
+                            "component_source_feature_total": component_source_total,
+                            "component_decomp_feature_total": component_decomp_total,
+                            "component_intersection_feature_total": component_intersection_total,
+                        }
+                    )
+                if component_source_present and not component_intersection_present:
+                    static_component_absence_rows[component]["zero_intersection_rows"].append(
+                        {
+                            **triage_row_summary(row),
+                            "component": component,
+                            "component_source_feature_total": component_source_total,
+                            "component_decomp_feature_total": component_decomp_total,
+                            "component_intersection_feature_total": component_intersection_total,
+                        }
+                    )
                 for key in [
                     "source_feature_total",
                     "decomp_feature_total",
@@ -3640,6 +3699,50 @@ def summarize(rows: list[dict[str, Any]], manifest_name: str, entries: list[Benc
                 {"feature": feature, "count": count}
                 for feature, count in static_gap_component_extra_features[component].most_common(12)
             ],
+        }
+    static_component_absence_export: dict[str, dict[str, Any]] = {}
+
+    def top_absence_rows(component: str, row_kind: str) -> list[dict[str, Any]]:
+        return sorted(
+            static_component_absence_rows.get(component, {}).get(row_kind) or [],
+            key=lambda row: (
+                -float(row.get("component_source_feature_total") or 0.0),
+                -float(row.get("component_decomp_feature_total") or 0.0),
+                float(row.get("semantic_score_percent") or 0.0),
+                str(row.get("function_name") or ""),
+            ),
+        )[:8]
+
+    for component, counts in sorted(static_component_absence_counts.items()):
+        observed = int(counts.get("observed_row_count", 0) or 0)
+        static_component_absence_export[component] = {
+            "observed_row_count": observed,
+            "observed_row_rate_total_denominator": round(observed / total, 6) if total else 0.0,
+            "source_present_row_count": int(counts.get("source_present_row_count", 0) or 0),
+            "source_present_row_rate_observed_denominator": round(
+                float(counts.get("source_present_row_count", 0) or 0) / observed,
+                6,
+            ) if observed else 0.0,
+            "decomp_present_row_count": int(counts.get("decomp_present_row_count", 0) or 0),
+            "decomp_present_row_rate_observed_denominator": round(
+                float(counts.get("decomp_present_row_count", 0) or 0) / observed,
+                6,
+            ) if observed else 0.0,
+            "intersection_present_row_count": int(counts.get("intersection_present_row_count", 0) or 0),
+            "intersection_present_row_rate_observed_denominator": round(
+                float(counts.get("intersection_present_row_count", 0) or 0) / observed,
+                6,
+            ) if observed else 0.0,
+            "both_present_row_count": int(counts.get("both_present_row_count", 0) or 0),
+            "source_only_row_count": int(counts.get("source_only_row_count", 0) or 0),
+            "decomp_only_row_count": int(counts.get("decomp_only_row_count", 0) or 0),
+            "both_absent_row_count": int(counts.get("both_absent_row_count", 0) or 0),
+            "zero_intersection_source_present_row_count": int(
+                counts.get("zero_intersection_source_present_row_count", 0) or 0
+            ),
+            "source_only_rows": top_absence_rows(component, "source_only_rows"),
+            "decomp_only_rows": top_absence_rows(component, "decomp_only_rows"),
+            "zero_intersection_rows": top_absence_rows(component, "zero_intersection_rows"),
         }
     triage_priority_rows = [
         triage_row_summary(row)
@@ -4390,6 +4493,7 @@ def summarize(rows: list[dict[str, Any]], manifest_name: str, entries: list[Benc
             "rows_with_missing_features": static_missing_feature_rows,
             "rows_with_zero_static_intersection": static_zero_similarity_rows,
         },
+        "static_component_absence_matrix_metrics": static_component_absence_export,
         "source_decomp_size_metrics": {
             "source_body_line_count_distribution": numeric_distribution(source_body_line_counts),
             "decomp_line_count_distribution": numeric_distribution(decomp_line_counts),
@@ -5938,6 +6042,27 @@ def render_markdown(summary: dict[str, Any], rows: list[dict[str, Any]]) -> str:
             f"rows with no decomp features despite source "
             f"{int(static_absence.get('rows_with_no_decomp_features_despite_source', 0) or 0)}"
         )
+    component_absence = summary.get("static_component_absence_matrix_metrics")
+    if isinstance(component_absence, dict) and component_absence:
+        lines.extend(["", "## Static Component Absence Matrix", ""])
+        lines.extend(
+            [
+                "| Component | Observed Rows | Source Present | Decomp Present | Both Present | Source Only | Decomp Only | Zero Intersection |",
+                "|---|---:|---:|---:|---:|---:|---:|---:|",
+            ]
+        )
+        for component, metrics in sorted(component_absence.items()):
+            if not isinstance(metrics, dict):
+                continue
+            lines.append(
+                f"| {component} | {metrics.get('observed_row_count', 0)} | "
+                f"{metrics.get('source_present_row_count', 0)} | "
+                f"{metrics.get('decomp_present_row_count', 0)} | "
+                f"{metrics.get('both_present_row_count', 0)} | "
+                f"{metrics.get('source_only_row_count', 0)} | "
+                f"{metrics.get('decomp_only_row_count', 0)} | "
+                f"{metrics.get('zero_intersection_source_present_row_count', 0)} |"
+            )
     size_metrics = summary.get("source_decomp_size_metrics")
     if isinstance(size_metrics, dict):
         line_ratio = size_metrics.get("decomp_to_source_line_ratio_distribution")
@@ -7036,6 +7161,10 @@ int max(int a, int b) { if (a > b) return a; return b; }
                     },
                     "static_similarity_gap_components": {
                         "signature": {
+                            "source_feature_total": 2,
+                            "decomp_feature_total": 2,
+                            "intersection_feature_total": 0,
+                            "union_feature_total": 4,
                             "missing_feature_total": 2,
                             "extra_feature_total": 2,
                             "top_missing_features": [{"feature": "sig:param:int", "count": 2}],
@@ -7120,6 +7249,13 @@ int max(int a, int b) { if (a > b) return a; return b; }
         assert summary["static_gap_row_metrics"]["missing_feature_row_count"] == 1
         assert summary["static_absence_penalty_metrics"]["missing_feature_total"] == 2.0
         assert summary["static_absence_penalty_metrics"]["rows_with_no_decomp_features_despite_source"] == 1
+        assert summary["static_component_absence_matrix_metrics"]["signature"]["both_present_row_count"] == 1
+        assert (
+            summary["static_component_absence_matrix_metrics"]["signature"][
+                "zero_intersection_source_present_row_count"
+            ]
+            == 1
+        )
         assert summary["source_decomp_size_metrics"]["decomp_to_source_line_ratio_distribution"]["max"] == 2.0
         assert summary["static_source_variant_metrics"]["variant_counts"]["direct_source"] == 2
         assert summary["score_by_behavior_status"]["pass"]["count"] == 1
