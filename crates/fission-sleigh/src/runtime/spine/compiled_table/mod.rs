@@ -380,6 +380,16 @@ fn checked_context_commit_handle_index(hand_index: u32) -> Result<usize> {
         .map_err(|_| anyhow!("context commit handle index {hand_index} does not fit usize"))
 }
 
+fn context_commit_handle_is_const_space(handle: &RuntimeHandle) -> Result<bool> {
+    Ok(handle
+        .fixed
+        .space
+        .as_ref()
+        .ok_or_else(|| anyhow!("context commit handle missing primary space metadata"))?
+        .name
+        == "const")
+}
+
 /// Resolved deferred context commit: Ghidra's SleighParserContext.applyCommits().
 ///
 /// Each entry is `(target_address, word_index, mask, context_word_value)`.
@@ -421,13 +431,7 @@ pub(crate) fn apply_context_commits(
                 // lives in the constant space, scale by the current address
                 // space's addressable unit size.
                 let offset = handle.fixed.offset_offset;
-                if handle
-                    .fixed
-                    .space
-                    .as_ref()
-                    .map(|s| s.name == "const")
-                    .unwrap_or(false)
-                {
+                if context_commit_handle_is_const_space(handle)? {
                     let cur_space_index = compiled.sla_default_cur_space_index()?;
                     let cur_space = compiled.sla_spaces.get(&cur_space_index).ok_or_else(|| {
                         anyhow!("CurSpace index {cur_space_index} missing from sla_spaces")

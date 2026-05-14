@@ -1,7 +1,7 @@
 use super::*;
 use crate::compiler::{
     compile_frontend_for_entry_spec, compile_x86_64_frontend, discovery, spec_root_for_arch,
-    CompiledTemplateSource,
+    CompiledOperandSpec, CompiledSpaceRef, CompiledTemplateSource,
 };
 use std::path::PathBuf;
 
@@ -46,6 +46,37 @@ fn runtime_window_and_length_helpers_fail_closed_on_invalid_widths() {
         assert!(checked_runtime_length_u32(u32::MAX as usize + 1, "test").is_err());
     }
     assert_eq!(checked_context_commit_handle_index(3).unwrap(), 3);
+}
+
+#[test]
+fn context_commit_const_space_check_requires_primary_space_metadata() {
+    let handle = RuntimeHandle {
+        operand_index: 0,
+        spec: CompiledOperandSpec::ContextFieldExtraction {
+            bit_offset: 0,
+            bit_width: 1,
+            sign_extend: false,
+        },
+        fixed: RuntimeFixedHandle::default(),
+        debug_value: None,
+        subtable_state: None,
+    };
+
+    let err = context_commit_handle_is_const_space(&handle)
+        .expect_err("context commit handle must carry decoded primary space metadata");
+
+    assert!(err
+        .to_string()
+        .contains("context commit handle missing primary space metadata"));
+
+    let mut const_handle = handle;
+    const_handle.fixed.space = Some(CompiledSpaceRef {
+        name: "const".to_string(),
+        index: 0,
+        word_size: 1,
+        addr_size: 8,
+    });
+    assert!(context_commit_handle_is_const_space(&const_handle).unwrap());
 }
 
 #[test]
@@ -869,6 +900,8 @@ fn compiled_table_policy_symbols_stay_architecture_neutral() {
     ]
     .join(" ");
     let context_commit_addr_unit_fallback = ".unwrap_or(1)";
+    let context_commit_missing_space_non_const_fallback =
+        [".map(|s| s.name == ", "\"const\")", ".unwrap_or(false)"].join("");
     let context_commit_addr_unit_wrap = "offset.wrapping_mul(addr_unit)";
     let static_handle_addr_unit_wrap = "offset_offset.wrapping_mul(addr_unit)";
     let swallowed_context_word_error = "let _ = set_packed_context_word";
@@ -1123,6 +1156,7 @@ fn compiled_table_policy_symbols_stay_architecture_neutral() {
         );
         assert!(
             !source.contains(context_commit_addr_unit_fallback)
+                && !source.contains(&context_commit_missing_space_non_const_fallback)
                 && !source.contains(context_commit_addr_unit_wrap)
                 && !source.contains(static_handle_addr_unit_wrap),
             "{} still hides invalid address-unit scaling",
