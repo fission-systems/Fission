@@ -46,6 +46,7 @@ pub struct RuntimeVariantDescriptor {
     pub entry_id: String,
     pub language_ids: Vec<String>,
     pub language_aliases: Vec<String>,
+    pub processor_spec: Option<String>,
     pub generated_path: String,
     pub endian: RuntimeEndian,
     pub support_level: RuntimeSupportLevel,
@@ -60,6 +61,7 @@ pub struct RuntimeFrontendDescriptor {
     pub entry_id: String,
     pub language_ids: Vec<String>,
     pub language_aliases: Vec<String>,
+    pub processor_spec: Option<String>,
     pub generated_path: String,
     pub status: RuntimeFrontendStatus,
 }
@@ -396,6 +398,7 @@ fn load_registry_data() -> RegistryData {
             entry_id: entry.entry_id.clone(),
             language_ids: entry.language_ids.clone(),
             language_aliases: entry.language_aliases.clone(),
+            processor_spec: entry.processor_spec.clone(),
             generated_path: format!("{}/{}", entry.processor, entry.entry_id),
             endian: endian_from_manifest(entry),
             support_level,
@@ -408,6 +411,7 @@ fn load_registry_data() -> RegistryData {
             entry_id: variant.entry_id.clone(),
             language_ids: variant.language_ids.clone(),
             language_aliases: variant.language_aliases.clone(),
+            processor_spec: variant.processor_spec.clone(),
             generated_path: variant.generated_path.clone(),
             status: variant.support_level.as_frontend_status(),
         });
@@ -565,8 +569,13 @@ mod tests {
     #[test]
     fn powerpc64_load_spec_exposes_executable_isa_siblings() {
         let registry = CompiledRuntimeRegistry::discover().expect("discover runtime registry");
-        let load_spec =
-            BinaryLoadSpec::compatibility_from_language_id("ELF", 0, "PowerPC:LE:64:default");
+        let load_spec = BinaryLoadSpec::new(
+            "ELF",
+            0,
+            "PowerPC:LE:64:default",
+            "gcc",
+            "registry-test",
+        );
         let entry_ids = registry
             .executable_sibling_entry_ids_for_load_spec(&load_spec)
             .expect("PowerPC64 LE sibling frontends");
@@ -577,5 +586,36 @@ mod tests {
                 .any(|entry_id| entry_id == "ppc_64_isa_altivec_le"),
             "expected PowerISA Altivec LE sibling in {entry_ids:?}"
         );
+    }
+
+    #[test]
+    fn runtime_registry_preserves_ldefs_processor_spec_metadata() {
+        let registry = CompiledRuntimeRegistry::discover().expect("discover runtime registry");
+
+        let arm8m = registry
+            .frontends()
+            .iter()
+            .find(|frontend| frontend.entry_id == "ARM8m_le")
+            .expect("ARM8m_le frontend");
+        assert_eq!(arm8m.processor_spec.as_deref(), Some("ARMCortex.pspec"));
+
+        let arm8 = registry
+            .frontends()
+            .iter()
+            .find(|frontend| frontend.entry_id == "ARM8_le")
+            .expect("ARM8_le frontend");
+        assert_eq!(arm8.processor_spec.as_deref(), None);
+
+        let load_spec = BinaryLoadSpec::new(
+            "ELF",
+            0,
+            "ARM:LE:32:v8-m",
+            "gcc",
+            "registry-test",
+        );
+        let selected = registry
+            .resolve_from_load_spec(&load_spec)
+            .expect("resolve ARM8m from ldefs language id");
+        assert_eq!(selected.entry_id, "ARM8m_le");
     }
 }
