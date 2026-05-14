@@ -537,6 +537,10 @@ impl<'a> PreviewBuilder<'a> {
         let mut zero_incoming = false;
         for pred_idx in predecessor_idxs {
             let pred_block = self.pcode.blocks.get(pred_idx)?;
+            if self.predecessor_edge_forces_register_zero(pred_idx, site.block_idx, vn) {
+                zero_incoming = true;
+                continue;
+            }
             let term_idx = self
                 .block_terminator_index(pred_block)
                 .unwrap_or(pred_block.ops.len());
@@ -580,7 +584,95 @@ impl<'a> PreviewBuilder<'a> {
         materialized_expr
     }
 
-    fn last_register_redefinition_before<'b>(
+    pub(in crate::nir::builder) fn predecessor_edge_forces_register_zero(
+        &self,
+        pred_idx: usize,
+        succ_idx: usize,
+        vn: &Varnode,
+    ) -> bool {
+        if vn.is_constant || !is_register_space_id(vn.space_id) {
+            return false;
+        }
+        let Some(pred_block) = self.pcode.blocks.get(pred_idx) else {
+            return false;
+        };
+        let Some(term_idx) = self.block_terminator_index(pred_block) else {
+            return false;
+        };
+        let Some(term) = pred_block.ops.get(term_idx) else {
+            return false;
+        };
+        if term.opcode != PcodeOpcode::CBranch || term.inputs.len() < 2 {
+            return false;
+        }
+        let Some(edge_is_taken) = self.cbranch_successor_is_taken_edge(pred_block, succ_idx) else {
+            return false;
+        };
+        let predicate = &term.inputs[1];
+        self.predicate_edge_forces_register_zero(pred_block, term_idx, predicate, vn, edge_is_taken)
+    }
+
+    fn cbranch_successor_is_taken_edge(
+        &self,
+        pred_block: &crate::pcode::PcodeBasicBlock,
+        succ_idx: usize,
+    ) -> Option<bool> {
+        let succ_idx = u32::try_from(succ_idx).ok()?;
+        let first = pred_block.successors.first().copied()?;
+        if first == succ_idx {
+            return Some(true);
+        }
+        if pred_block.successors.get(1).copied() == Some(succ_idx) {
+            return Some(false);
+        }
+        None
+    }
+
+    fn predicate_edge_forces_register_zero(
+        &self,
+        block: &crate::pcode::PcodeBasicBlock,
+        before_idx: usize,
+        predicate: &Varnode,
+        vn: &Varnode,
+        predicate_value: bool,
+    ) -> bool {
+        if predicate.is_constant {
+            return false;
+        }
+        let key = VarnodeKey::from(predicate);
+        let Some(pred_op) = block.ops.iter().take(before_idx).rev().find(|op| {
+            op.output
+                .as_ref()
+                .is_some_and(|output| VarnodeKey::from(output) == key)
+        }) else {
+            return false;
+        };
+        match pred_op.opcode {
+            PcodeOpcode::IntEqual | PcodeOpcode::IntNotEqual if pred_op.inputs.len() == 2 => {
+                let forces_equal = match pred_op.opcode {
+                    PcodeOpcode::IntEqual => predicate_value,
+                    PcodeOpcode::IntNotEqual => !predicate_value,
+                    _ => false,
+                };
+                forces_equal && self.compare_predicate_tests_register_against_zero(pred_op, vn)
+            }
+            _ => false,
+        }
+    }
+
+    fn compare_predicate_tests_register_against_zero(&self, op: &PcodeOp, vn: &Varnode) -> bool {
+        let [left, right] = op.inputs.as_slice() else {
+            return false;
+        };
+        (self.varnode_aliases_value(left, vn) && self.varnode_is_const_zero(right))
+            || (self.varnode_aliases_value(right, vn) && self.varnode_is_const_zero(left))
+    }
+
+    fn varnode_is_const_zero(&self, vn: &Varnode) -> bool {
+        vn.is_constant && vn.constant_val == 0
+    }
+
+    pub(in crate::nir::builder) fn last_register_redefinition_before<'b>(
         &self,
         block: &'b crate::pcode::PcodeBasicBlock,
         before_idx: usize,
@@ -1430,6 +1522,20 @@ impl<'a> PreviewBuilder<'a> {
             return Ok(expr);
         }
         if def_site.is_none() {
+            if is_register_space_id(vn.space_id)
+                && self.current_lowering_site.is_some_and(|site| {
+                    self.predecessors
+                        .get(site.block_idx)
+                        .is_some_and(|preds| preds.len() > 1)
+                })
+                && let Some(name) = self.prior_materialized_same_register_output_name(vn)
+                && self
+                    .temps
+                    .get(&name)
+                    .is_some_and(|binding| binding.initializer.is_some())
+            {
+                return Ok(HirExpr::Var(name));
+            }
             if let Some(param) = self.register_param(vn) {
                 return Ok(HirExpr::Var(param));
             }
@@ -2453,5 +2559,94 @@ mod tests {
             .expect("stale lowering-site op index should not panic");
 
         assert!(lowered.is_none());
+    }
+
+    #[test]
+    fn join_register_read_uses_edge_zero_as_carried_initializer() {
+        let mut options = test_options();
+        options.calling_convention = CallingConvention::AArch64;
+        options.format = "ELF64".to_string();
+        options.pe_x64_only = false;
+
+        let cond = varnode(0x80);
+        let x0 = register(0x4000, 8);
+        let w0 = register(0x4000, 4);
+        let cond_def = op(
+            0,
+            PcodeOpcode::IntEqual,
+            Some(cond.clone()),
+            vec![w0.clone(), constant_sized(0, 4)],
+        );
+        let carried_def = op(
+            1,
+            PcodeOpcode::Copy,
+            Some(x0.clone()),
+            vec![constant_sized(7, 4)],
+        );
+        let mut blocks = vec![
+            block_at(
+                0x1000,
+                0,
+                vec![
+                    cond_def,
+                    op(2, PcodeOpcode::CBranch, None, vec![constant(0x1020), cond]),
+                ],
+            ),
+            block_at(
+                0x1010,
+                1,
+                vec![
+                    carried_def.clone(),
+                    op(3, PcodeOpcode::Branch, None, vec![constant(0x1020)]),
+                ],
+            ),
+            block_at(
+                0x1020,
+                2,
+                vec![op(4, PcodeOpcode::Return, None, vec![w0.clone()])],
+            ),
+        ];
+        blocks[0].successors = vec![2, 1];
+        blocks[1].successors = vec![2];
+        let pcode = pcode_function(blocks);
+        let mut builder = PreviewBuilder::new(&pcode, &options, None);
+        builder.materialized_vns.insert(
+            MaterializedVarnodeKey::new(&x0, &carried_def),
+            "carried".to_string(),
+        );
+        builder.temps.insert(
+            "carried".to_string(),
+            NirBinding {
+                name: "carried".to_string(),
+                ty: type_from_size(8, false),
+                surface_type_name: None,
+                origin: Some(NirBindingOrigin::TempPreserved),
+                initializer: None,
+            },
+        );
+        builder.current_lowering_site = Some(LoweringSite {
+            block_idx: 2,
+            op_idx: 0,
+        });
+        let mut visiting = HashSet::new();
+
+        let lowered = builder
+            .lower_varnode(&w0, &mut visiting)
+            .expect("join register read lowers");
+
+        assert_eq!(
+            lowered,
+            HirExpr::Cast {
+                ty: type_from_size(4, false),
+                expr: Box::new(HirExpr::Var("carried".to_string())),
+            }
+        );
+        assert_eq!(
+            builder
+                .temps
+                .get("carried")
+                .and_then(|binding| binding.initializer.as_ref()),
+            Some(&HirExpr::Const(0, type_from_size(4, false)))
+        );
     }
 }

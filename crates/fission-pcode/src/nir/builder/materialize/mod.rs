@@ -355,7 +355,57 @@ impl<'a> PreviewBuilder<'a> {
         {
             return Ok(None);
         }
-        let Some(rhs) = self.try_lower_materialized_output_rhs(block_addr, op)? else {
+        let block_idx_for_rhs = self.address_to_index.get(&block.start_address).copied();
+        let scoped_loop_keys = loop_carried_lhs_name.as_ref().and_then(|name| {
+            let block_idx = block_idx_for_rhs?;
+            let output_key = VarnodeKey::from(output);
+            let mut keys = vec![output_key.clone()];
+            for input in &op.inputs {
+                if input.is_constant {
+                    continue;
+                }
+                let input_key = VarnodeKey::from(input);
+                if input_key != output_key
+                    && Self::varnode_key_may_alias_output(&input_key, &output_key)
+                {
+                    keys.push(input_key);
+                }
+            }
+            keys.sort_by_key(|key| (key.space_id, key.offset, key.size));
+            keys.dedup();
+            let previous = keys
+                .into_iter()
+                .map(|key| {
+                    let scoped_key = (block_idx, key);
+                    let previous = self
+                        .explicit_merge_bindings
+                        .insert(scoped_key.clone(), name.clone());
+                    (scoped_key, previous)
+                })
+                .collect::<Vec<_>>();
+            self.invalidate_materialization_dependent_caches();
+            Some(previous)
+        });
+        let rhs = if scoped_loop_keys.is_some()
+            && let Some(block_idx) = block_idx_for_rhs
+        {
+            self.with_lowering_site(LoweringSite { block_idx, op_idx }, |this| {
+                this.try_lower_materialized_output_rhs(block_addr, op)
+            })
+        } else {
+            self.try_lower_materialized_output_rhs(block_addr, op)
+        };
+        if let Some(previous_bindings) = scoped_loop_keys {
+            for (key, previous) in previous_bindings {
+                if let Some(previous) = previous {
+                    self.explicit_merge_bindings.insert(key, previous);
+                } else {
+                    self.explicit_merge_bindings.remove(&key);
+                }
+            }
+            self.invalidate_materialization_dependent_caches();
+        }
+        let Some(rhs) = rhs? else {
             return Ok(None);
         };
         let legacy_inline_candidate =
@@ -487,6 +537,7 @@ impl<'a> PreviewBuilder<'a> {
         }
         let preserve_materialization = Self::should_preserve_materialized_expr(&rhs);
         let lhs_name = if let Some(name) = loop_carried_lhs_name {
+            self.seed_loop_carried_binding_initializer_from_edge_zero(block, output, &name);
             self.bind_materialized_output_to_existing_name(
                 op,
                 output,
