@@ -911,23 +911,31 @@ impl<'a> PreviewBuilder<'a> {
                 if candidate
                     .inputs
                     .iter()
-                    .any(|input| VarnodeKey::from(input) == key)
+                    .any(|input| Self::varnode_matches_key(input, &key))
                 {
                     return true;
                 }
-                if candidate.output.as_ref().map(VarnodeKey::from) == Some(key.clone()) {
+                if candidate
+                    .output
+                    .as_ref()
+                    .is_some_and(|output| Self::varnode_matches_key(output, &key))
+                {
                     break;
                 }
             }
         }
         for candidate in block.ops.iter().skip(op_idx + 1) {
-            if candidate.output.as_ref().map(VarnodeKey::from) == Some(key.clone()) {
+            if candidate
+                .output
+                .as_ref()
+                .is_some_and(|output| Self::varnode_matches_key(output, &key))
+            {
                 break;
             }
             if candidate
                 .inputs
                 .iter()
-                .any(|input| VarnodeKey::from(input) == key)
+                .any(|input| Self::varnode_matches_key(input, &key))
             {
                 return false;
             }
@@ -3215,6 +3223,16 @@ mod tests {
         NirType::Ptr(Box::new(NirType::Unknown))
     }
 
+    fn reg(offset: u64, size: u32) -> Varnode {
+        Varnode {
+            space_id: RUST_SLEIGH_REGISTER_SPACE_ID,
+            offset,
+            size,
+            is_constant: false,
+            constant_val: 0,
+        }
+    }
+
     fn stack_addr_proof(
         consumer_kind: DisallowedSingleConsumerConsumerKind,
         downstream_opcode: Option<PcodeOpcode>,
@@ -3238,6 +3256,39 @@ mod tests {
             frame_relative_candidate,
             reason,
         }
+    }
+
+    #[test]
+    fn output_nonlocal_use_detection_matches_overlapping_register_aliases() {
+        let x20 = reg(0x40a0, 8);
+        let w20 = reg(0x40a0, 4);
+        let x21 = reg(0x40a8, 8);
+        let mut def_block = block_at(
+            0x1000,
+            0,
+            vec![op(
+                1,
+                PcodeOpcode::Copy,
+                Some(x20.clone()),
+                vec![constant(1)],
+            )],
+        );
+        def_block.successors = vec![1];
+        let use_block = block_at(
+            0x2000,
+            1,
+            vec![op(
+                2,
+                PcodeOpcode::IntAdd,
+                Some(x21),
+                vec![w20, constant(1)],
+            )],
+        );
+        let pcode = pcode_function(vec![def_block.clone(), use_block]);
+        let options = test_options();
+        let builder = PreviewBuilder::new(&pcode, &options, None);
+
+        assert!(builder.output_has_nonlocal_use(&def_block, 0, &x20));
     }
 
     #[test]
