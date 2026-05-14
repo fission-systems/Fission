@@ -917,6 +917,7 @@ fn compiled_table_policy_symbols_stay_architecture_neutral() {
     let immediate_byte_unchecked_shift = "u64::from(*byte) << (index * 8)";
     let tokenfield_saturating_range = "byte_end.saturating_sub(byte_start)";
     let tokenfield_saturating_bit_range = "bit_end.saturating_sub(bit_start)";
+    let encoded_size_max_fallback = "((*byte_end - *byte_start) + 1).max(1)";
     let tokenfield_unchecked_accumulation = "res = (res << 8) | u64::from(byte)";
     let tokenfield_unchecked_right_shift = "res >> (shift as u32)";
     let tokenfield_unchecked_left_shift = "res << ((-shift) as u32)";
@@ -1190,7 +1191,8 @@ fn compiled_table_policy_symbols_stay_architecture_neutral() {
         );
         assert!(
             !source.contains(tokenfield_saturating_range)
-                && !source.contains(tokenfield_saturating_bit_range),
+                && !source.contains(tokenfield_saturating_bit_range)
+                && !source.contains(encoded_size_max_fallback),
             "{} still accepts inverted SLA tokenfield ranges via saturating arithmetic",
             file.display()
         );

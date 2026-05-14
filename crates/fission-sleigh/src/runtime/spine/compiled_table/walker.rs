@@ -817,7 +817,8 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                     *byte_end,
                     *shift,
                 )?;
-                let encoded_size = ((*byte_end - *byte_start) + 1).max(1);
+                let encoded_size =
+                    checked_sla_field_encoded_size(*byte_start, *byte_end, "token field")?;
                 self.advance_cursor_past_sla_field(token_base, encoded_size)?;
                 Ok(OperandBinding::with_fixed(
                     BoundOperand::Immediate {
@@ -852,7 +853,8 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                     *byte_end,
                     *shift,
                 )?;
-                let encoded_size = ((*byte_end - *byte_start) + 1).max(1);
+                let encoded_size =
+                    checked_sla_field_encoded_size(*byte_start, *byte_end, "varnode list")?;
                 self.advance_cursor_past_sla_field(token_base, encoded_size)?;
                 let entry = entries.get(selector as usize).ok_or_else(|| {
                     anyhow!(
@@ -926,7 +928,8 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                         values.len()
                     )
                 })?;
-                let encoded_size = ((*byte_end - *byte_start) + 1).max(1);
+                let encoded_size =
+                    checked_sla_field_encoded_size(*byte_start, *byte_end, "value map")?;
                 self.advance_cursor_past_sla_field(token_base, encoded_size)?;
                 Ok(OperandBinding::with_fixed(
                     BoundOperand::Immediate {
@@ -998,7 +1001,8 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                         *byte_end,
                         *shift,
                     )?);
-                    encoded_size = ((*byte_end - *byte_start) + 1).max(1);
+                    encoded_size =
+                        checked_sla_field_encoded_size(*byte_start, *byte_end, "pattern token")?;
                     self.advance_cursor_past_sla_field(token_base, encoded_size)?;
                     value
                 } else {
@@ -1540,6 +1544,15 @@ fn subtable_decode_address(ctx: &CompiledInstructionContext<'_>) -> Result<u64> 
 
 fn checked_usize_to_u64(value: usize, role: &str) -> Result<u64> {
     u64::try_from(value).map_err(|_| anyhow!("{role} {value} exceeds u64"))
+}
+
+fn checked_sla_field_encoded_size(byte_start: u32, byte_end: u32, role: &str) -> Result<u32> {
+    byte_end
+        .checked_sub(byte_start)
+        .and_then(|width| width.checked_add(1))
+        .ok_or_else(|| {
+            anyhow!("{role} byte range {byte_start}..={byte_end} is invalid or overflows")
+        })
 }
 
 fn checked_relative_offset(base: usize, rel: i32, role: &str) -> Result<usize> {
