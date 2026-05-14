@@ -291,37 +291,69 @@ pub(super) fn format_operand_with_display_kind(
 
 pub(super) fn operand_display_index(operand: &BoundOperand) -> Option<usize> {
     match operand {
-        BoundOperand::Immediate { value, .. } => usize::try_from(*value).ok(),
-        BoundOperand::Register { index, .. } => usize::try_from(*index).ok(),
+        BoundOperand::Immediate { value, .. } => display_table_index_from_u64(*value),
+        BoundOperand::Register { index, .. } => display_table_index_from_u8(*index),
         BoundOperand::NamedVarnode { display_index, .. } => {
-            display_index.and_then(|idx| usize::try_from(idx).ok())
+            display_index.and_then(display_table_index_from_u32)
         }
-        BoundOperand::Relative { target } => usize::try_from(*target).ok(),
+        BoundOperand::Relative { target } => display_table_index_from_u64(*target),
         BoundOperand::Memory {
             absolute,
             displacement,
             ..
         } => match absolute {
-            Some(value) => usize::try_from(*value).ok(),
-            None => usize::try_from(*displacement).ok(),
+            Some(value) => display_table_index_from_u64(*value),
+            None => display_table_index_from_i64(*displacement),
         },
     }
 }
 
 pub(super) fn operand_display_value(operand: &BoundOperand) -> Option<i64> {
     match operand {
-        BoundOperand::Immediate { value, .. } => i64::try_from(*value).ok(),
+        BoundOperand::Immediate { value, .. } => display_value_from_u64(*value),
         BoundOperand::Register { index, .. } => Some(i64::from(*index)),
         BoundOperand::NamedVarnode { display_index, .. } => display_index.map(i64::from),
-        BoundOperand::Relative { target } => i64::try_from(*target).ok(),
+        BoundOperand::Relative { target } => display_value_from_u64(*target),
         BoundOperand::Memory {
             absolute,
             displacement,
             ..
         } => match absolute {
-            Some(value) => i64::try_from(*value).ok(),
+            Some(value) => display_value_from_u64(*value),
             None => Some(*displacement),
         },
+    }
+}
+
+fn display_table_index_from_u64(value: u64) -> Option<usize> {
+    match usize::try_from(value) {
+        Ok(index) => Some(index),
+        Err(_) => None,
+    }
+}
+
+fn display_table_index_from_u32(value: u32) -> Option<usize> {
+    match usize::try_from(value) {
+        Ok(index) => Some(index),
+        Err(_) => None,
+    }
+}
+
+fn display_table_index_from_u8(value: u8) -> Option<usize> {
+    Some(usize::from(value))
+}
+
+fn display_table_index_from_i64(value: i64) -> Option<usize> {
+    if value < 0 {
+        return None;
+    }
+    display_table_index_from_u64(value.unsigned_abs())
+}
+
+fn display_value_from_u64(value: u64) -> Option<i64> {
+    match i64::try_from(value) {
+        Ok(value) => Some(value),
+        Err(_) => None,
     }
 }
 
