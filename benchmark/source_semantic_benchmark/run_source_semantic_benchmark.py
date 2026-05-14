@@ -3032,6 +3032,7 @@ def summarize(rows: list[dict[str, Any]], manifest_name: str, entries: list[Benc
     score_values_by_stage_first_failure: dict[str, list[float]] = {}
     behavior_score_values: list[float] = []
     static_score_values: list[float] = []
+    component_loss_hot_rows: list[dict[str, Any]] = []
     source_body_line_counts: list[float] = []
     decomp_line_counts: list[float] = []
     source_body_byte_counts: list[float] = []
@@ -3424,6 +3425,19 @@ def summarize(rows: list[dict[str, Any]], manifest_name: str, entries: list[Benc
         static_score = float(row.get("static_semantic_score", 0.0) or 0.0)
         behavior_score_values.append(behavior_score)
         static_score_values.append(static_score)
+        behavior_component_loss = round(0.65 * max(0.0, 1.0 - behavior_score), 6)
+        static_component_loss = round(0.35 * max(0.0, 1.0 - static_score), 6)
+        if behavior_component_loss > 0.0 or static_component_loss > 0.0:
+            component_loss_hot_rows.append(
+                {
+                    **triage_row_summary(row),
+                    "behavior_score": round(behavior_score, 6),
+                    "static_score": round(static_score, 6),
+                    "behavior_component_loss": behavior_component_loss,
+                    "static_component_loss": static_component_loss,
+                    "total_component_loss": round(behavior_component_loss + static_component_loss, 6),
+                }
+            )
         static_source_variant = str(row.get("static_similarity_source_variant") or "direct_source")
         static_source_variant_counts[static_source_variant] += 1
         direct_static_score = row.get("static_semantic_score_direct")
@@ -4509,6 +4523,46 @@ def summarize(rows: list[dict[str, Any]], manifest_name: str, entries: list[Benc
     static_score_sum = round(sum(static_score_values), 6)
     behavior_component_score_sum = round(0.65 * behavior_score_sum, 6)
     static_component_score_sum = round(0.35 * static_score_sum, 6)
+    current_weighted_score = round(
+        sum(
+            (0.65 * behavior_score) + (0.35 * static_score)
+            for behavior_score, static_score in zip(behavior_score_values, static_score_values, strict=False)
+        ) / total,
+        6,
+    ) if total else 0.0
+    weight_scenarios: dict[str, dict[str, Any]] = {}
+    for behavior_weight in [0.0, 0.25, 0.5, 0.65, 0.75, 1.0]:
+        static_weight = round(1.0 - behavior_weight, 6)
+        scenario_score = round(
+            sum(
+                (behavior_weight * behavior_score) + (static_weight * static_score)
+                for behavior_score, static_score in zip(behavior_score_values, static_score_values, strict=False)
+            ) / total,
+            6,
+        ) if total else 0.0
+        scenario_key = f"behavior_{int(round(behavior_weight * 100)):03d}_static_{int(round(static_weight * 100)):03d}"
+        weight_scenarios[scenario_key] = {
+            "behavior_weight": behavior_weight,
+            "static_weight": static_weight,
+            "weighted_score": scenario_score,
+            "weighted_score_percent": percent(scenario_score),
+            "delta_from_current_score": round(scenario_score - current_weighted_score, 6),
+            "delta_from_current_score_percent": percent(scenario_score - current_weighted_score),
+        }
+    behavior_static_score_delta_values = [
+        round(behavior_score - static_score, 6)
+        for behavior_score, static_score in zip(behavior_score_values, static_score_values, strict=False)
+    ]
+    component_loss_hot_rows = sorted(
+        component_loss_hot_rows,
+        key=lambda row: (
+            float(row.get("total_component_loss") or 0.0),
+            float(row.get("behavior_component_loss") or 0.0),
+            float(row.get("static_component_loss") or 0.0),
+            str(row.get("function_name") or ""),
+        ),
+        reverse=True,
+    )[:20]
     zero_score_count = int(score_distribution.get("zero", 0))
     nonzero_score_count = sum(1 for score in score_values if score > 0.0)
     perfect_score_count = sum(1 for score in score_values if score == 1.0)
@@ -4981,6 +5035,38 @@ def summarize(rows: list[dict[str, Any]], manifest_name: str, entries: list[Benc
             "static_component_lost_score_sum": round((0.35 * total) - static_component_score_sum, 6),
             "behavior_score_distribution": numeric_distribution(behavior_score_values),
             "static_score_distribution": numeric_distribution(static_score_values),
+        },
+        "score_weight_sensitivity_metrics": {
+            "current_behavior_weight": 0.65,
+            "current_static_weight": 0.35,
+            "current_weighted_score": current_weighted_score,
+            "current_weighted_score_percent": percent(current_weighted_score),
+            "scenario_scores": weight_scenarios,
+            "behavior_minus_static_score_distribution": numeric_distribution(behavior_static_score_delta_values),
+            "behavior_greater_than_static_row_count": sum(1 for value in behavior_static_score_delta_values if value > 0.0),
+            "static_greater_than_behavior_row_count": sum(1 for value in behavior_static_score_delta_values if value < 0.0),
+            "behavior_static_equal_row_count": sum(1 for value in behavior_static_score_delta_values if value == 0.0),
+        },
+        "component_loss_hot_row_metrics": {
+            "top_total_component_loss_rows": component_loss_hot_rows,
+            "top_behavior_component_loss_rows": sorted(
+                component_loss_hot_rows,
+                key=lambda row: (
+                    float(row.get("behavior_component_loss") or 0.0),
+                    float(row.get("total_component_loss") or 0.0),
+                    str(row.get("function_name") or ""),
+                ),
+                reverse=True,
+            )[:12],
+            "top_static_component_loss_rows": sorted(
+                component_loss_hot_rows,
+                key=lambda row: (
+                    float(row.get("static_component_loss") or 0.0),
+                    float(row.get("total_component_loss") or 0.0),
+                    str(row.get("function_name") or ""),
+                ),
+                reverse=True,
+            )[:12],
         },
         "score_denominator_metrics": {
             "score_denominator_row_count": total,
@@ -6421,6 +6507,56 @@ def render_markdown(summary: dict[str, Any], rows: list[dict[str, Any]]) -> str:
             f"- Behavior lost {float(score_components.get('behavior_component_lost_score_sum', 0.0) or 0.0):.6f}, "
             f"static lost {float(score_components.get('static_component_lost_score_sum', 0.0) or 0.0):.6f}"
         )
+    weight_sensitivity = summary.get("score_weight_sensitivity_metrics")
+    if isinstance(weight_sensitivity, dict):
+        lines.extend(["", "## Score Weight Sensitivity Metrics", ""])
+        lines.append(
+            f"- Current weighted score "
+            f"{float(weight_sensitivity.get('current_weighted_score_percent', 0.0) or 0.0):.3f}% "
+            f"at behavior/static weights "
+            f"{float(weight_sensitivity.get('current_behavior_weight', 0.0) or 0.0):.2f}/"
+            f"{float(weight_sensitivity.get('current_static_weight', 0.0) or 0.0):.2f}"
+        )
+        scenarios = weight_sensitivity.get("scenario_scores")
+        if isinstance(scenarios, dict) and scenarios:
+            lines.extend(["", "| Scenario | Score | Delta vs Current |", "|---|---:|---:|"])
+            for name, scenario in sorted(scenarios.items()):
+                if not isinstance(scenario, dict):
+                    continue
+                lines.append(
+                    f"| `{name}` | "
+                    f"{float(scenario.get('weighted_score_percent', 0.0) or 0.0):.3f}% | "
+                    f"{float(scenario.get('delta_from_current_score_percent', 0.0) or 0.0):+.3f}% |"
+                )
+        delta_dist = weight_sensitivity.get("behavior_minus_static_score_distribution")
+        if isinstance(delta_dist, dict):
+            lines.append(
+                f"- Behavior-static row delta avg {float(delta_dist.get('avg', 0.0) or 0.0):+.6f}, "
+                f"p50 {float(delta_dist.get('p50', 0.0) or 0.0):+.6f}; "
+                f"behavior higher rows {weight_sensitivity.get('behavior_greater_than_static_row_count', 0)}, "
+                f"static higher rows {weight_sensitivity.get('static_greater_than_behavior_row_count', 0)}"
+            )
+    component_loss_rows = summary.get("component_loss_hot_row_metrics")
+    if isinstance(component_loss_rows, dict):
+        top_rows = component_loss_rows.get("top_total_component_loss_rows")
+        if isinstance(top_rows, list) and top_rows:
+            lines.extend([
+                "",
+                "## Component Loss Hot Rows",
+                "",
+                "| Function | Score | Behavior Loss | Static Loss | Behavior |",
+                "|---|---:|---:|---:|---|",
+            ])
+            for row in top_rows[:8]:
+                if not isinstance(row, dict):
+                    continue
+                lines.append(
+                    f"| `{row.get('function_name')}` | "
+                    f"{float(row.get('semantic_score_percent', 0.0) or 0.0):.3f}% | "
+                    f"{float(row.get('behavior_component_loss', 0.0) or 0.0):.6f} | "
+                    f"{float(row.get('static_component_loss', 0.0) or 0.0):.6f} | "
+                    f"{row.get('behavior_status')} |"
+                )
     scoring_contract = summary.get("scoring_contract")
     if isinstance(scoring_contract, dict):
         lines.extend(["", "## Scoring Contract", ""])
@@ -8336,6 +8472,10 @@ int max(int a, int b) { if (a > b) return a; return b; }
         assert summary["scoring_contract"]["semantic_score_denominator"] == "all manifest rows"
         assert summary["score_component_metrics"]["behavior_component_score_sum"] == 0.65
         assert summary["score_component_metrics"]["static_component_score_sum"] == 0.35
+        assert summary["score_weight_sensitivity_metrics"]["scenario_scores"]["behavior_100_static_000"]["weighted_score_percent"] == 50.0
+        assert summary["score_weight_sensitivity_metrics"]["scenario_scores"]["behavior_000_static_100"]["weighted_score_percent"] == 50.0
+        assert summary["score_weight_sensitivity_metrics"]["behavior_static_equal_row_count"] == 2
+        assert summary["component_loss_hot_row_metrics"]["top_total_component_loss_rows"][0]["total_component_loss"] == 1.0
         assert summary["score_denominator_metrics"]["score_denominator_row_count"] == 2
         assert summary["score_denominator_metrics"]["lost_score_sum"] == 1.0
         assert summary["semantic_loss_metrics"]["lost_score_by_zero_credit_reason"]["unmapped"] == 1.0

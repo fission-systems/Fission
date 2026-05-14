@@ -111,6 +111,13 @@ manifest.
   sums, lost contribution sums, and per-component score distributions. This
   makes it clear whether a run is losing credit in dynamic behavior, static
   shape, or both.
+- `score_weight_sensitivity_metrics`: the same row scores recomputed under
+  alternate behavior/static weights, plus behavior-minus-static row deltas. This
+  shows whether the headline result is robust or mostly an artifact of the
+  current `0.65/0.35` weighting.
+- `component_loss_hot_row_metrics`: row shortlists ranked by total,
+  behavior-component, and static-component weighted loss, so high-impact rows
+  are visible without inferring loss from the aggregate score.
 - `effective_coverage`: mapped, decompiled, behavior-expected, and
   behavior-executed row counts/rates over the full manifest denominator.
 - `behavior_eligibility`: behavior eligibility/execution/pass rates with both
