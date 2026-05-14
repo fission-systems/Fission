@@ -102,6 +102,7 @@ pub fn decompile_with_rust_sleigh(
 
     evidence.decode_attempt_count = diag.attempts;
     evidence.decode_stop_reason = diag.stop_reason.clone();
+    evidence.template_source_counts = diag.template_source_counts.clone();
     evidence.raw_pcode_op_count = Some(pcode_op_count(&pcode));
     evidence.observe_pcode(&pcode);
     evidence
@@ -145,6 +146,7 @@ pub fn decompile_with_rust_sleigh(
 
             evidence.decode_attempt_count = diag.attempts.saturating_add(diag2.attempts);
             evidence.decode_stop_reason = diag2.stop_reason.clone();
+            evidence.template_source_counts = diag2.template_source_counts.clone();
             evidence.raw_pcode_op_count = Some(pcode_op_count(&strict_pcode));
             evidence.observe_pcode(&strict_pcode);
             evidence

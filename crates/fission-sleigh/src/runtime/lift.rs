@@ -521,6 +521,26 @@ mod tests {
                 .any(|op| op.address == 0x100034 && op.opcode == PcodeOpcode::IntAdd)
         }));
     }
+
+    #[test]
+    fn function_lift_reports_sla_template_source_counts() {
+        let frontend = RuntimeSleighFrontend::new_for_language("x86-64").expect("x86-64 frontend");
+        let bytes = [0x90, 0xc3]; // nop; ret
+
+        let decoded = frontend
+            .lift_raw_pcode_function_with_contract(&bytes, 0x100000, 4)
+            .expect("lift x86-64 nop-ret");
+
+        assert_eq!(decoded.decoded_instructions, 2);
+        assert_eq!(
+            decoded.template_source_counts.get("spec_derived").copied(),
+            Some(2)
+        );
+        assert_eq!(
+            decoded.template_source_counts.values().sum::<usize>(),
+            decoded.decoded_instructions
+        );
+    }
 }
 
 impl RuntimeSleighFrontend {
@@ -598,6 +618,7 @@ impl RuntimeSleighFrontend {
 
         let mut decoded = BTreeMap::<u64, Vec<PcodeOp>>::new();
         let mut inferred_indirect_edges = BTreeMap::<u64, Vec<u64>>::new();
+        let mut template_source_counts = BTreeMap::<String, usize>::new();
         let base_context_override = initial_context_override;
         let mut context_overrides = BTreeMap::<u64, PackedContextOverride>::new();
         if let Some(override_bits) = initial_context_override {
@@ -630,6 +651,11 @@ impl RuntimeSleighFrontend {
             let (mut ins_ops, decoded_len, details) = self
                 .decode_and_lift_with_context_override(remaining, current, context_override)
                 .map_err(|err| anyhow!("decode failed at 0x{:x}: {:#}", current, err))?;
+            if let Some(source) = details.template_source {
+                *template_source_counts
+                    .entry(source.as_str().to_string())
+                    .or_insert(0) += 1;
+            }
 
             if decoded_len == 0 {
                 bail!("decoder returned zero length at 0x{:x}", current);
@@ -763,6 +789,7 @@ impl RuntimeSleighFrontend {
             function,
             decoded_instructions: instruction_count,
             stop_reason,
+            template_source_counts,
         })
     }
 }

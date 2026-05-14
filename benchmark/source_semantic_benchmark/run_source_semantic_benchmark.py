@@ -853,6 +853,7 @@ def debug_decomp_summary(debug_decomp: Any) -> dict[str, Any] | None:
                 "instruction_limit",
                 "decode_attempt_count",
                 "decode_stop_reason",
+                "template_source_counts",
                 "raw_pcode_block_count",
                 "raw_pcode_op_count",
                 "raw_pcode_edge_count",
@@ -1796,6 +1797,7 @@ def summarize(rows: list[dict[str, Any]], manifest_name: str, entries: list[Benc
     debug_owner_bucket_counts: Counter[str] = Counter()
     debug_stage_status_counts: Counter[str] = Counter()
     debug_quality_evidence_totals: Counter[str] = Counter()
+    debug_template_source_totals: Counter[str] = Counter()
     by_language: dict[str, dict[str, Any]] = {}
     by_tag: dict[str, dict[str, Any]] = {}
     by_entry: dict[str, dict[str, Any]] = {}
@@ -1836,6 +1838,16 @@ def summarize(rows: list[dict[str, Any]], manifest_name: str, entries: list[Benc
                 for key, value in quality.items():
                     if isinstance(value, int | float):
                         debug_quality_evidence_totals[key] += value
+            pipeline = debug_decomp.get("rust_sleigh_pipeline")
+            template_sources = (
+                pipeline.get("template_source_counts")
+                if isinstance(pipeline, dict)
+                and isinstance(pipeline.get("template_source_counts"), dict)
+                else {}
+            )
+            for key, value in template_sources.items():
+                if isinstance(value, int | float):
+                    debug_template_source_totals[key] += value
 
         for tag in row.get("tags") or []:
             tag_bucket = by_tag.setdefault(
@@ -1876,6 +1888,7 @@ def summarize(rows: list[dict[str, Any]], manifest_name: str, entries: list[Benc
         "debug_owner_bucket_counts": dict(sorted(debug_owner_bucket_counts.items())),
         "debug_stage_status_counts": dict(sorted(debug_stage_status_counts.items())),
         "debug_quality_evidence_totals": dict(sorted(debug_quality_evidence_totals.items())),
+        "debug_template_source_totals": dict(sorted(debug_template_source_totals.items())),
         "host_execution_unavailable_count": sum(host_statuses.values()),
         "host_execution_unavailable_reasons": dict(host_statuses),
         "by_language": by_language,
@@ -2437,6 +2450,10 @@ def render_markdown(summary: dict[str, Any], rows: list[dict[str, Any]]) -> str:
         lines.extend(["", "## Debug Quality Evidence", "", "| Metric | Total |", "|---|---:|"])
         for metric, total_value in sorted(summary["debug_quality_evidence_totals"].items()):
             lines.append(f"| {metric} | {total_value} |")
+    if summary.get("debug_template_source_totals"):
+        lines.extend(["", "## Debug SLEIGH Template Sources", "", "| Source | Total |", "|---|---:|"])
+        for source, total_value in sorted(summary["debug_template_source_totals"].items()):
+            lines.append(f"| {source} | {total_value} |")
     comparison = summary.get("comparison")
     if isinstance(comparison, dict):
         outcome = summary.get("comparison_outcome") if isinstance(summary.get("comparison_outcome"), dict) else {}

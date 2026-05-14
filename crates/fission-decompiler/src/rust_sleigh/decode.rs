@@ -6,6 +6,7 @@ use fission_sleigh::runtime::{DecodeContract, DecodeMemoryContext, RuntimeSleigh
 pub(crate) struct DecodeDiag {
     pub attempts: usize,
     pub stop_reason: String,
+    pub template_source_counts: std::collections::BTreeMap<String, usize>,
 }
 
 #[derive(Debug)]
@@ -67,6 +68,7 @@ pub(crate) fn decode_rust_sleigh_pcode(
         diag: DecodeDiag {
             attempts: 0,
             stop_reason: "missing_load_spec".into(),
+            template_source_counts: Default::default(),
         },
     })?;
 
@@ -77,6 +79,7 @@ pub(crate) fn decode_rust_sleigh_pcode(
                 diag: DecodeDiag {
                     attempts: 0,
                     stop_reason: "lifter_init_failed".into(),
+                    template_source_counts: Default::default(),
                 },
             }
         })?;
@@ -88,6 +91,7 @@ pub(crate) fn decode_rust_sleigh_pcode(
         diag: DecodeDiag {
             attempts: 0,
             stop_reason: "lifter_init_failed".into(),
+            template_source_counts: Default::default(),
         },
     })?;
     let address_state = lifter.normalize_low_bit_code_address(entry_address);
@@ -102,6 +106,7 @@ pub(crate) fn decode_rust_sleigh_pcode(
             diag: DecodeDiag {
                 attempts: 0,
                 stop_reason: "view_bytes_unavailable".into(),
+                template_source_counts: Default::default(),
             },
         })?;
 
@@ -119,13 +124,17 @@ pub(crate) fn decode_rust_sleigh_pcode(
         initial_context_override,
     );
     match result {
-        Ok(lifted) => Ok((
-            lifted.function,
-            DecodeDiag {
-                attempts: 1,
-                stop_reason: "success_first_lift".into(),
-            },
-        )),
+        Ok(lifted) => {
+            let template_source_counts = lifted.template_source_counts.clone();
+            Ok((
+                lifted.function,
+                DecodeDiag {
+                    attempts: 1,
+                    stop_reason: "success_first_lift".into(),
+                    template_source_counts,
+                },
+            ))
+        }
         Err(first_err) => {
             if retry_on_decode_error {
                 for variant_lifter in lifters.iter().skip(1) {
@@ -148,6 +157,7 @@ pub(crate) fn decode_rust_sleigh_pcode(
                             variant_address_state.context_override,
                         )
                     {
+                        let template_source_counts = retry.template_source_counts.clone();
                         return Ok((
                             retry.function,
                             DecodeDiag {
@@ -156,6 +166,7 @@ pub(crate) fn decode_rust_sleigh_pcode(
                                     "success_after_sibling_language_retry:{}",
                                     variant_lifter.entry().entry_id
                                 ),
+                                template_source_counts,
                             },
                         ));
                     }
@@ -171,11 +182,13 @@ pub(crate) fn decode_rust_sleigh_pcode(
                             initial_context_override,
                         )
                     {
+                        let template_source_counts = retry.template_source_counts.clone();
                         return Ok((
                             retry.function,
                             DecodeDiag {
                                 attempts: 2,
                                 stop_reason: "success_after_strict_indirect_retry".into(),
+                                template_source_counts,
                             },
                         ));
                     }
@@ -195,11 +208,13 @@ pub(crate) fn decode_rust_sleigh_pcode(
                                 initial_context_override,
                             )
                         {
+                            let template_source_counts = retry.template_source_counts.clone();
                             return Ok((
                                 retry.function,
                                 DecodeDiag {
                                     attempts: 2,
                                     stop_reason: "success_after_truncated_retry".into(),
+                                    template_source_counts,
                                 },
                             ));
                         }
@@ -210,6 +225,7 @@ pub(crate) fn decode_rust_sleigh_pcode(
                             diag: DecodeDiag {
                                 attempts: 2,
                                 stop_reason: "lift_failed_after_truncated_retry".into(),
+                                template_source_counts: Default::default(),
                             },
                         });
                     }
@@ -222,6 +238,7 @@ pub(crate) fn decode_rust_sleigh_pcode(
                 diag: DecodeDiag {
                     attempts: 1,
                     stop_reason: "lift_failed".into(),
+                    template_source_counts: Default::default(),
                 },
             })
         }

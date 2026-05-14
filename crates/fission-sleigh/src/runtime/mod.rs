@@ -9,7 +9,7 @@ pub mod native;
 mod registry;
 mod spine;
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fmt;
 
 use anyhow::{anyhow, bail, Result};
@@ -131,6 +131,7 @@ pub struct DecodedPcodeFunction {
     pub function: PcodeFunction,
     pub decoded_instructions: usize,
     pub stop_reason: DecodeStopReason,
+    pub template_source_counts: BTreeMap<String, usize>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
