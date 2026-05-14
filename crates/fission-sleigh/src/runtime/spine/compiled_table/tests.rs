@@ -872,6 +872,9 @@ fn compiled_table_policy_symbols_stay_architecture_neutral() {
     let relative_label_encode_lossy_cast = "label_num as i64";
     let relative_label_decode_lossy_cast = "sentinel as i64";
     let build_operand_index_lossy_cast = "Some(*value as usize)";
+    let selector_lossy_usize_cast = ["selector", "as", "usize"].join(" ");
+    let selector_lossy_u32_cast = ["selector", "as", "u32"].join(" ");
+    let selector_index_lossy_u32_cast = ["selector_index", "as", "u32"].join(" ");
     let delay_slot_length_lossy_cast_local = "slot_state.length as u32";
     let template_positive_int_lossy_cast = "Ok(*value as u64)";
     let template_state_length_lossy_cast = "state.length as u64";
@@ -1269,12 +1272,15 @@ fn compiled_table_policy_symbols_stay_architecture_neutral() {
                 && !source.contains(relative_label_encode_lossy_cast)
                 && !source.contains(relative_label_decode_lossy_cast)
                 && !source.contains(build_operand_index_lossy_cast)
+                && !source.contains(&selector_lossy_usize_cast)
+                && !source.contains(&selector_lossy_u32_cast)
+                && !source.contains(&selector_index_lossy_u32_cast)
                 && !source.contains(delay_slot_length_lossy_cast_local)
                 && !source.contains(template_positive_int_lossy_cast)
                 && !source.contains(template_state_length_lossy_cast)
                 && !source.contains(template_space_size_lossy_cast)
                 && !source.contains(handle_size_lossy_cast),
-            "{} still uses lossy template evaluator integer casts",
+            "{} still uses lossy template evaluator or selector integer casts",
             file.display()
         );
         assert!(

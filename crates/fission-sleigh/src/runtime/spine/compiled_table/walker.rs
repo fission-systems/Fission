@@ -138,7 +138,8 @@ mod construct_state_offset_tests {
     use super::{
         checked_pattern_add, checked_pattern_div, checked_pattern_left_shift, checked_pattern_mul,
         checked_pattern_negate, checked_pattern_right_shift, checked_pattern_sub,
-        checked_relative_offset, context_change_expr_word, context_change_mask_word,
+        checked_relative_offset, checked_selector_display_index, checked_selector_index_i64,
+        checked_selector_index_u64, context_change_expr_word, context_change_mask_word,
         pattern_context_bits_i64, shifted_context_change_word,
     };
     use crate::compiler::{compile_x86_64_frontend, discovery};
@@ -243,6 +244,21 @@ mod construct_state_offset_tests {
         assert_eq!(checked_relative_offset(10, 3, "test").unwrap(), 13);
         assert!(checked_relative_offset(0, -1, "test").is_err());
         assert!(checked_relative_offset(usize::MAX, 1, "test").is_err());
+    }
+
+    #[test]
+    fn selector_indices_fail_closed_on_lossy_conversion() {
+        assert_eq!(checked_selector_index_u64(3, "test").unwrap(), 3);
+        assert_eq!(checked_selector_index_i64(3, "test").unwrap(), 3);
+        assert_eq!(checked_selector_display_index(3, "test").unwrap(), 3);
+
+        if usize::try_from(u64::MAX).is_err() {
+            assert!(checked_selector_index_u64(u64::MAX, "test").is_err());
+        }
+        assert!(checked_selector_index_i64(-1, "test").is_err());
+        if usize::BITS > u32::BITS {
+            assert!(checked_selector_display_index(u32::MAX as usize + 1, "test").is_err());
+        }
     }
 
     #[test]
@@ -848,7 +864,9 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                 let encoded_size =
                     checked_sla_field_encoded_size(*byte_start, *byte_end, "varnode list")?;
                 self.advance_cursor_past_sla_field(token_base, encoded_size)?;
-                let entry = entries.get(selector as usize).ok_or_else(|| {
+                let selector_index = checked_selector_index_u64(selector, "varnode list")?;
+                let display_index = checked_selector_display_index(selector_index, "varnode list")?;
+                let entry = entries.get(selector_index).ok_or_else(|| {
                     anyhow!(
                         "varnode list selector {} out of range for {} entries",
                         selector,
@@ -858,7 +876,7 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                 Ok(OperandBinding::with_fixed(
                     BoundOperand::NamedVarnode {
                         name: entry.name.clone(),
-                        display_index: Some(selector as u32),
+                        display_index: Some(display_index),
                         size: entry.size,
                     },
                     fixed_handle_from_resolved_varnode(entry),
@@ -871,8 +889,8 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                 offsetbase: _,
             } => {
                 let selector = self.eval_pattern_expression(expr)?;
-                let selector_index = usize::try_from(selector)
-                    .map_err(|_| anyhow!("varnode list selector {selector} is negative"))?;
+                let selector_index = checked_selector_index_i64(selector, "varnode list")?;
+                let display_index = checked_selector_display_index(selector_index, "varnode list")?;
                 let entry = entries.get(selector_index).ok_or_else(|| {
                     anyhow!(
                         "varnode list selector {} out of range for {} entries",
@@ -883,7 +901,7 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                 Ok(OperandBinding::with_fixed(
                     BoundOperand::NamedVarnode {
                         name: entry.name.clone(),
-                        display_index: Some(selector_index as u32),
+                        display_index: Some(display_index),
                         size: entry.size,
                     },
                     fixed_handle_from_resolved_varnode(entry),
@@ -913,7 +931,8 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                     *byte_end,
                     *shift,
                 )?;
-                let value = values.get(selector as usize).copied().ok_or_else(|| {
+                let selector_index = checked_selector_index_u64(selector, "value map")?;
+                let value = values.get(selector_index).copied().ok_or_else(|| {
                     anyhow!(
                         "value map selector {} out of range for {} entries",
                         selector,
@@ -939,8 +958,7 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                 offsetbase: _,
             } => {
                 let selector = self.eval_pattern_expression(expr)?;
-                let selector_index = usize::try_from(selector)
-                    .map_err(|_| anyhow!("value map selector {selector} is negative"))?;
+                let selector_index = checked_selector_index_i64(selector, "value map")?;
                 let value = values.get(selector_index).copied().ok_or_else(|| {
                     anyhow!(
                         "value map selector {} out of range for {} entries",
@@ -1536,6 +1554,21 @@ fn subtable_decode_address(ctx: &CompiledInstructionContext<'_>) -> Result<u64> 
 
 fn checked_usize_to_u64(value: usize, role: &str) -> Result<u64> {
     u64::try_from(value).map_err(|_| anyhow!("{role} {value} exceeds u64"))
+}
+
+fn checked_selector_index_u64(value: u64, role: &str) -> Result<usize> {
+    usize::try_from(value).map_err(|_| anyhow!("{role} selector {value} exceeds usize"))
+}
+
+fn checked_selector_index_i64(value: i64, role: &str) -> Result<usize> {
+    if value < 0 {
+        bail!("{role} selector {value} is negative");
+    }
+    usize::try_from(value).map_err(|_| anyhow!("{role} selector {value} exceeds usize"))
+}
+
+fn checked_selector_display_index(value: usize, role: &str) -> Result<u32> {
+    u32::try_from(value).map_err(|_| anyhow!("{role} selector {value} exceeds u32 display index"))
 }
 
 fn checked_sla_field_encoded_size(byte_start: u32, byte_end: u32, role: &str) -> Result<u32> {
