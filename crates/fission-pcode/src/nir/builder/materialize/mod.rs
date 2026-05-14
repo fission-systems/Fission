@@ -635,7 +635,10 @@ impl<'a> PreviewBuilder<'a> {
             return None;
         }
         let proof = self.describe_missing_merge_binding_proof(block, op_idx, output, rhs)?;
-        if proof.relation != MissingMergeBindingRelation::PredicateMergeMissing {
+        let live_register_join = proof.relation == MissingMergeBindingRelation::PredicateMergeMissing
+            || (proof.consumer_kind == DisallowedSingleConsumerConsumerKind::StoreValue
+                && proof.relation == MissingMergeBindingRelation::JoinMergeMissing);
+        if !live_register_join {
             return None;
         }
         let output_key = VarnodeKey::from(output);
@@ -1429,6 +1432,63 @@ mod tests {
                 ),
             ),
             Some(("w12".to_string(), 4))
+        );
+    }
+
+    #[test]
+    fn missing_join_store_value_uses_low_live_register_binding_for_safe_rhs() {
+        let x0 = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0x4000, 8);
+        let w0 = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0x4000, 4);
+        let ptr = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0x4040, 8);
+        let value = register(UNIQUE_SPACE_ID, 0x100, 4);
+        let def_op = op(1, PcodeOpcode::IntZExt, Some(x0.clone()), vec![value]);
+        let def_block = block_at(
+            0x1000,
+            0,
+            vec![
+                def_op.clone(),
+                op(
+                    4,
+                    PcodeOpcode::CBranch,
+                    None,
+                    vec![constant(0x2000), register(UNIQUE_SPACE_ID, 0x200, 1)],
+                ),
+            ],
+        );
+        let other_pred = block_at(
+            0x1800,
+            1,
+            vec![op(3, PcodeOpcode::Branch, None, vec![constant(0x2000)])],
+        );
+        let merge_block = block_at(
+            0x2000,
+            2,
+            vec![op(2, PcodeOpcode::Store, None, vec![constant(0), ptr, w0])],
+        );
+        let pcode = pcode_function(vec![def_block.clone(), other_pred, merge_block]);
+        let mut options = crate::nir::builder::materialize::test_support::test_options();
+        options.calling_convention = CallingConvention::AArch64;
+        options.format = "ELF64".to_string();
+        options.pe_x64_only = false;
+        let builder = PreviewBuilder::new(&pcode, &options, None);
+        let rhs = HirExpr::Cast {
+            ty: int(64),
+            expr: Box::new(HirExpr::Var("uVar1".to_string())),
+        };
+
+        assert_eq!(
+            builder.live_register_lhs_name_for_safe_missing_merge(
+                &def_block,
+                0,
+                &def_op,
+                &x0,
+                &rhs,
+                ReplacementValuePlan::incomplete(
+                    ReplacementReadClass::Merge,
+                    MaterializationRejectionReason::MissingMergeBinding,
+                ),
+            ),
+            Some(("w0".to_string(), 4))
         );
     }
 

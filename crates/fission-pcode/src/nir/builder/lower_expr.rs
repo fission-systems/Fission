@@ -1547,6 +1547,20 @@ impl<'a> PreviewBuilder<'a> {
             {
                 return Ok(HirExpr::Var(name));
             }
+            if is_register_space_id(vn.space_id)
+                && self.current_store_value_read_at_join(vn)
+                && let Some(name) = self.live_register_name_for_join_register_read(vn)
+            {
+                self.ensure_live_register_binding(&name, vn.size);
+                return Ok(HirExpr::Var(name));
+            }
+            if is_register_space_id(vn.space_id)
+                && self.current_join_register_update_reads_live_register(vn)
+                && let Some(name) = self.live_register_name_for_join_register_read(vn)
+            {
+                self.ensure_live_register_binding(&name, vn.size);
+                return Ok(HirExpr::Var(name));
+            }
             if let Some(param) = self.register_param(vn) {
                 return Ok(HirExpr::Var(param));
             }
@@ -1699,6 +1713,81 @@ impl<'a> PreviewBuilder<'a> {
         };
         visiting.remove(&key);
         result
+    }
+
+    fn current_store_value_read_at_join(&self, vn: &Varnode) -> bool {
+        let Some(site) = self.current_lowering_site else {
+            return false;
+        };
+        if self
+            .predecessors
+            .get(site.block_idx)
+            .is_none_or(|preds| preds.len() < 2)
+        {
+            return false;
+        }
+        let Some(op) = self
+            .pcode
+            .blocks
+            .get(site.block_idx)
+            .and_then(|block| block.ops.get(site.op_idx))
+        else {
+            return false;
+        };
+        op.opcode == PcodeOpcode::Store
+            && op
+                .inputs
+                .get(2)
+                .is_some_and(|input| self.varnode_aliases_value(input, vn))
+    }
+
+    fn current_join_register_update_reads_live_register(&self, vn: &Varnode) -> bool {
+        let Some(site) = self.current_lowering_site else {
+            return false;
+        };
+        if self
+            .predecessors
+            .get(site.block_idx)
+            .is_none_or(|preds| preds.len() < 2)
+        {
+            return false;
+        }
+        let Some(block) = self.pcode.blocks.get(site.block_idx) else {
+            return false;
+        };
+        let Some(op) = block.ops.get(site.op_idx) else {
+            return false;
+        };
+        if !op.inputs.iter().any(|input| self.varnode_aliases_value(input, vn)) {
+            return false;
+        }
+        block
+            .ops
+            .iter()
+            .skip(site.op_idx + 1)
+            .any(|candidate| {
+                candidate
+                    .output
+                    .as_ref()
+                    .is_some_and(|output| self.varnode_aliases_value(output, vn))
+            })
+    }
+
+    fn live_register_name_for_join_register_read(&self, vn: &Varnode) -> Option<String> {
+        if !is_register_space_id(vn.space_id) {
+            return None;
+        }
+        match self.options.calling_convention {
+            CallingConvention::AArch64 => {
+                if vn.size == 8 {
+                    aarch64_ghidra_reg_name(vn.offset, 4).map(str::to_string)
+                } else {
+                    aarch64_ghidra_reg_name(vn.offset, vn.size).map(str::to_string)
+                }
+            }
+            _ => register_hardware_name_for_abi(vn.offset, vn.size, self.options.calling_convention)
+                .map(str::to_string),
+        }
     }
 
     fn try_lower_diamond_select_for_varnode(
@@ -2659,5 +2748,64 @@ mod tests {
                 .and_then(|binding| binding.initializer.as_ref()),
             Some(&HirExpr::Const(0, type_from_size(4, false)))
         );
+    }
+
+    #[test]
+    fn join_register_update_read_stays_live_register_instead_of_abi_param() {
+        let mut options = test_options();
+        options.calling_convention = CallingConvention::AArch64;
+        options.format = "ELF64".to_string();
+        options.pe_x64_only = false;
+
+        let w0 = register(0x4000, 4);
+        let x0 = register(0x4000, 8);
+        let w8 = register(0x4040, 4);
+        let sum = Varnode {
+            space_id: UNIQUE_SPACE_ID,
+            offset: 0x200,
+            size: 4,
+            is_constant: false,
+            constant_val: 0,
+        };
+        let mut blocks = vec![
+            block_at(
+                0x1000,
+                0,
+                vec![op(0, PcodeOpcode::Branch, None, vec![constant(0x1020)])],
+            ),
+            block_at(
+                0x1010,
+                1,
+                vec![op(1, PcodeOpcode::Branch, None, vec![constant(0x1020)])],
+            ),
+            block_at(
+                0x1020,
+                2,
+                vec![
+                    op(
+                        2,
+                        PcodeOpcode::IntAdd,
+                        Some(sum.clone()),
+                        vec![w0.clone(), w8],
+                    ),
+                    op(3, PcodeOpcode::IntZExt, Some(x0), vec![sum]),
+                ],
+            ),
+        ];
+        blocks[0].successors = vec![2];
+        blocks[1].successors = vec![2];
+        let pcode = pcode_function(blocks);
+        let mut builder = PreviewBuilder::new(&pcode, &options, None);
+        builder.current_lowering_site = Some(LoweringSite {
+            block_idx: 2,
+            op_idx: 0,
+        });
+        let mut visiting = HashSet::new();
+
+        let lowered = builder
+            .lower_varnode(&w0, &mut visiting)
+            .expect("join register update read lowers");
+
+        assert_eq!(lowered, HirExpr::Var("w0".to_string()));
     }
 }
