@@ -220,6 +220,52 @@ fn sla_native_runtime_ready_constructors_are_canonical() {
 }
 
 #[test]
+fn promoted_non_x86_frontends_have_no_unsupported_sla_templates() {
+    if !discovery::ghidra_packaged_sla_available() {
+        eprintln!("skip: packaged Ghidra .sla not available for non-x86 runtime-ready check");
+        return;
+    }
+
+    let entry_specs = [
+        (
+            "AARCH64",
+            spec_root_for_arch("AARCH64").join("AARCH64.slaspec"),
+        ),
+        ("ARM8_le", spec_root_for_arch("ARM").join("ARM8_le.slaspec")),
+        (
+            "ARM8m_le",
+            spec_root_for_arch("ARM").join("ARM8m_le.slaspec"),
+        ),
+    ];
+
+    for (entry_id, entry_spec) in entry_specs {
+        let compiled = crate::compiler::compile_frontend_for_entry_spec(&entry_spec)
+            .unwrap_or_else(|error| panic!("compile {entry_id} frontend: {error:#}"));
+        let mut total = 0usize;
+        let mut unsupported = Vec::new();
+        for constructor in compiled
+            .subtables
+            .values()
+            .flat_map(|subtable| subtable.constructors.iter())
+        {
+            total += 1;
+            if !constructor.runtime_ready {
+                unsupported.push((
+                    constructor.source.clone(),
+                    constructor.unsupported_template_kind.clone(),
+                ));
+            }
+        }
+        assert!(total > 0, "{entry_id} should expose SLA constructors");
+        assert!(
+            unsupported.is_empty(),
+            "{entry_id} .sla constructors must all be runtime-ready: {:?}",
+            unsupported
+        );
+    }
+}
+
+#[test]
 fn runtime_ready_constructors_do_not_depend_on_compat_token_selectors() {
     if !discovery::ghidra_packaged_sla_available() {
         eprintln!("skip: packaged Ghidra .sla not available for token parser dependency check");
