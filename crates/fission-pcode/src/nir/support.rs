@@ -358,6 +358,10 @@ pub enum CallingConvention {
     LoongArch32,
     /// LoongArch 64-bit ELF ABI: first eight integer args in a0-a7, return in a0.
     LoongArch64,
+    /// MIPS 32-bit ELF ABI: first four integer args in a0-a3, return in v0.
+    Mips32,
+    /// MIPS 64-bit ELF ABI: first four integer args in a0-a3, return in v0.
+    Mips64,
 }
 
 impl Default for CallingConvention {
@@ -440,6 +444,18 @@ impl CallingConvention {
                 0x150, // a6 → param_7
                 0x158, // a7 → param_8
             ],
+            Self::Mips32 => &[
+                0x10, // a0 → param_1
+                0x14, // a1 → param_2
+                0x18, // a2 → param_3
+                0x1c, // a3 → param_4
+            ],
+            Self::Mips64 => &[
+                0x20, // a0 → param_1
+                0x28, // a1 → param_2
+                0x30, // a2 → param_3
+                0x38, // a3 → param_4
+            ],
         }
     }
 
@@ -516,6 +532,18 @@ impl CallingConvention {
                 (0x148, 8), // a5
                 (0x150, 8), // a6
                 (0x158, 8), // a7
+            ],
+            Self::Mips32 => &[
+                (0x10, 4), // a0
+                (0x14, 4), // a1
+                (0x18, 4), // a2
+                (0x1c, 4), // a3
+            ],
+            Self::Mips64 => &[
+                (0x20, 8), // a0
+                (0x28, 8), // a1
+                (0x30, 8), // a2
+                (0x38, 8), // a3
             ],
         }
     }
@@ -782,6 +810,63 @@ pub(crate) fn loongarch_ghidra_reg_name_for_abi(
     GPRS.get(idx).copied()
 }
 
+pub(crate) fn mips_gpr_family_index(name: &str) -> Option<usize> {
+    match name {
+        "zero" => Some(0),
+        "at" => Some(1),
+        "v0" => Some(2),
+        "v1" => Some(3),
+        "a0" => Some(4),
+        "a1" => Some(5),
+        "a2" => Some(6),
+        "a3" => Some(7),
+        "gp" => Some(28),
+        "sp" => Some(29),
+        "fp" => Some(30),
+        "ra" => Some(31),
+        _ => {
+            if let Some(rest) = name.strip_prefix('t') {
+                let idx = rest.parse::<usize>().ok()?;
+                return match idx {
+                    0..=7 => Some(8 + idx),
+                    8..=9 => Some(24 + (idx - 8)),
+                    _ => None,
+                };
+            }
+            if let Some(rest) = name.strip_prefix('s') {
+                let idx = rest.parse::<usize>().ok()?;
+                return (idx < 8).then_some(16 + idx);
+            }
+            name.strip_prefix('r')?
+                .parse::<usize>()
+                .ok()
+                .filter(|idx| *idx < 32)
+        }
+    }
+}
+
+pub(crate) fn mips_ghidra_reg_name_for_abi(
+    offset: u64,
+    size: u32,
+    abi: CallingConvention,
+) -> Option<&'static str> {
+    const GPRS: [&str; 32] = [
+        "zero", "at", "v0", "v1", "a0", "a1", "a2", "a3", "t0", "t1", "t2", "t3", "t4", "t5", "t6",
+        "t7", "s0", "s1", "s2", "s3", "s4", "s5", "s6", "s7", "t8", "t9", "k0", "k1", "gp", "sp",
+        "fp", "ra",
+    ];
+    let (stride, full_size) = match abi {
+        CallingConvention::Mips32 => (4, 4),
+        CallingConvention::Mips64 => (8, 8),
+        _ => return None,
+    };
+    if size != full_size || offset % stride != 0 {
+        return None;
+    }
+    let idx = (offset / stride) as usize;
+    GPRS.get(idx).copied()
+}
+
 /// Static `param_N` names for up to 8 parameters (enough for AArch64 PCS).
 const PARAM_NAMES: [&str; 8] = [
     "param_1", "param_2", "param_3", "param_4", "param_5", "param_6", "param_7", "param_8",
@@ -808,6 +893,9 @@ pub(crate) fn register_name_with_param(
         }
         CallingConvention::LoongArch32 | CallingConvention::LoongArch64 => {
             loongarch_ghidra_reg_name_for_abi(offset, _size, abi)?
+        }
+        CallingConvention::Mips32 | CallingConvention::Mips64 => {
+            mips_ghidra_reg_name_for_abi(offset, _size, abi)?
         }
         CallingConvention::WindowsX64 | CallingConvention::SystemVAmd64 => {
             x64_ghidra_reg_name(offset)?
@@ -856,6 +944,19 @@ pub(crate) fn register_name_with_param(
                 })
             })
         }
+        CallingConvention::Mips32 | CallingConvention::Mips64 => mips_gpr_family_index(hw_name)
+            .and_then(|name_family| {
+                let slot_size = if abi == CallingConvention::Mips64 {
+                    8
+                } else {
+                    4
+                };
+                abi.param_offsets().iter().position(|&param_offset| {
+                    mips_ghidra_reg_name_for_abi(param_offset, slot_size, abi)
+                        .and_then(mips_gpr_family_index)
+                        .is_some_and(|family| family == name_family)
+                })
+            }),
         CallingConvention::WindowsX64 | CallingConvention::SystemVAmd64 => abi
             .param_offsets()
             .iter()
@@ -875,6 +976,8 @@ pub(crate) fn register_name(offset: u64, size: u32) -> &'static str {
         .or_else(|| powerpc_ghidra_reg_name(offset, size))
         .or_else(|| loongarch_ghidra_reg_name_for_abi(offset, size, CallingConvention::LoongArch64))
         .or_else(|| loongarch_ghidra_reg_name_for_abi(offset, size, CallingConvention::LoongArch32))
+        .or_else(|| mips_ghidra_reg_name_for_abi(offset, size, CallingConvention::Mips64))
+        .or_else(|| mips_ghidra_reg_name_for_abi(offset, size, CallingConvention::Mips32))
         .unwrap_or("reg")
 }
 
@@ -891,6 +994,9 @@ pub(crate) fn register_hardware_name_for_abi(
         }
         CallingConvention::LoongArch32 | CallingConvention::LoongArch64 => {
             loongarch_ghidra_reg_name_for_abi(offset, size, abi)
+        }
+        CallingConvention::Mips32 | CallingConvention::Mips64 => {
+            mips_ghidra_reg_name_for_abi(offset, size, abi)
         }
         CallingConvention::WindowsX64 | CallingConvention::SystemVAmd64 => {
             x64_ghidra_reg_name(offset)
@@ -920,6 +1026,8 @@ pub(crate) fn is_primary_return_register_for_abi(vn: &Varnode, abi: CallingConve
         CallingConvention::PowerPc64 => is_register_space_id(vn.space_id) && vn.offset == 0x18,
         CallingConvention::LoongArch32 => is_register_space_id(vn.space_id) && vn.offset == 0x110,
         CallingConvention::LoongArch64 => is_register_space_id(vn.space_id) && vn.offset == 0x120,
+        CallingConvention::Mips32 => is_register_space_id(vn.space_id) && vn.offset == 0x08,
+        CallingConvention::Mips64 => is_register_space_id(vn.space_id) && vn.offset == 0x10,
         CallingConvention::WindowsX64 | CallingConvention::SystemVAmd64 => {
             is_primary_return_register(vn)
         }
@@ -941,6 +1049,9 @@ pub(crate) fn is_return_target_register_for_abi(vn: &Varnode, abi: CallingConven
         }
         CallingConvention::LoongArch32 | CallingConvention::LoongArch64 => {
             loongarch_ghidra_reg_name_for_abi(vn.offset, vn.size, abi) == Some("ra")
+        }
+        CallingConvention::Mips32 | CallingConvention::Mips64 => {
+            mips_ghidra_reg_name_for_abi(vn.offset, vn.size, abi) == Some("ra")
         }
         CallingConvention::WindowsX64 | CallingConvention::SystemVAmd64 => false,
     }
@@ -1053,6 +1164,38 @@ pub(crate) fn primary_return_registers(pointer_size: u32, abi: CallingConvention
             Varnode {
                 space_id: RUST_SLEIGH_ALT_REGISTER_SPACE_ID,
                 offset: 0x120,
+                size: 8,
+                is_constant: false,
+                constant_val: 0,
+            },
+        ],
+        CallingConvention::Mips32 => vec![
+            Varnode {
+                space_id: REGISTER_SPACE_ID,
+                offset: 0x08,
+                size: 4,
+                is_constant: false,
+                constant_val: 0,
+            },
+            Varnode {
+                space_id: RUST_SLEIGH_REGISTER_SPACE_ID,
+                offset: 0x08,
+                size: 4,
+                is_constant: false,
+                constant_val: 0,
+            },
+        ],
+        CallingConvention::Mips64 => vec![
+            Varnode {
+                space_id: REGISTER_SPACE_ID,
+                offset: 0x10,
+                size: 8,
+                is_constant: false,
+                constant_val: 0,
+            },
+            Varnode {
+                space_id: RUST_SLEIGH_REGISTER_SPACE_ID,
+                offset: 0x10,
                 size: 8,
                 is_constant: false,
                 constant_val: 0,

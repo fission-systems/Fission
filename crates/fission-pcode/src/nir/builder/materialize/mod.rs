@@ -67,6 +67,7 @@ impl<'a> PreviewBuilder<'a> {
                 CallingConvention::Arm32
                     | CallingConvention::PowerPc32
                     | CallingConvention::LoongArch32
+                    | CallingConvention::Mips32
             )
         {
             return Vec::new();
@@ -1267,9 +1268,7 @@ mod tests {
             result: MergeBindingCandidateResult::PhiLikeBindingCandidate,
         };
 
-        assert!(builder.merge_binding_proof_allows_predecessor_assignment(
-            &proof, false,
-        ));
+        assert!(builder.merge_binding_proof_allows_predecessor_assignment(&proof, false,));
     }
 
     #[test]

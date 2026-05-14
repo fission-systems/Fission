@@ -478,6 +478,7 @@ impl<'a> PreviewBuilder<'a> {
                 CallingConvention::Arm32
                     | CallingConvention::PowerPc32
                     | CallingConvention::LoongArch32
+                    | CallingConvention::Mips32
             )
     }
 

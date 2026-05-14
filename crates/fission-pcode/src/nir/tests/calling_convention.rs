@@ -2079,3 +2079,53 @@ fn loongarch32_alt_register_space_primary_return_is_a0() {
         CallingConvention::LoongArch32
     ));
 }
+
+#[test]
+fn mips32_a0_to_a3_are_params() {
+    for slot in 0..4usize {
+        let offset = 0x10 + (slot as u64 * 4);
+        let (name, idx) = register_name_with_param(offset, 4, CallingConvention::Mips32).unwrap();
+        assert_eq!(name, format!("param_{}", slot + 1));
+        assert_eq!(idx, Some(slot));
+    }
+}
+
+#[test]
+fn mips32_non_param_registers_are_named() {
+    let (name, idx) = register_name_with_param(0x74, 4, CallingConvention::Mips32).unwrap();
+    assert_eq!(name, "sp");
+    assert_eq!(idx, None);
+
+    let (name, idx) = register_name_with_param(0x78, 4, CallingConvention::Mips32).unwrap();
+    assert_eq!(name, "fp");
+    assert_eq!(idx, None);
+
+    let (name, idx) = register_name_with_param(0x7c, 4, CallingConvention::Mips32).unwrap();
+    assert_eq!(name, "ra");
+    assert_eq!(idx, None);
+}
+
+#[test]
+fn mips32_param_slots_work_for_abi_state() {
+    let abi = AbiState::new(CallingConvention::Mips32, false, 4, 0);
+    assert_eq!(abi.param_slot_for_name("a0"), Some(0));
+    assert_eq!(abi.param_slot_for_name("a3"), Some(3));
+    assert_eq!(abi.param_slot_for_name("sp"), None);
+    assert_eq!(abi.param_slot_for_name("fp"), None);
+    assert_eq!(abi.param_slot_for_name("ra"), None);
+}
+
+#[test]
+fn mips32_primary_return_is_v0() {
+    let ret = Varnode {
+        space_id: RUST_SLEIGH_ALT_REGISTER_SPACE_ID,
+        offset: 0x08,
+        size: 4,
+        is_constant: false,
+        constant_val: 0,
+    };
+    assert!(is_primary_return_register_for_abi(
+        &ret,
+        CallingConvention::Mips32
+    ));
+}

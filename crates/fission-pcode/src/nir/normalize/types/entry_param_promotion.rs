@@ -17,13 +17,25 @@ fn abi_pointer_size(is_64bit: bool, abi: CallingConvention) -> u32 {
     if is_64bit
         || matches!(
             abi,
-            CallingConvention::LoongArch64 | CallingConvention::PowerPc64
+            CallingConvention::LoongArch64
+                | CallingConvention::Mips64
+                | CallingConvention::PowerPc64
         )
     {
         8
     } else {
         4
     }
+}
+
+fn abi_is_32bit_register_set(abi: CallingConvention) -> bool {
+    matches!(
+        abi,
+        CallingConvention::Arm32
+            | CallingConvention::LoongArch32
+            | CallingConvention::Mips32
+            | CallingConvention::PowerPc32
+    )
 }
 
 fn param_slot_for_hw_register(reg: &str, abi: CallingConvention, is_64bit: bool) -> Option<usize> {
@@ -309,10 +321,7 @@ fn trim_unused_variadic_tail_params(func: &mut HirFunction) -> bool {
 }
 
 fn hw_name_for_slot(abi: CallingConvention, slot: usize) -> Option<&'static str> {
-    let is_64bit = !matches!(
-        abi,
-        CallingConvention::Arm32 | CallingConvention::PowerPc32 | CallingConvention::LoongArch32
-    );
+    let is_64bit = !abi_is_32bit_register_set(abi);
     AbiState::new(abi, is_64bit, abi_pointer_size(is_64bit, abi), 0).param_hw_name(slot)
 }
 
@@ -329,16 +338,8 @@ fn remove_redundant_param_hw_copies(body: &mut Vec<HirStmt>, abi: CallingConvent
                 .map(|n| n.saturating_sub(1))
             {
                 if let Some(hw) = peel_var_name(rhs)
-                    && param_slot_for_hw_register(
-                        hw,
-                        abi,
-                        !matches!(
-                            abi,
-                            CallingConvention::Arm32
-                                | CallingConvention::PowerPc32
-                                | CallingConvention::LoongArch32
-                        ),
-                    ) == Some(slot)
+                    && param_slot_for_hw_register(hw, abi, !abi_is_32bit_register_set(abi))
+                        == Some(slot)
                 {
                     return false;
                 }
@@ -384,6 +385,7 @@ pub(crate) fn apply_entry_param_promotion_pass(func: &mut HirFunction) -> bool {
             CallingConvention::Arm32
                 | CallingConvention::PowerPc32
                 | CallingConvention::LoongArch32
+                | CallingConvention::Mips32
         ))
         || func.suppress_entry_register_params
     {

@@ -15,7 +15,7 @@ impl<'a> PreviewBuilder<'a> {
         if !self.options.is_64bit
             && !matches!(
                 self.options.calling_convention,
-                CallingConvention::Arm32 | CallingConvention::PowerPc32
+                CallingConvention::Arm32 | CallingConvention::PowerPc32 | CallingConvention::Mips32
             )
         {
             return None;
@@ -408,6 +408,16 @@ impl<'a> PreviewBuilder<'a> {
                 CallingConvention::LoongArch64 => match ptr.offset {
                     0x118 => Some((StackBase::Rsp, 0)),
                     0x1b0 => Some((StackBase::Rbp, 0)),
+                    _ => None,
+                },
+                CallingConvention::Mips32 => match ptr.offset {
+                    0x74 => Some((StackBase::Rsp, 0)),
+                    0x78 => Some((StackBase::Rbp, 0)),
+                    _ => None,
+                },
+                CallingConvention::Mips64 => match ptr.offset {
+                    0xe8 => Some((StackBase::Rsp, 0)),
+                    0xf0 => Some((StackBase::Rbp, 0)),
                     _ => None,
                 },
                 CallingConvention::AArch64 => match ptr.offset {
