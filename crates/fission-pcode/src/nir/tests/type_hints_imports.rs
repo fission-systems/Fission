@@ -437,6 +437,81 @@ fn preview_store_resolves_split_constant_global_address() {
 }
 
 #[test]
+fn preview_store_resolves_inline_relocation_inside_pcode_op_instruction() {
+    let ptr_hi = uniq(0x2000, 4);
+    let ptr = uniq(0x2004, 4);
+    let value = reg(0x0c, 4);
+    let func = PcodeFunction {
+        blocks: vec![PcodeBasicBlock {
+            index: 0,
+            start_address: 0x10004c,
+            successors: vec![],
+            ops: vec![
+                PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::IntLeft,
+                    address: 0x10004c,
+                    output: Some(ptr_hi.clone()),
+                    inputs: vec![cst(0, 4), cst(16, 4)],
+                    asm_mnemonic: Some("lis r0,0".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 1,
+                    opcode: PcodeOpcode::IntAdd,
+                    address: 0x100050,
+                    output: Some(ptr.clone()),
+                    inputs: vec![ptr_hi, cst(0, 4)],
+                    asm_mnemonic: Some("addi r0,r0,0".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 2,
+                    opcode: PcodeOpcode::Store,
+                    address: 0x100050,
+                    output: None,
+                    inputs: vec![cst(3, 8), ptr, value],
+                    asm_mnemonic: Some("stw r6,0(r0)".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 3,
+                    opcode: PcodeOpcode::Return,
+                    address: 0x100054,
+                    output: None,
+                    inputs: vec![reg(0x1020, 4)],
+                    asm_mnemonic: Some("blr".to_string()),
+                },
+            ],
+        }],
+    };
+
+    let mut options = preview_options();
+    options.pe_x64_only = false;
+    options.is_64bit = false;
+    options.pointer_size = 4;
+    options.format = "ELF32".to_string();
+    options.calling_convention = CallingConvention::PowerPc32;
+    options
+        .relocation_names
+        .insert(0x100052, "math_sink".to_string());
+    options
+        .global_names
+        .insert(0x100058, "math_sink".to_string());
+    options.global_sizes.insert(0x100058, 4);
+
+    let rendered = render_mlil_preview_with_context(
+        &func,
+        "run_mathematics",
+        0x10004c,
+        &options,
+        Some(&PreviewTypeContext::default()),
+    )
+    .expect("preview render should succeed");
+
+    assert!(rendered.contains("uint math_sink;"), "{rendered}");
+    assert!(rendered.contains("math_sink = "), "{rendered}");
+    assert!(!rendered.contains("*(uint *)(0)"), "{rendered}");
+}
+
+#[test]
 fn preview_call_target_refs_resolve_direct_symbol_call_target() {
     let func = PcodeFunction {
         blocks: vec![PcodeBasicBlock {

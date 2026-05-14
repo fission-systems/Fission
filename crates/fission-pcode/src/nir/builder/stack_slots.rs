@@ -73,8 +73,8 @@ impl<'a> PreviewBuilder<'a> {
     }
 
     pub(super) fn try_global_lvalue(&self, op: &PcodeOp, ptr: &Varnode) -> Option<String> {
-        if let Some(name) = self.options.relocation_names.get(&op.address) {
-            return Some(name.clone());
+        if let Some(name) = self.relocation_name_for_pcode_op(op.address) {
+            return Some(name);
         }
         if let Some(name) = self.resolve_relocated_pointer_symbol(ptr, 16) {
             return Some(name);
@@ -89,8 +89,8 @@ impl<'a> PreviewBuilder<'a> {
         ptr: &Varnode,
         ty: NirType,
     ) -> Option<HirLValue> {
-        if let Some(name) = self.options.relocation_names.get(&op.address) {
-            return Some(HirLValue::Var(name.clone()));
+        if let Some(name) = self.relocation_name_for_pcode_op(op.address) {
+            return Some(HirLValue::Var(name));
         }
         if let Some(global) = self.resolve_relocated_pointer(ptr, 16) {
             return Some(if global.byte_offset == 0 {
@@ -117,6 +117,22 @@ impl<'a> PreviewBuilder<'a> {
         self.resolve_relocated_pointer(ptr, budget)
             .filter(|global| global.byte_offset == 0)
             .map(|global| global.name)
+    }
+
+    pub(super) fn relocation_name_for_pcode_op(&self, address: u64) -> Option<String> {
+        if let Some(name) = self.options.relocation_names.get(&address) {
+            return Some(name.clone());
+        }
+        let max_inline_reloc_delta = u64::from(self.options.pointer_size.min(4));
+        self.options
+            .relocation_names
+            .iter()
+            .filter_map(|(&reloc_addr, name)| {
+                let delta = reloc_addr.checked_sub(address)?;
+                (delta > 0 && delta <= max_inline_reloc_delta).then_some((delta, reloc_addr, name))
+            })
+            .min_by_key(|(delta, reloc_addr, _)| (*delta, *reloc_addr))
+            .map(|(_, _, name)| name.clone())
     }
 
     fn resolve_relocated_pointer(
@@ -196,9 +212,9 @@ impl<'a> PreviewBuilder<'a> {
         if op.opcode != PcodeOpcode::Load || op.inputs.len() < 2 {
             return None;
         }
-        if let Some(name) = self.options.relocation_names.get(&op.address) {
+        if let Some(name) = self.relocation_name_for_pcode_op(op.address) {
             return Some(ResolvedGlobalPointer {
-                name: name.clone(),
+                name,
                 byte_offset: 0,
             });
         }
