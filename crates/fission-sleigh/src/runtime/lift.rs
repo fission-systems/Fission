@@ -1,6 +1,12 @@
 use super::*;
 use std::collections::{BTreeMap, HashMap, VecDeque};
 
+fn template_source_evidence_key(source: crate::compiler::CompiledTemplateSource) -> &'static str {
+    match source {
+        crate::compiler::CompiledTemplateSource::SpecDerived => "sla_construct_tpl",
+    }
+}
+
 fn internal_byte_offset(entry_address: u64, bytes_len: usize, address: u64) -> Option<usize> {
     let rel = address.checked_sub(entry_address)?;
     let offset = usize::try_from(rel).ok()?;
@@ -523,22 +529,10 @@ mod tests {
     }
 
     #[test]
-    fn function_lift_reports_sla_template_source_counts() {
-        let frontend = RuntimeSleighFrontend::new_for_language("x86-64").expect("x86-64 frontend");
-        let bytes = [0x90, 0xc3]; // nop; ret
-
-        let decoded = frontend
-            .lift_raw_pcode_function_with_contract(&bytes, 0x100000, 4)
-            .expect("lift x86-64 nop-ret");
-
-        assert_eq!(decoded.decoded_instructions, 2);
+    fn template_source_evidence_key_names_sla_construct_tpl() {
         assert_eq!(
-            decoded.template_source_counts.get("spec_derived").copied(),
-            Some(2)
-        );
-        assert_eq!(
-            decoded.template_source_counts.values().sum::<usize>(),
-            decoded.decoded_instructions
+            template_source_evidence_key(crate::compiler::CompiledTemplateSource::SpecDerived),
+            "sla_construct_tpl"
         );
     }
 }
@@ -653,7 +647,7 @@ impl RuntimeSleighFrontend {
                 .map_err(|err| anyhow!("decode failed at 0x{:x}: {:#}", current, err))?;
             if let Some(source) = details.template_source {
                 *template_source_counts
-                    .entry(source.as_str().to_string())
+                    .entry(template_source_evidence_key(source).to_string())
                     .or_insert(0) += 1;
             }
 

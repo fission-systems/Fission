@@ -1847,7 +1847,7 @@ def summarize(rows: list[dict[str, Any]], manifest_name: str, entries: list[Benc
             )
             for key, value in template_sources.items():
                 if isinstance(value, int | float):
-                    debug_template_source_totals[key] += value
+                    debug_template_source_totals[canonical_sleigh_template_source(str(key))] += value
 
         for tag in row.get("tags") or []:
             tag_bucket = by_tag.setdefault(
@@ -1897,6 +1897,12 @@ def summarize(rows: list[dict[str, Any]], manifest_name: str, entries: list[Benc
     }
 
 
+def canonical_sleigh_template_source(source: str) -> str:
+    if source in {"spec_derived", "SpecDerived"}:
+        return "sla_construct_tpl"
+    return source
+
+
 def row_key(row: dict[str, Any]) -> str:
     return "::".join(
         [
@@ -1908,9 +1914,14 @@ def row_key(row: dict[str, Any]) -> str:
 
 
 def sleigh_template_source_gate(summary: dict[str, Any], required_source: str) -> dict[str, Any]:
-    template_totals = summary.get("debug_template_source_totals")
-    if not isinstance(template_totals, dict):
-        template_totals = {}
+    raw_template_totals = summary.get("debug_template_source_totals")
+    if not isinstance(raw_template_totals, dict):
+        raw_template_totals = {}
+    template_totals: dict[str, int] = {}
+    for source, value in raw_template_totals.items():
+        if isinstance(value, int | float):
+            canonical = canonical_sleigh_template_source(str(source))
+            template_totals[canonical] = template_totals.get(canonical, 0) + int(value)
     stage_counts = summary.get("debug_stage_status_counts")
     if not isinstance(stage_counts, dict):
         stage_counts = {}
@@ -3012,9 +3023,9 @@ int max(int a, int b) { if (a > b) return a; return b; }
                 "row_count": 1,
                 "debug_stage_status_counts": {"decode:ok": 1, "raw_pcode:ok": 1},
                 "debug_quality_evidence_totals": {"invalid_pcode_shape_count": 0},
-                "debug_template_source_totals": {"spec_derived": 2},
+                "debug_template_source_totals": {"sla_construct_tpl": 2},
             },
-            "spec_derived",
+            "sla_construct_tpl",
         )
         assert gate["status"] == "passed"
         gate = sleigh_template_source_gate(
@@ -3022,9 +3033,20 @@ int max(int a, int b) { if (a > b) return a; return b; }
                 "row_count": 1,
                 "debug_stage_status_counts": {"decode:ok": 1, "raw_pcode:ok": 1},
                 "debug_quality_evidence_totals": {"invalid_pcode_shape_count": 0},
+                "debug_template_source_totals": {"spec_derived": 2},
+            },
+            "sla_construct_tpl",
+        )
+        assert gate["status"] == "passed"
+        assert gate["template_source_totals"] == {"sla_construct_tpl": 2}
+        gate = sleigh_template_source_gate(
+            {
+                "row_count": 1,
+                "debug_stage_status_counts": {"decode:ok": 1, "raw_pcode:ok": 1},
+                "debug_quality_evidence_totals": {"invalid_pcode_shape_count": 0},
                 "debug_template_source_totals": {"compatibility_lowered": 1},
             },
-            "spec_derived",
+            "sla_construct_tpl",
         )
         assert gate["status"] == "failed"
         assert "compatibility_lowered" in gate["failures"][0]
@@ -3033,9 +3055,9 @@ int max(int a, int b) { if (a > b) return a; return b; }
                 "row_count": 1,
                 "debug_stage_status_counts": {"decode:ok": 1, "raw_pcode:failed": 1},
                 "debug_quality_evidence_totals": {"invalid_pcode_shape_count": 0},
-                "debug_template_source_totals": {"spec_derived": 1},
+                "debug_template_source_totals": {"sla_construct_tpl": 1},
             },
-            "spec_derived",
+            "sla_construct_tpl",
         )
         assert gate["status"] == "failed"
         assert any("raw_pcode:failed" in failure for failure in gate["failures"])
@@ -3044,9 +3066,9 @@ int max(int a, int b) { if (a > b) return a; return b; }
                 "row_count": 2,
                 "debug_stage_status_counts": {"decode:ok": 1, "raw_pcode:ok": 1},
                 "debug_quality_evidence_totals": {"invalid_pcode_shape_count": 0},
-                "debug_template_source_totals": {"spec_derived": 1},
+                "debug_template_source_totals": {"sla_construct_tpl": 1},
             },
-            "spec_derived",
+            "sla_construct_tpl",
         )
         assert gate["status"] == "failed"
         assert any("decode must be ok for every row (1/2)" in failure for failure in gate["failures"])
@@ -3055,9 +3077,9 @@ int max(int a, int b) { if (a > b) return a; return b; }
                 "row_count": 1,
                 "debug_stage_status_counts": {"decode:ok": 1, "raw_pcode:ok": 1},
                 "debug_quality_evidence_totals": {"invalid_pcode_shape_count": 1},
-                "debug_template_source_totals": {"spec_derived": 1},
+                "debug_template_source_totals": {"sla_construct_tpl": 1},
             },
-            "spec_derived",
+            "sla_construct_tpl",
         )
         assert gate["status"] == "failed"
         assert any("invalid_pcode_shape_count" in failure for failure in gate["failures"])
@@ -3067,7 +3089,7 @@ int max(int a, int b) { if (a > b) return a; return b; }
                 "debug_stage_status_counts": {},
                 "debug_template_source_totals": {},
             },
-            "spec_derived",
+            "sla_construct_tpl",
         )
         assert gate["status"] == "failed"
         assert "--include-debug-decomp" in gate["failures"][0]
@@ -3109,7 +3131,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--require-sleigh-template-source",
-        choices=["spec_derived"],
+        choices=["sla_construct_tpl"],
         help=(
             "Fail the run unless all debug SLEIGH template-source evidence uses this source. "
             "Requires --include-debug-decomp for rows with raw_pcode:ok."
