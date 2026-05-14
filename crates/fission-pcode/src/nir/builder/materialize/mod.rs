@@ -1727,6 +1727,98 @@ mod tests {
     }
 
     #[test]
+    fn cross_block_return_register_reads_resolve_to_live_call_result_binding() {
+        let ret_eax = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0, 4);
+        let ebx = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0x0c, 4);
+        let out = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0x100, 4);
+        let mut call_block = block_at(
+            0x1000,
+            0,
+            vec![op(1, PcodeOpcode::Call, None, vec![constant(0x2000)])],
+        );
+        call_block.successors = vec![1];
+        let use_block = block_at(
+            0x1010,
+            1,
+            vec![op(
+                2,
+                PcodeOpcode::IntAdd,
+                Some(out),
+                vec![ebx, ret_eax.clone()],
+            )],
+        );
+        let pcode = pcode_function(vec![call_block, use_block]);
+        let options = crate::nir::builder::materialize::test_support::test_options();
+        let mut builder = PreviewBuilder::new(&pcode, &options, None);
+        builder.call_result_bindings.insert(
+            LoweringSite {
+                block_idx: 0,
+                op_idx: 0,
+            },
+            "xVarCall".to_string(),
+        );
+        builder.current_lowering_site = Some(LoweringSite {
+            block_idx: 1,
+            op_idx: 0,
+        });
+
+        assert_eq!(
+            builder.live_call_result_binding_for_return_register(&ret_eax),
+            Some("xVarCall".to_string())
+        );
+    }
+
+    #[test]
+    fn cross_block_return_register_binding_stops_at_redefinition() {
+        let ret_eax = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0, 4);
+        let ebx = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0x0c, 4);
+        let out = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0x100, 4);
+        let mut call_block = block_at(
+            0x1000,
+            0,
+            vec![
+                op(1, PcodeOpcode::Call, None, vec![constant(0x2000)]),
+                op(
+                    2,
+                    PcodeOpcode::IntAdd,
+                    Some(ret_eax.clone()),
+                    vec![ret_eax.clone(), constant(1)],
+                ),
+            ],
+        );
+        call_block.successors = vec![1];
+        let use_block = block_at(
+            0x1010,
+            1,
+            vec![op(
+                3,
+                PcodeOpcode::IntAdd,
+                Some(out),
+                vec![ebx, ret_eax.clone()],
+            )],
+        );
+        let pcode = pcode_function(vec![call_block, use_block]);
+        let options = crate::nir::builder::materialize::test_support::test_options();
+        let mut builder = PreviewBuilder::new(&pcode, &options, None);
+        builder.call_result_bindings.insert(
+            LoweringSite {
+                block_idx: 0,
+                op_idx: 0,
+            },
+            "xVarCall".to_string(),
+        );
+        builder.current_lowering_site = Some(LoweringSite {
+            block_idx: 1,
+            op_idx: 0,
+        });
+
+        assert_eq!(
+            builder.live_call_result_binding_for_return_register(&ret_eax),
+            None
+        );
+    }
+
+    #[test]
     fn same_instruction_callother_does_not_steal_arm_call_args_or_result() {
         fn op_at(
             seq_num: u32,

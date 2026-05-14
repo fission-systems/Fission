@@ -46,10 +46,35 @@ impl<'a> PreviewBuilder<'a> {
             return None;
         }
         let site = self.current_lowering_site?;
-        let block = self.pcode.blocks.get(site.block_idx)?;
-        for (prior_idx, op) in block.ops.iter().enumerate().take(site.op_idx).rev() {
+        if let Some(name) = self.live_call_result_binding_in_block_for_return_register(
+            vn,
+            site.block_idx,
+            site.op_idx,
+        ) {
+            return Some(name);
+        }
+        let mut visited = HashSet::new();
+        let (call_site, name) = self
+            .live_call_result_binding_from_predecessors_for_return_register(
+                vn,
+                site.block_idx,
+                &mut visited,
+            )?;
+        let def_site = self.lookup_def_site(vn).map(|(site, _)| site);
+        self.call_result_site_outranks_def_site(call_site, def_site)
+            .then_some(name)
+    }
+
+    fn live_call_result_binding_in_block_for_return_register(
+        &self,
+        vn: &Varnode,
+        block_idx: usize,
+        before_op_idx: usize,
+    ) -> Option<String> {
+        let block = self.pcode.blocks.get(block_idx)?;
+        for (prior_idx, op) in block.ops.iter().enumerate().take(before_op_idx).rev() {
             let prior_site = LoweringSite {
-                block_idx: site.block_idx,
+                block_idx,
                 op_idx: prior_idx,
             };
             if op.output.is_none()
@@ -68,6 +93,93 @@ impl<'a> PreviewBuilder<'a> {
             }
         }
         None
+    }
+
+    fn live_call_result_binding_from_predecessors_for_return_register(
+        &self,
+        vn: &Varnode,
+        block_idx: usize,
+        visited: &mut HashSet<usize>,
+    ) -> Option<(LoweringSite, String)> {
+        if !visited.insert(block_idx) {
+            return None;
+        }
+        let predecessors = self.predecessors.get(block_idx)?;
+        if predecessors.is_empty() {
+            return None;
+        }
+
+        let mut shared_binding: Option<(LoweringSite, String)> = None;
+        for pred_idx in predecessors {
+            let pred_block = self.pcode.blocks.get(*pred_idx)?;
+            let mut pred_visited = visited.clone();
+            let candidate = self
+                .live_call_result_site_in_block_for_return_register(
+                    vn,
+                    *pred_idx,
+                    pred_block.ops.len(),
+                )
+                .or_else(|| {
+                    self.live_call_result_binding_from_predecessors_for_return_register(
+                        vn,
+                        *pred_idx,
+                        &mut pred_visited,
+                    )
+                })?;
+            if shared_binding
+                .as_ref()
+                .is_some_and(|(_, name)| name != &candidate.1)
+            {
+                return None;
+            }
+            shared_binding = Some(candidate);
+        }
+        shared_binding
+    }
+
+    fn live_call_result_site_in_block_for_return_register(
+        &self,
+        vn: &Varnode,
+        block_idx: usize,
+        before_op_idx: usize,
+    ) -> Option<(LoweringSite, String)> {
+        let block = self.pcode.blocks.get(block_idx)?;
+        for (prior_idx, op) in block.ops.iter().enumerate().take(before_op_idx).rev() {
+            let prior_site = LoweringSite {
+                block_idx,
+                op_idx: prior_idx,
+            };
+            if op.output.is_none()
+                && matches!(
+                    op.opcode,
+                    PcodeOpcode::Call | PcodeOpcode::CallInd | PcodeOpcode::CallOther
+                )
+                && let Some(name) = self.call_result_bindings.get(&prior_site)
+            {
+                return Some((prior_site, name.clone()));
+            }
+            if let Some(output) = op.output.as_ref()
+                && self.varnode_aliases_value(output, vn)
+            {
+                return None;
+            }
+        }
+        None
+    }
+
+    fn call_result_site_outranks_def_site(
+        &self,
+        call_site: LoweringSite,
+        def_site: Option<LoweringSite>,
+    ) -> bool {
+        let Some(def_site) = def_site else {
+            return true;
+        };
+        if def_site.block_idx == call_site.block_idx {
+            return def_site.op_idx < call_site.op_idx;
+        }
+        self.dom_tree
+            .dominates(def_site.block_idx, call_site.block_idx)
     }
 
     fn debug_preview_log(&self, message: &str) {
@@ -285,6 +397,24 @@ impl<'a> PreviewBuilder<'a> {
             );
         }
         candidates
+    }
+
+    fn has_prior_local_def_for_varnode(&self, vn: &Varnode, site: LoweringSite) -> bool {
+        let key = VarnodeKey::from(vn);
+        let candidate_keys = self.lookup_candidate_def_keys(&key);
+        let Some(defs_in_block) = self.block_defs.get(site.block_idx) else {
+            return false;
+        };
+        candidate_keys.iter().any(|candidate_key| {
+            defs_in_block.get(candidate_key).is_some_and(|def_indices| {
+                def_indices.iter().any(|def_idx| {
+                    *def_idx < site.op_idx
+                        && !Self::is_identity_copy_def(
+                            &self.pcode.blocks[site.block_idx].ops[*def_idx],
+                        )
+                })
+            })
+        })
     }
 
     fn is_identity_copy_def(op: &PcodeOp) -> bool {
@@ -1492,31 +1622,34 @@ impl<'a> PreviewBuilder<'a> {
 
         let key = VarnodeKey::from(vn);
         if let Some(site) = self.current_lowering_site {
-            if let Some(name) = self
-                .explicit_merge_bindings
-                .get(&(site.block_idx, key.clone()))
-            {
-                return Ok(HirExpr::Var(name.clone()));
-            }
-            if let Some(((_, candidate_key), name)) =
-                self.explicit_merge_bindings
-                    .iter()
-                    .find(|((block_idx, candidate_key), _)| {
-                        *block_idx == site.block_idx
-                            && (Self::register_key_covers(candidate_key, &key)
-                                || self.register_key_zero_extends(candidate_key, &key)
-                                || self.register_key_cross_space_covers(candidate_key, &key)
-                                || self.register_key_cross_space_zero_extends(candidate_key, &key))
-                    })
-            {
-                let expr = HirExpr::Var(name.clone());
-                if candidate_key.size == key.size {
-                    return Ok(expr);
+            if !self.has_prior_local_def_for_varnode(vn, site) {
+                if let Some(name) = self
+                    .explicit_merge_bindings
+                    .get(&(site.block_idx, key.clone()))
+                {
+                    return Ok(HirExpr::Var(name.clone()));
                 }
-                return Ok(HirExpr::Cast {
-                    ty: type_from_size(vn.size, false),
-                    expr: Box::new(expr),
-                });
+                if let Some(((_, candidate_key), name)) =
+                    self.explicit_merge_bindings
+                        .iter()
+                        .find(|((block_idx, candidate_key), _)| {
+                            *block_idx == site.block_idx
+                                && (Self::register_key_covers(candidate_key, &key)
+                                    || self.register_key_zero_extends(candidate_key, &key)
+                                    || self.register_key_cross_space_covers(candidate_key, &key)
+                                    || self
+                                        .register_key_cross_space_zero_extends(candidate_key, &key))
+                        })
+                {
+                    let expr = HirExpr::Var(name.clone());
+                    if candidate_key.size == key.size {
+                        return Ok(expr);
+                    }
+                    return Ok(HirExpr::Cast {
+                        ty: type_from_size(vn.size, false),
+                        expr: Box::new(expr),
+                    });
+                }
             }
         }
         let def_site = self.lookup_def_site(vn);
