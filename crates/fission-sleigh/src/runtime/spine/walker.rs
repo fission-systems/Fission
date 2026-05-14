@@ -53,7 +53,7 @@ impl RuntimeParserWalker {
         let end_bit = start_bit
             .checked_add(bit_size)
             .ok_or_else(|| anyhow!("instruction bit range overflow"))?;
-        let required_bytes = end_bit.div_ceil(8) as usize;
+        let required_bytes = checked_u32_to_usize(end_bit.div_ceil(8), "instruction bit bytes")?;
         if bytes.len() < required_bytes {
             bail!(
                 "instruction bit read [{}..{}) requires {required_bytes} bytes, got {}",
@@ -65,7 +65,7 @@ impl RuntimeParserWalker {
         let mut result = 0u64;
         for i in 0..bit_size {
             let bit_pos = start_bit + i;
-            let byte_idx = (bit_pos / 8) as usize;
+            let byte_idx = checked_u32_to_usize(bit_pos / 8, "instruction bit byte index")?;
             let bit_in_byte = bit_pos % 8;
             let bit = (bytes[byte_idx] >> bit_in_byte) & 1;
             result |= u64::from(bit) << i;
@@ -76,6 +76,10 @@ impl RuntimeParserWalker {
     pub fn into_nodes(self) -> Vec<RuntimeConstructNode> {
         self.construct_nodes
     }
+}
+
+fn checked_u32_to_usize(value: u32, role: &str) -> Result<usize> {
+    usize::try_from(value).map_err(|_| anyhow!("{role} {value} exceeds usize"))
 }
 
 #[cfg(test)]
@@ -115,5 +119,19 @@ mod tests {
             .expect_err("oversized bit read must fail");
 
         assert!(err.to_string().contains("exceeds u64"), "{err:#}");
+    }
+
+    #[test]
+    fn instruction_bits_source_has_no_lossy_cursor_casts() {
+        let source_path =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/runtime/spine/walker.rs");
+        let source = std::fs::read_to_string(source_path).expect("read source");
+        let required_bytes_cast = ["end_bit.div_ceil(8)", " as usize"].join("");
+        let byte_index_cast = ["(bit_pos / 8)", " as usize"].join("");
+
+        assert!(
+            !source.contains(&required_bytes_cast) && !source.contains(&byte_index_cast),
+            "instruction bit extraction still casts SLA cursor sizes through usize"
+        );
     }
 }
