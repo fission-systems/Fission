@@ -1120,8 +1120,10 @@ impl<'a> PreviewBuilder<'a> {
     }
 
     fn materialize_call_target_is_known_pure_intrinsic(target: &str) -> bool {
-        matches!(target, "__popcount" | "__carry" | "__scarry" | "__sborrow")
-            || target.starts_with("__pcodeop_")
+        matches!(
+            target,
+            "__popcount" | "__lzcnt" | "__carry" | "__scarry" | "__sborrow"
+        ) || target.starts_with("__pcodeop_")
     }
 
     fn materialize_call_target_is_carry_like_intrinsic(target: &str) -> bool {
@@ -1221,6 +1223,8 @@ impl<'a> PreviewBuilder<'a> {
             | PcodeOpcode::IntAnd
             | PcodeOpcode::IntOr
             | PcodeOpcode::IntXor
+            | PcodeOpcode::PopCount
+            | PcodeOpcode::LzCount
             | PcodeOpcode::IntNegate
             | PcodeOpcode::Int2Comp
             | PcodeOpcode::PtrAdd
@@ -3061,6 +3065,8 @@ impl<'a> PreviewBuilder<'a> {
                 | PcodeOpcode::IntRight
                 | PcodeOpcode::IntSRight
                 | PcodeOpcode::IntMult
+                | PcodeOpcode::PopCount
+                | PcodeOpcode::LzCount
                 | PcodeOpcode::Piece
                 | PcodeOpcode::SubPiece
                 | PcodeOpcode::Cast
@@ -3304,6 +3310,50 @@ mod tests {
         ));
         assert!(PreviewBuilder::use_opcode_allows_single_use_builder_inline(
             PcodeOpcode::BoolOr
+        ));
+        assert!(PreviewBuilder::use_opcode_allows_single_use_builder_inline(
+            PcodeOpcode::PopCount
+        ));
+        assert!(PreviewBuilder::use_opcode_allows_single_use_builder_inline(
+            PcodeOpcode::LzCount
+        ));
+    }
+
+    #[test]
+    fn count_intrinsic_consumers_are_data_consumers_for_single_use_inline() {
+        let popcount = op(
+            1,
+            PcodeOpcode::PopCount,
+            Some(varnode(0x20)),
+            vec![varnode(0x10)],
+        );
+        let lzcnt = op(
+            2,
+            PcodeOpcode::LzCount,
+            Some(varnode(0x30)),
+            vec![varnode(0x10)],
+        );
+
+        assert_eq!(
+            PreviewBuilder::classify_disallowed_single_consumer_kind(&popcount, &[0]),
+            DisallowedSingleConsumerConsumerKind::OtherData
+        );
+        assert_eq!(
+            PreviewBuilder::classify_disallowed_single_consumer_kind(&lzcnt, &[0]),
+            DisallowedSingleConsumerConsumerKind::OtherData
+        );
+    }
+
+    #[test]
+    fn lzcnt_intrinsic_rhs_is_low_cost_builder_inline_candidate() {
+        let expr = HirExpr::Call {
+            target: "__lzcnt".to_string(),
+            args: vec![HirExpr::Var("tmp_1".to_string())],
+            ty: int(32),
+        };
+
+        assert!(PreviewBuilder::expr_is_low_cost_builder_inline_candidate(
+            &expr
         ));
     }
 
