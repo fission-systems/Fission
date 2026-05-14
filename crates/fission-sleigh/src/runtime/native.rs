@@ -6,6 +6,7 @@ use std::path::Path;
 #[derive(Debug)]
 pub struct NativeBackend {
     _library: Library,
+    decode_match_fn: FissionDecodeMatchFn,
 }
 
 type FissionDecodeMatchFn = unsafe extern "C" fn(
@@ -23,7 +24,15 @@ impl NativeBackend {
         );
         let library = unsafe { Library::new(path) }
             .map_err(|e| anyhow!("failed to load native backend {}: {}", path.display(), e))?;
-        Ok(Self { _library: library })
+        let decode_match_fn = {
+            let func: Symbol<FissionDecodeMatchFn> =
+                unsafe { library.get(b"fission_decode_match") }?;
+            *func
+        };
+        Ok(Self {
+            _library: library,
+            decode_match_fn,
+        })
     }
 
     pub fn decode_match(
@@ -32,11 +41,9 @@ impl NativeBackend {
         bytes: &[u8],
         context_register: u64,
     ) -> Result<Option<usize>> {
-        let func: Symbol<FissionDecodeMatchFn> =
-            unsafe { self._library.get(b"fission_decode_match") }?;
         let table_name_c = CString::new(table_name)?;
         let result = unsafe {
-            func(
+            (self.decode_match_fn)(
                 table_name_c.as_ptr(),
                 bytes.as_ptr(),
                 bytes.len(),

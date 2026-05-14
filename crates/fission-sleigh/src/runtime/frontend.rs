@@ -1,9 +1,19 @@
 use super::*;
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use crate::runtime::native::NativeBackend;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, OnceLock};
+
+#[derive(Clone)]
+struct RuntimeFrontendArtifacts {
+    compiled: Option<CompiledFrontend>,
+    native_backend: Option<Arc<NativeBackend>>,
+}
+
+static RUNTIME_FRONTEND_ARTIFACT_CACHE: OnceLock<Mutex<HashMap<String, RuntimeFrontendArtifacts>>> =
+    OnceLock::new();
 
 pub(super) fn entry_matches_language_name(entry: &EntrySpec, language_name: &str) -> bool {
     entry.entry_id == language_name
@@ -23,13 +33,50 @@ pub(super) fn entry_matches_language_name(entry: &EntrySpec, language_name: &str
 impl RuntimeSleighFrontend {
     pub(super) fn from_entry(entry: EntrySpec, language: String) -> Result<Self> {
         let status = registry::status_for_entry(&entry);
+        let artifacts = Self::runtime_artifacts_for_entry(&entry, status)?;
+
+        Ok(Self {
+            language,
+            entry,
+            status,
+            compiled: artifacts.compiled,
+            native_backend: artifacts.native_backend,
+        })
+    }
+
+    fn runtime_artifacts_for_entry(
+        entry: &EntrySpec,
+        status: RuntimeFrontendStatus,
+    ) -> Result<RuntimeFrontendArtifacts> {
+        let cache = RUNTIME_FRONTEND_ARTIFACT_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+        if let Some(artifacts) = cache
+            .lock()
+            .expect("runtime artifact cache poisoned")
+            .get(&entry.entry_id)
+            .cloned()
+        {
+            return Ok(artifacts);
+        }
+
+        let artifacts = Self::load_runtime_artifacts_for_entry(entry, status)?;
+        cache
+            .lock()
+            .expect("runtime artifact cache poisoned")
+            .insert(entry.entry_id.clone(), artifacts.clone());
+        Ok(artifacts)
+    }
+
+    fn load_runtime_artifacts_for_entry(
+        entry: &EntrySpec,
+        status: RuntimeFrontendStatus,
+    ) -> Result<RuntimeFrontendArtifacts> {
         let compiled = if status == RuntimeFrontendStatus::ExecutableCandidate {
             Some(compile_frontend_for_entry_spec(&entry.path)?)
         } else {
             None
         };
 
-        let native_backend = if let Some(ref _c) = compiled {
+        let native_backend = if compiled.is_some() {
             let spec_root = crate::compiler::generated_root_for_entry_spec(&entry.path).ok();
             let dylib_name = crate::compiler::native_backend_library_name();
 
@@ -55,10 +102,7 @@ impl RuntimeSleighFrontend {
             None
         };
 
-        Ok(Self {
-            language,
-            entry,
-            status,
+        Ok(RuntimeFrontendArtifacts {
             compiled,
             native_backend,
         })
