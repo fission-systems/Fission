@@ -783,7 +783,8 @@ impl Collector {
             return None;
         }
         let matcher = self.parse_opcode_matcher(signature)?;
-        let minimum_length = u32::try_from(native_matcher_minimum_length(&matcher)?).ok()?;
+        let minimum_length =
+            constructor_minimum_length_u32(native_matcher_minimum_length(&matcher)?)?;
         let opsize_variants = parse_opsize_variants(signature);
         let operand_specs = parse_operand_specs(signature, &matcher).ok()?;
         let hidden_subtables = parse_hidden_subtables(signature, &self.field_info);
@@ -1050,12 +1051,33 @@ fn native_matcher_minimum_length(matcher: &CompiledPatternMatcher) -> Option<usi
             let mut len = None;
             for constraint in constraints {
                 if let PatternConstraint::Instruction { offset, .. } = constraint {
-                    let end = usize::try_from(*offset).ok()?.checked_add(1)?;
+                    let end = matcher_constraint_offset_usize(*offset)?.checked_add(1)?;
                     len = Some(len.map_or(end, |current: usize| current.max(end)));
                 }
             }
             len
         }
+    }
+}
+
+fn constructor_minimum_length_u32(value: usize) -> Option<u32> {
+    match u32::try_from(value) {
+        Ok(value) => Some(value),
+        Err(_) => None,
+    }
+}
+
+fn matcher_constraint_offset_usize(value: u32) -> Option<usize> {
+    match usize::try_from(value) {
+        Ok(value) => Some(value),
+        Err(_) => None,
+    }
+}
+
+fn probe_value_u8(value: u64) -> Option<u8> {
+    match u8::try_from(value) {
+        Ok(value) => Some(value),
+        Err(_) => None,
     }
 }
 
@@ -1264,7 +1286,7 @@ fn decision_feature_values(
             shift,
         } => context_probe_values(&ctor.matcher, usize::from(offset))
             .into_iter()
-            .filter_map(|v| u8::try_from((v & u64::from(mask)) >> shift).ok())
+            .filter_map(|v| probe_value_u8((v & u64::from(mask)) >> shift))
             .collect(),
         CompiledDecisionProbe::SlaInstructionBits { .. }
         | CompiledDecisionProbe::SlaContextBits { .. } => Vec::new(),
@@ -1287,7 +1309,7 @@ fn instruction_probe_values(matcher: &CompiledPatternMatcher, offset: usize) -> 
                     value,
                 } = c
                 {
-                    let Ok(constraint_offset) = usize::try_from(*c_off) else {
+                    let Some(constraint_offset) = matcher_constraint_offset_usize(*c_off) else {
                         continue;
                     };
                     let Some(constraint_end) = constraint_offset.checked_add(8) else {
@@ -1296,7 +1318,7 @@ fn instruction_probe_values(matcher: &CompiledPatternMatcher, offset: usize) -> 
                     if offset >= constraint_offset && offset < constraint_end {
                         let shift = (offset - constraint_offset) * 8;
                         if (mask >> shift) & 0xff != 0 {
-                            if let Ok(byte) = u8::try_from((value >> shift) & 0xff) {
+                            if let Some(byte) = probe_value_u8((value >> shift) & 0xff) {
                                 val |= byte;
                             }
                             found = true;
@@ -1325,7 +1347,7 @@ fn context_probe_values(matcher: &CompiledPatternMatcher, offset: usize) -> Vec<
                     ..
                 } = c
                 {
-                    let Ok(constraint_offset) = usize::try_from(*c_off) else {
+                    let Some(constraint_offset) = matcher_constraint_offset_usize(*c_off) else {
                         return None;
                     };
                     if offset == constraint_offset {
