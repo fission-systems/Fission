@@ -99,16 +99,19 @@ where
                 if subtable.sla_subtable_id != 0 || !subtable.constructors_by_sla_id.is_empty() {
                     return None;
                 }
-                node.leaf_constructor_indexes
-                    .iter()
-                    .copied()
-                    .map(|constructor_index| CompiledDecisionLeafEntry {
+                let mut entries = Vec::new();
+                for constructor_index in node.leaf_constructor_indexes.iter().copied() {
+                    let Ok(constructor_id) = u32::try_from(constructor_index) else {
+                        return None;
+                    };
+                    entries.push(CompiledDecisionLeafEntry {
                         subtable_id: 0,
-                        constructor_id: constructor_index as u32,
+                        constructor_id,
                         constructor_index,
                         pattern: always_true_instruction_pattern(),
-                    })
-                    .collect()
+                    });
+                }
+                entries
             } else {
                 node.leaf_entries.clone()
             };
@@ -330,19 +333,31 @@ fn pattern_block_matches(
     if block.nonzero_size <= 0 {
         return block.nonzero_size == 0;
     }
-    let mut remaining = block.nonzero_size as u32;
+    let Ok(mut remaining) = u32::try_from(block.nonzero_size) else {
+        return false;
+    };
     for (index, mask) in block.mask_words.iter().enumerate() {
         if remaining == 0 {
             break;
         }
         let chunk_size = remaining.min(4);
-        let Ok(mut data) = read_bytes(block.offset + (index as i32 * 4), chunk_size) else {
+        let value_index = index;
+        let Ok(word_index) = i32::try_from(index) else {
+            return false;
+        };
+        let Some(offset_delta) = word_index.checked_mul(4) else {
+            return false;
+        };
+        let Some(offset) = block.offset.checked_add(offset_delta) else {
+            return false;
+        };
+        let Ok(mut data) = read_bytes(offset, chunk_size) else {
             return false;
         };
         if chunk_size < 4 {
             data <<= (4 - chunk_size) * 8;
         }
-        let Some(value) = block.value_words.get(index).copied() else {
+        let Some(value) = block.value_words.get(value_index).copied() else {
             return false;
         };
         if (mask & data) != value {
@@ -368,10 +383,9 @@ mod tests {
             if offset < 0 || size == 0 || size > 4 {
                 bail!("invalid read");
             }
-            let start = offset as usize;
-            let end = start
-                .checked_add(size as usize)
-                .ok_or_else(|| anyhow!("overflow"))?;
+            let start = usize::try_from(offset).map_err(|_| anyhow!("negative offset"))?;
+            let size = usize::try_from(size).map_err(|_| anyhow!("size overflow"))?;
+            let end = start.checked_add(size).ok_or_else(|| anyhow!("overflow"))?;
             let bytes = buf.get(start..end).ok_or_else(|| anyhow!("out of range"))?;
             Ok(bytes
                 .iter()

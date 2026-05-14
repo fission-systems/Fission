@@ -144,21 +144,29 @@ impl DecisionProbeEvaluator for CompiledDecisionProbeEvaluator<'_, '_> {
                 let byte_cnt = (bit_offset + bit_size + 7) / 8;
                 ensure_decision_probe_byte_width(byte_cnt, "SLA instruction bits")?;
                 let mut word = 0u64;
+                let byte_offset = usize::try_from(byte_offset)
+                    .map_err(|_| anyhow!("instruction bit probe byte offset exceeds usize"))?;
                 let start = self
                     .ctx
                     .cursor
-                    .checked_add(byte_offset as usize)
+                    .checked_add(byte_offset)
                     .ok_or_else(|| anyhow!("instruction bit probe cursor overflow"))?;
-                for i in 0..byte_cnt {
+                let byte_cnt_u32 = byte_cnt;
+                let byte_count = usize::try_from(byte_cnt_u32)
+                    .map_err(|_| anyhow!("instruction bit probe byte count exceeds usize"))?;
+                for i in 0..byte_count {
                     let absolute = start
-                        .checked_add(i as usize)
+                        .checked_add(i)
                         .ok_or_else(|| anyhow!("instruction bit probe range overflow"))?;
                     let byte = self.ctx.bytes.get(absolute).copied().ok_or_else(|| {
                         anyhow!("instruction bit read out of range at bit {start_bit}")
                     })?;
                     word = append_decision_probe_byte(word, byte)?;
                 }
-                let shift = (8 * byte_cnt) - bit_offset - bit_size;
+                let shift = (8 * byte_cnt_u32)
+                    .checked_sub(bit_offset)
+                    .and_then(|value| value.checked_sub(bit_size))
+                    .ok_or_else(|| anyhow!("instruction bit probe shift underflow"))?;
                 let value = (word >> shift) & ((1u64 << bit_size) - 1);
                 vec![decision_probe_value_u8(value, "SLA instruction bits")?]
             }
@@ -187,10 +195,15 @@ impl DecisionProbeEvaluator for CompiledDecisionProbeEvaluator<'_, '_> {
         let start = self
             .ctx
             .cursor
-            .checked_add_signed(offset as isize)
+            .checked_add_signed(
+                isize::try_from(offset)
+                    .map_err(|_| anyhow!("instruction byte read offset exceeds isize"))?,
+            )
             .ok_or_else(|| anyhow!("instruction byte read underflow at offset {offset}"))?;
         let mut word = 0u32;
-        for i in 0..size as usize {
+        let size = usize::try_from(size)
+            .map_err(|_| anyhow!("instruction byte read size exceeds usize"))?;
+        for i in 0..size {
             let absolute = start
                 .checked_add(i)
                 .ok_or_else(|| anyhow!("instruction byte read range overflow"))?;
@@ -208,7 +221,9 @@ impl DecisionProbeEvaluator for CompiledDecisionProbeEvaluator<'_, '_> {
         if offset < 0 {
             bail!("context byte read underflow at offset {offset}");
         }
-        packed_context_bytes(self.ctx.context_register, offset as u32, size)
+        let offset =
+            u32::try_from(offset).map_err(|_| anyhow!("context byte offset exceeds u32"))?;
+        packed_context_bytes(self.ctx.context_register, offset, size)
     }
 }
 
@@ -370,7 +385,9 @@ pub(super) fn constructor_matches(
                         let required_bytes = if *mask == 0 {
                             0usize
                         } else {
-                            (64usize - mask.leading_zeros() as usize).div_ceil(8)
+                            let leading = usize::try_from(mask.leading_zeros())
+                                .map_err(|_| anyhow!("mask leading-zero count exceeds usize"))?;
+                            (64usize - leading).div_ceil(8)
                         };
                         let offset = usize::try_from(*offset)
                             .map_err(|_| anyhow!("instruction constraint offset overflow"))?;
