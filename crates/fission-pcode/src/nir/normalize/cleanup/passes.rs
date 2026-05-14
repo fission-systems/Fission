@@ -678,6 +678,30 @@ mod tests {
     }
 
     #[test]
+    fn prune_unused_temp_bindings_keeps_side_effect_assignment_target() {
+        let mut func = HirFunction {
+            name: "test_side_effect_lhs_preserved".to_string(),
+            params: vec![],
+            locals: vec![preserved_temp_binding("xVar30", 64)],
+            return_type: int(32),
+            surface_return_type_name: None,
+            body: vec![HirStmt::Assign {
+                lhs: HirLValue::Var("xVar30".to_string()),
+                rhs: HirExpr::Call {
+                    target: "__pcodeop_294".to_string(),
+                    args: vec![],
+                    ty: int(64),
+                },
+            }],
+            ..Default::default()
+        };
+
+        assert!(!prune_unused_temp_bindings(&mut func));
+        assert_eq!(func.locals.len(), 1);
+        assert_eq!(func.locals[0].name, "xVar30");
+    }
+
+    #[test]
     fn inline_single_use_temps_does_not_cross_label_boundary() {
         let mut stmts = vec![
             HirStmt::Assign {
@@ -963,9 +987,11 @@ pub(crate) fn prune_unused_temp_bindings(func: &mut HirFunction) -> bool {
     let mut changed = false;
     func.locals.retain(|binding| {
         let used = count_uses_in_stmt_list(&func.body, &binding.name) > 0;
+        let assigned_side_effect =
+            stmt_list_assigns_var_from_side_effecting_expr(&func.body, &binding.name);
         let keep = should_keep_unused_temp_binding(
             is_trivial_temp_name(&binding.name),
-            used,
+            used || assigned_side_effect,
             binding
                 .initializer
                 .as_ref()
@@ -975,6 +1001,58 @@ pub(crate) fn prune_unused_temp_bindings(func: &mut HirFunction) -> bool {
         keep
     });
     changed
+}
+
+fn stmt_list_assigns_var_from_side_effecting_expr(stmts: &[HirStmt], name: &str) -> bool {
+    stmts
+        .iter()
+        .any(|stmt| stmt_assigns_var_from_side_effecting_expr(stmt, name))
+}
+
+fn stmt_assigns_var_from_side_effecting_expr(stmt: &HirStmt, name: &str) -> bool {
+    match stmt {
+        HirStmt::Assign {
+            lhs: HirLValue::Var(lhs_name),
+            rhs,
+        } => lhs_name == name && expr_has_side_effects(rhs),
+        HirStmt::Block(stmts)
+        | HirStmt::While { body: stmts, .. }
+        | HirStmt::DoWhile { body: stmts, .. } => {
+            stmt_list_assigns_var_from_side_effecting_expr(stmts, name)
+        }
+        HirStmt::If {
+            then_body,
+            else_body,
+            ..
+        } => {
+            stmt_list_assigns_var_from_side_effecting_expr(then_body, name)
+                || stmt_list_assigns_var_from_side_effecting_expr(else_body, name)
+        }
+        HirStmt::For {
+            init, update, body, ..
+        } => {
+            init.as_deref()
+                .is_some_and(|stmt| stmt_assigns_var_from_side_effecting_expr(stmt, name))
+                || update
+                    .as_deref()
+                    .is_some_and(|stmt| stmt_assigns_var_from_side_effecting_expr(stmt, name))
+                || stmt_list_assigns_var_from_side_effecting_expr(body, name)
+        }
+        HirStmt::Switch { cases, default, .. } => {
+            cases
+                .iter()
+                .any(|case| stmt_list_assigns_var_from_side_effecting_expr(&case.body, name))
+                || stmt_list_assigns_var_from_side_effecting_expr(default, name)
+        }
+        HirStmt::Assign { .. }
+        | HirStmt::VaStart { .. }
+        | HirStmt::Expr(_)
+        | HirStmt::Label(_)
+        | HirStmt::Goto(_)
+        | HirStmt::Return(_)
+        | HirStmt::Break
+        | HirStmt::Continue => false,
+    }
 }
 
 pub(crate) fn prune_unused_dead_local_bindings(func: &mut HirFunction) -> bool {

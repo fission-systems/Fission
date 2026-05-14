@@ -6,7 +6,7 @@
 
 use crate::pcode::{PcodeFunction, PcodeOp, PcodeOpcode, Varnode};
 use fission_loader::loader::LoadedBinary;
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::time::Instant;
 
 mod abi;
@@ -309,17 +309,374 @@ fn render_hir_function_with_global_decls(
     options: &MlilPreviewOptions,
 ) -> String {
     let decls = collect_referenced_global_decls(hir, options);
-    if decls.is_empty() {
+    let aggregate_typedefs = collect_referenced_aggregate_type_sizes(hir, decls.values());
+    let opaque_pcodeop_stubs = collect_opaque_pcodeop_stubs(hir);
+    if decls.is_empty() && aggregate_typedefs.is_empty() && opaque_pcodeop_stubs.is_empty() {
         return print_hir_function(hir);
     }
 
     let mut rendered = String::new();
+    for size in aggregate_typedefs {
+        rendered.push_str(&format!(
+            "typedef struct fission_agg{size} {{ unsigned char bytes[{size}]; }} fission_agg{size};\n"
+        ));
+    }
+    for (target, return_ty) in opaque_pcodeop_stubs {
+        rendered.push_str(&render_opaque_pcodeop_stub(&target, &return_ty));
+    }
     for (name, ty) in decls {
         rendered.push_str(&format!("{} {};\n", print_type(&ty), name));
     }
     rendered.push('\n');
     rendered.push_str(&print_hir_function(hir));
     rendered
+}
+
+fn collect_opaque_pcodeop_stubs(hir: &HirFunction) -> BTreeMap<String, NirType> {
+    let mut stubs = BTreeMap::new();
+    collect_opaque_pcodeop_stubs_from_stmts(&hir.body, &mut stubs);
+    stubs
+}
+
+fn collect_opaque_pcodeop_stubs_from_stmts(
+    stmts: &[HirStmt],
+    stubs: &mut BTreeMap<String, NirType>,
+) {
+    for stmt in stmts {
+        collect_opaque_pcodeop_stubs_from_stmt(stmt, stubs);
+    }
+}
+
+fn collect_opaque_pcodeop_stubs_from_stmt(stmt: &HirStmt, stubs: &mut BTreeMap<String, NirType>) {
+    match stmt {
+        HirStmt::Assign { lhs, rhs } => {
+            collect_opaque_pcodeop_stubs_from_lvalue(lhs, stubs);
+            collect_opaque_pcodeop_stubs_from_expr(rhs, stubs);
+        }
+        HirStmt::VaStart { va_list, .. }
+        | HirStmt::Expr(va_list)
+        | HirStmt::Return(Some(va_list)) => {
+            collect_opaque_pcodeop_stubs_from_expr(va_list, stubs);
+        }
+        HirStmt::Block(body) | HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
+            collect_opaque_pcodeop_stubs_from_stmts(body, stubs);
+        }
+        HirStmt::If {
+            cond,
+            then_body,
+            else_body,
+        } => {
+            collect_opaque_pcodeop_stubs_from_expr(cond, stubs);
+            collect_opaque_pcodeop_stubs_from_stmts(then_body, stubs);
+            collect_opaque_pcodeop_stubs_from_stmts(else_body, stubs);
+        }
+        HirStmt::For {
+            init,
+            cond,
+            update,
+            body,
+        } => {
+            if let Some(init) = init {
+                collect_opaque_pcodeop_stubs_from_stmt(init, stubs);
+            }
+            if let Some(cond) = cond {
+                collect_opaque_pcodeop_stubs_from_expr(cond, stubs);
+            }
+            if let Some(update) = update {
+                collect_opaque_pcodeop_stubs_from_stmt(update, stubs);
+            }
+            collect_opaque_pcodeop_stubs_from_stmts(body, stubs);
+        }
+        HirStmt::Switch {
+            expr,
+            cases,
+            default,
+        } => {
+            collect_opaque_pcodeop_stubs_from_expr(expr, stubs);
+            for case in cases {
+                collect_opaque_pcodeop_stubs_from_stmts(&case.body, stubs);
+            }
+            collect_opaque_pcodeop_stubs_from_stmts(default, stubs);
+        }
+        HirStmt::Label(_)
+        | HirStmt::Goto(_)
+        | HirStmt::Return(None)
+        | HirStmt::Break
+        | HirStmt::Continue => {}
+    }
+}
+
+fn collect_opaque_pcodeop_stubs_from_lvalue(
+    lhs: &HirLValue,
+    stubs: &mut BTreeMap<String, NirType>,
+) {
+    match lhs {
+        HirLValue::Var(_) => {}
+        HirLValue::Deref { ptr, .. } => collect_opaque_pcodeop_stubs_from_expr(ptr, stubs),
+        HirLValue::Index { base, index, .. } => {
+            collect_opaque_pcodeop_stubs_from_expr(base, stubs);
+            collect_opaque_pcodeop_stubs_from_expr(index, stubs);
+        }
+    }
+}
+
+fn collect_opaque_pcodeop_stubs_from_expr(expr: &HirExpr, stubs: &mut BTreeMap<String, NirType>) {
+    match expr {
+        HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) | HirExpr::Const(_, _) => {}
+        HirExpr::Cast { expr, .. }
+        | HirExpr::Unary { expr, .. }
+        | HirExpr::Load { ptr: expr, .. }
+        | HirExpr::PtrOffset { base: expr, .. }
+        | HirExpr::AggregateCopy { src: expr, .. } => {
+            collect_opaque_pcodeop_stubs_from_expr(expr, stubs);
+        }
+        HirExpr::Binary { lhs, rhs, .. }
+        | HirExpr::Index {
+            base: lhs,
+            index: rhs,
+            ..
+        } => {
+            collect_opaque_pcodeop_stubs_from_expr(lhs, stubs);
+            collect_opaque_pcodeop_stubs_from_expr(rhs, stubs);
+        }
+        HirExpr::Call { target, args, ty } => {
+            if target.starts_with("__pcodeop_") {
+                let entry = stubs.entry(target.clone()).or_insert_with(|| ty.clone());
+                *entry = merge_opaque_pcodeop_return_type(entry, ty);
+            }
+            for arg in args {
+                collect_opaque_pcodeop_stubs_from_expr(arg, stubs);
+            }
+        }
+        HirExpr::Select {
+            cond,
+            then_expr,
+            else_expr,
+            ..
+        } => {
+            collect_opaque_pcodeop_stubs_from_expr(cond, stubs);
+            collect_opaque_pcodeop_stubs_from_expr(then_expr, stubs);
+            collect_opaque_pcodeop_stubs_from_expr(else_expr, stubs);
+        }
+    }
+}
+
+fn merge_opaque_pcodeop_return_type(existing: &NirType, next: &NirType) -> NirType {
+    if existing == next || *next == NirType::Unknown {
+        return existing.clone();
+    }
+    if *existing == NirType::Unknown {
+        return next.clone();
+    }
+    match (existing, next) {
+        (NirType::Aggregate { .. }, _) | (_, NirType::Aggregate { .. }) => existing.clone(),
+        (NirType::Ptr(_), _) | (_, NirType::Ptr(_)) => existing.clone(),
+        (
+            NirType::Int {
+                bits: existing_bits,
+                signed: existing_signed,
+            },
+            NirType::Int {
+                bits: next_bits,
+                signed: next_signed,
+            },
+        ) => NirType::Int {
+            bits: (*existing_bits).max(*next_bits),
+            signed: *existing_signed || *next_signed,
+        },
+        (
+            NirType::Float {
+                bits: existing_bits,
+            },
+            NirType::Float { bits: next_bits },
+        ) => NirType::Float {
+            bits: (*existing_bits).max(*next_bits),
+        },
+        _ => existing.clone(),
+    }
+}
+
+fn render_opaque_pcodeop_stub(target: &str, return_ty: &NirType) -> String {
+    let return_type = opaque_pcodeop_return_type_name(return_ty);
+    let return_stmt = opaque_pcodeop_default_return(return_ty);
+    format!("static inline {return_type} {target}() {{ {return_stmt} }}\n")
+}
+
+fn opaque_pcodeop_return_type_name(return_ty: &NirType) -> String {
+    match return_ty {
+        NirType::Unknown => "ulonglong".to_string(),
+        _ => print_type(return_ty),
+    }
+}
+
+fn opaque_pcodeop_default_return(return_ty: &NirType) -> String {
+    match return_ty {
+        NirType::Aggregate { size, .. } => {
+            format!("fission_agg{size} out = {{0}}; return out;")
+        }
+        NirType::Ptr(_) => format!("return ({})0;", print_type(return_ty)),
+        NirType::Float { .. } => "return 0.0;".to_string(),
+        NirType::Bool => "return false;".to_string(),
+        NirType::Unknown | NirType::Int { .. } => "return 0;".to_string(),
+    }
+}
+
+fn collect_referenced_aggregate_type_sizes<'a>(
+    hir: &'a HirFunction,
+    global_decl_types: impl IntoIterator<Item = &'a NirType>,
+) -> BTreeSet<u32> {
+    let mut sizes = BTreeSet::new();
+    collect_aggregate_sizes_from_type(&hir.return_type, &mut sizes);
+    for binding in hir.params.iter().chain(hir.locals.iter()) {
+        collect_aggregate_sizes_from_type(&binding.ty, &mut sizes);
+    }
+    for ty in global_decl_types {
+        collect_aggregate_sizes_from_type(ty, &mut sizes);
+    }
+    collect_aggregate_sizes_from_stmts(&hir.body, &mut sizes);
+    sizes
+}
+
+fn collect_aggregate_sizes_from_type(ty: &NirType, sizes: &mut BTreeSet<u32>) {
+    match ty {
+        NirType::Ptr(inner) => collect_aggregate_sizes_from_type(inner, sizes),
+        NirType::Aggregate { size, .. } => {
+            sizes.insert(*size);
+        }
+        NirType::Unknown | NirType::Bool | NirType::Int { .. } | NirType::Float { .. } => {}
+    }
+}
+
+fn collect_aggregate_sizes_from_stmts(stmts: &[HirStmt], sizes: &mut BTreeSet<u32>) {
+    for stmt in stmts {
+        collect_aggregate_sizes_from_stmt(stmt, sizes);
+    }
+}
+
+fn collect_aggregate_sizes_from_stmt(stmt: &HirStmt, sizes: &mut BTreeSet<u32>) {
+    match stmt {
+        HirStmt::Assign { lhs, rhs } => {
+            collect_aggregate_sizes_from_lvalue(lhs, sizes);
+            collect_aggregate_sizes_from_expr(rhs, sizes);
+        }
+        HirStmt::VaStart { va_list, .. }
+        | HirStmt::Expr(va_list)
+        | HirStmt::Return(Some(va_list)) => {
+            collect_aggregate_sizes_from_expr(va_list, sizes);
+        }
+        HirStmt::Block(body) | HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
+            collect_aggregate_sizes_from_stmts(body, sizes);
+        }
+        HirStmt::If {
+            cond,
+            then_body,
+            else_body,
+        } => {
+            collect_aggregate_sizes_from_expr(cond, sizes);
+            collect_aggregate_sizes_from_stmts(then_body, sizes);
+            collect_aggregate_sizes_from_stmts(else_body, sizes);
+        }
+        HirStmt::For {
+            init,
+            cond,
+            update,
+            body,
+        } => {
+            if let Some(init) = init {
+                collect_aggregate_sizes_from_stmt(init, sizes);
+            }
+            if let Some(cond) = cond {
+                collect_aggregate_sizes_from_expr(cond, sizes);
+            }
+            if let Some(update) = update {
+                collect_aggregate_sizes_from_stmt(update, sizes);
+            }
+            collect_aggregate_sizes_from_stmts(body, sizes);
+        }
+        HirStmt::Switch {
+            expr,
+            cases,
+            default,
+        } => {
+            collect_aggregate_sizes_from_expr(expr, sizes);
+            for case in cases {
+                collect_aggregate_sizes_from_stmts(&case.body, sizes);
+            }
+            collect_aggregate_sizes_from_stmts(default, sizes);
+        }
+        HirStmt::Label(_)
+        | HirStmt::Goto(_)
+        | HirStmt::Return(None)
+        | HirStmt::Break
+        | HirStmt::Continue => {}
+    }
+}
+
+fn collect_aggregate_sizes_from_lvalue(lhs: &HirLValue, sizes: &mut BTreeSet<u32>) {
+    match lhs {
+        HirLValue::Var(_) => {}
+        HirLValue::Deref { ptr, ty } => {
+            collect_aggregate_sizes_from_type(ty, sizes);
+            collect_aggregate_sizes_from_expr(ptr, sizes);
+        }
+        HirLValue::Index {
+            base,
+            index,
+            elem_ty,
+        } => {
+            collect_aggregate_sizes_from_type(elem_ty, sizes);
+            collect_aggregate_sizes_from_expr(base, sizes);
+            collect_aggregate_sizes_from_expr(index, sizes);
+        }
+    }
+}
+
+fn collect_aggregate_sizes_from_expr(expr: &HirExpr, sizes: &mut BTreeSet<u32>) {
+    match expr {
+        HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) | HirExpr::Const(_, _) => {}
+        HirExpr::Cast { ty, expr }
+        | HirExpr::Unary { ty, expr, .. }
+        | HirExpr::Load { ty, ptr: expr } => {
+            collect_aggregate_sizes_from_type(ty, sizes);
+            collect_aggregate_sizes_from_expr(expr, sizes);
+        }
+        HirExpr::Binary { lhs, rhs, ty, .. } => {
+            collect_aggregate_sizes_from_type(ty, sizes);
+            collect_aggregate_sizes_from_expr(lhs, sizes);
+            collect_aggregate_sizes_from_expr(rhs, sizes);
+        }
+        HirExpr::Call { args, ty, .. } => {
+            collect_aggregate_sizes_from_type(ty, sizes);
+            for arg in args {
+                collect_aggregate_sizes_from_expr(arg, sizes);
+            }
+        }
+        HirExpr::PtrOffset { base, .. } => collect_aggregate_sizes_from_expr(base, sizes),
+        HirExpr::Index {
+            base,
+            index,
+            elem_ty,
+        } => {
+            collect_aggregate_sizes_from_type(elem_ty, sizes);
+            collect_aggregate_sizes_from_expr(base, sizes);
+            collect_aggregate_sizes_from_expr(index, sizes);
+        }
+        HirExpr::AggregateCopy { src, size } => {
+            sizes.insert(*size);
+            collect_aggregate_sizes_from_expr(src, sizes);
+        }
+        HirExpr::Select {
+            cond,
+            then_expr,
+            else_expr,
+            ty,
+        } => {
+            collect_aggregate_sizes_from_type(ty, sizes);
+            collect_aggregate_sizes_from_expr(cond, sizes);
+            collect_aggregate_sizes_from_expr(then_expr, sizes);
+            collect_aggregate_sizes_from_expr(else_expr, sizes);
+        }
+    }
 }
 
 fn recover_global_symbol_accesses(hir: &mut HirFunction, options: &MlilPreviewOptions) {
@@ -982,6 +1339,82 @@ mod global_decl_tests {
             render_hir_function_with_global_decls(&hir, &preview_options_with_global("\"hello\""));
 
         assert!(!rendered.starts_with("undefined \"hello\";"), "{rendered}");
+    }
+
+    #[test]
+    fn render_hir_declares_referenced_aggregate_placeholder_types() {
+        let hir = HirFunction {
+            name: "aggregate_user".to_string(),
+            params: vec![NirBinding {
+                name: "param_1".to_string(),
+                ty: NirType::Ptr(Box::new(NirType::Aggregate {
+                    size: 16,
+                    fields: Vec::new(),
+                })),
+                surface_type_name: None,
+                origin: Some(NirBindingOrigin::ParamIndex(0)),
+                initializer: None,
+            }],
+            return_type: NirType::Unknown,
+            body: vec![HirStmt::Return(None)],
+            ..HirFunction::default()
+        };
+        let rendered =
+            render_hir_function_with_global_decls(&hir, &preview_options_with_global("unused"));
+
+        assert!(
+            rendered.starts_with(
+                "typedef struct fission_agg16 { unsigned char bytes[16]; } fission_agg16;\n\n"
+            ),
+            "{rendered}"
+        );
+        assert!(rendered.contains("fission_agg16 * param_1"), "{rendered}");
+    }
+
+    #[test]
+    fn render_hir_declares_opaque_pcodeop_stub_for_aggregate_return() {
+        let hir = HirFunction {
+            name: "userop_aggregate".to_string(),
+            locals: vec![NirBinding {
+                name: "xVar30".to_string(),
+                ty: NirType::Aggregate {
+                    size: 16,
+                    fields: Vec::new(),
+                },
+                surface_type_name: None,
+                origin: Some(NirBindingOrigin::TempPreserved),
+                initializer: None,
+            }],
+            return_type: NirType::Unknown,
+            body: vec![HirStmt::Assign {
+                lhs: HirLValue::Var("xVar30".to_string()),
+                rhs: HirExpr::Call {
+                    target: "__pcodeop_294".to_string(),
+                    args: Vec::new(),
+                    ty: NirType::Aggregate {
+                        size: 16,
+                        fields: Vec::new(),
+                    },
+                },
+            }],
+            ..HirFunction::default()
+        };
+        let rendered =
+            render_hir_function_with_global_decls(&hir, &preview_options_with_global("unused"));
+
+        assert!(
+            rendered.starts_with(
+                "typedef struct fission_agg16 { unsigned char bytes[16]; } fission_agg16;\n"
+            ),
+            "{rendered}"
+        );
+        assert!(
+            rendered.contains(
+                "static inline fission_agg16 __pcodeop_294() { fission_agg16 out = {0}; return out; }"
+            ),
+            "{rendered}"
+        );
+        assert!(rendered.contains("xVar30 = __pcodeop_294();"), "{rendered}");
     }
 }
 
