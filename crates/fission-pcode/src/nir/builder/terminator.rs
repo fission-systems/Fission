@@ -850,6 +850,11 @@ impl<'a> PreviewBuilder<'a> {
             && let Some(input) = block.ops[term_idx].inputs.last()
             && self.return_input_is_control_target(input)
         {
+            if self.return_input_is_stack_target(input)
+                && !self.return_join_has_primary_return_evidence(idx)
+            {
+                return Ok(None);
+            }
             return self.live_primary_return_register_expr(block, term_idx);
         }
         if self.uses_primary_return_registers()

@@ -1551,6 +1551,71 @@ fn aarch64_return_join_with_terminal_store_does_not_synthesize_live_return() {
     assert!(!code.contains("return param_1"), "{code}");
 }
 
+#[test]
+fn win64_return_target_load_without_return_register_def_is_void() {
+    let options = preview_options();
+    let rsp = Varnode {
+        space_id: RUST_SLEIGH_REGISTER_SPACE_ID,
+        offset: 0x20,
+        size: 8,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let ret_target = Varnode {
+        space_id: RUST_SLEIGH_REGISTER_SPACE_ID,
+        offset: 0x288,
+        size: 8,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let func = PcodeFunction {
+        blocks: vec![
+            PcodeBasicBlock {
+                index: 0,
+                start_address: 0x140001000,
+                successors: vec![1],
+                ops: vec![PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::Branch,
+                    address: 0x140001000,
+                    output: None,
+                    inputs: vec![cst(0x140001010, 8)],
+                    asm_mnemonic: None,
+                }],
+            },
+            PcodeBasicBlock {
+                index: 1,
+                start_address: 0x140001010,
+                successors: vec![],
+                ops: vec![
+                    PcodeOp {
+                        seq_num: 1,
+                        opcode: PcodeOpcode::Load,
+                        address: 0x140001010,
+                        output: Some(ret_target.clone()),
+                        inputs: vec![cst(3, 8), rsp],
+                        asm_mnemonic: None,
+                    },
+                    PcodeOp {
+                        seq_num: 2,
+                        opcode: PcodeOpcode::Return,
+                        address: 0x140001010,
+                        output: None,
+                        inputs: vec![ret_target],
+                        asm_mnemonic: None,
+                    },
+                ],
+            },
+        ],
+    };
+
+    let code = render_mlil_preview(&func, "leaf_void", 0x140001000, &options)
+        .expect("preview render");
+    assert!(code.contains("void leaf_void"), "{code}");
+    assert!(code.contains("return;"), "{code}");
+    assert!(!code.contains("return rax"), "{code}");
+}
+
 fn aarch64_preview_options() -> MlilPreviewOptions {
     let mut options = preview_options();
     options.calling_convention = CallingConvention::AArch64;
