@@ -1052,8 +1052,7 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                     *bit_width,
                 )?);
                 let value = if *sign_extend {
-                    let shift = 64 - bit_width;
-                    ((val << shift) as i64 >> shift) as u64
+                    sign_extend_bits(val, *bit_width)
                 } else {
                     val
                 };
