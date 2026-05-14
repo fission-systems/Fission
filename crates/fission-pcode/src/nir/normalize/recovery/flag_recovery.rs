@@ -24,9 +24,12 @@
 /// | JNP   | `!pf`               | (!parity)            |
 ///
 /// Algorithm:
-/// 1. Scan all assignments to flag variables; record definitions for flags with
-///    EXACTLY ONE assignment (conservative — skip ambiguous/re-assigned flags).
-/// 2. Walk every branch condition in the HIR; pattern-match against the table above.
+/// 1. Walk straight-line statement streams with a local reaching-definition map
+///    for raw flags. Conditions use the most recent flag definitions in that
+///    stream. Labels and terminating control-flow statements clear the map so
+///    definitions never cross a possible non-linear predecessor.
+/// 2. Also keep the older single-definition scan as a whole-function fallback
+///    for already-structured shapes where a flag has only one definition.
 /// 3. Reconstruct the high-level expression using the flag definitions.
 /// 4. Return `true` if any substitution was made (caller re-runs cleanup passes).
 use super::super::*;
@@ -418,6 +421,95 @@ fn recover_in_stmts(stmts: &mut Vec<HirStmt>, defs: &HashMap<String, HirExpr>, c
     }
 }
 
+fn recover_in_stmts_with_reaching_defs(
+    stmts: &mut Vec<HirStmt>,
+    defs: &mut HashMap<String, HirExpr>,
+    changed: &mut bool,
+) {
+    for stmt in stmts.iter_mut() {
+        match stmt {
+            HirStmt::Assign {
+                lhs: HirLValue::Var(name),
+                rhs,
+            } if is_flag_var(name) => {
+                defs.insert(name.clone(), rhs.clone());
+            }
+            HirStmt::Block(body) => {
+                let mut nested_defs = defs.clone();
+                recover_in_stmts_with_reaching_defs(body, &mut nested_defs, changed);
+            }
+            HirStmt::If {
+                cond,
+                then_body,
+                else_body,
+            } => {
+                recover_in_cond(cond, defs, changed);
+                let mut then_defs = defs.clone();
+                recover_in_stmts_with_reaching_defs(then_body, &mut then_defs, changed);
+                let mut else_defs = defs.clone();
+                recover_in_stmts_with_reaching_defs(else_body, &mut else_defs, changed);
+            }
+            HirStmt::While { cond, body } => {
+                recover_in_cond(cond, defs, changed);
+                let mut body_defs = defs.clone();
+                recover_in_stmts_with_reaching_defs(body, &mut body_defs, changed);
+            }
+            HirStmt::DoWhile { body, cond } => {
+                let mut body_defs = defs.clone();
+                recover_in_stmts_with_reaching_defs(body, &mut body_defs, changed);
+                recover_in_cond(cond, &body_defs, changed);
+            }
+            HirStmt::For {
+                init,
+                cond,
+                update,
+                body,
+            } => {
+                let mut loop_defs = defs.clone();
+                if let Some(init) = init {
+                    recover_in_stmts_box_with_reaching_defs(init, &mut loop_defs, changed);
+                }
+                if let Some(cond) = cond {
+                    recover_in_cond(cond, &loop_defs, changed);
+                }
+                let mut body_defs = loop_defs.clone();
+                recover_in_stmts_with_reaching_defs(body, &mut body_defs, changed);
+                if let Some(update) = update {
+                    recover_in_stmts_box_with_reaching_defs(update, &mut body_defs, changed);
+                }
+            }
+            HirStmt::Switch { cases, default, .. } => {
+                for case in cases {
+                    let mut case_defs = defs.clone();
+                    recover_in_stmts_with_reaching_defs(&mut case.body, &mut case_defs, changed);
+                }
+                let mut default_defs = defs.clone();
+                recover_in_stmts_with_reaching_defs(default, &mut default_defs, changed);
+            }
+            HirStmt::Label(_)
+            | HirStmt::Goto(_)
+            | HirStmt::Return(_)
+            | HirStmt::Break
+            | HirStmt::Continue => {
+                defs.clear();
+            }
+            _ => {}
+        }
+    }
+}
+
+fn recover_in_stmts_box_with_reaching_defs(
+    stmt: &mut Box<HirStmt>,
+    defs: &mut HashMap<String, HirExpr>,
+    changed: &mut bool,
+) {
+    let mut tmp = vec![*stmt.clone()];
+    recover_in_stmts_with_reaching_defs(&mut tmp, defs, changed);
+    if let Some(s) = tmp.into_iter().next() {
+        **stmt = s;
+    }
+}
+
 // ── Dead flag assignment elimination ─────────────────────────────────────────
 
 /// Remove assignments to x86 flag variables that have zero rvalue uses in the
@@ -647,12 +739,14 @@ fn expr_has_flag_side_effects(expr: &HirExpr) -> bool {
 /// follow up with `defuse_dead_assignment_pass` to remove now-dead flag
 /// assignments.
 pub(crate) fn apply_flag_recovery_pass(func: &mut HirFunction) -> bool {
-    let defs = collect_single_defs(&func.body);
-    if defs.is_empty() {
-        return false;
-    }
     let mut changed = false;
-    recover_in_stmts(&mut func.body, &defs, &mut changed);
+    let mut reaching_defs = HashMap::new();
+    recover_in_stmts_with_reaching_defs(&mut func.body, &mut reaching_defs, &mut changed);
+
+    let defs = collect_single_defs(&func.body);
+    if !defs.is_empty() {
+        recover_in_stmts(&mut func.body, &defs, &mut changed);
+    }
     if changed {
         // Remove assignments to flag variables that are now dead after recovery.
         remove_dead_flag_assigns(func);
@@ -670,4 +764,95 @@ pub(super) fn is_x86_flag_variable(name: &str) -> bool {
 /// Returns the set of all x86 flag variable names.
 pub(super) fn x86_flag_names() -> &'static [&'static str] {
     FLAG_NAMES
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn var(name: &str) -> HirExpr {
+        HirExpr::Var(name.to_string())
+    }
+
+    fn int(value: i64) -> HirExpr {
+        HirExpr::Const(
+            value,
+            NirType::Int {
+                bits: 32,
+                signed: false,
+            },
+        )
+    }
+
+    fn eq(lhs: HirExpr, rhs: HirExpr) -> HirExpr {
+        bool_binary(HirBinaryOp::Eq, lhs, rhs)
+    }
+
+    fn not(expr: HirExpr) -> HirExpr {
+        HirExpr::Unary {
+            op: HirUnaryOp::Not,
+            expr: Box::new(expr),
+            ty: NirType::Bool,
+        }
+    }
+
+    fn assign(name: &str, rhs: HirExpr) -> HirStmt {
+        HirStmt::Assign {
+            lhs: HirLValue::Var(name.to_string()),
+            rhs,
+        }
+    }
+
+    fn first_if_cond(func: &HirFunction) -> &HirExpr {
+        func.body
+            .iter()
+            .find_map(|stmt| match stmt {
+                HirStmt::If { cond, .. } => Some(cond),
+                _ => None,
+            })
+            .expect("function contains if")
+    }
+
+    #[test]
+    fn local_reaching_flag_recovery_uses_latest_straight_line_definition() {
+        let mut func = HirFunction {
+            body: vec![
+                assign("zf", eq(var("stale_row"), var("stale_limit"))),
+                assign("tmp", int(0)),
+                assign("zf", eq(var("row"), var("limit"))),
+                HirStmt::If {
+                    cond: not(var("zf")),
+                    then_body: Vec::new(),
+                    else_body: Vec::new(),
+                },
+            ],
+            ..HirFunction::default()
+        };
+
+        assert!(apply_flag_recovery_pass(&mut func));
+        assert_eq!(
+            first_if_cond(&func),
+            &bool_binary(HirBinaryOp::Ne, var("row"), var("limit"))
+        );
+    }
+
+    #[test]
+    fn local_reaching_flag_recovery_does_not_cross_label_boundary() {
+        let mut func = HirFunction {
+            body: vec![
+                assign("zf", eq(var("stale_row"), var("stale_limit"))),
+                HirStmt::Label("join".to_string()),
+                HirStmt::If {
+                    cond: not(var("zf")),
+                    then_body: Vec::new(),
+                    else_body: Vec::new(),
+                },
+                assign("zf", eq(var("later_row"), var("later_limit"))),
+            ],
+            ..HirFunction::default()
+        };
+
+        assert!(!apply_flag_recovery_pass(&mut func));
+        assert_eq!(first_if_cond(&func), &not(var("zf")));
+    }
 }
