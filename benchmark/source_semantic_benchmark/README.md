@@ -103,6 +103,20 @@ manifest.
 - `static_similarity_component_averages` and
   `static_similarity_component_average_percent`: static similarity split into
   control-flow, operator, call, constant, memory, and signature token families.
+- `static_similarity_gap_totals`: coverage-aware feature accounting for the
+  same static comparison, including source/decompiler feature totals,
+  intersection/union totals, missing feature count/rate, extra feature
+  count/rate, and top missing/extra features. Missing source features are
+  included in the denominator, so absent semantics are penalized.
+- `static_similarity_gap_component_totals`: the same missing/extra accounting
+  split by static feature family.
+- `behavior_case_metrics`: dynamic behavior at case granularity, including
+  total/pass/fail case counts, case pass rate, and rows where at least one case
+  passed despite an overall mismatch.
+- `score_distribution`: row counts in `zero`, `low`, `medium`, `high`, and
+  `perfect` semantic-score buckets.
+- `debug_quality_evidence_nonzero_rows`: row counts for nonzero NIR/debug
+  evidence counters, complementing `debug_quality_evidence_totals`.
 - `harness_cost_metrics`: decompile, behavior compile, behavior run, and
   behavior wall-time totals/averages, plus behavior cache status aggregation.
 

@@ -1400,6 +1400,34 @@ def multiset_jaccard(left: Counter[str], right: Counter[str]) -> float:
     return round(inter / union, 6) if union else 1.0
 
 
+def multiset_gap_details(left: Counter[str], right: Counter[str], top_limit: int = 12) -> dict[str, Any]:
+    keys = set(left) | set(right)
+    intersection = sum(min(left[key], right[key]) for key in keys)
+    union = sum(max(left[key], right[key]) for key in keys)
+    missing = Counter({key: left[key] - right[key] for key in keys if left[key] > right[key]})
+    extra = Counter({key: right[key] - left[key] for key in keys if right[key] > left[key]})
+    missing_total = sum(missing.values())
+    extra_total = sum(extra.values())
+    return {
+        "source_feature_total": sum(left.values()),
+        "decomp_feature_total": sum(right.values()),
+        "intersection_feature_total": intersection,
+        "union_feature_total": union,
+        "missing_feature_total": missing_total,
+        "extra_feature_total": extra_total,
+        "missing_feature_rate": round(missing_total / sum(left.values()), 6) if left else 0.0,
+        "extra_feature_rate": round(extra_total / sum(right.values()), 6) if right else 0.0,
+        "top_missing_features": [
+            {"feature": feature, "count": count}
+            for feature, count in missing.most_common(top_limit)
+        ],
+        "top_extra_features": [
+            {"feature": feature, "count": count}
+            for feature, count in extra.most_common(top_limit)
+        ],
+    }
+
+
 STATIC_SIMILARITY_COMPONENTS: dict[str, tuple[str, ...]] = {
     "control_flow": ("ctrl:",),
     "operator": ("op:",),
@@ -1417,6 +1445,17 @@ def fingerprint_subset(fp: Counter[str], prefixes: tuple[str, ...]) -> Counter[s
 def static_similarity_components(source_fp: Counter[str], decomp_fp: Counter[str]) -> dict[str, float]:
     return {
         name: multiset_jaccard(fingerprint_subset(source_fp, prefixes), fingerprint_subset(decomp_fp, prefixes))
+        for name, prefixes in STATIC_SIMILARITY_COMPONENTS.items()
+    }
+
+
+def static_similarity_gap_components(source_fp: Counter[str], decomp_fp: Counter[str]) -> dict[str, dict[str, Any]]:
+    return {
+        name: multiset_gap_details(
+            fingerprint_subset(source_fp, prefixes),
+            fingerprint_subset(decomp_fp, prefixes),
+            top_limit=6,
+        )
         for name, prefixes in STATIC_SIMILARITY_COMPONENTS.items()
     }
 
@@ -1965,9 +2004,28 @@ def run_behavior_check(
         oracle_lines = [line.strip() for line in oracle["stdout"].splitlines() if line.strip()]
         candidate_lines = [line.strip() for line in candidate["stdout"].splitlines() if line.strip()]
         passed = oracle_lines == candidate_lines
+        matched_cases = sum(
+            1
+            for expected, actual in zip(oracle_lines, candidate_lines, strict=False)
+            if expected == actual
+        )
+        compared_cases = max(len(oracle_lines), len(candidate_lines), len(cases))
+        first_mismatch_index = next(
+            (
+                index
+                for index in range(compared_cases)
+                if (oracle_lines[index] if index < len(oracle_lines) else None)
+                != (candidate_lines[index] if index < len(candidate_lines) else None)
+            ),
+            None,
+        )
         return maybe_attach_artifacts({
             "status": "pass" if passed else "mismatch",
             "score": 1.0 if passed else 0.0,
+            "case_pass_count": matched_cases,
+            "case_fail_count": max(0, compared_cases - matched_cases),
+            "case_pass_rate": round(matched_cases / compared_cases, 6) if compared_cases else 0.0,
+            "first_mismatch_index": first_mismatch_index,
             "cases": serialize_behavior_cases(cases),
             "oracle": oracle_lines,
             "candidate": candidate_lines,
@@ -2011,9 +2069,17 @@ def summarize(rows: list[dict[str, Any]], manifest_name: str, entries: list[Benc
         if row.get("mapping_status") == "matched"
     )
     static_component_sums: Counter[str] = Counter()
+    static_gap_totals: Counter[str] = Counter()
+    static_gap_component_totals: dict[str, Counter[str]] = {
+        component: Counter() for component in STATIC_SIMILARITY_COMPONENTS
+    }
+    static_missing_feature_counts: Counter[str] = Counter()
+    static_extra_feature_counts: Counter[str] = Counter()
+    score_distribution = Counter()
     debug_owner_bucket_counts: Counter[str] = Counter()
     debug_stage_status_counts: Counter[str] = Counter()
     debug_quality_evidence_totals: Counter[str] = Counter()
+    debug_quality_evidence_nonzero_rows: Counter[str] = Counter()
     debug_template_source_totals: Counter[str] = Counter()
     by_language: dict[str, dict[str, Any]] = {}
     by_tag: dict[str, dict[str, Any]] = {}
@@ -2027,9 +2093,55 @@ def summarize(rows: list[dict[str, Any]], manifest_name: str, entries: list[Benc
         bucket["score_sum"] += float(row.get("semantic_score", 0.0) or 0.0)
 
     for row in rows:
+        score = float(row.get("semantic_score", 0.0) or 0.0)
+        if score == 1.0:
+            score_distribution["perfect"] += 1
+        elif score == 0.0:
+            score_distribution["zero"] += 1
+        elif score < 0.25:
+            score_distribution["low"] += 1
+        elif score < 0.75:
+            score_distribution["medium"] += 1
+        else:
+            score_distribution["high"] += 1
         for component, value in (row.get("static_similarity_components") or {}).items():
             if isinstance(value, int | float):
                 static_component_sums[component] += float(value)
+        static_gaps = row.get("static_similarity_gaps")
+        if isinstance(static_gaps, dict):
+            for key in [
+                "source_feature_total",
+                "decomp_feature_total",
+                "intersection_feature_total",
+                "union_feature_total",
+                "missing_feature_total",
+                "extra_feature_total",
+            ]:
+                value = static_gaps.get(key)
+                if isinstance(value, int | float):
+                    static_gap_totals[key] += value
+            for item in static_gaps.get("top_missing_features") or []:
+                if isinstance(item, dict) and isinstance(item.get("feature"), str) and isinstance(item.get("count"), int | float):
+                    static_missing_feature_counts[item["feature"]] += item["count"]
+            for item in static_gaps.get("top_extra_features") or []:
+                if isinstance(item, dict) and isinstance(item.get("feature"), str) and isinstance(item.get("count"), int | float):
+                    static_extra_feature_counts[item["feature"]] += item["count"]
+        gap_components = row.get("static_similarity_gap_components")
+        if isinstance(gap_components, dict):
+            for component, details in gap_components.items():
+                if component not in static_gap_component_totals or not isinstance(details, dict):
+                    continue
+                for key in [
+                    "source_feature_total",
+                    "decomp_feature_total",
+                    "intersection_feature_total",
+                    "union_feature_total",
+                    "missing_feature_total",
+                    "extra_feature_total",
+                ]:
+                    value = details.get(key)
+                    if isinstance(value, int | float):
+                        static_gap_component_totals[component][key] += value
         lang = row["language"]
         bucket = by_language.setdefault(
             lang,
@@ -2058,6 +2170,8 @@ def summarize(rows: list[dict[str, Any]], manifest_name: str, entries: list[Benc
                 for key, value in quality.items():
                     if isinstance(value, int | float):
                         debug_quality_evidence_totals[key] += value
+                        if value != 0:
+                            debug_quality_evidence_nonzero_rows[key] += 1
             pipeline = debug_decomp.get("rust_sleigh_pipeline")
             template_sources = (
                 pipeline.get("template_source_counts")
@@ -2103,6 +2217,59 @@ def summarize(rows: list[dict[str, Any]], manifest_name: str, entries: list[Benc
         for row in rows
         if isinstance(row.get("behavior", {}).get("wall_sec"), int | float)
     ]
+    behavior_case_total = sum(
+        int(row.get("behavior", {}).get("case_count") or 0)
+        for row in rows
+        if isinstance(row.get("behavior"), dict)
+    )
+    behavior_case_pass_total = sum(
+        int(row.get("behavior", {}).get("case_pass_count") or 0)
+        for row in rows
+        if isinstance(row.get("behavior"), dict)
+    )
+    behavior_case_fail_total = sum(
+        int(row.get("behavior", {}).get("case_fail_count") or 0)
+        for row in rows
+        if isinstance(row.get("behavior"), dict)
+    )
+    partial_behavior_rows = sum(
+        1
+        for row in rows
+        if row.get("behavior", {}).get("status") == "mismatch"
+        and int(row.get("behavior", {}).get("case_pass_count") or 0) > 0
+    )
+    static_source_total = float(static_gap_totals.get("source_feature_total", 0.0) or 0.0)
+    static_decomp_total = float(static_gap_totals.get("decomp_feature_total", 0.0) or 0.0)
+    static_gap_summary = dict(sorted(static_gap_totals.items()))
+    static_gap_summary["missing_feature_rate"] = round(
+        float(static_gap_totals.get("missing_feature_total", 0.0) or 0.0) / static_source_total,
+        6,
+    ) if static_source_total else 0.0
+    static_gap_summary["extra_feature_rate"] = round(
+        float(static_gap_totals.get("extra_feature_total", 0.0) or 0.0) / static_decomp_total,
+        6,
+    ) if static_decomp_total else 0.0
+    static_gap_summary["top_missing_features"] = [
+        {"feature": feature, "count": count}
+        for feature, count in static_missing_feature_counts.most_common(20)
+    ]
+    static_gap_summary["top_extra_features"] = [
+        {"feature": feature, "count": count}
+        for feature, count in static_extra_feature_counts.most_common(20)
+    ]
+    static_gap_component_summary: dict[str, dict[str, Any]] = {}
+    for component, totals in static_gap_component_totals.items():
+        component_source_total = float(totals.get("source_feature_total", 0.0) or 0.0)
+        component_decomp_total = float(totals.get("decomp_feature_total", 0.0) or 0.0)
+        static_gap_component_summary[component] = dict(sorted(totals.items()))
+        static_gap_component_summary[component]["missing_feature_rate"] = round(
+            float(totals.get("missing_feature_total", 0.0) or 0.0) / component_source_total,
+            6,
+        ) if component_source_total else 0.0
+        static_gap_component_summary[component]["extra_feature_rate"] = round(
+            float(totals.get("extra_feature_total", 0.0) or 0.0) / component_decomp_total,
+            6,
+        ) if component_decomp_total else 0.0
     return {
         "manifest": manifest_name,
         "entry_count": len(entries),
@@ -2141,6 +2308,7 @@ def summarize(rows: list[dict[str, Any]], manifest_name: str, entries: list[Benc
         "decomp_cache_status_counts": dict(sorted(decomp_cache_status_counts.items())),
         "behavior_cache_status_counts": dict(sorted(behavior_cache_status_counts.items())),
         "zero_credit_breakdown": dict(sorted(zero_credit_breakdown.items())),
+        "score_distribution": dict(sorted(score_distribution.items())),
         "stage_first_failure_counts": dict(sorted(stage_first_failure_counts.items())),
         "static_similarity_component_averages": {
             component: round(static_component_sums[component] / total, 6) if total else 0.0
@@ -2149,6 +2317,17 @@ def summarize(rows: list[dict[str, Any]], manifest_name: str, entries: list[Benc
         "static_similarity_component_average_percent": {
             component: percent(round(static_component_sums[component] / total, 6) if total else 0.0)
             for component in sorted(STATIC_SIMILARITY_COMPONENTS)
+        },
+        "static_similarity_gap_totals": static_gap_summary,
+        "static_similarity_gap_component_totals": static_gap_component_summary,
+        "behavior_case_metrics": {
+            "case_count": behavior_case_total,
+            "case_pass_count": behavior_case_pass_total,
+            "case_fail_count": behavior_case_fail_total,
+            "case_pass_rate": round(behavior_case_pass_total / behavior_case_total, 6)
+            if behavior_case_total
+            else 0.0,
+            "partial_mismatch_row_count": partial_behavior_rows,
         },
         "harness_cost_metrics": {
             "decompile_total_sec": round(sum(decomp_times), 6),
@@ -2169,6 +2348,7 @@ def summarize(rows: list[dict[str, Any]], manifest_name: str, entries: list[Benc
         "debug_owner_bucket_counts": dict(sorted(debug_owner_bucket_counts.items())),
         "debug_stage_status_counts": dict(sorted(debug_stage_status_counts.items())),
         "debug_quality_evidence_totals": dict(sorted(debug_quality_evidence_totals.items())),
+        "debug_quality_evidence_nonzero_rows": dict(sorted(debug_quality_evidence_nonzero_rows.items())),
         "debug_template_source_totals": dict(sorted(debug_template_source_totals.items())),
         "host_execution_unavailable_count": sum(host_statuses.values()),
         "host_execution_unavailable_reasons": dict(host_statuses),
@@ -2886,6 +3066,10 @@ def render_markdown(summary: dict[str, Any], rows: list[dict[str, Any]]) -> str:
         lines.extend(["", "## Zero-Credit Breakdown", "", "| Reason | Rows |", "|---|---:|"])
         for reason, count in sorted(summary["zero_credit_breakdown"].items()):
             lines.append(f"| {reason} | {count} |")
+    if summary.get("score_distribution"):
+        lines.extend(["", "## Score Distribution", "", "| Bucket | Rows |", "|---|---:|"])
+        for bucket, count in sorted(summary["score_distribution"].items()):
+            lines.append(f"| {bucket} | {count} |")
     if summary.get("stage_first_failure_counts"):
         lines.extend(["", "## First Stage Failure", "", "| Stage Status | Rows |", "|---|---:|"])
         for status, count in sorted(summary["stage_first_failure_counts"].items()):
@@ -2894,6 +3078,37 @@ def render_markdown(summary: dict[str, Any], rows: list[dict[str, Any]]) -> str:
         lines.extend(["", "## Static Similarity Components", "", "| Component | Avg Similarity |", "|---|---:|"])
         for component, avg in sorted(summary["static_similarity_component_average_percent"].items()):
             lines.append(f"| {component} | {float(avg or 0.0):.3f}% |")
+    static_gaps = summary.get("static_similarity_gap_totals")
+    if isinstance(static_gaps, dict):
+        lines.extend(["", "## Static Similarity Gaps", ""])
+        lines.append(
+            f"- Source features: {int(static_gaps.get('source_feature_total', 0) or 0)}, "
+            f"decomp features: {int(static_gaps.get('decomp_feature_total', 0) or 0)}, "
+            f"missing: {int(static_gaps.get('missing_feature_total', 0) or 0)} "
+            f"({float(static_gaps.get('missing_feature_rate', 0.0) or 0.0):.3f}), "
+            f"extra: {int(static_gaps.get('extra_feature_total', 0) or 0)} "
+            f"({float(static_gaps.get('extra_feature_rate', 0.0) or 0.0):.3f})"
+        )
+        missing = static_gaps.get("top_missing_features") or []
+        if missing:
+            lines.extend(["", "| Top Missing Feature | Count |", "|---|---:|"])
+            for item in missing[:10]:
+                lines.append(f"| `{item.get('feature')}` | {item.get('count')} |")
+        extra = static_gaps.get("top_extra_features") or []
+        if extra:
+            lines.extend(["", "| Top Extra Feature | Count |", "|---|---:|"])
+            for item in extra[:10]:
+                lines.append(f"| `{item.get('feature')}` | {item.get('count')} |")
+    behavior_cases = summary.get("behavior_case_metrics")
+    if isinstance(behavior_cases, dict):
+        lines.extend(["", "## Behavior Case Metrics", ""])
+        lines.append(
+            f"- Cases: pass {behavior_cases.get('case_pass_count', 0)}/"
+            f"{behavior_cases.get('case_count', 0)} "
+            f"({float(behavior_cases.get('case_pass_rate', 0.0) or 0.0):.3f}), "
+            f"failed {behavior_cases.get('case_fail_count', 0)}, "
+            f"partial mismatch rows {behavior_cases.get('partial_mismatch_row_count', 0)}"
+        )
     if summary.get("harness_cost_metrics"):
         costs = summary["harness_cost_metrics"]
         lines.extend(["", "## Harness Cost Metrics", "", "| Metric | Seconds |", "|---|---:|"])
@@ -2919,6 +3134,10 @@ def render_markdown(summary: dict[str, Any], rows: list[dict[str, Any]]) -> str:
         lines.extend(["", "## Debug Quality Evidence", "", "| Metric | Total |", "|---|---:|"])
         for metric, total_value in sorted(summary["debug_quality_evidence_totals"].items()):
             lines.append(f"| {metric} | {total_value} |")
+    if summary.get("debug_quality_evidence_nonzero_rows"):
+        lines.extend(["", "## Debug Quality Evidence Nonzero Rows", "", "| Metric | Rows |", "|---|---:|"])
+        for metric, count in sorted(summary["debug_quality_evidence_nonzero_rows"].items()):
+            lines.append(f"| {metric} | {count} |")
     if summary.get("debug_template_source_totals"):
         lines.extend(["", "## Debug SLEIGH Template Sources", "", "| Source | Total |", "|---|---:|"])
         for source, total_value in sorted(summary["debug_template_source_totals"].items()):
@@ -3163,6 +3382,12 @@ def row_for_function(
     static_components = static_similarity_components(source_fp, decomp_fp) if decomp_code else {
         name: 0.0 for name in STATIC_SIMILARITY_COMPONENTS
     }
+    static_gaps = multiset_gap_details(source_fp, decomp_fp) if decomp_code else multiset_gap_details(source_fp, Counter())
+    static_gap_components = (
+        static_similarity_gap_components(source_fp, decomp_fp)
+        if decomp_code
+        else static_similarity_gap_components(source_fp, Counter())
+    )
     behavior = run_behavior_check(
         entry,
         func,
@@ -3204,6 +3429,8 @@ def row_for_function(
         "static_semantic_score": static_score,
         "static_semantic_score_percent": percent(static_score),
         "static_similarity_components": static_components,
+        "static_similarity_gaps": static_gaps,
+        "static_similarity_gap_components": static_gap_components,
         "behavior": behavior,
         "semantic_score": semantic_score,
         "semantic_score_percent": percent(semantic_score),
@@ -3443,6 +3670,12 @@ int max(int a, int b) { if (a > b) return a; return b; }
             code_fingerprint("return a;", funcs[0]),
         )
         assert 0.0 < missing_feature_score < 1.0, missing_feature_score
+        gap_details = multiset_gap_details(
+            code_fingerprint("if (a > b) return helper(a + b);", funcs[0]),
+            code_fingerprint("return a;", funcs[0]),
+        )
+        assert gap_details["missing_feature_total"] > 0
+        assert gap_details["union_feature_total"] >= gap_details["intersection_feature_total"]
         status, matched, _ = match_function(funcs[0], [FissionFunction("0x1000", "add [export]")])
         assert status == "matched"
         assert matched is not None
@@ -3525,8 +3758,17 @@ int max(int a, int b) { if (a > b) return a; return b; }
                     "entry_id": "selftest",
                     "mapping_status": "matched",
                     "decomp_success": True,
-                    "behavior": {"status": "pass"},
+                    "behavior": {"status": "pass", "case_count": 2, "case_pass_count": 2, "case_fail_count": 0},
                     "semantic_score": 1.0,
+                    "static_similarity_gaps": {
+                        "source_feature_total": 2,
+                        "decomp_feature_total": 2,
+                        "intersection_feature_total": 2,
+                        "union_feature_total": 2,
+                        "missing_feature_total": 0,
+                        "extra_feature_total": 0,
+                    },
+                    "static_similarity_gap_components": {},
                 },
                 {
                     "language": "c",
@@ -3534,8 +3776,18 @@ int max(int a, int b) { if (a > b) return a; return b; }
                     "entry_id": "selftest",
                     "mapping_status": "unmapped",
                     "decomp_success": False,
-                    "behavior": {"status": "decomp_failed", "score": 0.0},
+                    "behavior": {"status": "decomp_failed", "score": 0.0, "case_count": 1},
                     "semantic_score": 0.0,
+                    "static_similarity_gaps": {
+                        "source_feature_total": 2,
+                        "decomp_feature_total": 0,
+                        "intersection_feature_total": 0,
+                        "union_feature_total": 2,
+                        "missing_feature_total": 2,
+                        "extra_feature_total": 0,
+                        "top_missing_features": [{"feature": "op:+", "count": 1}],
+                    },
+                    "static_similarity_gap_components": {},
                 },
             ],
             "selftest",
@@ -3548,6 +3800,11 @@ int max(int a, int b) { if (a > b) return a; return b; }
         assert summary["effective_coverage"]["mapped_rows"] == 1
         assert summary["zero_credit_breakdown"]["unmapped"] == 1
         assert "control_flow" in summary["static_similarity_component_averages"]
+        assert summary["static_similarity_gap_totals"]["missing_feature_total"] == 2
+        assert summary["static_similarity_gap_totals"]["top_missing_features"][0]["feature"] == "op:+"
+        assert summary["behavior_case_metrics"]["case_pass_count"] == 2
+        assert summary["score_distribution"]["perfect"] == 1
+        assert summary["score_distribution"]["zero"] == 1
         assert "decompile_avg_sec" in summary["harness_cost_metrics"]
         void_func = SourceFunction(
             name="touch",
