@@ -24,7 +24,7 @@ impl RuntimePcodeEmitter {
     /// Ghidra `PcodeEmit.setUniqueOffset(Address)` — seed for unique temporaries at `pcode_address`.
     #[inline]
     pub fn unique_seed_for_address(unique_mask: u64, pcode_address: u64) -> u64 {
-        (pcode_address & unique_mask).wrapping_shl(8)
+        ghidra_unique_seed_address_bits(unique_mask, pcode_address)
     }
 
     /// Temporarily switch the pcode instruction address and unique temp allocator (cross-build / delay slot).
@@ -189,6 +189,10 @@ impl RuntimePcodeEmitter {
     }
 }
 
+fn ghidra_unique_seed_address_bits(unique_mask: u64, pcode_address: u64) -> u64 {
+    (pcode_address & unique_mask) << 8
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -237,13 +241,28 @@ mod tests {
     }
 
     #[test]
+    fn unique_seed_for_address_matches_ghidra_address_shift() {
+        assert_eq!(
+            RuntimePcodeEmitter::unique_seed_for_address(u64::MAX, 0x1234),
+            0x123400
+        );
+        assert_eq!(
+            RuntimePcodeEmitter::unique_seed_for_address(0x00ff, 0x1234),
+            0x3400
+        );
+    }
+
+    #[test]
     fn emitter_source_has_no_wrapping_or_saturating_allocators() {
         let source = include_str!("emitter.rs");
         let tmp_wrap = ["next_tmp", "wrapping_add"].join(".");
         let seq_saturating = ["seq", "saturating_add"].join(".");
+        let seed_wrap = ["wrapping", "_shl"].join("");
 
         assert!(
-            !source.contains(&tmp_wrap) && !source.contains(&seq_saturating),
+            !source.contains(&tmp_wrap)
+                && !source.contains(&seq_saturating)
+                && !source.contains(&seed_wrap),
             "p-code emission must not hide seq or unique temp overflow"
         );
     }
