@@ -2819,11 +2819,13 @@ def summarize(rows: list[dict[str, Any]], manifest_name: str, entries: list[Benc
     static_missing_density_values: list[float] = []
     static_extra_density_values: list[float] = []
     static_score_by_missing_gap_bucket: dict[str, list[float]] = {}
+    static_gap_hot_rows: list[dict[str, Any]] = []
     hard_function_rows: list[dict[str, Any]] = []
     static_source_variant_counts: Counter[str] = Counter()
     inline_expanded_static_score_deltas: list[float] = []
     inline_expanded_static_hot_rows: list[dict[str, Any]] = []
     semantic_quality_quadrants: dict[str, dict[str, Any]] = {}
+    semantic_readiness_counts: Counter[str] = Counter()
     sleigh_blocker_rows: list[dict[str, Any]] = []
     coverage_blind_spot_rows: dict[str, list[dict[str, Any]]] = {}
     coverage_blind_spot_counts: Counter[str] = Counter()
@@ -3155,6 +3157,33 @@ def summarize(rows: list[dict[str, Any]], manifest_name: str, entries: list[Benc
         preview_stats_dict = preview_stats if isinstance(preview_stats, dict) else None
         debug_decomp = row.get("debug_decomp")
         debug_decomp_dict = debug_decomp if isinstance(debug_decomp, dict) else None
+        stage_status_for_readiness = (
+            debug_decomp.get("stage_status")
+            if isinstance(debug_decomp, dict) and isinstance(debug_decomp.get("stage_status"), dict)
+            else {}
+        )
+        all_pipeline_stages_ok = bool(stage_status_for_readiness) and all(
+            stage_status_for_readiness.get(stage) == "ok"
+            for stage in STAGE_FAILURE_ORDER
+            if stage != "load"
+        )
+        semantic_readiness_counts["manifest_rows"] += 1
+        semantic_readiness_counts["fully_perfect_rows"] += int(score == 1.0)
+        semantic_readiness_counts["partial_credit_rows"] += int(0.0 < score < 1.0)
+        semantic_readiness_counts["zero_credit_rows"] += int(score == 0.0)
+        semantic_readiness_counts["behavior_pass_static_perfect_rows"] += int(
+            behavior_status == "pass" and static_score == 1.0
+        )
+        semantic_readiness_counts["behavior_pass_static_gap_rows"] += int(
+            behavior_status == "pass" and static_score < 1.0
+        )
+        semantic_readiness_counts["static_perfect_behavior_nonpass_rows"] += int(
+            behavior_status != "pass" and static_score == 1.0
+        )
+        semantic_readiness_counts["pipeline_ok_behavior_nonpass_rows"] += int(
+            all_pipeline_stages_ok and behavior_status != "pass"
+        )
+        semantic_readiness_counts["pipeline_blocked_rows"] += int(first_stage != "none")
         add_semantic_quality_quadrant(row, behavior_status, score)
         if first_stage.startswith("decode:") or first_stage.startswith("raw_pcode:"):
             sleigh_blocker_rows.append(triage_row_summary(row))
@@ -3377,6 +3406,22 @@ def summarize(rows: list[dict[str, Any]], manifest_name: str, entries: list[Benc
             missing_gap_bucket = feature_gap_bucket(row_missing_total)
             static_score_by_missing_gap_bucket.setdefault(missing_gap_bucket, []).append(static_score)
             if row_missing_total > 0.0 or row_extra_total > 0.0:
+                static_gap_hot_rows.append(
+                    {
+                        **triage_row_summary(row),
+                        "static_semantic_score_percent": row.get("static_semantic_score_percent"),
+                        "source_feature_total": row_source_total,
+                        "decomp_feature_total": row_decomp_total,
+                        "intersection_feature_total": row_intersection_total,
+                        "union_feature_total": row_union_total,
+                        "missing_feature_total": row_missing_total,
+                        "extra_feature_total": row_extra_total,
+                        "missing_density": missing_density,
+                        "extra_density": extra_density,
+                        "top_missing_features": (static_gaps.get("top_missing_features") or [])[:5],
+                        "top_extra_features": (static_gaps.get("top_extra_features") or [])[:5],
+                    }
+                )
                 density_key = f"missing:{missing_gap_bucket}|extra:{feature_gap_bucket(row_extra_total)}"
                 density_bucket = static_gap_density_rows.setdefault(
                     density_key,
@@ -4295,6 +4340,74 @@ def summarize(rows: list[dict[str, Any]], manifest_name: str, entries: list[Benc
             "extra_feature_total": round(float(bucket.get("extra_feature_total", 0.0) or 0.0), 6),
             "top_rows": top_rows,
         }
+    static_gap_hot_row_metrics = {
+        "top_missing_feature_rows": sorted(
+            static_gap_hot_rows,
+            key=lambda row: (
+                -float(row.get("missing_feature_total") or 0.0),
+                float(row.get("static_semantic_score_percent") or row.get("semantic_score_percent") or 0.0),
+                str(row.get("function_name") or ""),
+            ),
+        )[:20],
+        "top_extra_feature_rows": sorted(
+            static_gap_hot_rows,
+            key=lambda row: (
+                -float(row.get("extra_feature_total") or 0.0),
+                float(row.get("static_semantic_score_percent") or row.get("semantic_score_percent") or 0.0),
+                str(row.get("function_name") or ""),
+            ),
+        )[:20],
+        "top_zero_intersection_rows": sorted(
+            [
+                row
+                for row in static_gap_hot_rows
+                if float(row.get("source_feature_total") or 0.0) > 0.0
+                and float(row.get("intersection_feature_total") or 0.0) == 0.0
+            ],
+            key=lambda row: (
+                -float(row.get("source_feature_total") or 0.0),
+                float(row.get("static_semantic_score_percent") or row.get("semantic_score_percent") or 0.0),
+                str(row.get("function_name") or ""),
+            ),
+        )[:20],
+    }
+    semantic_readiness_metrics = {
+        **{key: int(value) for key, value in sorted(semantic_readiness_counts.items())},
+        "fully_perfect_rate": round(
+            float(semantic_readiness_counts.get("fully_perfect_rows", 0)) / total,
+            6,
+        ) if total else 0.0,
+        "behavior_pass_static_perfect_rate": round(
+            float(semantic_readiness_counts.get("behavior_pass_static_perfect_rows", 0)) / total,
+            6,
+        ) if total else 0.0,
+        "behavior_pass_static_gap_rate": round(
+            float(semantic_readiness_counts.get("behavior_pass_static_gap_rows", 0)) / total,
+            6,
+        ) if total else 0.0,
+        "static_perfect_behavior_nonpass_rate": round(
+            float(semantic_readiness_counts.get("static_perfect_behavior_nonpass_rows", 0)) / total,
+            6,
+        ) if total else 0.0,
+        "pipeline_ok_behavior_nonpass_rate": round(
+            float(semantic_readiness_counts.get("pipeline_ok_behavior_nonpass_rows", 0)) / total,
+            6,
+        ) if total else 0.0,
+    }
+    benchmark_integrity_metrics = {
+        "score_denominator_row_count": total,
+        "row_count": total,
+        "rows_excluded_from_semantic_score_denominator": 0,
+        "rows_excluded_from_static_similarity_denominator": 0,
+        "missing_source_features_penalized": True,
+        "extra_decompiler_features_penalized": True,
+        "behavior_missing_or_unsupported_rows_fail_closed": True,
+        "unmapped_or_failed_rows_remain_in_denominator": True,
+        "static_missing_feature_row_count": static_missing_feature_rows,
+        "static_decomp_absent_feature_row_count": static_decomp_absent_feature_rows,
+        "behavior_unsupported_or_ineligible_row_count": max(0, total - behavior_expected),
+        "behavior_expected_but_not_executed_row_count": max(0, behavior_expected - behavior_executed),
+    }
     semantic_quality_quadrant_export: dict[str, dict[str, Any]] = {}
     for quadrant, bucket in sorted(semantic_quality_quadrants.items()):
         row_count = int(bucket.get("row_count", 0) or 0)
@@ -4607,6 +4720,8 @@ def summarize(rows: list[dict[str, Any]], manifest_name: str, entries: list[Benc
             },
             "top_lost_score_rows": semantic_loss_hot_rows,
         },
+        "semantic_readiness_metrics": semantic_readiness_metrics,
+        "benchmark_integrity_metrics": benchmark_integrity_metrics,
         "improvement_axis_metrics": improvement_axis_export,
         "focus_area_metrics": focus_area_export,
         "roadmap_priority_metrics": {
@@ -4708,6 +4823,7 @@ def summarize(rows: list[dict[str, Any]], manifest_name: str, entries: list[Benc
             },
             "gap_bucket_rows": static_gap_density_export,
         },
+        "static_gap_hot_row_metrics": static_gap_hot_row_metrics,
         "perfect_row_count": perfect_score_count,
         "supported_behavior_row_count": sum(
             1 for row in rows if row.get("behavior", {}).get("status") != "unsupported_signature"
@@ -5314,6 +5430,12 @@ def compare_to_baseline(
         "static_missing_feature_row_rate",
         "static_decomp_absent_feature_row_rate",
         "zero_static_intersection_row_rate",
+        "fully_perfect_rate",
+        "behavior_pass_static_perfect_rate",
+        "behavior_pass_static_gap_rate",
+        "static_perfect_behavior_nonpass_rate",
+        "pipeline_ok_behavior_nonpass_rate",
+        "rows_excluded_from_semantic_score_denominator",
         "source_extracted_function_count",
         "source_selected_function_count",
         "source_suppressed_static_inline_helper_count",
@@ -5375,6 +5497,16 @@ def compare_to_baseline(
         if isinstance(summary.get("score_denominator_metrics"), dict)
         else {}
     )
+    readiness_metrics = (
+        summary.get("semantic_readiness_metrics")
+        if isinstance(summary.get("semantic_readiness_metrics"), dict)
+        else {}
+    )
+    integrity_metrics = (
+        summary.get("benchmark_integrity_metrics")
+        if isinstance(summary.get("benchmark_integrity_metrics"), dict)
+        else {}
+    )
     source_row_selection = (
         summary.get("source_row_selection_metrics")
         if isinstance(summary.get("source_row_selection_metrics"), dict)
@@ -5401,6 +5533,14 @@ def compare_to_baseline(
             "static_missing_feature_row_rate": static_gap_rows.get("missing_feature_row_rate"),
             "static_decomp_absent_feature_row_rate": static_gap_rows.get("decomp_absent_feature_row_rate"),
             "zero_static_intersection_row_rate": static_gap_rows.get("zero_static_intersection_row_rate"),
+            "fully_perfect_rate": readiness_metrics.get("fully_perfect_rate"),
+            "behavior_pass_static_perfect_rate": readiness_metrics.get("behavior_pass_static_perfect_rate"),
+            "behavior_pass_static_gap_rate": readiness_metrics.get("behavior_pass_static_gap_rate"),
+            "static_perfect_behavior_nonpass_rate": readiness_metrics.get("static_perfect_behavior_nonpass_rate"),
+            "pipeline_ok_behavior_nonpass_rate": readiness_metrics.get("pipeline_ok_behavior_nonpass_rate"),
+            "rows_excluded_from_semantic_score_denominator": integrity_metrics.get(
+                "rows_excluded_from_semantic_score_denominator"
+            ),
             "source_extracted_function_count": source_row_selection.get("extracted_source_function_count"),
             "source_selected_function_count": source_row_selection.get("selected_source_function_count"),
             "source_suppressed_static_inline_helper_count": source_row_selection.get(
@@ -5458,6 +5598,16 @@ def compare_to_baseline(
         if isinstance(baseline_summary.get("score_denominator_metrics"), dict)
         else {}
     )
+    baseline_readiness_metrics = (
+        baseline_summary.get("semantic_readiness_metrics")
+        if isinstance(baseline_summary.get("semantic_readiness_metrics"), dict)
+        else {}
+    )
+    baseline_integrity_metrics = (
+        baseline_summary.get("benchmark_integrity_metrics")
+        if isinstance(baseline_summary.get("benchmark_integrity_metrics"), dict)
+        else {}
+    )
     baseline_source_row_selection = (
         baseline_summary.get("source_row_selection_metrics")
         if isinstance(baseline_summary.get("source_row_selection_metrics"), dict)
@@ -5484,6 +5634,16 @@ def compare_to_baseline(
             "static_missing_feature_row_rate": baseline_static_gap_rows.get("missing_feature_row_rate"),
             "static_decomp_absent_feature_row_rate": baseline_static_gap_rows.get("decomp_absent_feature_row_rate"),
             "zero_static_intersection_row_rate": baseline_static_gap_rows.get("zero_static_intersection_row_rate"),
+            "fully_perfect_rate": baseline_readiness_metrics.get("fully_perfect_rate"),
+            "behavior_pass_static_perfect_rate": baseline_readiness_metrics.get("behavior_pass_static_perfect_rate"),
+            "behavior_pass_static_gap_rate": baseline_readiness_metrics.get("behavior_pass_static_gap_rate"),
+            "static_perfect_behavior_nonpass_rate": baseline_readiness_metrics.get(
+                "static_perfect_behavior_nonpass_rate"
+            ),
+            "pipeline_ok_behavior_nonpass_rate": baseline_readiness_metrics.get("pipeline_ok_behavior_nonpass_rate"),
+            "rows_excluded_from_semantic_score_denominator": baseline_integrity_metrics.get(
+                "rows_excluded_from_semantic_score_denominator"
+            ),
             "source_extracted_function_count": baseline_source_row_selection.get("extracted_source_function_count"),
             "source_selected_function_count": baseline_source_row_selection.get("selected_source_function_count"),
             "source_suppressed_static_inline_helper_count": baseline_source_row_selection.get(
@@ -5994,6 +6154,33 @@ def render_markdown(summary: dict[str, Any], rows: list[dict[str, Any]]) -> str:
             lines.extend(["", "| First Stage Failure | Lost Score |", "|---|---:|"])
             for stage, value in sorted(loss_by_stage.items()):
                 lines.append(f"| {stage} | {float(value or 0.0):.6f} |")
+    readiness = summary.get("semantic_readiness_metrics")
+    if isinstance(readiness, dict):
+        lines.extend(["", "## Semantic Readiness Metrics", ""])
+        lines.append(
+            f"- Fully perfect {readiness.get('fully_perfect_rows', 0)}/{readiness.get('manifest_rows', 0)} "
+            f"({float(readiness.get('fully_perfect_rate', 0.0) or 0.0):.3f}), "
+            f"behavior pass + static perfect {readiness.get('behavior_pass_static_perfect_rows', 0)} "
+            f"({float(readiness.get('behavior_pass_static_perfect_rate', 0.0) or 0.0):.3f})"
+        )
+        lines.append(
+            f"- Behavior pass with static gap {readiness.get('behavior_pass_static_gap_rows', 0)}, "
+            f"static perfect but behavior non-pass {readiness.get('static_perfect_behavior_nonpass_rows', 0)}, "
+            f"pipeline OK but behavior non-pass {readiness.get('pipeline_ok_behavior_nonpass_rows', 0)}"
+        )
+    integrity = summary.get("benchmark_integrity_metrics")
+    if isinstance(integrity, dict):
+        lines.extend(["", "## Benchmark Integrity Metrics", ""])
+        lines.append(
+            f"- Score denominator rows {integrity.get('score_denominator_row_count', 0)}, "
+            f"excluded rows {integrity.get('rows_excluded_from_semantic_score_denominator', 0)}, "
+            f"static excluded rows {integrity.get('rows_excluded_from_static_similarity_denominator', 0)}"
+        )
+        lines.append(
+            f"- Missing source features penalized: {integrity.get('missing_source_features_penalized')}; "
+            f"extra decompiler features penalized: {integrity.get('extra_decompiler_features_penalized')}; "
+            f"behavior unsupported/missing fail closed: {integrity.get('behavior_missing_or_unsupported_rows_fail_closed')}"
+        )
     improvement_axes = summary.get("improvement_axis_metrics")
     if isinstance(improvement_axes, dict) and improvement_axes:
         lines.extend([
@@ -6359,6 +6546,26 @@ def render_markdown(summary: dict[str, Any], rows: list[dict[str, Any]]) -> str:
                     f"{float(metrics.get('avg_semantic_score_percent', 0.0) or 0.0):.3f}% | "
                     f"{float(metrics.get('missing_feature_total', 0.0) or 0.0):.0f} | "
                     f"{float(metrics.get('extra_feature_total', 0.0) or 0.0):.0f} |"
+                )
+    static_hot_rows = summary.get("static_gap_hot_row_metrics")
+    if isinstance(static_hot_rows, dict):
+        missing_rows = static_hot_rows.get("top_missing_feature_rows")
+        if isinstance(missing_rows, list) and missing_rows:
+            lines.extend(["", "## Static Gap Hot Rows", "", "| Function | Score | Missing | Extra | Top Missing Features |", "|---|---:|---:|---:|---|"])
+            for row in missing_rows[:10]:
+                if not isinstance(row, dict):
+                    continue
+                top_missing = ", ".join(
+                    f"{item.get('feature')}:{item.get('count')}"
+                    for item in (row.get("top_missing_features") or [])[:3]
+                    if isinstance(item, dict)
+                )
+                lines.append(
+                    f"| `{row.get('function_name')}` | "
+                    f"{float(row.get('static_semantic_score_percent', row.get('semantic_score_percent', 0.0)) or 0.0):.3f}% | "
+                    f"{float(row.get('missing_feature_total', 0.0) or 0.0):.0f} | "
+                    f"{float(row.get('extra_feature_total', 0.0) or 0.0):.0f} | "
+                    f"`{top_missing}` |"
                 )
     denominator_accounting = summary.get("denominator_accounting_metrics")
     if isinstance(denominator_accounting, dict):
@@ -7782,6 +7989,11 @@ int max(int a, int b) { if (a > b) return a; return b; }
         assert summary["score_denominator_metrics"]["score_denominator_row_count"] == 2
         assert summary["score_denominator_metrics"]["lost_score_sum"] == 1.0
         assert summary["semantic_loss_metrics"]["lost_score_by_zero_credit_reason"]["unmapped"] == 1.0
+        assert summary["semantic_readiness_metrics"]["fully_perfect_rows"] == 1
+        assert summary["semantic_readiness_metrics"]["behavior_pass_static_perfect_rows"] == 1
+        assert summary["semantic_readiness_metrics"]["pipeline_ok_behavior_nonpass_rows"] == 0
+        assert summary["benchmark_integrity_metrics"]["rows_excluded_from_semantic_score_denominator"] == 0
+        assert summary["benchmark_integrity_metrics"]["missing_source_features_penalized"] is True
         assert summary["behavior_mismatch_metrics"]["mismatch_row_count"] == 0
         assert summary["behavior_case_metrics"]["compared_case_count"] == 3
         assert summary["behavior_denominator_metrics"]["case_denominator_count"] == 3
@@ -7835,6 +8047,7 @@ int max(int a, int b) { if (a > b) return a; return b; }
         assert summary["coverage_blind_spot_metrics"]["counts"]["unmapped_source_function"] == 1
         assert summary["coverage_blind_spot_metrics"]["counts"]["source_features_without_decomp_features"] == 1
         assert summary["static_gap_density_metrics"]["gap_bucket_rows"]["missing:small|extra:none"]["row_count"] == 1
+        assert summary["static_gap_hot_row_metrics"]["top_missing_feature_rows"][0]["missing_feature_total"] == 2.0
         assert summary["static_component_precision_recall_metrics"]["signature"]["precision"] == 0.0
         assert summary["behavior_partial_progress_metrics"]["row_count"] == 0
         assert summary["focus_area_metrics"]["nir_builder_dataflow"]["row_count"] == 1

@@ -99,6 +99,14 @@ manifest.
   accounting over the full row denominator, including zero/nonzero/perfect row
   counts, lost-score totals, and lost-score attribution by behavior status,
   first failing stage, and zero-credit reason.
+- `semantic_readiness_metrics`: release-readiness counters for fully perfect
+  rows, behavior-pass/static-perfect rows, behavior-pass rows that still have
+  static gaps, static-perfect rows that still fail behavior, and rows whose
+  pipeline is OK but behavior is not.
+- `benchmark_integrity_metrics`: machine-readable proof that no rows are
+  excluded from the semantic or static-similarity denominators, that missing
+  source features and extra decompiler features are penalized, and that
+  unsupported or missing behavior fails closed.
 - `score_component_metrics`: behavior/static score sums, weighted contribution
   sums, lost contribution sums, and per-component score distributions. This
   makes it clear whether a run is losing credit in dynamic behavior, static
@@ -244,6 +252,9 @@ manifest.
 - `static_gap_density_metrics`: missing/extra feature density distributions and
   feature-gap buckets, so source absence and decompiler excess are visible even
   when raw feature totals differ by function size.
+- `static_gap_hot_row_metrics`: row shortlists ranked by missing feature count,
+  extra feature count, and zero source/decompiler intersection, preserving top
+  missing/extra feature examples for direct triage.
 - `complexity_quality_metrics`: source static-feature complexity buckets plus
   hard non-perfect rows, so large functions and dense semantic shapes can be
   separated from small-row failures.
