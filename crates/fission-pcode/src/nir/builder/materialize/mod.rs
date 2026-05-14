@@ -334,6 +334,9 @@ impl<'a> PreviewBuilder<'a> {
         {
             return Ok(None);
         }
+        if self.output_is_stack_pointer_register(output) {
+            return Ok(None);
+        }
         if self.output_used_only_by_single_store(block, op_idx, output) {
             return Ok(None);
         }
@@ -596,6 +599,11 @@ impl<'a> PreviewBuilder<'a> {
                 .output_use_sites_in_block(block, op_idx, output)
                 .into_iter()
                 .all(|(use_idx, _)| use_idx == term_idx)
+    }
+
+    fn output_is_stack_pointer_register(&self, output: &Varnode) -> bool {
+        self.stack_pointer_register_name(output)
+            .is_some_and(|name| matches!(name, "rsp" | "esp" | "sp"))
     }
 
     fn is_predicate_passthrough_to_terminator(op: &PcodeOp) -> bool {

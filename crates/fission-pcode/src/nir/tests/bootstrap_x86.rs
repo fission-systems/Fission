@@ -841,6 +841,7 @@ fn preview_recovers_stack_slot_from_rust_sleigh_rsp_space() {
 
     let code = render_mlil_preview(&func, "rust_sleigh_rsp_slot", 0x140001940, &options)
         .expect("preview render");
+    assert!(!code.contains("rsp ="), "{code}");
     assert!(!code.contains("var_20"), "{code}");
     assert!(!code.contains("undefined *"), "{code}");
     assert!(
