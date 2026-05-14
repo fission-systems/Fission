@@ -34,6 +34,7 @@ DEFAULT_LIST_CACHE_FILE = DEFAULT_ARTIFACT_ROOT / ".cache" / "list_cache.json"
 DEFAULT_BEHAVIOR_CACHE_FILE = DEFAULT_ARTIFACT_ROOT / ".cache" / "behavior_cache.json"
 DEFAULT_HISTORY_FILE = DEFAULT_ARTIFACT_ROOT / "source_semantic_history.jsonl"
 DEFAULT_LATEST_INDEX_FILE = DEFAULT_ARTIFACT_ROOT / "source_semantic_latest_by_manifest.json"
+DEBUG_DECOMP_EVIDENCE_CONTRACT = "template_source_counts_v1"
 DEFAULT_JOBS = max(1, (os.cpu_count() or 2) // 2)
 
 SANITIZE_ID_RE = re.compile(r"[^A-Za-z0-9_.-]+")
@@ -246,6 +247,7 @@ def decomp_cache_key(
             f"fission_bin={file_cache_fingerprint(fission_bin)}",
             f"addr={canonical_address(address)}",
             f"debug={int(include_debug_decomp)}",
+            f"debug_contract={DEBUG_DECOMP_EVIDENCE_CONTRACT if include_debug_decomp else 'none'}",
         ]
     )
 

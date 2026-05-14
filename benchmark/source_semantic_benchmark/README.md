@@ -115,8 +115,10 @@ otherwise the standard library `json` module is used.
 Fission decompile results are cached in
 `benchmark/artifacts/source_semantic_benchmark/.cache/decomp_cache.json` by
 default. Cache keys include the input binary path/stat, `fission_cli` path/stat,
-function address, and whether `--include-debug-decomp` is enabled, so rebuilding
-`fission_cli` invalidates old decompile rows automatically. Use
+function address, whether `--include-debug-decomp` is enabled, and the
+debug-evidence contract required by the source-semantic runner, so rebuilding
+`fission_cli` or changing debug evidence invalidates old decompile rows
+automatically. Use
 `--decomp-cache-file <path>` to pin a different cache file or
 `--no-decomp-cache` to disable the persistent cache; repeated decompile requests
 inside the same process can still reuse the in-memory cache. Each row includes
