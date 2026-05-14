@@ -516,6 +516,49 @@ mod tests {
     }
 
     #[test]
+    fn merge_assign_preserves_telemetry_sentinel_counters() {
+        let source = NirBuildStats {
+            replacement_plan_rejected_alias_unsafe_count: 2,
+            replacement_plan_rejected_missing_merge_count: 3,
+            guarded_tail_replacement_plan_rejected_missing_merge_count: 5,
+            guarded_tail_replacement_plan_rejected_unstable_read_count: 7,
+            region_emit_ready_failed_count: 11,
+            call_target_unresolved_sub_fallback_count: 13,
+            structuring_irreducible_scc_count: 17,
+            max_structuring_scc_component_size: 19,
+            ..NirBuildStats::default()
+        };
+        let mut target = NirBuildStats {
+            replacement_plan_rejected_alias_unsafe_count: 20,
+            replacement_plan_rejected_missing_merge_count: 30,
+            guarded_tail_replacement_plan_rejected_missing_merge_count: 50,
+            guarded_tail_replacement_plan_rejected_unstable_read_count: 70,
+            region_emit_ready_failed_count: 110,
+            call_target_unresolved_sub_fallback_count: 130,
+            structuring_irreducible_scc_count: 170,
+            max_structuring_scc_component_size: 3,
+            ..NirBuildStats::default()
+        };
+
+        target.merge_assign(&source);
+
+        assert_eq!(target.replacement_plan_rejected_alias_unsafe_count, 22);
+        assert_eq!(target.replacement_plan_rejected_missing_merge_count, 33);
+        assert_eq!(
+            target.guarded_tail_replacement_plan_rejected_missing_merge_count,
+            55
+        );
+        assert_eq!(
+            target.guarded_tail_replacement_plan_rejected_unstable_read_count,
+            77
+        );
+        assert_eq!(target.region_emit_ready_failed_count, 121);
+        assert_eq!(target.call_target_unresolved_sub_fallback_count, 143);
+        assert_eq!(target.structuring_irreducible_scc_count, 187);
+        assert_eq!(target.max_structuring_scc_component_size, 19);
+    }
+
+    #[test]
     fn guarded_tail_discovery_merge_preserves_legacy_projection_boundary() {
         let source = NirBuildStats {
             promotion_candidate_count: 1,
