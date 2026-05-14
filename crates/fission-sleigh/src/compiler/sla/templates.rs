@@ -458,19 +458,12 @@ pub(super) fn decode_construct_templates(
             .filter(|child| child.id == sla_format::ELEM_CONSTRUCTOR)
             .enumerate()
         {
-            // Decision leaf pairs reference Ghidra's packed constructor id,
-            // not the ordinal after Fission's iteration/filtering. Preserve
-            // that slot identity so terminal verification lands on the same
-            // constructor that the .sla decision tree selected.
-            let slot = child
-                .attr_unsigned(sla_format::ATTR_ID)
-                .map(|value| {
-                    usize::try_from(value).map_err(|_| {
-                        anyhow!("constructor id {value} in subtable {name} does not fit host usize")
-                    })
-                })
-                .transpose()?
-                .unwrap_or(local_index);
+            // Ghidra SubtableSymbol.decode() rebuilds the constructor array by
+            // local ordinal and DecisionNode pair ATTR_ID resolves through
+            // sub.getConstructor(id). Constructor elements do not reliably carry
+            // their own ATTR_ID in packaged .sla files, so the local ordinal is
+            // the canonical runtime slot, not a fallback.
+            let slot = local_index;
             let template = match parse_constructor(id, &name, child, slot) {
                 Ok(template) => template,
                 Err(reason) => return Err(anyhow!(reason)),

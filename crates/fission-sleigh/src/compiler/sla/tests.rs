@@ -645,6 +645,26 @@ fn sla_constructor_identity_is_not_silently_overwritten() {
 }
 
 #[test]
+fn sla_constructor_slots_follow_ghidra_subtable_ordinals() {
+    let templates = include_str!("templates.rs");
+    for forbidden in [
+        ".attr_unsigned(sla_format::ATTR_ID)\n                .map(|value|",
+        ".transpose()?\n                .unwrap_or(local_index)",
+        ".unwrap_or(local_index)",
+        "missing packed id",
+    ] {
+        assert!(
+            !templates.contains(forbidden),
+            "compiled .sla constructor identity must use Ghidra subtable ordinals instead of ATTR_ID fallback/rewrite: {forbidden}"
+        );
+    }
+    assert!(
+        templates.contains("let slot = local_index;"),
+        "compiled .sla constructor identity must make the Ghidra subtable ordinal contract explicit"
+    );
+}
+
+#[test]
 fn sla_decode_diagnostics_are_trace_gated() {
     let templates = include_str!("templates.rs");
     for forbidden in ["SLA Symbols Found", "'instruction' Root Node"] {
