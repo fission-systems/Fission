@@ -955,8 +955,11 @@ fn compiled_table_policy_symbols_stay_architecture_neutral() {
     ]
     .join(" ");
     let context_expr_lossy_word_cast = "eval_pattern_expression(expr)? as u32";
+    let context_expr_lossy_value_word_cast = "Ok(value as u32)";
     let context_expr_unchecked_left_shift = "raw << (change.shift as u32)";
     let context_expr_unchecked_right_shift = "raw >> ((-change.shift) as u32)";
+    let context_expr_lossy_left_shift = ".checked_shl(shift as u32)";
+    let context_expr_lossy_right_shift = ".checked_neg()\n            .ok_or_else(|| anyhow!(\"context expression shift underflow\"))?\n            as u32";
     let pattern_token_lossy_i64_cast = ")? as i64)";
     let pattern_token_at_lossy_i64_cast = ")? as i64),";
     let pattern_context_lossy_sign_extend = "Ok(((raw << shift) as i64) >> shift)";
@@ -1319,8 +1322,11 @@ fn compiled_table_policy_symbols_stay_architecture_neutral() {
         );
         assert!(
             !source.contains(context_expr_lossy_word_cast)
+                && !source.contains(context_expr_lossy_value_word_cast)
                 && !source.contains(context_expr_unchecked_left_shift)
-                && !source.contains(context_expr_unchecked_right_shift),
+                && !source.contains(context_expr_unchecked_right_shift)
+                && !source.contains(context_expr_lossy_left_shift)
+                && !source.contains(context_expr_lossy_right_shift),
             "{} still truncates or unchecked-shifts context-change pattern expressions",
             file.display()
         );

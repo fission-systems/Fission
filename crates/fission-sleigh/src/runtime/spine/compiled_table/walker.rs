@@ -1620,7 +1620,14 @@ fn context_change_expr_word(value: i64) -> Result<u32> {
     if value < i64::from(i32::MIN) || value > i64::from(u32::MAX) {
         return Err(anyhow!("context expression value {value} exceeds u32 word"));
     }
-    Ok(value as u32)
+    if value < 0 {
+        let signed = i32::try_from(value)
+            .map_err(|_| anyhow!("context expression value {value} exceeds i32 word"))?;
+        Ok(u32::from_ne_bytes(signed.to_ne_bytes()))
+    } else {
+        u32::try_from(value)
+            .map_err(|_| anyhow!("context expression value {value} exceeds u32 word"))
+    }
 }
 
 fn context_change_mask_word(mask: u64) -> Result<u32> {
@@ -1629,14 +1636,17 @@ fn context_change_mask_word(mask: u64) -> Result<u32> {
 
 fn shifted_context_change_word(value: u32, shift: i32) -> Result<u32> {
     if shift >= 0 {
+        let shift =
+            u32::try_from(shift).map_err(|_| anyhow!("context expression shift exceeds u32"))?;
         value
-            .checked_shl(shift as u32)
+            .checked_shl(shift)
             .ok_or_else(|| anyhow!("context expression left shift {shift} exceeds u32 width"))
     } else {
         let amount = shift
             .checked_neg()
-            .ok_or_else(|| anyhow!("context expression shift underflow"))?
-            as u32;
+            .ok_or_else(|| anyhow!("context expression shift underflow"))?;
+        let amount =
+            u32::try_from(amount).map_err(|_| anyhow!("context expression shift exceeds u32"))?;
         value
             .checked_shr(amount)
             .ok_or_else(|| anyhow!("context expression right shift {amount} exceeds u32 width"))
