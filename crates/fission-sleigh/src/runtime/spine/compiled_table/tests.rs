@@ -962,6 +962,11 @@ fn compiled_table_policy_symbols_stay_architecture_neutral() {
     let pattern_context_lossy_sign_extend = "Ok(((raw << shift) as i64) >> shift)";
     let operand_context_lossy_sign_extend = "((val << shift) as i64 >> shift) as u64";
     let pattern_context_lossy_raw_cast = "Ok(raw as i64)";
+    let pattern_address_lossy_cast = "self.ctx.address as i64";
+    let pattern_inst_next_lossy_result_cast = "as i64)";
+    let pattern_operand_const_lossy_cast = "return Ok(fixed.offset_offset as i64);";
+    let pattern_right_shift_lossy_lhs_cast = "let shifted = (lhs as u64)";
+    let pattern_right_shift_lossy_result_cast = "Ok(shifted as i64)";
     let pattern_expr_unchecked_add =
         "eval_pattern_expression(lhs)? + self.eval_pattern_expression(rhs)?";
     let pattern_expr_unchecked_sub =
@@ -1324,7 +1329,12 @@ fn compiled_table_policy_symbols_stay_architecture_neutral() {
                 && !source.contains(pattern_token_at_lossy_i64_cast)
                 && !source.contains(pattern_context_lossy_sign_extend)
                 && !source.contains(operand_context_lossy_sign_extend)
-                && !source.contains(pattern_context_lossy_raw_cast),
+                && !source.contains(pattern_context_lossy_raw_cast)
+                && !source.contains(pattern_address_lossy_cast)
+                && !source.contains(pattern_inst_next_lossy_result_cast)
+                && !source.contains(pattern_operand_const_lossy_cast)
+                && !source.contains(pattern_right_shift_lossy_lhs_cast)
+                && !source.contains(pattern_right_shift_lossy_result_cast),
             "{} still uses unnamed token/context pattern value bit casts",
             file.display()
         );

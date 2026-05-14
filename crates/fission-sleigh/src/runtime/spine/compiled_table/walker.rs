@@ -1189,14 +1189,14 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
             let masked_value = change.value & field_mask;
             set_packed_context_bits(
                 &mut self.context_register,
-                change.bit_offset as u32,
-                change.bit_width as u32,
+                change.bit_offset,
+                change.bit_width,
                 masked_value,
             )?;
             set_packed_context_bits(
                 &mut self.context_known_mask,
-                change.bit_offset as u32,
-                change.bit_width as u32,
+                change.bit_offset,
+                change.bit_width,
                 field_mask,
             )?;
             if crate::runtime::diagnostics::terminal_reselect_trace_enabled() {
@@ -1260,7 +1260,7 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
     fn eval_pattern_expression(&mut self, expr: &CompiledPatternExpression) -> Result<i64> {
         match expr {
             CompiledPatternExpression::Constant(value) => Ok(*value),
-            CompiledPatternExpression::InstStart => Ok(self.ctx.address as i64),
+            CompiledPatternExpression::InstStart => Ok(u64_to_i64_bits(self.ctx.address)),
             CompiledPatternExpression::InstNext => {
                 let construct_end = self
                     .ctx
@@ -1272,12 +1272,12 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                     .ok_or_else(|| anyhow!("pattern InstNext construct end overflowed"))?;
                 let next_offset = self.cursor.max(construct_end);
                 let next_offset = checked_usize_to_u64(next_offset, "pattern InstNext offset")?;
-                Ok(self
+                let address = self
                     .ctx
                     .address
                     .checked_add(next_offset)
-                    .ok_or_else(|| anyhow!("pattern InstNext address overflowed"))?
-                    as i64)
+                    .ok_or_else(|| anyhow!("pattern InstNext address overflowed"))?;
+                Ok(u64_to_i64_bits(address))
             }
             CompiledPatternExpression::InstNext2 => {
                 bail!("pattern expression inst_next2 requires delayed instruction context")
@@ -1448,7 +1448,7 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                         .as_ref()
                         .is_some_and(|space| space.name == "const" || space.index == 0)
                 {
-                    return Ok(fixed.offset_offset as i64);
+                    return Ok(u64_to_i64_bits(fixed.offset_offset));
                 }
                 bail!(
                     "operand {operand_index} has no evaluable defining expression for pattern expression"
@@ -1677,10 +1677,10 @@ fn checked_pattern_left_shift(lhs: i64, rhs: i64) -> Result<i64> {
 
 fn checked_pattern_right_shift(lhs: i64, rhs: i64) -> Result<i64> {
     let amount = pattern_shift_amount(rhs)?;
-    let shifted = (lhs as u64)
+    let shifted = i64_to_u64_bits(lhs)
         .checked_shr(amount)
         .ok_or_else(|| anyhow!("pattern expression right shift {amount} exceeds i64 width"))?;
-    Ok(shifted as i64)
+    Ok(u64_to_i64_bits(shifted))
 }
 
 fn pattern_context_bits_i64(raw: u64, bit_width: u32, sign_extend: bool) -> Result<i64> {
