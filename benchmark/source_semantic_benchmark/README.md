@@ -204,9 +204,22 @@ manifest.
   perfect rows, and fully perfect semantic rows.
 - `stage_transition_metrics`: debug-stage transition evidence, including
   furthest OK stage counts and lost-score attribution by first stage blocker.
+- `sleigh_lift_health_metrics`: decode/raw-p-code OK rates over mapped rows,
+  template-source totals, raw p-code compatibility import totals, invalid p-code
+  shape totals, and SLEIGH first-blocker rows. This makes SLEIGH regressions
+  visible even when downstream behavior or static scores also fail.
 - `behavior_failure_diagnostics`: behavior failure owner buckets
   (`candidate`, `oracle`, harness unavailable, unsupported, mismatch) plus
   normalized compiler/runtime detail signatures and representative rows.
+- `semantic_quality_quadrant_metrics`: row buckets combining dynamic behavior
+  state (`dynamic_pass`, `dynamic_mismatch`, unsupported/blocked states) with
+  static feature state (`static_perfect`, `static_gap`,
+  `static_no_decomp_features`, ...). This separates “behavior correct but shape
+  poor” from “shape plausible but behavior wrong.”
+- `coverage_blind_spot_metrics`: explicit row counts and representative rows
+  for missing evidence surfaces such as unmapped source functions, missing debug
+  decomp evidence, unsupported behavior signatures, eligible-but-not-executed
+  behavior rows, and source features with no comparable decompiler features.
 - `static_gap_density_metrics`: missing/extra feature density distributions and
   feature-gap buckets, so source absence and decompiler excess are visible even
   when raw feature totals differ by function size.

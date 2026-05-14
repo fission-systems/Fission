@@ -2373,6 +2373,10 @@ def summarize(rows: list[dict[str, Any]], manifest_name: str, entries: list[Benc
     static_extra_density_values: list[float] = []
     static_score_by_missing_gap_bucket: dict[str, list[float]] = {}
     hard_function_rows: list[dict[str, Any]] = []
+    semantic_quality_quadrants: dict[str, dict[str, Any]] = {}
+    sleigh_blocker_rows: list[dict[str, Any]] = []
+    coverage_blind_spot_rows: dict[str, list[dict[str, Any]]] = {}
+    coverage_blind_spot_counts: Counter[str] = Counter()
     focus_area_metrics: dict[str, dict[str, Any]] = {}
     by_language: dict[str, dict[str, Any]] = {}
     by_arch: dict[str, dict[str, Any]] = {}
@@ -2587,6 +2591,66 @@ def summarize(rows: list[dict[str, Any]], manifest_name: str, entries: list[Benc
         if isinstance(source_features, int | float):
             bucket["source_feature_counts"].append(float(source_features))
 
+    def dynamic_semantic_axis(behavior_status: str) -> str:
+        if behavior_status == "pass":
+            return "dynamic_pass"
+        if behavior_status == "mismatch":
+            return "dynamic_mismatch"
+        if behavior_status == "unsupported_signature":
+            return "dynamic_unsupported"
+        if behavior_status in {
+            "candidate_compile_failed",
+            "candidate_compile_timeout",
+            "candidate_run_failed",
+            "candidate_run_timeout",
+            "oracle_compile_failed",
+            "oracle_compile_timeout",
+            "oracle_run_failed",
+            "oracle_run_timeout",
+            "host_execution_unavailable",
+            "decomp_failed",
+        }:
+            return "dynamic_harness_or_decomp_blocked"
+        return "dynamic_unknown"
+
+    def static_semantic_axis(row: dict[str, Any]) -> str:
+        static_gaps = row.get("static_similarity_gaps") if isinstance(row.get("static_similarity_gaps"), dict) else {}
+        source_total = float(static_gaps.get("source_feature_total", 0.0) or 0.0)
+        decomp_total = float(static_gaps.get("decomp_feature_total", 0.0) or 0.0)
+        if source_total == 0.0:
+            return "static_no_source_features"
+        if decomp_total == 0.0:
+            return "static_no_decomp_features"
+        if float(row.get("static_semantic_score", 0.0) or 0.0) >= 1.0:
+            return "static_perfect"
+        return "static_gap"
+
+    def add_semantic_quality_quadrant(row: dict[str, Any], behavior_status: str, score: float) -> None:
+        static_gaps = row.get("static_similarity_gaps") if isinstance(row.get("static_similarity_gaps"), dict) else {}
+        quadrant = f"{dynamic_semantic_axis(behavior_status)}|{static_semantic_axis(row)}"
+        bucket = semantic_quality_quadrants.setdefault(
+            quadrant,
+            {
+                "row_count": 0,
+                "score_sum": 0.0,
+                "lost_score_sum": 0.0,
+                "missing_feature_total": 0.0,
+                "extra_feature_total": 0.0,
+                "top_rows": [],
+            },
+        )
+        bucket["row_count"] += 1
+        bucket["score_sum"] += score
+        bucket["lost_score_sum"] += max(0.0, 1.0 - score)
+        bucket["missing_feature_total"] += float(static_gaps.get("missing_feature_total", 0.0) or 0.0)
+        bucket["extra_feature_total"] += float(static_gaps.get("extra_feature_total", 0.0) or 0.0)
+        if score < 1.0:
+            bucket["top_rows"].append(triage_row_summary(row))
+
+    def add_coverage_blind_spot(kind: str, row: dict[str, Any]) -> None:
+        coverage_blind_spot_counts[kind] += 1
+        coverage_blind_spot_rows.setdefault(kind, []).append(triage_row_summary(row))
+
     for row in rows:
         score = float(row.get("semantic_score", 0.0) or 0.0)
         behavior = row.get("behavior") if isinstance(row.get("behavior"), dict) else {}
@@ -2606,6 +2670,19 @@ def summarize(rows: list[dict[str, Any]], manifest_name: str, entries: list[Benc
         preview_stats_dict = preview_stats if isinstance(preview_stats, dict) else None
         debug_decomp = row.get("debug_decomp")
         debug_decomp_dict = debug_decomp if isinstance(debug_decomp, dict) else None
+        add_semantic_quality_quadrant(row, behavior_status, score)
+        if first_stage.startswith("decode:") or first_stage.startswith("raw_pcode:"):
+            sleigh_blocker_rows.append(triage_row_summary(row))
+        if row.get("mapping_status") != "matched":
+            add_coverage_blind_spot("unmapped_source_function", row)
+        if row.get("mapping_status") == "matched" and not row.get("decomp_success"):
+            add_coverage_blind_spot("mapped_but_decompile_failed", row)
+        if not isinstance(debug_decomp, dict):
+            add_coverage_blind_spot("missing_debug_decomp_evidence", row)
+        if behavior_status == "unsupported_signature":
+            add_coverage_blind_spot("unsupported_behavior_signature", row)
+        if row.get("behavior", {}).get("eligible") is True and behavior_status not in {"pass", "mismatch"}:
+            add_coverage_blind_spot("eligible_behavior_not_executed", row)
         if score_loss > 0.0:
             loss_reason = row_zero_credit_reason(row) if score == 0.0 else "partial_credit"
             semantic_loss_by_behavior_status[behavior_status] += score_loss
@@ -2770,6 +2847,8 @@ def summarize(rows: list[dict[str, Any]], manifest_name: str, entries: list[Benc
             source_feature_rows += int(row_source_total > 0.0)
             decomp_feature_rows += int(row_decomp_total > 0.0)
             static_decomp_absent_feature_rows += int(row_source_total > 0.0 and row_decomp_total == 0.0)
+            if row_source_total > 0.0 and row_decomp_total == 0.0:
+                add_coverage_blind_spot("source_features_without_decomp_features", row)
             static_missing_feature_rows += int(row_missing_total > 0.0)
             static_extra_feature_rows += int(row_extra_total > 0.0)
             static_zero_similarity_rows += int(row_source_total > 0.0 and row_intersection_total == 0.0)
@@ -3346,6 +3425,54 @@ def summarize(rows: list[dict[str, Any]], manifest_name: str, entries: list[Benc
             "extra_feature_total": round(float(bucket.get("extra_feature_total", 0.0) or 0.0), 6),
             "top_rows": top_rows,
         }
+    semantic_quality_quadrant_export: dict[str, dict[str, Any]] = {}
+    for quadrant, bucket in sorted(semantic_quality_quadrants.items()):
+        row_count = int(bucket.get("row_count", 0) or 0)
+        top_rows = sorted(
+            bucket.get("top_rows") or [],
+            key=lambda row: (
+                float(row.get("semantic_score_percent") or 0.0),
+                str(row.get("function_name") or ""),
+            ),
+        )[:10]
+        semantic_quality_quadrant_export[quadrant] = {
+            "row_count": row_count,
+            "row_rate_total_denominator": round(row_count / total, 6) if total else 0.0,
+            "avg_semantic_score": round(float(bucket.get("score_sum", 0.0) or 0.0) / row_count, 6)
+            if row_count
+            else 0.0,
+            "avg_semantic_score_percent": percent(
+                round(float(bucket.get("score_sum", 0.0) or 0.0) / row_count, 6)
+            ) if row_count else 0.0,
+            "lost_score_sum": round(float(bucket.get("lost_score_sum", 0.0) or 0.0), 6),
+            "missing_feature_total": round(float(bucket.get("missing_feature_total", 0.0) or 0.0), 6),
+            "extra_feature_total": round(float(bucket.get("extra_feature_total", 0.0) or 0.0), 6),
+            "top_rows": top_rows,
+        }
+    coverage_blind_spot_export = {
+        kind: {
+            "row_count": int(count),
+            "row_rate_total_denominator": round(float(count) / total, 6) if total else 0.0,
+            "top_rows": sorted(
+                coverage_blind_spot_rows.get(kind) or [],
+                key=lambda row: (
+                    float(row.get("semantic_score_percent") or 0.0),
+                    str(row.get("function_name") or ""),
+                ),
+            )[:8],
+        }
+        for kind, count in sorted(coverage_blind_spot_counts.items())
+    }
+    raw_pcode_compat_total = float(nir_build_stats_numeric_totals.get("raw_pcode_compat_import_count", 0.0) or 0.0)
+    invalid_pcode_shape_total = float(debug_quality_evidence_totals.get("invalid_pcode_shape_count", 0.0) or 0.0)
+    sleigh_blocker_row_count = len(sleigh_blocker_rows)
+    sleigh_blocker_rows = sorted(
+        sleigh_blocker_rows,
+        key=lambda row: (
+            float(row.get("semantic_score_percent") or 0.0),
+            str(row.get("function_name") or ""),
+        ),
+    )[:12]
     return {
         "manifest": manifest_name,
         "entry_count": len(entries),
@@ -3466,10 +3593,42 @@ def summarize(rows: list[dict[str, Any]], manifest_name: str, entries: list[Benc
         },
         "admission_gate_metrics": admission_gate_metrics,
         "stage_transition_metrics": stage_transition_metrics,
+        "sleigh_lift_health_metrics": {
+            "mapped_rows": mapped,
+            "debug_stage_status_rows": debug_stage_status_row_count,
+            "decode_ok_rows": int(admission_gate_counts.get("decode_ok_rows", 0)),
+            "raw_pcode_ok_rows": int(admission_gate_counts.get("raw_pcode_ok_rows", 0)),
+            "decode_ok_rate_mapped_denominator": round(
+                float(admission_gate_counts.get("decode_ok_rows", 0)) / mapped,
+                6,
+            ) if mapped else 0.0,
+            "raw_pcode_ok_rate_mapped_denominator": round(
+                float(admission_gate_counts.get("raw_pcode_ok_rows", 0)) / mapped,
+                6,
+            ) if mapped else 0.0,
+            "template_source_totals": dict(sorted(debug_template_source_totals.items())),
+            "raw_pcode_compat_import_total": raw_pcode_compat_total,
+            "invalid_pcode_shape_total": invalid_pcode_shape_total,
+            "sleigh_first_blocker_row_count": sleigh_blocker_row_count,
+            "sleigh_first_blocker_lost_score": round(
+                sum(
+                    float(value)
+                    for key, value in stage_first_blocker_lost_score.items()
+                    if key.startswith("decode:") or key.startswith("raw_pcode:")
+                ),
+                6,
+            ),
+            "top_sleigh_blocker_rows": sleigh_blocker_rows,
+        },
         "behavior_failure_diagnostics": {
             "owner_counts": dict(sorted(behavior_failure_owner_counts.items())),
             "detail_signature_counts": dict(behavior_failure_detail_counts.most_common(20)),
             "top_detail_rows": behavior_failure_detail_top_rows,
+        },
+        "semantic_quality_quadrant_metrics": semantic_quality_quadrant_export,
+        "coverage_blind_spot_metrics": {
+            "counts": dict(sorted(coverage_blind_spot_counts.items())),
+            "details": coverage_blind_spot_export,
         },
         "static_gap_density_metrics": {
             "missing_density_distribution": numeric_distribution(static_missing_density_values),
@@ -4810,6 +4969,29 @@ def render_markdown(summary: dict[str, Any], rows: list[dict[str, Any]]) -> str:
             lines.extend(["", "## Stage Transition Metrics", "", "| Furthest OK Stage | Rows |", "|---|---:|"])
             for stage, count in sorted(furthest.items()):
                 lines.append(f"| {stage} | {count} |")
+    sleigh_health = summary.get("sleigh_lift_health_metrics")
+    if isinstance(sleigh_health, dict):
+        lines.extend(["", "## SLEIGH Lift Health Metrics", ""])
+        lines.append(
+            f"- Decode OK {sleigh_health.get('decode_ok_rows', 0)}/{sleigh_health.get('mapped_rows', 0)} "
+            f"({float(sleigh_health.get('decode_ok_rate_mapped_denominator', 0.0) or 0.0):.3f} mapped denominator), "
+            f"raw p-code OK {sleigh_health.get('raw_pcode_ok_rows', 0)}/{sleigh_health.get('mapped_rows', 0)} "
+            f"({float(sleigh_health.get('raw_pcode_ok_rate_mapped_denominator', 0.0) or 0.0):.3f})"
+        )
+        lines.append(
+            f"- Compat imports {float(sleigh_health.get('raw_pcode_compat_import_total', 0.0) or 0.0):.0f}, "
+            f"invalid p-code shapes {float(sleigh_health.get('invalid_pcode_shape_total', 0.0) or 0.0):.0f}, "
+            f"SLEIGH first-blocker rows {sleigh_health.get('sleigh_first_blocker_row_count', 0)}"
+        )
+        blocker_rows = sleigh_health.get("top_sleigh_blocker_rows") or []
+        if blocker_rows:
+            lines.extend(["", "| Function | Address | Score | First Failure |", "|---|---|---:|---|"])
+            for row in blocker_rows[:8]:
+                lines.append(
+                    f"| `{row.get('function_name')}` | `{row.get('address')}` | "
+                    f"{float(row.get('semantic_score_percent', 0.0) or 0.0):.3f}% | "
+                    f"{row.get('stage_first_failure')} |"
+                )
     failure_diagnostics = summary.get("behavior_failure_diagnostics")
     if isinstance(failure_diagnostics, dict):
         owner_counts = failure_diagnostics.get("owner_counts")
@@ -4822,6 +5004,36 @@ def render_markdown(summary: dict[str, Any], rows: list[dict[str, Any]]) -> str:
             lines.extend(["", "| Detail Signature | Rows |", "|---|---:|"])
             for signature, count in list(detail_counts.items())[:8]:
                 lines.append(f"| `{signature}` | {count} |")
+    quadrants = summary.get("semantic_quality_quadrant_metrics")
+    if isinstance(quadrants, dict) and quadrants:
+        lines.extend([
+            "",
+            "## Semantic Quality Quadrants",
+            "",
+            "| Quadrant | Rows | Avg Similarity | Lost Score | Missing | Extra |",
+            "|---|---:|---:|---:|---:|---:|",
+        ])
+        for quadrant, metrics in sorted(
+            quadrants.items(),
+            key=lambda item: float((item[1] or {}).get("lost_score_sum", 0.0) or 0.0),
+            reverse=True,
+        ):
+            if not isinstance(metrics, dict):
+                continue
+            lines.append(
+                f"| `{quadrant}` | {metrics.get('row_count', 0)} | "
+                f"{float(metrics.get('avg_semantic_score_percent', 0.0) or 0.0):.3f}% | "
+                f"{float(metrics.get('lost_score_sum', 0.0) or 0.0):.6f} | "
+                f"{float(metrics.get('missing_feature_total', 0.0) or 0.0):.0f} | "
+                f"{float(metrics.get('extra_feature_total', 0.0) or 0.0):.0f} |"
+            )
+    blind_spots = summary.get("coverage_blind_spot_metrics")
+    if isinstance(blind_spots, dict):
+        counts = blind_spots.get("counts")
+        if isinstance(counts, dict) and counts:
+            lines.extend(["", "## Coverage Blind-Spot Metrics", "", "| Blind Spot | Rows |", "|---|---:|"])
+            for kind, count in sorted(counts.items()):
+                lines.append(f"| {kind} | {count} |")
     gap_density = summary.get("static_gap_density_metrics")
     if isinstance(gap_density, dict):
         missing_density = gap_density.get("missing_density_distribution")
@@ -5981,7 +6193,19 @@ int max(int a, int b) { if (a > b) return a; return b; }
         assert summary["admission_gate_metrics"]["counts"]["manifest_rows"] == 2
         assert summary["admission_gate_metrics"]["counts"]["raw_pcode_ok_rows"] == 1
         assert summary["stage_transition_metrics"]["furthest_ok_stage_counts"]["render"] == 1
+        assert summary["sleigh_lift_health_metrics"]["decode_ok_rows"] == 1
+        assert summary["sleigh_lift_health_metrics"]["raw_pcode_ok_rows"] == 1
+        assert summary["sleigh_lift_health_metrics"]["raw_pcode_compat_import_total"] == 0.0
         assert summary["behavior_failure_diagnostics"]["owner_counts"]["decomp_failed"] == 1
+        assert summary["semantic_quality_quadrant_metrics"]["dynamic_pass|static_perfect"]["row_count"] == 1
+        assert (
+            summary["semantic_quality_quadrant_metrics"][
+                "dynamic_harness_or_decomp_blocked|static_no_decomp_features"
+            ]["row_count"]
+            == 1
+        )
+        assert summary["coverage_blind_spot_metrics"]["counts"]["unmapped_source_function"] == 1
+        assert summary["coverage_blind_spot_metrics"]["counts"]["source_features_without_decomp_features"] == 1
         assert summary["static_gap_density_metrics"]["gap_bucket_rows"]["missing:small|extra:none"]["row_count"] == 1
         assert summary["focus_area_metrics"]["nir_builder_dataflow"]["row_count"] == 1
         assert summary["focus_area_metrics"]["mapping_name_recovery"]["lost_score_sum"] == 1.0
