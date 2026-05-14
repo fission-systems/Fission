@@ -190,7 +190,9 @@ mod construct_state_offset_tests {
     #[test]
     fn context_change_expr_word_fails_closed_on_out_of_range_values() {
         assert_eq!(context_change_expr_word(0xffff_ffff).unwrap(), u32::MAX);
-        assert!(context_change_expr_word(-1).is_err());
+        assert_eq!(context_change_expr_word(-1).unwrap(), u32::MAX);
+        assert_eq!(context_change_expr_word(-2).unwrap(), 0xffff_fffe);
+        assert!(context_change_expr_word(i64::from(i32::MIN) - 1).is_err());
         assert!(context_change_expr_word(i64::from(u32::MAX) + 1).is_err());
     }
 
@@ -1530,7 +1532,10 @@ fn checked_relative_offset(base: usize, rel: i32, role: &str) -> Result<usize> {
 }
 
 fn context_change_expr_word(value: i64) -> Result<u32> {
-    u32::try_from(value).map_err(|_| anyhow!("context expression value {value} exceeds u32"))
+    if value < i64::from(i32::MIN) || value > i64::from(u32::MAX) {
+        return Err(anyhow!("context expression value {value} exceeds u32 word"));
+    }
+    Ok(value as u32)
 }
 
 fn context_change_mask_word(mask: u64) -> Result<u32> {
