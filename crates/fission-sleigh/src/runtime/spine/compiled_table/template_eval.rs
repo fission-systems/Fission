@@ -48,6 +48,20 @@ fn space_id_const_varnode(space: &CompiledSpaceRef, role: &str) -> Result<Varnod
     Ok(Varnode::constant(value, 4))
 }
 
+fn build_operand_index_from_op(op: &CompiledOpTpl) -> Result<usize> {
+    let input = op
+        .inputs
+        .first()
+        .ok_or_else(|| anyhow!("BUILD template missing operand input"))?;
+    let CompiledVarnodeTpl::Varnode { offset, .. } = input else {
+        bail!("BUILD template operand input must be a VarnodeTpl");
+    };
+    let CompiledConstTpl::Real { value } = offset.as_ref() else {
+        bail!("BUILD template operand offset must be a real operand index");
+    };
+    usize::try_from(*value).map_err(|_| anyhow!("BUILD operand index {value} exceeds usize"))
+}
+
 fn label_id_from_op_tpl(op: &CompiledOpTpl) -> Result<u64> {
     if op.output.is_some() || op.inputs.len() != 1 {
         bail!("LABEL template shape is unsupported");
@@ -735,41 +749,29 @@ impl<'c> CompiledTableEmitter<'c> {
             // architecture-specific effective-address expression from the
             // already decoded display operand.
             CompiledOpTplOpcode::Build => {
-                let operand_index = if let Some(input_tpl) = op.inputs.first() {
-                    match input_tpl {
-                        CompiledVarnodeTpl::Varnode { offset, .. } => match offset.as_ref() {
-                            CompiledConstTpl::Real { value } => usize::try_from(*value).ok(),
-                            _ => None,
-                        },
-                        _ => None,
-                    }
-                } else {
-                    None
-                };
-                if let Some(idx) = operand_index {
-                    if std::env::var("FISSION_BUILD_DEBUG").is_ok() {
-                        let handle = state.handles.get(idx);
-                        let has_sub = handle
-                            .as_ref()
-                            .and_then(|h| h.subtable_state.as_ref())
-                            .is_some();
-                        let template_src = handle
-                            .as_ref()
-                            .and_then(|h| h.subtable_state.as_ref())
-                            .map(|s| format!("{:?}", s.constructor_template.template_source))
-                            .unwrap_or_else(|| "None".to_string());
-                        let ops_count = handle
-                            .as_ref()
-                            .and_then(|h| h.subtable_state.as_ref())
-                            .map(|s| s.constructor_template.ops.len())
-                            .unwrap_or(0);
-                        eprintln!(
-                            "[BUILD] operand={idx} has_sub={has_sub} template_src={template_src} ops={ops_count} already_built={}",
-                            self.built_operands.contains(&idx)
-                        );
-                    }
-                    self.emit_build_operand(state, idx)?;
+                let idx = build_operand_index_from_op(op)?;
+                if std::env::var("FISSION_BUILD_DEBUG").is_ok() {
+                    let handle = state.handles.get(idx);
+                    let has_sub = handle
+                        .as_ref()
+                        .and_then(|h| h.subtable_state.as_ref())
+                        .is_some();
+                    let template_src = handle
+                        .as_ref()
+                        .and_then(|h| h.subtable_state.as_ref())
+                        .map(|s| format!("{:?}", s.constructor_template.template_source))
+                        .unwrap_or_else(|| "None".to_string());
+                    let ops_count = handle
+                        .as_ref()
+                        .and_then(|h| h.subtable_state.as_ref())
+                        .map(|s| s.constructor_template.ops.len())
+                        .unwrap_or(0);
+                    eprintln!(
+                        "[BUILD] operand={idx} has_sub={has_sub} template_src={template_src} ops={ops_count} already_built={}",
+                        self.built_operands.contains(&idx)
+                    );
                 }
+                self.emit_build_operand(state, idx)?;
                 Ok(())
             }
             // CallOther: user-defined pcodeop. Ghidra emits this as a real
@@ -1702,6 +1704,20 @@ mod tests {
         }
     }
 
+    fn build_op_with_operand_index(value: u64) -> CompiledOpTpl {
+        CompiledOpTpl {
+            sla_raw_pcode_opcode: 0,
+            opcode: CompiledOpTplOpcode::Build,
+            output: None,
+            inputs: vec![CompiledVarnodeTpl::Varnode {
+                space: CompiledSpaceTpl::Const(Box::new(CompiledConstTpl::Real { value: 0 })),
+                offset: Box::new(CompiledConstTpl::Real { value }),
+                size: Box::new(CompiledConstTpl::Real { value: 0 }),
+            }],
+            label: None,
+        }
+    }
+
     fn test_handle(space_name: &str, offset: u64) -> RuntimeHandle {
         RuntimeHandle {
             operand_index: 0,
@@ -1795,11 +1811,34 @@ mod tests {
     }
 
     #[test]
+    fn build_operand_index_fails_closed_on_malformed_templates() {
+        assert_eq!(
+            build_operand_index_from_op(&build_op_with_operand_index(3)).unwrap(),
+            3
+        );
+
+        if usize::try_from(u64::MAX).is_err() {
+            let err = build_operand_index_from_op(&build_op_with_operand_index(u64::MAX))
+                .expect_err("oversized BUILD operand index must fail closed");
+            assert!(err.to_string().contains("BUILD operand index"));
+        }
+
+        let mut missing_input = build_op_with_operand_index(0);
+        missing_input.inputs.clear();
+        let err = build_operand_index_from_op(&missing_input)
+            .expect_err("missing BUILD operand input must fail closed");
+        assert!(err
+            .to_string()
+            .contains("BUILD template missing operand input"));
+    }
+
+    #[test]
     fn offset_plus_source_has_no_saturating_shift_fallback() {
         let source = include_str!("template_eval.rs");
         let saturating_shift_fallback =
             ["let shift_bits = shift_bytes.", "saturating", "_mul(8);"].concat();
         let dynamic_space_id_lossy_cast = ["space.index", "as", "i64"].join(" ");
+        let build_index_ok_fallback = ["usize::try_from(*value)", ".ok()"].join("");
         let missing_space_non_const_fallback =
             [".map(|s| s.name == \"const\")", ".unwrap_or(false)"].join("\n");
         let missing_const_space_materialization = [
@@ -1820,6 +1859,10 @@ mod tests {
         assert!(
             !source.contains(&dynamic_space_id_lossy_cast),
             "dynamic LOAD/STORE space-id constants must fail closed instead of truncating SLA space ids"
+        );
+        assert!(
+            !source.contains(&build_index_ok_fallback),
+            "BUILD operand index conversion must fail closed instead of skipping malformed templates"
         );
         assert!(
             !source.contains(&missing_const_space_materialization),
