@@ -73,6 +73,7 @@ pub struct EntrySpec {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct GhidraLanguageManifestEntry {
     pub processor: String,
     pub entry_spec: String,
@@ -86,7 +87,7 @@ pub struct GhidraLanguageManifestEntry {
     #[serde(default)]
     pub imported_aux_files: Vec<String>,
     pub runtime_status: String,
-    #[serde(default, alias = "compatibility_aliases")]
+    #[serde(default)]
     pub language_aliases: Vec<String>,
 }
 
@@ -901,6 +902,30 @@ mod tests {
                 entry.entry_id
             );
         }
+    }
+
+    #[test]
+    fn language_manifest_rejects_legacy_compatibility_aliases_field() {
+        let payload = r#"{
+            "processor_count": 1,
+            "variant_count": 1,
+            "entries": [{
+                "processor": "x86",
+                "entry_spec": "x86-64.slaspec",
+                "entry_id": "x86-64",
+                "language_id": "x86:LE:64:default",
+                "language_ids": [],
+                "endian": "little",
+                "processor_spec": "x86-64.pspec",
+                "variant_class": "default",
+                "imported_aux_files": [],
+                "runtime_status": "executable_candidate",
+                "compatibility_aliases": ["x86:LE:64:default"]
+            }]
+        }"#;
+
+        serde_json::from_str::<GhidraLanguageManifest>(payload)
+            .expect_err("legacy compatibility_aliases must not be accepted");
     }
 
     #[test]
