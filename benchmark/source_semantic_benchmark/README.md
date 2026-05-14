@@ -199,6 +199,21 @@ manifest.
   structuring/render, mapping/name recovery, behavior harness coverage,
   dynamic semantics, and unclassified quality loss. Row counts can exceed the
   manifest denominator because a row may expose more than one focus area.
+- `roadmap_priority_metrics`: the same evidence folded into the current
+  priority order: SLEIGH lift correctness, type/data abstraction, hard
+  structuring, FID/name recovery, and architecture breadth. Each bucket includes
+  row counts, lost-score totals, behavior/stage cross-tabs, feature gaps, and
+  representative rows.
+- `type_data_gap_metrics`: signature, memory, and call feature-gap hot rows for
+  type/prototype/data-abstraction work.
+- `structuring_gap_metrics`: control-flow feature-gap rows plus hard
+  non-perfect rows, exposing large or dense functions separately from small
+  shape misses.
+- `fid_name_recovery_metrics`: unmapped or suspiciously renamed rows for
+  symbol/FID/name recovery follow-up.
+- `architecture_support_metrics`: per-architecture quality, lost-score, and
+  first-failing-stage buckets so architecture breadth is visible without
+  relying only on `by_arch`.
 - `admission_gate_metrics`: full-denominator funnel counts/rates for mapping,
   decompile, Rust-SLEIGH stages, candidate compile, behavior pass, static
   perfect rows, and fully perfect semantic rows.

@@ -1666,6 +1666,74 @@ def add_numeric_debug_pipeline_values(values: dict[str, list[float]], pipeline: 
             values.setdefault(key, []).append(float(value))
 
 
+ROADMAP_PRIORITY_ORDER = [
+    "p1_sleigh_lift_correctness",
+    "p2_type_data_abstraction",
+    "p3_structuring_hard_cases",
+    "p4_fid_name_recovery",
+    "p5_architecture_breadth",
+]
+
+
+def add_priority_bucket_row(
+    buckets: dict[str, dict[str, Any]],
+    priority: str,
+    row: dict[str, Any],
+    behavior_status: str,
+    first_stage: str,
+    score: float,
+) -> None:
+    static_gaps = row.get("static_similarity_gaps") if isinstance(row.get("static_similarity_gaps"), dict) else {}
+    bucket = buckets.setdefault(
+        priority,
+        {
+            "row_count": 0,
+            "score_sum": 0.0,
+            "lost_score_sum": 0.0,
+            "missing_feature_total": 0.0,
+            "extra_feature_total": 0.0,
+            "behavior_status_counts": Counter(),
+            "stage_first_failure_counts": Counter(),
+            "top_rows": [],
+        },
+    )
+    bucket["row_count"] += 1
+    bucket["score_sum"] += score
+    bucket["lost_score_sum"] += max(0.0, 1.0 - score)
+    bucket["missing_feature_total"] += float(static_gaps.get("missing_feature_total", 0.0) or 0.0)
+    bucket["extra_feature_total"] += float(static_gaps.get("extra_feature_total", 0.0) or 0.0)
+    bucket["behavior_status_counts"][behavior_status] += 1
+    bucket["stage_first_failure_counts"][first_stage] += 1
+    bucket["top_rows"].append(triage_row_summary(row))
+
+
+def metric_bucket_export(metrics: dict[str, Any], total: int, top_limit: int = 12) -> dict[str, Any]:
+    row_count = int(metrics.get("row_count", 0) or 0)
+    top_rows = sorted(
+        metrics.get("top_rows") or [],
+        key=lambda row: (
+            float(row.get("semantic_score_percent") or 0.0),
+            str(row.get("function_name") or ""),
+        ),
+    )[:top_limit]
+    return {
+        "row_count": row_count,
+        "row_rate_total_denominator": round(row_count / total, 6) if total else 0.0,
+        "avg_semantic_score": round(float(metrics.get("score_sum", 0.0) or 0.0) / row_count, 6)
+        if row_count
+        else 0.0,
+        "avg_semantic_score_percent": percent(
+            round(float(metrics.get("score_sum", 0.0) or 0.0) / row_count, 6)
+        ) if row_count else 0.0,
+        "lost_score_sum": round(float(metrics.get("lost_score_sum", 0.0) or 0.0), 6),
+        "missing_feature_total": round(float(metrics.get("missing_feature_total", 0.0) or 0.0), 6),
+        "extra_feature_total": round(float(metrics.get("extra_feature_total", 0.0) or 0.0), 6),
+        "behavior_status_counts": dict(sorted(metrics.get("behavior_status_counts", Counter()).items())),
+        "stage_first_failure_counts": dict(sorted(metrics.get("stage_first_failure_counts", Counter()).items())),
+        "top_rows": top_rows,
+    }
+
+
 def default_behavior_cases(param_count: int) -> list[tuple[int, ...]]:
     if param_count == 0:
         return [()]
@@ -2392,6 +2460,13 @@ def summarize(rows: list[dict[str, Any]], manifest_name: str, entries: list[Benc
     coverage_blind_spot_rows: dict[str, list[dict[str, Any]]] = {}
     coverage_blind_spot_counts: Counter[str] = Counter()
     focus_area_metrics: dict[str, dict[str, Any]] = {}
+    roadmap_priority_metrics: dict[str, dict[str, Any]] = {}
+    signature_gap_rows: list[dict[str, Any]] = []
+    memory_gap_rows: list[dict[str, Any]] = []
+    call_gap_rows: list[dict[str, Any]] = []
+    control_flow_gap_rows: list[dict[str, Any]] = []
+    name_recovery_rows: list[dict[str, Any]] = []
+    architecture_stage_metrics: dict[str, dict[str, Any]] = {}
     by_language: dict[str, dict[str, Any]] = {}
     by_arch: dict[str, dict[str, Any]] = {}
     by_source_return_kind: dict[str, dict[str, Any]] = {}
@@ -2718,8 +2793,54 @@ def summarize(rows: list[dict[str, Any]], manifest_name: str, entries: list[Benc
         score_values_by_stage_first_failure.setdefault(first_stage, []).append(score)
         axis = improvement_axis_for(row, behavior, first_stage)
         add_axis_row(axis, row, behavior_status, first_stage, score)
-        for area in focus_areas_for(row, behavior, first_stage, preview_stats_dict, debug_decomp_dict):
+        areas = focus_areas_for(row, behavior, first_stage, preview_stats_dict, debug_decomp_dict)
+        for area in areas:
             add_focus_area_row(area, row, behavior_status, first_stage, score)
+        if "sleigh_runtime_lift" in areas:
+            add_priority_bucket_row(
+                roadmap_priority_metrics,
+                "p1_sleigh_lift_correctness",
+                row,
+                behavior_status,
+                first_stage,
+                score,
+            )
+        if "type_data_abstraction" in areas:
+            add_priority_bucket_row(
+                roadmap_priority_metrics,
+                "p2_type_data_abstraction",
+                row,
+                behavior_status,
+                first_stage,
+                score,
+            )
+        if "structuring_render" in areas:
+            add_priority_bucket_row(
+                roadmap_priority_metrics,
+                "p3_structuring_hard_cases",
+                row,
+                behavior_status,
+                first_stage,
+                score,
+            )
+        if "mapping_name_recovery" in areas:
+            add_priority_bucket_row(
+                roadmap_priority_metrics,
+                "p4_fid_name_recovery",
+                row,
+                behavior_status,
+                first_stage,
+                score,
+            )
+        if row.get("binary_arch") not in {None, "unknown"} and score < 1.0:
+            add_priority_bucket_row(
+                roadmap_priority_metrics,
+                "p5_architecture_breadth",
+                row,
+                behavior_status,
+                first_stage,
+                score,
+            )
         source_complexity_value = float(row.get("source_static_feature_count") or 0.0)
         add_complexity_row(complexity_bucket(source_complexity_value), row, score, behavior_status)
         if isinstance(row.get("decomp_wall_sec"), int | float):
@@ -2891,6 +3012,7 @@ def summarize(rows: list[dict[str, Any]], manifest_name: str, entries: list[Benc
                 if component not in static_gap_component_totals or not isinstance(details, dict):
                     continue
                 component_missing_total = float(details.get("missing_feature_total", 0.0) or 0.0)
+                component_extra_total = float(details.get("extra_feature_total", 0.0) or 0.0)
                 component_source_total = float(details.get("source_feature_total", 0.0) or 0.0)
                 component_decomp_total = float(details.get("decomp_feature_total", 0.0) or 0.0)
                 component_intersection_total = float(details.get("intersection_feature_total", 0.0) or 0.0)
@@ -2925,6 +3047,23 @@ def summarize(rows: list[dict[str, Any]], manifest_name: str, entries: list[Benc
                         and isinstance(item.get("count"), int | float)
                     ):
                         static_gap_component_extra_features[component][item["feature"]] += item["count"]
+                if component_missing_total > 0.0 or component_extra_total > 0.0:
+                    component_row = {
+                        **triage_row_summary(row),
+                        "component": component,
+                        "component_missing_feature_total": component_missing_total,
+                        "component_extra_feature_total": component_extra_total,
+                        "component_source_feature_total": component_source_total,
+                        "component_decomp_feature_total": component_decomp_total,
+                    }
+                    if component == "signature":
+                        signature_gap_rows.append(component_row)
+                    elif component == "memory":
+                        memory_gap_rows.append(component_row)
+                    elif component == "call":
+                        call_gap_rows.append(component_row)
+                    elif component == "control_flow":
+                        control_flow_gap_rows.append(component_row)
         lang = row["language"]
         bucket = by_language.setdefault(
             lang,
@@ -2938,6 +3077,29 @@ def summarize(rows: list[dict[str, Any]], manifest_name: str, entries: list[Benc
             {"row_count": 0, "mapped": 0, "decomp_success": 0, "behavior_pass": 0, "score_sum": 0.0},
         )
         add_bucket(arch_bucket, row)
+        arch_metrics = architecture_stage_metrics.setdefault(
+            arch,
+            {
+                "row_count": 0,
+                "score_sum": 0.0,
+                "lost_score_sum": 0.0,
+                "missing_feature_total": 0.0,
+                "extra_feature_total": 0.0,
+                "behavior_status_counts": Counter(),
+                "stage_first_failure_counts": Counter(),
+                "top_rows": [],
+            },
+        )
+        arch_metrics["row_count"] += 1
+        arch_metrics["score_sum"] += score
+        arch_metrics["lost_score_sum"] += score_loss
+        static_gaps_for_arch = row.get("static_similarity_gaps") if isinstance(row.get("static_similarity_gaps"), dict) else {}
+        arch_metrics["missing_feature_total"] += float(static_gaps_for_arch.get("missing_feature_total", 0.0) or 0.0)
+        arch_metrics["extra_feature_total"] += float(static_gaps_for_arch.get("extra_feature_total", 0.0) or 0.0)
+        arch_metrics["behavior_status_counts"][behavior_status] += 1
+        arch_metrics["stage_first_failure_counts"][first_stage] += 1
+        if score < 1.0:
+            arch_metrics["top_rows"].append(triage_row_summary(row))
 
         return_kind = str(row.get("source_return_kind") or "unknown")
         return_bucket = by_source_return_kind.setdefault(
@@ -2958,6 +3120,21 @@ def summarize(rows: list[dict[str, Any]], manifest_name: str, entries: list[Benc
             {"row_count": 0, "mapped": 0, "decomp_success": 0, "behavior_pass": 0, "score_sum": 0.0},
         )
         add_bucket(entry_bucket, row)
+        if row.get("mapping_status") != "matched" or (
+            row.get("fission_name")
+            and row.get("function_name")
+            and normalize_name(str(row.get("fission_name"))) != normalize_name(str(row.get("function_name")))
+        ):
+            name_recovery_rows.append(triage_row_summary(row))
+            if "mapping_name_recovery" not in areas:
+                add_priority_bucket_row(
+                    roadmap_priority_metrics,
+                    "p4_fid_name_recovery",
+                    row,
+                    behavior_status,
+                    first_stage,
+                    score,
+                )
 
         if isinstance(debug_decomp, dict):
             debug_decomp_row_count += 1
@@ -3487,6 +3664,53 @@ def summarize(rows: list[dict[str, Any]], manifest_name: str, entries: list[Benc
             str(row.get("function_name") or ""),
         ),
     )[:12]
+
+    roadmap_priority_export: dict[str, dict[str, Any]] = {}
+    for priority in ROADMAP_PRIORITY_ORDER:
+        if priority in roadmap_priority_metrics:
+            roadmap_priority_export[priority] = metric_bucket_export(roadmap_priority_metrics[priority], total)
+        else:
+            roadmap_priority_export[priority] = metric_bucket_export({}, total)
+
+    def top_component_gap_rows(component_rows: list[dict[str, Any]], limit: int = 12) -> list[dict[str, Any]]:
+        return sorted(
+            component_rows,
+            key=lambda row: (
+                -float(row.get("component_missing_feature_total") or 0.0),
+                -float(row.get("component_extra_feature_total") or 0.0),
+                float(row.get("semantic_score_percent") or 0.0),
+                str(row.get("function_name") or ""),
+            ),
+        )[:limit]
+
+    type_data_gap_metrics = {
+        "signature_gap_row_count": len(signature_gap_rows),
+        "memory_gap_row_count": len(memory_gap_rows),
+        "call_gap_row_count": len(call_gap_rows),
+        "signature_gap_rows": top_component_gap_rows(signature_gap_rows),
+        "memory_gap_rows": top_component_gap_rows(memory_gap_rows),
+        "call_gap_rows": top_component_gap_rows(call_gap_rows),
+    }
+    structuring_gap_metrics = {
+        "control_flow_gap_row_count": len(control_flow_gap_rows),
+        "hard_nonperfect_row_count": len(hard_function_rows),
+        "control_flow_gap_rows": top_component_gap_rows(control_flow_gap_rows),
+        "hard_nonperfect_rows": hard_function_rows[:12],
+    }
+    fid_name_recovery_metrics = {
+        "name_or_mapping_gap_row_count": len(name_recovery_rows),
+        "top_name_or_mapping_gap_rows": sorted(
+            name_recovery_rows,
+            key=lambda row: (
+                float(row.get("semantic_score_percent") or 0.0),
+                str(row.get("function_name") or ""),
+            ),
+        )[:12],
+    }
+    architecture_support_metrics = {
+        arch: metric_bucket_export(metrics, total)
+        for arch, metrics in sorted(architecture_stage_metrics.items())
+    }
     return {
         "manifest": manifest_name,
         "entry_count": len(entries),
@@ -3578,6 +3802,14 @@ def summarize(rows: list[dict[str, Any]], manifest_name: str, entries: list[Benc
         },
         "improvement_axis_metrics": improvement_axis_export,
         "focus_area_metrics": focus_area_export,
+        "roadmap_priority_metrics": {
+            "priority_order": ROADMAP_PRIORITY_ORDER,
+            "buckets": roadmap_priority_export,
+        },
+        "type_data_gap_metrics": type_data_gap_metrics,
+        "structuring_gap_metrics": structuring_gap_metrics,
+        "fid_name_recovery_metrics": fid_name_recovery_metrics,
+        "architecture_support_metrics": architecture_support_metrics,
         "complexity_quality_metrics": {
             "source_feature_bucket_policy": "tiny<=5, small<=15, medium<=40, large>40 source static features",
             "by_source_feature_bucket": complexity_export,
@@ -4920,6 +5152,69 @@ def render_markdown(summary: dict[str, Any], rows: list[dict[str, Any]]) -> str:
                 f"{float(metrics.get('lost_score_sum', 0.0) or 0.0):.6f} | "
                 f"{float(metrics.get('missing_feature_total', 0.0) or 0.0):.0f} |"
             )
+    roadmap = summary.get("roadmap_priority_metrics")
+    if isinstance(roadmap, dict):
+        buckets = roadmap.get("buckets") if isinstance(roadmap.get("buckets"), dict) else {}
+        order = roadmap.get("priority_order") if isinstance(roadmap.get("priority_order"), list) else sorted(buckets)
+        if buckets:
+            lines.extend([
+                "",
+                "## Roadmap Priority Metrics",
+                "",
+                "| Priority | Rows | Avg Similarity | Lost Score | Missing | Extra |",
+                "|---|---:|---:|---:|---:|---:|",
+            ])
+            for priority in order:
+                metrics = buckets.get(priority)
+                if not isinstance(metrics, dict):
+                    continue
+                lines.append(
+                    f"| {priority} | {metrics.get('row_count', 0)} | "
+                    f"{float(metrics.get('avg_semantic_score_percent', 0.0) or 0.0):.3f}% | "
+                    f"{float(metrics.get('lost_score_sum', 0.0) or 0.0):.6f} | "
+                    f"{float(metrics.get('missing_feature_total', 0.0) or 0.0):.0f} | "
+                    f"{float(metrics.get('extra_feature_total', 0.0) or 0.0):.0f} |"
+                )
+    type_data_gaps = summary.get("type_data_gap_metrics")
+    if isinstance(type_data_gaps, dict):
+        lines.extend(["", "## Type/Data Gap Metrics", ""])
+        lines.append(
+            f"- Signature gap rows {type_data_gaps.get('signature_gap_row_count', 0)}, "
+            f"memory gap rows {type_data_gaps.get('memory_gap_row_count', 0)}, "
+            f"call gap rows {type_data_gaps.get('call_gap_row_count', 0)}"
+        )
+    structuring_gaps = summary.get("structuring_gap_metrics")
+    if isinstance(structuring_gaps, dict):
+        lines.extend(["", "## Structuring Gap Metrics", ""])
+        lines.append(
+            f"- Control-flow gap rows {structuring_gaps.get('control_flow_gap_row_count', 0)}, "
+            f"hard non-perfect rows {structuring_gaps.get('hard_nonperfect_row_count', 0)}"
+        )
+    fid_name = summary.get("fid_name_recovery_metrics")
+    if isinstance(fid_name, dict):
+        lines.extend(["", "## FID/Name Recovery Metrics", ""])
+        lines.append(f"- Name or mapping gap rows {fid_name.get('name_or_mapping_gap_row_count', 0)}")
+    arch_support = summary.get("architecture_support_metrics")
+    if isinstance(arch_support, dict) and arch_support:
+        lines.extend([
+            "",
+            "## Architecture Support Metrics",
+            "",
+            "| Architecture | Rows | Avg Similarity | Lost Score | Top First Failure |",
+            "|---|---:|---:|---:|---|",
+        ])
+        for arch, metrics in sorted(arch_support.items()):
+            if not isinstance(metrics, dict):
+                continue
+            stage_counts = metrics.get("stage_first_failure_counts")
+            top_stage = "none"
+            if isinstance(stage_counts, dict) and stage_counts:
+                top_stage = sorted(stage_counts.items(), key=lambda item: (item[1], item[0]), reverse=True)[0][0]
+            lines.append(
+                f"| {arch} | {metrics.get('row_count', 0)} | "
+                f"{float(metrics.get('avg_semantic_score_percent', 0.0) or 0.0):.3f}% | "
+                f"{float(metrics.get('lost_score_sum', 0.0) or 0.0):.6f} | {top_stage} |"
+            )
     complexity_quality = summary.get("complexity_quality_metrics")
     if isinstance(complexity_quality, dict):
         buckets = complexity_quality.get("by_source_feature_bucket")
@@ -6249,6 +6544,13 @@ int max(int a, int b) { if (a > b) return a; return b; }
         assert summary["static_gap_density_metrics"]["gap_bucket_rows"]["missing:small|extra:none"]["row_count"] == 1
         assert summary["focus_area_metrics"]["nir_builder_dataflow"]["row_count"] == 1
         assert summary["focus_area_metrics"]["mapping_name_recovery"]["lost_score_sum"] == 1.0
+        assert summary["roadmap_priority_metrics"]["priority_order"][0] == "p1_sleigh_lift_correctness"
+        assert summary["roadmap_priority_metrics"]["buckets"]["p3_structuring_hard_cases"]["row_count"] == 1
+        assert summary["roadmap_priority_metrics"]["buckets"]["p4_fid_name_recovery"]["lost_score_sum"] == 1.0
+        assert "signature_gap_rows" in summary["type_data_gap_metrics"]
+        assert "control_flow_gap_rows" in summary["structuring_gap_metrics"]
+        assert summary["fid_name_recovery_metrics"]["name_or_mapping_gap_row_count"] == 1
+        assert "unknown" in summary["architecture_support_metrics"]
         assert summary["complexity_quality_metrics"]["by_source_feature_bucket"]["tiny"]["row_count"] == 2
         assert "decompile_wall_by_stage_first_failure" in summary["stage_cost_correlation_metrics"]
         assert "score_by_decompile_cost_bucket" in summary["stage_cost_correlation_metrics"]
