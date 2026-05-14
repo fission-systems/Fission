@@ -902,6 +902,7 @@ fn compiled_table_policy_symbols_stay_architecture_neutral() {
     let context_commit_addr_unit_fallback = ".unwrap_or(1)";
     let context_commit_missing_space_non_const_fallback =
         [".map(|s| s.name == ", "\"const\")", ".unwrap_or(false)"].join("");
+    let static_handle_addr_unit_max_fallback = [".word_size", ".max(1) as u64"].join("\n");
     let context_commit_addr_unit_wrap = "offset.wrapping_mul(addr_unit)";
     let static_handle_addr_unit_wrap = "offset_offset.wrapping_mul(addr_unit)";
     let swallowed_context_word_error = "let _ = set_packed_context_word";
@@ -1157,6 +1158,7 @@ fn compiled_table_policy_symbols_stay_architecture_neutral() {
         assert!(
             !source.contains(context_commit_addr_unit_fallback)
                 && !source.contains(&context_commit_missing_space_non_const_fallback)
+                && !source.contains(&static_handle_addr_unit_max_fallback)
                 && !source.contains(context_commit_addr_unit_wrap)
                 && !source.contains(static_handle_addr_unit_wrap),
             "{} still hides invalid address-unit scaling",

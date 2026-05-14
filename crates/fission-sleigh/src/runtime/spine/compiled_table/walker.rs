@@ -535,13 +535,21 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
             let space_ref = space
                 .as_ref()
                 .ok_or_else(|| anyhow!("static HandleTpl missing target space"))?;
-            let addr_unit = self
+            let target_space = self
                 .compiled
                 .sla_spaces
                 .get(&space_ref.index)
-                .ok_or_else(|| anyhow!("static HandleTpl target space missing SLA metadata"))?
-                .word_size
-                .max(1) as u64;
+                .ok_or_else(|| anyhow!("static HandleTpl target space missing SLA metadata"))?;
+            let addr_unit = if target_space.index == 0 || target_space.name == "const" {
+                1
+            } else if target_space.word_size == 0 {
+                bail!(
+                    "static HandleTpl target space {} has word_size=0",
+                    target_space.name
+                );
+            } else {
+                u64::from(target_space.word_size)
+            };
             (
                 None,
                 offset_offset
