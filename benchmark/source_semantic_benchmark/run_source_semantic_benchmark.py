@@ -1958,6 +1958,10 @@ def sleigh_template_source_gate(summary: dict[str, Any], required_source: str) -
         failures.append(
             "SLEIGH template source gate requires debug_template_source_totals; run with --include-debug-decomp"
         )
+    if raw_pcode_ok > 0 and total_templates < raw_pcode_ok:
+        failures.append(
+            f"SLEIGH template source evidence must cover every raw_pcode:ok row ({total_templates}/{raw_pcode_ok})"
+        )
     if row_count > 0 and decode_ok != row_count:
         failures.append(f"SLEIGH decode must be ok for every row ({decode_ok}/{row_count})")
     if row_count > 0 and raw_pcode_ok != row_count:
@@ -1977,6 +1981,7 @@ def sleigh_template_source_gate(summary: dict[str, Any], required_source: str) -
         "status": "passed" if not failures else "failed",
         "failures": failures,
         "template_source_totals": dict(sorted(template_totals.items())),
+        "template_source_count": total_templates,
         "row_count": row_count,
         "decode_ok_rows": decode_ok,
         "raw_pcode_ok_rows": raw_pcode_ok,
@@ -3072,6 +3077,17 @@ int max(int a, int b) { if (a > b) return a; return b; }
         )
         assert gate["status"] == "failed"
         assert any("decode must be ok for every row (1/2)" in failure for failure in gate["failures"])
+        gate = sleigh_template_source_gate(
+            {
+                "row_count": 2,
+                "debug_stage_status_counts": {"decode:ok": 2, "raw_pcode:ok": 2},
+                "debug_quality_evidence_totals": {"invalid_pcode_shape_count": 0},
+                "debug_template_source_totals": {"sla_construct_tpl": 1},
+            },
+            "sla_construct_tpl",
+        )
+        assert gate["status"] == "failed"
+        assert any("template source evidence must cover every raw_pcode:ok row (1/2)" in failure for failure in gate["failures"])
         gate = sleigh_template_source_gate(
             {
                 "row_count": 1,
