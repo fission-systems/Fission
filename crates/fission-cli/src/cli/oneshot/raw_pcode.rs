@@ -3,6 +3,7 @@ use fission_loader::loader::LoadedBinary;
 use fission_sleigh::runtime::{
     DecodeContract, DecodeMemoryContext, DecodeStopReason, RuntimeSleighFrontend,
 };
+use std::collections::BTreeMap;
 use std::io::{self, Write};
 
 pub(super) fn emit_raw_pcode(
@@ -64,6 +65,7 @@ pub(super) fn emit_raw_pcode(
                 decode_addr,
                 lifted.decoded_instructions,
                 lifted.stop_reason,
+                &lifted.template_source_counts,
                 &lifted.function,
             )
         )?;
@@ -112,12 +114,14 @@ fn render_pcode_text(
     decode_address: u64,
     decoded_instructions: usize,
     stop_reason: DecodeStopReason,
+    template_source_counts: &BTreeMap<String, usize>,
     pcode: &PcodeFunction,
 ) -> String {
     let mut out = String::new();
     out.push_str(&format!(
-        "// raw p-code entry=0x{entry_address:x} decode=0x{decode_address:x} instructions={decoded_instructions} stop={}\n",
-        decode_stop_reason_label(stop_reason)
+        "// raw p-code entry=0x{entry_address:x} decode=0x{decode_address:x} instructions={decoded_instructions} stop={} template_sources={}\n",
+        decode_stop_reason_label(stop_reason),
+        format_template_source_counts(template_source_counts)
     ));
     for block in &pcode.blocks {
         out.push_str(&format!(
@@ -129,6 +133,17 @@ fn render_pcode_text(
         }
     }
     out
+}
+
+fn format_template_source_counts(counts: &BTreeMap<String, usize>) -> String {
+    if counts.is_empty() {
+        return "none".to_string();
+    }
+    counts
+        .iter()
+        .map(|(source, count)| format!("{source}:{count}"))
+        .collect::<Vec<_>>()
+        .join(",")
 }
 
 fn format_pcode_op(op: &PcodeOp) -> String {
@@ -165,5 +180,32 @@ fn decode_stop_reason_label(reason: DecodeStopReason) -> &'static str {
         DecodeStopReason::TerminalControlFlow => "terminal_control_flow",
         DecodeStopReason::InputExhausted => "input_exhausted",
         DecodeStopReason::InstructionLimit => "instruction_limit",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn raw_pcode_text_header_reports_template_source_counts() {
+        let counts = BTreeMap::from([("sla_construct_tpl".to_string(), 8usize)]);
+        let text = render_pcode_text(
+            0x100001,
+            0x100000,
+            8,
+            DecodeStopReason::InstructionLimit,
+            &counts,
+            &PcodeFunction { blocks: Vec::new() },
+        );
+
+        assert!(text.contains("entry=0x100001"));
+        assert!(text.contains("decode=0x100000"));
+        assert!(text.contains("template_sources=sla_construct_tpl:8"));
+    }
+
+    #[test]
+    fn raw_pcode_text_header_names_missing_template_source_counts() {
+        assert_eq!(format_template_source_counts(&BTreeMap::new()), "none");
     }
 }
