@@ -597,6 +597,12 @@ impl<'a> PreviewBuilder<'a> {
             );
             name
         } else if let Some((name, binding_size)) = self
+            .live_register_lhs_name_for_passthrough_join_store_producer(block, op_idx, output, &rhs)
+        {
+            self.ensure_live_register_binding(&name, binding_size);
+            self.bind_materialized_output_to_existing_name(op, output, &name, true);
+            name
+        } else if let Some((name, binding_size)) = self
             .live_register_lhs_name_for_safe_missing_merge(
                 block,
                 op_idx,
@@ -617,6 +623,55 @@ impl<'a> PreviewBuilder<'a> {
         Ok(Some(HirStmt::Assign { lhs, rhs }))
     }
 
+    fn live_register_lhs_name_for_passthrough_join_store_producer(
+        &self,
+        block: &crate::pcode::PcodeBasicBlock,
+        op_idx: usize,
+        output: &Varnode,
+        rhs: &HirExpr,
+    ) -> Option<(String, u32)> {
+        if output.is_constant
+            || !is_unique_space_id(output.space_id)
+            || !Self::rhs_is_safe_scalar_live_register_merge(rhs)
+        {
+            return None;
+        }
+        for (_, consumer_op) in self.output_use_sites_in_block(block, op_idx, output) {
+            if !matches!(
+                consumer_op.opcode,
+                PcodeOpcode::Copy | PcodeOpcode::IntZExt | PcodeOpcode::Cast
+            ) {
+                continue;
+            }
+            if !consumer_op
+                .inputs
+                .iter()
+                .any(|input| self.varnode_aliases_value(input, output))
+            {
+                continue;
+            }
+            let Some(consumer_output) = consumer_op.output.as_ref() else {
+                continue;
+            };
+            let consumer_rhs = HirExpr::Var("producer".to_string());
+            let Some((name, binding_size)) = self.live_register_lhs_name_for_safe_missing_merge(
+                block,
+                op_idx,
+                consumer_op,
+                consumer_output,
+                &consumer_rhs,
+                ReplacementValuePlan::incomplete(
+                    ReplacementReadClass::Merge,
+                    MaterializationRejectionReason::MissingMergeBinding,
+                ),
+            ) else {
+                continue;
+            };
+            return Some((name, binding_size.min(output.size)));
+        }
+        None
+    }
+
     fn live_register_lhs_name_for_safe_missing_merge(
         &self,
         block: &crate::pcode::PcodeBasicBlock,
@@ -635,7 +690,8 @@ impl<'a> PreviewBuilder<'a> {
             return None;
         }
         let proof = self.describe_missing_merge_binding_proof(block, op_idx, output, rhs)?;
-        let live_register_join = proof.relation == MissingMergeBindingRelation::PredicateMergeMissing
+        let live_register_join = proof.relation
+            == MissingMergeBindingRelation::PredicateMergeMissing
             || (proof.consumer_kind == DisallowedSingleConsumerConsumerKind::StoreValue
                 && proof.relation == MissingMergeBindingRelation::JoinMergeMissing);
         if !live_register_join {
@@ -1487,6 +1543,69 @@ mod tests {
                     ReplacementReadClass::Merge,
                     MaterializationRejectionReason::MissingMergeBinding,
                 ),
+            ),
+            Some(("w0".to_string(), 4))
+        );
+    }
+
+    #[test]
+    fn passthrough_join_store_producer_uses_low_live_register_binding() {
+        let x0 = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0x4000, 8);
+        let w0 = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0x4000, 4);
+        let ptr = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0x4040, 8);
+        let add_out = register(UNIQUE_SPACE_ID, 0x100, 4);
+        let add_op = op(
+            1,
+            PcodeOpcode::IntAdd,
+            Some(add_out.clone()),
+            vec![w0.clone(), constant(1)],
+        );
+        let zext_op = op(
+            2,
+            PcodeOpcode::IntZExt,
+            Some(x0.clone()),
+            vec![add_out.clone()],
+        );
+        let def_block = block_at(
+            0x1000,
+            0,
+            vec![
+                add_op,
+                zext_op,
+                op(
+                    4,
+                    PcodeOpcode::CBranch,
+                    None,
+                    vec![constant(0x2000), register(UNIQUE_SPACE_ID, 0x200, 1)],
+                ),
+            ],
+        );
+        let other_pred = block_at(
+            0x1800,
+            1,
+            vec![op(3, PcodeOpcode::Branch, None, vec![constant(0x2000)])],
+        );
+        let merge_block = block_at(
+            0x2000,
+            2,
+            vec![op(5, PcodeOpcode::Store, None, vec![constant(0), ptr, w0])],
+        );
+        let pcode = pcode_function(vec![def_block.clone(), other_pred, merge_block]);
+        let mut options = crate::nir::builder::materialize::test_support::test_options();
+        options.calling_convention = CallingConvention::AArch64;
+        options.format = "ELF64".to_string();
+        options.pe_x64_only = false;
+        let builder = PreviewBuilder::new(&pcode, &options, None);
+        let rhs = HirExpr::Binary {
+            op: HirBinaryOp::Add,
+            lhs: Box::new(HirExpr::Var("w0".to_string())),
+            rhs: Box::new(HirExpr::Const(1, int(32))),
+            ty: int(32),
+        };
+
+        assert_eq!(
+            builder.live_register_lhs_name_for_passthrough_join_store_producer(
+                &def_block, 0, &add_out, &rhs,
             ),
             Some(("w0".to_string(), 4))
         );

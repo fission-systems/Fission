@@ -1758,19 +1758,19 @@ impl<'a> PreviewBuilder<'a> {
         let Some(op) = block.ops.get(site.op_idx) else {
             return false;
         };
-        if !op.inputs.iter().any(|input| self.varnode_aliases_value(input, vn)) {
+        if !op
+            .inputs
+            .iter()
+            .any(|input| self.varnode_aliases_value(input, vn))
+        {
             return false;
         }
-        block
-            .ops
-            .iter()
-            .skip(site.op_idx + 1)
-            .any(|candidate| {
-                candidate
-                    .output
-                    .as_ref()
-                    .is_some_and(|output| self.varnode_aliases_value(output, vn))
-            })
+        block.ops.iter().skip(site.op_idx + 1).any(|candidate| {
+            candidate
+                .output
+                .as_ref()
+                .is_some_and(|output| self.varnode_aliases_value(output, vn))
+        })
     }
 
     fn live_register_name_for_join_register_read(&self, vn: &Varnode) -> Option<String> {
@@ -1785,8 +1785,10 @@ impl<'a> PreviewBuilder<'a> {
                     aarch64_ghidra_reg_name(vn.offset, vn.size).map(str::to_string)
                 }
             }
-            _ => register_hardware_name_for_abi(vn.offset, vn.size, self.options.calling_convention)
-                .map(str::to_string),
+            _ => {
+                register_hardware_name_for_abi(vn.offset, vn.size, self.options.calling_convention)
+                    .map(str::to_string)
+            }
         }
     }
 
