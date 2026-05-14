@@ -191,6 +191,7 @@ def enforce_perfect_canonical_gate(
     failures: list[str] = []
     buckets = aggregate.get("bucket_totals", {})
     invariants = aggregate.get("invariant_totals", {})
+    legacy_path_audit = aggregate.get("legacy_path_audit_totals", {})
     similarity = aggregate.get("similarity_summary", {})
     template_sources = aggregate.get("template_source_totals", {})
 
@@ -213,6 +214,12 @@ def enforce_perfect_canonical_gate(
     for key in ("compat_emitter_used", "fake_placeholder_op", "invalid_pcode_shape"):
         if int(invariants.get(key, 0)) != 0:
             failures.append(f"{key} must be 0 (got {invariants.get(key)})")
+
+    legacy_path_hits = {
+        name: count for name, count in legacy_path_audit.items() if int(count) != 0
+    }
+    if legacy_path_hits:
+        failures.append(f"legacy path audit counters must be 0 (got {legacy_path_hits})")
 
     allowed_nonsemantic = {
         "full_match",
@@ -558,7 +565,8 @@ def main() -> int:
         help=(
             "Fail if the aggregate canonical raw p-code gate is not exact: "
             "similarity/parity 1.0, invariant counts 0, no semantic mismatch "
-            "buckets, and only sla_construct_tpl success sources."
+            "buckets, no legacy path audit hits, and only sla_construct_tpl "
+            "success sources."
         ),
     )
     parser.add_argument(
