@@ -364,6 +364,24 @@ def discover_source_entries(manifest: dict[str, Any]) -> list[BenchmarkEntry]:
     return list(dedup.values())
 
 
+def filter_entries(
+    entries: list[BenchmarkEntry],
+    entry_ids: list[str] | None,
+    required_tags: list[str] | None,
+) -> list[BenchmarkEntry]:
+    if entry_ids:
+        wanted_ids = set(entry_ids)
+        entries = [entry for entry in entries if entry.id in wanted_ids]
+    if required_tags:
+        wanted_tags = set(required_tags)
+        entries = [
+            entry
+            for entry in entries
+            if wanted_tags.issubset(set(entry.tags))
+        ]
+    return entries
+
+
 def matching_binary_paths(source_path: Path) -> list[Path]:
     parts = list(source_path.parts)
     try:
@@ -730,6 +748,16 @@ def select_source_functions(
         else:
             fallback.append(func)
     return (matched + fallback)[:limit]
+
+
+def filter_source_functions(
+    source_functions: list[SourceFunction],
+    function_names: list[str] | None,
+) -> list[SourceFunction]:
+    if not function_names:
+        return source_functions
+    wanted = set(function_names)
+    return [func for func in source_functions if func.name in wanted]
 
 
 def parse_json_loose(text: str) -> Any:
@@ -2766,6 +2794,7 @@ def run_benchmark(args: argparse.Namespace) -> int:
     manifest_name = manifest.get("name", manifest_path.stem)
     run_id = f"{sanitize_id(manifest_name)}-{utc_timestamp_slug(created_at)}"
     entries = discover_source_entries(manifest)
+    entries = filter_entries(entries, args.entry_id, args.tag)
     if args.limit_binaries is not None:
         entries = entries[: args.limit_binaries]
 
@@ -2787,6 +2816,7 @@ def run_benchmark(args: argparse.Namespace) -> int:
     list_cache_initial_entry_count = len(list_cache)
     for entry in entries:
         source_functions = extract_source_functions(entry.source_path, entry.language)
+        source_functions = filter_source_functions(source_functions, args.function_name)
         fission_funcs, fission_error = run_fission_list_cached(
             entry.binary_path,
             fission_bin,
@@ -3016,6 +3046,31 @@ int max(int a, int b) { if (a > b) return a; return b; }
             1,
         )
         assert [func.name for func in limited] == ["entry"]
+        entries = [
+            BenchmarkEntry(
+                id="x86-smoke",
+                binary_path=Path("/tmp/x86.exe"),
+                source_path=Path("/tmp/x86.c"),
+                language="c",
+                tags=["smoke", "x86-64"],
+            ),
+            BenchmarkEntry(
+                id="aarch64-control",
+                binary_path=Path("/tmp/aarch64.o"),
+                source_path=Path("/tmp/aarch64.c"),
+                language="c",
+                tags=["smoke", "aarch64", "control-flow"],
+            ),
+        ]
+        assert [entry.id for entry in filter_entries(entries, ["aarch64-control"], None)] == [
+            "aarch64-control"
+        ]
+        assert [entry.id for entry in filter_entries(entries, None, ["smoke", "aarch64"])] == [
+            "aarch64-control"
+        ]
+        assert [
+            func.name for func in filter_source_functions(funcs, ["max"])
+        ] == ["max"]
         assert classify_return("u64 wide(unsigned int seed)", "wide", "unsigned int seed", "c") == "int"
         assert classify_return("uint64_t wide(unsigned int seed)", "wide", "unsigned int seed", "c") == "int"
         summary = summarize(
@@ -3190,6 +3245,21 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--output-dir",
         help="Output artifact directory; defaults to a timestamped directory under benchmark/artifacts/source_semantic_benchmark",
+    )
+    parser.add_argument(
+        "--entry-id",
+        action="append",
+        help="Run only the manifest entry with this exact id; repeat to include multiple entries",
+    )
+    parser.add_argument(
+        "--tag",
+        action="append",
+        help="Run only manifest entries containing this tag; repeat to require all listed tags",
+    )
+    parser.add_argument(
+        "--function-name",
+        action="append",
+        help="Run only source functions with this exact name; repeat to include multiple functions",
     )
     parser.add_argument("--limit-binaries", type=int, help="Limit discovered manifest entries")
     parser.add_argument("--limit-functions", type=int, help="Limit source functions per entry")
