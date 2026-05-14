@@ -663,6 +663,65 @@ fn preview_inlines_read_modify_write_register_return() {
 }
 
 #[test]
+fn preview_refines_win64_param_width_from_later_subregister_use() {
+    let mut options = preview_options();
+    options.calling_convention = CallingConvention::WindowsX64;
+    let runtime_reg = |offset, size| Varnode {
+        space_id: RUST_SLEIGH_REGISTER_SPACE_ID,
+        offset,
+        size,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let func = PcodeFunction {
+        blocks: vec![PcodeBasicBlock {
+            index: 0,
+            start_address: 0x140001880,
+            successors: vec![],
+            ops: vec![
+                PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::Copy,
+                    address: 0x140001880,
+                    output: Some(uniq(0x4f900, 8)),
+                    inputs: vec![runtime_reg(0x80, 8)],
+                    asm_mnemonic: Some("PUSH R8".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 1,
+                    opcode: PcodeOpcode::IntSExt,
+                    address: 0x140001881,
+                    output: Some(runtime_reg(0x00, 8)),
+                    inputs: vec![runtime_reg(0x80, 4)],
+                    asm_mnemonic: Some("MOVSXD RAX,R8D".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 2,
+                    opcode: PcodeOpcode::Load,
+                    address: 0x140001882,
+                    output: Some(runtime_reg(0x288, 8)),
+                    inputs: vec![cst(3, 8), runtime_reg(0x20, 8)],
+                    asm_mnemonic: Some("RET".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 3,
+                    opcode: PcodeOpcode::Return,
+                    address: 0x140001882,
+                    output: None,
+                    inputs: vec![cst(3, 8), runtime_reg(0x288, 8)],
+                    asm_mnemonic: Some("RET".to_string()),
+                },
+            ],
+        }],
+    };
+
+    let code =
+        render_mlil_preview(&func, "narrow_param", 0x140001880, &options).expect("preview render");
+    assert!(code.contains("int param_3"), "{code}");
+    assert!(!code.contains("longlong param_3"), "{code}");
+}
+
+#[test]
 fn preview_projects_narrow_read_from_wide_register_write() {
     let mut options = preview_options();
     options.calling_convention = CallingConvention::WindowsX64;

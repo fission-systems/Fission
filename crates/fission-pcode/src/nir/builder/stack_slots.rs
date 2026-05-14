@@ -7,6 +7,30 @@ pub(super) struct ResolvedGlobalPointer {
 }
 
 impl<'a> PreviewBuilder<'a> {
+    fn refine_register_param_type_from_varnode(&mut self, param_index: usize, vn: &Varnode) {
+        let Some(binding) = self.params.get_mut(&param_index) else {
+            return;
+        };
+        if binding.surface_type_name.is_some() {
+            return;
+        }
+        let new_bits = vn.size.saturating_mul(8);
+        let NirType::Int {
+            bits: current_bits,
+            signed,
+        } = binding.ty
+        else {
+            return;
+        };
+        if new_bits == 0 || new_bits >= current_bits {
+            return;
+        }
+        binding.ty = NirType::Int {
+            bits: new_bits,
+            signed,
+        };
+    }
+
     fn classify_stack_slot_origin(&self, base: StackBase, offset: i64) -> NirBindingOrigin {
         self.abi_state().classify_stack_slot_origin(base, offset)
     }
@@ -44,6 +68,7 @@ impl<'a> PreviewBuilder<'a> {
                     origin: Some(NirBindingOrigin::ParamIndex(param_index)),
                     initializer: None,
                 });
+            self.refine_register_param_type_from_varnode(param_index, vn);
             return Some(alias_name);
         }
         let Some(index) = abi.param_slot_for_varnode(vn) else {
@@ -57,6 +82,7 @@ impl<'a> PreviewBuilder<'a> {
             origin: Some(NirBindingOrigin::ParamIndex(index)),
             initializer: None,
         });
+        self.refine_register_param_type_from_varnode(index, vn);
         Some(name)
     }
 
