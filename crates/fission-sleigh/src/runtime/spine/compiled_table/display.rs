@@ -408,12 +408,11 @@ pub(super) fn decoded_references(
                 let is_rip_relative = *rip_relative || subtable_relative_target.is_some();
                 let target = if is_rip_relative {
                     subtable_relative_target.or(*absolute).or_else(|| {
-                        address
-                            .checked_add(length as u64)
+                        instruction_end_address(address, length)
                             .and_then(|base| add_signed(base, *displacement))
                     })
                 } else if *displacement > 0 {
-                    Some(*displacement as u64)
+                    u64::try_from(*displacement).ok()
                 } else {
                     None
                 };
@@ -483,8 +482,7 @@ fn reference_from_subtable_state(
     }) = first_rip_relative_memory(state)
     {
         let target = absolute.or_else(|| {
-            address
-                .checked_add(length as u64)
+            instruction_end_address(address, length)
                 .and_then(|base| add_signed(base, *displacement))
         })?;
         return Some(DecodedReference {
@@ -616,10 +614,14 @@ fn first_materialized_address_target(state: &RuntimeConstructState, target: u64)
 
 pub(super) fn add_signed(base: u64, delta: i64) -> Option<u64> {
     if delta >= 0 {
-        base.checked_add(delta as u64)
+        base.checked_add(u64::try_from(delta).ok()?)
     } else {
         base.checked_sub(delta.unsigned_abs())
     }
+}
+
+fn instruction_end_address(address: u64, length: usize) -> Option<u64> {
+    address.checked_add(u64::try_from(length).ok()?)
 }
 
 #[cfg(test)]
@@ -636,6 +638,7 @@ mod tests {
         let whitespace_len_fallback = "first_whitespace\n        .unwrap_or";
         let lossy_display_index_cast = ["value", "as", "usize"].join(" ");
         let lossy_display_value_cast = ["value", "as", "i64"].join(" ");
+        let lossy_reference_length_cast = ["length", "as", "u64"].join(" ");
 
         assert!(
             !source.contains(&dummy_immediate_fallback),
@@ -657,6 +660,10 @@ mod tests {
             !source.contains(&lossy_display_index_cast)
                 && !source.contains(&lossy_display_value_cast),
             "display rendering must not truncate display table indexes or values with lossy casts"
+        );
+        assert!(
+            !source.contains(&lossy_reference_length_cast),
+            "display reference extraction must not cast instruction lengths through unchecked u64 conversion"
         );
     }
 
@@ -814,6 +821,12 @@ mod tests {
             refs.is_empty(),
             "overflowing RIP-relative reference must not be clipped into a false target"
         );
+    }
+
+    #[test]
+    fn instruction_end_address_rejects_overflowing_length() {
+        assert_eq!(instruction_end_address(0x1000, 4), Some(0x1004));
+        assert_eq!(instruction_end_address(u64::MAX - 1, 4), None);
     }
 
     #[test]
