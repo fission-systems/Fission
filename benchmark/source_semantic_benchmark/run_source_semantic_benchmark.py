@@ -1907,6 +1907,46 @@ def row_key(row: dict[str, Any]) -> str:
     )
 
 
+def sleigh_template_source_gate(summary: dict[str, Any], required_source: str) -> dict[str, Any]:
+    template_totals = summary.get("debug_template_source_totals")
+    if not isinstance(template_totals, dict):
+        template_totals = {}
+    stage_counts = summary.get("debug_stage_status_counts")
+    if not isinstance(stage_counts, dict):
+        stage_counts = {}
+
+    failures: list[str] = []
+    row_count = int(summary.get("row_count", 0) or 0)
+    raw_pcode_ok = int(stage_counts.get("raw_pcode:ok", 0) or 0)
+    total_templates = sum(
+        int(value) for value in template_totals.values() if isinstance(value, int | float)
+    )
+    unexpected_sources = {
+        source: int(value)
+        for source, value in template_totals.items()
+        if source != required_source and isinstance(value, int | float) and int(value) != 0
+    }
+
+    if row_count > 0 and total_templates == 0:
+        failures.append(
+            "SLEIGH template source gate requires debug_template_source_totals; run with --include-debug-decomp"
+        )
+    if unexpected_sources:
+        failures.append(
+            f"SLEIGH template sources must be only {required_source!r} "
+            f"(unexpected {unexpected_sources})"
+        )
+
+    return {
+        "required_source": required_source,
+        "status": "passed" if not failures else "failed",
+        "failures": failures,
+        "template_source_totals": dict(sorted(template_totals.items())),
+        "row_count": row_count,
+        "raw_pcode_ok_rows": raw_pcode_ok,
+    }
+
+
 def load_baseline_artifacts(path: Path) -> tuple[dict[str, Any], list[dict[str, Any]], Path]:
     summary_path = path
     if path.is_dir():
@@ -2454,6 +2494,13 @@ def render_markdown(summary: dict[str, Any], rows: list[dict[str, Any]]) -> str:
         lines.extend(["", "## Debug SLEIGH Template Sources", "", "| Source | Total |", "|---|---:|"])
         for source, total_value in sorted(summary["debug_template_source_totals"].items()):
             lines.append(f"| {source} | {total_value} |")
+    gate = summary.get("sleigh_template_source_gate")
+    if isinstance(gate, dict):
+        lines.extend(["", "## SLEIGH Template Source Gate", ""])
+        lines.append(f"- Status: `{gate.get('status')}`")
+        lines.append(f"- Required source: `{gate.get('required_source')}`")
+        for failure in gate.get("failures") or []:
+            lines.append(f"- Failure: {failure}")
     comparison = summary.get("comparison")
     if isinstance(comparison, dict):
         outcome = summary.get("comparison_outcome") if isinstance(summary.get("comparison_outcome"), dict) else {}
@@ -2757,6 +2804,11 @@ def run_benchmark(args: argparse.Namespace) -> int:
     summary["list_cache_miss_count"] = int(list_cache_stats.get("miss", 0))
     summary["list_cache_stored_count"] = int(list_cache_stats.get("stored", 0))
     summary["wall_sec"] = round(time.perf_counter() - start, 6)
+    if args.require_sleigh_template_source:
+        summary["sleigh_template_source_gate"] = sleigh_template_source_gate(
+            summary,
+            args.require_sleigh_template_source,
+        )
     history = history_snapshot(DEFAULT_HISTORY_FILE, summary)
     if history is not None:
         summary["history"] = history
@@ -2829,10 +2881,13 @@ def run_benchmark(args: argparse.Namespace) -> int:
             dump_json_pretty(summary["comparison"]), encoding="utf-8"
         )
     (output_dir / "source_semantic_summary.md").write_text(render_markdown(summary, rows), encoding="utf-8")
-    append_history_record(DEFAULT_HISTORY_FILE, summary)
-    update_latest_index(DEFAULT_LATEST_INDEX_FILE, summary)
+    gate = summary.get("sleigh_template_source_gate")
+    gate_failed = isinstance(gate, dict) and gate.get("status") == "failed"
+    if not gate_failed:
+        append_history_record(DEFAULT_HISTORY_FILE, summary)
+        update_latest_index(DEFAULT_LATEST_INDEX_FILE, summary)
     print(dump_json_pretty(summary), end="")
-    return 0
+    return 1 if gate_failed else 0
 
 
 def run_self_test() -> int:
@@ -2926,6 +2981,35 @@ int max(int a, int b) { if (a > b) return a; return b; }
         assert "volatile unsigned int control_sink = 0;" in deduped_candidate
         assert "\nuint control_sink;\n" not in deduped_candidate
         assert "\nuint math_sink;\n" in deduped_candidate
+        gate = sleigh_template_source_gate(
+            {
+                "row_count": 1,
+                "debug_stage_status_counts": {"raw_pcode:ok": 1},
+                "debug_template_source_totals": {"spec_derived": 2},
+            },
+            "spec_derived",
+        )
+        assert gate["status"] == "passed"
+        gate = sleigh_template_source_gate(
+            {
+                "row_count": 1,
+                "debug_stage_status_counts": {"raw_pcode:ok": 1},
+                "debug_template_source_totals": {"compatibility_lowered": 1},
+            },
+            "spec_derived",
+        )
+        assert gate["status"] == "failed"
+        assert "compatibility_lowered" in gate["failures"][0]
+        gate = sleigh_template_source_gate(
+            {
+                "row_count": 1,
+                "debug_stage_status_counts": {},
+                "debug_template_source_totals": {},
+            },
+            "spec_derived",
+        )
+        assert gate["status"] == "failed"
+        assert "--include-debug-decomp" in gate["failures"][0]
     print("self-test ok")
     return 0
 
@@ -2961,6 +3045,14 @@ def parse_args() -> argparse.Namespace:
         "--include-debug-decomp",
         action="store_true",
         help="Pass fission_cli decomp --debug-decomp and attach compact stage/owner evidence to each row",
+    )
+    parser.add_argument(
+        "--require-sleigh-template-source",
+        choices=["spec_derived"],
+        help=(
+            "Fail the run unless all debug SLEIGH template-source evidence uses this source. "
+            "Requires --include-debug-decomp for rows with raw_pcode:ok."
+        ),
     )
     parser.add_argument(
         "--materialize-debug-triage",
