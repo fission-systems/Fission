@@ -1,3 +1,4 @@
+use crate::rust_sleigh::bounds::{clamp_to_available_execution, next_function_distance};
 use crate::rust_sleigh::decode::{decode_rust_sleigh_pcode, pcode_op_count};
 use crate::rust_sleigh::probe::probe_wrapper_contraction;
 use crate::rust_sleigh::render_finish::{
@@ -37,25 +38,14 @@ pub fn decompile_with_rust_sleigh(
     let max_bytes = if function_size > 0 {
         function_size.min(max_bytes_limit)
     } else if config.use_next_function_distance_if_unknown {
-        binary
-            .function_after(entry_address)
-            .and_then(|next| {
-                let dist = next.address.saturating_sub(entry_address) as usize;
-                if dist > 0 {
-                    Some(dist.min(max_bytes_limit))
-                } else {
-                    None
-                }
-            })
+        next_function_distance(binary, entry_address)
+            .map(|dist| dist.min(max_bytes_limit))
             .unwrap_or(fallback_default_bytes)
     } else {
         fallback_default_bytes
     }
     .max(1);
-    let max_bytes = binary
-        .available_execution_bytes(entry_address)
-        .map(|available| max_bytes.min(available).max(1))
-        .unwrap_or(max_bytes);
+    let max_bytes = clamp_to_available_execution(binary, entry_address, max_bytes);
 
     let default_instruction_limit = if config.continue_past_indirect_branch {
         config

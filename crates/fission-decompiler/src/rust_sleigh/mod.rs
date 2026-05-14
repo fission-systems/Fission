@@ -1,5 +1,6 @@
 //! Rust-Sleigh decode + NIR rendering pipeline (`decompile_with_rust_sleigh`).
 
+pub mod bounds;
 mod config;
 mod decode;
 mod evidence;

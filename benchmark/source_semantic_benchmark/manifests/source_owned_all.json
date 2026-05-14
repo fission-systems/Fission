@@ -40,6 +40,28 @@
             "args": [10],
             "globals": [{"name": "data_sink", "ctype": "unsigned int", "reset": 0}]
           }
+        ],
+        "run_function_calls": [
+          {
+            "args": [0],
+            "candidate_support_code": "uint recursive_fib(uint n, ...) { if (n <= 1) return n; return recursive_fib(n - 1) + recursive_fib(n - 2); }",
+            "globals": [{"name": "func_sink", "ctype": "unsigned int", "reset": 0}]
+          },
+          {
+            "args": [1],
+            "candidate_support_code": "uint recursive_fib(uint n, ...) { if (n <= 1) return n; return recursive_fib(n - 1) + recursive_fib(n - 2); }",
+            "globals": [{"name": "func_sink", "ctype": "unsigned int", "reset": 0}]
+          },
+          {
+            "args": [5],
+            "candidate_support_code": "uint recursive_fib(uint n, ...) { if (n <= 1) return n; return recursive_fib(n - 1) + recursive_fib(n - 2); }",
+            "globals": [{"name": "func_sink", "ctype": "unsigned int", "reset": 0}]
+          },
+          {
+            "args": [10],
+            "candidate_support_code": "uint recursive_fib(uint n, ...) { if (n <= 1) return n; return recursive_fib(n - 1) + recursive_fib(n - 2); }",
+            "globals": [{"name": "func_sink", "ctype": "unsigned int", "reset": 0}]
+          }
         ]
       },
       "tags": ["source-owned"]
