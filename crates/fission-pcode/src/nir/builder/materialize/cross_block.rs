@@ -1079,7 +1079,11 @@ impl<'a> PreviewBuilder<'a> {
         if proof.conflicting_incoming_count != 1 {
             return Err(ExplicitMergeBindingTrialReason::RejectedMultipleConflicts);
         }
-        if proof.consumer_kind != DisallowedSingleConsumerConsumerKind::OtherData {
+        if !matches!(
+            proof.consumer_kind,
+            DisallowedSingleConsumerConsumerKind::OtherData
+                | DisallowedSingleConsumerConsumerKind::StoreValue
+        ) {
             return Err(ExplicitMergeBindingTrialReason::RejectedConsumerKind);
         }
         if !proof.incoming_value_kinds.iter().all(|kind| {

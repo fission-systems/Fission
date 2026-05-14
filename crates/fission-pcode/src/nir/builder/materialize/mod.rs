@@ -1444,6 +1444,95 @@ mod tests {
     }
 
     #[test]
+    fn explicit_merge_select_materializes_store_value_diamond() {
+        fn op_at(
+            seq_num: u32,
+            address: u64,
+            opcode: PcodeOpcode,
+            output: Option<Varnode>,
+            inputs: Vec<Varnode>,
+        ) -> PcodeOp {
+            PcodeOp {
+                seq_num,
+                opcode,
+                address,
+                output,
+                inputs,
+                asm_mnemonic: None,
+            }
+        }
+
+        let param = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0x4000, 4);
+        let lhs = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0x4008, 4);
+        let rhs = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0x4010, 4);
+        let merge_value = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0x4028, 4);
+        let ptr = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0x4030, 8);
+        let first = PcodeBasicBlock {
+            index: 0,
+            start_address: 0x1000,
+            successors: vec![2, 1],
+            ops: vec![
+                op_at(
+                    0,
+                    0x1000,
+                    PcodeOpcode::IntSub,
+                    Some(merge_value.clone()),
+                    vec![lhs.clone(), rhs.clone()],
+                ),
+                op_at(
+                    1,
+                    0x1004,
+                    PcodeOpcode::CBranch,
+                    None,
+                    vec![Varnode::constant(0x1020, 8), param],
+                ),
+            ],
+        };
+        let alternate = PcodeBasicBlock {
+            index: 1,
+            start_address: 0x1010,
+            successors: vec![2],
+            ops: vec![op_at(
+                2,
+                0x1010,
+                PcodeOpcode::IntSub,
+                Some(merge_value.clone()),
+                vec![rhs, lhs],
+            )],
+        };
+        let merge = PcodeBasicBlock {
+            index: 2,
+            start_address: 0x1020,
+            successors: Vec::new(),
+            ops: vec![op_at(
+                3,
+                0x1020,
+                PcodeOpcode::Store,
+                None,
+                vec![Varnode::constant(3, 8), ptr, merge_value.clone()],
+            )],
+        };
+        let pcode = pcode_function(vec![first.clone(), alternate.clone(), merge.clone()]);
+        let options = crate::nir::builder::materialize::test_support::test_options();
+        let mut builder = PreviewBuilder::new(&pcode, &options, None);
+
+        let stmts = builder
+            .synthesize_explicit_merge_bindings_for_block(&merge)
+            .expect("synthesize merge binding");
+
+        assert!(
+            matches!(
+                stmts.as_slice(),
+                [HirStmt::Assign {
+                    rhs: HirExpr::Select { .. },
+                    ..
+                }]
+            ),
+            "{stmts:?}"
+        );
+    }
+
+    #[test]
     fn missing_merge_aarch64_zero_extend_uses_low_live_register_binding_for_safe_rhs() {
         let x12 = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0x4060, 8);
         let w12 = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0x4060, 4);
