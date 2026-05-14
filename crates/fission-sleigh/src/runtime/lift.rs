@@ -88,8 +88,8 @@ fn instruction_cbranch_exits_to_fallthrough(ops: &[PcodeOp], fallthrough: u64) -
     if !matches!(last.opcode, PcodeOpcode::Return | PcodeOpcode::BranchInd) {
         return false;
     }
-    ops.iter()
-        .take(ops.len().saturating_sub(1))
+    ops[..ops.len() - 1]
+        .iter()
         .filter(|op| op.opcode == PcodeOpcode::CBranch)
         .any(|op| {
             if direct_pcode_branch_target(op) == Some(fallthrough) {
@@ -511,6 +511,13 @@ mod tests {
             ),
             op(1, 0x1000, PcodeOpcode::Return, None, vec![var(0x10, 4)]),
         ];
+
+        assert!(!instruction_cbranch_exits_to_fallthrough(&ops, 0x1004));
+    }
+
+    #[test]
+    fn conditional_terminal_instruction_handles_single_terminal_without_length_fallback() {
+        let ops = vec![op(0, 0x1000, PcodeOpcode::Return, None, vec![var(0x10, 4)])];
 
         assert!(!instruction_cbranch_exits_to_fallthrough(&ops, 0x1004));
     }
