@@ -637,6 +637,25 @@ impl<'a> PreviewBuilder<'a> {
         })
     }
 
+    fn side_effect_consumes_exact_primary_return_register_before(
+        &self,
+        block: &crate::pcode::PcodeBasicBlock,
+        term_idx: usize,
+    ) -> bool {
+        let ret_regs =
+            primary_return_registers(self.options.pointer_size, self.options.calling_convention);
+        if ret_regs.is_empty() {
+            return false;
+        }
+        block.ops.iter().take(term_idx).any(|op| {
+            matches!(op.opcode, PcodeOpcode::Store)
+                && op.inputs
+                    .iter()
+                    .skip(1)
+                    .any(|input| ret_regs.iter().any(|ret_reg| input == ret_reg))
+        })
+    }
+
     pub(in crate::nir) fn lower_return_join_expr_for_predecessor(
         &mut self,
         pred_idx: usize,
@@ -836,7 +855,8 @@ impl<'a> PreviewBuilder<'a> {
                 .map(Some);
         }
         if self.uses_primary_return_registers()
-            && !self.side_effect_consumes_primary_return_register_before(block, term_idx)
+            && (!self.side_effect_consumes_primary_return_register_before(block, term_idx)
+                || self.side_effect_consumes_exact_primary_return_register_before(block, term_idx))
             && let Some(expr) = self.predecessor_primary_return_expr(idx)?
         {
             return Ok(Some(expr));

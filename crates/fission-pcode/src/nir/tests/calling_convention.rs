@@ -1552,6 +1552,111 @@ fn aarch64_return_join_with_terminal_store_does_not_synthesize_live_return() {
 }
 
 #[test]
+fn aarch64_return_join_with_exact_x0_store_preserves_predecessor_return() {
+    let mut options = aarch64_preview_options();
+    options.force_linear_structuring = true;
+    options
+        .global_names
+        .insert(0x2000, "result_sink".to_string());
+
+    let x0 = Varnode {
+        space_id: RUST_SLEIGH_REGISTER_SPACE_ID,
+        offset: 0x4000,
+        size: 8,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let x30 = Varnode {
+        space_id: RUST_SLEIGH_REGISTER_SPACE_ID,
+        offset: 0x40f0,
+        size: 8,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let ret_target = Varnode {
+        space_id: RUST_SLEIGH_REGISTER_SPACE_ID,
+        offset: 0,
+        size: 8,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let store_ptr = uniq(0x2600, 8);
+    let func = PcodeFunction {
+        blocks: vec![
+            PcodeBasicBlock {
+                index: 0,
+                start_address: 0x1060,
+                successors: vec![1],
+                ops: vec![
+                    PcodeOp {
+                        seq_num: 0,
+                        opcode: PcodeOpcode::IntAdd,
+                        address: 0x1060,
+                        output: Some(x0.clone()),
+                        inputs: vec![x0.clone(), cst(10, 8)],
+                        asm_mnemonic: None,
+                    },
+                    PcodeOp {
+                        seq_num: 1,
+                        opcode: PcodeOpcode::Branch,
+                        address: 0x1064,
+                        output: None,
+                        inputs: vec![cst(0x1070, 8)],
+                        asm_mnemonic: None,
+                    },
+                ],
+            },
+            PcodeBasicBlock {
+                index: 1,
+                start_address: 0x1070,
+                successors: vec![],
+                ops: vec![
+                    PcodeOp {
+                        seq_num: 2,
+                        opcode: PcodeOpcode::Copy,
+                        address: 0x1070,
+                        output: Some(store_ptr.clone()),
+                        inputs: vec![cst(0x2000, 8)],
+                        asm_mnemonic: None,
+                    },
+                    PcodeOp {
+                        seq_num: 3,
+                        opcode: PcodeOpcode::Store,
+                        address: 0x1074,
+                        output: None,
+                        inputs: vec![cst(3, 8), store_ptr, x0.clone()],
+                        asm_mnemonic: None,
+                    },
+                    PcodeOp {
+                        seq_num: 4,
+                        opcode: PcodeOpcode::Copy,
+                        address: 0x1078,
+                        output: Some(ret_target),
+                        inputs: vec![x30.clone()],
+                        asm_mnemonic: None,
+                    },
+                    PcodeOp {
+                        seq_num: 5,
+                        opcode: PcodeOpcode::Return,
+                        address: 0x1078,
+                        output: None,
+                        inputs: vec![x30],
+                        asm_mnemonic: None,
+                    },
+                ],
+            },
+        ],
+    };
+
+    let code = render_mlil_preview(&func, "store_and_return", 0x1060, &options)
+        .expect("preview render");
+    assert!(code.contains("ulonglong store_and_return"), "{code}");
+    assert!(code.contains("xVar0 = param_1 + 10;"), "{code}");
+    assert!(code.contains("result_sink = xVar0;"), "{code}");
+    assert!(code.contains("return xVar0;"), "{code}");
+}
+
+#[test]
 fn win64_return_target_load_without_return_register_def_is_void() {
     let options = preview_options();
     let rsp = Varnode {
