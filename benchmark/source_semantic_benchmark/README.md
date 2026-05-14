@@ -132,6 +132,9 @@ manifest.
   intersection/union totals, missing feature count/rate, extra feature
   count/rate, and top missing/extra features. Missing source features are
   included in the denominator, so absent semantics are penalized.
+  Function-pointer parameter calls are compared as `call:indirect_param` so
+  source parameter names and recovered decompiler parameter names do not
+  distort call-semantics recall.
 - `static_similarity_gap_component_totals`: the same missing/extra accounting
   split by static feature family.
 - `static_absence_penalty_metrics`: source recall, decompiler precision, union

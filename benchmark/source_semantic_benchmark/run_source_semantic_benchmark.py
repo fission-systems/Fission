@@ -45,6 +45,8 @@ WORD_BOUNDARY_RE = re.compile(r"\b[A-Za-z_][A-Za-z0-9_]*\b")
 CTYPE_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_\s*]*")
 CONST_RE = re.compile(r"\b(?:0x[0-9A-Fa-f]+|\d+)\b")
 CALL_RE = re.compile(r"\b([A-Za-z_][A-Za-z0-9_:]*)\s*\(")
+INDIRECT_CAST_CALL_RE = re.compile(r"\)\s*([A-Za-z_][A-Za-z0-9_]*)\s*\)\s*\(")
+DEREF_INDIRECT_CALL_RE = re.compile(r"\(\s*\*\s*([A-Za-z_][A-Za-z0-9_]*)\s*\)\s*\(")
 ARRAY_SUFFIX_RE = re.compile(r"\[[^\]]*\]")
 RETURN_ARROW_RE = re.compile(r"->\s*([^{]+)$")
 ACCESS_LABEL_RE = re.compile(r"\b(public|private|protected)\s*:\s*")
@@ -918,6 +920,43 @@ def call_names_for_fingerprint(code: str) -> list[str]:
     return calls
 
 
+def function_pointer_param_names(func: SourceFunction | None) -> set[str]:
+    if func is None:
+        return set()
+    return {
+        normalize_name(name)
+        for name, kind in zip(func.param_names, func.param_kinds, strict=False)
+        if kind == "aggregate_or_pointer"
+    }
+
+
+def indirect_cast_call_names_for_fingerprint(code: str) -> list[str]:
+    stripped = strip_comments(code)
+    calls = [
+        normalize_name(match.group(1))
+        for match in INDIRECT_CAST_CALL_RE.finditer(stripped)
+    ]
+    calls.extend(
+        normalize_name(match.group(1))
+        for match in DEREF_INDIRECT_CALL_RE.finditer(stripped)
+    )
+    return calls
+
+
+def add_call_fingerprint(counter: Counter[str], code: str, func: SourceFunction | None) -> None:
+    pointer_params = function_pointer_param_names(func)
+    for call in call_names_for_fingerprint(code):
+        if call in pointer_params:
+            counter["call:indirect_param"] += 1
+        else:
+            counter[f"call:{call}"] += 1
+    for call in indirect_cast_call_names_for_fingerprint(code):
+        if call in pointer_params or call.startswith("param"):
+            counter["call:indirect_param"] += 1
+        else:
+            counter["call:indirect"] += 1
+
+
 def matched_source_names(
     source_functions: list[SourceFunction],
     fission_funcs: list[FissionFunction],
@@ -1583,6 +1622,11 @@ def materialize_regression_debug_triage(
 def code_fingerprint(code: str, func: SourceFunction | None = None) -> Counter[str]:
     stripped = strip_comments(code)
     counter: Counter[str] = Counter()
+    signature_func = func
+    if signature_func is None:
+        rendered_functions = extract_c_like_functions(stripped, "c")
+        if rendered_functions:
+            signature_func = rendered_functions[0]
     for word in WORD_BOUNDARY_RE.findall(stripped):
         lowered = word.lower()
         if lowered in CONTROL_WORDS:
@@ -1591,15 +1635,14 @@ def code_fingerprint(code: str, func: SourceFunction | None = None) -> Counter[s
         counter[f"op:{op}"] += stripped.count(op)
     for const in CONST_RE.findall(stripped):
         counter[f"const:{const.lower()}"] += 1
-    for call in call_names_for_fingerprint(stripped):
-        counter[f"call:{call}"] += 1
+    add_call_fingerprint(counter, stripped, signature_func)
     counter["mem:index"] += stripped.count("[")
     counter["mem:deref_or_ptr"] += stripped.count("*")
     counter["mem:field"] += stripped.count("->") + stripped.count(".")
     if func is not None:
         add_signature_fingerprint(counter, func.return_kind, func.param_kinds)
-    else:
-        add_rendered_signature_fingerprint(counter, stripped)
+    elif signature_func is not None:
+        add_signature_fingerprint(counter, signature_func.return_kind, signature_func.param_kinds)
     return +counter
 
 
@@ -7755,6 +7798,26 @@ int max(int a, int b) { if (a > b) return a; return b; }
         )
         assert rendered_call_fp["call:caller"] == 0
         assert rendered_call_fp["call:helper"] == 1
+        function_pointer_source = SourceFunction(
+            name="apply_op",
+            signature="u32 apply_op(op_func f, u32 a, u32 b)",
+            body="return f(a, b);",
+            return_kind="int",
+            param_kinds=["aggregate_or_pointer", "uint", "uint"],
+            param_names=["f", "a", "b"],
+            line=1,
+        )
+        function_pointer_source_fp = code_fingerprint(
+            function_pointer_source.body,
+            function_pointer_source,
+        )
+        function_pointer_decomp_fp = code_fingerprint(
+            "uint apply_op(void * param_1, uint param_2, uint param_3) { "
+            "return ((uint (*)(uint, uint))param_1)(param_2, param_3); }"
+        )
+        assert function_pointer_source_fp["call:indirect_param"] == 1
+        assert function_pointer_source_fp["call:f"] == 0
+        assert function_pointer_decomp_fp["call:indirect_param"] == 1
         status, matched, _ = match_function(funcs[1], [FissionFunction("0x1000", "add [export]")])
         assert status == "matched"
         assert matched is not None
