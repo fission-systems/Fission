@@ -1711,6 +1711,49 @@ def static_similarity_gap_components(source_fp: Counter[str], decomp_fp: Counter
     }
 
 
+def gap_feature_count(items: Any, feature: str) -> float:
+    if not isinstance(items, list):
+        return 0.0
+    total = 0.0
+    for item in items:
+        if (
+            isinstance(item, dict)
+            and item.get("feature") == feature
+            and isinstance(item.get("count"), int | float)
+        ):
+            total += float(item["count"])
+    return total
+
+
+def signedness_only_signature_gap(details: dict[str, Any]) -> dict[str, float]:
+    missing = details.get("top_missing_features")
+    extra = details.get("top_extra_features")
+    source_int_param_decomp_uint = min(
+        gap_feature_count(missing, "sig:param:int"),
+        gap_feature_count(extra, "sig:param:uint"),
+    )
+    source_uint_param_decomp_int = min(
+        gap_feature_count(missing, "sig:param:uint"),
+        gap_feature_count(extra, "sig:param:int"),
+    )
+    source_int_return_decomp_uint = min(
+        gap_feature_count(missing, "sig:return:int"),
+        gap_feature_count(extra, "sig:return:uint"),
+    )
+    source_uint_return_decomp_int = min(
+        gap_feature_count(missing, "sig:return:uint"),
+        gap_feature_count(extra, "sig:return:int"),
+    )
+    return {
+        "param_pair_count": source_int_param_decomp_uint + source_uint_param_decomp_int,
+        "return_pair_count": source_int_return_decomp_uint + source_uint_return_decomp_int,
+        "source_int_param_decomp_uint_count": source_int_param_decomp_uint,
+        "source_uint_param_decomp_int_count": source_uint_param_decomp_int,
+        "source_int_return_decomp_uint_count": source_int_return_decomp_uint,
+        "source_uint_return_decomp_int_count": source_uint_return_decomp_int,
+    }
+
+
 def percent(value: float) -> float:
     return round(value * 100.0, 3)
 
@@ -2662,6 +2705,8 @@ def summarize(rows: list[dict[str, Any]], manifest_name: str, entries: list[Benc
     memory_gap_rows: list[dict[str, Any]] = []
     call_gap_rows: list[dict[str, Any]] = []
     control_flow_gap_rows: list[dict[str, Any]] = []
+    signedness_only_signature_gap_rows: list[dict[str, Any]] = []
+    signedness_only_signature_gap_totals: Counter[str] = Counter()
     name_recovery_rows: list[dict[str, Any]] = []
     architecture_stage_metrics: dict[str, dict[str, Any]] = {}
     by_language: dict[str, dict[str, Any]] = {}
@@ -3269,6 +3314,22 @@ def summarize(rows: list[dict[str, Any]], manifest_name: str, entries: list[Benc
                         and isinstance(item.get("count"), int | float)
                     ):
                         static_gap_component_extra_features[component][item["feature"]] += item["count"]
+                if component == "signature":
+                    signedness_gap = signedness_only_signature_gap(details)
+                    total_signedness_gap = signedness_gap["param_pair_count"] + signedness_gap["return_pair_count"]
+                    if total_signedness_gap > 0.0:
+                        for key, value in signedness_gap.items():
+                            signedness_only_signature_gap_totals[key] += value
+                        signedness_only_signature_gap_rows.append(
+                            {
+                                **triage_row_summary(row),
+                                **{
+                                    key: round(value, 6)
+                                    for key, value in signedness_gap.items()
+                                    if value > 0.0
+                                },
+                            }
+                        )
                 if component_missing_total > 0.0 or component_extra_total > 0.0:
                     component_row = {
                         **triage_row_summary(row),
@@ -3921,6 +3982,41 @@ def summarize(rows: list[dict[str, Any]], manifest_name: str, entries: list[Benc
         "memory_gap_rows": top_component_gap_rows(memory_gap_rows),
         "call_gap_rows": top_component_gap_rows(call_gap_rows),
     }
+    signedness_only_signature_gap_metrics = {
+        "row_count": len(signedness_only_signature_gap_rows),
+        "total_pair_count": round(
+            float(signedness_only_signature_gap_totals.get("param_pair_count", 0.0))
+            + float(signedness_only_signature_gap_totals.get("return_pair_count", 0.0)),
+            6,
+        ),
+        "param_pair_count": round(float(signedness_only_signature_gap_totals.get("param_pair_count", 0.0)), 6),
+        "return_pair_count": round(float(signedness_only_signature_gap_totals.get("return_pair_count", 0.0)), 6),
+        "source_int_param_decomp_uint_count": round(
+            float(signedness_only_signature_gap_totals.get("source_int_param_decomp_uint_count", 0.0)),
+            6,
+        ),
+        "source_uint_param_decomp_int_count": round(
+            float(signedness_only_signature_gap_totals.get("source_uint_param_decomp_int_count", 0.0)),
+            6,
+        ),
+        "source_int_return_decomp_uint_count": round(
+            float(signedness_only_signature_gap_totals.get("source_int_return_decomp_uint_count", 0.0)),
+            6,
+        ),
+        "source_uint_return_decomp_int_count": round(
+            float(signedness_only_signature_gap_totals.get("source_uint_return_decomp_int_count", 0.0)),
+            6,
+        ),
+        "top_rows": sorted(
+            signedness_only_signature_gap_rows,
+            key=lambda row: (
+                -float(row.get("param_pair_count", 0.0) or 0.0),
+                -float(row.get("return_pair_count", 0.0) or 0.0),
+                float(row.get("semantic_score_percent") or 0.0),
+                str(row.get("function_name") or ""),
+            ),
+        )[:12],
+    }
     structuring_gap_metrics = {
         "control_flow_gap_row_count": len(control_flow_gap_rows),
         "hard_nonperfect_row_count": len(hard_function_rows),
@@ -4037,6 +4133,7 @@ def summarize(rows: list[dict[str, Any]], manifest_name: str, entries: list[Benc
             "buckets": roadmap_priority_export,
         },
         "type_data_gap_metrics": type_data_gap_metrics,
+        "signedness_only_signature_gap_metrics": signedness_only_signature_gap_metrics,
         "structuring_gap_metrics": structuring_gap_metrics,
         "fid_name_recovery_metrics": fid_name_recovery_metrics,
         "architecture_support_metrics": architecture_support_metrics,
@@ -5454,6 +5551,27 @@ def render_markdown(summary: dict[str, Any], rows: list[dict[str, Any]]) -> str:
             f"memory gap rows {type_data_gaps.get('memory_gap_row_count', 0)}, "
             f"call gap rows {type_data_gaps.get('call_gap_row_count', 0)}"
         )
+    signedness_gaps = summary.get("signedness_only_signature_gap_metrics")
+    if isinstance(signedness_gaps, dict):
+        lines.extend(["", "## Signedness-Only Signature Gap Metrics", ""])
+        lines.append(
+            f"- Rows {signedness_gaps.get('row_count', 0)}, "
+            f"pairs {float(signedness_gaps.get('total_pair_count', 0.0) or 0.0):.0f}, "
+            f"param pairs {float(signedness_gaps.get('param_pair_count', 0.0) or 0.0):.0f}, "
+            f"return pairs {float(signedness_gaps.get('return_pair_count', 0.0) or 0.0):.0f}"
+        )
+        top_rows = signedness_gaps.get("top_rows")
+        if isinstance(top_rows, list) and top_rows:
+            lines.extend(["", "| Function | Score | Param Pairs | Return Pairs |", "|---|---:|---:|---:|"])
+            for row in top_rows[:8]:
+                if not isinstance(row, dict):
+                    continue
+                lines.append(
+                    f"| `{row.get('function_name')}` | "
+                    f"{float(row.get('semantic_score_percent', 0.0) or 0.0):.3f}% | "
+                    f"{float(row.get('param_pair_count', 0.0) or 0.0):.0f} | "
+                    f"{float(row.get('return_pair_count', 0.0) or 0.0):.0f} |"
+                )
     structuring_gaps = summary.get("structuring_gap_metrics")
     if isinstance(structuring_gaps, dict):
         lines.extend(["", "## Structuring Gap Metrics", ""])
@@ -6916,7 +7034,14 @@ int max(int a, int b) { if (a > b) return a; return b; }
                         "missing_feature_total": 0,
                         "extra_feature_total": 0,
                     },
-                    "static_similarity_gap_components": {},
+                    "static_similarity_gap_components": {
+                        "signature": {
+                            "missing_feature_total": 2,
+                            "extra_feature_total": 2,
+                            "top_missing_features": [{"feature": "sig:param:int", "count": 2}],
+                            "top_extra_features": [{"feature": "sig:param:uint", "count": 2}],
+                        }
+                    },
                     "preview_build_stats": {
                         "validated_pcode_op_count": 10,
                         "replacement_plan_rejected_missing_merge_count": 2,
@@ -7035,6 +7160,8 @@ int max(int a, int b) { if (a > b) return a; return b; }
         assert summary["roadmap_priority_metrics"]["buckets"]["p3_structuring_hard_cases"]["row_count"] == 1
         assert summary["roadmap_priority_metrics"]["buckets"]["p4_fid_name_recovery"]["lost_score_sum"] == 1.0
         assert "signature_gap_rows" in summary["type_data_gap_metrics"]
+        assert summary["signedness_only_signature_gap_metrics"]["row_count"] == 1
+        assert summary["signedness_only_signature_gap_metrics"]["param_pair_count"] == 2.0
         assert "control_flow_gap_rows" in summary["structuring_gap_metrics"]
         assert summary["fid_name_recovery_metrics"]["name_or_mapping_gap_row_count"] == 1
         assert "unknown" in summary["architecture_support_metrics"]
