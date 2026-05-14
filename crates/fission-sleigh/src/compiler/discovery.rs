@@ -40,8 +40,7 @@ fn normalize_sleigh_specs_root(path: PathBuf) -> PathBuf {
     if path
         .file_name()
         .and_then(|name| name.to_str())
-        .map(|name| name == "languages")
-        .unwrap_or(false)
+        .is_some_and(|name| name == "languages")
     {
         return path.parent().unwrap_or(&path).to_path_buf();
     }
@@ -122,8 +121,7 @@ fn normalize_ghidra_install_root(path: PathBuf) -> PathBuf {
     if path
         .file_name()
         .and_then(|name| name.to_str())
-        .map(|name| name == "Ghidra")
-        .unwrap_or(false)
+        .is_some_and(|name| name == "Ghidra")
         && path.join("Processors").exists()
     {
         path.parent().unwrap_or(&path).to_path_buf()
@@ -155,16 +153,14 @@ pub(super) fn generated_output_root_for_entry_spec(
     if output_root
         .file_name()
         .and_then(|name| name.to_str())
-        .map(|name| name == entry_id)
-        .unwrap_or(false)
+        .is_some_and(|name| name == entry_id)
     {
         return Ok(output_root.to_path_buf());
     }
     if output_root
         .file_name()
         .and_then(|name| name.to_str())
-        .map(|name| name == arch)
-        .unwrap_or(false)
+        .is_some_and(|name| name == arch)
     {
         return Ok(output_root.join(entry_id));
     }

@@ -225,8 +225,7 @@ fn ldefs_metadata_for_processor(
         let is_ldefs = path
             .extension()
             .and_then(|ext| ext.to_str())
-            .map(|ext| ext == "ldefs")
-            .unwrap_or(false);
+            .is_some_and(|ext| ext == "ldefs");
         if !is_ldefs {
             continue;
         }
@@ -457,8 +456,7 @@ pub fn discover_entry_specs_for_arch(arch: &str) -> Result<Vec<EntrySpec>> {
         let is_slaspec = path
             .extension()
             .and_then(|extension| extension.to_str())
-            .map(|extension| extension == "slaspec")
-            .unwrap_or(false);
+            .is_some_and(|extension| extension == "slaspec");
         if is_slaspec {
             let mut spec = entry_spec_from_path(path)?;
             spec.language_aliases = language_aliases_for(&spec.arch);
@@ -781,8 +779,7 @@ pub fn write_x86_64_generated_artifacts(output_root: &Path) -> Result<GeneratedA
     let root = if output_root
         .file_name()
         .and_then(|name| name.to_str())
-        .map(|name| name == "x86-64")
-        .unwrap_or(false)
+        .is_some_and(|name| name == "x86-64")
     {
         output_root.to_path_buf()
     } else {

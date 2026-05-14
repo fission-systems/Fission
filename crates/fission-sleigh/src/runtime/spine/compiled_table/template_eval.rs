@@ -201,8 +201,7 @@ fn uses_inst_next2(ops: &[CompiledOpTpl]) -> bool {
             }
             _ => false,
         };
-        op.output.as_ref().map(check_varnode).unwrap_or(false)
-            || op.inputs.iter().any(check_varnode)
+        op.output.as_ref().is_some_and(check_varnode) || op.inputs.iter().any(check_varnode)
     })
 }
 

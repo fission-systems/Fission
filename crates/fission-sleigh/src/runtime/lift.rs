@@ -724,8 +724,7 @@ impl RuntimeSleighFrontend {
 
             let terminal = ins_ops
                 .last()
-                .map(|op| contract.is_terminal_control_flow(op.opcode))
-                .unwrap_or(false);
+                .is_some_and(|op| contract.is_terminal_control_flow(op.opcode));
             let last_opcode = ins_ops.last().map(|op| op.opcode);
             let direct_target = ins_ops.last().and_then(direct_pcode_branch_target);
             let fallthrough = checked_instruction_fallthrough(current, decoded_len)?;

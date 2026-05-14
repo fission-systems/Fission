@@ -477,8 +477,7 @@ pub fn module_name_for_processor(processor: &str) -> String {
     if normalized
         .chars()
         .next()
-        .map(|ch| ch.is_ascii_digit())
-        .unwrap_or(false)
+        .is_some_and(|ch| ch.is_ascii_digit())
     {
         format!("p_{normalized}")
     } else {

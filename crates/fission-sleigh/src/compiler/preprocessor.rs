@@ -336,8 +336,7 @@ impl<'a> ConditionParser<'a> {
             return Ok(self
                 .defines
                 .get(name)
-                .map(|value| !value.is_empty())
-                .unwrap_or(false));
+                .is_some_and(|value| !value.is_empty()));
         }
 
         bail!(
