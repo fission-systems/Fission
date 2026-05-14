@@ -764,8 +764,7 @@ impl<'c> CompiledTableEmitter<'c> {
                     let ops_count = handle
                         .as_ref()
                         .and_then(|h| h.subtable_state.as_ref())
-                        .map(|s| s.constructor_template.ops.len())
-                        .unwrap_or(0);
+                        .map_or(0, |s| s.constructor_template.ops.len());
                     eprintln!(
                         "[BUILD] operand={idx} has_sub={has_sub} template_src={template_src} ops={ops_count} already_built={}",
                         self.built_operands.contains(&idx)
