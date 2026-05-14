@@ -2684,6 +2684,7 @@ def summarize(rows: list[dict[str, Any]], manifest_name: str, entries: list[Benc
     behavior_case_pass_rates: list[float] = []
     behavior_missing_candidate_line_total = 0
     behavior_extra_candidate_line_total = 0
+    behavior_partial_progress_rows: list[dict[str, Any]] = []
     behavior_status_by_stage_first_failure: dict[str, Counter[str]] = {}
     behavior_status_by_zero_credit_reason: dict[str, Counter[str]] = {}
     score_values_by_behavior_status: dict[str, list[float]] = {}
@@ -2791,6 +2792,9 @@ def summarize(rows: list[dict[str, Any]], manifest_name: str, entries: list[Benc
     signature_param_arity_mismatch_rows: list[dict[str, Any]] = []
     name_recovery_rows: list[dict[str, Any]] = []
     architecture_stage_metrics: dict[str, dict[str, Any]] = {}
+    outcome_matrix_counts: Counter[str] = Counter()
+    outcome_matrix_lost_score: Counter[str] = Counter()
+    outcome_matrix_rows: dict[str, list[dict[str, Any]]] = {}
     by_language: dict[str, dict[str, Any]] = {}
     by_arch: dict[str, dict[str, Any]] = {}
     by_source_return_kind: dict[str, dict[str, Any]] = {}
@@ -3132,6 +3136,22 @@ def summarize(rows: list[dict[str, Any]], manifest_name: str, entries: list[Benc
                     "zero_credit_reason": loss_reason,
                 }
             )
+        static_gaps_for_outcome = row.get("static_similarity_gaps") if isinstance(row.get("static_similarity_gaps"), dict) else {}
+        static_missing_for_outcome = float(static_gaps_for_outcome.get("missing_feature_total", 0.0) or 0.0)
+        static_extra_for_outcome = float(static_gaps_for_outcome.get("extra_feature_total", 0.0) or 0.0)
+        static_gap_bucket_for_outcome = (
+            "static_perfect"
+            if static_missing_for_outcome == 0.0 and static_extra_for_outcome == 0.0
+            else f"missing:{feature_gap_bucket(static_missing_for_outcome)}|extra:{feature_gap_bucket(static_extra_for_outcome)}"
+        )
+        outcome_key = (
+            f"mapping:{row.get('mapping_status', 'unknown')}|"
+            f"stage:{first_stage}|behavior:{behavior_status}|static:{static_gap_bucket_for_outcome}"
+        )
+        outcome_matrix_counts[outcome_key] += 1
+        outcome_matrix_lost_score[outcome_key] += score_loss
+        if score_loss > 0.0:
+            outcome_matrix_rows.setdefault(outcome_key, []).append(triage_row_summary(row))
         score_values_by_behavior_status.setdefault(behavior_status, []).append(score)
         score_values_by_stage_first_failure.setdefault(first_stage, []).append(score)
         axis = improvement_axis_for(row, behavior, first_stage)
@@ -3251,6 +3271,24 @@ def summarize(rows: list[dict[str, Any]], manifest_name: str, entries: list[Benc
         case_pass_rate = behavior.get("case_pass_rate")
         if isinstance(case_pass_rate, int | float):
             behavior_case_pass_rates.append(float(case_pass_rate))
+        case_pass_count = int(behavior.get("case_pass_count") or 0)
+        compared_case_count = int(behavior.get("compared_case_count") or behavior.get("case_count") or 0)
+        if behavior_status != "pass" and case_pass_count > 0:
+            behavior_partial_progress_rows.append(
+                {
+                    **triage_row_summary(row),
+                    "behavior_status": behavior_status,
+                    "case_pass_count": case_pass_count,
+                    "case_fail_count": int(behavior.get("case_fail_count") or 0),
+                    "compared_case_count": compared_case_count,
+                    "case_pass_rate": round(case_pass_count / compared_case_count, 6)
+                    if compared_case_count
+                    else 0.0,
+                    "first_mismatch_index": behavior.get("first_mismatch_index"),
+                    "candidate_missing_line_count": int(behavior.get("candidate_missing_line_count") or 0),
+                    "candidate_extra_line_count": int(behavior.get("candidate_extra_line_count") or 0),
+                }
+            )
         cost_hot_rows.append(
             {
                 "entry_id": row.get("entry_id"),
@@ -3822,9 +3860,26 @@ def summarize(rows: list[dict[str, Any]], manifest_name: str, entries: list[Benc
     static_extra_total = float(static_gap_totals.get("extra_feature_total", 0.0) or 0.0)
     static_gap_component_summary: dict[str, dict[str, Any]] = {}
     static_gap_component_top_summary: dict[str, dict[str, Any]] = {}
+    static_component_precision_recall_summary: dict[str, dict[str, Any]] = {}
     for component, totals in static_gap_component_totals.items():
         component_source_total = float(totals.get("source_feature_total", 0.0) or 0.0)
         component_decomp_total = float(totals.get("decomp_feature_total", 0.0) or 0.0)
+        component_intersection_total = float(totals.get("intersection_feature_total", 0.0) or 0.0)
+        component_precision = (
+            round(component_intersection_total / component_decomp_total, 6)
+            if component_decomp_total
+            else 0.0
+        )
+        component_recall = (
+            round(component_intersection_total / component_source_total, 6)
+            if component_source_total
+            else 0.0
+        )
+        component_f1 = (
+            round((2.0 * component_precision * component_recall) / (component_precision + component_recall), 6)
+            if component_precision + component_recall
+            else 0.0
+        )
         static_gap_component_summary[component] = dict(sorted(totals.items()))
         static_gap_component_summary[component]["missing_feature_rate"] = round(
             float(totals.get("missing_feature_total", 0.0) or 0.0) / component_source_total,
@@ -3834,6 +3889,17 @@ def summarize(rows: list[dict[str, Any]], manifest_name: str, entries: list[Benc
             float(totals.get("extra_feature_total", 0.0) or 0.0) / component_decomp_total,
             6,
         ) if component_decomp_total else 0.0
+        static_component_precision_recall_summary[component] = {
+            "source_feature_total": component_source_total,
+            "decomp_feature_total": component_decomp_total,
+            "intersection_feature_total": component_intersection_total,
+            "precision": component_precision,
+            "precision_percent": percent(component_precision),
+            "recall": component_recall,
+            "recall_percent": percent(component_recall),
+            "f1": component_f1,
+            "f1_percent": percent(component_f1),
+        }
         static_gap_component_top_summary[component] = {
             "top_missing_features": [
                 {"feature": feature, "count": count}
@@ -4123,6 +4189,32 @@ def summarize(rows: list[dict[str, Any]], manifest_name: str, entries: list[Benc
             for key, value in sorted(stage_first_blocker_lost_score.items())
         },
     }
+    gate_order = [
+        "manifest_rows",
+        "mapped_rows",
+        "decompiled_rows",
+        "decode_ok_rows",
+        "raw_pcode_ok_rows",
+        "nir_build_ok_rows",
+        "normalize_ok_rows",
+        "structuring_ok_rows",
+        "render_ok_rows",
+        "full_pipeline_ok_rows",
+        "candidate_compiled_rows",
+        "behavior_pass_rows",
+        "static_perfect_rows",
+        "semantic_perfect_rows",
+    ]
+    gate_drop_rows: dict[str, int] = {}
+    gate_retention_rates: dict[str, float] = {}
+    previous_gate: str | None = None
+    for gate in gate_order:
+        count = int(admission_gate_counts.get(gate, 0))
+        if previous_gate is not None:
+            previous_count = int(admission_gate_counts.get(previous_gate, 0))
+            gate_drop_rows[f"{previous_gate}->{gate}"] = max(0, previous_count - count)
+            gate_retention_rates[f"{previous_gate}->{gate}"] = round(count / previous_count, 6) if previous_count else 0.0
+        previous_gate = gate
     behavior_failure_detail_top_rows = {
         signature: rows_for_signature[:5]
         for signature, rows_for_signature in sorted(
@@ -4202,6 +4294,46 @@ def summarize(rows: list[dict[str, Any]], manifest_name: str, entries: list[Benc
             str(row.get("function_name") or ""),
         ),
     )[:12]
+    behavior_partial_progress_row_count = len(behavior_partial_progress_rows)
+    behavior_partial_progress_case_pass_total = sum(
+        int(row.get("case_pass_count") or 0) for row in behavior_partial_progress_rows
+    )
+    behavior_partial_progress_compared_case_total = sum(
+        int(row.get("compared_case_count") or 0) for row in behavior_partial_progress_rows
+    )
+    behavior_partial_progress_case_pass_rates = [
+        float(row.get("case_pass_rate") or 0.0) for row in behavior_partial_progress_rows
+    ]
+    behavior_partial_progress_rows = sorted(
+        behavior_partial_progress_rows,
+        key=lambda row: (
+            -float(row.get("case_pass_count") or 0),
+            float(row.get("semantic_score_percent") or 0.0),
+            str(row.get("function_name") or ""),
+        ),
+    )[:20]
+    outcome_matrix_top = {
+        key: {
+            "row_count": int(outcome_matrix_counts.get(key, 0)),
+            "lost_score_sum": round(float(outcome_matrix_lost_score.get(key, 0.0) or 0.0), 6),
+            "top_rows": sorted(
+                outcome_matrix_rows.get(key) or [],
+                key=lambda row: (
+                    float(row.get("semantic_score_percent") or 0.0),
+                    str(row.get("function_name") or ""),
+                ),
+            )[:5],
+        }
+        for key, _count in sorted(
+            outcome_matrix_counts.items(),
+            key=lambda item: (
+                float(outcome_matrix_lost_score.get(item[0], 0.0) or 0.0),
+                item[1],
+                item[0],
+            ),
+            reverse=True,
+        )[:20]
+    }
 
     roadmap_priority_export: dict[str, dict[str, Any]] = {}
     for priority in ROADMAP_PRIORITY_ORDER:
@@ -4466,6 +4598,16 @@ def summarize(rows: list[dict[str, Any]], manifest_name: str, entries: list[Benc
             },
         },
         "admission_gate_metrics": admission_gate_metrics,
+        "quality_gate_funnel_metrics": {
+            "gate_order": gate_order,
+            "counts": {key: int(admission_gate_counts.get(key, 0)) for key in gate_order},
+            "drop_rows_from_previous_gate": gate_drop_rows,
+            "retention_rate_from_previous_gate": gate_retention_rates,
+            "rates_total_denominator": {
+                key: round(float(admission_gate_counts.get(key, 0)) / total, 6) if total else 0.0
+                for key in gate_order
+            },
+        },
         "stage_transition_metrics": stage_transition_metrics,
         "sleigh_lift_health_metrics": {
             "mapped_rows": mapped,
@@ -4500,6 +4642,10 @@ def summarize(rows: list[dict[str, Any]], manifest_name: str, entries: list[Benc
             "top_detail_rows": behavior_failure_detail_top_rows,
         },
         "semantic_quality_quadrant_metrics": semantic_quality_quadrant_export,
+        "outcome_matrix_metrics": {
+            "top_outcomes_by_lost_score": outcome_matrix_top,
+            "outcome_count": len(outcome_matrix_counts),
+        },
         "coverage_blind_spot_metrics": {
             "counts": dict(sorted(coverage_blind_spot_counts.items())),
             "details": coverage_blind_spot_export,
@@ -4536,6 +4682,7 @@ def summarize(rows: list[dict[str, Any]], manifest_name: str, entries: list[Benc
         "static_similarity_gap_totals": static_gap_summary,
         "static_similarity_gap_component_totals": static_gap_component_summary,
         "static_similarity_gap_component_top_features": static_gap_component_top_summary,
+        "static_component_precision_recall_metrics": static_component_precision_recall_summary,
         "behavior_case_metrics": {
             "case_count": behavior_case_total,
             "compared_case_count": behavior_compared_case_total,
@@ -4558,6 +4705,13 @@ def summarize(rows: list[dict[str, Any]], manifest_name: str, entries: list[Benc
             if partial_timeout_compared_case_total
             else 0.0,
             "partial_timeout_missing_candidate_line_total": partial_timeout_missing_line_total,
+        },
+        "behavior_partial_progress_metrics": {
+            "row_count": behavior_partial_progress_row_count,
+            "case_pass_count": behavior_partial_progress_case_pass_total,
+            "compared_case_count": behavior_partial_progress_compared_case_total,
+            "case_pass_rate_distribution": numeric_distribution(behavior_partial_progress_case_pass_rates),
+            "top_rows": behavior_partial_progress_rows,
         },
         "behavior_support_metrics": {
             "case_source_counts": dict(sorted(behavior_case_source_counts.items())),
@@ -6022,6 +6176,33 @@ def render_markdown(summary: dict[str, Any], rows: list[dict[str, Any]]) -> str:
                 f"| {gate_name} | {counts.get(gate_name, 0)} | "
                 f"{float(rates.get(gate_name, 0.0) or 0.0):.3f} |"
             )
+    quality_funnel = summary.get("quality_gate_funnel_metrics")
+    if isinstance(quality_funnel, dict):
+        counts = quality_funnel.get("counts") if isinstance(quality_funnel.get("counts"), dict) else {}
+        drops = (
+            quality_funnel.get("drop_rows_from_previous_gate")
+            if isinstance(quality_funnel.get("drop_rows_from_previous_gate"), dict)
+            else {}
+        )
+        retention = (
+            quality_funnel.get("retention_rate_from_previous_gate")
+            if isinstance(quality_funnel.get("retention_rate_from_previous_gate"), dict)
+            else {}
+        )
+        order = quality_funnel.get("gate_order") if isinstance(quality_funnel.get("gate_order"), list) else sorted(counts)
+        if counts:
+            lines.extend(["", "## Quality Gate Funnel Metrics", "", "| Gate | Rows | Drop From Previous | Retention |", "|---|---:|---:|---:|"])
+            previous_gate = None
+            for gate_name in order:
+                if gate_name not in counts:
+                    continue
+                edge = f"{previous_gate}->{gate_name}" if previous_gate is not None else ""
+                lines.append(
+                    f"| {gate_name} | {counts.get(gate_name, 0)} | "
+                    f"{drops.get(edge, 0) if edge else 0} | "
+                    f"{float(retention.get(edge, 1.0 if previous_gate is None else 0.0) or 0.0):.3f} |"
+                )
+                previous_gate = gate_name
     stage_transitions = summary.get("stage_transition_metrics")
     if isinstance(stage_transitions, dict):
         furthest = stage_transitions.get("furthest_ok_stage_counts")
@@ -6087,6 +6268,18 @@ def render_markdown(summary: dict[str, Any], rows: list[dict[str, Any]]) -> str:
                 f"{float(metrics.get('missing_feature_total', 0.0) or 0.0):.0f} | "
                 f"{float(metrics.get('extra_feature_total', 0.0) or 0.0):.0f} |"
             )
+    outcome_matrix = summary.get("outcome_matrix_metrics")
+    if isinstance(outcome_matrix, dict):
+        outcomes = outcome_matrix.get("top_outcomes_by_lost_score")
+        if isinstance(outcomes, dict) and outcomes:
+            lines.extend(["", "## Outcome Matrix Metrics", "", "| Outcome | Rows | Lost Score |", "|---|---:|---:|"])
+            for outcome, metrics in outcomes.items():
+                if not isinstance(metrics, dict):
+                    continue
+                lines.append(
+                    f"| `{outcome}` | {metrics.get('row_count', 0)} | "
+                    f"{float(metrics.get('lost_score_sum', 0.0) or 0.0):.6f} |"
+                )
     blind_spots = summary.get("coverage_blind_spot_metrics")
     if isinstance(blind_spots, dict):
         counts = blind_spots.get("counts")
@@ -6299,6 +6492,20 @@ def render_markdown(summary: dict[str, Any], rows: list[dict[str, Any]]) -> str:
                 f"{metrics.get('decomp_only_row_count', 0)} | "
                 f"{metrics.get('zero_intersection_source_present_row_count', 0)} |"
             )
+    component_pr = summary.get("static_component_precision_recall_metrics")
+    if isinstance(component_pr, dict) and component_pr:
+        lines.extend(["", "## Static Component Precision/Recall", "", "| Component | Precision | Recall | F1 | Source | Decomp | Intersection |", "|---|---:|---:|---:|---:|---:|---:|"])
+        for component, metrics in sorted(component_pr.items()):
+            if not isinstance(metrics, dict):
+                continue
+            lines.append(
+                f"| {component} | {float(metrics.get('precision', 0.0) or 0.0):.3f} | "
+                f"{float(metrics.get('recall', 0.0) or 0.0):.3f} | "
+                f"{float(metrics.get('f1', 0.0) or 0.0):.3f} | "
+                f"{float(metrics.get('source_feature_total', 0.0) or 0.0):.0f} | "
+                f"{float(metrics.get('decomp_feature_total', 0.0) or 0.0):.0f} | "
+                f"{float(metrics.get('intersection_feature_total', 0.0) or 0.0):.0f} |"
+            )
     size_metrics = summary.get("source_decomp_size_metrics")
     if isinstance(size_metrics, dict):
         line_ratio = size_metrics.get("decomp_to_source_line_ratio_distribution")
@@ -6343,6 +6550,26 @@ def render_markdown(summary: dict[str, Any], rows: list[dict[str, Any]]) -> str:
             f"({float(behavior_timeouts.get('partial_timeout_case_pass_rate', 0.0) or 0.0):.3f}), "
             f"missing candidate lines {behavior_timeouts.get('partial_timeout_missing_candidate_line_total', 0)}"
         )
+    partial_progress = summary.get("behavior_partial_progress_metrics")
+    if isinstance(partial_progress, dict) and partial_progress.get("row_count"):
+        lines.extend(["", "## Behavior Partial Progress Metrics", ""])
+        lines.append(
+            f"- Partial progress rows {partial_progress.get('row_count', 0)}, "
+            f"cases passed {partial_progress.get('case_pass_count', 0)}/"
+            f"{partial_progress.get('compared_case_count', 0)}"
+        )
+        top_rows = partial_progress.get("top_rows")
+        if isinstance(top_rows, list) and top_rows:
+            lines.extend(["", "| Function | Address | Behavior | Passed Cases | First Mismatch | Score |", "|---|---|---|---:|---:|---:|"])
+            for row in top_rows[:8]:
+                if not isinstance(row, dict):
+                    continue
+                lines.append(
+                    f"| `{row.get('function_name')}` | `{row.get('address')}` | {row.get('behavior_status')} | "
+                    f"{row.get('case_pass_count', 0)}/{row.get('compared_case_count', 0)} | "
+                    f"{row.get('first_mismatch_index')} | "
+                    f"{float(row.get('semantic_score_percent', 0.0) or 0.0):.3f}% |"
+                )
     behavior_support = summary.get("behavior_support_metrics")
     if isinstance(behavior_support, dict):
         lines.extend(["", "## Behavior Support Metrics", ""])
@@ -7542,6 +7769,7 @@ int max(int a, int b) { if (a > b) return a; return b; }
         assert summary["improvement_axis_metrics"]["mapping"]["lost_score_sum"] == 1.0
         assert summary["admission_gate_metrics"]["counts"]["manifest_rows"] == 2
         assert summary["admission_gate_metrics"]["counts"]["raw_pcode_ok_rows"] == 1
+        assert summary["quality_gate_funnel_metrics"]["drop_rows_from_previous_gate"]["manifest_rows->mapped_rows"] == 1
         assert summary["stage_transition_metrics"]["furthest_ok_stage_counts"]["render"] == 1
         assert summary["sleigh_lift_health_metrics"]["decode_ok_rows"] == 1
         assert summary["sleigh_lift_health_metrics"]["raw_pcode_ok_rows"] == 1
@@ -7554,9 +7782,12 @@ int max(int a, int b) { if (a > b) return a; return b; }
             ]["row_count"]
             == 1
         )
+        assert summary["outcome_matrix_metrics"]["outcome_count"] == 2
         assert summary["coverage_blind_spot_metrics"]["counts"]["unmapped_source_function"] == 1
         assert summary["coverage_blind_spot_metrics"]["counts"]["source_features_without_decomp_features"] == 1
         assert summary["static_gap_density_metrics"]["gap_bucket_rows"]["missing:small|extra:none"]["row_count"] == 1
+        assert summary["static_component_precision_recall_metrics"]["signature"]["precision"] == 0.0
+        assert summary["behavior_partial_progress_metrics"]["row_count"] == 0
         assert summary["focus_area_metrics"]["nir_builder_dataflow"]["row_count"] == 1
         assert summary["focus_area_metrics"]["mapping_name_recovery"]["lost_score_sum"] == 1.0
         assert summary["roadmap_priority_metrics"]["priority_order"][0] == "p1_sleigh_lift_correctness"
