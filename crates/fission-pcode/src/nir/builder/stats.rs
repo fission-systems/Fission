@@ -53,6 +53,35 @@ mod tests {
         assert_eq!(projected_keys, default_keys);
     }
 
+    #[test]
+    fn builder_stats_projection_preserves_telemetry_sentinel_counters() {
+        let mut telemetry = super::super::telemetry::BuilderTelemetry::default();
+        telemetry
+            .materialization
+            .replacement_plan_rejected_alias_unsafe_count = 3;
+        telemetry
+            .materialization
+            .replacement_plan_rejected_missing_merge_count = 5;
+        telemetry.structuring.region_emit_ready_failed_count = 7;
+        telemetry.structuring.structuring_irreducible_scc_count = 11;
+        telemetry
+            .call_targets
+            .call_target_unresolved_sub_fallback_count = 13;
+
+        let stats = BuilderStatsProjection {
+            telemetry: &telemetry,
+            validated_pcode_op_count: 17,
+        }
+        .into_public_stats();
+
+        assert_eq!(stats.replacement_plan_rejected_alias_unsafe_count, 3);
+        assert_eq!(stats.replacement_plan_rejected_missing_merge_count, 5);
+        assert_eq!(stats.region_emit_ready_failed_count, 7);
+        assert_eq!(stats.structuring_irreducible_scc_count, 11);
+        assert_eq!(stats.call_target_unresolved_sub_fallback_count, 13);
+        assert_eq!(stats.validated_pcode_op_count, 17);
+    }
+
     fn serialized_keys(stats: &PreviewBuildStats) -> Vec<String> {
         let serde_json::Value::Object(object) =
             serde_json::to_value(stats).expect("serialize NirBuildStats")
