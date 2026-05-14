@@ -29,6 +29,13 @@ fn usize_to_u32(value: usize, label: &str) -> Result<u32> {
     u32::try_from(value).map_err(|_| anyhow!("{label} out of u32 range: {value}"))
 }
 
+fn dense_operand_count<T>(operands_by_index: &BTreeMap<usize, T>) -> usize {
+    match operands_by_index.keys().next_back() {
+        Some(last_index) => last_index + 1,
+        None => 0,
+    }
+}
+
 fn required_unsigned_u32(element: &PackedElement, attr: u32, label: &str) -> Result<u32> {
     let value = element
         .attr_unsigned(attr)
@@ -292,11 +299,7 @@ pub(super) fn decode_construct_templates(
                     _ => {}
                 }
             }
-            let operand_count = operand_specs_by_index
-                .keys()
-                .next_back()
-                .map(|value| value + 1)
-                .unwrap_or(0);
+            let operand_count = dense_operand_count(&operand_specs_by_index);
             let mut operand_specs = Vec::with_capacity(operand_count);
             let mut operand_minimum_lengths = Vec::with_capacity(operand_count);
             let mut display_operands = Vec::with_capacity(operand_count);
@@ -1006,6 +1009,16 @@ fn decode_space_tpl(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn dense_operand_count_distinguishes_empty_and_sparse_slots() {
+        let empty: BTreeMap<usize, ()> = BTreeMap::new();
+        assert_eq!(dense_operand_count(&empty), 0);
+
+        let mut sparse = BTreeMap::new();
+        sparse.insert(2, ());
+        assert_eq!(dense_operand_count(&sparse), 3);
+    }
 
     #[test]
     fn map_pcode_opcode_fails_closed_on_unknown_raw_opcode() {
