@@ -8,6 +8,26 @@
       "root": "benchmark/binary",
       "languages": ["c", "cpp", "go", "rust"],
       "require_binary": true,
+      "behavior_cases": {
+        "run_data_structures": [
+          {
+            "args": [0],
+            "globals": [{"name": "data_sink", "ctype": "unsigned int", "reset": 0}]
+          },
+          {
+            "args": [1],
+            "globals": [{"name": "data_sink", "ctype": "unsigned int", "reset": 0}]
+          },
+          {
+            "args": [5],
+            "globals": [{"name": "data_sink", "ctype": "unsigned int", "reset": 0}]
+          },
+          {
+            "args": [10],
+            "globals": [{"name": "data_sink", "ctype": "unsigned int", "reset": 0}]
+          }
+        ]
+      },
       "tags": ["source-owned"]
     }
   ],

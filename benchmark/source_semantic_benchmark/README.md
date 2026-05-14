@@ -194,15 +194,28 @@ manifest.
   `structuring_render`, `behavior_harness`, `dynamic_semantics`,
   `static_semantic_gaps`, and related buckets), including lost-score totals,
   behavior/stage cross-tabs, missing-feature totals, and representative rows.
+- `admission_gate_metrics`: full-denominator funnel counts/rates for mapping,
+  decompile, Rust-SLEIGH stages, candidate compile, behavior pass, static
+  perfect rows, and fully perfect semantic rows.
+- `stage_transition_metrics`: debug-stage transition evidence, including
+  furthest OK stage counts and lost-score attribution by first stage blocker.
+- `behavior_failure_diagnostics`: behavior failure owner buckets
+  (`candidate`, `oracle`, harness unavailable, unsupported, mismatch) plus
+  normalized compiler/runtime detail signatures and representative rows.
+- `static_gap_density_metrics`: missing/extra feature density distributions and
+  feature-gap buckets, so source absence and decompiler excess are visible even
+  when raw feature totals differ by function size.
 - `complexity_quality_metrics`: source static-feature complexity buckets plus
   hard non-perfect rows, so large functions and dense semantic shapes can be
   separated from small-row failures.
 - `stage_cost_correlation_metrics`: decompile wall-time distributions grouped
-  by behavior status and first failing debug stage, linking quality blockers to
-  runtime cost.
+  by behavior status, first failing debug stage, score bucket, and decompile
+  cost bucket, linking quality blockers to runtime cost.
 - `harness_cost_metrics`: decompile, behavior compile, behavior run, and
   behavior wall-time totals/averages and p50/p90/p95/max timings, plus behavior
   cache status aggregation.
+- `cache_efficiency_metrics`: request counts and hit rates for list, decompile,
+  and behavior caches.
 - `cost_hot_rows`: slowest rows by decompile wall time and behavior wall time,
   preserving row identity so benchmark runtime improvements can target the
   responsible function instead of only the aggregate timer.

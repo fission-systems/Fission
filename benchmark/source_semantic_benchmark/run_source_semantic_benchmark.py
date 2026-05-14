@@ -1552,6 +1552,71 @@ def complexity_bucket(value: float) -> str:
     return "large"
 
 
+def feature_gap_bucket(value: float) -> str:
+    if value <= 0:
+        return "none"
+    if value <= 5:
+        return "small"
+    if value <= 20:
+        return "medium"
+    return "large"
+
+
+def cost_bucket(seconds: float) -> str:
+    if seconds <= 0.1:
+        return "fast"
+    if seconds <= 1.0:
+        return "normal"
+    if seconds <= 5.0:
+        return "slow"
+    return "very_slow"
+
+
+def behavior_failure_owner(status: str) -> str:
+    if status.startswith("oracle_"):
+        return "oracle"
+    if status.startswith("candidate_"):
+        return "candidate"
+    if status in {"decomp_failed", "unsupported_signature", "host_execution_unavailable"}:
+        return status
+    if status == "mismatch":
+        return "semantic_mismatch"
+    if status == "pass":
+        return "pass"
+    return "unknown"
+
+
+def behavior_detail_signature(detail: Any) -> str:
+    if not isinstance(detail, str) or not detail.strip():
+        return "none"
+    lines = [line.strip() for line in detail.splitlines() if line.strip()]
+    if not lines:
+        return "none"
+    def stable_detail_line(line: str) -> str:
+        line = re.sub(r".*/(candidate|oracle)\.c:", r"\1.c:", line)
+        line = re.sub(r"/(?:private/)?(?:tmp|var)/[^\s:]+", "<tmp>", line)
+        return re.sub(r"\s+", " ", line)[-240:]
+
+    for line in lines:
+        if "error:" in line or "undefined reference" in line or "undeclared" in line:
+            return stable_detail_line(line)
+    return stable_detail_line(lines[-1])
+
+
+def furthest_ok_stage(stage_status: Any) -> str:
+    if not isinstance(stage_status, dict):
+        return "missing"
+    furthest = "none"
+    for stage in STAGE_FAILURE_ORDER:
+        status = stage_status.get(stage)
+        if status is None:
+            continue
+        if status != "ok":
+            break
+        furthest = stage
+    return furthest
+
+
 NIR_DEBT_METRIC_RE = re.compile(
     r"(rejected|failed|fallback|irreducible|invalid|missing|conflict|forced|unsupported|timeout|error)"
 )
@@ -2293,6 +2358,20 @@ def summarize(rows: list[dict[str, Any]], manifest_name: str, entries: list[Benc
     complexity_buckets: dict[str, dict[str, Any]] = {}
     cost_values_by_behavior_status: dict[str, list[float]] = {}
     cost_values_by_stage_first_failure: dict[str, list[float]] = {}
+    cost_values_by_score_bucket: dict[str, list[float]] = {}
+    scores_by_cost_bucket: dict[str, list[float]] = {}
+    lost_score_by_cost_bucket: Counter[str] = Counter()
+    stage_funnel_counts: Counter[str] = Counter()
+    stage_furthest_ok_counts: Counter[str] = Counter()
+    stage_first_blocker_lost_score: Counter[str] = Counter()
+    admission_gate_counts: Counter[str] = Counter()
+    behavior_failure_owner_counts: Counter[str] = Counter()
+    behavior_failure_detail_counts: Counter[str] = Counter()
+    behavior_failure_detail_rows: dict[str, list[dict[str, Any]]] = {}
+    static_gap_density_rows: dict[str, dict[str, Any]] = {}
+    static_missing_density_values: list[float] = []
+    static_extra_density_values: list[float] = []
+    static_score_by_missing_gap_bucket: dict[str, list[float]] = {}
     hard_function_rows: list[dict[str, Any]] = []
     by_language: dict[str, dict[str, Any]] = {}
     by_arch: dict[str, dict[str, Any]] = {}
@@ -2436,11 +2515,34 @@ def summarize(rows: list[dict[str, Any]], manifest_name: str, entries: list[Benc
         source_complexity_value = float(row.get("source_static_feature_count") or 0.0)
         add_complexity_row(complexity_bucket(source_complexity_value), row, score, behavior_status)
         if isinstance(row.get("decomp_wall_sec"), int | float):
-            cost_values_by_behavior_status.setdefault(behavior_status, []).append(float(row.get("decomp_wall_sec") or 0.0))
-            cost_values_by_stage_first_failure.setdefault(first_stage, []).append(float(row.get("decomp_wall_sec") or 0.0))
+            decompile_sec = float(row.get("decomp_wall_sec") or 0.0)
+            cost_values_by_behavior_status.setdefault(behavior_status, []).append(decompile_sec)
+            cost_values_by_stage_first_failure.setdefault(first_stage, []).append(decompile_sec)
+            score_bucket_name = (
+                "perfect"
+                if score == 1.0
+                else "zero"
+                if score == 0.0
+                else "low"
+                if score < 0.25
+                else "medium"
+                if score < 0.75
+                else "high"
+            )
+            cost_values_by_score_bucket.setdefault(score_bucket_name, []).append(decompile_sec)
+            cost_bucket_name = cost_bucket(decompile_sec)
+            scores_by_cost_bucket.setdefault(cost_bucket_name, []).append(score)
+            lost_score_by_cost_bucket[cost_bucket_name] += score_loss
         behavior_status_by_stage_first_failure.setdefault(first_stage, Counter())[behavior_status] += 1
         zero_reason = row_zero_credit_reason(row) if score == 0.0 else "nonzero"
         behavior_status_by_zero_credit_reason.setdefault(zero_reason, Counter())[behavior_status] += 1
+        if behavior_status != "pass":
+            failure_owner = behavior_failure_owner(behavior_status)
+            behavior_failure_owner_counts[failure_owner] += 1
+            detail_signature = behavior_detail_signature(behavior.get("detail"))
+            if detail_signature != "none":
+                behavior_failure_detail_counts[detail_signature] += 1
+                behavior_failure_detail_rows.setdefault(detail_signature, []).append(triage_row_summary(row))
         source_lines = row.get("source_body_line_count")
         decomp_lines = row.get("decomp_line_count")
         source_bytes = row.get("source_body_byte_count")
@@ -2509,6 +2611,29 @@ def summarize(rows: list[dict[str, Any]], manifest_name: str, entries: list[Benc
             row_union_total = float(static_gaps.get("union_feature_total", 0.0) or 0.0)
             row_missing_total = float(static_gaps.get("missing_feature_total", 0.0) or 0.0)
             row_extra_total = float(static_gaps.get("extra_feature_total", 0.0) or 0.0)
+            missing_density = round(row_missing_total / row_source_total, 6) if row_source_total else 0.0
+            extra_density = round(row_extra_total / row_decomp_total, 6) if row_decomp_total else 0.0
+            static_missing_density_values.append(missing_density)
+            static_extra_density_values.append(extra_density)
+            missing_gap_bucket = feature_gap_bucket(row_missing_total)
+            static_score_by_missing_gap_bucket.setdefault(missing_gap_bucket, []).append(static_score)
+            if row_missing_total > 0.0 or row_extra_total > 0.0:
+                density_key = f"missing:{missing_gap_bucket}|extra:{feature_gap_bucket(row_extra_total)}"
+                density_bucket = static_gap_density_rows.setdefault(
+                    density_key,
+                    {
+                        "row_count": 0,
+                        "score_sum": 0.0,
+                        "missing_feature_total": 0.0,
+                        "extra_feature_total": 0.0,
+                        "top_rows": [],
+                    },
+                )
+                density_bucket["row_count"] += 1
+                density_bucket["score_sum"] += score
+                density_bucket["missing_feature_total"] += row_missing_total
+                density_bucket["extra_feature_total"] += row_extra_total
+                density_bucket["top_rows"].append(triage_row_summary(row))
             source_feature_total_values.append(row_source_total)
             decomp_feature_total_values.append(row_decomp_total)
             static_intersection_feature_total_values.append(row_intersection_total)
@@ -2631,6 +2756,22 @@ def summarize(rows: list[dict[str, Any]], manifest_name: str, entries: list[Benc
             stage_status = debug_decomp.get("stage_status")
             if isinstance(stage_status, dict):
                 debug_stage_status_row_count += 1
+                furthest_stage = furthest_ok_stage(stage_status)
+                stage_furthest_ok_counts[furthest_stage] += 1
+                if first_stage != "none":
+                    stage_first_blocker_lost_score[first_stage] += score_loss
+                pipeline_statuses = [
+                    stage_status.get(stage)
+                    for stage in STAGE_FAILURE_ORDER
+                    if stage_status.get(stage) is not None
+                ]
+                pipeline_ok = bool(pipeline_statuses) and all(status == "ok" for status in pipeline_statuses)
+                stage_funnel_counts["mapped_with_debug_stage_status"] += 1
+                if pipeline_ok:
+                    stage_funnel_counts["all_pipeline_stages_ok"] += 1
+                for stage in STAGE_FAILURE_ORDER:
+                    if stage_status.get(stage) == "ok":
+                        stage_funnel_counts[f"{stage}_ok"] += 1
                 debug_stage_status_counts.update(
                     f"{stage}:{status}"
                     for stage, status in stage_status.items()
@@ -2971,6 +3112,100 @@ def summarize(rows: list[dict[str, Any]], manifest_name: str, entries: list[Benc
     zero_score_count = int(score_distribution.get("zero", 0))
     nonzero_score_count = sum(1 for score in score_values if score > 0.0)
     perfect_score_count = sum(1 for score in score_values if score == 1.0)
+
+    def row_stage_ok(row: dict[str, Any], stage: str) -> bool:
+        debug_decomp = row.get("debug_decomp")
+        if not isinstance(debug_decomp, dict):
+            return False
+        stage_status = debug_decomp.get("stage_status")
+        return isinstance(stage_status, dict) and stage_status.get(stage) == "ok"
+
+    admission_gate_counts = Counter(
+        {
+            "manifest_rows": total,
+            "mapped_rows": mapped,
+            "decompiled_rows": decomp_ok,
+            "decode_ok_rows": sum(1 for row in rows if row_stage_ok(row, "decode")),
+            "raw_pcode_ok_rows": sum(1 for row in rows if row_stage_ok(row, "raw_pcode")),
+            "nir_build_ok_rows": sum(1 for row in rows if row_stage_ok(row, "nir_build")),
+            "normalize_ok_rows": sum(1 for row in rows if row_stage_ok(row, "normalize")),
+            "structuring_ok_rows": sum(1 for row in rows if row_stage_ok(row, "structuring")),
+            "render_ok_rows": sum(1 for row in rows if row_stage_ok(row, "render")),
+            "full_pipeline_ok_rows": sum(
+                1
+                for row in rows
+                if all(row_stage_ok(row, stage) for stage in STAGE_FAILURE_ORDER if stage != "load")
+            ),
+            "candidate_compiled_rows": compile_ok,
+            "behavior_pass_rows": behavior_pass,
+            "static_perfect_rows": sum(
+                1 for row in rows if float(row.get("static_semantic_score", 0.0) or 0.0) == 1.0
+            ),
+            "semantic_perfect_rows": perfect_score_count,
+        }
+    )
+    admission_gate_metrics = {
+        "gate_order": [
+            "manifest_rows",
+            "mapped_rows",
+            "decompiled_rows",
+            "decode_ok_rows",
+            "raw_pcode_ok_rows",
+            "nir_build_ok_rows",
+            "normalize_ok_rows",
+            "structuring_ok_rows",
+            "render_ok_rows",
+            "full_pipeline_ok_rows",
+            "candidate_compiled_rows",
+            "behavior_pass_rows",
+            "static_perfect_rows",
+            "semantic_perfect_rows",
+        ],
+        "counts": dict(admission_gate_counts),
+        "rates_total_denominator": {
+            key: round(float(value) / total, 6) if total else 0.0
+            for key, value in sorted(admission_gate_counts.items())
+        },
+    }
+    stage_transition_metrics = {
+        "stage_ok_funnel_counts": dict(sorted(stage_funnel_counts.items())),
+        "furthest_ok_stage_counts": dict(sorted(stage_furthest_ok_counts.items())),
+        "lost_score_by_first_stage_blocker": {
+            key: round(float(value), 6)
+            for key, value in sorted(stage_first_blocker_lost_score.items())
+        },
+    }
+    behavior_failure_detail_top_rows = {
+        signature: rows_for_signature[:5]
+        for signature, rows_for_signature in sorted(
+            behavior_failure_detail_rows.items(),
+            key=lambda item: (len(item[1]), item[0]),
+            reverse=True,
+        )[:12]
+    }
+    static_gap_density_export: dict[str, dict[str, Any]] = {}
+    for bucket_name, bucket in sorted(static_gap_density_rows.items()):
+        row_count = int(bucket.get("row_count", 0) or 0)
+        top_rows = sorted(
+            bucket.get("top_rows") or [],
+            key=lambda row: (
+                float(row.get("semantic_score_percent") or 0.0),
+                str(row.get("function_name") or ""),
+            ),
+        )[:8]
+        static_gap_density_export[bucket_name] = {
+            "row_count": row_count,
+            "row_rate": round(row_count / total, 6) if total else 0.0,
+            "avg_semantic_score": round(float(bucket.get("score_sum", 0.0) or 0.0) / row_count, 6)
+            if row_count
+            else 0.0,
+            "avg_semantic_score_percent": percent(
+                round(float(bucket.get("score_sum", 0.0) or 0.0) / row_count, 6)
+            ) if row_count else 0.0,
+            "missing_feature_total": round(float(bucket.get("missing_feature_total", 0.0) or 0.0), 6),
+            "extra_feature_total": round(float(bucket.get("extra_feature_total", 0.0) or 0.0), 6),
+            "top_rows": top_rows,
+        }
     return {
         "manifest": manifest_name,
         "entry_count": len(entries),
@@ -3075,6 +3310,34 @@ def summarize(rows: list[dict[str, Any]], manifest_name: str, entries: list[Benc
                 stage: numeric_distribution(values)
                 for stage, values in sorted(cost_values_by_stage_first_failure.items())
             },
+            "decompile_wall_by_score_bucket": {
+                bucket: numeric_distribution(values)
+                for bucket, values in sorted(cost_values_by_score_bucket.items())
+            },
+            "score_by_decompile_cost_bucket": {
+                bucket: numeric_distribution(values)
+                for bucket, values in sorted(scores_by_cost_bucket.items())
+            },
+            "lost_score_by_decompile_cost_bucket": {
+                bucket: round(float(value), 6)
+                for bucket, value in sorted(lost_score_by_cost_bucket.items())
+            },
+        },
+        "admission_gate_metrics": admission_gate_metrics,
+        "stage_transition_metrics": stage_transition_metrics,
+        "behavior_failure_diagnostics": {
+            "owner_counts": dict(sorted(behavior_failure_owner_counts.items())),
+            "detail_signature_counts": dict(behavior_failure_detail_counts.most_common(20)),
+            "top_detail_rows": behavior_failure_detail_top_rows,
+        },
+        "static_gap_density_metrics": {
+            "missing_density_distribution": numeric_distribution(static_missing_density_values),
+            "extra_density_distribution": numeric_distribution(static_extra_density_values),
+            "static_score_by_missing_gap_bucket": {
+                bucket: numeric_distribution(values)
+                for bucket, values in sorted(static_score_by_missing_gap_bucket.items())
+            },
+            "gap_bucket_rows": static_gap_density_export,
         },
         "perfect_row_count": perfect_score_count,
         "supported_behavior_row_count": sum(
@@ -4103,6 +4366,14 @@ def render_markdown(summary: dict[str, Any], rows: list[dict[str, Any]]) -> str:
             f"- List cache hits/misses: {summary.get('list_cache_hit_count', 0)}/"
             f"{summary.get('list_cache_miss_count', 0)}"
         )
+    cache_efficiency = summary.get("cache_efficiency_metrics")
+    if isinstance(cache_efficiency, dict):
+        lines.append(
+            "- Cache hit rates: "
+            f"decomp {float(cache_efficiency.get('decomp_cache_hit_rate', 0.0) or 0.0):.3f}, "
+            f"list {float(cache_efficiency.get('list_cache_hit_rate', 0.0) or 0.0):.3f}, "
+            f"behavior {float(cache_efficiency.get('behavior_cache_hit_rate', 0.0) or 0.0):.3f}"
+        )
     if summary.get("history_file"):
         lines.append(f"- History: `{summary['history_file']}`")
     if summary.get("latest_index_file"):
@@ -4336,6 +4607,81 @@ def render_markdown(summary: dict[str, Any], rows: list[dict[str, Any]]) -> str:
                     f"{float(stats.get('avg', 0.0) or 0.0):.6f} | "
                     f"{float(stats.get('p95', 0.0) or 0.0):.6f} | "
                     f"{float(stats.get('max', 0.0) or 0.0):.6f} |"
+                )
+        score_by_cost = stage_costs.get("score_by_decompile_cost_bucket")
+        if isinstance(score_by_cost, dict) and score_by_cost:
+            lines.extend(["", "| Cost Bucket | Rows | Avg Score | P50 | Lost Score |", "|---|---:|---:|---:|---:|"])
+            lost_by_cost = stage_costs.get("lost_score_by_decompile_cost_bucket")
+            if not isinstance(lost_by_cost, dict):
+                lost_by_cost = {}
+            for bucket, stats in sorted(score_by_cost.items()):
+                if not isinstance(stats, dict):
+                    continue
+                lines.append(
+                    f"| {bucket} | {stats.get('count', 0)} | "
+                    f"{float(stats.get('avg', 0.0) or 0.0):.6f} | "
+                    f"{float(stats.get('p50', 0.0) or 0.0):.6f} | "
+                    f"{float(lost_by_cost.get(bucket, 0.0) or 0.0):.6f} |"
+                )
+    admission = summary.get("admission_gate_metrics")
+    if isinstance(admission, dict):
+        counts = admission.get("counts") if isinstance(admission.get("counts"), dict) else {}
+        rates = (
+            admission.get("rates_total_denominator")
+            if isinstance(admission.get("rates_total_denominator"), dict)
+            else {}
+        )
+        order = admission.get("gate_order") if isinstance(admission.get("gate_order"), list) else sorted(counts)
+        lines.extend(["", "## Admission Gate Metrics", "", "| Gate | Rows | Total Rate |", "|---|---:|---:|"])
+        for gate_name in order:
+            if gate_name not in counts:
+                continue
+            lines.append(
+                f"| {gate_name} | {counts.get(gate_name, 0)} | "
+                f"{float(rates.get(gate_name, 0.0) or 0.0):.3f} |"
+            )
+    stage_transitions = summary.get("stage_transition_metrics")
+    if isinstance(stage_transitions, dict):
+        furthest = stage_transitions.get("furthest_ok_stage_counts")
+        if isinstance(furthest, dict) and furthest:
+            lines.extend(["", "## Stage Transition Metrics", "", "| Furthest OK Stage | Rows |", "|---|---:|"])
+            for stage, count in sorted(furthest.items()):
+                lines.append(f"| {stage} | {count} |")
+    failure_diagnostics = summary.get("behavior_failure_diagnostics")
+    if isinstance(failure_diagnostics, dict):
+        owner_counts = failure_diagnostics.get("owner_counts")
+        if isinstance(owner_counts, dict) and owner_counts:
+            lines.extend(["", "## Behavior Failure Diagnostics", "", "| Owner | Rows |", "|---|---:|"])
+            for owner, count in sorted(owner_counts.items()):
+                lines.append(f"| {owner} | {count} |")
+        detail_counts = failure_diagnostics.get("detail_signature_counts")
+        if isinstance(detail_counts, dict) and detail_counts:
+            lines.extend(["", "| Detail Signature | Rows |", "|---|---:|"])
+            for signature, count in list(detail_counts.items())[:8]:
+                lines.append(f"| `{signature}` | {count} |")
+    gap_density = summary.get("static_gap_density_metrics")
+    if isinstance(gap_density, dict):
+        missing_density = gap_density.get("missing_density_distribution")
+        extra_density = gap_density.get("extra_density_distribution")
+        if isinstance(missing_density, dict) and isinstance(extra_density, dict):
+            lines.extend(["", "## Static Gap Density Metrics", ""])
+            lines.append(
+                f"- Missing density avg {float(missing_density.get('avg', 0.0) or 0.0):.6f}, "
+                f"p95 {float(missing_density.get('p95', 0.0) or 0.0):.6f}; "
+                f"extra density avg {float(extra_density.get('avg', 0.0) or 0.0):.6f}, "
+                f"p95 {float(extra_density.get('p95', 0.0) or 0.0):.6f}"
+            )
+        gap_buckets = gap_density.get("gap_bucket_rows")
+        if isinstance(gap_buckets, dict) and gap_buckets:
+            lines.extend(["", "| Gap Bucket | Rows | Avg Similarity | Missing | Extra |", "|---|---:|---:|---:|---:|"])
+            for bucket, metrics in sorted(gap_buckets.items()):
+                if not isinstance(metrics, dict):
+                    continue
+                lines.append(
+                    f"| `{bucket}` | {metrics.get('row_count', 0)} | "
+                    f"{float(metrics.get('avg_semantic_score_percent', 0.0) or 0.0):.3f}% | "
+                    f"{float(metrics.get('missing_feature_total', 0.0) or 0.0):.0f} | "
+                    f"{float(metrics.get('extra_feature_total', 0.0) or 0.0):.0f} |"
                 )
     denominator_accounting = summary.get("denominator_accounting_metrics")
     if isinstance(denominator_accounting, dict):
@@ -5150,6 +5496,26 @@ def run_benchmark(args: argparse.Namespace) -> int:
     summary["behavior_cache_hit_count"] = int(behavior_cache_stats.get("hit", 0))
     summary["behavior_cache_miss_count"] = int(behavior_cache_stats.get("miss", 0))
     summary["behavior_cache_stored_count"] = int(behavior_cache_stats.get("stored", 0))
+    decomp_cache_requests = summary["decomp_cache_hit_count"] + summary["decomp_cache_miss_count"]
+    list_cache_requests = summary["list_cache_hit_count"] + summary["list_cache_miss_count"]
+    behavior_cache_requests = summary["behavior_cache_hit_count"] + summary["behavior_cache_miss_count"]
+    summary["cache_efficiency_metrics"] = {
+        "decomp_cache_request_count": decomp_cache_requests,
+        "decomp_cache_hit_rate": round(summary["decomp_cache_hit_count"] / decomp_cache_requests, 6)
+        if decomp_cache_requests
+        else 0.0,
+        "decomp_cache_stored_count": summary["decomp_cache_stored_count"],
+        "list_cache_request_count": list_cache_requests,
+        "list_cache_hit_rate": round(summary["list_cache_hit_count"] / list_cache_requests, 6)
+        if list_cache_requests
+        else 0.0,
+        "list_cache_stored_count": summary["list_cache_stored_count"],
+        "behavior_cache_request_count": behavior_cache_requests,
+        "behavior_cache_hit_rate": round(summary["behavior_cache_hit_count"] / behavior_cache_requests, 6)
+        if behavior_cache_requests
+        else 0.0,
+        "behavior_cache_stored_count": summary["behavior_cache_stored_count"],
+    }
     summary["wall_sec"] = round(time.perf_counter() - start, 6)
     if args.require_sleigh_template_source:
         summary["sleigh_template_source_gate"] = sleigh_template_source_gate(
@@ -5449,8 +5815,14 @@ int max(int a, int b) { if (a > b) return a; return b; }
         assert summary["behavior_distance_metrics"]["case_pass_rate_distribution"]["count"] == 0
         assert summary["improvement_axis_metrics"]["nir_telemetry_debt"]["row_count"] == 1
         assert summary["improvement_axis_metrics"]["mapping"]["lost_score_sum"] == 1.0
+        assert summary["admission_gate_metrics"]["counts"]["manifest_rows"] == 2
+        assert summary["admission_gate_metrics"]["counts"]["raw_pcode_ok_rows"] == 1
+        assert summary["stage_transition_metrics"]["furthest_ok_stage_counts"]["render"] == 1
+        assert summary["behavior_failure_diagnostics"]["owner_counts"]["decomp_failed"] == 1
+        assert summary["static_gap_density_metrics"]["gap_bucket_rows"]["missing:small|extra:none"]["row_count"] == 1
         assert summary["complexity_quality_metrics"]["by_source_feature_bucket"]["tiny"]["row_count"] == 2
         assert "decompile_wall_by_stage_first_failure" in summary["stage_cost_correlation_metrics"]
+        assert "score_by_decompile_cost_bucket" in summary["stage_cost_correlation_metrics"]
         void_func = SourceFunction(
             name="touch",
             signature="void touch(unsigned int seed)",
