@@ -1931,6 +1931,11 @@ def sleigh_template_source_gate(summary: dict[str, Any], required_source: str) -
 
     failures: list[str] = []
     row_count = int(summary.get("row_count", 0) or 0)
+    mapping_counts = summary.get("mapping_status_counts")
+    if not isinstance(mapping_counts, dict):
+        mapping_counts = {}
+    mapped_row_count = int(mapping_counts.get("matched", row_count) or 0)
+    unmapped_row_count = max(0, row_count - mapped_row_count)
     decode_ok = int(stage_counts.get("decode:ok", 0) or 0)
     raw_pcode_ok = int(stage_counts.get("raw_pcode:ok", 0) or 0)
     invalid_pcode_shape_count = int(quality_totals.get("invalid_pcode_shape_count", 0) or 0)
@@ -1954,7 +1959,7 @@ def sleigh_template_source_gate(summary: dict[str, Any], required_source: str) -
         if source != required_source and isinstance(value, int | float) and int(value) != 0
     }
 
-    if row_count > 0 and total_templates == 0:
+    if mapped_row_count > 0 and total_templates == 0:
         failures.append(
             "SLEIGH template source gate requires debug_template_source_totals; run with --include-debug-decomp"
         )
@@ -1962,10 +1967,14 @@ def sleigh_template_source_gate(summary: dict[str, Any], required_source: str) -
         failures.append(
             f"SLEIGH template source evidence must cover every raw_pcode:ok row ({total_templates}/{raw_pcode_ok})"
         )
-    if row_count > 0 and decode_ok != row_count:
-        failures.append(f"SLEIGH decode must be ok for every row ({decode_ok}/{row_count})")
-    if row_count > 0 and raw_pcode_ok != row_count:
-        failures.append(f"SLEIGH raw_pcode must be ok for every row ({raw_pcode_ok}/{row_count})")
+    if mapped_row_count > 0 and decode_ok != mapped_row_count:
+        failures.append(
+            f"SLEIGH decode must be ok for every mapped row ({decode_ok}/{mapped_row_count})"
+        )
+    if mapped_row_count > 0 and raw_pcode_ok != mapped_row_count:
+        failures.append(
+            f"SLEIGH raw_pcode must be ok for every mapped row ({raw_pcode_ok}/{mapped_row_count})"
+        )
     if unexpected_sources:
         failures.append(
             f"SLEIGH template sources must be only {required_source!r} "
@@ -1983,6 +1992,8 @@ def sleigh_template_source_gate(summary: dict[str, Any], required_source: str) -
         "template_source_totals": dict(sorted(template_totals.items())),
         "template_source_count": total_templates,
         "row_count": row_count,
+        "mapped_row_count": mapped_row_count,
+        "unmapped_row_count": unmapped_row_count,
         "decode_ok_rows": decode_ok,
         "raw_pcode_ok_rows": raw_pcode_ok,
         "invalid_pcode_shape_count": invalid_pcode_shape_count,
@@ -2541,6 +2552,14 @@ def render_markdown(summary: dict[str, Any], rows: list[dict[str, Any]]) -> str:
         lines.extend(["", "## SLEIGH Template Source Gate", ""])
         lines.append(f"- Status: `{gate.get('status')}`")
         lines.append(f"- Required source: `{gate.get('required_source')}`")
+        if gate.get("mapped_row_count") is not None:
+            lines.append(
+                f"- Rows: mapped `{gate.get('mapped_row_count')}` / total `{gate.get('row_count')}`"
+            )
+        if gate.get("unmapped_row_count"):
+            lines.append(
+                f"- Unmapped rows ignored by SLEIGH gate: `{gate.get('unmapped_row_count')}`"
+            )
         for failure in gate.get("failures") or []:
             lines.append(f"- Failure: {failure}")
     comparison = summary.get("comparison")
@@ -3076,7 +3095,23 @@ int max(int a, int b) { if (a > b) return a; return b; }
             "sla_construct_tpl",
         )
         assert gate["status"] == "failed"
-        assert any("decode must be ok for every row (1/2)" in failure for failure in gate["failures"])
+        assert any(
+            "decode must be ok for every mapped row (1/2)" in failure
+            for failure in gate["failures"]
+        )
+        gate = sleigh_template_source_gate(
+            {
+                "row_count": 2,
+                "mapping_status_counts": {"matched": 1, "unmapped": 1},
+                "debug_stage_status_counts": {"decode:ok": 1, "raw_pcode:ok": 1},
+                "debug_quality_evidence_totals": {"invalid_pcode_shape_count": 0},
+                "debug_template_source_totals": {"sla_construct_tpl": 1},
+            },
+            "sla_construct_tpl",
+        )
+        assert gate["status"] == "passed"
+        assert gate["mapped_row_count"] == 1
+        assert gate["unmapped_row_count"] == 1
         gate = sleigh_template_source_gate(
             {
                 "row_count": 2,
