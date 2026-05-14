@@ -99,6 +99,10 @@ manifest.
   accounting over the full row denominator, including zero/nonzero/perfect row
   counts, lost-score totals, and lost-score attribution by behavior status,
   first failing stage, and zero-credit reason.
+- `score_component_metrics`: behavior/static score sums, weighted contribution
+  sums, lost contribution sums, and per-component score distributions. This
+  makes it clear whether a run is losing credit in dynamic behavior, static
+  shape, or both.
 - `effective_coverage`: mapped, decompiled, behavior-expected, and
   behavior-executed row counts/rates over the full manifest denominator.
 - `behavior_eligibility`: behavior eligibility/execution/pass rates with both
@@ -126,6 +130,10 @@ manifest.
   Jaccard, missing/extra totals, and rows where source features exist but the
   decompiler emitted no comparable features. This is the top-level proof that
   absence is included rather than ignored.
+- `source_decomp_size_metrics`: source-body and decompiler output line/byte
+  distributions, decompiler/source size ratios, and the rows with the largest
+  decompiler/source line ratio. This helps separate semantic failures from
+  excessively expanded or unexpectedly empty output.
 - `behavior_case_metrics`: dynamic behavior at case granularity, including
   total/pass/fail case counts, case pass rate, and rows where at least one case
   passed despite an overall mismatch.
@@ -160,6 +168,10 @@ manifest.
   numeric totals, nonzero row counts, debt-metric distributions, and highest
   debt rows. This keeps NIR telemetry aligned with the canonical stats payload
   while making benchmark triage possible from the summary alone.
+- `nir_debt_correlation_metrics`: rows with nonzero NIR debt metrics,
+  behavior-status buckets for those rows, and score distributions for rows with
+  and without NIR debt. This is a coarse admission check for whether telemetry
+  debt is actually correlated with benchmark quality loss.
 - `debug_quality_evidence_nonzero_rows`: row counts for nonzero NIR/debug
   evidence counters, complementing `debug_quality_evidence_totals`.
 - `triage_priority_rows`: compact low-score row shortlist with behavior status,

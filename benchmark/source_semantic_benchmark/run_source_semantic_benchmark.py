@@ -2153,6 +2153,15 @@ def summarize(rows: list[dict[str, Any]], manifest_name: str, entries: list[Benc
     behavior_status_by_zero_credit_reason: dict[str, Counter[str]] = {}
     score_values_by_behavior_status: dict[str, list[float]] = {}
     score_values_by_stage_first_failure: dict[str, list[float]] = {}
+    behavior_score_values: list[float] = []
+    static_score_values: list[float] = []
+    source_body_line_counts: list[float] = []
+    decomp_line_counts: list[float] = []
+    source_body_byte_counts: list[float] = []
+    decomp_byte_counts: list[float] = []
+    decomp_to_source_line_ratios: list[float] = []
+    decomp_to_source_byte_ratios: list[float] = []
+    source_decomp_size_hot_rows: list[dict[str, Any]] = []
     source_feature_rows = 0
     decomp_feature_rows = 0
     static_missing_feature_rows = 0
@@ -2178,6 +2187,10 @@ def summarize(rows: list[dict[str, Any]], manifest_name: str, entries: list[Benc
     nir_build_stats_nonzero_rows: Counter[str] = Counter()
     nir_build_stats_values: dict[str, list[float]] = {}
     nir_build_stats_debt_hot_rows: list[dict[str, Any]] = []
+    nir_debt_row_count = 0
+    nir_debt_score_values: list[float] = []
+    nir_no_debt_score_values: list[float] = []
+    nir_debt_behavior_status_counts: Counter[str] = Counter()
     by_language: dict[str, dict[str, Any]] = {}
     by_tag: dict[str, dict[str, Any]] = {}
     by_entry: dict[str, dict[str, Any]] = {}
@@ -2193,6 +2206,15 @@ def summarize(rows: list[dict[str, Any]], manifest_name: str, entries: list[Benc
         score = float(row.get("semantic_score", 0.0) or 0.0)
         behavior = row.get("behavior") if isinstance(row.get("behavior"), dict) else {}
         behavior_status = str(behavior.get("status", "unknown"))
+        raw_behavior_score = behavior.get("score")
+        behavior_score = (
+            float(raw_behavior_score)
+            if isinstance(raw_behavior_score, int | float)
+            else (1.0 if behavior_status == "pass" else 0.0)
+        )
+        static_score = float(row.get("static_semantic_score", 0.0) or 0.0)
+        behavior_score_values.append(behavior_score)
+        static_score_values.append(static_score)
         first_stage = str(row.get("stage_first_failure") or "none")
         score_loss = round(max(0.0, 1.0 - score), 6)
         if score_loss > 0.0:
@@ -2217,6 +2239,39 @@ def summarize(rows: list[dict[str, Any]], manifest_name: str, entries: list[Benc
         behavior_status_by_stage_first_failure.setdefault(first_stage, Counter())[behavior_status] += 1
         zero_reason = row_zero_credit_reason(row) if score == 0.0 else "nonzero"
         behavior_status_by_zero_credit_reason.setdefault(zero_reason, Counter())[behavior_status] += 1
+        source_lines = row.get("source_body_line_count")
+        decomp_lines = row.get("decomp_line_count")
+        source_bytes = row.get("source_body_byte_count")
+        decomp_bytes = row.get("decomp_byte_count")
+        if isinstance(source_lines, int | float):
+            source_body_line_counts.append(float(source_lines))
+        if isinstance(decomp_lines, int | float):
+            decomp_line_counts.append(float(decomp_lines))
+        if isinstance(source_bytes, int | float):
+            source_body_byte_counts.append(float(source_bytes))
+        if isinstance(decomp_bytes, int | float):
+            decomp_byte_counts.append(float(decomp_bytes))
+        if isinstance(source_lines, int | float) and isinstance(decomp_lines, int | float) and source_lines > 0:
+            decomp_to_source_line_ratios.append(float(decomp_lines) / float(source_lines))
+        if isinstance(source_bytes, int | float) and isinstance(decomp_bytes, int | float) and source_bytes > 0:
+            decomp_to_source_byte_ratios.append(float(decomp_bytes) / float(source_bytes))
+        if isinstance(source_lines, int | float) or isinstance(decomp_lines, int | float):
+            source_decomp_size_hot_rows.append(
+                {
+                    "entry_id": row.get("entry_id"),
+                    "function_name": row.get("function_name"),
+                    "address": row.get("address"),
+                    "semantic_score_percent": row.get("semantic_score_percent"),
+                    "behavior_status": behavior_status,
+                    "source_body_line_count": source_lines,
+                    "decomp_line_count": decomp_lines,
+                    "decomp_to_source_line_ratio": round(float(decomp_lines) / float(source_lines), 6)
+                    if isinstance(source_lines, int | float)
+                    and isinstance(decomp_lines, int | float)
+                    and source_lines > 0
+                    else None,
+                }
+            )
         case_pass_rate = behavior.get("case_pass_rate")
         if isinstance(case_pass_rate, int | float):
             behavior_case_pass_rates.append(float(case_pass_rate))
@@ -2393,6 +2448,11 @@ def summarize(rows: list[dict[str, Any]], manifest_name: str, entries: list[Benc
                         ],
                     }
                 )
+                nir_debt_row_count += 1
+                nir_debt_score_values.append(score)
+                nir_debt_behavior_status_counts[behavior_status] += 1
+            else:
+                nir_no_debt_score_values.append(score)
 
         for tag in row.get("tags") or []:
             tag_bucket = by_tag.setdefault(
@@ -2591,7 +2651,20 @@ def summarize(rows: list[dict[str, Any]], manifest_name: str, entries: list[Benc
         key=lambda row: (float(row.get("lost_score") or 0.0), row.get("function_name") or ""),
         reverse=True,
     )[:20]
+    source_decomp_size_hot_rows = sorted(
+        source_decomp_size_hot_rows,
+        key=lambda row: (
+            float(row.get("decomp_to_source_line_ratio") or 0.0),
+            float(row.get("decomp_line_count") or 0.0),
+            row.get("function_name") or "",
+        ),
+        reverse=True,
+    )[:20]
     score_sum = round(sum(score_values), 6)
+    behavior_score_sum = round(sum(behavior_score_values), 6)
+    static_score_sum = round(sum(static_score_values), 6)
+    behavior_component_score_sum = round(0.65 * behavior_score_sum, 6)
+    static_component_score_sum = round(0.35 * static_score_sum, 6)
     zero_score_count = int(score_distribution.get("zero", 0))
     nonzero_score_count = sum(1 for score in score_values if score > 0.0)
     perfect_score_count = sum(1 for score in score_values if score == 1.0)
@@ -2637,6 +2710,22 @@ def summarize(rows: list[dict[str, Any]], manifest_name: str, entries: list[Benc
                 nonzero_score_count / total,
                 6,
             ) if total else 0.0,
+        },
+        "score_component_metrics": {
+            "row_count": total,
+            "behavior_weight": 0.65,
+            "static_weight": 0.35,
+            "behavior_score_sum": behavior_score_sum,
+            "static_score_sum": static_score_sum,
+            "behavior_component_score_sum": behavior_component_score_sum,
+            "static_component_score_sum": static_component_score_sum,
+            "weighted_score_sum": score_sum,
+            "behavior_component_possible_score_sum": round(0.65 * total, 6),
+            "static_component_possible_score_sum": round(0.35 * total, 6),
+            "behavior_component_lost_score_sum": round((0.65 * total) - behavior_component_score_sum, 6),
+            "static_component_lost_score_sum": round((0.35 * total) - static_component_score_sum, 6),
+            "behavior_score_distribution": numeric_distribution(behavior_score_values),
+            "static_score_distribution": numeric_distribution(static_score_values),
         },
         "score_denominator_metrics": {
             "score_denominator_row_count": total,
@@ -2814,6 +2903,15 @@ def summarize(rows: list[dict[str, Any]], manifest_name: str, entries: list[Benc
             "rows_with_missing_features": static_missing_feature_rows,
             "rows_with_zero_static_intersection": static_zero_similarity_rows,
         },
+        "source_decomp_size_metrics": {
+            "source_body_line_count_distribution": numeric_distribution(source_body_line_counts),
+            "decomp_line_count_distribution": numeric_distribution(decomp_line_counts),
+            "source_body_byte_count_distribution": numeric_distribution(source_body_byte_counts),
+            "decomp_byte_count_distribution": numeric_distribution(decomp_byte_counts),
+            "decomp_to_source_line_ratio_distribution": numeric_distribution(decomp_to_source_line_ratios),
+            "decomp_to_source_byte_ratio_distribution": numeric_distribution(decomp_to_source_byte_ratios),
+            "top_decomp_to_source_line_ratio_rows": source_decomp_size_hot_rows,
+        },
         "harness_cost_metrics": {
             "decompile_total_sec": round(sum(decomp_times), 6),
             "decompile_avg_sec": round(sum(decomp_times) / len(decomp_times), 6) if decomp_times else 0.0,
@@ -2872,6 +2970,16 @@ def summarize(rows: list[dict[str, Any]], manifest_name: str, entries: list[Benc
             "debt_metric_totals": nir_debt_totals,
             "debt_metric_distributions": nir_build_stats_distributions,
             "top_debt_rows": nir_build_stats_debt_hot_rows,
+        },
+        "nir_debt_correlation_metrics": {
+            "stats_row_count": nir_build_stats_row_count,
+            "debt_row_count": nir_debt_row_count,
+            "debt_row_rate_stats_denominator": round(nir_debt_row_count / nir_build_stats_row_count, 6)
+            if nir_build_stats_row_count
+            else 0.0,
+            "score_distribution_debt_rows": numeric_distribution(nir_debt_score_values),
+            "score_distribution_no_debt_rows": numeric_distribution(nir_no_debt_score_values),
+            "behavior_status_counts_debt_rows": dict(sorted(nir_debt_behavior_status_counts.items())),
         },
         "debug_owner_bucket_counts": dict(sorted(debug_owner_bucket_counts.items())),
         "debug_stage_status_counts": dict(sorted(debug_stage_status_counts.items())),
@@ -3741,6 +3849,19 @@ def render_markdown(summary: dict[str, Any], rows: list[dict[str, Any]]) -> str:
             f"nonzero {stats.get('nonzero_count', 0)}/{stats.get('count', 0)} "
             f"({float(stats.get('nonzero_rate', 0.0) or 0.0):.3f})"
         )
+    score_components = summary.get("score_component_metrics")
+    if isinstance(score_components, dict):
+        lines.extend(["", "## Score Component Metrics", ""])
+        lines.append(
+            f"- Behavior contribution {float(score_components.get('behavior_component_score_sum', 0.0) or 0.0):.6f}/"
+            f"{float(score_components.get('behavior_component_possible_score_sum', 0.0) or 0.0):.6f}, "
+            f"static contribution {float(score_components.get('static_component_score_sum', 0.0) or 0.0):.6f}/"
+            f"{float(score_components.get('static_component_possible_score_sum', 0.0) or 0.0):.6f}"
+        )
+        lines.append(
+            f"- Behavior lost {float(score_components.get('behavior_component_lost_score_sum', 0.0) or 0.0):.6f}, "
+            f"static lost {float(score_components.get('static_component_lost_score_sum', 0.0) or 0.0):.6f}"
+        )
     scoring_contract = summary.get("scoring_contract")
     if isinstance(scoring_contract, dict):
         lines.extend(["", "## Scoring Contract", ""])
@@ -3857,6 +3978,29 @@ def render_markdown(summary: dict[str, Any], rows: list[dict[str, Any]]) -> str:
             f"rows with no decomp features despite source "
             f"{int(static_absence.get('rows_with_no_decomp_features_despite_source', 0) or 0)}"
         )
+    size_metrics = summary.get("source_decomp_size_metrics")
+    if isinstance(size_metrics, dict):
+        line_ratio = size_metrics.get("decomp_to_source_line_ratio_distribution")
+        source_lines = size_metrics.get("source_body_line_count_distribution")
+        decomp_lines = size_metrics.get("decomp_line_count_distribution")
+        if isinstance(line_ratio, dict) and isinstance(source_lines, dict) and isinstance(decomp_lines, dict):
+            lines.extend(["", "## Source/Decompiler Size Metrics", ""])
+            lines.append(
+                f"- Source lines avg {float(source_lines.get('avg', 0.0) or 0.0):.6f}, "
+                f"decomp lines avg {float(decomp_lines.get('avg', 0.0) or 0.0):.6f}, "
+                f"decomp/source line ratio p95 {float(line_ratio.get('p95', 0.0) or 0.0):.6f}"
+            )
+        hot_size_rows = size_metrics.get("top_decomp_to_source_line_ratio_rows") or []
+        if hot_size_rows:
+            lines.extend(["", "| Function | Address | Source Lines | Decomp Lines | Ratio | Behavior |", "|---|---|---:|---:|---:|---|"])
+            for row in hot_size_rows[:8]:
+                ratio = row.get("decomp_to_source_line_ratio")
+                ratio_text = "n/a" if ratio is None else f"{float(ratio or 0.0):.6f}"
+                lines.append(
+                    f"| `{row.get('function_name')}` | `{row.get('address')}` | "
+                    f"{row.get('source_body_line_count') or 0} | {row.get('decomp_line_count') or 0} | "
+                    f"{ratio_text} | {row.get('behavior_status')} |"
+                )
     behavior_cases = summary.get("behavior_case_metrics")
     if isinstance(behavior_cases, dict):
         lines.extend(["", "## Behavior Case Metrics", ""])
@@ -3964,6 +4108,21 @@ def render_markdown(summary: dict[str, Any], rows: list[dict[str, Any]]) -> str:
                     f"{float(row.get('debt_metric_total') or 0.0):.6f} | "
                     f"{row.get('behavior_status')} | {row.get('stage_first_failure')} |"
                 )
+    debt_correlation = summary.get("nir_debt_correlation_metrics")
+    if isinstance(debt_correlation, dict) and debt_correlation.get("stats_row_count"):
+        debt_scores = debt_correlation.get("score_distribution_debt_rows")
+        no_debt_scores = debt_correlation.get("score_distribution_no_debt_rows")
+        lines.extend(["", "## NIR Debt Correlation Metrics", ""])
+        lines.append(
+            f"- Debt rows: {debt_correlation.get('debt_row_count', 0)}/"
+            f"{debt_correlation.get('stats_row_count', 0)} "
+            f"({float(debt_correlation.get('debt_row_rate_stats_denominator', 0.0) or 0.0):.3f})"
+        )
+        if isinstance(debt_scores, dict) and isinstance(no_debt_scores, dict):
+            lines.append(
+                f"- Avg score with debt {float(debt_scores.get('avg', 0.0) or 0.0):.6f}, "
+                f"without debt {float(no_debt_scores.get('avg', 0.0) or 0.0):.6f}"
+            )
     if summary.get("decomp_cache_status_counts"):
         lines.extend(["", "## Decompile Cache Status", "", "| Status | Rows |", "|---|---:|"])
         for status, count in sorted(summary["decomp_cache_status_counts"].items()):
@@ -4287,6 +4446,8 @@ def row_for_function(
     else:
         decomp["decomp_cache_status"] = "not_requested"
     decomp_code = decomp.get("code") if decomp.get("success") else None
+    source_body_lines = func.body.splitlines()
+    decomp_lines = decomp_code.splitlines() if decomp_code else []
     decomp_fp = code_fingerprint(decomp_code or "") if decomp_code else Counter()
     static_score = multiset_jaccard(source_fp, decomp_fp) if decomp_code else 0.0
     static_components = static_similarity_components(source_fp, decomp_fp) if decomp_code else {
@@ -4323,6 +4484,8 @@ def row_for_function(
         "source_signature": func.signature,
         "source_return_kind": func.return_kind,
         "source_param_kinds": func.param_kinds,
+        "source_body_line_count": len(source_body_lines),
+        "source_body_byte_count": len(func.body.encode("utf-8")),
         "address": matched.address if matched else None,
         "fission_name": matched.name if matched else None,
         "mapping_status": mapping_status,
@@ -4337,6 +4500,8 @@ def row_for_function(
         "debug_decomp": debug_decomp,
         "decomp_cache_status": decomp.get("decomp_cache_status", "not_requested"),
         "decomp_wall_sec": decomp.get("wall_sec"),
+        "decomp_line_count": len(decomp_lines),
+        "decomp_byte_count": len(decomp_code.encode("utf-8")) if decomp_code else 0,
         "static_semantic_score": static_score,
         "static_semantic_score_percent": percent(static_score),
         "static_similarity_components": static_components,
@@ -4671,6 +4836,11 @@ int max(int a, int b) { if (a > b) return a; return b; }
                     "decomp_success": True,
                     "behavior": {"status": "pass", "case_count": 2, "case_pass_count": 2, "case_fail_count": 0},
                     "semantic_score": 1.0,
+                    "static_semantic_score": 1.0,
+                    "source_body_line_count": 1,
+                    "source_body_byte_count": 12,
+                    "decomp_line_count": 2,
+                    "decomp_byte_count": 24,
                     "static_similarity_gaps": {
                         "source_feature_total": 2,
                         "decomp_feature_total": 2,
@@ -4706,6 +4876,11 @@ int max(int a, int b) { if (a > b) return a; return b; }
                     "decomp_success": False,
                     "behavior": {"status": "decomp_failed", "score": 0.0, "case_count": 1},
                     "semantic_score": 0.0,
+                    "static_semantic_score": 0.0,
+                    "source_body_line_count": 1,
+                    "source_body_byte_count": 12,
+                    "decomp_line_count": 0,
+                    "decomp_byte_count": 0,
                     "static_similarity_gaps": {
                         "source_feature_total": 2,
                         "decomp_feature_total": 0,
@@ -4735,6 +4910,8 @@ int max(int a, int b) { if (a > b) return a; return b; }
         assert summary["score_distribution"]["zero"] == 1
         assert summary["semantic_score_stats"]["nonzero_count"] == 1
         assert summary["scoring_contract"]["semantic_score_denominator"] == "all manifest rows"
+        assert summary["score_component_metrics"]["behavior_component_score_sum"] == 0.65
+        assert summary["score_component_metrics"]["static_component_score_sum"] == 0.35
         assert summary["score_denominator_metrics"]["score_denominator_row_count"] == 2
         assert summary["score_denominator_metrics"]["lost_score_sum"] == 1.0
         assert summary["semantic_loss_metrics"]["lost_score_by_zero_credit_reason"]["unmapped"] == 1.0
@@ -4746,6 +4923,7 @@ int max(int a, int b) { if (a > b) return a; return b; }
         assert summary["static_gap_row_metrics"]["missing_feature_row_count"] == 1
         assert summary["static_absence_penalty_metrics"]["missing_feature_total"] == 2.0
         assert summary["static_absence_penalty_metrics"]["rows_with_no_decomp_features_despite_source"] == 1
+        assert summary["source_decomp_size_metrics"]["decomp_to_source_line_ratio_distribution"]["max"] == 2.0
         assert summary["score_by_behavior_status"]["pass"]["count"] == 1
         assert summary["behavior_status_by_zero_credit_reason"]["unmapped"]["decomp_failed"] == 1
         assert "top_decompile_wall_rows" in summary["cost_hot_rows"]
@@ -4756,6 +4934,7 @@ int max(int a, int b) { if (a > b) return a; return b; }
         assert summary["pipeline_stage_metrics"]["decode"]["ok_count"] == 1
         assert summary["nir_build_stats_metrics"]["stats_row_count"] == 1
         assert summary["nir_build_stats_metrics"]["debt_metric_totals"]["replacement_plan_rejected_missing_merge_count"] == 2.0
+        assert summary["nir_debt_correlation_metrics"]["debt_row_count"] == 1
         assert summary["debug_quality_evidence_totals"]["region_emit_ready_failed_count"] == 1.0
         assert summary["behavior_distance_metrics"]["case_pass_rate_distribution"]["count"] == 0
         void_func = SourceFunction(
