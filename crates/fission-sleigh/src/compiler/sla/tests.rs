@@ -655,7 +655,11 @@ fn sla_root_unique_base_is_not_synthesized() {
 fn sla_root_unique_mask_default_matches_ghidra() {
     let templates = include_str!("templates.rs");
     assert!(
-        templates.contains(".attr_unsigned(sla_format::ATTR_UNIQMASK)\n        .unwrap_or(0)"),
+        templates.contains("unwrap_or_else(ghidra_absent_uniqmask_default)"),
+        "compiled .sla root decode must name Ghidra's absent uniqmask default"
+    );
+    assert!(
+        templates.contains("fn ghidra_absent_uniqmask_default() -> u64 {\n    0\n}"),
         "compiled .sla root decode must use Ghidra's absent uniqmask default of 0"
     );
     assert!(

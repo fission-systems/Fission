@@ -86,7 +86,9 @@ pub(super) fn decode_construct_templates(
     let uniqbase = root
         .attr_unsigned(sla_format::ATTR_UNIQBASE)
         .ok_or_else(|| anyhow!("compiled SLEIGH root missing uniqbase"))?;
-    let uniqmask = root.attr_unsigned(sla_format::ATTR_UNIQMASK).unwrap_or(0);
+    let uniqmask = root
+        .attr_unsigned(sla_format::ATTR_UNIQMASK)
+        .unwrap_or_else(ghidra_absent_uniqmask_default);
 
     // 1. Pass One: Build a complete symbol ID -> name mapping from the symbol table
     let mut symbol_names = BTreeMap::new();
@@ -823,6 +825,10 @@ fn decode_pattern_block(element: &PackedElement) -> Result<CompiledPatternBlock>
 
 fn basename(path: &str) -> &str {
     path.rsplit(['/', '\\']).next().unwrap_or(path)
+}
+
+fn ghidra_absent_uniqmask_default() -> u64 {
+    0
 }
 
 fn decode_construct_tpl(
