@@ -413,7 +413,7 @@ pub(super) fn decoded_references(
                             .and_then(|base| add_signed(base, *displacement))
                     })
                 } else if *displacement > 0 {
-                    u64::try_from(*displacement).ok()
+                    Some(displacement.unsigned_abs())
                 } else {
                     None
                 };
@@ -615,7 +615,7 @@ fn first_materialized_address_target(state: &RuntimeConstructState, target: u64)
 
 pub(super) fn add_signed(base: u64, delta: i64) -> Option<u64> {
     if delta >= 0 {
-        base.checked_add(positive_i64_to_u64(delta)?)
+        base.checked_add(nonnegative_i64_to_u64(delta))
     } else {
         base.checked_sub(delta.unsigned_abs())
     }
@@ -625,12 +625,16 @@ fn instruction_end_address(address: u64, length: usize) -> Option<u64> {
     address.checked_add(usize_to_u64(length)?)
 }
 
-fn positive_i64_to_u64(value: i64) -> Option<u64> {
-    u64::try_from(value).ok()
+fn nonnegative_i64_to_u64(value: i64) -> u64 {
+    debug_assert!(value >= 0);
+    value.unsigned_abs()
 }
 
 fn usize_to_u64(value: usize) -> Option<u64> {
-    u64::try_from(value).ok()
+    match u64::try_from(value) {
+        Ok(value) => Some(value),
+        Err(_) => None,
+    }
 }
 
 #[cfg(test)]
@@ -651,6 +655,10 @@ mod tests {
         let lossy_signed_hex_cast = ["value", "as", "u64"].join(" ");
         let silent_delta_conversion = ["u64::try_from(delta)", ".ok()?"].join("");
         let silent_length_conversion = ["u64::try_from(length)", ".ok()?"].join("");
+        let silent_displacement_conversion =
+            ["u64::try_from(*displacement)", ".ok()"].join("");
+        let silent_nonnegative_conversion =
+            ["u64::try_from(value)", ".ok()"].join("");
 
         assert!(
             !source.contains(&dummy_immediate_fallback),
@@ -680,9 +688,18 @@ mod tests {
         assert!(
             !source.contains(&lossy_signed_hex_cast)
                 && !source.contains(&silent_delta_conversion)
-                && !source.contains(&silent_length_conversion),
+                && !source.contains(&silent_length_conversion)
+                && !source.contains(&silent_displacement_conversion)
+                && !source.contains(&silent_nonnegative_conversion),
             "display reference extraction must name signed/length conversions before address arithmetic"
         );
+    }
+
+    #[test]
+    fn nonnegative_signed_reference_offsets_convert_without_silent_drop() {
+        assert_eq!(nonnegative_i64_to_u64(0), 0);
+        assert_eq!(nonnegative_i64_to_u64(0x1234), 0x1234);
+        assert_eq!(nonnegative_i64_to_u64(i64::MAX), i64::MAX as u64);
     }
 
     #[test]
