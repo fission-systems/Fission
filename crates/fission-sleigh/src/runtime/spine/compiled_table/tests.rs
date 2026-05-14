@@ -834,12 +834,15 @@ fn compiled_table_policy_symbols_stay_architecture_neutral() {
     let relative_offset_lossy_usize_cast = "Ok(offset as usize)";
     let constructor_cursor_unchecked_add = "cursor: ctx.cursor + opcode_len";
     let export_inst_next_saturating = "self.ctx.address.saturating_add(self.minimum_length as u64)";
+    let export_inst_next_lossy_length = "checked_add(self.minimum_length as u64)";
     let pattern_inst_next_saturating_constructor =
         "saturating_add(self.selection.constructor.minimum_length as usize)";
     let pattern_inst_next_saturating_address =
         "self.ctx.address.saturating_add(next_offset as u64)";
+    let pattern_inst_next_lossy_offset = "checked_add(next_offset as u64)";
     let subtable_cursor_saturating_delta = "self.cursor.saturating_sub(self.ctx.cursor)";
     let subtable_decode_address_wrapping = "sub_ctx.address.wrapping_add(sub_ctx.cursor as u64)";
+    let subtable_decode_address_lossy_cursor = "checked_add(ctx.cursor as u64)";
     let delay_slot_length_lossy_cast =
         ["Ok(decoded) => return Ok(decoded.length", "as u32)"].join(" ");
     let bind_target_offset_lossy_cast =
@@ -1229,15 +1232,18 @@ fn compiled_table_policy_symbols_stay_architecture_neutral() {
                 && !source.contains(pattern_inst_next_saturating_address)
                 && !source.contains(subtable_cursor_saturating_delta)
                 && !source.contains(subtable_decode_address_wrapping)
+                && !source.contains(subtable_decode_address_lossy_cursor)
                 && !source.contains(&delay_slot_length_lossy_cast)
                 && !source.contains(&bind_target_offset_lossy_cast)
                 && !source.contains(&context_commit_handle_lossy_cast)
                 && !source.contains(template_delay_slot_inst_next_saturating)
                 && !source.contains(template_delay_slot_pc_saturating)
                 && !source.contains(template_delay_slot_fall_saturating)
+                && !source.contains(export_inst_next_lossy_length)
                 && !source.contains(template_const_inst_next_saturating)
                 && !source.contains(template_const_inst_next_zero_fallback)
                 && !source.contains(template_const_inst_next2_saturating)
+                && !source.contains(pattern_inst_next_lossy_offset)
                 && !source.contains(non_offset_handle_plus_wrapping_fallback)
                 && !source.contains(context_commit_inst_next_saturating)
                 && !source.contains(decoded_length_lossy_cast),

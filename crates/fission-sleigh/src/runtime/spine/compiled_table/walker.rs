@@ -540,7 +540,10 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                 .sla_spaces
                 .get(&space_ref.index)
                 .ok_or_else(|| anyhow!("static HandleTpl target space missing SLA metadata"))?;
-            let addr_unit = if target_space.index == 0 || target_space.name == "const" {
+            let addr_unit = if target_space.index == 0
+                || target_space.name == "const"
+                || target_space.name == "unique"
+            {
                 1
             } else if target_space.word_size == 0 {
                 bail!(
@@ -647,11 +650,14 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                 Ok(value)
             }
             CompiledConstTpl::InstStart => Ok(self.ctx.address),
-            CompiledConstTpl::InstNext => self
-                .ctx
-                .address
-                .checked_add(self.minimum_length as u64)
-                .ok_or_else(|| anyhow!("export InstNext address overflowed")),
+            CompiledConstTpl::InstNext => {
+                let minimum_length =
+                    checked_usize_to_u64(self.minimum_length, "export InstNext minimum length")?;
+                self.ctx
+                    .address
+                    .checked_add(minimum_length)
+                    .ok_or_else(|| anyhow!("export InstNext address overflowed"))
+            }
             other => bail!("export ConstTpl {:?} is unsupported", other),
         }
     }
@@ -1226,10 +1232,11 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                     .checked_add(self.selection.constructor.minimum_length as usize)
                     .ok_or_else(|| anyhow!("pattern InstNext construct end overflowed"))?;
                 let next_offset = self.cursor.max(construct_end);
+                let next_offset = checked_usize_to_u64(next_offset, "pattern InstNext offset")?;
                 Ok(self
                     .ctx
                     .address
-                    .checked_add(next_offset as u64)
+                    .checked_add(next_offset)
                     .ok_or_else(|| anyhow!("pattern InstNext address overflowed"))?
                     as i64)
             }
@@ -1525,9 +1532,14 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
 }
 
 fn subtable_decode_address(ctx: &CompiledInstructionContext<'_>) -> Result<u64> {
+    let cursor = checked_usize_to_u64(ctx.cursor, "subtable cursor")?;
     ctx.address
-        .checked_add(ctx.cursor as u64)
+        .checked_add(cursor)
         .ok_or_else(|| anyhow!("subtable decode address overflowed"))
+}
+
+fn checked_usize_to_u64(value: usize, role: &str) -> Result<u64> {
+    u64::try_from(value).map_err(|_| anyhow!("{role} {value} exceeds u64"))
 }
 
 fn checked_relative_offset(base: usize, rel: i32, role: &str) -> Result<usize> {
