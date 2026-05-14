@@ -36,6 +36,8 @@ DEFAULT_HISTORY_FILE = DEFAULT_ARTIFACT_ROOT / "source_semantic_history.jsonl"
 DEFAULT_LATEST_INDEX_FILE = DEFAULT_ARTIFACT_ROOT / "source_semantic_latest_by_manifest.json"
 DEBUG_DECOMP_EVIDENCE_CONTRACT = "template_source_counts_v1"
 DEFAULT_JOBS = max(1, (os.cpu_count() or 2) // 2)
+CANDIDATE_TIMEOUT_MIN_SEC = 3
+CANDIDATE_TIMEOUT_ORACLE_MULTIPLIER = 10
 
 SANITIZE_ID_RE = re.compile(r"[^A-Za-z0-9_.-]+")
 BLOCK_COMMENT_RE = re.compile(r"/\*.*?\*/", re.S)
@@ -292,11 +294,12 @@ def list_cache_key(binary_path: Path, fission_bin: Path) -> str:
     )
 
 
-def behavior_cache_key(code: str, clang: str) -> str:
+def behavior_cache_key(code: str, clang: str, timeout_sec: int) -> str:
     return "|".join(
         [
             "source-semantic-behavior-v1",
             f"clang={file_cache_fingerprint(Path(clang))}",
+            f"timeout_sec={timeout_sec}",
             f"code_sha256={hashlib.sha256(code.encode('utf-8')).hexdigest()}",
         ]
     )
@@ -2505,7 +2508,7 @@ def compile_and_run_c_cached(
     cache_stats: Counter[str] | None,
 ) -> dict[str, Any]:
     clang = os.environ.get("CLANG") or shutil.which("clang") or "/opt/homebrew/opt/llvm/bin/clang"
-    key = behavior_cache_key(code, clang)
+    key = behavior_cache_key(code, clang, timeout_sec)
     if cache is not None and cache_lock is not None:
         with cache_lock:
             cached = cache.get(key)
@@ -2529,6 +2532,13 @@ def compile_and_run_c_cached(
     result = dict(result)
     result["behavior_cache_status"] = "miss"
     return result
+
+
+def candidate_timeout_sec(timeout_sec: int, oracle: dict[str, Any]) -> int:
+    oracle_run_sec = float(oracle.get("run_sec", 0.0) or 0.0)
+    measured_cap = int(oracle_run_sec * CANDIDATE_TIMEOUT_ORACLE_MULTIPLIER) + 1
+    bounded = max(CANDIDATE_TIMEOUT_MIN_SEC, measured_cap)
+    return max(1, min(timeout_sec, bounded))
 
 
 def c_host_execution_probe(timeout_sec: int) -> dict[str, Any]:
@@ -2648,11 +2658,12 @@ def run_behavior_check(
                 oracle,
                 None,
             )
+        candidate_timeout = candidate_timeout_sec(timeout_sec, oracle)
         candidate = compile_and_run_c_cached(
             candidate_code,
             tmp_path,
             "candidate",
-            timeout_sec,
+            candidate_timeout,
             behavior_cache,
             behavior_cache_lock,
             behavior_cache_stats,
@@ -2664,6 +2675,7 @@ def run_behavior_check(
                     "status": f"candidate_{candidate.get('status')}",
                     "score": 0.0,
                     "detail": candidate.get("detail"),
+                    "candidate_timeout_sec": candidate_timeout,
                     "cases": serialize_behavior_cases(cases),
                     **progress,
                 },
@@ -2696,6 +2708,7 @@ def run_behavior_check(
             "compared_case_count": compared_cases,
             "case_pass_rate": round(matched_cases / compared_cases, 6) if compared_cases else 0.0,
             "first_mismatch_index": first_mismatch_index,
+            "candidate_timeout_sec": candidate_timeout,
             "cases": serialize_behavior_cases(cases),
             "oracle": oracle_lines,
             "candidate": candidate_lines,
@@ -8162,6 +8175,10 @@ int max(int a, int b) { if (a > b) return a; return b; }
         assert progress["compared_case_count"] == 4
         assert progress["first_mismatch_index"] == 3
         assert progress["candidate_missing_line_count"] == 1
+        assert candidate_timeout_sec(20, {"run_sec": 0.01}) == CANDIDATE_TIMEOUT_MIN_SEC
+        assert candidate_timeout_sec(20, {"run_sec": 0.25}) == 3
+        assert candidate_timeout_sec(20, {"run_sec": 0.32}) == 4
+        assert "timeout_sec=7" in behavior_cache_key("int main(void){return 0;}", "/bin/clang", 7)
         assert "control_flow_gap_rows" in summary["structuring_gap_metrics"]
         assert summary["fid_name_recovery_metrics"]["name_or_mapping_gap_row_count"] == 1
         assert "unknown" in summary["architecture_support_metrics"]

@@ -266,7 +266,9 @@ manifest.
   cost bucket, linking quality blockers to runtime cost.
 - `harness_cost_metrics`: decompile, behavior compile, behavior run, and
   behavior wall-time totals/averages and p50/p90/p95/max timings, plus behavior
-  cache status aggregation.
+  cache status aggregation. Candidate harnesses use a measured oracle-run-time
+  bound for execution timeouts, so a known-hanging candidate does not consume
+  the full command timeout after the source oracle has already completed.
 - `cache_efficiency_metrics`: request counts and hit rates for list, decompile,
   and behavior caches.
 - `cost_hot_rows`: slowest rows by decompile wall time and behavior wall time,
@@ -292,6 +294,9 @@ inside the same process can still reuse the in-memory cache. Each row includes
 `decomp_cache_status` (`hit`, `miss`, `refreshed_debug_bundle`, or
 `not_requested`) and the summary/Markdown report aggregates those statuses, so
 throughput changes are visible separately from semantic-quality changes.
+Behavior harness cache keys include the C compiler identity, generated source
+hash, and execution timeout, keeping timeout-bound changes from reusing stale
+run results.
 
 By default, each run looks for the latest previous artifact under
 `benchmark/artifacts/source_semantic_benchmark/` with the same manifest name and
