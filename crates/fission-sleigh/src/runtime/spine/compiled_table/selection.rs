@@ -78,7 +78,7 @@ pub(super) fn select_constructor<'a>(
         .subtables
         .get(table_name)
         .ok_or_else(|| anyhow!("missing subtable {table_name} for constructor selection"))?;
-    Ok(spine::select_constructor(
+    spine::select_constructor(
         compiled,
         [(
             table_name.to_string(),
@@ -86,7 +86,7 @@ pub(super) fn select_constructor<'a>(
         )],
         || CompiledDecisionProbeEvaluator::new(ctx),
         |constructor| constructor_matches(ctx, constructor),
-    ))
+    )
 }
 
 pub(super) struct CompiledDecisionProbeEvaluator<'a, 'b> {

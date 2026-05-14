@@ -984,6 +984,7 @@ fn compiled_table_policy_symbols_stay_architecture_neutral() {
     let matcher_opcode_len_zero_fallback = ".max()\n            .unwrap_or(0)";
     let token_span_try_from_ok_fallback = "i32::try_from(byte_start).ok()?";
     let token_span_missing_subtable_none_fallback = "compiled.subtables.get(table_name)?";
+    let decision_probe_error_swallow = "evaluator.probe_values(probe).ok()?";
     let decision_edge_lossy_u8_cast = "value: val as u8";
     let decision_probe_lossy_context_cast =
         "packed_context_bits(self.ctx.context_register, start_bit, bit_size)? as u8";
@@ -1361,6 +1362,11 @@ fn compiled_table_policy_symbols_stay_architecture_neutral() {
             !source.contains(token_span_try_from_ok_fallback)
                 && !source.contains(token_span_missing_subtable_none_fallback),
             "{} still hides malformed SLA token-span analysis as a non-sequential operand",
+            file.display()
+        );
+        assert!(
+            !source.contains(decision_probe_error_swallow),
+            "{} still hides decision-probe evaluator errors as constructor no-match",
             file.display()
         );
         assert!(

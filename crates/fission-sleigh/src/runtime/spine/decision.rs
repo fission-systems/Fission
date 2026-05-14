@@ -41,13 +41,16 @@ pub fn select_constructor<'a, E, M>(
     roots: impl IntoIterator<Item = (String, usize)>,
     mut evaluator_factory: impl FnMut() -> E,
     mut constructor_matches: M,
-) -> Option<RuntimeSelection<'a>>
+) -> Result<Option<RuntimeSelection<'a>>>
 where
     E: DecisionProbeEvaluator,
     M: FnMut(&CompiledExecutableConstructor) -> Result<()>,
 {
     for (table_name, root_node_index) in roots {
-        let subtable = compiled.subtables.get(&table_name)?;
+        let subtable = compiled
+            .subtables
+            .get(&table_name)
+            .ok_or_else(|| anyhow::anyhow!("missing subtable {table_name} for decision root"))?;
         let mut evaluator = evaluator_factory();
         if let Some(selection) = walk_decision_tree(
             subtable,
@@ -61,11 +64,11 @@ where
                 leaf_constructor_indexes: Vec::new(),
                 matched_leaf_pattern: None,
             },
-        ) {
-            return Some(selection);
+        )? {
+            return Ok(Some(selection));
         }
     }
-    None
+    Ok(None)
 }
 
 fn walk_decision_tree<'a, E, M>(
@@ -75,12 +78,15 @@ fn walk_decision_tree<'a, E, M>(
     evaluator: &mut E,
     constructor_matches: &mut M,
     mut trace: RuntimeMatchTrace,
-) -> Option<RuntimeSelection<'a>>
+) -> Result<Option<RuntimeSelection<'a>>>
 where
     E: DecisionProbeEvaluator,
     M: FnMut(&CompiledExecutableConstructor) -> Result<()>,
 {
-    let node = decision_tree.nodes.get(node_index)?;
+    let node = decision_tree
+        .nodes
+        .get(node_index)
+        .ok_or_else(|| anyhow::anyhow!("decision tree node index {node_index} is out of range"))?;
     let trace_walk = crate::runtime::diagnostics::terminal_reselect_trace_enabled();
     match node.probe {
         CompiledDecisionProbe::Terminal => {
@@ -97,12 +103,12 @@ where
             let mut matched_any_pattern = false;
             let leaf_entries: Vec<CompiledDecisionLeafEntry> = if node.leaf_entries.is_empty() {
                 if subtable.sla_subtable_id != 0 || !subtable.constructors_by_sla_id.is_empty() {
-                    return None;
+                    return Ok(None);
                 }
                 let mut entries = Vec::new();
                 for constructor_index in node.leaf_constructor_indexes.iter().copied() {
                     let Ok(constructor_id) = u32::try_from(constructor_index) else {
-                        return None;
+                        return Ok(None);
                     };
                     entries.push(CompiledDecisionLeafEntry {
                         subtable_id: 0,
@@ -146,15 +152,21 @@ where
                             constructor,
                             constructor_index,
                             entry.subtable_id,
-                        )?;
-                        return Some(RuntimeSelection {
+                        )
+                        .ok_or_else(|| {
+                            anyhow::anyhow!(
+                                "selected constructor {} is missing SLA selection identity",
+                                constructor.constructor_id
+                            )
+                        })?;
+                        return Ok(Some(RuntimeSelection {
                             constructor,
                             constructor_index,
                             subtable_id: entry.subtable_id,
                             constructor_id: entry.constructor_id,
                             constructor_slot,
                             trace,
-                        });
+                        }));
                     }
                     if first_unsupported_match.is_none() {
                         first_unsupported_match = Some((
@@ -167,29 +179,37 @@ where
                 }
             }
             if !matched_any_pattern {
-                return None;
+                return Ok(None);
             }
-            first_unsupported_match.and_then(
-                |(constructor, constructor_index, subtable_id, constructor_id)| {
-                    let constructor_slot = selection_constructor_slot(
-                        subtable,
-                        constructor,
-                        constructor_index,
-                        subtable_id,
-                    )?;
-                    Some(RuntimeSelection {
-                        constructor,
-                        constructor_index,
-                        subtable_id,
-                        constructor_id,
-                        constructor_slot,
-                        trace,
-                    })
-                },
-            )
+            first_unsupported_match
+                .map(
+                    |(constructor, constructor_index, subtable_id, constructor_id)| {
+                        let constructor_slot = selection_constructor_slot(
+                            subtable,
+                            constructor,
+                            constructor_index,
+                            subtable_id,
+                        )
+                        .ok_or_else(|| {
+                            anyhow::anyhow!(
+                                "selected constructor {} is missing SLA selection identity",
+                                constructor.constructor_id
+                            )
+                        })?;
+                        Ok(RuntimeSelection {
+                            constructor,
+                            constructor_index,
+                            subtable_id,
+                            constructor_id,
+                            constructor_slot,
+                            trace,
+                        })
+                    },
+                )
+                .transpose()
         }
         probe => {
-            let values = evaluator.probe_values(probe).ok()?;
+            let values = evaluator.probe_values(probe)?;
             if trace_walk {
                 eprintln!(
                     "[decision-walk] node={} probe={:?} values={:?} branches={}",
@@ -227,11 +247,11 @@ where
                     evaluator,
                     constructor_matches,
                     branch_trace,
-                ) {
-                    return Some(selection);
+                )? {
+                    return Ok(Some(selection));
                 }
             }
-            None
+            Ok(None)
         }
     }
 }
@@ -372,6 +392,7 @@ fn pattern_block_matches(
 mod tests {
     use super::*;
     use anyhow::{anyhow, bail};
+    use std::collections::BTreeMap;
 
     struct BytesEvaluator {
         instruction: Vec<u8>,
@@ -405,6 +426,99 @@ mod tests {
         fn context_bytes(&self, offset: i32, size: u32) -> Result<u32> {
             Self::read(&self.context, offset, size)
         }
+    }
+
+    struct FailingProbeEvaluator;
+
+    impl DecisionProbeEvaluator for FailingProbeEvaluator {
+        fn probe_values(&mut self, _probe: CompiledDecisionProbe) -> Result<Vec<u8>> {
+            bail!("synthetic probe failure")
+        }
+
+        fn instruction_bytes(&self, _offset: i32, _size: u32) -> Result<u32> {
+            bail!("unexpected instruction read")
+        }
+
+        fn context_bytes(&self, _offset: i32, _size: u32) -> Result<u32> {
+            bail!("unexpected context read")
+        }
+    }
+
+    fn minimal_frontend_with_tree(
+        decision_tree: crate::compiler::CompiledDecisionTree,
+    ) -> CompiledFrontend {
+        let mut subtables = BTreeMap::new();
+        subtables.insert(
+            "instruction".to_string(),
+            CompiledSubtableDefinition {
+                name: "instruction".to_string(),
+                sla_subtable_id: 0,
+                constructors_by_sla_id: BTreeMap::new(),
+                constructors: Vec::new(),
+                decision_tree,
+            },
+        );
+        CompiledFrontend {
+            arch: "test".to_string(),
+            default_context: 0,
+            default_context_known_mask: 0,
+            entry_spec: "test.slaspec".to_string(),
+            entry_id: "test".to_string(),
+            include_manifest: Vec::new(),
+            defines: Vec::new(),
+            definitions: Vec::new(),
+            macros: Vec::new(),
+            constructors: Vec::new(),
+            subtables,
+            language_layout: crate::compiler::CompiledLanguageLayout {
+                address_spaces: Vec::new(),
+                registers: Vec::new(),
+                token_fields: Vec::new(),
+                context_fields: Vec::new(),
+                subtables: Vec::new(),
+                display_templates: Vec::new(),
+            },
+            construct_templates: Vec::new(),
+            pcode_ops: Vec::new(),
+            pattern_nodes: Vec::new(),
+            sla_spaces: BTreeMap::new(),
+            sla_unique_space_index: 0,
+            sla_register_space_index: 0,
+            sla_uniqbase: 0,
+            sla_uniqmask: u64::MAX,
+        }
+    }
+
+    #[test]
+    fn decision_probe_evaluator_errors_propagate() {
+        let compiled = minimal_frontend_with_tree(crate::compiler::CompiledDecisionTree {
+            root_node_index: 0,
+            root_buckets: Vec::new(),
+            nodes: vec![crate::compiler::CompiledDecisionNode {
+                probe: CompiledDecisionProbe::InstructionBitSlice {
+                    offset: 0,
+                    mask: 0xff,
+                    shift: 0,
+                },
+                branches: Vec::new(),
+                leaf_constructor_indexes: Vec::new(),
+                leaf_entries: Vec::new(),
+            }],
+            decision_node_count: 1,
+        });
+
+        let error = select_constructor(
+            &compiled,
+            [("instruction".to_string(), 0)],
+            || FailingProbeEvaluator,
+            |_| Ok(()),
+        )
+        .expect_err("decision probe evaluator errors must fail closed");
+
+        assert!(
+            error.to_string().contains("synthetic probe failure"),
+            "{error:#}"
+        );
     }
 
     #[test]
