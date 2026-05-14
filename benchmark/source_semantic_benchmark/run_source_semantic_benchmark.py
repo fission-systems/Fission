@@ -2358,6 +2358,51 @@ def compile_and_run_c(code: str, cwd: Path, name: str, timeout_sec: int) -> dict
     }
 
 
+def behavior_output_lines(stdout: Any) -> list[str]:
+    if not isinstance(stdout, str):
+        return []
+    return [line.strip() for line in stdout.splitlines() if line.strip()]
+
+
+def partial_behavior_progress(
+    oracle: dict[str, Any],
+    candidate: dict[str, Any],
+    cases: list[tuple[int, ...]] | list[dict[str, Any]],
+) -> dict[str, Any]:
+    oracle_lines = behavior_output_lines(oracle.get("stdout"))
+    candidate_lines = behavior_output_lines(
+        candidate.get("partial_stdout") or candidate.get("stdout")
+    )
+    compared_cases = max(len(oracle_lines), len(candidate_lines), len(cases))
+    matched_cases = sum(
+        1
+        for expected, actual in zip(oracle_lines, candidate_lines, strict=False)
+        if expected == actual
+    )
+    first_mismatch_index = next(
+        (
+            index
+            for index in range(compared_cases)
+            if (oracle_lines[index] if index < len(oracle_lines) else None)
+            != (candidate_lines[index] if index < len(candidate_lines) else None)
+        ),
+        None,
+    )
+    return {
+        "case_pass_count": matched_cases,
+        "case_fail_count": max(0, compared_cases - matched_cases),
+        "compared_case_count": compared_cases,
+        "case_pass_rate": round(matched_cases / compared_cases, 6) if compared_cases else 0.0,
+        "first_mismatch_index": first_mismatch_index,
+        "oracle_line_count": len(oracle_lines),
+        "candidate_partial_line_count": len(candidate_lines),
+        "candidate_missing_line_count": max(0, len(oracle_lines) - len(candidate_lines)),
+        "candidate_extra_line_count": max(0, len(candidate_lines) - len(oracle_lines)),
+        "oracle": oracle_lines,
+        "candidate": candidate_lines,
+    }
+
+
 def compile_and_run_c_cached(
     code: str,
     cwd: Path,
@@ -2521,13 +2566,20 @@ def run_behavior_check(
             behavior_cache_stats,
         )
         if candidate.get("status") != "ok":
+            progress = partial_behavior_progress(oracle, candidate, cases)
             return maybe_attach_artifacts(
-                {"status": f"candidate_{candidate.get('status')}", "score": 0.0, "detail": candidate.get("detail")},
+                {
+                    "status": f"candidate_{candidate.get('status')}",
+                    "score": 0.0,
+                    "detail": candidate.get("detail"),
+                    "cases": serialize_behavior_cases(cases),
+                    **progress,
+                },
                 oracle,
                 candidate,
             )
-        oracle_lines = [line.strip() for line in oracle["stdout"].splitlines() if line.strip()]
-        candidate_lines = [line.strip() for line in candidate["stdout"].splitlines() if line.strip()]
+        oracle_lines = behavior_output_lines(oracle["stdout"])
+        candidate_lines = behavior_output_lines(candidate["stdout"])
         passed = oracle_lines == candidate_lines
         matched_cases = sum(
             1
@@ -3710,11 +3762,40 @@ def summarize(rows: list[dict[str, Any]], manifest_name: str, entries: list[Benc
         for row in rows
         if isinstance(row.get("behavior"), dict)
     )
-    partial_behavior_rows = sum(
+    partial_mismatch_rows = sum(
         1
         for row in rows
         if row.get("behavior", {}).get("status") == "mismatch"
         and int(row.get("behavior", {}).get("case_pass_count") or 0) > 0
+    )
+    partial_progress_rows = sum(
+        1
+        for row in rows
+        if row.get("behavior", {}).get("status")
+        in {"mismatch", "candidate_run_timeout", "candidate_run_failed"}
+        and int(row.get("behavior", {}).get("case_pass_count") or 0) > 0
+    )
+    partial_timeout_rows = [
+        row
+        for row in rows
+        if row.get("behavior", {}).get("status") == "candidate_run_timeout"
+        and int(row.get("behavior", {}).get("case_pass_count") or 0) > 0
+    ]
+    partial_timeout_case_pass_total = sum(
+        int(row.get("behavior", {}).get("case_pass_count") or 0)
+        for row in partial_timeout_rows
+    )
+    partial_timeout_compared_case_total = sum(
+        int(
+            row.get("behavior", {}).get("compared_case_count")
+            or row.get("behavior", {}).get("case_count")
+            or 0
+        )
+        for row in partial_timeout_rows
+    )
+    partial_timeout_missing_line_total = sum(
+        int(row.get("behavior", {}).get("candidate_missing_line_count") or 0)
+        for row in partial_timeout_rows
     )
     static_source_total = float(static_gap_totals.get("source_feature_total", 0.0) or 0.0)
     static_decomp_total = float(static_gap_totals.get("decomp_feature_total", 0.0) or 0.0)
@@ -4463,7 +4544,20 @@ def summarize(rows: list[dict[str, Any]], manifest_name: str, entries: list[Benc
             "case_pass_rate": round(behavior_case_pass_total / behavior_compared_case_total, 6)
             if behavior_compared_case_total
             else 0.0,
-            "partial_mismatch_row_count": partial_behavior_rows,
+            "partial_mismatch_row_count": partial_mismatch_rows,
+            "partial_progress_row_count": partial_progress_rows,
+        },
+        "behavior_timeout_progress_metrics": {
+            "partial_timeout_row_count": len(partial_timeout_rows),
+            "partial_timeout_case_pass_count": partial_timeout_case_pass_total,
+            "partial_timeout_compared_case_count": partial_timeout_compared_case_total,
+            "partial_timeout_case_pass_rate": round(
+                partial_timeout_case_pass_total / partial_timeout_compared_case_total,
+                6,
+            )
+            if partial_timeout_compared_case_total
+            else 0.0,
+            "partial_timeout_missing_candidate_line_total": partial_timeout_missing_line_total,
         },
         "behavior_support_metrics": {
             "case_source_counts": dict(sorted(behavior_case_source_counts.items())),
@@ -6236,7 +6330,18 @@ def render_markdown(summary: dict[str, Any], rows: list[dict[str, Any]]) -> str:
             f"{behavior_cases.get('compared_case_count', behavior_cases.get('case_count', 0))} "
             f"({float(behavior_cases.get('case_pass_rate', 0.0) or 0.0):.3f}), "
             f"failed {behavior_cases.get('case_fail_count', 0)}, "
-            f"partial mismatch rows {behavior_cases.get('partial_mismatch_row_count', 0)}"
+            f"partial mismatch rows {behavior_cases.get('partial_mismatch_row_count', 0)}, "
+            f"partial progress rows {behavior_cases.get('partial_progress_row_count', 0)}"
+        )
+    behavior_timeouts = summary.get("behavior_timeout_progress_metrics")
+    if isinstance(behavior_timeouts, dict) and behavior_timeouts.get("partial_timeout_row_count"):
+        lines.extend(["", "## Behavior Timeout Progress Metrics", ""])
+        lines.append(
+            f"- Partial timeout rows {behavior_timeouts.get('partial_timeout_row_count', 0)}, "
+            f"cases passed before timeout {behavior_timeouts.get('partial_timeout_case_pass_count', 0)}/"
+            f"{behavior_timeouts.get('partial_timeout_compared_case_count', 0)} "
+            f"({float(behavior_timeouts.get('partial_timeout_case_pass_rate', 0.0) or 0.0):.3f}), "
+            f"missing candidate lines {behavior_timeouts.get('partial_timeout_missing_candidate_line_total', 0)}"
         )
     behavior_support = summary.get("behavior_support_metrics")
     if isinstance(behavior_support, dict):
@@ -7404,6 +7509,8 @@ int max(int a, int b) { if (a > b) return a; return b; }
         assert summary["behavior_mismatch_metrics"]["mismatch_row_count"] == 0
         assert summary["behavior_case_metrics"]["compared_case_count"] == 3
         assert summary["behavior_denominator_metrics"]["case_denominator_count"] == 3
+        assert summary["behavior_timeout_progress_metrics"]["partial_timeout_row_count"] == 0
+        assert summary["behavior_case_metrics"]["partial_progress_row_count"] == 0
         assert summary["denominator_accounting_metrics"]["unmapped_row_count"] == 1
         assert summary["denominator_accounting_metrics"]["semantic_score_denominator_row_count"] == 2
         assert summary["static_gap_row_metrics"]["missing_feature_row_count"] == 1
@@ -7462,6 +7569,16 @@ int max(int a, int b) { if (a > b) return a; return b; }
         assert summary["signature_kind_confusion_metrics"]["param_pair_counts"]["int->missing"] == 1
         assert summary["signature_kind_confusion_metrics"]["param_pair_counts"]["int->uint"] == 2
         assert summary["signature_kind_confusion_metrics"]["param_arity_mismatch_row_count"] == 1
+        progress = partial_behavior_progress(
+            {"stdout": "ret=0\nret=1\nret=1\nret=5\n"},
+            {"partial_stdout": "ret=0\nret=1\nret=1\n"},
+            [(0,), (1,), (2,), (5,)],
+        )
+        assert progress["case_pass_count"] == 3
+        assert progress["case_fail_count"] == 1
+        assert progress["compared_case_count"] == 4
+        assert progress["first_mismatch_index"] == 3
+        assert progress["candidate_missing_line_count"] == 1
         assert "control_flow_gap_rows" in summary["structuring_gap_metrics"]
         assert summary["fid_name_recovery_metrics"]["name_or_mapping_gap_row_count"] == 1
         assert "unknown" in summary["architecture_support_metrics"]
