@@ -34,6 +34,10 @@ pub struct OneShotArgs {
     pub strings: Option<usize>,
     pub disasm: Option<u64>,
     pub disasm_function: Option<u64>,
+    pub raw_pcode: Option<u64>,
+    pub raw_pcode_max_bytes: usize,
+    pub raw_pcode_instruction_limit: usize,
+    pub raw_pcode_continue_past_indirect: bool,
     pub count: usize,
     pub compiler_id: Option<String>,
     pub profile: Option<String>,
@@ -91,6 +95,10 @@ impl Default for OneShotArgs {
             strings: None,
             disasm: None,
             disasm_function: None,
+            raw_pcode: None,
+            raw_pcode_max_bytes: 4096,
+            raw_pcode_instruction_limit: 512,
+            raw_pcode_continue_past_indirect: false,
             count: 20,
             compiler_id: None,
             profile: None,
@@ -195,7 +203,7 @@ struct CommonBinaryOutputArgs {
 #[command(version = env!("CARGO_PKG_VERSION"))]
 #[command(about = "Rust-native binary analysis and decompilation")]
 #[command(
-    long_about = "Fission is a headless-first binary analysis and decompilation tool with explicit one-shot subcommands.\n\nCanonical human-facing entrypoints:\n  fission_cli info binary.exe\n  fission_cli list binary.exe --json\n  fission_cli disasm binary.exe --addr 0x1400\n  fission_cli decomp binary.exe --addr 0x1400\n  fission_cli strings binary.exe --min-len 6\n  fission_cli xrefs binary.exe --json\n\nOperator-oriented inventory lives under:\n  fission_cli inventory <SUBCOMMAND> ...\n"
+    long_about = "Fission is a headless-first binary analysis and decompilation tool with explicit one-shot subcommands.\n\nCanonical human-facing entrypoints:\n  fission_cli info binary.exe\n  fission_cli list binary.exe --json\n  fission_cli disasm binary.exe --addr 0x1400\n  fission_cli raw-pcode binary.exe --addr 0x1400\n  fission_cli decomp binary.exe --addr 0x1400\n  fission_cli strings binary.exe --min-len 6\n  fission_cli xrefs binary.exe --json\n\nOperator-oriented inventory lives under:\n  fission_cli inventory <SUBCOMMAND> ...\n"
 )]
 #[command(arg_required_else_help = true)]
 struct CliArgs {
@@ -215,6 +223,8 @@ enum CliCommand {
     List(ListArgs),
     /// Disassemble instructions or a full function
     Disasm(DisasmArgs),
+    /// Emit Rust-Sleigh raw p-code for a function
+    RawPcode(RawPcodeArgs),
     /// Decompile one function or all discovered functions
     Decomp(DecompArgs),
     /// Extract binary strings
@@ -299,6 +309,35 @@ struct DisasmArgs {
     /// Number of instructions to disassemble
     #[arg(short = 'n', long, default_value_t = 20)]
     count: usize,
+
+    #[command(flatten)]
+    common: CommonBinaryOutputArgs,
+}
+
+#[derive(Args, Debug)]
+#[command(
+    long_about = "Emit Rust-Sleigh raw p-code for the function starting at or containing an address.\n\nThis is a diagnostic surface for SLEIGH/runtime parity and NIR admission debugging.",
+    after_help = "Examples:\n  fission_cli raw-pcode app.exe --addr 0x140001000\n  fission_cli raw-pcode app.exe --addr 0x140001000 --json\n  fission_cli raw-pcode app.exe --addr 0x140001000 --max-bytes 1024 --instruction-limit 128"
+)]
+struct RawPcodeArgs {
+    /// Path to the binary file to analyze
+    binary: PathBuf,
+
+    /// Function entry address or low-bit encoded code pointer
+    #[arg(long, value_parser = parse_hex_address, required = true)]
+    addr: u64,
+
+    /// Maximum bytes to read from the containing executable section
+    #[arg(long, default_value_t = 4096)]
+    max_bytes: usize,
+
+    /// Maximum instructions to decode
+    #[arg(long, default_value_t = 512)]
+    instruction_limit: usize,
+
+    /// Continue past indirect branches while lifting
+    #[arg(long)]
+    continue_past_indirect: bool,
 
     #[command(flatten)]
     common: CommonBinaryOutputArgs,
@@ -835,6 +874,7 @@ const CANONICAL_SUBCOMMANDS: &[&str] = &[
     "info",
     "list",
     "disasm",
+    "raw-pcode",
     "decomp",
     "strings",
     "xrefs",
@@ -938,6 +978,16 @@ fn normalize_canonical(cli: CliArgs) -> ParsedInvocation {
                     } else {
                         args.disasm = Some(disasm.addr);
                     }
+                    args
+                }
+                CliCommand::RawPcode(raw_pcode) => {
+                    let mut args = OneShotArgs::with_binary(raw_pcode.binary);
+                    args.raw_pcode = Some(raw_pcode.addr);
+                    args.raw_pcode_max_bytes = raw_pcode.max_bytes;
+                    args.raw_pcode_instruction_limit = raw_pcode.instruction_limit;
+                    args.raw_pcode_continue_past_indirect = raw_pcode.continue_past_indirect;
+                    args.json = raw_pcode.common.json;
+                    args.verbose = raw_pcode.common.verbose;
                     args
                 }
                 CliCommand::Decomp(decomp) => {
@@ -1047,6 +1097,10 @@ fn normalize_legacy(cli: LegacyCliArgs) -> ParsedOneShotArgs {
         strings: cli.strings,
         disasm: cli.disasm,
         disasm_function: cli.disasm_function,
+        raw_pcode: None,
+        raw_pcode_max_bytes: 4096,
+        raw_pcode_instruction_limit: 512,
+        raw_pcode_continue_past_indirect: false,
         count: cli.count,
         compiler_id: cli.compiler_id,
         profile: cli.profile,
@@ -1288,6 +1342,28 @@ mod tests {
         assert_eq!(parsed.args.disasm, Some(0x1400));
         assert_eq!(parsed.args.disasm_function, None);
         assert_eq!(parsed.args.count, 32);
+    }
+
+    #[test]
+    fn canonical_raw_pcode_parsing_maps_to_raw_pcode_command() {
+        let parsed = parse_canonical(&[
+            "fission_cli",
+            "raw-pcode",
+            "bin.exe",
+            "--addr",
+            "0x1400",
+            "--max-bytes",
+            "1024",
+            "--instruction-limit",
+            "64",
+            "--continue-past-indirect",
+            "--json",
+        ]);
+        assert_eq!(parsed.args.raw_pcode, Some(0x1400));
+        assert_eq!(parsed.args.raw_pcode_max_bytes, 1024);
+        assert_eq!(parsed.args.raw_pcode_instruction_limit, 64);
+        assert!(parsed.args.raw_pcode_continue_past_indirect);
+        assert!(parsed.args.json);
     }
 
     #[test]

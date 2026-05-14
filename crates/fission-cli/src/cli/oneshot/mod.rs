@@ -14,6 +14,7 @@ mod disasm;
 mod function_select;
 mod functions;
 mod inventory;
+mod raw_pcode;
 #[cfg(not(feature = "native_decomp"))]
 mod rust_decomp;
 mod script;
@@ -28,6 +29,7 @@ use decompile::{
 use disasm::{disassemble, disassemble_function};
 use functions::print_function_list;
 use inventory::emit_function_facts_inventory;
+use raw_pcode::emit_raw_pcode;
 #[cfg(not(feature = "native_decomp"))]
 use rust_decomp::run_decompilation_rust_sleigh;
 use strings::print_strings;
@@ -254,6 +256,17 @@ fn execute_command(cli: &OneShotArgs) -> Result<()> {
 
     if let Some(addr) = cli.disasm_function {
         return Ok(disassemble_function(&binary, &binary_data, addr, cli.json)?);
+    }
+
+    if let Some(addr) = cli.raw_pcode {
+        return Ok(emit_raw_pcode(
+            &binary,
+            addr,
+            cli.raw_pcode_max_bytes,
+            cli.raw_pcode_instruction_limit,
+            cli.raw_pcode_continue_past_indirect,
+            cli.json,
+        )?);
     }
 
     if cli.address.is_some() || cli.decomp_all {

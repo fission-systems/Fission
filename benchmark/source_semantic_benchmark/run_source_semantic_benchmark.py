@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import datetime
+import hashlib
 import json
 import os
 import re
@@ -30,6 +31,7 @@ DEFAULT_FISSION_BIN = ROOT_DIR / "target" / "release" / "fission_cli"
 DEFAULT_ARTIFACT_ROOT = ROOT_DIR / "benchmark" / "artifacts" / "source_semantic_benchmark"
 DEFAULT_DECOMP_CACHE_FILE = DEFAULT_ARTIFACT_ROOT / ".cache" / "decomp_cache.json"
 DEFAULT_LIST_CACHE_FILE = DEFAULT_ARTIFACT_ROOT / ".cache" / "list_cache.json"
+DEFAULT_BEHAVIOR_CACHE_FILE = DEFAULT_ARTIFACT_ROOT / ".cache" / "behavior_cache.json"
 DEFAULT_HISTORY_FILE = DEFAULT_ARTIFACT_ROOT / "source_semantic_history.jsonl"
 DEFAULT_LATEST_INDEX_FILE = DEFAULT_ARTIFACT_ROOT / "source_semantic_latest_by_manifest.json"
 DEFAULT_JOBS = max(1, (os.cpu_count() or 2) // 2)
@@ -258,6 +260,16 @@ def list_cache_key(binary_path: Path, fission_bin: Path) -> str:
     )
 
 
+def behavior_cache_key(code: str, clang: str) -> str:
+    return "|".join(
+        [
+            "source-semantic-behavior-v1",
+            f"clang={file_cache_fingerprint(Path(clang))}",
+            f"code_sha256={hashlib.sha256(code.encode('utf-8')).hexdigest()}",
+        ]
+    )
+
+
 def load_decomp_cache(path: Path | None) -> dict[str, dict[str, Any]]:
     if path is None or not path.exists():
         return {}
@@ -298,6 +310,25 @@ def save_list_cache(path: Path | None, cache: dict[str, dict[str, Any]]) -> None
     path.parent.mkdir(parents=True, exist_ok=True)
     payload = {
         "format": "source-semantic-list-cache-v1",
+        "updated_at_unix": round(time.time(), 6),
+        "entry_count": len(cache),
+        "entries": cache,
+    }
+    tmp_path = path.with_suffix(path.suffix + ".tmp")
+    tmp_path.write_text(dump_json_pretty(payload), encoding="utf-8")
+    tmp_path.replace(path)
+
+
+def load_behavior_cache(path: Path | None) -> dict[str, dict[str, Any]]:
+    return load_decomp_cache(path)
+
+
+def save_behavior_cache(path: Path | None, cache: dict[str, dict[str, Any]]) -> None:
+    if path is None:
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "format": "source-semantic-behavior-cache-v1",
         "updated_at_unix": round(time.time(), 6),
         "entry_count": len(cache),
         "entries": cache,
@@ -1719,6 +1750,42 @@ def compile_and_run_c(code: str, cwd: Path, name: str, timeout_sec: int) -> dict
     return {"status": "ok", "stdout": run_res.stdout, "compile_stdout": compile_res.stdout}
 
 
+def compile_and_run_c_cached(
+    code: str,
+    cwd: Path,
+    name: str,
+    timeout_sec: int,
+    cache: dict[str, dict[str, Any]] | None,
+    cache_lock: threading.Lock | None,
+    cache_stats: Counter[str] | None,
+) -> dict[str, Any]:
+    clang = os.environ.get("CLANG") or shutil.which("clang") or "/opt/homebrew/opt/llvm/bin/clang"
+    key = behavior_cache_key(code, clang)
+    if cache is not None and cache_lock is not None:
+        with cache_lock:
+            cached = cache.get(key)
+        if cached is not None:
+            if cache_stats is not None:
+                cache_stats["hit"] += 1
+            result = dict(cached)
+            result["behavior_cache_status"] = "hit"
+            return result
+
+    if cache_stats is not None:
+        cache_stats["miss"] += 1
+    result = compile_and_run_c(code, cwd, name, timeout_sec)
+    if cache is not None and cache_lock is not None:
+        stored = dict(result)
+        stored["behavior_cache_status"] = "stored"
+        with cache_lock:
+            cache[key] = stored
+        if cache_stats is not None:
+            cache_stats["stored"] += 1
+    result = dict(result)
+    result["behavior_cache_status"] = "miss"
+    return result
+
+
 def c_host_execution_probe(timeout_sec: int) -> dict[str, Any]:
     code = """
 #include <stdio.h>
@@ -1743,6 +1810,9 @@ def run_behavior_check(
     decomp_code: str | None,
     timeout_sec: int,
     host_execution: dict[str, Any],
+    behavior_cache: dict[str, dict[str, Any]] | None = None,
+    behavior_cache_lock: threading.Lock | None = None,
+    behavior_cache_stats: Counter[str] | None = None,
     output_dir: Path | None = None,
     address: str | None = None,
 ) -> dict[str, Any]:
@@ -1781,14 +1851,30 @@ def run_behavior_check(
 
     with tempfile.TemporaryDirectory(prefix="source-semantic-") as tmp:
         tmp_path = Path(tmp)
-        oracle = compile_and_run_c(oracle_code, tmp_path, "oracle", timeout_sec)
+        oracle = compile_and_run_c_cached(
+            oracle_code,
+            tmp_path,
+            "oracle",
+            timeout_sec,
+            behavior_cache,
+            behavior_cache_lock,
+            behavior_cache_stats,
+        )
         if oracle.get("status") != "ok":
             return maybe_attach_artifacts(
                 {"status": f"oracle_{oracle.get('status')}", "score": 0.0, "detail": oracle.get("detail")},
                 oracle,
                 None,
             )
-        candidate = compile_and_run_c(candidate_code, tmp_path, "candidate", timeout_sec)
+        candidate = compile_and_run_c_cached(
+            candidate_code,
+            tmp_path,
+            "candidate",
+            timeout_sec,
+            behavior_cache,
+            behavior_cache_lock,
+            behavior_cache_stats,
+        )
         if candidate.get("status") != "ok":
             return maybe_attach_artifacts(
                 {"status": f"candidate_{candidate.get('status')}", "score": 0.0, "detail": candidate.get("detail")},
@@ -2717,6 +2803,9 @@ def row_for_function(
     decomp_cache: dict[str, dict[str, Any]],
     decomp_cache_lock: threading.Lock,
     decomp_cache_stats: Counter[str],
+    behavior_cache: dict[str, dict[str, Any]] | None,
+    behavior_cache_lock: threading.Lock | None,
+    behavior_cache_stats: Counter[str],
     include_debug_decomp: bool,
     output_dir: Path | None = None,
 ) -> dict[str, Any]:
@@ -2751,6 +2840,9 @@ def row_for_function(
         decomp_code,
         timeout_sec,
         host_execution,
+        behavior_cache,
+        behavior_cache_lock,
+        behavior_cache_stats,
         output_dir=output_dir,
         address=matched.address if matched else None,
     )
@@ -2814,6 +2906,11 @@ def run_benchmark(args: argparse.Namespace) -> int:
     list_cache: dict[str, dict[str, Any]] = load_list_cache(list_cache_path)
     list_cache_stats: Counter[str] = Counter()
     list_cache_initial_entry_count = len(list_cache)
+    behavior_cache_path = None if args.no_behavior_cache else resolve_path(args.behavior_cache_file)
+    behavior_cache: dict[str, dict[str, Any]] | None = load_behavior_cache(behavior_cache_path)
+    behavior_cache_lock = threading.Lock()
+    behavior_cache_stats: Counter[str] = Counter()
+    behavior_cache_initial_entry_count = len(behavior_cache or {})
     for entry in entries:
         source_functions = extract_source_functions(entry.source_path, entry.language)
         source_functions = filter_source_functions(source_functions, args.function_name)
@@ -2844,6 +2941,9 @@ def run_benchmark(args: argparse.Namespace) -> int:
                         decomp_cache,
                         decomp_cache_lock,
                         decomp_cache_stats,
+                        behavior_cache,
+                        behavior_cache_lock,
+                        behavior_cache_stats,
                         args.include_debug_decomp,
                         output_dir,
                     )
@@ -2865,6 +2965,9 @@ def run_benchmark(args: argparse.Namespace) -> int:
                     decomp_cache,
                     decomp_cache_lock,
                     decomp_cache_stats,
+                    behavior_cache,
+                    behavior_cache_lock,
+                    behavior_cache_stats,
                     args.include_debug_decomp,
                     output_dir,
                 ): index
@@ -2882,6 +2985,7 @@ def run_benchmark(args: argparse.Namespace) -> int:
     summary["jobs"] = jobs
     summary["decomp_cache_file"] = rel(decomp_cache_path) if decomp_cache_path is not None else None
     summary["list_cache_file"] = rel(list_cache_path) if list_cache_path is not None else None
+    summary["behavior_cache_file"] = rel(behavior_cache_path) if behavior_cache_path is not None else None
     summary["history_file"] = rel(DEFAULT_HISTORY_FILE)
     summary["latest_index_file"] = rel(DEFAULT_LATEST_INDEX_FILE)
     summary["decomp_cache_initial_entry_count"] = decomp_cache_initial_entry_count
@@ -2894,6 +2998,11 @@ def run_benchmark(args: argparse.Namespace) -> int:
     summary["list_cache_hit_count"] = int(list_cache_stats.get("hit", 0))
     summary["list_cache_miss_count"] = int(list_cache_stats.get("miss", 0))
     summary["list_cache_stored_count"] = int(list_cache_stats.get("stored", 0))
+    summary["behavior_cache_initial_entry_count"] = behavior_cache_initial_entry_count
+    summary["behavior_cache_entry_count"] = len(behavior_cache or {})
+    summary["behavior_cache_hit_count"] = int(behavior_cache_stats.get("hit", 0))
+    summary["behavior_cache_miss_count"] = int(behavior_cache_stats.get("miss", 0))
+    summary["behavior_cache_stored_count"] = int(behavior_cache_stats.get("stored", 0))
     summary["wall_sec"] = round(time.perf_counter() - start, 6)
     if args.require_sleigh_template_source:
         summary["sleigh_template_source_gate"] = sleigh_template_source_gate(
@@ -2905,6 +3014,7 @@ def run_benchmark(args: argparse.Namespace) -> int:
         summary["history"] = history
     save_decomp_cache(decomp_cache_path, decomp_cache)
     save_list_cache(list_cache_path, list_cache)
+    save_behavior_cache(behavior_cache_path, behavior_cache or {})
     baseline_path: Path | None = None
     if not args.no_baseline_compare:
         baseline_path = resolve_path(args.baseline_dir) if args.baseline_dir else find_latest_baseline_dir(
@@ -3332,6 +3442,16 @@ def parse_args() -> argparse.Namespace:
         "--no-list-cache",
         action="store_true",
         help="Disable the persistent fission_cli list-result cache",
+    )
+    parser.add_argument(
+        "--behavior-cache-file",
+        default=str(DEFAULT_BEHAVIOR_CACHE_FILE),
+        help="Persistent behavior harness cache file keyed by C harness contents and compiler metadata",
+    )
+    parser.add_argument(
+        "--no-behavior-cache",
+        action="store_true",
+        help="Disable persistent behavior harness compile/run cache",
     )
     parser.add_argument(
         "--jobs",
