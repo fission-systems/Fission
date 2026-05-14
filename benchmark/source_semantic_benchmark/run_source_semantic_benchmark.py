@@ -1464,6 +1464,39 @@ def percent(value: float) -> float:
     return round(value * 100.0, 3)
 
 
+def numeric_distribution(values: list[float]) -> dict[str, Any]:
+    if not values:
+        return {
+            "count": 0,
+            "min": 0.0,
+            "max": 0.0,
+            "avg": 0.0,
+            "p50": 0.0,
+            "p90": 0.0,
+            "p95": 0.0,
+        }
+    sorted_values = sorted(values)
+
+    def percentile(rank: float) -> float:
+        if len(sorted_values) == 1:
+            return sorted_values[0]
+        index = (len(sorted_values) - 1) * rank
+        lower = int(index)
+        upper = min(lower + 1, len(sorted_values) - 1)
+        fraction = index - lower
+        return sorted_values[lower] + (sorted_values[upper] - sorted_values[lower]) * fraction
+
+    return {
+        "count": len(sorted_values),
+        "min": round(sorted_values[0], 6),
+        "max": round(sorted_values[-1], 6),
+        "avg": round(sum(sorted_values) / len(sorted_values), 6),
+        "p50": round(percentile(0.50), 6),
+        "p90": round(percentile(0.90), 6),
+        "p95": round(percentile(0.95), 6),
+    }
+
+
 def default_behavior_cases(param_count: int) -> list[tuple[int, ...]]:
     if param_count == 0:
         return [()]
@@ -2073,14 +2106,28 @@ def summarize(rows: list[dict[str, Any]], manifest_name: str, entries: list[Benc
     static_gap_component_totals: dict[str, Counter[str]] = {
         component: Counter() for component in STATIC_SIMILARITY_COMPONENTS
     }
+    static_gap_component_missing_features: dict[str, Counter[str]] = {
+        component: Counter() for component in STATIC_SIMILARITY_COMPONENTS
+    }
+    static_gap_component_extra_features: dict[str, Counter[str]] = {
+        component: Counter() for component in STATIC_SIMILARITY_COMPONENTS
+    }
     static_missing_feature_counts: Counter[str] = Counter()
     static_extra_feature_counts: Counter[str] = Counter()
     score_distribution = Counter()
     debug_owner_bucket_counts: Counter[str] = Counter()
     debug_stage_status_counts: Counter[str] = Counter()
+    debug_stage_status_matrix: dict[str, Counter[str]] = {
+        stage: Counter() for stage in STAGE_FAILURE_ORDER
+    }
     debug_quality_evidence_totals: Counter[str] = Counter()
     debug_quality_evidence_nonzero_rows: Counter[str] = Counter()
     debug_template_source_totals: Counter[str] = Counter()
+    behavior_first_mismatch_index_counts: Counter[str] = Counter()
+    behavior_output_length_delta_counts: Counter[str] = Counter()
+    behavior_mismatch_kind_counts: Counter[str] = Counter()
+    debug_decomp_row_count = 0
+    debug_stage_status_row_count = 0
     by_language: dict[str, dict[str, Any]] = {}
     by_tag: dict[str, dict[str, Any]] = {}
     by_entry: dict[str, dict[str, Any]] = {}
@@ -2142,6 +2189,20 @@ def summarize(rows: list[dict[str, Any]], manifest_name: str, entries: list[Benc
                     value = details.get(key)
                     if isinstance(value, int | float):
                         static_gap_component_totals[component][key] += value
+                for item in details.get("top_missing_features") or []:
+                    if (
+                        isinstance(item, dict)
+                        and isinstance(item.get("feature"), str)
+                        and isinstance(item.get("count"), int | float)
+                    ):
+                        static_gap_component_missing_features[component][item["feature"]] += item["count"]
+                for item in details.get("top_extra_features") or []:
+                    if (
+                        isinstance(item, dict)
+                        and isinstance(item.get("feature"), str)
+                        and isinstance(item.get("count"), int | float)
+                    ):
+                        static_gap_component_extra_features[component][item["feature"]] += item["count"]
         lang = row["language"]
         bucket = by_language.setdefault(
             lang,
@@ -2157,14 +2218,20 @@ def summarize(rows: list[dict[str, Any]], manifest_name: str, entries: list[Benc
 
         debug_decomp = row.get("debug_decomp")
         if isinstance(debug_decomp, dict):
+            debug_decomp_row_count += 1
             debug_owner_bucket_counts.update(debug_decomp.get("owner_buckets") or [])
             stage_status = debug_decomp.get("stage_status")
             if isinstance(stage_status, dict):
+                debug_stage_status_row_count += 1
                 debug_stage_status_counts.update(
                     f"{stage}:{status}"
                     for stage, status in stage_status.items()
                     if status is not None
                 )
+                for stage in STAGE_FAILURE_ORDER:
+                    status = stage_status.get(stage)
+                    if status is not None:
+                        debug_stage_status_matrix[stage][str(status)] += 1
             quality = debug_decomp.get("quality_evidence")
             if isinstance(quality, dict):
                 for key, value in quality.items():
@@ -2189,6 +2256,22 @@ def summarize(rows: list[dict[str, Any]], manifest_name: str, entries: list[Benc
                 {"row_count": 0, "mapped": 0, "decomp_success": 0, "behavior_pass": 0, "score_sum": 0.0},
             )
             add_bucket(tag_bucket, row)
+
+        behavior = row.get("behavior")
+        if isinstance(behavior, dict) and behavior.get("status") == "mismatch":
+            first_mismatch = behavior.get("first_mismatch_index")
+            behavior_first_mismatch_index_counts[str(first_mismatch)] += 1
+            oracle = behavior.get("oracle")
+            candidate = behavior.get("candidate")
+            if isinstance(oracle, list) and isinstance(candidate, list):
+                length_delta = len(candidate) - len(oracle)
+                behavior_output_length_delta_counts[str(length_delta)] += 1
+                if length_delta != 0:
+                    behavior_mismatch_kind_counts["output_length"] += 1
+                else:
+                    behavior_mismatch_kind_counts["wrong_value"] += 1
+            else:
+                behavior_mismatch_kind_counts["unknown"] += 1
 
     for bucket in list(by_language.values()) + list(by_tag.values()) + list(by_entry.values()):
         count = max(1, bucket["row_count"])
@@ -2258,6 +2341,7 @@ def summarize(rows: list[dict[str, Any]], manifest_name: str, entries: list[Benc
         for feature, count in static_extra_feature_counts.most_common(20)
     ]
     static_gap_component_summary: dict[str, dict[str, Any]] = {}
+    static_gap_component_top_summary: dict[str, dict[str, Any]] = {}
     for component, totals in static_gap_component_totals.items():
         component_source_total = float(totals.get("source_feature_total", 0.0) or 0.0)
         component_decomp_total = float(totals.get("decomp_feature_total", 0.0) or 0.0)
@@ -2270,6 +2354,27 @@ def summarize(rows: list[dict[str, Any]], manifest_name: str, entries: list[Benc
             float(totals.get("extra_feature_total", 0.0) or 0.0) / component_decomp_total,
             6,
         ) if component_decomp_total else 0.0
+        static_gap_component_top_summary[component] = {
+            "top_missing_features": [
+                {"feature": feature, "count": count}
+                for feature, count in static_gap_component_missing_features[component].most_common(12)
+            ],
+            "top_extra_features": [
+                {"feature": feature, "count": count}
+                for feature, count in static_gap_component_extra_features[component].most_common(12)
+            ],
+        }
+    triage_priority_rows = [
+        triage_row_summary(row)
+        for row in sorted(rows, key=row_triage_priority)
+        if float(row.get("semantic_score", 0.0) or 0.0) < 1.0
+    ][:20]
+    mapped_debug_denominator = max(1, mapped)
+    debug_stage_status_matrix_export = {
+        stage: dict(sorted(counts.items()))
+        for stage, counts in debug_stage_status_matrix.items()
+        if counts
+    }
     return {
         "manifest": manifest_name,
         "entry_count": len(entries),
@@ -2298,6 +2403,14 @@ def summarize(rows: list[dict[str, Any]], manifest_name: str, entries: list[Benc
         },
         "weighted_semantic_similarity": weighted_semantic_similarity,
         "weighted_semantic_similarity_percent": percent(weighted_semantic_similarity),
+        "semantic_score_stats": {
+            **numeric_distribution(score_values),
+            "nonzero_count": sum(1 for score in score_values if score > 0.0),
+            "nonzero_rate": round(
+                sum(1 for score in score_values if score > 0.0) / total,
+                6,
+            ) if total else 0.0,
+        },
         "perfect_row_count": sum(1 for score in score_values if score == 1.0),
         "supported_behavior_row_count": sum(
             1 for row in rows if row.get("behavior", {}).get("status") != "unsupported_signature"
@@ -2320,6 +2433,7 @@ def summarize(rows: list[dict[str, Any]], manifest_name: str, entries: list[Benc
         },
         "static_similarity_gap_totals": static_gap_summary,
         "static_similarity_gap_component_totals": static_gap_component_summary,
+        "static_similarity_gap_component_top_features": static_gap_component_top_summary,
         "behavior_case_metrics": {
             "case_count": behavior_case_total,
             "case_pass_count": behavior_case_pass_total,
@@ -2329,27 +2443,62 @@ def summarize(rows: list[dict[str, Any]], manifest_name: str, entries: list[Benc
             else 0.0,
             "partial_mismatch_row_count": partial_behavior_rows,
         },
+        "behavior_mismatch_metrics": {
+            "mismatch_row_count": int(behavior_status_counts.get("mismatch", 0)),
+            "first_mismatch_index_counts": dict(sorted(behavior_first_mismatch_index_counts.items())),
+            "output_length_delta_counts": dict(sorted(behavior_output_length_delta_counts.items())),
+            "mismatch_kind_counts": dict(sorted(behavior_mismatch_kind_counts.items())),
+        },
         "harness_cost_metrics": {
             "decompile_total_sec": round(sum(decomp_times), 6),
             "decompile_avg_sec": round(sum(decomp_times) / len(decomp_times), 6) if decomp_times else 0.0,
+            "decompile_p50_sec": numeric_distribution(decomp_times)["p50"],
+            "decompile_p90_sec": numeric_distribution(decomp_times)["p90"],
+            "decompile_p95_sec": numeric_distribution(decomp_times)["p95"],
+            "decompile_max_sec": numeric_distribution(decomp_times)["max"],
             "behavior_compile_total_sec": round(sum(behavior_compile_times), 6),
             "behavior_compile_avg_sec": round(sum(behavior_compile_times) / len(behavior_compile_times), 6)
             if behavior_compile_times
             else 0.0,
+            "behavior_compile_p50_sec": numeric_distribution(behavior_compile_times)["p50"],
+            "behavior_compile_p90_sec": numeric_distribution(behavior_compile_times)["p90"],
+            "behavior_compile_p95_sec": numeric_distribution(behavior_compile_times)["p95"],
+            "behavior_compile_max_sec": numeric_distribution(behavior_compile_times)["max"],
             "behavior_run_total_sec": round(sum(behavior_run_times), 6),
             "behavior_run_avg_sec": round(sum(behavior_run_times) / len(behavior_run_times), 6)
             if behavior_run_times
             else 0.0,
+            "behavior_run_p50_sec": numeric_distribution(behavior_run_times)["p50"],
+            "behavior_run_p90_sec": numeric_distribution(behavior_run_times)["p90"],
+            "behavior_run_p95_sec": numeric_distribution(behavior_run_times)["p95"],
+            "behavior_run_max_sec": numeric_distribution(behavior_run_times)["max"],
             "behavior_wall_total_sec": round(sum(behavior_wall_times), 6),
             "behavior_wall_avg_sec": round(sum(behavior_wall_times) / len(behavior_wall_times), 6)
             if behavior_wall_times
             else 0.0,
+            "behavior_wall_p50_sec": numeric_distribution(behavior_wall_times)["p50"],
+            "behavior_wall_p90_sec": numeric_distribution(behavior_wall_times)["p90"],
+            "behavior_wall_p95_sec": numeric_distribution(behavior_wall_times)["p95"],
+            "behavior_wall_max_sec": numeric_distribution(behavior_wall_times)["max"],
+        },
+        "debug_coverage_metrics": {
+            "debug_decomp_rows": debug_decomp_row_count,
+            "debug_decomp_rate_mapped_denominator": round(debug_decomp_row_count / mapped_debug_denominator, 6)
+            if mapped
+            else 0.0,
+            "debug_stage_status_rows": debug_stage_status_row_count,
+            "debug_stage_status_rate_mapped_denominator": round(
+                debug_stage_status_row_count / mapped_debug_denominator,
+                6,
+            ) if mapped else 0.0,
         },
         "debug_owner_bucket_counts": dict(sorted(debug_owner_bucket_counts.items())),
         "debug_stage_status_counts": dict(sorted(debug_stage_status_counts.items())),
+        "debug_stage_status_matrix": debug_stage_status_matrix_export,
         "debug_quality_evidence_totals": dict(sorted(debug_quality_evidence_totals.items())),
         "debug_quality_evidence_nonzero_rows": dict(sorted(debug_quality_evidence_nonzero_rows.items())),
         "debug_template_source_totals": dict(sorted(debug_template_source_totals.items())),
+        "triage_priority_rows": triage_priority_rows,
         "host_execution_unavailable_count": sum(host_statuses.values()),
         "host_execution_unavailable_reasons": dict(host_statuses),
         "by_language": by_language,
@@ -2622,13 +2771,17 @@ def compare_to_baseline(
     metric_keys = [
         "weighted_semantic_similarity",
         "weighted_semantic_similarity_percent",
+        "semantic_score_nonzero_rate",
         "function_mapping_rate",
         "decomp_success_rate",
         "candidate_compile_rate",
         "behavior_pass_rate",
         "behavior_pass_rate_total_denominator",
+        "behavior_case_pass_rate",
+        "behavior_mismatch_row_count",
         "behavior_expected_rate",
         "behavior_executed_rate",
+        "static_missing_feature_rate",
         "perfect_row_count",
         "supported_behavior_row_count",
         "row_count",
@@ -2648,19 +2801,59 @@ def compare_to_baseline(
         else {}
     )
     metric_source = dict(summary)
+    semantic_stats = summary.get("semantic_score_stats") if isinstance(summary.get("semantic_score_stats"), dict) else {}
+    behavior_cases = summary.get("behavior_case_metrics") if isinstance(summary.get("behavior_case_metrics"), dict) else {}
+    behavior_mismatches = (
+        summary.get("behavior_mismatch_metrics")
+        if isinstance(summary.get("behavior_mismatch_metrics"), dict)
+        else {}
+    )
+    static_gaps = (
+        summary.get("static_similarity_gap_totals")
+        if isinstance(summary.get("static_similarity_gap_totals"), dict)
+        else {}
+    )
     metric_source.update(
         {
+            "semantic_score_nonzero_rate": semantic_stats.get("nonzero_rate"),
             "behavior_pass_rate_total_denominator": behavior_eligibility.get("pass_rate_total_denominator"),
+            "behavior_case_pass_rate": behavior_cases.get("case_pass_rate"),
+            "behavior_mismatch_row_count": behavior_mismatches.get("mismatch_row_count"),
             "behavior_expected_rate": effective.get("behavior_expected_rate"),
             "behavior_executed_rate": effective.get("behavior_executed_rate"),
+            "static_missing_feature_rate": static_gaps.get("missing_feature_rate"),
         }
     )
     baseline_metric_source = dict(baseline_summary)
+    baseline_semantic_stats = (
+        baseline_summary.get("semantic_score_stats")
+        if isinstance(baseline_summary.get("semantic_score_stats"), dict)
+        else {}
+    )
+    baseline_behavior_cases = (
+        baseline_summary.get("behavior_case_metrics")
+        if isinstance(baseline_summary.get("behavior_case_metrics"), dict)
+        else {}
+    )
+    baseline_behavior_mismatches = (
+        baseline_summary.get("behavior_mismatch_metrics")
+        if isinstance(baseline_summary.get("behavior_mismatch_metrics"), dict)
+        else {}
+    )
+    baseline_static_gaps = (
+        baseline_summary.get("static_similarity_gap_totals")
+        if isinstance(baseline_summary.get("static_similarity_gap_totals"), dict)
+        else {}
+    )
     baseline_metric_source.update(
         {
+            "semantic_score_nonzero_rate": baseline_semantic_stats.get("nonzero_rate"),
             "behavior_pass_rate_total_denominator": baseline_behavior_eligibility.get("pass_rate_total_denominator"),
+            "behavior_case_pass_rate": baseline_behavior_cases.get("case_pass_rate"),
+            "behavior_mismatch_row_count": baseline_behavior_mismatches.get("mismatch_row_count"),
             "behavior_expected_rate": baseline_effective.get("behavior_expected_rate"),
             "behavior_executed_rate": baseline_effective.get("behavior_executed_rate"),
+            "static_missing_feature_rate": baseline_static_gaps.get("missing_feature_rate"),
         }
     )
     return {
@@ -2735,10 +2928,12 @@ def improvement_summary(comparison: dict[str, Any]) -> dict[str, Any]:
     regressed_metrics: list[dict[str, Any]] = []
     for key in [
         "weighted_semantic_similarity_percent",
+        "semantic_score_nonzero_rate",
         "function_mapping_rate",
         "decomp_success_rate",
         "candidate_compile_rate",
         "behavior_pass_rate",
+        "behavior_case_pass_rate",
         "perfect_row_count",
         "supported_behavior_row_count",
     ]:
@@ -3070,10 +3265,27 @@ def render_markdown(summary: dict[str, Any], rows: list[dict[str, Any]]) -> str:
         lines.extend(["", "## Score Distribution", "", "| Bucket | Rows |", "|---|---:|"])
         for bucket, count in sorted(summary["score_distribution"].items()):
             lines.append(f"| {bucket} | {count} |")
+    if summary.get("semantic_score_stats"):
+        stats = summary["semantic_score_stats"]
+        lines.extend(["", "## Semantic Score Stats", ""])
+        lines.append(
+            f"- Avg {float(stats.get('avg', 0.0) or 0.0):.6f}, "
+            f"p50 {float(stats.get('p50', 0.0) or 0.0):.6f}, "
+            f"p90 {float(stats.get('p90', 0.0) or 0.0):.6f}, "
+            f"nonzero {stats.get('nonzero_count', 0)}/{stats.get('count', 0)} "
+            f"({float(stats.get('nonzero_rate', 0.0) or 0.0):.3f})"
+        )
     if summary.get("stage_first_failure_counts"):
         lines.extend(["", "## First Stage Failure", "", "| Stage Status | Rows |", "|---|---:|"])
         for status, count in sorted(summary["stage_first_failure_counts"].items()):
             lines.append(f"| {status} | {count} |")
+    if summary.get("debug_stage_status_matrix"):
+        lines.extend(["", "## Debug Stage Status Matrix", "", "| Stage | Status | Rows |", "|---|---|---:|"])
+        for stage, counts in sorted(summary["debug_stage_status_matrix"].items()):
+            if not isinstance(counts, dict):
+                continue
+            for status, count in sorted(counts.items()):
+                lines.append(f"| {stage} | {status} | {count} |")
     if summary.get("static_similarity_component_average_percent"):
         lines.extend(["", "## Static Similarity Components", "", "| Component | Avg Similarity |", "|---|---:|"])
         for component, avg in sorted(summary["static_similarity_component_average_percent"].items()):
@@ -3109,11 +3321,29 @@ def render_markdown(summary: dict[str, Any], rows: list[dict[str, Any]]) -> str:
             f"failed {behavior_cases.get('case_fail_count', 0)}, "
             f"partial mismatch rows {behavior_cases.get('partial_mismatch_row_count', 0)}"
         )
+    behavior_mismatches = summary.get("behavior_mismatch_metrics")
+    if isinstance(behavior_mismatches, dict) and behavior_mismatches.get("mismatch_row_count"):
+        lines.extend(["", "## Behavior Mismatch Metrics", ""])
+        lines.append(f"- Mismatch rows: {behavior_mismatches.get('mismatch_row_count', 0)}")
+        kinds = behavior_mismatches.get("mismatch_kind_counts")
+        if isinstance(kinds, dict) and kinds:
+            lines.extend(["", "| Kind | Rows |", "|---|---:|"])
+            for kind, count in sorted(kinds.items()):
+                lines.append(f"| {kind} | {count} |")
     if summary.get("harness_cost_metrics"):
         costs = summary["harness_cost_metrics"]
         lines.extend(["", "## Harness Cost Metrics", "", "| Metric | Seconds |", "|---|---:|"])
         for key, value in sorted(costs.items()):
             lines.append(f"| {key} | {float(value or 0.0):.6f} |")
+    debug_coverage = summary.get("debug_coverage_metrics")
+    if isinstance(debug_coverage, dict):
+        lines.extend(["", "## Debug Coverage Metrics", ""])
+        lines.append(
+            f"- Debug decomp rows: {debug_coverage.get('debug_decomp_rows', 0)} "
+            f"({float(debug_coverage.get('debug_decomp_rate_mapped_denominator', 0.0) or 0.0):.3f} mapped denominator), "
+            f"stage status rows: {debug_coverage.get('debug_stage_status_rows', 0)} "
+            f"({float(debug_coverage.get('debug_stage_status_rate_mapped_denominator', 0.0) or 0.0):.3f} mapped denominator)"
+        )
     if summary.get("decomp_cache_status_counts"):
         lines.extend(["", "## Decompile Cache Status", "", "| Status | Rows |", "|---|---:|"])
         for status, count in sorted(summary["decomp_cache_status_counts"].items()):
@@ -3157,6 +3387,17 @@ def render_markdown(summary: dict[str, Any], rows: list[dict[str, Any]]) -> str:
             )
         for failure in gate.get("failures") or []:
             lines.append(f"- Failure: {failure}")
+    triage_rows = summary.get("triage_priority_rows") or []
+    if triage_rows:
+        lines.extend(["", "## Triage Priority Rows", "", "| Function | Score | Behavior | Stage | Missing | Artifact |", "|---|---:|---|---|---:|---|"])
+        for row in triage_rows[:12]:
+            artifact = row.get("behavior_artifact_dir") or row.get("debug_decomp_bundle_path") or ""
+            lines.append(
+                f"| `{row.get('function_name')}` | "
+                f"{float(row.get('semantic_score_percent', 0.0) or 0.0):.3f}% | "
+                f"{row.get('behavior_status')} | {row.get('stage_first_failure')} | "
+                f"{row.get('missing_feature_total') or 0} | `{artifact}` |"
+            )
     comparison = summary.get("comparison")
     if isinstance(comparison, dict):
         outcome = summary.get("comparison_outcome") if isinstance(summary.get("comparison_outcome"), dict) else {}
@@ -3335,6 +3576,55 @@ def row_zero_credit_reason(row: dict[str, Any]) -> str:
     if float(row.get("static_semantic_score", 0.0) or 0.0) == 0.0:
         return "static_zero"
     return "weighted_zero"
+
+
+def row_triage_priority(row: dict[str, Any]) -> tuple[int, float, int, str]:
+    score = float(row.get("semantic_score", 0.0) or 0.0)
+    behavior = row.get("behavior") if isinstance(row.get("behavior"), dict) else {}
+    static_gaps = row.get("static_similarity_gaps") if isinstance(row.get("static_similarity_gaps"), dict) else {}
+    missing_total = int(static_gaps.get("missing_feature_total") or 0)
+    if row.get("mapping_status") != "matched":
+        severity = 0
+    elif not row.get("decomp_success"):
+        severity = 1
+    elif behavior.get("status") not in {"pass", "unsupported_signature"}:
+        severity = 2
+    elif missing_total > 0:
+        severity = 3
+    else:
+        severity = 4
+    return (severity, score, -missing_total, str(row.get("function_name") or ""))
+
+
+def triage_row_summary(row: dict[str, Any]) -> dict[str, Any]:
+    behavior = row.get("behavior") if isinstance(row.get("behavior"), dict) else {}
+    static_gaps = row.get("static_similarity_gaps") if isinstance(row.get("static_similarity_gaps"), dict) else {}
+    debug_decomp = row.get("debug_decomp") if isinstance(row.get("debug_decomp"), dict) else {}
+    return {
+        "entry_id": row.get("entry_id"),
+        "function_name": row.get("function_name"),
+        "address": row.get("address"),
+        "semantic_score_percent": row.get("semantic_score_percent"),
+        "static_semantic_score_percent": row.get("static_semantic_score_percent"),
+        "mapping_status": row.get("mapping_status"),
+        "decomp_success": bool(row.get("decomp_success")),
+        "decomp_failure_kind": row.get("decomp_failure_kind"),
+        "behavior_status": behavior.get("status"),
+        "case_pass_count": behavior.get("case_pass_count"),
+        "case_fail_count": behavior.get("case_fail_count"),
+        "first_mismatch_index": behavior.get("first_mismatch_index"),
+        "zero_credit_reason": row_zero_credit_reason(row)
+        if float(row.get("semantic_score", 0.0) or 0.0) == 0.0
+        else row.get("zero_credit_reason"),
+        "stage_first_failure": row.get("stage_first_failure"),
+        "debug_owner_buckets": debug_decomp.get("owner_buckets") if isinstance(debug_decomp, dict) else None,
+        "missing_feature_total": static_gaps.get("missing_feature_total"),
+        "extra_feature_total": static_gaps.get("extra_feature_total"),
+        "top_missing_features": (static_gaps.get("top_missing_features") or [])[:5],
+        "top_extra_features": (static_gaps.get("top_extra_features") or [])[:5],
+        "debug_decomp_bundle_path": row.get("debug_decomp_bundle_path"),
+        "behavior_artifact_dir": behavior.get("artifact_dir"),
+    }
 
 
 def row_for_function(
@@ -3805,7 +4095,12 @@ int max(int a, int b) { if (a > b) return a; return b; }
         assert summary["behavior_case_metrics"]["case_pass_count"] == 2
         assert summary["score_distribution"]["perfect"] == 1
         assert summary["score_distribution"]["zero"] == 1
+        assert summary["semantic_score_stats"]["nonzero_count"] == 1
+        assert summary["behavior_mismatch_metrics"]["mismatch_row_count"] == 0
+        assert "debug_coverage_metrics" in summary
+        assert summary["triage_priority_rows"][0]["function_name"] is None
         assert "decompile_avg_sec" in summary["harness_cost_metrics"]
+        assert "decompile_p95_sec" in summary["harness_cost_metrics"]
         void_func = SourceFunction(
             name="touch",
             signature="void touch(unsigned int seed)",

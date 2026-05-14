@@ -113,12 +113,22 @@ manifest.
 - `behavior_case_metrics`: dynamic behavior at case granularity, including
   total/pass/fail case counts, case pass rate, and rows where at least one case
   passed despite an overall mismatch.
+- `behavior_mismatch_metrics`: mismatch-row diagnostics including first failing
+  case index buckets, output-length deltas, and mismatch kind counts.
 - `score_distribution`: row counts in `zero`, `low`, `medium`, `high`, and
   `perfect` semantic-score buckets.
+- `semantic_score_stats`: min/max/average and p50/p90/p95 score distribution
+  over the full manifest denominator, plus nonzero row count/rate.
+- `debug_coverage_metrics` and `debug_stage_status_matrix`: debug evidence
+  coverage and per-stage status counts for rows where debug decomp evidence was
+  requested.
 - `debug_quality_evidence_nonzero_rows`: row counts for nonzero NIR/debug
   evidence counters, complementing `debug_quality_evidence_totals`.
+- `triage_priority_rows`: compact low-score row shortlist with behavior status,
+  first failing stage, feature gaps, and artifact paths for follow-up.
 - `harness_cost_metrics`: decompile, behavior compile, behavior run, and
-  behavior wall-time totals/averages, plus behavior cache status aggregation.
+  behavior wall-time totals/averages and p50/p90/p95/max timings, plus behavior
+  cache status aggregation.
 
 The JSON and Markdown summaries also include mapping, decompile-failure, and
 behavior-status buckets plus language/tag/entry breakdowns. `--jobs` changes
