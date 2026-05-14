@@ -15,6 +15,7 @@ struct PrintCtx<'a> {
     var_types: HashMap<&'a str, &'a NirType>,
     /// variable name → pointer-pointee type (Aggregate with fields)
     agg_ptr: HashMap<&'a str, &'a NirType>,
+    return_type: &'a NirType,
     inline_guard_goto: bool,
 }
 
@@ -35,6 +36,7 @@ impl<'a> PrintCtx<'a> {
         Self {
             var_types,
             agg_ptr,
+            return_type: &func.return_type,
             inline_guard_goto: func.body.len() <= 6,
         }
     }
@@ -398,7 +400,8 @@ fn print_expr_prec(expr: &HirExpr, parent_prec: u8, depth: usize) -> String {
             let else_expr = print_expr_prec(else_expr, prec, depth + 1);
             (format!("{cond} ? {then_expr} : {else_expr}"), prec)
         }
-        HirExpr::Call { target, args, .. } => {
+        HirExpr::Call { target, args, ty } => {
+            let target = print_callable_target(target, args, ty, None);
             let args = args
                 .iter()
                 .map(|arg| print_expr_prec(arg, 0, depth + 1))
@@ -542,6 +545,63 @@ pub(super) fn print_type(ty: &NirType) -> String {
     }
 }
 
+fn print_callable_target(
+    target: &str,
+    args: &[HirExpr],
+    return_ty: &NirType,
+    ctx: Option<&PrintCtx<'_>>,
+) -> String {
+    let Some(target_expr) = target
+        .strip_prefix("((code *)")
+        .and_then(|rest| rest.strip_suffix(')'))
+    else {
+        return target.to_string();
+    };
+    let ret_ty = if matches!(return_ty, NirType::Unknown) {
+        ctx.map(|ctx| ctx.return_type).unwrap_or(return_ty)
+    } else {
+        return_ty
+    };
+    if matches!(ret_ty, NirType::Unknown) {
+        return target.to_string();
+    }
+    let arg_types = args
+        .iter()
+        .map(|arg| callable_arg_type_name(arg, ctx))
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!("(({} (*)({arg_types})){target_expr})", print_type(ret_ty))
+}
+
+fn callable_arg_type_name(arg: &HirExpr, ctx: Option<&PrintCtx<'_>>) -> String {
+    if let Some(ctx) = ctx
+        && let HirExpr::Var(name) = arg
+        && let Some(ty) = ctx.var_types.get(name.as_str())
+    {
+        return print_type(ty);
+    }
+    match arg {
+        HirExpr::Const(_, ty)
+        | HirExpr::Cast { ty, .. }
+        | HirExpr::Unary { ty, .. }
+        | HirExpr::Binary { ty, .. }
+        | HirExpr::Call { ty, .. }
+        | HirExpr::Load { ty, .. }
+        | HirExpr::Select { ty, .. } => {
+            if matches!(ty, NirType::Unknown) {
+                "uint".to_string()
+            } else {
+                print_type(ty)
+            }
+        }
+        HirExpr::Index { elem_ty, .. } => print_type(elem_ty),
+        HirExpr::Var(_)
+        | HirExpr::AddressOfGlobal(_)
+        | HirExpr::PtrOffset { .. }
+        | HirExpr::AggregateCopy { .. } => "uint".to_string(),
+    }
+}
+
 // ── Context-aware printing (struct field access) ──────────────────────────────
 
 fn print_expr_with_ctx(expr: &HirExpr, ctx: &PrintCtx<'_>) -> String {
@@ -615,7 +675,8 @@ fn print_expr_prec_ctx(
             let else_expr = print_expr_prec_ctx(else_expr, prec, depth + 1, ctx);
             (format!("{cond} ? {then_expr} : {else_expr}"), prec)
         }
-        HirExpr::Call { target, args, .. } => {
+        HirExpr::Call { target, args, ty } => {
+            let target = print_callable_target(target, args, ty, Some(ctx));
             let args = args
                 .iter()
                 .map(|arg| print_expr_prec_ctx(arg, 0, depth + 1, ctx))

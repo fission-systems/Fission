@@ -9,6 +9,20 @@
       "languages": ["c", "cpp", "go", "rust"],
       "require_binary": true,
       "behavior_cases": {
+        "apply_op": [
+          {
+            "args": ["op_add", 2, 3],
+            "candidate_support_code": "uint op_add(uint a, uint b) { return a + b; }"
+          },
+          {
+            "args": ["op_sub", 9, 4],
+            "candidate_support_code": "uint op_sub(uint a, uint b) { return a >= b ? a - b : b - a; }"
+          },
+          {
+            "args": ["op_mul", 6, 7],
+            "candidate_support_code": "uint op_mul(uint a, uint b) { return a * b; }"
+          }
+        ],
         "run_data_structures": [
           {
             "args": [0],

@@ -910,6 +910,8 @@ def call_names_for_fingerprint(code: str) -> list[str]:
         lowered = match.group(1).split("::")[-1].lower()
         if lowered in CALL_EXCLUDE:
             continue
+        if stripped[match.end() :].lstrip().startswith("*"):
+            continue
         if is_function_definition_call_match(stripped, match):
             continue
         calls.append(normalize_name(lowered))
@@ -2040,7 +2042,11 @@ def behavior_supported(
     if explicit_cases is not None:
         if func.return_kind not in {"int", "void"}:
             return False, f"unsupported return kind: {func.return_kind}"
-        unsupported = [kind for kind in func.param_kinds if kind not in {"int", "uint", "int_ptr"}]
+        unsupported = [
+            kind
+            for kind in func.param_kinds
+            if kind not in {"int", "uint", "int_ptr", "aggregate_or_pointer"}
+        ]
         if unsupported:
             return False, f"unsupported parameter kinds: {func.param_kinds}"
         valid, reason = validate_explicit_behavior_cases(func, explicit_cases)
@@ -2076,6 +2082,15 @@ def validate_explicit_behavior_cases(
                 values = arg["int_array"]
                 if not isinstance(values, list) or not all(isinstance(v, int) for v in values):
                     return False, f"case {case_index} arg {arg_index} has invalid int_array"
+            if kind == "aggregate_or_pointer":
+                if not isinstance(arg, str) or not WORD_BOUNDARY_RE.fullmatch(arg):
+                    return False, f"case {case_index} arg {arg_index} must be a symbol name"
+        support_code = case.get("candidate_support_code")
+        if support_code is not None:
+            if not isinstance(support_code, str):
+                return False, f"case {case_index} candidate_support_code must be a string"
+            if "#include" in support_code or re.search(r"\bmain\s*\(", support_code):
+                return False, f"case {case_index} candidate_support_code has unsupported contents"
         globals_to_observe = case.get("globals", [])
         if globals_to_observe is None:
             globals_to_observe = []
@@ -2125,6 +2140,7 @@ def candidate_harness(
     candidate_code: str, func: SourceFunction, cases: list[tuple[int, ...]] | list[dict[str, Any]]
 ) -> str:
     calls = "\n".join(render_case_call(func, case, index) for index, case in enumerate(cases))
+    support_code = "\n".join(candidate_support_code_blocks(cases))
     observed_globals = collect_observed_globals(cases)
     globals_decl = "\n".join(render_candidate_global_decl(spec) for spec in observed_globals)
     candidate_code = remove_duplicate_candidate_global_decls(candidate_code, observed_globals)
@@ -2178,6 +2194,7 @@ static inline bool __fission_sborrow64(uint64 a, uint64 b) {{
 #define __scarry(a, b) (sizeof(a) <= 4 ? __fission_scarry32((uint32)(a), (uint32)(b)) : __fission_scarry64((uint64)(a), (uint64)(b)))
 #define __sborrow(a, b) (sizeof(a) <= 4 ? __fission_sborrow32((uint32)(a), (uint32)(b)) : __fission_sborrow64((uint64)(a), (uint64)(b)))
 {globals_decl}
+{support_code}
 {candidate_code}
 int main(void) {{
 {calls}
@@ -2217,6 +2234,23 @@ def collect_observed_globals(cases: list[tuple[int, ...]] | list[dict[str, Any]]
 
 def render_candidate_global_decl(spec: dict[str, Any]) -> str:
     return f"volatile {spec.get('ctype', 'unsigned int')} {spec['name']} = {int(spec.get('reset', 0))};"
+
+
+def candidate_support_code_blocks(cases: list[tuple[int, ...]] | list[dict[str, Any]]) -> list[str]:
+    blocks: list[str] = []
+    seen: set[str] = set()
+    for case in cases:
+        if not isinstance(case, dict):
+            continue
+        support_code = case.get("candidate_support_code")
+        if not isinstance(support_code, str):
+            continue
+        normalized = support_code.strip()
+        if not normalized or normalized in seen:
+            continue
+        blocks.append(normalized)
+        seen.add(normalized)
+    return blocks
 
 
 def remove_duplicate_candidate_global_decls(candidate_code: str, observed_globals: list[dict[str, Any]]) -> str:
@@ -2260,6 +2294,9 @@ def render_explicit_case_call(func: SourceFunction, case: dict[str, Any], index:
             setup.append(f"    int {name}[] = {{{c_int_array(values)}}};")
             call_args.append(name)
             pointer_arrays.append((arg_index, name, len(values)))
+            continue
+        if kind == "aggregate_or_pointer":
+            call_args.append(arg)
             continue
         raise AssertionError(f"unsupported explicit behavior kind: {kind}")
 
@@ -7823,6 +7860,22 @@ int max(int a, int b) { if (a > b) return a; return b; }
             "c",
         )
         assert parsed[0].param_kinds == ["aggregate_or_pointer", "uint"]
+        assert "uint" not in call_names_for_fingerprint(
+            "return ((uint (*)(uint, uint))param_1)(param_2, param_3);"
+        )
+        fp_cases = [
+            {
+                "args": ["op_add", 2],
+                "candidate_support_code": "uint op_add(uint a, uint b) { return a + b; }",
+            }
+        ]
+        valid, reason = validate_explicit_behavior_cases(parsed[0], fp_cases)
+        assert valid, reason
+        rendered = render_explicit_case_call(parsed[0], fp_cases[0], 0)
+        assert "apply_op(op_add, 2)" in rendered
+        assert candidate_support_code_blocks(fp_cases) == [
+            "uint op_add(uint a, uint b) { return a + b; }"
+        ]
         progress = partial_behavior_progress(
             {"stdout": "ret=0\nret=1\nret=1\nret=5\n"},
             {"partial_stdout": "ret=0\nret=1\nret=1\n"},

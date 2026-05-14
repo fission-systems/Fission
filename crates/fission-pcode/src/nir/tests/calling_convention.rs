@@ -1173,7 +1173,7 @@ fn arm32_branchind_tail_call_recovers_function_pointer_call() {
 
     let code = render_mlil_preview(&func, "apply_op", 0x10005c, &options).expect("preview render");
     assert!(
-        code.contains("return ((code *)param_1)(param_2, param_3);"),
+        code.contains("return ((uint (*)(uint, uint))param_1)(param_2, param_3);"),
         "{code}"
     );
     assert!(!code.contains("sub_3e"), "{code}");
@@ -1956,7 +1956,7 @@ fn aarch64_branchind_tail_call_recovers_function_pointer_call() {
 
     let code = render_mlil_preview(&func, "apply_op", 0x100068, &options).expect("preview render");
     assert!(
-        code.contains("return ((code *)param_1)(param_2, param_3);"),
+        code.contains("return ((uint (*)(uint, uint))param_1)(param_2, param_3);"),
         "{code}"
     );
     assert!(!code.contains("__fission_branchind"), "{code}");
