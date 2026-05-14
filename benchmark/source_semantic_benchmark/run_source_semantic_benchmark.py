@@ -1917,10 +1917,22 @@ def sleigh_template_source_gate(summary: dict[str, Any], required_source: str) -
 
     failures: list[str] = []
     row_count = int(summary.get("row_count", 0) or 0)
+    decode_ok = int(stage_counts.get("decode:ok", 0) or 0)
     raw_pcode_ok = int(stage_counts.get("raw_pcode:ok", 0) or 0)
     total_templates = sum(
         int(value) for value in template_totals.values() if isinstance(value, int | float)
     )
+    failed_sleigh_stages = {
+        stage: int(value)
+        for stage, value in stage_counts.items()
+        if (
+            stage.startswith("decode:")
+            or stage.startswith("raw_pcode:")
+        )
+        and stage not in {"decode:ok", "raw_pcode:ok"}
+        and isinstance(value, int | float)
+        and int(value) != 0
+    }
     unexpected_sources = {
         source: int(value)
         for source, value in template_totals.items()
@@ -1936,6 +1948,8 @@ def sleigh_template_source_gate(summary: dict[str, Any], required_source: str) -
             f"SLEIGH template sources must be only {required_source!r} "
             f"(unexpected {unexpected_sources})"
         )
+    if failed_sleigh_stages:
+        failures.append(f"SLEIGH decode/raw_pcode stages must be ok (got {failed_sleigh_stages})")
 
     return {
         "required_source": required_source,
@@ -1943,6 +1957,7 @@ def sleigh_template_source_gate(summary: dict[str, Any], required_source: str) -
         "failures": failures,
         "template_source_totals": dict(sorted(template_totals.items())),
         "row_count": row_count,
+        "decode_ok_rows": decode_ok,
         "raw_pcode_ok_rows": raw_pcode_ok,
     }
 
@@ -2984,7 +2999,7 @@ int max(int a, int b) { if (a > b) return a; return b; }
         gate = sleigh_template_source_gate(
             {
                 "row_count": 1,
-                "debug_stage_status_counts": {"raw_pcode:ok": 1},
+                "debug_stage_status_counts": {"decode:ok": 1, "raw_pcode:ok": 1},
                 "debug_template_source_totals": {"spec_derived": 2},
             },
             "spec_derived",
@@ -2993,13 +3008,23 @@ int max(int a, int b) { if (a > b) return a; return b; }
         gate = sleigh_template_source_gate(
             {
                 "row_count": 1,
-                "debug_stage_status_counts": {"raw_pcode:ok": 1},
+                "debug_stage_status_counts": {"decode:ok": 1, "raw_pcode:ok": 1},
                 "debug_template_source_totals": {"compatibility_lowered": 1},
             },
             "spec_derived",
         )
         assert gate["status"] == "failed"
         assert "compatibility_lowered" in gate["failures"][0]
+        gate = sleigh_template_source_gate(
+            {
+                "row_count": 1,
+                "debug_stage_status_counts": {"decode:ok": 1, "raw_pcode:failed": 1},
+                "debug_template_source_totals": {"spec_derived": 1},
+            },
+            "spec_derived",
+        )
+        assert gate["status"] == "failed"
+        assert "raw_pcode:failed" in gate["failures"][0]
         gate = sleigh_template_source_gate(
             {
                 "row_count": 1,
