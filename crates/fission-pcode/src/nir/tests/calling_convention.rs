@@ -1435,6 +1435,122 @@ fn aarch64_return_only_join_inlines_predecessor_return_values() {
     assert!(!code.contains("goto block_1030"), "{code}");
 }
 
+#[test]
+fn aarch64_return_join_with_terminal_store_does_not_synthesize_live_return() {
+    let mut options = aarch64_preview_options();
+    options.force_linear_structuring = true;
+    options
+        .global_names
+        .insert(0x2000, "control_sink".to_string());
+
+    let x0 = Varnode {
+        space_id: RUST_SLEIGH_REGISTER_SPACE_ID,
+        offset: 0x4000,
+        size: 8,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let w0 = Varnode {
+        size: 4,
+        ..x0.clone()
+    };
+    let x30 = Varnode {
+        space_id: RUST_SLEIGH_REGISTER_SPACE_ID,
+        offset: 0x40f0,
+        size: 8,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let ret_target = Varnode {
+        space_id: RUST_SLEIGH_REGISTER_SPACE_ID,
+        offset: 0,
+        size: 8,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let add_tmp = uniq(0x2400, 4);
+    let store_ptr = uniq(0x2500, 8);
+    let func = PcodeFunction {
+        blocks: vec![
+            PcodeBasicBlock {
+                index: 0,
+                start_address: 0x1040,
+                successors: vec![1],
+                ops: vec![
+                    PcodeOp {
+                        seq_num: 0,
+                        opcode: PcodeOpcode::IntAdd,
+                        address: 0x1040,
+                        output: Some(add_tmp.clone()),
+                        inputs: vec![w0.clone(), cst(10, 4)],
+                        asm_mnemonic: None,
+                    },
+                    PcodeOp {
+                        seq_num: 1,
+                        opcode: PcodeOpcode::IntZExt,
+                        address: 0x1040,
+                        output: Some(x0),
+                        inputs: vec![add_tmp],
+                        asm_mnemonic: None,
+                    },
+                    PcodeOp {
+                        seq_num: 2,
+                        opcode: PcodeOpcode::Branch,
+                        address: 0x1044,
+                        output: None,
+                        inputs: vec![cst(0x1050, 8)],
+                        asm_mnemonic: None,
+                    },
+                ],
+            },
+            PcodeBasicBlock {
+                index: 1,
+                start_address: 0x1050,
+                successors: vec![],
+                ops: vec![
+                    PcodeOp {
+                        seq_num: 3,
+                        opcode: PcodeOpcode::Copy,
+                        address: 0x1050,
+                        output: Some(store_ptr.clone()),
+                        inputs: vec![cst(0x2000, 8)],
+                        asm_mnemonic: None,
+                    },
+                    PcodeOp {
+                        seq_num: 4,
+                        opcode: PcodeOpcode::Store,
+                        address: 0x1054,
+                        output: None,
+                        inputs: vec![cst(3, 8), store_ptr, w0],
+                        asm_mnemonic: None,
+                    },
+                    PcodeOp {
+                        seq_num: 5,
+                        opcode: PcodeOpcode::Copy,
+                        address: 0x1058,
+                        output: Some(ret_target),
+                        inputs: vec![x30.clone()],
+                        asm_mnemonic: None,
+                    },
+                    PcodeOp {
+                        seq_num: 6,
+                        opcode: PcodeOpcode::Return,
+                        address: 0x1058,
+                        output: None,
+                        inputs: vec![x30],
+                        asm_mnemonic: None,
+                    },
+                ],
+            },
+        ],
+    };
+
+    let code = render_mlil_preview(&func, "store_sink", 0x1040, &options).expect("preview render");
+    assert!(code.contains("void store_sink"), "{code}");
+    assert!(code.contains("return;"), "{code}");
+    assert!(!code.contains("return param_1"), "{code}");
+}
+
 fn aarch64_preview_options() -> MlilPreviewOptions {
     let mut options = preview_options();
     options.calling_convention = CallingConvention::AArch64;

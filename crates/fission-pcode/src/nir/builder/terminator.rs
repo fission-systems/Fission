@@ -616,6 +616,27 @@ impl<'a> PreviewBuilder<'a> {
         })
     }
 
+    fn side_effect_consumes_primary_return_register_before(
+        &self,
+        block: &crate::pcode::PcodeBasicBlock,
+        term_idx: usize,
+    ) -> bool {
+        let ret_regs =
+            primary_return_registers(self.options.pointer_size, self.options.calling_convention);
+        if ret_regs.is_empty() {
+            return false;
+        }
+        block.ops.iter().take(term_idx).any(|op| {
+            matches!(op.opcode, PcodeOpcode::Store)
+                && op.inputs.iter().skip(1).any(|input| {
+                    ret_regs.iter().any(|ret_reg| {
+                        self.varnode_aliases_value(ret_reg, input)
+                            || self.varnode_aliases_value(input, ret_reg)
+                    })
+                })
+        })
+    }
+
     pub(in crate::nir) fn lower_return_join_expr_for_predecessor(
         &mut self,
         pred_idx: usize,
@@ -654,6 +675,17 @@ impl<'a> PreviewBuilder<'a> {
         let pred_term_idx = self
             .block_terminator_index(&pred_block)
             .unwrap_or(pred_block.ops.len());
+        let return_pcode_idx = self.pcode_block_idx(return_idx);
+        if let Some(return_block) = self.pcode.blocks.get(return_pcode_idx)
+            && let Some(return_term_idx) = self.block_terminator_index(return_block)
+            && self
+                .side_effect_consumes_primary_return_register_before(return_block, return_term_idx)
+            && self
+                .last_primary_return_def_after_barrier(return_block, return_term_idx)
+                .is_none()
+        {
+            return Ok(None);
+        }
         if let Some(expr) =
             self.lower_primary_return_expr_from_block(pred_pcode_idx, &pred_block, pred_term_idx)?
         {
@@ -804,11 +836,13 @@ impl<'a> PreviewBuilder<'a> {
                 .map(Some);
         }
         if self.uses_primary_return_registers()
+            && !self.side_effect_consumes_primary_return_register_before(block, term_idx)
             && let Some(expr) = self.predecessor_primary_return_expr(idx)?
         {
             return Ok(Some(expr));
         }
         if self.uses_primary_return_registers()
+            && !self.side_effect_consumes_primary_return_register_before(block, term_idx)
             && self
                 .predecessors
                 .get(idx)
