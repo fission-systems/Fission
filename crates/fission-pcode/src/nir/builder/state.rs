@@ -26,6 +26,7 @@ pub(crate) struct PreviewBuilder<'a> {
     pub(crate) layout_fallthrough: Vec<Option<usize>>,
     pub(crate) successors: Vec<Vec<usize>>,
     pub(crate) predecessors: Vec<Vec<usize>>,
+    pub(crate) reachability_cache: RefCell<BuilderCacheMap<(usize, usize, usize), bool>>,
     pub(crate) cfg_facts: crate::nir::structuring::CfgFactCache,
     pub(crate) dom_tree: crate::nir::structuring::DomTree,
     pub(crate) irreducible_edges: HashSet<(usize, usize)>,

@@ -752,6 +752,23 @@ impl<'a> PreviewBuilder<'a> {
         target_idx: usize,
         stop_idx: usize,
     ) -> bool {
+        let cache_key = (start_idx, target_idx, stop_idx);
+        if let Some(cached) = self.reachability_cache.borrow().get(&cache_key).copied() {
+            return cached;
+        }
+        let reachable = self.block_can_reach_uncached(start_idx, target_idx, stop_idx);
+        self.reachability_cache
+            .borrow_mut()
+            .insert(cache_key, reachable);
+        reachable
+    }
+
+    fn block_can_reach_uncached(
+        &self,
+        start_idx: usize,
+        target_idx: usize,
+        stop_idx: usize,
+    ) -> bool {
         if start_idx == target_idx {
             return true;
         }
@@ -1453,6 +1470,28 @@ mod tests {
         let builder = PreviewBuilder::new(&pcode, &options, None);
 
         assert!(builder.block_can_reach(0, 1, 0));
+    }
+
+    #[test]
+    fn block_reachability_queries_are_cached() {
+        let mut blocks = vec![
+            block_at(
+                0x1000,
+                0,
+                vec![op(0, PcodeOpcode::Branch, None, vec![constant(0x1010)])],
+            ),
+            block_at(0x1010, 1, vec![op(1, PcodeOpcode::Return, None, vec![])]),
+        ];
+        blocks[0].successors = vec![1];
+        let pcode = pcode_function(blocks);
+        let options = test_options();
+        let builder = PreviewBuilder::new(&pcode, &options, None);
+
+        assert!(builder.reachability_cache.borrow().is_empty());
+        assert!(builder.block_can_reach(0, 1, usize::MAX));
+        assert_eq!(builder.reachability_cache.borrow().len(), 1);
+        assert!(builder.block_can_reach(0, 1, usize::MAX));
+        assert_eq!(builder.reachability_cache.borrow().len(), 1);
     }
 
     #[test]

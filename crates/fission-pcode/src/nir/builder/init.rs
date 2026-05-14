@@ -107,6 +107,7 @@ impl<'a> PreviewBuilder<'a> {
             layout_fallthrough,
             successors,
             predecessors,
+            reachability_cache: std::cell::RefCell::new(BuilderCacheMap::default()),
             cfg_facts,
             dom_tree,
             irreducible_edges,
