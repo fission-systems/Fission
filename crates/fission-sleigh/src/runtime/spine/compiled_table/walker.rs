@@ -953,13 +953,14 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                 let encoded_size =
                     checked_sla_field_encoded_size(*byte_start, *byte_end, "value map")?;
                 self.advance_cursor_past_sla_field(token_base, encoded_size)?;
+                let value_bits = i64_to_u64_bits(value);
                 Ok(OperandBinding::with_fixed(
                     BoundOperand::Immediate {
-                        value: value as u64,
+                        value: value_bits,
                         encoded_size,
                         signed: *sign_bit || value < 0,
                     },
-                    fixed_handle_for_const_value(value as u64, encoded_size),
+                    fixed_handle_for_const_value(value_bits, encoded_size),
                 ))
             }
             CompiledOperandSpec::SlaValueMapExpression {
@@ -977,13 +978,14 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                         values.len()
                     )
                 })?;
+                let value_bits = i64_to_u64_bits(value);
                 Ok(OperandBinding::with_fixed(
                     BoundOperand::Immediate {
-                        value: value as u64,
+                        value: value_bits,
                         encoded_size: 0,
                         signed: value < 0,
                     },
-                    fixed_handle_for_const_value(value as u64, 0),
+                    fixed_handle_for_const_value(value_bits, 0),
                 ))
             }
             CompiledOperandSpec::SlaFixedVarnode { varnode } => Ok(OperandBinding::with_fixed(
@@ -1029,13 +1031,14 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                 } else {
                     self.eval_pattern_expression(expr)?
                 };
+                let value_bits = i64_to_u64_bits(value);
                 Ok(OperandBinding::with_fixed(
                     BoundOperand::Immediate {
-                        value: value as u64,
+                        value: value_bits,
                         encoded_size,
                         signed: value < 0,
                     },
-                    fixed_handle_for_const_value(value as u64, encoded_size),
+                    fixed_handle_for_const_value(value_bits, encoded_size),
                 ))
             }
             CompiledOperandSpec::ContextFieldExtraction {

@@ -880,6 +880,7 @@ fn compiled_table_policy_symbols_stay_architecture_neutral() {
     let selector_index_lossy_u32_cast = ["selector_index", "as", "u32"].join(" ");
     let delay_slot_length_lossy_cast_local = "slot_state.length as u32";
     let template_positive_int_lossy_cast = "Ok(*value as u64)";
+    let signed_value_lossy_cast = ["value", "as", "u64"].join(" ");
     let template_state_length_lossy_cast = "state.length as u64";
     let template_space_size_lossy_cast = "space.addr_size as u64";
     let handle_size_lossy_cast = "handle.fixed.size as u64";
@@ -1282,6 +1283,7 @@ fn compiled_table_policy_symbols_stay_architecture_neutral() {
                 && !source.contains(&selector_index_lossy_u32_cast)
                 && !source.contains(delay_slot_length_lossy_cast_local)
                 && !source.contains(template_positive_int_lossy_cast)
+                && !source.contains(&signed_value_lossy_cast)
                 && !source.contains(template_state_length_lossy_cast)
                 && !source.contains(template_space_size_lossy_cast)
                 && !source.contains(handle_size_lossy_cast),
