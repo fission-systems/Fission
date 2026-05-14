@@ -1,17 +1,4 @@
 use super::*;
-use crate::packed_context::packed_context_word_to_u64;
-use anyhow::Context;
-
-fn merge_context_overrides(
-    base: PackedContextOverride,
-    pending: PackedContextOverride,
-) -> PackedContextOverride {
-    let pending_mask = pending.mask_bits();
-    PackedContextOverride::new(
-        (base.context_bits() & !pending_mask) | (pending.context_bits() & pending_mask),
-        base.mask_bits() | pending_mask,
-    )
-}
 
 impl RuntimeSleighFrontend {
     pub fn decode_and_lift(&self, bytes: &[u8], address: u64) -> Result<Vec<PcodeOp>> {
@@ -90,7 +77,7 @@ impl RuntimeSleighFrontend {
             return Ok(Vec::new());
         }
 
-        // Pending ContextCommit overrides: address → (context_bits, mask).
+        // Pending ContextCommit overrides: address -> packed context override.
         // Populated after each instruction's globalset / ContextCommit ops.
         let mut pending_overrides: std::collections::BTreeMap<u64, PackedContextOverride> =
             std::collections::BTreeMap::new();
@@ -102,7 +89,7 @@ impl RuntimeSleighFrontend {
 
             // Apply any pending ContextCommit overrides for this address.
             let ctx_override = match (initial_context_override, pending_overrides.get(&current)) {
-                (Some(base), Some(pending)) => Some(merge_context_overrides(base, *pending)),
+                (Some(base), Some(pending)) => Some(base.merge_override(*pending)),
                 (Some(base), None) => Some(base),
                 (None, Some(pending)) => Some(*pending),
                 (None, None) => None,
@@ -134,15 +121,8 @@ impl RuntimeSleighFrontend {
             for (target_addr, word_index, mask_u32, value_u32) in
                 &instruction.pending_context_commits
             {
-                let mask_u64 = packed_context_word_to_u64(*word_index, *mask_u32)
-                    .with_context(|| "merge pending context commit mask")?;
-                let value_u64 = packed_context_word_to_u64(*word_index, *value_u32)
-                    .with_context(|| "merge pending context commit value")?;
                 let entry = pending_overrides.entry(*target_addr).or_default();
-                *entry = PackedContextOverride::new(
-                    (entry.context_bits() & !mask_u64) | (value_u64 & mask_u64),
-                    entry.mask_bits() | mask_u64,
-                );
+                entry.merge_commit_word(*word_index, *mask_u32, *value_u32)?;
             }
 
             current = checked_instruction_fallthrough(current, step as u64)?;
@@ -249,22 +229,5 @@ impl RuntimeSleighFrontend {
                 address,
             ),
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use crate::packed_context::packed_context_word_to_u64;
-
-    #[test]
-    fn context_commit_word_shift_fails_closed_above_packed_u64() {
-        assert_eq!(
-            packed_context_word_to_u64(1, 0x8000_0000).expect("word 1"),
-            0x8000_0000_0000_0000
-        );
-        assert!(
-            packed_context_word_to_u64(2, 1).is_err(),
-            "word 2 must not wrap or silently clear in the u64 context cache"
-        );
     }
 }

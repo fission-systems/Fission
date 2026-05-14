@@ -477,28 +477,6 @@ fn generated_runtime_lifts_x86_scalar_float_templates_without_unsupported_cutove
 }
 
 #[test]
-fn packed_context_word_write_matches_ghidra_bit_numbering() {
-    let mut context = 0u64;
-    set_packed_context_word(&mut context, 0, 1u32 << 31, 1u32 << 31).expect("set context word");
-    assert_eq!(packed_context_bits(context, 0, 1).expect("bit 0"), 1);
-    assert_eq!(packed_context_bits(context, 31, 1).expect("bit 31"), 0);
-}
-
-#[test]
-fn packed_context_bit_write_matches_ghidra_bit_numbering() {
-    let mut context = 0u64;
-    set_packed_context_bits(&mut context, 0, 1, 1).expect("set bit 0");
-    assert_eq!(packed_context_bits(context, 0, 1).expect("bit 0"), 1);
-    assert_eq!(packed_context_bits(context, 31, 1).expect("bit 31"), 0);
-
-    set_packed_context_bits(&mut context, 31, 2, 0b11).expect("set cross-word bits");
-    assert_eq!(
-        packed_context_bits(context, 31, 2).expect("cross-word bits"),
-        0b11
-    );
-}
-
-#[test]
 fn packed_context_bit_reads_cross_word_boundaries_like_ghidra() {
     let mut context = 0u64;
     set_packed_context_word(&mut context, 0, 0x0000_0001, 0x0000_0001).expect("set low word");

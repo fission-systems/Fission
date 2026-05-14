@@ -67,6 +67,14 @@ impl PackedContextOverride {
         Ok(())
     }
 
+    pub const fn merge_override(self, pending: Self) -> Self {
+        let pending_mask = pending.mask_bits();
+        Self::new(
+            (self.context_bits() & !pending_mask) | (pending.context_bits() & pending_mask),
+            self.mask_bits() | pending_mask,
+        )
+    }
+
     pub fn apply_to(self, context_register: &mut u64, known_mask: &mut u64) {
         let mask = self.mask_bits();
         *context_register = (*context_register & !mask) | (self.context_bits() & mask);
@@ -177,5 +185,26 @@ mod tests {
             0x8000_0000_0000_0000
         );
         assert!(packed_context_word_to_u64(2, 1).is_err());
+    }
+
+    #[test]
+    fn packed_context_override_merge_uses_pending_mask() {
+        let base = PackedContextOverride::new(0b1010, 0b1111);
+        let pending = PackedContextOverride::new(0b0101, 0b0011);
+        let merged = base.merge_override(pending);
+
+        assert_eq!(merged.context_bits(), 0b1001);
+        assert_eq!(merged.mask_bits(), 0b1111);
+    }
+
+    #[test]
+    fn packed_context_override_commit_word_merges_checked_word() {
+        let mut context_override = PackedContextOverride::new(0, 0);
+        context_override
+            .merge_commit_word(1, 0x8000_0000, 0x8000_0000)
+            .expect("merge high context word");
+
+        assert_eq!(context_override.context_bits(), 0x8000_0000_0000_0000);
+        assert_eq!(context_override.mask_bits(), 0x8000_0000_0000_0000);
     }
 }
