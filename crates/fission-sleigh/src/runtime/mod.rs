@@ -727,7 +727,13 @@ mod tests {
             details.template_source,
             Some(crate::compiler::CompiledTemplateSource::SpecDerived)
         );
-        assert!(ops.iter().any(|op| op.opcode == PcodeOpcode::IntZExt));
+        assert!(ops.iter().any(|op| {
+            op.opcode == PcodeOpcode::IntZExt
+                && op
+                    .inputs
+                    .first()
+                    .is_some_and(|input| input.is_constant && input.constant_val == 0xcccd)
+        }));
     }
 
     #[test]
@@ -810,8 +816,8 @@ mod tests {
             (
                 "ARM8_le",
                 [
-                    0x4c, 0xf6, 0xcd, 0x41, // movw r1,#0xcf4c
-                    0xcc, 0xf6, 0xcc, 0x41, // movt r1,#0xcfcc
+                    0x4c, 0xf6, 0xcd, 0x41, // movw r1,#0xcccd
+                    0xcc, 0xf6, 0xcc, 0x41, // movt r1,#0xcccc
                     0xa0, 0xfb, 0x01, 0x12, // umull r1,r2,r0,r1
                     0x91, 0x08, // lsrs r1,r2,#0x2
                     0x01, 0xeb, 0x81, 0x01, // add.w r1,r1,r1, lsl #0x2
@@ -825,8 +831,8 @@ mod tests {
             (
                 "ARM8_be",
                 [
-                    0xf6, 0x4c, 0x41, 0xcd, // movw r1,#0xcf4c
-                    0xf6, 0xcc, 0x41, 0xcc, // movt r1,#0xcfcc
+                    0xf6, 0x4c, 0x41, 0xcd, // movw r1,#0xcccd
+                    0xf6, 0xcc, 0x41, 0xcc, // movt r1,#0xcccc
                     0xfb, 0xa0, 0x12, 0x01, // umull r1,r2,r0,r1
                     0x08, 0x91, // lsrs r1,r2,#0x2
                     0xeb, 0x01, 0x01, 0x81, // add.w r1,r1,r1, lsl #0x2

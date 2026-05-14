@@ -1,0 +1,40 @@
+{
+  "name": "arm8m-low-bit-thumb-raw-pcode-canaries",
+  "notes": "ARMv8-M Thumb low-bit code pointer rows. Ghidra imports relocatable ARM ELF .text at 0x10000 while Fission maps these object fixtures at 0x100000, so rows carry explicit oracle and runtime addresses.",
+  "rows": [
+    {
+      "name": "arm8m-le-low-bit-movw",
+      "entry_id": "ARM8m_le",
+      "binary": "benchmark/binary/ARM8m_le/baremetal/small/binary/c/mathematics.o",
+      "addr": "0x100001",
+      "ghidra_addr": "0x10000",
+      "fission_addr": "0x100001",
+      "count": 1,
+      "language": "ARM:LE:32:v8-m",
+      "compiler": "default",
+      "no_analyze": true,
+      "disassemble_missing": true,
+      "feature_group": "architecture",
+      "feature": "arm8m_low_bit_thumb_context",
+      "owner": "sleigh_runtime_context",
+      "notes": "LE Thumb function symbol has low bit set; Fission must normalize to 0x100000 while preserving Thumb context. Ghidra oracle uses the imported aligned .text address."
+    },
+    {
+      "name": "arm8m-be-low-bit-addw",
+      "entry_id": "ARM8m_be",
+      "binary": "benchmark/binary/ARM8m_be/baremetal/small/binary/cpp/cpp_smoke.o",
+      "addr": "0x100019",
+      "ghidra_addr": "0x10018",
+      "fission_addr": "0x100019",
+      "count": 1,
+      "language": "ARM:BE:32:v8-m",
+      "compiler": "default",
+      "no_analyze": true,
+      "disassemble_missing": true,
+      "feature_group": "architecture",
+      "feature": "arm8m_low_bit_thumb_context",
+      "owner": "sleigh_runtime_context",
+      "notes": "BE Thumb row guards byte alignment and context propagation for odd code pointers."
+    }
+  ]
+}

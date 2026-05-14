@@ -249,6 +249,8 @@ def run_one(
     *,
     binary: Path,
     addr: int,
+    ghidra_addr: int | None,
+    fission_addr: int | None,
     count: int,
     language: str,
     compiler: str,
@@ -270,7 +272,7 @@ def run_one(
             "--binary",
             str(binary),
             "--addr",
-            hex(addr),
+            hex(ghidra_addr if ghidra_addr is not None else addr),
             "--count",
             str(count),
             "--language",
@@ -291,7 +293,7 @@ def run_one(
             "--binary",
             str(binary),
             "--addr",
-            hex(addr),
+            hex(fission_addr if fission_addr is not None else addr),
             "--count",
             str(count),
             "--output",
@@ -373,12 +375,23 @@ def run_manifest(args: argparse.Namespace) -> int:
         row_name = row.get("name", f"0x{parse_int(str(row['addr'])):x}")
         binary_id = row.get("binary_id") or str(binary)
         language = row.get("language", args.language)
+        row_addr = parse_int(str(row["addr"]))
         feature = row.get("feature", "unclassified")
         feature_group = row.get("feature_group", "ungrouped")
         output_dir = args.output_dir / row_name
         report = run_one(
             binary=binary,
-            addr=parse_int(str(row["addr"])),
+            addr=row_addr,
+            ghidra_addr=(
+                parse_int(str(row["ghidra_addr"]))
+                if row.get("ghidra_addr") is not None
+                else None
+            ),
+            fission_addr=(
+                parse_int(str(row["fission_addr"]))
+                if row.get("fission_addr") is not None
+                else None
+            ),
             count=int(row.get("count", args.count)),
             language=language,
             compiler=row.get("compiler", args.compiler),
@@ -435,6 +448,8 @@ def run_manifest(args: argparse.Namespace) -> int:
                 "binary": str(binary),
                 "language": language,
                 "addr": row["addr"],
+                "ghidra_addr": row.get("ghidra_addr", row["addr"]),
+                "fission_addr": row.get("fission_addr", row["addr"]),
                 "report": report["report"],
                 "total_instructions": report["total_instructions"],
                 "bucket_totals": report["bucket_totals"],

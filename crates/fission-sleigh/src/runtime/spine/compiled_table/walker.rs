@@ -1417,7 +1417,30 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
             CompiledOperandSpec::SlaVarnodeListExpression { expr, .. }
             | CompiledOperandSpec::SlaValueMapExpression { expr, .. }
             | CompiledOperandSpec::SlaPatternExpression { expr, .. } => {
-                self.eval_pattern_expression(expr)
+                if let CompiledPatternExpression::TokenField {
+                    big_endian,
+                    sign_bit,
+                    bit_start,
+                    bit_end,
+                    byte_start,
+                    byte_end,
+                    shift,
+                } = expr
+                {
+                    Ok(u64_to_i64_bits(read_sla_token_field_at(
+                        self.ctx,
+                        operand_absolute_offset,
+                        *big_endian,
+                        *sign_bit,
+                        *bit_start,
+                        *bit_end,
+                        *byte_start,
+                        *byte_end,
+                        *shift,
+                    )?))
+                } else {
+                    self.eval_pattern_expression(expr)
+                }
             }
             CompiledOperandSpec::ContextFieldExtraction {
                 bit_offset,
