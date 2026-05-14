@@ -189,6 +189,17 @@ manifest.
   evidence counters, complementing `debug_quality_evidence_totals`.
 - `triage_priority_rows`: compact low-score row shortlist with behavior status,
   first failing stage, feature gaps, and artifact paths for follow-up.
+- `improvement_axis_metrics`: full-denominator rows grouped by likely owner
+  axis (`mapping`, `sleigh_decode_lift`, `nir_build_normalize`,
+  `structuring_render`, `behavior_harness`, `dynamic_semantics`,
+  `static_semantic_gaps`, and related buckets), including lost-score totals,
+  behavior/stage cross-tabs, missing-feature totals, and representative rows.
+- `complexity_quality_metrics`: source static-feature complexity buckets plus
+  hard non-perfect rows, so large functions and dense semantic shapes can be
+  separated from small-row failures.
+- `stage_cost_correlation_metrics`: decompile wall-time distributions grouped
+  by behavior status and first failing debug stage, linking quality blockers to
+  runtime cost.
 - `harness_cost_metrics`: decompile, behavior compile, behavior run, and
   behavior wall-time totals/averages and p50/p90/p95/max timings, plus behavior
   cache status aggregation.

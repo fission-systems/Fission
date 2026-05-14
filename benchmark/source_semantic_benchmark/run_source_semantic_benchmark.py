@@ -1542,6 +1542,16 @@ def numeric_distribution(values: list[float]) -> dict[str, Any]:
     }
 
 
+def complexity_bucket(value: float) -> str:
+    if value <= 5:
+        return "tiny"
+    if value <= 15:
+        return "small"
+    if value <= 40:
+        return "medium"
+    return "large"
+
+
 NIR_DEBT_METRIC_RE = re.compile(
     r"(rejected|failed|fallback|irreducible|invalid|missing|conflict|forced|unsupported|timeout|error)"
 )
@@ -2279,6 +2289,11 @@ def summarize(rows: list[dict[str, Any]], manifest_name: str, entries: list[Benc
     nir_debt_behavior_status_counts: Counter[str] = Counter()
     nir_debt_stage_first_failure_counts: Counter[str] = Counter()
     debug_pipeline_numeric_values: dict[str, list[float]] = {}
+    improvement_axis_metrics: dict[str, dict[str, Any]] = {}
+    complexity_buckets: dict[str, dict[str, Any]] = {}
+    cost_values_by_behavior_status: dict[str, list[float]] = {}
+    cost_values_by_stage_first_failure: dict[str, list[float]] = {}
+    hard_function_rows: list[dict[str, Any]] = []
     by_language: dict[str, dict[str, Any]] = {}
     by_arch: dict[str, dict[str, Any]] = {}
     by_source_return_kind: dict[str, dict[str, Any]] = {}
@@ -2292,6 +2307,95 @@ def summarize(rows: list[dict[str, Any]], manifest_name: str, entries: list[Benc
         bucket["decomp_success"] += int(bool(row.get("decomp_success")))
         bucket["behavior_pass"] += int(row.get("behavior", {}).get("status") == "pass")
         bucket["score_sum"] += float(row.get("semantic_score", 0.0) or 0.0)
+
+    def improvement_axis_for(row: dict[str, Any], behavior: dict[str, Any], first_stage: str) -> str:
+        if row.get("mapping_status") != "matched":
+            return "mapping"
+        if first_stage.startswith("decode:") or first_stage.startswith("raw_pcode:"):
+            return "sleigh_decode_lift"
+        if first_stage.startswith("nir_build:") or first_stage.startswith("normalize:"):
+            return "nir_build_normalize"
+        if first_stage.startswith("structuring:") or first_stage.startswith("render:"):
+            return "structuring_render"
+        if not row.get("decomp_success"):
+            return "decompile_orchestration"
+        behavior_status = str(behavior.get("status", "unknown"))
+        if behavior_status == "unsupported_signature":
+            return "behavior_coverage"
+        if behavior_status in {
+            "candidate_compile_failed",
+            "candidate_compile_timeout",
+            "candidate_run_failed",
+            "candidate_run_timeout",
+            "oracle_compile_failed",
+            "oracle_compile_timeout",
+            "oracle_run_failed",
+            "oracle_run_timeout",
+            "host_execution_unavailable",
+        }:
+            return "behavior_harness"
+        if behavior_status == "mismatch":
+            return "dynamic_semantics"
+        static_gaps = row.get("static_similarity_gaps") if isinstance(row.get("static_similarity_gaps"), dict) else {}
+        if float(static_gaps.get("missing_feature_total", 0.0) or 0.0) > 0.0:
+            return "static_semantic_gaps"
+        preview_stats = row.get("preview_build_stats")
+        if isinstance(preview_stats, dict) and any(
+            is_debt_metric_name(key) and value != 0
+            for key, value in numeric_items(preview_stats)
+        ):
+            return "nir_telemetry_debt"
+        if float(row.get("semantic_score", 0.0) or 0.0) < 1.0:
+            return "partial_quality"
+        return "passing"
+
+    def add_axis_row(axis: str, row: dict[str, Any], behavior_status: str, first_stage: str, score: float) -> None:
+        static_gaps = row.get("static_similarity_gaps") if isinstance(row.get("static_similarity_gaps"), dict) else {}
+        metrics = improvement_axis_metrics.setdefault(
+            axis,
+            {
+                "row_count": 0,
+                "score_sum": 0.0,
+                "lost_score_sum": 0.0,
+                "behavior_status_counts": Counter(),
+                "stage_first_failure_counts": Counter(),
+                "missing_feature_total": 0.0,
+                "top_rows": [],
+            },
+        )
+        metrics["row_count"] += 1
+        metrics["score_sum"] += score
+        metrics["lost_score_sum"] += max(0.0, 1.0 - score)
+        metrics["behavior_status_counts"][behavior_status] += 1
+        metrics["stage_first_failure_counts"][first_stage] += 1
+        metrics["missing_feature_total"] += float(static_gaps.get("missing_feature_total", 0.0) or 0.0)
+        metrics["top_rows"].append(triage_row_summary(row))
+
+    def add_complexity_row(bucket_name: str, row: dict[str, Any], score: float, behavior_status: str) -> None:
+        static_gaps = row.get("static_similarity_gaps") if isinstance(row.get("static_similarity_gaps"), dict) else {}
+        bucket = complexity_buckets.setdefault(
+            bucket_name,
+            {
+                "row_count": 0,
+                "score_sum": 0.0,
+                "behavior_pass_count": 0,
+                "missing_feature_total": 0.0,
+                "zero_score_count": 0,
+                "source_line_counts": [],
+                "source_feature_counts": [],
+            },
+        )
+        bucket["row_count"] += 1
+        bucket["score_sum"] += score
+        bucket["behavior_pass_count"] += int(behavior_status == "pass")
+        bucket["missing_feature_total"] += float(static_gaps.get("missing_feature_total", 0.0) or 0.0)
+        bucket["zero_score_count"] += int(score == 0.0)
+        source_lines = row.get("source_body_line_count")
+        source_features = row.get("source_static_feature_count")
+        if isinstance(source_lines, int | float):
+            bucket["source_line_counts"].append(float(source_lines))
+        if isinstance(source_features, int | float):
+            bucket["source_feature_counts"].append(float(source_features))
 
     for row in rows:
         score = float(row.get("semantic_score", 0.0) or 0.0)
@@ -2327,6 +2431,13 @@ def summarize(rows: list[dict[str, Any]], manifest_name: str, entries: list[Benc
             )
         score_values_by_behavior_status.setdefault(behavior_status, []).append(score)
         score_values_by_stage_first_failure.setdefault(first_stage, []).append(score)
+        axis = improvement_axis_for(row, behavior, first_stage)
+        add_axis_row(axis, row, behavior_status, first_stage, score)
+        source_complexity_value = float(row.get("source_static_feature_count") or 0.0)
+        add_complexity_row(complexity_bucket(source_complexity_value), row, score, behavior_status)
+        if isinstance(row.get("decomp_wall_sec"), int | float):
+            cost_values_by_behavior_status.setdefault(behavior_status, []).append(float(row.get("decomp_wall_sec") or 0.0))
+            cost_values_by_stage_first_failure.setdefault(first_stage, []).append(float(row.get("decomp_wall_sec") or 0.0))
         behavior_status_by_stage_first_failure.setdefault(first_stage, Counter())[behavior_status] += 1
         zero_reason = row_zero_credit_reason(row) if score == 0.0 else "nonzero"
         behavior_status_by_zero_credit_reason.setdefault(zero_reason, Counter())[behavior_status] += 1
@@ -2402,6 +2513,18 @@ def summarize(rows: list[dict[str, Any]], manifest_name: str, entries: list[Benc
             decomp_feature_total_values.append(row_decomp_total)
             static_intersection_feature_total_values.append(row_intersection_total)
             static_union_feature_total_values.append(row_union_total)
+            if (
+                float(row.get("semantic_score", 0.0) or 0.0) < 1.0
+                and (row_source_total >= 40.0 or float(row.get("source_body_line_count") or 0.0) >= 40.0)
+            ):
+                hard_function_rows.append(
+                    {
+                        **triage_row_summary(row),
+                        "source_feature_total": row_source_total,
+                        "source_body_line_count": row.get("source_body_line_count"),
+                        "decomp_wall_sec": row.get("decomp_wall_sec"),
+                    }
+                )
             source_feature_rows += int(row_source_total > 0.0)
             decomp_feature_rows += int(row_decomp_total > 0.0)
             static_decomp_absent_feature_rows += int(row_source_total > 0.0 and row_decomp_total == 0.0)
@@ -2789,6 +2912,57 @@ def summarize(rows: list[dict[str, Any]], manifest_name: str, entries: list[Benc
         ),
         reverse=True,
     )[:20]
+    improvement_axis_export: dict[str, dict[str, Any]] = {}
+    for axis, metrics in sorted(improvement_axis_metrics.items()):
+        row_count = int(metrics.get("row_count", 0) or 0)
+        top_rows = sorted(
+            metrics.get("top_rows") or [],
+            key=lambda row: (
+                float(row.get("semantic_score_percent") or 0.0),
+                str(row.get("function_name") or ""),
+            ),
+        )[:12]
+        improvement_axis_export[axis] = {
+            "row_count": row_count,
+            "row_rate": round(row_count / total, 6) if total else 0.0,
+            "avg_semantic_score": round(float(metrics.get("score_sum", 0.0) or 0.0) / row_count, 6)
+            if row_count
+            else 0.0,
+            "avg_semantic_score_percent": percent(
+                round(float(metrics.get("score_sum", 0.0) or 0.0) / row_count, 6)
+            ) if row_count else 0.0,
+            "lost_score_sum": round(float(metrics.get("lost_score_sum", 0.0) or 0.0), 6),
+            "missing_feature_total": round(float(metrics.get("missing_feature_total", 0.0) or 0.0), 6),
+            "behavior_status_counts": dict(sorted(metrics.get("behavior_status_counts", Counter()).items())),
+            "stage_first_failure_counts": dict(sorted(metrics.get("stage_first_failure_counts", Counter()).items())),
+            "top_rows": top_rows,
+        }
+    complexity_export: dict[str, dict[str, Any]] = {}
+    for bucket_name, bucket in sorted(complexity_buckets.items()):
+        row_count = int(bucket.get("row_count", 0) or 0)
+        score_sum_for_bucket = float(bucket.get("score_sum", 0.0) or 0.0)
+        complexity_export[bucket_name] = {
+            "row_count": row_count,
+            "row_rate": round(row_count / total, 6) if total else 0.0,
+            "avg_semantic_score": round(score_sum_for_bucket / row_count, 6) if row_count else 0.0,
+            "avg_semantic_score_percent": percent(round(score_sum_for_bucket / row_count, 6)) if row_count else 0.0,
+            "behavior_pass_count": int(bucket.get("behavior_pass_count", 0) or 0),
+            "behavior_pass_rate": round(float(bucket.get("behavior_pass_count", 0) or 0) / row_count, 6)
+            if row_count
+            else 0.0,
+            "zero_score_count": int(bucket.get("zero_score_count", 0) or 0),
+            "missing_feature_total": round(float(bucket.get("missing_feature_total", 0.0) or 0.0), 6),
+            "source_line_count_distribution": numeric_distribution(bucket.get("source_line_counts") or []),
+            "source_feature_count_distribution": numeric_distribution(bucket.get("source_feature_counts") or []),
+        }
+    hard_function_rows = sorted(
+        hard_function_rows,
+        key=lambda row: (
+            float(row.get("semantic_score_percent") or 0.0),
+            -float(row.get("source_feature_total") or 0.0),
+            str(row.get("function_name") or ""),
+        ),
+    )[:20]
     score_sum = round(sum(score_values), 6)
     behavior_score_sum = round(sum(behavior_score_values), 6)
     static_score_sum = round(sum(static_score_values), 6)
@@ -2885,6 +3059,22 @@ def summarize(rows: list[dict[str, Any]], manifest_name: str, entries: list[Benc
                 for key, value in sorted(semantic_loss_by_zero_credit_reason.items())
             },
             "top_lost_score_rows": semantic_loss_hot_rows,
+        },
+        "improvement_axis_metrics": improvement_axis_export,
+        "complexity_quality_metrics": {
+            "source_feature_bucket_policy": "tiny<=5, small<=15, medium<=40, large>40 source static features",
+            "by_source_feature_bucket": complexity_export,
+            "hard_nonperfect_rows": hard_function_rows,
+        },
+        "stage_cost_correlation_metrics": {
+            "decompile_wall_by_behavior_status": {
+                status: numeric_distribution(values)
+                for status, values in sorted(cost_values_by_behavior_status.items())
+            },
+            "decompile_wall_by_stage_first_failure": {
+                stage: numeric_distribution(values)
+                for stage, values in sorted(cost_values_by_stage_first_failure.items())
+            },
         },
         "perfect_row_count": perfect_score_count,
         "supported_behavior_row_count": sum(
@@ -4079,6 +4269,74 @@ def render_markdown(summary: dict[str, Any], rows: list[dict[str, Any]]) -> str:
             lines.extend(["", "| First Stage Failure | Lost Score |", "|---|---:|"])
             for stage, value in sorted(loss_by_stage.items()):
                 lines.append(f"| {stage} | {float(value or 0.0):.6f} |")
+    improvement_axes = summary.get("improvement_axis_metrics")
+    if isinstance(improvement_axes, dict) and improvement_axes:
+        lines.extend([
+            "",
+            "## Improvement Axis Metrics",
+            "",
+            "| Axis | Rows | Avg Similarity | Lost Score | Missing Features |",
+            "|---|---:|---:|---:|---:|",
+        ])
+        for axis, metrics in sorted(
+            improvement_axes.items(),
+            key=lambda item: float((item[1] or {}).get("lost_score_sum", 0.0) or 0.0),
+            reverse=True,
+        ):
+            if not isinstance(metrics, dict):
+                continue
+            lines.append(
+                f"| {axis} | {metrics.get('row_count', 0)} | "
+                f"{float(metrics.get('avg_semantic_score_percent', 0.0) or 0.0):.3f}% | "
+                f"{float(metrics.get('lost_score_sum', 0.0) or 0.0):.6f} | "
+                f"{float(metrics.get('missing_feature_total', 0.0) or 0.0):.0f} |"
+            )
+    complexity_quality = summary.get("complexity_quality_metrics")
+    if isinstance(complexity_quality, dict):
+        buckets = complexity_quality.get("by_source_feature_bucket")
+        if isinstance(buckets, dict) and buckets:
+            lines.extend([
+                "",
+                "## Complexity Quality Metrics",
+                "",
+                "| Source Feature Bucket | Rows | Avg Similarity | Behavior Pass Rate | Zero Rows | Missing Features |",
+                "|---|---:|---:|---:|---:|---:|",
+            ])
+            for bucket_name, bucket in sorted(buckets.items()):
+                if not isinstance(bucket, dict):
+                    continue
+                lines.append(
+                    f"| {bucket_name} | {bucket.get('row_count', 0)} | "
+                    f"{float(bucket.get('avg_semantic_score_percent', 0.0) or 0.0):.3f}% | "
+                    f"{float(bucket.get('behavior_pass_rate', 0.0) or 0.0):.3f} | "
+                    f"{bucket.get('zero_score_count', 0)} | "
+                    f"{float(bucket.get('missing_feature_total', 0.0) or 0.0):.0f} |"
+                )
+        hard_rows = complexity_quality.get("hard_nonperfect_rows") or []
+        if hard_rows:
+            lines.extend(["", "### Hard Non-Perfect Rows", "", "| Function | Score | Behavior | Stage | Source Features | Missing |", "|---|---:|---|---|---:|---:|"])
+            for row in hard_rows[:8]:
+                lines.append(
+                    f"| `{row.get('function_name')}` | "
+                    f"{float(row.get('semantic_score_percent', 0.0) or 0.0):.3f}% | "
+                    f"{row.get('behavior_status')} | {row.get('stage_first_failure')} | "
+                    f"{float(row.get('source_feature_total', 0.0) or 0.0):.0f} | "
+                    f"{float(row.get('missing_feature_total', 0.0) or 0.0):.0f} |"
+                )
+    stage_costs = summary.get("stage_cost_correlation_metrics")
+    if isinstance(stage_costs, dict):
+        by_stage = stage_costs.get("decompile_wall_by_stage_first_failure")
+        if isinstance(by_stage, dict) and by_stage:
+            lines.extend(["", "## Stage Cost Correlation Metrics", "", "| First Stage Failure | Rows | Avg Decompile Sec | P95 | Max |", "|---|---:|---:|---:|---:|"])
+            for stage, stats in sorted(by_stage.items()):
+                if not isinstance(stats, dict):
+                    continue
+                lines.append(
+                    f"| {stage} | {stats.get('count', 0)} | "
+                    f"{float(stats.get('avg', 0.0) or 0.0):.6f} | "
+                    f"{float(stats.get('p95', 0.0) or 0.0):.6f} | "
+                    f"{float(stats.get('max', 0.0) or 0.0):.6f} |"
+                )
     denominator_accounting = summary.get("denominator_accounting_metrics")
     if isinstance(denominator_accounting, dict):
         lines.extend(["", "## Denominator Accounting", "", "| Metric | Rows |", "|---|---:|"])
@@ -5189,6 +5447,10 @@ int max(int a, int b) { if (a > b) return a; return b; }
         assert summary["nir_debt_correlation_metrics"]["debt_row_count"] == 1
         assert summary["debug_quality_evidence_totals"]["region_emit_ready_failed_count"] == 1.0
         assert summary["behavior_distance_metrics"]["case_pass_rate_distribution"]["count"] == 0
+        assert summary["improvement_axis_metrics"]["nir_telemetry_debt"]["row_count"] == 1
+        assert summary["improvement_axis_metrics"]["mapping"]["lost_score_sum"] == 1.0
+        assert summary["complexity_quality_metrics"]["by_source_feature_bucket"]["tiny"]["row_count"] == 2
+        assert "decompile_wall_by_stage_first_failure" in summary["stage_cost_correlation_metrics"]
         void_func = SourceFunction(
             name="touch",
             signature="void touch(unsigned int seed)",
