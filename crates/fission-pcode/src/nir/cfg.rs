@@ -180,12 +180,7 @@ pub(super) fn resolve_branch_target_index(
     })
 }
 
-fn resolve_instruction_local_branch_target_index(
-    pcode: &PcodeFunction,
-    _block_idx: usize,
-    op: &PcodeOp,
-    vn: &Varnode,
-) -> Option<usize> {
+pub(super) fn instruction_local_branch_target_seq(op: &PcodeOp, vn: &Varnode) -> Option<u32> {
     if vn.space_id != 0 || !vn.is_constant {
         return None;
     }
@@ -199,11 +194,20 @@ fn resolve_instruction_local_branch_target_index(
     if delta == 0 {
         return None;
     }
-    let target_seq = if delta > 0 {
-        op.seq_num.checked_add(delta as u32)?
+    if delta > 0 {
+        op.seq_num.checked_add(delta as u32)
     } else {
-        op.seq_num.checked_sub(delta.unsigned_abs())?
-    };
+        op.seq_num.checked_sub(delta.unsigned_abs())
+    }
+}
+
+fn resolve_instruction_local_branch_target_index(
+    pcode: &PcodeFunction,
+    _block_idx: usize,
+    op: &PcodeOp,
+    vn: &Varnode,
+) -> Option<usize> {
+    let target_seq = instruction_local_branch_target_seq(op, vn)?;
 
     pcode
         .blocks
@@ -216,6 +220,20 @@ fn resolve_instruction_local_branch_target_index(
                 .is_some_and(|first| first.address == op.address && first.seq_num == target_seq)
         })
         .map(|(idx, _)| idx)
+        .or_else(|| {
+            pcode
+                .blocks
+                .iter()
+                .enumerate()
+                .find(|(_, block)| {
+                    block.start_address == op.address
+                        && block
+                            .ops
+                            .iter()
+                            .any(|candidate| candidate.seq_num == target_seq)
+                })
+                .map(|(idx, _)| idx)
+        })
 }
 
 pub(super) fn block_label(address: u64) -> String {

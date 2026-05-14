@@ -2129,3 +2129,78 @@ fn mips32_primary_return_is_v0() {
         CallingConvention::Mips32
     ));
 }
+
+#[test]
+fn mips32_guarded_trap_callother_does_not_surface_as_pcodeop() {
+    let mut options = preview_options();
+    options.calling_convention = CallingConvention::Mips32;
+    options.format = "ELF32".to_string();
+    options.pe_x64_only = false;
+    options.pointer_size = 4;
+    options.is_64bit = false;
+
+    let a0 = Varnode {
+        space_id: RUST_SLEIGH_ALT_REGISTER_SPACE_ID,
+        offset: 0x10,
+        size: 4,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let cond = uniq(0xc000, 1);
+    let func = PcodeFunction {
+        blocks: vec![
+            PcodeBasicBlock {
+                index: 0,
+                start_address: 0x100054,
+                successors: vec![1],
+                ops: vec![
+                    PcodeOp {
+                        seq_num: 0,
+                        opcode: PcodeOpcode::IntNotEqual,
+                        address: 0x100054,
+                        output: Some(cond.clone()),
+                        inputs: vec![a0.clone(), cst(0, 4)],
+                        asm_mnemonic: None,
+                    },
+                    PcodeOp {
+                        seq_num: 1,
+                        opcode: PcodeOpcode::CBranch,
+                        address: 0x100054,
+                        output: None,
+                        inputs: vec![cst(2, 8), cond],
+                        asm_mnemonic: None,
+                    },
+                ],
+            },
+            PcodeBasicBlock {
+                index: 1,
+                start_address: 0x100054,
+                successors: vec![],
+                ops: vec![
+                    PcodeOp {
+                        seq_num: 2,
+                        opcode: PcodeOpcode::CallOther,
+                        address: 0x100054,
+                        output: None,
+                        inputs: vec![cst(1, 4), cst(7, 2)],
+                        asm_mnemonic: None,
+                    },
+                    PcodeOp {
+                        seq_num: 3,
+                        opcode: PcodeOpcode::Return,
+                        address: 0x100058,
+                        output: None,
+                        inputs: vec![a0],
+                        asm_mnemonic: None,
+                    },
+                ],
+            },
+        ],
+    };
+
+    let code =
+        render_mlil_preview(&func, "guarded_trap", 0x100054, &options).expect("preview render");
+    assert!(!code.contains("__fission_branchind"), "{code}");
+    assert!(!code.contains("__pcodeop_1"), "{code}");
+    assert!(code.contains("return param_1;"), "{code}");
+}

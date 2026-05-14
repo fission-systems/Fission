@@ -96,6 +96,47 @@ impl<'a> PreviewBuilder<'a> {
                 })
     }
 
+    fn callother_is_guarded_trap_marker(
+        &self,
+        block: &crate::pcode::PcodeBasicBlock,
+        op_idx: usize,
+    ) -> bool {
+        let Some(op) = block.ops.get(op_idx) else {
+            return false;
+        };
+        if op.opcode != PcodeOpcode::CallOther || op.output.is_some() {
+            return false;
+        }
+        let block_idx = self.lowering_block_index(block);
+        let Some(preds) = self.predecessors.get(block_idx) else {
+            return false;
+        };
+        preds.iter().any(|pred_idx| {
+            let pred = self.pcode_block(*pred_idx);
+            let Some(term_idx) = self.block_terminator_index(pred) else {
+                return false;
+            };
+            let term = &pred.ops[term_idx];
+            if term.opcode != PcodeOpcode::CBranch || term.address != op.address {
+                return false;
+            }
+            let Some(target_seq) = term
+                .inputs
+                .first()
+                .and_then(|target| instruction_local_branch_target_seq(term, target))
+            else {
+                return false;
+            };
+            block
+                .ops
+                .iter()
+                .enumerate()
+                .any(|(target_op_idx, candidate)| {
+                    target_op_idx > op_idx && candidate.seq_num == target_seq
+                })
+        })
+    }
+
     fn call_result_is_observed(
         &self,
         block: &crate::pcode::PcodeBasicBlock,
@@ -249,6 +290,7 @@ impl<'a> PreviewBuilder<'a> {
                             if this.call_is_return_target_artifact(block, op_idx)
                                 || this.call_is_terminal_branchind_artifact(block, op_idx)
                                 || this.callother_is_same_instruction_call_marker(block, op_idx)
+                                || this.callother_is_guarded_trap_marker(block, op_idx)
                             {
                                 return Ok(None);
                             }
