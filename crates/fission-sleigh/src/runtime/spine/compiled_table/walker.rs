@@ -139,8 +139,8 @@ mod construct_state_offset_tests {
         checked_pattern_add, checked_pattern_div, checked_pattern_left_shift, checked_pattern_mul,
         checked_pattern_negate, checked_pattern_right_shift, checked_pattern_sub,
         checked_relative_offset, checked_selector_display_index, checked_selector_index_i64,
-        checked_selector_index_u64, context_change_expr_word, context_change_mask_word,
-        pattern_context_bits_i64, shifted_context_change_word,
+        checked_selector_index_u64, checked_u32_to_usize, context_change_expr_word,
+        context_change_mask_word, pattern_context_bits_i64, shifted_context_change_word,
     };
     use crate::compiler::{compile_x86_64_frontend, discovery};
 
@@ -262,6 +262,14 @@ mod construct_state_offset_tests {
     }
 
     #[test]
+    fn u32_to_usize_conversion_fails_closed_on_narrow_targets() {
+        assert_eq!(checked_u32_to_usize(3, "test").unwrap(), 3);
+        if usize::BITS < u32::BITS {
+            assert!(checked_u32_to_usize(u32::MAX, "test").is_err());
+        }
+    }
+
+    #[test]
     fn pattern_context_bits_preserve_or_sign_extend_bit_patterns() {
         assert_eq!(pattern_context_bits_i64(0xff, 8, false).unwrap(), 0xff);
         assert_eq!(pattern_context_bits_i64(0xff, 8, true).unwrap(), -1);
@@ -304,7 +312,10 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                 anyhow!("native matcher has no instruction byte span for opcode length")
             })?
         };
-        let minimum_length = selection.constructor.minimum_length as usize;
+        let minimum_length = checked_u32_to_usize(
+            selection.constructor.minimum_length,
+            "constructor minimum length",
+        )?;
         let handles = vec![None; selection.constructor.constructor_template.handles.len()];
         let operand_absolute_offsets =
             vec![None; selection.constructor.constructor_template.handles.len()];
@@ -1213,7 +1224,10 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
             return Ok(());
         }
         let field_end = token_base
-            .checked_add(encoded_size as usize)
+            .checked_add(checked_u32_to_usize(
+                encoded_size,
+                "SLA token field encoded size",
+            )?)
             .ok_or_else(|| anyhow!("SLA token field end offset overflowed"))?;
         self.cursor = self.cursor.max(field_end);
         Ok(())
@@ -1227,10 +1241,16 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
         let constructor_end = self
             .ctx
             .cursor
-            .checked_add(self.selection.constructor.minimum_length as usize)
+            .checked_add(checked_u32_to_usize(
+                self.selection.constructor.minimum_length,
+                "constructor minimum length",
+            )?)
             .ok_or_else(|| anyhow!("constructor minimum token range overflowed"))?;
         let token_end = token_base
-            .checked_add(encoded_size as usize)
+            .checked_add(checked_u32_to_usize(
+                encoded_size,
+                "SLA token field encoded size",
+            )?)
             .ok_or_else(|| anyhow!("SLA token field end offset overflowed"))?;
         Ok(token_base == self.ctx.cursor && token_end <= constructor_end)
     }
@@ -1243,7 +1263,10 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                 let construct_end = self
                     .ctx
                     .cursor
-                    .checked_add(self.selection.constructor.minimum_length as usize)
+                    .checked_add(checked_u32_to_usize(
+                        self.selection.constructor.minimum_length,
+                        "constructor minimum length",
+                    )?)
                     .ok_or_else(|| anyhow!("pattern InstNext construct end overflowed"))?;
                 let next_offset = self.cursor.max(construct_end);
                 let next_offset = checked_usize_to_u64(next_offset, "pattern InstNext offset")?;
@@ -1554,6 +1577,10 @@ fn subtable_decode_address(ctx: &CompiledInstructionContext<'_>) -> Result<u64> 
 
 fn checked_usize_to_u64(value: usize, role: &str) -> Result<u64> {
     u64::try_from(value).map_err(|_| anyhow!("{role} {value} exceeds u64"))
+}
+
+fn checked_u32_to_usize(value: u32, role: &str) -> Result<usize> {
+    usize::try_from(value).map_err(|_| anyhow!("{role} {value} exceeds usize"))
 }
 
 fn checked_selector_index_u64(value: u64, role: &str) -> Result<usize> {

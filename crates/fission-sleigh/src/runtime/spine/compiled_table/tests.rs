@@ -833,6 +833,9 @@ fn compiled_table_policy_symbols_stay_architecture_neutral() {
     let operand_subtable_minimum_fallback = ".unwrap_or(template.minimum_length as usize)";
     let token_field_saturating_end = "token_base.saturating_add(encoded_size as usize)";
     let token_field_unchecked_end = "token_base + encoded_size as usize";
+    let token_field_checked_lossy_end = "checked_add(encoded_size as usize)";
+    let constructor_minimum_checked_lossy_end =
+        "checked_add(self.selection.constructor.minimum_length as usize)";
     let token_read_unchecked_end = "offset + size as usize";
     let token_read_unchecked_absolute = "base_cursor + off";
     let operand_offset_lossy_signed_add = "base as i64 + i64::from(reloffset)";
@@ -1128,7 +1131,9 @@ fn compiled_table_policy_symbols_stay_architecture_neutral() {
         );
         assert!(
             !source.contains(token_field_saturating_end)
-                && !source.contains(token_field_unchecked_end),
+                && !source.contains(token_field_unchecked_end)
+                && !source.contains(token_field_checked_lossy_end)
+                && !source.contains(constructor_minimum_checked_lossy_end),
             "{} still hides malformed SLA token-field cursor arithmetic",
             file.display()
         );
