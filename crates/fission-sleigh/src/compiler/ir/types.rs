@@ -890,6 +890,14 @@ mod tests {
     }
 
     #[test]
+    fn default_sla_uniqmask_matches_ghidra_absent_attribute() {
+        let frontend = minimal_frontend_with_spaces(BTreeMap::new());
+
+        assert_eq!(default_sla_uniqmask(), 0);
+        assert_eq!(frontend.sla_uniqmask, 0);
+    }
+
+    #[test]
     fn sla_ram_address_size_fails_closed_when_space_metadata_is_missing() {
         let frontend = minimal_frontend_with_spaces(BTreeMap::new());
 

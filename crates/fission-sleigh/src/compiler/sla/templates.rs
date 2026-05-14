@@ -25,6 +25,15 @@ fn signed_to_i32(value: i64, label: &str) -> Result<i32> {
     i32::try_from(value).map_err(|_| anyhow!("{label} out of i32 range: {value}"))
 }
 
+fn optional_nonnegative_u64(value: i64, label: &str) -> Result<Option<u64>> {
+    if value < 0 {
+        return Ok(None);
+    }
+    u64::try_from(value)
+        .map(Some)
+        .map_err(|_| anyhow!("{label} out of u64 range: {value}"))
+}
+
 fn usize_to_u32(value: usize, label: &str) -> Result<u32> {
     u32::try_from(value).map_err(|_| anyhow!("{label} out of u32 range: {value}"))
 }
@@ -160,7 +169,11 @@ pub(super) fn decode_construct_templates(
                     u32::try_from(value)
                         .map_err(|_| "constructor_negative_minimum_length".to_string())
                 })?;
-            let source_index_key = u64::try_from(source_index).ok();
+            let source_index_key = optional_nonnegative_u64(
+                source_index,
+                "constructor source index",
+            )
+            .map_err(|err| err.to_string())?;
             let source_file = source_index_key
                 .and_then(|idx| source_files.get(&idx).cloned())
                 .unwrap_or_else(|| format!("<generated:{subtable_name}>"));
@@ -1055,6 +1068,22 @@ mod tests {
         let opcode = map_pcode_opcode(73).expect("known LZCOUNT opcode");
 
         assert_eq!(opcode, CompiledOpTplOpcode::LzCount);
+    }
+
+    #[test]
+    fn optional_nonnegative_u64_only_treats_negative_values_as_absent() {
+        assert_eq!(
+            optional_nonnegative_u64(-1, "test").expect("negative is absent"),
+            None
+        );
+        assert_eq!(
+            optional_nonnegative_u64(0, "test").expect("zero is present"),
+            Some(0)
+        );
+        assert_eq!(
+            optional_nonnegative_u64(i64::MAX, "test").expect("i64 max fits u64"),
+            Some(i64::MAX as u64)
+        );
     }
 }
 

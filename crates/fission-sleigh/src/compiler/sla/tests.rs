@@ -678,6 +678,19 @@ fn sla_constructor_slots_follow_ghidra_subtable_ordinals() {
 }
 
 #[test]
+fn sla_constructor_source_index_conversion_is_not_silent() {
+    let templates = include_str!("templates.rs");
+    assert!(
+        !templates.contains("u64::try_from(source_index).ok()"),
+        "constructor source index conversion must only treat negative values as generated, not silently drop conversion errors"
+    );
+    assert!(
+        templates.contains("optional_nonnegative_u64(\n                source_index"),
+        "constructor source index decode must use the explicit optional nonnegative conversion helper"
+    );
+}
+
+#[test]
 fn sla_decode_diagnostics_are_trace_gated() {
     let templates = include_str!("templates.rs");
     for forbidden in ["SLA Symbols Found", "'instruction' Root Node"] {
