@@ -137,6 +137,10 @@ manifest.
 - `behavior_case_metrics`: dynamic behavior at case granularity, including
   total/pass/fail case counts, case pass rate, and rows where at least one case
   passed despite an overall mismatch.
+- `behavior_support_metrics`: behavior harness case-source counts
+  (`explicit` vs `default`), unsupported-signature row counts, and unsupported
+  reason buckets, so untested functions are visible instead of blending into
+  ordinary behavior failures.
 - `behavior_mismatch_metrics`: mismatch-row diagnostics including first failing
   case index buckets, output-length deltas, and mismatch kind counts.
 - `behavior_distance_metrics`: case pass-rate distribution plus missing/extra
@@ -159,11 +163,20 @@ manifest.
   with missing/extra features, rows with zero source/decompiler feature
   intersection, per-component missing-row counts, and missing/extra feature
   count distributions.
+- `source_feature_metrics`: source/decompiler/intersection/union feature-count
+  distributions, plus per-component source/decompiler feature-count
+  distributions. This exposes whether low similarity is caused by absent output,
+  excessive output, or high-complexity source rows.
+- `by_arch`, `by_source_return_kind`, and `by_source_param_shape`: quality
+  buckets split by inferred binary architecture and source signature shape.
+  These are additive to `by_language`, `by_tag`, and `by_entry`.
 - `debug_coverage_metrics` and `debug_stage_status_matrix`: debug evidence
   coverage and per-stage status counts for rows where debug decomp evidence was
   requested.
 - `pipeline_stage_metrics`: per-stage OK/non-OK/missing counts and OK rates for
   load, decode, raw p-code, NIR build, normalize, structuring, and render.
+- `debug_pipeline_numeric_metrics`: distributions for numeric Rust-SLEIGH
+  pipeline evidence such as decode attempts and raw p-code block/op/edge counts.
 - `nir_build_stats_metrics`: flattened `PreviewBuildStats`/`NirBuildStats`
   numeric totals, nonzero row counts, debt-metric distributions, and highest
   debt rows. This keeps NIR telemetry aligned with the canonical stats payload

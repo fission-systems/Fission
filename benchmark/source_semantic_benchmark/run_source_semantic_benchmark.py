@@ -73,6 +73,26 @@ SOURCE_EXTENSIONS = {
     ".rs": "rust",
 }
 
+KNOWN_ARCH_TAGS = {
+    "aarch64",
+    "arm",
+    "arm8",
+    "arm8m",
+    "ebpf",
+    "loongarch64",
+    "mips",
+    "mips32",
+    "mips32le",
+    "ppc",
+    "ppc64",
+    "riscv",
+    "riscv64",
+    "sparc",
+    "x86",
+    "x86-64",
+    "x86_64",
+}
+
 CONTROL_WORDS = {
     "if",
     "else",
@@ -438,6 +458,31 @@ def matching_binary_paths(source_path: Path) -> list[Path]:
         if candidate.name == stem or candidate.stem == stem:
             matches.append(candidate)
     return matches
+
+
+def infer_entry_arch(entry: BenchmarkEntry) -> str:
+    for tag in entry.tags:
+        normalized = str(tag).strip().lower()
+        if normalized in KNOWN_ARCH_TAGS:
+            return "x86-64" if normalized == "x86_64" else normalized
+    parts = [part.lower() for part in entry.binary_path.parts]
+    try:
+        binary_idx = parts.index("binary")
+    except ValueError:
+        binary_idx = -1
+    if binary_idx >= 0 and binary_idx + 1 < len(parts):
+        candidate = parts[binary_idx + 1]
+        return "x86-64" if candidate == "x86_64" else candidate
+    return "unknown"
+
+
+def source_param_shape(param_kinds: list[str]) -> str:
+    if not param_kinds:
+        return "arity_0"
+    counts = Counter(param_kinds)
+    if len(counts) == 1:
+        return f"{param_kinds[0]}_arity_{len(param_kinds)}"
+    return "+".join(f"{kind}{counts[kind]}" for kind in sorted(counts))
 
 
 def strip_comments(text: str) -> str:
@@ -1516,6 +1561,22 @@ def is_debt_metric_name(name: str) -> bool:
     return bool(NIR_DEBT_METRIC_RE.search(name))
 
 
+def add_numeric_debug_pipeline_values(values: dict[str, list[float]], pipeline: Any) -> None:
+    if not isinstance(pipeline, dict):
+        return
+    for key in [
+        "decode_attempt_count",
+        "raw_pcode_block_count",
+        "raw_pcode_op_count",
+        "raw_pcode_edge_count",
+        "instruction_limit",
+        "max_bytes",
+    ]:
+        value = pipeline.get(key)
+        if isinstance(value, int | float) and not isinstance(value, bool):
+            values.setdefault(key, []).append(float(value))
+
+
 def default_behavior_cases(param_count: int) -> list[tuple[int, ...]]:
     if param_count == 0:
         return [()]
@@ -1958,6 +2019,7 @@ def run_behavior_check(
 ) -> dict[str, Any]:
     behavior_start = time.perf_counter()
     explicit_cases = explicit_behavior_cases(entry, func)
+    case_source = "explicit" if explicit_cases is not None else "default"
     supported, reason = behavior_supported(entry, func, explicit_cases)
     if not supported:
         return {
@@ -1965,6 +2027,7 @@ def run_behavior_check(
             "score": 0.0,
             "reason": reason,
             "eligible": False,
+            "case_source": case_source,
             "case_count": 0,
             "wall_sec": round(time.perf_counter() - behavior_start, 6),
         }
@@ -1975,6 +2038,7 @@ def run_behavior_check(
             "reason": host_execution.get("status"),
             "detail": host_execution.get("detail"),
             "eligible": True,
+            "case_source": case_source,
             "case_count": 0,
             "wall_sec": round(time.perf_counter() - behavior_start, 6),
         }
@@ -1983,6 +2047,7 @@ def run_behavior_check(
             "status": "decomp_failed",
             "score": 0.0,
             "eligible": True,
+            "case_source": case_source,
             "case_count": 0,
             "wall_sec": round(time.perf_counter() - behavior_start, 6),
         }
@@ -1998,6 +2063,7 @@ def run_behavior_check(
 
     def maybe_attach_artifacts(result: dict[str, Any], oracle: dict[str, Any] | None, candidate: dict[str, Any] | None) -> dict[str, Any]:
         result.setdefault("eligible", True)
+        result.setdefault("case_source", case_source)
         result.setdefault("case_count", len(cases))
         result["wall_sec"] = round(time.perf_counter() - behavior_start, 6)
         result["oracle_cache_status"] = (oracle or {}).get("behavior_cache_status")
@@ -2110,6 +2176,16 @@ def summarize(rows: list[dict[str, Any]], manifest_name: str, entries: list[Benc
         ]
         if status
     )
+    behavior_case_source_counts = Counter(
+        row.get("behavior", {}).get("case_source", "unknown")
+        for row in rows
+        if isinstance(row.get("behavior"), dict)
+    )
+    behavior_unsupported_reason_counts = Counter(
+        row.get("behavior", {}).get("reason", "unknown")
+        for row in rows
+        if row.get("behavior", {}).get("status") == "unsupported_signature"
+    )
     decomp_cache_status_counts = Counter(row.get("decomp_cache_status", "not_requested") for row in rows)
     zero_credit_breakdown = Counter(
         row_zero_credit_reason(row)
@@ -2161,6 +2237,16 @@ def summarize(rows: list[dict[str, Any]], manifest_name: str, entries: list[Benc
     decomp_byte_counts: list[float] = []
     decomp_to_source_line_ratios: list[float] = []
     decomp_to_source_byte_ratios: list[float] = []
+    source_feature_total_values: list[float] = []
+    decomp_feature_total_values: list[float] = []
+    static_intersection_feature_total_values: list[float] = []
+    static_union_feature_total_values: list[float] = []
+    static_component_source_feature_values: dict[str, list[float]] = {
+        component: [] for component in STATIC_SIMILARITY_COMPONENTS
+    }
+    static_component_decomp_feature_values: dict[str, list[float]] = {
+        component: [] for component in STATIC_SIMILARITY_COMPONENTS
+    }
     source_decomp_size_hot_rows: list[dict[str, Any]] = []
     source_feature_rows = 0
     decomp_feature_rows = 0
@@ -2191,7 +2277,12 @@ def summarize(rows: list[dict[str, Any]], manifest_name: str, entries: list[Benc
     nir_debt_score_values: list[float] = []
     nir_no_debt_score_values: list[float] = []
     nir_debt_behavior_status_counts: Counter[str] = Counter()
+    nir_debt_stage_first_failure_counts: Counter[str] = Counter()
+    debug_pipeline_numeric_values: dict[str, list[float]] = {}
     by_language: dict[str, dict[str, Any]] = {}
+    by_arch: dict[str, dict[str, Any]] = {}
+    by_source_return_kind: dict[str, dict[str, Any]] = {}
+    by_source_param_shape: dict[str, dict[str, Any]] = {}
     by_tag: dict[str, dict[str, Any]] = {}
     by_entry: dict[str, dict[str, Any]] = {}
 
@@ -2304,8 +2395,13 @@ def summarize(rows: list[dict[str, Any]], manifest_name: str, entries: list[Benc
             row_source_total = float(static_gaps.get("source_feature_total", 0.0) or 0.0)
             row_decomp_total = float(static_gaps.get("decomp_feature_total", 0.0) or 0.0)
             row_intersection_total = float(static_gaps.get("intersection_feature_total", 0.0) or 0.0)
+            row_union_total = float(static_gaps.get("union_feature_total", 0.0) or 0.0)
             row_missing_total = float(static_gaps.get("missing_feature_total", 0.0) or 0.0)
             row_extra_total = float(static_gaps.get("extra_feature_total", 0.0) or 0.0)
+            source_feature_total_values.append(row_source_total)
+            decomp_feature_total_values.append(row_decomp_total)
+            static_intersection_feature_total_values.append(row_intersection_total)
+            static_union_feature_total_values.append(row_union_total)
             source_feature_rows += int(row_source_total > 0.0)
             decomp_feature_rows += int(row_decomp_total > 0.0)
             static_decomp_absent_feature_rows += int(row_source_total > 0.0 and row_decomp_total == 0.0)
@@ -2338,7 +2434,10 @@ def summarize(rows: list[dict[str, Any]], manifest_name: str, entries: list[Benc
                     continue
                 component_missing_total = float(details.get("missing_feature_total", 0.0) or 0.0)
                 component_source_total = float(details.get("source_feature_total", 0.0) or 0.0)
+                component_decomp_total = float(details.get("decomp_feature_total", 0.0) or 0.0)
                 component_intersection_total = float(details.get("intersection_feature_total", 0.0) or 0.0)
+                static_component_source_feature_values[component].append(component_source_total)
+                static_component_decomp_feature_values[component].append(component_decomp_total)
                 static_component_missing_row_counts[component] += int(component_missing_total > 0.0)
                 static_component_zero_similarity_row_counts[component] += int(
                     component_source_total > 0.0 and component_intersection_total == 0.0
@@ -2375,6 +2474,27 @@ def summarize(rows: list[dict[str, Any]], manifest_name: str, entries: list[Benc
         )
         add_bucket(bucket, row)
 
+        arch = str(row.get("binary_arch") or "unknown")
+        arch_bucket = by_arch.setdefault(
+            arch,
+            {"row_count": 0, "mapped": 0, "decomp_success": 0, "behavior_pass": 0, "score_sum": 0.0},
+        )
+        add_bucket(arch_bucket, row)
+
+        return_kind = str(row.get("source_return_kind") or "unknown")
+        return_bucket = by_source_return_kind.setdefault(
+            return_kind,
+            {"row_count": 0, "mapped": 0, "decomp_success": 0, "behavior_pass": 0, "score_sum": 0.0},
+        )
+        add_bucket(return_bucket, row)
+
+        param_shape = str(row.get("source_param_shape") or "unknown")
+        param_bucket = by_source_param_shape.setdefault(
+            param_shape,
+            {"row_count": 0, "mapped": 0, "decomp_success": 0, "behavior_pass": 0, "score_sum": 0.0},
+        )
+        add_bucket(param_bucket, row)
+
         entry_bucket = by_entry.setdefault(
             row["entry_id"],
             {"row_count": 0, "mapped": 0, "decomp_success": 0, "behavior_pass": 0, "score_sum": 0.0},
@@ -2405,6 +2525,7 @@ def summarize(rows: list[dict[str, Any]], manifest_name: str, entries: list[Benc
                     if value != 0:
                         debug_quality_evidence_nonzero_rows[key] += 1
             pipeline = debug_decomp.get("rust_sleigh_pipeline")
+            add_numeric_debug_pipeline_values(debug_pipeline_numeric_values, pipeline)
             template_sources = (
                 pipeline.get("template_source_counts")
                 if isinstance(pipeline, dict)
@@ -2451,6 +2572,7 @@ def summarize(rows: list[dict[str, Any]], manifest_name: str, entries: list[Benc
                 nir_debt_row_count += 1
                 nir_debt_score_values.append(score)
                 nir_debt_behavior_status_counts[behavior_status] += 1
+                nir_debt_stage_first_failure_counts[first_stage] += 1
             else:
                 nir_no_debt_score_values.append(score)
 
@@ -2480,7 +2602,14 @@ def summarize(rows: list[dict[str, Any]], manifest_name: str, entries: list[Benc
             else:
                 behavior_mismatch_kind_counts["unknown"] += 1
 
-    for bucket in list(by_language.values()) + list(by_tag.values()) + list(by_entry.values()):
+    for bucket in (
+        list(by_language.values())
+        + list(by_arch.values())
+        + list(by_source_return_kind.values())
+        + list(by_source_param_shape.values())
+        + list(by_tag.values())
+        + list(by_entry.values())
+    ):
         count = max(1, bucket["row_count"])
         avg_score = round(bucket.pop("score_sum") / count, 6)
         bucket["avg_semantic_score"] = avg_score
@@ -2790,6 +2919,13 @@ def summarize(rows: list[dict[str, Any]], manifest_name: str, entries: list[Benc
             else 0.0,
             "partial_mismatch_row_count": partial_behavior_rows,
         },
+        "behavior_support_metrics": {
+            "case_source_counts": dict(sorted(behavior_case_source_counts.items())),
+            "unsupported_reason_counts": dict(sorted(behavior_unsupported_reason_counts.items())),
+            "unsupported_signature_row_count": int(behavior_status_counts.get("unsupported_signature", 0)),
+            "eligible_row_count": behavior_expected,
+            "executed_row_count": behavior_executed,
+        },
         "behavior_denominator_metrics": {
             "row_denominator_count": total,
             "eligible_row_count": behavior_expected,
@@ -2874,6 +3010,20 @@ def summarize(rows: list[dict[str, Any]], manifest_name: str, entries: list[Benc
             "extra_feature_count_distribution": numeric_distribution(extra_feature_count_values),
             "component_missing_row_counts": dict(sorted(static_component_missing_row_counts.items())),
             "component_zero_similarity_row_counts": dict(sorted(static_component_zero_similarity_row_counts.items())),
+        },
+        "source_feature_metrics": {
+            "source_feature_total_distribution": numeric_distribution(source_feature_total_values),
+            "decomp_feature_total_distribution": numeric_distribution(decomp_feature_total_values),
+            "intersection_feature_total_distribution": numeric_distribution(static_intersection_feature_total_values),
+            "union_feature_total_distribution": numeric_distribution(static_union_feature_total_values),
+            "component_source_feature_distributions": {
+                component: numeric_distribution(values)
+                for component, values in sorted(static_component_source_feature_values.items())
+            },
+            "component_decomp_feature_distributions": {
+                component: numeric_distribution(values)
+                for component, values in sorted(static_component_decomp_feature_values.items())
+            },
         },
         "static_absence_penalty_metrics": {
             "source_feature_total": static_source_total,
@@ -2960,6 +3110,10 @@ def summarize(rows: list[dict[str, Any]], manifest_name: str, entries: list[Benc
             ) if mapped else 0.0,
         },
         "pipeline_stage_metrics": pipeline_stage_metrics,
+        "debug_pipeline_numeric_metrics": {
+            key: numeric_distribution(values)
+            for key, values in sorted(debug_pipeline_numeric_values.items())
+        },
         "nir_build_stats_metrics": {
             "stats_row_count": nir_build_stats_row_count,
             "stats_row_rate_mapped_denominator": round(nir_build_stats_row_count / mapped_debug_denominator, 6)
@@ -2980,6 +3134,7 @@ def summarize(rows: list[dict[str, Any]], manifest_name: str, entries: list[Benc
             "score_distribution_debt_rows": numeric_distribution(nir_debt_score_values),
             "score_distribution_no_debt_rows": numeric_distribution(nir_no_debt_score_values),
             "behavior_status_counts_debt_rows": dict(sorted(nir_debt_behavior_status_counts.items())),
+            "stage_first_failure_counts_debt_rows": dict(sorted(nir_debt_stage_first_failure_counts.items())),
         },
         "debug_owner_bucket_counts": dict(sorted(debug_owner_bucket_counts.items())),
         "debug_stage_status_counts": dict(sorted(debug_stage_status_counts.items())),
@@ -2991,6 +3146,9 @@ def summarize(rows: list[dict[str, Any]], manifest_name: str, entries: list[Benc
         "host_execution_unavailable_count": sum(host_statuses.values()),
         "host_execution_unavailable_reasons": dict(host_statuses),
         "by_language": by_language,
+        "by_arch": by_arch,
+        "by_source_return_kind": by_source_return_kind,
+        "by_source_param_shape": by_source_param_shape,
         "by_tag": by_tag,
         "by_entry": by_entry,
     }
@@ -3827,6 +3985,40 @@ def render_markdown(summary: dict[str, Any], rows: list[dict[str, Any]]) -> str:
             f"| {lang} | {bucket['row_count']} | {bucket['mapped']} | {bucket['decomp_success']} | "
             f"{bucket['behavior_pass']} | {bucket['avg_semantic_score_percent']:.3f}% |"
         )
+    if summary.get("by_arch"):
+        lines.extend([
+            "",
+            "## By Architecture",
+            "",
+            "| Architecture | Rows | Mapped | Decomp OK | Behavior Pass | Avg Similarity |",
+            "|---|---:|---:|---:|---:|---:|",
+        ])
+        for arch, bucket in sorted(summary["by_arch"].items()):
+            lines.append(
+                f"| {arch} | {bucket['row_count']} | {bucket['mapped']} | {bucket['decomp_success']} | "
+                f"{bucket['behavior_pass']} | {bucket['avg_semantic_score_percent']:.3f}% |"
+            )
+    if summary.get("by_source_return_kind"):
+        lines.extend([
+            "",
+            "## By Source Signature",
+            "",
+            "| Return Kind | Rows | Mapped | Decomp OK | Behavior Pass | Avg Similarity |",
+            "|---|---:|---:|---:|---:|---:|",
+        ])
+        for return_kind, bucket in sorted(summary["by_source_return_kind"].items()):
+            lines.append(
+                f"| {return_kind} | {bucket['row_count']} | {bucket['mapped']} | {bucket['decomp_success']} | "
+                f"{bucket['behavior_pass']} | {bucket['avg_semantic_score_percent']:.3f}% |"
+            )
+        param_shapes = summary.get("by_source_param_shape")
+        if isinstance(param_shapes, dict) and param_shapes:
+            lines.extend(["", "| Param Shape | Rows | Mapped | Decomp OK | Behavior Pass | Avg Similarity |", "|---|---:|---:|---:|---:|---:|"])
+            for param_shape, bucket in sorted(param_shapes.items()):
+                lines.append(
+                    f"| {param_shape} | {bucket['row_count']} | {bucket['mapped']} | {bucket['decomp_success']} | "
+                    f"{bucket['behavior_pass']} | {bucket['avg_semantic_score_percent']:.3f}% |"
+                )
     if summary.get("behavior_status_counts"):
         lines.extend(["", "## Behavior Status", "", "| Status | Rows |", "|---|---:|"])
         for status, count in sorted(summary["behavior_status_counts"].items()):
@@ -3964,6 +4156,32 @@ def render_markdown(summary: dict[str, Any], rows: list[dict[str, Any]]) -> str:
             lines.extend(["", "| Component | Missing Rows |", "|---|---:|"])
             for component, count in sorted(component_missing.items()):
                 lines.append(f"| {component} | {count} |")
+    source_features = summary.get("source_feature_metrics")
+    if isinstance(source_features, dict):
+        source_dist = source_features.get("source_feature_total_distribution")
+        decomp_dist = source_features.get("decomp_feature_total_distribution")
+        union_dist = source_features.get("union_feature_total_distribution")
+        if isinstance(source_dist, dict) and isinstance(decomp_dist, dict) and isinstance(union_dist, dict):
+            lines.extend(["", "## Source Feature Metrics", ""])
+            lines.append(
+                f"- Source feature avg {float(source_dist.get('avg', 0.0) or 0.0):.6f}, "
+                f"decomp feature avg {float(decomp_dist.get('avg', 0.0) or 0.0):.6f}, "
+                f"union feature p95 {float(union_dist.get('p95', 0.0) or 0.0):.6f}"
+            )
+        component_source = source_features.get("component_source_feature_distributions")
+        if isinstance(component_source, dict) and component_source:
+            lines.extend(["", "| Component | Source Avg Features | Decomp Avg Features |", "|---|---:|---:|"])
+            component_decomp = (
+                source_features.get("component_decomp_feature_distributions")
+                if isinstance(source_features.get("component_decomp_feature_distributions"), dict)
+                else {}
+            )
+            for component, stats in sorted(component_source.items()):
+                decomp_stats = component_decomp.get(component) if isinstance(component_decomp, dict) else {}
+                lines.append(
+                    f"| {component} | {float((stats or {}).get('avg', 0.0) or 0.0):.6f} | "
+                    f"{float((decomp_stats or {}).get('avg', 0.0) or 0.0):.6f} |"
+                )
     static_absence = summary.get("static_absence_penalty_metrics")
     if isinstance(static_absence, dict):
         lines.extend(["", "## Static Absence Penalty Metrics", ""])
@@ -4011,6 +4229,24 @@ def render_markdown(summary: dict[str, Any], rows: list[dict[str, Any]]) -> str:
             f"failed {behavior_cases.get('case_fail_count', 0)}, "
             f"partial mismatch rows {behavior_cases.get('partial_mismatch_row_count', 0)}"
         )
+    behavior_support = summary.get("behavior_support_metrics")
+    if isinstance(behavior_support, dict):
+        lines.extend(["", "## Behavior Support Metrics", ""])
+        lines.append(
+            f"- Eligible rows {behavior_support.get('eligible_row_count', 0)}, "
+            f"executed rows {behavior_support.get('executed_row_count', 0)}, "
+            f"unsupported signature rows {behavior_support.get('unsupported_signature_row_count', 0)}"
+        )
+        case_sources = behavior_support.get("case_source_counts")
+        if isinstance(case_sources, dict) and case_sources:
+            lines.extend(["", "| Case Source | Rows |", "|---|---:|"])
+            for source, count in sorted(case_sources.items()):
+                lines.append(f"| {source} | {count} |")
+        unsupported_reasons = behavior_support.get("unsupported_reason_counts")
+        if isinstance(unsupported_reasons, dict) and unsupported_reasons:
+            lines.extend(["", "| Unsupported Reason | Rows |", "|---|---:|"])
+            for reason, count in sorted(unsupported_reasons.items()):
+                lines.append(f"| `{reason}` | {count} |")
     behavior_denominators = summary.get("behavior_denominator_metrics")
     if isinstance(behavior_denominators, dict):
         lines.extend(["", "## Behavior Denominator Metrics", "", "| Metric | Value |", "|---|---:|"])
@@ -4085,6 +4321,18 @@ def render_markdown(summary: dict[str, Any], rows: list[dict[str, Any]]) -> str:
                 f"| {stage} | {metrics.get('row_count', 0)} | {metrics.get('ok_count', 0)} | "
                 f"{metrics.get('non_ok_count', 0)} | {metrics.get('missing_count', 0)} | "
                 f"{float(metrics.get('ok_rate', 0.0) or 0.0):.3f} |"
+            )
+    debug_pipeline_numeric = summary.get("debug_pipeline_numeric_metrics")
+    if isinstance(debug_pipeline_numeric, dict) and debug_pipeline_numeric:
+        lines.extend(["", "## Debug Pipeline Numeric Metrics", "", "| Metric | Rows | Avg | P95 | Max |", "|---|---:|---:|---:|---:|"])
+        for metric, stats in sorted(debug_pipeline_numeric.items()):
+            if not isinstance(stats, dict):
+                continue
+            lines.append(
+                f"| {metric} | {stats.get('count', 0)} | "
+                f"{float(stats.get('avg', 0.0) or 0.0):.6f} | "
+                f"{float(stats.get('p95', 0.0) or 0.0):.6f} | "
+                f"{float(stats.get('max', 0.0) or 0.0):.6f} |"
             )
     nir_stats = summary.get("nir_build_stats_metrics")
     if isinstance(nir_stats, dict) and nir_stats.get("stats_row_count"):
@@ -4476,6 +4724,7 @@ def row_for_function(
     return {
         "entry_id": entry.id,
         "binary_path": rel(entry.binary_path),
+        "binary_arch": infer_entry_arch(entry),
         "source_path": rel(entry.source_path),
         "language": entry.language,
         "tags": entry.tags,
@@ -4484,8 +4733,10 @@ def row_for_function(
         "source_signature": func.signature,
         "source_return_kind": func.return_kind,
         "source_param_kinds": func.param_kinds,
+        "source_param_shape": source_param_shape(func.param_kinds),
         "source_body_line_count": len(source_body_lines),
         "source_body_byte_count": len(func.body.encode("utf-8")),
+        "source_static_feature_count": sum(source_fp.values()),
         "address": matched.address if matched else None,
         "fission_name": matched.name if matched else None,
         "mapping_status": mapping_status,
@@ -4502,6 +4753,7 @@ def row_for_function(
         "decomp_wall_sec": decomp.get("wall_sec"),
         "decomp_line_count": len(decomp_lines),
         "decomp_byte_count": len(decomp_code.encode("utf-8")) if decomp_code else 0,
+        "decomp_static_feature_count": sum(decomp_fp.values()),
         "static_semantic_score": static_score,
         "static_semantic_score_percent": percent(static_score),
         "static_similarity_components": static_components,
