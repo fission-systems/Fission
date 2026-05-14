@@ -36,7 +36,7 @@ impl PackedElement {
     pub fn attr_signed(&self, id: u32) -> Option<i64> {
         match self.attrs.get(&id) {
             Some(PackedAttrValue::Signed(value)) => Some(*value),
-            Some(PackedAttrValue::Unsigned(value)) => i64::try_from(*value).ok(),
+            Some(PackedAttrValue::Unsigned(value)) => unsigned_attr_value_as_i64(*value),
             _ => None,
         }
     }
@@ -68,6 +68,13 @@ impl PackedElement {
 
     pub fn children(&self) -> &[PackedElement] {
         &self.children
+    }
+}
+
+fn unsigned_attr_value_as_i64(value: u64) -> Option<i64> {
+    match i64::try_from(value) {
+        Ok(value) => Some(value),
+        Err(_) => None,
     }
 }
 

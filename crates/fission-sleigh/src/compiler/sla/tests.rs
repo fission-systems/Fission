@@ -107,12 +107,29 @@ fn packed_parser_does_not_wrap_narrow_attribute_values() {
         "-(self.read_integer(len)? as i64)",
         "self.read_integer(len)? as usize",
         "self.offset + str_len",
+        "i64::try_from(*value).ok()",
     ] {
         assert!(
             !packed.contains(forbidden),
             "packed parser must fail closed instead of wrapping attribute values: {forbidden}"
         );
     }
+}
+
+#[test]
+fn packed_attr_signed_does_not_treat_oversized_unsigned_as_signed() {
+    let mut root = PackedElement {
+        id: 0,
+        attrs: BTreeMap::new(),
+        children: Vec::new(),
+    };
+    root.attrs
+        .insert(1, PackedAttrValue::Unsigned(i64::MAX as u64));
+    root.attrs
+        .insert(2, PackedAttrValue::Unsigned(i64::MAX as u64 + 1));
+
+    assert_eq!(root.attr_signed(1), Some(i64::MAX));
+    assert_eq!(root.attr_signed(2), None);
 }
 
 #[test]
