@@ -577,17 +577,17 @@ impl<'a> PreviewBuilder<'a> {
         }
 
         let proof = self.describe_merge_binding_candidate_proof(block, op_idx, output, rhs)?;
-        if !self.duplicate_start_merge_block(proof.merge_block)
-            || !proof.can_synthesize_phi_like_binding
-            || proof.predecessor_count != 2
-            || proof.missing_incoming_count != 0
-            || proof.conflicting_incoming_count != 1
-            || proof.consumer_kind != DisallowedSingleConsumerConsumerKind::OtherData
-        {
+        let duplicate_start = self.duplicate_start_merge_block(proof.merge_block);
+        if !self.merge_binding_proof_allows_predecessor_assignment(&proof, duplicate_start) {
             return None;
         }
         let (merge_idx, merge_addr, _, _) =
             self.first_output_use_site_outside_block_by_index(block_idx, output)?;
+        if merge_addr == proof.merge_block
+            && let Some(name) = self.explicit_merge_bindings.get(&(merge_idx, key.clone()))
+        {
+            return Some(name.clone());
+        }
         if merge_addr != proof.merge_block
             || !self
                 .successors
@@ -609,6 +609,29 @@ impl<'a> PreviewBuilder<'a> {
             ExplicitMergeBindingTrialReason::PhiLikeBindingMaterialized,
         );
         Some(binding.name)
+    }
+
+    fn merge_binding_proof_allows_predecessor_assignment(
+        &self,
+        proof: &MergeBindingCandidateProof,
+        duplicate_start: bool,
+    ) -> bool {
+        proof.can_synthesize_phi_like_binding
+            && (proof.predecessor_count > 2 || (duplicate_start && proof.predecessor_count == 2))
+            && proof.missing_incoming_count == 0
+            && proof.conflicting_incoming_count >= 1
+            && matches!(
+                proof.consumer_kind,
+                DisallowedSingleConsumerConsumerKind::OtherData
+                    | DisallowedSingleConsumerConsumerKind::Predicate
+            )
+            && proof.incoming_value_kinds.iter().all(|kind| {
+                matches!(
+                    kind,
+                    MergeBindingCandidateIncomingKind::VarOrConst
+                        | MergeBindingCandidateIncomingKind::Arithmetic
+                )
+            })
     }
 
     fn duplicate_start_merge_block(&self, merge_block: u64) -> bool {
@@ -1222,6 +1245,31 @@ mod tests {
         let builder = PreviewBuilder::new(&pcode, &options, None);
 
         assert!(builder.call_result_is_observed(&block, 0));
+    }
+
+    #[test]
+    fn predecessor_assignment_accepts_predicate_merge_consumers() {
+        let pcode = pcode_function(vec![block(Vec::new())]);
+        let options = crate::nir::builder::materialize::test_support::test_options();
+        let builder = PreviewBuilder::new(&pcode, &options, None);
+        let proof = MergeBindingCandidateProof {
+            merge_block: 0x2000,
+            predecessor_count: 3,
+            missing_incoming_count: 0,
+            conflicting_incoming_count: 1,
+            incoming_value_kinds: vec![
+                MergeBindingCandidateIncomingKind::VarOrConst,
+                MergeBindingCandidateIncomingKind::Arithmetic,
+            ],
+            consumer_kind: DisallowedSingleConsumerConsumerKind::Predicate,
+            rhs_kind: DisallowedSingleConsumerRhsKind::VarOrConst,
+            can_synthesize_phi_like_binding: true,
+            result: MergeBindingCandidateResult::PhiLikeBindingCandidate,
+        };
+
+        assert!(builder.merge_binding_proof_allows_predecessor_assignment(
+            &proof, false,
+        ));
     }
 
     #[test]

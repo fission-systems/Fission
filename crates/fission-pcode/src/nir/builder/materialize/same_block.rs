@@ -1200,6 +1200,9 @@ impl<'a> PreviewBuilder<'a> {
             | PcodeOpcode::IntLessEqual
             | PcodeOpcode::IntSLess
             | PcodeOpcode::IntSLessEqual
+            | PcodeOpcode::IntCarry
+            | PcodeOpcode::IntSCarry
+            | PcodeOpcode::IntSBorrow
             | PcodeOpcode::BoolNegate
             | PcodeOpcode::BoolXor
             | PcodeOpcode::BoolAnd
@@ -3342,6 +3345,26 @@ mod tests {
             PreviewBuilder::classify_disallowed_single_consumer_kind(&lzcnt, &[0]),
             DisallowedSingleConsumerConsumerKind::OtherData
         );
+    }
+
+    #[test]
+    fn carry_intrinsic_consumers_are_predicate_consumers() {
+        for opcode in [
+            PcodeOpcode::IntCarry,
+            PcodeOpcode::IntSCarry,
+            PcodeOpcode::IntSBorrow,
+        ] {
+            let carry = op(
+                1,
+                opcode,
+                Some(varnode(0x20)),
+                vec![varnode(0x10), varnode(0x14)],
+            );
+            assert_eq!(
+                PreviewBuilder::classify_disallowed_single_consumer_kind(&carry, &[0]),
+                DisallowedSingleConsumerConsumerKind::Predicate
+            );
+        }
     }
 
     #[test]

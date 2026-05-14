@@ -736,7 +736,12 @@ impl<'a> PreviewBuilder<'a> {
         rhs: &HirExpr,
     ) -> Option<JoinMergeMissingProof> {
         let proof = self.describe_missing_merge_binding_proof(block, op_idx, output, rhs)?;
-        if proof.relation != MissingMergeBindingRelation::JoinMergeMissing {
+        if !matches!(
+            proof.relation,
+            MissingMergeBindingRelation::JoinMergeMissing
+                | MissingMergeBindingRelation::LoopHeaderMergeMissing
+                | MissingMergeBindingRelation::PredicateMergeMissing
+        ) {
             return None;
         }
         let def_block_idx = self.lowering_block_index(block);
@@ -1053,7 +1058,12 @@ impl<'a> PreviewBuilder<'a> {
         else {
             return Err(ExplicitMergeBindingTrialReason::RejectedNotJoinMerge);
         };
-        if missing_proof.relation != MissingMergeBindingRelation::JoinMergeMissing {
+        if !matches!(
+            missing_proof.relation,
+            MissingMergeBindingRelation::JoinMergeMissing
+                | MissingMergeBindingRelation::LoopHeaderMergeMissing
+                | MissingMergeBindingRelation::PredicateMergeMissing
+        ) {
             return Err(ExplicitMergeBindingTrialReason::RejectedNotJoinMerge);
         }
         let Some(proof) = self.describe_merge_binding_candidate_proof(block, op_idx, output, rhs)
@@ -3476,6 +3486,18 @@ mod tests {
             1,
             &kinds,
             DisallowedSingleConsumerConsumerKind::OtherData,
+        );
+        assert_eq!(result, MergeBindingCandidateResult::PhiLikeBindingCandidate);
+    }
+
+    #[test]
+    fn merge_binding_candidate_result_accepts_predicate_consumers() {
+        let kinds = BTreeSet::from([MergeBindingCandidateIncomingKind::VarOrConst]);
+        let result = PreviewBuilder::classify_merge_binding_candidate_result(
+            0,
+            1,
+            &kinds,
+            DisallowedSingleConsumerConsumerKind::Predicate,
         );
         assert_eq!(result, MergeBindingCandidateResult::PhiLikeBindingCandidate);
     }
