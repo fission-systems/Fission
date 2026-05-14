@@ -518,6 +518,33 @@ def find_matching_brace(text: str, open_idx: int) -> int | None:
     return None
 
 
+def find_matching_paren(text: str, open_idx: int) -> int | None:
+    depth = 0
+    i = open_idx
+    in_string: str | None = None
+    escaped = False
+    while i < len(text):
+        ch = text[i]
+        if in_string:
+            if escaped:
+                escaped = False
+            elif ch == "\\":
+                escaped = True
+            elif ch == in_string:
+                in_string = None
+        else:
+            if ch in ("'", '"'):
+                in_string = ch
+            elif ch == "(":
+                depth += 1
+            elif ch == ")":
+                depth -= 1
+                if depth == 0:
+                    return i
+        i += 1
+    return None
+
+
 def split_params(params: str) -> list[str]:
     params = params.strip()
     if not params or params == "void":
@@ -833,11 +860,41 @@ def select_source_functions(
 
 
 def source_call_counts(body: str) -> Counter[str]:
-    return Counter(
-        normalize_name(call.split("::")[-1].lower())
-        for call in CALL_RE.findall(strip_comments(body))
-        if call.split("::")[-1].lower() not in CALL_EXCLUDE
-    )
+    return Counter(call_names_for_fingerprint(body))
+
+
+def is_function_definition_call_match(text: str, match: re.Match[str]) -> bool:
+    open_idx = text.rfind("(", match.start(), match.end())
+    if open_idx < 0:
+        return False
+    close_idx = find_matching_paren(text, open_idx)
+    if close_idx is None:
+        return False
+    next_idx = close_idx + 1
+    while next_idx < len(text) and text[next_idx].isspace():
+        next_idx += 1
+    if next_idx >= len(text) or text[next_idx] != "{":
+        return False
+    statement_start = max(
+        text.rfind(";", 0, match.start()),
+        text.rfind("{", 0, match.start()),
+        text.rfind("}", 0, match.start()),
+    ) + 1
+    prefix = text[statement_start:match.start()].strip()
+    return bool(prefix)
+
+
+def call_names_for_fingerprint(code: str) -> list[str]:
+    stripped = strip_comments(code)
+    calls: list[str] = []
+    for match in CALL_RE.finditer(stripped):
+        lowered = match.group(1).split("::")[-1].lower()
+        if lowered in CALL_EXCLUDE:
+            continue
+        if is_function_definition_call_match(stripped, match):
+            continue
+        calls.append(normalize_name(lowered))
+    return calls
 
 
 def matched_source_names(
@@ -1513,10 +1570,8 @@ def code_fingerprint(code: str, func: SourceFunction | None = None) -> Counter[s
         counter[f"op:{op}"] += stripped.count(op)
     for const in CONST_RE.findall(stripped):
         counter[f"const:{const.lower()}"] += 1
-    for call in CALL_RE.findall(stripped):
-        lowered = call.split("::")[-1].lower()
-        if lowered not in CALL_EXCLUDE:
-            counter[f"call:{normalize_name(lowered)}"] += 1
+    for call in call_names_for_fingerprint(stripped):
+        counter[f"call:{call}"] += 1
     counter["mem:index"] += stripped.count("[")
     counter["mem:deref_or_ptr"] += stripped.count("*")
     counter["mem:field"] += stripped.count("->") + stripped.count(".")
@@ -6715,6 +6770,12 @@ int max(int a, int b) { if (a > b) return a; return b; }
         assert rendered_sig_fp["sig:return:int"] == 1
         assert rendered_sig_fp["sig:param_count:1"] == 1
         assert rendered_sig_fp["sig:param:uint"] == 1
+        assert rendered_sig_fp["call:testswitch"] == 0
+        rendered_call_fp = code_fingerprint(
+            "uint caller(uint param_1) { return helper(param_1); }"
+        )
+        assert rendered_call_fp["call:caller"] == 0
+        assert rendered_call_fp["call:helper"] == 1
         status, matched, _ = match_function(funcs[1], [FissionFunction("0x1000", "add [export]")])
         assert status == "matched"
         assert matched is not None
