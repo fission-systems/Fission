@@ -129,7 +129,17 @@ pub(super) fn handle_selector_index(
     if *selector != expected_selector || plus.is_some() || *handle_index < 0 {
         return None;
     }
-    usize::try_from(*handle_index).ok()
+    nonnegative_handle_index(*handle_index)
+}
+
+fn nonnegative_handle_index(handle_index: i64) -> Option<usize> {
+    if handle_index < 0 {
+        return None;
+    }
+    match usize::try_from(handle_index) {
+        Ok(index) => Some(index),
+        Err(_) => None,
+    }
 }
 
 pub(super) fn matches_negative_handle_selector(
@@ -174,13 +184,15 @@ pub(super) fn exported_build_handle_key(operand_index: usize) -> Result<i64> {
 mod tests {
     use super::{
         build_operand_section_index, checked_handle_index, exported_build_handle_key,
-        i64_to_u64_bits, u64_to_i64_bits,
+        i64_to_u64_bits, nonnegative_handle_index, u64_to_i64_bits,
     };
 
     #[test]
     fn handle_index_helpers_fail_closed_on_invalid_values() {
         assert_eq!(checked_handle_index(3, "test").unwrap(), 3);
         assert!(checked_handle_index(-1, "test").is_err());
+        assert_eq!(nonnegative_handle_index(3), Some(3));
+        assert_eq!(nonnegative_handle_index(-1), None);
 
         assert_eq!(build_operand_section_index(7).unwrap(), 7);
         assert!(build_operand_section_index(i32::MAX as usize + 1).is_err());
@@ -197,5 +209,17 @@ mod tests {
         assert_eq!(i64_to_u64_bits(0), 0);
         assert_eq!(i64_to_u64_bits(-1), u64::MAX);
         assert_eq!(i64_to_u64_bits(i64::MIN), 0x8000_0000_0000_0000);
+    }
+
+    #[test]
+    fn handle_selector_index_source_has_no_silent_conversion_drop() {
+        let source = include_str!("handles.rs");
+        let silent_selector_conversion =
+            ["usize::try_from(*handle_index)", ".ok()"].join("");
+
+        assert!(
+            !source.contains(&silent_selector_conversion),
+            "HandleTpl selector indexes must use the named nonnegative conversion helper"
+        );
     }
 }

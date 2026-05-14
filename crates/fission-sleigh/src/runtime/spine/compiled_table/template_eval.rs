@@ -241,9 +241,17 @@ fn decode_relative_sentinel(sentinel: u64) -> Option<u64> {
     if sentinel > RELATIVE_LABEL_SENTINEL_THRESHOLD {
         let sentinel = u64_to_i64_bits(sentinel);
         let label_num = sentinel.checked_neg()?.checked_sub(1)?;
-        u64::try_from(label_num).ok()
+        Some(nonnegative_i64_to_u64(label_num)?)
     } else {
         None
+    }
+}
+
+fn nonnegative_i64_to_u64(value: i64) -> Option<u64> {
+    if value < 0 {
+        None
+    } else {
+        Some(value.unsigned_abs())
     }
 }
 
@@ -1832,12 +1840,24 @@ mod tests {
     }
 
     #[test]
+    fn relative_label_sentinel_decode_names_signed_conversion() {
+        let label = 7;
+        let sentinel = encode_relative_sentinel(label).expect("encode label sentinel");
+
+        assert_eq!(decode_relative_sentinel(sentinel), Some(label));
+        assert_eq!(nonnegative_i64_to_u64(0), Some(0));
+        assert_eq!(nonnegative_i64_to_u64(i64::MAX), Some(i64::MAX as u64));
+        assert_eq!(nonnegative_i64_to_u64(-1), None);
+    }
+
+    #[test]
     fn offset_plus_source_has_no_saturating_shift_fallback() {
         let source = include_str!("template_eval.rs");
         let saturating_shift_fallback =
             ["let shift_bits = shift_bytes.", "saturating", "_mul(8);"].concat();
         let dynamic_space_id_lossy_cast = ["space.index", "as", "i64"].join(" ");
         let build_index_ok_fallback = ["usize::try_from(*value)", ".ok()"].join("");
+        let relative_label_ok_fallback = ["u64::try_from(label_num)", ".ok()"].join("");
         let missing_space_non_const_fallback =
             [".map(|s| s.name == \"const\")", ".unwrap_or(false)"].join("\n");
         let missing_const_space_materialization = [
@@ -1862,6 +1882,10 @@ mod tests {
         assert!(
             !source.contains(&build_index_ok_fallback),
             "BUILD operand index conversion must fail closed instead of skipping malformed templates"
+        );
+        assert!(
+            !source.contains(&relative_label_ok_fallback),
+            "relative label sentinel decode must name signed conversion instead of silently dropping it"
         );
         assert!(
             !source.contains(&missing_const_space_materialization),
