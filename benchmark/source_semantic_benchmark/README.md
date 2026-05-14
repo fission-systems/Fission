@@ -91,11 +91,23 @@ manifest.
 - `weighted_semantic_similarity_percent`: the same weighted score expressed as
   a percentage for report display. Per-row `semantic_score_percent` and
   `static_semantic_score_percent` are emitted alongside the raw 0..1 scores.
+- `scoring_contract`: machine-readable statement of the scoring denominator
+  and component policies. The semantic score denominator is all manifest rows;
+  static similarity is a multiset Jaccard over the source/decompiler union, so
+  missing source features and extra decompiler features both affect the score.
+- `score_denominator_metrics` and `semantic_loss_metrics`: explicit score-sum
+  accounting over the full row denominator, including zero/nonzero/perfect row
+  counts, lost-score totals, and lost-score attribution by behavior status,
+  first failing stage, and zero-credit reason.
 - `effective_coverage`: mapped, decompiled, behavior-expected, and
   behavior-executed row counts/rates over the full manifest denominator.
 - `behavior_eligibility`: behavior eligibility/execution/pass rates with both
   eligible-row and total-row denominators, so unsupported or absent behavior
   cases cannot silently inflate the pass rate.
+- `behavior_denominator_metrics`: row and case denominators for dynamic checks,
+  including eligible/executed/pass rates under total, eligible, and executed
+  denominators. `behavior_case_metrics.compared_case_count` counts missing or
+  extra output lines as failed cases instead of dropping them.
 - `zero_credit_breakdown`: reason buckets for rows whose weighted semantic score
   is exactly zero (`unmapped`, `decomp:*`, `behavior:*`, `static_zero`, ...).
 - `stage_first_failure_counts`: first non-`ok` debug stage per mapped row when
@@ -110,6 +122,10 @@ manifest.
   included in the denominator, so absent semantics are penalized.
 - `static_similarity_gap_component_totals`: the same missing/extra accounting
   split by static feature family.
+- `static_absence_penalty_metrics`: source recall, decompiler precision, union
+  Jaccard, missing/extra totals, and rows where source features exist but the
+  decompiler emitted no comparable features. This is the top-level proof that
+  absence is included rather than ignored.
 - `behavior_case_metrics`: dynamic behavior at case granularity, including
   total/pass/fail case counts, case pass rate, and rows where at least one case
   passed despite an overall mismatch.
