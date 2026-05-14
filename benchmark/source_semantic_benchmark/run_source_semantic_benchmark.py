@@ -138,6 +138,10 @@ INTEGRAL_WORDS = {
     "uint32_t",
     "uint64_t",
     "uint",
+    "uchar",
+    "ushort",
+    "ulonglong",
+    "longlong",
     "unsigned",
     "signed",
     "long",
@@ -156,6 +160,9 @@ UNSIGNED_INTEGRAL_WORDS = {
     "uint32_t",
     "uint64_t",
     "uint",
+    "uchar",
+    "ushort",
+    "ulonglong",
     "usize",
     "unsigned",
 }
@@ -1597,6 +1604,14 @@ def add_rendered_signature_fingerprint(counter: Counter[str], code: str) -> None
     add_signature_fingerprint(counter, rendered.return_kind, rendered.param_kinds)
 
 
+def rendered_signature_kinds(code: str) -> tuple[str, list[str]] | None:
+    functions = extract_c_like_functions(strip_comments(code), "c")
+    if not functions:
+        return None
+    rendered = functions[0]
+    return rendered.return_kind, rendered.param_kinds
+
+
 def inline_expanded_source_fingerprint(
     func: SourceFunction,
     functions_by_name: dict[str, SourceFunction],
@@ -2718,6 +2733,10 @@ def summarize(rows: list[dict[str, Any]], manifest_name: str, entries: list[Benc
     control_flow_gap_rows: list[dict[str, Any]] = []
     signedness_only_signature_gap_rows: list[dict[str, Any]] = []
     signedness_only_signature_gap_totals: Counter[str] = Counter()
+    signature_return_pair_counts: Counter[str] = Counter()
+    signature_param_pair_counts: Counter[str] = Counter()
+    signature_pair_gap_rows: list[dict[str, Any]] = []
+    signature_param_arity_mismatch_rows: list[dict[str, Any]] = []
     name_recovery_rows: list[dict[str, Any]] = []
     architecture_stage_metrics: dict[str, dict[str, Any]] = {}
     by_language: dict[str, dict[str, Any]] = {}
@@ -3406,6 +3425,50 @@ def summarize(rows: list[dict[str, Any]], manifest_name: str, entries: list[Benc
                         call_gap_rows.append(component_row)
                     elif component == "control_flow":
                         control_flow_gap_rows.append(component_row)
+        source_return_kind = str(row.get("source_return_kind") or "unknown")
+        decomp_return_kind = str(row.get("decomp_return_kind") or "missing")
+        source_param_kinds = row.get("source_param_kinds") if isinstance(row.get("source_param_kinds"), list) else []
+        decomp_param_kinds = row.get("decomp_param_kinds") if isinstance(row.get("decomp_param_kinds"), list) else []
+        signature_return_pair_counts[f"{source_return_kind}->{decomp_return_kind}"] += 1
+        max_param_count = max(len(source_param_kinds), len(decomp_param_kinds))
+        param_mismatch_count = 0
+        missing_param_count = 0
+        extra_param_count = 0
+        for index in range(max_param_count):
+            source_kind = str(source_param_kinds[index]) if index < len(source_param_kinds) else "missing"
+            decomp_kind = str(decomp_param_kinds[index]) if index < len(decomp_param_kinds) else "missing"
+            signature_param_pair_counts[f"{source_kind}->{decomp_kind}"] += 1
+            param_mismatch_count += int(source_kind != decomp_kind)
+            missing_param_count += int(source_kind != "missing" and decomp_kind == "missing")
+            extra_param_count += int(source_kind == "missing" and decomp_kind != "missing")
+        return_mismatch = source_return_kind != decomp_return_kind
+        arity_mismatch = len(source_param_kinds) != len(decomp_param_kinds)
+        if return_mismatch or param_mismatch_count > 0:
+            signature_pair_gap_rows.append(
+                {
+                    **triage_row_summary(row),
+                    "source_return_kind": source_return_kind,
+                    "decomp_return_kind": decomp_return_kind,
+                    "source_param_kinds": source_param_kinds,
+                    "decomp_param_kinds": decomp_param_kinds,
+                    "param_mismatch_count": param_mismatch_count,
+                    "missing_param_count": missing_param_count,
+                    "extra_param_count": extra_param_count,
+                    "return_mismatch": return_mismatch,
+                }
+            )
+        if arity_mismatch:
+            signature_param_arity_mismatch_rows.append(
+                {
+                    **triage_row_summary(row),
+                    "source_param_count": len(source_param_kinds),
+                    "decomp_param_count": len(decomp_param_kinds),
+                    "missing_param_count": missing_param_count,
+                    "extra_param_count": extra_param_count,
+                    "source_param_kinds": source_param_kinds,
+                    "decomp_param_kinds": decomp_param_kinds,
+                }
+            )
         lang = row["language"]
         bucket = by_language.setdefault(
             lang,
@@ -4120,6 +4183,59 @@ def summarize(rows: list[dict[str, Any]], manifest_name: str, entries: list[Benc
             ),
         )[:12],
     }
+    signature_return_pair_total = sum(signature_return_pair_counts.values())
+    signature_param_pair_total = sum(signature_param_pair_counts.values())
+    signature_return_mismatch_count = sum(
+        count
+        for pair, count in signature_return_pair_counts.items()
+        if pair.split("->", 1)[0] != pair.split("->", 1)[1]
+    )
+    signature_param_mismatch_count = sum(
+        count
+        for pair, count in signature_param_pair_counts.items()
+        if pair.split("->", 1)[0] != pair.split("->", 1)[1]
+    )
+    signature_kind_confusion_metrics = {
+        "return_pair_count": signature_return_pair_total,
+        "return_mismatch_count": signature_return_mismatch_count,
+        "return_match_rate": round(
+            (signature_return_pair_total - signature_return_mismatch_count) / signature_return_pair_total,
+            6,
+        )
+        if signature_return_pair_total
+        else 0.0,
+        "param_pair_count": signature_param_pair_total,
+        "param_mismatch_count": signature_param_mismatch_count,
+        "param_match_rate": round(
+            (signature_param_pair_total - signature_param_mismatch_count) / signature_param_pair_total,
+            6,
+        )
+        if signature_param_pair_total
+        else 0.0,
+        "param_arity_mismatch_row_count": len(signature_param_arity_mismatch_rows),
+        "return_pair_counts": dict(sorted(signature_return_pair_counts.items())),
+        "param_pair_counts": dict(sorted(signature_param_pair_counts.items())),
+        "top_signature_pair_gap_rows": sorted(
+            signature_pair_gap_rows,
+            key=lambda row: (
+                -int(bool(row.get("return_mismatch"))),
+                -int(row.get("param_mismatch_count") or 0),
+                -int(row.get("missing_param_count") or 0),
+                -int(row.get("extra_param_count") or 0),
+                float(row.get("semantic_score_percent") or 0.0),
+                str(row.get("function_name") or ""),
+            ),
+        )[:12],
+        "top_param_arity_mismatch_rows": sorted(
+            signature_param_arity_mismatch_rows,
+            key=lambda row: (
+                -int(row.get("missing_param_count") or 0),
+                -int(row.get("extra_param_count") or 0),
+                float(row.get("semantic_score_percent") or 0.0),
+                str(row.get("function_name") or ""),
+            ),
+        )[:12],
+    }
     structuring_gap_metrics = {
         "control_flow_gap_row_count": len(control_flow_gap_rows),
         "hard_nonperfect_row_count": len(hard_function_rows),
@@ -4237,6 +4353,7 @@ def summarize(rows: list[dict[str, Any]], manifest_name: str, entries: list[Benc
         },
         "type_data_gap_metrics": type_data_gap_metrics,
         "signedness_only_signature_gap_metrics": signedness_only_signature_gap_metrics,
+        "signature_kind_confusion_metrics": signature_kind_confusion_metrics,
         "structuring_gap_metrics": structuring_gap_metrics,
         "fid_name_recovery_metrics": fid_name_recovery_metrics,
         "architecture_support_metrics": architecture_support_metrics,
@@ -5676,6 +5793,31 @@ def render_markdown(summary: dict[str, Any], rows: list[dict[str, Any]]) -> str:
                     f"{float(row.get('param_pair_count', 0.0) or 0.0):.0f} | "
                     f"{float(row.get('return_pair_count', 0.0) or 0.0):.0f} |"
                 )
+    signature_confusion = summary.get("signature_kind_confusion_metrics")
+    if isinstance(signature_confusion, dict):
+        lines.extend(["", "## Signature Kind Confusion Metrics", ""])
+        lines.append(
+            f"- Return match rate {float(signature_confusion.get('return_match_rate', 0.0) or 0.0):.3f}, "
+            f"param match rate {float(signature_confusion.get('param_match_rate', 0.0) or 0.0):.3f}, "
+            f"arity mismatch rows {signature_confusion.get('param_arity_mismatch_row_count', 0)}"
+        )
+        param_pairs = signature_confusion.get("param_pair_counts")
+        if isinstance(param_pairs, dict) and param_pairs:
+            lines.extend(["", "| Param Pair | Count |", "|---|---:|"])
+            for pair, count in sorted(param_pairs.items(), key=lambda item: (-int(item[1]), str(item[0])))[:10]:
+                lines.append(f"| `{pair}` | {count} |")
+        gap_rows = signature_confusion.get("top_signature_pair_gap_rows")
+        if isinstance(gap_rows, list) and gap_rows:
+            lines.extend(["", "| Function | Score | Return | Params |", "|---|---:|---|---|"])
+            for row in gap_rows[:8]:
+                if not isinstance(row, dict):
+                    continue
+                lines.append(
+                    f"| `{row.get('function_name')}` | "
+                    f"{float(row.get('semantic_score_percent', 0.0) or 0.0):.3f}% | "
+                    f"`{row.get('source_return_kind')}->{row.get('decomp_return_kind')}` | "
+                    f"{int(row.get('param_mismatch_count') or 0)} mismatches |"
+                )
     structuring_gaps = summary.get("structuring_gap_metrics")
     if isinstance(structuring_gaps, dict):
         lines.extend(["", "## Structuring Gap Metrics", ""])
@@ -6572,6 +6714,9 @@ def row_for_function(
     decomp_code = decomp.get("code") if decomp.get("success") else None
     source_body_lines = func.body.splitlines()
     decomp_lines = decomp_code.splitlines() if decomp_code else []
+    decomp_signature = rendered_signature_kinds(decomp_code) if decomp_code else None
+    decomp_return_kind = decomp_signature[0] if decomp_signature is not None else None
+    decomp_param_kinds = decomp_signature[1] if decomp_signature is not None else None
     decomp_fp = code_fingerprint(decomp_code or "") if decomp_code else Counter()
     static_score_direct = multiset_jaccard(source_fp_direct, decomp_fp) if decomp_code else 0.0
     static_score_inline_expanded = (
@@ -6645,6 +6790,9 @@ def row_for_function(
         "decomp_wall_sec": decomp.get("wall_sec"),
         "decomp_line_count": len(decomp_lines),
         "decomp_byte_count": len(decomp_code.encode("utf-8")) if decomp_code else 0,
+        "decomp_return_kind": decomp_return_kind,
+        "decomp_param_kinds": decomp_param_kinds,
+        "decomp_param_shape": source_param_shape(decomp_param_kinds or []) if decomp_param_kinds is not None else None,
         "decomp_static_feature_count": sum(decomp_fp.values()),
         "static_semantic_score": static_score,
         "static_semantic_score_percent": percent(static_score),
@@ -7131,6 +7279,10 @@ int max(int a, int b) { if (a > b) return a; return b; }
         ] == ["max"]
         assert classify_return("u64 wide(unsigned int seed)", "wide", "unsigned int seed", "c") == "int"
         assert classify_return("uint64_t wide(unsigned int seed)", "wide", "unsigned int seed", "c") == "int"
+        assert classify_return("longlong wide(longlong seed)", "wide", "longlong seed", "c") == "int"
+        assert classify_param("ulonglong count", "c") == "uint"
+        assert classify_param("ushort flags", "c") == "uint"
+        assert classify_param("uchar byte", "c") == "uint"
         summary = summarize(
             [
                 {
@@ -7147,6 +7299,10 @@ int max(int a, int b) { if (a > b) return a; return b; }
                     "static_similarity_source_variant": "direct_source",
                     "source_body_line_count": 1,
                     "source_body_byte_count": 12,
+                    "source_return_kind": "int",
+                    "source_param_kinds": ["int", "int"],
+                    "decomp_return_kind": "int",
+                    "decomp_param_kinds": ["uint", "uint"],
                     "source_static_feature_count_direct": 2,
                     "source_static_feature_count_inline_expanded": 2,
                     "decomp_line_count": 2,
@@ -7203,6 +7359,10 @@ int max(int a, int b) { if (a > b) return a; return b; }
                     "static_similarity_source_variant": "direct_source",
                     "source_body_line_count": 1,
                     "source_body_byte_count": 12,
+                    "source_return_kind": "int",
+                    "source_param_kinds": ["int"],
+                    "decomp_return_kind": None,
+                    "decomp_param_kinds": None,
                     "source_static_feature_count_direct": 2,
                     "source_static_feature_count_inline_expanded": 2,
                     "decomp_line_count": 0,
@@ -7298,6 +7458,10 @@ int max(int a, int b) { if (a > b) return a; return b; }
         assert "signature_gap_rows" in summary["type_data_gap_metrics"]
         assert summary["signedness_only_signature_gap_metrics"]["row_count"] == 1
         assert summary["signedness_only_signature_gap_metrics"]["param_pair_count"] == 2.0
+        assert summary["signature_kind_confusion_metrics"]["return_pair_counts"]["int->missing"] == 1
+        assert summary["signature_kind_confusion_metrics"]["param_pair_counts"]["int->missing"] == 1
+        assert summary["signature_kind_confusion_metrics"]["param_pair_counts"]["int->uint"] == 2
+        assert summary["signature_kind_confusion_metrics"]["param_arity_mismatch_row_count"] == 1
         assert "control_flow_gap_rows" in summary["structuring_gap_metrics"]
         assert summary["fid_name_recovery_metrics"]["name_or_mapping_gap_row_count"] == 1
         assert "unknown" in summary["architecture_support_metrics"]
