@@ -1429,11 +1429,25 @@ def code_fingerprint(code: str, func: SourceFunction | None = None) -> Counter[s
     counter["mem:deref_or_ptr"] += stripped.count("*")
     counter["mem:field"] += stripped.count("->") + stripped.count(".")
     if func is not None:
-        counter[f"sig:return:{func.return_kind}"] += 1
-        counter[f"sig:param_count:{len(func.param_kinds)}"] += 1
-        for kind in func.param_kinds:
-            counter[f"sig:param:{kind}"] += 1
+        add_signature_fingerprint(counter, func.return_kind, func.param_kinds)
+    else:
+        add_rendered_signature_fingerprint(counter, stripped)
     return +counter
+
+
+def add_signature_fingerprint(counter: Counter[str], return_kind: str, param_kinds: list[str]) -> None:
+    counter[f"sig:return:{return_kind}"] += 1
+    counter[f"sig:param_count:{len(param_kinds)}"] += 1
+    for kind in param_kinds:
+        counter[f"sig:param:{kind}"] += 1
+
+
+def add_rendered_signature_fingerprint(counter: Counter[str], code: str) -> None:
+    functions = extract_c_like_functions(code, "c")
+    if not functions:
+        return
+    rendered = functions[0]
+    add_signature_fingerprint(counter, rendered.return_kind, rendered.param_kinds)
 
 
 def multiset_jaccard(left: Counter[str], right: Counter[str]) -> float:
@@ -6025,6 +6039,10 @@ int max(int a, int b) { if (a > b) return a; return b; }
         )
         assert gap_details["missing_feature_total"] > 0
         assert gap_details["union_feature_total"] >= gap_details["intersection_feature_total"]
+        rendered_sig_fp = code_fingerprint("uint test_switch(uint param_1) { return param_1; }")
+        assert rendered_sig_fp["sig:return:int"] == 1
+        assert rendered_sig_fp["sig:param_count:1"] == 1
+        assert rendered_sig_fp["sig:param:uint"] == 1
         status, matched, _ = match_function(funcs[0], [FissionFunction("0x1000", "add [export]")])
         assert status == "matched"
         assert matched is not None
