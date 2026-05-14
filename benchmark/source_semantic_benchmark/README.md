@@ -131,6 +131,9 @@ manifest.
   passed despite an overall mismatch.
 - `behavior_mismatch_metrics`: mismatch-row diagnostics including first failing
   case index buckets, output-length deltas, and mismatch kind counts.
+- `behavior_distance_metrics`: case pass-rate distribution plus missing/extra
+  candidate output-line totals, so partial dynamic mismatches are visible even
+  when the row-level behavior score is still fail-closed.
 - `score_distribution`: row counts in `zero`, `low`, `medium`, `high`, and
   `perfect` semantic-score buckets.
 - `semantic_score_stats`: min/max/average and p50/p90/p95 score distribution
@@ -151,6 +154,12 @@ manifest.
 - `debug_coverage_metrics` and `debug_stage_status_matrix`: debug evidence
   coverage and per-stage status counts for rows where debug decomp evidence was
   requested.
+- `pipeline_stage_metrics`: per-stage OK/non-OK/missing counts and OK rates for
+  load, decode, raw p-code, NIR build, normalize, structuring, and render.
+- `nir_build_stats_metrics`: flattened `PreviewBuildStats`/`NirBuildStats`
+  numeric totals, nonzero row counts, debt-metric distributions, and highest
+  debt rows. This keeps NIR telemetry aligned with the canonical stats payload
+  while making benchmark triage possible from the summary alone.
 - `debug_quality_evidence_nonzero_rows`: row counts for nonzero NIR/debug
   evidence counters, complementing `debug_quality_evidence_totals`.
 - `triage_priority_rows`: compact low-score row shortlist with behavior status,

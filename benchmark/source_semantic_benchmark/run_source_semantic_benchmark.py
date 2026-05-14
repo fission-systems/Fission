@@ -1497,6 +1497,25 @@ def numeric_distribution(values: list[float]) -> dict[str, Any]:
     }
 
 
+NIR_DEBT_METRIC_RE = re.compile(
+    r"(rejected|failed|fallback|irreducible|invalid|missing|conflict|forced|unsupported|timeout|error)"
+)
+
+
+def numeric_items(payload: Any) -> list[tuple[str, float]]:
+    if not isinstance(payload, dict):
+        return []
+    return [
+        (str(key), float(value))
+        for key, value in payload.items()
+        if isinstance(value, int | float) and not isinstance(value, bool)
+    ]
+
+
+def is_debt_metric_name(name: str) -> bool:
+    return bool(NIR_DEBT_METRIC_RE.search(name))
+
+
 def default_behavior_cases(param_count: int) -> list[tuple[int, ...]]:
     if param_count == 0:
         return [()]
@@ -2127,6 +2146,9 @@ def summarize(rows: list[dict[str, Any]], manifest_name: str, entries: list[Benc
     behavior_first_mismatch_index_counts: Counter[str] = Counter()
     behavior_output_length_delta_counts: Counter[str] = Counter()
     behavior_mismatch_kind_counts: Counter[str] = Counter()
+    behavior_case_pass_rates: list[float] = []
+    behavior_missing_candidate_line_total = 0
+    behavior_extra_candidate_line_total = 0
     behavior_status_by_stage_first_failure: dict[str, Counter[str]] = {}
     behavior_status_by_zero_credit_reason: dict[str, Counter[str]] = {}
     score_values_by_behavior_status: dict[str, list[float]] = {}
@@ -2148,6 +2170,14 @@ def summarize(rows: list[dict[str, Any]], manifest_name: str, entries: list[Benc
     cost_hot_rows: list[dict[str, Any]] = []
     debug_decomp_row_count = 0
     debug_stage_status_row_count = 0
+    stage_status_metrics: dict[str, Counter[str]] = {
+        stage: Counter() for stage in STAGE_FAILURE_ORDER
+    }
+    nir_build_stats_row_count = 0
+    nir_build_stats_numeric_totals: Counter[str] = Counter()
+    nir_build_stats_nonzero_rows: Counter[str] = Counter()
+    nir_build_stats_values: dict[str, list[float]] = {}
+    nir_build_stats_debt_hot_rows: list[dict[str, Any]] = []
     by_language: dict[str, dict[str, Any]] = {}
     by_tag: dict[str, dict[str, Any]] = {}
     by_entry: dict[str, dict[str, Any]] = {}
@@ -2187,6 +2217,9 @@ def summarize(rows: list[dict[str, Any]], manifest_name: str, entries: list[Benc
         behavior_status_by_stage_first_failure.setdefault(first_stage, Counter())[behavior_status] += 1
         zero_reason = row_zero_credit_reason(row) if score == 0.0 else "nonzero"
         behavior_status_by_zero_credit_reason.setdefault(zero_reason, Counter())[behavior_status] += 1
+        case_pass_rate = behavior.get("case_pass_rate")
+        if isinstance(case_pass_rate, int | float):
+            behavior_case_pass_rates.append(float(case_pass_rate))
         cost_hot_rows.append(
             {
                 "entry_id": row.get("entry_id"),
@@ -2307,15 +2340,15 @@ def summarize(rows: list[dict[str, Any]], manifest_name: str, entries: list[Benc
                 )
                 for stage in STAGE_FAILURE_ORDER:
                     status = stage_status.get(stage)
+                    stage_status_metrics[stage][str(status if status is not None else "missing")] += 1
                     if status is not None:
                         debug_stage_status_matrix[stage][str(status)] += 1
             quality = debug_decomp.get("quality_evidence")
             if isinstance(quality, dict):
-                for key, value in quality.items():
-                    if isinstance(value, int | float):
-                        debug_quality_evidence_totals[key] += value
-                        if value != 0:
-                            debug_quality_evidence_nonzero_rows[key] += 1
+                for key, value in numeric_items(quality):
+                    debug_quality_evidence_totals[key] += value
+                    if value != 0:
+                        debug_quality_evidence_nonzero_rows[key] += 1
             pipeline = debug_decomp.get("rust_sleigh_pipeline")
             template_sources = (
                 pipeline.get("template_source_counts")
@@ -2326,6 +2359,40 @@ def summarize(rows: list[dict[str, Any]], manifest_name: str, entries: list[Benc
             for key, value in template_sources.items():
                 if isinstance(value, int | float):
                     debug_template_source_totals[canonical_sleigh_template_source(str(key))] += value
+
+        preview_stats = row.get("preview_build_stats")
+        if isinstance(preview_stats, dict):
+            nir_build_stats_row_count += 1
+            row_debt_total = 0.0
+            row_debt_metrics: dict[str, float] = {}
+            for key, value in numeric_items(preview_stats):
+                nir_build_stats_numeric_totals[key] += value
+                nir_build_stats_values.setdefault(key, []).append(value)
+                if value != 0:
+                    nir_build_stats_nonzero_rows[key] += 1
+                if is_debt_metric_name(key) and value != 0:
+                    row_debt_metrics[key] = value
+                    row_debt_total += value
+            if row_debt_metrics:
+                nir_build_stats_debt_hot_rows.append(
+                    {
+                        "entry_id": row.get("entry_id"),
+                        "function_name": row.get("function_name"),
+                        "address": row.get("address"),
+                        "semantic_score_percent": row.get("semantic_score_percent"),
+                        "behavior_status": behavior_status,
+                        "stage_first_failure": first_stage,
+                        "debt_metric_total": round(row_debt_total, 6),
+                        "top_debt_metrics": [
+                            {"metric": key, "value": value}
+                            for key, value in sorted(
+                                row_debt_metrics.items(),
+                                key=lambda item: (item[1], item[0]),
+                                reverse=True,
+                            )[:10]
+                        ],
+                    }
+                )
 
         for tag in row.get("tags") or []:
             tag_bucket = by_tag.setdefault(
@@ -2344,6 +2411,10 @@ def summarize(rows: list[dict[str, Any]], manifest_name: str, entries: list[Benc
                 behavior_output_length_delta_counts[str(length_delta)] += 1
                 if length_delta != 0:
                     behavior_mismatch_kind_counts["output_length"] += 1
+                    if length_delta < 0:
+                        behavior_missing_candidate_line_total += abs(length_delta)
+                    else:
+                        behavior_extra_candidate_line_total += length_delta
                 else:
                     behavior_mismatch_kind_counts["wrong_value"] += 1
             else:
@@ -2468,6 +2539,35 @@ def summarize(rows: list[dict[str, Any]], manifest_name: str, entries: list[Benc
         stage: numeric_distribution(values)
         for stage, values in sorted(score_values_by_stage_first_failure.items())
     }
+    pipeline_stage_metrics = {
+        stage: {
+            "row_count": sum(counts.values()),
+            "ok_count": int(counts.get("ok", 0)),
+            "missing_count": int(counts.get("missing", 0)),
+            "non_ok_count": sum(count for status, count in counts.items() if status != "ok"),
+            "ok_rate": round(float(counts.get("ok", 0)) / sum(counts.values()), 6)
+            if sum(counts.values())
+            else 0.0,
+            "status_counts": dict(sorted(counts.items())),
+        }
+        for stage, counts in stage_status_metrics.items()
+        if counts
+    }
+    nir_debt_totals = {
+        key: value
+        for key, value in sorted(nir_build_stats_numeric_totals.items())
+        if is_debt_metric_name(key) and value != 0
+    }
+    nir_build_stats_distributions = {
+        key: numeric_distribution(values)
+        for key, values in sorted(nir_build_stats_values.items())
+        if key in nir_debt_totals
+    }
+    nir_build_stats_debt_hot_rows = sorted(
+        nir_build_stats_debt_hot_rows,
+        key=lambda row: (float(row.get("debt_metric_total") or 0.0), row.get("function_name") or ""),
+        reverse=True,
+    )[:20]
     cost_hot_rows_by_decompile = sorted(
         (
             row
@@ -2633,6 +2733,13 @@ def summarize(rows: list[dict[str, Any]], manifest_name: str, entries: list[Benc
             "output_length_delta_counts": dict(sorted(behavior_output_length_delta_counts.items())),
             "mismatch_kind_counts": dict(sorted(behavior_mismatch_kind_counts.items())),
         },
+        "behavior_distance_metrics": {
+            "case_pass_rate_distribution": numeric_distribution(behavior_case_pass_rates),
+            "missing_candidate_line_total": behavior_missing_candidate_line_total,
+            "extra_candidate_line_total": behavior_extra_candidate_line_total,
+            "output_length_delta_counts": dict(sorted(behavior_output_length_delta_counts.items())),
+            "first_mismatch_index_counts": dict(sorted(behavior_first_mismatch_index_counts.items())),
+        },
         "denominator_accounting_metrics": {
             "row_count": total,
             "mapped_row_count": mapped,
@@ -2753,6 +2860,18 @@ def summarize(rows: list[dict[str, Any]], manifest_name: str, entries: list[Benc
                 debug_stage_status_row_count / mapped_debug_denominator,
                 6,
             ) if mapped else 0.0,
+        },
+        "pipeline_stage_metrics": pipeline_stage_metrics,
+        "nir_build_stats_metrics": {
+            "stats_row_count": nir_build_stats_row_count,
+            "stats_row_rate_mapped_denominator": round(nir_build_stats_row_count / mapped_debug_denominator, 6)
+            if mapped
+            else 0.0,
+            "numeric_totals": dict(sorted(nir_build_stats_numeric_totals.items())),
+            "nonzero_row_counts": dict(sorted(nir_build_stats_nonzero_rows.items())),
+            "debt_metric_totals": nir_debt_totals,
+            "debt_metric_distributions": nir_build_stats_distributions,
+            "top_debt_rows": nir_build_stats_debt_hot_rows,
         },
         "debug_owner_bucket_counts": dict(sorted(debug_owner_bucket_counts.items())),
         "debug_stage_status_counts": dict(sorted(debug_stage_status_counts.items())),
@@ -3762,6 +3881,20 @@ def render_markdown(summary: dict[str, Any], rows: list[dict[str, Any]]) -> str:
             lines.extend(["", "| Kind | Rows |", "|---|---:|"])
             for kind, count in sorted(kinds.items()):
                 lines.append(f"| {kind} | {count} |")
+    behavior_distance = summary.get("behavior_distance_metrics")
+    if isinstance(behavior_distance, dict):
+        case_pass_rate = behavior_distance.get("case_pass_rate_distribution")
+        if isinstance(case_pass_rate, dict) and case_pass_rate.get("count"):
+            lines.extend(["", "## Behavior Distance Metrics", ""])
+            lines.append(
+                f"- Case pass rate avg {float(case_pass_rate.get('avg', 0.0) or 0.0):.6f}, "
+                f"p50 {float(case_pass_rate.get('p50', 0.0) or 0.0):.6f}, "
+                f"p90 {float(case_pass_rate.get('p90', 0.0) or 0.0):.6f}"
+            )
+            lines.append(
+                f"- Missing candidate lines: {behavior_distance.get('missing_candidate_line_total', 0)}, "
+                f"extra candidate lines: {behavior_distance.get('extra_candidate_line_total', 0)}"
+            )
     if summary.get("harness_cost_metrics"):
         costs = summary["harness_cost_metrics"]
         lines.extend(["", "## Harness Cost Metrics", "", "| Metric | Seconds |", "|---|---:|"])
@@ -3798,6 +3931,39 @@ def render_markdown(summary: dict[str, Any], rows: list[dict[str, Any]]) -> str:
             f"stage status rows: {debug_coverage.get('debug_stage_status_rows', 0)} "
             f"({float(debug_coverage.get('debug_stage_status_rate_mapped_denominator', 0.0) or 0.0):.3f} mapped denominator)"
         )
+    pipeline_stage_metrics = summary.get("pipeline_stage_metrics")
+    if isinstance(pipeline_stage_metrics, dict) and pipeline_stage_metrics:
+        lines.extend(["", "## Pipeline Stage Metrics", "", "| Stage | Rows | OK | Non-OK | Missing | OK Rate |", "|---|---:|---:|---:|---:|---:|"])
+        for stage, metrics in sorted(pipeline_stage_metrics.items()):
+            if not isinstance(metrics, dict):
+                continue
+            lines.append(
+                f"| {stage} | {metrics.get('row_count', 0)} | {metrics.get('ok_count', 0)} | "
+                f"{metrics.get('non_ok_count', 0)} | {metrics.get('missing_count', 0)} | "
+                f"{float(metrics.get('ok_rate', 0.0) or 0.0):.3f} |"
+            )
+    nir_stats = summary.get("nir_build_stats_metrics")
+    if isinstance(nir_stats, dict) and nir_stats.get("stats_row_count"):
+        lines.extend(["", "## NIR Build Stats Metrics", ""])
+        lines.append(
+            f"- Stats rows: {nir_stats.get('stats_row_count', 0)} "
+            f"({float(nir_stats.get('stats_row_rate_mapped_denominator', 0.0) or 0.0):.3f} mapped denominator)"
+        )
+        debt_totals = nir_stats.get("debt_metric_totals")
+        if isinstance(debt_totals, dict) and debt_totals:
+            lines.extend(["", "| Debt Metric | Total | Nonzero Rows |", "|---|---:|---:|"])
+            nonzero_rows = nir_stats.get("nonzero_row_counts") if isinstance(nir_stats.get("nonzero_row_counts"), dict) else {}
+            for metric, total_value in sorted(debt_totals.items()):
+                lines.append(f"| {metric} | {total_value} | {nonzero_rows.get(metric, 0)} |")
+        top_debt_rows = nir_stats.get("top_debt_rows") or []
+        if top_debt_rows:
+            lines.extend(["", "### NIR Debt Hot Rows", "", "| Function | Address | Debt Total | Behavior | First Failure |", "|---|---|---:|---|---|"])
+            for row in top_debt_rows[:8]:
+                lines.append(
+                    f"| `{row.get('function_name')}` | `{row.get('address')}` | "
+                    f"{float(row.get('debt_metric_total') or 0.0):.6f} | "
+                    f"{row.get('behavior_status')} | {row.get('stage_first_failure')} |"
+                )
     if summary.get("decomp_cache_status_counts"):
         lines.extend(["", "## Decompile Cache Status", "", "| Status | Rows |", "|---|---:|"])
         for status, count in sorted(summary["decomp_cache_status_counts"].items()):
@@ -4166,6 +4332,7 @@ def row_for_function(
         "decomp_failure_kind": decomp.get("failure_kind"),
         "decomp_failure_detail": decomp.get("failure_detail"),
         "engine_used": decomp.get("engine_used"),
+        "preview_build_stats": decomp.get("preview_build_stats"),
         "debug_decomp_bundle_path": decomp.get("debug_decomp_bundle_path"),
         "debug_decomp": debug_decomp,
         "decomp_cache_status": decomp.get("decomp_cache_status", "not_requested"),
@@ -4513,6 +4680,23 @@ int max(int a, int b) { if (a > b) return a; return b; }
                         "extra_feature_total": 0,
                     },
                     "static_similarity_gap_components": {},
+                    "preview_build_stats": {
+                        "validated_pcode_op_count": 10,
+                        "replacement_plan_rejected_missing_merge_count": 2,
+                    },
+                    "debug_decomp": {
+                        "stage_status": {
+                            "decode": "ok",
+                            "raw_pcode": "ok",
+                            "nir_build": "ok",
+                            "normalize": "ok",
+                            "structuring": "ok",
+                            "render": "ok",
+                        },
+                        "quality_evidence": {
+                            "region_emit_ready_failed_count": 1,
+                        },
+                    },
                 },
                 {
                     "language": "c",
@@ -4569,6 +4753,11 @@ int max(int a, int b) { if (a > b) return a; return b; }
         assert summary["triage_priority_rows"][0]["function_name"] is None
         assert "decompile_avg_sec" in summary["harness_cost_metrics"]
         assert "decompile_p95_sec" in summary["harness_cost_metrics"]
+        assert summary["pipeline_stage_metrics"]["decode"]["ok_count"] == 1
+        assert summary["nir_build_stats_metrics"]["stats_row_count"] == 1
+        assert summary["nir_build_stats_metrics"]["debt_metric_totals"]["replacement_plan_rejected_missing_merge_count"] == 2.0
+        assert summary["debug_quality_evidence_totals"]["region_emit_ready_failed_count"] == 1.0
+        assert summary["behavior_distance_metrics"]["case_pass_rate_distribution"]["count"] == 0
         void_func = SourceFunction(
             name="touch",
             signature="void touch(unsigned int seed)",
