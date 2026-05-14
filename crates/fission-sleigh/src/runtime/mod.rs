@@ -762,6 +762,45 @@ mod tests {
     }
 
     #[test]
+    fn arm8m_be_low_bit_code_address_decodes_thumb_instruction_without_byte_skew() {
+        if !discovery::ghidra_packaged_sla_available() {
+            eprintln!("skip: packaged Ghidra .sla not available for ARM8m_be low-bit test");
+            return;
+        }
+        let frontend =
+            RuntimeSleighFrontend::new_for_language("ARM8m_be").expect("ARM8m_be runtime");
+        let address_state = frontend.normalize_low_bit_code_address(0x100019);
+        assert_eq!(address_state.address, 0x100018);
+        assert!(address_state.context_override.is_some());
+
+        let bytes = [0xeb, 0x00, 0x00, 0x80];
+        let decoded = frontend
+            .decode_instruction_with_context_override(
+                &bytes,
+                address_state.address,
+                address_state.context_override,
+            )
+            .expect("ARM8m_be Thumb low-bit code pointer should decode from aligned bytes");
+        assert_eq!(decoded.address, 0x100018);
+        assert_eq!(decoded.length, 4);
+        assert_eq!(decoded.mnemonic, "add.w");
+
+        let (ops, length, details) = frontend
+            .decode_and_lift_with_context_override(
+                &bytes,
+                address_state.address,
+                address_state.context_override,
+            )
+            .expect("ARM8m_be Thumb low-bit code pointer should lift from aligned bytes");
+        assert_eq!(length, 4);
+        assert_eq!(
+            details.template_source,
+            Some(crate::compiler::CompiledTemplateSource::SpecDerived)
+        );
+        assert!(ops.iter().any(|op| op.opcode == PcodeOpcode::IntSub));
+    }
+
+    #[test]
     fn arm_thumb_it_context_commit_keeps_conditional_bx_fallthrough_reachable() {
         if !discovery::ghidra_packaged_sla_available() {
             eprintln!("skip: packaged Ghidra .sla not available for ARM Thumb IT lift test");
