@@ -181,6 +181,7 @@ class SourceFunction:
     param_kinds: list[str]
     param_names: list[str]
     line: int
+    is_static: bool = False
 
 
 @dataclass(frozen=True)
@@ -641,6 +642,7 @@ def extract_go_functions(text: str) -> list[SourceFunction]:
                 param_kinds=[classify_param(p, "go") for p in params_split],
                 param_names=param_names(params),
                 line=text.count("\n", 0, match.start()) + 1,
+                is_static=False,
             )
         )
     return funcs
@@ -665,6 +667,7 @@ def extract_rust_functions(text: str) -> list[SourceFunction]:
                 param_kinds=[classify_param(p, "rust") for p in params_split],
                 param_names=param_names(params),
                 line=text.count("\n", 0, match.start()) + 1,
+                is_static=False,
             )
         )
     return funcs
@@ -703,6 +706,7 @@ def extract_c_like_functions(text: str, language: str) -> list[SourceFunction]:
                 param_kinds=[classify_param(p, language) for p in params_split],
                 param_names=param_names(params),
                 line=text.count("\n", 0, start) + 1,
+                is_static=bool(re.search(r"\bstatic\b", signature)),
             )
         )
     return funcs
@@ -826,6 +830,94 @@ def select_source_functions(
         else:
             fallback.append(func)
     return (matched + fallback)[:limit]
+
+
+def source_call_counts(body: str) -> Counter[str]:
+    return Counter(
+        normalize_name(call.split("::")[-1].lower())
+        for call in CALL_RE.findall(strip_comments(body))
+        if call.split("::")[-1].lower() not in CALL_EXCLUDE
+    )
+
+
+def matched_source_names(
+    source_functions: list[SourceFunction],
+    fission_funcs: list[FissionFunction],
+) -> set[str]:
+    matched: set[str] = set()
+    for func in source_functions:
+        status, matched_func, _ = match_function(func, fission_funcs)
+        if status == "matched" and matched_func is not None:
+            matched.add(normalize_name(func.name))
+    return matched
+
+
+def reachable_source_calls(
+    seed_names: set[str],
+    functions_by_name: dict[str, SourceFunction],
+    max_depth: int = 2,
+) -> dict[str, set[str]]:
+    callers_by_callee: dict[str, set[str]] = {}
+    frontier: list[tuple[str, str, int]] = [
+        (seed_name, seed_name, 0)
+        for seed_name in sorted(seed_names)
+        if seed_name in functions_by_name
+    ]
+    visited: set[tuple[str, str]] = set()
+    while frontier:
+        root_name, current_name, depth = frontier.pop(0)
+        key = (root_name, current_name)
+        if key in visited or depth >= max_depth:
+            continue
+        visited.add(key)
+        current = functions_by_name.get(current_name)
+        root = functions_by_name.get(root_name)
+        if current is None or root is None:
+            continue
+        for callee_name in source_call_counts(current.body):
+            if not callee_name or callee_name == current_name:
+                continue
+            callers_by_callee.setdefault(callee_name, set()).add(root.name)
+            if callee_name in functions_by_name:
+                frontier.append((root_name, callee_name, depth + 1))
+    return callers_by_callee
+
+
+def filter_inlined_static_source_functions(
+    source_functions: list[SourceFunction],
+    all_source_functions: list[SourceFunction],
+    fission_funcs: list[FissionFunction],
+    explicit_function_filter: bool,
+    fission_error: str | None = None,
+) -> tuple[list[SourceFunction], list[dict[str, Any]]]:
+    if explicit_function_filter or fission_error or not fission_funcs:
+        return source_functions, []
+    functions_by_name = {
+        normalize_name(func.name): func
+        for func in all_source_functions
+    }
+    matched_names = matched_source_names(all_source_functions, fission_funcs)
+    reachable_callers = reachable_source_calls(matched_names, functions_by_name)
+    kept: list[SourceFunction] = []
+    suppressed: list[dict[str, Any]] = []
+    for func in source_functions:
+        func_name = normalize_name(func.name)
+        status, matched_func, _ = match_function(func, fission_funcs)
+        is_matched = status == "matched" and matched_func is not None
+        callers = sorted(reachable_callers.get(func_name) or [])
+        if func.is_static and not is_matched and callers:
+            suppressed.append(
+                {
+                    "function_name": func.name,
+                    "source_line": func.line,
+                    "source_signature": func.signature,
+                    "reason": "static_source_function_reachable_from_matched_source_but_absent_from_binary_symbols",
+                    "matched_callers": callers,
+                }
+            )
+            continue
+        kept.append(func)
+    return kept, suppressed
 
 
 def filter_source_functions(
@@ -1474,11 +1566,7 @@ def expand_source_body_fingerprint(
     counter = code_fingerprint(body, include_signature)
     if max_depth <= 0:
         return counter
-    calls = Counter(
-        normalize_name(call.split("::")[-1].lower())
-        for call in CALL_RE.findall(strip_comments(body))
-        if call.split("::")[-1].lower() not in CALL_EXCLUDE
-    )
+    calls = source_call_counts(body)
     for callee_name, count in calls.items():
         if count <= 0 or callee_name in visiting:
             continue
@@ -4556,6 +4644,10 @@ def compare_to_baseline(
         "static_missing_feature_row_rate",
         "static_decomp_absent_feature_row_rate",
         "zero_static_intersection_row_rate",
+        "source_extracted_function_count",
+        "source_selected_function_count",
+        "source_suppressed_static_inline_helper_count",
+        "source_suppressed_static_inline_helper_rate",
         "lost_score_sum",
         "perfect_row_count",
         "supported_behavior_row_count",
@@ -4613,6 +4705,11 @@ def compare_to_baseline(
         if isinstance(summary.get("score_denominator_metrics"), dict)
         else {}
     )
+    source_row_selection = (
+        summary.get("source_row_selection_metrics")
+        if isinstance(summary.get("source_row_selection_metrics"), dict)
+        else {}
+    )
     metric_source.update(
         {
             "semantic_score_nonzero_rate": semantic_stats.get("nonzero_rate"),
@@ -4634,6 +4731,14 @@ def compare_to_baseline(
             "static_missing_feature_row_rate": static_gap_rows.get("missing_feature_row_rate"),
             "static_decomp_absent_feature_row_rate": static_gap_rows.get("decomp_absent_feature_row_rate"),
             "zero_static_intersection_row_rate": static_gap_rows.get("zero_static_intersection_row_rate"),
+            "source_extracted_function_count": source_row_selection.get("extracted_source_function_count"),
+            "source_selected_function_count": source_row_selection.get("selected_source_function_count"),
+            "source_suppressed_static_inline_helper_count": source_row_selection.get(
+                "suppressed_static_inline_helper_count"
+            ),
+            "source_suppressed_static_inline_helper_rate": source_row_selection.get(
+                "suppressed_static_inline_helper_rate_filtered_denominator"
+            ),
             "lost_score_sum": score_denominators.get("lost_score_sum"),
         }
     )
@@ -4683,6 +4788,11 @@ def compare_to_baseline(
         if isinstance(baseline_summary.get("score_denominator_metrics"), dict)
         else {}
     )
+    baseline_source_row_selection = (
+        baseline_summary.get("source_row_selection_metrics")
+        if isinstance(baseline_summary.get("source_row_selection_metrics"), dict)
+        else {}
+    )
     baseline_metric_source.update(
         {
             "semantic_score_nonzero_rate": baseline_semantic_stats.get("nonzero_rate"),
@@ -4704,6 +4814,14 @@ def compare_to_baseline(
             "static_missing_feature_row_rate": baseline_static_gap_rows.get("missing_feature_row_rate"),
             "static_decomp_absent_feature_row_rate": baseline_static_gap_rows.get("decomp_absent_feature_row_rate"),
             "zero_static_intersection_row_rate": baseline_static_gap_rows.get("zero_static_intersection_row_rate"),
+            "source_extracted_function_count": baseline_source_row_selection.get("extracted_source_function_count"),
+            "source_selected_function_count": baseline_source_row_selection.get("selected_source_function_count"),
+            "source_suppressed_static_inline_helper_count": baseline_source_row_selection.get(
+                "suppressed_static_inline_helper_count"
+            ),
+            "source_suppressed_static_inline_helper_rate": baseline_source_row_selection.get(
+                "suppressed_static_inline_helper_rate_filtered_denominator"
+            ),
             "lost_score_sum": baseline_score_denominators.get("lost_score_sum"),
         }
     )
@@ -5492,6 +5610,25 @@ def render_markdown(summary: dict[str, Any], rows: list[dict[str, Any]]) -> str:
         lines.extend(["", "## Denominator Accounting", "", "| Metric | Rows |", "|---|---:|"])
         for key, value in sorted(denominator_accounting.items()):
             lines.append(f"| {key} | {value} |")
+    source_selection = summary.get("source_row_selection_metrics")
+    if isinstance(source_selection, dict):
+        lines.extend(["", "## Source Row Selection Metrics", ""])
+        lines.append(
+            f"- Extracted {source_selection.get('extracted_source_function_count', 0)} source functions, "
+            f"filtered {source_selection.get('filtered_source_function_count', 0)}, "
+            f"selected {source_selection.get('selected_source_function_count', 0)}, "
+            f"suppressed static inline helpers "
+            f"{source_selection.get('suppressed_static_inline_helper_count', 0)}"
+        )
+        suppressed = source_selection.get("suppressed_static_inline_helpers") or []
+        if suppressed:
+            lines.extend(["", "| Suppressed Helper | Entry | Callers | Reason |", "|---|---|---|---|"])
+            for row in suppressed[:12]:
+                callers = ", ".join(str(name) for name in (row.get("matched_callers") or []))
+                lines.append(
+                    f"| `{row.get('function_name')}` | `{row.get('entry_id')}` | `{callers}` | "
+                    f"{row.get('reason')} |"
+                )
     score_by_behavior = summary.get("score_by_behavior_status")
     if isinstance(score_by_behavior, dict) and score_by_behavior:
         lines.extend(["", "## Score By Behavior Status", "", "| Status | Rows | Avg | P50 | P90 |", "|---|---:|---:|---:|---:|"])
@@ -6185,6 +6322,7 @@ def row_for_function(
         "function_name": func.name,
         "source_line": func.line,
         "source_signature": func.signature,
+        "source_is_static": func.is_static,
         "source_return_kind": func.return_kind,
         "source_param_kinds": func.param_kinds,
         "source_param_shape": source_param_shape(func.param_kinds),
@@ -6259,6 +6397,8 @@ def run_benchmark(args: argparse.Namespace) -> int:
     behavior_cache_lock = threading.Lock()
     behavior_cache_stats: Counter[str] = Counter()
     behavior_cache_initial_entry_count = len(behavior_cache or {})
+    source_row_selection_entries: list[dict[str, Any]] = []
+    suppressed_static_inline_rows: list[dict[str, Any]] = []
     for entry in entries:
         all_source_functions = extract_source_functions(entry.source_path, entry.language)
         source_functions = filter_source_functions(all_source_functions, args.function_name)
@@ -6273,11 +6413,41 @@ def run_benchmark(args: argparse.Namespace) -> int:
             list_cache,
             list_cache_stats,
         )
+        source_functions, suppressed_for_entry = filter_inlined_static_source_functions(
+            source_functions,
+            all_source_functions,
+            fission_funcs,
+            explicit_function_filter=bool(args.function_name),
+            fission_error=fission_error,
+        )
+        for suppressed in suppressed_for_entry:
+            suppressed_static_inline_rows.append(
+                {
+                    "entry_id": entry.id,
+                    "source_path": rel(entry.source_path),
+                    "binary_path": rel(entry.binary_path),
+                    **suppressed,
+                }
+            )
         source_functions = select_source_functions(
             source_functions,
             fission_funcs,
             args.limit_functions,
             fission_error,
+        )
+        source_row_selection_entries.append(
+            {
+                "entry_id": entry.id,
+                "source_path": rel(entry.source_path),
+                "binary_path": rel(entry.binary_path),
+                "extracted_source_function_count": len(all_source_functions),
+                "extracted_static_source_function_count": sum(1 for func in all_source_functions if func.is_static),
+                "filtered_source_function_count": len(filter_source_functions(all_source_functions, args.function_name)),
+                "suppressed_static_inline_helper_count": len(suppressed_for_entry),
+                "selected_source_function_count": len(source_functions),
+                "listed_binary_function_count": len(fission_funcs),
+                "list_error": fission_error,
+            }
         )
         if jobs == 1 or len(source_functions) <= 1:
             for func in source_functions:
@@ -6357,6 +6527,43 @@ def run_benchmark(args: argparse.Namespace) -> int:
     summary["behavior_cache_hit_count"] = int(behavior_cache_stats.get("hit", 0))
     summary["behavior_cache_miss_count"] = int(behavior_cache_stats.get("miss", 0))
     summary["behavior_cache_stored_count"] = int(behavior_cache_stats.get("stored", 0))
+    extracted_source_function_count = sum(
+        int(entry.get("extracted_source_function_count") or 0)
+        for entry in source_row_selection_entries
+    )
+    filtered_source_function_count = sum(
+        int(entry.get("filtered_source_function_count") or 0)
+        for entry in source_row_selection_entries
+    )
+    selected_source_function_count = sum(
+        int(entry.get("selected_source_function_count") or 0)
+        for entry in source_row_selection_entries
+    )
+    suppressed_static_inline_count = len(suppressed_static_inline_rows)
+    summary["source_row_selection_metrics"] = {
+        "extracted_source_function_count": extracted_source_function_count,
+        "extracted_static_source_function_count": sum(
+            int(entry.get("extracted_static_source_function_count") or 0)
+            for entry in source_row_selection_entries
+        ),
+        "filtered_source_function_count": filtered_source_function_count,
+        "selected_source_function_count": selected_source_function_count,
+        "semantic_score_denominator_row_count": summary.get("row_count"),
+        "explicit_function_filter_active": bool(args.function_name),
+        "limit_functions": args.limit_functions,
+        "suppressed_static_inline_helper_count": suppressed_static_inline_count,
+        "suppressed_static_inline_helper_rate_filtered_denominator": round(
+            suppressed_static_inline_count / filtered_source_function_count,
+            6,
+        ) if filtered_source_function_count else 0.0,
+        "suppressed_static_inline_policy": (
+            "static source helpers reachable from matched source functions but absent from binary symbols "
+            "are excluded from benchmark rows unless explicitly selected; they remain available for "
+            "same-source inline-expanded fingerprints"
+        ),
+        "entries": source_row_selection_entries,
+        "suppressed_static_inline_helpers": suppressed_static_inline_rows,
+    }
     decomp_cache_requests = summary["decomp_cache_hit_count"] + summary["decomp_cache_miss_count"]
     list_cache_requests = summary["list_cache_hit_count"] + summary["list_cache_miss_count"]
     behavior_cache_requests = summary["behavior_cache_hit_count"] + summary["behavior_cache_miss_count"]
@@ -6467,6 +6674,7 @@ def run_benchmark(args: argparse.Namespace) -> int:
 
 def run_self_test() -> int:
     sample = """
+static int helper(int x) { return x + 1; }
 int add(int a, int b) { return a + b; }
 int max(int a, int b) { if (a > b) return a; return b; }
 """
@@ -6474,9 +6682,10 @@ int max(int a, int b) { if (a > b) return a; return b; }
         path = Path(tmp) / "sample.c"
         path.write_text(sample, encoding="utf-8")
         funcs = extract_source_functions(path, "c")
-        assert [f.name for f in funcs] == ["add", "max"]
-        assert funcs[0].return_kind == "int"
-        assert funcs[0].param_kinds == ["int", "int"]
+        assert [f.name for f in funcs] == ["helper", "add", "max"]
+        assert funcs[0].is_static
+        assert funcs[1].return_kind == "int"
+        assert funcs[1].param_kinds == ["int", "int"]
         funcs_by_name = {normalize_name(f.name): f for f in funcs}
         caller = SourceFunction(
             name="caller",
@@ -6490,15 +6699,15 @@ int max(int a, int b) { if (a > b) return a; return b; }
         expanded_fp = inline_expanded_source_fingerprint(caller, funcs_by_name)
         assert expanded_fp["call:add"] == 0
         assert expanded_fp["op:+"] >= 1
-        assert multiset_jaccard(code_fingerprint(funcs[0].body, funcs[0]), code_fingerprint(funcs[0].body, funcs[0])) == 1.0
+        assert multiset_jaccard(code_fingerprint(funcs[1].body, funcs[1]), code_fingerprint(funcs[1].body, funcs[1])) == 1.0
         missing_feature_score = multiset_jaccard(
-            code_fingerprint("if (a > b) return helper(a + b);", funcs[0]),
-            code_fingerprint("return a;", funcs[0]),
+            code_fingerprint("if (a > b) return helper(a + b);", funcs[1]),
+            code_fingerprint("return a;", funcs[1]),
         )
         assert 0.0 < missing_feature_score < 1.0, missing_feature_score
         gap_details = multiset_gap_details(
-            code_fingerprint("if (a > b) return helper(a + b);", funcs[0]),
-            code_fingerprint("return a;", funcs[0]),
+            code_fingerprint("if (a > b) return helper(a + b);", funcs[1]),
+            code_fingerprint("return a;", funcs[1]),
         )
         assert gap_details["missing_feature_total"] > 0
         assert gap_details["union_feature_total"] >= gap_details["intersection_feature_total"]
@@ -6506,7 +6715,7 @@ int max(int a, int b) { if (a > b) return a; return b; }
         assert rendered_sig_fp["sig:return:int"] == 1
         assert rendered_sig_fp["sig:param_count:1"] == 1
         assert rendered_sig_fp["sig:param:uint"] == 1
-        status, matched, _ = match_function(funcs[0], [FissionFunction("0x1000", "add [export]")])
+        status, matched, _ = match_function(funcs[1], [FissionFunction("0x1000", "add [export]")])
         assert status == "matched"
         assert matched is not None
         status, matched, candidates = match_function(
@@ -6538,6 +6747,7 @@ int max(int a, int b) { if (a > b) return a; return b; }
                     param_kinds=["int"],
                     param_names=["x"],
                     line=1,
+                    is_static=True,
                 ),
                 SourceFunction(
                     name="entry",
@@ -6553,6 +6763,43 @@ int max(int a, int b) { if (a > b) return a; return b; }
             1,
         )
         assert [func.name for func in limited] == ["entry"]
+        static_funcs = [
+            SourceFunction(
+                name="helper",
+                signature="static int helper(int x)",
+                body="return x + 1;",
+                return_kind="int",
+                param_kinds=["int"],
+                param_names=["x"],
+                line=1,
+                is_static=True,
+            ),
+            SourceFunction(
+                name="entry",
+                signature="int entry(int x)",
+                body="return helper(x);",
+                return_kind="int",
+                param_kinds=["int"],
+                param_names=["x"],
+                line=2,
+            ),
+        ]
+        filtered_static, suppressed_static = filter_inlined_static_source_functions(
+            static_funcs,
+            static_funcs,
+            [FissionFunction("0x3000", "entry")],
+            explicit_function_filter=False,
+        )
+        assert [func.name for func in filtered_static] == ["entry"]
+        assert [row["function_name"] for row in suppressed_static] == ["helper"]
+        explicit_static, explicit_suppressed = filter_inlined_static_source_functions(
+            [static_funcs[0]],
+            static_funcs,
+            [FissionFunction("0x3000", "entry")],
+            explicit_function_filter=True,
+        )
+        assert [func.name for func in explicit_static] == ["helper"]
+        assert explicit_suppressed == []
         entries = [
             BenchmarkEntry(
                 id="x86-smoke",
