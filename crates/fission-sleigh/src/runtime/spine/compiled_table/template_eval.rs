@@ -1366,14 +1366,6 @@ impl<'c> CompiledTableEmitter<'c> {
                 if let Some(space_ref) = self.sla_spaces.get(&space_id) {
                     return Ok(space_ref.clone());
                 }
-                if space_id == 0 {
-                    return Ok(CompiledSpaceRef {
-                        name: "const".to_string(),
-                        index: 0,
-                        word_size: 0,
-                        addr_size: 0,
-                    });
-                }
                 bail!("SpaceTpl references unknown SLA space id {space_id}")
             }
         }
@@ -1628,6 +1620,87 @@ impl RuntimeTemplateExecutor for CompiledTableEmitter<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::compiler::{
+        CompiledConstructorTemplate, CompiledDisplayTemplate, CompiledLanguageLayout,
+    };
+    use crate::runtime::spine::RuntimeMatchTrace;
+
+    fn minimal_frontend_with_spaces(
+        spaces: std::collections::BTreeMap<u64, CompiledSpaceRef>,
+    ) -> CompiledFrontend {
+        CompiledFrontend {
+            arch: "test".to_string(),
+            default_context: 0,
+            default_context_known_mask: 0,
+            entry_spec: "test.slaspec".to_string(),
+            entry_id: "test".to_string(),
+            include_manifest: Vec::new(),
+            defines: Vec::new(),
+            definitions: Vec::new(),
+            macros: Vec::new(),
+            constructors: Vec::new(),
+            subtables: std::collections::BTreeMap::new(),
+            language_layout: CompiledLanguageLayout {
+                address_spaces: Vec::new(),
+                registers: Vec::new(),
+                token_fields: Vec::new(),
+                context_fields: Vec::new(),
+                subtables: Vec::new(),
+                display_templates: Vec::new(),
+            },
+            construct_templates: Vec::new(),
+            pcode_ops: Vec::new(),
+            pattern_nodes: Vec::new(),
+            sla_spaces: spaces,
+            sla_unique_space_index: 0,
+            sla_register_space_index: 0,
+            sla_uniqbase: 0,
+            sla_uniqmask: u64::MAX,
+        }
+    }
+
+    fn minimal_construct_state() -> RuntimeConstructState {
+        RuntimeConstructState {
+            subtable_id: 0,
+            constructor_id: 0,
+            constructor_slot: 0,
+            mnemonic: "test".to_string(),
+            construct_tpl_kind: CompiledConstructTplKind::Generic,
+            constructor_template: CompiledConstructorTemplate {
+                handles: Vec::new(),
+                decode_steps: Vec::new(),
+                num_labels: 0,
+                result: None,
+                ops: Vec::new(),
+                template_source: CompiledTemplateSource::SpecDerived,
+            },
+            named_templates: Vec::new(),
+            context_commits: Vec::new(),
+            display_template: CompiledDisplayTemplate {
+                constructor_hash: 0,
+                pieces: Vec::new(),
+                first_whitespace: None,
+                flowthru_operand_index: None,
+                display: String::new(),
+            },
+            display_operands: Vec::new(),
+            construct_nodes: Vec::new(),
+            handles: Vec::new(),
+            exported_handle: None,
+            operands: Vec::new(),
+            context_register: 0,
+            context_known_mask: 0,
+            absolute_offset: 0,
+            relative_length: 0,
+            length: 0,
+            match_trace: RuntimeMatchTrace {
+                root_bucket: "test".to_string(),
+                probes: Vec::new(),
+                leaf_constructor_indexes: Vec::new(),
+                matched_leaf_pattern: None,
+            },
+        }
+    }
 
     fn test_handle(space_name: &str, offset: u64) -> RuntimeHandle {
         RuntimeHandle {
@@ -1698,6 +1771,30 @@ mod tests {
     }
 
     #[test]
+    fn const_space_tpl_requires_decoded_sla_space_metadata() {
+        let compiled = minimal_frontend_with_spaces(std::collections::BTreeMap::new());
+        let mut emitter = CompiledTableEmitter::new(
+            &compiled,
+            None,
+            0x1000,
+            &[],
+            0x1000,
+            FlowEmitOptions::default(),
+        );
+        let state = minimal_construct_state();
+        let err = emitter
+            .resolve_space_tpl(
+                &CompiledSpaceTpl::Const(Box::new(CompiledConstTpl::Real { value: 0 })),
+                &state,
+            )
+            .expect_err("const space id must come from decoded SLA space metadata");
+
+        assert!(err
+            .to_string()
+            .contains("SpaceTpl references unknown SLA space id 0"));
+    }
+
+    #[test]
     fn offset_plus_source_has_no_saturating_shift_fallback() {
         let source = include_str!("template_eval.rs");
         let saturating_shift_fallback =
@@ -1705,6 +1802,12 @@ mod tests {
         let dynamic_space_id_lossy_cast = ["space.index", "as", "i64"].join(" ");
         let missing_space_non_const_fallback =
             [".map(|s| s.name == \"const\")", ".unwrap_or(false)"].join("\n");
+        let missing_const_space_materialization = [
+            "name: \"const\".to_string()",
+            "word_size: 0",
+            "addr_size: 0",
+        ]
+        .join("\n");
 
         assert!(
             !source.contains(&saturating_shift_fallback),
@@ -1717,6 +1820,10 @@ mod tests {
         assert!(
             !source.contains(&dynamic_space_id_lossy_cast),
             "dynamic LOAD/STORE space-id constants must fail closed instead of truncating SLA space ids"
+        );
+        assert!(
+            !source.contains(&missing_const_space_materialization),
+            "SpaceTpl::Const must use decoded SLA const-space metadata instead of materializing it at runtime"
         );
     }
 

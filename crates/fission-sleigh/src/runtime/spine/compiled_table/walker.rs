@@ -597,14 +597,6 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                 if let Some(space_ref) = self.compiled.sla_spaces.get(&index) {
                     return Ok(space_ref.clone());
                 }
-                if index == 0 {
-                    return Ok(CompiledSpaceRef {
-                        name: "const".to_string(),
-                        index: 0,
-                        word_size: 0,
-                        addr_size: 0,
-                    });
-                }
                 bail!("export SpaceTpl references unknown SLA space id {index}")
             }
         }

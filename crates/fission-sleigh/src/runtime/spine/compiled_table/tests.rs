@@ -801,6 +801,12 @@ fn compiled_table_policy_symbols_stay_architecture_neutral() {
     let isa_opcode_policy = ["is", "instruction", "prefix", "byte"].join("_");
     let opcode_context_policy = ["opcode", "len", "from", "context"].join("_");
     let unknown_space_materialization = ["name: ", "\"unknown\""].concat();
+    let const_space_runtime_materialization = [
+        "name: \"const\".to_string()",
+        "word_size: 0",
+        "addr_size: 0",
+    ]
+    .join("\n");
     let unknown_space_match_arm = ["_ => ", "\"unknown\""].concat();
     let hardcoded_unique_space = ["2 => ", "\"unique\""].concat();
     let hardcoded_ram_space = ["3 => ", "\"ram\""].concat();
@@ -1039,6 +1045,11 @@ fn compiled_table_policy_symbols_stay_architecture_neutral() {
         assert!(
             !source.contains(&unknown_space_materialization),
             "{} still materializes missing SLA spaces instead of failing closed",
+            file.display()
+        );
+        assert!(
+            !source.contains(&const_space_runtime_materialization),
+            "{} still materializes missing SLA const-space metadata instead of failing closed",
             file.display()
         );
         assert!(
