@@ -14,7 +14,10 @@ mod disasm;
 mod function_select;
 mod functions;
 mod inventory;
+mod nir_stats;
+mod pcode_diagnostics;
 mod pcode_stages;
+mod pcode_topology;
 mod raw_pcode;
 #[cfg(not(feature = "native_decomp"))]
 mod rust_decomp;
@@ -30,7 +33,9 @@ use decompile::{
 use disasm::{disassemble, disassemble_function};
 use functions::print_function_list;
 use inventory::emit_function_facts_inventory;
+use nir_stats::emit_nir_stats;
 use pcode_stages::emit_pcode_stages;
+use pcode_topology::emit_pcode_topology;
 use raw_pcode::emit_raw_pcode;
 #[cfg(not(feature = "native_decomp"))]
 use rust_decomp::run_decompilation_rust_sleigh;
@@ -282,6 +287,28 @@ fn execute_command(cli: &OneShotArgs) -> Result<()> {
         )?);
     }
 
+    if let Some(addr) = cli.nir_stats {
+        return Ok(emit_nir_stats(
+            &binary,
+            addr,
+            cli.nir_stats_max_bytes,
+            cli.nir_stats_instruction_limit,
+            cli.nir_stats_strict_indirect_stop,
+            cli.json,
+        )?);
+    }
+
+    if let Some(addr) = cli.pcode_topology {
+        return Ok(emit_pcode_topology(
+            &binary,
+            addr,
+            cli.pcode_topology_max_bytes,
+            cli.pcode_topology_instruction_limit,
+            cli.pcode_topology_strict_indirect_stop,
+            cli.json,
+        )?);
+    }
+
     if cli.address.is_some() || cli.decomp_all {
         if cli.debug_decomp && !cli.json && !cli.benchmark {
             anyhow::bail!(
@@ -359,6 +386,8 @@ fn print_help() {
     println!("  fission_cli disasm <binary> --addr <ADDR> [--count N] [--function] [--json]");
     println!("  fission_cli raw-pcode <binary> --addr <ADDR> [--json]");
     println!("  fission_cli pcode-stages <binary> --addr <ADDR> [--json]");
+    println!("  fission_cli nir-stats <binary> --addr <ADDR> [--json]");
+    println!("  fission_cli pcode-topology <binary> --addr <ADDR> [--json]");
     println!("  fission_cli decomp <binary> (--addr <ADDR> | --all) [OPTIONS]");
     println!("  fission_cli strings <binary> [--min-len N] [--json]");
     println!("  fission_cli xrefs <binary> [--json] [--no-disassembly] [--function ADDR]");
@@ -372,6 +401,8 @@ fn print_help() {
     println!("  disasm     Disassemble instructions or full functions");
     println!("  raw-pcode  Emit Rust-Sleigh raw p-code");
     println!("  pcode-stages  Emit Rust-Sleigh/NIR stage diagnostics");
+    println!("  nir-stats  Emit canonical NirBuildStats telemetry");
+    println!("  pcode-topology  Emit raw p-code block topology");
     println!("  decomp     Decompile one function or all discovered functions");
     println!("  strings    Extract strings");
     println!("  xrefs      Canonical xref index (loader + optional disassembly)");
@@ -397,6 +428,8 @@ fn print_help() {
     println!("  fission_cli disasm app.exe --addr 0x140001000");
     println!("  fission_cli raw-pcode app.exe --addr 0x140001000");
     println!("  fission_cli pcode-stages app.exe --addr 0x140001000 --json");
+    println!("  fission_cli nir-stats app.exe --addr 0x140001000 --json");
+    println!("  fission_cli pcode-topology app.exe --addr 0x140001000");
     println!("  fission_cli decomp app.exe --addr 0x140001000");
     println!("  fission_cli decomp app.exe --all --limit 10");
     println!(

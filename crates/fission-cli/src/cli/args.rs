@@ -42,6 +42,14 @@ pub struct OneShotArgs {
     pub pcode_stages_max_bytes: usize,
     pub pcode_stages_instruction_limit: usize,
     pub pcode_stages_strict_indirect_stop: bool,
+    pub nir_stats: Option<u64>,
+    pub nir_stats_max_bytes: usize,
+    pub nir_stats_instruction_limit: usize,
+    pub nir_stats_strict_indirect_stop: bool,
+    pub pcode_topology: Option<u64>,
+    pub pcode_topology_max_bytes: usize,
+    pub pcode_topology_instruction_limit: usize,
+    pub pcode_topology_strict_indirect_stop: bool,
     pub count: usize,
     pub compiler_id: Option<String>,
     pub profile: Option<String>,
@@ -107,6 +115,14 @@ impl Default for OneShotArgs {
             pcode_stages_max_bytes: 0x4000,
             pcode_stages_instruction_limit: 512,
             pcode_stages_strict_indirect_stop: false,
+            nir_stats: None,
+            nir_stats_max_bytes: 0x4000,
+            nir_stats_instruction_limit: 512,
+            nir_stats_strict_indirect_stop: false,
+            pcode_topology: None,
+            pcode_topology_max_bytes: 0x4000,
+            pcode_topology_instruction_limit: 512,
+            pcode_topology_strict_indirect_stop: false,
             count: 20,
             compiler_id: None,
             profile: None,
@@ -211,7 +227,7 @@ struct CommonBinaryOutputArgs {
 #[command(version = env!("CARGO_PKG_VERSION"))]
 #[command(about = "Rust-native binary analysis and decompilation")]
 #[command(
-    long_about = "Fission is a headless-first binary analysis and decompilation tool with explicit one-shot subcommands.\n\nCanonical human-facing entrypoints:\n  fission_cli info binary.exe\n  fission_cli list binary.exe --json\n  fission_cli disasm binary.exe --addr 0x1400\n  fission_cli raw-pcode binary.exe --addr 0x1400\n  fission_cli pcode-stages binary.exe --addr 0x1400 --json\n  fission_cli decomp binary.exe --addr 0x1400\n  fission_cli strings binary.exe --min-len 6\n  fission_cli xrefs binary.exe --json\n\nOperator-oriented inventory lives under:\n  fission_cli inventory <SUBCOMMAND> ...\n"
+    long_about = "Fission is a headless-first binary analysis and decompilation tool with explicit one-shot subcommands.\n\nCanonical human-facing entrypoints:\n  fission_cli info binary.exe\n  fission_cli list binary.exe --json\n  fission_cli disasm binary.exe --addr 0x1400\n  fission_cli raw-pcode binary.exe --addr 0x1400\n  fission_cli pcode-stages binary.exe --addr 0x1400 --json\n  fission_cli nir-stats binary.exe --addr 0x1400 --json\n  fission_cli pcode-topology binary.exe --addr 0x1400 --json\n  fission_cli decomp binary.exe --addr 0x1400\n  fission_cli strings binary.exe --min-len 6\n  fission_cli xrefs binary.exe --json\n\nOperator-oriented inventory lives under:\n  fission_cli inventory <SUBCOMMAND> ...\n"
 )]
 #[command(arg_required_else_help = true)]
 struct CliArgs {
@@ -235,6 +251,10 @@ enum CliCommand {
     RawPcode(RawPcodeArgs),
     /// Emit Rust-Sleigh decode/NIR/render stage diagnostics for a function
     PcodeStages(PcodeStagesArgs),
+    /// Emit canonical NIR build telemetry for a function
+    NirStats(NirStatsArgs),
+    /// Emit raw p-code CFG/topology diagnostics for a function
+    PcodeTopology(PcodeTopologyArgs),
     /// Decompile one function or all discovered functions
     Decomp(DecompArgs),
     /// Extract binary strings
@@ -359,6 +379,64 @@ struct RawPcodeArgs {
     after_help = "Examples:\n  fission_cli pcode-stages app.exe --addr 0x140001000\n  fission_cli pcode-stages app.exe --addr 0x140001000 --json\n  fission_cli pcode-stages app.exe --addr 0x140001000 --max-bytes 1024 --instruction-limit 128"
 )]
 struct PcodeStagesArgs {
+    /// Path to the binary file to analyze
+    binary: PathBuf,
+
+    /// Function entry address or an address inside the function
+    #[arg(long, value_parser = parse_hex_address, required = true)]
+    addr: u64,
+
+    /// Maximum bytes to decode from the function body
+    #[arg(long, default_value_t = 0x4000)]
+    max_bytes: usize,
+
+    /// Maximum instructions to decode
+    #[arg(long, default_value_t = 512)]
+    instruction_limit: usize,
+
+    /// Stop at indirect branches instead of continuing through the function body
+    #[arg(long)]
+    strict_indirect_stop: bool,
+
+    #[command(flatten)]
+    common: CommonBinaryOutputArgs,
+}
+
+#[derive(Args, Debug)]
+#[command(
+    long_about = "Emit the canonical flat NirBuildStats telemetry for one Rust-Sleigh decompilation.\n\nJSON mode preserves the public NirBuildStats field names used by automation and benchmark artifacts.",
+    after_help = "Examples:\n  fission_cli nir-stats app.exe --addr 0x140001000\n  fission_cli nir-stats app.exe --addr 0x140001000 --json\n  fission_cli nir-stats app.exe --addr 0x140001000 --max-bytes 1024 --instruction-limit 128"
+)]
+struct NirStatsArgs {
+    /// Path to the binary file to analyze
+    binary: PathBuf,
+
+    /// Function entry address or an address inside the function
+    #[arg(long, value_parser = parse_hex_address, required = true)]
+    addr: u64,
+
+    /// Maximum bytes to decode from the function body
+    #[arg(long, default_value_t = 0x4000)]
+    max_bytes: usize,
+
+    /// Maximum instructions to decode
+    #[arg(long, default_value_t = 512)]
+    instruction_limit: usize,
+
+    /// Stop at indirect branches instead of continuing through the function body
+    #[arg(long)]
+    strict_indirect_stop: bool,
+
+    #[command(flatten)]
+    common: CommonBinaryOutputArgs,
+}
+
+#[derive(Args, Debug)]
+#[command(
+    long_about = "Emit raw p-code block topology from the Rust-Sleigh pipeline without dumping every p-code op.\n\nUse this to inspect block count, edges, terminal opcodes, and per-block successors before NIR materialization or structuring changes.",
+    after_help = "Examples:\n  fission_cli pcode-topology app.exe --addr 0x140001000\n  fission_cli pcode-topology app.exe --addr 0x140001000 --json\n  fission_cli pcode-topology app.exe --addr 0x140001000 --max-bytes 1024 --instruction-limit 128"
+)]
+struct PcodeTopologyArgs {
     /// Path to the binary file to analyze
     binary: PathBuf,
 
@@ -915,6 +993,8 @@ const CANONICAL_SUBCOMMANDS: &[&str] = &[
     "disasm",
     "raw-pcode",
     "pcode-stages",
+    "nir-stats",
+    "pcode-topology",
     "decomp",
     "strings",
     "xrefs",
@@ -1040,6 +1120,26 @@ fn normalize_canonical(cli: CliArgs) -> ParsedInvocation {
                     args.verbose = stages.common.verbose;
                     args
                 }
+                CliCommand::NirStats(stats) => {
+                    let mut args = OneShotArgs::with_binary(stats.binary);
+                    args.nir_stats = Some(stats.addr);
+                    args.nir_stats_max_bytes = stats.max_bytes;
+                    args.nir_stats_instruction_limit = stats.instruction_limit;
+                    args.nir_stats_strict_indirect_stop = stats.strict_indirect_stop;
+                    args.json = stats.common.json;
+                    args.verbose = stats.common.verbose;
+                    args
+                }
+                CliCommand::PcodeTopology(topology) => {
+                    let mut args = OneShotArgs::with_binary(topology.binary);
+                    args.pcode_topology = Some(topology.addr);
+                    args.pcode_topology_max_bytes = topology.max_bytes;
+                    args.pcode_topology_instruction_limit = topology.instruction_limit;
+                    args.pcode_topology_strict_indirect_stop = topology.strict_indirect_stop;
+                    args.json = topology.common.json;
+                    args.verbose = topology.common.verbose;
+                    args
+                }
                 CliCommand::Decomp(decomp) => {
                     let mut args = OneShotArgs::with_binary(decomp.binary);
                     args.address = decomp.addr;
@@ -1155,6 +1255,14 @@ fn normalize_legacy(cli: LegacyCliArgs) -> ParsedOneShotArgs {
         pcode_stages_max_bytes: 0x4000,
         pcode_stages_instruction_limit: 512,
         pcode_stages_strict_indirect_stop: false,
+        nir_stats: None,
+        nir_stats_max_bytes: 0x4000,
+        nir_stats_instruction_limit: 512,
+        nir_stats_strict_indirect_stop: false,
+        pcode_topology: None,
+        pcode_topology_max_bytes: 0x4000,
+        pcode_topology_instruction_limit: 512,
+        pcode_topology_strict_indirect_stop: false,
         count: cli.count,
         compiler_id: cli.compiler_id,
         profile: cli.profile,
@@ -1439,6 +1547,50 @@ mod tests {
         assert_eq!(parsed.args.pcode_stages_max_bytes, 1024);
         assert_eq!(parsed.args.pcode_stages_instruction_limit, 64);
         assert!(parsed.args.pcode_stages_strict_indirect_stop);
+        assert!(parsed.args.json);
+    }
+
+    #[test]
+    fn canonical_nir_stats_parsing_maps_to_nir_stats_command() {
+        let parsed = parse_canonical(&[
+            "fission_cli",
+            "nir-stats",
+            "bin.exe",
+            "--addr",
+            "0x1400",
+            "--max-bytes",
+            "1024",
+            "--instruction-limit",
+            "64",
+            "--strict-indirect-stop",
+            "--json",
+        ]);
+        assert_eq!(parsed.args.nir_stats, Some(0x1400));
+        assert_eq!(parsed.args.nir_stats_max_bytes, 1024);
+        assert_eq!(parsed.args.nir_stats_instruction_limit, 64);
+        assert!(parsed.args.nir_stats_strict_indirect_stop);
+        assert!(parsed.args.json);
+    }
+
+    #[test]
+    fn canonical_pcode_topology_parsing_maps_to_pcode_topology_command() {
+        let parsed = parse_canonical(&[
+            "fission_cli",
+            "pcode-topology",
+            "bin.exe",
+            "--addr",
+            "0x1400",
+            "--max-bytes",
+            "2048",
+            "--instruction-limit",
+            "96",
+            "--strict-indirect-stop",
+            "--json",
+        ]);
+        assert_eq!(parsed.args.pcode_topology, Some(0x1400));
+        assert_eq!(parsed.args.pcode_topology_max_bytes, 2048);
+        assert_eq!(parsed.args.pcode_topology_instruction_limit, 96);
+        assert!(parsed.args.pcode_topology_strict_indirect_stop);
         assert!(parsed.args.json);
     }
 
