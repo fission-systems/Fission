@@ -208,6 +208,8 @@ manifest.
   template-source totals, raw p-code compatibility import totals, invalid p-code
   shape totals, and SLEIGH first-blocker rows. This makes SLEIGH regressions
   visible even when downstream behavior or static scores also fail.
+  `--require-sleigh-template-source` also fails if compatibility imports or
+  invalid p-code shapes are nonzero.
 - `behavior_failure_diagnostics`: behavior failure owner buckets
   (`candidate`, `oracle`, harness unavailable, unsupported, mismatch) plus
   normalized compiler/runtime detail signatures and representative rows.

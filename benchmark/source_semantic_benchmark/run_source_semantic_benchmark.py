@@ -3938,6 +3938,15 @@ def sleigh_template_source_gate(summary: dict[str, Any], required_source: str) -
     quality_totals = summary.get("debug_quality_evidence_totals")
     if not isinstance(quality_totals, dict):
         quality_totals = {}
+    sleigh_health = summary.get("sleigh_lift_health_metrics")
+    if not isinstance(sleigh_health, dict):
+        sleigh_health = {}
+    nir_stats = summary.get("nir_build_stats_metrics")
+    if not isinstance(nir_stats, dict):
+        nir_stats = {}
+    nir_numeric_totals = nir_stats.get("numeric_totals")
+    if not isinstance(nir_numeric_totals, dict):
+        nir_numeric_totals = {}
 
     failures: list[str] = []
     row_count = int(summary.get("row_count", 0) or 0)
@@ -3949,6 +3958,13 @@ def sleigh_template_source_gate(summary: dict[str, Any], required_source: str) -
     decode_ok = int(stage_counts.get("decode:ok", 0) or 0)
     raw_pcode_ok = int(stage_counts.get("raw_pcode:ok", 0) or 0)
     invalid_pcode_shape_count = int(quality_totals.get("invalid_pcode_shape_count", 0) or 0)
+    raw_pcode_compat_import_count = int(
+        sleigh_health.get(
+            "raw_pcode_compat_import_total",
+            nir_numeric_totals.get("raw_pcode_compat_import_count", 0),
+        )
+        or 0
+    )
     total_templates = sum(
         int(value) for value in template_totals.values() if isinstance(value, int | float)
     )
@@ -3994,6 +4010,11 @@ def sleigh_template_source_gate(summary: dict[str, Any], required_source: str) -
         failures.append(f"SLEIGH decode/raw_pcode stages must be ok (got {failed_sleigh_stages})")
     if invalid_pcode_shape_count != 0:
         failures.append(f"SLEIGH invalid_pcode_shape_count must be 0 (got {invalid_pcode_shape_count})")
+    if raw_pcode_compat_import_count != 0:
+        failures.append(
+            "SLEIGH raw_pcode_compat_import_count must be 0 "
+            f"(got {raw_pcode_compat_import_count})"
+        )
 
     return {
         "required_source": required_source,
@@ -4007,6 +4028,7 @@ def sleigh_template_source_gate(summary: dict[str, Any], required_source: str) -
         "decode_ok_rows": decode_ok,
         "raw_pcode_ok_rows": raw_pcode_ok,
         "invalid_pcode_shape_count": invalid_pcode_shape_count,
+        "raw_pcode_compat_import_count": raw_pcode_compat_import_count,
     }
 
 
@@ -6251,6 +6273,7 @@ int max(int a, int b) { if (a > b) return a; return b; }
             "sla_construct_tpl",
         )
         assert gate["status"] == "passed"
+        assert gate["raw_pcode_compat_import_count"] == 0
         gate = sleigh_template_source_gate(
             {
                 "row_count": 1,
@@ -6333,6 +6356,20 @@ int max(int a, int b) { if (a > b) return a; return b; }
         )
         assert gate["status"] == "failed"
         assert any("invalid_pcode_shape_count" in failure for failure in gate["failures"])
+        gate = sleigh_template_source_gate(
+            {
+                "row_count": 1,
+                "debug_stage_status_counts": {"decode:ok": 1, "raw_pcode:ok": 1},
+                "debug_quality_evidence_totals": {"invalid_pcode_shape_count": 0},
+                "debug_template_source_totals": {"sla_construct_tpl": 1},
+                "nir_build_stats_metrics": {
+                    "numeric_totals": {"raw_pcode_compat_import_count": 1}
+                },
+            },
+            "sla_construct_tpl",
+        )
+        assert gate["status"] == "failed"
+        assert any("raw_pcode_compat_import_count" in failure for failure in gate["failures"])
         gate = sleigh_template_source_gate(
             {
                 "row_count": 1,
