@@ -49,7 +49,7 @@ pub struct CompiledFrontend {
 }
 
 fn default_sla_uniqmask() -> u64 {
-    u64::MAX
+    0
 }
 
 impl CompiledFrontend {

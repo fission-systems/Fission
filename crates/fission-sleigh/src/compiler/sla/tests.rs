@@ -635,6 +635,19 @@ fn sla_root_unique_base_is_not_synthesized() {
 }
 
 #[test]
+fn sla_root_unique_mask_default_matches_ghidra() {
+    let templates = include_str!("templates.rs");
+    assert!(
+        templates.contains(".attr_unsigned(sla_format::ATTR_UNIQMASK)\n        .unwrap_or(0)"),
+        "compiled .sla root decode must use Ghidra's absent uniqmask default of 0"
+    );
+    assert!(
+        !templates.contains(".attr_unsigned(sla_format::ATTR_UNIQMASK)\n        .unwrap_or(u64::MAX)"),
+        "compiled .sla root decode must not synthesize all address bits as the unique allocation mask"
+    );
+}
+
+#[test]
 fn sla_constructor_identity_is_not_silently_overwritten() {
     let templates = include_str!("templates.rs");
     let forbidden = "constructors_by_index.insert(slot, template);";

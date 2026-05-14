@@ -135,7 +135,7 @@ pub fn compile_frontend(
         sla_unique_space_index: u64::MAX,
         sla_register_space_index: u64::MAX,
         sla_uniqbase: 0,
-        sla_uniqmask: u64::MAX,
+        sla_uniqmask: 0,
     })
 }
 

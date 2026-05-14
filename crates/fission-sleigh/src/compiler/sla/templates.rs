@@ -79,7 +79,7 @@ pub(super) fn decode_construct_templates(
         .ok_or_else(|| anyhow!("compiled SLEIGH root missing uniqbase"))?;
     let uniqmask = root
         .attr_unsigned(sla_format::ATTR_UNIQMASK)
-        .unwrap_or(u64::MAX);
+        .unwrap_or(0);
 
     // 1. Pass One: Build a complete symbol ID -> name mapping from the symbol table
     let mut symbol_names = BTreeMap::new();
