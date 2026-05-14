@@ -38,6 +38,10 @@ pub struct OneShotArgs {
     pub raw_pcode_max_bytes: usize,
     pub raw_pcode_instruction_limit: usize,
     pub raw_pcode_continue_past_indirect: bool,
+    pub pcode_stages: Option<u64>,
+    pub pcode_stages_max_bytes: usize,
+    pub pcode_stages_instruction_limit: usize,
+    pub pcode_stages_strict_indirect_stop: bool,
     pub count: usize,
     pub compiler_id: Option<String>,
     pub profile: Option<String>,
@@ -99,6 +103,10 @@ impl Default for OneShotArgs {
             raw_pcode_max_bytes: 4096,
             raw_pcode_instruction_limit: 512,
             raw_pcode_continue_past_indirect: false,
+            pcode_stages: None,
+            pcode_stages_max_bytes: 0x4000,
+            pcode_stages_instruction_limit: 512,
+            pcode_stages_strict_indirect_stop: false,
             count: 20,
             compiler_id: None,
             profile: None,
@@ -203,7 +211,7 @@ struct CommonBinaryOutputArgs {
 #[command(version = env!("CARGO_PKG_VERSION"))]
 #[command(about = "Rust-native binary analysis and decompilation")]
 #[command(
-    long_about = "Fission is a headless-first binary analysis and decompilation tool with explicit one-shot subcommands.\n\nCanonical human-facing entrypoints:\n  fission_cli info binary.exe\n  fission_cli list binary.exe --json\n  fission_cli disasm binary.exe --addr 0x1400\n  fission_cli raw-pcode binary.exe --addr 0x1400\n  fission_cli decomp binary.exe --addr 0x1400\n  fission_cli strings binary.exe --min-len 6\n  fission_cli xrefs binary.exe --json\n\nOperator-oriented inventory lives under:\n  fission_cli inventory <SUBCOMMAND> ...\n"
+    long_about = "Fission is a headless-first binary analysis and decompilation tool with explicit one-shot subcommands.\n\nCanonical human-facing entrypoints:\n  fission_cli info binary.exe\n  fission_cli list binary.exe --json\n  fission_cli disasm binary.exe --addr 0x1400\n  fission_cli raw-pcode binary.exe --addr 0x1400\n  fission_cli pcode-stages binary.exe --addr 0x1400 --json\n  fission_cli decomp binary.exe --addr 0x1400\n  fission_cli strings binary.exe --min-len 6\n  fission_cli xrefs binary.exe --json\n\nOperator-oriented inventory lives under:\n  fission_cli inventory <SUBCOMMAND> ...\n"
 )]
 #[command(arg_required_else_help = true)]
 struct CliArgs {
@@ -225,6 +233,8 @@ enum CliCommand {
     Disasm(DisasmArgs),
     /// Emit Rust-Sleigh raw p-code for a function
     RawPcode(RawPcodeArgs),
+    /// Emit Rust-Sleigh decode/NIR/render stage diagnostics for a function
+    PcodeStages(PcodeStagesArgs),
     /// Decompile one function or all discovered functions
     Decomp(DecompArgs),
     /// Extract binary strings
@@ -338,6 +348,35 @@ struct RawPcodeArgs {
     /// Continue past indirect branches while lifting
     #[arg(long)]
     continue_past_indirect: bool,
+
+    #[command(flatten)]
+    common: CommonBinaryOutputArgs,
+}
+
+#[derive(Args, Debug)]
+#[command(
+    long_about = "Emit Rust-Sleigh decode, raw p-code, NIR, normalization, structuring, and render stage diagnostics for one function.\n\nThis reuses the canonical debug_decomp bundle shape so automation can compare stage status and telemetry without parsing rendered C-like output.",
+    after_help = "Examples:\n  fission_cli pcode-stages app.exe --addr 0x140001000\n  fission_cli pcode-stages app.exe --addr 0x140001000 --json\n  fission_cli pcode-stages app.exe --addr 0x140001000 --max-bytes 1024 --instruction-limit 128"
+)]
+struct PcodeStagesArgs {
+    /// Path to the binary file to analyze
+    binary: PathBuf,
+
+    /// Function entry address or an address inside the function
+    #[arg(long, value_parser = parse_hex_address, required = true)]
+    addr: u64,
+
+    /// Maximum bytes to decode from the function body
+    #[arg(long, default_value_t = 0x4000)]
+    max_bytes: usize,
+
+    /// Maximum instructions to decode
+    #[arg(long, default_value_t = 512)]
+    instruction_limit: usize,
+
+    /// Stop at indirect branches instead of continuing through the function body
+    #[arg(long)]
+    strict_indirect_stop: bool,
 
     #[command(flatten)]
     common: CommonBinaryOutputArgs,
@@ -875,6 +914,7 @@ const CANONICAL_SUBCOMMANDS: &[&str] = &[
     "list",
     "disasm",
     "raw-pcode",
+    "pcode-stages",
     "decomp",
     "strings",
     "xrefs",
@@ -990,6 +1030,16 @@ fn normalize_canonical(cli: CliArgs) -> ParsedInvocation {
                     args.verbose = raw_pcode.common.verbose;
                     args
                 }
+                CliCommand::PcodeStages(stages) => {
+                    let mut args = OneShotArgs::with_binary(stages.binary);
+                    args.pcode_stages = Some(stages.addr);
+                    args.pcode_stages_max_bytes = stages.max_bytes;
+                    args.pcode_stages_instruction_limit = stages.instruction_limit;
+                    args.pcode_stages_strict_indirect_stop = stages.strict_indirect_stop;
+                    args.json = stages.common.json;
+                    args.verbose = stages.common.verbose;
+                    args
+                }
                 CliCommand::Decomp(decomp) => {
                     let mut args = OneShotArgs::with_binary(decomp.binary);
                     args.address = decomp.addr;
@@ -1101,6 +1151,10 @@ fn normalize_legacy(cli: LegacyCliArgs) -> ParsedOneShotArgs {
         raw_pcode_max_bytes: 4096,
         raw_pcode_instruction_limit: 512,
         raw_pcode_continue_past_indirect: false,
+        pcode_stages: None,
+        pcode_stages_max_bytes: 0x4000,
+        pcode_stages_instruction_limit: 512,
+        pcode_stages_strict_indirect_stop: false,
         count: cli.count,
         compiler_id: cli.compiler_id,
         profile: cli.profile,
@@ -1363,6 +1417,28 @@ mod tests {
         assert_eq!(parsed.args.raw_pcode_max_bytes, 1024);
         assert_eq!(parsed.args.raw_pcode_instruction_limit, 64);
         assert!(parsed.args.raw_pcode_continue_past_indirect);
+        assert!(parsed.args.json);
+    }
+
+    #[test]
+    fn canonical_pcode_stages_parsing_maps_to_pcode_stages_command() {
+        let parsed = parse_canonical(&[
+            "fission_cli",
+            "pcode-stages",
+            "bin.exe",
+            "--addr",
+            "0x1400",
+            "--max-bytes",
+            "1024",
+            "--instruction-limit",
+            "64",
+            "--strict-indirect-stop",
+            "--json",
+        ]);
+        assert_eq!(parsed.args.pcode_stages, Some(0x1400));
+        assert_eq!(parsed.args.pcode_stages_max_bytes, 1024);
+        assert_eq!(parsed.args.pcode_stages_instruction_limit, 64);
+        assert!(parsed.args.pcode_stages_strict_indirect_stop);
         assert!(parsed.args.json);
     }
 

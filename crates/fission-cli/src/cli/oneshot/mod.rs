@@ -14,6 +14,7 @@ mod disasm;
 mod function_select;
 mod functions;
 mod inventory;
+mod pcode_stages;
 mod raw_pcode;
 #[cfg(not(feature = "native_decomp"))]
 mod rust_decomp;
@@ -29,6 +30,7 @@ use decompile::{
 use disasm::{disassemble, disassemble_function};
 use functions::print_function_list;
 use inventory::emit_function_facts_inventory;
+use pcode_stages::emit_pcode_stages;
 use raw_pcode::emit_raw_pcode;
 #[cfg(not(feature = "native_decomp"))]
 use rust_decomp::run_decompilation_rust_sleigh;
@@ -269,6 +271,17 @@ fn execute_command(cli: &OneShotArgs) -> Result<()> {
         )?);
     }
 
+    if let Some(addr) = cli.pcode_stages {
+        return Ok(emit_pcode_stages(
+            &binary,
+            addr,
+            cli.pcode_stages_max_bytes,
+            cli.pcode_stages_instruction_limit,
+            cli.pcode_stages_strict_indirect_stop,
+            cli.json,
+        )?);
+    }
+
     if cli.address.is_some() || cli.decomp_all {
         if cli.debug_decomp && !cli.json && !cli.benchmark {
             anyhow::bail!(
@@ -344,6 +357,8 @@ fn print_help() {
     println!("  fission_cli info <binary> [--sections|--imports|--exports] [--json]");
     println!("  fission_cli list <binary> [--json]");
     println!("  fission_cli disasm <binary> --addr <ADDR> [--count N] [--function] [--json]");
+    println!("  fission_cli raw-pcode <binary> --addr <ADDR> [--json]");
+    println!("  fission_cli pcode-stages <binary> --addr <ADDR> [--json]");
     println!("  fission_cli decomp <binary> (--addr <ADDR> | --all) [OPTIONS]");
     println!("  fission_cli strings <binary> [--min-len N] [--json]");
     println!("  fission_cli xrefs <binary> [--json] [--no-disassembly] [--function ADDR]");
@@ -355,6 +370,8 @@ fn print_help() {
     println!("  info       Show binary metadata and inventory views");
     println!("  list       List discovered functions");
     println!("  disasm     Disassemble instructions or full functions");
+    println!("  raw-pcode  Emit Rust-Sleigh raw p-code");
+    println!("  pcode-stages  Emit Rust-Sleigh/NIR stage diagnostics");
     println!("  decomp     Decompile one function or all discovered functions");
     println!("  strings    Extract strings");
     println!("  xrefs      Canonical xref index (loader + optional disassembly)");
@@ -378,6 +395,8 @@ fn print_help() {
     println!("  fission_cli info app.exe");
     println!("  fission_cli list app.exe");
     println!("  fission_cli disasm app.exe --addr 0x140001000");
+    println!("  fission_cli raw-pcode app.exe --addr 0x140001000");
+    println!("  fission_cli pcode-stages app.exe --addr 0x140001000 --json");
     println!("  fission_cli decomp app.exe --addr 0x140001000");
     println!("  fission_cli decomp app.exe --all --limit 10");
     println!(
