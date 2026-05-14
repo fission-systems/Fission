@@ -12,6 +12,7 @@
 ///    - `Index { base: Var(x), elem_ty }` (array lvalue) → x is `Ptr(elem_ty)`
 ///    - `Binary { op: SLt|SLe, lhs: Var(x), ty }` → x is a signed integer
 ///    - `Binary { op: Lt|Le, lhs: Var(x), ty }` → x is an unsigned integer
+///    - `Call { target: x }` → x must be an indirect-code pointer
 ///    - `Return(Var(x))` + known function return type → x gets the return type
 ///    - `Assign rhs = Cast(T, Var(x))` → x gets type T (the cast source)
 ///
@@ -327,7 +328,12 @@ fn collect_constraints_expr(
         HirExpr::Cast { expr: inner, .. } => {
             collect_constraints_expr(inner, return_type, known_binding_types, out);
         }
-        HirExpr::Call { args, .. } => {
+        HirExpr::Call { target, args, .. } => {
+            if let Some(name) = indirect_call_target_binding_name(target) {
+                out.entry(name.to_owned())
+                    .or_default()
+                    .push(UseConstraint::Ptr(NirType::Unknown));
+            }
             for arg in args {
                 collect_constraints_expr(arg, return_type, known_binding_types, out);
             }
@@ -413,6 +419,25 @@ fn expr_int_bits(expr: &HirExpr, known_binding_types: &HashMap<String, NirType>)
         HirExpr::Binary { ty, .. } => nir_type_bits(ty),
         HirExpr::PtrOffset { .. } | HirExpr::AggregateCopy { .. } => None,
     }
+}
+
+fn indirect_call_target_binding_name(target: &str) -> Option<&str> {
+    if is_binding_name(target) {
+        return Some(target);
+    }
+    target
+        .strip_prefix("((code *)")
+        .and_then(|rest| rest.strip_suffix(')'))
+        .filter(|name| is_binding_name(name))
+}
+
+fn is_binding_name(name: &str) -> bool {
+    let mut chars = name.chars();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+    (first == '_' || first.is_ascii_alphabetic())
+        && chars.all(|ch| ch == '_' || ch.is_ascii_alphanumeric())
 }
 
 /// Extract the bit-width of an integer/bool NirType, if applicable.
@@ -1141,6 +1166,55 @@ mod tests {
                 bits: 32,
                 signed: false
             }
+        );
+    }
+
+    #[test]
+    fn call_target_use_promotes_binding_to_pointer() {
+        let body = vec![HirStmt::Return(Some(HirExpr::Call {
+            target: "((code *)param_1)".to_owned(),
+            args: vec![
+                HirExpr::Var("param_2".to_owned()),
+                HirExpr::Var("param_3".to_owned()),
+            ],
+            ty: NirType::Unknown,
+        }))];
+        let mut func = make_func(
+            vec![
+                make_typed_binding(
+                    "param_1",
+                    NirType::Int {
+                        bits: 32,
+                        signed: false,
+                    },
+                    NirBindingOrigin::ParamIndex(0),
+                ),
+                make_typed_binding(
+                    "param_2",
+                    NirType::Int {
+                        bits: 32,
+                        signed: false,
+                    },
+                    NirBindingOrigin::ParamIndex(1),
+                ),
+                make_typed_binding(
+                    "param_3",
+                    NirType::Int {
+                        bits: 32,
+                        signed: false,
+                    },
+                    NirBindingOrigin::ParamIndex(2),
+                ),
+            ],
+            body,
+            NirType::Unknown,
+        );
+        func.is_64bit = false;
+
+        assert!(super::apply_use_driven_type_infer_pass(&mut func));
+        assert_eq!(
+            func.locals[0].ty,
+            NirType::Ptr(Box::new(NirType::Unknown))
         );
     }
 

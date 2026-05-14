@@ -531,6 +531,7 @@ pub(super) fn print_type(ty: &NirType) -> String {
             (64, true) => "longlong".to_string(),
             _ => format!("int{}", bits),
         },
+        NirType::Ptr(inner) if matches!(inner.as_ref(), NirType::Unknown) => "void *".to_string(),
         NirType::Ptr(inner) => format!("{} *", print_type(inner)),
         NirType::Aggregate { size, .. } => format!("fission_agg{}", size),
         NirType::Float { bits } => match *bits {

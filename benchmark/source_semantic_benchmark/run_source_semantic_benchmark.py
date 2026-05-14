@@ -573,9 +573,11 @@ def split_params(params: str) -> list[str]:
     return result
 
 
-def classify_param(param: str, language: str) -> str:
+def classify_param(param: str, language: str, pointer_aliases: set[str] | None = None) -> str:
     lowered = param.lower()
     words = set(WORD_RE.findall(lowered))
+    if language in {"c", "cpp"} and pointer_aliases and words.intersection(pointer_aliases):
+        return "aggregate_or_pointer"
     if language in {"c", "cpp"} and any(token in lowered for token in ["*", "[]", "["]):
         if words.intersection(INTEGRAL_WORDS):
             return "int_ptr"
@@ -709,6 +711,7 @@ def extract_rust_functions(text: str) -> list[SourceFunction]:
 
 def extract_c_like_functions(text: str, language: str) -> list[SourceFunction]:
     funcs: list[SourceFunction] = []
+    pointer_aliases = c_like_pointer_typedef_aliases(text) if language in {"c", "cpp"} else set()
     for open_idx, ch in enumerate(text):
         if ch != "{":
             continue
@@ -737,13 +740,22 @@ def extract_c_like_functions(text: str, language: str) -> list[SourceFunction]:
                 signature=signature,
                 body=text[open_idx + 1 : end],
                 return_kind=classify_return(signature, name, params, language),
-                param_kinds=[classify_param(p, language) for p in params_split],
+                param_kinds=[classify_param(p, language, pointer_aliases) for p in params_split],
                 param_names=param_names(params),
                 line=text.count("\n", 0, start) + 1,
                 is_static=bool(re.search(r"\bstatic\b", signature)),
             )
         )
     return funcs
+
+
+def c_like_pointer_typedef_aliases(text: str) -> set[str]:
+    aliases: set[str] = set()
+    for match in re.finditer(r"\btypedef\b[^;]*\(\s*\*\s*([A-Za-z_]\w*)\s*\)\s*\([^;]*\)\s*;", text):
+        aliases.add(match.group(1).lower())
+    for match in re.finditer(r"\btypedef\b[^;()]*\*\s*([A-Za-z_]\w*)\s*;", text):
+        aliases.add(match.group(1).lower())
+    return aliases
 
 
 def normalize_name(name: str) -> str:
@@ -7800,6 +7812,17 @@ int max(int a, int b) { if (a > b) return a; return b; }
         assert summary["signature_kind_confusion_metrics"]["param_pair_counts"]["int->missing"] == 1
         assert summary["signature_kind_confusion_metrics"]["param_pair_counts"]["int->uint"] == 2
         assert summary["signature_kind_confusion_metrics"]["param_arity_mismatch_row_count"] == 1
+        aliases = c_like_pointer_typedef_aliases(
+            "typedef unsigned int (*op_func)(unsigned int, unsigned int);\n"
+            "typedef unsigned char *byte_ptr;\n"
+        )
+        assert aliases == {"op_func", "byte_ptr"}
+        parsed = extract_c_like_functions(
+            "typedef unsigned int (*op_func)(unsigned int, unsigned int);\n"
+            "unsigned int apply_op(op_func f, unsigned int a) { return f(a, a); }\n",
+            "c",
+        )
+        assert parsed[0].param_kinds == ["aggregate_or_pointer", "uint"]
         progress = partial_behavior_progress(
             {"stdout": "ret=0\nret=1\nret=1\nret=5\n"},
             {"partial_stdout": "ret=0\nret=1\nret=1\n"},
