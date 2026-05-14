@@ -1781,6 +1781,8 @@ fn preview_recovers_win64_stack_args_when_unique_address_scratch_is_reused() {
 
 #[test]
 fn preview_recovers_win64_register_arg_from_live_call_result() {
+    let addr_tmp = uniq(0x9e00, 8);
+    let value_tmp = uniq(0xd500, 4);
     let func = PcodeFunction {
         blocks: vec![PcodeBasicBlock {
             index: 0,
@@ -1845,6 +1847,54 @@ fn preview_recovers_win64_register_arg_from_live_call_result() {
                 },
                 PcodeOp {
                     seq_num: 7,
+                    opcode: PcodeOpcode::IntAdd,
+                    address: 0x14000631d,
+                    output: Some(addr_tmp.clone()),
+                    inputs: vec![cst(0x28, 8), reg(0x20, 8)],
+                    asm_mnemonic: Some("MOV dword ptr [RSP + 0x28],0x14".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 8,
+                    opcode: PcodeOpcode::Copy,
+                    address: 0x14000631d,
+                    output: Some(value_tmp.clone()),
+                    inputs: vec![cst(20, 4)],
+                    asm_mnemonic: Some("MOV dword ptr [RSP + 0x28],0x14".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 9,
+                    opcode: PcodeOpcode::Store,
+                    address: 0x14000631d,
+                    output: None,
+                    inputs: vec![cst(3, 4), addr_tmp.clone(), value_tmp.clone()],
+                    asm_mnemonic: None,
+                },
+                PcodeOp {
+                    seq_num: 10,
+                    opcode: PcodeOpcode::IntAdd,
+                    address: 0x14000631e,
+                    output: Some(addr_tmp.clone()),
+                    inputs: vec![cst(0x20, 8), reg(0x20, 8)],
+                    asm_mnemonic: Some("MOV dword ptr [RSP + 0x20],0xf".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 11,
+                    opcode: PcodeOpcode::Copy,
+                    address: 0x14000631e,
+                    output: Some(value_tmp.clone()),
+                    inputs: vec![cst(15, 4)],
+                    asm_mnemonic: Some("MOV dword ptr [RSP + 0x20],0xf".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 12,
+                    opcode: PcodeOpcode::Store,
+                    address: 0x14000631e,
+                    output: None,
+                    inputs: vec![cst(3, 4), addr_tmp, value_tmp],
+                    asm_mnemonic: None,
+                },
+                PcodeOp {
+                    seq_num: 13,
                     opcode: PcodeOpcode::Call,
                     address: 0x14000631f,
                     output: None,
@@ -1852,7 +1902,7 @@ fn preview_recovers_win64_register_arg_from_live_call_result() {
                     asm_mnemonic: Some("CALL printf".to_string()),
                 },
                 PcodeOp {
-                    seq_num: 8,
+                    seq_num: 14,
                     opcode: PcodeOpcode::Return,
                     address: 0x140006324,
                     output: None,
@@ -1903,7 +1953,7 @@ fn preview_recovers_win64_register_arg_from_live_call_result() {
     )
     .expect("preview render");
     assert!(
-        code.contains("printf(5368725504, 15, 10, (ulonglong)fibonacci(10));"),
+        code.contains("printf(5368725504, 15, 10, (ulonglong)fibonacci(10), 15, 20);"),
         "{code}"
     );
     assert!(!code.contains("(ulonglong)rax"), "{code}");

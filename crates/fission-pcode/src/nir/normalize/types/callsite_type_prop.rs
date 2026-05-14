@@ -464,6 +464,66 @@ fn rewrite_call_targets_expr(expr: &mut HirExpr, rewrites: &HashMap<String, Stri
     changed
 }
 
+fn canonical_variadic_runtime_symbol(target: &str) -> String {
+    let mut symbol = target
+        .rsplit_once('!')
+        .map(|(_, symbol)| symbol)
+        .unwrap_or(target)
+        .trim()
+        .to_ascii_lowercase();
+
+    loop {
+        if let Some(stripped) = symbol.strip_prefix("__imp_") {
+            symbol = stripped.to_string();
+            continue;
+        }
+        if let Some(stripped) = symbol.strip_prefix("__mingw_") {
+            symbol = stripped.to_string();
+            continue;
+        }
+        if let Some(stripped) = symbol.strip_prefix('_') {
+            symbol = stripped.to_string();
+            continue;
+        }
+        break;
+    }
+    symbol
+}
+
+fn is_known_variadic_runtime_symbol(target: &str) -> bool {
+    matches!(
+        canonical_variadic_runtime_symbol(target).as_str(),
+        "printf"
+            | "fprintf"
+            | "sprintf"
+            | "snprintf"
+            | "scanf"
+            | "fscanf"
+            | "sscanf"
+            | "wprintf"
+            | "fwprintf"
+            | "swprintf"
+            | "snwprintf"
+            | "wscanf"
+            | "fwscanf"
+            | "swscanf"
+            | "sprintf_s"
+            | "snprintf_s"
+            | "fprintf_s"
+            | "printf_s"
+            | "scanf_s"
+            | "fscanf_s"
+            | "sscanf_s"
+            | "swprintf_s"
+            | "snwprintf_s"
+            | "fwprintf_s"
+            | "wprintf_s"
+            | "wscanf_s"
+            | "fwscanf_s"
+            | "swscanf_s"
+    )
+}
+
 /// Apply call-site type propagation to a function.
 ///
 /// Collects all `Call` expressions, looks up each target in the API type provider, and
@@ -627,6 +687,10 @@ fn exact_arity_for_target(
     summaries: &indexmap::IndexMap<String, CallSummary>,
 ) -> Option<usize> {
     let resolved_target = resolve_call_target_symbol(target, summaries);
+    if is_known_variadic_runtime_symbol(target) || is_known_variadic_runtime_symbol(resolved_target)
+    {
+        return None;
+    }
     if resolved_target != target {
         return api_signature_via_import_aliases(resolved_target)
             .map(|sig| sig.params.len())
@@ -1118,6 +1182,71 @@ mod tests {
         match &func.body[1] {
             HirStmt::Expr(HirExpr::Call { args, .. }) => assert_eq!(args.len(), 3),
             other => panic!("unexpected second stmt: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn callsite_type_prop_keeps_extra_args_for_known_variadic_runtime_symbol() {
+        reset_normalize_wave_stats();
+        let mut func = HirFunction {
+            name: "caller".to_string(),
+            params: vec![],
+            locals: vec![],
+            return_type: NirType::Unknown,
+            surface_return_type_name: None,
+            body: vec![HirStmt::Expr(HirExpr::Call {
+                target: "printf".to_string(),
+                args: vec![
+                    HirExpr::Const(0, NirType::Unknown),
+                    HirExpr::Const(1, NirType::Unknown),
+                    HirExpr::Const(2, NirType::Unknown),
+                    HirExpr::Const(3, NirType::Unknown),
+                    HirExpr::Const(4, NirType::Unknown),
+                    HirExpr::Const(5, NirType::Unknown),
+                ],
+                ty: NirType::Unknown,
+            })],
+            calling_convention: CallingConvention::default(),
+            is_64bit: true,
+            suppress_entry_register_params: false,
+            callee_observed_max_arity: Default::default(),
+            callee_summaries: indexmap::IndexMap::from([(
+                "printf".to_string(),
+                CallSummary {
+                    target: CallTargetRef {
+                        address: Some(0x140007000),
+                        symbol: "printf".to_string(),
+                        provenance: CallTargetProvenance::Direct,
+                        edge_kind: CallEdgeKind::Direct,
+                        confidence: 160,
+                    },
+                    prototype: PrototypeSummary {
+                        min_arity: 4,
+                        max_arity: 4,
+                        locked_exact_arity: Some(4),
+                        return_lattice: NirType::Unknown,
+                        param_lattices: vec![NirType::Unknown; 4],
+                        soundness: SummarySoundness::Optimistic,
+                    },
+                    effect_summary: CallEffectSummary {
+                        reads_memory: Some(true),
+                        writes_memory: Some(true),
+                        escapes_args: None,
+                        regions: vec![],
+                        wrapper_class: WrapperClass::None,
+                        wrapper_of: None,
+                        confidence: 160,
+                    },
+                },
+            )]),
+        };
+
+        assert!(!apply_callsite_type_prop_pass(&mut func));
+        let stats = take_normalize_wave_stats();
+        assert_eq!(stats.call_prototype_exact_api_arity_pruned_count, 0);
+        match &func.body[0] {
+            HirStmt::Expr(HirExpr::Call { args, .. }) => assert_eq!(args.len(), 6),
+            other => panic!("unexpected stmt: {other:?}"),
         }
     }
 
