@@ -327,7 +327,8 @@ pub(super) fn operand_display_value(operand: &BoundOperand) -> Option<i64> {
 
 pub(super) fn format_signed_hex(value: i64) -> String {
     if value >= 0 {
-        format!("0x{:x}", value as u64)
+        let value = value.unsigned_abs();
+        format!("0x{value:x}")
     } else {
         format!("-0x{:x}", value.unsigned_abs())
     }
@@ -614,14 +615,22 @@ fn first_materialized_address_target(state: &RuntimeConstructState, target: u64)
 
 pub(super) fn add_signed(base: u64, delta: i64) -> Option<u64> {
     if delta >= 0 {
-        base.checked_add(u64::try_from(delta).ok()?)
+        base.checked_add(positive_i64_to_u64(delta)?)
     } else {
         base.checked_sub(delta.unsigned_abs())
     }
 }
 
 fn instruction_end_address(address: u64, length: usize) -> Option<u64> {
-    address.checked_add(u64::try_from(length).ok()?)
+    address.checked_add(usize_to_u64(length)?)
+}
+
+fn positive_i64_to_u64(value: i64) -> Option<u64> {
+    u64::try_from(value).ok()
+}
+
+fn usize_to_u64(value: usize) -> Option<u64> {
+    u64::try_from(value).ok()
 }
 
 #[cfg(test)]
@@ -639,6 +648,9 @@ mod tests {
         let lossy_display_index_cast = ["value", "as", "usize"].join(" ");
         let lossy_display_value_cast = ["value", "as", "i64"].join(" ");
         let lossy_reference_length_cast = ["length", "as", "u64"].join(" ");
+        let lossy_signed_hex_cast = ["value", "as", "u64"].join(" ");
+        let silent_delta_conversion = ["u64::try_from(delta)", ".ok()?"].join("");
+        let silent_length_conversion = ["u64::try_from(length)", ".ok()?"].join("");
 
         assert!(
             !source.contains(&dummy_immediate_fallback),
@@ -664,6 +676,12 @@ mod tests {
         assert!(
             !source.contains(&lossy_reference_length_cast),
             "display reference extraction must not cast instruction lengths through unchecked u64 conversion"
+        );
+        assert!(
+            !source.contains(&lossy_signed_hex_cast)
+                && !source.contains(&silent_delta_conversion)
+                && !source.contains(&silent_length_conversion),
+            "display reference extraction must name signed/length conversions before address arithmetic"
         );
     }
 
