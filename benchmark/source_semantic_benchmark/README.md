@@ -167,6 +167,10 @@ manifest.
   distributions, plus per-component source/decompiler feature-count
   distributions. This exposes whether low similarity is caused by absent output,
   excessive output, or high-complexity source rows.
+- `static_source_variant_metrics`: counts and score deltas for direct-source
+  static comparison versus same-source inline-expanded comparison. This keeps
+  optimized sample binaries from being penalized solely because a same-file
+  helper was inlined into the target function.
 - `by_arch`, `by_source_return_kind`, and `by_source_param_shape`: quality
   buckets split by inferred binary architecture and source signature shape.
   These are additive to `by_language`, `by_tag`, and `by_entry`.

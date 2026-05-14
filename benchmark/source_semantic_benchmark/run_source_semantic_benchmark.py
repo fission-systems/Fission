@@ -1450,6 +1450,55 @@ def add_rendered_signature_fingerprint(counter: Counter[str], code: str) -> None
     add_signature_fingerprint(counter, rendered.return_kind, rendered.param_kinds)
 
 
+def inline_expanded_source_fingerprint(
+    func: SourceFunction,
+    functions_by_name: dict[str, SourceFunction],
+    max_depth: int = 2,
+) -> Counter[str]:
+    return expand_source_body_fingerprint(
+        func.body,
+        functions_by_name,
+        include_signature=func,
+        max_depth=max_depth,
+        visiting=(normalize_name(func.name),),
+    )
+
+
+def expand_source_body_fingerprint(
+    body: str,
+    functions_by_name: dict[str, SourceFunction],
+    include_signature: SourceFunction | None,
+    max_depth: int,
+    visiting: tuple[str, ...],
+) -> Counter[str]:
+    counter = code_fingerprint(body, include_signature)
+    if max_depth <= 0:
+        return counter
+    calls = Counter(
+        normalize_name(call.split("::")[-1].lower())
+        for call in CALL_RE.findall(strip_comments(body))
+        if call.split("::")[-1].lower() not in CALL_EXCLUDE
+    )
+    for callee_name, count in calls.items():
+        if count <= 0 or callee_name in visiting:
+            continue
+        callee = functions_by_name.get(callee_name)
+        if callee is None:
+            continue
+        call_key = f"call:{callee_name}"
+        counter[call_key] -= min(counter.get(call_key, 0), count)
+        callee_fp = expand_source_body_fingerprint(
+            callee.body,
+            functions_by_name,
+            include_signature=None,
+            max_depth=max_depth - 1,
+            visiting=(*visiting, callee_name),
+        )
+        for key, value in callee_fp.items():
+            counter[key] += value * count
+    return +counter
+
+
 def multiset_jaccard(left: Counter[str], right: Counter[str]) -> float:
     keys = set(left) | set(right)
     if not keys:
@@ -2395,6 +2444,8 @@ def summarize(rows: list[dict[str, Any]], manifest_name: str, entries: list[Benc
     decomp_to_source_line_ratios: list[float] = []
     decomp_to_source_byte_ratios: list[float] = []
     source_feature_total_values: list[float] = []
+    source_feature_total_direct_values: list[float] = []
+    source_feature_total_inline_expanded_values: list[float] = []
     decomp_feature_total_values: list[float] = []
     static_intersection_feature_total_values: list[float] = []
     static_union_feature_total_values: list[float] = []
@@ -2455,6 +2506,9 @@ def summarize(rows: list[dict[str, Any]], manifest_name: str, entries: list[Benc
     static_extra_density_values: list[float] = []
     static_score_by_missing_gap_bucket: dict[str, list[float]] = {}
     hard_function_rows: list[dict[str, Any]] = []
+    static_source_variant_counts: Counter[str] = Counter()
+    inline_expanded_static_score_deltas: list[float] = []
+    inline_expanded_static_hot_rows: list[dict[str, Any]] = []
     semantic_quality_quadrants: dict[str, dict[str, Any]] = {}
     sleigh_blocker_rows: list[dict[str, Any]] = []
     coverage_blind_spot_rows: dict[str, list[dict[str, Any]]] = {}
@@ -2753,6 +2807,25 @@ def summarize(rows: list[dict[str, Any]], manifest_name: str, entries: list[Benc
         static_score = float(row.get("static_semantic_score", 0.0) or 0.0)
         behavior_score_values.append(behavior_score)
         static_score_values.append(static_score)
+        static_source_variant = str(row.get("static_similarity_source_variant") or "direct_source")
+        static_source_variant_counts[static_source_variant] += 1
+        direct_static_score = row.get("static_semantic_score_direct")
+        expanded_static_score = row.get("static_semantic_score_inline_expanded")
+        if isinstance(direct_static_score, int | float) and isinstance(expanded_static_score, int | float):
+            delta = round(float(expanded_static_score) - float(direct_static_score), 6)
+            if delta > 0.0:
+                inline_expanded_static_score_deltas.append(delta)
+                inline_expanded_static_hot_rows.append(
+                    {
+                        "entry_id": row.get("entry_id"),
+                        "function_name": row.get("function_name"),
+                        "address": row.get("address"),
+                        "direct_static_semantic_score_percent": percent(float(direct_static_score)),
+                        "inline_expanded_static_semantic_score_percent": percent(float(expanded_static_score)),
+                        "static_score_delta_percent": percent(delta),
+                        "semantic_score_percent": row.get("semantic_score_percent"),
+                    }
+                )
         first_stage = str(row.get("stage_first_failure") or "none")
         score_loss = round(max(0.0, 1.0 - score), 6)
         preview_stats = row.get("preview_build_stats")
@@ -2964,6 +3037,12 @@ def summarize(rows: list[dict[str, Any]], manifest_name: str, entries: list[Benc
                 density_bucket["extra_feature_total"] += row_extra_total
                 density_bucket["top_rows"].append(triage_row_summary(row))
             source_feature_total_values.append(row_source_total)
+            direct_feature_total = row.get("source_static_feature_count_direct")
+            expanded_feature_total = row.get("source_static_feature_count_inline_expanded")
+            if isinstance(direct_feature_total, int | float):
+                source_feature_total_direct_values.append(float(direct_feature_total))
+            if isinstance(expanded_feature_total, int | float):
+                source_feature_total_inline_expanded_values.append(float(expanded_feature_total))
             decomp_feature_total_values.append(row_decomp_total)
             static_intersection_feature_total_values.append(row_intersection_total)
             static_union_feature_total_values.append(row_union_total)
@@ -3435,6 +3514,14 @@ def summarize(rows: list[dict[str, Any]], manifest_name: str, entries: list[Benc
             float(row.get("decomp_to_source_line_ratio") or 0.0),
             float(row.get("decomp_line_count") or 0.0),
             row.get("function_name") or "",
+        ),
+        reverse=True,
+    )[:20]
+    inline_expanded_static_hot_rows = sorted(
+        inline_expanded_static_hot_rows,
+        key=lambda row: (
+            float(row.get("static_score_delta_percent") or 0.0),
+            str(row.get("function_name") or ""),
         ),
         reverse=True,
     )[:20]
@@ -4012,6 +4099,10 @@ def summarize(rows: list[dict[str, Any]], manifest_name: str, entries: list[Benc
         },
         "source_feature_metrics": {
             "source_feature_total_distribution": numeric_distribution(source_feature_total_values),
+            "source_feature_total_direct_distribution": numeric_distribution(source_feature_total_direct_values),
+            "source_feature_total_inline_expanded_distribution": numeric_distribution(
+                source_feature_total_inline_expanded_values
+            ),
             "decomp_feature_total_distribution": numeric_distribution(decomp_feature_total_values),
             "intersection_feature_total_distribution": numeric_distribution(static_intersection_feature_total_values),
             "union_feature_total_distribution": numeric_distribution(static_union_feature_total_values),
@@ -4023,6 +4114,13 @@ def summarize(rows: list[dict[str, Any]], manifest_name: str, entries: list[Benc
                 component: numeric_distribution(values)
                 for component, values in sorted(static_component_decomp_feature_values.items())
             },
+        },
+        "static_source_variant_metrics": {
+            "variant_counts": dict(sorted(static_source_variant_counts.items())),
+            "inline_expanded_static_score_delta_distribution": numeric_distribution(
+                inline_expanded_static_score_deltas
+            ),
+            "top_inline_expanded_static_rows": inline_expanded_static_hot_rows,
         },
         "static_absence_penalty_metrics": {
             "source_feature_total": static_source_total,
@@ -5492,6 +5590,30 @@ def render_markdown(summary: dict[str, Any], rows: list[dict[str, Any]]) -> str:
                     f"| {component} | {float((stats or {}).get('avg', 0.0) or 0.0):.6f} | "
                     f"{float((decomp_stats or {}).get('avg', 0.0) or 0.0):.6f} |"
                 )
+    source_variants = summary.get("static_source_variant_metrics")
+    if isinstance(source_variants, dict):
+        counts = source_variants.get("variant_counts")
+        delta_dist = source_variants.get("inline_expanded_static_score_delta_distribution")
+        if isinstance(counts, dict) and counts:
+            lines.extend(["", "## Static Source Variant Metrics", "", "| Variant | Rows |", "|---|---:|"])
+            for variant, count in sorted(counts.items()):
+                lines.append(f"| {variant} | {count} |")
+        if isinstance(delta_dist, dict) and delta_dist.get("count"):
+            lines.append(
+                f"- Inline-expanded static score delta avg "
+                f"{float(delta_dist.get('avg', 0.0) or 0.0):.6f}, "
+                f"max {float(delta_dist.get('max', 0.0) or 0.0):.6f}"
+            )
+        hot_rows = source_variants.get("top_inline_expanded_static_rows") or []
+        if hot_rows:
+            lines.extend(["", "| Function | Direct Static | Inline Expanded | Delta |", "|---|---:|---:|---:|"])
+            for row in hot_rows[:8]:
+                lines.append(
+                    f"| `{row.get('function_name')}` | "
+                    f"{float(row.get('direct_static_semantic_score_percent', 0.0) or 0.0):.3f}% | "
+                    f"{float(row.get('inline_expanded_static_semantic_score_percent', 0.0) or 0.0):.3f}% | "
+                    f"{float(row.get('static_score_delta_percent', 0.0) or 0.0):.3f}% |"
+                )
     static_absence = summary.get("static_absence_penalty_metrics")
     if isinstance(static_absence, dict):
         lines.extend(["", "## Static Absence Penalty Metrics", ""])
@@ -5943,6 +6065,13 @@ def triage_row_summary(row: dict[str, Any]) -> dict[str, Any]:
         "address": row.get("address"),
         "semantic_score_percent": row.get("semantic_score_percent"),
         "static_semantic_score_percent": row.get("static_semantic_score_percent"),
+        "static_similarity_source_variant": row.get("static_similarity_source_variant"),
+        "static_semantic_score_direct_percent": percent(float(row.get("static_semantic_score_direct", 0.0) or 0.0)),
+        "static_semantic_score_inline_expanded_percent": percent(
+            float(row.get("static_semantic_score_inline_expanded", 0.0) or 0.0)
+        ),
+        "source_static_feature_count_direct": row.get("source_static_feature_count_direct"),
+        "source_static_feature_count_inline_expanded": row.get("source_static_feature_count_inline_expanded"),
         "mapping_status": row.get("mapping_status"),
         "decomp_success": bool(row.get("decomp_success")),
         "decomp_failure_kind": row.get("decomp_failure_kind"),
@@ -5967,6 +6096,7 @@ def triage_row_summary(row: dict[str, Any]) -> dict[str, Any]:
 def row_for_function(
     entry: BenchmarkEntry,
     func: SourceFunction,
+    source_functions_by_name: dict[str, SourceFunction],
     fission_funcs: list[FissionFunction],
     fission_error: str | None,
     fission_bin: Path,
@@ -5981,7 +6111,8 @@ def row_for_function(
     include_debug_decomp: bool,
     output_dir: Path | None = None,
 ) -> dict[str, Any]:
-    source_fp = code_fingerprint(func.body, func)
+    source_fp_direct = code_fingerprint(func.body, func)
+    source_fp_inline_expanded = inline_expanded_source_fingerprint(func, source_functions_by_name)
     mapping_status, matched, candidates = match_function(func, fission_funcs) if not fission_error else ("list_failed", None, [])
     decomp: dict[str, Any] = {"success": False, "failure_kind": mapping_status}
     if matched is not None:
@@ -6007,7 +6138,20 @@ def row_for_function(
     source_body_lines = func.body.splitlines()
     decomp_lines = decomp_code.splitlines() if decomp_code else []
     decomp_fp = code_fingerprint(decomp_code or "") if decomp_code else Counter()
-    static_score = multiset_jaccard(source_fp, decomp_fp) if decomp_code else 0.0
+    static_score_direct = multiset_jaccard(source_fp_direct, decomp_fp) if decomp_code else 0.0
+    static_score_inline_expanded = (
+        multiset_jaccard(source_fp_inline_expanded, decomp_fp)
+        if decomp_code and source_fp_inline_expanded != source_fp_direct
+        else static_score_direct
+    )
+    if static_score_inline_expanded > static_score_direct:
+        source_fp = source_fp_inline_expanded
+        static_score = static_score_inline_expanded
+        static_source_variant = "same_source_inline_expanded"
+    else:
+        source_fp = source_fp_direct
+        static_score = static_score_direct
+        static_source_variant = "direct_source"
     static_components = static_similarity_components(source_fp, decomp_fp) if decomp_code else {
         name: 0.0 for name in STATIC_SIMILARITY_COMPONENTS
     }
@@ -6047,6 +6191,8 @@ def row_for_function(
         "source_body_line_count": len(source_body_lines),
         "source_body_byte_count": len(func.body.encode("utf-8")),
         "source_static_feature_count": sum(source_fp.values()),
+        "source_static_feature_count_direct": sum(source_fp_direct.values()),
+        "source_static_feature_count_inline_expanded": sum(source_fp_inline_expanded.values()),
         "address": matched.address if matched else None,
         "fission_name": matched.name if matched else None,
         "mapping_status": mapping_status,
@@ -6066,6 +6212,9 @@ def row_for_function(
         "decomp_static_feature_count": sum(decomp_fp.values()),
         "static_semantic_score": static_score,
         "static_semantic_score_percent": percent(static_score),
+        "static_semantic_score_direct": static_score_direct,
+        "static_semantic_score_inline_expanded": static_score_inline_expanded,
+        "static_similarity_source_variant": static_source_variant,
         "static_similarity_components": static_components,
         "static_similarity_gaps": static_gaps,
         "static_similarity_gap_components": static_gap_components,
@@ -6111,8 +6260,12 @@ def run_benchmark(args: argparse.Namespace) -> int:
     behavior_cache_stats: Counter[str] = Counter()
     behavior_cache_initial_entry_count = len(behavior_cache or {})
     for entry in entries:
-        source_functions = extract_source_functions(entry.source_path, entry.language)
-        source_functions = filter_source_functions(source_functions, args.function_name)
+        all_source_functions = extract_source_functions(entry.source_path, entry.language)
+        source_functions = filter_source_functions(all_source_functions, args.function_name)
+        source_functions_by_name = {
+            normalize_name(func.name): func
+            for func in all_source_functions
+        }
         fission_funcs, fission_error = run_fission_list_cached(
             entry.binary_path,
             fission_bin,
@@ -6132,6 +6285,7 @@ def run_benchmark(args: argparse.Namespace) -> int:
                     row_for_function(
                         entry,
                         func,
+                        source_functions_by_name,
                         fission_funcs,
                         fission_error,
                         fission_bin,
@@ -6156,6 +6310,7 @@ def run_benchmark(args: argparse.Namespace) -> int:
                     row_for_function,
                     entry,
                     func,
+                    source_functions_by_name,
                     fission_funcs,
                     fission_error,
                     fission_bin,
@@ -6322,6 +6477,19 @@ int max(int a, int b) { if (a > b) return a; return b; }
         assert [f.name for f in funcs] == ["add", "max"]
         assert funcs[0].return_kind == "int"
         assert funcs[0].param_kinds == ["int", "int"]
+        funcs_by_name = {normalize_name(f.name): f for f in funcs}
+        caller = SourceFunction(
+            name="caller",
+            signature="int caller(int a, int b)",
+            body="return add(a, b);",
+            return_kind="int",
+            param_kinds=["int", "int"],
+            param_names=["a", "b"],
+            line=1,
+        )
+        expanded_fp = inline_expanded_source_fingerprint(caller, funcs_by_name)
+        assert expanded_fp["call:add"] == 0
+        assert expanded_fp["op:+"] >= 1
         assert multiset_jaccard(code_fingerprint(funcs[0].body, funcs[0]), code_fingerprint(funcs[0].body, funcs[0])) == 1.0
         missing_feature_score = multiset_jaccard(
             code_fingerprint("if (a > b) return helper(a + b);", funcs[0]),
@@ -6423,8 +6591,13 @@ int max(int a, int b) { if (a > b) return a; return b; }
                     "behavior": {"status": "pass", "case_count": 2, "case_pass_count": 2, "case_fail_count": 0},
                     "semantic_score": 1.0,
                     "static_semantic_score": 1.0,
+                    "static_semantic_score_direct": 1.0,
+                    "static_semantic_score_inline_expanded": 1.0,
+                    "static_similarity_source_variant": "direct_source",
                     "source_body_line_count": 1,
                     "source_body_byte_count": 12,
+                    "source_static_feature_count_direct": 2,
+                    "source_static_feature_count_inline_expanded": 2,
                     "decomp_line_count": 2,
                     "decomp_byte_count": 24,
                     "static_similarity_gaps": {
@@ -6463,8 +6636,13 @@ int max(int a, int b) { if (a > b) return a; return b; }
                     "behavior": {"status": "decomp_failed", "score": 0.0, "case_count": 1},
                     "semantic_score": 0.0,
                     "static_semantic_score": 0.0,
+                    "static_semantic_score_direct": 0.0,
+                    "static_semantic_score_inline_expanded": 0.0,
+                    "static_similarity_source_variant": "direct_source",
                     "source_body_line_count": 1,
                     "source_body_byte_count": 12,
+                    "source_static_feature_count_direct": 2,
+                    "source_static_feature_count_inline_expanded": 2,
                     "decomp_line_count": 0,
                     "decomp_byte_count": 0,
                     "static_similarity_gaps": {
@@ -6510,6 +6688,7 @@ int max(int a, int b) { if (a > b) return a; return b; }
         assert summary["static_absence_penalty_metrics"]["missing_feature_total"] == 2.0
         assert summary["static_absence_penalty_metrics"]["rows_with_no_decomp_features_despite_source"] == 1
         assert summary["source_decomp_size_metrics"]["decomp_to_source_line_ratio_distribution"]["max"] == 2.0
+        assert summary["static_source_variant_metrics"]["variant_counts"]["direct_source"] == 2
         assert summary["score_by_behavior_status"]["pass"]["count"] == 1
         assert summary["behavior_status_by_zero_credit_reason"]["unmapped"]["decomp_failed"] == 1
         assert "top_decompile_wall_rows" in summary["cost_hot_rows"]
