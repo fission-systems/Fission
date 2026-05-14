@@ -1,8 +1,10 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::env;
 
 use anyhow::{anyhow, Result};
-use fission_sleigh::compiler::{compile_frontend_for_entry_spec, discover_all_entry_specs};
+use fission_sleigh::compiler::{
+    build_ghidra_language_manifest, compile_frontend_for_entry_spec, discover_all_entry_specs,
+};
 use serde::Serialize;
 
 #[derive(Debug, Serialize)]
@@ -30,6 +32,7 @@ struct EntryRuntimeReadyAudit {
 fn main() -> Result<()> {
     let mut entry_filter = Some("x86-64".to_string());
     let mut all = false;
+    let mut executable_candidates = false;
     let mut args = env::args().skip(1);
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -43,18 +46,46 @@ fn main() -> Result<()> {
                 all = true;
                 entry_filter = None;
             }
+            "--executable-candidates" => {
+                executable_candidates = true;
+                entry_filter = None;
+            }
             "--help" | "-h" => {
-                println!("usage: sla_runtime_ready_audit [--entry <entry-id>] [--all]");
+                println!(
+                    "usage: sla_runtime_ready_audit [--entry <entry-id>] [--all] [--executable-candidates]"
+                );
                 return Ok(());
             }
             other => return Err(anyhow!("unknown argument {other}")),
         }
     }
 
+    let executable_candidate_ids = if executable_candidates {
+        Some(
+            build_ghidra_language_manifest()?
+                .entries
+                .into_iter()
+                .filter(|entry| entry.runtime_status == "executable_candidate")
+                .map(|entry| entry.entry_id)
+                .collect::<BTreeSet<_>>(),
+        )
+    } else {
+        None
+    };
+
     let mut audits = Vec::new();
     for entry in discover_all_entry_specs()? {
-        if !all && entry_filter.as_deref() != Some(entry.entry_id.as_str()) {
+        if let Some(filter) = entry_filter.as_deref() {
+            if filter != entry.entry_id {
+                continue;
+            }
+        } else if !all && executable_candidate_ids.is_none() {
             continue;
+        }
+        if let Some(ids) = &executable_candidate_ids {
+            if !ids.contains(&entry.entry_id) {
+                continue;
+            }
         }
         let compiled = compile_frontend_for_entry_spec(&entry.path)?;
         let mut constructor_template_count = 0usize;
