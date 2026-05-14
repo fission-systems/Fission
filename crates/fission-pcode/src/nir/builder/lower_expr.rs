@@ -358,7 +358,10 @@ impl<'a> PreviewBuilder<'a> {
             && self.gpr_family_index_for_key(candidate).is_some()
     }
 
-    fn gpr_family_index_for_key(&self, key: &VarnodeKey) -> Option<usize> {
+    pub(in crate::nir::builder) fn gpr_family_index_for_key(
+        &self,
+        key: &VarnodeKey,
+    ) -> Option<usize> {
         if key.is_constant {
             return None;
         }

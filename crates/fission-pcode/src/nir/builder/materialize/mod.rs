@@ -596,12 +596,83 @@ impl<'a> PreviewBuilder<'a> {
                 preserve_materialization,
             );
             name
+        } else if let Some((name, binding_size)) = self
+            .live_register_lhs_name_for_safe_missing_merge(
+                block,
+                op_idx,
+                op,
+                output,
+                &rhs,
+                replacement_plan,
+            )
+        {
+            self.ensure_live_register_binding(&name, binding_size);
+            self.bind_materialized_output_to_existing_name(op, output, &name, true);
+            name
         } else {
             self.ensure_temp_binding_for_output(op, output, preserve_materialization)
                 .name
         };
         let lhs = HirLValue::Var(lhs_name);
         Ok(Some(HirStmt::Assign { lhs, rhs }))
+    }
+
+    fn live_register_lhs_name_for_safe_missing_merge(
+        &self,
+        block: &crate::pcode::PcodeBasicBlock,
+        op_idx: usize,
+        op: &PcodeOp,
+        output: &Varnode,
+        rhs: &HirExpr,
+        replacement_plan: ReplacementValuePlan,
+    ) -> Option<(String, u32)> {
+        if replacement_plan.rejection_reason()
+            != Some(MaterializationRejectionReason::MissingMergeBinding)
+            || output.is_constant
+            || !is_register_space_id(output.space_id)
+            || !Self::rhs_is_safe_scalar_live_register_merge(rhs)
+        {
+            return None;
+        }
+        let proof = self.describe_missing_merge_binding_proof(block, op_idx, output, rhs)?;
+        if proof.relation != MissingMergeBindingRelation::PredicateMergeMissing {
+            return None;
+        }
+        let output_key = VarnodeKey::from(output);
+        self.gpr_family_index_for_key(&output_key)?;
+        if self.options.calling_convention == CallingConvention::AArch64
+            && output.size == 8
+            && matches!(op.opcode, PcodeOpcode::IntZExt | PcodeOpcode::Cast)
+            && op.inputs.first().is_some_and(|input| input.size <= 4)
+        {
+            return aarch64_ghidra_reg_name(output.offset, 4).map(|name| (name.to_string(), 4));
+        }
+        None
+    }
+
+    fn rhs_is_safe_scalar_live_register_merge(expr: &HirExpr) -> bool {
+        match expr {
+            HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) | HirExpr::Const(..) => true,
+            HirExpr::Cast { ty, expr } | HirExpr::Unary { ty, expr, .. } => {
+                Self::type_is_scalar_live_register_merge(ty)
+                    && Self::rhs_is_safe_scalar_live_register_merge(expr)
+            }
+            HirExpr::Binary { ty, lhs, rhs, .. } => {
+                Self::type_is_scalar_live_register_merge(ty)
+                    && Self::rhs_is_safe_scalar_live_register_merge(lhs)
+                    && Self::rhs_is_safe_scalar_live_register_merge(rhs)
+            }
+            HirExpr::Call { .. }
+            | HirExpr::Load { .. }
+            | HirExpr::PtrOffset { .. }
+            | HirExpr::Index { .. }
+            | HirExpr::AggregateCopy { .. }
+            | HirExpr::Select { .. } => false,
+        }
+    }
+
+    fn type_is_scalar_live_register_merge(ty: &NirType) -> bool {
+        matches!(ty, NirType::Bool | NirType::Int { .. })
     }
 
     fn merge_binding_name_for_materialized_output(
@@ -1260,7 +1331,7 @@ mod tests {
     use super::*;
     use crate::PcodeBasicBlock;
     use crate::nir::builder::materialize::test_support::{
-        block, block_at, constant, op, pcode_function,
+        block, block_at, constant, int, op, pcode_function,
     };
     use crate::nir::render_mlil_preview;
 
@@ -1311,6 +1382,108 @@ mod tests {
         };
 
         assert!(builder.merge_binding_proof_allows_predecessor_assignment(&proof, false,));
+    }
+
+    #[test]
+    fn missing_merge_aarch64_zero_extend_uses_low_live_register_binding_for_safe_rhs() {
+        let x12 = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0x4060, 8);
+        let w12 = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0x4060, 4);
+        let w8 = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0x4040, 4);
+        let def_op = op(1, PcodeOpcode::IntZExt, Some(x12.clone()), vec![w8]);
+        let mut def_block = block_at(0x1000, 0, vec![def_op.clone()]);
+        def_block.successors = vec![1];
+        let merge_block = block_at(
+            0x2000,
+            1,
+            vec![op(
+                2,
+                PcodeOpcode::IntEqual,
+                Some(register(UNIQUE_SPACE_ID, 0x100, 1)),
+                vec![w12, constant(0)],
+            )],
+        );
+        let pcode = pcode_function(vec![def_block.clone(), merge_block]);
+        let mut options = crate::nir::builder::materialize::test_support::test_options();
+        options.calling_convention = CallingConvention::AArch64;
+        options.format = "ELF64".to_string();
+        options.pe_x64_only = false;
+        let builder = PreviewBuilder::new(&pcode, &options, None);
+        let rhs = HirExpr::Cast {
+            ty: int(64),
+            expr: Box::new(HirExpr::Cast {
+                ty: int(32),
+                expr: Box::new(HirExpr::Var("xVar7".to_string())),
+            }),
+        };
+
+        assert_eq!(
+            builder.live_register_lhs_name_for_safe_missing_merge(
+                &def_block,
+                0,
+                &def_op,
+                &x12,
+                &rhs,
+                ReplacementValuePlan::incomplete(
+                    ReplacementReadClass::Merge,
+                    MaterializationRejectionReason::MissingMergeBinding,
+                ),
+            ),
+            Some(("w12".to_string(), 4))
+        );
+    }
+
+    #[test]
+    fn missing_merge_live_register_binding_rejects_call_or_aggregate_rhs() {
+        let x8 = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0x4040, 8);
+        let w8 = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0x4040, 4);
+        let input = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0x5020, 16);
+        let def_op = op(1, PcodeOpcode::IntZExt, Some(x8.clone()), vec![input]);
+        let mut def_block = block_at(0x1000, 0, vec![def_op.clone()]);
+        def_block.successors = vec![1];
+        let merge_block = block_at(
+            0x2000,
+            1,
+            vec![op(
+                2,
+                PcodeOpcode::IntEqual,
+                Some(register(UNIQUE_SPACE_ID, 0x100, 1)),
+                vec![w8, constant(0)],
+            )],
+        );
+        let pcode = pcode_function(vec![def_block.clone(), merge_block]);
+        let mut options = crate::nir::builder::materialize::test_support::test_options();
+        options.calling_convention = CallingConvention::AArch64;
+        options.format = "ELF64".to_string();
+        options.pe_x64_only = false;
+        let builder = PreviewBuilder::new(&pcode, &options, None);
+        let rhs = HirExpr::Binary {
+            op: HirBinaryOp::Add,
+            lhs: Box::new(HirExpr::Call {
+                target: "__pcodeop_294".to_string(),
+                args: vec![HirExpr::Var("reg".to_string())],
+                ty: NirType::Aggregate {
+                    size: 16,
+                    fields: Vec::new(),
+                },
+            }),
+            rhs: Box::new(HirExpr::Const(4, int(32))),
+            ty: int(32),
+        };
+
+        assert_eq!(
+            builder.live_register_lhs_name_for_safe_missing_merge(
+                &def_block,
+                0,
+                &def_op,
+                &x8,
+                &rhs,
+                ReplacementValuePlan::incomplete(
+                    ReplacementReadClass::Merge,
+                    MaterializationRejectionReason::MissingMergeBinding,
+                ),
+            ),
+            None
+        );
     }
 
     #[test]
