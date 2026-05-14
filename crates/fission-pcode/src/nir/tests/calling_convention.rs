@@ -60,6 +60,123 @@ fn win64_rsi_is_not_a_param() {
     assert_eq!(idx, None);
 }
 
+#[test]
+fn win64_pointer_swap_does_not_synthesize_stale_eax_return() {
+    let mut options = preview_options();
+    options.calling_convention = CallingConvention::WindowsX64;
+
+    let rcx = reg(0x08, 8);
+    let rdx = reg(0x10, 8);
+    let eax = reg(0x00, 4);
+    let rax = reg(0x00, 8);
+    let r8d = reg(0x80, 4);
+    let rsp = reg(0x20, 8);
+    let ret_target = reg(0x288, 8);
+    let tmp = uniq(0x23d00, 4);
+    let store_tmp = uniq(0xd400, 4);
+    let func = PcodeFunction {
+        blocks: vec![PcodeBasicBlock {
+            index: 0,
+            start_address: 0x1400018e0,
+            successors: vec![],
+            ops: vec![
+                PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::Load,
+                    address: 0x1400018e0,
+                    output: Some(tmp.clone()),
+                    inputs: vec![cst(3, 4), rcx.clone()],
+                    asm_mnemonic: None,
+                },
+                PcodeOp {
+                    seq_num: 1,
+                    opcode: PcodeOpcode::Copy,
+                    address: 0x1400018e0,
+                    output: Some(eax.clone()),
+                    inputs: vec![tmp.clone()],
+                    asm_mnemonic: None,
+                },
+                PcodeOp {
+                    seq_num: 2,
+                    opcode: PcodeOpcode::IntZExt,
+                    address: 0x1400018e0,
+                    output: Some(rax),
+                    inputs: vec![eax.clone()],
+                    asm_mnemonic: None,
+                },
+                PcodeOp {
+                    seq_num: 3,
+                    opcode: PcodeOpcode::Load,
+                    address: 0x1400018e2,
+                    output: Some(tmp),
+                    inputs: vec![cst(3, 4), rdx.clone()],
+                    asm_mnemonic: None,
+                },
+                PcodeOp {
+                    seq_num: 4,
+                    opcode: PcodeOpcode::Copy,
+                    address: 0x1400018e2,
+                    output: Some(r8d.clone()),
+                    inputs: vec![uniq(0x23d00, 4)],
+                    asm_mnemonic: None,
+                },
+                PcodeOp {
+                    seq_num: 5,
+                    opcode: PcodeOpcode::Copy,
+                    address: 0x1400018e5,
+                    output: Some(store_tmp.clone()),
+                    inputs: vec![r8d],
+                    asm_mnemonic: None,
+                },
+                PcodeOp {
+                    seq_num: 6,
+                    opcode: PcodeOpcode::Store,
+                    address: 0x1400018e5,
+                    output: None,
+                    inputs: vec![cst(3, 4), rcx, store_tmp.clone()],
+                    asm_mnemonic: None,
+                },
+                PcodeOp {
+                    seq_num: 7,
+                    opcode: PcodeOpcode::Copy,
+                    address: 0x1400018e8,
+                    output: Some(store_tmp.clone()),
+                    inputs: vec![eax],
+                    asm_mnemonic: None,
+                },
+                PcodeOp {
+                    seq_num: 8,
+                    opcode: PcodeOpcode::Store,
+                    address: 0x1400018e8,
+                    output: None,
+                    inputs: vec![cst(3, 4), rdx, store_tmp],
+                    asm_mnemonic: None,
+                },
+                PcodeOp {
+                    seq_num: 9,
+                    opcode: PcodeOpcode::Load,
+                    address: 0x1400018ea,
+                    output: Some(ret_target.clone()),
+                    inputs: vec![cst(3, 8), rsp],
+                    asm_mnemonic: None,
+                },
+                PcodeOp {
+                    seq_num: 10,
+                    opcode: PcodeOpcode::Return,
+                    address: 0x1400018ea,
+                    output: None,
+                    inputs: vec![ret_target],
+                    asm_mnemonic: None,
+                },
+            ],
+        }],
+    };
+
+    let code = render_mlil_preview(&func, "swap", 0x1400018e0, &options).expect("preview render");
+    assert!(code.contains("void swap"), "{code}");
+    assert!(!code.contains("return uVar"), "{code}");
+}
+
 // ── System V AMD64 ─────────────────────────────────────────────────────────────
 
 #[test]
@@ -1648,8 +1765,8 @@ fn aarch64_return_join_with_exact_x0_store_preserves_predecessor_return() {
         ],
     };
 
-    let code = render_mlil_preview(&func, "store_and_return", 0x1060, &options)
-        .expect("preview render");
+    let code =
+        render_mlil_preview(&func, "store_and_return", 0x1060, &options).expect("preview render");
     assert!(code.contains("ulonglong store_and_return"), "{code}");
     assert!(code.contains("xVar0 = param_1 + 10;"), "{code}");
     assert!(code.contains("result_sink = xVar0;"), "{code}");
@@ -1714,8 +1831,8 @@ fn win64_return_target_load_without_return_register_def_is_void() {
         ],
     };
 
-    let code = render_mlil_preview(&func, "leaf_void", 0x140001000, &options)
-        .expect("preview render");
+    let code =
+        render_mlil_preview(&func, "leaf_void", 0x140001000, &options).expect("preview render");
     assert!(code.contains("void leaf_void"), "{code}");
     assert!(code.contains("return;"), "{code}");
     assert!(!code.contains("return rax"), "{code}");

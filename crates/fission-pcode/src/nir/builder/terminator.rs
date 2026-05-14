@@ -649,10 +649,72 @@ impl<'a> PreviewBuilder<'a> {
         }
         block.ops.iter().take(term_idx).any(|op| {
             matches!(op.opcode, PcodeOpcode::Store)
-                && op.inputs
+                && op
+                    .inputs
                     .iter()
                     .skip(1)
                     .any(|input| ret_regs.iter().any(|ret_reg| input == ret_reg))
+        })
+    }
+
+    fn primary_return_value_flows_to_later_store(
+        &self,
+        block: &crate::pcode::PcodeBasicBlock,
+        ret_op_idx: usize,
+        term_idx: usize,
+        ret_vn: &Varnode,
+    ) -> bool {
+        block
+            .ops
+            .iter()
+            .enumerate()
+            .take(term_idx)
+            .skip(ret_op_idx + 1)
+            .any(|(op_idx, op)| {
+                matches!(op.opcode, PcodeOpcode::Store)
+                    && op.inputs.iter().skip(1).any(|input| {
+                        self.varnode_derives_from_varnode_before(block, op_idx, input, ret_vn, 0)
+                    })
+            })
+    }
+
+    fn varnode_derives_from_varnode_before(
+        &self,
+        block: &crate::pcode::PcodeBasicBlock,
+        before_idx: usize,
+        value: &Varnode,
+        source: &Varnode,
+        depth: usize,
+    ) -> bool {
+        if depth > 6 {
+            return false;
+        }
+        if self.varnode_aliases_value(source, value) || self.varnode_aliases_value(value, source) {
+            return true;
+        }
+        let Some((_def_idx, def)) =
+            block
+                .ops
+                .iter()
+                .enumerate()
+                .take(before_idx)
+                .rev()
+                .find(|(_, op)| {
+                    op.output
+                        .as_ref()
+                        .is_some_and(|output| self.varnode_aliases_value(output, value))
+                })
+        else {
+            return false;
+        };
+        if !matches!(
+            def.opcode,
+            PcodeOpcode::Copy | PcodeOpcode::IntZExt | PcodeOpcode::IntSExt
+        ) {
+            return false;
+        }
+        def.inputs.first().is_some_and(|input| {
+            self.varnode_derives_from_varnode_before(block, before_idx, input, source, depth + 1)
         })
     }
 
@@ -847,6 +909,14 @@ impl<'a> PreviewBuilder<'a> {
             && let Some((ret_op_idx, ret_vn)) =
                 self.last_primary_return_def_after_barrier(block, term_idx)
         {
+            if matches!(
+                self.options.calling_convention,
+                CallingConvention::WindowsX64 | CallingConvention::SystemVAmd64
+            ) && self
+                .primary_return_value_flows_to_later_store(block, ret_op_idx, term_idx, &ret_vn)
+            {
+                return Ok(None);
+            }
             let ret_vn = self
                 .narrow_zero_extended_primary_return_source(block, ret_op_idx, &ret_vn)
                 .unwrap_or(ret_vn);
