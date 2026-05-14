@@ -119,6 +119,19 @@ manifest.
   `perfect` semantic-score buckets.
 - `semantic_score_stats`: min/max/average and p50/p90/p95 score distribution
   over the full manifest denominator, plus nonzero row count/rate.
+- `denominator_accounting_metrics`: explicit row accounting for mapped,
+  unmapped, decompiled, behavior expected/executed, behavior non-pass, static
+  missing-feature, zero, nonzero, and perfect-score rows. This keeps absent or
+  unsupported rows visible instead of letting them disappear from the
+  denominator.
+- `score_by_behavior_status`, `score_by_stage_first_failure`,
+  `behavior_status_by_stage_first_failure`, and
+  `behavior_status_by_zero_credit_reason`: cross-tabs that connect score loss to
+  dynamic behavior status, first failing debug stage, and zero-credit reason.
+- `static_gap_row_metrics`: row-level static-gap accounting, including rows
+  with missing/extra features, rows with zero source/decompiler feature
+  intersection, per-component missing-row counts, and missing/extra feature
+  count distributions.
 - `debug_coverage_metrics` and `debug_stage_status_matrix`: debug evidence
   coverage and per-stage status counts for rows where debug decomp evidence was
   requested.
@@ -129,6 +142,9 @@ manifest.
 - `harness_cost_metrics`: decompile, behavior compile, behavior run, and
   behavior wall-time totals/averages and p50/p90/p95/max timings, plus behavior
   cache status aggregation.
+- `cost_hot_rows`: slowest rows by decompile wall time and behavior wall time,
+  preserving row identity so benchmark runtime improvements can target the
+  responsible function instead of only the aggregate timer.
 
 The JSON and Markdown summaries also include mapping, decompile-failure, and
 behavior-status buckets plus language/tag/entry breakdowns. `--jobs` changes
