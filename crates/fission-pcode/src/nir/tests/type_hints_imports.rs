@@ -365,6 +365,78 @@ fn preview_call_target_uses_relocation_symbol_for_direct_placeholder_call() {
 }
 
 #[test]
+fn preview_store_resolves_split_constant_global_address() {
+    let ptr_hi = uniq(0x2000, 4);
+    let ptr = uniq(0x2004, 4);
+    let value = reg(0x20, 4);
+    let func = PcodeFunction {
+        blocks: vec![PcodeBasicBlock {
+            index: 0,
+            start_address: 0x100044,
+            successors: vec![],
+            ops: vec![
+                PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::IntLeft,
+                    address: 0x100048,
+                    output: Some(ptr_hi.clone()),
+                    inputs: vec![cst(0x10, 4), cst(16, 4)],
+                    asm_mnemonic: Some("movt r1,#0x10".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 1,
+                    opcode: PcodeOpcode::IntOr,
+                    address: 0x100048,
+                    output: Some(ptr.clone()),
+                    inputs: vec![ptr_hi, cst(0x58, 4)],
+                    asm_mnemonic: Some("movw r1,#0x58".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 2,
+                    opcode: PcodeOpcode::Store,
+                    address: 0x10004c,
+                    output: None,
+                    inputs: vec![cst(0, 4), ptr, value],
+                    asm_mnemonic: Some("str r0,[r1]".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 3,
+                    opcode: PcodeOpcode::Return,
+                    address: 0x10004e,
+                    output: None,
+                    inputs: vec![cst(1, 4)],
+                    asm_mnemonic: Some("bx lr".to_string()),
+                },
+            ],
+        }],
+    };
+
+    let mut options = preview_options();
+    options.pe_x64_only = false;
+    options.is_64bit = false;
+    options.pointer_size = 4;
+    options.format = "ELF32".to_string();
+    options.calling_convention = CallingConvention::Arm32;
+    options
+        .global_names
+        .insert(0x100058, "math_sink".to_string());
+    options.global_sizes.insert(0x100058, 4);
+
+    let rendered = render_mlil_preview_with_context(
+        &func,
+        "run_mathematics",
+        0x100044,
+        &options,
+        Some(&PreviewTypeContext::default()),
+    )
+    .expect("preview render should succeed");
+
+    assert!(rendered.contains("uint math_sink;"), "{rendered}");
+    assert!(rendered.contains("math_sink = param_1;"), "{rendered}");
+    assert!(!rendered.contains("*(uint *)(1048664)"), "{rendered}");
+}
+
+#[test]
 fn preview_call_target_refs_resolve_direct_symbol_call_target() {
     let func = PcodeFunction {
         blocks: vec![PcodeBasicBlock {

@@ -37,6 +37,10 @@ const R_ARM_PC24: u32 = 1;
 const R_ARM_ABS32: u32 = 2;
 const R_ARM_CALL: u32 = 28;
 const R_ARM_JUMP24: u32 = 29;
+const R_ARM_MOVW_ABS_NC: u32 = 43;
+const R_ARM_MOVT_ABS: u32 = 44;
+const R_ARM_THM_MOVW_ABS_NC: u32 = 47;
+const R_ARM_THM_MOVT_ABS: u32 = 48;
 const R_PPC64_ADDR64: u32 = 38;
 const R_RISCV_HI20: u32 = 26;
 const R_RISCV_LO12_I: u32 = 27;
@@ -1204,9 +1208,14 @@ fn arm_relocation_patches_32(
             } else {
                 None
             };
-            if let Some(patched) =
-                apply_arm_relocation_to_word(word, reloc_type, symbol_value, place, explicit_addend)
-            {
+            if let Some(patched) = apply_arm_relocation_to_word(
+                word,
+                reloc_type,
+                symbol_value,
+                place,
+                explicit_addend,
+                endian,
+            ) {
                 patches.push((patch_offset, patched));
             }
         }
@@ -1245,12 +1254,42 @@ fn apply_arm_relocation_to_word(
     symbol_value: u64,
     place: u64,
     explicit_addend: Option<i64>,
+    endian: Endian,
 ) -> Option<u32> {
     match reloc_type {
         R_ARM_ABS32 => {
             let addend = explicit_addend.unwrap_or(word as i32 as i64);
             let value = (symbol_value as i128).wrapping_add(addend as i128) as u32;
             Some(value)
+        }
+        R_ARM_MOVW_ABS_NC | R_ARM_MOVT_ABS => {
+            let encoded_addend = (((word & 0x000f_0000) >> 4) | (word & 0x0000_0fff)) as u16;
+            let addend = explicit_addend.unwrap_or_else(|| sign_extend_i16(encoded_addend));
+            let mut value = (symbol_value as i128).wrapping_add(addend as i128) as u32;
+            if reloc_type == R_ARM_MOVT_ABS {
+                value >>= 16;
+            }
+            let patched =
+                (word & 0xfff0_f000) | ((value & 0x0000_f000) << 4) | (value & 0x0000_0fff);
+            Some(patched)
+        }
+        R_ARM_THM_MOVW_ABS_NC | R_ARM_THM_MOVT_ABS => {
+            let old_value = thumb_relocation_word(word, endian);
+            let encoded_addend = (((old_value >> 4) & 0x0000_f000)
+                | ((old_value >> 15) & 0x0000_0800)
+                | ((old_value >> 4) & 0x0000_0700)
+                | (old_value & 0x0000_00ff)) as u16;
+            let addend = explicit_addend.unwrap_or_else(|| sign_extend_i16(encoded_addend));
+            let mut value = (symbol_value as i128).wrapping_add(addend as i128) as u32;
+            if reloc_type == R_ARM_THM_MOVT_ABS {
+                value >>= 16;
+            }
+            let patched = (old_value & 0xfbf0_8f00)
+                | ((value & 0x0000_f000) << 4)
+                | ((value & 0x0000_0800) << 15)
+                | ((value & 0x0000_0700) << 4)
+                | (value & 0x0000_00ff);
+            Some(thumb_relocation_word_to_file_word(patched, endian))
         }
         R_ARM_PC24 | R_ARM_CALL | R_ARM_JUMP24 => {
             let addend = explicit_addend.unwrap_or_else(|| arm_branch_addend(word));
@@ -1261,6 +1300,24 @@ fn apply_arm_relocation_to_word(
             Some((word & 0xff00_0000) | encoded)
         }
         _ => None,
+    }
+}
+
+fn sign_extend_i16(value: u16) -> i64 {
+    i64::from(i16::from_ne_bytes(value.to_ne_bytes()))
+}
+
+fn thumb_relocation_word(word: u32, endian: Endian) -> u32 {
+    match endian {
+        Endian::Little => ((word & 0x0000_ffff) << 16) | (word >> 16),
+        Endian::Big => word,
+    }
+}
+
+fn thumb_relocation_word_to_file_word(value: u32, endian: Endian) -> u32 {
+    match endian {
+        Endian::Little => ((value & 0x0000_ffff) << 16) | (value >> 16),
+        Endian::Big => value,
     }
 }
 
@@ -1590,9 +1647,47 @@ mod tests {
             "REL addend is encoded in the ARM branch immediate"
         );
         assert_eq!(
-            apply_arm_relocation_to_word(bl_self_loop, R_ARM_CALL, 0x100000, 0x100018, None)
-                .expect("ARM CALL patch"),
+            apply_arm_relocation_to_word(
+                bl_self_loop,
+                R_ARM_CALL,
+                0x100000,
+                0x100018,
+                None,
+                Endian::Big,
+            )
+            .expect("ARM CALL patch"),
             0xebff_fff8
+        );
+    }
+
+    #[test]
+    fn arm_thumb_movw_movt_relocations_patch_symbol_address() {
+        let movw_r1_zero_le_file_word = 0x0100_f240;
+        let movt_r1_zero_le_file_word = 0x0100_f2c0;
+
+        assert_eq!(
+            apply_arm_relocation_to_word(
+                movw_r1_zero_le_file_word,
+                R_ARM_THM_MOVW_ABS_NC,
+                0x100054,
+                0x100044,
+                None,
+                Endian::Little,
+            )
+            .expect("THM MOVW patch"),
+            0x0154_f240
+        );
+        assert_eq!(
+            apply_arm_relocation_to_word(
+                movt_r1_zero_le_file_word,
+                R_ARM_THM_MOVT_ABS,
+                0x100054,
+                0x100048,
+                None,
+                Endian::Little,
+            )
+            .expect("THM MOVT patch"),
+            0x0110_f2c0
         );
     }
 
@@ -1613,6 +1708,38 @@ mod tests {
             call,
             [0xeb, 0xff, 0xff, 0xf8],
             "R_ARM_CALL should retarget recursive_fib BL to 0x100000"
+        );
+    }
+
+    #[test]
+    fn elf32_arm_thumb_movw_movt_relocations_patch_loaded_image() {
+        let fixture = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../benchmark/binary/ARM8m_le/baremetal/small/binary/c/mathematics.o");
+        if !fixture.exists() {
+            eprintln!("skip: ARM8m mathematics fixture missing");
+            return;
+        }
+
+        let binary = LoadedBinary::from_file(&fixture).expect("load ARM8m relocatable object");
+        assert_eq!(
+            binary.inner().global_symbols.get(&0x100058),
+            Some(&"math_sink".to_string())
+        );
+        let movw = binary
+            .view_bytes(0x100044, 4)
+            .expect("math_sink MOVW bytes");
+        let movt = binary
+            .view_bytes(0x100048, 4)
+            .expect("math_sink MOVT bytes");
+        assert_eq!(
+            movw,
+            [0x40, 0xf2, 0x58, 0x01],
+            "R_ARM_THM_MOVW_ABS_NC should materialize math_sink low half"
+        );
+        assert_eq!(
+            movt,
+            [0xc0, 0xf2, 0x10, 0x01],
+            "R_ARM_THM_MOVT_ABS should materialize math_sink high half"
         );
     }
 

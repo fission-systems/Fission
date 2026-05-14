@@ -323,6 +323,35 @@ impl<'a> PreviewBuilder<'a> {
                     base.checked_add(delta.unsigned_abs())
                 }
             }
+            PcodeOpcode::IntOr => {
+                let lhs = self.resolve_global_address(op.inputs.first()?, budget - 1)?;
+                let rhs = self.resolve_global_address(op.inputs.get(1)?, budget - 1)?;
+                Some(lhs | rhs)
+            }
+            PcodeOpcode::IntAnd => {
+                let lhs = self.resolve_global_address(op.inputs.first()?, budget - 1)?;
+                let rhs = self.resolve_global_address(op.inputs.get(1)?, budget - 1)?;
+                Some(lhs & rhs)
+            }
+            PcodeOpcode::IntXor => {
+                let lhs = self.resolve_global_address(op.inputs.first()?, budget - 1)?;
+                let rhs = self.resolve_global_address(op.inputs.get(1)?, budget - 1)?;
+                Some(lhs ^ rhs)
+            }
+            PcodeOpcode::IntLeft => {
+                let value = self.resolve_global_address(op.inputs.first()?, budget - 1)?;
+                let shift = const_offset(op.inputs.get(1)?)?;
+                u32::try_from(shift)
+                    .ok()
+                    .map(|shift| value.checked_shl(shift).unwrap_or(0))
+            }
+            PcodeOpcode::IntRight => {
+                let value = self.resolve_global_address(op.inputs.first()?, budget - 1)?;
+                let shift = const_offset(op.inputs.get(1)?)?;
+                u32::try_from(shift)
+                    .ok()
+                    .map(|shift| value.checked_shr(shift).unwrap_or(0))
+            }
             PcodeOpcode::PtrAdd => {
                 let base = self.resolve_global_address(op.inputs.first()?, budget - 1)?;
                 let index = const_offset(op.inputs.get(1)?)?;

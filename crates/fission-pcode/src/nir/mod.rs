@@ -271,6 +271,7 @@ pub fn render_mlil_preview_with_binary_and_context(
         }
         debug_log("type_hints_done");
     }
+    recover_global_symbol_accesses(&mut hir, options);
     debug_log("mir_shadow_projection_start");
     let mir_projection_start = Instant::now();
     let (_shadow_mir, mir_lowering_stats) = project_hir_to_mir(&hir);
@@ -319,6 +320,156 @@ fn render_hir_function_with_global_decls(
     rendered.push('\n');
     rendered.push_str(&print_hir_function(hir));
     rendered
+}
+
+fn recover_global_symbol_accesses(hir: &mut HirFunction, options: &MlilPreviewOptions) {
+    let globals = global_symbol_name_map(hir, options);
+    if globals.is_empty() {
+        return;
+    }
+    recover_global_symbol_accesses_in_stmts(&mut hir.body, &globals);
+}
+
+fn global_symbol_name_map(hir: &HirFunction, options: &MlilPreviewOptions) -> HashMap<u64, String> {
+    options
+        .global_names
+        .iter()
+        .filter(|(_, name)| is_c_identifier(name))
+        .filter(|(_, name)| {
+            name.as_str() != hir.name
+                && !hir.params.iter().any(|binding| binding.name == **name)
+                && !hir.locals.iter().any(|binding| binding.name == **name)
+        })
+        .map(|(addr, name)| (*addr, name.clone()))
+        .collect()
+}
+
+fn recover_global_symbol_accesses_in_stmts(stmts: &mut [HirStmt], globals: &HashMap<u64, String>) {
+    for stmt in stmts {
+        match stmt {
+            HirStmt::Assign { lhs, rhs } => {
+                recover_global_symbol_accesses_in_lvalue(lhs, globals);
+                recover_global_symbol_accesses_in_expr(rhs, globals);
+            }
+            HirStmt::Expr(expr) | HirStmt::Return(Some(expr)) => {
+                recover_global_symbol_accesses_in_expr(expr, globals);
+            }
+            HirStmt::VaStart { va_list, .. } => {
+                recover_global_symbol_accesses_in_expr(va_list, globals);
+            }
+            HirStmt::Block(body) | HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
+                recover_global_symbol_accesses_in_stmts(body, globals);
+            }
+            HirStmt::Switch {
+                expr,
+                cases,
+                default,
+            } => {
+                recover_global_symbol_accesses_in_expr(expr, globals);
+                for case in cases {
+                    recover_global_symbol_accesses_in_stmts(&mut case.body, globals);
+                }
+                recover_global_symbol_accesses_in_stmts(default, globals);
+            }
+            HirStmt::If {
+                cond,
+                then_body,
+                else_body,
+            } => {
+                recover_global_symbol_accesses_in_expr(cond, globals);
+                recover_global_symbol_accesses_in_stmts(then_body, globals);
+                recover_global_symbol_accesses_in_stmts(else_body, globals);
+            }
+            HirStmt::For {
+                init,
+                cond,
+                update,
+                body,
+            } => {
+                if let Some(init) = init.as_mut() {
+                    recover_global_symbol_accesses_in_stmts(std::slice::from_mut(init), globals);
+                }
+                if let Some(cond) = cond {
+                    recover_global_symbol_accesses_in_expr(cond, globals);
+                }
+                if let Some(update) = update.as_mut() {
+                    recover_global_symbol_accesses_in_stmts(std::slice::from_mut(update), globals);
+                }
+                recover_global_symbol_accesses_in_stmts(body, globals);
+            }
+            HirStmt::Return(None)
+            | HirStmt::Label(_)
+            | HirStmt::Goto(_)
+            | HirStmt::Break
+            | HirStmt::Continue => {}
+        }
+    }
+}
+
+fn recover_global_symbol_accesses_in_lvalue(
+    lvalue: &mut HirLValue,
+    globals: &HashMap<u64, String>,
+) {
+    match lvalue {
+        HirLValue::Deref { ptr, .. } => {
+            recover_global_symbol_accesses_in_expr(ptr, globals);
+            if let HirExpr::Const(value, _) = ptr.as_ref()
+                && let Ok(addr) = u64::try_from(*value)
+                && let Some(name) = globals.get(&addr)
+            {
+                *lvalue = HirLValue::Var(name.clone());
+            }
+        }
+        HirLValue::Index { base, index, .. } => {
+            recover_global_symbol_accesses_in_expr(base, globals);
+            recover_global_symbol_accesses_in_expr(index, globals);
+        }
+        HirLValue::Var(_) => {}
+    }
+}
+
+fn recover_global_symbol_accesses_in_expr(expr: &mut HirExpr, globals: &HashMap<u64, String>) {
+    match expr {
+        HirExpr::Load { ptr, .. } => {
+            recover_global_symbol_accesses_in_expr(ptr, globals);
+            if let HirExpr::Const(value, _) = ptr.as_ref()
+                && let Ok(addr) = u64::try_from(*value)
+                && let Some(name) = globals.get(&addr)
+            {
+                *expr = HirExpr::Var(name.clone());
+            }
+        }
+        HirExpr::Cast { expr: inner, .. }
+        | HirExpr::Unary { expr: inner, .. }
+        | HirExpr::PtrOffset { base: inner, .. }
+        | HirExpr::AggregateCopy { src: inner, .. } => {
+            recover_global_symbol_accesses_in_expr(inner, globals);
+        }
+        HirExpr::Binary { lhs, rhs, .. } => {
+            recover_global_symbol_accesses_in_expr(lhs, globals);
+            recover_global_symbol_accesses_in_expr(rhs, globals);
+        }
+        HirExpr::Select {
+            cond,
+            then_expr,
+            else_expr,
+            ..
+        } => {
+            recover_global_symbol_accesses_in_expr(cond, globals);
+            recover_global_symbol_accesses_in_expr(then_expr, globals);
+            recover_global_symbol_accesses_in_expr(else_expr, globals);
+        }
+        HirExpr::Call { args, .. } => {
+            for arg in args {
+                recover_global_symbol_accesses_in_expr(arg, globals);
+            }
+        }
+        HirExpr::Index { base, index, .. } => {
+            recover_global_symbol_accesses_in_expr(base, globals);
+            recover_global_symbol_accesses_in_expr(index, globals);
+        }
+        HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) | HirExpr::Const(_, _) => {}
+    }
 }
 
 fn collect_referenced_global_decls(
