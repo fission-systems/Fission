@@ -5,11 +5,11 @@ use super::*;
 /// `plus` is value_real read from ATTR_PLUS in the SLA.
 /// - Non-constant space: effective_offset + (plus & 0xFFFF)
 /// - Constant space: effective_offset >> (8 * (plus >> 16)), using Java long shift masking.
-pub(super) fn resolve_offset_plus_pub(handle: &RuntimeHandle, plus: u64) -> u64 {
+pub(super) fn resolve_offset_plus_pub(handle: &RuntimeHandle, plus: u64) -> Result<u64> {
     resolve_offset_plus(handle, plus)
 }
 
-fn resolve_offset_plus(handle: &RuntimeHandle, plus: u64) -> u64 {
+fn resolve_offset_plus(handle: &RuntimeHandle, plus: u64) -> Result<u64> {
     let effective_offset = if handle.fixed.offset_space.is_some() {
         handle.fixed.temp_offset
     } else {
@@ -19,14 +19,15 @@ fn resolve_offset_plus(handle: &RuntimeHandle, plus: u64) -> u64 {
         .fixed
         .space
         .as_ref()
-        .map(|s| s.name == "const")
-        .unwrap_or(false);
+        .ok_or_else(|| anyhow!("offset_plus handle missing primary space metadata"))?
+        .name
+        == "const";
     if !is_const_space {
-        effective_offset.wrapping_add(plus & 0xFFFF)
+        Ok(effective_offset.wrapping_add(plus & 0xFFFF))
     } else {
         let shift_bits = u32::try_from(((plus >> 16).wrapping_mul(8)) & 0x3f)
             .expect("masked Java shift amount fits u32");
-        effective_offset >> shift_bits
+        Ok(effective_offset >> shift_bits)
     }
 }
 
@@ -1410,7 +1411,7 @@ impl<'c> CompiledTableEmitter<'c> {
 
                 if matches!(selector, CompiledHandleSelector::OffsetPlus) {
                     let plus = plus.ok_or_else(|| anyhow!("offset_plus handle is missing plus"))?;
-                    return Ok(resolve_offset_plus(handle, plus));
+                    return resolve_offset_plus(handle, plus);
                 }
 
                 reject_non_offset_handle_plus(*plus, "template")?;
@@ -1656,15 +1657,34 @@ mod tests {
     fn offset_plus_constant_space_uses_ghidra_java_shift_masking() {
         let handle = test_handle("const", 0x8877_6655_4433_2211);
 
-        assert_eq!(resolve_offset_plus(&handle, 1 << 16), 0x0088_7766_5544_3322);
-        assert_eq!(resolve_offset_plus(&handle, 8 << 16), 0x8877_6655_4433_2211);
+        assert_eq!(
+            resolve_offset_plus(&handle, 1 << 16).unwrap(),
+            0x0088_7766_5544_3322
+        );
+        assert_eq!(
+            resolve_offset_plus(&handle, 8 << 16).unwrap(),
+            0x8877_6655_4433_2211
+        );
     }
 
     #[test]
     fn offset_plus_non_constant_space_preserves_ghidra_long_addition() {
         let handle = test_handle("ram", u64::MAX);
 
-        assert_eq!(resolve_offset_plus(&handle, 1), 0);
+        assert_eq!(resolve_offset_plus(&handle, 1).unwrap(), 0);
+    }
+
+    #[test]
+    fn offset_plus_rejects_missing_primary_space_metadata() {
+        let mut handle = test_handle("ram", 0);
+        handle.fixed.space = None;
+
+        let err = resolve_offset_plus(&handle, 1)
+            .expect_err("offset_plus requires decoded primary space metadata");
+
+        assert!(err
+            .to_string()
+            .contains("offset_plus handle missing primary space metadata"));
     }
 
     #[test]
@@ -1683,10 +1703,16 @@ mod tests {
         let saturating_shift_fallback =
             ["let shift_bits = shift_bytes.", "saturating", "_mul(8);"].concat();
         let dynamic_space_id_lossy_cast = ["space.index", "as", "i64"].join(" ");
+        let missing_space_non_const_fallback =
+            [".map(|s| s.name == \"const\")", ".unwrap_or(false)"].join("\n");
 
         assert!(
             !source.contains(&saturating_shift_fallback),
             "constant-space offset_plus must mirror Ghidra Java long shift masking"
+        );
+        assert!(
+            !source.contains(&missing_space_non_const_fallback),
+            "offset_plus must require decoded primary space metadata instead of assuming non-constant space"
         );
         assert!(
             !source.contains(&dynamic_space_id_lossy_cast),

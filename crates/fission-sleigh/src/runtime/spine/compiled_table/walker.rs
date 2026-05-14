@@ -622,7 +622,7 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                 if matches!(selector, CompiledHandleSelector::OffsetPlus) {
                     let plus =
                         plus.ok_or_else(|| anyhow!("export offset_plus handle is missing plus"))?;
-                    return Ok(resolve_offset_plus_pub(handle, plus));
+                    return resolve_offset_plus_pub(handle, plus);
                 }
                 let value = match selector {
                     CompiledHandleSelector::Space => handle
