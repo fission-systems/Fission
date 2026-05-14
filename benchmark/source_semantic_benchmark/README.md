@@ -294,6 +294,11 @@ inside the same process can still reuse the in-memory cache. Each row includes
 `decomp_cache_status` (`hit`, `miss`, `refreshed_debug_bundle`, or
 `not_requested`) and the summary/Markdown report aggregates those statuses, so
 throughput changes are visible separately from semantic-quality changes.
+When an entry selects multiple mapped functions, the runner prewarms the
+per-row decompile cache with one `fission_cli decomp --addresses-file ...`
+batch invocation for that binary, then writes per-row debug bundles from the
+aggregate debug payload. This keeps row artifacts and cache keys stable while
+avoiding repeated binary/SLEIGH initialization for the same entry.
 Behavior harness cache keys include the C compiler identity, generated source
 hash, and execution timeout, keeping timeout-bound changes from reusing stale
 run results.

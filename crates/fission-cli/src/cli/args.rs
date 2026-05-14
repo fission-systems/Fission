@@ -464,11 +464,11 @@ struct PcodeTopologyArgs {
 #[command(group(
     clap::ArgGroup::new("decomp_target")
         .required(true)
-        .args(["addr", "all"])
+        .args(["addr", "all", "addresses_file"])
 ))]
 #[command(
-    long_about = "Decompile one function or all discovered functions.\n\nThis is the canonical human-facing decompilation entrypoint. Use `--addr` for focused analysis and `--all` only for bounded batch-style local runs.\n\nBy default, `--all` filters imported functions and the zero-size `register_frame_ctor` runtime wrapper. Use `--include-nonuser-functions` to restore compatibility/forensics coverage.",
-    after_help = "Examples:\n  fission_cli decomp app.exe --addr 0x140001000\n  fission_cli decomp app.exe --addr 0x140001000 --ghidra-compat\n  fission_cli decomp app.exe --all --limit 10 --json\n  fission_cli decomp app.exe --all --include-nonuser-functions --json"
+    long_about = "Decompile one function, an explicit address file, or all discovered functions.\n\nThis is the canonical human-facing decompilation entrypoint. Use `--addr` for focused analysis and `--addresses-file` for benchmark/operator batches that should reuse one loaded binary. Use `--all` only for bounded batch-style local runs.\n\nBy default, batch selection filters imported functions and the zero-size `register_frame_ctor` runtime wrapper. Use `--include-nonuser-functions` to restore compatibility/forensics coverage.",
+    after_help = "Examples:\n  fission_cli decomp app.exe --addr 0x140001000\n  fission_cli decomp app.exe --addr 0x140001000 --ghidra-compat\n  fission_cli decomp app.exe --addresses-file addrs.txt --json\n  fission_cli decomp app.exe --all --limit 10 --json\n  fission_cli decomp app.exe --all --include-nonuser-functions --json"
 )]
 struct DecompArgs {
     /// Path to the binary file to analyze
@@ -481,6 +481,10 @@ struct DecompArgs {
     /// Decompile all discovered functions
     #[arg(long)]
     all: bool,
+
+    /// File containing one hex function address per line
+    #[arg(long, value_name = "FILE")]
+    addresses_file: Option<PathBuf>,
 
     /// With --all, limit to first N functions
     #[arg(long, value_name = "N")]
@@ -1143,7 +1147,8 @@ fn normalize_canonical(cli: CliArgs) -> ParsedInvocation {
                 CliCommand::Decomp(decomp) => {
                     let mut args = OneShotArgs::with_binary(decomp.binary);
                     args.address = decomp.addr;
-                    args.decomp_all = decomp.all;
+                    args.decomp_all = decomp.all || decomp.addresses_file.is_some();
+                    args.addresses_file = decomp.addresses_file;
                     args.decomp_limit = decomp.limit;
                     args.include_nonuser_functions = decomp.include_nonuser_functions;
                     args.profile = decomp.profile;
@@ -1639,6 +1644,21 @@ mod tests {
             parse_canonical(&["fission_cli", "decomp", "bin.exe", "--all", "--limit", "10"]);
         assert!(parsed.args.decomp_all);
         assert_eq!(parsed.args.decomp_limit, Some(10));
+    }
+
+    #[test]
+    fn canonical_decomp_addresses_file_maps_to_batch_decomp() {
+        let parsed = parse_canonical(&[
+            "fission_cli",
+            "decomp",
+            "bin.exe",
+            "--addresses-file",
+            "/tmp/addrs.txt",
+            "--json",
+        ]);
+        assert!(parsed.args.decomp_all);
+        assert_eq!(parsed.args.addresses_file, Some(PathBuf::from("/tmp/addrs.txt")));
+        assert!(parsed.args.json);
     }
 
     #[test]

@@ -1267,6 +1267,210 @@ def run_fission_decomp_cached(
     return dict(decomp)
 
 
+def decomp_result_from_function_payload(
+    func: dict[str, Any],
+    wall_sec: float,
+    debug_bundle: dict[str, Any] | None,
+    debug_decomp_bundle_path: Path | None,
+) -> dict[str, Any]:
+    if func.get("error"):
+        return {
+            "success": False,
+            "failure_kind": "decompile_error",
+            "failure_detail": func.get("error"),
+            "wall_sec": round(float(func.get("decomp_sec", wall_sec) or wall_sec), 6),
+            "engine_used": func.get("engine_used"),
+            "debug_decomp": debug_decomp_summary(debug_bundle or func.get("debug_decomp")),
+        }
+    code = func.get("code") or ""
+    if not code.strip():
+        return {
+            "success": False,
+            "failure_kind": "empty_output",
+            "wall_sec": round(float(func.get("decomp_sec", wall_sec) or wall_sec), 6),
+        }
+    return {
+        "success": True,
+        "code": code,
+        "wall_sec": round(float(func.get("decomp_sec", wall_sec) or wall_sec), 6),
+        "engine_used": func.get("engine_used"),
+        "fell_back": bool(func.get("fell_back", False)),
+        "fallback_reason": func.get("fallback_reason"),
+        "preview_build_stats": func.get("preview_build_stats"),
+        "debug_decomp": debug_decomp_summary(debug_bundle or func.get("debug_decomp")),
+        "debug_decomp_bundle_path": rel(debug_decomp_bundle_path)
+        if debug_decomp_bundle_path is not None
+        else None,
+    }
+
+
+def write_single_debug_bundle(path: Path, bundle: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        dump_json_pretty({"schema_version": 1, "functions": [bundle]}),
+        encoding="utf-8",
+    )
+
+
+def run_fission_decomp_batch(
+    binary_path: Path,
+    address_paths: list[tuple[str, Path | None]],
+    fission_bin: Path,
+    timeout_sec: int,
+    include_debug_decomp: bool,
+    output_dir: Path,
+    entry_id: str,
+) -> dict[str, dict[str, Any]]:
+    if not address_paths:
+        return {}
+    batch_dir = output_dir / "batch_decomp"
+    batch_dir.mkdir(parents=True, exist_ok=True)
+    slug = sanitize_id(entry_id)
+    address_file = batch_dir / f"{slug}-addresses.txt"
+    address_file.write_text(
+        "".join(f"{address}\n" for address, _path in address_paths),
+        encoding="utf-8",
+    )
+    debug_bundle_path = batch_dir / f"{slug}-debug-decomp.json"
+    cmd = [
+        str(fission_bin),
+        "decomp",
+        str(binary_path),
+        "--addresses-file",
+        str(address_file),
+        "--benchmark",
+        "--no-header",
+        "--no-warnings",
+        "--timeout-ms",
+        str(max(1000, timeout_sec * 1000)),
+    ]
+    if include_debug_decomp:
+        cmd.append("--debug-decomp")
+        cmd.extend(["--debug-decomp-bundle", str(debug_bundle_path)])
+    start = time.perf_counter()
+    try:
+        res = subprocess.run(
+            cmd,
+            cwd=ROOT_DIR,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=max(timeout_sec, timeout_sec * len(address_paths)),
+            check=True,
+        )
+    except (subprocess.TimeoutExpired, subprocess.CalledProcessError):
+        return {}
+
+    wall_sec = round(time.perf_counter() - start, 6)
+    try:
+        payload = parse_json_loose(res.stdout)
+    except json.JSONDecodeError:
+        return {}
+    functions = payload.get("functions") if isinstance(payload, dict) else None
+    if not isinstance(functions, list):
+        return {}
+
+    debug_by_address: dict[str, dict[str, Any]] = {}
+    if include_debug_decomp and debug_bundle_path.exists():
+        try:
+            debug_payload = json.loads(debug_bundle_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            debug_payload = {}
+        debug_functions = debug_payload.get("functions", []) if isinstance(debug_payload, dict) else []
+        for bundle in debug_functions:
+            if not isinstance(bundle, dict):
+                continue
+            function = bundle.get("function") if isinstance(bundle.get("function"), dict) else {}
+            address = function.get("resolved_address") or function.get("requested_address")
+            if isinstance(address, str):
+                debug_by_address[canonical_address(address)] = bundle
+
+    requested_paths = {
+        canonical_address(address): path
+        for address, path in address_paths
+    }
+    results: dict[str, dict[str, Any]] = {}
+    for func in functions:
+        if not isinstance(func, dict):
+            continue
+        address = func.get("address")
+        if not isinstance(address, str):
+            continue
+        key = canonical_address(address)
+        debug_bundle = debug_by_address.get(key)
+        requested_path = requested_paths.get(key)
+        if debug_bundle is not None and requested_path is not None:
+            write_single_debug_bundle(requested_path, debug_bundle)
+        results[key] = decomp_result_from_function_payload(
+            func,
+            wall_sec,
+            debug_bundle,
+            requested_path,
+        )
+    return results
+
+
+def prewarm_decomp_cache_for_entry(
+    entry: BenchmarkEntry,
+    source_functions: list[SourceFunction],
+    fission_funcs: list[FissionFunction],
+    fission_error: str | None,
+    fission_bin: Path,
+    timeout_sec: int,
+    include_debug_decomp: bool,
+    output_dir: Path,
+    cache: dict[str, dict[str, Any]],
+    cache_lock: threading.Lock,
+    cache_stats: Counter[str],
+) -> None:
+    if fission_error or len(source_functions) <= 1:
+        return
+    address_paths: list[tuple[str, Path | None]] = []
+    address_to_cache_key: dict[str, str] = {}
+    for func in source_functions:
+        _status, matched, _candidates = match_function(func, fission_funcs)
+        if matched is None:
+            continue
+        key = decomp_cache_key(entry.binary_path, matched.address, fission_bin, include_debug_decomp)
+        bundle_path = (
+            debug_bundle_path_for_parts(output_dir, entry.id, func.name, matched.address)
+            if include_debug_decomp
+            else None
+        )
+        with cache_lock:
+            cached = cache.get(key)
+        if cached is not None and (
+            not include_debug_decomp
+            or bundle_path is None
+            or bundle_path.exists()
+        ):
+            continue
+        canonical = canonical_address(matched.address)
+        address_to_cache_key[canonical] = key
+        address_paths.append((matched.address, bundle_path))
+    if len(address_paths) <= 1:
+        return
+    batch_results = run_fission_decomp_batch(
+        entry.binary_path,
+        address_paths,
+        fission_bin,
+        timeout_sec,
+        include_debug_decomp,
+        output_dir,
+        entry.id,
+    )
+    if not batch_results:
+        return
+    with cache_lock:
+        for address, result in batch_results.items():
+            key = address_to_cache_key.get(address)
+            if key is None:
+                continue
+            cache[key] = result
+            cache_stats["miss"] += 1
+            cache_stats["stored"] += 1
+
+
 def shell_command(parts: list[Any]) -> str:
     return " ".join(shlex.quote(str(part)) for part in parts)
 
@@ -7538,6 +7742,19 @@ def run_benchmark(args: argparse.Namespace) -> int:
                 "listed_binary_function_count": len(fission_funcs),
                 "list_error": fission_error,
             }
+        )
+        prewarm_decomp_cache_for_entry(
+            entry,
+            source_functions,
+            fission_funcs,
+            fission_error,
+            fission_bin,
+            args.timeout_sec,
+            args.include_debug_decomp,
+            output_dir,
+            decomp_cache,
+            decomp_cache_lock,
+            decomp_cache_stats,
         )
         if jobs == 1 or len(source_functions) <= 1:
             for func in source_functions:
