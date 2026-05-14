@@ -635,10 +635,8 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                     CompiledHandleSelector::Size => u64::from(handle.fixed.size),
                     CompiledHandleSelector::OffsetPlus => unreachable!(),
                 };
-                match plus {
-                    Some(plus) => Ok(value.wrapping_add(*plus)),
-                    None => Ok(value),
-                }
+                reject_non_offset_handle_plus(*plus, "export")?;
+                Ok(value)
             }
             CompiledConstTpl::InstStart => Ok(self.ctx.address),
             CompiledConstTpl::InstNext => self

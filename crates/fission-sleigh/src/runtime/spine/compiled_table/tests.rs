@@ -822,6 +822,7 @@ fn compiled_table_policy_symbols_stay_architecture_neutral() {
     let template_const_inst_next_saturating = "self.address.saturating_add(state.length as u64)";
     let template_const_inst_next_zero_fallback = "self.flow.instruction_length.unwrap_or(0)";
     let template_const_inst_next2_saturating = "inst_next.saturating_add(delay_len)";
+    let non_offset_handle_plus_wrapping_fallback = "wrapping_add(*plus)";
     let context_commit_inst_next_saturating =
         "instruction_address.saturating_add(decoded.length as u64)";
     let template_inst_length_lossy_cast = "checked_add(inst_length as u64)";
@@ -1199,8 +1200,9 @@ fn compiled_table_policy_symbols_stay_architecture_neutral() {
                 && !source.contains(template_const_inst_next_saturating)
                 && !source.contains(template_const_inst_next_zero_fallback)
                 && !source.contains(template_const_inst_next2_saturating)
+                && !source.contains(non_offset_handle_plus_wrapping_fallback)
                 && !source.contains(context_commit_inst_next_saturating),
-            "{} still hides malformed SLA parser cursor or InstNext arithmetic",
+            "{} still hides malformed SLA parser cursor, InstNext arithmetic, or non-offset_plus handle plus",
             file.display()
         );
         assert!(

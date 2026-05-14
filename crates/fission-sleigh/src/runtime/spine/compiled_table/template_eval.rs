@@ -30,6 +30,13 @@ fn resolve_offset_plus(handle: &RuntimeHandle, plus: u64) -> u64 {
     }
 }
 
+pub(super) fn reject_non_offset_handle_plus(plus: Option<u64>, role: &str) -> Result<()> {
+    if let Some(plus) = plus {
+        bail!("{role} non-offset_plus handle unexpectedly carried plus {plus}");
+    }
+    Ok(())
+}
+
 fn const_varnode(value: u64, size: u32) -> Varnode {
     Varnode::constant(u64_to_i64_bits(value), size)
 }
@@ -1406,12 +1413,9 @@ impl<'c> CompiledTableEmitter<'c> {
                     return Ok(resolve_offset_plus(handle, plus));
                 }
 
+                reject_non_offset_handle_plus(*plus, "template")?;
                 let val = self.resolve_fixed_handle_selector(handle, *selector)?;
-                if let Some(plus) = plus {
-                    Ok(val.wrapping_add(*plus))
-                } else {
-                    Ok(val)
-                }
+                Ok(val)
             }
             CompiledConstTpl::Relative { value: label_num } => {
                 // Emit a sentinel value; resolveRelatives() in finish() will replace it
@@ -1661,6 +1665,16 @@ mod tests {
         let handle = test_handle("ram", u64::MAX);
 
         assert_eq!(resolve_offset_plus(&handle, 1), 0);
+    }
+
+    #[test]
+    fn non_offset_handle_plus_is_rejected_as_malformed_sla_contract() {
+        let err = reject_non_offset_handle_plus(Some(1), "template")
+            .expect_err("non-offset_plus ATTR_PLUS must fail closed");
+
+        assert!(err
+            .to_string()
+            .contains("non-offset_plus handle unexpectedly carried plus"));
     }
 
     #[test]
