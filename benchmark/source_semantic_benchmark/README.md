@@ -360,6 +360,10 @@ header and runs deterministic cases for supported scalar integral signatures,
 plus manifest-owned `behavior_cases` for C `int *` arguments and `void`
 side-effect functions. Explicit cases can list observed globals so a function
 that communicates through a checked-in global sink is compared by effect, not
-only by return value. If the local host cannot execute a freshly compiled C
+only by return value. Zero-argument `main` rows are behavior-checked by compiling
+the source translation unit with `main` renamed to `source_original_main` and
+the candidate output with its `main` renamed to `fission_candidate_main`, so
+callee dependencies from the original source stay available without a duplicate
+entrypoint conflict. If the local host cannot execute a freshly compiled C
 probe, supported dynamic rows fail closed as `host_execution_unavailable`
 instead of being silently skipped.

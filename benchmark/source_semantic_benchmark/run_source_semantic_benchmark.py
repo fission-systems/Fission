@@ -2287,8 +2287,6 @@ def behavior_supported(
     language = entry.language
     if language != "c":
         return False, "dynamic harness currently supports C source functions only"
-    if func.name == "main":
-        return False, "main is not called as a unit function"
     if explicit_cases is not None:
         if func.return_kind not in {"int", "void"}:
             return False, f"unsupported return kind: {func.return_kind}"
@@ -2373,7 +2371,11 @@ def behavior_cases_for(
 def source_harness(
     source_path: Path, func: SourceFunction, cases: list[tuple[int, ...]] | list[dict[str, Any]]
 ) -> str:
-    calls = "\n".join(render_case_call(func, case, index) for index, case in enumerate(cases))
+    call_name = "source_original_main" if func.name == "main" else None
+    calls = "\n".join(
+        render_case_call(func, case, index, call_name=call_name)
+        for index, case in enumerate(cases)
+    )
     return f"""
 #include <stdio.h>
 #define main source_original_main
@@ -2387,13 +2389,27 @@ int main(void) {{
 
 
 def candidate_harness(
-    candidate_code: str, func: SourceFunction, cases: list[tuple[int, ...]] | list[dict[str, Any]]
+    candidate_code: str,
+    func: SourceFunction,
+    cases: list[tuple[int, ...]] | list[dict[str, Any]],
+    source_path: Path | None = None,
 ) -> str:
-    calls = "\n".join(render_case_call(func, case, index) for index, case in enumerate(cases))
+    call_name = "fission_candidate_main" if func.name == "main" else None
+    calls = "\n".join(
+        render_case_call(func, case, index, call_name=call_name)
+        for index, case in enumerate(cases)
+    )
     support_code = "\n".join(candidate_support_code_blocks(cases))
     observed_globals = collect_observed_globals(cases)
     globals_decl = "\n".join(render_candidate_global_decl(spec) for spec in observed_globals)
     candidate_code = remove_duplicate_candidate_global_decls(candidate_code, observed_globals)
+    main_define = "#define main fission_candidate_main" if func.name == "main" else ""
+    main_undef = "#undef main" if func.name == "main" else ""
+    source_dependencies = (
+        f'#define main source_original_main\n#include "{source_path}"\n#undef main'
+        if func.name == "main" and source_path is not None
+        else ""
+    )
     return f"""
 #include <stdint.h>
 #include <stdbool.h>
@@ -2440,12 +2456,16 @@ static inline bool __fission_sborrow64(uint64 a, uint64 b) {{
     int64 sa = (int64)a, sb = (int64)b, sr = (int64)(a - b);
     return ((sa ^ sb) & (sa ^ sr)) < 0;
 }}
+static inline ulonglong __main(void) {{ return 0; }}
 #define __carry(a, b) (sizeof(a) <= 4 ? __fission_carry32((uint32)(a), (uint32)(b)) : __fission_carry64((uint64)(a), (uint64)(b)))
 #define __scarry(a, b) (sizeof(a) <= 4 ? __fission_scarry32((uint32)(a), (uint32)(b)) : __fission_scarry64((uint64)(a), (uint64)(b)))
 #define __sborrow(a, b) (sizeof(a) <= 4 ? __fission_sborrow32((uint32)(a), (uint32)(b)) : __fission_sborrow64((uint64)(a), (uint64)(b)))
 {globals_decl}
 {support_code}
+{source_dependencies}
+{main_define}
 {candidate_code}
+{main_undef}
 int main(void) {{
 {calls}
     return 0;
@@ -2453,11 +2473,17 @@ int main(void) {{
 """
 
 
-def render_case_call(func: SourceFunction, case: tuple[int, ...] | dict[str, Any], index: int) -> str:
+def render_case_call(
+    func: SourceFunction,
+    case: tuple[int, ...] | dict[str, Any],
+    index: int,
+    call_name: str | None = None,
+) -> str:
     if isinstance(case, dict):
-        return render_explicit_case_call(func, case, index)
+        return render_explicit_case_call(func, case, index, call_name=call_name)
     args = ", ".join(str(v) for v in case)
-    return f'    printf("%lld\\n", (long long){func.name}({args}));\n    fflush(stdout);'
+    target = call_name or func.name
+    return f'    printf("%lld\\n", (long long){target}({args}));\n    fflush(stdout);'
 
 
 def c_int_array(values: list[int]) -> str:
@@ -2529,7 +2555,12 @@ def remove_duplicate_candidate_global_decls(candidate_code: str, observed_global
     return "\n".join(line for line in candidate_code.splitlines() if not is_duplicate_decl(line))
 
 
-def render_explicit_case_call(func: SourceFunction, case: dict[str, Any], index: int) -> str:
+def render_explicit_case_call(
+    func: SourceFunction,
+    case: dict[str, Any],
+    index: int,
+    call_name: str | None = None,
+) -> str:
     args = case["args"]
     setup: list[str] = []
     call_args: list[str] = []
@@ -2551,15 +2582,16 @@ def render_explicit_case_call(func: SourceFunction, case: dict[str, Any], index:
         raise AssertionError(f"unsupported explicit behavior kind: {kind}")
 
     joined_args = ", ".join(call_args)
+    target = call_name or func.name
     globals_to_observe = case.get("globals") or []
     lines = setup
     for spec in globals_to_observe:
         lines.append(f"    {spec['name']} = {int(spec.get('reset', 0))};")
     if func.return_kind == "void":
-        lines.append(f"    {func.name}({joined_args});")
+        lines.append(f"    {target}({joined_args});")
         lines.append('    printf("ret=void");')
     else:
-        lines.append(f"    long long case_{index}_ret = (long long){func.name}({joined_args});")
+        lines.append(f"    long long case_{index}_ret = (long long){target}({joined_args});")
         lines.append(f'    printf("ret=%lld", case_{index}_ret);')
     for arg_index, array_name, length in pointer_arrays:
         lines.append(f'    printf(" arg{arg_index}=");')
@@ -2812,7 +2844,7 @@ def run_behavior_check(
 
     cases = behavior_cases_for(entry, func)
     oracle_code = source_harness(entry.source_path, func, cases)
-    candidate_code = candidate_harness(decomp_code, func, cases)
+    candidate_code = candidate_harness(decomp_code, func, cases, entry.source_path)
     artifact_dir = (
         behavior_artifact_dir_for_row(output_dir, entry, func, address)
         if output_dir is not None
@@ -8070,6 +8102,31 @@ int max(int a, int b) { if (a > b) return a; return b; }
         assert matched is not None
         assert matched.address == "0x2000"
         assert candidates == []
+        main_func = SourceFunction(
+            name="main",
+            signature="int main()",
+            body="return 0;",
+            return_kind="int",
+            param_kinds=[],
+            param_names=[],
+            line=1,
+        )
+        main_entry = BenchmarkEntry(
+            id="main-smoke",
+            binary_path=Path("/tmp/main.exe"),
+            source_path=path,
+            language="c",
+            tags=[],
+        )
+        supported, reason = behavior_supported(main_entry, main_func, None)
+        assert supported, reason
+        main_source_harness = source_harness(path, main_func, [()])
+        assert "source_original_main()" in main_source_harness
+        assert "main()" not in main_source_harness.split("#undef main", 1)[1].split("source_original_main()", 1)[0]
+        main_candidate_harness = candidate_harness("uint main(void) { return 0; }", main_func, [()], path)
+        assert "source_original_main" in main_candidate_harness
+        assert "#define main fission_candidate_main" in main_candidate_harness
+        assert "fission_candidate_main()" in main_candidate_harness
         limited = select_source_functions(
             [
                 SourceFunction(
