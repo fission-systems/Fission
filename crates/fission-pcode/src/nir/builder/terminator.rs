@@ -501,11 +501,14 @@ impl<'a> PreviewBuilder<'a> {
         {
             return Ok(Some(expr));
         }
-        let Some((_ret_op_idx, ret_vn)) =
+        let Some((ret_op_idx, ret_vn)) =
             self.last_primary_return_def_after_barrier(block, term_idx)
         else {
             return Ok(None);
         };
+        let ret_vn = self
+            .narrow_zero_extended_primary_return_source(block, ret_op_idx, &ret_vn)
+            .unwrap_or(ret_vn);
         self.with_lowering_site(
             LoweringSite {
                 block_idx,
@@ -514,6 +517,27 @@ impl<'a> PreviewBuilder<'a> {
             |this| this.lower_wrapped_varnode(&ret_vn, &mut HashSet::new()),
         )
         .map(Some)
+    }
+
+    fn narrow_zero_extended_primary_return_source(
+        &self,
+        block: &crate::pcode::PcodeBasicBlock,
+        ret_op_idx: usize,
+        ret_vn: &Varnode,
+    ) -> Option<Varnode> {
+        if !self.options.is_64bit {
+            return None;
+        }
+        let op = block.ops.get(ret_op_idx)?;
+        if op.opcode != PcodeOpcode::IntZExt || op.output.as_ref() != Some(ret_vn) {
+            return None;
+        }
+        let input = op.inputs.first()?;
+        if input.size >= ret_vn.size || !is_register_space_id(input.space_id) {
+            return None;
+        }
+        is_primary_return_register_for_abi(input, self.options.calling_convention)
+            .then_some(input.clone())
     }
 
     fn block_has_primary_return_def_before_terminator(&self, idx: usize) -> bool {
@@ -768,9 +792,12 @@ impl<'a> PreviewBuilder<'a> {
             return Ok(Some(expr));
         }
         if self.uses_primary_return_registers()
-            && let Some((_ret_op_idx, ret_vn)) =
+            && let Some((ret_op_idx, ret_vn)) =
                 self.last_primary_return_def_after_barrier(block, term_idx)
         {
+            let ret_vn = self
+                .narrow_zero_extended_primary_return_source(block, ret_op_idx, &ret_vn)
+                .unwrap_or(ret_vn);
             return self
                 .lower_wrapped_varnode(&ret_vn, &mut HashSet::new())
                 .map(Some);
@@ -3906,6 +3933,79 @@ mod tests {
             "{code}"
         );
         assert!(code.contains("return 7;"), "{code}");
+    }
+
+    #[test]
+    fn x64_return_recovery_uses_eax_source_for_zero_extended_rax() {
+        let eax = Varnode {
+            space_id: RUST_SLEIGH_REGISTER_SPACE_ID,
+            offset: 0x00,
+            size: 4,
+            is_constant: false,
+            constant_val: 0,
+        };
+        let rax = Varnode {
+            space_id: RUST_SLEIGH_REGISTER_SPACE_ID,
+            offset: 0x00,
+            size: 8,
+            is_constant: false,
+            constant_val: 0,
+        };
+        let pcode = PcodeFunction {
+            blocks: vec![PcodeBasicBlock {
+                index: 0,
+                start_address: 0x1400_1000,
+                successors: Vec::new(),
+                ops: vec![
+                    PcodeOp {
+                        seq_num: 0,
+                        opcode: PcodeOpcode::Copy,
+                        address: 0x1400_1000,
+                        output: Some(eax.clone()),
+                        inputs: vec![Varnode::constant(7, 4)],
+                        asm_mnemonic: None,
+                    },
+                    PcodeOp {
+                        seq_num: 1,
+                        opcode: PcodeOpcode::IntZExt,
+                        address: 0x1400_1001,
+                        output: Some(rax),
+                        inputs: vec![eax],
+                        asm_mnemonic: None,
+                    },
+                    PcodeOp {
+                        seq_num: 2,
+                        opcode: PcodeOpcode::Return,
+                        address: 0x1400_1002,
+                        output: None,
+                        inputs: vec![Varnode::constant(0, 8)],
+                        asm_mnemonic: None,
+                    },
+                ],
+            }],
+        };
+        let options = MlilPreviewOptions {
+            pe_x64_only: false,
+            is_64bit: true,
+            is_big_endian: false,
+            pointer_size: 8,
+            format: "PE".to_string(),
+            image_base: 0x1400_0000,
+            sections: vec![(0x1400_1000, 0x1400_2000)],
+            region_linearize_structuring: false,
+            force_linear_structuring: false,
+            conservative_irreducible_fallback: false,
+            structuring_engine: StructuringEngineKind::GraphCollapseV1,
+            global_names: Default::default(),
+            global_sizes: Default::default(),
+            relocation_names: Default::default(),
+            calling_convention: CallingConvention::WindowsX64,
+        };
+        let code = render_mlil_preview(&pcode, "narrow_return", 0x1400_1000, &options)
+            .expect("preview render");
+
+        assert!(code.contains("return 7;"), "{code}");
+        assert!(!code.contains("ulonglong narrow_return"), "{code}");
     }
 
     #[test]
