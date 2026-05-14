@@ -768,6 +768,44 @@ mod tests {
     }
 
     #[test]
+    fn arm8m_recursive_thumb_subtables_decode_without_sequential_recursion_failure() {
+        if !discovery::ghidra_packaged_sla_available() {
+            eprintln!("skip: packaged Ghidra .sla not available for ARM8m recursion test");
+            return;
+        }
+        for (entry_id, bytes) in [("ARM8m_le", [0xb0, 0xb5]), ("ARM8m_be", [0xb5, 0xb0])] {
+            let frontend =
+                RuntimeSleighFrontend::new_for_language(entry_id).expect("ARM8m runtime");
+            let address_state = frontend.normalize_low_bit_code_address(0x100001);
+            assert_eq!(address_state.address, 0x100000);
+            let decoded = frontend
+                .decode_instruction_with_context_override(
+                    &bytes,
+                    address_state.address,
+                    address_state.context_override,
+                )
+                .unwrap_or_else(|err| panic!("{entry_id} Thumb push decode: {err:#}"));
+            assert_eq!(decoded.length, 2, "{entry_id} Thumb push length");
+            assert_eq!(decoded.mnemonic, "push", "{entry_id} Thumb push mnemonic");
+
+            let (ops, length, details) = frontend
+                .decode_and_lift_with_context_override(
+                    &bytes,
+                    address_state.address,
+                    address_state.context_override,
+                )
+                .unwrap_or_else(|err| panic!("{entry_id} Thumb push lift: {err:#}"));
+            assert_eq!(length, 2, "{entry_id} Thumb push lift length");
+            assert_eq!(
+                details.template_source,
+                Some(crate::compiler::CompiledTemplateSource::SpecDerived),
+                "{entry_id} Thumb push should stay on SLA ConstructTpl"
+            );
+            assert!(!ops.is_empty(), "{entry_id} Thumb push should emit p-code");
+        }
+    }
+
+    #[test]
     fn arm8m_be_low_bit_code_address_decodes_thumb_instruction_without_byte_skew() {
         if !discovery::ghidra_packaged_sla_available() {
             eprintln!("skip: packaged Ghidra .sla not available for ARM8m_be low-bit test");

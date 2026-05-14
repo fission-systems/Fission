@@ -34,9 +34,18 @@ fn operand_spec_primary_sla_token_span(
     spec: &CompiledOperandSpec,
     depth: usize,
 ) -> Result<Option<SlaTokenByteSpan>> {
-    if depth > 8 {
-        bail!("SLA token span recursion limit exceeded");
-    }
+    let mut visiting = Vec::new();
+    let mut memo = std::collections::BTreeMap::new();
+    operand_spec_primary_sla_token_span_with_stack(compiled, spec, depth, &mut visiting, &mut memo)
+}
+
+fn operand_spec_primary_sla_token_span_with_stack(
+    compiled: &CompiledFrontend,
+    spec: &CompiledOperandSpec,
+    depth: usize,
+    visiting: &mut Vec<String>,
+    memo: &mut std::collections::BTreeMap<String, Option<SlaTokenByteSpan>>,
+) -> Result<Option<SlaTokenByteSpan>> {
     match spec {
         CompiledOperandSpec::SlaTokenField {
             byte_start,
@@ -80,9 +89,15 @@ fn operand_spec_primary_sla_token_span(
             table_name,
             reloffset,
             offsetbase: _,
-        } => subtable_primary_sla_token_span(compiled, table_name, depth + 1)?
-            .map(|span| span.shifted(*reloffset))
-            .transpose(),
+        } => subtable_primary_sla_token_span_with_stack(
+            compiled,
+            table_name,
+            depth + 1,
+            visiting,
+            memo,
+        )?
+        .map(|span| span.shifted(*reloffset))
+        .transpose(),
         _ => Ok(None),
     }
 }
@@ -126,19 +141,45 @@ fn subtable_primary_sla_token_span(
     table_name: &str,
     depth: usize,
 ) -> Result<Option<SlaTokenByteSpan>> {
-    if depth > 8 {
-        bail!("SLA token span recursion limit exceeded");
+    let mut visiting = Vec::new();
+    let mut memo = std::collections::BTreeMap::new();
+    subtable_primary_sla_token_span_with_stack(
+        compiled,
+        table_name,
+        depth,
+        &mut visiting,
+        &mut memo,
+    )
+}
+
+fn subtable_primary_sla_token_span_with_stack(
+    compiled: &CompiledFrontend,
+    table_name: &str,
+    depth: usize,
+    visiting: &mut Vec<String>,
+    memo: &mut std::collections::BTreeMap<String, Option<SlaTokenByteSpan>>,
+) -> Result<Option<SlaTokenByteSpan>> {
+    if visiting.iter().any(|name| name == table_name) {
+        return Ok(None);
+    }
+    if let Some(span) = memo.get(table_name) {
+        return Ok(*span);
     }
     let subtable = compiled
         .subtables
         .get(table_name)
         .ok_or_else(|| anyhow!("missing subtable {table_name} for SLA token span"))?;
+    visiting.push(table_name.to_string());
     let mut span: Option<SlaTokenByteSpan> = None;
     for constructor in &subtable.constructors {
         for handle in &constructor.constructor_template.handles {
-            if let Some(handle_span) =
-                operand_spec_primary_sla_token_span(compiled, &handle.spec, depth + 1)?
-            {
+            if let Some(handle_span) = operand_spec_primary_sla_token_span_with_stack(
+                compiled,
+                &handle.spec,
+                depth + 1,
+                visiting,
+                memo,
+            )? {
                 span = Some(match span {
                     Some(current) => current.union(handle_span),
                     None => handle_span,
@@ -147,6 +188,8 @@ fn subtable_primary_sla_token_span(
             }
         }
     }
+    visiting.pop();
+    memo.insert(table_name.to_string(), span);
     Ok(span)
 }
 
@@ -224,22 +267,50 @@ pub(super) fn subtable_consumes_sequential_bytes(
     table_name: &str,
     depth: usize,
 ) -> Result<bool> {
-    if depth > 8 {
-        bail!("SLA sequential-byte recursion limit exceeded");
+    let mut visiting = Vec::new();
+    let mut memo = std::collections::BTreeMap::new();
+    subtable_consumes_sequential_bytes_with_stack(
+        compiled,
+        table_name,
+        depth,
+        &mut visiting,
+        &mut memo,
+    )
+}
+
+fn subtable_consumes_sequential_bytes_with_stack(
+    compiled: &CompiledFrontend,
+    table_name: &str,
+    depth: usize,
+    visiting: &mut Vec<String>,
+    memo: &mut std::collections::BTreeMap<String, bool>,
+) -> Result<bool> {
+    if visiting.iter().any(|name| name == table_name) {
+        return Ok(false);
+    }
+    if let Some(consumes) = memo.get(table_name) {
+        return Ok(*consumes);
     }
     let subtable = compiled
         .subtables
         .get(table_name)
         .ok_or_else(|| anyhow!("missing subtable {table_name} for sequential-byte analysis"))?;
+    visiting.push(table_name.to_string());
     for constructor in &subtable.constructors {
         if constructor_consumes_sequential_operand_bytes_with_depth(
             compiled,
             constructor,
             depth + 1,
+            visiting,
+            memo,
         )? {
+            visiting.pop();
+            memo.insert(table_name.to_string(), true);
             return Ok(true);
         }
     }
+    visiting.pop();
+    memo.insert(table_name.to_string(), false);
     Ok(false)
 }
 
@@ -247,9 +318,17 @@ pub(super) fn constructor_consumes_sequential_operand_bytes_with_depth(
     compiled: &CompiledFrontend,
     constructor: &CompiledExecutableConstructor,
     depth: usize,
+    visiting: &mut Vec<String>,
+    memo: &mut std::collections::BTreeMap<String, bool>,
 ) -> Result<bool> {
     for handle in &constructor.constructor_template.handles {
-        if operand_spec_consumes_sequential_bytes(compiled, &handle.spec, depth)? {
+        if operand_spec_consumes_sequential_bytes_with_stack(
+            compiled,
+            &handle.spec,
+            depth,
+            visiting,
+            memo,
+        )? {
             return Ok(true);
         }
     }
@@ -260,6 +339,24 @@ pub(super) fn operand_spec_consumes_sequential_bytes(
     compiled: &CompiledFrontend,
     spec: &CompiledOperandSpec,
     depth: usize,
+) -> Result<bool> {
+    let mut visiting = Vec::new();
+    let mut memo = std::collections::BTreeMap::new();
+    operand_spec_consumes_sequential_bytes_with_stack(
+        compiled,
+        spec,
+        depth,
+        &mut visiting,
+        &mut memo,
+    )
+}
+
+fn operand_spec_consumes_sequential_bytes_with_stack(
+    compiled: &CompiledFrontend,
+    spec: &CompiledOperandSpec,
+    depth: usize,
+    visiting: &mut Vec<String>,
+    memo: &mut std::collections::BTreeMap<String, bool>,
 ) -> Result<bool> {
     match spec {
         CompiledOperandSpec::SlaTokenField { .. }
@@ -274,7 +371,13 @@ pub(super) fn operand_spec_consumes_sequential_bytes(
         }
         CompiledOperandSpec::SlaValueMap { .. } => Ok(true),
         CompiledOperandSpec::SubtableEvaluation { table_name, .. } => {
-            subtable_consumes_sequential_bytes(compiled, table_name, depth + 1)
+            subtable_consumes_sequential_bytes_with_stack(
+                compiled,
+                table_name,
+                depth + 1,
+                visiting,
+                memo,
+            )
         }
         _ => Ok(false),
     }

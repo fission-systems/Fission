@@ -706,7 +706,7 @@ fn sla_constructor_source_index_conversion_is_not_silent() {
         "constructor source index conversion must only treat negative values as generated, not silently drop conversion errors"
     );
     assert!(
-        templates.contains("optional_nonnegative_u64(\n                source_index"),
+        templates.contains("optional_nonnegative_u64(source_index"),
         "constructor source index decode must use the explicit optional nonnegative conversion helper"
     );
 }
