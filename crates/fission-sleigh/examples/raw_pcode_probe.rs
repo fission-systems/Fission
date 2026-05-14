@@ -82,6 +82,7 @@ struct ProbeReport {
     entry_id: String,
     execution_mode: String,
     start_address: u64,
+    decode_start_address: u64,
     requested_count: usize,
     space_map: BTreeMap<String, u64>,
     timing: ProbeTiming,
@@ -346,7 +347,9 @@ fn main() -> Result<()> {
                 if len == 0 {
                     break;
                 }
-                current = current.saturating_add(len);
+                current = current.checked_add(len).ok_or_else(|| {
+                    anyhow!("instruction address overflow after 0x{current:x} length {len}")
+                })?;
             }
             Err(err) => {
                 instructions.push(InstructionReport {
@@ -377,6 +380,7 @@ fn main() -> Result<()> {
         entry_id: frontend.entry().entry_id.clone(),
         execution_mode: "compiled_table_mixed".to_string(),
         start_address: args.address,
+        decode_start_address: address_state.address,
         requested_count: args.count,
         space_map: space_map_json,
         timing: ProbeTiming {
