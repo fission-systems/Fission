@@ -1,12 +1,24 @@
 use super::*;
 
-#[derive(Debug, Default)]
-struct BuilderStatsProjection {
-    telemetry: super::telemetry::BuilderTelemetry,
+#[derive(Debug)]
+struct BuilderStatsProjection<'a> {
+    telemetry: &'a super::telemetry::BuilderTelemetry,
     validated_pcode_op_count: usize,
 }
 
-impl BuilderStatsProjection {
+impl<'a> BuilderStatsProjection<'a> {
+    fn from_builder<'builder>(builder: &'a PreviewBuilder<'builder>) -> Self {
+        Self {
+            telemetry: &builder.telemetry,
+            validated_pcode_op_count: builder
+                .pcode
+                .blocks
+                .iter()
+                .map(|block| block.ops.len())
+                .sum(),
+        }
+    }
+
     fn into_public_stats(self) -> PreviewBuildStats {
         let mut stats = PreviewBuildStats {
             validated_pcode_op_count: self.validated_pcode_op_count,
@@ -19,13 +31,7 @@ impl BuilderStatsProjection {
 
 impl<'a> PreviewBuilder<'a> {
     pub(crate) fn preview_build_stats(&self) -> PreviewBuildStats {
-        let validated_pcode_op_count = self.pcode.blocks.iter().map(|block| block.ops.len()).sum();
-        let mut stats = PreviewBuildStats {
-            validated_pcode_op_count,
-            ..PreviewBuildStats::default()
-        };
-        self.telemetry.apply_to_public_stats(&mut stats);
-        stats
+        BuilderStatsProjection::from_builder(self).into_public_stats()
     }
 }
 
@@ -35,11 +41,12 @@ mod tests {
 
     #[test]
     fn builder_stats_projection_keeps_public_nir_build_stats_field_set() {
+        let telemetry = super::super::telemetry::BuilderTelemetry::default();
         let default_keys = serialized_keys(&PreviewBuildStats::default());
         let projected_keys = serialized_keys(
             &BuilderStatsProjection {
+                telemetry: &telemetry,
                 validated_pcode_op_count: 17,
-                ..BuilderStatsProjection::default()
             }
             .into_public_stats(),
         );
