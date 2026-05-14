@@ -8,7 +8,7 @@ use super::*;
 use crate::compiler::ast::{AstConstructor, AstItem, SpecAst, WithContextFrame};
 use crate::compiler::preprocessor::{ExpandedSpec, PreprocessedLine};
 use crate::compiler::sla::CompiledSlaTemplateLibrary;
-use crate::packed_context::set_packed_context_bits;
+use crate::packed_context::{set_packed_context_bits, PackedContextOverride};
 
 pub fn compile_frontend(
     arch: &str,
@@ -35,9 +35,9 @@ pub fn compile_frontend(
     collector.collect_define_bits_from_expanded(&expanded.lines);
 
     // Infer default context from .pspec if available
-    let (default_context, default_context_known_mask) =
+    let default_context_override =
         infer_default_context_from_pspec(entry_spec, processor_spec, &collector.field_info)?;
-    collector.default_context = default_context;
+    collector.default_context = default_context_override.context_bits();
     if std::env::var_os("FISSION_TRACE_CONTEXT_DEFAULT").is_some() {
         eprintln!(
             "Inferred Default Context for {}: 0x{:016x}",
@@ -100,7 +100,7 @@ pub fn compile_frontend(
     Ok(CompiledFrontend {
         arch: arch.to_string(),
         default_context: collector.default_context,
-        default_context_known_mask,
+        default_context_known_mask: default_context_override.mask_bits(),
         entry_spec: expanded
             .entry_spec
             .file_name()
@@ -143,12 +143,12 @@ fn infer_default_context_from_pspec(
     entry_spec: &Path,
     processor_spec: Option<&Path>,
     field_info: &BTreeMap<String, FieldBitRange>,
-) -> Result<(u64, u64)> {
+) -> Result<PackedContextOverride> {
     let pspec_path = processor_spec
         .map(Path::to_path_buf)
         .unwrap_or_else(|| entry_spec.with_extension("pspec"));
     if !pspec_path.exists() {
-        return Ok((0, 0));
+        return Ok(PackedContextOverride::default());
     }
 
     let content = fs::read_to_string(&pspec_path)
@@ -200,7 +200,10 @@ fn infer_default_context_from_pspec(
             }
         }
     }
-    Ok((default_context, default_context_known_mask))
+    Ok(PackedContextOverride::new(
+        default_context,
+        default_context_known_mask,
+    ))
 }
 
 fn extract_xml_attribute(line: &str, attr: &str) -> Option<String> {

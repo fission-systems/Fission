@@ -140,9 +140,9 @@ pub(crate) fn decode_and_lift_with_context_override(
 
 /// Decodes a single instruction with optional context register override.
 ///
-/// `context_override` – when `Some((ctx, mask))`, applies `ctx` bits (selected by `mask`)
-/// over the default context before matching. Used by multi-instruction loops to propagate
-/// `ContextCommit` / `globalset` effects across instruction boundaries.
+/// `context_override` applies packed context bits over the default context before matching.
+/// Used by multi-instruction loops to propagate `ContextCommit` / `globalset` effects across
+/// instruction boundaries.
 pub(crate) fn decode_instruction_with_context(
     compiled: &CompiledFrontend,
     native: Option<&Arc<NativeBackend>>,
