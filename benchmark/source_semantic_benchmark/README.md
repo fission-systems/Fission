@@ -91,6 +91,20 @@ manifest.
 - `weighted_semantic_similarity_percent`: the same weighted score expressed as
   a percentage for report display. Per-row `semantic_score_percent` and
   `static_semantic_score_percent` are emitted alongside the raw 0..1 scores.
+- `effective_coverage`: mapped, decompiled, behavior-expected, and
+  behavior-executed row counts/rates over the full manifest denominator.
+- `behavior_eligibility`: behavior eligibility/execution/pass rates with both
+  eligible-row and total-row denominators, so unsupported or absent behavior
+  cases cannot silently inflate the pass rate.
+- `zero_credit_breakdown`: reason buckets for rows whose weighted semantic score
+  is exactly zero (`unmapped`, `decomp:*`, `behavior:*`, `static_zero`, ...).
+- `stage_first_failure_counts`: first non-`ok` debug stage per mapped row when
+  debug evidence is available.
+- `static_similarity_component_averages` and
+  `static_similarity_component_average_percent`: static similarity split into
+  control-flow, operator, call, constant, memory, and signature token families.
+- `harness_cost_metrics`: decompile, behavior compile, behavior run, and
+  behavior wall-time totals/averages, plus behavior cache status aggregation.
 
 The JSON and Markdown summaries also include mapping, decompile-failure, and
 behavior-status buckets plus language/tag/entry breakdowns. `--jobs` changes

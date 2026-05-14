@@ -1398,6 +1398,27 @@ def multiset_jaccard(left: Counter[str], right: Counter[str]) -> float:
     return round(inter / union, 6) if union else 1.0
 
 
+STATIC_SIMILARITY_COMPONENTS: dict[str, tuple[str, ...]] = {
+    "control_flow": ("ctrl:",),
+    "operator": ("op:",),
+    "call": ("call:",),
+    "constant": ("const:",),
+    "memory": ("mem:",),
+    "signature": ("sig:",),
+}
+
+
+def fingerprint_subset(fp: Counter[str], prefixes: tuple[str, ...]) -> Counter[str]:
+    return Counter({key: value for key, value in fp.items() if key.startswith(prefixes)})
+
+
+def static_similarity_components(source_fp: Counter[str], decomp_fp: Counter[str]) -> dict[str, float]:
+    return {
+        name: multiset_jaccard(fingerprint_subset(source_fp, prefixes), fingerprint_subset(decomp_fp, prefixes))
+        for name, prefixes in STATIC_SIMILARITY_COMPONENTS.items()
+    }
+
+
 def percent(value: float) -> float:
     return round(value * 100.0, 3)
 
@@ -1703,11 +1724,13 @@ def serialize_behavior_cases(cases: list[tuple[int, ...]] | list[dict[str, Any]]
 
 
 def compile_and_run_c(code: str, cwd: Path, name: str, timeout_sec: int) -> dict[str, Any]:
+    wall_start = time.perf_counter()
     source = cwd / f"{name}.c"
     binary = cwd / name
     source.write_text(code, encoding="utf-8")
     clang = os.environ.get("CLANG") or shutil.which("clang") or "/opt/homebrew/opt/llvm/bin/clang"
     cmd = [clang, "-x", "c", "-std=c11", "-Wno-everything", str(source), "-o", str(binary)]
+    compile_start = time.perf_counter()
     try:
         compile_res = subprocess.run(
             cmd,
@@ -1722,10 +1745,18 @@ def compile_and_run_c(code: str, cwd: Path, name: str, timeout_sec: int) -> dict
         return {
             "status": "compile_failed",
             "detail": (exc.stderr or exc.stdout or str(exc))[-4000:],
+            "compile_sec": round(time.perf_counter() - compile_start, 6),
+            "wall_sec": round(time.perf_counter() - wall_start, 6),
         }
     except subprocess.TimeoutExpired:
-        return {"status": "compile_timeout"}
+        return {
+            "status": "compile_timeout",
+            "compile_sec": round(time.perf_counter() - compile_start, 6),
+            "wall_sec": round(time.perf_counter() - wall_start, 6),
+        }
 
+    compile_sec = round(time.perf_counter() - compile_start, 6)
+    run_start = time.perf_counter()
     try:
         run_res = subprocess.run(
             [str(binary)],
@@ -1737,7 +1768,13 @@ def compile_and_run_c(code: str, cwd: Path, name: str, timeout_sec: int) -> dict
             check=True,
         )
     except subprocess.CalledProcessError as exc:
-        return {"status": "run_failed", "detail": (exc.stderr or exc.stdout or str(exc))[-4000:]}
+        return {
+            "status": "run_failed",
+            "detail": (exc.stderr or exc.stdout or str(exc))[-4000:],
+            "compile_sec": compile_sec,
+            "run_sec": round(time.perf_counter() - run_start, 6),
+            "wall_sec": round(time.perf_counter() - wall_start, 6),
+        }
     except subprocess.TimeoutExpired as exc:
         stdout = exc.stdout.decode("utf-8", errors="replace") if isinstance(exc.stdout, bytes) else (exc.stdout or "")
         stderr = exc.stderr.decode("utf-8", errors="replace") if isinstance(exc.stderr, bytes) else (exc.stderr or "")
@@ -1745,9 +1782,19 @@ def compile_and_run_c(code: str, cwd: Path, name: str, timeout_sec: int) -> dict
             "status": "run_timeout",
             "partial_stdout": stdout[-4000:],
             "partial_stderr": stderr[-4000:],
+            "compile_sec": compile_sec,
+            "run_sec": round(time.perf_counter() - run_start, 6),
+            "wall_sec": round(time.perf_counter() - wall_start, 6),
         }
 
-    return {"status": "ok", "stdout": run_res.stdout, "compile_stdout": compile_res.stdout}
+    return {
+        "status": "ok",
+        "stdout": run_res.stdout,
+        "compile_stdout": compile_res.stdout,
+        "compile_sec": compile_sec,
+        "run_sec": round(time.perf_counter() - run_start, 6),
+        "wall_sec": round(time.perf_counter() - wall_start, 6),
+    }
 
 
 def compile_and_run_c_cached(
@@ -1816,19 +1863,36 @@ def run_behavior_check(
     output_dir: Path | None = None,
     address: str | None = None,
 ) -> dict[str, Any]:
+    behavior_start = time.perf_counter()
     explicit_cases = explicit_behavior_cases(entry, func)
     supported, reason = behavior_supported(entry, func, explicit_cases)
     if not supported:
-        return {"status": "unsupported_signature", "score": 0.0, "reason": reason}
+        return {
+            "status": "unsupported_signature",
+            "score": 0.0,
+            "reason": reason,
+            "eligible": False,
+            "case_count": 0,
+            "wall_sec": round(time.perf_counter() - behavior_start, 6),
+        }
     if host_execution.get("status") != "ok":
         return {
             "status": "host_execution_unavailable",
             "score": 0.0,
             "reason": host_execution.get("status"),
             "detail": host_execution.get("detail"),
+            "eligible": True,
+            "case_count": 0,
+            "wall_sec": round(time.perf_counter() - behavior_start, 6),
         }
     if not decomp_code:
-        return {"status": "decomp_failed", "score": 0.0}
+        return {
+            "status": "decomp_failed",
+            "score": 0.0,
+            "eligible": True,
+            "case_count": 0,
+            "wall_sec": round(time.perf_counter() - behavior_start, 6),
+        }
 
     cases = behavior_cases_for(entry, func)
     oracle_code = source_harness(entry.source_path, func, cases)
@@ -1840,6 +1904,21 @@ def run_behavior_check(
     )
 
     def maybe_attach_artifacts(result: dict[str, Any], oracle: dict[str, Any] | None, candidate: dict[str, Any] | None) -> dict[str, Any]:
+        result.setdefault("eligible", True)
+        result.setdefault("case_count", len(cases))
+        result["wall_sec"] = round(time.perf_counter() - behavior_start, 6)
+        result["oracle_cache_status"] = (oracle or {}).get("behavior_cache_status")
+        result["candidate_cache_status"] = (candidate or {}).get("behavior_cache_status")
+        result["compile_sec"] = round(
+            float((oracle or {}).get("compile_sec", 0.0) or 0.0)
+            + float((candidate or {}).get("compile_sec", 0.0) or 0.0),
+            6,
+        )
+        result["run_sec"] = round(
+            float((oracle or {}).get("run_sec", 0.0) or 0.0)
+            + float((candidate or {}).get("run_sec", 0.0) or 0.0),
+            6,
+        )
         if artifact_dir is None or result.get("status") == "pass":
             return result
         write_behavior_artifacts(artifact_dir, oracle_code, candidate_code, oracle, candidate)
@@ -1899,6 +1978,8 @@ def summarize(rows: list[dict[str, Any]], manifest_name: str, entries: list[Benc
     decomp_ok = sum(1 for row in rows if row.get("decomp_success"))
     compile_ok = sum(1 for row in rows if row.get("behavior", {}).get("status") in {"pass", "mismatch"})
     behavior_pass = sum(1 for row in rows if row.get("behavior", {}).get("status") == "pass")
+    behavior_expected = sum(1 for row in rows if row.get("behavior", {}).get("eligible") is True)
+    behavior_executed = sum(1 for row in rows if row.get("behavior", {}).get("status") in {"pass", "mismatch"})
     score_values = [float(row.get("semantic_score", 0.0) or 0.0) for row in rows]
     mapping_status_counts = Counter(row.get("mapping_status", "unknown") for row in rows)
     decomp_failure_counts = Counter(
@@ -1907,7 +1988,27 @@ def summarize(rows: list[dict[str, Any]], manifest_name: str, entries: list[Benc
         if not row.get("decomp_success")
     )
     behavior_status_counts = Counter(row.get("behavior", {}).get("status", "unknown") for row in rows)
+    behavior_cache_status_counts = Counter(
+        status
+        for row in rows
+        for status in [
+            row.get("behavior", {}).get("oracle_cache_status"),
+            row.get("behavior", {}).get("candidate_cache_status"),
+        ]
+        if status
+    )
     decomp_cache_status_counts = Counter(row.get("decomp_cache_status", "not_requested") for row in rows)
+    zero_credit_breakdown = Counter(
+        row_zero_credit_reason(row)
+        for row in rows
+        if float(row.get("semantic_score", 0.0) or 0.0) == 0.0
+    )
+    stage_first_failure_counts = Counter(
+        row.get("stage_first_failure") or "none"
+        for row in rows
+        if row.get("mapping_status") == "matched"
+    )
+    static_component_sums: Counter[str] = Counter()
     debug_owner_bucket_counts: Counter[str] = Counter()
     debug_stage_status_counts: Counter[str] = Counter()
     debug_quality_evidence_totals: Counter[str] = Counter()
@@ -1924,6 +2025,9 @@ def summarize(rows: list[dict[str, Any]], manifest_name: str, entries: list[Benc
         bucket["score_sum"] += float(row.get("semantic_score", 0.0) or 0.0)
 
     for row in rows:
+        for component, value in (row.get("static_similarity_components") or {}).items():
+            if isinstance(value, int | float):
+                static_component_sums[component] += float(value)
         lang = row["language"]
         bucket = by_language.setdefault(
             lang,
@@ -1981,6 +2085,22 @@ def summarize(rows: list[dict[str, Any]], manifest_name: str, entries: list[Benc
         if row.get("behavior", {}).get("status") == "host_execution_unavailable"
     )
     weighted_semantic_similarity = round(sum(score_values) / total, 6) if total else 0.0
+    decomp_times = [float(row.get("decomp_wall_sec") or 0.0) for row in rows if isinstance(row.get("decomp_wall_sec"), int | float)]
+    behavior_compile_times = [
+        float(row.get("behavior", {}).get("compile_sec") or 0.0)
+        for row in rows
+        if isinstance(row.get("behavior", {}).get("compile_sec"), int | float)
+    ]
+    behavior_run_times = [
+        float(row.get("behavior", {}).get("run_sec") or 0.0)
+        for row in rows
+        if isinstance(row.get("behavior", {}).get("run_sec"), int | float)
+    ]
+    behavior_wall_times = [
+        float(row.get("behavior", {}).get("wall_sec") or 0.0)
+        for row in rows
+        if isinstance(row.get("behavior", {}).get("wall_sec"), int | float)
+    ]
     return {
         "manifest": manifest_name,
         "entry_count": len(entries),
@@ -1989,6 +2109,24 @@ def summarize(rows: list[dict[str, Any]], manifest_name: str, entries: list[Benc
         "decomp_success_rate": round(decomp_ok / total, 6) if total else 0.0,
         "candidate_compile_rate": round(compile_ok / total, 6) if total else 0.0,
         "behavior_pass_rate": round(behavior_pass / total, 6) if total else 0.0,
+        "effective_coverage": {
+            "mapped_rows": mapped,
+            "mapped_rate": round(mapped / total, 6) if total else 0.0,
+            "decompiled_rows": decomp_ok,
+            "decompiled_rate": round(decomp_ok / total, 6) if total else 0.0,
+            "behavior_expected_rows": behavior_expected,
+            "behavior_expected_rate": round(behavior_expected / total, 6) if total else 0.0,
+            "behavior_executed_rows": behavior_executed,
+            "behavior_executed_rate": round(behavior_executed / total, 6) if total else 0.0,
+        },
+        "behavior_eligibility": {
+            "eligible_rows": behavior_expected,
+            "eligible_rate": round(behavior_expected / total, 6) if total else 0.0,
+            "executed_rows": behavior_executed,
+            "execution_rate": round(behavior_executed / behavior_expected, 6) if behavior_expected else 0.0,
+            "pass_rate_eligible_denominator": round(behavior_pass / behavior_expected, 6) if behavior_expected else 0.0,
+            "pass_rate_total_denominator": round(behavior_pass / total, 6) if total else 0.0,
+        },
         "weighted_semantic_similarity": weighted_semantic_similarity,
         "weighted_semantic_similarity_percent": percent(weighted_semantic_similarity),
         "perfect_row_count": sum(1 for score in score_values if score == 1.0),
@@ -1999,6 +2137,33 @@ def summarize(rows: list[dict[str, Any]], manifest_name: str, entries: list[Benc
         "decomp_failure_counts": dict(sorted(decomp_failure_counts.items())),
         "behavior_status_counts": dict(sorted(behavior_status_counts.items())),
         "decomp_cache_status_counts": dict(sorted(decomp_cache_status_counts.items())),
+        "behavior_cache_status_counts": dict(sorted(behavior_cache_status_counts.items())),
+        "zero_credit_breakdown": dict(sorted(zero_credit_breakdown.items())),
+        "stage_first_failure_counts": dict(sorted(stage_first_failure_counts.items())),
+        "static_similarity_component_averages": {
+            component: round(static_component_sums[component] / total, 6) if total else 0.0
+            for component in sorted(STATIC_SIMILARITY_COMPONENTS)
+        },
+        "static_similarity_component_average_percent": {
+            component: percent(round(static_component_sums[component] / total, 6) if total else 0.0)
+            for component in sorted(STATIC_SIMILARITY_COMPONENTS)
+        },
+        "harness_cost_metrics": {
+            "decompile_total_sec": round(sum(decomp_times), 6),
+            "decompile_avg_sec": round(sum(decomp_times) / len(decomp_times), 6) if decomp_times else 0.0,
+            "behavior_compile_total_sec": round(sum(behavior_compile_times), 6),
+            "behavior_compile_avg_sec": round(sum(behavior_compile_times) / len(behavior_compile_times), 6)
+            if behavior_compile_times
+            else 0.0,
+            "behavior_run_total_sec": round(sum(behavior_run_times), 6),
+            "behavior_run_avg_sec": round(sum(behavior_run_times) / len(behavior_run_times), 6)
+            if behavior_run_times
+            else 0.0,
+            "behavior_wall_total_sec": round(sum(behavior_wall_times), 6),
+            "behavior_wall_avg_sec": round(sum(behavior_wall_times) / len(behavior_wall_times), 6)
+            if behavior_wall_times
+            else 0.0,
+        },
         "debug_owner_bucket_counts": dict(sorted(debug_owner_bucket_counts.items())),
         "debug_stage_status_counts": dict(sorted(debug_stage_status_counts.items())),
         "debug_quality_evidence_totals": dict(sorted(debug_quality_evidence_totals.items())),
@@ -2209,6 +2374,11 @@ def compare_to_baseline(
     unchanged = 0
     behavior_improved = 0
     behavior_regressed = 0
+    score_delta_sum_negative = 0.0
+    score_delta_sum_positive = 0.0
+    new_zero_score_rows = 0
+    new_unmapped_rows = 0
+    new_behavior_fail_rows = 0
     for key in shared_keys:
         current = current_by_key[key]
         baseline = baseline_by_key[key]
@@ -2217,8 +2387,10 @@ def compare_to_baseline(
         delta = round(current_score - baseline_score, 6)
         if delta > 0:
             improved += 1
+            score_delta_sum_positive += delta
         elif delta < 0:
             regressed += 1
+            score_delta_sum_negative += delta
         else:
             unchanged += 1
 
@@ -2228,6 +2400,11 @@ def compare_to_baseline(
             behavior_improved += 1
         elif current_behavior != "pass" and baseline_behavior == "pass":
             behavior_regressed += 1
+            new_behavior_fail_rows += 1
+        if current_score == 0.0 and baseline_score > 0.0:
+            new_zero_score_rows += 1
+        if current.get("mapping_status") != "matched" and baseline.get("mapping_status") == "matched":
+            new_unmapped_rows += 1
 
         if delta != 0 or current_behavior != baseline_behavior:
             row_deltas.append(
@@ -2267,10 +2444,43 @@ def compare_to_baseline(
         "decomp_success_rate",
         "candidate_compile_rate",
         "behavior_pass_rate",
+        "behavior_pass_rate_total_denominator",
+        "behavior_expected_rate",
+        "behavior_executed_rate",
         "perfect_row_count",
         "supported_behavior_row_count",
         "row_count",
     ]
+    effective = summary.get("effective_coverage") if isinstance(summary.get("effective_coverage"), dict) else {}
+    behavior_eligibility = (
+        summary.get("behavior_eligibility") if isinstance(summary.get("behavior_eligibility"), dict) else {}
+    )
+    baseline_effective = (
+        baseline_summary.get("effective_coverage")
+        if isinstance(baseline_summary.get("effective_coverage"), dict)
+        else {}
+    )
+    baseline_behavior_eligibility = (
+        baseline_summary.get("behavior_eligibility")
+        if isinstance(baseline_summary.get("behavior_eligibility"), dict)
+        else {}
+    )
+    metric_source = dict(summary)
+    metric_source.update(
+        {
+            "behavior_pass_rate_total_denominator": behavior_eligibility.get("pass_rate_total_denominator"),
+            "behavior_expected_rate": effective.get("behavior_expected_rate"),
+            "behavior_executed_rate": effective.get("behavior_executed_rate"),
+        }
+    )
+    baseline_metric_source = dict(baseline_summary)
+    baseline_metric_source.update(
+        {
+            "behavior_pass_rate_total_denominator": baseline_behavior_eligibility.get("pass_rate_total_denominator"),
+            "behavior_expected_rate": baseline_effective.get("behavior_expected_rate"),
+            "behavior_executed_rate": baseline_effective.get("behavior_executed_rate"),
+        }
+    )
     return {
         "baseline_summary_path": rel(baseline_path),
         "shared_row_count": len(shared_keys),
@@ -2281,7 +2491,14 @@ def compare_to_baseline(
         "unchanged_row_count": unchanged,
         "behavior_improved_row_count": behavior_improved,
         "behavior_regressed_row_count": behavior_regressed,
-        "metric_deltas": {key: metric_delta(summary, baseline_summary, key) for key in metric_keys},
+        "regression_severity": {
+            "score_delta_sum_negative": round(score_delta_sum_negative, 6),
+            "score_delta_sum_positive": round(score_delta_sum_positive, 6),
+            "new_zero_score_rows": new_zero_score_rows,
+            "new_unmapped_rows": new_unmapped_rows,
+            "new_behavior_fail_rows": new_behavior_fail_rows,
+        },
+        "metric_deltas": {key: metric_delta(metric_source, baseline_metric_source, key) for key in metric_keys},
         "top_row_deltas": row_deltas[:20],
         "top_improvements": top_improvements,
         "top_regressions": top_regressions,
@@ -2551,6 +2768,28 @@ def render_markdown(summary: dict[str, Any], rows: list[dict[str, Any]]) -> str:
         f"- Supported behavior rows: {summary['supported_behavior_row_count']}",
         f"- Host execution unavailable rows: {summary['host_execution_unavailable_count']}",
     ]
+    effective = summary.get("effective_coverage") if isinstance(summary.get("effective_coverage"), dict) else {}
+    behavior_eligibility = (
+        summary.get("behavior_eligibility") if isinstance(summary.get("behavior_eligibility"), dict) else {}
+    )
+    if effective:
+        lines.append(
+            "- Effective coverage: "
+            f"mapped {effective.get('mapped_rows', 0)}/{summary['row_count']} "
+            f"({float(effective.get('mapped_rate', 0.0) or 0.0):.3f}), "
+            f"decompiled {effective.get('decompiled_rows', 0)}/{summary['row_count']} "
+            f"({float(effective.get('decompiled_rate', 0.0) or 0.0):.3f}), "
+            f"behavior executed {effective.get('behavior_executed_rows', 0)}/{summary['row_count']} "
+            f"({float(effective.get('behavior_executed_rate', 0.0) or 0.0):.3f})"
+        )
+    if behavior_eligibility:
+        lines.append(
+            "- Behavior eligibility: "
+            f"eligible {behavior_eligibility.get('eligible_rows', 0)}, "
+            f"execution rate {float(behavior_eligibility.get('execution_rate', 0.0) or 0.0):.3f}, "
+            f"pass/eligible {float(behavior_eligibility.get('pass_rate_eligible_denominator', 0.0) or 0.0):.3f}, "
+            f"pass/total {float(behavior_eligibility.get('pass_rate_total_denominator', 0.0) or 0.0):.3f}"
+        )
     if "wall_sec" in summary:
         lines.append(f"- Wall time: {summary['wall_sec']:.3f}s")
     if summary.get("decomp_cache_file"):
@@ -2641,9 +2880,30 @@ def render_markdown(summary: dict[str, Any], rows: list[dict[str, Any]]) -> str:
         lines.extend(["", "## Behavior Status", "", "| Status | Rows |", "|---|---:|"])
         for status, count in sorted(summary["behavior_status_counts"].items()):
             lines.append(f"| {status} | {count} |")
+    if summary.get("zero_credit_breakdown"):
+        lines.extend(["", "## Zero-Credit Breakdown", "", "| Reason | Rows |", "|---|---:|"])
+        for reason, count in sorted(summary["zero_credit_breakdown"].items()):
+            lines.append(f"| {reason} | {count} |")
+    if summary.get("stage_first_failure_counts"):
+        lines.extend(["", "## First Stage Failure", "", "| Stage Status | Rows |", "|---|---:|"])
+        for status, count in sorted(summary["stage_first_failure_counts"].items()):
+            lines.append(f"| {status} | {count} |")
+    if summary.get("static_similarity_component_average_percent"):
+        lines.extend(["", "## Static Similarity Components", "", "| Component | Avg Similarity |", "|---|---:|"])
+        for component, avg in sorted(summary["static_similarity_component_average_percent"].items()):
+            lines.append(f"| {component} | {float(avg or 0.0):.3f}% |")
+    if summary.get("harness_cost_metrics"):
+        costs = summary["harness_cost_metrics"]
+        lines.extend(["", "## Harness Cost Metrics", "", "| Metric | Seconds |", "|---|---:|"])
+        for key, value in sorted(costs.items()):
+            lines.append(f"| {key} | {float(value or 0.0):.6f} |")
     if summary.get("decomp_cache_status_counts"):
         lines.extend(["", "## Decompile Cache Status", "", "| Status | Rows |", "|---|---:|"])
         for status, count in sorted(summary["decomp_cache_status_counts"].items()):
+            lines.append(f"| {status} | {count} |")
+    if summary.get("behavior_cache_status_counts"):
+        lines.extend(["", "## Behavior Cache Status", "", "| Status | Hits |", "|---|---:|"])
+        for status, count in sorted(summary["behavior_cache_status_counts"].items()):
             lines.append(f"| {status} | {count} |")
     if summary.get("decomp_failure_counts"):
         lines.extend(["", "## Decompile Failures", "", "| Failure | Rows |", "|---|---:|"])
@@ -2698,6 +2958,16 @@ def render_markdown(summary: dict[str, Any], rows: list[dict[str, Any]]) -> str:
                 f"- Missing rows: {comparison.get('missing_row_count', 0)}",
             ]
         )
+        severity = comparison.get("regression_severity") if isinstance(comparison.get("regression_severity"), dict) else {}
+        if severity:
+            lines.extend(
+                [
+                    f"- Negative score delta sum: {float(severity.get('score_delta_sum_negative', 0.0) or 0.0):+.6f}",
+                    f"- New zero-score rows: {severity.get('new_zero_score_rows', 0)}",
+                    f"- New unmapped rows: {severity.get('new_unmapped_rows', 0)}",
+                    f"- New behavior-fail rows: {severity.get('new_behavior_fail_rows', 0)}",
+                ]
+            )
         top_improvements = comparison.get("top_improvements") or []
         if top_improvements:
             lines.extend(["", "### Top Improvements", "", "| Function | Delta | Baseline | Current | Behavior |", "|---|---:|---:|---:|---|"])
@@ -2792,6 +3062,60 @@ def render_markdown(summary: dict[str, Any], rows: list[dict[str, Any]]) -> str:
     return "\n".join(lines)
 
 
+STAGE_FAILURE_ORDER = ["load", "decode", "raw_pcode", "nir_build", "normalize", "structuring", "render"]
+
+
+def stage_first_failure(debug_decomp: Any) -> str | None:
+    if not isinstance(debug_decomp, dict):
+        return None
+    stage_status = debug_decomp.get("stage_status")
+    if not isinstance(stage_status, dict):
+        return None
+    for stage in STAGE_FAILURE_ORDER:
+        status = stage_status.get(stage)
+        if status not in {None, "ok"}:
+            return f"{stage}:{status}"
+    return None
+
+
+def zero_credit_reason(
+    mapping_status: str,
+    decomp: dict[str, Any],
+    behavior: dict[str, Any],
+    static_score: float,
+    semantic_score: float,
+) -> str | None:
+    if semantic_score > 0.0:
+        return None
+    if mapping_status != "matched":
+        return mapping_status
+    if not decomp.get("success"):
+        return f"decomp:{decomp.get('failure_kind', 'unknown')}"
+    behavior_status = behavior.get("status", "unknown")
+    if behavior_status not in {"unsupported_signature", "pass"}:
+        return f"behavior:{behavior_status}"
+    if static_score == 0.0:
+        return "static_zero"
+    return "weighted_zero"
+
+
+def row_zero_credit_reason(row: dict[str, Any]) -> str:
+    explicit = row.get("zero_credit_reason")
+    if explicit:
+        return str(explicit)
+    mapping_status = str(row.get("mapping_status") or "unknown")
+    if mapping_status != "matched":
+        return mapping_status
+    if not row.get("decomp_success"):
+        return f"decomp:{row.get('decomp_failure_kind', 'unknown')}"
+    behavior_status = row.get("behavior", {}).get("status", "unknown")
+    if behavior_status not in {"unsupported_signature", "pass"}:
+        return f"behavior:{behavior_status}"
+    if float(row.get("static_semantic_score", 0.0) or 0.0) == 0.0:
+        return "static_zero"
+    return "weighted_zero"
+
+
 def row_for_function(
     entry: BenchmarkEntry,
     func: SourceFunction,
@@ -2834,6 +3158,9 @@ def row_for_function(
     decomp_code = decomp.get("code") if decomp.get("success") else None
     decomp_fp = code_fingerprint(decomp_code or "") if decomp_code else Counter()
     static_score = multiset_jaccard(source_fp, decomp_fp) if decomp_code else 0.0
+    static_components = static_similarity_components(source_fp, decomp_fp) if decomp_code else {
+        name: 0.0 for name in STATIC_SIMILARITY_COMPONENTS
+    }
     behavior = run_behavior_check(
         entry,
         func,
@@ -2847,6 +3174,7 @@ def row_for_function(
         address=matched.address if matched else None,
     )
     semantic_score = round(0.65 * float(behavior.get("score", 0.0)) + 0.35 * static_score, 6)
+    debug_decomp = decomp.get("debug_decomp")
     return {
         "entry_id": entry.id,
         "binary_path": rel(entry.binary_path),
@@ -2868,13 +3196,17 @@ def row_for_function(
         "decomp_failure_detail": decomp.get("failure_detail"),
         "engine_used": decomp.get("engine_used"),
         "debug_decomp_bundle_path": decomp.get("debug_decomp_bundle_path"),
-        "debug_decomp": decomp.get("debug_decomp"),
+        "debug_decomp": debug_decomp,
         "decomp_cache_status": decomp.get("decomp_cache_status", "not_requested"),
+        "decomp_wall_sec": decomp.get("wall_sec"),
         "static_semantic_score": static_score,
         "static_semantic_score_percent": percent(static_score),
+        "static_similarity_components": static_components,
         "behavior": behavior,
         "semantic_score": semantic_score,
         "semantic_score_percent": percent(semantic_score),
+        "zero_credit_reason": zero_credit_reason(mapping_status, decomp, behavior, static_score, semantic_score),
+        "stage_first_failure": stage_first_failure(debug_decomp),
     }
 
 
@@ -3211,6 +3543,10 @@ int max(int a, int b) { if (a > b) return a; return b; }
         assert summary["function_mapping_rate"] == 0.5
         assert summary["decomp_success_rate"] == 0.5
         assert summary["weighted_semantic_similarity"] == 0.5
+        assert summary["effective_coverage"]["mapped_rows"] == 1
+        assert summary["zero_credit_breakdown"]["unmapped"] == 1
+        assert "control_flow" in summary["static_similarity_component_averages"]
+        assert "decompile_avg_sec" in summary["harness_cost_metrics"]
         void_func = SourceFunction(
             name="touch",
             signature="void touch(unsigned int seed)",
