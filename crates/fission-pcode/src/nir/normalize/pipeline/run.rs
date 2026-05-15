@@ -16,10 +16,11 @@ use super::super::cleanup::{
     collapse_redundant_conditional_returns, collapse_trivial_assign_returns,
     collapse_trivial_pointer_alias_bindings, elide_unused_popcount_assigns,
     eliminate_dead_local_clobber_assigns, eliminate_dead_temp_assigns,
-    fuse_single_predecessor_boundaries, inline_single_use_temps, promote_guarded_jump_target_tail,
-    prune_unused_dead_local_bindings, prune_unused_temp_bindings,
-    remove_unreferenced_leading_labels, simplify_empty_and_constant_ifs,
-    simplify_empty_and_constant_ifs_recursive, simplify_fallthrough_edges,
+    fuse_single_predecessor_boundaries, inline_loop_condition_trailing_temps,
+    inline_single_use_temps, promote_guarded_jump_target_tail, prune_unused_dead_local_bindings,
+    prune_unused_temp_bindings, remove_unreferenced_leading_labels,
+    simplify_empty_and_constant_ifs, simplify_empty_and_constant_ifs_recursive,
+    simplify_fallthrough_edges,
 };
 use super::super::global_opt::{
     apply_cse_pass, apply_dead_store_elimination, apply_gvn_join_hoist_pass, apply_licm_pass,
@@ -730,6 +731,24 @@ pub(crate) fn normalize_hir_function(func: &mut HirFunction) {
         apply_for_loop_folding(&mut func.body);
         prune_unused_temp_bindings(func);
         prune_unused_dead_local_bindings(func);
+    }
+    if run_pass_logged(func, "loop_condition_trailing_temp_inline", perf, |f| {
+        let preserved_temps = preserved_materialization_names(&f.locals);
+        inline_loop_condition_trailing_temps(f, &preserved_temps)
+    }) {
+        run_pass_logged(
+            func,
+            "ptr_arith_recovery_after_loop_condition_temps",
+            perf,
+            apply_ptr_arith_recovery_pass,
+        );
+        run_cleanup_block(func, "cleanup_loop_condition_temps", perf, |f| {
+            cleanup_func_stmt_list(f);
+
+            prune_unused_temp_bindings(f);
+
+            prune_unused_dead_local_bindings(f);
+        });
     }
     // Loop IV recovery (SCEV-lite): upgrade While → For for linear induction
     // variables.  Runs after label inlining so the loop body is maximally

@@ -222,6 +222,122 @@ fn recover_const_offset_as_typed_pointer_add(
     })
 }
 
+fn condition_pointer_operand(
+    expr: &HirExpr,
+    binding_types: &HashMap<String, NirType>,
+) -> Option<HirExpr> {
+    match expr {
+        HirExpr::Cast { ty, expr } if matches!(ty, NirType::Int { .. }) => {
+            typed_pointer_base(expr, binding_types).map(|(base, _, _)| base)
+        }
+        _ => typed_pointer_base(expr, binding_types).map(|(base, _, _)| base),
+    }
+}
+
+fn recover_pointer_difference_condition(
+    expr: &HirExpr,
+    binding_types: &HashMap<String, NirType>,
+) -> Option<HirExpr> {
+    let HirExpr::Binary {
+        op: HirBinaryOp::Sub,
+        lhs,
+        rhs,
+        ..
+    } = expr
+    else {
+        return None;
+    };
+    let lhs = condition_pointer_operand(lhs, binding_types)?;
+    let rhs = condition_pointer_operand(rhs, binding_types)?;
+    Some(HirExpr::Binary {
+        op: HirBinaryOp::Ne,
+        lhs: Box::new(lhs),
+        rhs: Box::new(rhs),
+        ty: NirType::Bool,
+    })
+}
+
+fn recover_pointer_difference_zero_compare(
+    expr: &HirExpr,
+    binding_types: &HashMap<String, NirType>,
+) -> Option<HirExpr> {
+    let HirExpr::Binary {
+        op: op @ (HirBinaryOp::Eq | HirBinaryOp::Ne),
+        lhs,
+        rhs,
+        ..
+    } = expr
+    else {
+        return None;
+    };
+    if matches!(rhs.as_ref(), HirExpr::Const(0, _)) {
+        let HirExpr::Binary {
+            op: HirBinaryOp::Sub,
+            lhs: diff_lhs,
+            rhs: diff_rhs,
+            ..
+        } = lhs.as_ref()
+        else {
+            return None;
+        };
+        let diff_lhs = condition_pointer_operand(diff_lhs, binding_types)?;
+        let diff_rhs = condition_pointer_operand(diff_rhs, binding_types)?;
+        return Some(HirExpr::Binary {
+            op: *op,
+            lhs: Box::new(diff_lhs),
+            rhs: Box::new(diff_rhs),
+            ty: NirType::Bool,
+        });
+    }
+    if matches!(lhs.as_ref(), HirExpr::Const(0, _)) {
+        let HirExpr::Binary {
+            op: HirBinaryOp::Sub,
+            lhs: diff_lhs,
+            rhs: diff_rhs,
+            ..
+        } = rhs.as_ref()
+        else {
+            return None;
+        };
+        let diff_lhs = condition_pointer_operand(diff_lhs, binding_types)?;
+        let diff_rhs = condition_pointer_operand(diff_rhs, binding_types)?;
+        return Some(HirExpr::Binary {
+            op: *op,
+            lhs: Box::new(diff_lhs),
+            rhs: Box::new(diff_rhs),
+            ty: NirType::Bool,
+        });
+    }
+    None
+}
+
+fn recover_negated_pointer_difference_condition(
+    expr: &HirExpr,
+    binding_types: &HashMap<String, NirType>,
+) -> Option<HirExpr> {
+    let HirExpr::Unary {
+        op: HirUnaryOp::Not,
+        expr,
+        ..
+    } = expr
+    else {
+        return None;
+    };
+    recover_pointer_difference_zero_compare(expr, binding_types).map(negate_expr)
+}
+
+fn recover_condition_expr(expr: &mut HirExpr, binding_types: &HashMap<String, NirType>) -> bool {
+    let mut changed = recover_in_expr(expr, binding_types);
+    if let Some(new_expr) = recover_pointer_difference_condition(expr, binding_types)
+        .or_else(|| recover_pointer_difference_zero_compare(expr, binding_types))
+        .or_else(|| recover_negated_pointer_difference_condition(expr, binding_types))
+    {
+        *expr = new_expr;
+        changed = true;
+    }
+    changed
+}
+
 /// Attempt to convert a pointer-arithmetic expression to a PtrOffset or Index
 /// node.  Returns `Some(new_expr)` on success; `None` means leave unchanged.
 fn try_recover_ptr_arith(
@@ -576,17 +692,17 @@ fn recover_in_stmt(stmt: &mut HirStmt, binding_types: &HashMap<String, NirType>)
             then_body,
             else_body,
         } => {
-            changed |= recover_in_expr(cond, binding_types);
+            changed |= recover_condition_expr(cond, binding_types);
             changed |= recover_in_stmts(then_body, binding_types);
             changed |= recover_in_stmts(else_body, binding_types);
         }
         HirStmt::While { cond, body } => {
-            changed |= recover_in_expr(cond, binding_types);
+            changed |= recover_condition_expr(cond, binding_types);
             changed |= recover_in_stmts(body, binding_types);
         }
         HirStmt::DoWhile { body, cond } => {
             changed |= recover_in_stmts(body, binding_types);
-            changed |= recover_in_expr(cond, binding_types);
+            changed |= recover_condition_expr(cond, binding_types);
         }
         HirStmt::For {
             init,
@@ -598,7 +714,7 @@ fn recover_in_stmt(stmt: &mut HirStmt, binding_types: &HashMap<String, NirType>)
                 changed |= recover_in_stmt(i, binding_types);
             }
             if let Some(c) = cond {
-                changed |= recover_in_expr(c, binding_types);
+                changed |= recover_condition_expr(c, binding_types);
             }
             if let Some(u) = update {
                 changed |= recover_in_stmt(u, binding_types);
