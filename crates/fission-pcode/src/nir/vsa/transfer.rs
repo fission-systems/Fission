@@ -208,7 +208,7 @@ fn eval_binary(op: HirBinaryOp, a: CircleRange, b: CircleRange, bits: u32) -> Ci
             }
         }
         // Comparisons produce 0 or 1.
-        Eq | Ne | Lt | Le | SLt | SLe => {
+        Eq | Ne | Lt | Le | Gt | Ge | SLt | SLe | SGt | SGe => {
             if let (Some(av), Some(bv)) = (a.singleton_value(), b.singleton_value()) {
                 CircleRange::singleton(eval_cmp(op, av, bv, bits), 1)
             } else {
@@ -225,8 +225,12 @@ fn eval_cmp(op: HirBinaryOp, a: u64, b: u64, bits: u32) -> u64 {
         Ne => a != b,
         Lt => a < b,
         Le => a <= b,
+        Gt => a > b,
+        Ge => a >= b,
         SLt => sign_extend(a, bits) < sign_extend(b, bits),
         SLe => sign_extend(a, bits) <= sign_extend(b, bits),
+        SGt => sign_extend(a, bits) > sign_extend(b, bits),
+        SGe => sign_extend(a, bits) >= sign_extend(b, bits),
         _ => return 0,
     };
     if result { 1 } else { 0 }

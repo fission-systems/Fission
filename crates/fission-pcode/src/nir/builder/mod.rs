@@ -527,7 +527,7 @@ impl<'a> PreviewBuilder<'a> {
             return binding;
         }
 
-        let ty = type_from_size(output.size, false);
+        let ty = pcode_output_type_from_size(op.opcode, output.size);
         let name = next_temp_name(&ty, &mut self.temp_next_id);
         let binding = NirBinding {
             name: name.clone(),

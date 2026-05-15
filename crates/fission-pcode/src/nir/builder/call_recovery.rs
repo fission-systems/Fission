@@ -129,6 +129,9 @@ impl<'a> PreviewBuilder<'a> {
         call_idx: usize,
     ) -> Result<Vec<HirExpr>, MlilPreviewError> {
         let abi = self.abi_state();
+        if !self.options.is_64bit && self.x86_32_stack_call_args_enabled() {
+            return self.recover_x86_32_stack_args_from_block(block, call_idx);
+        }
         if !self.options.is_64bit {
             return Ok(Vec::new());
         }
@@ -185,6 +188,131 @@ impl<'a> PreviewBuilder<'a> {
         Ok(out)
     }
 
+    fn x86_32_stack_call_args_enabled(&self) -> bool {
+        self.options.pointer_size == 4
+            && matches!(
+                self.options.calling_convention,
+                CallingConvention::WindowsX64 | CallingConvention::SystemVAmd64
+            )
+    }
+
+    fn recover_x86_32_stack_args_from_block(
+        &mut self,
+        block: &crate::pcode::PcodeBasicBlock,
+        call_idx: usize,
+    ) -> Result<Vec<HirExpr>, MlilPreviewError> {
+        const MAX_STACK_ARGS: usize = 32;
+
+        let call_address = block.ops[call_idx].address;
+        let mut out = Vec::new();
+        let mut current_push_address = None;
+        for prev_idx in (0..call_idx).rev() {
+            if out.len() >= MAX_STACK_ARGS {
+                break;
+            }
+            let prev = &block.ops[prev_idx];
+            if prev.address == call_address {
+                continue;
+            }
+            if prev.opcode.is_control_flow() {
+                if prev.opcode == PcodeOpcode::CallOther
+                    && prev.output.is_none()
+                    && prev.address == block.ops[call_idx].address
+                {
+                    continue;
+                }
+                if self.call_is_terminal_branchind_artifact(block, prev_idx) {
+                    continue;
+                }
+                break;
+            }
+            if self.x86_32_stack_push_update(prev) {
+                continue;
+            }
+            if current_push_address.is_some_and(|address| address == prev.address) {
+                continue;
+            }
+            if !self.x86_32_stack_push_store(prev) {
+                if !out.is_empty() {
+                    break;
+                }
+                continue;
+            }
+            let site = LoweringSite {
+                block_idx: block.index as usize,
+                op_idx: prev_idx,
+            };
+            let value = self.with_lowering_site(site, |this| {
+                this.lower_varnode(prev.inputs.last().expect("store rhs"), &mut HashSet::new())
+            })?;
+            out.push(self.normalize_recovered_call_arg(value));
+            current_push_address = Some(prev.address);
+        }
+
+        self.debug_call_recovery(&format!("x86_32_stack_args={}", out.len()));
+        Ok(out)
+    }
+
+    fn x86_32_stack_push_update(&self, op: &PcodeOp) -> bool {
+        op.opcode == PcodeOpcode::IntSub
+            && op.inputs.len() >= 2
+            && op
+                .output
+                .as_ref()
+                .is_some_and(|output| self.is_x86_32_esp(output))
+            && self.is_x86_32_esp(&op.inputs[0])
+            && const_offset(&op.inputs[1]) == Some(i64::from(self.options.pointer_size))
+    }
+
+    fn x86_32_stack_push_store(&self, op: &PcodeOp) -> bool {
+        if op.opcode != PcodeOpcode::Store || op.inputs.len() < 3 {
+            return false;
+        }
+        let is_stack_ptr = self.is_x86_32_esp(&op.inputs[1])
+            || self
+                .resolve_stack_address_from_memory_op(op)
+                .is_some_and(|(base, offset)| base == StackBase::Rsp && offset < 0);
+        is_stack_ptr
+            && op
+                .inputs
+                .last()
+                .is_some_and(|value| value.size == self.options.pointer_size || value.size == 0)
+    }
+
+    pub(in crate::nir::builder) fn x86_32_store_is_recovered_call_arg(
+        &self,
+        block: &crate::pcode::PcodeBasicBlock,
+        op_idx: usize,
+    ) -> bool {
+        let Some(op) = block.ops.get(op_idx) else {
+            return false;
+        };
+        if !self.x86_32_stack_call_args_enabled() || !self.x86_32_stack_push_store(op) {
+            return false;
+        }
+        for candidate in block.ops.iter().skip(op_idx + 1) {
+            if candidate.address == op.address && self.x86_32_stack_push_update(candidate) {
+                continue;
+            }
+            if self.x86_32_stack_push_update(candidate) || self.x86_32_stack_push_store(candidate) {
+                continue;
+            }
+            return matches!(
+                candidate.opcode,
+                PcodeOpcode::Call | PcodeOpcode::CallInd | PcodeOpcode::CallOther
+            );
+        }
+        false
+    }
+
+    fn is_x86_32_esp(&self, vn: &Varnode) -> bool {
+        self.options.pointer_size == 4
+            && !self.options.is_64bit
+            && is_register_space_id(vn.space_id)
+            && vn.offset == 0x10
+            && vn.size == 4
+    }
+
     pub(in crate::nir::builder) fn recover_call_args_from_block(
         &mut self,
         block: &crate::pcode::PcodeBasicBlock,
@@ -208,6 +336,7 @@ impl<'a> PreviewBuilder<'a> {
         prefer_source_values: bool,
     ) -> Result<Option<Vec<HirExpr>>, MlilPreviewError> {
         if !self.options.is_64bit
+            && !self.x86_32_stack_call_args_enabled()
             && !matches!(
                 self.options.calling_convention,
                 CallingConvention::Arm32
@@ -347,7 +476,12 @@ impl<'a> PreviewBuilder<'a> {
         }
 
         let contiguous_reg_count = recovered.iter().take_while(|expr| expr.is_some()).count();
+        let stack_args = self.recover_call_stack_args_from_block(block, call_idx)?;
         if contiguous_reg_count == 0 {
+            if !stack_args.is_empty() {
+                self.debug_call_recovery(&format!("reg_args=0 total_args={}", stack_args.len()));
+                return Ok(Some(stack_args));
+            }
             self.debug_call_recovery("no_contiguous_reg_args");
             return Ok(None);
         }
@@ -357,7 +491,6 @@ impl<'a> PreviewBuilder<'a> {
             .take(contiguous_reg_count)
             .map(|expr| expr.expect("contiguous recovered reg arg"))
             .collect::<Vec<_>>();
-        let stack_args = self.recover_call_stack_args_from_block(block, call_idx)?;
         args.extend(stack_args);
         self.debug_call_recovery(&format!(
             "reg_args={} total_args={}",

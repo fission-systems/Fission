@@ -12,13 +12,15 @@ use super::super::arith::{
 };
 use super::super::cleanup::single_pred_label_inline;
 use super::super::cleanup::{
-    cast_elision_pass, cleanup_redundant_boundary_labels, collapse_redundant_conditional_returns,
-    collapse_trivial_assign_returns, elide_unused_popcount_assigns,
+    canonicalize_minmax_conditional_returns, cast_elision_pass, cleanup_redundant_boundary_labels,
+    collapse_redundant_conditional_returns, collapse_trivial_assign_returns,
+    collapse_trivial_pointer_alias_bindings, elide_unused_popcount_assigns,
     eliminate_dead_local_clobber_assigns, eliminate_dead_temp_assigns,
-    fuse_single_predecessor_boundaries, inline_single_use_temps, promote_guarded_jump_target_tail,
-    prune_unused_dead_local_bindings, prune_unused_temp_bindings,
-    remove_unreferenced_leading_labels, simplify_empty_and_constant_ifs,
-    simplify_empty_and_constant_ifs_recursive, simplify_fallthrough_edges,
+    fuse_single_predecessor_boundaries, inline_loop_condition_trailing_temps,
+    inline_single_use_temps, promote_guarded_jump_target_tail, prune_unused_dead_local_bindings,
+    prune_unused_temp_bindings, remove_unreferenced_leading_labels,
+    simplify_empty_and_constant_ifs, simplify_empty_and_constant_ifs_recursive,
+    simplify_fallthrough_edges,
 };
 use super::super::global_opt::{
     apply_cse_pass, apply_dead_store_elimination, apply_gvn_join_hoist_pass, apply_licm_pass,
@@ -143,6 +145,89 @@ fn cleanup_func_stmt_list(func: &mut HirFunction) {
         },
         &preserved_temps,
     );
+}
+
+fn contains_call_expr(expr: &HirExpr) -> bool {
+    match expr {
+        HirExpr::Call { .. } => true,
+        HirExpr::Cast { expr, .. }
+        | HirExpr::Unary { expr, .. }
+        | HirExpr::Load { ptr: expr, .. }
+        | HirExpr::PtrOffset { base: expr, .. }
+        | HirExpr::AggregateCopy { src: expr, .. } => contains_call_expr(expr),
+        HirExpr::Binary { lhs, rhs, .. } => contains_call_expr(lhs) || contains_call_expr(rhs),
+        HirExpr::Index { base, index, .. } => contains_call_expr(base) || contains_call_expr(index),
+        HirExpr::Select {
+            cond,
+            then_expr,
+            else_expr,
+            ..
+        } => {
+            contains_call_expr(cond)
+                || contains_call_expr(then_expr)
+                || contains_call_expr(else_expr)
+        }
+        HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) | HirExpr::Const(_, _) => false,
+    }
+}
+
+fn contains_call_lvalue(lhs: &HirLValue) -> bool {
+    match lhs {
+        HirLValue::Var(_) => false,
+        HirLValue::Deref { ptr, .. } => contains_call_expr(ptr),
+        HirLValue::Index { base, index, .. } => {
+            contains_call_expr(base) || contains_call_expr(index)
+        }
+    }
+}
+
+fn contains_call_stmt(stmt: &HirStmt) -> bool {
+    match stmt {
+        HirStmt::Assign { lhs, rhs } => contains_call_lvalue(lhs) || contains_call_expr(rhs),
+        HirStmt::VaStart { va_list, .. } | HirStmt::Expr(va_list) => contains_call_expr(va_list),
+        HirStmt::Block(stmts)
+        | HirStmt::While { body: stmts, .. }
+        | HirStmt::DoWhile { body: stmts, .. } => contains_call_stmts(stmts),
+        HirStmt::If {
+            cond,
+            then_body,
+            else_body,
+        } => {
+            contains_call_expr(cond)
+                || contains_call_stmts(then_body)
+                || contains_call_stmts(else_body)
+        }
+        HirStmt::For {
+            init,
+            cond,
+            update,
+            body,
+        } => {
+            init.as_deref().is_some_and(contains_call_stmt)
+                || cond.as_ref().is_some_and(contains_call_expr)
+                || update.as_deref().is_some_and(contains_call_stmt)
+                || contains_call_stmts(body)
+        }
+        HirStmt::Switch {
+            expr,
+            cases,
+            default,
+        } => {
+            contains_call_expr(expr)
+                || cases.iter().any(|case| contains_call_stmts(&case.body))
+                || contains_call_stmts(default)
+        }
+        HirStmt::Return(Some(expr)) => contains_call_expr(expr),
+        HirStmt::Return(None)
+        | HirStmt::Label(_)
+        | HirStmt::Goto(_)
+        | HirStmt::Break
+        | HirStmt::Continue => false,
+    }
+}
+
+fn contains_call_stmts(stmts: &[HirStmt]) -> bool {
+    stmts.iter().any(contains_call_stmt)
 }
 
 pub(crate) fn normalize_hir_function(func: &mut HirFunction) {
@@ -410,6 +495,15 @@ pub(crate) fn normalize_hir_function(func: &mut HirFunction) {
     // declared type (assignment-context cast: `x = (T)y` where x.ty == T).
     // Runs after type inference so that NirBinding.ty is maximally populated.
     if run_pass_logged(func, "cast_elision", perf, cast_elision_pass) {
+        if !contains_call_stmts(&func.body) {
+            apply_type_signature_fixed_point(func, diag, perf);
+            run_pass_logged(
+                func,
+                "cast_elision_after_type_refine",
+                perf,
+                cast_elision_pass,
+            );
+        }
         // A light cleanup pass to simplify any newly-exposed dead code.
         run_pass_logged(
             func,
@@ -637,6 +731,24 @@ pub(crate) fn normalize_hir_function(func: &mut HirFunction) {
         apply_for_loop_folding(&mut func.body);
         prune_unused_temp_bindings(func);
         prune_unused_dead_local_bindings(func);
+    }
+    if run_pass_logged(func, "loop_condition_trailing_temp_inline", perf, |f| {
+        let preserved_temps = preserved_materialization_names(&f.locals);
+        inline_loop_condition_trailing_temps(f, &preserved_temps)
+    }) {
+        run_pass_logged(
+            func,
+            "ptr_arith_recovery_after_loop_condition_temps",
+            perf,
+            apply_ptr_arith_recovery_pass,
+        );
+        run_cleanup_block(func, "cleanup_loop_condition_temps", perf, |f| {
+            cleanup_func_stmt_list(f);
+
+            prune_unused_temp_bindings(f);
+
+            prune_unused_dead_local_bindings(f);
+        });
     }
     // Loop IV recovery (SCEV-lite): upgrade While → For for linear induction
     // variables.  Runs after label inlining so the loop body is maximally
@@ -1139,6 +1251,14 @@ fn run_cleanup_family_passes(
             normalize_binding_initializers(&mut f.locals);
             before != collect_initializer_fingerprints(&f.locals)
         });
+        if within_body_budget {
+            changed |= run_pass_logged(
+                func,
+                &format!("cleanup_pointer_alias_binding_{stage}"),
+                perf,
+                collapse_trivial_pointer_alias_bindings,
+            );
+        }
     } else {
         wave_stats::add_cleanup_budget_skips(1);
     }
@@ -1756,6 +1876,10 @@ fn cleanup_stmt_list_with_options_and_preserved(
         if simplify_empty_and_constant_ifs(stmts) {
             changed = true;
             last_changed_pass = Some("simplify_empty_and_constant_ifs");
+        }
+        if canonicalize_minmax_conditional_returns(stmts) {
+            changed = true;
+            last_changed_pass = Some("canonicalize_minmax_conditional_returns");
         }
         if collapse_redundant_conditional_returns(stmts) {
             changed = true;

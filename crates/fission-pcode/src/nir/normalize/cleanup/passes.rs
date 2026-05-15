@@ -1,3 +1,4 @@
+use super::super::analysis::defuse::DefUseMap;
 use super::super::analysis::preservation::{
     should_block_trivial_return_collapse, should_keep_unused_temp_binding,
     should_skip_inline_for_preserved_temp,
@@ -138,6 +139,158 @@ pub(crate) fn eliminate_dead_temp_assigns(
 
     if changed {
         retain_unmarked_stmts(stmts, &to_remove);
+    }
+    changed
+}
+
+pub(crate) fn collapse_trivial_pointer_alias_bindings(func: &mut HirFunction) -> bool {
+    let mut aliases = HashMap::<String, HirExpr>::new();
+    for binding in &func.locals {
+        if !matches!(binding.ty, NirType::Ptr(_)) {
+            continue;
+        }
+        let Some(initializer) = binding.initializer.as_ref() else {
+            continue;
+        };
+        let Some(replacement) = pointer_alias_replacement(initializer) else {
+            continue;
+        };
+        if expr_mentions_var(&replacement, &binding.name)
+            || expr_has_side_effects(&replacement)
+            || var_is_assigned_in_stmts(&func.body, &binding.name)
+        {
+            continue;
+        }
+        let use_count = count_uses_in_stmt_list(&func.body, &binding.name)
+            + count_uses_in_bindings(&func.locals, &binding.name);
+        if use_count > 0 {
+            aliases.insert(binding.name.clone(), replacement);
+        }
+    }
+    if aliases.is_empty() {
+        return false;
+    }
+
+    for (name, replacement) in &aliases {
+        for stmt in &mut func.body {
+            replace_var_in_stmt(stmt, name, replacement);
+        }
+        for binding in &mut func.locals {
+            if binding.name != *name
+                && let Some(initializer) = &mut binding.initializer
+            {
+                replace_var_in_expr(initializer, name, replacement);
+            }
+        }
+    }
+
+    let before = func.locals.len();
+    func.locals
+        .retain(|binding| !aliases.contains_key(&binding.name));
+    before != func.locals.len()
+}
+
+pub(crate) fn inline_loop_condition_trailing_temps(
+    func: &mut HirFunction,
+    _preserved_temps: &HashSet<String>,
+) -> bool {
+    let mut changed = false;
+    for _ in 0..8 {
+        let use_count = DefUseMap::build(&func.body).use_count;
+        if !inline_loop_condition_trailing_temps_in_stmts(&mut func.body, &use_count) {
+            break;
+        }
+        changed = true;
+    }
+    changed
+}
+
+fn inline_loop_condition_trailing_temps_in_stmts(
+    stmts: &mut Vec<HirStmt>,
+    read_counts: &HashMap<String, usize>,
+) -> bool {
+    let mut changed = false;
+    for stmt in stmts {
+        match stmt {
+            HirStmt::DoWhile { body, cond } => {
+                changed |= inline_trailing_temps_into_condition(body, cond, read_counts);
+                changed |= inline_loop_condition_trailing_temps_in_stmts(body, read_counts);
+            }
+            HirStmt::While { body, .. } | HirStmt::Block(body) => {
+                changed |= inline_loop_condition_trailing_temps_in_stmts(body, read_counts);
+            }
+            HirStmt::For {
+                init, update, body, ..
+            } => {
+                if let Some(init) = init
+                    && let HirStmt::Block(body) = init.as_mut()
+                {
+                    changed |= inline_loop_condition_trailing_temps_in_stmts(body, read_counts);
+                }
+                if let Some(update) = update
+                    && let HirStmt::Block(body) = update.as_mut()
+                {
+                    changed |= inline_loop_condition_trailing_temps_in_stmts(body, read_counts);
+                }
+                changed |= inline_loop_condition_trailing_temps_in_stmts(body, read_counts);
+            }
+            HirStmt::If {
+                then_body,
+                else_body,
+                ..
+            } => {
+                changed |= inline_loop_condition_trailing_temps_in_stmts(then_body, read_counts);
+                changed |= inline_loop_condition_trailing_temps_in_stmts(else_body, read_counts);
+            }
+            HirStmt::Switch { cases, default, .. } => {
+                for case in cases {
+                    changed |=
+                        inline_loop_condition_trailing_temps_in_stmts(&mut case.body, read_counts);
+                }
+                changed |= inline_loop_condition_trailing_temps_in_stmts(default, read_counts);
+            }
+            HirStmt::Assign { .. }
+            | HirStmt::VaStart { .. }
+            | HirStmt::Expr(_)
+            | HirStmt::Label(_)
+            | HirStmt::Goto(_)
+            | HirStmt::Return(_)
+            | HirStmt::Break
+            | HirStmt::Continue => {}
+        }
+    }
+    changed
+}
+
+fn inline_trailing_temps_into_condition(
+    body: &mut Vec<HirStmt>,
+    cond: &mut HirExpr,
+    read_counts: &HashMap<String, usize>,
+) -> bool {
+    let mut changed = false;
+    loop {
+        let Some(HirStmt::Assign {
+            lhs: HirLValue::Var(name),
+            rhs,
+        }) = body.last()
+        else {
+            break;
+        };
+        if !is_trivial_temp_name(name)
+            || expr_has_side_effects(rhs)
+            || !expr_is_low_cost_inline_candidate(rhs)
+            || expr_mentions_var(rhs, name)
+        {
+            break;
+        }
+        let cond_uses = count_var_uses(cond, name);
+        if cond_uses == 0 || read_counts.get(name).copied().unwrap_or(0) != cond_uses {
+            break;
+        }
+        let replacement = rhs.clone();
+        replace_var_in_expr(cond, name, &replacement);
+        body.pop();
+        changed = true;
     }
     changed
 }
@@ -309,6 +462,66 @@ pub(crate) fn collapse_redundant_conditional_returns(stmts: &mut Vec<HirStmt>) -
     if changed {
         *stmts = rewritten;
     }
+    changed
+}
+
+pub(crate) fn canonicalize_minmax_conditional_returns(stmts: &mut Vec<HirStmt>) -> bool {
+    let mut changed = false;
+    let mut idx = 0usize;
+
+    while idx + 1 < stmts.len() {
+        let Some((cond, then_body, else_body)) = if_parts(&stmts[idx]) else {
+            idx += 1;
+            continue;
+        };
+        if !else_body.is_empty() {
+            idx += 1;
+            continue;
+        }
+        let Some(then_expr) = single_return_expr(then_body) else {
+            idx += 1;
+            continue;
+        };
+        let Some(next_expr) = return_expr(&stmts[idx + 1]) else {
+            idx += 1;
+            continue;
+        };
+        let Some((op, lhs, rhs, ty)) = binary_comparison_parts(cond) else {
+            idx += 1;
+            continue;
+        };
+        if expr_has_side_effects(lhs) || expr_has_side_effects(rhs) {
+            idx += 1;
+            continue;
+        }
+
+        let Some(new_op) = minmax_branch_swap_op(op) else {
+            idx += 1;
+            continue;
+        };
+        if then_expr != rhs.as_ref() || next_expr != lhs.as_ref() {
+            idx += 1;
+            continue;
+        }
+        let lhs_expr = (**lhs).clone();
+        let rhs_expr = (**rhs).clone();
+        let cond_ty = ty.clone();
+
+        stmts[idx] = HirStmt::If {
+            cond: HirExpr::Binary {
+                op: new_op,
+                lhs: Box::new(lhs_expr.clone()),
+                rhs: Box::new(rhs_expr.clone()),
+                ty: cond_ty,
+            },
+            then_body: vec![HirStmt::Return(Some(lhs_expr))],
+            else_body: Vec::new(),
+        };
+        stmts[idx + 1] = HirStmt::Return(Some(rhs_expr));
+        changed = true;
+        idx += 2;
+    }
+
     changed
 }
 
@@ -782,6 +995,84 @@ mod tests {
     }
 
     #[test]
+    fn inline_loop_condition_trailing_temps_substitutes_condition_chain() {
+        let mut func = HirFunction {
+            name: "test_loop_cond_inline".to_string(),
+            params: vec![],
+            locals: vec![],
+            return_type: NirType::Unknown,
+            surface_return_type_name: None,
+            body: vec![HirStmt::DoWhile {
+                body: vec![
+                    HirStmt::Assign {
+                        lhs: HirLValue::Var("sum".to_string()),
+                        rhs: HirExpr::Binary {
+                            op: HirBinaryOp::Add,
+                            lhs: Box::new(HirExpr::Var("sum".to_string())),
+                            rhs: Box::new(HirExpr::Const(1, int(32))),
+                            ty: int(32),
+                        },
+                    },
+                    HirStmt::Assign {
+                        lhs: HirLValue::Var("xVar38".to_string()),
+                        rhs: HirExpr::Binary {
+                            op: HirBinaryOp::Sub,
+                            lhs: Box::new(HirExpr::Var("ptr".to_string())),
+                            rhs: Box::new(HirExpr::Var("end".to_string())),
+                            ty: int(64),
+                        },
+                    },
+                    HirStmt::Assign {
+                        lhs: HirLValue::Var("xVar39".to_string()),
+                        rhs: HirExpr::Binary {
+                            op: HirBinaryOp::Eq,
+                            lhs: Box::new(HirExpr::Var("xVar38".to_string())),
+                            rhs: Box::new(HirExpr::Const(0, int(64))),
+                            ty: NirType::Bool,
+                        },
+                    },
+                ],
+                cond: HirExpr::Unary {
+                    op: HirUnaryOp::Not,
+                    expr: Box::new(HirExpr::Var("xVar39".to_string())),
+                    ty: NirType::Bool,
+                },
+            }],
+            ..Default::default()
+        };
+
+        assert!(inline_loop_condition_trailing_temps(
+            &mut func,
+            &HashSet::new(),
+        ));
+        let HirStmt::DoWhile { body, cond } = &func.body[0] else {
+            panic!("expected do-while");
+        };
+        assert_eq!(body.len(), 1);
+        assert!(matches!(
+            cond,
+            HirExpr::Unary {
+                op: HirUnaryOp::Not,
+                expr,
+                ..
+            } if matches!(
+                expr.as_ref(),
+                HirExpr::Binary {
+                    op: HirBinaryOp::Eq,
+                    lhs,
+                    ..
+                } if matches!(
+                    lhs.as_ref(),
+                    HirExpr::Binary {
+                        op: HirBinaryOp::Sub,
+                        ..
+                    }
+                )
+            )
+        ));
+    }
+
+    #[test]
     fn inline_single_use_temps_keeps_unknown_call_out_of_predicate() {
         let mut stmts = vec![
             HirStmt::Assign {
@@ -831,9 +1122,66 @@ fn as_return_stmt(stmt: &HirStmt) -> Option<&HirStmt> {
     matches!(stmt, HirStmt::Return(_)).then_some(stmt)
 }
 
+fn return_expr(stmt: &HirStmt) -> Option<&HirExpr> {
+    match stmt {
+        HirStmt::Return(Some(expr)) => Some(expr),
+        _ => None,
+    }
+}
+
 fn single_return_stmt(body: &[HirStmt]) -> Option<HirStmt> {
     match body {
         [HirStmt::Return(expr)] => Some(HirStmt::Return(expr.clone())),
+        _ => None,
+    }
+}
+
+fn single_return_expr(body: &[HirStmt]) -> Option<&HirExpr> {
+    match body {
+        [HirStmt::Return(Some(expr))] => Some(expr),
+        _ => None,
+    }
+}
+
+fn if_parts(stmt: &HirStmt) -> Option<(&HirExpr, &[HirStmt], &[HirStmt])> {
+    match stmt {
+        HirStmt::If {
+            cond,
+            then_body,
+            else_body,
+        } => Some((cond, then_body, else_body)),
+        _ => None,
+    }
+}
+
+fn binary_comparison_parts(
+    expr: &HirExpr,
+) -> Option<(HirBinaryOp, &Box<HirExpr>, &Box<HirExpr>, &NirType)> {
+    match expr {
+        HirExpr::Binary {
+            op:
+                op @ (HirBinaryOp::Lt
+                | HirBinaryOp::Le
+                | HirBinaryOp::Gt
+                | HirBinaryOp::Ge
+                | HirBinaryOp::SLt
+                | HirBinaryOp::SLe
+                | HirBinaryOp::SGt
+                | HirBinaryOp::SGe),
+            lhs,
+            rhs,
+            ty,
+        } => Some((*op, lhs, rhs, ty)),
+        _ => None,
+    }
+}
+
+fn minmax_branch_swap_op(op: HirBinaryOp) -> Option<HirBinaryOp> {
+    match op {
+        HirBinaryOp::Lt | HirBinaryOp::Le => Some(HirBinaryOp::Gt),
+        HirBinaryOp::Gt | HirBinaryOp::Ge => Some(HirBinaryOp::Lt),
+        HirBinaryOp::SLt | HirBinaryOp::SLe => Some(HirBinaryOp::SGt),
+        HirBinaryOp::SGt | HirBinaryOp::SGe => Some(HirBinaryOp::SLt),
         _ => None,
     }
 }
@@ -1521,6 +1869,69 @@ fn count_uses_in_stmt_list(stmts: &[HirStmt], name: &str) -> usize {
         .iter()
         .map(|stmt| count_var_uses_in_stmt(stmt, name))
         .sum()
+}
+
+fn count_uses_in_bindings(bindings: &[NirBinding], name: &str) -> usize {
+    bindings
+        .iter()
+        .filter(|binding| binding.name != name)
+        .filter_map(|binding| binding.initializer.as_ref())
+        .map(|expr| count_var_uses(expr, name))
+        .sum()
+}
+
+fn pointer_alias_replacement(expr: &HirExpr) -> Option<HirExpr> {
+    match expr {
+        HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) => Some(expr.clone()),
+        HirExpr::Cast {
+            ty: NirType::Ptr(_),
+            expr,
+        } => match expr.as_ref() {
+            HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) => Some((**expr).clone()),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+fn expr_mentions_var(expr: &HirExpr, name: &str) -> bool {
+    count_var_uses(expr, name) > 0
+}
+
+fn var_is_assigned_in_stmts(stmts: &[HirStmt], name: &str) -> bool {
+    stmts.iter().any(|stmt| var_is_assigned_in_stmt(stmt, name))
+}
+
+fn var_is_assigned_in_stmt(stmt: &HirStmt, name: &str) -> bool {
+    match stmt {
+        HirStmt::Assign {
+            lhs: HirLValue::Var(lhs_name),
+            ..
+        } => lhs_name == name,
+        HirStmt::Assign { .. }
+        | HirStmt::VaStart { .. }
+        | HirStmt::Expr(_)
+        | HirStmt::Return(_)
+        | HirStmt::Label(_)
+        | HirStmt::Goto(_)
+        | HirStmt::Break
+        | HirStmt::Continue => false,
+        HirStmt::Block(body)
+        | HirStmt::While { body, .. }
+        | HirStmt::DoWhile { body, .. }
+        | HirStmt::For { body, .. } => var_is_assigned_in_stmts(body, name),
+        HirStmt::If {
+            then_body,
+            else_body,
+            ..
+        } => var_is_assigned_in_stmts(then_body, name) || var_is_assigned_in_stmts(else_body, name),
+        HirStmt::Switch { cases, default, .. } => {
+            cases
+                .iter()
+                .any(|case| var_is_assigned_in_stmts(&case.body, name))
+                || var_is_assigned_in_stmts(default, name)
+        }
+    }
 }
 
 fn count_var_uses_in_lvalue(lhs: &HirLValue, name: &str) -> usize {

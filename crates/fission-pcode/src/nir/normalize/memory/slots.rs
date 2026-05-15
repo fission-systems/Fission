@@ -510,11 +510,17 @@ fn rewrite_memory_slot_lvalue(
             if let Some(pattern) = parse_memory_slot_pattern(ptr, ty)
                 && let Some(alias) = aliases.get(&pattern.key)
             {
-                let index = pattern.index.unwrap_or_else(zero_index_expr);
-                *lhs = HirLValue::Index {
-                    base: Box::new(HirExpr::Var(alias.alias.clone())),
-                    index: Box::new(index),
-                    elem_ty: alias.elem_ty.clone(),
+                *lhs = if let Some(index) = pattern.index {
+                    HirLValue::Index {
+                        base: Box::new(HirExpr::Var(alias.alias.clone())),
+                        index: Box::new(index),
+                        elem_ty: alias.elem_ty.clone(),
+                    }
+                } else {
+                    HirLValue::Deref {
+                        ptr: Box::new(HirExpr::Var(alias.alias.clone())),
+                        ty: alias.elem_ty.clone(),
+                    }
                 };
                 return true;
             }
@@ -539,11 +545,17 @@ fn rewrite_memory_slot_expr(
             if let Some(pattern) = parse_memory_slot_pattern(ptr, ty)
                 && let Some(alias) = aliases.get(&pattern.key)
             {
-                let index = pattern.index.unwrap_or_else(zero_index_expr);
-                *expr = HirExpr::Index {
-                    base: Box::new(HirExpr::Var(alias.alias.clone())),
-                    index: Box::new(index),
-                    elem_ty: ty.clone(),
+                *expr = if let Some(index) = pattern.index {
+                    HirExpr::Index {
+                        base: Box::new(HirExpr::Var(alias.alias.clone())),
+                        index: Box::new(index),
+                        elem_ty: ty.clone(),
+                    }
+                } else {
+                    HirExpr::Load {
+                        ptr: Box::new(HirExpr::Var(alias.alias.clone())),
+                        ty: ty.clone(),
+                    }
                 };
                 return true;
             }
@@ -820,14 +832,4 @@ fn slot_family_layout(key: &MemorySlotKey) -> (i64, i64) {
     let family_offset = key.offset - lane_bytes;
     let lane = lane_bytes / i64::from(key.access_size);
     (family_offset, lane)
-}
-
-fn zero_index_expr() -> HirExpr {
-    HirExpr::Const(
-        0,
-        NirType::Int {
-            bits: 64,
-            signed: false,
-        },
-    )
 }

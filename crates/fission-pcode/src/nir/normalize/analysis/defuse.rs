@@ -429,8 +429,12 @@ fn eval_binary(op: HirBinaryOp, a: i64, b: i64, ty: &NirType) -> Option<i64> {
         HirBinaryOp::Ne => i64::from(a != b),
         HirBinaryOp::Lt => i64::from((a as u64) < (b as u64)),
         HirBinaryOp::Le => i64::from((a as u64) <= (b as u64)),
+        HirBinaryOp::Gt => i64::from((a as u64) > (b as u64)),
+        HirBinaryOp::Ge => i64::from((a as u64) >= (b as u64)),
         HirBinaryOp::SLt => i64::from(a < b),
         HirBinaryOp::SLe => i64::from(a <= b),
+        HirBinaryOp::SGt => i64::from(a > b),
+        HirBinaryOp::SGe => i64::from(a >= b),
         HirBinaryOp::Div => {
             let bu = b as u64;
             if bu == 0 {
@@ -1254,8 +1258,12 @@ fn is_stabilization_candidate_expr(expr: &HirExpr) -> bool {
                 | HirBinaryOp::Ne
                 | HirBinaryOp::Lt
                 | HirBinaryOp::Le
+                | HirBinaryOp::Gt
+                | HirBinaryOp::Ge
                 | HirBinaryOp::SLt
                 | HirBinaryOp::SLe
+                | HirBinaryOp::SGt
+                | HirBinaryOp::SGe
                 | HirBinaryOp::Shl
                 | HirBinaryOp::Shr
                 | HirBinaryOp::Sar,

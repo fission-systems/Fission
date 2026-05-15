@@ -66,7 +66,7 @@ fn collect_constraints_stmt(
             collect_constraints_lvalue(lhs, out);
             collect_assignment_copy_constraints(lhs, rhs, known_binding_types, out);
             // Use-site on the rhs: look for Cast(T, Var(x)) → x: T.
-            collect_constraints_cast_source(rhs, out);
+            collect_constraints_cast_source(rhs, known_binding_types, out);
             // Recurse into rhs for nested uses.
             collect_constraints_expr(rhs, return_type, known_binding_types, out);
         }
@@ -257,7 +257,11 @@ fn collect_constraints_lvalue(lhs: &HirLValue, out: &mut HashMap<String, Vec<Use
 }
 
 /// Collect `Cast(T, Var(x))` → x: T constraints.
-fn collect_constraints_cast_source(expr: &HirExpr, out: &mut HashMap<String, Vec<UseConstraint>>) {
+fn collect_constraints_cast_source(
+    expr: &HirExpr,
+    known_binding_types: &HashMap<String, NirType>,
+    out: &mut HashMap<String, Vec<UseConstraint>>,
+) {
     if let HirExpr::Cast { ty, expr: inner } = expr {
         if let HirExpr::Var(name) = inner.as_ref() {
             // The variable is being cast; constrain it to the source type of the
@@ -271,6 +275,12 @@ fn collect_constraints_cast_source(expr: &HirExpr, out: &mut HashMap<String, Vec
                 }
                 _ => {}
             }
+        }
+        if matches!(ty, NirType::Int { .. })
+            && let HirExpr::Binary { op, lhs, rhs, .. } = inner.as_ref()
+            && matches!(op, HirBinaryOp::Add | HirBinaryOp::Sub | HirBinaryOp::Mul)
+        {
+            collect_arithmetic_result_constraints(lhs, rhs, ty, known_binding_types, out);
         }
     }
 }
@@ -298,11 +308,11 @@ fn collect_constraints_expr(
                 // Signed comparison → operands are signed integers.  The
                 // comparison expression itself is Bool, so operand width must
                 // come from an actual operand or an existing binding type.
-                HirBinaryOp::SLt | HirBinaryOp::SLe => {
+                HirBinaryOp::SLt | HirBinaryOp::SLe | HirBinaryOp::SGt | HirBinaryOp::SGe => {
                     collect_compare_constraints(lhs, rhs, ty, known_binding_types, true, out)
                 }
                 // Unsigned comparison → operands are unsigned integers.
-                HirBinaryOp::Lt | HirBinaryOp::Le => {
+                HirBinaryOp::Lt | HirBinaryOp::Le | HirBinaryOp::Gt | HirBinaryOp::Ge => {
                     collect_compare_constraints(lhs, rhs, ty, known_binding_types, false, out)
                 }
                 // Arithmetic right-shift: the left operand must be a signed integer.
@@ -317,6 +327,9 @@ fn collect_constraints_expr(
                             .push(UseConstraint::Signed { bits });
                     }
                 }
+                HirBinaryOp::Add | HirBinaryOp::Sub | HirBinaryOp::Mul => {
+                    collect_arithmetic_result_constraints(lhs, rhs, ty, known_binding_types, out);
+                }
                 _ => {}
             }
             collect_constraints_expr(lhs, return_type, known_binding_types, out);
@@ -326,6 +339,7 @@ fn collect_constraints_expr(
             collect_constraints_expr(inner, return_type, known_binding_types, out);
         }
         HirExpr::Cast { expr: inner, .. } => {
+            collect_constraints_cast_source(expr, known_binding_types, out);
             collect_constraints_expr(inner, return_type, known_binding_types, out);
         }
         HirExpr::Call { target, args, .. } => {
@@ -402,6 +416,42 @@ fn compare_constraint(bits: u32, signed: bool) -> UseConstraint {
     } else {
         UseConstraint::Unsigned { bits }
     }
+}
+
+fn collect_arithmetic_result_constraints(
+    lhs: &HirExpr,
+    rhs: &HirExpr,
+    result_ty: &NirType,
+    known_binding_types: &HashMap<String, NirType>,
+    out: &mut HashMap<String, Vec<UseConstraint>>,
+) {
+    let NirType::Int {
+        bits: result_bits,
+        signed,
+    } = result_ty
+    else {
+        return;
+    };
+    collect_arithmetic_operand_constraint(lhs, *result_bits, *signed, known_binding_types, out);
+    collect_arithmetic_operand_constraint(rhs, *result_bits, *signed, known_binding_types, out);
+}
+
+fn collect_arithmetic_operand_constraint(
+    expr: &HirExpr,
+    result_bits: u32,
+    signed: bool,
+    known_binding_types: &HashMap<String, NirType>,
+    out: &mut HashMap<String, Vec<UseConstraint>>,
+) {
+    let HirExpr::Var(name) = expr else {
+        return;
+    };
+    if expr_int_bits(expr, known_binding_types) != Some(result_bits) {
+        return;
+    }
+    out.entry(name.clone())
+        .or_default()
+        .push(compare_constraint(result_bits, signed));
 }
 
 fn expr_int_bits(expr: &HirExpr, known_binding_types: &HashMap<String, NirType>) -> Option<u32> {
@@ -1212,10 +1262,7 @@ mod tests {
         func.is_64bit = false;
 
         assert!(super::apply_use_driven_type_infer_pass(&mut func));
-        assert_eq!(
-            func.locals[0].ty,
-            NirType::Ptr(Box::new(NirType::Unknown))
-        );
+        assert_eq!(func.locals[0].ty, NirType::Ptr(Box::new(NirType::Unknown)));
     }
 
     #[test]
@@ -1273,6 +1320,77 @@ mod tests {
         assert_eq!(func.params[0].ty, signed_i32);
         assert_eq!(func.params[1].ty, signed_i32);
         assert_eq!(func.return_type, signed_i32);
+    }
+
+    #[test]
+    fn signed_neutral_arithmetic_result_promotes_operand_signedness() {
+        let u32_ty = NirType::Int {
+            bits: 32,
+            signed: false,
+        };
+        let i32_ty = NirType::Int {
+            bits: 32,
+            signed: true,
+        };
+        let body = vec![HirStmt::Return(Some(HirExpr::Binary {
+            op: HirBinaryOp::Add,
+            lhs: Box::new(HirExpr::Var("a".to_owned())),
+            rhs: Box::new(HirExpr::Var("b".to_owned())),
+            ty: i32_ty.clone(),
+        }))];
+        let mut func = HirFunction {
+            name: "add".to_owned(),
+            params: vec![
+                make_typed_binding("a", u32_ty.clone(), NirBindingOrigin::ParamIndex(0)),
+                make_typed_binding("b", u32_ty, NirBindingOrigin::ParamIndex(1)),
+            ],
+            locals: vec![],
+            return_type: i32_ty.clone(),
+            surface_return_type_name: None,
+            body,
+            ..Default::default()
+        };
+
+        assert!(super::apply_use_driven_type_infer_pass(&mut func));
+        assert_eq!(func.params[0].ty, i32_ty);
+        assert_eq!(func.params[1].ty, i32_ty);
+    }
+
+    #[test]
+    fn signed_casted_arithmetic_result_promotes_operand_signedness() {
+        let u32_ty = NirType::Int {
+            bits: 32,
+            signed: false,
+        };
+        let i32_ty = NirType::Int {
+            bits: 32,
+            signed: true,
+        };
+        let body = vec![HirStmt::Return(Some(HirExpr::Cast {
+            ty: i32_ty.clone(),
+            expr: Box::new(HirExpr::Binary {
+                op: HirBinaryOp::Add,
+                lhs: Box::new(HirExpr::Var("a".to_owned())),
+                rhs: Box::new(HirExpr::Var("b".to_owned())),
+                ty: u32_ty.clone(),
+            }),
+        }))];
+        let mut func = HirFunction {
+            name: "add".to_owned(),
+            params: vec![
+                make_typed_binding("a", u32_ty.clone(), NirBindingOrigin::ParamIndex(0)),
+                make_typed_binding("b", u32_ty, NirBindingOrigin::ParamIndex(1)),
+            ],
+            locals: vec![],
+            return_type: i32_ty.clone(),
+            surface_return_type_name: None,
+            body,
+            ..Default::default()
+        };
+
+        assert!(super::apply_use_driven_type_infer_pass(&mut func));
+        assert_eq!(func.params[0].ty, i32_ty);
+        assert_eq!(func.params[1].ty, i32_ty);
     }
 
     #[test]

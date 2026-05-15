@@ -1428,8 +1428,12 @@ pub enum HirBinaryOp {
     Ne,
     Lt,
     Le,
+    Gt,
+    Ge,
     SLt,
     SLe,
+    SGt,
+    SGe,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]

@@ -177,6 +177,69 @@ fn win64_pointer_swap_does_not_synthesize_stale_eax_return() {
     assert!(!code.contains("return uVar"), "{code}");
 }
 
+#[test]
+fn x86_32_stack_pushes_become_call_arguments() {
+    let mut options = preview_options_x86();
+    options.calling_convention = CallingConvention::WindowsX64;
+
+    let stack_a = uniq(0x1000, 4);
+    let stack_b = uniq(0x1004, 4);
+    let stack_ret = uniq(0x1008, 4);
+    let func = PcodeFunction {
+        blocks: vec![PcodeBasicBlock {
+            index: 0,
+            start_address: 0x401000,
+            successors: vec![],
+            ops: vec![
+                PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::Store,
+                    address: 0x401000,
+                    output: None,
+                    inputs: vec![cst(3, 8), stack_a, cst(34, 4)],
+                    asm_mnemonic: Some("mov dword ptr [ESP - 0x4], 0x22".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 1,
+                    opcode: PcodeOpcode::Store,
+                    address: 0x401002,
+                    output: None,
+                    inputs: vec![cst(3, 8), stack_b, cst(17, 4)],
+                    asm_mnemonic: Some("mov dword ptr [ESP - 0x8], 0x11".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 2,
+                    opcode: PcodeOpcode::Store,
+                    address: 0x401004,
+                    output: None,
+                    inputs: vec![cst(3, 8), stack_ret, cst(0x401009, 4)],
+                    asm_mnemonic: Some("mov dword ptr [ESP - 0xc], 0x401009".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 3,
+                    opcode: PcodeOpcode::Call,
+                    address: 0x401004,
+                    output: None,
+                    inputs: vec![cst(0x401100, 4)],
+                    asm_mnemonic: None,
+                },
+                PcodeOp {
+                    seq_num: 4,
+                    opcode: PcodeOpcode::Return,
+                    address: 0x401009,
+                    output: None,
+                    inputs: vec![cst(0, 4), reg(0x00, 4)],
+                    asm_mnemonic: None,
+                },
+            ],
+        }],
+    };
+
+    let code = render_mlil_preview(&func, "caller", 0x401000, &options).expect("preview render");
+    assert!(code.contains("sub_401100(17, 34);"), "{code}");
+    assert!(!code.contains("local_"), "{code}");
+}
+
 // ── System V AMD64 ─────────────────────────────────────────────────────────────
 
 #[test]
@@ -514,7 +577,7 @@ fn arm32_bx_lr_returns_primary_r0_not_link_target() {
 
     let code = render_mlil_preview(&func, "op_add", 0x100038, &options).expect("preview render");
     assert!(
-        code.contains("uint op_add(uint param_1, uint param_2)"),
+        code.contains("int op_add(int param_1, int param_2)"),
         "{code}"
     );
     assert!(code.contains("return param_2 + param_1;"), "{code}");
@@ -766,7 +829,7 @@ fn powerpc32_blr_returns_primary_r3_not_link_target() {
 
     let code = render_mlil_preview(&func, "op_sub", 0x1000, &options).expect("preview render");
     assert!(
-        code.contains("uint op_sub(uint param_1, uint param_2)"),
+        code.contains("int op_sub(int param_1, int param_2)"),
         "{code}"
     );
     assert!(code.contains("return param_2 - param_1;"), "{code}");
@@ -972,7 +1035,7 @@ fn arm32_r1_r0_pair_materializes_u64_return() {
 
     let code = render_mlil_preview(&func, "u64_pair", 0x100040, &options).expect("preview render");
     assert!(
-        code.contains("ulonglong u64_pair(uint param_1, uint param_2)"),
+        code.contains("ulonglong u64_pair(int param_1, int param_2)"),
         "{code}"
     );
     assert!(
@@ -1066,7 +1129,7 @@ fn arm32_address_in_r1_does_not_force_u64_return() {
     };
 
     let code = render_mlil_preview(&func, "math_like", 0x100040, &options).expect("preview render");
-    assert!(code.contains("uint math_like(uint param_1)"), "{code}");
+    assert!(code.contains("int math_like(int param_1)"), "{code}");
     assert!(code.contains("return param_1 + 1;"), "{code}");
     assert!(!code.contains("ulonglong math_like"), "{code}");
     assert!(
@@ -1767,7 +1830,7 @@ fn aarch64_return_join_with_exact_x0_store_preserves_predecessor_return() {
 
     let code =
         render_mlil_preview(&func, "store_and_return", 0x1060, &options).expect("preview render");
-    assert!(code.contains("ulonglong store_and_return"), "{code}");
+    assert!(code.contains("longlong store_and_return"), "{code}");
     assert!(code.contains("xVar0 = param_1 + 10;"), "{code}");
     assert!(code.contains("result_sink = xVar0;"), "{code}");
     assert!(code.contains("return xVar0;"), "{code}");
@@ -1956,7 +2019,7 @@ fn aarch64_branchind_tail_call_recovers_function_pointer_call() {
 
     let code = render_mlil_preview(&func, "apply_op", 0x100068, &options).expect("preview render");
     assert!(
-        code.contains("return ((uint (*)(uint, uint))param_1)(param_2, param_3);"),
+        code.contains("return ((ulonglong (*)(uint, uint))param_1)(param_2, param_3);"),
         "{code}"
     );
     assert!(!code.contains("__fission_branchind"), "{code}");
@@ -2363,7 +2426,10 @@ fn aarch64_instruction_local_conditional_merge_returns_both_values() {
     let code = render_mlil_preview(&func, "op_sub", 0x100054, &options).expect("preview render");
     assert!(!code.contains("__fission_branchind"), "{code}");
     assert!(!code.contains("var_39c00"), "{code}");
-    assert!(code.contains("return -(param_1 - param_2);"), "{code}");
+    assert!(
+        code.contains("return -(uint)(param_1 - param_2);"),
+        "{code}"
+    );
     assert!(code.contains("return param_1 - param_2;"), "{code}");
 }
 

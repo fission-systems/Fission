@@ -231,6 +231,7 @@ impl<'a> PreviewBuilder<'a> {
                             }
                             if this.is_callee_saved_push_store(op)
                                 || this.is_call_return_scaffold_store(block, op_idx, op)
+                                || this.x86_32_store_is_recovered_call_arg(block, op_idx)
                             {
                                 return Ok(None);
                             }

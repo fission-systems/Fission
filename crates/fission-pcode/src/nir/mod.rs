@@ -758,7 +758,9 @@ fn recover_global_symbol_accesses_in_stmts(
                 recover_global_symbol_accesses_in_stmts(then_body, globals, &mut then_aliases);
                 recover_global_symbol_accesses_in_stmts(else_body, globals, &mut else_aliases);
                 aliases.retain(|name, global| {
-                    then_aliases.get(name).is_some_and(|then_global| then_global == global)
+                    then_aliases
+                        .get(name)
+                        .is_some_and(|then_global| then_global == global)
                         && else_aliases
                             .get(name)
                             .is_some_and(|else_global| else_global == global)

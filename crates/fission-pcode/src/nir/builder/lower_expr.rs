@@ -30,6 +30,13 @@ impl<'a> PreviewBuilder<'a> {
         match vn.space_id {
             UNIQUE_SPACE_ID => unique_register_name(vn.offset, vn.size),
             space_id if is_register_space_id(space_id) => {
+                if !self.options.is_64bit && self.options.pointer_size == 4 && vn.size == 4 {
+                    match vn.offset {
+                        0x10 => return Some("esp"),
+                        0x14 => return Some("ebp"),
+                        _ => {}
+                    }
+                }
                 register_name_with_param(vn.offset, vn.size, self.options.calling_convention)
                     .map(|(name, _)| name)
                     .or_else(|| Some(register_name(vn.offset, vn.size)))
@@ -2521,16 +2528,7 @@ impl<'a> PreviewBuilder<'a> {
         ) {
             float_type_from_size(output.size)
         } else {
-            type_from_size(
-                output.size,
-                matches!(
-                    op.opcode,
-                    PcodeOpcode::IntSDiv
-                        | PcodeOpcode::IntSRem
-                        | PcodeOpcode::IntSLess
-                        | PcodeOpcode::IntSLessEqual
-                ),
-            )
+            pcode_output_type_from_size(op.opcode, output.size)
         };
         Ok(HirExpr::Binary {
             op: map_binary_op(op.opcode)?,
