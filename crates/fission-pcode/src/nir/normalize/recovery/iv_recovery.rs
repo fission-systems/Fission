@@ -43,6 +43,7 @@
 /// one incoming `Goto` (the one being replaced), so the label can also be
 /// removed afterwards.
 use super::super::*;
+use crate::nir::support::expr_type;
 use std::collections::{HashMap, HashSet};
 
 // ── Part B — Break/Continue recovery ─────────────────────────────────────────
@@ -606,39 +607,51 @@ fn labels_after(stmts: &[HirStmt], idx: usize) -> HashSet<String> {
     labels
 }
 
-fn guard_exits_when_count_non_positive(cond: &HirExpr, count: &HirExpr) -> bool {
+fn positive_count_loop_cmp(cond: &HirExpr, count: &HirExpr) -> Option<HirBinaryOp> {
     let HirExpr::Binary { op, lhs, rhs, .. } = cond else {
-        return false;
+        return None;
     };
     match op {
-        HirBinaryOp::Le | HirBinaryOp::SLe => {
-            vars_equivalent_after_casts(lhs, count) && is_zero(rhs)
-        }
-        HirBinaryOp::Ge | HirBinaryOp::SGe => {
-            is_zero(lhs) && vars_equivalent_after_casts(rhs, count)
-        }
-        _ => false,
+        HirBinaryOp::Le | HirBinaryOp::SLe => (vars_equivalent_after_casts(lhs, count)
+            && is_zero(rhs))
+        .then_some(if matches!(op, HirBinaryOp::SLe) {
+            HirBinaryOp::SLt
+        } else {
+            HirBinaryOp::Lt
+        }),
+        HirBinaryOp::Ge | HirBinaryOp::SGe => (is_zero(lhs)
+            && vars_equivalent_after_casts(rhs, count))
+        .then_some(if matches!(op, HirBinaryOp::SGe) {
+            HirBinaryOp::SLt
+        } else {
+            HirBinaryOp::Lt
+        }),
+        _ => None,
     }
 }
 
-fn has_positive_count_entry_guard(
+fn positive_count_entry_guard_cmp(
     stmts: &[HirStmt],
     loop_idx: usize,
     count: &HirExpr,
     after_labels: &HashSet<String>,
-) -> bool {
-    stmts[..loop_idx].iter().any(|stmt| {
+) -> Option<HirBinaryOp> {
+    stmts[..loop_idx].iter().find_map(|stmt| {
         let HirStmt::If {
             cond,
             then_body,
             else_body,
         } = stmt
         else {
-            return false;
+            return None;
         };
-        else_body.is_empty()
+        if else_body.is_empty()
             && single_goto_target(then_body).is_some_and(|label| after_labels.contains(label))
-            && guard_exits_when_count_non_positive(cond, count)
+        {
+            positive_count_loop_cmp(cond, count)
+        } else {
+            None
+        }
     })
 }
 
@@ -779,6 +792,279 @@ fn count_var_uses(expr: &HirExpr, name: &str) -> usize {
     }
 }
 
+fn collect_names_in_lvalue(lhs: &HirLValue, out: &mut HashSet<String>) {
+    match lhs {
+        HirLValue::Var(name) => {
+            out.insert(name.clone());
+        }
+        HirLValue::Deref { ptr, .. } => expr_vars(ptr, out),
+        HirLValue::Index { base, index, .. } => {
+            expr_vars(base, out);
+            expr_vars(index, out);
+        }
+    }
+}
+
+fn collect_names_in_stmt(stmt: &HirStmt, out: &mut HashSet<String>) {
+    match stmt {
+        HirStmt::Assign { lhs, rhs } => {
+            collect_names_in_lvalue(lhs, out);
+            expr_vars(rhs, out);
+        }
+        HirStmt::VaStart { va_list, .. } | HirStmt::Expr(va_list) => expr_vars(va_list, out),
+        HirStmt::Return(Some(expr)) => expr_vars(expr, out),
+        HirStmt::Block(body) | HirStmt::While { body, .. } => {
+            collect_names_in_stmts(body, out);
+        }
+        HirStmt::DoWhile { body, cond } => {
+            collect_names_in_stmts(body, out);
+            expr_vars(cond, out);
+        }
+        HirStmt::For {
+            init,
+            cond,
+            update,
+            body,
+        } => {
+            if let Some(init) = init {
+                collect_names_in_stmt(init, out);
+            }
+            if let Some(cond) = cond {
+                expr_vars(cond, out);
+            }
+            if let Some(update) = update {
+                collect_names_in_stmt(update, out);
+            }
+            collect_names_in_stmts(body, out);
+        }
+        HirStmt::If {
+            cond,
+            then_body,
+            else_body,
+        } => {
+            expr_vars(cond, out);
+            collect_names_in_stmts(then_body, out);
+            collect_names_in_stmts(else_body, out);
+        }
+        HirStmt::Switch {
+            expr,
+            cases,
+            default,
+        } => {
+            expr_vars(expr, out);
+            for case in cases {
+                collect_names_in_stmts(&case.body, out);
+            }
+            collect_names_in_stmts(default, out);
+        }
+        HirStmt::Return(None)
+        | HirStmt::Label(_)
+        | HirStmt::Goto(_)
+        | HirStmt::Break
+        | HirStmt::Continue => {}
+    }
+}
+
+fn collect_names_in_stmts(stmts: &[HirStmt], out: &mut HashSet<String>) {
+    for stmt in stmts {
+        collect_names_in_stmt(stmt, out);
+    }
+}
+
+fn fresh_index_name(locals: &[NirBinding], stmts: &[HirStmt]) -> String {
+    let mut used = HashSet::new();
+    for local in locals {
+        used.insert(local.name.clone());
+    }
+    collect_names_in_stmts(stmts, &mut used);
+    for id in 0.. {
+        let name = format!("iVar{id}");
+        if !used.contains(&name) {
+            return name;
+        }
+    }
+    unreachable!()
+}
+
+fn index_type_for_count(count_expr: &HirExpr) -> NirType {
+    match expr_type(count_expr) {
+        NirType::Int { bits, signed } if bits >= 32 => NirType::Int { bits, signed },
+        _ => NirType::Int {
+            bits: 64,
+            signed: true,
+        },
+    }
+}
+
+fn direct_cursor_var(expr: &HirExpr, cursor: &str) -> bool {
+    matches!(strip_casts(expr), HirExpr::Var(name) if name == cursor)
+}
+
+fn index_var_expr(index_name: &str) -> HirExpr {
+    HirExpr::Var(index_name.to_string())
+}
+
+fn cursor_index_expr(cursor: &str, index_name: &str, elem_ty: NirType) -> HirExpr {
+    HirExpr::Index {
+        base: Box::new(HirExpr::Var(cursor.to_string())),
+        index: Box::new(index_var_expr(index_name)),
+        elem_ty,
+    }
+}
+
+fn is_one(expr: &HirExpr) -> bool {
+    matches!(strip_casts(expr), HirExpr::Const(1, _))
+}
+
+fn is_cursor_increment_by_one(stmt: &HirStmt, cursor: &str) -> bool {
+    let HirStmt::Assign {
+        lhs: HirLValue::Var(lhs),
+        rhs,
+    } = stmt
+    else {
+        return false;
+    };
+    if lhs != cursor {
+        return false;
+    }
+    let HirExpr::Binary {
+        op: HirBinaryOp::Add,
+        lhs,
+        rhs,
+        ..
+    } = strip_casts(rhs)
+    else {
+        return false;
+    };
+    (direct_cursor_var(lhs, cursor) && is_one(rhs))
+        || (direct_cursor_var(rhs, cursor) && is_one(lhs))
+}
+
+fn rewrite_cursor_expr_to_index(expr: &mut HirExpr, cursor: &str, index_name: &str) -> bool {
+    match expr {
+        HirExpr::Var(name) => name != cursor,
+        HirExpr::AddressOfGlobal(_) | HirExpr::Const(_, _) => true,
+        HirExpr::Cast { expr, .. }
+        | HirExpr::Unary { expr, .. }
+        | HirExpr::AggregateCopy { src: expr, .. } => {
+            rewrite_cursor_expr_to_index(expr, cursor, index_name)
+        }
+        HirExpr::Binary { lhs, rhs, .. } => {
+            rewrite_cursor_expr_to_index(lhs, cursor, index_name)
+                && rewrite_cursor_expr_to_index(rhs, cursor, index_name)
+        }
+        HirExpr::Select {
+            cond,
+            then_expr,
+            else_expr,
+            ..
+        } => {
+            rewrite_cursor_expr_to_index(cond, cursor, index_name)
+                && rewrite_cursor_expr_to_index(then_expr, cursor, index_name)
+                && rewrite_cursor_expr_to_index(else_expr, cursor, index_name)
+        }
+        HirExpr::Call { args, .. } => args
+            .iter_mut()
+            .all(|arg| rewrite_cursor_expr_to_index(arg, cursor, index_name)),
+        HirExpr::Load { ptr, ty } if direct_cursor_var(ptr, cursor) => {
+            *expr = cursor_index_expr(cursor, index_name, ty.clone());
+            true
+        }
+        HirExpr::Load { ptr, .. } | HirExpr::PtrOffset { base: ptr, .. } => {
+            rewrite_cursor_expr_to_index(ptr, cursor, index_name)
+        }
+        HirExpr::Index { base, index, .. } => {
+            rewrite_cursor_expr_to_index(base, cursor, index_name)
+                && rewrite_cursor_expr_to_index(index, cursor, index_name)
+        }
+    }
+}
+
+fn rewrite_cursor_lvalue_to_index(lhs: &mut HirLValue, cursor: &str, index_name: &str) -> bool {
+    match lhs {
+        HirLValue::Var(name) => name != cursor,
+        HirLValue::Deref { ptr, ty } if direct_cursor_var(ptr, cursor) => {
+            *lhs = HirLValue::Index {
+                base: Box::new(HirExpr::Var(cursor.to_string())),
+                index: Box::new(index_var_expr(index_name)),
+                elem_ty: ty.clone(),
+            };
+            true
+        }
+        HirLValue::Deref { ptr, .. } => rewrite_cursor_expr_to_index(ptr, cursor, index_name),
+        HirLValue::Index { base, index, .. } => {
+            rewrite_cursor_expr_to_index(base, cursor, index_name)
+                && rewrite_cursor_expr_to_index(index, cursor, index_name)
+        }
+    }
+}
+
+fn rewrite_cursor_stmt_to_index(stmt: &mut HirStmt, cursor: &str, index_name: &str) -> bool {
+    match stmt {
+        HirStmt::Assign { lhs, rhs } => {
+            rewrite_cursor_lvalue_to_index(lhs, cursor, index_name)
+                && rewrite_cursor_expr_to_index(rhs, cursor, index_name)
+        }
+        HirStmt::VaStart { va_list, .. } | HirStmt::Expr(va_list) => {
+            rewrite_cursor_expr_to_index(va_list, cursor, index_name)
+        }
+        HirStmt::Return(Some(expr)) => rewrite_cursor_expr_to_index(expr, cursor, index_name),
+        HirStmt::Block(body) | HirStmt::While { body, .. } => {
+            rewrite_cursor_body_to_index(body, cursor, index_name)
+        }
+        HirStmt::DoWhile { body, cond } => {
+            rewrite_cursor_body_to_index(body, cursor, index_name)
+                && rewrite_cursor_expr_to_index(cond, cursor, index_name)
+        }
+        HirStmt::For {
+            init,
+            cond,
+            update,
+            body,
+        } => {
+            init.as_deref_mut()
+                .is_none_or(|stmt| rewrite_cursor_stmt_to_index(stmt, cursor, index_name))
+                && cond
+                    .as_mut()
+                    .is_none_or(|expr| rewrite_cursor_expr_to_index(expr, cursor, index_name))
+                && update
+                    .as_deref_mut()
+                    .is_none_or(|stmt| rewrite_cursor_stmt_to_index(stmt, cursor, index_name))
+                && rewrite_cursor_body_to_index(body, cursor, index_name)
+        }
+        HirStmt::If {
+            cond,
+            then_body,
+            else_body,
+        } => {
+            rewrite_cursor_expr_to_index(cond, cursor, index_name)
+                && rewrite_cursor_body_to_index(then_body, cursor, index_name)
+                && rewrite_cursor_body_to_index(else_body, cursor, index_name)
+        }
+        HirStmt::Switch {
+            expr,
+            cases,
+            default,
+        } => {
+            rewrite_cursor_expr_to_index(expr, cursor, index_name)
+                && cases
+                    .iter_mut()
+                    .all(|case| rewrite_cursor_body_to_index(&mut case.body, cursor, index_name))
+                && rewrite_cursor_body_to_index(default, cursor, index_name)
+        }
+        HirStmt::Return(None)
+        | HirStmt::Label(_)
+        | HirStmt::Goto(_)
+        | HirStmt::Break
+        | HirStmt::Continue => true,
+    }
+}
+
+fn rewrite_cursor_body_to_index(body: &mut [HirStmt], cursor: &str, index_name: &str) -> bool {
+    body.iter_mut()
+        .all(|stmt| rewrite_cursor_stmt_to_index(stmt, cursor, index_name))
+}
+
 /// Try to upgrade a `While` loop at `stmts[loop_idx]` to a `For` loop using
 /// SCEV-lite IV detection.  Returns `true` if a transformation was applied.
 fn try_scev_upgrade(stmts: &mut Vec<HirStmt>, loop_idx: usize) -> bool {
@@ -837,7 +1123,11 @@ fn try_scev_upgrade(stmts: &mut Vec<HirStmt>, loop_idx: usize) -> bool {
     false
 }
 
-fn try_guarded_dowhile_pointer_iv_upgrade(stmts: &mut [HirStmt], loop_idx: usize) -> bool {
+fn try_guarded_dowhile_pointer_iv_upgrade(
+    stmts: &mut [HirStmt],
+    locals: &mut Vec<NirBinding>,
+    loop_idx: usize,
+) -> bool {
     let (cond, body) = match &stmts[loop_idx] {
         HirStmt::DoWhile { cond, body } => (cond.clone(), body.clone()),
         _ => return false,
@@ -858,14 +1148,63 @@ fn try_guarded_dowhile_pointer_iv_upgrade(stmts: &mut [HirStmt], loop_idx: usize
         return false;
     };
     let after_labels = labels_after(stmts, loop_idx);
-    if !has_positive_count_entry_guard(stmts, loop_idx, &count_expr, &after_labels)
-        || cursor_used_after_loop(stmts, loop_idx, cursor)
-    {
+    let Some(count_cmp) =
+        positive_count_entry_guard_cmp(stmts, loop_idx, &count_expr, &after_labels)
+    else {
+        return false;
+    };
+    if cursor_used_after_loop(stmts, loop_idx, cursor) {
         return false;
     }
 
     let mut new_body = body;
     let update_stmt = new_body.remove(update_idx);
+    let cursor_body_uses = new_body
+        .iter()
+        .map(|stmt| count_var_uses_in_stmt(stmt, cursor))
+        .sum::<usize>();
+    let index_name = fresh_index_name(locals, stmts);
+    let mut indexed_body = new_body.clone();
+    if cursor_body_uses > 0
+        && rewrite_cursor_body_to_index(&mut indexed_body, cursor, &index_name)
+        && is_cursor_increment_by_one(&update_stmt, cursor)
+    {
+        let index_ty = index_type_for_count(&count_expr);
+        locals.push(NirBinding {
+            name: index_name.clone(),
+            ty: index_ty.clone(),
+            surface_type_name: None,
+            origin: Some(NirBindingOrigin::Temp),
+            initializer: None,
+        });
+        let init_stmt = HirStmt::Assign {
+            lhs: HirLValue::Var(index_name.clone()),
+            rhs: HirExpr::Const(0, index_ty.clone()),
+        };
+        let cond = HirExpr::Binary {
+            op: count_cmp,
+            lhs: Box::new(HirExpr::Var(index_name.clone())),
+            rhs: Box::new(count_expr),
+            ty: NirType::Bool,
+        };
+        let update_stmt = HirStmt::Assign {
+            lhs: HirLValue::Var(index_name.clone()),
+            rhs: HirExpr::Binary {
+                op: HirBinaryOp::Add,
+                lhs: Box::new(HirExpr::Var(index_name.clone())),
+                rhs: Box::new(HirExpr::Const(1, index_ty.clone())),
+                ty: index_ty,
+            },
+        };
+        stmts[loop_idx] = HirStmt::For {
+            init: Some(Box::new(init_stmt)),
+            cond: Some(cond),
+            update: Some(Box::new(update_stmt)),
+            body: indexed_body,
+        };
+        return true;
+    }
+
     stmts[loop_idx] = HirStmt::For {
         init: None,
         cond: Some(cond),
@@ -875,7 +1214,7 @@ fn try_guarded_dowhile_pointer_iv_upgrade(stmts: &mut [HirStmt], loop_idx: usize
     true
 }
 
-fn apply_scev_upgrade_in_stmts(stmts: &mut Vec<HirStmt>) -> bool {
+fn apply_scev_upgrade_in_stmts(stmts: &mut Vec<HirStmt>, locals: &mut Vec<NirBinding>) -> bool {
     let mut changed = false;
     let mut i = 0;
     while i < stmts.len() {
@@ -887,7 +1226,7 @@ fn apply_scev_upgrade_in_stmts(stmts: &mut Vec<HirStmt>) -> bool {
                 continue;
             }
         } else if matches!(&stmts[i], HirStmt::DoWhile { .. })
-            && try_guarded_dowhile_pointer_iv_upgrade(stmts, i)
+            && try_guarded_dowhile_pointer_iv_upgrade(stmts, locals, i)
         {
             changed = true;
             continue;
@@ -899,20 +1238,20 @@ fn apply_scev_upgrade_in_stmts(stmts: &mut Vec<HirStmt>) -> bool {
                 else_body,
                 ..
             } => {
-                changed |= apply_scev_upgrade_in_stmts(then_body);
-                changed |= apply_scev_upgrade_in_stmts(else_body);
+                changed |= apply_scev_upgrade_in_stmts(then_body, locals);
+                changed |= apply_scev_upgrade_in_stmts(else_body, locals);
             }
             HirStmt::Block(body)
             | HirStmt::While { body, .. }
             | HirStmt::DoWhile { body, .. }
             | HirStmt::For { body, .. } => {
-                changed |= apply_scev_upgrade_in_stmts(body);
+                changed |= apply_scev_upgrade_in_stmts(body, locals);
             }
             HirStmt::Switch { cases, default, .. } => {
                 for case in cases.iter_mut() {
-                    changed |= apply_scev_upgrade_in_stmts(&mut case.body);
+                    changed |= apply_scev_upgrade_in_stmts(&mut case.body, locals);
                 }
-                changed |= apply_scev_upgrade_in_stmts(default);
+                changed |= apply_scev_upgrade_in_stmts(default, locals);
             }
             _ => {}
         }
@@ -926,7 +1265,7 @@ fn apply_scev_upgrade_in_stmts(stmts: &mut Vec<HirStmt>) -> bool {
 /// Apply IV-to-For upgrade (SCEV-lite) across the entire function body.
 /// Returns `true` if any transformation was made.
 pub(crate) fn apply_iv_recovery_pass(func: &mut HirFunction) -> bool {
-    apply_scev_upgrade_in_stmts(&mut func.body)
+    apply_scev_upgrade_in_stmts(&mut func.body, &mut func.locals)
 }
 
 /// Apply break/continue recovery across the entire function body.
@@ -1030,10 +1369,40 @@ mod tests {
         else {
             panic!("expected guarded do-while to become for");
         };
-        assert!(init.is_none());
-        assert!(cond.is_some());
+        assert!(init.is_some());
+        assert!(matches!(
+            cond,
+            Some(HirExpr::Binary {
+                op: HirBinaryOp::SLt,
+                lhs,
+                rhs,
+                ..
+            }) if matches!(lhs.as_ref(), HirExpr::Var(name) if name == "iVar0")
+                && matches!(rhs.as_ref(), HirExpr::Var(name) if name == "len")
+        ));
         assert!(update.is_some());
         assert_eq!(body.len(), 1);
+        assert!(matches!(
+            &body[0],
+            HirStmt::Assign {
+                lhs: HirLValue::Var(name),
+                rhs:
+                    HirExpr::Index {
+                        base,
+                        index,
+                        elem_ty
+                    },
+            } if name == "value"
+                && matches!(base.as_ref(), HirExpr::Var(name) if name == "ptr")
+                && matches!(index.as_ref(), HirExpr::Var(name) if name == "iVar0")
+                && *elem_ty == int(32, false)
+        ));
+        assert!(func.locals.iter().any(|local| local.name == "iVar0"
+            && local.ty
+                == (NirType::Int {
+                    bits: 64,
+                    signed: true,
+                })));
     }
 
     #[test]
