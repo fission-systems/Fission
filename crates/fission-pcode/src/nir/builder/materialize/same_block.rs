@@ -1731,8 +1731,12 @@ impl<'a> PreviewBuilder<'a> {
                 | HirBinaryOp::Ne
                 | HirBinaryOp::Lt
                 | HirBinaryOp::Le
+                | HirBinaryOp::Gt
+                | HirBinaryOp::Ge
                 | HirBinaryOp::SLt
-                | HirBinaryOp::SLe => LowBitMaskInputOriginKind::Compare,
+                | HirBinaryOp::SLe
+                | HirBinaryOp::SGt
+                | HirBinaryOp::SGe => LowBitMaskInputOriginKind::Compare,
                 HirBinaryOp::LogicalAnd | HirBinaryOp::LogicalOr => {
                     LowBitMaskInputOriginKind::BoolOp
                 }

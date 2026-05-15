@@ -216,6 +216,22 @@ pub(crate) fn type_from_size(size: u32, signed: bool) -> NirType {
     }
 }
 
+pub(crate) fn pcode_output_type_from_size(opcode: PcodeOpcode, size: u32) -> NirType {
+    type_from_size(
+        size,
+        matches!(
+            opcode,
+            PcodeOpcode::IntAdd
+                | PcodeOpcode::IntSub
+                | PcodeOpcode::IntMult
+                | PcodeOpcode::IntSDiv
+                | PcodeOpcode::IntSRem
+                | PcodeOpcode::IntSLess
+                | PcodeOpcode::IntSLessEqual
+        ),
+    )
+}
+
 pub(crate) fn float_type_from_size(size: u32) -> NirType {
     match size {
         4 => NirType::Float { bits: 32 },

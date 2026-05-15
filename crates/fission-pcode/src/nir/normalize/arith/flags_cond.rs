@@ -79,8 +79,12 @@ pub(crate) fn normalize_boolean_logic(expr: &HirExpr) -> Option<HirExpr> {
                     // !(a < b)  →  b <= a
                     HirBinaryOp::Lt => None, // handled below with swapped operands
                     HirBinaryOp::Le => None,
+                    HirBinaryOp::Gt => None,
+                    HirBinaryOp::Ge => None,
                     HirBinaryOp::SLt => None,
                     HirBinaryOp::SLe => None,
+                    HirBinaryOp::SGt => None,
+                    HirBinaryOp::SGe => None,
                     _ => None,
                 };
                 if let Some(op2) = negated_op {
@@ -109,6 +113,18 @@ pub(crate) fn normalize_boolean_logic(expr: &HirExpr) -> Option<HirExpr> {
                         rhs: lhs.clone(),
                         ty: ty.clone(),
                     }),
+                    HirBinaryOp::Gt => Some(HirExpr::Binary {
+                        op: HirBinaryOp::Ge,
+                        lhs: rhs.clone(),
+                        rhs: lhs.clone(),
+                        ty: ty.clone(),
+                    }),
+                    HirBinaryOp::Ge => Some(HirExpr::Binary {
+                        op: HirBinaryOp::Gt,
+                        lhs: rhs.clone(),
+                        rhs: lhs.clone(),
+                        ty: ty.clone(),
+                    }),
                     HirBinaryOp::SLt => Some(HirExpr::Binary {
                         op: HirBinaryOp::SLe,
                         lhs: rhs.clone(),
@@ -117,6 +133,18 @@ pub(crate) fn normalize_boolean_logic(expr: &HirExpr) -> Option<HirExpr> {
                     }),
                     HirBinaryOp::SLe => Some(HirExpr::Binary {
                         op: HirBinaryOp::SLt,
+                        lhs: rhs.clone(),
+                        rhs: lhs.clone(),
+                        ty: ty.clone(),
+                    }),
+                    HirBinaryOp::SGt => Some(HirExpr::Binary {
+                        op: HirBinaryOp::SGe,
+                        lhs: rhs.clone(),
+                        rhs: lhs.clone(),
+                        ty: ty.clone(),
+                    }),
+                    HirBinaryOp::SGe => Some(HirExpr::Binary {
+                        op: HirBinaryOp::SGt,
                         lhs: rhs.clone(),
                         rhs: lhs.clone(),
                         ty: ty.clone(),

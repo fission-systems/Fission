@@ -312,6 +312,66 @@ pub(crate) fn collapse_redundant_conditional_returns(stmts: &mut Vec<HirStmt>) -
     changed
 }
 
+pub(crate) fn canonicalize_minmax_conditional_returns(stmts: &mut Vec<HirStmt>) -> bool {
+    let mut changed = false;
+    let mut idx = 0usize;
+
+    while idx + 1 < stmts.len() {
+        let Some((cond, then_body, else_body)) = if_parts(&stmts[idx]) else {
+            idx += 1;
+            continue;
+        };
+        if !else_body.is_empty() {
+            idx += 1;
+            continue;
+        }
+        let Some(then_expr) = single_return_expr(then_body) else {
+            idx += 1;
+            continue;
+        };
+        let Some(next_expr) = return_expr(&stmts[idx + 1]) else {
+            idx += 1;
+            continue;
+        };
+        let Some((op, lhs, rhs, ty)) = binary_comparison_parts(cond) else {
+            idx += 1;
+            continue;
+        };
+        if expr_has_side_effects(lhs) || expr_has_side_effects(rhs) {
+            idx += 1;
+            continue;
+        }
+
+        let Some(new_op) = minmax_branch_swap_op(op) else {
+            idx += 1;
+            continue;
+        };
+        if then_expr != rhs.as_ref() || next_expr != lhs.as_ref() {
+            idx += 1;
+            continue;
+        }
+        let lhs_expr = (**lhs).clone();
+        let rhs_expr = (**rhs).clone();
+        let cond_ty = ty.clone();
+
+        stmts[idx] = HirStmt::If {
+            cond: HirExpr::Binary {
+                op: new_op,
+                lhs: Box::new(lhs_expr.clone()),
+                rhs: Box::new(rhs_expr.clone()),
+                ty: cond_ty,
+            },
+            then_body: vec![HirStmt::Return(Some(lhs_expr))],
+            else_body: Vec::new(),
+        };
+        stmts[idx + 1] = HirStmt::Return(Some(rhs_expr));
+        changed = true;
+        idx += 2;
+    }
+
+    changed
+}
+
 pub(crate) fn simplify_fallthrough_edges(stmts: &mut Vec<HirStmt>) -> bool {
     let mut changed = false;
     let mut rewritten = Vec::with_capacity(stmts.len());
@@ -831,9 +891,66 @@ fn as_return_stmt(stmt: &HirStmt) -> Option<&HirStmt> {
     matches!(stmt, HirStmt::Return(_)).then_some(stmt)
 }
 
+fn return_expr(stmt: &HirStmt) -> Option<&HirExpr> {
+    match stmt {
+        HirStmt::Return(Some(expr)) => Some(expr),
+        _ => None,
+    }
+}
+
 fn single_return_stmt(body: &[HirStmt]) -> Option<HirStmt> {
     match body {
         [HirStmt::Return(expr)] => Some(HirStmt::Return(expr.clone())),
+        _ => None,
+    }
+}
+
+fn single_return_expr(body: &[HirStmt]) -> Option<&HirExpr> {
+    match body {
+        [HirStmt::Return(Some(expr))] => Some(expr),
+        _ => None,
+    }
+}
+
+fn if_parts(stmt: &HirStmt) -> Option<(&HirExpr, &[HirStmt], &[HirStmt])> {
+    match stmt {
+        HirStmt::If {
+            cond,
+            then_body,
+            else_body,
+        } => Some((cond, then_body, else_body)),
+        _ => None,
+    }
+}
+
+fn binary_comparison_parts(
+    expr: &HirExpr,
+) -> Option<(HirBinaryOp, &Box<HirExpr>, &Box<HirExpr>, &NirType)> {
+    match expr {
+        HirExpr::Binary {
+            op:
+                op @ (HirBinaryOp::Lt
+                | HirBinaryOp::Le
+                | HirBinaryOp::Gt
+                | HirBinaryOp::Ge
+                | HirBinaryOp::SLt
+                | HirBinaryOp::SLe
+                | HirBinaryOp::SGt
+                | HirBinaryOp::SGe),
+            lhs,
+            rhs,
+            ty,
+        } => Some((*op, lhs, rhs, ty)),
+        _ => None,
+    }
+}
+
+fn minmax_branch_swap_op(op: HirBinaryOp) -> Option<HirBinaryOp> {
+    match op {
+        HirBinaryOp::Lt | HirBinaryOp::Le => Some(HirBinaryOp::Gt),
+        HirBinaryOp::Gt | HirBinaryOp::Ge => Some(HirBinaryOp::Lt),
+        HirBinaryOp::SLt | HirBinaryOp::SLe => Some(HirBinaryOp::SGt),
+        HirBinaryOp::SGt | HirBinaryOp::SGe => Some(HirBinaryOp::SLt),
         _ => None,
     }
 }

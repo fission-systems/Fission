@@ -473,6 +473,12 @@ impl<'a> PreviewBuilder<'a> {
 
     fn uses_primary_return_registers(&self) -> bool {
         self.options.is_64bit
+            || (!self.options.is_64bit
+                && self.options.pointer_size == 4
+                && matches!(
+                    self.options.calling_convention,
+                    CallingConvention::WindowsX64 | CallingConvention::SystemVAmd64
+                ))
             || matches!(
                 self.options.calling_convention,
                 CallingConvention::Arm32

@@ -89,8 +89,14 @@ impl<'a> PreviewBuilder<'a> {
             .output
             .as_ref()
             .ok_or(MlilPreviewError::UnsupportedExprPieceShape)?;
-        let output_ty = type_from_size(output.size, false);
         let base = self.lower_varnode(&op.inputs[0], visiting)?;
+        let base_expr_signed = matches!(expr_type(&base), NirType::Int { signed: true, .. });
+        let base_def_signed = self
+            .lookup_def_site(&op.inputs[0])
+            .map(|(_, def)| pcode_output_type_from_size(def.opcode, op.inputs[0].size))
+            .is_some_and(|ty| matches!(ty, NirType::Int { signed: true, .. }));
+        let output_signed = base_expr_signed || base_def_signed;
+        let output_ty = type_from_size(output.size, output_signed);
         let byte_offset =
             const_offset(&op.inputs[1]).ok_or(MlilPreviewError::UnsupportedExprPieceShape)?;
         let shifted = if byte_offset == 0 {
@@ -106,7 +112,7 @@ impl<'a> PreviewBuilder<'a> {
                         signed: false,
                     },
                 )),
-                ty: type_from_size(op.inputs[0].size, false),
+                ty: type_from_size(op.inputs[0].size, output_signed),
             }
         };
         Ok(HirExpr::Cast {

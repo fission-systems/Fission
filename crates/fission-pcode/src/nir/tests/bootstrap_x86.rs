@@ -555,10 +555,7 @@ fn preview_inlines_lea_register_return() {
 
     let code =
         render_mlil_preview(&func, "lea_add", 0x140001450, &options).expect("preview render");
-    assert!(
-        code.contains("lea_add(uint param_1, uint param_2)"),
-        "{code}"
-    );
+    assert!(code.contains("lea_add(int param_1, int param_2)"), "{code}");
     assert!(code.contains("param_1 + param_2"), "{code}");
     assert!(!code.contains("*var_"), "{code}");
 }

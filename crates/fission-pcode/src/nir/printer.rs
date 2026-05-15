@@ -475,7 +475,14 @@ fn binary_precedence(op: HirBinaryOp) -> u8 {
         HirBinaryOp::Xor => 40,
         HirBinaryOp::And => 50,
         HirBinaryOp::Eq | HirBinaryOp::Ne => 60,
-        HirBinaryOp::Lt | HirBinaryOp::Le | HirBinaryOp::SLt | HirBinaryOp::SLe => 70,
+        HirBinaryOp::Lt
+        | HirBinaryOp::Le
+        | HirBinaryOp::Gt
+        | HirBinaryOp::Ge
+        | HirBinaryOp::SLt
+        | HirBinaryOp::SLe
+        | HirBinaryOp::SGt
+        | HirBinaryOp::SGe => 70,
         HirBinaryOp::Shl | HirBinaryOp::Shr | HirBinaryOp::Sar => 80,
         HirBinaryOp::Add | HirBinaryOp::Sub => 90,
         HirBinaryOp::Mul | HirBinaryOp::Div | HirBinaryOp::Mod => 100,
@@ -489,7 +496,14 @@ fn binary_rhs_parent_precedence(parent_op: HirBinaryOp, rhs: &HirExpr, fallback:
     if matches!(parent_op, HirBinaryOp::Eq | HirBinaryOp::Ne)
         && matches!(
             rhs_op,
-            HirBinaryOp::Lt | HirBinaryOp::Le | HirBinaryOp::SLt | HirBinaryOp::SLe
+            HirBinaryOp::Lt
+                | HirBinaryOp::Le
+                | HirBinaryOp::Gt
+                | HirBinaryOp::Ge
+                | HirBinaryOp::SLt
+                | HirBinaryOp::SLe
+                | HirBinaryOp::SGt
+                | HirBinaryOp::SGe
         )
     {
         return binary_precedence(*rhs_op) + 1;
@@ -516,6 +530,8 @@ fn print_binary_op(op: HirBinaryOp) -> &'static str {
         HirBinaryOp::Ne => "!=",
         HirBinaryOp::Lt | HirBinaryOp::SLt => "<",
         HirBinaryOp::Le | HirBinaryOp::SLe => "<=",
+        HirBinaryOp::Gt | HirBinaryOp::SGt => ">",
+        HirBinaryOp::Ge | HirBinaryOp::SGe => ">=",
     }
 }
 
