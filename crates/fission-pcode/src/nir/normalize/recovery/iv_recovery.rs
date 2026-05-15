@@ -287,7 +287,7 @@ fn apply_break_continue_in_stmts(
     changed
 }
 
-// ── Part A — SCEV-lite: enhance While → For ──────────────────────────────────
+// ── Part A — SCEV-lite: enhance While/guarded DoWhile → For ─────────────────
 
 /// Collect all variable names mentioned in an expression.
 fn expr_vars(expr: &HirExpr, out: &mut HashSet<String>) {
@@ -442,6 +442,28 @@ fn is_loop_invariant_scalar(expr: &HirExpr, loop_variant: &HashSet<String>) -> b
     }
 }
 
+fn strip_casts(expr: &HirExpr) -> &HirExpr {
+    match expr {
+        HirExpr::Cast { expr, .. } => strip_casts(expr),
+        _ => expr,
+    }
+}
+
+fn stripped_var_name(expr: &HirExpr) -> Option<&str> {
+    match strip_casts(expr) {
+        HirExpr::Var(name) => Some(name.as_str()),
+        _ => None,
+    }
+}
+
+fn vars_equivalent_after_casts(a: &HirExpr, b: &HirExpr) -> bool {
+    matches!((stripped_var_name(a), stripped_var_name(b)), (Some(x), Some(y)) if x == y)
+}
+
+fn is_zero(expr: &HirExpr) -> bool {
+    matches!(strip_casts(expr), HirExpr::Const(0, _))
+}
+
 /// Collect the set of variables modified inside the loop body (excluding
 /// variables modified only in nested loops, which are their own scope).
 fn loop_variant_vars(body: &[HirStmt]) -> HashSet<String> {
@@ -524,6 +546,239 @@ fn find_init_before(stmts: &[HirStmt], loop_idx: usize, var: &str) -> Option<usi
     None
 }
 
+fn find_pointer_end_assignment_before(
+    stmts: &[HirStmt],
+    loop_idx: usize,
+    cursor: &str,
+    end: &str,
+) -> Option<(usize, HirExpr)> {
+    let mut scan = loop_idx;
+    while scan > 0 {
+        scan -= 1;
+        match &stmts[scan] {
+            HirStmt::Assign {
+                lhs: HirLValue::Var(name),
+                rhs:
+                    HirExpr::Binary {
+                        op: HirBinaryOp::Add,
+                        lhs,
+                        rhs,
+                        ..
+                    },
+            } if name == end => {
+                if matches!(lhs.as_ref(), HirExpr::Var(name) if name == cursor) {
+                    return Some((scan, rhs.as_ref().clone()));
+                }
+                if matches!(rhs.as_ref(), HirExpr::Var(name) if name == cursor) {
+                    return Some((scan, lhs.as_ref().clone()));
+                }
+                return None;
+            }
+            HirStmt::Label(_)
+            | HirStmt::Goto(_)
+            | HirStmt::While { .. }
+            | HirStmt::DoWhile { .. }
+            | HirStmt::For { .. }
+            | HirStmt::Switch { .. }
+            | HirStmt::Expr(_)
+            | HirStmt::Return(_)
+            | HirStmt::Break
+            | HirStmt::Continue => break,
+            HirStmt::If { .. } | HirStmt::Assign { .. } | HirStmt::VaStart { .. } => {}
+            HirStmt::Block(_) => break,
+        }
+    }
+    None
+}
+
+fn single_goto_target(stmts: &[HirStmt]) -> Option<&str> {
+    match stmts {
+        [HirStmt::Goto(label)] => Some(label.as_str()),
+        _ => None,
+    }
+}
+
+fn labels_after(stmts: &[HirStmt], idx: usize) -> HashSet<String> {
+    let mut labels = HashSet::new();
+    for stmt in stmts.iter().skip(idx + 1) {
+        collect_labels_stmt(stmt, &mut labels);
+    }
+    labels
+}
+
+fn guard_exits_when_count_non_positive(cond: &HirExpr, count: &HirExpr) -> bool {
+    let HirExpr::Binary { op, lhs, rhs, .. } = cond else {
+        return false;
+    };
+    match op {
+        HirBinaryOp::Le | HirBinaryOp::SLe => {
+            vars_equivalent_after_casts(lhs, count) && is_zero(rhs)
+        }
+        HirBinaryOp::Ge | HirBinaryOp::SGe => {
+            is_zero(lhs) && vars_equivalent_after_casts(rhs, count)
+        }
+        _ => false,
+    }
+}
+
+fn has_positive_count_entry_guard(
+    stmts: &[HirStmt],
+    loop_idx: usize,
+    count: &HirExpr,
+    after_labels: &HashSet<String>,
+) -> bool {
+    stmts[..loop_idx].iter().any(|stmt| {
+        let HirStmt::If {
+            cond,
+            then_body,
+            else_body,
+        } = stmt
+        else {
+            return false;
+        };
+        else_body.is_empty()
+            && single_goto_target(then_body).is_some_and(|label| after_labels.contains(label))
+            && guard_exits_when_count_non_positive(cond, count)
+    })
+}
+
+fn pointer_cursor_condition(cond: &HirExpr) -> Option<(&str, &str)> {
+    let HirExpr::Binary {
+        op: HirBinaryOp::Ne,
+        lhs,
+        rhs,
+        ..
+    } = cond
+    else {
+        return None;
+    };
+    match (lhs.as_ref(), rhs.as_ref()) {
+        (HirExpr::Var(cursor), HirExpr::Var(end)) => Some((cursor.as_str(), end.as_str())),
+        _ => None,
+    }
+}
+
+fn cursor_used_after_loop(stmts: &[HirStmt], loop_idx: usize, cursor: &str) -> bool {
+    stmts
+        .iter()
+        .skip(loop_idx + 1)
+        .any(|stmt| count_var_uses_in_stmt(stmt, cursor) > 0)
+}
+
+fn count_var_uses_in_stmt(stmt: &HirStmt, name: &str) -> usize {
+    match stmt {
+        HirStmt::Assign { lhs, rhs } => {
+            count_var_uses_in_lvalue(lhs, name) + count_var_uses(rhs, name)
+        }
+        HirStmt::VaStart { va_list, .. } | HirStmt::Expr(va_list) => count_var_uses(va_list, name),
+        HirStmt::Return(Some(expr)) => count_var_uses(expr, name),
+        HirStmt::Block(body) | HirStmt::While { body, .. } => body
+            .iter()
+            .map(|stmt| count_var_uses_in_stmt(stmt, name))
+            .sum(),
+        HirStmt::DoWhile { body, cond } => {
+            body.iter()
+                .map(|stmt| count_var_uses_in_stmt(stmt, name))
+                .sum::<usize>()
+                + count_var_uses(cond, name)
+        }
+        HirStmt::For {
+            init,
+            cond,
+            update,
+            body,
+        } => {
+            init.as_deref()
+                .map_or(0, |stmt| count_var_uses_in_stmt(stmt, name))
+                + cond.as_ref().map_or(0, |expr| count_var_uses(expr, name))
+                + update
+                    .as_deref()
+                    .map_or(0, |stmt| count_var_uses_in_stmt(stmt, name))
+                + body
+                    .iter()
+                    .map(|stmt| count_var_uses_in_stmt(stmt, name))
+                    .sum::<usize>()
+        }
+        HirStmt::If {
+            cond,
+            then_body,
+            else_body,
+        } => {
+            count_var_uses(cond, name)
+                + then_body
+                    .iter()
+                    .map(|stmt| count_var_uses_in_stmt(stmt, name))
+                    .sum::<usize>()
+                + else_body
+                    .iter()
+                    .map(|stmt| count_var_uses_in_stmt(stmt, name))
+                    .sum::<usize>()
+        }
+        HirStmt::Switch {
+            expr,
+            cases,
+            default,
+        } => {
+            count_var_uses(expr, name)
+                + cases
+                    .iter()
+                    .map(|case| {
+                        case.body
+                            .iter()
+                            .map(|stmt| count_var_uses_in_stmt(stmt, name))
+                            .sum::<usize>()
+                    })
+                    .sum::<usize>()
+                + default
+                    .iter()
+                    .map(|stmt| count_var_uses_in_stmt(stmt, name))
+                    .sum::<usize>()
+        }
+        HirStmt::Return(None)
+        | HirStmt::Label(_)
+        | HirStmt::Goto(_)
+        | HirStmt::Break
+        | HirStmt::Continue => 0,
+    }
+}
+
+fn count_var_uses_in_lvalue(lhs: &HirLValue, name: &str) -> usize {
+    match lhs {
+        HirLValue::Var(_) => 0,
+        HirLValue::Deref { ptr, .. } => count_var_uses(ptr, name),
+        HirLValue::Index { base, index, .. } => {
+            count_var_uses(base, name) + count_var_uses(index, name)
+        }
+    }
+}
+
+fn count_var_uses(expr: &HirExpr, name: &str) -> usize {
+    match expr {
+        HirExpr::Var(var) | HirExpr::AddressOfGlobal(var) => usize::from(var == name),
+        HirExpr::Const(_, _) => 0,
+        HirExpr::Cast { expr, .. }
+        | HirExpr::Unary { expr, .. }
+        | HirExpr::Load { ptr: expr, .. }
+        | HirExpr::PtrOffset { base: expr, .. }
+        | HirExpr::AggregateCopy { src: expr, .. } => count_var_uses(expr, name),
+        HirExpr::Binary { lhs, rhs, .. } => count_var_uses(lhs, name) + count_var_uses(rhs, name),
+        HirExpr::Call { args, .. } => args.iter().map(|arg| count_var_uses(arg, name)).sum(),
+        HirExpr::Index { base, index, .. } => {
+            count_var_uses(base, name) + count_var_uses(index, name)
+        }
+        HirExpr::Select {
+            cond,
+            then_expr,
+            else_expr,
+            ..
+        } => {
+            count_var_uses(cond, name)
+                + count_var_uses(then_expr, name)
+                + count_var_uses(else_expr, name)
+        }
+    }
+}
+
 /// Try to upgrade a `While` loop at `stmts[loop_idx]` to a `For` loop using
 /// SCEV-lite IV detection.  Returns `true` if a transformation was applied.
 fn try_scev_upgrade(stmts: &mut Vec<HirStmt>, loop_idx: usize) -> bool {
@@ -582,6 +837,44 @@ fn try_scev_upgrade(stmts: &mut Vec<HirStmt>, loop_idx: usize) -> bool {
     false
 }
 
+fn try_guarded_dowhile_pointer_iv_upgrade(stmts: &mut [HirStmt], loop_idx: usize) -> bool {
+    let (cond, body) = match &stmts[loop_idx] {
+        HirStmt::DoWhile { cond, body } => (cond.clone(), body.clone()),
+        _ => return false,
+    };
+    if super::for_loops::stmt_list_contains_continue_pub(&body) {
+        return false;
+    }
+    let Some((cursor, end)) = pointer_cursor_condition(&cond) else {
+        return false;
+    };
+    let loop_variant = loop_variant_vars(&body);
+    let Some((update_idx, true)) = find_iv_update(&body, cursor, &loop_variant) else {
+        return false;
+    };
+    let Some((_end_idx, count_expr)) =
+        find_pointer_end_assignment_before(stmts, loop_idx, cursor, end)
+    else {
+        return false;
+    };
+    let after_labels = labels_after(stmts, loop_idx);
+    if !has_positive_count_entry_guard(stmts, loop_idx, &count_expr, &after_labels)
+        || cursor_used_after_loop(stmts, loop_idx, cursor)
+    {
+        return false;
+    }
+
+    let mut new_body = body;
+    let update_stmt = new_body.remove(update_idx);
+    stmts[loop_idx] = HirStmt::For {
+        init: None,
+        cond: Some(cond),
+        update: Some(Box::new(update_stmt)),
+        body: new_body,
+    };
+    true
+}
+
 fn apply_scev_upgrade_in_stmts(stmts: &mut Vec<HirStmt>) -> bool {
     let mut changed = false;
     let mut i = 0;
@@ -593,6 +886,11 @@ fn apply_scev_upgrade_in_stmts(stmts: &mut Vec<HirStmt>) -> bool {
                 // another pass, but more likely just continue).
                 continue;
             }
+        } else if matches!(&stmts[i], HirStmt::DoWhile { .. })
+            && try_guarded_dowhile_pointer_iv_upgrade(stmts, i)
+        {
+            changed = true;
+            continue;
         }
         // Recurse into nested constructs.
         match &mut stmts[i] {
@@ -637,4 +935,132 @@ pub(crate) fn apply_break_continue_pass(func: &mut HirFunction) -> bool {
     let mut goto_counts: HashMap<String, usize> = HashMap::new();
     count_goto_targets(&func.body, &mut goto_counts);
     apply_break_continue_in_stmts(&mut func.body, &goto_counts)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn int(bits: u32, signed: bool) -> NirType {
+        NirType::Int { bits, signed }
+    }
+
+    fn ptr_u32() -> NirType {
+        NirType::Ptr(Box::new(int(32, false)))
+    }
+
+    fn var(name: &str) -> HirExpr {
+        HirExpr::Var(name.to_string())
+    }
+
+    fn const_i(value: i64) -> HirExpr {
+        HirExpr::Const(value, int(64, true))
+    }
+
+    fn add(lhs: HirExpr, rhs: HirExpr, ty: NirType) -> HirExpr {
+        HirExpr::Binary {
+            op: HirBinaryOp::Add,
+            lhs: Box::new(lhs),
+            rhs: Box::new(rhs),
+            ty,
+        }
+    }
+
+    fn ne(lhs: HirExpr, rhs: HirExpr) -> HirExpr {
+        HirExpr::Binary {
+            op: HirBinaryOp::Ne,
+            lhs: Box::new(lhs),
+            rhs: Box::new(rhs),
+            ty: NirType::Bool,
+        }
+    }
+
+    #[test]
+    fn guarded_pointer_dowhile_upgrades_to_for() {
+        let mut func = HirFunction {
+            name: "guarded_pointer_loop".to_string(),
+            params: Vec::new(),
+            locals: Vec::new(),
+            return_type: NirType::Unknown,
+            surface_return_type_name: None,
+            body: vec![
+                HirStmt::If {
+                    cond: HirExpr::Binary {
+                        op: HirBinaryOp::SLe,
+                        lhs: Box::new(var("len")),
+                        rhs: Box::new(const_i(0)),
+                        ty: NirType::Bool,
+                    },
+                    then_body: vec![HirStmt::Goto("exit".to_string())],
+                    else_body: Vec::new(),
+                },
+                HirStmt::Assign {
+                    lhs: HirLValue::Var("end".to_string()),
+                    rhs: add(var("ptr"), var("len"), ptr_u32()),
+                },
+                HirStmt::DoWhile {
+                    body: vec![
+                        HirStmt::Assign {
+                            lhs: HirLValue::Var("value".to_string()),
+                            rhs: HirExpr::Load {
+                                ptr: Box::new(var("ptr")),
+                                ty: int(32, false),
+                            },
+                        },
+                        HirStmt::Assign {
+                            lhs: HirLValue::Var("ptr".to_string()),
+                            rhs: add(var("ptr"), const_i(1), ptr_u32()),
+                        },
+                    ],
+                    cond: ne(var("ptr"), var("end")),
+                },
+                HirStmt::Label("exit".to_string()),
+                HirStmt::Return(None),
+            ],
+            ..Default::default()
+        };
+
+        assert!(apply_iv_recovery_pass(&mut func));
+        let HirStmt::For {
+            init,
+            cond,
+            update,
+            body,
+        } = &func.body[2]
+        else {
+            panic!("expected guarded do-while to become for");
+        };
+        assert!(init.is_none());
+        assert!(cond.is_some());
+        assert!(update.is_some());
+        assert_eq!(body.len(), 1);
+    }
+
+    #[test]
+    fn unguarded_pointer_dowhile_stays_dowhile() {
+        let mut func = HirFunction {
+            name: "unguarded_pointer_loop".to_string(),
+            params: Vec::new(),
+            locals: Vec::new(),
+            return_type: NirType::Unknown,
+            surface_return_type_name: None,
+            body: vec![
+                HirStmt::Assign {
+                    lhs: HirLValue::Var("end".to_string()),
+                    rhs: add(var("ptr"), var("len"), ptr_u32()),
+                },
+                HirStmt::DoWhile {
+                    body: vec![HirStmt::Assign {
+                        lhs: HirLValue::Var("ptr".to_string()),
+                        rhs: add(var("ptr"), const_i(1), ptr_u32()),
+                    }],
+                    cond: ne(var("ptr"), var("end")),
+                },
+            ],
+            ..Default::default()
+        };
+
+        assert!(!apply_iv_recovery_pass(&mut func));
+        assert!(matches!(func.body[1], HirStmt::DoWhile { .. }));
+    }
 }
