@@ -14,9 +14,10 @@ use super::super::cleanup::single_pred_label_inline;
 use super::super::cleanup::{
     canonicalize_minmax_conditional_returns, cast_elision_pass, cleanup_redundant_boundary_labels,
     collapse_redundant_conditional_returns, collapse_trivial_assign_returns,
-    elide_unused_popcount_assigns, eliminate_dead_local_clobber_assigns,
-    eliminate_dead_temp_assigns, fuse_single_predecessor_boundaries, inline_single_use_temps,
-    promote_guarded_jump_target_tail, prune_unused_dead_local_bindings, prune_unused_temp_bindings,
+    collapse_trivial_pointer_alias_bindings, elide_unused_popcount_assigns,
+    eliminate_dead_local_clobber_assigns, eliminate_dead_temp_assigns,
+    fuse_single_predecessor_boundaries, inline_single_use_temps, promote_guarded_jump_target_tail,
+    prune_unused_dead_local_bindings, prune_unused_temp_bindings,
     remove_unreferenced_leading_labels, simplify_empty_and_constant_ifs,
     simplify_empty_and_constant_ifs_recursive, simplify_fallthrough_edges,
 };
@@ -1231,6 +1232,14 @@ fn run_cleanup_family_passes(
             normalize_binding_initializers(&mut f.locals);
             before != collect_initializer_fingerprints(&f.locals)
         });
+        if within_body_budget {
+            changed |= run_pass_logged(
+                func,
+                &format!("cleanup_pointer_alias_binding_{stage}"),
+                perf,
+                collapse_trivial_pointer_alias_bindings,
+            );
+        }
     } else {
         wave_stats::add_cleanup_budget_skips(1);
     }

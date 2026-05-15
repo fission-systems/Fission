@@ -142,6 +142,53 @@ pub(crate) fn eliminate_dead_temp_assigns(
     changed
 }
 
+pub(crate) fn collapse_trivial_pointer_alias_bindings(func: &mut HirFunction) -> bool {
+    let mut aliases = HashMap::<String, HirExpr>::new();
+    for binding in &func.locals {
+        if !matches!(binding.ty, NirType::Ptr(_)) {
+            continue;
+        }
+        let Some(initializer) = binding.initializer.as_ref() else {
+            continue;
+        };
+        let Some(replacement) = pointer_alias_replacement(initializer) else {
+            continue;
+        };
+        if expr_mentions_var(&replacement, &binding.name)
+            || expr_has_side_effects(&replacement)
+            || var_is_assigned_in_stmts(&func.body, &binding.name)
+        {
+            continue;
+        }
+        let use_count = count_uses_in_stmt_list(&func.body, &binding.name)
+            + count_uses_in_bindings(&func.locals, &binding.name);
+        if use_count > 0 {
+            aliases.insert(binding.name.clone(), replacement);
+        }
+    }
+    if aliases.is_empty() {
+        return false;
+    }
+
+    for (name, replacement) in &aliases {
+        for stmt in &mut func.body {
+            replace_var_in_stmt(stmt, name, replacement);
+        }
+        for binding in &mut func.locals {
+            if binding.name != *name
+                && let Some(initializer) = &mut binding.initializer
+            {
+                replace_var_in_expr(initializer, name, replacement);
+            }
+        }
+    }
+
+    let before = func.locals.len();
+    func.locals
+        .retain(|binding| !aliases.contains_key(&binding.name));
+    before != func.locals.len()
+}
+
 pub(crate) fn simplify_empty_and_constant_ifs(stmts: &mut Vec<HirStmt>) -> bool {
     let mut changed = false;
     let mut rewritten = Vec::with_capacity(stmts.len());
@@ -1638,6 +1685,69 @@ fn count_uses_in_stmt_list(stmts: &[HirStmt], name: &str) -> usize {
         .iter()
         .map(|stmt| count_var_uses_in_stmt(stmt, name))
         .sum()
+}
+
+fn count_uses_in_bindings(bindings: &[NirBinding], name: &str) -> usize {
+    bindings
+        .iter()
+        .filter(|binding| binding.name != name)
+        .filter_map(|binding| binding.initializer.as_ref())
+        .map(|expr| count_var_uses(expr, name))
+        .sum()
+}
+
+fn pointer_alias_replacement(expr: &HirExpr) -> Option<HirExpr> {
+    match expr {
+        HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) => Some(expr.clone()),
+        HirExpr::Cast {
+            ty: NirType::Ptr(_),
+            expr,
+        } => match expr.as_ref() {
+            HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) => Some((**expr).clone()),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+fn expr_mentions_var(expr: &HirExpr, name: &str) -> bool {
+    count_var_uses(expr, name) > 0
+}
+
+fn var_is_assigned_in_stmts(stmts: &[HirStmt], name: &str) -> bool {
+    stmts.iter().any(|stmt| var_is_assigned_in_stmt(stmt, name))
+}
+
+fn var_is_assigned_in_stmt(stmt: &HirStmt, name: &str) -> bool {
+    match stmt {
+        HirStmt::Assign {
+            lhs: HirLValue::Var(lhs_name),
+            ..
+        } => lhs_name == name,
+        HirStmt::Assign { .. }
+        | HirStmt::VaStart { .. }
+        | HirStmt::Expr(_)
+        | HirStmt::Return(_)
+        | HirStmt::Label(_)
+        | HirStmt::Goto(_)
+        | HirStmt::Break
+        | HirStmt::Continue => false,
+        HirStmt::Block(body)
+        | HirStmt::While { body, .. }
+        | HirStmt::DoWhile { body, .. }
+        | HirStmt::For { body, .. } => var_is_assigned_in_stmts(body, name),
+        HirStmt::If {
+            then_body,
+            else_body,
+            ..
+        } => var_is_assigned_in_stmts(then_body, name) || var_is_assigned_in_stmts(else_body, name),
+        HirStmt::Switch { cases, default, .. } => {
+            cases
+                .iter()
+                .any(|case| var_is_assigned_in_stmts(&case.body, name))
+                || var_is_assigned_in_stmts(default, name)
+        }
+    }
 }
 
 fn count_var_uses_in_lvalue(lhs: &HirLValue, name: &str) -> usize {
