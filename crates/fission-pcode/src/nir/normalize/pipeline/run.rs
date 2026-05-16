@@ -32,7 +32,7 @@ use super::super::idioms::{
 use super::super::memory::{
     apply_aggregate_alias_access_rewrite_pass, apply_aggregate_fields_pass,
     apply_memory_slot_surfacing, apply_memory_slot_surfacing_cheap, apply_ptr_arith_recovery_pass,
-    normalize_binding_initializers,
+    apply_zero_index_deref_pass, normalize_binding_initializers,
 };
 use super::super::recovery::{
     apply_break_continue_pass, apply_flag_recovery_pass, apply_for_loop_folding,
@@ -627,6 +627,12 @@ pub(crate) fn normalize_hir_function(func: &mut HirFunction) {
         wave_stats::add_memory_fact_prefilter_skip(1);
         wave_stats::add_aggregate_fields_skipped_by_admission(1);
     }
+    run_pass_logged(
+        func,
+        "zero_index_deref_after_aggregate_fields",
+        perf,
+        apply_zero_index_deref_pass,
+    );
     // Single-predecessor label inlining: reduce goto/label pairs by inlining
     // blocks that are targeted by exactly one forward unconditional goto.
     // Runs last so all other structural passes have already had their say.

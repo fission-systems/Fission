@@ -415,7 +415,11 @@ fn recover_in_expr(expr: &mut HirExpr, binding_types: &HashMap<String, NirType>)
         HirExpr::PtrOffset { base, .. } => {
             changed |= recover_in_expr(base, binding_types);
         }
-        HirExpr::Index { base, index, .. } => {
+        HirExpr::Index {
+            base,
+            index,
+            ..
+        } => {
             changed |= recover_in_expr(base, binding_types);
             changed |= recover_in_expr(index, binding_types);
         }
@@ -456,13 +460,21 @@ fn recover_in_lvalue(lhs: &mut HirLValue, binding_types: &HashMap<String, NirTyp
                 recover_in_expr(ptr, binding_types)
             }
         }
-        HirLValue::Index { base, index, .. } => {
+        HirLValue::Index {
+            base,
+            index,
+            ..
+        } => {
             let a = recover_in_expr(base, binding_types);
             let b = recover_in_expr(index, binding_types);
             a || b
         }
         HirLValue::Var(_) => false,
     }
+}
+
+fn is_zero_index(index: &HirExpr) -> bool {
+    matches!(index, HirExpr::Const(0, _))
 }
 
 fn collect_pointer_assignment_types(stmts: &[HirStmt], out: &mut HashMap<String, Option<NirType>>) {
@@ -645,6 +657,167 @@ pub(crate) fn apply_ptr_arith_recovery_pass(func: &mut HirFunction) -> bool {
     changed
 }
 
+pub(crate) fn apply_zero_index_deref_pass(func: &mut HirFunction) -> bool {
+    let mut changed = false;
+    for stmt in &mut func.body {
+        changed |= normalize_zero_index_stmt(stmt);
+    }
+    changed
+}
+
+fn normalize_zero_index_stmt(stmt: &mut HirStmt) -> bool {
+    let mut changed = false;
+    match stmt {
+        HirStmt::Assign { lhs, rhs } => {
+            changed |= normalize_zero_index_lvalue(lhs);
+            changed |= normalize_zero_index_expr(rhs);
+        }
+        HirStmt::Expr(expr) | HirStmt::Return(Some(expr)) => {
+            changed |= normalize_zero_index_expr(expr);
+        }
+        HirStmt::If {
+            cond,
+            then_body,
+            else_body,
+        } => {
+            changed |= normalize_zero_index_expr(cond);
+            for stmt in then_body {
+                changed |= normalize_zero_index_stmt(stmt);
+            }
+            for stmt in else_body {
+                changed |= normalize_zero_index_stmt(stmt);
+            }
+        }
+        HirStmt::While { cond, body } => {
+            changed |= normalize_zero_index_expr(cond);
+            for stmt in body {
+                changed |= normalize_zero_index_stmt(stmt);
+            }
+        }
+        HirStmt::DoWhile { body, cond } => {
+            for stmt in body {
+                changed |= normalize_zero_index_stmt(stmt);
+            }
+            changed |= normalize_zero_index_expr(cond);
+        }
+        HirStmt::For {
+            init,
+            cond,
+            update,
+            body,
+        } => {
+            if let Some(init) = init {
+                changed |= normalize_zero_index_stmt(init);
+            }
+            if let Some(cond) = cond {
+                changed |= normalize_zero_index_expr(cond);
+            }
+            if let Some(update) = update {
+                changed |= normalize_zero_index_stmt(update);
+            }
+            for stmt in body {
+                changed |= normalize_zero_index_stmt(stmt);
+            }
+        }
+        HirStmt::Switch {
+            expr,
+            cases,
+            default,
+        } => {
+            changed |= normalize_zero_index_expr(expr);
+            for case in cases {
+                for stmt in &mut case.body {
+                    changed |= normalize_zero_index_stmt(stmt);
+                }
+            }
+            for stmt in default {
+                changed |= normalize_zero_index_stmt(stmt);
+            }
+        }
+        HirStmt::Block(body) => {
+            for stmt in body {
+                changed |= normalize_zero_index_stmt(stmt);
+            }
+        }
+        HirStmt::Return(None)
+        | HirStmt::VaStart { .. }
+        | HirStmt::Label(_)
+        | HirStmt::Goto(_)
+        | HirStmt::Break
+        | HirStmt::Continue => {}
+    }
+    changed
+}
+
+fn normalize_zero_index_lvalue(lhs: &mut HirLValue) -> bool {
+    match lhs {
+        HirLValue::Deref { ptr, .. } => normalize_zero_index_expr(ptr),
+        HirLValue::Index {
+            base,
+            index,
+            elem_ty,
+        } => {
+            let mut changed = normalize_zero_index_expr(base) | normalize_zero_index_expr(index);
+            if is_zero_index(index) {
+                let ptr = std::mem::replace(base, Box::new(HirExpr::Const(0, NirType::Unknown)));
+                let ty = elem_ty.clone();
+                *lhs = HirLValue::Deref { ptr, ty };
+                changed = true;
+            }
+            changed
+        }
+        HirLValue::Var(_) => false,
+    }
+}
+
+fn normalize_zero_index_expr(expr: &mut HirExpr) -> bool {
+    let mut changed = false;
+    match expr {
+        HirExpr::Binary { lhs, rhs, .. } => {
+            changed |= normalize_zero_index_expr(lhs);
+            changed |= normalize_zero_index_expr(rhs);
+        }
+        HirExpr::Unary { expr, .. }
+        | HirExpr::Cast { expr, .. }
+        | HirExpr::Load { ptr: expr, .. }
+        | HirExpr::PtrOffset { base: expr, .. }
+        | HirExpr::AggregateCopy { src: expr, .. } => {
+            changed |= normalize_zero_index_expr(expr);
+        }
+        HirExpr::Call { args, .. } => {
+            for arg in args {
+                changed |= normalize_zero_index_expr(arg);
+            }
+        }
+        HirExpr::Index {
+            base,
+            index,
+            elem_ty,
+        } => {
+            changed |= normalize_zero_index_expr(base);
+            changed |= normalize_zero_index_expr(index);
+            if is_zero_index(index) {
+                let ptr = std::mem::replace(base, Box::new(HirExpr::Const(0, NirType::Unknown)));
+                let ty = elem_ty.clone();
+                *expr = HirExpr::Load { ptr, ty };
+                changed = true;
+            }
+        }
+        HirExpr::Select {
+            cond,
+            then_expr,
+            else_expr,
+            ..
+        } => {
+            changed |= normalize_zero_index_expr(cond);
+            changed |= normalize_zero_index_expr(then_expr);
+            changed |= normalize_zero_index_expr(else_expr);
+        }
+        HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) | HirExpr::Const(_, _) => {}
+    }
+    changed
+}
+
 #[cfg(test)]
 mod tests {
     use super::super::super::*;
@@ -669,6 +842,62 @@ mod tests {
             body,
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn rewrites_zero_index_access_to_deref() {
+        let elem_ty = NirType::Int {
+            bits: 32,
+            signed: true,
+        };
+        let ptr_ty = NirType::Ptr(Box::new(elem_ty.clone()));
+        let body = vec![
+            HirStmt::Assign {
+                lhs: HirLValue::Var("value".to_owned()),
+                rhs: HirExpr::Index {
+                    base: Box::new(HirExpr::Var("p".to_owned())),
+                    index: Box::new(HirExpr::Const(
+                        0,
+                        NirType::Int {
+                            bits: 64,
+                            signed: false,
+                        },
+                    )),
+                    elem_ty: elem_ty.clone(),
+                },
+            },
+            HirStmt::Assign {
+                lhs: HirLValue::Index {
+                    base: Box::new(HirExpr::Var("p".to_owned())),
+                    index: Box::new(HirExpr::Const(
+                        0,
+                        NirType::Int {
+                            bits: 64,
+                            signed: false,
+                        },
+                    )),
+                    elem_ty,
+                },
+                rhs: HirExpr::Var("value".to_owned()),
+            },
+        ];
+        let mut func = make_func(vec![make_binding_with_ty("p", ptr_ty)], body);
+
+        assert!(super::apply_zero_index_deref_pass(&mut func));
+        assert!(matches!(
+            &func.body[0],
+            HirStmt::Assign {
+                rhs: HirExpr::Load { .. },
+                ..
+            }
+        ));
+        assert!(matches!(
+            &func.body[1],
+            HirStmt::Assign {
+                lhs: HirLValue::Deref { .. },
+                ..
+            }
+        ));
     }
 
     /// Add(Var("p"), Const(8)) where p: Ptr(Aggregate) preserves byte-offset form
