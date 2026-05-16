@@ -190,7 +190,9 @@ fn stmt_may_bypass_following_stmts(stmt: &HirStmt) -> bool {
                 .any(|case| case.body.iter().any(stmt_may_bypass_following_stmts))
                 || default.iter().any(stmt_may_bypass_following_stmts)
         }
-        HirStmt::While { .. } | HirStmt::DoWhile { .. } | HirStmt::For { .. } => false,
+        HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } | HirStmt::For { body, .. } => {
+            body.iter().any(stmt_may_bypass_following_stmts)
+        }
         HirStmt::Assign { .. }
         | HirStmt::Expr(_)
         | HirStmt::VaStart { .. }
