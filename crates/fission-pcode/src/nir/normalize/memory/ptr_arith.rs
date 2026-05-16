@@ -739,8 +739,10 @@ fn normalize_zero_index_stmt(stmt: &mut HirStmt) -> bool {
                 changed |= normalize_zero_index_stmt(stmt);
             }
         }
+        HirStmt::VaStart { va_list, .. } => {
+            changed |= normalize_zero_index_expr(va_list);
+        }
         HirStmt::Return(None)
-        | HirStmt::VaStart { .. }
         | HirStmt::Label(_)
         | HirStmt::Goto(_)
         | HirStmt::Break
