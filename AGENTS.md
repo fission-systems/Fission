@@ -59,10 +59,11 @@ Read the nearest child file before editing those areas.
 | Benchmark manifests / automation manifests | `benchmark/config/` | Corpus manifests and sentinel sets live here now |
 | CLI one-shot parsing / command ownership | `crates/fission-cli/src/cli/` | Keep subcommand UX and legacy shims separate from semantics |
 | Runtime resource paths (signatures, DiE, FID, patterns, typeinfo) | `crates/fission-core/src/core/path_config.rs`, `resource_roots.rs` | `PATHS` / `PathConfig::detect`; overrides: CLI `--resource-root`, `FISSION_RESOURCE_ROOT`; operator docs: `docs/CLI.md` § *Runtime resource bundle* |
+| Checked-in utility resources | `/Users/sjkim1127/Fission/utils` | Prefer existing resource/path config and utility loaders over hardcoded paths; use this tree when reusable signatures, type info, benchmark support data, or other checked-in resources already cover the need |
 | Loader identity / binary provenance hints | `crates/fission-loader/src/loader/identity/` | Evidence-backed `BinaryIdentityReport` on `LoadedBinary`; not an IR/decompiler repair layer |
 | Static facts and binary-derived analysis services | `crates/fission-static/src/analysis/` | Xrefs, discovery, patches, strings; fact extraction — not decompiler orchestration |
 | Decomp-facing facts / native prep surface | `crates/fission-static/src/analysis/decomp/` | `FactStore` and related helpers consumed by `fission-decompiler` |
-| Reference algorithms | `vendor/ghidra/`, `vendor/retdec-5.0/` | Use for invariants, not binary-specific shortcuts |
+| Reference algorithms | `/Users/sjkim1127/Fission/vendor`, especially `vendor/ghidra/` and `vendor/retdec-5.0/` | Reference these often for invariants and behavior, but do not add runtime/build dependencies, bindings, or copied implementation shortcuts |
 
 ## Core Rules
 
@@ -71,6 +72,8 @@ Read the nearest child file before editing those areas.
 3. Use typed contracts; do not invent parallel telemetry payloads outside `NirBuildStats`.
 4. Keep behavior deterministic when outputs feed snapshots, metrics, or automation comparisons.
 5. Large refactors are acceptable when they reduce long-term complexity and tighten ownership.
+6. Do not hardcode repository-local resource paths in code; route reusable resources through existing `utils`-backed path discovery/configuration when applicable.
+7. Treat `vendor` as a reference corpus only: use it to understand algorithms and invariants, but keep Fission-owned Rust implementations dependency-free from that tree.
 
 ## Anti-Patterns
 
@@ -79,6 +82,8 @@ Read the nearest child file before editing those areas.
 - Do not duplicate the same metric definition across pcode and automation.
 - Do not treat `fission-cli` or `fission-tauri` as semantic repair layers.
 - Do not treat benchmark/reporting scripts as semantic repair layers.
+- Do not bypass `PathConfig`, `PATHS`, `resource_roots`, or related helpers by embedding `/Users/sjkim1127/Fission/utils` directly in implementation logic.
+- Do not link against, shell out to, bind to, or otherwise depend on `/Users/sjkim1127/Fission/vendor` code in production paths.
 - Do not claim success from one targeted test if crate-level regression remains.
 
 ## Build / Test Commands
