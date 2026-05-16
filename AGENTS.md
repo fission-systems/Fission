@@ -82,7 +82,7 @@ Read the nearest child file before editing those areas.
 - Do not duplicate the same metric definition across pcode and automation.
 - Do not treat `fission-cli` or `fission-tauri` as semantic repair layers.
 - Do not treat benchmark/reporting scripts as semantic repair layers.
-- Do not bypass `PathConfig`, `PATHS`, `resource_roots`, or related helpers by embedding `/Users/sjkim1127/Fission/utils` directly in implementation logic.
+- Do not bypass `PathConfig`, `PATHS`, `resource_roots`, or related helpers by embedding `utils/` directly in implementation logic.
 - Do not link against, shell out to, bind to, or otherwise depend on `vendor/` code in production paths.
 - Do not claim success from one targeted test if crate-level regression remains.
 
