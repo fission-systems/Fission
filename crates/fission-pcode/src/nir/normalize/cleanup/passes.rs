@@ -112,64 +112,14 @@ pub(crate) fn inline_single_use_temps(
     changed
 }
 
-pub(crate) fn collapse_loop_exit_alias_returns(stmts: &mut Vec<HirStmt>) -> bool {
-    let mut changed = false;
-    let mut idx = 0usize;
-    while idx + 1 < stmts.len() {
-        let replacement = match (&stmts[idx], &stmts[idx + 1]) {
-            (
-                HirStmt::DoWhile { body, .. },
-                HirStmt::Return(Some(HirExpr::Var(ret_name))),
-            ) => find_loop_exit_alias_replacement(body, ret_name),
-            _ => None,
-        };
-        if let Some((copy_idx, rhs)) = replacement {
-            if let HirStmt::DoWhile { body, .. } = &mut stmts[idx] {
-                body.remove(copy_idx);
-                stmts[idx + 1] = HirStmt::Return(Some(rhs));
-                changed = true;
-            }
-        }
-        idx += 1;
-    }
-    changed
-}
-
-fn find_loop_exit_alias_replacement(body: &[HirStmt], ret_name: &str) -> Option<(usize, HirExpr)> {
-    if body.is_empty() {
-        return None;
-    }
-    let mut copy_idx = None;
-    let mut rhs = None;
-    for (idx, stmt) in body.iter().enumerate() {
-        let HirStmt::Assign {
-            lhs: HirLValue::Var(lhs_name),
-            rhs: candidate_rhs,
-        } = stmt
-        else {
-            continue;
-        };
-        if lhs_name != ret_name {
-            continue;
-        }
-        if copy_idx.is_some() || !matches!(candidate_rhs, HirExpr::Var(_)) {
-            return None;
-        }
-        copy_idx = Some(idx);
-        rhs = Some(candidate_rhs.clone());
-    }
-    let copy_idx = copy_idx?;
-    let rhs = rhs?;
-    if body[..copy_idx].iter().any(stmt_may_bypass_following_stmts) {
-        return None;
-    }
-    if body[copy_idx + 1..]
-        .iter()
-        .any(|stmt| stmt_assigns_any_expr_var(stmt, &rhs))
-    {
-        return None;
-    }
-    Some((copy_idx, rhs))
+pub(crate) fn collapse_loop_exit_alias_returns(_stmts: &mut Vec<HirStmt>) -> bool {
+    // This rewrite is currently disabled because removing `ret_name = rhs`
+    // from a `do/while` body is only safe if `ret_name` is proven dead for
+    // the remainder of the iteration and for the loop condition itself.
+    // The previous implementation only checked for later assignments to
+    // variables referenced by `rhs`, which is not sufficient to preserve
+    // loop behavior.
+    false
 }
 
 fn stmt_may_bypass_following_stmts(stmt: &HirStmt) -> bool {
