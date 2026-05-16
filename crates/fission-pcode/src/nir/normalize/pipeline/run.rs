@@ -16,7 +16,7 @@ use super::super::cleanup::{
     collapse_trivial_assign_returns, elide_unused_popcount_assigns,
     eliminate_dead_local_clobber_assigns, eliminate_dead_temp_assigns,
     fuse_single_predecessor_boundaries, inline_single_use_temps, promote_guarded_jump_target_tail,
-    prune_unused_dead_local_bindings, prune_unused_temp_bindings,
+    prune_unreachable_after_terminal, prune_unused_dead_local_bindings, prune_unused_temp_bindings,
     remove_unreferenced_leading_labels, simplify_empty_and_constant_ifs,
     simplify_empty_and_constant_ifs_recursive, simplify_fallthrough_edges,
 };
@@ -1748,6 +1748,10 @@ fn cleanup_stmt_list_with_options_and_preserved(
         if depth == 0 && inline_single_use_temps(stmts, preserved_temps) {
             changed = true;
             last_changed_pass = Some("inline_single_use_temps");
+        }
+        if prune_unreachable_after_terminal(stmts) {
+            changed = true;
+            last_changed_pass = Some("prune_unreachable_after_terminal");
         }
         if depth == 0 && eliminate_dead_temp_assigns(stmts, preserved_temps) {
             changed = true;

@@ -112,6 +112,78 @@ pub(crate) fn inline_single_use_temps(
     changed
 }
 
+pub(crate) fn prune_unreachable_after_terminal(stmts: &mut Vec<HirStmt>) -> bool {
+    let mut changed = false;
+    let referenced_labels = collect_referenced_labels(stmts);
+    let mut idx = 0usize;
+    while idx < stmts.len() {
+        if !is_unconditional_terminal(&stmts[idx]) {
+            idx += 1;
+            continue;
+        }
+
+        let mut end = idx + 1;
+        while end < stmts.len() && !stmt_contains_referenced_label(&stmts[end], &referenced_labels)
+        {
+            end += 1;
+        }
+        if end > idx + 1 {
+            stmts.drain(idx + 1..end);
+            changed = true;
+        }
+        idx += 1;
+    }
+    changed
+}
+
+fn is_unconditional_terminal(stmt: &HirStmt) -> bool {
+    matches!(
+        stmt,
+        HirStmt::Return(_) | HirStmt::Goto(_) | HirStmt::Break | HirStmt::Continue
+    )
+}
+
+fn stmt_contains_referenced_label(stmt: &HirStmt, referenced_labels: &HashSet<String>) -> bool {
+    match stmt {
+        HirStmt::Label(label) => referenced_labels.contains(label),
+        HirStmt::Block(body)
+        | HirStmt::While { body, .. }
+        | HirStmt::DoWhile { body, .. }
+        | HirStmt::For { body, .. } => body
+            .iter()
+            .any(|stmt| stmt_contains_referenced_label(stmt, referenced_labels)),
+        HirStmt::If {
+            then_body,
+            else_body,
+            ..
+        } => {
+            then_body
+                .iter()
+                .any(|stmt| stmt_contains_referenced_label(stmt, referenced_labels))
+                || else_body
+                    .iter()
+                    .any(|stmt| stmt_contains_referenced_label(stmt, referenced_labels))
+        }
+        HirStmt::Switch { cases, default, .. } => {
+            default
+                .iter()
+                .any(|stmt| stmt_contains_referenced_label(stmt, referenced_labels))
+                || cases.iter().any(|case| {
+                    case.body
+                        .iter()
+                        .any(|stmt| stmt_contains_referenced_label(stmt, referenced_labels))
+                })
+        }
+        HirStmt::Assign { .. }
+        | HirStmt::VaStart { .. }
+        | HirStmt::Expr(_)
+        | HirStmt::Return(_)
+        | HirStmt::Goto(_)
+        | HirStmt::Break
+        | HirStmt::Continue => false,
+    }
+}
+
 pub(crate) fn eliminate_dead_temp_assigns(
     stmts: &mut Vec<HirStmt>,
     _preserved_temps: &HashSet<String>,
@@ -659,6 +731,30 @@ mod tests {
             &HashSet::from([String::from("uVar0")]),
         ));
         assert!(stmts.is_empty());
+    }
+
+    #[test]
+    fn prune_unreachable_after_return_stops_at_label_boundary() {
+        let mut stmts = vec![
+            HirStmt::Return(Some(HirExpr::Var("ret".to_string()))),
+            HirStmt::Assign {
+                lhs: HirLValue::Var("dead".to_string()),
+                rhs: HirExpr::Const(1, int(32)),
+            },
+            HirStmt::Goto("kept".to_string()),
+            HirStmt::Label("kept".to_string()),
+            HirStmt::Return(None),
+        ];
+
+        assert!(prune_unreachable_after_terminal(&mut stmts));
+        assert_eq!(
+            stmts,
+            vec![
+                HirStmt::Return(Some(HirExpr::Var("ret".to_string()))),
+                HirStmt::Label("kept".to_string()),
+                HirStmt::Return(None),
+            ]
+        );
     }
 
     #[test]
