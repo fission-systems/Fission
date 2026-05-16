@@ -12,15 +12,15 @@ use super::super::arith::{
 };
 use super::super::cleanup::single_pred_label_inline;
 use super::super::cleanup::{
-    cast_elision_pass, cleanup_redundant_boundary_labels, collapse_loop_exit_alias_returns,
-    collapse_redundant_conditional_returns, collapse_trivial_assign_returns,
-    elide_unused_popcount_assigns,
+    cast_elision_pass, cleanup_redundant_boundary_labels, collapse_redundant_conditional_returns,
+    collapse_trivial_assign_returns, elide_unused_popcount_assigns,
     eliminate_dead_local_clobber_assigns, eliminate_dead_temp_assigns,
     fuse_single_predecessor_boundaries, inline_single_use_temps, promote_guarded_jump_target_tail,
-    prune_unreachable_after_terminal, prune_unused_dead_local_bindings, prune_unused_temp_bindings,
+    prune_unused_dead_local_bindings, prune_unused_temp_bindings,
     remove_unreferenced_leading_labels, simplify_empty_and_constant_ifs,
     simplify_empty_and_constant_ifs_recursive, simplify_fallthrough_edges,
 };
+use super::super::cleanup::{collapse_loop_exit_alias_returns, prune_unreachable_after_terminal};
 use super::super::global_opt::{
     apply_cse_pass, apply_dead_store_elimination, apply_gvn_join_hoist_pass, apply_licm_pass,
     apply_post_assign_value_representative_pass, apply_redundant_load_elimination, apply_sccp_pass,
