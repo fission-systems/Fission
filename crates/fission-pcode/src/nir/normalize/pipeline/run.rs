@@ -22,6 +22,7 @@ use super::super::cleanup::{
     simplify_empty_and_constant_ifs, simplify_empty_and_constant_ifs_recursive,
     simplify_fallthrough_edges,
 };
+use super::super::cleanup::{collapse_loop_exit_alias_returns, prune_unreachable_after_terminal};
 use super::super::global_opt::{
     apply_cse_pass, apply_dead_store_elimination, apply_gvn_join_hoist_pass, apply_licm_pass,
     apply_post_assign_value_representative_pass, apply_redundant_load_elimination, apply_sccp_pass,
@@ -34,7 +35,7 @@ use super::super::idioms::{
 use super::super::memory::{
     apply_aggregate_alias_access_rewrite_pass, apply_aggregate_fields_pass,
     apply_memory_slot_surfacing, apply_memory_slot_surfacing_cheap, apply_ptr_arith_recovery_pass,
-    normalize_binding_initializers,
+    apply_zero_index_deref_pass, normalize_binding_initializers,
 };
 use super::super::recovery::{
     apply_break_continue_pass, apply_flag_recovery_pass, apply_for_loop_folding,
@@ -721,6 +722,12 @@ pub(crate) fn normalize_hir_function(func: &mut HirFunction) {
         wave_stats::add_memory_fact_prefilter_skip(1);
         wave_stats::add_aggregate_fields_skipped_by_admission(1);
     }
+    run_pass_logged(
+        func,
+        "zero_index_deref_after_aggregate_fields",
+        perf,
+        apply_zero_index_deref_pass,
+    );
     // Single-predecessor label inlining: reduce goto/label pairs by inlining
     // blocks that are targeted by exactly one forward unconditional goto.
     // Runs last so all other structural passes have already had their say.
@@ -828,6 +835,12 @@ pub(crate) fn normalize_hir_function(func: &mut HirFunction) {
     }
     run_pass_logged(func, "cleanup_empty_ifs_final", perf, |f| {
         simplify_empty_and_constant_ifs_recursive(&mut f.body)
+    });
+    run_pass_logged(func, "prune_unused_bindings_final", perf, |f| {
+        let before = hir_shape(f);
+        prune_unused_temp_bindings(f);
+        prune_unused_dead_local_bindings(f);
+        before != hir_shape(f)
     });
     if perf {
         let (final_stmts, final_locals) = hir_shape(func);
@@ -1865,9 +1878,17 @@ fn cleanup_stmt_list_with_options_and_preserved(
             changed = true;
             last_changed_pass = Some("collapse_trivial_assign_returns");
         }
+        if collapse_loop_exit_alias_returns(stmts) {
+            changed = true;
+            last_changed_pass = Some("collapse_loop_exit_alias_returns");
+        }
         if depth == 0 && inline_single_use_temps(stmts, preserved_temps) {
             changed = true;
             last_changed_pass = Some("inline_single_use_temps");
+        }
+        if prune_unreachable_after_terminal(stmts) {
+            changed = true;
+            last_changed_pass = Some("prune_unreachable_after_terminal");
         }
         if depth == 0 && eliminate_dead_temp_assigns(stmts, preserved_temps) {
             changed = true;

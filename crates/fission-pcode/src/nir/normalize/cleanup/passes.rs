@@ -113,6 +113,169 @@ pub(crate) fn inline_single_use_temps(
     changed
 }
 
+pub(crate) fn collapse_loop_exit_alias_returns(_stmts: &mut Vec<HirStmt>) -> bool {
+    // This rewrite is currently disabled because removing `ret_name = rhs`
+    // from a `do/while` body is only safe if `ret_name` is proven dead for
+    // the remainder of the iteration and for the loop condition itself.
+    // The previous implementation only checked for later assignments to
+    // variables referenced by `rhs`, which is not sufficient to preserve
+    // loop behavior.
+    false
+}
+
+fn stmt_may_bypass_following_stmts(stmt: &HirStmt) -> bool {
+    match stmt {
+        HirStmt::Return(_) | HirStmt::Goto(_) | HirStmt::Break | HirStmt::Continue => true,
+        HirStmt::Block(body) => body.iter().any(stmt_may_bypass_following_stmts),
+        HirStmt::If {
+            then_body,
+            else_body,
+            ..
+        } => {
+            then_body.iter().any(stmt_may_bypass_following_stmts)
+                || else_body.iter().any(stmt_may_bypass_following_stmts)
+        }
+        HirStmt::Switch { cases, default, .. } => {
+            cases
+                .iter()
+                .any(|case| case.body.iter().any(stmt_may_bypass_following_stmts))
+                || default.iter().any(stmt_may_bypass_following_stmts)
+        }
+        HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } | HirStmt::For { body, .. } => {
+            body.iter().any(stmt_may_bypass_following_stmts)
+        }
+        HirStmt::Assign { .. }
+        | HirStmt::Expr(_)
+        | HirStmt::VaStart { .. }
+        | HirStmt::Label(_) => false,
+    }
+}
+
+fn stmt_assigns_any_expr_var(stmt: &HirStmt, expr: &HirExpr) -> bool {
+    match stmt {
+        HirStmt::Assign { lhs, .. } => lvalue_assigns_any_expr_var(lhs, expr),
+        HirStmt::Block(body) | HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
+            body.iter().any(|stmt| stmt_assigns_any_expr_var(stmt, expr))
+        }
+        HirStmt::For {
+            init, update, body, ..
+        } => {
+            init.as_deref()
+                .is_some_and(|stmt| stmt_assigns_any_expr_var(stmt, expr))
+                || update
+                    .as_deref()
+                    .is_some_and(|stmt| stmt_assigns_any_expr_var(stmt, expr))
+                || body.iter().any(|stmt| stmt_assigns_any_expr_var(stmt, expr))
+        }
+        HirStmt::If {
+            then_body,
+            else_body,
+            ..
+        } => {
+            then_body
+                .iter()
+                .any(|stmt| stmt_assigns_any_expr_var(stmt, expr))
+                || else_body
+                    .iter()
+                    .any(|stmt| stmt_assigns_any_expr_var(stmt, expr))
+        }
+        HirStmt::Switch { cases, default, .. } => {
+            cases
+                .iter()
+                .any(|case| case.body.iter().any(|stmt| stmt_assigns_any_expr_var(stmt, expr)))
+                || default
+                    .iter()
+                    .any(|stmt| stmt_assigns_any_expr_var(stmt, expr))
+        }
+        HirStmt::Expr(_)
+        | HirStmt::Return(_)
+        | HirStmt::VaStart { .. }
+        | HirStmt::Label(_)
+        | HirStmt::Goto(_)
+        | HirStmt::Break
+        | HirStmt::Continue => false,
+    }
+}
+
+fn lvalue_assigns_any_expr_var(lhs: &HirLValue, expr: &HirExpr) -> bool {
+    match lhs {
+        HirLValue::Var(name) => expr_contains_var(expr, name),
+        HirLValue::Deref { .. } | HirLValue::Index { .. } => false,
+    }
+}
+
+pub(crate) fn prune_unreachable_after_terminal(stmts: &mut Vec<HirStmt>) -> bool {
+    let mut changed = false;
+    let referenced_labels = collect_referenced_labels(stmts);
+    let mut idx = 0usize;
+    while idx < stmts.len() {
+        if !is_unconditional_terminal(&stmts[idx]) {
+            idx += 1;
+            continue;
+        }
+
+        let mut end = idx + 1;
+        while end < stmts.len() && !stmt_contains_referenced_label(&stmts[end], &referenced_labels)
+        {
+            end += 1;
+        }
+        if end > idx + 1 {
+            stmts.drain(idx + 1..end);
+            changed = true;
+        }
+        idx += 1;
+    }
+    changed
+}
+
+fn is_unconditional_terminal(stmt: &HirStmt) -> bool {
+    matches!(
+        stmt,
+        HirStmt::Return(_) | HirStmt::Goto(_) | HirStmt::Break | HirStmt::Continue
+    )
+}
+
+fn stmt_contains_referenced_label(stmt: &HirStmt, referenced_labels: &HashSet<String>) -> bool {
+    match stmt {
+        HirStmt::Label(label) => referenced_labels.contains(label),
+        HirStmt::Block(body)
+        | HirStmt::While { body, .. }
+        | HirStmt::DoWhile { body, .. }
+        | HirStmt::For { body, .. } => body
+            .iter()
+            .any(|stmt| stmt_contains_referenced_label(stmt, referenced_labels)),
+        HirStmt::If {
+            then_body,
+            else_body,
+            ..
+        } => {
+            then_body
+                .iter()
+                .any(|stmt| stmt_contains_referenced_label(stmt, referenced_labels))
+                || else_body
+                    .iter()
+                    .any(|stmt| stmt_contains_referenced_label(stmt, referenced_labels))
+        }
+        HirStmt::Switch { cases, default, .. } => {
+            default
+                .iter()
+                .any(|stmt| stmt_contains_referenced_label(stmt, referenced_labels))
+                || cases.iter().any(|case| {
+                    case.body
+                        .iter()
+                        .any(|stmt| stmt_contains_referenced_label(stmt, referenced_labels))
+                })
+        }
+        HirStmt::Assign { .. }
+        | HirStmt::VaStart { .. }
+        | HirStmt::Expr(_)
+        | HirStmt::Return(_)
+        | HirStmt::Goto(_)
+        | HirStmt::Break
+        | HirStmt::Continue => false,
+    }
+}
+
 pub(crate) fn eliminate_dead_temp_assigns(
     stmts: &mut Vec<HirStmt>,
     _preserved_temps: &HashSet<String>,
@@ -856,6 +1019,99 @@ mod tests {
     }
 
     #[test]
+    fn collapse_loop_exit_alias_return_rewrites_do_while_exit_copy() {
+        let mut stmts = vec![
+            HirStmt::DoWhile {
+                body: vec![
+                    HirStmt::Assign {
+                        lhs: HirLValue::Var("sum".to_string()),
+                        rhs: HirExpr::Binary {
+                            op: HirBinaryOp::Add,
+                            lhs: Box::new(HirExpr::Var("sum".to_string())),
+                            rhs: Box::new(HirExpr::Var("value".to_string())),
+                            ty: int(32),
+                        },
+                    },
+                    HirStmt::Assign {
+                        lhs: HirLValue::Var("exit_sum".to_string()),
+                        rhs: HirExpr::Var("sum".to_string()),
+                    },
+                    HirStmt::Assign {
+                        lhs: HirLValue::Var("ptr".to_string()),
+                        rhs: HirExpr::Binary {
+                            op: HirBinaryOp::Add,
+                            lhs: Box::new(HirExpr::Var("ptr".to_string())),
+                            rhs: Box::new(HirExpr::Const(1, int(64))),
+                            ty: int(64),
+                        },
+                    },
+                ],
+                cond: HirExpr::Var("keep_going".to_string()),
+            },
+            HirStmt::Return(Some(HirExpr::Var("exit_sum".to_string()))),
+        ];
+
+        assert!(collapse_loop_exit_alias_returns(&mut stmts));
+        let HirStmt::DoWhile { body, .. } = &stmts[0] else {
+            panic!("expected do/while");
+        };
+        assert!(!body.iter().any(|stmt| matches!(
+            stmt,
+            HirStmt::Assign {
+                lhs: HirLValue::Var(name),
+                ..
+            } if name == "exit_sum"
+        )));
+        assert!(matches!(
+            &stmts[1],
+            HirStmt::Return(Some(HirExpr::Var(name))) if name == "sum"
+        ));
+    }
+
+    #[test]
+    fn collapse_loop_exit_alias_return_rejects_rhs_mutated_after_copy() {
+        let mut stmts = vec![
+            HirStmt::DoWhile {
+                body: vec![
+                    HirStmt::Assign {
+                        lhs: HirLValue::Var("exit_sum".to_string()),
+                        rhs: HirExpr::Var("sum".to_string()),
+                    },
+                    HirStmt::Assign {
+                        lhs: HirLValue::Var("sum".to_string()),
+                        rhs: HirExpr::Const(0, int(32)),
+                    },
+                ],
+                cond: HirExpr::Var("keep_going".to_string()),
+            },
+            HirStmt::Return(Some(HirExpr::Var("exit_sum".to_string()))),
+        ];
+
+        assert!(!collapse_loop_exit_alias_returns(&mut stmts));
+    }
+
+    #[test]
+    fn collapse_loop_exit_alias_return_rejects_non_alias_expression() {
+        let mut stmts = vec![
+            HirStmt::DoWhile {
+                body: vec![HirStmt::Assign {
+                    lhs: HirLValue::Var("exit_sum".to_string()),
+                    rhs: HirExpr::Binary {
+                        op: HirBinaryOp::Add,
+                        lhs: Box::new(HirExpr::Var("sum".to_string())),
+                        rhs: Box::new(HirExpr::Var("value".to_string())),
+                        ty: int(32),
+                    },
+                }],
+                cond: HirExpr::Var("keep_going".to_string()),
+            },
+            HirStmt::Return(Some(HirExpr::Var("exit_sum".to_string()))),
+        ];
+
+        assert!(!collapse_loop_exit_alias_returns(&mut stmts));
+    }
+
+    #[test]
     fn eliminate_dead_temp_assigns_removes_dead_preserved_temp() {
         let mut stmts = vec![HirStmt::Assign {
             lhs: HirLValue::Var("uVar0".to_string()),
@@ -872,6 +1128,30 @@ mod tests {
             &HashSet::from([String::from("uVar0")]),
         ));
         assert!(stmts.is_empty());
+    }
+
+    #[test]
+    fn prune_unreachable_after_return_stops_at_label_boundary() {
+        let mut stmts = vec![
+            HirStmt::Return(Some(HirExpr::Var("ret".to_string()))),
+            HirStmt::Assign {
+                lhs: HirLValue::Var("dead".to_string()),
+                rhs: HirExpr::Const(1, int(32)),
+            },
+            HirStmt::Goto("kept".to_string()),
+            HirStmt::Label("kept".to_string()),
+            HirStmt::Return(None),
+        ];
+
+        assert!(prune_unreachable_after_terminal(&mut stmts));
+        assert_eq!(
+            stmts,
+            vec![
+                HirStmt::Return(Some(HirExpr::Var("ret".to_string()))),
+                HirStmt::Label("kept".to_string()),
+                HirStmt::Return(None),
+            ]
+        );
     }
 
     #[test]
