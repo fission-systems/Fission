@@ -12,8 +12,9 @@ use super::super::arith::{
 };
 use super::super::cleanup::single_pred_label_inline;
 use super::super::cleanup::{
-    cast_elision_pass, cleanup_redundant_boundary_labels, collapse_redundant_conditional_returns,
-    collapse_trivial_assign_returns, elide_unused_popcount_assigns,
+    cast_elision_pass, cleanup_redundant_boundary_labels, collapse_loop_exit_alias_returns,
+    collapse_redundant_conditional_returns, collapse_trivial_assign_returns,
+    elide_unused_popcount_assigns,
     eliminate_dead_local_clobber_assigns, eliminate_dead_temp_assigns,
     fuse_single_predecessor_boundaries, inline_single_use_temps, promote_guarded_jump_target_tail,
     prune_unreachable_after_terminal, prune_unused_dead_local_bindings, prune_unused_temp_bindings,
@@ -722,6 +723,12 @@ pub(crate) fn normalize_hir_function(func: &mut HirFunction) {
     }
     run_pass_logged(func, "cleanup_empty_ifs_final", perf, |f| {
         simplify_empty_and_constant_ifs_recursive(&mut f.body)
+    });
+    run_pass_logged(func, "prune_unused_bindings_final", perf, |f| {
+        let before = hir_shape(f);
+        prune_unused_temp_bindings(f);
+        prune_unused_dead_local_bindings(f);
+        before != hir_shape(f)
     });
     if perf {
         let (final_stmts, final_locals) = hir_shape(func);
@@ -1750,6 +1757,10 @@ fn cleanup_stmt_list_with_options_and_preserved(
         if depth == 0 && collapse_trivial_assign_returns(stmts, preserved_temps) {
             changed = true;
             last_changed_pass = Some("collapse_trivial_assign_returns");
+        }
+        if collapse_loop_exit_alias_returns(stmts) {
+            changed = true;
+            last_changed_pass = Some("collapse_loop_exit_alias_returns");
         }
         if depth == 0 && inline_single_use_temps(stmts, preserved_temps) {
             changed = true;
