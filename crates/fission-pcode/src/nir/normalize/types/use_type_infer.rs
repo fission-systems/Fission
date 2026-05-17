@@ -774,7 +774,10 @@ fn count_var_uses_stmt(stmt: &HirStmt, out: &mut HashMap<String, usize>) {
             count_var_uses_stmts(else_body, out);
         }
         HirStmt::For {
-            init, cond, update, ..
+            init,
+            cond,
+            update,
+            body,
         } => {
             if let Some(init) = init {
                 count_var_uses_stmt(init, out);
@@ -785,6 +788,7 @@ fn count_var_uses_stmt(stmt: &HirStmt, out: &mut HashMap<String, usize>) {
             if let Some(update) = update {
                 count_var_uses_stmt(update, out);
             }
+            count_var_uses_stmts(body, out);
         }
         HirStmt::Switch {
             expr,
@@ -810,6 +814,102 @@ fn count_var_uses_stmts(stmts: &[HirStmt], out: &mut HashMap<String, usize>) {
     for stmt in stmts {
         count_var_uses_stmt(stmt, out);
     }
+}
+
+fn store_value_var_name(expr: &HirExpr) -> Option<&str> {
+    match expr {
+        HirExpr::Var(name) => Some(name.as_str()),
+        HirExpr::Cast { expr, .. } => store_value_var_name(expr),
+        _ => None,
+    }
+}
+
+fn count_store_value_uses_stmt(stmt: &HirStmt, out: &mut HashMap<String, usize>) {
+    match stmt {
+        HirStmt::Assign {
+            lhs: HirLValue::Deref { .. } | HirLValue::Index { .. },
+            rhs,
+        } => {
+            if let Some(name) = store_value_var_name(rhs) {
+                *out.entry(name.to_owned()).or_default() += 1;
+            }
+        }
+        HirStmt::Block(stmts)
+        | HirStmt::While { body: stmts, .. }
+        | HirStmt::DoWhile { body: stmts, .. } => count_store_value_uses_stmts(stmts, out),
+        HirStmt::If {
+            then_body,
+            else_body,
+            ..
+        } => {
+            count_store_value_uses_stmts(then_body, out);
+            count_store_value_uses_stmts(else_body, out);
+        }
+        HirStmt::For {
+            init, update, body, ..
+        } => {
+            if let Some(init) = init {
+                count_store_value_uses_stmt(init, out);
+            }
+            if let Some(update) = update {
+                count_store_value_uses_stmt(update, out);
+            }
+            count_store_value_uses_stmts(body, out);
+        }
+        HirStmt::Switch { cases, default, .. } => {
+            for case in cases {
+                count_store_value_uses_stmts(&case.body, out);
+            }
+            count_store_value_uses_stmts(default, out);
+        }
+        HirStmt::Assign { .. }
+        | HirStmt::VaStart { .. }
+        | HirStmt::Expr(_)
+        | HirStmt::Return(_)
+        | HirStmt::Label(_)
+        | HirStmt::Goto(_)
+        | HirStmt::Break
+        | HirStmt::Continue => {}
+    }
+}
+
+fn count_store_value_uses_stmts(stmts: &[HirStmt], out: &mut HashMap<String, usize>) {
+    for stmt in stmts {
+        count_store_value_uses_stmt(stmt, out);
+    }
+}
+
+fn promote_store_value_only_unsigned_params(func: &mut HirFunction) -> bool {
+    let mut all_uses = HashMap::new();
+    count_var_uses_stmts(&func.body, &mut all_uses);
+    let mut store_value_uses = HashMap::new();
+    count_store_value_uses_stmts(&func.body, &mut store_value_uses);
+
+    let mut changed = false;
+    for binding in &mut func.params {
+        if binding.surface_type_name.is_some()
+            || !matches!(binding.origin, Some(NirBindingOrigin::ParamIndex(_)))
+        {
+            continue;
+        }
+        let NirType::Int {
+            bits: 32,
+            signed: false,
+        } = binding.ty
+        else {
+            continue;
+        };
+        let all = all_uses.get(&binding.name).copied().unwrap_or(0);
+        let stores = store_value_uses.get(&binding.name).copied().unwrap_or(0);
+        if all > 0 && all == stores {
+            binding.ty = NirType::Int {
+                bits: 32,
+                signed: true,
+            };
+            changed = true;
+        }
+    }
+    changed
 }
 
 fn wrapping_narrow_op(op: HirBinaryOp) -> bool {
@@ -1063,6 +1163,7 @@ pub(crate) fn apply_use_driven_type_infer_pass(func: &mut HirFunction) -> bool {
         round_changed |= promote_unknown_call_return_type(func);
         round_changed |= promote_return_signedness_from_returns(func);
         round_changed |= narrow_integer_params_from_wrapping_return_uses(func);
+        round_changed |= promote_store_value_only_unsigned_params(func);
         if !round_changed {
             break;
         }
@@ -1459,6 +1560,88 @@ mod tests {
 
         assert!(!super::apply_use_driven_type_infer_pass(&mut func));
         assert_eq!(func.params[0].ty, u64_ty);
+    }
+
+    #[test]
+    fn store_value_only_unsigned_param_defaults_to_signed_int() {
+        let u32_ty = NirType::Int {
+            bits: 32,
+            signed: false,
+        };
+        let i32_ty = NirType::Int {
+            bits: 32,
+            signed: true,
+        };
+        let mut func = HirFunction {
+            name: "fill".to_owned(),
+            params: vec![
+                make_typed_binding(
+                    "param_1",
+                    NirType::Ptr(Box::new(u32_ty.clone())),
+                    NirBindingOrigin::ParamIndex(0),
+                ),
+                make_typed_binding("param_2", u32_ty.clone(), NirBindingOrigin::ParamIndex(1)),
+            ],
+            locals: vec![],
+            return_type: NirType::Unknown,
+            surface_return_type_name: None,
+            body: vec![HirStmt::Assign {
+                lhs: HirLValue::Deref {
+                    ptr: Box::new(HirExpr::Var("param_1".to_owned())),
+                    ty: u32_ty.clone(),
+                },
+                rhs: HirExpr::Var("param_2".to_owned()),
+            }],
+            ..Default::default()
+        };
+
+        assert!(super::apply_use_driven_type_infer_pass(&mut func));
+        assert_eq!(func.params[1].ty, i32_ty);
+    }
+
+    #[test]
+    fn store_value_param_keeps_unsigned_when_used_in_unsigned_comparison() {
+        let u32_ty = NirType::Int {
+            bits: 32,
+            signed: false,
+        };
+        let mut func = HirFunction {
+            name: "fill_guarded".to_owned(),
+            params: vec![
+                make_typed_binding(
+                    "param_1",
+                    NirType::Ptr(Box::new(u32_ty.clone())),
+                    NirBindingOrigin::ParamIndex(0),
+                ),
+                make_typed_binding("param_2", u32_ty.clone(), NirBindingOrigin::ParamIndex(1)),
+            ],
+            locals: vec![],
+            return_type: NirType::Unknown,
+            surface_return_type_name: None,
+            body: vec![
+                HirStmt::If {
+                    cond: HirExpr::Binary {
+                        op: HirBinaryOp::Lt,
+                        lhs: Box::new(HirExpr::Var("param_2".to_owned())),
+                        rhs: Box::new(HirExpr::Const(10, u32_ty.clone())),
+                        ty: NirType::Bool,
+                    },
+                    then_body: Vec::new(),
+                    else_body: Vec::new(),
+                },
+                HirStmt::Assign {
+                    lhs: HirLValue::Deref {
+                        ptr: Box::new(HirExpr::Var("param_1".to_owned())),
+                        ty: u32_ty.clone(),
+                    },
+                    rhs: HirExpr::Var("param_2".to_owned()),
+                },
+            ],
+            ..Default::default()
+        };
+
+        assert!(!super::apply_use_driven_type_infer_pass(&mut func));
+        assert_eq!(func.params[1].ty, u32_ty);
     }
 
     #[test]
