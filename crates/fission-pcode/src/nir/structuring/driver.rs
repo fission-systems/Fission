@@ -479,7 +479,11 @@ impl<'a> PreviewBuilder<'a> {
                         )?;
                     }
                     CollapseRule::DoWhile => {
-                        let dowhile_candidate = self.try_lower_dowhile(idx);
+                        let mut dowhile_candidate = self.try_lower_dowhile(idx)?;
+                        if dowhile_candidate.is_none() {
+                            dowhile_candidate = self.try_lower_multiblock_dowhile(idx)?;
+                        }
+                        let dowhile_candidate = Ok(dowhile_candidate);
                         self.consider_structured_candidate(
                             rule,
                             idx,

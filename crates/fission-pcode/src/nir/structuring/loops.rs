@@ -521,6 +521,68 @@ impl<'a> PreviewBuilder<'a> {
         }
     }
 
+    pub(super) fn try_lower_multiblock_dowhile(
+        &mut self,
+        idx: usize,
+    ) -> Result<Option<(HirStmt, usize)>, MlilPreviewError> {
+        let diag = structuring_diag_enabled();
+        
+        let (exit_idx, latch_idx, body_set) = {
+            let Some(loop_body) = self.get_loop_body(idx) else {
+                return Ok(None);
+            };
+            let Some(exit_idx) = loop_body.exit_idx else {
+                return Ok(None);
+            };
+            if loop_body.tails.len() != 1 {
+                return Ok(None);
+            }
+            let latch_idx = loop_body.tails[0];
+            let body_set: HashSet<usize> = loop_body.body.iter().copied().collect();
+            (exit_idx, latch_idx, body_set)
+        };
+
+        let start_addr = self.block_target_key(idx);
+        let exit_addr = self.block_target_key(exit_idx);
+
+        let LoweredTerminator::Cond {
+            cond,
+            true_target,
+            false_target,
+        } = self.lower_block_terminator(latch_idx)?
+        else {
+            return Ok(None);
+        };
+
+        let _while_cond = if true_target == start_addr && false_target == Some(exit_addr) {
+            cond
+        } else if false_target == Some(start_addr) && true_target == exit_addr {
+            negate_expr(cond)
+        } else {
+            return Ok(None);
+        };
+
+        if diag {
+            eprintln!("[DIAG] try_lower_multiblock_dowhile: attempting subgraph for idx={}", idx);
+        }
+
+        let Some(lowered) =
+            self.lower_loop_body_subgraph(&body_set, idx, Some(exit_idx), idx)?
+        else {
+            return Ok(None);
+        };
+
+        self.telemetry.structuring.loop_while_subgraph_lowered_count += 1;
+
+        Ok(Some((
+            HirStmt::While {
+                cond: HirExpr::Const(1, NirType::Bool),
+                body: lowered,
+            },
+            exit_idx,
+        )))
+    }
+
     // -----------------------------------------------------------------------
     // For-loop pattern detection
     // -----------------------------------------------------------------------
