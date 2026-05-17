@@ -28,6 +28,9 @@ except ImportError:  # pragma: no cover - optional fast path
 ROOT_DIR = Path(__file__).resolve().parents[2]
 DEFAULT_MANIFEST = Path(__file__).resolve().parent / "manifests" / "source_owned_all.json"
 DEFAULT_FISSION_BIN = ROOT_DIR / "target" / "release" / "fission_cli"
+DEFAULT_GHIDRA_HOME = ROOT_DIR / "vendor" / "ghidra" / "ghidra_12.0.4_PUBLIC"
+DEFAULT_GHIDRA_SCRIPT_DIR = Path(__file__).resolve().parent / "ghidra_scripts"
+DEFAULT_GHIDRA_EXPORT_SCRIPT = "ExportSourceSemanticDecomp.java"
 DEFAULT_ARTIFACT_ROOT = ROOT_DIR / "benchmark" / "artifacts" / "source_semantic_benchmark"
 DEFAULT_DECOMP_CACHE_FILE = DEFAULT_ARTIFACT_ROOT / ".cache" / "decomp_cache.json"
 DEFAULT_LIST_CACHE_FILE = DEFAULT_ARTIFACT_ROOT / ".cache" / "list_cache.json"
@@ -822,6 +825,137 @@ def run_fission_list_cached(
     }
     cache_stats["stored"] += 1
     return funcs, error
+
+
+def ghidra_headless_path(ghidra_home: Path) -> Path:
+    candidates = [
+        ghidra_home / "Ghidra" / "RuntimeScripts" / "Linux" / "support" / "analyzeHeadless",
+        ghidra_home / "support" / "analyzeHeadless",
+        ghidra_home / "analyzeHeadless",
+    ]
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    return candidates[0]
+
+
+def run_ghidra_reference_export(
+    binary_path: Path,
+    ghidra_home: Path,
+    timeout_sec: int,
+    output_dir: Path,
+    entry_id: str,
+) -> dict[str, Any]:
+    headless = ghidra_headless_path(ghidra_home)
+    if not headless.exists():
+        return {
+            "success": False,
+            "failure_kind": "missing_analyze_headless",
+            "failure_detail": str(headless),
+            "functions": [],
+        }
+    script_path = DEFAULT_GHIDRA_SCRIPT_DIR / DEFAULT_GHIDRA_EXPORT_SCRIPT
+    if not script_path.exists():
+        return {
+            "success": False,
+            "failure_kind": "missing_export_script",
+            "failure_detail": str(script_path),
+            "functions": [],
+        }
+
+    ghidra_dir = output_dir / "ghidra_reference"
+    ghidra_dir.mkdir(parents=True, exist_ok=True)
+    export_path = ghidra_dir / f"{sanitize_id(entry_id)}-decomp.json"
+    project_dir = ghidra_dir / "projects"
+    project_dir.mkdir(parents=True, exist_ok=True)
+    project_name = f"{sanitize_id(entry_id)}-{hashlib.sha1(str(binary_path).encode('utf-8')).hexdigest()[:10]}"
+    cmd = [
+        str(headless),
+        str(project_dir),
+        project_name,
+        "-import",
+        str(binary_path),
+        "-deleteProject",
+        "-scriptPath",
+        str(DEFAULT_GHIDRA_SCRIPT_DIR),
+        "-postScript",
+        DEFAULT_GHIDRA_EXPORT_SCRIPT,
+        str(export_path),
+        str(max(1, timeout_sec)),
+    ]
+    start = time.perf_counter()
+    try:
+        res = subprocess.run(
+            cmd,
+            cwd=ROOT_DIR,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=max(timeout_sec * 4, timeout_sec + 30),
+            check=True,
+        )
+    except subprocess.TimeoutExpired as exc:
+        return {
+            "success": False,
+            "failure_kind": "timeout",
+            "failure_detail": ((exc.stderr or "") + "\n" + (exc.stdout or "")).strip()[-4000:],
+            "functions": [],
+            "wall_sec": round(time.perf_counter() - start, 6),
+            "command": shlex.join(cmd),
+        }
+    except subprocess.CalledProcessError as exc:
+        return {
+            "success": False,
+            "failure_kind": "command_failed",
+            "failure_detail": ((exc.stderr or "") + "\n" + (exc.stdout or "")).strip()[-4000:],
+            "functions": [],
+            "wall_sec": round(time.perf_counter() - start, 6),
+            "command": shlex.join(cmd),
+        }
+
+    try:
+        payload = load_json(export_path)
+    except Exception as exc:
+        return {
+            "success": False,
+            "failure_kind": "invalid_export_json",
+            "failure_detail": str(exc),
+            "functions": [],
+            "wall_sec": round(time.perf_counter() - start, 6),
+            "stdout": res.stdout[-4000:],
+            "stderr": res.stderr[-4000:],
+            "command": shlex.join(cmd),
+        }
+    functions = payload.get("functions") if isinstance(payload, dict) else []
+    if not isinstance(functions, list):
+        functions = []
+    return {
+        "success": True,
+        "failure_kind": None,
+        "functions": functions,
+        "function_count": len(functions),
+        "artifact_path": rel(export_path),
+        "wall_sec": round(time.perf_counter() - start, 6),
+        "command": shlex.join(cmd),
+        "stdout_tail": res.stdout[-4000:],
+        "stderr_tail": res.stderr[-4000:],
+    }
+
+
+def ghidra_function_index(functions: list[dict[str, Any]]) -> tuple[list[FissionFunction], dict[str, dict[str, Any]]]:
+    listed: list[FissionFunction] = []
+    by_address: dict[str, dict[str, Any]] = {}
+    for raw in functions:
+        if not isinstance(raw, dict):
+            continue
+        address = raw.get("address")
+        name = raw.get("name")
+        if not address or not name:
+            continue
+        canonical = canonical_address(str(address))
+        listed.append(FissionFunction(address=canonical, name=str(name)))
+        by_address[canonical] = raw
+    return listed, by_address
 
 
 def canonical_address(value: str | int) -> str:
@@ -7509,6 +7643,65 @@ def render_markdown(summary: dict[str, Any], rows: list[dict[str, Any]]) -> str:
                     f"{row.get('baseline_score_percent', 0.0):.3f}% | {row.get('current_score_percent', 0.0):.3f}% | "
                     f"{row.get('baseline_behavior')} -> {row.get('current_behavior')} |"
                 )
+    ghidra_reference = summary.get("ghidra_reference")
+    if isinstance(ghidra_reference, dict):
+        ghidra_comparison = ghidra_reference.get("comparison") if isinstance(ghidra_reference.get("comparison"), dict) else {}
+        delta = ghidra_comparison.get("weighted_semantic_similarity_delta_percent")
+        delta_text = "n/a" if delta is None else f"{float(delta):+.3f}%"
+        lines.extend(
+            [
+                "",
+                "## Ghidra Reference Lane",
+                "",
+                "- Contract: Ghidra is scored against source as a reference lane; it is not the oracle.",
+                f"- Ghidra summary: `{ghidra_reference.get('summary_path')}`",
+                f"- Ghidra rows: `{ghidra_reference.get('rows_path')}`",
+                f"- Comparison: `{ghidra_reference.get('comparison_path')}`",
+                f"- Ghidra weighted semantic similarity: {float(ghidra_reference.get('weighted_semantic_similarity_percent', 0.0) or 0.0):.3f}%",
+                f"- Fission minus Ghidra weighted delta: {delta_text}",
+                f"- Export success/failure: {ghidra_reference.get('reference_export_success_count', 0)}/"
+                f"{ghidra_reference.get('reference_export_failure_count', 0)}",
+            ]
+        )
+        bucket_counts = ghidra_comparison.get("bucket_counts") if isinstance(ghidra_comparison.get("bucket_counts"), dict) else {}
+        if bucket_counts:
+            lines.extend(["", "| Bucket | Rows |", "|---|---:|"])
+            for bucket, count in sorted(bucket_counts.items()):
+                lines.append(f"| `{bucket}` | {count} |")
+        export_failures = [
+            export
+            for export in (ghidra_reference.get("reference_exports") or [])
+            if isinstance(export, dict) and not export.get("success")
+        ]
+        if export_failures:
+            lines.extend(["", "### Ghidra Export Failures", "", "| Entry | Failure | Detail |", "|---|---|---|"])
+            for export in export_failures[:8]:
+                detail = str(export.get("failure_detail") or "")
+                if len(detail) > 160:
+                    detail = detail[:157] + "..."
+                lines.append(
+                    f"| `{export.get('entry_id')}` | `{export.get('failure_kind')}` | {detail} |"
+                )
+        top_ghidra = ghidra_comparison.get("top_ghidra_ahead") or []
+        if top_ghidra:
+            lines.extend(["", "### Ghidra Ahead Rows", "", "| Function | Delta | Fission | Ghidra | Behavior |", "|---|---:|---:|---:|---|"])
+            for row in top_ghidra[:8]:
+                lines.append(
+                    f"| `{row.get('function_name')}` | {float(row.get('delta_percent', 0.0) or 0.0):+.3f}% | "
+                    f"{float(row.get('fission_score_percent', 0.0) or 0.0):.3f}% | "
+                    f"{float(row.get('ghidra_score_percent', 0.0) or 0.0):.3f}% | "
+                    f"{row.get('fission_behavior')} -> {row.get('ghidra_behavior')} |"
+                )
+        top_fission = ghidra_comparison.get("top_fission_ahead") or []
+        if top_fission:
+            lines.extend(["", "### Fission Ahead Rows", "", "| Function | Delta | Fission | Ghidra | Behavior |", "|---|---:|---:|---:|---|"])
+            for row in top_fission[:8]:
+                lines.append(
+                    f"| `{row.get('function_name')}` | {float(row.get('delta_percent', 0.0) or 0.0):+.3f}% | "
+                    f"{float(row.get('fission_score_percent', 0.0) or 0.0):.3f}% | "
+                    f"{float(row.get('ghidra_score_percent', 0.0) or 0.0):.3f}% | "
+                    f"{row.get('fission_behavior')} -> {row.get('ghidra_behavior')} |"
+                )
     debug_triage = summary.get("debug_triage") or []
     if debug_triage:
         lines.extend(["", "## Materialized Debug Triage", "", "| Function | Score | Debug Bundle | Disasm | Xrefs | Facts |", "|---|---:|---|---|---|---|"])
@@ -7772,6 +7965,7 @@ def row_for_function(
     semantic_score = round(0.65 * float(behavior.get("score", 0.0)) + 0.35 * static_score, 6)
     debug_decomp = decomp.get("debug_decomp")
     return {
+        "candidate_decompiler": "fission",
         "entry_id": entry.id,
         "binary_path": rel(entry.binary_path),
         "binary_arch": infer_entry_arch(entry),
@@ -7826,6 +8020,210 @@ def row_for_function(
     }
 
 
+def row_for_ghidra_function(
+    entry: BenchmarkEntry,
+    func: SourceFunction,
+    source_functions_by_name: dict[str, SourceFunction],
+    ghidra_funcs: list[FissionFunction],
+    ghidra_by_address: dict[str, dict[str, Any]],
+    ghidra_error: str | None,
+    timeout_sec: int,
+    host_execution: dict[str, Any],
+    behavior_cache: dict[str, dict[str, Any]] | None,
+    behavior_cache_lock: threading.Lock | None,
+    behavior_cache_stats: Counter[str],
+    output_dir: Path | None = None,
+) -> dict[str, Any]:
+    source_fp_direct = code_fingerprint(func.body, func)
+    source_fp_inline_expanded = inline_expanded_source_fingerprint(func, source_functions_by_name)
+    mapping_status, matched, candidates = match_function(func, ghidra_funcs) if not ghidra_error else ("list_failed", None, [])
+    decomp: dict[str, Any] = {"success": False, "failure_kind": mapping_status}
+    if matched is not None:
+        raw = ghidra_by_address.get(matched.address, {})
+        decomp = {
+            "success": bool(raw.get("success")) and bool(str(raw.get("code") or "").strip()),
+            "code": raw.get("code") or "",
+            "failure_kind": None if raw.get("success") else "decompile_error",
+            "failure_detail": raw.get("error"),
+            "wall_sec": raw.get("decompile_sec"),
+            "engine_used": "ghidra",
+        }
+        if not decomp["success"] and not decomp.get("failure_detail"):
+            decomp["failure_detail"] = "empty_output"
+    decomp_code = decomp.get("code") if decomp.get("success") else None
+    source_body_lines = func.body.splitlines()
+    decomp_lines = decomp_code.splitlines() if decomp_code else []
+    decomp_signature = rendered_signature_kinds(decomp_code) if decomp_code else None
+    decomp_return_kind = decomp_signature[0] if decomp_signature is not None else None
+    decomp_param_kinds = decomp_signature[1] if decomp_signature is not None else None
+    decomp_fp = code_fingerprint(decomp_code or "") if decomp_code else Counter()
+    static_score_direct = multiset_jaccard(source_fp_direct, decomp_fp) if decomp_code else 0.0
+    static_score_inline_expanded = (
+        multiset_jaccard(source_fp_inline_expanded, decomp_fp)
+        if decomp_code and source_fp_inline_expanded != source_fp_direct
+        else static_score_direct
+    )
+    if static_score_inline_expanded > static_score_direct:
+        source_fp = source_fp_inline_expanded
+        static_score = static_score_inline_expanded
+        static_source_variant = "same_source_inline_expanded"
+    else:
+        source_fp = source_fp_direct
+        static_score = static_score_direct
+        static_source_variant = "direct_source"
+    static_components = static_similarity_components(source_fp, decomp_fp) if decomp_code else {
+        name: 0.0 for name in STATIC_SIMILARITY_COMPONENTS
+    }
+    static_gaps = multiset_gap_details(source_fp, decomp_fp) if decomp_code else multiset_gap_details(source_fp, Counter())
+    static_gap_components = (
+        static_similarity_gap_components(source_fp, decomp_fp)
+        if decomp_code
+        else static_similarity_gap_components(source_fp, Counter())
+    )
+    behavior_output_dir = output_dir / "ghidra_reference_behavior" if output_dir is not None else None
+    behavior = run_behavior_check(
+        entry,
+        func,
+        decomp_code,
+        timeout_sec,
+        host_execution,
+        behavior_cache,
+        behavior_cache_lock,
+        behavior_cache_stats,
+        output_dir=behavior_output_dir,
+        address=matched.address if matched else None,
+    )
+    semantic_score = round(0.65 * float(behavior.get("score", 0.0)) + 0.35 * static_score, 6)
+    return {
+        "candidate_decompiler": "ghidra",
+        "entry_id": entry.id,
+        "binary_path": rel(entry.binary_path),
+        "binary_arch": infer_entry_arch(entry),
+        "source_path": rel(entry.source_path),
+        "language": entry.language,
+        "tags": entry.tags,
+        "function_name": func.name,
+        "source_line": func.line,
+        "source_signature": func.signature,
+        "source_is_static": func.is_static,
+        "source_return_kind": func.return_kind,
+        "source_param_kinds": func.param_kinds,
+        "source_param_shape": source_param_shape(func.param_kinds),
+        "source_body_line_count": len(source_body_lines),
+        "source_body_byte_count": len(func.body.encode("utf-8")),
+        "source_static_feature_count": sum(source_fp.values()),
+        "source_static_feature_count_direct": sum(source_fp_direct.values()),
+        "source_static_feature_count_inline_expanded": sum(source_fp_inline_expanded.values()),
+        "address": matched.address if matched else None,
+        "fission_name": matched.name if matched else None,
+        "mapping_status": mapping_status,
+        "mapping_candidates": candidates,
+        "list_error": ghidra_error,
+        "decomp_success": bool(decomp.get("success")),
+        "decomp_failure_kind": decomp.get("failure_kind"),
+        "decomp_failure_detail": decomp.get("failure_detail"),
+        "engine_used": decomp.get("engine_used"),
+        "preview_build_stats": None,
+        "debug_decomp_bundle_path": None,
+        "debug_decomp": None,
+        "decomp_cache_status": "not_requested",
+        "decomp_wall_sec": decomp.get("wall_sec"),
+        "decomp_line_count": len(decomp_lines),
+        "decomp_byte_count": len(decomp_code.encode("utf-8")) if decomp_code else 0,
+        "decomp_return_kind": decomp_return_kind,
+        "decomp_param_kinds": decomp_param_kinds,
+        "decomp_param_shape": source_param_shape(decomp_param_kinds or []) if decomp_param_kinds is not None else None,
+        "decomp_static_feature_count": sum(decomp_fp.values()),
+        "static_semantic_score": static_score,
+        "static_semantic_score_percent": percent(static_score),
+        "static_semantic_score_direct": static_score_direct,
+        "static_semantic_score_inline_expanded": static_score_inline_expanded,
+        "static_similarity_source_variant": static_source_variant,
+        "static_similarity_components": static_components,
+        "static_similarity_gaps": static_gaps,
+        "static_similarity_gap_components": static_gap_components,
+        "behavior": behavior,
+        "semantic_score": semantic_score,
+        "semantic_score_percent": percent(semantic_score),
+        "zero_credit_reason": zero_credit_reason(mapping_status, decomp, behavior, static_score, semantic_score),
+        "stage_first_failure": None,
+    }
+
+
+def compare_ghidra_reference(
+    fission_summary: dict[str, Any],
+    fission_rows: list[dict[str, Any]],
+    ghidra_summary: dict[str, Any],
+    ghidra_rows: list[dict[str, Any]],
+) -> dict[str, Any]:
+    fission_by_key = {row_key(row): row for row in fission_rows}
+    ghidra_by_key = {row_key(row): row for row in ghidra_rows}
+    shared_keys = sorted(set(fission_by_key) & set(ghidra_by_key))
+    fission_only = sorted(set(fission_by_key) - set(ghidra_by_key))
+    ghidra_only = sorted(set(ghidra_by_key) - set(fission_by_key))
+    buckets: Counter[str] = Counter()
+    deltas: list[dict[str, Any]] = []
+    for key in shared_keys:
+        fission = fission_by_key[key]
+        ghidra = ghidra_by_key[key]
+        fission_score = float(fission.get("semantic_score", 0.0) or 0.0)
+        ghidra_score = float(ghidra.get("semantic_score", 0.0) or 0.0)
+        delta = round(fission_score - ghidra_score, 6)
+        fission_behavior = fission.get("behavior", {}).get("status")
+        ghidra_behavior = ghidra.get("behavior", {}).get("status")
+        if fission.get("mapping_status") != "matched" and ghidra.get("mapping_status") == "matched":
+            bucket = "fission_failed_only"
+        elif fission.get("mapping_status") == "matched" and ghidra.get("mapping_status") != "matched":
+            bucket = "ghidra_failed_only"
+        elif fission_score >= 0.999 and ghidra_score >= 0.999:
+            bucket = "both_good"
+        elif fission_score <= 0.0 and ghidra_score <= 0.0:
+            bucket = "both_bad"
+        elif delta > 0:
+            bucket = "fission_ahead"
+        elif delta < 0:
+            bucket = "ghidra_ahead"
+        else:
+            bucket = "tied"
+        buckets[bucket] += 1
+        deltas.append(
+            {
+                "key": key,
+                "entry_id": fission.get("entry_id"),
+                "function_name": fission.get("function_name"),
+                "fission_score": fission_score,
+                "ghidra_score": ghidra_score,
+                "delta": delta,
+                "fission_score_percent": percent(fission_score),
+                "ghidra_score_percent": percent(ghidra_score),
+                "delta_percent": percent(delta),
+                "fission_behavior": fission_behavior,
+                "ghidra_behavior": ghidra_behavior,
+                "fission_mapping_status": fission.get("mapping_status"),
+                "ghidra_mapping_status": ghidra.get("mapping_status"),
+                "bucket": bucket,
+            }
+        )
+    deltas.sort(key=lambda row: (abs(float(row.get("delta", 0.0) or 0.0)), row.get("function_name") or ""), reverse=True)
+    return {
+        "contract": "reference lane only; Ghidra is compared against source and Fission but is not used as the oracle",
+        "row_count": len(shared_keys),
+        "fission_only_row_count": len(fission_only),
+        "ghidra_only_row_count": len(ghidra_only),
+        "fission_weighted_semantic_similarity_percent": fission_summary.get("weighted_semantic_similarity_percent"),
+        "ghidra_weighted_semantic_similarity_percent": ghidra_summary.get("weighted_semantic_similarity_percent"),
+        "weighted_semantic_similarity_delta_percent": round(
+            float(fission_summary.get("weighted_semantic_similarity_percent", 0.0) or 0.0)
+            - float(ghidra_summary.get("weighted_semantic_similarity_percent", 0.0) or 0.0),
+            6,
+        ),
+        "bucket_counts": dict(sorted(buckets.items())),
+        "top_fission_ahead": [row for row in deltas if float(row.get("delta", 0.0) or 0.0) > 0.0][:12],
+        "top_ghidra_ahead": [row for row in deltas if float(row.get("delta", 0.0) or 0.0) < 0.0][:12],
+        "top_absolute_deltas": deltas[:20],
+    }
+
+
 def run_benchmark(args: argparse.Namespace) -> int:
     start = time.perf_counter()
     created_at = utc_now()
@@ -7841,9 +8239,12 @@ def run_benchmark(args: argparse.Namespace) -> int:
     output_dir = resolve_path(args.output_dir) if args.output_dir else DEFAULT_ARTIFACT_ROOT / run_id
     output_dir.mkdir(parents=True, exist_ok=True)
     fission_bin = resolve_path(args.fission_bin)
+    ghidra_home = resolve_path(args.ghidra_home) if args.include_ghidra_reference else None
     host_execution = c_host_execution_probe(args.timeout_sec)
 
     rows: list[dict[str, Any]] = []
+    ghidra_rows: list[dict[str, Any]] = []
+    ghidra_reference_exports: list[dict[str, Any]] = []
     jobs = max(1, int(args.jobs or 1))
     decomp_cache_path = None if args.no_decomp_cache else resolve_path(args.decomp_cache_file)
     decomp_cache: dict[str, dict[str, Any]] = load_decomp_cache(decomp_cache_path)
@@ -7911,6 +8312,51 @@ def run_benchmark(args: argparse.Namespace) -> int:
                 "list_error": fission_error,
             }
         )
+        ghidra_funcs: list[FissionFunction] = []
+        ghidra_by_address: dict[str, dict[str, Any]] = {}
+        ghidra_error: str | None = None
+        if args.include_ghidra_reference and ghidra_home is not None:
+            ghidra_export = run_ghidra_reference_export(
+                entry.binary_path,
+                ghidra_home,
+                args.timeout_sec,
+                output_dir,
+                entry.id,
+            )
+            ghidra_reference_exports.append(
+                {
+                    "entry_id": entry.id,
+                    "binary_path": rel(entry.binary_path),
+                    "success": ghidra_export.get("success"),
+                    "failure_kind": ghidra_export.get("failure_kind"),
+                    "failure_detail": ghidra_export.get("failure_detail"),
+                    "function_count": ghidra_export.get("function_count", 0),
+                    "artifact_path": ghidra_export.get("artifact_path"),
+                    "wall_sec": ghidra_export.get("wall_sec"),
+                    "command": ghidra_export.get("command"),
+                }
+            )
+            if ghidra_export.get("success"):
+                ghidra_funcs, ghidra_by_address = ghidra_function_index(ghidra_export.get("functions") or [])
+            else:
+                ghidra_error = str(ghidra_export.get("failure_kind") or "ghidra_reference_failed")
+            for func in source_functions:
+                ghidra_rows.append(
+                    row_for_ghidra_function(
+                        entry,
+                        func,
+                        source_functions_by_name,
+                        ghidra_funcs,
+                        ghidra_by_address,
+                        ghidra_error,
+                        args.timeout_sec,
+                        host_execution,
+                        behavior_cache,
+                        behavior_cache_lock,
+                        behavior_cache_stats,
+                        output_dir,
+                    )
+                )
         prewarm_decomp_cache_for_entry(
             entry,
             source_functions,
@@ -8065,6 +8511,34 @@ def run_benchmark(args: argparse.Namespace) -> int:
             summary,
             args.require_sleigh_template_source,
         )
+    ghidra_summary: dict[str, Any] | None = None
+    ghidra_comparison: dict[str, Any] | None = None
+    if args.include_ghidra_reference:
+        ghidra_summary = summarize(ghidra_rows, manifest_name, entries)
+        ghidra_summary["candidate_decompiler"] = "ghidra"
+        ghidra_summary["artifact_dir"] = rel(output_dir)
+        ghidra_summary["ghidra_home"] = rel(ghidra_home) if ghidra_home is not None else None
+        ghidra_summary["reference_exports"] = ghidra_reference_exports
+        ghidra_summary["reference_export_success_count"] = sum(
+            1 for export in ghidra_reference_exports if export.get("success")
+        )
+        ghidra_summary["reference_export_failure_count"] = sum(
+            1 for export in ghidra_reference_exports if not export.get("success")
+        )
+        ghidra_comparison = compare_ghidra_reference(summary, rows, ghidra_summary, ghidra_rows)
+        summary["ghidra_reference"] = {
+            "contract": "reference lane only; Ghidra is not the oracle",
+            "summary_path": rel(output_dir / "ghidra_source_semantic_summary.json"),
+            "rows_path": rel(output_dir / "ghidra_source_semantic_rows.json"),
+            "comparison_path": rel(output_dir / "ghidra_source_semantic_comparison.json"),
+            "ghidra_home": rel(ghidra_home) if ghidra_home is not None else None,
+            "reference_export_success_count": ghidra_summary["reference_export_success_count"],
+            "reference_export_failure_count": ghidra_summary["reference_export_failure_count"],
+            "reference_exports": ghidra_reference_exports,
+            "weighted_semantic_similarity_percent": ghidra_summary.get("weighted_semantic_similarity_percent"),
+            "behavior_status_counts": ghidra_summary.get("behavior_status_counts"),
+            "comparison": ghidra_comparison,
+        }
     history = history_snapshot(DEFAULT_HISTORY_FILE, summary)
     if history is not None:
         summary["history"] = history
@@ -8136,6 +8610,17 @@ def run_benchmark(args: argparse.Namespace) -> int:
     if "comparison" in summary:
         (output_dir / "source_semantic_comparison.json").write_text(
             dump_json_pretty(summary["comparison"]), encoding="utf-8"
+        )
+    if ghidra_summary is not None:
+        (output_dir / "ghidra_source_semantic_rows.json").write_text(
+            dump_json_pretty(ghidra_rows), encoding="utf-8"
+        )
+        (output_dir / "ghidra_source_semantic_summary.json").write_text(
+            dump_json_pretty(ghidra_summary), encoding="utf-8"
+        )
+    if ghidra_comparison is not None:
+        (output_dir / "ghidra_source_semantic_comparison.json").write_text(
+            dump_json_pretty(ghidra_comparison), encoding="utf-8"
         )
     (output_dir / "source_semantic_summary.md").write_text(render_markdown(summary, rows), encoding="utf-8")
     gate = summary.get("sleigh_template_source_gate")
@@ -8751,10 +9236,23 @@ int max(int a, int b) { if (a > b) return a; return b; }
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Benchmark Fission pseudocode against original source semantics. Ghidra is not used."
+        description=(
+            "Benchmark Fission pseudocode against original source semantics. "
+            "Optional Ghidra runs are reference lanes, not oracles."
+        )
     )
     parser.add_argument("--manifest", default=str(DEFAULT_MANIFEST), help="Source semantic manifest JSON")
     parser.add_argument("--fission-bin", default=str(DEFAULT_FISSION_BIN), help="Path to fission_cli")
+    parser.add_argument(
+        "--include-ghidra-reference",
+        action="store_true",
+        help="Also run Ghidra headless and score Ghidra decompiler output against the same source rows as a reference lane",
+    )
+    parser.add_argument(
+        "--ghidra-home",
+        default=str(DEFAULT_GHIDRA_HOME),
+        help="Ghidra checkout/install root used by --include-ghidra-reference",
+    )
     parser.add_argument(
         "--output-dir",
         help="Output artifact directory; defaults to a timestamped directory under benchmark/artifacts/source_semantic_benchmark",

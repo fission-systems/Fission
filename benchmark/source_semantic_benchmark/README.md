@@ -1,11 +1,13 @@
 # Source Semantic Benchmark
 
 This benchmark compares Fission output against checked-in original source code.
-It does not run Ghidra and does not consume Ghidra output as a baseline.
+Ghidra can be run as an optional reference lane, but source remains the oracle.
 
 ## Contract
 
 - Source files are the oracle.
+- Ghidra reference output is never an oracle or gate; it is scored against the
+  same source rows to contextualize Fission deltas.
 - Every source-defined function produces a row.
 - Mapping, decompilation, candidate compilation, and behavior failures are rows,
   not skipped cases.
@@ -62,6 +64,26 @@ Generated artifacts:
 - `behavior/<entry>/<function-address>/oracle.c`, `candidate.c`, and
   `result.json` for non-passing dynamic behavior rows
 - `debug_triage/...` captures when `--materialize-debug-triage` is used
+
+Optional Ghidra reference lane:
+
+```bash
+python3 benchmark/source_semantic_benchmark/run_source_semantic_benchmark.py \
+  --manifest benchmark/source_semantic_benchmark/manifests/smoke_windows_small_c.json \
+  --fission-bin target/release/fission_cli \
+  --include-ghidra-reference \
+  --ghidra-home vendor/ghidra/ghidra_12.0.4_PUBLIC \
+  --timeout-sec 30 \
+  --output-dir benchmark/artifacts/source_semantic_benchmark/smoke-ghidra-reference
+```
+
+This adds:
+
+- `ghidra_reference/<entry>-decomp.json`: raw Ghidra headless export.
+- `ghidra_source_semantic_rows.json`: Ghidra rows scored against source.
+- `ghidra_source_semantic_summary.json`: Ghidra aggregate metrics.
+- `ghidra_source_semantic_comparison.json`: Fission-minus-Ghidra deltas and
+  buckets such as `fission_ahead`, `ghidra_ahead`, `both_good`, and `both_bad`.
 
 If `--output-dir` is omitted, the runner writes to a timestamped artifact
 directory under `benchmark/artifacts/source_semantic_benchmark/` instead of
