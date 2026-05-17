@@ -1299,6 +1299,44 @@ pub(crate) fn promote_guarded_jump_target_tail(stmts: &mut Vec<HirStmt>) -> bool
     changed
 }
 
+pub(crate) fn collapse_common_exit_guard_chain(stmts: &mut Vec<HirStmt>) -> bool {
+    let mut changed = false;
+    let mut idx = 0usize;
+
+    while idx < stmts.len() {
+        let Some((exit_label, guard_count, conds)) = common_exit_guard_chain(stmts, idx) else {
+            idx += 1;
+            continue;
+        };
+        let Some(exit_idx) = stmts.iter().enumerate().skip(idx + guard_count).find_map(
+            |(label_idx, stmt)| match stmt {
+                HirStmt::Label(label) if label == &exit_label => Some(label_idx),
+                _ => None,
+            },
+        ) else {
+            idx += 1;
+            continue;
+        };
+        if exit_idx == idx + guard_count {
+            idx += 1;
+            continue;
+        }
+
+        let guarded_body = stmts[idx + guard_count..exit_idx].to_vec();
+        let exit_cond = simplify_logical_expr(fold_logical_chain(conds, HirBinaryOp::LogicalOr));
+        stmts[idx] = HirStmt::If {
+            cond: negate_expr(exit_cond),
+            then_body: guarded_body,
+            else_body: Vec::new(),
+        };
+        stmts.drain(idx + 1..exit_idx);
+        changed = true;
+        idx += 1;
+    }
+
+    changed
+}
+
 pub(crate) fn cleanup_redundant_boundary_labels(stmts: &mut Vec<HirStmt>) -> bool {
     let original = stmts.clone();
     let cleaned = cleanup_redundant_labels(std::mem::take(stmts));
@@ -1597,6 +1635,94 @@ mod tests {
         };
 
         assert!(!cast_elision_pass(&mut func));
+    }
+
+    #[test]
+    fn collapse_common_exit_guard_chain_wraps_body_and_preserves_exit_label() {
+        let mut stmts = vec![
+            HirStmt::If {
+                cond: HirExpr::Binary {
+                    op: HirBinaryOp::SLe,
+                    lhs: Box::new(HirExpr::Var("rows".to_string())),
+                    rhs: Box::new(HirExpr::Const(0, int(32))),
+                    ty: NirType::Bool,
+                },
+                then_body: vec![HirStmt::Goto("exit".to_string())],
+                else_body: Vec::new(),
+            },
+            HirStmt::If {
+                cond: HirExpr::Binary {
+                    op: HirBinaryOp::SLe,
+                    lhs: Box::new(HirExpr::Var("cols".to_string())),
+                    rhs: Box::new(HirExpr::Const(0, int(32))),
+                    ty: NirType::Bool,
+                },
+                then_body: vec![HirStmt::Goto("exit".to_string())],
+                else_body: Vec::new(),
+            },
+            HirStmt::Label("loop".to_string()),
+            HirStmt::Assign {
+                lhs: HirLValue::Deref {
+                    ptr: Box::new(HirExpr::Var("ptr".to_string())),
+                    ty: int(32),
+                },
+                rhs: HirExpr::Var("value".to_string()),
+            },
+            HirStmt::Goto("loop".to_string()),
+            HirStmt::Label("exit".to_string()),
+            HirStmt::Return(None),
+        ];
+
+        assert!(collapse_common_exit_guard_chain(&mut stmts));
+        assert_eq!(stmts.len(), 3);
+        let HirStmt::If {
+            cond,
+            then_body,
+            else_body,
+        } = &stmts[0]
+        else {
+            panic!("expected wrapped body");
+        };
+        assert!(else_body.is_empty());
+        assert!(matches!(
+            cond,
+            HirExpr::Unary {
+                op: HirUnaryOp::Not,
+                ..
+            }
+        ));
+        assert_eq!(then_body.len(), 3);
+        assert!(matches!(&then_body[0], HirStmt::Label(label) if label == "loop"));
+        assert!(matches!(&stmts[1], HirStmt::Label(label) if label == "exit"));
+        assert!(matches!(&stmts[2], HirStmt::Return(None)));
+    }
+
+    #[test]
+    fn collapse_common_exit_guard_chain_rejects_mixed_targets() {
+        let original = vec![
+            HirStmt::If {
+                cond: HirExpr::Var("a".to_string()),
+                then_body: vec![HirStmt::Goto("exit_a".to_string())],
+                else_body: Vec::new(),
+            },
+            HirStmt::If {
+                cond: HirExpr::Var("b".to_string()),
+                then_body: vec![HirStmt::Goto("exit_b".to_string())],
+                else_body: Vec::new(),
+            },
+            HirStmt::Assign {
+                lhs: HirLValue::Var("x".to_string()),
+                rhs: HirExpr::Const(1, int(32)),
+            },
+            HirStmt::Label("exit_a".to_string()),
+            HirStmt::Return(None),
+            HirStmt::Label("exit_b".to_string()),
+            HirStmt::Return(None),
+        ];
+        let mut stmts = original.clone();
+
+        assert!(!collapse_common_exit_guard_chain(&mut stmts));
+        assert_eq!(stmts, original);
     }
 
     #[test]
@@ -2058,6 +2184,42 @@ fn single_goto_target(body: &[HirStmt]) -> Option<&str> {
         [HirStmt::Goto(target)] => Some(target.as_str()),
         _ => None,
     }
+}
+
+fn common_exit_guard_chain(
+    stmts: &[HirStmt],
+    start_idx: usize,
+) -> Option<(String, usize, Vec<HirExpr>)> {
+    let mut guard_count = 0usize;
+    let mut exit_label: Option<String> = None;
+    let mut conds = Vec::new();
+
+    for stmt in stmts.iter().skip(start_idx) {
+        let HirStmt::If {
+            cond,
+            then_body,
+            else_body,
+        } = stmt
+        else {
+            break;
+        };
+        if !else_body.is_empty() {
+            break;
+        }
+        let Some(target) = single_goto_target(then_body) else {
+            break;
+        };
+        match exit_label.as_deref() {
+            Some(label) if label != target => break,
+            None => exit_label = Some(target.to_string()),
+            _ => {}
+        }
+        guard_count += 1;
+        conds.push(cond.clone());
+    }
+
+    Some((exit_label?, guard_count, conds))
+        .filter(|(_, count, conds)| *count > 1 && !conds.is_empty())
 }
 
 fn stmts_are_fuseable_linear_segment(stmts: &[HirStmt]) -> bool {

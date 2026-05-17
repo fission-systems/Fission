@@ -13,14 +13,15 @@ use super::super::arith::{
 use super::super::cleanup::single_pred_label_inline;
 use super::super::cleanup::{
     canonicalize_minmax_conditional_returns, cast_elision_pass, cleanup_redundant_boundary_labels,
-    collapse_redundant_conditional_returns, collapse_trivial_assign_returns,
-    collapse_trivial_pointer_alias_bindings, elide_unused_popcount_assigns,
-    eliminate_dead_local_clobber_assigns, eliminate_dead_temp_assigns,
-    eliminate_redundant_var_assigns, fuse_single_predecessor_boundaries,
-    inline_loop_condition_trailing_temps, inline_single_use_temps,
-    promote_guarded_jump_target_tail, prune_unused_dead_local_bindings, prune_unused_temp_bindings,
-    remove_unreferenced_leading_labels, simplify_empty_and_constant_ifs,
-    simplify_empty_and_constant_ifs_recursive, simplify_fallthrough_edges,
+    collapse_common_exit_guard_chain, collapse_redundant_conditional_returns,
+    collapse_trivial_assign_returns, collapse_trivial_pointer_alias_bindings,
+    elide_unused_popcount_assigns, eliminate_dead_local_clobber_assigns,
+    eliminate_dead_temp_assigns, eliminate_redundant_var_assigns,
+    fuse_single_predecessor_boundaries, inline_loop_condition_trailing_temps,
+    inline_single_use_temps, promote_guarded_jump_target_tail, prune_unused_dead_local_bindings,
+    prune_unused_temp_bindings, remove_unreferenced_leading_labels,
+    simplify_empty_and_constant_ifs, simplify_empty_and_constant_ifs_recursive,
+    simplify_fallthrough_edges,
 };
 use super::super::cleanup::{collapse_loop_exit_alias_returns, prune_unreachable_after_terminal};
 use super::super::global_opt::{
@@ -1921,6 +1922,10 @@ fn cleanup_stmt_list_with_options_and_preserved(
         if fuse_single_predecessor_boundaries(stmts) {
             changed = true;
             last_changed_pass = Some("fuse_single_predecessor_boundaries");
+        }
+        if collapse_common_exit_guard_chain(stmts) {
+            changed = true;
+            last_changed_pass = Some("collapse_common_exit_guard_chain");
         }
         if promote_guarded_jump_target_tail(stmts) {
             changed = true;
