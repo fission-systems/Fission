@@ -655,6 +655,147 @@ fn redundant_assign_rhs_equal(lhs: &HirExpr, rhs: &HirExpr) -> bool {
         )
 }
 
+/// Strip redundant outer casts from Assign RHS when the Cast target type
+/// matches the LHS variable's known declared type.
+///
+/// Example: `*param_2 = (uint)uVar1;` → `*param_2 = uVar1;`
+/// when `uVar1` is declared as `uint` in the locals/params list.
+pub(crate) fn strip_redundant_assign_casts(func: &mut HirFunction) -> bool {
+    let mut type_map: HashMap<String, NirType> = HashMap::new();
+    for binding in func.params.iter().chain(func.locals.iter()) {
+        type_map.insert(binding.name.clone(), binding.ty.clone());
+    }
+    if type_map.is_empty() {
+        return false;
+    }
+    strip_redundant_casts_in_stmts(&mut func.body, &type_map)
+}
+
+fn strip_redundant_casts_in_stmts(
+    stmts: &mut [HirStmt],
+    type_map: &HashMap<String, NirType>,
+) -> bool {
+    let mut changed = false;
+    for stmt in stmts.iter_mut() {
+        changed |= strip_redundant_casts_in_stmt(stmt, type_map);
+    }
+    changed
+}
+
+fn strip_redundant_casts_in_stmt(
+    stmt: &mut HirStmt,
+    type_map: &HashMap<String, NirType>,
+) -> bool {
+    let mut changed = false;
+    match stmt {
+        HirStmt::Assign { rhs, .. } => {
+            changed |= strip_redundant_casts_in_expr(rhs, type_map);
+        }
+        HirStmt::Expr(expr) | HirStmt::Return(Some(expr)) => {
+            changed |= strip_redundant_casts_in_expr(expr, type_map);
+        }
+        HirStmt::Block(body) | HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
+            changed |= strip_redundant_casts_in_stmts(body, type_map);
+        }
+        HirStmt::For {
+            init,
+            update,
+            body,
+            cond,
+        } => {
+            if let Some(i) = init {
+                changed |= strip_redundant_casts_in_stmt(i, type_map);
+            }
+            if let Some(c) = cond {
+                changed |= strip_redundant_casts_in_expr(c, type_map);
+            }
+            if let Some(u) = update {
+                changed |= strip_redundant_casts_in_stmt(u, type_map);
+            }
+            changed |= strip_redundant_casts_in_stmts(body, type_map);
+        }
+        HirStmt::If {
+            cond,
+            then_body,
+            else_body,
+        } => {
+            changed |= strip_redundant_casts_in_expr(cond, type_map);
+            changed |= strip_redundant_casts_in_stmts(then_body, type_map);
+            changed |= strip_redundant_casts_in_stmts(else_body, type_map);
+        }
+        HirStmt::Switch {
+            expr,
+            cases,
+            default,
+        } => {
+            changed |= strip_redundant_casts_in_expr(expr, type_map);
+            for case in cases {
+                changed |= strip_redundant_casts_in_stmts(&mut case.body, type_map);
+            }
+            changed |= strip_redundant_casts_in_stmts(default, type_map);
+        }
+        _ => {}
+    }
+    changed
+}
+
+/// Strip redundant casts in expressions. A cast `(T)var` is redundant when
+/// `var`'s declared type in the type map is exactly `T`.
+fn strip_redundant_casts_in_expr(
+    expr: &mut HirExpr,
+    type_map: &HashMap<String, NirType>,
+) -> bool {
+    let mut changed = false;
+    // Recurse into children first.
+    match expr {
+        HirExpr::Cast { expr: inner, .. } => {
+            changed |= strip_redundant_casts_in_expr(inner, type_map);
+        }
+        HirExpr::Unary { expr: inner, .. }
+        | HirExpr::Load { ptr: inner, .. }
+        | HirExpr::PtrOffset { base: inner, .. }
+        | HirExpr::AggregateCopy { src: inner, .. } => {
+            changed |= strip_redundant_casts_in_expr(inner, type_map);
+        }
+        HirExpr::Binary { lhs, rhs, .. } => {
+            changed |= strip_redundant_casts_in_expr(lhs, type_map);
+            changed |= strip_redundant_casts_in_expr(rhs, type_map);
+        }
+        HirExpr::Call { args, .. } => {
+            for arg in args {
+                changed |= strip_redundant_casts_in_expr(arg, type_map);
+            }
+        }
+        HirExpr::Index { base, index, .. } => {
+            changed |= strip_redundant_casts_in_expr(base, type_map);
+            changed |= strip_redundant_casts_in_expr(index, type_map);
+        }
+        HirExpr::Select {
+            cond,
+            then_expr,
+            else_expr,
+            ..
+        } => {
+            changed |= strip_redundant_casts_in_expr(cond, type_map);
+            changed |= strip_redundant_casts_in_expr(then_expr, type_map);
+            changed |= strip_redundant_casts_in_expr(else_expr, type_map);
+        }
+        HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) | HirExpr::Const(_, _) => {}
+    }
+    // Now check if this node is a redundant cast.
+    if let HirExpr::Cast { ty, expr: inner } = expr {
+        if let HirExpr::Var(name) = inner.as_ref() {
+            if let Some(var_ty) = type_map.get(name) {
+                if var_ty == ty {
+                    *expr = (**inner).clone();
+                    changed = true;
+                }
+            }
+        }
+    }
+    changed
+}
+
 pub(crate) fn collapse_trivial_pointer_alias_bindings(func: &mut HirFunction) -> bool {
     let mut aliases = HashMap::<String, HirExpr>::new();
     for binding in &func.locals {

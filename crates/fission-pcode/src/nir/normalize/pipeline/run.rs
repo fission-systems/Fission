@@ -21,7 +21,7 @@ use super::super::cleanup::{
     inline_single_use_temps, promote_guarded_jump_target_tail, prune_unused_dead_local_bindings,
     prune_unused_temp_bindings, remove_unreferenced_leading_labels,
     simplify_empty_and_constant_ifs, simplify_empty_and_constant_ifs_recursive,
-    simplify_fallthrough_edges,
+    simplify_fallthrough_edges, strip_redundant_assign_casts,
 };
 use super::super::cleanup::{collapse_loop_exit_alias_returns, prune_unreachable_after_terminal};
 use super::super::global_opt::{
@@ -1308,6 +1308,15 @@ fn run_cleanup_family_passes(
             });
         } else if body_needs_stmt_fold_cleanup(&func.body) {
             wave_stats::add_cleanup_budget_skips(1);
+        }
+
+        if within_body_budget {
+            changed |= run_pass_logged(
+                func,
+                &format!("strip_redundant_assign_casts_{stage}"),
+                perf,
+                strip_redundant_assign_casts,
+            );
         }
 
         if body_has_boundary_label_shapes(&func.body) {
