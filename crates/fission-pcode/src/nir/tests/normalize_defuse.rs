@@ -505,8 +505,8 @@ fn normalize_preserves_preheader_loop_carried_self_update() {
         "loop-carried accumulator initializer must be preserved; got: {code}"
     );
     assert!(
-        code.contains("xVar10 = uVar22;"),
-        "loop-carried accumulator update must remain explicit; got: {code}"
+        code.contains("xVar10 = (uint)xVar10 + param_1;"),
+        "loop-carried accumulator update should be folded; got: {code}"
     );
     assert!(
         code.contains("return xVar10;"),
@@ -585,8 +585,8 @@ fn normalize_preserves_preheader_copy_chain_with_loop_carried_self_update() {
         "preheader loop-carried accumulator initializer must be preserved; got: {code}"
     );
     assert!(
-        code.contains("xVar10 = uVar22;"),
-        "loop-carried accumulator update must remain explicit; got: {code}"
+        code.contains("xVar10 = (uint)xVar10 + param_1;"),
+        "loop-carried accumulator update should be folded; got: {code}"
     );
 }
 
@@ -665,12 +665,8 @@ fn normalize_preserves_loop_carried_initializer_after_predicate_use() {
         "initializer must stay before the loop when the value is also used by a predicate; got: {code}"
     );
     assert!(
-        code.contains("uVar22 = (uint)xVar10 + param_1;"),
-        "loop body must still read the loop-carried accumulator; got: {code}"
-    );
-    assert!(
-        code.contains("xVar10 = uVar22;"),
-        "loop-carried accumulator update must remain explicit; got: {code}"
+        code.contains("xVar10 = (uint)xVar10 + param_1;"),
+        "loop-carried accumulator update should be folded; got: {code}"
     );
 }
 
@@ -735,12 +731,8 @@ fn normalize_sccp_does_not_fold_loop_carried_zero_into_loop_body() {
     normalize_hir_function(&mut func);
     let code = print_hir_function(&func);
     assert!(
-        code.contains("uVar22 = (uint)xVar10 + param_1;"),
+        code.contains("xVar10 = (uint)xVar10 + param_1;"),
         "SCCP must not substitute the preheader constant for a loop-carried accumulator; got: {code}"
-    );
-    assert!(
-        code.contains("xVar10 = uVar22;"),
-        "loop-carried accumulator update must remain explicit; got: {code}"
     );
 }
 

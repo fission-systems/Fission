@@ -951,7 +951,7 @@ impl<'a> PreviewBuilder<'a> {
         rhs: &HirExpr,
     ) -> AliasUnsafeHazard {
         let uses = Self::collect_output_use_sites_in_block(block, op_idx, output);
-        if let Some(hazard) = Self::first_intervening_alias_unsafe_hazard(block, op_idx, &uses) {
+        if let Some(hazard) = Self::first_intervening_alias_unsafe_hazard(block, op_idx, &uses, rhs) {
             return hazard;
         }
         if uses.len() > 1 {
@@ -2892,7 +2892,9 @@ impl<'a> PreviewBuilder<'a> {
         block: &crate::pcode::PcodeBasicBlock,
         op_idx: usize,
         uses: &[(usize, &PcodeOp)],
+        rhs: &HirExpr,
     ) -> Option<AliasUnsafeHazard> {
+        let has_mem_dep = Self::materialize_expr_contains_load(rhs) || Self::materialize_expr_contains_call(rhs);
         let first_use_idx = uses.first().map(|(idx, _)| *idx)?;
         let mut first_store: Option<(usize, PcodeOpcode)> = None;
         for (candidate_idx, candidate) in block
@@ -2904,35 +2906,45 @@ impl<'a> PreviewBuilder<'a> {
         {
             match candidate.opcode {
                 PcodeOpcode::Call | PcodeOpcode::CallInd | PcodeOpcode::CallOther => {
-                    return Some(AliasUnsafeHazard::new(
-                        AliasUnsafeHazardKind::CallBetweenDefUse,
-                        Some(first_use_idx),
-                        Some(candidate_idx),
-                        Some(candidate.opcode),
-                    ));
+                    if has_mem_dep {
+                        return Some(AliasUnsafeHazard::new(
+                            AliasUnsafeHazardKind::CallBetweenDefUse,
+                            Some(first_use_idx),
+                            Some(candidate_idx),
+                            Some(candidate.opcode),
+                        ));
+                    }
                 }
                 PcodeOpcode::Load if first_store.is_some() => {
-                    return Some(AliasUnsafeHazard::new(
-                        AliasUnsafeHazardKind::LoadAfterStore,
-                        Some(first_use_idx),
-                        Some(candidate_idx),
-                        Some(candidate.opcode),
-                    ));
+                    if has_mem_dep {
+                        return Some(AliasUnsafeHazard::new(
+                            AliasUnsafeHazardKind::LoadAfterStore,
+                            Some(first_use_idx),
+                            Some(candidate_idx),
+                            Some(candidate.opcode),
+                        ));
+                    }
                 }
                 PcodeOpcode::Store => {
-                    first_store.get_or_insert((candidate_idx, candidate.opcode));
+                    if has_mem_dep {
+                        first_store.get_or_insert((candidate_idx, candidate.opcode));
+                    }
                 }
                 _ => {}
             }
         }
-        first_store.map(|(store_idx, store_opcode)| {
-            AliasUnsafeHazard::new(
-                AliasUnsafeHazardKind::SameBlockStore,
-                Some(first_use_idx),
-                Some(store_idx),
-                Some(store_opcode),
-            )
-        })
+        if has_mem_dep {
+            first_store.map(|(store_idx, store_opcode)| {
+                AliasUnsafeHazard::new(
+                    AliasUnsafeHazardKind::SameBlockStore,
+                    Some(first_use_idx),
+                    Some(store_idx),
+                    Some(store_opcode),
+                )
+            })
+        } else {
+            None
+        }
     }
 
     pub(super) fn classify_same_block_overwrite_rhs_kind(

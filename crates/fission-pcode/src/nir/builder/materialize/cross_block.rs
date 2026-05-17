@@ -663,12 +663,22 @@ impl<'a> PreviewBuilder<'a> {
 
         for pred_idx in predecessor_idxs {
             let pred_block = self.pcode.blocks.get(pred_idx)?;
-            let pred_value = Self::first_output_redefinition_in_block_from(pred_block, 0, output)
+            let mut pred_value = Self::first_output_redefinition_in_block_from(pred_block, 0, output)
                 .map(|(_, op)| {
                     incoming_value_kinds
                         .insert(Self::classify_merge_binding_candidate_incoming_kind(op));
                     Self::format_incoming_value(op)
                 });
+            if pred_value.is_none() {
+                if let Some((best_idx, _, best_op_idx, _, _, _, value)) = self.best_prior_definition_for_missing_pred(pred_idx, output) {
+                    if let Some(best_block) = self.pcode.blocks.get(best_idx) {
+                        if let Some(best_op) = best_block.ops.get(best_op_idx) {
+                            incoming_value_kinds.insert(Self::classify_merge_binding_candidate_incoming_kind(best_op));
+                            pred_value = Some(value);
+                        }
+                    }
+                }
+            }
             if let Some(value) = pred_value.clone() {
                 defined_values.push(value);
             }
@@ -1071,12 +1081,15 @@ impl<'a> PreviewBuilder<'a> {
             return Err(ExplicitMergeBindingTrialReason::RejectedNotJoinMerge);
         };
         if proof.predecessor_count != 2 {
+            eprintln!("RejectedNonBinaryPreds: preds={} output={:?}", proof.predecessor_count, output);
             return Err(ExplicitMergeBindingTrialReason::RejectedNonBinaryPreds);
         }
         if proof.missing_incoming_count > 0 {
+            eprintln!("RejectedMissingIncoming: missing={} output={:?}", proof.missing_incoming_count, output);
             return Err(ExplicitMergeBindingTrialReason::RejectedMissingIncoming);
         }
         if proof.conflicting_incoming_count != 1 {
+            eprintln!("RejectedMultipleConflicts: conflicts={} output={:?}", proof.conflicting_incoming_count, output);
             return Err(ExplicitMergeBindingTrialReason::RejectedMultipleConflicts);
         }
         if !matches!(
@@ -1084,6 +1097,7 @@ impl<'a> PreviewBuilder<'a> {
             DisallowedSingleConsumerConsumerKind::OtherData
                 | DisallowedSingleConsumerConsumerKind::StoreValue
         ) {
+            eprintln!("RejectedConsumerKind: {:?} output={:?}", proof.consumer_kind, output);
             return Err(ExplicitMergeBindingTrialReason::RejectedConsumerKind);
         }
         if !proof.incoming_value_kinds.iter().all(|kind| {

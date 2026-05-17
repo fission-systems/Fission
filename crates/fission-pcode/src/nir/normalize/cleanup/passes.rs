@@ -52,6 +52,15 @@ pub(crate) fn inline_single_use_temps(
     stmts: &mut Vec<HirStmt>,
     preserved_temps: &HashSet<String>,
 ) -> bool {
+    let use_counts = DefUseMap::build(stmts).use_count;
+    inline_single_use_temps_recursive(stmts, preserved_temps, &use_counts)
+}
+
+fn inline_single_use_temps_recursive(
+    stmts: &mut Vec<HirStmt>,
+    preserved_temps: &HashSet<String>,
+    use_counts: &HashMap<String, usize>,
+) -> bool {
     let mut changed = false;
     let mut to_remove = vec![false; stmts.len()];
     let mut idx = 0usize;
@@ -79,17 +88,13 @@ pub(crate) fn inline_single_use_temps(
             continue;
         };
         let target_uses = count_var_uses_in_stmt(&stmts[target_idx], &name);
-        let total_uses = count_uses_in_stmt_list(stmts, &name);
+        let total_uses = use_counts.get(&name).copied().unwrap_or(0);
         if total_uses != target_uses {
             idx += 1;
             continue;
         }
         let predicate_sensitive = stmt_uses_var_in_predicate_position(&stmts[target_idx], &name);
         let low_cost_inline = expr_is_low_cost_inline_candidate(&rhs);
-        if predicate_sensitive && prefers_stable_materialization {
-            idx += 1;
-            continue;
-        }
         if target_uses > 1 && prefers_stable_materialization {
             idx += 1;
             continue;
@@ -110,6 +115,39 @@ pub(crate) fn inline_single_use_temps(
     if changed {
         retain_unmarked_stmts(stmts, &to_remove);
     }
+
+    for stmt in stmts.iter_mut() {
+        match stmt {
+            HirStmt::Block(body) | HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
+                changed |= inline_single_use_temps_recursive(body, preserved_temps, use_counts);
+            }
+            HirStmt::For { init, update, body, .. } => {
+                if let Some(i) = init {
+                    if let HirStmt::Block(b) = &mut **i {
+                        changed |= inline_single_use_temps_recursive(b, preserved_temps, use_counts);
+                    }
+                }
+                if let Some(u) = update {
+                    if let HirStmt::Block(b) = &mut **u {
+                        changed |= inline_single_use_temps_recursive(b, preserved_temps, use_counts);
+                    }
+                }
+                changed |= inline_single_use_temps_recursive(body, preserved_temps, use_counts);
+            }
+            HirStmt::If { then_body, else_body, .. } => {
+                changed |= inline_single_use_temps_recursive(then_body, preserved_temps, use_counts);
+                changed |= inline_single_use_temps_recursive(else_body, preserved_temps, use_counts);
+            }
+            HirStmt::Switch { cases, default, .. } => {
+                for case in cases {
+                    changed |= inline_single_use_temps_recursive(&mut case.body, preserved_temps, use_counts);
+                }
+                changed |= inline_single_use_temps_recursive(default, preserved_temps, use_counts);
+            }
+            _ => {}
+        }
+    }
+
     changed
 }
 
@@ -495,6 +533,14 @@ pub(crate) fn eliminate_dead_temp_assigns(
     stmts: &mut Vec<HirStmt>,
     _preserved_temps: &HashSet<String>,
 ) -> bool {
+    let use_counts = DefUseMap::build(stmts).use_count;
+    eliminate_dead_temp_assigns_recursive(stmts, &use_counts)
+}
+
+fn eliminate_dead_temp_assigns_recursive(
+    stmts: &mut Vec<HirStmt>,
+    use_counts: &HashMap<String, usize>,
+) -> bool {
     let mut changed = false;
     let mut to_remove = vec![false; stmts.len()];
 
@@ -507,7 +553,7 @@ pub(crate) fn eliminate_dead_temp_assigns(
             _ => continue,
         };
 
-        let uses = count_uses_in_stmt_list(stmts, name);
+        let uses = use_counts.get(name).copied().unwrap_or(0);
         let side_effects = expr_has_side_effects(rhs);
         if uses == 0 && !side_effects {
             to_remove[idx] = true;
@@ -518,6 +564,39 @@ pub(crate) fn eliminate_dead_temp_assigns(
     if changed {
         retain_unmarked_stmts(stmts, &to_remove);
     }
+
+    for stmt in stmts.iter_mut() {
+        match stmt {
+            HirStmt::Block(body) | HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
+                changed |= eliminate_dead_temp_assigns_recursive(body, use_counts);
+            }
+            HirStmt::For { init, update, body, .. } => {
+                if let Some(i) = init {
+                    if let HirStmt::Block(b) = &mut **i {
+                        changed |= eliminate_dead_temp_assigns_recursive(b, use_counts);
+                    }
+                }
+                if let Some(u) = update {
+                    if let HirStmt::Block(b) = &mut **u {
+                        changed |= eliminate_dead_temp_assigns_recursive(b, use_counts);
+                    }
+                }
+                changed |= eliminate_dead_temp_assigns_recursive(body, use_counts);
+            }
+            HirStmt::If { then_body, else_body, .. } => {
+                changed |= eliminate_dead_temp_assigns_recursive(then_body, use_counts);
+                changed |= eliminate_dead_temp_assigns_recursive(else_body, use_counts);
+            }
+            HirStmt::Switch { cases, default, .. } => {
+                for case in cases {
+                    changed |= eliminate_dead_temp_assigns_recursive(&mut case.body, use_counts);
+                }
+                changed |= eliminate_dead_temp_assigns_recursive(default, use_counts);
+            }
+            _ => {}
+        }
+    }
+
     changed
 }
 

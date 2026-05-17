@@ -364,20 +364,38 @@ fn is_truthy_condition_type(ty: &NirType) -> bool {
 pub(crate) fn canonicalize_condition_expr(expr: &HirExpr) -> Option<HirExpr> {
     match expr {
         HirExpr::Binary {
-            op: HirBinaryOp::Ne,
+            op: HirBinaryOp::Ne | HirBinaryOp::Eq,
             lhs,
             rhs,
             ..
-        } if is_zero_const(rhs.as_ref()) && is_truthy_condition_type(&expr_type(lhs)) => {
-            Some((**lhs).clone())
-        }
-        HirExpr::Binary {
-            op: HirBinaryOp::Eq,
-            lhs,
-            rhs,
-            ..
-        } if is_zero_const(rhs.as_ref()) && is_truthy_condition_type(&expr_type(lhs)) => {
-            Some(negate_expr((**lhs).clone()))
+        } if is_zero_const(rhs.as_ref()) => {
+            let is_eq = matches!(expr, HirExpr::Binary { op: HirBinaryOp::Eq, .. });
+            match lhs.as_ref() {
+                HirExpr::Binary {
+                    op: inner_op @ (HirBinaryOp::Sub | HirBinaryOp::Xor),
+                    lhs: inner_lhs,
+                    rhs: inner_rhs,
+                    ty: inner_ty,
+                } => {
+                    let new_op = if is_eq { HirBinaryOp::Eq } else { HirBinaryOp::Ne };
+                    return Some(HirExpr::Binary {
+                        op: new_op,
+                        lhs: inner_lhs.clone(),
+                        rhs: inner_rhs.clone(),
+                        ty: NirType::Bool,
+                    });
+                }
+                _ => {}
+            }
+            if is_truthy_condition_type(&expr_type(lhs)) {
+                if is_eq {
+                    Some(negate_expr((**lhs).clone()))
+                } else {
+                    Some((**lhs).clone())
+                }
+            } else {
+                None
+            }
         }
         _ => None,
     }
