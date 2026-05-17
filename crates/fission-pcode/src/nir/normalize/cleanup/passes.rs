@@ -525,6 +525,9 @@ pub(crate) fn collapse_trivial_pointer_alias_bindings(func: &mut HirFunction) ->
         if !matches!(binding.ty, NirType::Ptr(_)) {
             continue;
         }
+        if binding.name.starts_with("slot_") && should_preserve_slot_alias_binding(func, binding) {
+            continue;
+        }
         let Some(initializer) = binding.initializer.as_ref() else {
             continue;
         };
@@ -564,6 +567,119 @@ pub(crate) fn collapse_trivial_pointer_alias_bindings(func: &mut HirFunction) ->
     func.locals
         .retain(|binding| !aliases.contains_key(&binding.name));
     before != func.locals.len()
+}
+
+fn should_preserve_slot_alias_binding(func: &HirFunction, binding: &NirBinding) -> bool {
+    binding.surface_type_name.is_some()
+        || matches!(
+            binding.origin,
+            Some(NirBindingOrigin::StackOffset(_))
+                | Some(NirBindingOrigin::DerivedFromStackOffset(_))
+        )
+        || binding
+            .initializer
+            .as_ref()
+            .and_then(ptr_offset_const)
+            .is_some_and(|offset| offset != 0)
+        || stmt_list_uses_var_as_index_base(&func.body, &binding.name)
+}
+
+fn ptr_offset_const(expr: &HirExpr) -> Option<i64> {
+    match expr {
+        HirExpr::PtrOffset { offset, .. } => Some(*offset),
+        HirExpr::Cast { expr, .. } => ptr_offset_const(expr),
+        _ => Some(0),
+    }
+}
+
+fn stmt_list_uses_var_as_index_base(stmts: &[HirStmt], name: &str) -> bool {
+    stmts
+        .iter()
+        .any(|stmt| stmt_uses_var_as_index_base(stmt, name))
+}
+
+fn stmt_uses_var_as_index_base(stmt: &HirStmt, name: &str) -> bool {
+    match stmt {
+        HirStmt::Assign { lhs, rhs } => {
+            lvalue_uses_var_as_index_base(lhs, name) || expr_uses_var_as_index_base(rhs, name)
+        }
+        HirStmt::Expr(expr) | HirStmt::Return(Some(expr)) | HirStmt::VaStart { va_list: expr, .. } => {
+            expr_uses_var_as_index_base(expr, name)
+        }
+        HirStmt::Block(body)
+        | HirStmt::While { body, .. }
+        | HirStmt::DoWhile { body, .. }
+        | HirStmt::For { body, .. } => stmt_list_uses_var_as_index_base(body, name),
+        HirStmt::If {
+            cond,
+            then_body,
+            else_body,
+        } => {
+            expr_uses_var_as_index_base(cond, name)
+                || stmt_list_uses_var_as_index_base(then_body, name)
+                || stmt_list_uses_var_as_index_base(else_body, name)
+        }
+        HirStmt::Switch {
+            expr,
+            cases,
+            default,
+        } => {
+            expr_uses_var_as_index_base(expr, name)
+                || cases
+                    .iter()
+                    .any(|case| stmt_list_uses_var_as_index_base(&case.body, name))
+                || stmt_list_uses_var_as_index_base(default, name)
+        }
+        HirStmt::Label(_)
+        | HirStmt::Goto(_)
+        | HirStmt::Return(None)
+        | HirStmt::Break
+        | HirStmt::Continue => false,
+    }
+}
+
+fn lvalue_uses_var_as_index_base(lhs: &HirLValue, name: &str) -> bool {
+    match lhs {
+        HirLValue::Index { base, index, .. } => {
+            matches!(base.as_ref(), HirExpr::Var(var) if var == name)
+                || expr_uses_var_as_index_base(base, name)
+                || expr_uses_var_as_index_base(index, name)
+        }
+        HirLValue::Deref { ptr, .. } => expr_uses_var_as_index_base(ptr, name),
+        HirLValue::Var(_) => false,
+    }
+}
+
+fn expr_uses_var_as_index_base(expr: &HirExpr, name: &str) -> bool {
+    match expr {
+        HirExpr::Index { base, index, .. } => {
+            matches!(base.as_ref(), HirExpr::Var(var) if var == name)
+                || expr_uses_var_as_index_base(base, name)
+                || expr_uses_var_as_index_base(index, name)
+        }
+        HirExpr::Cast { expr, .. }
+        | HirExpr::Unary { expr, .. }
+        | HirExpr::Load { ptr: expr, .. }
+        | HirExpr::PtrOffset { base: expr, .. }
+        | HirExpr::AggregateCopy { src: expr, .. } => expr_uses_var_as_index_base(expr, name),
+        HirExpr::Binary { lhs, rhs, .. } => {
+            expr_uses_var_as_index_base(lhs, name) || expr_uses_var_as_index_base(rhs, name)
+        }
+        HirExpr::Call { args, .. } => args
+            .iter()
+            .any(|arg| expr_uses_var_as_index_base(arg, name)),
+        HirExpr::Select {
+            cond,
+            then_expr,
+            else_expr,
+            ..
+        } => {
+            expr_uses_var_as_index_base(cond, name)
+                || expr_uses_var_as_index_base(then_expr, name)
+                || expr_uses_var_as_index_base(else_expr, name)
+        }
+        HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) | HirExpr::Const(_, _) => false,
+    }
 }
 
 pub(crate) fn inline_loop_condition_trailing_temps(

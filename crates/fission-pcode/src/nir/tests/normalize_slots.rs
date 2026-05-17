@@ -316,24 +316,19 @@ fn memory_slot_surfacing_assigns_aliases_in_deterministic_first_use_order() {
 
     normalize_hir_function(&mut func);
 
-    let surfaced = func
-        .locals
-        .iter()
-        .filter(|binding| binding.initializer.is_some() && binding.name.starts_with("slot_0"))
-        .map(|binding| {
-            (
-                binding.name.clone(),
-                print_expr(binding.initializer.as_ref().expect("initializer")),
-            )
-        })
-        .collect::<Vec<_>>();
-    assert_eq!(
-        surfaced,
-        vec![
-            ("slot_0".to_string(), "(uchar *)rax".to_string()),
-            ("slot_0_1".to_string(), "(uchar *)param_1".to_string()),
-            ("slot_0_1_1".to_string(), "(uchar *)rdi".to_string()),
-        ]
+    let rendered = print_hir_function(&func);
+    assert!(
+        !func.locals.iter().any(|binding| binding
+            .initializer
+            .is_some()
+            && binding.name.starts_with("slot_0")),
+        "{rendered}"
+    );
+    assert!(
+        rendered.contains("*rax")
+            && rendered.contains("*param_1")
+            && rendered.contains("*rdi"),
+        "{rendered}"
     );
 }
 
@@ -388,14 +383,11 @@ fn memory_slot_surfacing_sorts_promoted_bindings_by_final_name() {
         .filter(|binding| binding.initializer.is_some() && binding.name.starts_with("slot_"))
         .map(|binding| binding.name.clone())
         .collect::<Vec<_>>();
-    assert_eq!(
-        surfaced_names,
-        vec!["slot_0".to_string(), "slot_12f0".to_string()]
-    );
+    assert_eq!(surfaced_names, vec!["slot_12f0".to_string()]);
 }
 
 #[test]
-fn memory_slot_surfacing_prefers_direct_alias_source_in_initializer() {
+fn memory_slot_surfacing_collapses_zero_offset_direct_alias_source() {
     let byte_ty = NirType::Int {
         bits: 8,
         signed: false,
@@ -442,19 +434,19 @@ fn memory_slot_surfacing_prefers_direct_alias_source_in_initializer() {
 
     normalize_hir_function(&mut func);
 
-    let surfaced = func
-        .locals
-        .iter()
-        .find(|binding| binding.name == "slot_0")
-        .expect("surfaced slot alias");
-    assert_eq!(
-        print_expr(surfaced.initializer.as_ref().expect("initializer")),
-        "(uchar *)rax"
+    let rendered = print_hir_function(&func);
+    assert!(
+        !func.locals.iter().any(|binding| binding.name == "slot_0"),
+        "{rendered}"
+    );
+    assert!(
+        rendered.contains("*rax + *rax"),
+        "{rendered}"
     );
 }
 
 #[test]
-fn memory_slot_surfacing_prefers_single_def_body_alias_source_in_initializer() {
+fn memory_slot_surfacing_collapses_zero_offset_single_def_body_alias_source() {
     let byte_ty = NirType::Int {
         bits: 8,
         signed: false,
@@ -498,14 +490,14 @@ fn memory_slot_surfacing_prefers_single_def_body_alias_source_in_initializer() {
 
     normalize_hir_function(&mut func);
 
-    let surfaced = func
-        .locals
-        .iter()
-        .find(|binding| binding.name == "slot_0")
-        .expect("surfaced slot alias");
-    assert_eq!(
-        print_expr(surfaced.initializer.as_ref().expect("initializer")),
-        "(uchar *)rax"
+    let rendered = print_hir_function(&func);
+    assert!(
+        !func.locals.iter().any(|binding| binding.name == "slot_0"),
+        "{rendered}"
+    );
+    assert!(
+        rendered.contains("*rax + *rax"),
+        "{rendered}"
     );
 }
 

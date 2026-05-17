@@ -136,13 +136,15 @@ impl<'a> PreviewBuilder<'a> {
             return Ok(Vec::new());
         }
 
+        let scan_end = call_idx.min(block.ops.len());
+        let call_address = block.ops.get(call_idx).map(|op| op.address);
         let mut recovered = std::collections::BTreeMap::<usize, HirExpr>::new();
-        for prev_idx in (0..call_idx).rev() {
+        for prev_idx in (0..scan_end).rev() {
             let prev = &block.ops[prev_idx];
             if prev.opcode.is_control_flow() {
                 if prev.opcode == PcodeOpcode::CallOther
                     && prev.output.is_none()
-                    && prev.address == block.ops[call_idx].address
+                    && Some(prev.address) == call_address
                 {
                     continue;
                 }
@@ -203,21 +205,22 @@ impl<'a> PreviewBuilder<'a> {
     ) -> Result<Vec<HirExpr>, MlilPreviewError> {
         const MAX_STACK_ARGS: usize = 32;
 
-        let call_address = block.ops[call_idx].address;
+        let scan_end = call_idx.min(block.ops.len());
+        let call_address = block.ops.get(call_idx).map(|op| op.address);
         let mut out = Vec::new();
         let mut current_push_address = None;
-        for prev_idx in (0..call_idx).rev() {
+        for prev_idx in (0..scan_end).rev() {
             if out.len() >= MAX_STACK_ARGS {
                 break;
             }
             let prev = &block.ops[prev_idx];
-            if prev.address == call_address {
+            if Some(prev.address) == call_address {
                 continue;
             }
             if prev.opcode.is_control_flow() {
                 if prev.opcode == PcodeOpcode::CallOther
                     && prev.output.is_none()
-                    && prev.address == block.ops[call_idx].address
+                    && Some(prev.address) == call_address
                 {
                     continue;
                 }
@@ -352,18 +355,20 @@ impl<'a> PreviewBuilder<'a> {
         let param_slots = self.options.calling_convention.param_reg_slots();
         let param_count = param_slots.len();
         let mut recovered: Vec<Option<HirExpr>> = vec![None; param_count];
-        let has_same_instruction_callother_marker = block.ops[..call_idx].iter().any(|prev| {
+        let scan_end = call_idx.min(block.ops.len());
+        let call_address = block.ops.get(call_idx).map(|op| op.address);
+        let has_same_instruction_callother_marker = block.ops[..scan_end].iter().any(|prev| {
             prev.opcode == PcodeOpcode::CallOther
                 && prev.output.is_none()
-                && prev.address == block.ops[call_idx].address
+                && Some(prev.address) == call_address
         });
 
-        for prev_idx in (0..call_idx).rev() {
+        for prev_idx in (0..scan_end).rev() {
             let prev = &block.ops[prev_idx];
             if prev.opcode.is_control_flow() {
                 if prev.opcode == PcodeOpcode::CallOther
                     && prev.output.is_none()
-                    && prev.address == block.ops[call_idx].address
+                    && Some(prev.address) == call_address
                 {
                     continue;
                 }
