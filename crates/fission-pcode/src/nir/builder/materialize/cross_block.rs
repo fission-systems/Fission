@@ -1081,15 +1081,12 @@ impl<'a> PreviewBuilder<'a> {
             return Err(ExplicitMergeBindingTrialReason::RejectedNotJoinMerge);
         };
         if proof.predecessor_count != 2 {
-            eprintln!("RejectedNonBinaryPreds: preds={} output={:?}", proof.predecessor_count, output);
             return Err(ExplicitMergeBindingTrialReason::RejectedNonBinaryPreds);
         }
         if proof.missing_incoming_count > 0 {
-            eprintln!("RejectedMissingIncoming: missing={} output={:?}", proof.missing_incoming_count, output);
             return Err(ExplicitMergeBindingTrialReason::RejectedMissingIncoming);
         }
         if proof.conflicting_incoming_count != 1 {
-            eprintln!("RejectedMultipleConflicts: conflicts={} output={:?}", proof.conflicting_incoming_count, output);
             return Err(ExplicitMergeBindingTrialReason::RejectedMultipleConflicts);
         }
         if !matches!(
@@ -1097,7 +1094,6 @@ impl<'a> PreviewBuilder<'a> {
             DisallowedSingleConsumerConsumerKind::OtherData
                 | DisallowedSingleConsumerConsumerKind::StoreValue
         ) {
-            eprintln!("RejectedConsumerKind: {:?} output={:?}", proof.consumer_kind, output);
             return Err(ExplicitMergeBindingTrialReason::RejectedConsumerKind);
         }
         if !proof.incoming_value_kinds.iter().all(|kind| {
