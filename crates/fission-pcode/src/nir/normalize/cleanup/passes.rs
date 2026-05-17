@@ -113,14 +113,227 @@ pub(crate) fn inline_single_use_temps(
     changed
 }
 
-pub(crate) fn collapse_loop_exit_alias_returns(_stmts: &mut Vec<HirStmt>) -> bool {
-    // This rewrite is currently disabled because removing `ret_name = rhs`
-    // from a `do/while` body is only safe if `ret_name` is proven dead for
-    // the remainder of the iteration and for the loop condition itself.
-    // The previous implementation only checked for later assignments to
-    // variables referenced by `rhs`, which is not sufficient to preserve
-    // loop behavior.
-    false
+pub(crate) fn collapse_loop_exit_alias_returns(stmts: &mut Vec<HirStmt>) -> bool {
+    let mut changed = false;
+    let mut idx = 0usize;
+
+    while idx + 1 < stmts.len() {
+        let Some(alias) = return_var_name(&stmts[idx + 1]).map(str::to_string) else {
+            idx += 1;
+            continue;
+        };
+        if count_uses_in_stmt_list(stmts, &alias) != 1 {
+            idx += 1;
+            continue;
+        }
+        if !loop_executes_before_exit_return(stmts, idx) {
+            idx += 1;
+            continue;
+        }
+        let Some(source) = loop_exit_alias_source(&stmts[idx], &alias) else {
+            idx += 1;
+            continue;
+        };
+        let source_expr = HirExpr::Var(source.clone());
+        if remove_loop_exit_alias_assignment(&mut stmts[idx], &alias, &source) {
+            stmts[idx + 1] = HirStmt::Return(Some(source_expr));
+            changed = true;
+        }
+        idx += 1;
+    }
+
+    changed
+}
+
+fn return_var_name(stmt: &HirStmt) -> Option<&str> {
+    match stmt {
+        HirStmt::Return(Some(HirExpr::Var(name))) => Some(name.as_str()),
+        _ => None,
+    }
+}
+
+fn loop_executes_before_exit_return(stmts: &[HirStmt], loop_idx: usize) -> bool {
+    match stmts.get(loop_idx) {
+        Some(HirStmt::DoWhile { .. }) => true,
+        Some(HirStmt::For { init, cond, .. }) => {
+            for_loop_guard_proves_first_iteration(stmts, loop_idx, init.as_deref(), cond.as_ref())
+        }
+        _ => false,
+    }
+}
+
+fn loop_exit_alias_source(stmt: &HirStmt, alias: &str) -> Option<String> {
+    match stmt {
+        HirStmt::DoWhile { body, cond } => loop_body_exit_alias_source(body, alias)
+            .filter(|source| !expr_mentions_var(cond, alias) && !expr_mentions_var(cond, source)),
+        HirStmt::For {
+            update, body, cond, ..
+        } => loop_body_exit_alias_source(body, alias).filter(|source| {
+            cond.as_ref()
+                .is_none_or(|cond| !expr_mentions_var(cond, alias))
+                && update.as_deref().is_none_or(|update| {
+                    !stmt_mentions_var(update, alias) && !stmt_assigns_var(update, source)
+                })
+        }),
+        _ => None,
+    }
+}
+
+fn loop_body_exit_alias_source(body: &[HirStmt], alias: &str) -> Option<String> {
+    let mut match_idx = None;
+    let mut match_source = None;
+
+    for (idx, stmt) in body.iter().enumerate() {
+        if let HirStmt::Assign {
+            lhs: HirLValue::Var(lhs),
+            rhs: HirExpr::Var(source),
+        } = stmt
+        {
+            if lhs == alias && source != alias {
+                if match_idx.is_some() {
+                    return None;
+                }
+                match_idx = Some(idx);
+                match_source = Some(source.clone());
+            }
+        } else if stmt_assigns_var(stmt, alias) {
+            return None;
+        }
+    }
+
+    let idx = match_idx?;
+    let source = match_source?;
+    if body[idx + 1..]
+        .iter()
+        .any(|stmt| stmt_assigns_var(stmt, &source) || stmt_mentions_var(stmt, alias))
+    {
+        return None;
+    }
+    Some(source)
+}
+
+fn remove_loop_exit_alias_assignment(stmt: &mut HirStmt, alias: &str, source: &str) -> bool {
+    let body = match stmt {
+        HirStmt::DoWhile { body, .. } | HirStmt::For { body, .. } => body,
+        _ => return false,
+    };
+    let Some(idx) = body.iter().position(|stmt| {
+        matches!(
+            stmt,
+            HirStmt::Assign {
+                lhs: HirLValue::Var(lhs),
+                rhs: HirExpr::Var(rhs),
+            } if lhs == alias && rhs == source
+        )
+    }) else {
+        return false;
+    };
+    body.remove(idx);
+    true
+}
+
+fn for_loop_guard_proves_first_iteration(
+    stmts: &[HirStmt],
+    loop_idx: usize,
+    init: Option<&HirStmt>,
+    cond: Option<&HirExpr>,
+) -> bool {
+    let Some(exit_label) = stmts.get(loop_idx + 2).and_then(|stmt| match stmt {
+        HirStmt::Label(label) => Some(label.as_str()),
+        _ => None,
+    }) else {
+        return false;
+    };
+    let Some((_iv, bound)) = zero_based_less_than_bound(init, cond) else {
+        return false;
+    };
+
+    stmts[..loop_idx].iter().any(|stmt| {
+        let HirStmt::If {
+            cond,
+            then_body,
+            else_body,
+        } = stmt
+        else {
+            return false;
+        };
+        else_body.is_empty()
+            && matches_single_goto(then_body, exit_label)
+            && guard_excludes_zero_iteration(cond, &bound)
+    })
+}
+
+fn zero_based_less_than_bound(
+    init: Option<&HirStmt>,
+    cond: Option<&HirExpr>,
+) -> Option<(String, String)> {
+    let HirStmt::Assign {
+        lhs: HirLValue::Var(init_var),
+        rhs,
+    } = init?
+    else {
+        return None;
+    };
+    if expr_as_const_ignoring_casts(rhs) != Some(0) {
+        return None;
+    }
+    let HirExpr::Binary {
+        op: HirBinaryOp::Lt | HirBinaryOp::SLt,
+        lhs,
+        rhs,
+        ..
+    } = cond?
+    else {
+        return None;
+    };
+    let cond_var = expr_as_var_ignoring_casts(lhs)?;
+    if cond_var != init_var {
+        return None;
+    }
+    let bound = expr_as_var_ignoring_casts(rhs)?;
+    Some((init_var.clone(), bound.to_string()))
+}
+
+fn guard_excludes_zero_iteration(cond: &HirExpr, bound: &str) -> bool {
+    let HirExpr::Binary { op, lhs, rhs, .. } = cond else {
+        return false;
+    };
+    let lhs_var = expr_as_var_ignoring_casts(lhs);
+    let rhs_var = expr_as_var_ignoring_casts(rhs);
+    let lhs_const = expr_as_const_ignoring_casts(lhs);
+    let rhs_const = expr_as_const_ignoring_casts(rhs);
+
+    matches!(
+        (op, lhs_var, rhs_const),
+        (HirBinaryOp::Le | HirBinaryOp::SLe, Some(var), Some(0)) if var == bound
+    ) || matches!(
+        (op, lhs_const, rhs_var),
+        (HirBinaryOp::Ge | HirBinaryOp::SGe, Some(0), Some(var)) if var == bound
+    )
+}
+
+fn expr_as_var_ignoring_casts(expr: &HirExpr) -> Option<&str> {
+    match expr {
+        HirExpr::Var(name) => Some(name.as_str()),
+        HirExpr::Cast { expr, .. } => expr_as_var_ignoring_casts(expr),
+        _ => None,
+    }
+}
+
+fn expr_as_const_ignoring_casts(expr: &HirExpr) -> Option<i64> {
+    match expr {
+        HirExpr::Const(value, _) => Some(*value),
+        HirExpr::Cast { expr, .. } => expr_as_const_ignoring_casts(expr),
+        _ => None,
+    }
+}
+
+fn stmt_mentions_var(stmt: &HirStmt, name: &str) -> bool {
+    count_var_uses_in_stmt(stmt, name) > 0
+}
+
+fn stmt_assigns_var(stmt: &HirStmt, name: &str) -> bool {
+    var_is_assigned_in_stmt(stmt, name)
 }
 
 fn stmt_may_bypass_following_stmts(stmt: &HirStmt) -> bool {
@@ -1088,6 +1301,84 @@ mod tests {
         ];
 
         assert!(!collapse_loop_exit_alias_returns(&mut stmts));
+    }
+
+    #[test]
+    fn collapse_loop_exit_alias_return_rewrites_guarded_for_exit_copy() {
+        let mut stmts = vec![
+            HirStmt::If {
+                cond: HirExpr::Binary {
+                    op: HirBinaryOp::SLe,
+                    lhs: Box::new(HirExpr::Var("len".to_string())),
+                    rhs: Box::new(HirExpr::Const(0, int(32))),
+                    ty: NirType::Bool,
+                },
+                then_body: vec![HirStmt::Goto("exit_zero".to_string())],
+                else_body: Vec::new(),
+            },
+            HirStmt::Assign {
+                lhs: HirLValue::Var("sum".to_string()),
+                rhs: HirExpr::Const(0, int(32)),
+            },
+            HirStmt::For {
+                init: Some(Box::new(HirStmt::Assign {
+                    lhs: HirLValue::Var("i".to_string()),
+                    rhs: HirExpr::Const(0, int(64)),
+                })),
+                cond: Some(HirExpr::Binary {
+                    op: HirBinaryOp::SLt,
+                    lhs: Box::new(HirExpr::Var("i".to_string())),
+                    rhs: Box::new(HirExpr::Cast {
+                        ty: int(64),
+                        expr: Box::new(HirExpr::Var("len".to_string())),
+                    }),
+                    ty: NirType::Bool,
+                }),
+                update: Some(Box::new(HirStmt::Assign {
+                    lhs: HirLValue::Var("i".to_string()),
+                    rhs: HirExpr::Binary {
+                        op: HirBinaryOp::Add,
+                        lhs: Box::new(HirExpr::Var("i".to_string())),
+                        rhs: Box::new(HirExpr::Const(1, int(64))),
+                        ty: int(64),
+                    },
+                })),
+                body: vec![
+                    HirStmt::Assign {
+                        lhs: HirLValue::Var("sum".to_string()),
+                        rhs: HirExpr::Binary {
+                            op: HirBinaryOp::Add,
+                            lhs: Box::new(HirExpr::Var("sum".to_string())),
+                            rhs: Box::new(HirExpr::Var("value".to_string())),
+                            ty: int(32),
+                        },
+                    },
+                    HirStmt::Assign {
+                        lhs: HirLValue::Var("exit_sum".to_string()),
+                        rhs: HirExpr::Var("sum".to_string()),
+                    },
+                ],
+            },
+            HirStmt::Return(Some(HirExpr::Var("exit_sum".to_string()))),
+            HirStmt::Label("exit_zero".to_string()),
+            HirStmt::Return(Some(HirExpr::Const(0, int(32)))),
+        ];
+
+        assert!(collapse_loop_exit_alias_returns(&mut stmts));
+        let HirStmt::For { body, .. } = &stmts[2] else {
+            panic!("expected for loop");
+        };
+        assert!(!body.iter().any(|stmt| matches!(
+            stmt,
+            HirStmt::Assign {
+                lhs: HirLValue::Var(name),
+                ..
+            } if name == "exit_sum"
+        )));
+        assert!(matches!(
+            &stmts[3],
+            HirStmt::Return(Some(HirExpr::Var(name))) if name == "sum"
+        ));
     }
 
     #[test]

@@ -836,6 +836,9 @@ pub(crate) fn normalize_hir_function(func: &mut HirFunction) {
     run_pass_logged(func, "cleanup_empty_ifs_final", perf, |f| {
         simplify_empty_and_constant_ifs_recursive(&mut f.body)
     });
+    run_pass_logged(func, "canonicalize_minmax_final", perf, |f| {
+        canonicalize_minmax_conditional_returns(&mut f.body)
+    });
     run_pass_logged(func, "prune_unused_bindings_final", perf, |f| {
         let before = hir_shape(f);
         prune_unused_temp_bindings(f);

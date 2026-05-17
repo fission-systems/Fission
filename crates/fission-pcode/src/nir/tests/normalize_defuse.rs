@@ -235,6 +235,58 @@ fn normalize_collapses_guarded_return_followed_by_same_return() {
 }
 
 #[test]
+fn normalize_canonicalizes_minmax_return_after_type_recovery() {
+    let signed_i32 = sint(32);
+    let mut func = HirFunction {
+        name: "max".to_string(),
+        params: vec![
+            NirBinding {
+                name: "param_1".to_string(),
+                ty: signed_i32.clone(),
+                surface_type_name: None,
+                origin: Some(NirBindingOrigin::ParamIndex(0)),
+                initializer: None,
+            },
+            NirBinding {
+                name: "param_2".to_string(),
+                ty: signed_i32.clone(),
+                surface_type_name: None,
+                origin: Some(NirBindingOrigin::ParamIndex(1)),
+                initializer: None,
+            },
+        ],
+        locals: vec![],
+        return_type: signed_i32.clone(),
+        surface_return_type_name: None,
+        body: vec![
+            HirStmt::If {
+                cond: HirExpr::Binary {
+                    op: HirBinaryOp::SLt,
+                    lhs: Box::new(varexpr("param_1")),
+                    rhs: Box::new(varexpr("param_2")),
+                    ty: NirType::Bool,
+                },
+                then_body: vec![return_expr(varexpr("param_2"))],
+                else_body: Vec::new(),
+            },
+            return_expr(varexpr("param_1")),
+        ],
+        ..Default::default()
+    };
+
+    normalize_hir_function(&mut func);
+    let code = print_hir_function(&func);
+    assert!(
+        code.contains("if (param_1 > param_2)"),
+        "expected max branch to prefer direct greater-than form; got: {code}"
+    );
+    assert!(
+        code.contains("return param_1;") && code.contains("return param_2;"),
+        "expected return arms to be preserved; got: {code}"
+    );
+}
+
+#[test]
 fn normalize_preserves_side_effect_in_redundant_conditional_return() {
     let mut func = make_func(
         "test_redundant_if_side_effect",
