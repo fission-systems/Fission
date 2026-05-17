@@ -496,6 +496,7 @@ pub(crate) fn normalize_hir_function(func: &mut HirFunction) {
     // declared type (assignment-context cast: `x = (T)y` where x.ty == T).
     // Runs after type inference so that NirBinding.ty is maximally populated.
     if run_pass_logged(func, "cast_elision", perf, cast_elision_pass) {
+        cleanup_func_stmt_list(func);
         if !contains_call_stmts(&func.body) {
             apply_type_signature_fixed_point(func, diag, perf);
             run_pass_logged(

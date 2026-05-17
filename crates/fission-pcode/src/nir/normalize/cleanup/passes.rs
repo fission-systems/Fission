@@ -1542,6 +1542,64 @@ mod tests {
     }
 
     #[test]
+    fn cast_elision_rewrites_self_widening_assignment_to_self_assign() {
+        let mut func = HirFunction {
+            name: "test_self_widening_cast".to_string(),
+            locals: vec![NirBinding {
+                name: "uVar84".to_string(),
+                ty: int(32),
+                surface_type_name: None,
+                origin: None,
+                initializer: None,
+            }],
+            body: vec![
+                HirStmt::Assign {
+                    lhs: HirLValue::Var("uVar84".to_string()),
+                    rhs: HirExpr::Cast {
+                        ty: int(64),
+                        expr: Box::new(HirExpr::Var("uVar84".to_string())),
+                    },
+                },
+                HirStmt::Return(Some(HirExpr::Var("uVar84".to_string()))),
+            ],
+            ..Default::default()
+        };
+
+        assert!(cast_elision_pass(&mut func));
+        assert_eq!(
+            func.body[0],
+            HirStmt::Assign {
+                lhs: HirLValue::Var("uVar84".to_string()),
+                rhs: HirExpr::Var("uVar84".to_string()),
+            }
+        );
+    }
+
+    #[test]
+    fn cast_elision_keeps_self_narrowing_assignment_to_wide_binding() {
+        let mut func = HirFunction {
+            name: "test_self_narrowing_cast".to_string(),
+            locals: vec![NirBinding {
+                name: "xVar29".to_string(),
+                ty: int(64),
+                surface_type_name: None,
+                origin: None,
+                initializer: None,
+            }],
+            body: vec![HirStmt::Assign {
+                lhs: HirLValue::Var("xVar29".to_string()),
+                rhs: HirExpr::Cast {
+                    ty: int(32),
+                    expr: Box::new(HirExpr::Var("xVar29".to_string())),
+                },
+            }],
+            ..Default::default()
+        };
+
+        assert!(!cast_elision_pass(&mut func));
+    }
+
+    #[test]
     fn collapse_loop_exit_alias_return_rewrites_guarded_for_exit_copy() {
         let mut stmts = vec![
             HirStmt::If {
@@ -2997,6 +3055,33 @@ fn is_scalar_non_unknown(ty: &NirType) -> bool {
     matches!(ty, NirType::Bool | NirType::Int { .. })
 }
 
+fn scalar_bit_width(ty: &NirType) -> Option<u32> {
+    match ty {
+        NirType::Bool => Some(1),
+        NirType::Int { bits, .. } => Some(*bits),
+        _ => None,
+    }
+}
+
+fn redundant_self_cast_assignment(name: &str, rhs: &HirExpr, binding_ty: &NirType) -> bool {
+    let HirExpr::Cast { ty: cast_ty, expr } = rhs else {
+        return false;
+    };
+    let HirExpr::Var(var) = expr.as_ref() else {
+        return false;
+    };
+    if var != name {
+        return false;
+    }
+    let Some(binding_bits) = scalar_bit_width(binding_ty) else {
+        return false;
+    };
+    let Some(cast_bits) = scalar_bit_width(cast_ty) else {
+        return false;
+    };
+    cast_bits >= binding_bits
+}
+
 fn elide_casts_in_stmts(
     stmts: &mut Vec<HirStmt>,
     binding_types: &std::collections::HashMap<String, NirType>,
@@ -3022,7 +3107,10 @@ fn elide_casts_in_stmt(
             // If the binding has a known scalar type, try to strip a redundant
             // outer cast whose target type matches the binding.
             if let Some(binding_ty) = binding_types.get(name.as_str()) {
-                if let Some(stripped) = try_strip_outer_cast(rhs, binding_ty) {
+                if redundant_self_cast_assignment(name, rhs, binding_ty) {
+                    *rhs = HirExpr::Var(name.clone());
+                    *changed = true;
+                } else if let Some(stripped) = try_strip_outer_cast(rhs, binding_ty) {
                     *rhs = stripped;
                     *changed = true;
                 }
