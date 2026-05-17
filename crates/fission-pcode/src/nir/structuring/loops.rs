@@ -108,6 +108,86 @@ fn rewrite_loop_control_gotos_multi(
     }
 }
 
+fn collect_defined_labels(stmts: &[HirStmt], labels: &mut HashSet<String>) {
+    for stmt in stmts {
+        match stmt {
+            HirStmt::Label(label) => {
+                labels.insert(label.clone());
+            }
+            HirStmt::If {
+                then_body,
+                else_body,
+                ..
+            } => {
+                collect_defined_labels(then_body, labels);
+                collect_defined_labels(else_body, labels);
+            }
+            HirStmt::Block(body)
+            | HirStmt::While { body, .. }
+            | HirStmt::DoWhile { body, .. }
+            | HirStmt::For { body, .. } => {
+                collect_defined_labels(body, labels);
+            }
+            HirStmt::Switch { cases, default, .. } => {
+                for case in cases {
+                    collect_defined_labels(&case.body, labels);
+                }
+                collect_defined_labels(default, labels);
+            }
+            HirStmt::Assign { .. }
+            | HirStmt::VaStart { .. }
+            | HirStmt::Expr(_)
+            | HirStmt::Goto(_)
+            | HirStmt::Return(_)
+            | HirStmt::Break
+            | HirStmt::Continue => {}
+        }
+    }
+}
+
+fn has_goto_to_undefined_label(stmts: &[HirStmt]) -> bool {
+    let mut labels = HashSet::new();
+    collect_defined_labels(stmts, &mut labels);
+    stmts_have_goto_to_undefined_label(stmts, &labels)
+}
+
+fn stmts_have_goto_to_undefined_label(stmts: &[HirStmt], labels: &HashSet<String>) -> bool {
+    stmts
+        .iter()
+        .any(|stmt| stmt_has_goto_to_undefined_label(stmt, labels))
+}
+
+fn stmt_has_goto_to_undefined_label(stmt: &HirStmt, labels: &HashSet<String>) -> bool {
+    match stmt {
+        HirStmt::Goto(label) => !labels.contains(label),
+        HirStmt::If {
+            then_body,
+            else_body,
+            ..
+        } => {
+            stmts_have_goto_to_undefined_label(then_body, labels)
+                || stmts_have_goto_to_undefined_label(else_body, labels)
+        }
+        HirStmt::Block(body)
+        | HirStmt::While { body, .. }
+        | HirStmt::DoWhile { body, .. }
+        | HirStmt::For { body, .. } => stmts_have_goto_to_undefined_label(body, labels),
+        HirStmt::Switch { cases, default, .. } => {
+            cases
+                .iter()
+                .any(|case| stmts_have_goto_to_undefined_label(&case.body, labels))
+                || stmts_have_goto_to_undefined_label(default, labels)
+        }
+        HirStmt::Assign { .. }
+        | HirStmt::VaStart { .. }
+        | HirStmt::Expr(_)
+        | HirStmt::Label(_)
+        | HirStmt::Return(_)
+        | HirStmt::Break
+        | HirStmt::Continue => false,
+    }
+}
+
 impl<'a> PreviewBuilder<'a> {
     pub(crate) fn get_loop_body(
         &self,
@@ -526,7 +606,7 @@ impl<'a> PreviewBuilder<'a> {
         idx: usize,
     ) -> Result<Option<(HirStmt, usize)>, MlilPreviewError> {
         let diag = structuring_diag_enabled();
-        
+
         let (exit_idx, latch_idx, body_set) = {
             let Some(loop_body) = self.get_loop_body(idx) else {
                 return Ok(None);
@@ -563,14 +643,19 @@ impl<'a> PreviewBuilder<'a> {
         };
 
         if diag {
-            eprintln!("[DIAG] try_lower_multiblock_dowhile: attempting subgraph for idx={}", idx);
+            eprintln!(
+                "[DIAG] try_lower_multiblock_dowhile: attempting subgraph for idx={}",
+                idx
+            );
         }
 
-        let Some(lowered) =
-            self.lower_loop_body_subgraph(&body_set, idx, Some(exit_idx), idx)?
+        let Some(lowered) = self.lower_loop_body_subgraph(&body_set, idx, Some(exit_idx), idx)?
         else {
             return Ok(None);
         };
+        if has_goto_to_undefined_label(&lowered) {
+            return Ok(None);
+        }
 
         self.telemetry.structuring.loop_while_subgraph_lowered_count += 1;
 
@@ -1152,5 +1237,31 @@ mod tests {
         assert_eq!(stats.break_rewrites, 0);
         assert_eq!(stats.continue_rewrites, 0);
         assert_eq!(stats.skipped_nested_scope_count, 2);
+    }
+
+    #[test]
+    fn undefined_goto_guard_rejects_missing_label_in_structured_loop_body() {
+        let body = vec![HirStmt::If {
+            cond: HirExpr::Const(1, NirType::Bool),
+            then_body: vec![HirStmt::Goto("block_missing".to_string())],
+            else_body: Vec::new(),
+        }];
+
+        assert!(has_goto_to_undefined_label(&body));
+    }
+
+    #[test]
+    fn undefined_goto_guard_allows_labels_defined_in_loop_body() {
+        let body = vec![
+            HirStmt::If {
+                cond: HirExpr::Const(1, NirType::Bool),
+                then_body: vec![HirStmt::Goto("block_join".to_string())],
+                else_body: Vec::new(),
+            },
+            HirStmt::Label("block_join".to_string()),
+            HirStmt::Break,
+        ];
+
+        assert!(!has_goto_to_undefined_label(&body));
     }
 }
