@@ -17,7 +17,7 @@ mod cfg;
 mod mir;
 mod normalize;
 mod piece;
-mod printer;
+mod render;
 mod stats;
 mod structuring;
 mod support;
@@ -38,7 +38,7 @@ pub use self::telemetry::{
 };
 pub use self::types::*;
 use self::{
-    action_pipeline::*, builder::*, cfg::*, mir::*, normalize::*, printer::*, structuring::*,
+    action_pipeline::*, builder::*, cfg::*, mir::*, normalize::*, render::*, structuring::*,
 };
 
 pub use self::normalize::{
@@ -151,10 +151,10 @@ pub fn render_mlil_preview_with_binary_and_context(
     binary: Option<&LoadedBinary>,
     type_context: Option<&PreviewTypeContext>,
 ) -> Result<String, MlilPreviewError> {
+    let debug = RenderDebugFlags::from_env();
     telemetry::reset_preview_telemetry();
-    let diag = std::env::var_os("FISSION_PREVIEW_DIAG").is_some();
     let debug_log = |stage: &str| {
-        if std::env::var_os("FISSION_PREVIEW_DEBUG").is_some() {
+        if debug.preview_debug {
             let _ = std::fs::OpenOptions::new()
                 .create(true)
                 .append(true)
@@ -167,7 +167,7 @@ pub fn render_mlil_preview_with_binary_and_context(
                 });
         }
     };
-    if std::env::var_os("FISSION_PREVIEW_DEBUG").is_some() {
+    if debug.preview_debug {
         let _ = std::fs::remove_file(format!("/tmp/fission_preview_{address:x}_unsupported.json"));
     }
     let target_profile = options.target_profile();
@@ -179,7 +179,7 @@ pub fn render_mlil_preview_with_binary_and_context(
     }
 
     if let Err(err) = pcode.validate() {
-        if diag || std::env::var_os("FISSION_PREVIEW_DEBUG").is_some() {
+        if debug.diag || debug.preview_debug {
             eprintln!("[mlil-preview] invalid pcode shape fn=0x{address:x} err={err}");
         }
         let stats = PreviewBuildStats {
@@ -191,7 +191,7 @@ pub fn render_mlil_preview_with_binary_and_context(
     }
 
     let build_start = Instant::now();
-    if std::env::var_os("FISSION_PREVIEW_DEBUG").is_some() {
+    if debug.preview_debug {
         eprintln!("[mlil-preview] stage=build_hir start fn=0x{address:x}");
     }
     debug_log("build_hir_start");
@@ -200,7 +200,7 @@ pub fn render_mlil_preview_with_binary_and_context(
         let mut stats = builder.preview_build_stats();
         stats.build_duration_ms = build_start.elapsed().as_millis() as usize;
         telemetry::store_preview_build_stats(stats);
-        if std::env::var_os("FISSION_PREVIEW_DEBUG").is_some() {
+        if debug.preview_debug {
             eprintln!("[mlil-preview] stage=build_hir error fn=0x{address:x} err={err}");
         }
         if matches!(err, MlilPreviewError::UnsupportedPattern("opcode")) {
@@ -224,7 +224,7 @@ pub fn render_mlil_preview_with_binary_and_context(
     if pcode.blocks.len() > 1 || build_stats.structuring_duration_ms > 0 {
         record_ghidra_action_stage(&mut build_stats, GhidraActionConcept::BlockGraphStructuring);
     }
-    if diag {
+    if debug.diag {
         eprintln!(
             "[DIAG] build_hir done: fn=0x{address:x} elapsed={:.3}s body_stmts={} locals={}",
             build_start.elapsed().as_secs_f64(),
@@ -232,7 +232,7 @@ pub fn render_mlil_preview_with_binary_and_context(
             hir.locals.len()
         );
     }
-    if std::env::var_os("FISSION_PREVIEW_DEBUG").is_some() {
+    if debug.preview_debug {
         eprintln!("[mlil-preview] stage=normalize start fn=0x{address:x}");
     }
     debug_log("normalize_start");
@@ -246,7 +246,7 @@ pub fn render_mlil_preview_with_binary_and_context(
     build_stats.refresh_structuring_reason_families();
     build_stats.build_duration_ms = build_start.elapsed().as_millis() as usize;
     build_stats.normalize_duration_ms = normalize_start.elapsed().as_millis() as usize;
-    if diag {
+    if debug.diag {
         eprintln!(
             "[DIAG] normalize stage done: fn=0x{address:x} elapsed={:.3}s body_stmts={} locals={}",
             normalize_start.elapsed().as_secs_f64(),
@@ -256,14 +256,14 @@ pub fn render_mlil_preview_with_binary_and_context(
     }
     debug_log("normalize_done");
     if let Some(context) = type_context {
-        if std::env::var_os("FISSION_PREVIEW_DEBUG").is_some() {
+        if debug.preview_debug {
             eprintln!("[mlil-preview] stage=type_hints start fn=0x{address:x}");
         }
         debug_log("type_hints_start");
         let type_hints_start = Instant::now();
         let hint_stats = apply_preview_type_hints(&mut hir, context);
         telemetry::store_preview_hint_stats(hint_stats);
-        if diag {
+        if debug.diag {
             eprintln!(
                 "[DIAG] type_hints done: fn=0x{address:x} elapsed={:.3}s",
                 type_hints_start.elapsed().as_secs_f64()
@@ -272,15 +272,17 @@ pub fn render_mlil_preview_with_binary_and_context(
         debug_log("type_hints_done");
     }
     recover_global_symbol_accesses(&mut hir, options);
-    debug_log("mir_shadow_projection_start");
-    let mir_projection_start = Instant::now();
-    let (_shadow_mir, mir_lowering_stats) = project_hir_to_mir(&hir);
-    mir_lowering_stats.apply_to_build_stats(
-        &mut build_stats,
-        mir_projection_start.elapsed().as_millis() as usize,
-    );
-    debug_log("mir_shadow_projection_done");
-    if std::env::var_os("FISSION_PREVIEW_DEBUG").is_some() {
+    if debug.mir_shadow_projection {
+        debug_log("mir_shadow_projection_start");
+        let mir_projection_start = Instant::now();
+        let (_shadow_mir, mir_lowering_stats) = project_hir_to_mir(&hir);
+        mir_lowering_stats.apply_to_build_stats(
+            &mut build_stats,
+            mir_projection_start.elapsed().as_millis() as usize,
+        );
+        debug_log("mir_shadow_projection_done");
+    }
+    if debug.preview_debug {
         eprintln!("[mlil-preview] stage=print start fn=0x{address:x}");
     }
     debug_log("print_start");
@@ -291,17 +293,36 @@ pub fn render_mlil_preview_with_binary_and_context(
     build_stats.render_duration_ms = print_start.elapsed().as_millis() as usize;
     build_stats.rendered_code_len = rendered.len();
     telemetry::store_preview_build_stats(build_stats);
-    if diag {
+    if debug.diag {
         eprintln!(
             "[DIAG] print done: fn=0x{address:x} elapsed={:.3}s",
             print_start.elapsed().as_secs_f64()
         );
     }
-    if std::env::var_os("FISSION_PREVIEW_DEBUG").is_some() {
+    if debug.preview_debug {
         eprintln!("[mlil-preview] stage=print done fn=0x{address:x}");
     }
     debug_log("print_done");
     Ok(rendered)
+}
+
+#[derive(Debug, Clone, Copy)]
+struct RenderDebugFlags {
+    diag: bool,
+    preview_debug: bool,
+    mir_shadow_projection: bool,
+}
+
+impl RenderDebugFlags {
+    fn from_env() -> Self {
+        let preview_debug = std::env::var_os("FISSION_PREVIEW_DEBUG").is_some();
+        Self {
+            diag: std::env::var_os("FISSION_PREVIEW_DIAG").is_some(),
+            preview_debug,
+            mir_shadow_projection: preview_debug
+                || std::env::var_os("FISSION_NIR_MIR_SHADOW").is_some(),
+        }
+    }
 }
 
 fn render_hir_function_with_global_decls(

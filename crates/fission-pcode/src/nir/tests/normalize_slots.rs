@@ -318,16 +318,14 @@ fn memory_slot_surfacing_assigns_aliases_in_deterministic_first_use_order() {
 
     let rendered = print_hir_function(&func);
     assert!(
-        !func.locals.iter().any(|binding| binding
-            .initializer
-            .is_some()
-            && binding.name.starts_with("slot_0")),
+        !func
+            .locals
+            .iter()
+            .any(|binding| binding.initializer.is_some() && binding.name.starts_with("slot_0")),
         "{rendered}"
     );
     assert!(
-        rendered.contains("*rax")
-            && rendered.contains("*param_1")
-            && rendered.contains("*rdi"),
+        rendered.contains("*rax") && rendered.contains("*param_1") && rendered.contains("*rdi"),
         "{rendered}"
     );
 }
@@ -439,10 +437,7 @@ fn memory_slot_surfacing_collapses_zero_offset_direct_alias_source() {
         !func.locals.iter().any(|binding| binding.name == "slot_0"),
         "{rendered}"
     );
-    assert!(
-        rendered.contains("*rax + *rax"),
-        "{rendered}"
-    );
+    assert!(rendered.contains("*rax + *rax"), "{rendered}");
 }
 
 #[test]
@@ -495,10 +490,7 @@ fn memory_slot_surfacing_collapses_zero_offset_single_def_body_alias_source() {
         !func.locals.iter().any(|binding| binding.name == "slot_0"),
         "{rendered}"
     );
-    assert!(
-        rendered.contains("*rax + *rax"),
-        "{rendered}"
-    );
+    assert!(rendered.contains("*rax + *rax"), "{rendered}");
 }
 
 #[test]

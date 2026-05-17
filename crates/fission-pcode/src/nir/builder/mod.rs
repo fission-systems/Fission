@@ -11,21 +11,21 @@ use std::collections::HashMap;
 mod state;
 pub(super) use state::PreviewBuilder;
 
-mod aggregate_recovery;
-mod call_recovery;
+mod calls;
+mod control;
 mod debug;
 mod entry_analysis;
+mod expr;
 mod init;
-mod lower_expr;
 mod materialize;
-mod stack_slots;
+mod memory;
 mod stats;
 pub(super) mod switch_table;
 mod telemetry;
-mod terminator;
 mod type_hints;
 
 use self::debug::preview_builder_diag_enabled;
+pub(in crate::nir::builder) use memory::aggregate_recovery;
 use tracing::trace_span;
 
 pub(super) fn apply_preview_type_hints(

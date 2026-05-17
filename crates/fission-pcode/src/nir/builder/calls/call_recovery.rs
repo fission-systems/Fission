@@ -2,7 +2,7 @@ use super::*;
 use std::collections::HashSet;
 
 impl<'a> PreviewBuilder<'a> {
-    pub(super) fn abi_state(&self) -> AbiState {
+    pub(in crate::nir::builder) fn abi_state(&self) -> AbiState {
         AbiState::new(
             self.options.calling_convention,
             self.options.is_64bit,

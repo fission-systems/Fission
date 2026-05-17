@@ -1,7 +1,7 @@
 use super::*;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct ResolvedGlobalPointer {
+pub(in crate::nir::builder) struct ResolvedGlobalPointer {
     pub name: String,
     pub byte_offset: i64,
 }
@@ -35,7 +35,7 @@ impl<'a> PreviewBuilder<'a> {
         self.abi_state().classify_stack_slot_origin(base, offset)
     }
 
-    pub(super) fn register_param(&mut self, vn: &Varnode) -> Option<String> {
+    pub(in crate::nir::builder) fn register_param(&mut self, vn: &Varnode) -> Option<String> {
         if !self.options.is_64bit
             && !matches!(
                 self.options.calling_convention,
@@ -86,7 +86,7 @@ impl<'a> PreviewBuilder<'a> {
         Some(name)
     }
 
-    pub(super) fn try_stack_slot_lvalue_for_memory_op(
+    pub(in crate::nir::builder) fn try_stack_slot_lvalue_for_memory_op(
         &mut self,
         op: &PcodeOp,
         ptr: &Varnode,
@@ -98,7 +98,11 @@ impl<'a> PreviewBuilder<'a> {
         self.try_stack_slot_lvalue(ptr, ty)
     }
 
-    pub(super) fn try_global_lvalue(&self, op: &PcodeOp, ptr: &Varnode) -> Option<String> {
+    pub(in crate::nir::builder) fn try_global_lvalue(
+        &self,
+        op: &PcodeOp,
+        ptr: &Varnode,
+    ) -> Option<String> {
         if let Some(name) = self.relocation_name_for_pcode_op(op.address) {
             return Some(name);
         }
@@ -109,7 +113,7 @@ impl<'a> PreviewBuilder<'a> {
         self.options.global_names.get(&addr).cloned()
     }
 
-    pub(super) fn try_global_memory_lvalue(
+    pub(in crate::nir::builder) fn try_global_memory_lvalue(
         &self,
         op: &PcodeOp,
         ptr: &Varnode,
@@ -145,7 +149,10 @@ impl<'a> PreviewBuilder<'a> {
             .map(|global| global.name)
     }
 
-    pub(super) fn relocation_name_for_pcode_op(&self, address: u64) -> Option<String> {
+    pub(in crate::nir::builder) fn relocation_name_for_pcode_op(
+        &self,
+        address: u64,
+    ) -> Option<String> {
         if let Some(name) = self.options.relocation_names.get(&address) {
             return Some(name.clone());
         }
@@ -230,7 +237,7 @@ impl<'a> PreviewBuilder<'a> {
         }
     }
 
-    pub(super) fn resolve_relocated_load_pointer(
+    pub(in crate::nir::builder) fn resolve_relocated_load_pointer(
         &self,
         op: &PcodeOp,
         budget: usize,
@@ -262,7 +269,11 @@ impl<'a> PreviewBuilder<'a> {
             })
     }
 
-    pub(super) fn read_readonly_scalar_from_binary(&self, address: u64, size: u32) -> Option<u64> {
+    pub(in crate::nir::builder) fn read_readonly_scalar_from_binary(
+        &self,
+        address: u64,
+        size: u32,
+    ) -> Option<u64> {
         if self.options.relocation_names.contains_key(&address)
             || self.options.global_names.contains_key(&address)
         {
@@ -329,7 +340,11 @@ impl<'a> PreviewBuilder<'a> {
         }
     }
 
-    pub(super) fn resolve_global_address(&self, ptr: &Varnode, budget: usize) -> Option<u64> {
+    pub(in crate::nir::builder) fn resolve_global_address(
+        &self,
+        ptr: &Varnode,
+        budget: usize,
+    ) -> Option<u64> {
         if ptr.is_constant {
             return if ptr.offset != 0 {
                 Some(ptr.offset)
@@ -409,7 +424,7 @@ impl<'a> PreviewBuilder<'a> {
         }
     }
 
-    pub(super) fn try_stack_slot_lvalue(
+    pub(in crate::nir::builder) fn try_stack_slot_lvalue(
         &mut self,
         ptr: &Varnode,
         ty: NirType,
@@ -418,7 +433,10 @@ impl<'a> PreviewBuilder<'a> {
         self.ensure_stack_slot_binding(base, offset, ty)
     }
 
-    pub(super) fn resolve_stack_address(&self, ptr: &Varnode) -> Option<(StackBase, i64)> {
+    pub(in crate::nir::builder) fn resolve_stack_address(
+        &self,
+        ptr: &Varnode,
+    ) -> Option<(StackBase, i64)> {
         self.resolve_stack_address_inner(ptr, &mut HashSet::new())
     }
 
@@ -542,7 +560,7 @@ impl<'a> PreviewBuilder<'a> {
         resolved
     }
 
-    pub(super) fn ensure_stack_slot_binding(
+    pub(in crate::nir::builder) fn ensure_stack_slot_binding(
         &mut self,
         base: StackBase,
         offset: i64,
@@ -619,7 +637,7 @@ impl<'a> PreviewBuilder<'a> {
         }
     }
 
-    pub(super) fn resolve_stack_address_from_memory_op(
+    pub(in crate::nir::builder) fn resolve_stack_address_from_memory_op(
         &self,
         op: &PcodeOp,
     ) -> Option<(StackBase, i64)> {

@@ -8,22 +8,18 @@
 //! - Cyclomatic complexity calculation
 //! - CFG visualization (Graphviz DOT format)
 
+mod analysis;
 mod basic_block;
-mod dominator;
 mod graph;
-mod loops;
-mod metrics;
+mod render;
 mod summary;
-mod visualization;
 
 use crate::PcodeFunction;
+pub use analysis::{CfgMetrics, ComplexityAnalyzer, DominatorTree, Loop, LoopAnalyzer, LoopKind};
 pub use basic_block::{BasicBlock, BlockEdge, EdgeKind};
-pub use dominator::DominatorTree;
 pub use graph::{CfgBuilder, ControlFlowGraph};
-pub use loops::{Loop, LoopAnalyzer, LoopKind};
-pub use metrics::{CfgMetrics, ComplexityAnalyzer};
+pub use render::{CfgVisualizer, DotOptions};
 pub use summary::*;
-pub use visualization::{CfgVisualizer, DotOptions};
 
 /// Error types for CFG analysis
 #[derive(Debug, Clone)]

@@ -71,7 +71,7 @@ impl<'a> PrintCtx<'a> {
     }
 }
 
-pub(super) fn print_hir_function(func: &HirFunction) -> String {
+pub(in crate::nir) fn print_hir_function(func: &HirFunction) -> String {
     let ctx = PrintCtx::build(func);
     let mut out = String::new();
     let return_type = func
@@ -123,7 +123,7 @@ fn print_binding_type(binding: &NirBinding) -> String {
         .unwrap_or_else(|| print_type(&binding.ty))
 }
 
-pub(super) fn print_stmt(stmt: &HirStmt) -> String {
+pub(in crate::nir) fn print_stmt(stmt: &HirStmt) -> String {
     match stmt {
         HirStmt::Assign { lhs, rhs } => {
             format!(
@@ -333,7 +333,7 @@ fn print_lvalue(lhs: &HirLValue, depth: usize) -> String {
     }
 }
 
-pub(super) fn print_expr(expr: &HirExpr) -> String {
+pub(in crate::nir) fn print_expr(expr: &HirExpr) -> String {
     print_expr_prec(expr, 0, 0)
 }
 
@@ -535,7 +535,7 @@ fn print_binary_op(op: HirBinaryOp) -> &'static str {
     }
 }
 
-pub(super) fn print_type(ty: &NirType) -> String {
+pub(in crate::nir) fn print_type(ty: &NirType) -> String {
     match ty {
         NirType::Unknown => "undefined".to_string(),
         NirType::Bool => "bool".to_string(),

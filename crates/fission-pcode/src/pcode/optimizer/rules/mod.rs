@@ -7,7 +7,7 @@
 //! - Comparison operations (EQUAL, LESS, etc.)
 //! - Constant folding for all operation types
 
-use super::def_use::{DEFAULT_VARNODE_SIZE, DefUseTracker, OpRef};
+use super::passes::def_use::{DEFAULT_VARNODE_SIZE, DefUseTracker, OpRef};
 use crate::pcode::{PcodeFunction, PcodeOp, PcodeOpcode, Varnode};
 
 mod dead_bit;

@@ -9,7 +9,7 @@ use crate::pcode::{PcodeFunction, PcodeOp, PcodeOpcode, Varnode};
 use std::collections::HashMap;
 
 /// Default varnode size (4 bytes = 32-bit) used when size cannot be determined
-pub(super) const DEFAULT_VARNODE_SIZE: u32 = 4;
+pub(in crate::pcode::optimizer) const DEFAULT_VARNODE_SIZE: u32 = 4;
 
 fn safe_shl_u64(value: u64, shift: u32) -> u64 {
     value.checked_shl(shift).unwrap_or(0)

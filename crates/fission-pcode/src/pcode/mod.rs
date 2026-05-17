@@ -4,9 +4,8 @@
 //!
 //! Optimizer hooks and IR shapes are consumed by [`crate::nir`] when building previews.
 
-// Core types
-mod types;
-pub use types::*;
+pub mod ir;
+pub use ir::*;
 
 // Sub-modules
 pub mod graph;

@@ -531,11 +531,7 @@ fn recover_in_expr(expr: &mut HirExpr, binding_types: &HashMap<String, NirType>)
         HirExpr::PtrOffset { base, .. } => {
             changed |= recover_in_expr(base, binding_types);
         }
-        HirExpr::Index {
-            base,
-            index,
-            ..
-        } => {
+        HirExpr::Index { base, index, .. } => {
             changed |= recover_in_expr(base, binding_types);
             changed |= recover_in_expr(index, binding_types);
         }
@@ -576,11 +572,7 @@ fn recover_in_lvalue(lhs: &mut HirLValue, binding_types: &HashMap<String, NirTyp
                 recover_in_expr(ptr, binding_types)
             }
         }
-        HirLValue::Index {
-            base,
-            index,
-            ..
-        } => {
+        HirLValue::Index { base, index, .. } => {
             let a = recover_in_expr(base, binding_types);
             let b = recover_in_expr(index, binding_types);
             a || b

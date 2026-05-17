@@ -357,19 +357,18 @@ fn stmt_may_bypass_following_stmts(stmt: &HirStmt) -> bool {
         HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } | HirStmt::For { body, .. } => {
             body.iter().any(stmt_may_bypass_following_stmts)
         }
-        HirStmt::Assign { .. }
-        | HirStmt::Expr(_)
-        | HirStmt::VaStart { .. }
-        | HirStmt::Label(_) => false,
+        HirStmt::Assign { .. } | HirStmt::Expr(_) | HirStmt::VaStart { .. } | HirStmt::Label(_) => {
+            false
+        }
     }
 }
 
 fn stmt_assigns_any_expr_var(stmt: &HirStmt, expr: &HirExpr) -> bool {
     match stmt {
         HirStmt::Assign { lhs, .. } => lvalue_assigns_any_expr_var(lhs, expr),
-        HirStmt::Block(body) | HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
-            body.iter().any(|stmt| stmt_assigns_any_expr_var(stmt, expr))
-        }
+        HirStmt::Block(body) | HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => body
+            .iter()
+            .any(|stmt| stmt_assigns_any_expr_var(stmt, expr)),
         HirStmt::For {
             init, update, body, ..
         } => {
@@ -378,7 +377,9 @@ fn stmt_assigns_any_expr_var(stmt: &HirStmt, expr: &HirExpr) -> bool {
                 || update
                     .as_deref()
                     .is_some_and(|stmt| stmt_assigns_any_expr_var(stmt, expr))
-                || body.iter().any(|stmt| stmt_assigns_any_expr_var(stmt, expr))
+                || body
+                    .iter()
+                    .any(|stmt| stmt_assigns_any_expr_var(stmt, expr))
         }
         HirStmt::If {
             then_body,
@@ -393,12 +394,13 @@ fn stmt_assigns_any_expr_var(stmt: &HirStmt, expr: &HirExpr) -> bool {
                     .any(|stmt| stmt_assigns_any_expr_var(stmt, expr))
         }
         HirStmt::Switch { cases, default, .. } => {
-            cases
-                .iter()
-                .any(|case| case.body.iter().any(|stmt| stmt_assigns_any_expr_var(stmt, expr)))
-                || default
+            cases.iter().any(|case| {
+                case.body
                     .iter()
                     .any(|stmt| stmt_assigns_any_expr_var(stmt, expr))
+            }) || default
+                .iter()
+                .any(|stmt| stmt_assigns_any_expr_var(stmt, expr))
         }
         HirStmt::Expr(_)
         | HirStmt::Return(_)
@@ -603,9 +605,9 @@ fn stmt_uses_var_as_index_base(stmt: &HirStmt, name: &str) -> bool {
         HirStmt::Assign { lhs, rhs } => {
             lvalue_uses_var_as_index_base(lhs, name) || expr_uses_var_as_index_base(rhs, name)
         }
-        HirStmt::Expr(expr) | HirStmt::Return(Some(expr)) | HirStmt::VaStart { va_list: expr, .. } => {
-            expr_uses_var_as_index_base(expr, name)
-        }
+        HirStmt::Expr(expr)
+        | HirStmt::Return(Some(expr))
+        | HirStmt::VaStart { va_list: expr, .. } => expr_uses_var_as_index_base(expr, name),
         HirStmt::Block(body)
         | HirStmt::While { body, .. }
         | HirStmt::DoWhile { body, .. }

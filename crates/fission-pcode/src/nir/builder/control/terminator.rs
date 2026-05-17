@@ -16,8 +16,9 @@ fn merge_inferred_branchind_targets(
 ) {
     *recovered_selector_cardinality = Some(recovered_targets.selector_cardinality);
     *recovered_case_map = Some(recovered_targets.recovered_cases);
+    let mut seen = targets.iter().copied().collect::<BTreeSet<_>>();
     for target in recovered_targets.unique_targets {
-        if !targets.contains(&target) {
+        if seen.insert(target) {
             targets.push(target);
         }
     }

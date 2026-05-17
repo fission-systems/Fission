@@ -1,4 +1,4 @@
-use crate::pcode::optimizer::def_use::DefUseTracker;
+use crate::pcode::optimizer::passes::def_use::DefUseTracker;
 use crate::pcode::{PcodeOp, PcodeOpcode};
 
 /// Rule: Dead Bit Elimination
