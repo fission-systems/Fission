@@ -521,6 +521,61 @@ pub(crate) fn eliminate_dead_temp_assigns(
     changed
 }
 
+pub(crate) fn eliminate_redundant_var_assigns(stmts: &mut Vec<HirStmt>) -> bool {
+    let mut changed = false;
+    let mut to_remove = vec![false; stmts.len()];
+
+    for idx in 0..stmts.len() {
+        let HirStmt::Assign {
+            lhs: HirLValue::Var(name),
+            rhs,
+        } = &stmts[idx]
+        else {
+            continue;
+        };
+
+        if matches!(rhs, HirExpr::Var(rhs_name) if rhs_name == name) {
+            to_remove[idx] = true;
+            changed = true;
+            continue;
+        }
+
+        if idx == 0
+            || to_remove[idx - 1]
+            || expr_has_side_effects(rhs)
+            || expr_mentions_var(rhs, name)
+        {
+            continue;
+        }
+
+        let HirStmt::Assign {
+            lhs: HirLValue::Var(prev_name),
+            rhs: prev_rhs,
+        } = &stmts[idx - 1]
+        else {
+            continue;
+        };
+
+        if prev_name == name && redundant_assign_rhs_equal(prev_rhs, rhs) {
+            to_remove[idx - 1] = true;
+            changed = true;
+        }
+    }
+
+    if changed {
+        retain_unmarked_stmts(stmts, &to_remove);
+    }
+    changed
+}
+
+fn redundant_assign_rhs_equal(lhs: &HirExpr, rhs: &HirExpr) -> bool {
+    lhs == rhs
+        || matches!(
+            (lhs, rhs),
+            (HirExpr::Const(lhs_value, _), HirExpr::Const(rhs_value, _)) if lhs_value == rhs_value
+        )
+}
+
 pub(crate) fn collapse_trivial_pointer_alias_bindings(func: &mut HirFunction) -> bool {
     let mut aliases = HashMap::<String, HirExpr>::new();
     for binding in &func.locals {
@@ -1419,6 +1474,71 @@ mod tests {
         ];
 
         assert!(!collapse_loop_exit_alias_returns(&mut stmts));
+    }
+
+    #[test]
+    fn eliminate_redundant_var_assigns_removes_adjacent_duplicate_assign() {
+        let mut stmts = vec![
+            HirStmt::Assign {
+                lhs: HirLValue::Var("uVar84".to_string()),
+                rhs: HirExpr::Const(0, int(64)),
+            },
+            HirStmt::Assign {
+                lhs: HirLValue::Var("uVar84".to_string()),
+                rhs: HirExpr::Const(0, int(64)),
+            },
+            HirStmt::Return(Some(HirExpr::Var("uVar84".to_string()))),
+        ];
+
+        assert!(eliminate_redundant_var_assigns(&mut stmts));
+        assert_eq!(stmts.len(), 2);
+        assert!(matches!(
+            &stmts[0],
+            HirStmt::Assign {
+                lhs: HirLValue::Var(name),
+                rhs: HirExpr::Const(0, _),
+            } if name == "uVar84"
+        ));
+    }
+
+    #[test]
+    fn eliminate_redundant_var_assigns_keeps_self_dependent_duplicate() {
+        let rhs = HirExpr::Binary {
+            op: HirBinaryOp::Add,
+            lhs: Box::new(HirExpr::Var("sum".to_string())),
+            rhs: Box::new(HirExpr::Const(1, int(32))),
+            ty: int(32),
+        };
+        let mut stmts = vec![
+            HirStmt::Assign {
+                lhs: HirLValue::Var("sum".to_string()),
+                rhs: rhs.clone(),
+            },
+            HirStmt::Assign {
+                lhs: HirLValue::Var("sum".to_string()),
+                rhs,
+            },
+        ];
+
+        assert!(!eliminate_redundant_var_assigns(&mut stmts));
+        assert_eq!(stmts.len(), 2);
+    }
+
+    #[test]
+    fn eliminate_redundant_var_assigns_removes_exact_self_assign() {
+        let mut stmts = vec![
+            HirStmt::Assign {
+                lhs: HirLValue::Var("xVar29".to_string()),
+                rhs: HirExpr::Var("xVar29".to_string()),
+            },
+            HirStmt::Return(Some(HirExpr::Var("xVar29".to_string()))),
+        ];
+
+        assert!(eliminate_redundant_var_assigns(&mut stmts));
+        assert_eq!(
+            stmts,
+            vec![HirStmt::Return(Some(HirExpr::Var("xVar29".to_string())))]
+        );
     }
 
     #[test]
