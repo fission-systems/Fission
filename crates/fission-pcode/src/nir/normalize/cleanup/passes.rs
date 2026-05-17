@@ -1608,6 +1608,16 @@ mod tests {
         }
     }
 
+    fn temp_binding(name: &str, bits: u32) -> NirBinding {
+        NirBinding {
+            name: name.to_string(),
+            ty: int(bits),
+            surface_type_name: None,
+            origin: Some(NirBindingOrigin::Temp),
+            initializer: None,
+        }
+    }
+
     #[test]
     fn recursive_empty_if_cleanup_prunes_nested_pure_empty_guard() {
         let mut stmts = vec![HirStmt::Block(vec![HirStmt::If {
@@ -2104,6 +2114,55 @@ mod tests {
     }
 
     #[test]
+    fn prune_unused_temp_bindings_removes_dead_plain_temp_with_nontrivial_name() {
+        let mut func = HirFunction {
+            name: "test_plain_temp_prune".to_string(),
+            params: vec![],
+            locals: vec![temp_binding("rcx", 64)],
+            return_type: int(32),
+            surface_return_type_name: None,
+            body: vec![HirStmt::Return(Some(HirExpr::Const(0, int(32))))],
+            ..Default::default()
+        };
+
+        assert!(prune_unused_temp_bindings(&mut func));
+        assert!(func.locals.is_empty());
+    }
+
+    #[test]
+    fn prune_unused_temp_bindings_removes_dead_preserved_temp_with_nontrivial_name() {
+        let mut func = HirFunction {
+            name: "test_preserved_named_register_prune".to_string(),
+            params: vec![],
+            locals: vec![preserved_temp_binding("rcx", 64)],
+            return_type: int(32),
+            surface_return_type_name: None,
+            body: vec![HirStmt::Return(Some(HirExpr::Const(0, int(32))))],
+            ..Default::default()
+        };
+
+        assert!(prune_unused_temp_bindings(&mut func));
+        assert!(func.locals.is_empty());
+    }
+
+    #[test]
+    fn prune_unused_temp_bindings_keeps_used_plain_temp_with_nontrivial_name() {
+        let mut func = HirFunction {
+            name: "test_plain_temp_used".to_string(),
+            params: vec![],
+            locals: vec![temp_binding("rcx", 64)],
+            return_type: int(64),
+            surface_return_type_name: None,
+            body: vec![HirStmt::Return(Some(HirExpr::Var("rcx".to_string())))],
+            ..Default::default()
+        };
+
+        assert!(!prune_unused_temp_bindings(&mut func));
+        assert_eq!(func.locals.len(), 1);
+        assert_eq!(func.locals[0].name, "rcx");
+    }
+
+    #[test]
     fn prune_unused_temp_bindings_keeps_side_effect_assignment_target() {
         let mut func = HirFunction {
             name: "test_side_effect_lhs_preserved".to_string(),
@@ -2587,7 +2646,7 @@ pub(crate) fn prune_unused_temp_bindings(func: &mut HirFunction) -> bool {
         let assigned_side_effect =
             stmt_list_assigns_var_from_side_effecting_expr(&func.body, &binding.name);
         let keep = should_keep_unused_temp_binding(
-            is_trivial_temp_name(&binding.name),
+            is_prunable_unused_temp_binding(binding),
             used || assigned_side_effect,
             binding
                 .initializer
@@ -2598,6 +2657,10 @@ pub(crate) fn prune_unused_temp_bindings(func: &mut HirFunction) -> bool {
         keep
     });
     changed
+}
+
+fn is_prunable_unused_temp_binding(binding: &NirBinding) -> bool {
+    is_trivial_temp_name(&binding.name) || binding.is_temp_like()
 }
 
 fn stmt_list_assigns_var_from_side_effecting_expr(stmts: &[HirStmt], name: &str) -> bool {

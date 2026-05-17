@@ -645,9 +645,13 @@ fn positive_count_entry_guard_cmp(
         else {
             return None;
         };
-        if else_body.is_empty()
-            && single_goto_target(then_body).is_some_and(|label| after_labels.contains(label))
-        {
+        if !else_body.is_empty() {
+            return None;
+        }
+        let exits_before_loop = single_goto_target(then_body)
+            .is_some_and(|label| after_labels.contains(label))
+            || matches!(then_body.as_slice(), [HirStmt::Return(Some(expr))] if is_zero(expr));
+        if exits_before_loop {
             positive_count_loop_cmp(cond, count)
         } else {
             None
@@ -1431,5 +1435,86 @@ mod tests {
 
         assert!(!apply_iv_recovery_pass(&mut func));
         assert!(matches!(func.body[1], HirStmt::DoWhile { .. }));
+    }
+
+    #[test]
+    fn early_return_guarded_pointer_dowhile_upgrades_to_indexed_for() {
+        let mut func = HirFunction {
+            name: "early_return_guarded_pointer_loop".to_string(),
+            params: Vec::new(),
+            locals: Vec::new(),
+            return_type: int(32, false),
+            surface_return_type_name: None,
+            body: vec![
+                HirStmt::If {
+                    cond: HirExpr::Binary {
+                        op: HirBinaryOp::SLe,
+                        lhs: Box::new(var("len")),
+                        rhs: Box::new(const_i(0)),
+                        ty: NirType::Bool,
+                    },
+                    then_body: vec![HirStmt::Return(Some(HirExpr::Const(0, int(32, false))))],
+                    else_body: Vec::new(),
+                },
+                HirStmt::Assign {
+                    lhs: HirLValue::Var("end".to_string()),
+                    rhs: add(var("ptr"), var("len"), ptr_u32()),
+                },
+                HirStmt::DoWhile {
+                    body: vec![
+                        HirStmt::Assign {
+                            lhs: HirLValue::Var("sum".to_string()),
+                            rhs: HirExpr::Binary {
+                                op: HirBinaryOp::Add,
+                                lhs: Box::new(var("sum")),
+                                rhs: Box::new(HirExpr::Load {
+                                    ptr: Box::new(var("ptr")),
+                                    ty: int(32, false),
+                                }),
+                                ty: int(32, false),
+                            },
+                        },
+                        HirStmt::Assign {
+                            lhs: HirLValue::Var("ptr".to_string()),
+                            rhs: add(var("ptr"), const_i(1), ptr_u32()),
+                        },
+                    ],
+                    cond: ne(var("ptr"), var("end")),
+                },
+                HirStmt::Return(Some(var("sum"))),
+            ],
+            ..Default::default()
+        };
+
+        assert!(apply_iv_recovery_pass(&mut func));
+        let HirStmt::For { body, cond, .. } = &func.body[2] else {
+            panic!("expected early-return guarded do-while to become for");
+        };
+        assert!(matches!(
+            cond,
+            Some(HirExpr::Binary {
+                op: HirBinaryOp::SLt,
+                lhs,
+                rhs,
+                ..
+            }) if matches!(lhs.as_ref(), HirExpr::Var(name) if name == "iVar0")
+                && matches!(rhs.as_ref(), HirExpr::Var(name) if name == "len")
+        ));
+        assert!(matches!(
+            &body[0],
+            HirStmt::Assign {
+                rhs:
+                    HirExpr::Binary {
+                        rhs,
+                        ..
+                    },
+                ..
+            } if matches!(
+                rhs.as_ref(),
+                HirExpr::Index { base, index, .. }
+                    if matches!(base.as_ref(), HirExpr::Var(name) if name == "ptr")
+                        && matches!(index.as_ref(), HirExpr::Var(name) if name == "iVar0")
+            )
+        ));
     }
 }
