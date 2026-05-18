@@ -665,8 +665,10 @@ pub(crate) fn sanitize_nir_symbol_name(name: &str) -> String {
 fn build_nir_call_param_rules(
     call_target_refs: &HashMap<u64, CallTargetRef>,
 ) -> Vec<NirCallParamRule> {
-    let structures = WindowsStructures::new();
     let mut call_param_rules = Vec::new();
+    let Ok(structures) = WindowsStructures::try_new() else {
+        return call_param_rules;
+    };
     let target_addresses_by_name = call_target_refs.iter().fold(
         HashMap::<String, Vec<u64>>::new(),
         |mut acc, (addr, target_ref)| {

@@ -17,6 +17,7 @@ import { DebugSidebar } from "./panels/sidebar/DebugSidebar";
 import ActivityBar from "./components/ActivityBar";
 import Sidebar from "./components/Sidebar";
 import EditorTabs from "./components/EditorTabs";
+import FunctionContextBar from "./components/FunctionContextBar";
 import StatusBar from "./components/StatusBar";
 import BottomPanel from "./components/BottomPanel";
 import GotoDialog from "./panels/dialogs/GotoDialog";
@@ -69,10 +70,9 @@ function App() {
         functions, setFunctions,
         sections, strings, imports, bookmarks, setBookmarks,
         patches, hexData, xrefs,
-        loading, progress, fidRunning,
-        lastFidResult,
+        loading, progress,
         decompileCache, decompileStatus, asmCache, asmHasMore, asmLoadingMore,
-        handleOpenFile, handleLoadBinary, handleRunFid,
+        handleOpenFile, handleLoadBinary,
         handleFunctionClick, fetchDecompileResult, handleAsmLoadMore,
         handleToggleBookmark: handleToggleBookmarkAt,
         handleRecordPatch, handleRevertPatch,
@@ -463,6 +463,22 @@ function App() {
 
     // --- Active tab ---
     const activeTab = tabs.find((t) => t.id === activeTabId) ?? null;
+    const activeFunction = activeTab
+        ? functions.find((f) => f.address.toLowerCase() === activeTab.address.toLowerCase()) ?? null
+        : null;
+    const activeDecompileStatus = activeTab
+        ? decompileStatus[`decomp-${activeTab.address}`] ?? "idle"
+        : "idle";
+    const sidebarTitle =
+        activeView === "settings" ? "Settings" :
+        activeView === "debug" ? "Debug" :
+        activeView === "search" ? "Search" :
+        activeView === "plugins" ? "Plugins" :
+        binaryInfo ? binaryInfo.name : "Explorer";
+    const sidebarSubtitle =
+        activeView === "explorer" && binaryInfo
+            ? `${binaryInfo.format} · ${binaryInfo.arch}${binaryInfo.bits ? `:${binaryInfo.bits}` : ""} · ${functions.length} funcs`
+            : undefined;
 
     // --- Render ---
     return (
@@ -471,36 +487,13 @@ function App() {
                 <ActivityBar activeView={activeView} onViewChange={setActiveView} />
 
                 {sidebarVisible && (
-                <Sidebar title={
-                    activeView === "settings" ? "Settings" :
-                    activeView === "debug" ? "Debug" :
-                    activeView === "search" ? "Search" :
-                    activeView === "plugins" ? "Plugins" :
-                    binaryInfo ? binaryInfo.name : "Explorer"
-                }>
+                <Sidebar title={sidebarTitle} subtitle={sidebarSubtitle}>
                     {activeView === "explorer" && (
                         <>
-                            {binaryInfo && (
-                                <div className="explorer__action-bar">
-                                    <button
-                                        className="explorer__action-btn"
-                                        onClick={handleRunFid}
-                                        disabled={fidRunning}
-                                        title="Automatically identify library functions using the signature DB"
-                                    >
-                                        {fidRunning ? "Identifying…" : "🔍 Function ID (FID)"}
-                                    </button>
-                                    {lastFidResult && (
-                                        <div className="explorer__action-meta" title="Latest FID database load stats">
-                                            DB {lastFidResult.fidbf_loaded}/{lastFidResult.fidbf_attempted}
-                                            {lastFidResult.fidbf_failed > 0 ? ` (fail ${lastFidResult.fidbf_failed})` : ""}
-                                        </div>
-                                    )}
-                                </div>
-                            )}
                             <FunctionsList
                                 functions={functions}
                                 loading={loading}
+                                decompileStatus={decompileStatus}
                                 onFunctionClick={handleFunctionClick}
                                 onOpenFile={handleOpenFile}
                                 selectedAddress={activeTab?.address ?? null}
@@ -553,6 +546,24 @@ function App() {
                         canGoForward={canGoForward}
                         onGoBack={goBack}
                         onGoForward={goForward}
+                    />
+
+                    <FunctionContextBar
+                        tab={activeTab}
+                        func={activeFunction}
+                        status={activeDecompileStatus}
+                        onAssembly={handleOpenAssemblyView}
+                        onDecompile={handleOpenDecompileView}
+                        onRename={() => {
+                            if (activeTab) openRename(activeTab.address, activeTab.functionName);
+                        }}
+                        onComment={() => {
+                            if (activeTab) openComment(activeTab.address, "");
+                        }}
+                        onXrefs={() => {
+                            setBottomPanelVisible(true);
+                            setBottomTab("xrefs");
+                        }}
                     />
 
                     <div className="editor-content">

@@ -49,6 +49,15 @@ impl CmdError {
             message: message.to_string(),
         }
     }
+
+    /// Construct a typed command error that does not map directly to a
+    /// [`FissionError`] variant.
+    pub fn typed(kind: &'static str, message: impl Into<String>) -> Self {
+        Self {
+            kind,
+            message: message.into(),
+        }
+    }
 }
 
 /// Allow `?` on `Result<T, String>` at the command boundary.

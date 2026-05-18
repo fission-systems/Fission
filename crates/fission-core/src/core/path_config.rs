@@ -153,8 +153,15 @@ impl PathConfig {
     pub fn detect() -> Self {
         let workspace_root = crate::core::utils::find_workspace_root("FISSION_ROOT");
 
-        let signatures_base = crate::core::resource_roots::resolve_signatures_base_from_bundles()
-            .or_else(|| workspace_root.as_ref().and_then(workspace_signatures_base));
+        let signatures_base = crate::core::resource_roots::resolve_signatures_base_from_roots(
+            crate::core::resource_roots::explicit_bundle_roots(),
+        )
+        .or_else(|| workspace_root.as_ref().and_then(workspace_signatures_base))
+        .or_else(|| {
+            crate::core::resource_roots::resolve_signatures_base_from_roots(
+                crate::core::resource_roots::ambient_bundle_roots(),
+            )
+        });
 
         let fid_dir = signatures_base
             .as_ref()

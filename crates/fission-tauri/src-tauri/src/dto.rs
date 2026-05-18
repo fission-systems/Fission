@@ -5,6 +5,7 @@ use fission_core::{
     MAX_INSTRUCTIONS_PER_FUNCTION,
 };
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 
 /// Binary metadata sent to the frontend after loading.
 #[derive(Debug, Clone, Serialize)]
@@ -59,6 +60,132 @@ pub struct DecompileResult {
     pub engine_used: DecompilerEngineMode,
     pub fell_back: bool,
     pub fallback_reason: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub diagnostics: Option<DecompileDiagnostics>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct DecompileDiagnostics {
+    pub decode: DecodeDiagnostics,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub nir: Option<NirDiagnostics>,
+    pub pipeline_stage_status: Vec<NamedCount>,
+    pub template_sources: Vec<NamedCount>,
+    pub terminal_opcodes: Vec<NamedCount>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct DecodeDiagnostics {
+    pub entry_address: String,
+    pub max_bytes: usize,
+    pub instruction_limit: usize,
+    pub attempts: usize,
+    pub stop_reason: String,
+    pub raw_pcode_ops: Option<usize>,
+    pub raw_pcode_blocks: Option<usize>,
+    pub raw_pcode_edges: Option<usize>,
+    pub strict_indirect_retry_attempted: bool,
+    pub wrapper_probe_attempted: bool,
+    pub wrapper_probe_matched: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct NirDiagnostics {
+    pub build_duration_ms: usize,
+    pub normalize_duration_ms: usize,
+    pub structuring_duration_ms: usize,
+    pub render_duration_ms: usize,
+    pub rendered_code_len: usize,
+    pub validated_pcode_op_count: usize,
+    pub invalid_pcode_shape_count: usize,
+    pub structuring_irreducible_scc_count: usize,
+    pub region_emit_ready_failed_count: usize,
+    pub call_target_unresolved_sub_fallback_count: usize,
+    pub typed_fact_evidence_count: usize,
+    pub typed_fact_conflict_count: usize,
+    pub object_root_fact_promotion_count: usize,
+    pub surface_fact_promotion_count: usize,
+    pub replacement_plan_candidate_count: usize,
+    pub replacement_plan_completed_count: usize,
+    pub replacement_plan_rejected_alias_unsafe_count: usize,
+    pub replacement_plan_rejected_missing_merge_count: usize,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct NamedCount {
+    pub name: String,
+    pub value: String,
+}
+
+impl DecompileDiagnostics {
+    pub fn from_rust_sleigh(result: &fission_decompiler::RustSleighDecompileResult) -> Self {
+        let evidence = &result.evidence;
+        Self {
+            decode: DecodeDiagnostics {
+                entry_address: format!("0x{:x}", evidence.entry_address),
+                max_bytes: evidence.max_bytes,
+                instruction_limit: evidence.instruction_limit,
+                attempts: evidence.decode_attempt_count,
+                stop_reason: evidence.decode_stop_reason.clone(),
+                raw_pcode_ops: evidence.raw_pcode_op_count,
+                raw_pcode_blocks: evidence.raw_pcode_block_count,
+                raw_pcode_edges: evidence.raw_pcode_edge_count,
+                strict_indirect_retry_attempted: evidence.strict_indirect_retry_attempted,
+                wrapper_probe_attempted: evidence.wrapper_probe_attempted,
+                wrapper_probe_matched: evidence.wrapper_probe_matched,
+            },
+            nir: result.build_stats.as_ref().map(NirDiagnostics::from),
+            pipeline_stage_status: string_map_to_named_counts(&evidence.pipeline_stage_status),
+            template_sources: usize_map_to_named_counts(&evidence.template_source_counts),
+            terminal_opcodes: usize_map_to_named_counts(&evidence.raw_pcode_terminal_opcode_counts),
+        }
+    }
+}
+
+impl From<&fission_decompiler::NirBuildStats> for NirDiagnostics {
+    fn from(stats: &fission_decompiler::NirBuildStats) -> Self {
+        Self {
+            build_duration_ms: stats.build_duration_ms,
+            normalize_duration_ms: stats.normalize_duration_ms,
+            structuring_duration_ms: stats.structuring_duration_ms,
+            render_duration_ms: stats.render_duration_ms,
+            rendered_code_len: stats.rendered_code_len,
+            validated_pcode_op_count: stats.validated_pcode_op_count,
+            invalid_pcode_shape_count: stats.invalid_pcode_shape_count,
+            structuring_irreducible_scc_count: stats.structuring_irreducible_scc_count,
+            region_emit_ready_failed_count: stats.region_emit_ready_failed_count,
+            call_target_unresolved_sub_fallback_count: stats
+                .call_target_unresolved_sub_fallback_count,
+            typed_fact_evidence_count: stats.typed_fact_evidence_count,
+            typed_fact_conflict_count: stats.typed_fact_conflict_count,
+            object_root_fact_promotion_count: stats.object_root_fact_promotion_count,
+            surface_fact_promotion_count: stats.surface_fact_promotion_count,
+            replacement_plan_candidate_count: stats.replacement_plan_candidate_count,
+            replacement_plan_completed_count: stats.replacement_plan_completed_count,
+            replacement_plan_rejected_alias_unsafe_count: stats
+                .replacement_plan_rejected_alias_unsafe_count,
+            replacement_plan_rejected_missing_merge_count: stats
+                .replacement_plan_rejected_missing_merge_count,
+        }
+    }
+}
+
+fn usize_map_to_named_counts(map: &BTreeMap<String, usize>) -> Vec<NamedCount> {
+    map.iter()
+        .map(|(name, value)| NamedCount {
+            name: name.clone(),
+            value: value.to_string(),
+        })
+        .collect()
+}
+
+fn string_map_to_named_counts(map: &BTreeMap<String, String>) -> Vec<NamedCount> {
+    map.iter()
+        .map(|(name, value)| NamedCount {
+            name: name.clone(),
+            value: value.clone(),
+        })
+        .collect()
 }
 
 /// Single assembly instruction.

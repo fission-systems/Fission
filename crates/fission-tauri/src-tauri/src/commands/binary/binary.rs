@@ -3,7 +3,7 @@
 use crate::dto::*;
 use crate::error::{CmdError, CmdResult};
 use crate::state::AppState;
-use fission_core::format_addr;
+use fission_core::{format_addr, FissionError};
 use fission_loader::detector::Detection;
 use fission_loader::loader::function_view::{canonical_functions_sorted, canonical_view_counts};
 use fission_loader::loader::LoadedBinary;
@@ -19,12 +19,11 @@ use tauri::State;
 #[tauri::command]
 pub async fn open_file(path: String, state: State<'_, AppState>) -> CmdResult<BinaryInfo> {
     let binary = tokio::task::spawn_blocking(move || {
-        let mut binary = LoadedBinary::from_file(&path)
-            .map_err(|e| CmdError::other(format!("Failed to load binary: {e}")))?;
-        // Keep open_file responsive: run only direct call-target discovery.
-        // The aggressive branch-target analyzer is available via `deep_scan_functions`.
-        let _ =
-            discover_functions_with_runtime(&mut binary, FunctionDiscoveryProfile::Conservative);
+        let mut binary = LoadedBinary::from_file(&path).map_err(map_load_binary_error)?;
+        // Keep open_file responsive: run direct call-target discovery with
+        // decode-gap recovery. The aggressive branch-target analyzer remains
+        // available via `deep_scan_functions`.
+        let _ = discover_functions_with_runtime(&mut binary, FunctionDiscoveryProfile::Balanced);
         Ok::<LoadedBinary, CmdError>(binary)
     })
     .await
@@ -110,6 +109,41 @@ pub(super) fn binary_to_info(binary: &fission_loader::loader::LoadedBinary) -> B
     }
 }
 
+fn map_load_binary_error(error: FissionError) -> CmdError {
+    if let FissionError::Loader(message) = &error {
+        if let Some(container) = parse_container_requires_extraction(message) {
+            return CmdError::typed(
+                "container",
+                container_requires_extraction_message(container),
+            );
+        }
+    }
+
+    CmdError::from(error)
+}
+
+fn parse_container_requires_extraction(message: &str) -> Option<&str> {
+    let marker = "ContainerRequiresExtraction(";
+    let start = message.find(marker)? + marker.len();
+    let tail = &message[start..];
+    let end = tail.find(')')?;
+    Some(&tail[..end])
+}
+
+fn container_requires_extraction_message(container: &str) -> String {
+    match container {
+        "CompoundDocument" => concat!(
+            "Selected file is an OLE Compound Document container, not a direct executable image. ",
+            "This often means a Windows Installer/MSI package. Extract or install it and open the embedded PE, ",
+            "or choose the portable executable instead."
+        )
+        .to_string(),
+        other => format!(
+            "Selected file is a {other} container, not a direct executable image. Extract it first, then open the embedded executable."
+        ),
+    }
+}
+
 fn detection_to_info(detection: &Detection) -> DetectionInfo {
     DetectionInfo {
         detection_type: detection.detection_type.to_string(),
@@ -164,4 +198,28 @@ pub(crate) fn functions_to_dtos(
             }
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn container_loader_error_maps_to_actionable_command_error() {
+        let error = map_load_binary_error(FissionError::loader(
+            "ContainerRequiresExtraction(CompoundDocument)",
+        ));
+
+        assert_eq!(error.kind, "container");
+        assert!(error.message.contains("OLE Compound Document"));
+        assert!(error.message.contains("embedded PE"));
+    }
+
+    #[test]
+    fn non_container_loader_error_preserves_loader_kind() {
+        let error = map_load_binary_error(FissionError::loader("Binary too small"));
+
+        assert_eq!(error.kind, "loader");
+        assert_eq!(error.message, "Loader error: Binary too small");
+    }
 }

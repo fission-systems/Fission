@@ -198,7 +198,7 @@ pub(super) fn collect_typed_fact_inventory(
     func: &HirFunction,
     record_stats: bool,
 ) -> TypedFactInventory {
-    let structures = WindowsStructures::new();
+    let structures = WindowsStructures::try_new().ok();
     let tracked = func
         .locals
         .iter()
@@ -284,27 +284,30 @@ pub(super) fn collect_typed_fact_inventory(
         }
 
         let inferred_size = inferred_aggregate_size(&facts.accesses).unwrap_or_default();
-        let resolved_struct_name =
-            candidate_struct_name(facts.object.type_hint.as_deref(), &structures)
-                .map(|name| (Some(name), 0usize))
-                .unwrap_or_else(|| {
-                    if allows_ambient_windows_struct_inference(func) {
-                        infer_struct_name_from_offsets(
-                            &facts.accesses,
-                            inferred_size,
-                            func.is_64bit,
-                            &structures,
-                        )
-                    } else {
-                        (None, 0)
-                    }
-                });
+        let resolved_struct_name = structures
+            .as_ref()
+            .and_then(|structures| {
+                candidate_struct_name(facts.object.type_hint.as_deref(), structures)
+                    .map(|name| (Some(name), 0usize))
+                    .or_else(|| {
+                        allows_ambient_windows_struct_inference(func).then(|| {
+                            infer_struct_name_from_offsets(
+                                &facts.accesses,
+                                inferred_size,
+                                func.is_64bit,
+                                structures,
+                            )
+                        })
+                    })
+            })
+            .unwrap_or((None, 0));
         facts.resolved_struct_name = resolved_struct_name.0;
         typed_fact_conflicts += resolved_struct_name.1;
 
         let mut named_fields = false;
         let mut name_by_offset = BTreeMap::<u32, String>::new();
         if let Some(struct_name) = facts.resolved_struct_name.as_ref()
+            && let Some(structures) = structures.as_ref()
             && let Some(struct_def) = structures.get(struct_name)
         {
             let struct_size = if func.is_64bit {

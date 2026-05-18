@@ -182,6 +182,7 @@ export default function DecompileView({
     const [hoveredSymbol, setHoveredSymbol] = useState<string | null>(null);
     const [selectedSymbol, setSelectedSymbol] = useState<string | null>(null);
     const [copied, setCopied] = useState(false);
+    const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
     const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
     const handleCopy = useCallback(() => {
@@ -200,6 +201,25 @@ export default function DecompileView({
             tokens: tokenize(line),
         }));
     }, [code]);
+    const diagnostics = result?.diagnostics ?? null;
+    const diagnosticChips = useMemo(() => {
+        if (!diagnostics) return [];
+        const chips = [
+            ["decode", diagnostics.decode.stop_reason || "ok"],
+            ["attempts", diagnostics.decode.attempts.toString()],
+            ["p-code", (diagnostics.decode.raw_pcode_ops ?? 0).toString()],
+            ["blocks", (diagnostics.decode.raw_pcode_blocks ?? 0).toString()],
+        ];
+        if (diagnostics.nir) {
+            chips.push(
+                ["build", `${diagnostics.nir.build_duration_ms}ms`],
+                ["normalize", `${diagnostics.nir.normalize_duration_ms}ms`],
+                ["structure", `${diagnostics.nir.structuring_duration_ms}ms`],
+                ["render", `${diagnostics.nir.render_duration_ms}ms`],
+            );
+        }
+        return chips;
+    }, [diagnostics]);
 
     const handleSymbolClick = useCallback(
         (symbol: string) => {
@@ -241,13 +261,91 @@ export default function DecompileView({
                         <span className="decomp-view__func-name">{result.address}</span>
                         <span className="decomp-view__func-name">{decompileStatusLabel(result)}</span>
                     </div>
-                    <button
-                        className="decomp-view__copy-btn"
-                        onClick={handleCopy}
-                        title="Copy decompiled code"
-                    >
-                        {copied ? "✓ Copied" : "📋 Copy"}
-                    </button>
+                    <div className="decomp-view__header-actions">
+                        {diagnostics && (
+                            <button
+                                className="decomp-view__copy-btn"
+                                onClick={() => setDiagnosticsOpen((open) => !open)}
+                                title="Show decompiler diagnostics"
+                            >
+                                Diagnostics
+                            </button>
+                        )}
+                        <button
+                            className="decomp-view__copy-btn"
+                            onClick={handleCopy}
+                            title="Copy decompiled code"
+                        >
+                            {copied ? "Copied" : "Copy"}
+                        </button>
+                    </div>
+                </div>
+            )}
+            {diagnostics && (
+                <div className="decomp-view__diagnostics">
+                    <div className="decomp-view__diag-chip-row">
+                        {diagnosticChips.map(([label, value]) => (
+                            <span key={label} className="decomp-view__diag-chip">
+                                <label>{label}</label>
+                                <strong>{value}</strong>
+                            </span>
+                        ))}
+                    </div>
+                    {diagnosticsOpen && (
+                        <div className="decomp-view__diag-grid">
+                            <div className="decomp-view__diag-section">
+                                <h4>Decode</h4>
+                                <dl>
+                                    <dt>entry</dt><dd>{diagnostics.decode.entry_address}</dd>
+                                    <dt>max bytes</dt><dd>{diagnostics.decode.max_bytes}</dd>
+                                    <dt>instruction limit</dt><dd>{diagnostics.decode.instruction_limit}</dd>
+                                    <dt>edges</dt><dd>{diagnostics.decode.raw_pcode_edges ?? 0}</dd>
+                                    <dt>strict retry</dt><dd>{diagnostics.decode.strict_indirect_retry_attempted ? "yes" : "no"}</dd>
+                                    <dt>wrapper probe</dt><dd>{diagnostics.decode.wrapper_probe_matched ? "matched" : diagnostics.decode.wrapper_probe_attempted ? "attempted" : "off"}</dd>
+                                </dl>
+                            </div>
+                            {diagnostics.nir && (
+                                <div className="decomp-view__diag-section">
+                                    <h4>NIR</h4>
+                                    <dl>
+                                        <dt>validated ops</dt><dd>{diagnostics.nir.validated_pcode_op_count}</dd>
+                                        <dt>invalid shapes</dt><dd>{diagnostics.nir.invalid_pcode_shape_count}</dd>
+                                        <dt>irreducible SCC</dt><dd>{diagnostics.nir.structuring_irreducible_scc_count}</dd>
+                                        <dt>emit-ready failed</dt><dd>{diagnostics.nir.region_emit_ready_failed_count}</dd>
+                                        <dt>typed facts</dt><dd>{diagnostics.nir.typed_fact_evidence_count}</dd>
+                                        <dt>typed conflicts</dt><dd>{diagnostics.nir.typed_fact_conflict_count}</dd>
+                                        <dt>surface facts</dt><dd>{diagnostics.nir.surface_fact_promotion_count}</dd>
+                                        <dt>replacement plans</dt><dd>{diagnostics.nir.replacement_plan_completed_count}/{diagnostics.nir.replacement_plan_candidate_count}</dd>
+                                    </dl>
+                                </div>
+                            )}
+                            <div className="decomp-view__diag-section">
+                                <h4>Pipeline</h4>
+                                <dl>
+                                    {diagnostics.pipeline_stage_status.map((item) => (
+                                        <div key={item.name} className="decomp-view__diag-pair">
+                                            <dt>{item.name}</dt><dd>{item.value}</dd>
+                                        </div>
+                                    ))}
+                                </dl>
+                            </div>
+                            <div className="decomp-view__diag-section">
+                                <h4>Sources</h4>
+                                <dl>
+                                    {diagnostics.template_sources.map((item) => (
+                                        <div key={item.name} className="decomp-view__diag-pair">
+                                            <dt>{item.name}</dt><dd>{item.value}</dd>
+                                        </div>
+                                    ))}
+                                    {diagnostics.terminal_opcodes.map((item) => (
+                                        <div key={`term-${item.name}`} className="decomp-view__diag-pair">
+                                            <dt>{item.name}</dt><dd>{item.value}</dd>
+                                        </div>
+                                    ))}
+                                </dl>
+                            </div>
+                        </div>
+                    )}
                 </div>
             )}
             <div className="decomp-view__code">

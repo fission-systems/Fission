@@ -24,6 +24,22 @@ interface UseBinaryOptions {
     onResetTabs: () => void;
 }
 
+function formatError(err: unknown): string {
+    if (err instanceof Error) return err.message;
+    if (typeof err === "string") return err;
+    if (err && typeof err === "object") {
+        const record = err as Record<string, unknown>;
+        const message = record.message ?? record.error ?? record.reason;
+        if (typeof message === "string") return message;
+        try {
+            return JSON.stringify(err);
+        } catch {
+            return String(err);
+        }
+    }
+    return String(err);
+}
+
 export function useBinary({ log, onOpenTabs, onResetTabs }: UseBinaryOptions) {
     const [binaryInfo, setBinaryInfo] = useState<BinaryInfo | null>(null);
     const [functions, setFunctions] = useState<FunctionDto[]>([]);
@@ -81,7 +97,7 @@ export function useBinary({ log, onOpenTabs, onResetTabs }: UseBinaryOptions) {
                 const refreshed = await invoke<FunctionDto[]>("get_functions");
                 setFunctions(refreshed);
             } catch (err) {
-                log(`Auto FID skipped: ${err}`);
+                log(`Auto FID skipped: ${formatError(err)}`);
             } finally {
                 setFidRunning(false);
             }
@@ -111,7 +127,7 @@ export function useBinary({ log, onOpenTabs, onResetTabs }: UseBinaryOptions) {
             setAsmCache({});
             await _loadBinaryState(path);
         } catch (err) {
-            log(`Error: ${err}`);
+            log(`Error: ${formatError(err)}`);
         } finally {
             setLoading(false);
         }
@@ -131,7 +147,7 @@ export function useBinary({ log, onOpenTabs, onResetTabs }: UseBinaryOptions) {
                 await _loadBinaryState(path);
                 setProgress({ value: 0.9, message: "Loading metadata..." });
             } catch (err) {
-                log(`Load binary error: ${err}`);
+                log(`Load binary error: ${formatError(err)}`);
             } finally {
                 setLoading(false);
                 setProgress(null);
@@ -154,7 +170,7 @@ export function useBinary({ log, onOpenTabs, onResetTabs }: UseBinaryOptions) {
             setFunctions(funcs);
             setAsmCache({});
         } catch (e) {
-            log(`FID error: ${e}`);
+            log(`FID error: ${formatError(e)}`);
         } finally {
             setFidRunning(false);
         }
@@ -178,16 +194,17 @@ export function useBinary({ log, onOpenTabs, onResetTabs }: UseBinaryOptions) {
                 return result;
             } catch (err) {
                 const fallback: DecompileResult = {
-                    code: `// Error decompiling ${functionName}: ${err}`,
+                    code: `// Error decompiling ${functionName}: ${formatError(err)}`,
                     function_name: functionName,
                     address: addressText,
                     engine_used: "nir",
                     fell_back: true,
-                    fallback_reason: `native_pcode_failure: ${String(err)}`,
+                    fallback_reason: `native_pcode_failure: ${formatError(err)}`,
+                    diagnostics: null,
                 };
                 setDecompileCache((prev) => ({ ...prev, [tabId]: fallback }));
                 setDecompileStatus((prev) => ({ ...prev, [tabId]: "error" }));
-                log(`Decompile error: ${err}`);
+                log(`Decompile error: ${formatError(err)}`);
                 return fallback;
             }
         },
@@ -220,7 +237,7 @@ export function useBinary({ log, onOpenTabs, onResetTabs }: UseBinaryOptions) {
                     setAsmCache((prev) => ({ ...prev, [asmTabId]: instructions }));
                     setAsmHasMore((prev) => ({ ...prev, [asmTabId]: instructions.length === ASM_PAGE }));
                 } catch (err) {
-                    log(`Assembly error: ${err}`);
+                    log(`Assembly error: ${formatError(err)}`);
                 }
             })();
 
@@ -260,7 +277,7 @@ export function useBinary({ log, onOpenTabs, onResetTabs }: UseBinaryOptions) {
                     [tabId]: instructions.length === currentCount + ASM_PAGE,
                 }));
             } catch (err) {
-                log(`Assembly load-more error: ${err}`);
+                log(`Assembly load-more error: ${formatError(err)}`);
             } finally {
                 setAsmLoadingMore((prev) => ({ ...prev, [tabId]: false }));
             }
@@ -277,7 +294,7 @@ export function useBinary({ log, onOpenTabs, onResetTabs }: UseBinaryOptions) {
                 const bms = await invoke<BookmarkDto[]>("get_bookmarks");
                 setBookmarks(bms);
             } catch (err) {
-                log(`Bookmark error: ${err}`);
+                log(`Bookmark error: ${formatError(err)}`);
             }
         },
         [log],
@@ -295,7 +312,7 @@ export function useBinary({ log, onOpenTabs, onResetTabs }: UseBinaryOptions) {
                 setPatches((prev) => prev.filter((p) => p !== rec));
                 log(`Reverted patch at 0x${rec.address.toString(16)}`);
             } catch (err) {
-                log(`Revert error: ${err}`);
+                log(`Revert error: ${formatError(err)}`);
             }
         },
         [log],

@@ -20,6 +20,7 @@ struct DecompileOutcome {
     engine_used: DecompilerEngineMode,
     fell_back: bool,
     fallback_reason: Option<String>,
+    diagnostics: Option<DecompileDiagnostics>,
 }
 
 fn decompile_rust_only(
@@ -35,12 +36,14 @@ fn decompile_rust_only(
 
     let result = decompile_with_rust_sleigh(binary, address, name, &config, None, None)
         .map_err(CmdError::other)?;
+    let diagnostics = DecompileDiagnostics::from_rust_sleigh(&result);
 
     Ok(DecompileOutcome {
         code: result.code,
         engine_used: DecompilerEngineMode::Nir,
         fell_back: result.fell_back,
         fallback_reason: result.fallback_reason,
+        diagnostics: Some(diagnostics),
     })
 }
 
@@ -110,6 +113,7 @@ pub async fn decompile_function(
                     "preview_timeout",
                     format!("decompilation exceeded {timeout_ms}ms"),
                 )),
+                diagnostics: None,
             });
         }
     };
@@ -122,6 +126,7 @@ pub async fn decompile_function(
             engine_used: result.engine_used,
             fell_back: result.fell_back,
             fallback_reason: result.fallback_reason,
+            diagnostics: result.diagnostics,
         }),
         Err(e) => Ok(DecompileResult {
             code: format!(
@@ -136,6 +141,7 @@ pub async fn decompile_function(
                 "rust_decomp_failure",
                 e.to_string(),
             )),
+            diagnostics: None,
         }),
     }
 }

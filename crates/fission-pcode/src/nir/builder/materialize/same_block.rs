@@ -951,7 +951,8 @@ impl<'a> PreviewBuilder<'a> {
         rhs: &HirExpr,
     ) -> AliasUnsafeHazard {
         let uses = Self::collect_output_use_sites_in_block(block, op_idx, output);
-        if let Some(hazard) = Self::first_intervening_alias_unsafe_hazard(block, op_idx, &uses, rhs) {
+        if let Some(hazard) = Self::first_intervening_alias_unsafe_hazard(block, op_idx, &uses, rhs)
+        {
             return hazard;
         }
         if uses.len() > 1 {
@@ -2894,7 +2895,8 @@ impl<'a> PreviewBuilder<'a> {
         uses: &[(usize, &PcodeOp)],
         rhs: &HirExpr,
     ) -> Option<AliasUnsafeHazard> {
-        let has_mem_dep = Self::materialize_expr_contains_load(rhs) || Self::materialize_expr_contains_call(rhs);
+        let has_mem_dep =
+            Self::materialize_expr_contains_load(rhs) || Self::materialize_expr_contains_call(rhs);
         let first_use_idx = uses.first().map(|(idx, _)| *idx)?;
         let mut first_store: Option<(usize, PcodeOpcode)> = None;
         for (candidate_idx, candidate) in block

@@ -188,9 +188,9 @@ fn guard_clause_promotion(stmts: Vec<HirStmt>, changed: &mut bool) -> Vec<HirStm
                 if let [HirStmt::Goto(goto_label)] = then_body.as_slice() {
                     if ref_counts.get(goto_label).copied() == Some(1) {
                         // Scan forward for `Label(L)` at the top level.
-                        if let Some(label_pos) = (i + 1..stmts.len()).find(|&j| {
-                            matches!(&stmts[j], HirStmt::Label(l) if l == goto_label)
-                        }) {
+                        if let Some(label_pos) = (i + 1..stmts.len())
+                            .find(|&j| matches!(&stmts[j], HirStmt::Label(l) if l == goto_label))
+                        {
                             // Collect the tail after the label.
                             let tail: Vec<HirStmt> = stmts[label_pos + 1..].to_vec();
                             // Only promote if the tail is a simple return or
@@ -235,12 +235,9 @@ fn is_promotable_guard_tail(tail: &[HirStmt]) -> bool {
         return false;
     }
     // All preceding statements must be simple assignments or expressions.
-    tail[..tail.len() - 1].iter().all(|s| {
-        matches!(
-            s,
-            HirStmt::Assign { .. } | HirStmt::Expr(_)
-        )
-    })
+    tail[..tail.len() - 1]
+        .iter()
+        .all(|s| matches!(s, HirStmt::Assign { .. } | HirStmt::Expr(_)))
 }
 
 /// Apply `goto_elim_pass` to fixpoint (convergence when no rule fires).

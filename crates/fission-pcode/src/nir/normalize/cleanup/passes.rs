@@ -121,26 +121,40 @@ fn inline_single_use_temps_recursive(
             HirStmt::Block(body) | HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
                 changed |= inline_single_use_temps_recursive(body, preserved_temps, use_counts);
             }
-            HirStmt::For { init, update, body, .. } => {
+            HirStmt::For {
+                init, update, body, ..
+            } => {
                 if let Some(i) = init {
                     if let HirStmt::Block(b) = &mut **i {
-                        changed |= inline_single_use_temps_recursive(b, preserved_temps, use_counts);
+                        changed |=
+                            inline_single_use_temps_recursive(b, preserved_temps, use_counts);
                     }
                 }
                 if let Some(u) = update {
                     if let HirStmt::Block(b) = &mut **u {
-                        changed |= inline_single_use_temps_recursive(b, preserved_temps, use_counts);
+                        changed |=
+                            inline_single_use_temps_recursive(b, preserved_temps, use_counts);
                     }
                 }
                 changed |= inline_single_use_temps_recursive(body, preserved_temps, use_counts);
             }
-            HirStmt::If { then_body, else_body, .. } => {
-                changed |= inline_single_use_temps_recursive(then_body, preserved_temps, use_counts);
-                changed |= inline_single_use_temps_recursive(else_body, preserved_temps, use_counts);
+            HirStmt::If {
+                then_body,
+                else_body,
+                ..
+            } => {
+                changed |=
+                    inline_single_use_temps_recursive(then_body, preserved_temps, use_counts);
+                changed |=
+                    inline_single_use_temps_recursive(else_body, preserved_temps, use_counts);
             }
             HirStmt::Switch { cases, default, .. } => {
                 for case in cases {
-                    changed |= inline_single_use_temps_recursive(&mut case.body, preserved_temps, use_counts);
+                    changed |= inline_single_use_temps_recursive(
+                        &mut case.body,
+                        preserved_temps,
+                        use_counts,
+                    );
                 }
                 changed |= inline_single_use_temps_recursive(default, preserved_temps, use_counts);
             }
@@ -570,7 +584,9 @@ fn eliminate_dead_temp_assigns_recursive(
             HirStmt::Block(body) | HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
                 changed |= eliminate_dead_temp_assigns_recursive(body, use_counts);
             }
-            HirStmt::For { init, update, body, .. } => {
+            HirStmt::For {
+                init, update, body, ..
+            } => {
                 if let Some(i) = init {
                     if let HirStmt::Block(b) = &mut **i {
                         changed |= eliminate_dead_temp_assigns_recursive(b, use_counts);
@@ -583,7 +599,11 @@ fn eliminate_dead_temp_assigns_recursive(
                 }
                 changed |= eliminate_dead_temp_assigns_recursive(body, use_counts);
             }
-            HirStmt::If { then_body, else_body, .. } => {
+            HirStmt::If {
+                then_body,
+                else_body,
+                ..
+            } => {
                 changed |= eliminate_dead_temp_assigns_recursive(then_body, use_counts);
                 changed |= eliminate_dead_temp_assigns_recursive(else_body, use_counts);
             }
@@ -682,10 +702,7 @@ fn strip_redundant_casts_in_stmts(
     changed
 }
 
-fn strip_redundant_casts_in_stmt(
-    stmt: &mut HirStmt,
-    type_map: &HashMap<String, NirType>,
-) -> bool {
+fn strip_redundant_casts_in_stmt(stmt: &mut HirStmt, type_map: &HashMap<String, NirType>) -> bool {
     let mut changed = false;
     match stmt {
         HirStmt::Assign { rhs, .. } => {
@@ -741,10 +758,7 @@ fn strip_redundant_casts_in_stmt(
 
 /// Strip redundant casts in expressions. A cast `(T)var` is redundant when
 /// `var`'s declared type in the type map is exactly `T`.
-fn strip_redundant_casts_in_expr(
-    expr: &mut HirExpr,
-    type_map: &HashMap<String, NirType>,
-) -> bool {
+fn strip_redundant_casts_in_expr(expr: &mut HirExpr, type_map: &HashMap<String, NirType>) -> bool {
     let mut changed = false;
     // Recurse into children first.
     match expr {

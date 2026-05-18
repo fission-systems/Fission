@@ -369,7 +369,13 @@ pub(crate) fn canonicalize_condition_expr(expr: &HirExpr) -> Option<HirExpr> {
             rhs,
             ..
         } if is_zero_const(rhs.as_ref()) => {
-            let is_eq = matches!(expr, HirExpr::Binary { op: HirBinaryOp::Eq, .. });
+            let is_eq = matches!(
+                expr,
+                HirExpr::Binary {
+                    op: HirBinaryOp::Eq,
+                    ..
+                }
+            );
             match lhs.as_ref() {
                 HirExpr::Binary {
                     op: inner_op @ (HirBinaryOp::Sub | HirBinaryOp::Xor),
@@ -377,7 +383,11 @@ pub(crate) fn canonicalize_condition_expr(expr: &HirExpr) -> Option<HirExpr> {
                     rhs: inner_rhs,
                     ty: inner_ty,
                 } => {
-                    let new_op = if is_eq { HirBinaryOp::Eq } else { HirBinaryOp::Ne };
+                    let new_op = if is_eq {
+                        HirBinaryOp::Eq
+                    } else {
+                        HirBinaryOp::Ne
+                    };
                     return Some(HirExpr::Binary {
                         op: new_op,
                         lhs: inner_lhs.clone(),

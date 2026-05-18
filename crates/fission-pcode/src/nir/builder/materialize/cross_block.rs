@@ -663,17 +663,23 @@ impl<'a> PreviewBuilder<'a> {
 
         for pred_idx in predecessor_idxs {
             let pred_block = self.pcode.blocks.get(pred_idx)?;
-            let mut pred_value = Self::first_output_redefinition_in_block_from(pred_block, 0, output)
-                .map(|(_, op)| {
-                    incoming_value_kinds
-                        .insert(Self::classify_merge_binding_candidate_incoming_kind(op));
-                    Self::format_incoming_value(op)
-                });
+            let mut pred_value = Self::first_output_redefinition_in_block_from(
+                pred_block, 0, output,
+            )
+            .map(|(_, op)| {
+                incoming_value_kinds
+                    .insert(Self::classify_merge_binding_candidate_incoming_kind(op));
+                Self::format_incoming_value(op)
+            });
             if pred_value.is_none() {
-                if let Some((best_idx, _, best_op_idx, _, _, _, value)) = self.best_prior_definition_for_missing_pred(pred_idx, output) {
+                if let Some((best_idx, _, best_op_idx, _, _, _, value)) =
+                    self.best_prior_definition_for_missing_pred(pred_idx, output)
+                {
                     if let Some(best_block) = self.pcode.blocks.get(best_idx) {
                         if let Some(best_op) = best_block.ops.get(best_op_idx) {
-                            incoming_value_kinds.insert(Self::classify_merge_binding_candidate_incoming_kind(best_op));
+                            incoming_value_kinds.insert(
+                                Self::classify_merge_binding_candidate_incoming_kind(best_op),
+                            );
                             pred_value = Some(value);
                         }
                     }

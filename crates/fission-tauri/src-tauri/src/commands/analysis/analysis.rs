@@ -94,11 +94,11 @@ pub async fn deep_scan_functions(state: State<'_, AppState>) -> CmdResult<Vec<Fu
 /// names so the frontend can refresh the function list.
 #[tauri::command]
 pub async fn run_fid(state: State<'_, AppState>) -> CmdResult<FidResultDto> {
-    use fission_signatures::SignatureDatabase;
+    use fission_signatures::{FidDatabaseSet, SignatureDatabase};
 
     // Collect everything we need from `binary` inside a block so the immutable
     // borrow of `inner` ends before further mutable work.
-    let (data, image_base, func_list, prev_names) = {
+    let (binary_for_fid, func_list, prev_names) = {
         let inner = state.inner.lock().await;
         let binary = inner
             .loaded_binary
@@ -122,28 +122,45 @@ pub async fn run_fid(state: State<'_, AppState>) -> CmdResult<FidResultDto> {
             })
             .collect();
 
-        let data: Vec<u8> = binary.inner().data.as_slice().to_vec();
-        let image_base = binary.image_base;
-
-        (data, image_base, func_list, prev_names)
+        (binary.clone(), func_list, prev_names)
     };
 
     let total_scanned = func_list.len();
+    let fidbf_set = FidDatabaseSet::discover_for_load_spec(
+        None,
+        None,
+        Some(&binary_for_fid.format),
+        binary_for_fid.is_64bit,
+    );
+    let fidbf_loaded = fidbf_set.databases.len();
+    let fidbf_failed = fidbf_set.errors.len();
+    let fidbf_attempted = fidbf_loaded + fidbf_failed;
 
     // Run built-in byte-pattern identification in a blocking thread (CPU-bound).
     // Clone func_list so it remains available after the closure consumes its capture.
     let func_list_for_fid = func_list.clone();
     let identified = tokio::task::spawn_blocking(move || {
         let db = SignatureDatabase::new();
-        db.identify_functions_in_binary(&data, &func_list_for_fid, image_base)
+        let mut identified = std::collections::HashMap::new();
+        for (addr, _current_name) in &func_list_for_fid {
+            let available = binary_for_fid
+                .available_execution_bytes(*addr)
+                .unwrap_or(0)
+                .min(32);
+            if available == 0 {
+                continue;
+            }
+            let Some(func_bytes) = binary_for_fid.view_bytes(*addr, available) else {
+                continue;
+            };
+            if let Some(sig) = db.identify(func_bytes) {
+                identified.insert(*addr, sig.name.clone());
+            }
+        }
+        identified
     })
     .await
     .map_err(|e| CmdError::other(format!("FID task failed: {e}")))?;
-
-    // Native `.fidbf` augmentation was removed with the native decompiler path.
-    let fidbf_attempted = 0usize;
-    let fidbf_loaded = 0usize;
-    let fidbf_failed = 0usize;
 
     // Apply renames to the state and collect match details.
     let mut inner = state.inner.lock().await;

@@ -47,6 +47,55 @@ export interface DecompileResult {
     engine_used: DecompilerEngineMode;
     fell_back: boolean;
     fallback_reason?: string | null;
+    diagnostics?: DecompileDiagnostics | null;
+}
+
+export interface DecompileDiagnostics {
+    decode: DecodeDiagnostics;
+    nir?: NirDiagnostics | null;
+    pipeline_stage_status: NamedValue[];
+    template_sources: NamedValue[];
+    terminal_opcodes: NamedValue[];
+}
+
+export interface DecodeDiagnostics {
+    entry_address: string;
+    max_bytes: number;
+    instruction_limit: number;
+    attempts: number;
+    stop_reason: string;
+    raw_pcode_ops?: number | null;
+    raw_pcode_blocks?: number | null;
+    raw_pcode_edges?: number | null;
+    strict_indirect_retry_attempted: boolean;
+    wrapper_probe_attempted: boolean;
+    wrapper_probe_matched: boolean;
+}
+
+export interface NirDiagnostics {
+    build_duration_ms: number;
+    normalize_duration_ms: number;
+    structuring_duration_ms: number;
+    render_duration_ms: number;
+    rendered_code_len: number;
+    validated_pcode_op_count: number;
+    invalid_pcode_shape_count: number;
+    structuring_irreducible_scc_count: number;
+    region_emit_ready_failed_count: number;
+    call_target_unresolved_sub_fallback_count: number;
+    typed_fact_evidence_count: number;
+    typed_fact_conflict_count: number;
+    object_root_fact_promotion_count: number;
+    surface_fact_promotion_count: number;
+    replacement_plan_candidate_count: number;
+    replacement_plan_completed_count: number;
+    replacement_plan_rejected_alias_unsafe_count: number;
+    replacement_plan_rejected_missing_merge_count: number;
+}
+
+export interface NamedValue {
+    name: string;
+    value: string;
 }
 
 export interface AsmInstructionDto {

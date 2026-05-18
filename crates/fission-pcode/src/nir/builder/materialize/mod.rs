@@ -272,6 +272,16 @@ impl<'a> PreviewBuilder<'a> {
                                     &op.inputs[2],
                                 )? {
                                 expr
+                            } else if let HirLValue::Var(slot_name) = &lhs
+                                && let Some(expr) = this.stack_home_accumulator_store_rhs(
+                                    block,
+                                    op_idx,
+                                    op,
+                                    slot_name,
+                                    &op.inputs[2],
+                                )
+                            {
+                                expr
                             } else {
                                 this.lower_varnode(&op.inputs[2], &mut HashSet::new())
                                     .map_err(|err| {
@@ -456,6 +466,8 @@ impl<'a> PreviewBuilder<'a> {
             self.output_replacement_is_complete(block, op_idx, output, &rhs);
         let replacement_plan =
             self.build_replacement_value_plan(block, op_idx, terminator_index, output, &rhs);
+        let direct_successor_merge_lhs_name =
+            self.merge_binding_name_for_direct_successor_accumulator(block, output, &rhs);
         let merge_lhs_name = if loop_carried_lhs_name.is_none() {
             self.merge_binding_name_for_materialized_output(block, op_idx, output, &rhs)
         } else {
@@ -529,7 +541,10 @@ impl<'a> PreviewBuilder<'a> {
                     &rhs,
                     suppression_enabled,
                 );
-                if suppression_enabled && merge_lhs_name.is_none() {
+                if suppression_enabled
+                    && merge_lhs_name.is_none()
+                    && direct_successor_merge_lhs_name.is_none()
+                {
                     self.trace_no_consumer_suppressed(block_addr, op.seq_num, output, &rhs);
                     return Ok(None);
                 }
@@ -580,7 +595,15 @@ impl<'a> PreviewBuilder<'a> {
             );
         }
         let preserve_materialization = Self::should_preserve_materialized_expr(&rhs);
-        let lhs_name = if let Some(name) = loop_carried_lhs_name {
+        let lhs_name = if let Some(name) = direct_successor_merge_lhs_name {
+            self.bind_materialized_output_to_existing_name(
+                op,
+                output,
+                &name,
+                preserve_materialization,
+            );
+            name
+        } else if let Some(name) = loop_carried_lhs_name {
             self.seed_loop_carried_binding_initializer_from_edge_zero(block, output, &name);
             self.bind_materialized_output_to_existing_name(
                 op,
@@ -695,17 +718,48 @@ impl<'a> PreviewBuilder<'a> {
             == MissingMergeBindingRelation::PredicateMergeMissing
             || (proof.consumer_kind == DisallowedSingleConsumerConsumerKind::StoreValue
                 && proof.relation == MissingMergeBindingRelation::JoinMergeMissing);
-        if !live_register_join {
+        let live_register_loop_carried = proof.relation
+            == MissingMergeBindingRelation::LoopHeaderMergeMissing
+            && matches!(
+                proof.consumer_kind,
+                DisallowedSingleConsumerConsumerKind::OtherData
+                    | DisallowedSingleConsumerConsumerKind::Predicate
+                    | DisallowedSingleConsumerConsumerKind::StoreValue
+            );
+        if !live_register_join && !live_register_loop_carried {
             return None;
         }
         let output_key = VarnodeKey::from(output);
-        self.gpr_family_index_for_key(&output_key)?;
+        if !live_register_loop_carried {
+            self.gpr_family_index_for_key(&output_key)?;
+        }
         if self.options.calling_convention == CallingConvention::AArch64
             && output.size == 8
             && matches!(op.opcode, PcodeOpcode::IntZExt | PcodeOpcode::Cast)
             && op.inputs.first().is_some_and(|input| input.size <= 4)
         {
             return aarch64_ghidra_reg_name(output.offset, 4).map(|name| (name.to_string(), 4));
+        }
+        if live_register_loop_carried {
+            let name = register_hardware_name_for_abi(
+                output.offset,
+                output.size,
+                self.options.calling_convention,
+            )?;
+            if crate::arch::x86::x86_gpr_family_index(name).is_none()
+                && self.gpr_family_index_for_key(&output_key).is_none()
+            {
+                return None;
+            }
+            self.trace_path_sensitive_register_merge(
+                block.start_address,
+                op.seq_num,
+                output,
+                proof.relation,
+                proof.consumer_kind,
+                name,
+            );
+            return Some((name.to_string(), output.size));
         }
         None
     }
@@ -749,6 +803,11 @@ impl<'a> PreviewBuilder<'a> {
                 return Some(name.clone());
             }
         }
+        if let Some(name) =
+            self.merge_binding_name_for_direct_successor_accumulator(block, output, rhs)
+        {
+            return Some(name);
+        }
 
         let proof = self.describe_merge_binding_candidate_proof(block, op_idx, output, rhs)?;
         let duplicate_start = self.duplicate_start_merge_block(proof.merge_block);
@@ -783,6 +842,1026 @@ impl<'a> PreviewBuilder<'a> {
             ExplicitMergeBindingTrialReason::PhiLikeBindingMaterialized,
         );
         Some(binding.name)
+    }
+
+    fn merge_binding_name_for_direct_successor_accumulator(
+        &mut self,
+        block: &crate::pcode::PcodeBasicBlock,
+        output: &Varnode,
+        rhs: &HirExpr,
+    ) -> Option<String> {
+        if output.is_constant
+            || !is_register_space_id(output.space_id)
+            || output.size != self.options.pointer_size
+            || !Self::rhs_is_safe_scalar_live_register_merge(rhs)
+            || !matches!(
+                self.options.calling_convention,
+                CallingConvention::WindowsX64 | CallingConvention::SystemVAmd64
+            )
+        {
+            self.trace_direct_successor_accumulator_merge_rejected(
+                block.start_address,
+                output,
+                "shape_or_abi",
+            );
+            return None;
+        }
+        let output_key = VarnodeKey::from(output);
+        if self.gpr_family_index_for_key(&output_key).is_none()
+            && !is_primary_return_register_for_abi(output, self.options.calling_convention)
+        {
+            self.trace_direct_successor_accumulator_merge_rejected(
+                block.start_address,
+                output,
+                "not_gpr_family",
+            );
+            return None;
+        }
+        let block_idx = self.lowering_block_index(block);
+        let Some(succ_idx) = self.single_successor_index(block_idx) else {
+            self.trace_direct_successor_accumulator_merge_rejected(
+                block.start_address,
+                output,
+                "not_single_successor",
+            );
+            return None;
+        };
+        let Some(predecessor_idxs) = self.predecessors.get(succ_idx) else {
+            self.trace_direct_successor_accumulator_merge_rejected(
+                block.start_address,
+                output,
+                "missing_predecessors",
+            );
+            return None;
+        };
+        let predecessor_idxs = predecessor_idxs.clone();
+        if predecessor_idxs.len() != 2 || !predecessor_idxs.contains(&block_idx) {
+            self.trace_direct_successor_accumulator_merge_rejected(
+                block.start_address,
+                output,
+                "not_binary_predecessor_join",
+            );
+            return None;
+        }
+        let succ_block = self.pcode.blocks.get(succ_idx)?;
+        if !self.block_reads_merge_input_before_redefinition(succ_block, output) {
+            self.trace_direct_successor_accumulator_merge_rejected(
+                block.start_address,
+                output,
+                "successor_does_not_read_before_redefine",
+            );
+            return None;
+        }
+        for pred_idx in &predecessor_idxs {
+            let pred_block = self.pcode.blocks.get(*pred_idx)?;
+            let Some(def_idx) = self.last_redefinition_index_before_terminator(pred_block, output)
+            else {
+                self.trace_direct_successor_accumulator_merge_rejected(
+                    block.start_address,
+                    output,
+                    "missing_pred_definition",
+                );
+                return None;
+            };
+            if !Self::output_def_is_safe_direct_successor_merge(&pred_block.ops[def_idx]) {
+                self.trace_direct_successor_accumulator_merge_rejected(
+                    block.start_address,
+                    output,
+                    "unsafe_pred_definition",
+                );
+                return None;
+            }
+            if Self::has_side_effect_between_ops(pred_block, def_idx + 1, pred_block.ops.len()) {
+                self.trace_direct_successor_accumulator_merge_rejected(
+                    block.start_address,
+                    output,
+                    "side_effect_after_pred_definition",
+                );
+                return None;
+            }
+        }
+        let binding = self.ensure_explicit_merge_binding_for_block(succ_idx, output);
+        let predecessor_addrs = predecessor_idxs
+            .iter()
+            .filter_map(|idx| self.pcode.blocks.get(*idx).map(|block| block.start_address))
+            .collect::<Vec<_>>();
+        self.trace_direct_successor_accumulator_merge_accepted(
+            block.start_address,
+            succ_block.start_address,
+            output,
+            &predecessor_addrs,
+            &binding.name,
+        );
+        Some(binding.name)
+    }
+
+    fn rewrite_block_entry_accumulator_rhs_with_live_gpr(
+        &mut self,
+        block_addr: u64,
+        op: &PcodeOp,
+        rhs: HirExpr,
+    ) -> HirExpr {
+        if !matches!(
+            self.options.calling_convention,
+            CallingConvention::WindowsX64 | CallingConvention::SystemVAmd64
+        ) || !self.options.is_64bit
+            || !Self::output_def_is_safe_direct_successor_merge(op)
+        {
+            return rhs;
+        }
+        let Some(site) = self.current_lowering_site else {
+            return rhs;
+        };
+        let Some(block) = self.pcode.blocks.get(site.block_idx) else {
+            return rhs;
+        };
+        if block.start_address != block_addr {
+            return rhs;
+        }
+        match rhs {
+            HirExpr::Binary {
+                op: binary_op,
+                lhs,
+                rhs,
+                ty,
+            } => {
+                let lhs = self.rewrite_block_entry_accumulator_input_expr(
+                    site.block_idx,
+                    site.op_idx,
+                    op.seq_num,
+                    op.inputs.first(),
+                    *lhs,
+                );
+                let rhs = self.rewrite_block_entry_accumulator_input_expr(
+                    site.block_idx,
+                    site.op_idx,
+                    op.seq_num,
+                    op.inputs.get(1),
+                    *rhs,
+                );
+                HirExpr::Binary {
+                    op: binary_op,
+                    lhs: Box::new(lhs),
+                    rhs: Box::new(rhs),
+                    ty,
+                }
+            }
+            other => other,
+        }
+    }
+
+    fn rewrite_block_entry_accumulator_input_expr(
+        &mut self,
+        block_idx: usize,
+        op_idx: usize,
+        op_seq: u32,
+        input: Option<&Varnode>,
+        expr: HirExpr,
+    ) -> HirExpr {
+        let Some(input) = input else {
+            return expr;
+        };
+        if input.size != self.options.pointer_size {
+            self.trace_block_entry_accumulator_read_merge_rejected(
+                block_idx,
+                op_seq,
+                input,
+                "partial_width_input",
+            );
+            return expr;
+        }
+        let Some((live_name, family_idx)) = self.canonical_x86_gpr64_name_for_value(input) else {
+            return expr;
+        };
+        if live_name == "rsp" || self.abi_state().param_slot_for_name(live_name).is_some() {
+            self.trace_block_entry_accumulator_read_merge_rejected(
+                block_idx,
+                op_seq,
+                input,
+                "stack_pointer_or_abi_param",
+            );
+            return expr;
+        }
+        if matches!(&expr, HirExpr::Var(name) if name == live_name) {
+            return expr;
+        }
+        if let Err(join_reason) =
+            self.block_entry_incoming_accumulator_read_is_proven(block_idx, op_idx, family_idx)
+        {
+            if let Err(exit_reason) =
+                self.loop_exit_accumulator_read_is_proven(block_idx, op_idx, family_idx, live_name)
+            {
+                let reason = if join_reason == "not_loop_local_join" {
+                    exit_reason
+                } else {
+                    join_reason
+                };
+                self.trace_block_entry_accumulator_read_merge_rejected(
+                    block_idx, op_seq, input, reason,
+                );
+                return expr;
+            }
+        }
+        self.ensure_live_register_binding(live_name, self.options.pointer_size);
+        self.trace_block_entry_accumulator_read_merge_accepted(block_idx, op_seq, input, live_name);
+        HirExpr::Var(live_name.to_string())
+    }
+
+    fn block_entry_incoming_accumulator_read_is_proven(
+        &self,
+        block_idx: usize,
+        op_idx: usize,
+        family_idx: usize,
+    ) -> Result<(), &'static str> {
+        let Some(block) = self.pcode.blocks.get(block_idx) else {
+            return Err("missing_block");
+        };
+        if Self::has_aliasing_side_effect_between_ops(block, 0, op_idx) {
+            return Err("side_effect_before_read");
+        }
+        if block
+            .ops
+            .iter()
+            .take(op_idx)
+            .any(|candidate| self.op_defines_x86_gpr_family(candidate, family_idx))
+        {
+            return Err("local_redefinition_before_read");
+        }
+        let Some(predecessors) = self.predecessors.get(block_idx) else {
+            return Err("missing_predecessors");
+        };
+        if predecessors.len() == 1 {
+            return Err("not_join_block");
+        }
+        if predecessors.len() < 2 {
+            return Err("missing_predecessors");
+        }
+        let Some(loop_body) = self
+            .loop_bodies
+            .iter()
+            .filter(|loop_body| loop_body.body.contains(&block_idx))
+            .find(|loop_body| {
+                predecessors
+                    .iter()
+                    .all(|pred| loop_body.body.contains(pred))
+            })
+        else {
+            return Err("not_loop_local_join");
+        };
+        if self.loop_body_has_side_entry_or_irreducible_edge(loop_body) {
+            return Err("side_entry_or_irreducible");
+        }
+        if predecessors.iter().all(|pred| {
+            self.pred_path_has_live_accumulator_def(*pred, block_idx, loop_body, family_idx)
+        }) {
+            Ok(())
+        } else {
+            Err("missing_predecessor_live_def")
+        }
+    }
+
+    fn loop_exit_accumulator_read_is_proven(
+        &self,
+        block_idx: usize,
+        op_idx: usize,
+        family_idx: usize,
+        live_name: &str,
+    ) -> Result<(), &'static str> {
+        if !self.temps.contains_key(live_name) {
+            return Err("missing_existing_live_binding");
+        }
+        let Some(block) = self.pcode.blocks.get(block_idx) else {
+            return Err("missing_block");
+        };
+        if Self::has_aliasing_side_effect_between_ops(block, 0, op_idx) {
+            return Err("side_effect_before_read");
+        }
+        if block
+            .ops
+            .iter()
+            .take(op_idx)
+            .any(|candidate| self.op_defines_x86_gpr_family(candidate, family_idx))
+        {
+            return Err("local_redefinition_before_read");
+        }
+        if !self
+            .single_successor_index(block_idx)
+            .and_then(|succ| self.pcode.blocks.get(succ))
+            .is_some_and(|succ| succ.ops.iter().any(|op| op.opcode == PcodeOpcode::Return))
+        {
+            return Err("not_return_exit_block");
+        }
+        let Some(predecessors) = self.predecessors.get(block_idx) else {
+            return Err("missing_predecessors");
+        };
+        if predecessors.len() != 2 {
+            return Err("not_binary_exit_join");
+        }
+        let Some((loop_body, loop_pred, external_pred)) =
+            self.loop_exit_accumulator_context(block_idx, predecessors)
+        else {
+            return Err("not_loop_exit_join");
+        };
+        if self.loop_body_has_side_entry_or_irreducible_edge(&loop_body) {
+            return Err("side_entry_or_irreducible");
+        }
+        if !self.pred_path_has_live_accumulator_def(loop_pred, block_idx, &loop_body, family_idx) {
+            return Err("missing_loop_exit_live_def");
+        }
+        let body = loop_body.body.iter().copied().collect::<HashSet<_>>();
+        let mut visiting = HashSet::new();
+        if !self.pred_path_has_zero_accumulator_seed(
+            external_pred,
+            block_idx,
+            &body,
+            family_idx,
+            0,
+            &mut visiting,
+        ) {
+            return Err("missing_external_zero_seed");
+        }
+        Ok(())
+    }
+
+    fn loop_exit_accumulator_context(
+        &self,
+        block_idx: usize,
+        predecessors: &[usize],
+    ) -> Option<(
+        crate::nir::structuring::loop_analysis::LoopBody,
+        usize,
+        usize,
+    )> {
+        self.loop_bodies.iter().find_map(|loop_body| {
+            if loop_body.body.contains(&block_idx) {
+                return None;
+            }
+            let loop_preds = predecessors
+                .iter()
+                .copied()
+                .filter(|pred| loop_body.body.contains(pred))
+                .collect::<Vec<_>>();
+            let external_preds = predecessors
+                .iter()
+                .copied()
+                .filter(|pred| !loop_body.body.contains(pred))
+                .collect::<Vec<_>>();
+            if loop_preds.len() == 1
+                && external_preds.len() == 1
+                && (loop_body.exit_idx == Some(block_idx)
+                    || loop_body.all_exits.contains(&block_idx)
+                    || self
+                        .successors
+                        .get(loop_preds[0])
+                        .is_some_and(|succs| succs.contains(&block_idx)))
+            {
+                Some((loop_body.clone(), loop_preds[0], external_preds[0]))
+            } else {
+                None
+            }
+        })
+    }
+
+    fn op_defines_x86_gpr_family(&self, op: &PcodeOp, family_idx: usize) -> bool {
+        op.output
+            .as_ref()
+            .and_then(|output| self.canonical_x86_gpr64_name_for_value(output))
+            .is_some_and(|(_, output_family)| output_family == family_idx)
+    }
+
+    fn single_successor_index(&self, block_idx: usize) -> Option<usize> {
+        let successors = self.successors.get(block_idx)?;
+        if successors.len() == 1 {
+            Some(successors[0])
+        } else {
+            None
+        }
+    }
+
+    fn block_reads_merge_input_before_redefinition(
+        &self,
+        block: &crate::pcode::PcodeBasicBlock,
+        output: &Varnode,
+    ) -> bool {
+        for op in &block.ops {
+            if op
+                .inputs
+                .iter()
+                .any(|input| self.varnode_aliases_value(input, output))
+            {
+                return true;
+            }
+            if op
+                .output
+                .as_ref()
+                .is_some_and(|candidate| self.varnode_aliases_value(candidate, output))
+            {
+                return false;
+            }
+        }
+        false
+    }
+
+    fn last_redefinition_index_before_terminator(
+        &self,
+        block: &crate::pcode::PcodeBasicBlock,
+        output: &Varnode,
+    ) -> Option<usize> {
+        block.ops.iter().enumerate().rev().find_map(|(idx, op)| {
+            op.output
+                .as_ref()
+                .is_some_and(|candidate| self.varnode_aliases_value(candidate, output))
+                .then_some(idx)
+        })
+    }
+
+    fn output_def_is_safe_direct_successor_merge(op: &PcodeOp) -> bool {
+        matches!(
+            op.opcode,
+            PcodeOpcode::Copy
+                | PcodeOpcode::SubPiece
+                | PcodeOpcode::IntZExt
+                | PcodeOpcode::Cast
+                | PcodeOpcode::IntAdd
+                | PcodeOpcode::IntSub
+                | PcodeOpcode::IntMult
+                | PcodeOpcode::IntAnd
+                | PcodeOpcode::IntOr
+                | PcodeOpcode::IntXor
+                | PcodeOpcode::IntNegate
+                | PcodeOpcode::IntLeft
+                | PcodeOpcode::IntRight
+                | PcodeOpcode::IntSRight
+        )
+    }
+
+    fn has_side_effect_between_ops(
+        block: &crate::pcode::PcodeBasicBlock,
+        start: usize,
+        end: usize,
+    ) -> bool {
+        block.ops[start..end.min(block.ops.len())].iter().any(|op| {
+            matches!(
+                op.opcode,
+                PcodeOpcode::Store
+                    | PcodeOpcode::Call
+                    | PcodeOpcode::CallInd
+                    | PcodeOpcode::CallOther
+            )
+        })
+    }
+
+    fn stack_home_accumulator_store_rhs(
+        &mut self,
+        block: &crate::pcode::PcodeBasicBlock,
+        _op_idx: usize,
+        op: &PcodeOp,
+        slot_name: &str,
+        value: &Varnode,
+    ) -> Option<HirExpr> {
+        if op.opcode != PcodeOpcode::Store
+            || !matches!(
+                self.options.calling_convention,
+                CallingConvention::WindowsX64 | CallingConvention::SystemVAmd64
+            )
+            || !self.options.is_64bit
+            || !matches!(value.size, 4 | 8)
+        {
+            self.trace_stack_home_accumulator_store_merge_rejected(
+                block.start_address,
+                op.seq_num,
+                slot_name,
+                value,
+                "shape_or_abi",
+            );
+            return None;
+        }
+        let Some((live_name, family_idx)) =
+            self.canonical_x86_gpr64_name_for_store_value(op, value)
+        else {
+            self.trace_stack_home_accumulator_store_merge_rejected(
+                block.start_address,
+                op.seq_num,
+                slot_name,
+                value,
+                "not_x86_gpr",
+            );
+            return None;
+        };
+        if live_name == "rsp" || self.abi_state().param_slot_for_name(live_name).is_some() {
+            self.trace_stack_home_accumulator_store_merge_rejected(
+                block.start_address,
+                op.seq_num,
+                slot_name,
+                value,
+                "stack_pointer_or_abi_param",
+            );
+            return None;
+        }
+        if self.resolve_stack_address_from_memory_op(op).is_none()
+            && op
+                .inputs
+                .get(1)
+                .and_then(|ptr| self.resolve_stack_address(ptr))
+                .is_none()
+        {
+            self.trace_stack_home_accumulator_store_merge_rejected(
+                block.start_address,
+                op.seq_num,
+                slot_name,
+                value,
+                "not_stable_stack_slot",
+            );
+            return None;
+        }
+        let block_idx = self.lowering_block_index(block);
+        let Some((loop_body, store_is_loop_header)) =
+            self.stack_home_accumulator_loop_context(block_idx)
+        else {
+            self.trace_stack_home_accumulator_store_merge_rejected(
+                block.start_address,
+                op.seq_num,
+                slot_name,
+                value,
+                "not_loop_header",
+            );
+            return None;
+        };
+        if self.loop_body_has_side_entry_or_irreducible_edge(&loop_body) {
+            self.trace_stack_home_accumulator_store_merge_rejected(
+                block.start_address,
+                op.seq_num,
+                slot_name,
+                value,
+                "side_entry_or_irreducible",
+            );
+            return None;
+        }
+        if store_is_loop_header
+            && !self
+                .predecessors
+                .get(block_idx)
+                .is_some_and(|preds| preds.iter().any(|pred| loop_body.body.contains(pred)))
+        {
+            self.trace_stack_home_accumulator_store_merge_rejected(
+                block.start_address,
+                op.seq_num,
+                slot_name,
+                value,
+                "missing_loop_predecessor",
+            );
+            return None;
+        }
+        let live_backedge_def = if store_is_loop_header {
+            self.predecessors
+                .get(block_idx)
+                .into_iter()
+                .flatten()
+                .filter(|pred| loop_body.body.contains(pred))
+                .any(|pred| {
+                    self.pred_path_has_live_accumulator_def(
+                        *pred, block_idx, &loop_body, family_idx,
+                    )
+                })
+        } else {
+            self.loop_body_has_live_accumulator_def(&loop_body, family_idx)
+        };
+        if !live_backedge_def {
+            self.trace_stack_home_accumulator_store_merge_rejected(
+                block.start_address,
+                op.seq_num,
+                slot_name,
+                value,
+                "missing_safe_backedge_definition",
+            );
+            return None;
+        }
+        let value_is_zero = self.varnode_known_const_zero(value, 8);
+        let external_zero_seed = store_is_loop_header
+            && self.loop_header_external_predecessors_seed_zero(block_idx, &loop_body, family_idx);
+        let zero_entry_default = value_is_zero || external_zero_seed;
+        if !zero_entry_default {
+            let external_preds = self
+                .predecessors
+                .get(block_idx)
+                .into_iter()
+                .flatten()
+                .copied()
+                .filter(|pred| !loop_body.body.contains(pred))
+                .collect::<Vec<_>>();
+            let reason = format!(
+                "missing_zero_entry_default:value_zero={} external_zero_seed={} external_preds={:?}",
+                value_is_zero, external_zero_seed, external_preds
+            );
+            self.trace_stack_home_accumulator_store_merge_rejected(
+                block.start_address,
+                op.seq_num,
+                slot_name,
+                value,
+                &reason,
+            );
+            return None;
+        }
+
+        self.ensure_live_register_binding(live_name, self.options.pointer_size);
+        if let Some(binding) = self.temps.get_mut(live_name)
+            && binding.initializer.is_none()
+        {
+            binding.initializer = Some(HirExpr::Const(
+                0,
+                type_from_size(self.options.pointer_size, false),
+            ));
+        }
+        self.trace_stack_home_accumulator_store_merge_accepted(
+            block.start_address,
+            op.seq_num,
+            slot_name,
+            value,
+            live_name,
+        );
+        Some(HirExpr::Var(live_name.to_string()))
+    }
+
+    fn loop_header_external_predecessors_seed_zero(
+        &self,
+        header_idx: usize,
+        loop_body: &crate::nir::structuring::loop_analysis::LoopBody,
+        family_idx: usize,
+    ) -> bool {
+        let body = loop_body.body.iter().copied().collect::<HashSet<_>>();
+        let incoming = self
+            .predecessors
+            .get(header_idx)
+            .into_iter()
+            .flatten()
+            .copied()
+            .filter(|pred| !body.contains(pred))
+            .collect::<Vec<_>>();
+        !incoming.is_empty()
+            && incoming.into_iter().all(|pred| {
+                let mut visiting = HashSet::new();
+                self.pred_path_has_zero_accumulator_seed(
+                    pred,
+                    header_idx,
+                    &body,
+                    family_idx,
+                    0,
+                    &mut visiting,
+                )
+            })
+    }
+
+    fn pred_path_has_zero_accumulator_seed(
+        &self,
+        idx: usize,
+        header_idx: usize,
+        loop_body: &HashSet<usize>,
+        family_idx: usize,
+        depth: usize,
+        visiting: &mut HashSet<usize>,
+    ) -> bool {
+        if depth > 8 || idx == header_idx || loop_body.contains(&idx) || !visiting.insert(idx) {
+            return false;
+        }
+        let result = self.pcode.blocks.get(idx).is_some_and(|block| {
+            if let Some(def_idx) = self.last_x86_gpr_family_definition(block, family_idx) {
+                return self.x86_gpr_definition_is_zero_in_block(block, def_idx, 4)
+                    && !Self::has_aliasing_side_effect_between_ops(
+                        block,
+                        def_idx + 1,
+                        block.ops.len(),
+                    );
+            }
+            if Self::has_aliasing_side_effect_between_ops(block, 0, block.ops.len()) {
+                return false;
+            }
+            let incoming = self
+                .predecessors
+                .get(idx)
+                .into_iter()
+                .flatten()
+                .copied()
+                .filter(|pred| *pred != header_idx && !loop_body.contains(pred))
+                .collect::<Vec<_>>();
+            !incoming.is_empty()
+                && incoming.into_iter().all(|pred| {
+                    self.pred_path_has_zero_accumulator_seed(
+                        pred,
+                        header_idx,
+                        loop_body,
+                        family_idx,
+                        depth + 1,
+                        visiting,
+                    )
+                })
+        });
+        visiting.remove(&idx);
+        result
+    }
+
+    fn stack_home_accumulator_loop_context(
+        &self,
+        block_idx: usize,
+    ) -> Option<(crate::nir::structuring::loop_analysis::LoopBody, bool)> {
+        if let Some(loop_body) = self
+            .loop_bodies
+            .iter()
+            .find(|loop_body| loop_body.head == block_idx && loop_body.body.contains(&block_idx))
+        {
+            return Some((loop_body.clone(), true));
+        }
+        self.successors.get(block_idx)?.iter().find_map(|succ| {
+            self.loop_bodies
+                .iter()
+                .find(|loop_body| loop_body.head == *succ && !loop_body.body.contains(&block_idx))
+                .cloned()
+                .map(|loop_body| (loop_body, false))
+        })
+    }
+
+    fn canonical_x86_gpr64_name_for_store_value(
+        &self,
+        op: &PcodeOp,
+        value: &Varnode,
+    ) -> Option<(&'static str, usize)> {
+        self.canonical_x86_gpr64_name_for_value(value)
+            .or_else(|| self.canonical_x86_gpr64_name_for_value_source(value, 4))
+            .or_else(|| {
+                let raw_name = Self::x86_store_source_register_name_from_asm(op)?;
+                Self::canonical_x86_gpr64_name_for_raw_name(&raw_name)
+            })
+    }
+
+    fn canonical_x86_gpr64_name_for_value(&self, value: &Varnode) -> Option<(&'static str, usize)> {
+        let raw_name = register_hardware_name_for_abi(
+            value.offset,
+            value.size,
+            self.options.calling_convention,
+        )
+        .or_else(|| register_name_32(value.offset, value.size))
+        .or_else(|| unique_register_name(value.offset, value.size))?;
+        Self::canonical_x86_gpr64_name_for_raw_name(raw_name)
+    }
+
+    fn canonical_x86_gpr64_name_for_value_source(
+        &self,
+        value: &Varnode,
+        budget: usize,
+    ) -> Option<(&'static str, usize)> {
+        if budget == 0 {
+            return None;
+        }
+        let Some((_, op)) = self.lookup_def_site(value) else {
+            return None;
+        };
+        match op.opcode {
+            PcodeOpcode::Copy
+            | PcodeOpcode::Cast
+            | PcodeOpcode::IntZExt
+            | PcodeOpcode::IntSExt
+            | PcodeOpcode::SubPiece => {
+                let input = op.inputs.first()?;
+                self.canonical_x86_gpr64_name_for_value(input)
+                    .or_else(|| self.canonical_x86_gpr64_name_for_value_source(input, budget - 1))
+            }
+            _ => None,
+        }
+    }
+
+    fn canonical_x86_gpr64_name_for_raw_name(raw_name: &str) -> Option<(&'static str, usize)> {
+        let family_idx = crate::arch::x86::x86_gpr_family_index(raw_name)?;
+        const GPR64: [&str; 16] = [
+            "rax", "rcx", "rdx", "rbx", "rsp", "rbp", "rsi", "rdi", "r8", "r9", "r10", "r11",
+            "r12", "r13", "r14", "r15",
+        ];
+        GPR64
+            .get(family_idx)
+            .copied()
+            .map(|name| (name, family_idx))
+    }
+
+    fn x86_store_source_register_name_from_asm(op: &PcodeOp) -> Option<String> {
+        let asm = op.asm_mnemonic.as_deref()?.trim();
+        let source = asm.rsplit_once(',')?.1.trim();
+        let source = source
+            .split_whitespace()
+            .next()
+            .unwrap_or(source)
+            .trim_matches(|ch: char| !ch.is_ascii_alphanumeric())
+            .to_ascii_lowercase();
+        crate::arch::x86::x86_gpr_family_index(&source).map(|_| source)
+    }
+
+    fn loop_body_has_side_entry_or_irreducible_edge(
+        &self,
+        loop_body: &crate::nir::structuring::loop_analysis::LoopBody,
+    ) -> bool {
+        let body = loop_body.body.iter().copied().collect::<HashSet<_>>();
+        for block_idx in &loop_body.body {
+            if self
+                .predecessors
+                .get(*block_idx)
+                .into_iter()
+                .flatten()
+                .any(|pred| !body.contains(pred) && *block_idx != loop_body.head)
+            {
+                return true;
+            }
+        }
+        self.irreducible_edges
+            .iter()
+            .any(|(from, to)| body.contains(from) || body.contains(to))
+    }
+
+    fn pred_path_has_live_accumulator_def(
+        &self,
+        pred_idx: usize,
+        target_idx: usize,
+        loop_body: &crate::nir::structuring::loop_analysis::LoopBody,
+        family_idx: usize,
+    ) -> bool {
+        let body = loop_body.body.iter().copied().collect::<HashSet<_>>();
+        let mut visiting = HashSet::new();
+        self.pred_path_has_live_accumulator_def_inner(
+            pred_idx,
+            target_idx,
+            &body,
+            family_idx,
+            0,
+            &mut visiting,
+        )
+    }
+
+    fn pred_path_has_live_accumulator_def_inner(
+        &self,
+        idx: usize,
+        target_idx: usize,
+        loop_body: &HashSet<usize>,
+        family_idx: usize,
+        depth: usize,
+        visiting: &mut HashSet<usize>,
+    ) -> bool {
+        if depth > 8 || idx == target_idx || !loop_body.contains(&idx) || !visiting.insert(idx) {
+            return false;
+        }
+        let result = self.pcode.blocks.get(idx).is_some_and(|block| {
+            if let Some(def_idx) = self.last_x86_gpr_family_definition(block, family_idx) {
+                return !Self::has_aliasing_side_effect_between_ops(
+                    block,
+                    def_idx + 1,
+                    block.ops.len(),
+                );
+            }
+            if Self::has_aliasing_side_effect_between_ops(block, 0, block.ops.len()) {
+                return false;
+            }
+            let incoming = self
+                .predecessors
+                .get(idx)
+                .into_iter()
+                .flatten()
+                .copied()
+                .filter(|pred| *pred != target_idx && loop_body.contains(pred))
+                .collect::<Vec<_>>();
+            !incoming.is_empty()
+                && incoming.into_iter().all(|pred| {
+                    self.pred_path_has_live_accumulator_def_inner(
+                        pred,
+                        target_idx,
+                        loop_body,
+                        family_idx,
+                        depth + 1,
+                        visiting,
+                    )
+                })
+        });
+        visiting.remove(&idx);
+        result
+    }
+
+    fn loop_body_has_live_accumulator_def(
+        &self,
+        loop_body: &crate::nir::structuring::loop_analysis::LoopBody,
+        family_idx: usize,
+    ) -> bool {
+        loop_body.body.iter().any(|idx| {
+            self.pcode
+                .blocks
+                .get(*idx)
+                .and_then(|block| self.last_x86_gpr_family_definition(block, family_idx))
+                .is_some()
+        })
+    }
+
+    fn last_x86_gpr_family_definition(
+        &self,
+        block: &crate::pcode::PcodeBasicBlock,
+        family_idx: usize,
+    ) -> Option<usize> {
+        block.ops.iter().enumerate().rev().find_map(|(idx, op)| {
+            let output = op.output.as_ref()?;
+            let (_, output_family) = self.canonical_x86_gpr64_name_for_value(output)?;
+            (output_family == family_idx && Self::output_def_is_safe_direct_successor_merge(op))
+                .then_some(idx)
+        })
+    }
+
+    fn x86_gpr_definition_is_zero_in_block(
+        &self,
+        block: &crate::pcode::PcodeBasicBlock,
+        op_idx: usize,
+        budget: usize,
+    ) -> bool {
+        if budget == 0 {
+            return false;
+        }
+        let Some(op) = block.ops.get(op_idx) else {
+            return false;
+        };
+        match op.opcode {
+            PcodeOpcode::Copy => op
+                .inputs
+                .first()
+                .is_some_and(|input| input.is_constant && input.constant_val == 0),
+            PcodeOpcode::Cast
+            | PcodeOpcode::IntZExt
+            | PcodeOpcode::IntSExt
+            | PcodeOpcode::SubPiece => op.inputs.first().is_some_and(|input| {
+                input.is_constant && input.constant_val == 0
+                    || self.value_has_prior_zero_def_in_block(block, op_idx, input, budget - 1)
+            }),
+            PcodeOpcode::IntXor if op.inputs.len() >= 2 => {
+                self.varnode_aliases_value(&op.inputs[0], &op.inputs[1])
+            }
+            _ => false,
+        }
+    }
+
+    fn value_has_prior_zero_def_in_block(
+        &self,
+        block: &crate::pcode::PcodeBasicBlock,
+        before_idx: usize,
+        value: &Varnode,
+        budget: usize,
+    ) -> bool {
+        if budget == 0 {
+            return false;
+        }
+        block.ops[..before_idx.min(block.ops.len())]
+            .iter()
+            .enumerate()
+            .rev()
+            .find_map(|(idx, candidate)| {
+                candidate
+                    .output
+                    .as_ref()
+                    .is_some_and(|output| self.varnode_aliases_value(output, value))
+                    .then_some(idx)
+            })
+            .is_some_and(|idx| self.x86_gpr_definition_is_zero_in_block(block, idx, budget - 1))
+    }
+
+    fn has_aliasing_side_effect_between_ops(
+        block: &crate::pcode::PcodeBasicBlock,
+        start: usize,
+        end: usize,
+    ) -> bool {
+        block.ops[start..end.min(block.ops.len())].iter().any(|op| {
+            matches!(
+                op.opcode,
+                PcodeOpcode::Load
+                    | PcodeOpcode::Store
+                    | PcodeOpcode::Call
+                    | PcodeOpcode::CallInd
+                    | PcodeOpcode::CallOther
+            )
+        })
+    }
+
+    fn varnode_known_const_zero(&self, value: &Varnode, budget: usize) -> bool {
+        if value.is_constant {
+            return value.constant_val == 0;
+        }
+        if budget == 0 {
+            return false;
+        }
+        let Some((_, op)) = self.lookup_def_site(value) else {
+            return false;
+        };
+        match op.opcode {
+            PcodeOpcode::Copy
+            | PcodeOpcode::Cast
+            | PcodeOpcode::IntZExt
+            | PcodeOpcode::IntSExt
+            | PcodeOpcode::SubPiece => op
+                .inputs
+                .first()
+                .is_some_and(|input| self.varnode_known_const_zero(input, budget - 1)),
+            PcodeOpcode::IntXor if op.inputs.len() >= 2 => {
+                self.varnode_aliases_value(&op.inputs[0], &op.inputs[1])
+            }
+            _ => false,
+        }
     }
 
     fn merge_binding_proof_allows_predecessor_assignment(
@@ -916,6 +1995,7 @@ impl<'a> PreviewBuilder<'a> {
                 return Err(err);
             }
         };
+        let rhs = self.rewrite_block_entry_accumulator_rhs_with_live_gpr(block_addr, op, rhs);
         let _ = output;
         Ok(Some(rhs))
     }
@@ -1445,6 +2525,727 @@ mod tests {
     }
 
     #[test]
+    fn direct_successor_return_register_merge_uses_shared_edge_binding() {
+        let rax = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0, 8);
+        let r12 = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0xa0, 4);
+        let pcode = pcode_function(vec![
+            PcodeBasicBlock {
+                index: 0,
+                start_address: 0x1000,
+                successors: vec![2],
+                ops: vec![
+                    op(1, PcodeOpcode::Copy, Some(rax.clone()), vec![constant(5)]),
+                    op(2, PcodeOpcode::Branch, None, vec![constant(0x1020)]),
+                ],
+            },
+            PcodeBasicBlock {
+                index: 1,
+                start_address: 0x1010,
+                successors: vec![2],
+                ops: vec![
+                    op(3, PcodeOpcode::Copy, Some(rax.clone()), vec![constant(7)]),
+                    op(4, PcodeOpcode::Branch, None, vec![constant(0x1020)]),
+                ],
+            },
+            PcodeBasicBlock {
+                index: 2,
+                start_address: 0x1020,
+                successors: Vec::new(),
+                ops: vec![op(
+                    5,
+                    PcodeOpcode::IntAdd,
+                    Some(r12.clone()),
+                    vec![r12, rax.clone()],
+                )],
+            },
+        ]);
+        let options = crate::nir::builder::materialize::test_support::test_options();
+        let mut builder = PreviewBuilder::new(&pcode, &options, None);
+        let rhs = HirExpr::Const(5, type_from_size(8, false));
+
+        let name = builder
+            .merge_binding_name_for_direct_successor_accumulator(&pcode.blocks[0], &rax, &rhs)
+            .expect("shared return register merge binding");
+
+        assert!(
+            builder
+                .explicit_merge_bindings
+                .contains_key(&(2, VarnodeKey::from(&rax)))
+        );
+        assert_eq!(
+            builder
+                .explicit_merge_bindings
+                .get(&(2, VarnodeKey::from(&rax))),
+            Some(&name)
+        );
+    }
+
+    #[test]
+    fn direct_successor_return_register_merge_rejects_side_effect_after_def() {
+        let rax = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0, 8);
+        let r12 = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0xa0, 4);
+        let ptr = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0x28, 8);
+        let pcode = pcode_function(vec![
+            PcodeBasicBlock {
+                index: 0,
+                start_address: 0x1000,
+                successors: vec![2],
+                ops: vec![
+                    op(1, PcodeOpcode::Copy, Some(rax.clone()), vec![constant(5)]),
+                    op(
+                        2,
+                        PcodeOpcode::Store,
+                        None,
+                        vec![constant(3), ptr, constant(0)],
+                    ),
+                    op(3, PcodeOpcode::Branch, None, vec![constant(0x1020)]),
+                ],
+            },
+            PcodeBasicBlock {
+                index: 1,
+                start_address: 0x1010,
+                successors: vec![2],
+                ops: vec![
+                    op(4, PcodeOpcode::Copy, Some(rax.clone()), vec![constant(7)]),
+                    op(5, PcodeOpcode::Branch, None, vec![constant(0x1020)]),
+                ],
+            },
+            PcodeBasicBlock {
+                index: 2,
+                start_address: 0x1020,
+                successors: Vec::new(),
+                ops: vec![op(
+                    6,
+                    PcodeOpcode::IntAdd,
+                    Some(r12.clone()),
+                    vec![r12, rax.clone()],
+                )],
+            },
+        ]);
+        let options = crate::nir::builder::materialize::test_support::test_options();
+        let mut builder = PreviewBuilder::new(&pcode, &options, None);
+        let rhs = HirExpr::Const(5, type_from_size(8, false));
+
+        assert!(
+            builder
+                .merge_binding_name_for_direct_successor_accumulator(&pcode.blocks[0], &rax, &rhs)
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn direct_successor_accumulator_merge_uses_shared_gpr_edge_binding() {
+        let r12 = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0xa0, 8);
+        let rax = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0, 8);
+        let pcode = pcode_function(vec![
+            PcodeBasicBlock {
+                index: 0,
+                start_address: 0x1000,
+                successors: vec![2],
+                ops: vec![
+                    op(1, PcodeOpcode::Copy, Some(r12.clone()), vec![constant(5)]),
+                    op(2, PcodeOpcode::Branch, None, vec![constant(0x1020)]),
+                ],
+            },
+            PcodeBasicBlock {
+                index: 1,
+                start_address: 0x1010,
+                successors: vec![2],
+                ops: vec![
+                    op(3, PcodeOpcode::Copy, Some(r12.clone()), vec![constant(7)]),
+                    op(4, PcodeOpcode::Branch, None, vec![constant(0x1020)]),
+                ],
+            },
+            PcodeBasicBlock {
+                index: 2,
+                start_address: 0x1020,
+                successors: Vec::new(),
+                ops: vec![op(
+                    5,
+                    PcodeOpcode::IntAdd,
+                    Some(rax),
+                    vec![r12.clone(), constant(1)],
+                )],
+            },
+        ]);
+        let options = crate::nir::builder::materialize::test_support::test_options();
+        let mut builder = PreviewBuilder::new(&pcode, &options, None);
+        let rhs = HirExpr::Const(5, type_from_size(8, false));
+
+        let name = builder
+            .merge_binding_name_for_direct_successor_accumulator(&pcode.blocks[0], &r12, &rhs)
+            .expect("shared accumulator merge binding");
+
+        assert_eq!(
+            builder
+                .explicit_merge_bindings
+                .get(&(2, VarnodeKey::from(&r12))),
+            Some(&name)
+        );
+    }
+
+    #[test]
+    fn direct_successor_accumulator_merge_rejects_partial_register_output() {
+        let r12d = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0xa0, 4);
+        let rax = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0, 8);
+        let pcode = pcode_function(vec![
+            PcodeBasicBlock {
+                index: 0,
+                start_address: 0x1000,
+                successors: vec![2],
+                ops: vec![
+                    op(1, PcodeOpcode::Copy, Some(r12d.clone()), vec![constant(5)]),
+                    op(2, PcodeOpcode::Branch, None, vec![constant(0x1020)]),
+                ],
+            },
+            PcodeBasicBlock {
+                index: 1,
+                start_address: 0x1010,
+                successors: vec![2],
+                ops: vec![
+                    op(3, PcodeOpcode::Copy, Some(r12d.clone()), vec![constant(7)]),
+                    op(4, PcodeOpcode::Branch, None, vec![constant(0x1020)]),
+                ],
+            },
+            PcodeBasicBlock {
+                index: 2,
+                start_address: 0x1020,
+                successors: Vec::new(),
+                ops: vec![op(
+                    5,
+                    PcodeOpcode::IntAdd,
+                    Some(rax),
+                    vec![r12d.clone(), constant(1)],
+                )],
+            },
+        ]);
+        let options = crate::nir::builder::materialize::test_support::test_options();
+        let mut builder = PreviewBuilder::new(&pcode, &options, None);
+        let rhs = HirExpr::Const(5, type_from_size(4, false));
+
+        assert!(
+            builder
+                .merge_binding_name_for_direct_successor_accumulator(&pcode.blocks[0], &r12d, &rhs,)
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn stack_home_accumulator_store_uses_seeded_live_gpr_binding() {
+        let ebp = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0x14, 4);
+        let rbp = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0x28, 8);
+        let rsp_addr = register(UNIQUE_SPACE_ID, 0x200, 8);
+        let cond = register(UNIQUE_SPACE_ID, 0x300, 1);
+        let mut store = op(
+            2,
+            PcodeOpcode::Store,
+            None,
+            vec![constant(0), rsp_addr, ebp.clone()],
+        );
+        store.asm_mnemonic = Some("MOV dword ptr [RSP+0x4c], EBP".to_string());
+        let pcode = pcode_function(vec![
+            block_at(
+                0x1000,
+                0,
+                vec![
+                    op(1, PcodeOpcode::Copy, Some(ebp.clone()), vec![constant(0)]),
+                    op(10, PcodeOpcode::Branch, None, vec![constant(0x1010)]),
+                ],
+            ),
+            block_at(
+                0x1010,
+                1,
+                vec![
+                    store.clone(),
+                    op(3, PcodeOpcode::CBranch, None, vec![constant(0x1030), cond]),
+                ],
+            ),
+            block_at(
+                0x1020,
+                2,
+                vec![
+                    op(
+                        4,
+                        PcodeOpcode::IntAdd,
+                        Some(rbp.clone()),
+                        vec![rbp.clone(), constant(1)],
+                    ),
+                    op(5, PcodeOpcode::Branch, None, vec![constant(0x1010)]),
+                ],
+            ),
+            block_at(
+                0x1030,
+                3,
+                vec![op(6, PcodeOpcode::Return, None, vec![constant(0)])],
+            ),
+        ]);
+        let options = crate::nir::builder::materialize::test_support::test_options();
+        let mut builder = PreviewBuilder::new(&pcode, &options, None);
+
+        let rhs = builder
+            .stack_home_accumulator_store_rhs(&pcode.blocks[1], 0, &store, "home_4c", &ebp)
+            .expect("stack-home accumulator merge");
+
+        assert_eq!(rhs, HirExpr::Var("rbp".to_string()));
+        assert!(builder.params.is_empty(), "must not promote rbp to a param");
+        assert_eq!(
+            builder
+                .temps
+                .get("rbp")
+                .and_then(|binding| binding.initializer.as_ref()),
+            Some(&HirExpr::Const(0, type_from_size(8, false)))
+        );
+    }
+
+    #[test]
+    fn stack_home_accumulator_store_accepts_joined_backedge_defs() {
+        let ebp = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0x28, 4);
+        let rbp = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0x28, 8);
+        let rsp_addr = register(UNIQUE_SPACE_ID, 0x200, 8);
+        let store_value = register(UNIQUE_SPACE_ID, 0xd400, 4);
+        let cond = register(UNIQUE_SPACE_ID, 0x300, 1);
+        let mut store = op(
+            3,
+            PcodeOpcode::Store,
+            None,
+            vec![constant(0), rsp_addr, store_value.clone()],
+        );
+        store.asm_mnemonic = Some("MOV dword ptr [RSP+0x4c], EBP".to_string());
+        let pcode = pcode_function(vec![
+            block_at(
+                0x1000,
+                0,
+                vec![
+                    op(1, PcodeOpcode::Copy, Some(ebp.clone()), vec![constant(0)]),
+                    op(10, PcodeOpcode::Branch, None, vec![constant(0x1010)]),
+                ],
+            ),
+            block_at(
+                0x1010,
+                1,
+                vec![
+                    op(
+                        2,
+                        PcodeOpcode::Copy,
+                        Some(store_value.clone()),
+                        vec![ebp.clone()],
+                    ),
+                    store.clone(),
+                    op(
+                        4,
+                        PcodeOpcode::CBranch,
+                        None,
+                        vec![constant(0x1060), cond.clone()],
+                    ),
+                ],
+            ),
+            block_at(
+                0x1020,
+                2,
+                vec![op(
+                    5,
+                    PcodeOpcode::CBranch,
+                    None,
+                    vec![constant(0x1040), cond.clone()],
+                )],
+            ),
+            block_at(
+                0x1030,
+                3,
+                vec![
+                    op(
+                        6,
+                        PcodeOpcode::IntAdd,
+                        Some(rbp.clone()),
+                        vec![rbp.clone(), constant(1)],
+                    ),
+                    op(7, PcodeOpcode::Branch, None, vec![constant(0x1050)]),
+                ],
+            ),
+            block_at(
+                0x1040,
+                4,
+                vec![
+                    op(
+                        8,
+                        PcodeOpcode::IntAdd,
+                        Some(rbp.clone()),
+                        vec![rbp.clone(), constant(2)],
+                    ),
+                    op(9, PcodeOpcode::Branch, None, vec![constant(0x1050)]),
+                ],
+            ),
+            block_at(
+                0x1050,
+                5,
+                vec![op(11, PcodeOpcode::Branch, None, vec![constant(0x1010)])],
+            ),
+            block_at(
+                0x1060,
+                6,
+                vec![op(12, PcodeOpcode::Return, None, vec![constant(0)])],
+            ),
+        ]);
+        let options = crate::nir::builder::materialize::test_support::test_options();
+        let mut builder = PreviewBuilder::new(&pcode, &options, None);
+
+        let rhs = builder.with_lowering_site(
+            LoweringSite {
+                block_idx: 1,
+                op_idx: 1,
+            },
+            |builder| {
+                builder
+                    .stack_home_accumulator_store_rhs(
+                        &pcode.blocks[1],
+                        1,
+                        &store,
+                        "home_4c",
+                        &store_value,
+                    )
+                    .expect("stack-home accumulator merge across joined backedge")
+            },
+        );
+
+        assert_eq!(rhs, HirExpr::Var("rbp".to_string()));
+        assert!(builder.params.is_empty(), "must not promote rbp to a param");
+    }
+
+    #[test]
+    fn block_entry_accumulator_read_uses_joined_live_gpr_binding() {
+        let rbp = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0x28, 8);
+        let tmp = register(UNIQUE_SPACE_ID, 0x8f00, 8);
+        let cond = register(UNIQUE_SPACE_ID, 0x300, 1);
+        let read_op = op(
+            10,
+            PcodeOpcode::IntAdd,
+            Some(tmp),
+            vec![rbp.clone(), constant(1)],
+        );
+        let pcode = pcode_function(vec![
+            block_at(
+                0x1000,
+                0,
+                vec![
+                    op(1, PcodeOpcode::Copy, Some(rbp.clone()), vec![constant(0)]),
+                    op(2, PcodeOpcode::Branch, None, vec![constant(0x1010)]),
+                ],
+            ),
+            block_at(
+                0x1010,
+                1,
+                vec![op(
+                    3,
+                    PcodeOpcode::CBranch,
+                    None,
+                    vec![constant(0x1060), cond.clone()],
+                )],
+            ),
+            block_at(
+                0x1020,
+                2,
+                vec![op(
+                    4,
+                    PcodeOpcode::CBranch,
+                    None,
+                    vec![constant(0x1030), cond.clone()],
+                )],
+            ),
+            block_at(
+                0x1030,
+                3,
+                vec![
+                    op(
+                        5,
+                        PcodeOpcode::IntAdd,
+                        Some(rbp.clone()),
+                        vec![rbp.clone(), constant(1)],
+                    ),
+                    op(6, PcodeOpcode::Branch, None, vec![constant(0x1050)]),
+                ],
+            ),
+            block_at(
+                0x1040,
+                4,
+                vec![
+                    op(
+                        7,
+                        PcodeOpcode::IntAdd,
+                        Some(rbp.clone()),
+                        vec![rbp.clone(), constant(2)],
+                    ),
+                    op(8, PcodeOpcode::Branch, None, vec![constant(0x1050)]),
+                ],
+            ),
+            block_at(
+                0x1050,
+                5,
+                vec![
+                    read_op.clone(),
+                    op(11, PcodeOpcode::Branch, None, vec![constant(0x1060)]),
+                ],
+            ),
+            block_at(
+                0x1060,
+                6,
+                vec![op(12, PcodeOpcode::Return, None, vec![constant(0)])],
+            ),
+        ]);
+        let options = crate::nir::builder::materialize::test_support::test_options();
+        let mut builder = PreviewBuilder::new(&pcode, &options, None);
+        builder.predecessors[5] = vec![3, 4];
+        builder.loop_bodies = vec![crate::nir::structuring::loop_analysis::LoopBody {
+            head: 1,
+            tails: vec![5],
+            body: vec![1, 2, 3, 4, 5],
+            exit_idx: Some(6),
+            all_exits: vec![6],
+        }];
+        let stale_rhs = HirExpr::Binary {
+            op: HirBinaryOp::Add,
+            lhs: Box::new(HirExpr::Var("xVar53".to_string())),
+            rhs: Box::new(HirExpr::Const(1, int(64))),
+            ty: int(64),
+        };
+
+        let rewritten = builder.with_lowering_site(
+            LoweringSite {
+                block_idx: 5,
+                op_idx: 0,
+            },
+            |builder| {
+                builder.rewrite_block_entry_accumulator_rhs_with_live_gpr(
+                    pcode.blocks[5].start_address,
+                    &read_op,
+                    stale_rhs,
+                )
+            },
+        );
+
+        assert_eq!(
+            rewritten,
+            HirExpr::Binary {
+                op: HirBinaryOp::Add,
+                lhs: Box::new(HirExpr::Var("rbp".to_string())),
+                rhs: Box::new(HirExpr::Const(1, int(64))),
+                ty: int(64),
+            }
+        );
+        assert!(builder.params.is_empty(), "must not promote rbp to a param");
+    }
+
+    #[test]
+    fn block_entry_accumulator_read_accepts_loop_exit_zero_seed() {
+        let rbp = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0x28, 8);
+        let tmp = register(UNIQUE_SPACE_ID, 0x9300, 8);
+        let read_op = op(
+            20,
+            PcodeOpcode::IntMult,
+            Some(tmp),
+            vec![rbp.clone(), constant(1)],
+        );
+        let pcode = pcode_function(vec![
+            block_at(
+                0x1000,
+                0,
+                vec![
+                    op(1, PcodeOpcode::Copy, Some(rbp.clone()), vec![constant(0)]),
+                    op(2, PcodeOpcode::Branch, None, vec![constant(0x1030)]),
+                ],
+            ),
+            block_at(
+                0x1010,
+                1,
+                vec![op(3, PcodeOpcode::Branch, None, vec![constant(0x1020)])],
+            ),
+            block_at(
+                0x1020,
+                2,
+                vec![
+                    op(
+                        4,
+                        PcodeOpcode::IntAdd,
+                        Some(rbp.clone()),
+                        vec![rbp.clone(), constant(1)],
+                    ),
+                    op(5, PcodeOpcode::Branch, None, vec![constant(0x1030)]),
+                ],
+            ),
+            block_at(
+                0x1030,
+                3,
+                vec![
+                    read_op.clone(),
+                    op(21, PcodeOpcode::Branch, None, vec![constant(0x1040)]),
+                ],
+            ),
+            block_at(
+                0x1040,
+                4,
+                vec![op(22, PcodeOpcode::Return, None, vec![constant(0)])],
+            ),
+        ]);
+        let options = crate::nir::builder::materialize::test_support::test_options();
+        let mut builder = PreviewBuilder::new(&pcode, &options, None);
+        builder.ensure_live_register_binding("rbp", 8);
+        builder.predecessors[3] = vec![0, 2];
+        builder.loop_bodies = vec![crate::nir::structuring::loop_analysis::LoopBody {
+            head: 1,
+            tails: vec![2],
+            body: vec![1, 2],
+            exit_idx: Some(3),
+            all_exits: vec![3],
+        }];
+        let stale_rhs = HirExpr::Binary {
+            op: HirBinaryOp::Mul,
+            lhs: Box::new(HirExpr::Var("xVar53".to_string())),
+            rhs: Box::new(HirExpr::Const(1, int(64))),
+            ty: int(64),
+        };
+
+        let rewritten = builder.with_lowering_site(
+            LoweringSite {
+                block_idx: 3,
+                op_idx: 0,
+            },
+            |builder| {
+                builder.rewrite_block_entry_accumulator_rhs_with_live_gpr(
+                    pcode.blocks[3].start_address,
+                    &read_op,
+                    stale_rhs,
+                )
+            },
+        );
+
+        assert_eq!(
+            rewritten,
+            HirExpr::Binary {
+                op: HirBinaryOp::Mul,
+                lhs: Box::new(HirExpr::Var("rbp".to_string())),
+                rhs: Box::new(HirExpr::Const(1, int(64))),
+                ty: int(64),
+            }
+        );
+        assert!(builder.params.is_empty(), "must not promote rbp to a param");
+    }
+
+    #[test]
+    fn stack_home_accumulator_store_rejects_side_effect_after_live_def() {
+        let ebp = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0x14, 4);
+        let rbp = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0x28, 8);
+        let rsp_addr = register(UNIQUE_SPACE_ID, 0x200, 8);
+        let load_tmp = register(UNIQUE_SPACE_ID, 0x208, 8);
+        let cond = register(UNIQUE_SPACE_ID, 0x300, 1);
+        let mut store = op(
+            2,
+            PcodeOpcode::Store,
+            None,
+            vec![constant(0), rsp_addr.clone(), ebp.clone()],
+        );
+        store.asm_mnemonic = Some("MOV dword ptr [RSP+0x4c], EBP".to_string());
+        let pcode = pcode_function(vec![
+            block_at(
+                0x1000,
+                0,
+                vec![
+                    op(1, PcodeOpcode::Copy, Some(ebp.clone()), vec![constant(0)]),
+                    op(10, PcodeOpcode::Branch, None, vec![constant(0x1010)]),
+                ],
+            ),
+            block_at(
+                0x1010,
+                1,
+                vec![
+                    store.clone(),
+                    op(3, PcodeOpcode::CBranch, None, vec![constant(0x1030), cond]),
+                ],
+            ),
+            block_at(
+                0x1020,
+                2,
+                vec![
+                    op(
+                        4,
+                        PcodeOpcode::IntAdd,
+                        Some(rbp.clone()),
+                        vec![rbp.clone(), constant(1)],
+                    ),
+                    op(
+                        5,
+                        PcodeOpcode::Load,
+                        Some(load_tmp),
+                        vec![constant(0), rsp_addr],
+                    ),
+                    op(6, PcodeOpcode::Branch, None, vec![constant(0x1010)]),
+                ],
+            ),
+            block_at(
+                0x1030,
+                3,
+                vec![op(7, PcodeOpcode::Return, None, vec![constant(0)])],
+            ),
+        ]);
+        let options = crate::nir::builder::materialize::test_support::test_options();
+        let mut builder = PreviewBuilder::new(&pcode, &options, None);
+
+        assert!(
+            builder
+                .stack_home_accumulator_store_rhs(&pcode.blocks[1], 0, &store, "home_4c", &ebp)
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn stack_home_accumulator_store_rejects_partial_register_value() {
+        let bp = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0x14, 2);
+        let rsp_addr = register(UNIQUE_SPACE_ID, 0x200, 8);
+        let cond = register(UNIQUE_SPACE_ID, 0x300, 1);
+        let mut store = op(
+            2,
+            PcodeOpcode::Store,
+            None,
+            vec![constant(0), rsp_addr, bp.clone()],
+        );
+        store.asm_mnemonic = Some("MOV word ptr [RSP+0x4c], BP".to_string());
+        let pcode = pcode_function(vec![
+            block_at(
+                0x1000,
+                0,
+                vec![
+                    op(1, PcodeOpcode::Copy, Some(bp.clone()), vec![constant(0)]),
+                    op(10, PcodeOpcode::Branch, None, vec![constant(0x1010)]),
+                ],
+            ),
+            block_at(
+                0x1010,
+                1,
+                vec![
+                    store.clone(),
+                    op(3, PcodeOpcode::CBranch, None, vec![constant(0x1030), cond]),
+                ],
+            ),
+            block_at(
+                0x1020,
+                2,
+                vec![op(4, PcodeOpcode::Branch, None, vec![constant(0x1010)])],
+            ),
+            block_at(
+                0x1030,
+                3,
+                vec![op(5, PcodeOpcode::Return, None, vec![constant(0)])],
+            ),
+        ]);
+        let options = crate::nir::builder::materialize::test_support::test_options();
+        let mut builder = PreviewBuilder::new(&pcode, &options, None);
+
+        assert!(
+            builder
+                .stack_home_accumulator_store_rhs(&pcode.blocks[1], 0, &store, "home_4c", &bp)
+                .is_none()
+        );
+    }
+
+    #[test]
     fn explicit_merge_select_materializes_store_value_diamond() {
         fn op_at(
             seq_num: u32,
@@ -1698,6 +3499,160 @@ mod tests {
                 &def_block, 0, &add_out, &rhs,
             ),
             Some(("w0".to_string(), 4))
+        );
+    }
+
+    #[test]
+    fn loop_header_missing_merge_uses_x64_live_register_binding() {
+        let r14d = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0xb0, 4);
+        let r15d = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0xb8, 4);
+        let store_ptr = register(UNIQUE_SPACE_ID, 0x100, 8);
+        let cond = register(UNIQUE_SPACE_ID, 0x108, 1);
+        let def_op = op(1, PcodeOpcode::Copy, Some(r15d.clone()), vec![r14d.clone()]);
+        let mut entry = block_at(
+            0x1000,
+            0,
+            vec![op(0, PcodeOpcode::Branch, None, vec![constant(0x1010)])],
+        );
+        entry.successors = vec![1];
+        let mut header = block_at(
+            0x1010,
+            1,
+            vec![
+                op(
+                    2,
+                    PcodeOpcode::Store,
+                    None,
+                    vec![constant(0), store_ptr, r15d.clone()],
+                ),
+                op(3, PcodeOpcode::CBranch, None, vec![constant(0x1030), cond]),
+            ],
+        );
+        header.successors = vec![3, 2];
+        let mut body = block_at(
+            0x1020,
+            2,
+            vec![
+                def_op.clone(),
+                op(5, PcodeOpcode::Branch, None, vec![constant(0x1010)]),
+            ],
+        );
+        body.successors = vec![1];
+        let exit = block_at(
+            0x1030,
+            3,
+            vec![op(
+                4,
+                PcodeOpcode::Return,
+                None,
+                vec![constant(0), r15d.clone()],
+            )],
+        );
+        let pcode = pcode_function(vec![entry, header, body.clone(), exit]);
+        let mut options = crate::nir::builder::materialize::test_support::test_options();
+        options.calling_convention = CallingConvention::WindowsX64;
+        let builder = PreviewBuilder::new(&pcode, &options, None);
+        let rhs = HirExpr::Var("r14".to_string());
+        let proof = builder
+            .describe_missing_merge_binding_proof(&body, 0, &r15d, &rhs)
+            .expect("missing merge proof");
+        assert_eq!(
+            proof.relation,
+            MissingMergeBindingRelation::LoopHeaderMergeMissing
+        );
+        assert_eq!(
+            proof.consumer_kind,
+            DisallowedSingleConsumerConsumerKind::StoreValue
+        );
+        assert_eq!(
+            register_hardware_name_for_abi(r15d.offset, r15d.size, options.calling_convention),
+            Some("r15")
+        );
+
+        assert_eq!(
+            builder.live_register_lhs_name_for_safe_missing_merge(
+                &body,
+                0,
+                &def_op,
+                &r15d,
+                &rhs,
+                ReplacementValuePlan::incomplete(
+                    ReplacementReadClass::Merge,
+                    MaterializationRejectionReason::MissingMergeBinding,
+                ),
+            ),
+            Some(("r15".to_string(), 4))
+        );
+    }
+
+    #[test]
+    fn loop_header_missing_merge_rejects_side_effect_rhs() {
+        let r14d = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0xb0, 4);
+        let r15d = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0xb8, 4);
+        let store_ptr = register(UNIQUE_SPACE_ID, 0x100, 8);
+        let cond = register(UNIQUE_SPACE_ID, 0x108, 1);
+        let def_op = op(1, PcodeOpcode::Copy, Some(r15d.clone()), vec![r14d]);
+        let mut entry = block_at(
+            0x1000,
+            0,
+            vec![op(0, PcodeOpcode::Branch, None, vec![constant(0x1010)])],
+        );
+        entry.successors = vec![1];
+        let mut header = block_at(
+            0x1010,
+            1,
+            vec![
+                op(
+                    2,
+                    PcodeOpcode::Store,
+                    None,
+                    vec![constant(0), store_ptr, r15d.clone()],
+                ),
+                op(3, PcodeOpcode::CBranch, None, vec![constant(0x1030), cond]),
+            ],
+        );
+        header.successors = vec![3, 2];
+        let mut body = block_at(
+            0x1020,
+            2,
+            vec![
+                def_op.clone(),
+                op(5, PcodeOpcode::Branch, None, vec![constant(0x1010)]),
+            ],
+        );
+        body.successors = vec![1];
+        let exit = block_at(
+            0x1030,
+            3,
+            vec![op(
+                4,
+                PcodeOpcode::Return,
+                None,
+                vec![constant(0), r15d.clone()],
+            )],
+        );
+        let pcode = pcode_function(vec![entry, header, body.clone(), exit]);
+        let options = crate::nir::builder::materialize::test_support::test_options();
+        let builder = PreviewBuilder::new(&pcode, &options, None);
+        let rhs = HirExpr::Call {
+            target: "may_call".to_string(),
+            args: vec![HirExpr::Var("r14".to_string())],
+            ty: int(32),
+        };
+
+        assert_eq!(
+            builder.live_register_lhs_name_for_safe_missing_merge(
+                &body,
+                0,
+                &def_op,
+                &r15d,
+                &rhs,
+                ReplacementValuePlan::incomplete(
+                    ReplacementReadClass::Merge,
+                    MaterializationRejectionReason::MissingMergeBinding,
+                ),
+            ),
+            None
         );
     }
 

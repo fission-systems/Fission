@@ -33,6 +33,15 @@ pub fn env_fission_resource_root() -> Option<PathBuf> {
 /// Ordered bundle roots tried before workspace-relative signatures (CLI → env → exe → user).
 #[must_use]
 pub fn prioritized_bundle_roots() -> Vec<PathBuf> {
+    explicit_bundle_roots()
+        .into_iter()
+        .chain(ambient_bundle_roots())
+        .collect()
+}
+
+/// Operator-provided bundle roots. These are allowed to override workspace resources.
+#[must_use]
+pub fn explicit_bundle_roots() -> Vec<PathBuf> {
     let mut seen = Vec::new();
     let mut push_unique = |p: PathBuf| {
         if seen.iter().any(|x: &PathBuf| x == &p) {
@@ -47,6 +56,22 @@ pub fn prioritized_bundle_roots() -> Vec<PathBuf> {
     if let Some(p) = env_fission_resource_root() {
         push_unique(p);
     }
+    seen
+}
+
+/// Auto-discovered install/user bundle roots. Use after workspace resources to
+/// keep repo-local development deterministic and avoid slow user/system probes
+/// when `utils/signatures` is available.
+#[must_use]
+pub fn ambient_bundle_roots() -> Vec<PathBuf> {
+    let mut seen = Vec::new();
+    let mut push_unique = |p: PathBuf| {
+        if seen.iter().any(|x: &PathBuf| x == &p) {
+            return;
+        }
+        seen.push(p);
+    };
+
     for p in exe_adjacent_bundle_roots() {
         push_unique(p);
     }
@@ -74,7 +99,14 @@ pub fn signatures_base_from_bundle_root(bundle_root: &Path) -> Option<PathBuf> {
 
 #[must_use]
 pub fn resolve_signatures_base_from_bundles() -> Option<PathBuf> {
-    prioritized_bundle_roots()
+    resolve_signatures_base_from_roots(prioritized_bundle_roots())
+}
+
+#[must_use]
+pub fn resolve_signatures_base_from_roots(
+    roots: impl IntoIterator<Item = PathBuf>,
+) -> Option<PathBuf> {
+    roots
         .into_iter()
         .filter(|root| root.exists())
         .find_map(|root| signatures_base_from_bundle_root(&root))

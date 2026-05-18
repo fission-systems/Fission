@@ -428,6 +428,178 @@ impl<'a> PreviewBuilder<'a> {
         }
     }
 
+    pub(super) fn trace_path_sensitive_register_merge(
+        &self,
+        block_addr: u64,
+        op_seq: u32,
+        output: &Varnode,
+        relation: MissingMergeBindingRelation,
+        consumer_kind: DisallowedSingleConsumerConsumerKind,
+        binding_name: &str,
+    ) {
+        if !self.emit_ready_trace_enabled_for_current_fn() {
+            return;
+        }
+        self.emit_ready_trace(format!(
+            "path-sensitive-register-merge block=0x{:x} op_seq={} output=space:{} off:0x{:x} size:{} relation={:?} consumer_kind={:?} binding={}",
+            block_addr,
+            op_seq,
+            output.space_id,
+            output.offset,
+            output.size,
+            relation,
+            consumer_kind,
+            binding_name,
+        ));
+    }
+
+    pub(super) fn trace_direct_successor_accumulator_merge_accepted(
+        &self,
+        block_addr: u64,
+        successor_addr: u64,
+        output: &Varnode,
+        predecessor_addrs: &[u64],
+        binding_name: &str,
+    ) {
+        if !self.emit_ready_trace_enabled_for_current_fn() {
+            return;
+        }
+        let predecessors = predecessor_addrs
+            .iter()
+            .map(|addr| format!("0x{addr:x}"))
+            .collect::<Vec<_>>()
+            .join(",");
+        self.emit_ready_trace(format!(
+            "direct-successor-accumulator-merge accepted=true block=0x{:x} successor=0x{:x} output=space:{} off:0x{:x} size:{} predecessors=[{}] binding={}",
+            block_addr,
+            successor_addr,
+            output.space_id,
+            output.offset,
+            output.size,
+            predecessors,
+            binding_name,
+        ));
+    }
+
+    pub(super) fn trace_direct_successor_accumulator_merge_rejected(
+        &self,
+        block_addr: u64,
+        output: &Varnode,
+        reason: &str,
+    ) {
+        if !self.emit_ready_trace_enabled_for_current_fn() {
+            return;
+        }
+        self.emit_ready_trace(format!(
+            "direct-successor-accumulator-merge accepted=false block=0x{:x} output=space:{} off:0x{:x} size:{} reason={}",
+            block_addr,
+            output.space_id,
+            output.offset,
+            output.size,
+            reason,
+        ));
+    }
+
+    pub(super) fn trace_stack_home_accumulator_store_merge_accepted(
+        &self,
+        block_addr: u64,
+        op_seq: u32,
+        slot_name: &str,
+        value: &Varnode,
+        binding_name: &str,
+    ) {
+        if !self.emit_ready_trace_enabled_for_current_fn() {
+            return;
+        }
+        self.emit_ready_trace(format!(
+            "stack-home-accumulator-store-merge accepted=true block=0x{:x} op_seq={} slot={} value=space:{} off:0x{:x} size:{} binding={}",
+            block_addr,
+            op_seq,
+            slot_name,
+            value.space_id,
+            value.offset,
+            value.size,
+            binding_name,
+        ));
+    }
+
+    pub(super) fn trace_stack_home_accumulator_store_merge_rejected(
+        &self,
+        block_addr: u64,
+        op_seq: u32,
+        slot_name: &str,
+        value: &Varnode,
+        reason: &str,
+    ) {
+        if !self.emit_ready_trace_enabled_for_current_fn() {
+            return;
+        }
+        self.emit_ready_trace(format!(
+            "stack-home-accumulator-store-merge accepted=false block=0x{:x} op_seq={} slot={} value=space:{} off:0x{:x} size:{} reason={}",
+            block_addr,
+            op_seq,
+            slot_name,
+            value.space_id,
+            value.offset,
+            value.size,
+            reason,
+        ));
+    }
+
+    pub(super) fn trace_block_entry_accumulator_read_merge_accepted(
+        &self,
+        block_idx: usize,
+        op_seq: u32,
+        input: &Varnode,
+        binding_name: &str,
+    ) {
+        if !self.emit_ready_trace_enabled_for_current_fn() {
+            return;
+        }
+        let block_addr = self
+            .pcode
+            .blocks
+            .get(block_idx)
+            .map(|block| block.start_address)
+            .unwrap_or_default();
+        self.emit_ready_trace(format!(
+            "block-entry-accumulator-read-merge accepted=true block=0x{:x} op_seq={} input=space:{} off:0x{:x} size:{} binding={}",
+            block_addr,
+            op_seq,
+            input.space_id,
+            input.offset,
+            input.size,
+            binding_name,
+        ));
+    }
+
+    pub(super) fn trace_block_entry_accumulator_read_merge_rejected(
+        &self,
+        block_idx: usize,
+        op_seq: u32,
+        input: &Varnode,
+        reason: &str,
+    ) {
+        if !self.emit_ready_trace_enabled_for_current_fn() {
+            return;
+        }
+        let block_addr = self
+            .pcode
+            .blocks
+            .get(block_idx)
+            .map(|block| block.start_address)
+            .unwrap_or_default();
+        self.emit_ready_trace(format!(
+            "block-entry-accumulator-read-merge accepted=false block=0x{:x} op_seq={} input=space:{} off:0x{:x} size:{} reason={}",
+            block_addr,
+            op_seq,
+            input.space_id,
+            input.offset,
+            input.size,
+            reason,
+        ));
+    }
+
     pub(super) fn trace_materialization_plan(
         &self,
         block_addr: u64,

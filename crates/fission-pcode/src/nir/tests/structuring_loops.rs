@@ -338,6 +338,132 @@ fn do_while_preview_lowers_multi_block_body() {
     assert!(code.contains("} while (param_1);"));
 }
 
+#[test]
+fn multiblock_loop_rewrites_all_exits_to_breaks() {
+    let early_exit_cond = uniq(0x450, 1);
+    let latch_cond = uniq(0x451, 1);
+    let ptr1 = uniq(0x452, 8);
+    let ptr2 = uniq(0x453, 8);
+    let func = PcodeFunction {
+        blocks: vec![
+            PcodeBasicBlock {
+                index: 0,
+                start_address: 0x5300,
+                successors: vec![],
+                ops: vec![
+                    PcodeOp {
+                        seq_num: 0,
+                        opcode: PcodeOpcode::IntAdd,
+                        address: 0x5300,
+                        output: Some(ptr1.clone()),
+                        inputs: vec![reg(0x28, 8), cst(-0x10, 8)],
+                        asm_mnemonic: None,
+                    },
+                    PcodeOp {
+                        seq_num: 1,
+                        opcode: PcodeOpcode::Store,
+                        address: 0x5301,
+                        output: None,
+                        inputs: vec![cst(0, 4), ptr1, cst(7, 4)],
+                        asm_mnemonic: None,
+                    },
+                    PcodeOp {
+                        seq_num: 2,
+                        opcode: PcodeOpcode::Copy,
+                        address: 0x5302,
+                        output: Some(early_exit_cond.clone()),
+                        inputs: vec![reg(0x08, 1)],
+                        asm_mnemonic: None,
+                    },
+                    PcodeOp {
+                        seq_num: 3,
+                        opcode: PcodeOpcode::CBranch,
+                        address: 0x5303,
+                        output: None,
+                        inputs: vec![cst(0x5330, 8), early_exit_cond],
+                        asm_mnemonic: None,
+                    },
+                ],
+            },
+            PcodeBasicBlock {
+                index: 1,
+                start_address: 0x5310,
+                successors: vec![],
+                ops: vec![
+                    PcodeOp {
+                        seq_num: 0,
+                        opcode: PcodeOpcode::IntAdd,
+                        address: 0x5310,
+                        output: Some(ptr2.clone()),
+                        inputs: vec![reg(0x28, 8), cst(-0x14, 8)],
+                        asm_mnemonic: None,
+                    },
+                    PcodeOp {
+                        seq_num: 1,
+                        opcode: PcodeOpcode::Store,
+                        address: 0x5311,
+                        output: None,
+                        inputs: vec![cst(0, 4), ptr2, cst(9, 4)],
+                        asm_mnemonic: None,
+                    },
+                    PcodeOp {
+                        seq_num: 2,
+                        opcode: PcodeOpcode::Copy,
+                        address: 0x5312,
+                        output: Some(latch_cond.clone()),
+                        inputs: vec![reg(0x10, 1)],
+                        asm_mnemonic: None,
+                    },
+                    PcodeOp {
+                        seq_num: 3,
+                        opcode: PcodeOpcode::CBranch,
+                        address: 0x5313,
+                        output: None,
+                        inputs: vec![cst(0x5300, 8), latch_cond],
+                        asm_mnemonic: None,
+                    },
+                ],
+            },
+            PcodeBasicBlock {
+                index: 2,
+                start_address: 0x5330,
+                successors: vec![],
+                ops: vec![PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::Return,
+                    address: 0x5330,
+                    output: None,
+                    inputs: vec![cst(0, 8), cst(1, 4)],
+                    asm_mnemonic: None,
+                }],
+            },
+            PcodeBasicBlock {
+                index: 3,
+                start_address: 0x5340,
+                successors: vec![],
+                ops: vec![PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::Return,
+                    address: 0x5340,
+                    output: None,
+                    inputs: vec![cst(0, 8), cst(2, 4)],
+                    asm_mnemonic: None,
+                }],
+            },
+        ],
+    };
+
+    let code = render_mlil_preview(&func, "multi_exit_loop_fn", 0x5300, &preview_options())
+        .expect("preview render");
+    assert!(
+        code.contains("while (true)") || code.contains("while (1)"),
+        "expected structured loop: {code}"
+    );
+    assert!(code.contains("break;"), "expected exit rewrites: {code}");
+    assert!(!code.contains("goto block_5330"), "{code}");
+    assert!(!code.contains("goto block_5340"), "{code}");
+}
+
 // ---------------------------------------------------------------------------
 // New tests: Phase 5 — Loop Control Strengthening
 // ---------------------------------------------------------------------------

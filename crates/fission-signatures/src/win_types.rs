@@ -6,6 +6,8 @@
 //! (`base_types.json`, `structures.json`), loaded via [`fission_core::resources::ResourceProvider`].
 
 use std::collections::HashMap;
+use std::error::Error;
+use std::fmt;
 use std::fs;
 use std::path::PathBuf;
 
@@ -16,29 +18,51 @@ fn resources() -> ResourceProvider {
     ResourceProvider::global()
 }
 
-fn win32_typeinfo_json_path(filename: &str) -> PathBuf {
+#[derive(Debug, Clone)]
+pub struct WinTypesError {
+    message: String,
+}
+
+impl WinTypesError {
+    fn new(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+        }
+    }
+}
+
+impl fmt::Display for WinTypesError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.message)
+    }
+}
+
+impl Error for WinTypesError {}
+
+fn try_win32_typeinfo_json_path(filename: &str) -> Result<PathBuf, WinTypesError> {
     resources()
         .win32_typeinfo_json_path(filename)
-        .unwrap_or_else(|| {
-            panic!(
-                "fission-signatures win_types: missing typeinfo JSON `{filename}` (configure bundle/workspace signatures or PATHS.gdt_dir)"
-            )
+        .ok_or_else(|| {
+            WinTypesError::new(format!(
+                "fission-signatures win_types: missing typeinfo JSON `{filename}` \
+                 (configure bundle/workspace signatures or PATHS.gdt_dir)"
+            ))
         })
 }
 
-fn read_typeinfo_json(filename: &str) -> String {
-    let path = win32_typeinfo_json_path(filename);
+fn try_read_typeinfo_json(filename: &str) -> Result<String, WinTypesError> {
+    let path = try_win32_typeinfo_json_path(filename)?;
     if !path.exists() {
-        panic!(
+        return Err(WinTypesError::new(format!(
             "fission-signatures win_types: missing canonical data file {} (under resolved Win32 typeinfo dir)",
             path.display()
-        );
+        )));
     }
-    fs::read_to_string(&path).unwrap_or_else(|e| {
-        panic!(
+    fs::read_to_string(&path).map_err(|e| {
+        WinTypesError::new(format!(
             "fission-signatures win_types: failed to read {}: {e}",
-            path.display()
-        )
+            path.display(),
+        ))
     })
 }
 
@@ -50,7 +74,7 @@ fn read_typeinfo_json(filename: &str) -> String {
 pub mod base_types {
     use serde::Deserialize;
 
-    use super::read_typeinfo_json;
+    use super::{WinTypesError, try_read_typeinfo_json};
 
     /// Type size information for annotation
     #[derive(Debug, Clone)]
@@ -73,12 +97,19 @@ pub mod base_types {
 
     /// Load all base types from `base_types.json` in the Win32 typeinfo corpus.
     pub fn all() -> Vec<TypeInfo> {
-        let json_str = read_typeinfo_json("base_types.json");
-        let items: Vec<JsonTypeInfo> = serde_json::from_str(&json_str).unwrap_or_else(|e| {
-            let path = super::win32_typeinfo_json_path("base_types.json");
-            panic!("Failed to parse base_types.json at {}: {e}", path.display())
-        });
-        items
+        try_all().unwrap_or_else(|e| panic!("{e}"))
+    }
+
+    /// Fallible variant of [`all`] for UI and batch workers that must degrade gracefully.
+    pub fn try_all() -> Result<Vec<TypeInfo>, WinTypesError> {
+        let json_str = try_read_typeinfo_json("base_types.json")?;
+        let items: Vec<JsonTypeInfo> = serde_json::from_str(&json_str).map_err(|e| {
+            let path = super::try_win32_typeinfo_json_path("base_types.json")
+                .map(|p| p.display().to_string())
+                .unwrap_or_else(|path_err| path_err.to_string());
+            WinTypesError::new(format!("Failed to parse base_types.json at {path}: {e}"))
+        })?;
+        Ok(items
             .into_iter()
             .map(|j| TypeInfo {
                 name: j.name,
@@ -87,7 +118,7 @@ pub mod base_types {
                 is_pointer: j.is_pointer,
                 is_signed: j.is_signed,
             })
-            .collect()
+            .collect())
     }
 }
 
@@ -141,11 +172,18 @@ pub struct WindowsStructures {
 
 impl WindowsStructures {
     pub fn new() -> Self {
-        let json_str = read_typeinfo_json("structures.json");
-        let items: Vec<JsonStructDef> = serde_json::from_str(&json_str).unwrap_or_else(|e| {
-            let path = win32_typeinfo_json_path("structures.json");
-            panic!("Failed to parse structures.json at {}: {e}", path.display())
-        });
+        Self::try_new().unwrap_or_else(|e| panic!("{e}"))
+    }
+
+    /// Load the Windows structure corpus without panicking.
+    pub fn try_new() -> Result<Self, WinTypesError> {
+        let json_str = try_read_typeinfo_json("structures.json")?;
+        let items: Vec<JsonStructDef> = serde_json::from_str(&json_str).map_err(|e| {
+            let path = try_win32_typeinfo_json_path("structures.json")
+                .map(|p| p.display().to_string())
+                .unwrap_or_else(|path_err| path_err.to_string());
+            WinTypesError::new(format!("Failed to parse structures.json at {path}: {e}"))
+        })?;
 
         let mut structures = HashMap::with_capacity(items.len());
         for item in items {
@@ -171,7 +209,7 @@ impl WindowsStructures {
             structures.insert(item.name, def);
         }
 
-        Self { structures }
+        Ok(Self { structures })
     }
 
     /// Get structure by name

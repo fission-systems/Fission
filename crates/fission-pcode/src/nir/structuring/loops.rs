@@ -859,6 +859,16 @@ impl<'a> PreviewBuilder<'a> {
         }
 
         let break_addr: Option<u64> = break_idx.map(|bi| self.block_target_key(bi));
+        let break_addrs: HashSet<u64> = self
+            .get_loop_body(head_idx)
+            .map(|lb| {
+                lb.all_exits
+                    .iter()
+                    .filter_map(|&exit| self.pcode.blocks.get(exit).map(|b| b.start_address))
+                    .collect()
+            })
+            .filter(|exits: &HashSet<u64>| !exits.is_empty())
+            .unwrap_or_else(|| break_addr.into_iter().collect());
         let head_addr: u64 = self.block_target_key(head_idx);
 
         let targeted = self.collect_jump_targets()?;
@@ -932,7 +942,7 @@ impl<'a> PreviewBuilder<'a> {
                     result_stmts.push(HirStmt::Return(expr));
                 }
                 LoweredTerminator::Goto(target) | LoweredTerminator::Fallthrough(Some(target)) => {
-                    if Some(target) == break_addr {
+                    if break_addrs.contains(&target) {
                         result_stmts.push(HirStmt::Break);
                         self.telemetry.structuring.loop_multi_exit_break_count += 1;
                     } else if target == head_addr {
@@ -949,8 +959,8 @@ impl<'a> PreviewBuilder<'a> {
                 } => {
                     let next_addr = self.next_block_address(idx);
                     // Check if either arm is the break or continue target
-                    let true_is_break = Some(true_target) == break_addr;
-                    let false_is_break = false_target.is_some() && false_target == break_addr;
+                    let true_is_break = break_addrs.contains(&true_target);
+                    let false_is_break = false_target.is_some_and(|target| break_addrs.contains(&target));
                     let true_is_continue = true_target == head_addr;
                     let false_is_continue = false_target == Some(head_addr);
 
