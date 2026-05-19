@@ -439,3 +439,56 @@ impl AbiProvider for GenericAbiProvider {
         NirBindingOrigin::StackOffset(offset)
     }
 }
+
+pub fn infer_entry_register_param_arity(
+    pcode: &crate::pcode::PcodeFunction,
+    abi: CallingConvention,
+) -> Option<usize> {
+    use crate::pcode::PcodeOpcode;
+    use std::collections::HashSet;
+    let entry = pcode.blocks.first()?;
+    let mut defined_param_regs = HashSet::new();
+    let mut max_param_index = None::<usize>;
+
+    for op in &entry.ops {
+        match op.opcode {
+            PcodeOpcode::Call
+            | PcodeOpcode::CallInd
+            | PcodeOpcode::CallOther
+            | PcodeOpcode::Branch
+            | PcodeOpcode::CBranch
+            | PcodeOpcode::BranchInd
+            | PcodeOpcode::Return => break,
+            _ => {}
+        }
+
+        for input in &op.inputs {
+            if input.is_constant || !is_register_varnode(input) {
+                continue;
+            }
+            let Some((_, Some(param_index))) =
+                register_name_with_param(input.offset, input.size, abi)
+            else {
+                continue;
+            };
+            if defined_param_regs.contains(&param_index) {
+                continue;
+            }
+            max_param_index = Some(max_param_index.map_or(param_index, |max| max.max(param_index)));
+        }
+
+        let Some(output) = &op.output else {
+            continue;
+        };
+        if output.is_constant || !is_register_varnode(output) {
+            continue;
+        }
+        if let Some((_, Some(param_index))) =
+            register_name_with_param(output.offset, output.size, abi)
+        {
+            defined_param_regs.insert(param_index);
+        }
+    }
+
+    max_param_index.map(|index| index + 1)
+}

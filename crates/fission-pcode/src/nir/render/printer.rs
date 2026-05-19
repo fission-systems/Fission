@@ -1007,3 +1007,22 @@ fn print_stmt_with_indent_ctx(
         }
     }
 }
+
+pub fn render_contracted_wrapper_summary(name: &str, summary: &crate::nir::ProcedureSummary) -> String {
+    let target = summary
+        .wrapper_contraction
+        .as_ref()
+        .map(|proof| proof.target.symbol.clone())
+        .unwrap_or_else(|| "unknown_target".to_string());
+    let mut hir = HirFunction {
+        name: name.to_string(),
+        return_type: NirType::Unknown,
+        ..HirFunction::default()
+    };
+    hir.body = vec![HirStmt::Return(Some(HirExpr::Call {
+        target,
+        args: Vec::new(),
+        ty: NirType::Unknown,
+    }))];
+    print_hir_function(&hir)
+}
