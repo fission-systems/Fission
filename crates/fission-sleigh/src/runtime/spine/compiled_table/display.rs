@@ -106,7 +106,7 @@ pub(super) fn flow_kind_for_state(state: &RuntimeConstructState) -> DecodedFlowK
         .constructor_template
         .ops
         .iter()
-        .any(|op| matches!(op.opcode, CompiledOpTplOpcode::Call))
+        .any(|op| matches!(op.opcode, CompiledOpTplOpcode::Call | CompiledOpTplOpcode::CallInd))
     {
         return DecodedFlowKind::Call;
     }
@@ -117,6 +117,14 @@ pub(super) fn flow_kind_for_state(state: &RuntimeConstructState) -> DecodedFlowK
         .any(|op| matches!(op.opcode, CompiledOpTplOpcode::CBranch))
     {
         return DecodedFlowKind::ConditionalJump;
+    }
+    if state
+        .constructor_template
+        .ops
+        .iter()
+        .any(|op| matches!(op.opcode, CompiledOpTplOpcode::Branch | CompiledOpTplOpcode::BranchInd))
+    {
+        return DecodedFlowKind::Jump;
     }
     DecodedFlowKind::None
 }

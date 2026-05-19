@@ -17,7 +17,6 @@
 #![allow(clippy::all)]
 
 mod runtime_status;
-pub mod x86_decode;
 pub mod decode;
 
 #[cfg(feature = "interactive_runtime")]

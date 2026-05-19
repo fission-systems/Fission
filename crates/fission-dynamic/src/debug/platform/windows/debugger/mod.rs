@@ -62,8 +62,7 @@ pub struct WindowsDebugger {
 impl WindowsDebugger {
     /// Create a new Windows debugger instance.
     ///
-    /// Automatically initialises a Sleigh decoder for x86-64 when the
-    /// `sleigh_decode` feature is enabled.
+    /// Automatically initialises a Sleigh decoder for x86-64.
     pub fn new() -> Self {
         let decoder = crate::decode::create_decoder("x86-64").ok();
         Self {
@@ -333,8 +332,7 @@ impl WindowsDebugger {
     /// Step over a single instruction.
     ///
     /// Uses the attached [`InstructionDecoder`](crate::decode::InstructionDecoder)
-    /// (Sleigh when available) for accurate CALL detection across architectures.
-    /// Falls back to the byte-pattern `x86_decode` when no decoder is present.
+    /// (Sleigh) for accurate CALL detection across all architectures.
     pub fn step_over(&mut self) -> FissionResult<()> {
         let tid = self
             .state
@@ -347,16 +345,14 @@ impl WindowsDebugger {
         let regs = self.fetch_registers(tid)?;
         let rip = regs.rip;
 
-        // Read a few bytes at RIP to detect CALL
+        // Read a few bytes at RIP to detect CALL via Sleigh
         let code_bytes = self.read_memory(rip, 16)?;
-        let (is_call, insn_len) = if let Some(decoder) = &self.decoder {
-            match decoder.decode_one(&code_bytes, rip) {
-                Ok(insn) => (insn.is_call, insn.length),
-                Err(_) => crate::x86_decode::detect_call_instruction(&code_bytes),
-            }
-        } else {
-            crate::x86_decode::detect_call_instruction(&code_bytes)
-        };
+        let decoder = self.decoder.as_ref().ok_or_else(|| {
+            FissionError::debug("No instruction decoder attached for step over")
+        })?;
+        let insn = decoder.decode_one(&code_bytes, rip)?;
+        let is_call = insn.is_call;
+        let insn_len = insn.length;
 
         if is_call && insn_len > 0 {
             // Set a temporary BP at the return address (next instruction)
