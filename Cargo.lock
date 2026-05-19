@@ -1495,6 +1495,7 @@ dependencies = [
  "fission-core",
  "fission-loader",
  "fission-plugin",
+ "fission-sleigh",
  "fission-static",
  "fission-ttd",
  "libloading 0.8.9",

@@ -21,13 +21,16 @@ interactive_runtime = [
     "dep:rayon",
     "dep:windows",
     "dep:nix",
+    "sleigh_decode",
 ]
 unpacker_runtime = ["dep:windows"]
+sleigh_decode = ["dep:fission-sleigh"]
 
 [dependencies]
 fission-core = { path = "../fission-core" }
 fission-ttd = { path = "../fission-ttd" }
 fission-plugin = { path = "../fission-plugin", optional = true, default-features = false, features = ["interactive_runtime"] }
+fission-sleigh = { path = "../fission-sleigh", optional = true }
 fission-loader = { path = "../fission-loader" }
 fission-static = { path = "../fission-static", default-features = false }
 tokio = { version = "1.36", features = ["full", "rt-multi-thread"], optional = true }

@@ -55,15 +55,22 @@ pub struct WindowsDebugger {
     process_handle: Option<HANDLE>,
     /// Execution timeline for auto-recording during debugging (shared with UI)
     pub ttd_timeline: Option<Arc<Mutex<Timeline>>>,
+    /// Instruction decoder for step-over and disassembly
+    decoder: Option<Box<dyn crate::decode::InstructionDecoder>>,
 }
 
 impl WindowsDebugger {
-    /// Create a new Windows debugger instance
+    /// Create a new Windows debugger instance.
+    ///
+    /// Automatically initialises a Sleigh decoder for x86-64 when the
+    /// `sleigh_decode` feature is enabled.
     pub fn new() -> Self {
+        let decoder = crate::decode::create_decoder("x86-64").ok();
         Self {
             state: DebugState::default(),
             process_handle: None,
             ttd_timeline: None,
+            decoder,
         }
     }
 
@@ -325,9 +332,9 @@ impl WindowsDebugger {
 
     /// Step over a single instruction.
     ///
-    /// If the current instruction is a `CALL` (opcode `0xE8` or `0xFF /2`),
-    /// sets a temporary breakpoint at the next instruction and continues.
-    /// Otherwise behaves like `single_step`.
+    /// Uses the attached [`InstructionDecoder`](crate::decode::InstructionDecoder)
+    /// (Sleigh when available) for accurate CALL detection across architectures.
+    /// Falls back to the byte-pattern `x86_decode` when no decoder is present.
     pub fn step_over(&mut self) -> FissionResult<()> {
         let tid = self
             .state
@@ -342,7 +349,14 @@ impl WindowsDebugger {
 
         // Read a few bytes at RIP to detect CALL
         let code_bytes = self.read_memory(rip, 16)?;
-        let (is_call, insn_len) = crate::x86_decode::detect_call_instruction(&code_bytes);
+        let (is_call, insn_len) = if let Some(decoder) = &self.decoder {
+            match decoder.decode_one(&code_bytes, rip) {
+                Ok(insn) => (insn.is_call, insn.length),
+                Err(_) => crate::x86_decode::detect_call_instruction(&code_bytes),
+            }
+        } else {
+            crate::x86_decode::detect_call_instruction(&code_bytes)
+        };
 
         if is_call && insn_len > 0 {
             // Set a temporary BP at the return address (next instruction)
@@ -364,6 +378,60 @@ impl WindowsDebugger {
         } else {
             self.single_step()
         }
+    }
+
+    /// Attach an instruction decoder for disassembly and step-over.
+    ///
+    /// Replaces the current decoder (if any). Typically called after
+    /// determining the target architecture from the PE header.
+    pub fn set_decoder(&mut self, decoder: Box<dyn crate::decode::InstructionDecoder>) {
+        self.decoder = Some(decoder);
+    }
+
+    /// Disassemble `count` instructions starting from `address`.
+    ///
+    /// Reads memory from the target process and decodes using the attached
+    /// instruction decoder.
+    pub fn disassemble_at(
+        &self,
+        address: u64,
+        count: usize,
+    ) -> FissionResult<Vec<crate::decode::DebugInstruction>> {
+        let decoder = self.decoder.as_ref().ok_or_else(|| {
+            FissionError::debug("No instruction decoder attached")
+        })?;
+        // Read enough bytes (estimate: 15 bytes/insn for x86, conservative)
+        let read_size = (count * 15).min(4096);
+        let bytes = self.read_memory(address, read_size)?;
+        decoder
+            .decode_window(&bytes, address, count)
+            .map_err(|e| FissionError::debug(format!("Disassemble failed: {}", e)))
+    }
+
+    /// Disassemble around the current RIP for a context window.
+    ///
+    /// Returns up to `after` instructions starting from the current RIP.
+    /// (Backward disassembly from an arbitrary address is unreliable for
+    /// variable-length ISAs like x86; use function-start-based scanning
+    /// if backward context is needed.)
+    pub fn disassemble_around_rip(
+        &self,
+        after: usize,
+    ) -> FissionResult<Vec<crate::decode::DebugInstruction>> {
+        let rip = self
+            .state
+            .registers
+            .as_ref()
+            .map(|r| r.rip)
+            .or_else(|| {
+                self.state
+                    .current_thread_id
+                    .or(self.state.main_thread_id)
+                    .and_then(|tid| self.fetch_registers(tid).ok())
+                    .map(|r| r.rip)
+            })
+            .ok_or_else(|| FissionError::debug("No RIP available"))?;
+        self.disassemble_at(rip, after)
     }
 
     /// Read a module/DLL image name from the target process.
