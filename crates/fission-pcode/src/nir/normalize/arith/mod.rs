@@ -22,5 +22,5 @@ pub(crate) use flags_cond::{
     canonicalize_condition_expr, canonicalize_flag_intrinsics, normalize_boolean_logic,
 };
 pub(crate) use simplify_algebraic::{
-    simplify_double_add, simplify_negated_const,
+    simplify_double_add, simplify_factor_common_mul, simplify_negated_const,
 };
