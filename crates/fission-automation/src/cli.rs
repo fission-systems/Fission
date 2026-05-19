@@ -16,8 +16,13 @@ pub struct Cli {
 
 #[derive(Subcommand, Debug)]
 pub enum Commands {
-    NirCheck(NirCheckArgs),
+    /// Run the source-semantic quality benchmark (canonical quality surface).
     SourceSemanticCheck(SourceSemanticCheckArgs),
+    /// Alias for `source-semantic-check`.
+    #[command(hide = true)]
+    Check(SourceSemanticCheckArgs),
+    /// Run the NIR inventory quality lane against sentinel binaries.
+    NirCheck(NirCheckArgs),
 }
 
 #[derive(Parser, Debug)]
@@ -200,6 +205,16 @@ mod tests {
         assert_eq!(
             args.ghidra_home,
             Some(PathBuf::from("vendor/ghidra/ghidra_12.0.4_PUBLIC"))
+        );
+    }
+
+    #[test]
+    fn check_alias_parses_as_source_semantic() {
+        let cli = Cli::try_parse_from(["fission-automation", "check"])
+            .expect("check alias parses");
+        assert!(
+            matches!(cli.command, Commands::Check(_)),
+            "expected Check variant"
         );
     }
 }

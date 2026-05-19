@@ -58,6 +58,8 @@ Heavy workflow builds `fission-cli` (release), runs crate tests, then a **fast**
 
 ```bash
 cargo test -p fission-automation
+cargo run -p fission-automation -- source-semantic-check --no-build --fission-bin target/release/fission_cli
+cargo run -p fission-automation -- check --help   # alias for source-semantic-check
 cargo run -p fission-automation -- nir-check --lane nir --dry-run
 ```
 

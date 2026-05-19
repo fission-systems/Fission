@@ -454,7 +454,14 @@ fn build_source_semantic_command(
         "--jobs".to_string(),
         jobs.max(1).to_string(),
     ];
-    if let Some(baseline_dir) = args.baseline_dir.as_ref() {
+    let effective_baseline_dir = args.baseline_dir.as_ref().cloned().or_else(|| {
+        let candidate = automation_artifact_root(root)
+            .join("latest")
+            .join(LANE_NAME)
+            .join("source_semantic");
+        candidate.exists().then_some(candidate)
+    });
+    if let Some(baseline_dir) = effective_baseline_dir.as_ref() {
         command.push("--baseline-dir".to_string());
         command.push(rel_path_for_command(root, baseline_dir));
     }
