@@ -55,7 +55,10 @@ pub mod macos {
 pub use traits::{Debugger, TimeTravelDebugger};
 
 // Re-export commonly used types
-pub use types::{Breakpoint, DebugEvent, DebugState, DebugStatus, ProcessInfo, RegisterState};
+pub use types::{
+    Breakpoint, DebugEvent, DebugState, DebugStatus, ExceptionPolicy, ModuleInfo, ProcessInfo,
+    RegisterState, ThreadInfo,
+};
 
 // ============================================================================
 // Platform debugger / process list (canonical owner: `platform`)

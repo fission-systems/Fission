@@ -340,9 +340,17 @@ fn conditional_loop_exit_accumulator_merge_uses_seeded_edge_binding() {
             .is_some()
     );
 
-    let name = builder
-        .merge_binding_name_for_direct_successor_accumulator(&pcode.blocks[3], &r10, &rhs)
-        .expect("conditional loop-exit accumulator merge binding");
+    let name = builder.with_lowering_site(
+        LoweringSite {
+            block_idx: 3,
+            op_idx: 0,
+        },
+        |builder| {
+            builder
+                .merge_binding_name_for_direct_successor_accumulator(&pcode.blocks[3], &r10, &rhs)
+                .expect("conditional loop-exit accumulator merge binding")
+        },
+    );
 
     assert_eq!(
         builder
@@ -402,6 +410,8 @@ fn conditional_loop_exit_accumulator_merge_uses_external_seed_binding() {
     ]);
     let options = crate::nir::builder::materialize::test_support::test_options();
     let mut builder = PreviewBuilder::new(&pcode, &options, None);
+    builder.successors[3] = vec![1, 2];
+    builder.predecessors[2] = vec![0, 3];
     builder.loop_bodies = vec![crate::nir::structuring::loop_analysis::LoopBody {
         head: 1,
         tails: vec![3],

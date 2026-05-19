@@ -17,6 +17,7 @@
 #![allow(clippy::all)]
 
 mod runtime_status;
+pub mod x86_decode;
 
 #[cfg(feature = "interactive_runtime")]
 #[allow(clippy::too_many_lines, clippy::cognitive_complexity)]

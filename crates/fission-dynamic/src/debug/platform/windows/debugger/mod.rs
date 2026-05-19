@@ -20,8 +20,8 @@ use windows::Win32::System::Diagnostics::Debug::{
     CONTEXT, CONTEXT_FLAGS, CREATE_PROCESS_DEBUG_EVENT, CREATE_THREAD_DEBUG_EVENT,
     ContinueDebugEvent, DEBUG_EVENT, DebugActiveProcess, DebugActiveProcessStop,
     EXCEPTION_DEBUG_EVENT, EXIT_PROCESS_DEBUG_EVENT, EXIT_THREAD_DEBUG_EVENT, GetThreadContext,
-    LOAD_DLL_DEBUG_EVENT, ReadProcessMemory, SetThreadContext, WaitForDebugEvent,
-    WriteProcessMemory,
+    LOAD_DLL_DEBUG_EVENT, ReadProcessMemory, SetThreadContext, UNLOAD_DLL_DEBUG_EVENT,
+    WaitForDebugEvent, WriteProcessMemory,
 };
 use windows::Win32::System::Memory::{
     PAGE_EXECUTE_READWRITE, PAGE_PROTECTION_FLAGS, VirtualProtectEx,
@@ -104,9 +104,368 @@ impl WindowsDebugger {
             }
         }
     }
+
+    // ========================================================================
+    // Integrated Debug Event Processing
+    // ========================================================================
+
+    /// Process a raw Win32 `DEBUG_EVENT` and update internal `DebugState`.
+    ///
+    /// Returns the translated [`DebugEvent`] (if any) and the `NTSTATUS`
+    /// that should be passed to `ContinueDebugEvent`.
+    pub fn process_debug_event(
+        &mut self,
+        debug_event: &DEBUG_EVENT,
+    ) -> (Option<crate::debug::types::DebugEvent>, NTSTATUS) {
+        let code = debug_event.dwDebugEventCode;
+        let _proc_id = debug_event.dwProcessId;
+        let thread_id = debug_event.dwThreadId;
+
+        self.state.last_thread_id = Some(thread_id);
+        self.state.event_count += 1;
+
+        let (evt, status) = match code {
+            CREATE_PROCESS_DEBUG_EVENT => {
+                let info = unsafe { debug_event.u.CreateProcessInfo };
+                self.state.main_thread_id = Some(thread_id);
+                self.state.current_thread_id = Some(thread_id);
+                // Register main thread
+                self.state.threads.insert(
+                    thread_id,
+                    crate::debug::types::ThreadInfo {
+                        thread_id,
+                        start_address: info
+                            .lpStartAddress
+                            .map(|p| p as usize as u64)
+                            .unwrap_or(0),
+                        suspended: false,
+                        is_main: true,
+                    },
+                );
+                // Register main module
+                let base = info.lpBaseOfImage as u64;
+                let module_name = self.read_image_name_safe(
+                    info.lpImageName as u64,
+                    info.fUnicode.0 != 0,
+                );
+                let short = module_short_name(&module_name);
+                self.state.modules.insert(
+                    base,
+                    crate::debug::types::ModuleInfo {
+                        base_address: base,
+                        size: 0,
+                        path: module_name.clone(),
+                        name: short,
+                    },
+                );
+                (
+                    Some(crate::debug::types::DebugEvent::ProcessCreated {
+                        pid: _proc_id,
+                        main_thread_id: thread_id,
+                    }),
+                    DBG_CONTINUE,
+                )
+            }
+            EXIT_PROCESS_DEBUG_EVENT => {
+                let exit_code = unsafe { debug_event.u.ExitProcess.dwExitCode };
+                self.state.status = DebugStatus::Terminated;
+                (
+                    Some(crate::debug::types::DebugEvent::ProcessExited { exit_code }),
+                    DBG_CONTINUE,
+                )
+            }
+            CREATE_THREAD_DEBUG_EVENT => {
+                let info = unsafe { debug_event.u.CreateThread };
+                self.state.threads.insert(
+                    thread_id,
+                    crate::debug::types::ThreadInfo {
+                        thread_id,
+                        start_address: info
+                            .lpStartAddress
+                            .map(|p| p as usize as u64)
+                            .unwrap_or(0),
+                        suspended: false,
+                        is_main: false,
+                    },
+                );
+                (
+                    Some(crate::debug::types::DebugEvent::ThreadCreated { thread_id }),
+                    DBG_CONTINUE,
+                )
+            }
+            EXIT_THREAD_DEBUG_EVENT => {
+                self.state.threads.remove(&thread_id);
+                // If the current thread exited, fall back to main
+                if self.state.current_thread_id == Some(thread_id) {
+                    self.state.current_thread_id = self.state.main_thread_id;
+                }
+                (
+                    Some(crate::debug::types::DebugEvent::ThreadExited { thread_id }),
+                    DBG_CONTINUE,
+                )
+            }
+            LOAD_DLL_DEBUG_EVENT => {
+                let info = unsafe { debug_event.u.LoadDll };
+                let base = info.lpBaseOfDll as u64;
+                let name = self.read_image_name_safe(
+                    info.lpImageName as u64,
+                    info.fUnicode.0 != 0,
+                );
+                let short = module_short_name(&name);
+                self.state.modules.insert(
+                    base,
+                    crate::debug::types::ModuleInfo {
+                        base_address: base,
+                        size: 0,
+                        path: name.clone(),
+                        name: short.clone(),
+                    },
+                );
+                // Close the DLL file handle if provided
+                if !info.hFile.is_invalid() {
+                    unsafe {
+                        let _ = CloseHandle(info.hFile);
+                    }
+                }
+                (
+                    Some(crate::debug::types::DebugEvent::DllLoaded {
+                        base_address: base,
+                        name: short,
+                    }),
+                    DBG_CONTINUE,
+                )
+            }
+            UNLOAD_DLL_DEBUG_EVENT => {
+                let base = unsafe { debug_event.u.UnloadDll.lpBaseOfDll } as u64;
+                self.state.modules.remove(&base);
+                (
+                    Some(crate::debug::types::DebugEvent::DllUnloaded { base_address: base }),
+                    DBG_CONTINUE,
+                )
+            }
+            EXCEPTION_DEBUG_EVENT => unsafe {
+                let info = debug_event.u.Exception;
+                let record = info.ExceptionRecord;
+                let is_first = info.dwFirstChance != 0;
+                let address = record.ExceptionAddress as u64;
+                let code_raw: u32 = record.ExceptionCode.0 as u32;
+
+                if code_raw == EXCEPTION_BREAKPOINT_CODE {
+                    // System breakpoint (first ntdll break): consume silently
+                    if !self.state.system_breakpoint_consumed {
+                        self.state.system_breakpoint_consumed = true;
+                        self.state.status = DebugStatus::Suspended;
+                        self.state.last_event =
+                            Some("System breakpoint (initial attach)".to_string());
+                        (
+                            Some(crate::debug::types::DebugEvent::BreakpointHit {
+                                address,
+                                thread_id,
+                            }),
+                            DBG_CONTINUE,
+                        )
+                    } else {
+                        // User breakpoint or step-over temp BP
+                        self.state.status = DebugStatus::Suspended;
+                        // Clean up temporary breakpoints
+                        if let Some(bp) = self.state.breakpoints.get(&address) {
+                            if bp.temporary {
+                                let orig = bp.original_byte;
+                                let _ = self.write_memory(address, &[orig]);
+                                self.state.breakpoints.remove(&address);
+                            }
+                        }
+                        self.state.last_event =
+                            Some(format!("Breakpoint hit at 0x{:016x}", address));
+                        (
+                            Some(crate::debug::types::DebugEvent::BreakpointHit {
+                                address,
+                                thread_id,
+                            }),
+                            DBG_CONTINUE,
+                        )
+                    }
+                } else if code_raw == EXCEPTION_SINGLE_STEP_CODE {
+                    self.state.status = DebugStatus::Suspended;
+                    self.state.last_event =
+                        Some(format!("Single step at thread {}", thread_id));
+                    (
+                        Some(crate::debug::types::DebugEvent::SingleStep { thread_id }),
+                        DBG_CONTINUE,
+                    )
+                } else {
+                    // Other exceptions: first-chance → pass to app; second-chance → break
+                    let status = if is_first {
+                        NTSTATUS(0x80010001u32 as i32) // DBG_EXCEPTION_NOT_HANDLED
+                    } else {
+                        self.state.status = DebugStatus::Suspended;
+                        DBG_CONTINUE
+                    };
+                    self.state.last_event = Some(format!(
+                        "Exception 0x{:08x} at 0x{:016x} ({})",
+                        code_raw,
+                        address,
+                        if is_first { "first" } else { "second" }
+                    ));
+                    (
+                        Some(crate::debug::types::DebugEvent::Exception {
+                            code: code_raw,
+                            address,
+                            first_chance: is_first,
+                        }),
+                        status,
+                    )
+                }
+            },
+            _ => (None, DBG_CONTINUE),
+        };
+
+        (evt, status)
+    }
+
+    /// Step over a single instruction.
+    ///
+    /// If the current instruction is a `CALL` (opcode `0xE8` or `0xFF /2`),
+    /// sets a temporary breakpoint at the next instruction and continues.
+    /// Otherwise behaves like `single_step`.
+    pub fn step_over(&mut self) -> FissionResult<()> {
+        let tid = self
+            .state
+            .current_thread_id
+            .or(self.state.last_thread_id)
+            .or(self.state.main_thread_id)
+            .ok_or_else(|| FissionError::debug("No thread id for step over"))?;
+
+        // Read current RIP
+        let regs = self.fetch_registers(tid)?;
+        let rip = regs.rip;
+
+        // Read a few bytes at RIP to detect CALL
+        let code_bytes = self.read_memory(rip, 16)?;
+        let (is_call, insn_len) = crate::x86_decode::detect_call_instruction(&code_bytes);
+
+        if is_call && insn_len > 0 {
+            // Set a temporary BP at the return address (next instruction)
+            let next_rip = rip + insn_len as u64;
+            let original_byte = self.read_memory(next_rip, 1)?[0];
+            if original_byte != 0xCC {
+                self.write_memory(next_rip, &[0xCC])?;
+                self.state.breakpoints.insert(
+                    next_rip,
+                    Breakpoint {
+                        address: next_rip,
+                        original_byte,
+                        enabled: true,
+                        temporary: true,
+                    },
+                );
+            }
+            self.continue_execution()
+        } else {
+            self.single_step()
+        }
+    }
+
+    /// Read a module/DLL image name from the target process.
+    ///
+    /// The `name_ptr_addr` points to a pointer in the target address space
+    /// that itself points to the name string. `is_unicode` indicates whether
+    /// the string is UTF-16.
+    fn read_image_name_safe(&self, name_ptr_addr: u64, is_unicode: bool) -> String {
+        if name_ptr_addr == 0 {
+            return "<unknown>".to_string();
+        }
+        // Read the pointer value first
+        let ptr_data = match self.read_memory(name_ptr_addr, 8) {
+            Ok(d) => d,
+            Err(_) => return "<unknown>".to_string(),
+        };
+        if ptr_data.len() < 8 {
+            return "<unknown>".to_string();
+        }
+        let name_addr = u64::from_le_bytes([
+            ptr_data[0], ptr_data[1], ptr_data[2], ptr_data[3],
+            ptr_data[4], ptr_data[5], ptr_data[6], ptr_data[7],
+        ]);
+        if name_addr == 0 {
+            return "<unknown>".to_string();
+        }
+        // Read the name string (up to 512 bytes)
+        let raw = match self.read_memory(name_addr, 512) {
+            Ok(d) => d,
+            Err(_) => return "<unknown>".to_string(),
+        };
+        if is_unicode {
+            // UTF-16 LE → find null terminator
+            let u16s: Vec<u16> = raw
+                .chunks_exact(2)
+                .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
+                .take_while(|&ch| ch != 0)
+                .collect();
+            String::from_utf16_lossy(&u16s)
+        } else {
+            // ASCII/ANSI → find null
+            let end = raw.iter().position(|&b| b == 0).unwrap_or(raw.len());
+            String::from_utf8_lossy(&raw[..end]).to_string()
+        }
+    }
+
+    /// Get the list of currently active threads
+    pub fn threads(&self) -> &std::collections::BTreeMap<u32, crate::debug::types::ThreadInfo> {
+        &self.state.threads
+    }
+
+    /// Get the list of currently loaded modules
+    pub fn modules(&self) -> &std::collections::BTreeMap<u64, crate::debug::types::ModuleInfo> {
+        &self.state.modules
+    }
+
+    /// Switch the active thread for register/step operations
+    pub fn set_current_thread(&mut self, thread_id: u32) -> FissionResult<()> {
+        if self.state.threads.contains_key(&thread_id) {
+            self.state.current_thread_id = Some(thread_id);
+            Ok(())
+        } else {
+            Err(FissionError::debug(format!(
+                "Thread {} not found in tracked threads",
+                thread_id
+            )))
+        }
+    }
+
+    /// Poll for a debug event with a timeout (ms).
+    ///
+    /// Calls `WaitForDebugEvent`, processes the raw event through
+    /// [`process_debug_event`](Self::process_debug_event), and calls
+    /// `ContinueDebugEvent` with the appropriate status.
+    ///
+    /// Returns the translated event (if any).
+    pub fn poll_event(
+        &mut self,
+        timeout_ms: u32,
+    ) -> FissionResult<Option<crate::debug::types::DebugEvent>> {
+        let mut raw = DEBUG_EVENT::default();
+        let wait_ok = unsafe { WaitForDebugEvent(&mut raw, timeout_ms) };
+        if wait_ok.is_err() {
+            return Ok(None);
+        }
+        let pid = raw.dwProcessId;
+        let tid = raw.dwThreadId;
+        let (evt, status) = self.process_debug_event(&raw);
+        unsafe {
+            let _ = ContinueDebugEvent(pid, tid, status);
+        }
+        Ok(evt)
+    }
 }
 
-/// Start debug event loop for the attached process
+/// Start debug event loop for the attached process (legacy channel-based API).
+///
+/// Spawns a background thread that polls for Win32 debug events, translates
+/// them into [`DebugEvent`] values, and sends them through a crossbeam channel.
+///
+/// > **Prefer** [`WindowsDebugger::poll_event`] for new code — it keeps
+/// > `DebugState` synchronized automatically.
 pub fn start_event_loop(
     pid: u32,
     tx: Sender<crate::debug::types::DebugEvent>,
@@ -184,6 +543,15 @@ pub fn start_event_loop(
             }
         }
     });
+}
+
+/// Extract a short module name from a full path.
+fn module_short_name(path: &str) -> String {
+    std::path::Path::new(path)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or(path)
+        .to_string()
 }
 
 impl Default for WindowsDebugger {
@@ -355,6 +723,7 @@ impl Debugger for WindowsDebugger {
             address,
             original_byte,
             enabled: true,
+            temporary: false,
         };
         self.state.breakpoints.insert(address, bp);
         self.state.last_event = Some(format!("Breakpoint set 0x{:016x}", address));
