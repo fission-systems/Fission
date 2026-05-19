@@ -101,6 +101,7 @@ fn cse_stmt(
             // Try to substitute rhs with a known equivalent variable.
             let mut changed = false;
             if let HirLValue::Var(target) = lhs {
+                invalidate_representative(map, target);
                 if let Some(key) = pure_expr_key(rhs) {
                     if let Some(existing) = map.get(&key) {
                         // Replace rhs with Var(existing).
@@ -143,7 +144,11 @@ fn cse_stmt(
             // Loop body: fresh map (loop may execute 0 or many times).
             let mut loop_map = HashMap::new();
             let changed = cse_stmts(body, &mut loop_map, non_value_representatives);
-            // After the loop, the outer map is unchanged (loop didn't run = no defs).
+            // Any representative known before the loop may be clobbered by
+            // a loop-carried assignment. Clearing is conservative, but it
+            // prevents substituting a pre-loop representative after the loop
+            // when that representative was mutated in the body.
+            map.clear();
             changed
         }
         HirStmt::For {
@@ -165,6 +170,7 @@ fn cse_stmt(
                     changed = true;
                 }
             }
+            map.clear();
             changed
         }
         HirStmt::Switch { cases, default, .. } => {
@@ -183,8 +189,16 @@ fn cse_stmt(
             changed
         }
         HirStmt::Block(body) => cse_stmts(body, map, non_value_representatives),
+        HirStmt::Return(_) | HirStmt::Break | HirStmt::Continue => {
+            map.clear();
+            false
+        }
         _ => false,
     }
+}
+
+fn invalidate_representative(map: &mut PureExprMap, defined_var: &str) {
+    map.retain(|_, representative| representative != defined_var);
 }
 
 #[cfg(test)]
@@ -266,5 +280,62 @@ mod tests {
             panic!("expected second assignment");
         };
         assert!(matches!(rhs, HirExpr::Var(name) if name == "uVar1"));
+    }
+
+    #[test]
+    fn loop_body_clobber_clears_outer_cse_representatives() {
+        let mut func = HirFunction {
+            name: "cse_loop_clobber".to_owned(),
+            body: vec![
+                assign("uVar1", HirExpr::Var("param_1".to_owned())),
+                HirStmt::DoWhile {
+                    body: vec![assign(
+                        "uVar1",
+                        HirExpr::Binary {
+                            op: HirBinaryOp::Add,
+                            lhs: Box::new(HirExpr::Var("uVar1".to_owned())),
+                            rhs: Box::new(HirExpr::Const(1, u32_ty())),
+                            ty: u32_ty(),
+                        },
+                    )],
+                    cond: HirExpr::Var("cond".to_owned()),
+                },
+                assign("uVar2", HirExpr::Var("param_1".to_owned())),
+            ],
+            ..Default::default()
+        };
+
+        assert!(!apply_cse_pass(&mut func));
+        let HirStmt::Assign { rhs, .. } = &func.body[2] else {
+            panic!("expected post-loop assignment");
+        };
+        assert!(matches!(rhs, HirExpr::Var(name) if name == "param_1"));
+    }
+
+    #[test]
+    fn redefining_representative_invalidates_cse_map_entry() {
+        let mut func = HirFunction {
+            name: "cse_representative_redef".to_owned(),
+            body: vec![
+                assign("uVar1", HirExpr::Var("param_1".to_owned())),
+                assign(
+                    "uVar1",
+                    HirExpr::Binary {
+                        op: HirBinaryOp::Add,
+                        lhs: Box::new(HirExpr::Var("uVar1".to_owned())),
+                        rhs: Box::new(HirExpr::Const(1, u32_ty())),
+                        ty: u32_ty(),
+                    },
+                ),
+                assign("uVar2", HirExpr::Var("param_1".to_owned())),
+            ],
+            ..Default::default()
+        };
+
+        assert!(!apply_cse_pass(&mut func));
+        let HirStmt::Assign { rhs, .. } = &func.body[2] else {
+            panic!("expected final assignment");
+        };
+        assert!(matches!(rhs, HirExpr::Var(name) if name == "param_1"));
     }
 }

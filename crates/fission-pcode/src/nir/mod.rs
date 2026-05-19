@@ -41,12 +41,11 @@ use self::{
     action_pipeline::*, builder::*, cfg::*, mir::*, normalize::*, render::*, structuring::*,
 };
 
+pub use self::abi::infer_entry_register_param_arity;
 pub use self::normalize::{
     summarize_direct_tail_wrapper_from_ops, summarize_direct_tail_wrapper_from_pcode,
 };
-pub use self::abi::infer_entry_register_param_arity;
 pub use self::render::render_contracted_wrapper_summary;
-
 
 pub fn render_mlil_preview(
     pcode: &PcodeFunction,

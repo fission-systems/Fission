@@ -2,7 +2,7 @@
 
 use std::path::PathBuf;
 
-use clap::{Parser, Subcommand, ValueEnum};
+use clap::{ArgAction, Parser, Subcommand, ValueEnum};
 
 #[derive(Parser, Debug)]
 #[command(name = "fission-automation")]
@@ -17,6 +17,7 @@ pub struct Cli {
 #[derive(Subcommand, Debug)]
 pub enum Commands {
     NirCheck(NirCheckArgs),
+    SourceSemanticCheck(SourceSemanticCheckArgs),
 }
 
 #[derive(Parser, Debug)]
@@ -60,6 +61,46 @@ pub struct NirCheckArgs {
     pub emit_legacy_preview_artifacts: bool,
 }
 
+#[derive(Parser, Debug)]
+pub struct SourceSemanticCheckArgs {
+    #[arg(long)]
+    pub release: bool,
+    #[arg(long)]
+    pub no_build: bool,
+    #[arg(long)]
+    pub fission_bin: Option<PathBuf>,
+    #[arg(long)]
+    pub manifest: Option<PathBuf>,
+    #[arg(long)]
+    pub output_dir: Option<PathBuf>,
+    #[arg(long)]
+    pub baseline_dir: Option<PathBuf>,
+    #[arg(long)]
+    pub jobs: Option<usize>,
+    #[arg(long)]
+    pub timeout_sec: Option<u64>,
+    #[arg(long = "function-name")]
+    pub function_names: Vec<String>,
+    #[arg(long = "entry-id")]
+    pub entry_ids: Vec<String>,
+    #[arg(long = "tag")]
+    pub tags: Vec<String>,
+    #[arg(long, default_value_t = true, action = ArgAction::Set)]
+    pub include_debug_decomp: bool,
+    #[arg(long)]
+    pub include_ghidra_reference: bool,
+    #[arg(long)]
+    pub ghidra_home: Option<PathBuf>,
+    #[arg(long)]
+    pub fail_on_stop: bool,
+    #[arg(long)]
+    pub no_decomp_cache: bool,
+    #[arg(long)]
+    pub no_behavior_cache: bool,
+    #[arg(long, value_enum, default_value_t = RunProfile::Mid)]
+    pub run_profile: RunProfile,
+}
+
 #[derive(Clone, Copy, Debug, ValueEnum)]
 pub enum RunProfile {
     Fast,
@@ -92,5 +133,73 @@ impl RunProfile {
             RunProfile::Mid => base,
             RunProfile::Full => base.max(10_000),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_source_semantic_check_defaults() {
+        let cli = Cli::try_parse_from(["fission-automation", "source-semantic-check"])
+            .expect("source semantic command parses");
+        let Commands::SourceSemanticCheck(args) = cli.command else {
+            panic!("expected source semantic command");
+        };
+        assert!(matches!(args.run_profile, RunProfile::Mid));
+        assert!(args.include_debug_decomp);
+        assert!(!args.include_ghidra_reference);
+        assert!(!args.no_decomp_cache);
+        assert!(!args.no_behavior_cache);
+        assert!(args.manifest.is_none());
+        assert!(args.jobs.is_none());
+    }
+
+    #[test]
+    fn parses_source_semantic_check_core_flags() {
+        let cli = Cli::try_parse_from([
+            "fission-automation",
+            "source-semantic-check",
+            "--no-build",
+            "--fission-bin",
+            "target/release/fission_cli",
+            "--function-name",
+            "fibonacci",
+            "--entry-id",
+            "x86-64-windows-small-c-test-functions",
+            "--tag",
+            "smoke",
+            "--jobs",
+            "1",
+            "--timeout-sec",
+            "30",
+            "--include-ghidra-reference",
+            "--ghidra-home",
+            "vendor/ghidra/ghidra_12.0.4_PUBLIC",
+            "--no-decomp-cache",
+            "--no-behavior-cache",
+        ])
+        .expect("source semantic flags parse");
+        let Commands::SourceSemanticCheck(args) = cli.command else {
+            panic!("expected source semantic command");
+        };
+        assert!(args.no_build);
+        assert_eq!(args.function_names, vec!["fibonacci"]);
+        assert_eq!(
+            args.entry_ids,
+            vec!["x86-64-windows-small-c-test-functions"]
+        );
+        assert_eq!(args.tags, vec!["smoke"]);
+        assert_eq!(args.jobs, Some(1));
+        assert_eq!(args.timeout_sec, Some(30));
+        assert!(args.include_debug_decomp);
+        assert!(args.include_ghidra_reference);
+        assert!(args.no_decomp_cache);
+        assert!(args.no_behavior_cache);
+        assert_eq!(
+            args.ghidra_home,
+            Some(PathBuf::from("vendor/ghidra/ghidra_12.0.4_PUBLIC"))
+        );
     }
 }

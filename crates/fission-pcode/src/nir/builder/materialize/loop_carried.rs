@@ -20,6 +20,11 @@ impl<'a> PreviewBuilder<'a> {
         if let Some(name) = self.prior_materialized_loop_carried_output_name(output) {
             return Some(name);
         }
+        if let Some(name) =
+            self.loop_header_external_seed_binding_name_for_update(block_idx, output)
+        {
+            return Some(name);
+        }
         if let Some(name) = self.prior_materialized_same_register_output_name(output) {
             return Some(name);
         }
@@ -74,6 +79,11 @@ impl<'a> PreviewBuilder<'a> {
             return None;
         }
         if let Some(name) = self.prior_materialized_loop_carried_output_name(output) {
+            return Some(name);
+        }
+        if let Some(name) =
+            self.loop_header_external_seed_binding_name_for_update(block_idx, output)
+        {
             return Some(name);
         }
         if let Some(name) = self.prior_materialized_same_register_output_name(output) {
@@ -266,6 +276,93 @@ impl<'a> PreviewBuilder<'a> {
         }
         if names.len() == 1 {
             names.into_iter().next()
+        } else {
+            None
+        }
+    }
+
+    fn loop_header_external_seed_binding_name_for_update(
+        &self,
+        block_idx: usize,
+        output: &Varnode,
+    ) -> Option<String> {
+        if !matches!(
+            self.options.calling_convention,
+            CallingConvention::WindowsX64 | CallingConvention::SystemVAmd64
+        ) || self.abi_state().param_slot_for_varnode(output).is_none()
+        {
+            return None;
+        }
+        let output_key = VarnodeKey::from(output);
+        let mut loop_candidates = BTreeSet::new();
+        for loop_body in &self.loop_bodies {
+            if !loop_body.body.contains(&block_idx)
+                || !self.loop_update_reaches_backedge_tail(block_idx, loop_body)
+                || self.loop_body_has_side_entry_or_irreducible_edge(loop_body)
+            {
+                continue;
+            }
+            let Some(header_preds) = self.predecessors.get(loop_body.head) else {
+                continue;
+            };
+            let external_preds = header_preds
+                .iter()
+                .copied()
+                .filter(|pred_idx| !loop_body.body.contains(pred_idx))
+                .collect::<Vec<_>>();
+            if external_preds.is_empty() {
+                continue;
+            }
+
+            let mut names = BTreeSet::new();
+            let mut complete = true;
+            for pred_idx in external_preds {
+                let Some(pred_block) = self.pcode.blocks.get(pred_idx) else {
+                    complete = false;
+                    break;
+                };
+                let term_idx = self
+                    .block_terminator_index(pred_block)
+                    .unwrap_or(pred_block.ops.len());
+                let Some((def_idx, pred_op)) =
+                    self.last_register_redefinition_before(pred_block, term_idx, output)
+                else {
+                    complete = false;
+                    break;
+                };
+                let Some(pred_output) = pred_op.output.as_ref() else {
+                    complete = false;
+                    break;
+                };
+                if !Self::output_def_is_safe_direct_successor_merge(pred_op)
+                    || Self::has_aliasing_side_effect_between_ops(pred_block, def_idx + 1, term_idx)
+                {
+                    complete = false;
+                    break;
+                }
+                let pred_key = VarnodeKey::from(pred_output);
+                if !Self::varnode_key_may_alias_output(&pred_key, &output_key)
+                    && !Self::prior_output_aliases_loop_carried_update(pred_output, output)
+                {
+                    complete = false;
+                    break;
+                }
+                let Some(name) = self
+                    .materialized_vns
+                    .get(&MaterializedVarnodeKey::new(pred_output, pred_op))
+                    .filter(|name| !name.starts_with("param_"))
+                else {
+                    complete = false;
+                    break;
+                };
+                names.insert(name.clone());
+            }
+            if complete && names.len() == 1 {
+                loop_candidates.extend(names);
+            }
+        }
+        if loop_candidates.len() == 1 {
+            loop_candidates.into_iter().next()
         } else {
             None
         }
@@ -1060,6 +1157,69 @@ mod tests {
                 .iter()
                 .any(|stmt| lhs_var(stmt) == Some(init_name)),
             "32-bit loop update should reuse the 64-bit zero initializer binding: {loop_body:?}"
+        );
+    }
+
+    #[test]
+    fn loop_carried_backedge_update_reuses_external_header_seed_binding() {
+        let rdx = reg(0x10, 8);
+        let edx = reg(0x10, 4);
+        let rbx = reg(0x18, 8);
+        let mut blocks = vec![
+            block_at(
+                0x1000,
+                0,
+                vec![
+                    op(0, PcodeOpcode::Copy, Some(rdx.clone()), vec![constant(6)]),
+                    op(1, PcodeOpcode::Branch, None, vec![constant(0x1010)]),
+                ],
+            ),
+            block_at(
+                0x1010,
+                1,
+                vec![
+                    op(2, PcodeOpcode::Copy, Some(rbx), vec![rdx.clone()]),
+                    op(3, PcodeOpcode::Branch, None, vec![constant(0x1020)]),
+                ],
+            ),
+            block_at(
+                0x1020,
+                2,
+                vec![
+                    op(
+                        4,
+                        PcodeOpcode::IntSub,
+                        Some(edx.clone()),
+                        vec![edx, constant(2)],
+                    ),
+                    op(5, PcodeOpcode::Branch, None, vec![constant(0x1010)]),
+                ],
+            ),
+            block_at(0x1030, 3, vec![op(6, PcodeOpcode::Return, None, vec![])]),
+        ];
+        blocks[0].successors = vec![1];
+        blocks[1].successors = vec![2];
+        blocks[2].successors = vec![1, 3];
+        let pcode = pcode_function(blocks);
+        let mut options = test_options();
+        options.calling_convention = CallingConvention::WindowsX64;
+        let mut builder = PreviewBuilder::new(&pcode, &options, None);
+
+        let preheader = builder
+            .lower_block_stmts(&pcode.blocks[0])
+            .expect("preheader lowering");
+        let init_name = lhs_var(&preheader[0]).expect("preheader init binding");
+        let latch = builder
+            .lower_block_stmts(&pcode.blocks[2])
+            .expect("latch lowering");
+
+        assert!(
+            latch.iter().any(|stmt| lhs_var(stmt) == Some(init_name)),
+            "backedge update should assign to the external loop-header seed binding: {latch:?}"
+        );
+        assert!(
+            !latch.iter().any(|stmt| lhs_var(stmt) == Some("param_2")),
+            "internal ABI register accumulator must not be promoted to param_2: {latch:?}"
         );
     }
 

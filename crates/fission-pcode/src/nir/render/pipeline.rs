@@ -1,9 +1,9 @@
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
-use crate::nir::{
-    expr_type, MlilPreviewOptions, NirBinding, NirBindingOrigin, NirType,
-    HirExpr, HirFunction, HirLValue, HirStmt,
-};
 use super::{print_hir_function, print_type};
+use crate::nir::{
+    HirExpr, HirFunction, HirLValue, HirStmt, MlilPreviewOptions, NirBinding, NirBindingOrigin,
+    NirType, expr_type,
+};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 pub(crate) fn render_hir_function_with_global_decls(
     hir: &HirFunction,
@@ -1256,4 +1256,3 @@ mod global_decl_tests {
         assert!(rendered.contains("xVar30 = __pcodeop_294();"), "{rendered}");
     }
 }
-

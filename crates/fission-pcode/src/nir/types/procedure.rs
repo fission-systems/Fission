@@ -664,4 +664,3 @@ impl Default for HirFunction {
         }
     }
 }
-

@@ -612,4 +612,3 @@ pub struct NirBuildStats {
     #[serde(default)]
     pub pass_metrics: std::collections::BTreeMap<String, PassAggregate>,
 }
-

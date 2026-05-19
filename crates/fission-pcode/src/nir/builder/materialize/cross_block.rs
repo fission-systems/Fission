@@ -1125,6 +1125,7 @@ impl<'a> PreviewBuilder<'a> {
         let Some(predecessor_idxs) = self.predecessors.get(block_idx).cloned() else {
             return Ok(Vec::new());
         };
+        self.ensure_conditional_loop_exit_accumulator_bindings_for_block(&predecessor_idxs)?;
         let allow_fallback_intrinsic = Self::explicit_merge_binding_enabled();
 
         struct PendingMergeBinding {
@@ -1239,6 +1240,45 @@ impl<'a> PreviewBuilder<'a> {
         }
 
         Ok(stmts)
+    }
+
+    fn ensure_conditional_loop_exit_accumulator_bindings_for_block(
+        &mut self,
+        predecessor_idxs: &[usize],
+    ) -> Result<(), MlilPreviewError> {
+        let predecessor_blocks = predecessor_idxs
+            .iter()
+            .filter_map(|pred_idx| self.pcode.blocks.get(*pred_idx).cloned())
+            .collect::<Vec<_>>();
+        for pred_block in predecessor_blocks {
+            for (op_idx, op) in pred_block.ops.iter().enumerate() {
+                let Some(output) = op.output.as_ref() else {
+                    continue;
+                };
+                if output.is_constant
+                    || !is_register_space_id(output.space_id)
+                    || output.size != self.options.pointer_size
+                {
+                    continue;
+                }
+                let Some(rhs) = self.with_lowering_site(
+                    LoweringSite {
+                        block_idx: self.lowering_block_index(&pred_block),
+                        op_idx,
+                    },
+                    |this| this.try_lower_materialized_output_rhs(pred_block.start_address, op),
+                )?
+                else {
+                    continue;
+                };
+                let _ = self.merge_binding_name_for_conditional_loop_exit_accumulator(
+                    &pred_block,
+                    output,
+                    &rhs,
+                );
+            }
+        }
+        Ok(())
     }
 
     fn synthesize_explicit_merge_select(

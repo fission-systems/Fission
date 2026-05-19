@@ -960,7 +960,8 @@ impl<'a> PreviewBuilder<'a> {
                     let next_addr = self.next_block_address(idx);
                     // Check if either arm is the break or continue target
                     let true_is_break = break_addrs.contains(&true_target);
-                    let false_is_break = false_target.is_some_and(|target| break_addrs.contains(&target));
+                    let false_is_break =
+                        false_target.is_some_and(|target| break_addrs.contains(&target));
                     let true_is_continue = true_target == head_addr;
                     let false_is_continue = false_target == Some(head_addr);
 

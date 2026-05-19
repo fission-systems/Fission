@@ -42,5 +42,6 @@ fn run_main() -> Result<()> {
     lanes::nir_check::init_automation_logging(&lanes::nir_check::repo_root());
     match cli.command {
         Commands::NirCheck(args) => lanes::nir_check::run(args),
+        Commands::SourceSemanticCheck(args) => lanes::source_semantic_check::run(args),
     }
 }

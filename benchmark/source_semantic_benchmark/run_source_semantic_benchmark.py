@@ -300,7 +300,7 @@ def list_cache_key(binary_path: Path, fission_bin: Path) -> str:
 def behavior_cache_key(code: str, clang: str, timeout_sec: int) -> str:
     return "|".join(
         [
-            "source-semantic-behavior-v1",
+            "source-semantic-behavior-v2",
             f"clang={file_cache_fingerprint(Path(clang))}",
             f"timeout_sec={timeout_sec}",
             f"code_sha256={hashlib.sha256(code.encode('utf-8')).hexdigest()}",
@@ -2794,9 +2794,13 @@ def compile_and_run_c(code: str, cwd: Path, name: str, timeout_sec: int) -> dict
             check=True,
         )
     except subprocess.CalledProcessError as exc:
+        stdout = exc.stdout or ""
+        stderr = exc.stderr or ""
         return {
             "status": "run_failed",
-            "detail": (exc.stderr or exc.stdout or str(exc))[-4000:],
+            "detail": (stderr or stdout or str(exc))[-4000:],
+            "partial_stdout": stdout[-4000:],
+            "partial_stderr": stderr[-4000:],
             "compile_sec": compile_sec,
             "run_sec": round(time.perf_counter() - run_start, 6),
             "wall_sec": round(time.perf_counter() - wall_start, 6),
@@ -2882,12 +2886,14 @@ def compile_and_run_c_cached(
     if cache is not None and cache_lock is not None:
         with cache_lock:
             cached = cache.get(key)
-        if cached is not None:
+        if cached is not None and behavior_cache_entry_is_valid(cached):
             if cache_stats is not None:
                 cache_stats["hit"] += 1
             result = dict(cached)
             result["behavior_cache_status"] = "hit"
             return result
+        if cached is not None and cache_stats is not None:
+            cache_stats["stale"] += 1
 
     if cache_stats is not None:
         cache_stats["miss"] += 1
@@ -2902,6 +2908,12 @@ def compile_and_run_c_cached(
     result = dict(result)
     result["behavior_cache_status"] = "miss"
     return result
+
+
+def behavior_cache_entry_is_valid(entry: dict[str, Any]) -> bool:
+    if entry.get("status") != "run_failed":
+        return True
+    return isinstance(entry.get("partial_stdout"), str) or isinstance(entry.get("stdout"), str)
 
 
 def candidate_timeout_sec(timeout_sec: int, oracle: dict[str, Any]) -> int:
@@ -9074,10 +9086,22 @@ int max(int a, int b) { if (a > b) return a; return b; }
         assert progress["compared_case_count"] == 4
         assert progress["first_mismatch_index"] == 3
         assert progress["candidate_missing_line_count"] == 1
+        run_failed_progress = partial_behavior_progress(
+            {"stdout": "0\n1\n1\n5\n55\n-1\n"},
+            {"status": "run_failed", "partial_stdout": "0\n1\n1\n5\n"},
+            [(0,), (1,), (2,), (5,), (10,), (-1,)],
+        )
+        assert run_failed_progress["case_pass_count"] == 4
+        assert run_failed_progress["case_fail_count"] == 2
+        assert run_failed_progress["first_mismatch_index"] == 4
+        assert not behavior_cache_entry_is_valid({"status": "run_failed", "detail": "0\n1\n"})
+        assert behavior_cache_entry_is_valid({"status": "run_failed", "partial_stdout": ""})
         assert candidate_timeout_sec(20, {"run_sec": 0.01}) == CANDIDATE_TIMEOUT_MIN_SEC
         assert candidate_timeout_sec(20, {"run_sec": 0.25}) == 3
         assert candidate_timeout_sec(20, {"run_sec": 0.32}) == 4
-        assert "timeout_sec=7" in behavior_cache_key("int main(void){return 0;}", "/bin/clang", 7)
+        cache_key = behavior_cache_key("int main(void){return 0;}", "/bin/clang", 7)
+        assert cache_key.startswith("source-semantic-behavior-v2|")
+        assert "timeout_sec=7" in cache_key
         assert "control_flow_gap_rows" in summary["structuring_gap_metrics"]
         assert summary["fid_name_recovery_metrics"]["name_or_mapping_gap_row_count"] == 1
         assert "unknown" in summary["architecture_support_metrics"]

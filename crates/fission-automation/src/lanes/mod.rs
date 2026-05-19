@@ -1,6 +1,7 @@
 //! Lane manifests, target resolution, and per-lane runners.
 
 pub mod nir_check;
+pub mod source_semantic_check;
 
 use crate::model::{LaneTarget, SourceMeta};
 use anyhow::{Context, Result};

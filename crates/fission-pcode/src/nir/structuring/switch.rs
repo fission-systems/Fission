@@ -16,7 +16,11 @@ impl<'a> PreviewBuilder<'a> {
         let emit_ready = EmitReadyDecision::from_dispatcher_proof(Some(&parsed.proof));
         if !emit_ready.emit_ready {
             if structuring_diag_enabled() {
-                eprintln!("[DIAG] switch chain at {} emit_ready failed: {:?}", self.block_target_key(idx), emit_ready.failure);
+                eprintln!(
+                    "[DIAG] switch chain at {} emit_ready failed: {:?}",
+                    self.block_target_key(idx),
+                    emit_ready.failure
+                );
             }
             self.telemetry.dispatcher.switch_emit_ready_failed_count += 1;
             self.telemetry.structuring.region_proof_candidate_count += 1;
@@ -100,7 +104,11 @@ impl<'a> PreviewBuilder<'a> {
         let emit_ready = EmitReadyDecision::from_dispatcher_proof(proof.as_ref());
         if !emit_ready.emit_ready {
             if structuring_diag_enabled() {
-                eprintln!("[DIAG] direct switch at {} emit_ready failed: {:?}", self.block_target_key(idx), emit_ready.failure);
+                eprintln!(
+                    "[DIAG] direct switch at {} emit_ready failed: {:?}",
+                    self.block_target_key(idx),
+                    emit_ready.failure
+                );
             }
             self.telemetry.dispatcher.switch_emit_ready_failed_count += 1;
             self.telemetry.structuring.region_proof_candidate_count += 1;

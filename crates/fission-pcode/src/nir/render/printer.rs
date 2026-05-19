@@ -1008,7 +1008,10 @@ fn print_stmt_with_indent_ctx(
     }
 }
 
-pub fn render_contracted_wrapper_summary(name: &str, summary: &crate::nir::ProcedureSummary) -> String {
+pub fn render_contracted_wrapper_summary(
+    name: &str,
+    summary: &crate::nir::ProcedureSummary,
+) -> String {
     let target = summary
         .wrapper_contraction
         .as_ref()
