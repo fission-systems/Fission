@@ -4,6 +4,7 @@ mod cast_wide;
 mod cleanup_shifts;
 mod div_mod;
 mod flags_cond;
+mod simplify_algebraic;
 mod util;
 
 pub(crate) use cast_wide::{
@@ -19,4 +20,7 @@ pub(crate) use div_mod::{
 };
 pub(crate) use flags_cond::{
     canonicalize_condition_expr, canonicalize_flag_intrinsics, normalize_boolean_logic,
+};
+pub(crate) use simplify_algebraic::{
+    simplify_double_add, simplify_negated_const,
 };

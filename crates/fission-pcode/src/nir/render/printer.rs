@@ -810,14 +810,58 @@ fn print_lvalue_ctx(lhs: &HirLValue, depth: usize, ctx: &PrintCtx<'_>) -> String
     }
 }
 
+fn try_compound_assignment(lhs: &HirLValue, rhs: &HirExpr, ctx: &PrintCtx<'_>) -> Option<String> {
+    let HirLValue::Var(var_name) = lhs else {
+        return None;
+    };
+    let HirExpr::Binary { op, lhs: lhs_expr, rhs: rhs_expr, .. } = rhs else {
+        return None;
+    };
+    let HirExpr::Var(lhs_name) = lhs_expr.as_ref() else {
+        return None;
+    };
+    if var_name != lhs_name {
+        return None;
+    }
+    if matches!(op, HirBinaryOp::Add) && matches!(rhs_expr.as_ref(), HirExpr::Const(1, _)) {
+        return Some(format!("{}++;", var_name));
+    }
+    if matches!(op, HirBinaryOp::Sub) && matches!(rhs_expr.as_ref(), HirExpr::Const(1, _)) {
+        return Some(format!("{}--;", var_name));
+    }
+    let op_str = match op {
+        HirBinaryOp::Add => "+=",
+        HirBinaryOp::Sub => "-=",
+        HirBinaryOp::Mul => "*=",
+        HirBinaryOp::Div => "/=",
+        HirBinaryOp::Mod => "%=",
+        HirBinaryOp::And => "&=",
+        HirBinaryOp::Or => "|=",
+        HirBinaryOp::Xor => "^=",
+        HirBinaryOp::Shl => "<<=",
+        HirBinaryOp::Shr => ">>=",
+        _ => return None,
+    };
+    Some(format!(
+        "{} {} {};",
+        var_name,
+        op_str,
+        print_expr_with_ctx(rhs_expr, ctx)
+    ))
+}
+
 fn print_stmt_ctx(stmt: &HirStmt, ctx: &PrintCtx<'_>) -> String {
     match stmt {
         HirStmt::Assign { lhs, rhs } => {
-            format!(
-                "{} = {};",
-                print_lvalue_ctx(lhs, 0, ctx),
-                print_expr_with_ctx(rhs, ctx)
-            )
+            if let Some(compound) = try_compound_assignment(lhs, rhs, ctx) {
+                compound
+            } else {
+                format!(
+                    "{} = {};",
+                    print_lvalue_ctx(lhs, 0, ctx),
+                    print_expr_with_ctx(rhs, ctx)
+                )
+            }
         }
         HirStmt::VaStart {
             va_list,
