@@ -1,8 +1,8 @@
 # Cargo configuration for Fission development
 
-# Use sccache for faster rebuilds (uncomment after installing sccache)
-# [build]
-# rustc-wrapper = "sccache"
+# Use sccache for faster rebuilds
+[build]
+rustc-wrapper = "sccache"
 
 # Address Sanitizer configuration (for debugging memory issues)
 # Usage: RUSTFLAGS="-Zsanitizer=address" cargo +nightly run --target x86_64-apple-darwin
@@ -11,6 +11,15 @@ rustflags = []
 
 [target.aarch64-apple-darwin]
 rustflags = []
+
+# Test profile: balance compile speed vs runtime speed
+[profile.test]
+opt-level = 1
+debug = true
+debug-assertions = true
+overflow-checks = true
+lto = false
+codegen-units = 16
 
 # Linker settings for better performance
 [profile.dev]
