@@ -22,7 +22,6 @@
 /// This is a conservative subset of full SCEV: only *linear* recurrences with
 /// loop-invariant steps, no irreducible or multi-update cases.  The algorithm
 /// is entirely syntax-driven on the HIR and has no binary-specific thresholds.
-///
 /// ## Part B — Break/Continue recovery
 ///
 /// Inside every loop body (While/DoWhile/For), scan for:
@@ -42,6 +41,30 @@
 /// is required.  The replacement is only performed when the label has exactly
 /// one incoming `Goto` (the one being replaced), so the label can also be
 /// removed afterwards.
+///
+/// ## Part C — Tail label loops → break-guarded `for (;;)`
+///
+/// Structuring can leave a reducible tail loop as:
+///
+/// ```text
+/// L:
+///   body
+///   if (continue_cond) goto L
+/// ```
+///
+/// when interleaved labels inside the body prevent direct loop emission.  When
+/// `L` has exactly one incoming goto and every remaining body goto is local to
+/// the loop body, this pass lowers the shape to:
+///
+/// ```text
+/// for (;;) {
+///   body
+///   if (!continue_cond) break;
+/// }
+/// ```
+///
+/// This preserves do-while entry semantics without requiring a separate
+/// preheader proof, while still removing the outer label/goto recurrence.
 use super::super::*;
 use crate::nir::support::expr_type;
 use std::collections::{HashMap, HashSet};
@@ -285,6 +308,217 @@ fn apply_break_continue_in_stmts(
         }
     }
 
+    changed
+}
+
+// ── Part C — Tail label loops → break-guarded `for (;;)` ─────────────────────
+
+fn invert_condition(expr: HirExpr) -> HirExpr {
+    match expr {
+        HirExpr::Binary { op, lhs, rhs, ty } => {
+            let inverted = match op {
+                HirBinaryOp::Eq => Some(HirBinaryOp::Ne),
+                HirBinaryOp::Ne => Some(HirBinaryOp::Eq),
+                HirBinaryOp::Lt => Some(HirBinaryOp::Ge),
+                HirBinaryOp::Le => Some(HirBinaryOp::Gt),
+                HirBinaryOp::Gt => Some(HirBinaryOp::Le),
+                HirBinaryOp::Ge => Some(HirBinaryOp::Lt),
+                HirBinaryOp::SLt => Some(HirBinaryOp::SGe),
+                HirBinaryOp::SLe => Some(HirBinaryOp::SGt),
+                HirBinaryOp::SGt => Some(HirBinaryOp::SLe),
+                HirBinaryOp::SGe => Some(HirBinaryOp::SLt),
+                _ => None,
+            };
+            if let Some(op) = inverted {
+                HirExpr::Binary { op, lhs, rhs, ty }
+            } else {
+                HirExpr::Unary {
+                    op: HirUnaryOp::Not,
+                    expr: Box::new(HirExpr::Binary { op, lhs, rhs, ty }),
+                    ty: NirType::Bool,
+                }
+            }
+        }
+        HirExpr::Unary {
+            op: HirUnaryOp::Not,
+            expr,
+            ..
+        } => *expr,
+        other => HirExpr::Unary {
+            op: HirUnaryOp::Not,
+            expr: Box::new(other),
+            ty: NirType::Bool,
+        },
+    }
+}
+
+fn tail_goto_condition(stmt: &HirStmt, label: &str) -> Option<HirExpr> {
+    let HirStmt::If {
+        cond,
+        then_body,
+        else_body,
+    } = stmt
+    else {
+        return None;
+    };
+    if !else_body.is_empty() {
+        return None;
+    }
+    matches!(then_body.as_slice(), [HirStmt::Goto(target)] if target == label).then(|| cond.clone())
+}
+
+fn collect_loop_body_labels(stmts: &[HirStmt]) -> HashSet<String> {
+    let mut labels = HashSet::new();
+    collect_labels(stmts, &mut labels);
+    labels
+}
+
+fn collect_goto_targets_in_stmts(stmts: &[HirStmt], out: &mut HashSet<String>) {
+    for stmt in stmts {
+        collect_goto_targets_in_stmt(stmt, out);
+    }
+}
+
+fn collect_goto_targets_in_stmt(stmt: &HirStmt, out: &mut HashSet<String>) {
+    match stmt {
+        HirStmt::Goto(label) => {
+            out.insert(label.clone());
+        }
+        HirStmt::If {
+            then_body,
+            else_body,
+            ..
+        } => {
+            collect_goto_targets_in_stmts(then_body, out);
+            collect_goto_targets_in_stmts(else_body, out);
+        }
+        HirStmt::Block(body)
+        | HirStmt::While { body, .. }
+        | HirStmt::DoWhile { body, .. }
+        | HirStmt::For { body, .. } => collect_goto_targets_in_stmts(body, out),
+        HirStmt::Switch { cases, default, .. } => {
+            for case in cases {
+                collect_goto_targets_in_stmts(&case.body, out);
+            }
+            collect_goto_targets_in_stmts(default, out);
+        }
+        _ => {}
+    }
+}
+
+fn has_unscoped_break(stmts: &[HirStmt]) -> bool {
+    stmts.iter().any(has_unscoped_break_stmt)
+}
+
+fn has_unscoped_break_stmt(stmt: &HirStmt) -> bool {
+    match stmt {
+        HirStmt::Break => true,
+        HirStmt::If {
+            then_body,
+            else_body,
+            ..
+        } => has_unscoped_break(then_body) || has_unscoped_break(else_body),
+        HirStmt::Block(body) => has_unscoped_break(body),
+        HirStmt::Switch { cases, default, .. } => {
+            cases.iter().any(|case| has_unscoped_break(&case.body)) || has_unscoped_break(default)
+        }
+        HirStmt::While { .. } | HirStmt::DoWhile { .. } | HirStmt::For { .. } => false,
+        _ => false,
+    }
+}
+
+fn body_gotos_are_loop_local(body: &[HirStmt]) -> bool {
+    let labels = collect_loop_body_labels(body);
+    let mut gotos = HashSet::new();
+    collect_goto_targets_in_stmts(body, &mut gotos);
+    gotos.iter().all(|target| labels.contains(target))
+}
+
+fn try_tail_label_loop_to_for(
+    stmts: &mut Vec<HirStmt>,
+    label_idx: usize,
+    goto_counts: &HashMap<String, usize>,
+) -> bool {
+    let HirStmt::Label(label) = &stmts[label_idx] else {
+        return false;
+    };
+    let label = label.clone();
+    if goto_counts.get(&label).copied().unwrap_or(0) != 1 {
+        return false;
+    }
+
+    for tail_idx in label_idx + 1..stmts.len() {
+        let Some(continue_cond) = tail_goto_condition(&stmts[tail_idx], &label) else {
+            continue;
+        };
+        let body_slice = &stmts[label_idx + 1..tail_idx];
+        if body_slice.is_empty()
+            || super::for_loops::stmt_list_contains_continue_pub(body_slice)
+            || has_unscoped_break(body_slice)
+            || !body_gotos_are_loop_local(body_slice)
+        {
+            return false;
+        }
+
+        let mut body = body_slice.to_vec();
+        body.push(HirStmt::If {
+            cond: invert_condition(continue_cond),
+            then_body: vec![HirStmt::Break],
+            else_body: Vec::new(),
+        });
+        let replacement = HirStmt::For {
+            init: None,
+            cond: None,
+            update: None,
+            body,
+        };
+        stmts.splice(label_idx..=tail_idx, [replacement]);
+        return true;
+    }
+
+    false
+}
+
+fn apply_tail_label_loop_recovery_in_stmts(
+    stmts: &mut Vec<HirStmt>,
+    goto_counts: &HashMap<String, usize>,
+) -> bool {
+    let mut changed = false;
+    let mut i = 0;
+    while i < stmts.len() {
+        if matches!(&stmts[i], HirStmt::Label(_))
+            && try_tail_label_loop_to_for(stmts, i, goto_counts)
+        {
+            changed = true;
+            continue;
+        }
+
+        match &mut stmts[i] {
+            HirStmt::If {
+                then_body,
+                else_body,
+                ..
+            } => {
+                changed |= apply_tail_label_loop_recovery_in_stmts(then_body, goto_counts);
+                changed |= apply_tail_label_loop_recovery_in_stmts(else_body, goto_counts);
+            }
+            HirStmt::Block(body)
+            | HirStmt::While { body, .. }
+            | HirStmt::DoWhile { body, .. }
+            | HirStmt::For { body, .. } => {
+                changed |= apply_tail_label_loop_recovery_in_stmts(body, goto_counts);
+            }
+            HirStmt::Switch { cases, default, .. } => {
+                for case in cases.iter_mut() {
+                    changed |=
+                        apply_tail_label_loop_recovery_in_stmts(&mut case.body, goto_counts);
+                }
+                changed |= apply_tail_label_loop_recovery_in_stmts(default, goto_counts);
+            }
+            _ => {}
+        }
+        i += 1;
+    }
     changed
 }
 
@@ -1269,7 +1503,10 @@ fn apply_scev_upgrade_in_stmts(stmts: &mut Vec<HirStmt>, locals: &mut Vec<NirBin
 /// Apply IV-to-For upgrade (SCEV-lite) across the entire function body.
 /// Returns `true` if any transformation was made.
 pub(crate) fn apply_iv_recovery_pass(func: &mut HirFunction) -> bool {
-    apply_scev_upgrade_in_stmts(&mut func.body, &mut func.locals)
+    let mut goto_counts: HashMap<String, usize> = HashMap::new();
+    count_goto_targets(&func.body, &mut goto_counts);
+    apply_tail_label_loop_recovery_in_stmts(&mut func.body, &goto_counts)
+        | apply_scev_upgrade_in_stmts(&mut func.body, &mut func.locals)
 }
 
 /// Apply break/continue recovery across the entire function body.
@@ -1516,5 +1753,185 @@ mod tests {
                         && matches!(index.as_ref(), HirExpr::Var(name) if name == "iVar0")
             )
         ));
+    }
+
+    #[test]
+    fn tail_label_counted_loop_becomes_break_guarded_for() {
+        let mut func = HirFunction {
+            name: "tail_label_loop".to_string(),
+            params: Vec::new(),
+            locals: Vec::new(),
+            return_type: NirType::Unknown,
+            surface_return_type_name: None,
+            body: vec![
+                HirStmt::Assign {
+                    lhs: HirLValue::Var("i".to_string()),
+                    rhs: const_i(0),
+                },
+                HirStmt::Label("head".to_string()),
+                HirStmt::Assign {
+                    lhs: HirLValue::Var("sum".to_string()),
+                    rhs: add(var("sum"), var("i"), int(64, true)),
+                },
+                HirStmt::Assign {
+                    lhs: HirLValue::Var("i".to_string()),
+                    rhs: add(var("i"), const_i(1), int(64, true)),
+                },
+                HirStmt::If {
+                    cond: ne(var("i"), var("n")),
+                    then_body: vec![HirStmt::Goto("head".to_string())],
+                    else_body: Vec::new(),
+                },
+                HirStmt::Return(None),
+            ],
+            ..Default::default()
+        };
+
+        assert!(apply_iv_recovery_pass(&mut func));
+        assert!(matches!(func.body[0], HirStmt::Assign { .. }));
+        let HirStmt::For {
+            init,
+            cond,
+            update,
+            body,
+        } = &func.body[1]
+        else {
+            panic!("expected tail label loop to become for");
+        };
+        assert!(init.is_none());
+        assert!(cond.is_none());
+        assert!(update.is_none());
+        assert_eq!(body.len(), 3);
+        assert!(matches!(
+            body.last(),
+            Some(HirStmt::If {
+                cond:
+                    HirExpr::Binary {
+                        op: HirBinaryOp::Eq,
+                        lhs,
+                        rhs,
+                        ..
+                    },
+                then_body,
+                else_body,
+            }) if matches!(lhs.as_ref(), HirExpr::Var(name) if name == "i")
+                && matches!(rhs.as_ref(), HirExpr::Var(name) if name == "n")
+                && matches!(then_body.as_slice(), [HirStmt::Break])
+                && else_body.is_empty()
+        ));
+        assert!(matches!(func.body[2], HirStmt::Return(None)));
+        assert!(
+            !func
+                .body
+                .iter()
+                .any(|stmt| matches!(stmt, HirStmt::Label(label) if label == "head"))
+        );
+    }
+
+    #[test]
+    fn tail_label_loop_allows_body_local_goto() {
+        let mut func = HirFunction {
+            name: "tail_label_loop_with_local_goto".to_string(),
+            params: Vec::new(),
+            locals: Vec::new(),
+            return_type: NirType::Unknown,
+            surface_return_type_name: None,
+            body: vec![
+                HirStmt::Label("head".to_string()),
+                HirStmt::If {
+                    cond: var("flag"),
+                    then_body: vec![HirStmt::Goto("inside".to_string())],
+                    else_body: Vec::new(),
+                },
+                HirStmt::Assign {
+                    lhs: HirLValue::Var("sum".to_string()),
+                    rhs: add(var("sum"), const_i(1), int(64, true)),
+                },
+                HirStmt::Label("inside".to_string()),
+                HirStmt::Assign {
+                    lhs: HirLValue::Var("i".to_string()),
+                    rhs: add(var("i"), const_i(1), int(64, true)),
+                },
+                HirStmt::If {
+                    cond: ne(var("i"), var("n")),
+                    then_body: vec![HirStmt::Goto("head".to_string())],
+                    else_body: Vec::new(),
+                },
+            ],
+            ..Default::default()
+        };
+
+        assert!(apply_iv_recovery_pass(&mut func));
+        let HirStmt::For { body, .. } = &func.body[0] else {
+            panic!("expected local-goto tail loop to become for");
+        };
+        assert!(body
+            .iter()
+            .any(|stmt| matches!(stmt, HirStmt::Label(label) if label == "inside")));
+    }
+
+    #[test]
+    fn tail_label_loop_rejects_nonlocal_body_goto() {
+        let mut func = HirFunction {
+            name: "tail_label_loop_with_external_goto".to_string(),
+            params: Vec::new(),
+            locals: Vec::new(),
+            return_type: NirType::Unknown,
+            surface_return_type_name: None,
+            body: vec![
+                HirStmt::Label("head".to_string()),
+                HirStmt::If {
+                    cond: var("flag"),
+                    then_body: vec![HirStmt::Goto("exit".to_string())],
+                    else_body: Vec::new(),
+                },
+                HirStmt::Assign {
+                    lhs: HirLValue::Var("i".to_string()),
+                    rhs: add(var("i"), const_i(1), int(64, true)),
+                },
+                HirStmt::If {
+                    cond: ne(var("i"), var("n")),
+                    then_body: vec![HirStmt::Goto("head".to_string())],
+                    else_body: Vec::new(),
+                },
+                HirStmt::Label("exit".to_string()),
+            ],
+            ..Default::default()
+        };
+
+        assert!(!apply_iv_recovery_pass(&mut func));
+        assert!(matches!(func.body[0], HirStmt::Label(_)));
+    }
+
+    #[test]
+    fn tail_label_loop_rejects_multiple_backedges_to_head() {
+        let mut func = HirFunction {
+            name: "tail_label_loop_with_multiple_backedges".to_string(),
+            params: Vec::new(),
+            locals: Vec::new(),
+            return_type: NirType::Unknown,
+            surface_return_type_name: None,
+            body: vec![
+                HirStmt::Label("head".to_string()),
+                HirStmt::If {
+                    cond: var("retry"),
+                    then_body: vec![HirStmt::Goto("head".to_string())],
+                    else_body: Vec::new(),
+                },
+                HirStmt::Assign {
+                    lhs: HirLValue::Var("i".to_string()),
+                    rhs: add(var("i"), const_i(1), int(64, true)),
+                },
+                HirStmt::If {
+                    cond: ne(var("i"), var("n")),
+                    then_body: vec![HirStmt::Goto("head".to_string())],
+                    else_body: Vec::new(),
+                },
+            ],
+            ..Default::default()
+        };
+
+        assert!(!apply_iv_recovery_pass(&mut func));
+        assert!(matches!(func.body[0], HirStmt::Label(_)));
     }
 }
