@@ -1,14 +1,17 @@
-#[cfg(target_os = "windows")]
-use super::pe;
-#[cfg(target_os = "windows")]
-use std::collections::HashMap;
+//! Import Address Table (IAT) reconstruction from a live process.
+//!
+//! Scans process memory to rebuild the IAT, resolving function addresses
+//! back to module+function names. Useful for analyzing packed/obfuscated
+//! executables.
 
-#[cfg(target_os = "windows")]
+use std::collections::HashMap;
 use windows::{
     Win32::Foundation::*, Win32::System::ProcessStatus::*, Win32::System::SystemServices::*,
-    core::*,
 };
 
+use super::pe_raw::{self, ExportedFunction};
+
+/// A single reconstructed import entry.
 #[derive(Debug, Clone)]
 pub struct ImportEntry {
     pub rva: u64,
@@ -18,22 +21,19 @@ pub struct ImportEntry {
     pub ordinal: u32,
 }
 
-#[cfg(target_os = "windows")]
 struct ModuleInfo {
     name: String,
     size: u32,
-    exports: Option<Vec<pe::ExportedFunction>>,
+    exports: Option<Vec<ExportedFunction>>,
 }
 
+/// Reconstructs imports by walking process memory.
 pub struct ImportReconstructor {
-    #[cfg(target_os = "windows")]
     process_handle: HANDLE,
-    #[cfg(target_os = "windows")]
     module_cache: HashMap<u64, ModuleInfo>,
 }
 
 impl ImportReconstructor {
-    #[cfg(target_os = "windows")]
     pub fn new(process_handle: HANDLE) -> Self {
         Self {
             process_handle,
@@ -41,15 +41,8 @@ impl ImportReconstructor {
         }
     }
 
-    #[cfg(not(target_os = "windows"))]
-    pub fn new(_process_handle: usize) -> Self {
-        Self {}
-    }
-
-    #[cfg(target_os = "windows")]
+    /// Refresh the module list from the target process.
     pub fn update_modules(&mut self) -> Result<(), String> {
-        // Dynamically resize the module buffer using cb_needed:
-        // if cb_needed > cb the buffer was too small — double and retry.
         let mut capacity = 256usize;
         let mut cb_needed: u32 = 0;
         let modules: Vec<HMODULE> = loop {
@@ -107,12 +100,7 @@ impl ImportReconstructor {
         Ok(())
     }
 
-    #[cfg(not(target_os = "windows"))]
-    pub fn update_modules(&mut self) -> Result<(), String> {
-        Ok(())
-    }
-
-    #[cfg(target_os = "windows")]
+    /// Scan an IAT region and resolve each pointer to a symbol.
     pub fn reconstruct_iat(
         &mut self,
         iat_start: u64,
@@ -120,11 +108,8 @@ impl ImportReconstructor {
     ) -> Result<Vec<ImportEntry>, String> {
         let mut imports = Vec::new();
         let mut current = iat_start;
+        let data = pe_raw::read_memory(self.process_handle, iat_start, iat_size)?;
 
-        // Read the whole IAT block
-        let data = super::memory::read_memory(self.process_handle, iat_start, iat_size)?;
-
-        // Iterate 8 bytes at a time (x64)
         for chunk in data.chunks(8) {
             if chunk.len() < 8 {
                 break;
@@ -136,10 +121,9 @@ impl ImportReconstructor {
             let ptr = u64::from_le_bytes(bytes);
 
             if ptr != 0 {
-                // Try to resolve
                 if let Ok((module, func, ordinal)) = self.resolve_address(ptr) {
                     imports.push(ImportEntry {
-                        rva: current, // Store the address in memory where this pointer was found
+                        rva: current,
                         target_address: ptr,
                         module_name: module,
                         function_name: func,
@@ -153,16 +137,7 @@ impl ImportReconstructor {
         Ok(imports)
     }
 
-    #[cfg(not(target_os = "windows"))]
-    pub fn reconstruct_iat(
-        &mut self,
-        _iat_start: u64,
-        _iat_size: usize,
-    ) -> Result<Vec<ImportEntry>, String> {
-        Ok(Vec::new())
-    }
-
-    #[cfg(target_os = "windows")]
+    /// Resolve an address to (module_name, function_name, ordinal).
     pub fn resolve_address(
         &mut self,
         address: u64,
@@ -177,7 +152,6 @@ impl ImportReconstructor {
         }
 
         if let Some((base, mod_name)) = target_module {
-            // Check if we have exports cached
             let needs_parsing = self
                 .module_cache
                 .get(&base)
@@ -185,17 +159,19 @@ impl ImportReconstructor {
                 .unwrap_or(true);
 
             if needs_parsing {
-                if let Ok(dos) = pe::read_dos_header(self.process_handle, base) {
-                    if let Ok(nt) = pe::read_nt_headers64(self.process_handle, base, dos.e_lfanew) {
+                if let Ok(dos) = pe_raw::read_dos_header(self.process_handle, base) {
+                    if let Ok(nt) =
+                        pe_raw::read_nt_headers64(self.process_handle, base, dos.e_lfanew)
+                    {
                         let export_rva = nt.OptionalHeader.DataDirectory[0].VirtualAddress;
                         let export_size = nt.OptionalHeader.DataDirectory[0].Size;
 
                         if export_rva != 0 && export_size != 0 {
                             if let Ok(export_dir) =
-                                pe::read_export_directory(self.process_handle, base, export_rva)
+                                pe_raw::read_export_directory(self.process_handle, base, export_rva)
                             {
                                 if let Ok(exports) =
-                                    pe::parse_exports(self.process_handle, base, &export_dir)
+                                    pe_raw::parse_exports(self.process_handle, base, &export_dir)
                                 {
                                     if let Some(info) = self.module_cache.get_mut(&base) {
                                         info.exports = Some(exports);
@@ -223,13 +199,5 @@ impl ImportReconstructor {
         }
 
         Err("Address not in any loaded module".to_string())
-    }
-
-    #[cfg(not(target_os = "windows"))]
-    pub fn resolve_address(
-        &mut self,
-        _address: u64,
-    ) -> Result<(String, Option<String>, u32), String> {
-        Err("Not supported".to_string())
     }
 }

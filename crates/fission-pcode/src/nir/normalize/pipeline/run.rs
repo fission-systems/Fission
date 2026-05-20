@@ -848,6 +848,7 @@ pub(crate) fn normalize_hir_function(func: &mut HirFunction) {
         prune_unused_dead_local_bindings(f);
         before != hir_shape(f)
     });
+    run_pass_logged(func, "type_inference_final", perf, apply_type_inference_pass);
     if perf {
         let (final_stmts, final_locals) = hir_shape(func);
         eprintln!(

@@ -22,6 +22,7 @@ native_decomp = [
     "fission-static/native_decomp",
     "dep:rayon",
 ]
+debugger = ["dep:fission-dynamic"]
 allocator-mimalloc = ["dep:mimalloc"]
 allocator-jemallocator = ["dep:jemallocator"]
 
@@ -32,6 +33,7 @@ fission-loader = { path = "../fission-loader" }
 fission-static = { path = "../fission-static" }
 fission-decompiler = { path = "../fission-decompiler" }
 fission-sleigh = { path = "../fission-sleigh" }
+fission-dynamic = { path = "../fission-dynamic", optional = true, features = ["interactive_runtime"] }
 rayon = { version = "1.10", optional = true }
 tracing = "0.1"
 anyhow = "1.0"

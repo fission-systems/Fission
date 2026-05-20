@@ -775,6 +775,220 @@ fn block_entry_accumulator_read_uses_joined_live_gpr_binding() {
 }
 
 #[test]
+fn block_entry_accumulator_read_projects_full_width_explicit_merge_for_partial_read() {
+    let rsi = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0x30, 8);
+    let esi = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0x30, 4);
+    let rbx = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0x18, 8);
+    let tmp = register(UNIQUE_SPACE_ID, 0x9400, 4);
+    let read_op = op(
+        30,
+        PcodeOpcode::IntSub,
+        Some(tmp),
+        vec![rbx.clone(), esi.clone()],
+    );
+    let pcode = pcode_function(vec![block_at(0x1000, 0, vec![read_op.clone()])]);
+    let options = crate::nir::builder::materialize::test_support::test_options();
+    let mut builder = PreviewBuilder::new(&pcode, &options, None);
+    let binding = builder.ensure_explicit_merge_binding_for_block(0, &rsi);
+    let stale_rhs = HirExpr::Binary {
+        op: HirBinaryOp::Sub,
+        lhs: Box::new(HirExpr::Var("rbx".to_string())),
+        rhs: Box::new(HirExpr::Var("xVar49".to_string())),
+        ty: int(32),
+    };
+
+    let rewritten = builder.with_lowering_site(
+        LoweringSite {
+            block_idx: 0,
+            op_idx: 0,
+        },
+        |builder| {
+            builder.rewrite_block_entry_accumulator_rhs_with_live_gpr(
+                pcode.blocks[0].start_address,
+                &read_op,
+                stale_rhs,
+            )
+        },
+    );
+
+    assert_eq!(
+        rewritten,
+        HirExpr::Binary {
+            op: HirBinaryOp::Sub,
+            lhs: Box::new(HirExpr::Var("rbx".to_string())),
+            rhs: Box::new(HirExpr::Cast {
+                ty: int(32),
+                expr: Box::new(HirExpr::Var(binding.name)),
+            }),
+            ty: int(32),
+        }
+    );
+}
+
+#[test]
+fn block_entry_partial_gpr_read_uses_pred_restore_binding() {
+    let rsi = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0x30, 8);
+    let esi = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0x30, 4);
+    let r14 = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0xd0, 8);
+    let rbx = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0x18, 8);
+    let tmp = register(UNIQUE_SPACE_ID, 0x9500, 4);
+    let read_op = op(
+        30,
+        PcodeOpcode::IntSub,
+        Some(tmp),
+        vec![rbx.clone(), esi.clone()],
+    );
+    let pcode = pcode_function(vec![
+        block_at(
+            0x1000,
+            0,
+            vec![
+                op(1, PcodeOpcode::Copy, Some(rsi.clone()), vec![r14.clone()]),
+                op(2, PcodeOpcode::Branch, None, vec![constant(0x1010)]),
+            ],
+        ),
+        block_at(
+            0x1010,
+            1,
+            vec![op(3, PcodeOpcode::Branch, None, vec![constant(0x1030)])],
+        ),
+        block_at(
+            0x1020,
+            2,
+            vec![
+                op(4, PcodeOpcode::Copy, Some(rsi.clone()), vec![r14.clone()]),
+                op(5, PcodeOpcode::Branch, None, vec![constant(0x1030)]),
+            ],
+        ),
+        block_at(0x1030, 3, vec![read_op.clone()]),
+    ]);
+    let options = crate::nir::builder::materialize::test_support::test_options();
+    let mut builder = PreviewBuilder::new(&pcode, &options, None);
+    builder.predecessors[1] = vec![0];
+    builder.predecessors[3] = vec![1, 2];
+    builder.materialized_vns.insert(
+        MaterializedVarnodeKey::new(&rsi, &pcode.blocks[0].ops[0]),
+        "limit".to_string(),
+    );
+    builder.materialized_vns.insert(
+        MaterializedVarnodeKey::new(&rsi, &pcode.blocks[2].ops[0]),
+        "limit".to_string(),
+    );
+    builder.temps.insert(
+        "limit".to_string(),
+        NirBinding {
+            name: "limit".to_string(),
+            ty: int(64),
+            surface_type_name: None,
+            origin: Some(NirBindingOrigin::TempPreserved),
+            initializer: None,
+        },
+    );
+    let stale_rhs = HirExpr::Binary {
+        op: HirBinaryOp::Sub,
+        lhs: Box::new(HirExpr::Var("rbx".to_string())),
+        rhs: Box::new(HirExpr::Var("xVar49".to_string())),
+        ty: int(32),
+    };
+
+    let rewritten = builder.with_lowering_site(
+        LoweringSite {
+            block_idx: 3,
+            op_idx: 0,
+        },
+        |builder| {
+            builder.rewrite_block_entry_accumulator_rhs_with_live_gpr(
+                pcode.blocks[3].start_address,
+                &read_op,
+                stale_rhs,
+            )
+        },
+    );
+
+    assert_eq!(
+        rewritten,
+        HirExpr::Binary {
+            op: HirBinaryOp::Sub,
+            lhs: Box::new(HirExpr::Var("rbx".to_string())),
+            rhs: Box::new(HirExpr::Cast {
+                ty: int(32),
+                expr: Box::new(HirExpr::Var("limit".to_string())),
+            }),
+            ty: int(32),
+        }
+    );
+    assert!(builder.params.is_empty(), "must not promote rsi to a param");
+}
+
+#[test]
+fn block_entry_partial_gpr_read_rejects_side_effect_after_pred_def() {
+    let rsi = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0x30, 8);
+    let esi = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0x30, 4);
+    let r14 = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0xd0, 8);
+    let rbx = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0x18, 8);
+    let tmp = register(UNIQUE_SPACE_ID, 0x9600, 4);
+    let read_op = op(
+        30,
+        PcodeOpcode::IntSub,
+        Some(tmp),
+        vec![rbx.clone(), esi.clone()],
+    );
+    let pcode = pcode_function(vec![
+        block_at(
+            0x1000,
+            0,
+            vec![
+                op(1, PcodeOpcode::Copy, Some(rsi.clone()), vec![r14.clone()]),
+                op(2, PcodeOpcode::Call, None, vec![constant(0x2000)]),
+                op(3, PcodeOpcode::Branch, None, vec![constant(0x1020)]),
+            ],
+        ),
+        block_at(
+            0x1010,
+            1,
+            vec![
+                op(4, PcodeOpcode::Copy, Some(rsi.clone()), vec![r14.clone()]),
+                op(5, PcodeOpcode::Branch, None, vec![constant(0x1020)]),
+            ],
+        ),
+        block_at(0x1020, 2, vec![read_op.clone()]),
+    ]);
+    let options = crate::nir::builder::materialize::test_support::test_options();
+    let mut builder = PreviewBuilder::new(&pcode, &options, None);
+    builder.predecessors[2] = vec![0, 1];
+    builder.materialized_vns.insert(
+        MaterializedVarnodeKey::new(&rsi, &pcode.blocks[0].ops[0]),
+        "limit".to_string(),
+    );
+    builder.materialized_vns.insert(
+        MaterializedVarnodeKey::new(&rsi, &pcode.blocks[1].ops[0]),
+        "limit".to_string(),
+    );
+    let stale_rhs = HirExpr::Binary {
+        op: HirBinaryOp::Sub,
+        lhs: Box::new(HirExpr::Var("rbx".to_string())),
+        rhs: Box::new(HirExpr::Var("xVar49".to_string())),
+        ty: int(32),
+    };
+
+    let rewritten = builder.with_lowering_site(
+        LoweringSite {
+            block_idx: 2,
+            op_idx: 0,
+        },
+        |builder| {
+            builder.rewrite_block_entry_accumulator_rhs_with_live_gpr(
+                pcode.blocks[2].start_address,
+                &read_op,
+                stale_rhs.clone(),
+            )
+        },
+    );
+
+    assert_eq!(rewritten, stale_rhs);
+}
+
+#[test]
 fn block_entry_accumulator_read_accepts_loop_exit_zero_seed() {
     let rbp = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0x28, 8);
     let tmp = register(UNIQUE_SPACE_ID, 0x9300, 8);

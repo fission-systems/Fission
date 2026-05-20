@@ -22,7 +22,6 @@ interactive_runtime = [
     "dep:windows",
     "dep:nix",
 ]
-unpacker_runtime = ["dep:windows"]
 
 [dependencies]
 fission-core = { path = "../fission-core" }

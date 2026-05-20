@@ -72,3 +72,92 @@ pub use platform::{PlatformDebugger, enumerate_processes};
 pub fn enumerate_processes() -> Vec<ProcessInfo> {
     Vec::new()
 }
+
+// ============================================================================
+// DebugSession — ergonomic session builder
+// ============================================================================
+
+use std::sync::{Arc, Mutex};
+use timeline::Timeline;
+
+/// High-level debug session wrapping a [`PlatformDebugger`] and an optional
+/// [`Timeline`] for time-travel recording.
+///
+/// # Example
+/// ```ignore
+/// let mut session = DebugSession::new()
+///     .with_timeline()
+///     .build();
+///
+/// session.attach(pid)?;
+/// session.debugger.poll_event(100)?;
+/// session.detach()?;
+/// ```
+#[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
+pub struct DebugSession {
+    /// The platform-native debugger instance.
+    pub debugger: PlatformDebugger,
+    /// Shared execution timeline (None if not requested at build time).
+    pub timeline: Option<Arc<Mutex<Timeline>>>,
+}
+
+/// Builder for [`DebugSession`].
+#[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
+pub struct DebugSessionBuilder {
+    with_timeline: bool,
+}
+
+#[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
+impl DebugSessionBuilder {
+    /// Enable automatic TTD timeline recording.
+    pub fn with_timeline(mut self) -> Self {
+        self.with_timeline = true;
+        self
+    }
+
+    /// Build the [`DebugSession`], wiring up the timeline if requested.
+    pub fn build(self) -> DebugSession {
+        let mut debugger = PlatformDebugger::default();
+        let timeline = if self.with_timeline {
+            let arc = Arc::new(Mutex::new(Timeline::new()));
+            #[cfg(target_os = "windows")]
+            debugger.set_ttd_timeline(arc.clone());
+            Some(arc)
+        } else {
+            None
+        };
+        DebugSession { debugger, timeline }
+    }
+}
+
+#[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
+impl DebugSession {
+    /// Create a new session builder.
+    pub fn new() -> DebugSessionBuilder {
+        DebugSessionBuilder { with_timeline: false }
+    }
+
+    /// Convenience: attach to a PID.
+    pub fn attach(&mut self, pid: u32) -> fission_core::Result<()> {
+        self.debugger.attach(pid)
+    }
+
+    /// Convenience: detach from the current process.
+    pub fn detach(&mut self) -> fission_core::Result<()> {
+        self.debugger.detach()
+    }
+
+    /// Convenience: write registers to a thread.
+    pub fn set_registers(
+        &mut self,
+        thread_id: u32,
+        regs: &crate::debug::types::RegisterState,
+    ) -> fission_core::Result<()> {
+        self.debugger.set_registers(thread_id, regs)
+    }
+
+    /// Convenience: launch a new process under the debugger.
+    pub fn launch(&mut self, path: &str, args: &[String]) -> fission_core::Result<u32> {
+        self.debugger.launch(path, args)
+    }
+}

@@ -79,27 +79,60 @@ impl PlatformMemory for WindowsMemory {
     }
 
     fn write(&self, address: u64, data: &[u8]) -> Result<usize, MemoryError> {
+        use std::ffi::c_void;
         use windows::Win32::Foundation::HANDLE;
         use windows::Win32::System::Diagnostics::Debug::WriteProcessMemory;
+        use windows::Win32::System::Memory::{
+            PAGE_EXECUTE_READWRITE, PAGE_PROTECTION_FLAGS, VirtualProtectEx,
+        };
 
         let handle_val = self.get_handle()?;
         // SAFETY: HANDLE is repr(transparent) wrapper around isize
         let handle: HANDLE = unsafe { std::mem::transmute(handle_val) };
-        let mut bytes_written = 0usize;
 
-        unsafe {
+        // Make the target page writable (e.g. for software breakpoint injection
+        // into .text sections).  Restore the original protection afterwards
+        // regardless of whether the write succeeded.
+        let mut old_protect = PAGE_PROTECTION_FLAGS::default();
+        let protect_ok = unsafe {
+            VirtualProtectEx(
+                handle,
+                address as *const c_void,
+                data.len(),
+                PAGE_EXECUTE_READWRITE,
+                &mut old_protect,
+            )
+        };
+
+        let mut bytes_written = 0usize;
+        let write_result = unsafe {
             WriteProcessMemory(
                 handle,
-                address as *const std::ffi::c_void,
-                data.as_ptr() as *const std::ffi::c_void,
+                address as *const c_void,
+                data.as_ptr() as *const c_void,
                 data.len(),
                 Some(&mut bytes_written),
             )
-            .map_err(|e| MemoryError::WriteFailed {
-                address,
-                reason: e.to_string(),
-            })?;
+        };
+
+        // Restore protection regardless of write outcome (best-effort).
+        if protect_ok.is_ok() {
+            let mut _unused = PAGE_PROTECTION_FLAGS::default();
+            unsafe {
+                let _ = VirtualProtectEx(
+                    handle,
+                    address as *const c_void,
+                    data.len(),
+                    old_protect,
+                    &mut _unused,
+                );
+            }
         }
+
+        write_result.map_err(|e| MemoryError::WriteFailed {
+            address,
+            reason: e.to_string(),
+        })?;
 
         Ok(bytes_written)
     }

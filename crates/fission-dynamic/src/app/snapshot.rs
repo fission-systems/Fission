@@ -69,6 +69,7 @@ mod tests {
             format: "ELF".into(),
             iat_symbols: HashMap::new(),
             global_symbols: HashMap::new(),
+            global_symbol_sizes: HashMap::new(),
             relocation_symbols: HashMap::new(),
             function_addr_index: HashMap::new(),
             function_name_index: HashMap::new(),

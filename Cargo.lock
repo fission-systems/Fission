@@ -1432,6 +1432,7 @@ dependencies = [
  "clap",
  "fission-core",
  "fission-decompiler",
+ "fission-dynamic",
  "fission-loader",
  "fission-script",
  "fission-sleigh",

@@ -295,8 +295,11 @@ fn zero_extended_return_candidate_type(
             };
             let inner_ty = match inner.as_ref() {
                 HirExpr::Var(name) | HirExpr::AddressOfGlobal(name) => {
-                    let mut visited = HashSet::new();
-                    infer_type_for_binding(name, defs, known_binding_types, &mut visited)
+                    zero_extended_return_candidate_type_for_binding(
+                        name,
+                        defs,
+                        known_binding_types,
+                    )?
                 }
                 other => expr_type(other),
             };
@@ -308,8 +311,8 @@ fn zero_extended_return_candidate_type(
             }
         }
         HirExpr::Var(name) | HirExpr::AddressOfGlobal(name) => {
-            let mut visited = HashSet::new();
-            let ty = infer_type_for_binding(name, defs, known_binding_types, &mut visited);
+            let ty =
+                zero_extended_return_candidate_type_for_binding(name, defs, known_binding_types)?;
             match ty {
                 NirType::Int { bits, .. } if bits < 64 => Some(ty),
                 _ => None,
@@ -319,6 +322,73 @@ fn zero_extended_return_candidate_type(
             ty @ NirType::Int { bits, .. } if bits < 64 => Some(ty),
             _ => None,
         },
+    }
+}
+
+fn zero_extended_return_candidate_type_for_binding(
+    name: &str,
+    defs: &HashMap<String, DefEntry>,
+    known_binding_types: &HashMap<String, NirType>,
+) -> Option<NirType> {
+    let mut current = name.to_owned();
+    let mut visited = HashSet::new();
+    let mut best = None;
+
+    loop {
+        if !visited.insert(current.clone()) {
+            return best;
+        }
+        if let Some(ty @ NirType::Int { bits, .. }) = known_binding_types.get(&current) {
+            if *bits < 64 {
+                best = Some(prefer_narrow_return_candidate(best, ty.clone()));
+            }
+        }
+        match defs.get(&current) {
+            Some(DefEntry::Known(ty @ NirType::Int { bits, .. })) => {
+                if *bits < 64 {
+                    best = Some(prefer_narrow_return_candidate(best, ty.clone()));
+                }
+                return best;
+            }
+            Some(DefEntry::Known(_)) | None => return best,
+            Some(DefEntry::Alias(src)) => {
+                current = src.clone();
+            }
+        }
+    }
+}
+
+fn prefer_narrow_return_candidate(current: Option<NirType>, candidate: NirType) -> NirType {
+    match (current, candidate) {
+        (
+            Some(NirType::Int {
+                bits: current_bits,
+                signed: current_signed,
+            }),
+            NirType::Int {
+                bits: candidate_bits,
+                signed: candidate_signed,
+            },
+        ) if current_bits == candidate_bits => NirType::Int {
+            bits: current_bits,
+            signed: current_signed || candidate_signed,
+        },
+        (
+            Some(current @ NirType::Int {
+                bits: current_bits, ..
+            }),
+            candidate @ NirType::Int {
+                bits: candidate_bits, ..
+            },
+        ) => {
+            if candidate_bits < current_bits {
+                candidate
+            } else {
+                current
+            }
+        }
+        (Some(current), _) => current,
+        (None, candidate) => candidate,
     }
 }
 
@@ -464,18 +534,38 @@ fn narrow_zero_extended_return_width(
     if value_return_count == 0 || candidates.len() != value_return_count {
         return false;
     }
-    let candidate = candidates[0].clone();
     let NirType::Int {
         bits: candidate_bits,
         ..
-    } = candidate
+    } = candidates[0].clone()
     else {
         return false;
     };
-    if candidate_bits >= *return_bits || candidates.iter().any(|ty| ty != &candidate) {
+    let candidate_signed = candidates.iter().any(|ty| {
+        matches!(
+            ty,
+            NirType::Int {
+                signed: true,
+                ..
+            }
+        )
+    });
+    if candidate_bits > *return_bits
+        || candidates.iter().any(|ty| {
+            !matches!(
+                ty,
+                NirType::Int { bits, .. } if *bits == candidate_bits
+            )
+        })
+        || (candidate_bits == *return_bits && !candidate_signed)
+    {
         return false;
     }
 
+    let candidate = NirType::Int {
+        bits: candidate_bits,
+        signed: candidate_signed,
+    };
     func.return_type = candidate.clone();
     strip_zero_extended_return_casts(&mut func.body, &candidate);
     true
@@ -893,5 +983,162 @@ mod tests {
         let changed = super::apply_type_inference_pass(&mut func);
         assert!(!changed);
         assert_eq!(func.return_type, u64_ty);
+    }
+
+    #[test]
+    fn narrows_mixed_zero_extended_return_candidates_to_signed_width() {
+        let i32_ty = NirType::Int {
+            bits: 32,
+            signed: true,
+        };
+        let u32_ty = NirType::Int {
+            bits: 32,
+            signed: false,
+        };
+        let u64_ty = NirType::Int {
+            bits: 64,
+            signed: false,
+        };
+        let mut func = HirFunction {
+            name: "test".to_owned(),
+            params: vec![make_param("param_1", i32_ty.clone())],
+            locals: vec![NirBinding {
+                name: "tmp".to_owned(),
+                ty: u32_ty,
+                surface_type_name: None,
+                origin: Some(NirBindingOrigin::Temp),
+                initializer: None,
+            }],
+            return_type: u64_ty,
+            surface_return_type_name: None,
+            body: vec![
+                HirStmt::If {
+                    cond: HirExpr::Var("cond".to_owned()),
+                    then_body: vec![HirStmt::Return(Some(HirExpr::Var(
+                        "param_1".to_owned(),
+                    )))],
+                    else_body: vec![],
+                },
+                HirStmt::Return(Some(HirExpr::Var("tmp".to_owned()))),
+            ],
+            ..Default::default()
+        };
+
+        let changed = super::apply_type_inference_pass(&mut func);
+
+        assert!(changed);
+        assert_eq!(func.return_type, i32_ty);
+    }
+
+    #[test]
+    fn narrows_zero_extended_return_through_typed_alias_slot() {
+        let i32_ty = NirType::Int {
+            bits: 32,
+            signed: true,
+        };
+        let u32_ty = NirType::Int {
+            bits: 32,
+            signed: false,
+        };
+        let i64_ty = NirType::Int {
+            bits: 64,
+            signed: true,
+        };
+        let u64_ty = NirType::Int {
+            bits: 64,
+            signed: false,
+        };
+        let local = |name: &str, ty: NirType| NirBinding {
+            name: name.to_owned(),
+            ty,
+            surface_type_name: None,
+            origin: Some(NirBindingOrigin::Temp),
+            initializer: None,
+        };
+        let mut func = HirFunction {
+            name: "test".to_owned(),
+            params: vec![make_param("param_1", i32_ty.clone())],
+            locals: vec![
+                local("rdi", i64_ty.clone()),
+                local("wide_acc", i64_ty),
+                local("ret32", u32_ty),
+                local("ret64", u64_ty.clone()),
+            ],
+            return_type: u64_ty,
+            surface_return_type_name: None,
+            body: vec![
+                make_assign("rdi", HirExpr::Var("param_1".to_owned())),
+                HirStmt::If {
+                    cond: HirExpr::Var("cond".to_owned()),
+                    then_body: vec![HirStmt::Return(Some(HirExpr::Var("rdi".to_owned())))],
+                    else_body: vec![],
+                },
+                make_assign("ret32", HirExpr::Var("wide_acc".to_owned())),
+                make_assign("ret64", HirExpr::Var("ret32".to_owned())),
+                HirStmt::Return(Some(HirExpr::Var("ret64".to_owned()))),
+            ],
+            ..Default::default()
+        };
+
+        let changed = super::apply_type_inference_pass(&mut func);
+
+        assert!(changed);
+        assert_eq!(func.return_type, i32_ty);
+    }
+
+    #[test]
+    fn promotes_same_width_zero_extended_return_signedness_through_alias_slot() {
+        let i32_ty = NirType::Int {
+            bits: 32,
+            signed: true,
+        };
+        let u32_ty = NirType::Int {
+            bits: 32,
+            signed: false,
+        };
+        let i64_ty = NirType::Int {
+            bits: 64,
+            signed: true,
+        };
+        let u64_ty = NirType::Int {
+            bits: 64,
+            signed: false,
+        };
+        let local = |name: &str, ty: NirType| NirBinding {
+            name: name.to_owned(),
+            ty,
+            surface_type_name: None,
+            origin: Some(NirBindingOrigin::Temp),
+            initializer: None,
+        };
+        let mut func = HirFunction {
+            name: "test".to_owned(),
+            params: vec![make_param("param_1", i32_ty.clone())],
+            locals: vec![
+                local("rdi", i64_ty.clone()),
+                local("wide_acc", i64_ty),
+                local("ret32", u32_ty.clone()),
+                local("ret64", u64_ty),
+            ],
+            return_type: u32_ty,
+            surface_return_type_name: None,
+            body: vec![
+                make_assign("rdi", HirExpr::Var("param_1".to_owned())),
+                HirStmt::If {
+                    cond: HirExpr::Var("cond".to_owned()),
+                    then_body: vec![HirStmt::Return(Some(HirExpr::Var("rdi".to_owned())))],
+                    else_body: vec![],
+                },
+                make_assign("ret32", HirExpr::Var("wide_acc".to_owned())),
+                make_assign("ret64", HirExpr::Var("ret32".to_owned())),
+                HirStmt::Return(Some(HirExpr::Var("ret64".to_owned()))),
+            ],
+            ..Default::default()
+        };
+
+        let changed = super::apply_type_inference_pass(&mut func);
+
+        assert!(changed);
+        assert_eq!(func.return_type, i32_ty);
     }
 }

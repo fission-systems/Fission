@@ -1,6 +1,54 @@
+use std::collections::HashSet;
+
 use super::*;
 
 impl<'a> PreviewBuilder<'a> {
+    /// Follows a linear chain of single-predecessor goto/fallthrough blocks
+    /// starting at `start_idx`, staying within `[start_idx, follow_idx)`,
+    /// and accepts the chain only if it terminates in a `Return`.
+    ///
+    /// Returns `Some((body_stmts, follow_idx))` on success or `None` if the
+    /// chain exits the range, has multiple predecessors, or doesn't end in Return.
+    fn try_lower_return_chain_arm(
+        &mut self,
+        start_idx: usize,
+        follow_idx: usize,
+    ) -> Result<Option<(Vec<HirStmt>, usize)>, MlilPreviewError> {
+        let mut body: Vec<HirStmt> = Vec::new();
+        let mut visited: HashSet<usize> = HashSet::new();
+        let mut idx = start_idx;
+        loop {
+            if idx >= follow_idx || !visited.insert(idx) {
+                return Ok(None);
+            }
+            let block = self.pcode_block(idx).clone();
+            body.extend(self.lower_block_stmts(&block)?);
+            match self.lower_block_terminator(idx)? {
+                LoweredTerminator::Return(expr) => {
+                    body.push(HirStmt::Return(expr));
+                    return Ok(Some((body, follow_idx)));
+                }
+                LoweredTerminator::Fallthrough(Some(target))
+                | LoweredTerminator::Goto(target) => {
+                    let Some(next_idx) = self.find_block_index_by_address(target) else {
+                        return Ok(None);
+                    };
+                    if next_idx == follow_idx {
+                        return Ok(None);
+                    }
+                    if next_idx >= follow_idx {
+                        return Ok(None);
+                    }
+                    if !self.can_inline_linear_successor(idx, next_idx, &visited) {
+                        return Ok(None);
+                    }
+                    idx = next_idx;
+                }
+                _ => return Ok(None),
+            }
+        }
+    }
+
     pub(in crate::nir::structuring) fn try_lower_if_else(
         &mut self,
         idx: usize,
@@ -132,11 +180,19 @@ impl<'a> PreviewBuilder<'a> {
             return Ok(None);
         }
 
-        let Some((then_body, _)) = self.lower_linear_body(then_idx, exit)? else {
-            return Ok(None);
+        let (then_body, _) = match self.lower_linear_body(then_idx, exit)? {
+            Some(result) => result,
+            None => match self.try_lower_return_chain_arm(then_idx, follow_idx)? {
+                Some(result) => result,
+                None => return Ok(None),
+            },
         };
-        let Some((else_body, _)) = self.lower_linear_body(else_idx, exit)? else {
-            return Ok(None);
+        let (else_body, _) = match self.lower_linear_body(else_idx, exit)? {
+            Some(result) => result,
+            None => match self.try_lower_return_chain_arm(else_idx, follow_idx)? {
+                Some(result) => result,
+                None => return Ok(None),
+            },
         };
 
         let stmt = HirStmt::If {

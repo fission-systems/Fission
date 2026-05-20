@@ -6,6 +6,8 @@ mod assessment;
 mod binary_info;
 #[cfg(feature = "native_decomp")]
 mod common;
+#[cfg(feature = "debugger")]
+mod debug;
 mod debug_bundle_extra;
 mod debug_decomp;
 #[cfg(feature = "native_decomp")]
@@ -111,6 +113,20 @@ fn run() -> Result<()> {
                 return Err(error.context(format!("span trace:\n{span_trace}")));
             }
             return Ok(());
+        }
+        ParsedInvocation::Debug(cmd) => {
+            #[cfg(feature = "debugger")]
+            {
+                return debug::run_debug_command(cmd);
+            }
+            #[cfg(not(feature = "debugger"))]
+            {
+                let _ = cmd;
+                anyhow::bail!(
+                    "Debugger support is not compiled into this build. \
+                     Rebuild with --features debugger."
+                );
+            }
         }
         ParsedInvocation::OneShot(parsed) => run_oneshot_inner(parsed),
     }
@@ -394,6 +410,32 @@ fn print_help() {
     println!("  fission_cli inventory <SUBCOMMAND> <binary> [OPTIONS]");
     println!("  fission_cli script check --script <FILE>");
     println!("  fission_cli script run <binary> --script <FILE> [--json]");
+    println!("  fission_cli debug init <path> [args...] [--json]");
+    println!("  fission_cli debug attach <PID> [--json]");
+    println!("  fission_cli debug detach");
+    println!("  fission_cli debug continue | pause | stop");
+    println!("  fission_cli debug step | step-over | step-out | skip");
+    println!("  fission_cli debug bp <addr> [--json]");
+    println!("  fission_cli debug rmbp <addr> [--json]");
+    println!("  fission_cli debug bpenable <addr> | bpdisable <addr> | bplist [--json]");
+    println!("  fission_cli debug hwbp <addr> [--kind execute|write|read-write] [--json]");
+    println!("  fission_cli debug membp <addr> --size <N> [--kind read|write|execute|access] [--json]");
+    println!("  fission_cli debug rmmembp <addr> [--json]");
+    println!("  fission_cli debug dllbp <name> | rmdllbp <name>");
+    println!("  fission_cli debug exbp <code> | rmexbp <code>");
+    println!("  fission_cli debug regs | setreg <name> <hex-value> [--json]");
+    println!("  fission_cli debug getflag <name> | setflag <name> <true|false> [--json]");
+    println!("  fission_cli debug read <addr> --size <N> [--json]");
+    println!("  fission_cli debug write <addr> <hex-data> [--json]");
+    println!("  fission_cli debug alloc <size> [--addr <hex>] [--json]");
+    println!("  fission_cli debug free <addr> [--json]");
+    println!("  fission_cli debug getprotect <addr> [--json]");
+    println!("  fission_cli debug setprotect <addr> <size> <protect-u32> [--json]");
+    println!("  fission_cli debug stack-peek [--offset <N>] | stack-pop | stack-push <value> [--json]");
+    println!("  fission_cli debug find <start> <size> <hex-pattern> [--json]");
+    println!("  fission_cli debug exports <base-addr> | imports <base-addr> [--json]");
+    println!("  fission_cli debug modules | threads | switch-thread <tid>");
+    println!("  fission_cli debug event");
     println!();
     println!("Commands:");
     println!("  info       Show binary metadata and inventory views");
@@ -408,6 +450,7 @@ fn print_help() {
     println!("  xrefs      Canonical xref index (loader + optional disassembly)");
     println!("  inventory  Operator-oriented inventory and batch emitters");
     println!("  script     Rhai automation against read-only binary inventory");
+    println!("  debug      Live process debugger (requires --features debugger)");
     println!();
     println!("Decomp options:");
     println!("      --profile <P>          balanced|quality|speed|nir");

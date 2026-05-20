@@ -81,6 +81,17 @@ pub enum DebugEvent {
     OutputString { message: String },
 }
 
+/// Hardware breakpoint kind (x86 debug register configuration).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum HwBreakpointKind {
+    /// Break on instruction execution (DR7 type 00)
+    Execute,
+    /// Break on memory write (DR7 type 01)
+    Write,
+    /// Break on memory read or write (DR7 type 11)
+    ReadWrite,
+}
+
 /// Debug session status
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub enum DebugStatus {
@@ -109,17 +120,95 @@ impl Default for ExceptionPolicy {
     }
 }
 
-/// Software breakpoint info
+/// Memory breakpoint access kind
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum MemoryBpKind {
+    /// Break on read
+    Read,
+    /// Break on write
+    Write,
+    /// Break on execute
+    Execute,
+    /// Break on any access (read, write, or execute)
+    Access,
+}
+
+/// Unified breakpoint kind
+#[derive(Debug, Clone, PartialEq)]
+pub enum BreakpointKind {
+    /// Software breakpoint (INT3)
+    Software,
+    /// Hardware breakpoint (x86 debug registers)
+    Hardware(HwBreakpointKind),
+    /// Memory breakpoint (guard page / page protection)
+    Memory { size: usize, kind: MemoryBpKind },
+    /// DLL load breakpoint
+    Dll { name: String },
+    /// Exception breakpoint
+    Exception { code: u32 },
+}
+
+impl Default for BreakpointKind {
+    fn default() -> Self {
+        BreakpointKind::Software
+    }
+}
+
+/// Breakpoint info (software, hardware, memory, DLL, or exception)
 #[derive(Debug, Clone)]
 pub struct Breakpoint {
-    /// Breakpoint address
+    /// Breakpoint address (meaning varies by kind)
     pub address: u64,
-    /// Original byte at this address
+    /// Original byte at this address (for software breakpoints)
     pub original_byte: u8,
     /// Is this breakpoint enabled?
     pub enabled: bool,
     /// Is this a temporary breakpoint (e.g., step-over helper)?
     pub temporary: bool,
+    /// Breakpoint kind
+    pub kind: BreakpointKind,
+    /// Hit count
+    pub hits: u64,
+    /// Optional condition expression
+    pub condition: Option<String>,
+}
+
+impl Default for Breakpoint {
+    fn default() -> Self {
+        Self {
+            address: 0,
+            original_byte: 0,
+            enabled: true,
+            temporary: false,
+            kind: BreakpointKind::Software,
+            hits: 0,
+            condition: None,
+        }
+    }
+}
+
+/// Information about a module export
+#[derive(Debug, Clone)]
+pub struct ExportInfo {
+    /// Export name (if available)
+    pub name: String,
+    /// Export address
+    pub address: u64,
+    /// Export ordinal
+    pub ordinal: Option<u32>,
+}
+
+/// Information about a module import
+#[derive(Debug, Clone)]
+pub struct ImportInfo {
+    /// Importing module name
+    pub module: String,
+    /// Import name (if by name)
+    pub name: Option<String>,
+    /// Import ordinal (if by ordinal)
+    pub ordinal: Option<u16>,
+    /// IAT slot address
+    pub address: u64,
 }
 
 /// Debug state for GUI and session tracking

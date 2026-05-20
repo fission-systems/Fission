@@ -188,6 +188,10 @@ impl Debugger for LinuxDebugger {
             address,
             original_byte,
             enabled: true,
+            temporary: false,
+            kind: crate::debug::types::BreakpointKind::Software,
+            hits: 0,
+            condition: None,
         };
         self.state.breakpoints.insert(address, bp);
         self.state.last_event = Some(format!("Breakpoint set at 0x{:016x}", address));

@@ -1240,7 +1240,8 @@ impl<'a> PreviewBuilder<'a> {
             | PcodeOpcode::IntNegate
             | PcodeOpcode::Int2Comp
             | PcodeOpcode::PtrAdd
-            | PcodeOpcode::PtrSub => DisallowedSingleConsumerConsumerKind::OtherData,
+            | PcodeOpcode::PtrSub
+            | PcodeOpcode::Return => DisallowedSingleConsumerConsumerKind::OtherData,
             _ => DisallowedSingleConsumerConsumerKind::UnknownConsumerKind,
         }
     }
@@ -2908,29 +2909,23 @@ impl<'a> PreviewBuilder<'a> {
         {
             match candidate.opcode {
                 PcodeOpcode::Call | PcodeOpcode::CallInd | PcodeOpcode::CallOther => {
-                    if has_mem_dep {
-                        return Some(AliasUnsafeHazard::new(
-                            AliasUnsafeHazardKind::CallBetweenDefUse,
-                            Some(first_use_idx),
-                            Some(candidate_idx),
-                            Some(candidate.opcode),
-                        ));
-                    }
+                    return Some(AliasUnsafeHazard::new(
+                        AliasUnsafeHazardKind::CallBetweenDefUse,
+                        Some(first_use_idx),
+                        Some(candidate_idx),
+                        Some(candidate.opcode),
+                    ));
                 }
                 PcodeOpcode::Load if first_store.is_some() => {
-                    if has_mem_dep {
-                        return Some(AliasUnsafeHazard::new(
-                            AliasUnsafeHazardKind::LoadAfterStore,
-                            Some(first_use_idx),
-                            Some(candidate_idx),
-                            Some(candidate.opcode),
-                        ));
-                    }
+                    return Some(AliasUnsafeHazard::new(
+                        AliasUnsafeHazardKind::LoadAfterStore,
+                        Some(first_use_idx),
+                        Some(candidate_idx),
+                        Some(candidate.opcode),
+                    ));
                 }
                 PcodeOpcode::Store => {
-                    if has_mem_dep {
-                        first_store.get_or_insert((candidate_idx, candidate.opcode));
-                    }
+                    first_store.get_or_insert((candidate_idx, candidate.opcode));
                 }
                 _ => {}
             }

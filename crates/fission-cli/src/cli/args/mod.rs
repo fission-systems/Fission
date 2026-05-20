@@ -17,6 +17,15 @@ pub fn parse_hex_address(s: &str) -> Result<u64, String> {
     u64::from_str_radix(s, 16).map_err(|e| format!("Invalid hex address: {}", e))
 }
 
+/// Parse boolean string for flag arguments
+pub fn parse_bool_str(s: &str) -> Result<bool, String> {
+    match s.to_lowercase().as_str() {
+        "true" | "1" | "yes" | "on" => Ok(true),
+        "false" | "0" | "no" | "off" => Ok(false),
+        _ => Err(format!("Invalid boolean value: {}", s)),
+    }
+}
+
 /// Internal normalized one-shot execution arguments.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct OneShotArgs {
@@ -190,6 +199,7 @@ pub enum ParsedInvocation {
     OneShot(ParsedOneShotArgs),
     Script(ScriptInvocation),
     ResourcesStatus { json: bool, verbose: bool },
+    Debug(DebugCommand),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -267,6 +277,8 @@ enum CliCommand {
     Resources(ResourcesArgs),
     /// Rhai scripts over read-only binary inventory (`binary.*`, `emit`)
     Script(ScriptArgs),
+    /// Live process debugger (Windows only)
+    Debug(DebugArgs),
 }
 
 #[derive(Args, Debug)]
@@ -643,7 +655,7 @@ struct ScriptCheckArgs {
     verbose: bool,
 }
 
-#[derive(Args, Debug)]
+#[derive(Args, Debug, Clone, PartialEq, Eq)]
 struct ScriptRunArgs {
     /// Binary to analyze
     binary: PathBuf,
@@ -1226,6 +1238,9 @@ fn normalize_canonical(cli: CliArgs) -> ParsedInvocation {
                         args
                     }
                 },
+                CliCommand::Debug(debug) => {
+                    return ParsedInvocation::Debug(debug.command);
+                }
                 CliCommand::Script(_) => unreachable!("script branch handled above"),
                 CliCommand::Resources(_) => unreachable!("resources branch handled above"),
             };
@@ -1326,6 +1341,21 @@ fn legacy_warning_kind(cli: &LegacyCliArgs) -> Option<LegacyInvocationKind> {
     None
 }
 
+
+// Re-export debug CLI types so existing consumers don't change paths
+mod debug;
+pub use debug::{
+    DebugArgs, DebugCommand,
+    DebugInitArgs, DebugAttachArgs, DebugSwitchThreadArgs,
+    DebugBpArgs, DebugHwBpArgs, DebugBpListArgs, DebugMemBpArgs,
+    DebugDllBpArgs, DebugExBpArgs, DebugSetRegArgs, DebugFlagArgs,
+    DebugAllocArgs, DebugFreeArgs, DebugProtectArgs,
+    DebugStackPeekArgs, DebugStackPopArgs, DebugStackPushArgs,
+    DebugFindArgs, DebugModuleArgs,
+    DebugReadArgs, DebugWriteArgs,
+    HwBpKindArg, MemoryBpKindArg,
+};
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1338,6 +1368,7 @@ mod tests {
             ParsedInvocation::ResourcesStatus { .. } => {
                 panic!("expected one-shot canonical parse")
             }
+            ParsedInvocation::Debug(_) => panic!("expected one-shot canonical parse"),
         }
     }
 
@@ -1348,6 +1379,7 @@ mod tests {
             ParsedInvocation::ResourcesStatus { .. } => {
                 panic!("legacy parser cannot emit resources status")
             }
+            ParsedInvocation::Debug(_) => panic!("legacy parser cannot emit debug"),
         }
     }
 
@@ -1787,6 +1819,10 @@ mod tests {
             .expect_err("expected unknown flag on info subcommand");
         assert_eq!(err.kind(), ErrorKind::UnknownArgument);
     }
+
+// ============================================================================
+// Tests
+// ============================================================================
 
     #[test]
     fn canonical_non_inventory_subcommands_reject_inventory_only_options() {

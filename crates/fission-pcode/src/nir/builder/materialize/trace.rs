@@ -600,6 +600,119 @@ impl<'a> PreviewBuilder<'a> {
         ));
     }
 
+    pub(super) fn trace_block_entry_partial_gpr_merge_accepted(
+        &self,
+        block_idx: usize,
+        op_seq: u32,
+        input: &Varnode,
+        family_idx: usize,
+        predecessor_addrs: &[u64],
+        expr: &HirExpr,
+    ) {
+        if !self.emit_ready_trace_enabled_for_current_fn() {
+            return;
+        }
+        let block_addr = self
+            .pcode
+            .blocks
+            .get(block_idx)
+            .map(|block| block.start_address)
+            .unwrap_or_default();
+        let predecessors = predecessor_addrs
+            .iter()
+            .map(|addr| format!("0x{addr:x}"))
+            .collect::<Vec<_>>()
+            .join(",");
+        self.emit_ready_trace(format!(
+            "block-entry-partial-gpr-merge accepted=true block=0x{:x} op_seq={} input=space:{} off:0x{:x} size:{} family={} predecessors=[{}] expr={:?}",
+            block_addr,
+            op_seq,
+            input.space_id,
+            input.offset,
+            input.size,
+            family_idx,
+            predecessors,
+            expr,
+        ));
+    }
+
+    pub(super) fn trace_block_entry_partial_gpr_merge_rejected(
+        &self,
+        block_idx: usize,
+        op_seq: u32,
+        input: &Varnode,
+        family_idx: usize,
+        predecessor_addrs: &[u64],
+        reason: &str,
+    ) {
+        if !self.emit_ready_trace_enabled_for_current_fn() {
+            return;
+        }
+        let block_addr = self
+            .pcode
+            .blocks
+            .get(block_idx)
+            .map(|block| block.start_address)
+            .unwrap_or_default();
+        let predecessors = predecessor_addrs
+            .iter()
+            .map(|addr| format!("0x{addr:x}"))
+            .collect::<Vec<_>>()
+            .join(",");
+        self.emit_ready_trace(format!(
+            "block-entry-partial-gpr-merge accepted=false block=0x{:x} op_seq={} input=space:{} off:0x{:x} size:{} family={} predecessors=[{}] reason={}",
+            block_addr,
+            op_seq,
+            input.space_id,
+            input.offset,
+            input.size,
+            family_idx,
+            predecessors,
+            reason,
+        ));
+    }
+
+    pub(super) fn trace_block_entry_partial_gpr_merge_incoming_values(
+        &self,
+        block_idx: usize,
+        op_seq: u32,
+        input: &Varnode,
+        family_idx: usize,
+        predecessor_addrs: &[u64],
+        incoming: &[HirExpr],
+    ) {
+        if !self.emit_ready_trace_enabled_for_current_fn() {
+            return;
+        }
+        let block_addr = self
+            .pcode
+            .blocks
+            .get(block_idx)
+            .map(|block| block.start_address)
+            .unwrap_or_default();
+        let predecessors = predecessor_addrs
+            .iter()
+            .map(|addr| format!("0x{addr:x}"))
+            .collect::<Vec<_>>()
+            .join(",");
+        let values = incoming
+            .iter()
+            .map(|expr| format!("{expr:?}"))
+            .collect::<Vec<_>>()
+            .join(" | ");
+        self.emit_ready_trace(format!(
+            "block-entry-partial-gpr-merge incoming-values block=0x{:x} op_seq={} input=space:{} off:0x{:x} size:{} family={} predecessors=[{}] values=[{}]",
+            block_addr,
+            op_seq,
+            input.space_id,
+            input.offset,
+            input.size,
+            family_idx,
+            predecessors,
+            values,
+        ));
+    }
+
     pub(super) fn trace_materialization_plan(
         &self,
         block_addr: u64,
