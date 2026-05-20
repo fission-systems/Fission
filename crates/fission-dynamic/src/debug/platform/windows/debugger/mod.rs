@@ -168,6 +168,69 @@ impl WindowsDebugger {
         &self.state
     }
 
+    /// Enable anti-debug bypasses in the target process.
+    ///
+    /// Patches PEB.BeingDebugged, NtGlobalFlag, heap flags, and
+    /// NtQueryInformationProcess(ProcessDebugPort) return values.
+    /// Requires an active process handle (attach first).
+    pub fn enable_anti_debug_bypass(&mut self) -> FissionResult<Vec<super::anti_debug::AntiDebugBypass>> {
+        let handle = self.ensure_process_handle()?;
+        super::anti_debug::AntiDebugBypassEngine::apply_all(handle)
+            .map_err(|e| FissionError::debug(e))
+    }
+
+    /// Enumerate all virtual-memory regions in the target process.
+    pub fn enumerate_memory_regions(&mut self) -> FissionResult<Vec<super::memory_map::MemoryRegion>> {
+        let handle = self.ensure_process_handle()?;
+        Ok(super::memory_map::enumerate_memory_regions(handle))
+    }
+
+    /// Return committed executable regions.
+    pub fn find_executable_regions(&mut self) -> FissionResult<Vec<super::memory_map::MemoryRegion>> {
+        let handle = self.ensure_process_handle()?;
+        Ok(super::memory_map::find_executable_regions(handle))
+    }
+
+    /// Return committed RWX regions (common in packers / self-modifying code).
+    pub fn find_writable_executable_regions(&mut self) -> FissionResult<Vec<super::memory_map::MemoryRegion>> {
+        let handle = self.ensure_process_handle()?;
+        Ok(super::memory_map::find_writable_executable_regions(handle))
+    }
+
+    /// Read the SEH (Structured Exception Handler) chain for a thread.
+    pub fn read_seh_chain(&mut self, thread_id: u32) -> FissionResult<Vec<super::seh::SehRecord>> {
+        let handle = self.ensure_process_handle()?;
+        super::seh::read_seh_chain(handle, thread_id)
+            .map_err(|e| FissionError::debug(e))
+    }
+
+    /// Read the Process Environment Block (PEB) of the target process.
+    pub fn read_peb(&mut self) -> FissionResult<super::os_structs::PebInfo> {
+        let handle = self.ensure_process_handle()?;
+        super::os_structs::read_peb(handle)
+            .map_err(|e| FissionError::debug(e))
+    }
+
+    /// Read the Thread Environment Block (TEB) of a specific thread.
+    pub fn read_teb(&mut self, thread_id: u32) -> FissionResult<super::os_structs::TebInfo> {
+        let handle = self.ensure_process_handle()?;
+        super::os_structs::read_teb(handle, thread_id)
+            .map_err(|e| FissionError::debug(e))
+    }
+
+    /// Enumerate all loaded modules in the target process.
+    pub fn enumerate_modules(&mut self) -> FissionResult<Vec<super::modules::ModuleInfo>> {
+        let handle = self.ensure_process_handle()?;
+        super::modules::enumerate_modules(handle)
+            .map_err(|e| FissionError::debug(e))
+    }
+
+    /// Resolve an address to the module that contains it.
+    pub fn resolve_address_to_module(&mut self, addr: u64) -> FissionResult<Option<super::modules::ModuleInfo>> {
+        let modules = self.enumerate_modules()?;
+        Ok(super::modules::resolve_address_to_module(addr, &modules))
+    }
+
     /// Ensure process handle is available
     fn ensure_process_handle(&mut self) -> FissionResult<HANDLE> {
         if let Some(h) = self.process_handle {

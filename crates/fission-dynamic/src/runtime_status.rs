@@ -17,7 +17,7 @@ pub fn runtime_status() -> DynamicRuntimeStatus {
     DynamicRuntimeStatus {
         crate_name: "fission-dynamic",
         interactive_runtime_enabled: cfg!(feature = "interactive_runtime"),
-        unpacker_runtime_enabled: cfg!(feature = "unpacker_runtime"),
+        unpacker_runtime_enabled: false,
         platform: std::env::consts::OS,
     }
 }
@@ -33,14 +33,9 @@ mod tests {
             s.interactive_runtime_enabled,
             cfg!(feature = "interactive_runtime")
         );
-        assert_eq!(
-            s.unpacker_runtime_enabled,
-            cfg!(feature = "unpacker_runtime")
-        );
+        assert!(!s.unpacker_runtime_enabled);
         #[cfg(not(feature = "interactive_runtime"))]
         assert!(!s.interactive_runtime_enabled);
-        #[cfg(not(feature = "unpacker_runtime"))]
-        assert!(!s.unpacker_runtime_enabled);
     }
 
     #[test]
@@ -60,9 +55,4 @@ mod tests {
         assert!(runtime_status().interactive_runtime_enabled);
     }
 
-    #[cfg(feature = "unpacker_runtime")]
-    #[test]
-    fn runtime_status_reports_unpacker_enabled_when_feature_on() {
-        assert!(runtime_status().unpacker_runtime_enabled);
-    }
 }
