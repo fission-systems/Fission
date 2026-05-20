@@ -474,6 +474,57 @@ fn try_recover_index_access(
     }
 }
 
+fn pointer_index_base_for_access(
+    expr: &HirExpr,
+    access_ty: &NirType,
+    binding_types: &HashMap<String, NirType>,
+) -> Option<(Box<HirExpr>, i64)> {
+    let (_base, ptr_ty, _from_byte_cast) = typed_pointer_base(expr, binding_types)?;
+    let elem_ty = pointee_ty(&ptr_ty)?;
+    if matches!(elem_ty, NirType::Aggregate { .. }) {
+        return None;
+    }
+    let access_size = i64::try_from(type_byte_size(access_ty)?).ok()?;
+    if access_size == 0 {
+        return None;
+    }
+    if !matches!(elem_ty, NirType::Unknown) {
+        let elem_size = i64::try_from(type_byte_size(elem_ty)?).ok()?;
+        if elem_size != access_size {
+            return None;
+        }
+    }
+    Some((Box::new(expr.clone()), access_size))
+}
+
+fn try_recover_const_index_access(
+    ptr: &HirExpr,
+    access_ty: &NirType,
+    binding_types: &HashMap<String, NirType>,
+) -> Option<HirExpr> {
+    let HirExpr::Binary { op, lhs, rhs, .. } = ptr else {
+        return None;
+    };
+    let HirExpr::Const(raw_index, index_ty) = rhs.as_ref() else {
+        return None;
+    };
+    let raw_offset = match op {
+        HirBinaryOp::Add => *raw_index,
+        HirBinaryOp::Sub => raw_index.checked_neg()?,
+        _ => return None,
+    };
+    let (base, elem_size) = pointer_index_base_for_access(lhs, access_ty, binding_types)?;
+    if raw_offset % elem_size != 0 {
+        return None;
+    }
+    let index = raw_offset / elem_size;
+    Some(HirExpr::Index {
+        base,
+        index: Box::new(HirExpr::Const(index, index_ty.clone())),
+        elem_ty: access_ty.clone(),
+    })
+}
+
 /// Recursively rewrite all pointer-arithmetic sub-expressions in `expr`.
 fn recover_in_expr(expr: &mut HirExpr, binding_types: &HashMap<String, NirType>) -> bool {
     // Try the top-level pattern first.
@@ -517,7 +568,9 @@ fn recover_in_expr(expr: &mut HirExpr, binding_types: &HashMap<String, NirType>)
             }
         }
         HirExpr::Load { ptr, ty } => {
-            if let Some(index_expr) = try_recover_index_access(ptr, ty, binding_types) {
+            if let Some(index_expr) = try_recover_index_access(ptr, ty, binding_types)
+                .or_else(|| try_recover_const_index_access(ptr, ty, binding_types))
+            {
                 *expr = index_expr;
                 return true;
             }
@@ -561,6 +614,7 @@ fn recover_in_lvalue(lhs: &mut HirLValue, binding_types: &HashMap<String, NirTyp
                 index,
                 elem_ty,
             }) = try_recover_index_access(ptr, ty, binding_types)
+                .or_else(|| try_recover_const_index_access(ptr, ty, binding_types))
             {
                 *lhs = HirLValue::Index {
                     base,
@@ -1277,6 +1331,143 @@ mod tests {
         } else {
             panic!("expected assign");
         }
+    }
+
+    /// Store through a typed pointer constant offset should surface as p[k],
+    /// including negative offsets emitted by post-increment store idioms.
+    #[test]
+    fn converts_deref_const_pointer_offset_to_index_lvalue() {
+        let elem_ty = NirType::Int {
+            bits: 32,
+            signed: false,
+        };
+        let p_ty = NirType::Ptr(Box::new(elem_ty.clone()));
+        let body = vec![HirStmt::Assign {
+            lhs: HirLValue::Deref {
+                ptr: Box::new(HirExpr::Binary {
+                    op: HirBinaryOp::Sub,
+                    lhs: Box::new(HirExpr::Var("p".to_owned())),
+                    rhs: Box::new(HirExpr::Const(
+                        4,
+                        NirType::Int {
+                            bits: 64,
+                            signed: false,
+                        },
+                    )),
+                    ty: p_ty.clone(),
+                }),
+                ty: elem_ty.clone(),
+            },
+            rhs: HirExpr::Var("value".to_owned()),
+        }];
+        let mut func = make_func(vec![make_binding_with_ty("p", p_ty)], body);
+
+        let changed = super::apply_ptr_arith_recovery_pass(&mut func);
+
+        assert!(changed);
+        assert!(matches!(
+            &func.body[0],
+            HirStmt::Assign {
+                lhs:
+                    HirLValue::Index {
+                        base,
+                        index,
+                        elem_ty: index_elem_ty,
+                    },
+                ..
+            } if matches!(base.as_ref(), HirExpr::Var(name) if name == "p")
+                && matches!(index.as_ref(), HirExpr::Const(-1, _))
+                && index_elem_ty == &elem_ty
+        ));
+    }
+
+    #[test]
+    fn converts_load_const_pointer_offset_to_index_value() {
+        let elem_ty = NirType::Int {
+            bits: 32,
+            signed: false,
+        };
+        let p_ty = NirType::Ptr(Box::new(elem_ty.clone()));
+        let body = vec![HirStmt::Assign {
+            lhs: HirLValue::Var("result".to_owned()),
+            rhs: HirExpr::Load {
+                ptr: Box::new(HirExpr::Binary {
+                    op: HirBinaryOp::Add,
+                    lhs: Box::new(HirExpr::Var("p".to_owned())),
+                    rhs: Box::new(HirExpr::Const(
+                        8,
+                        NirType::Int {
+                            bits: 64,
+                            signed: false,
+                        },
+                    )),
+                    ty: p_ty.clone(),
+                }),
+                ty: elem_ty.clone(),
+            },
+        }];
+        let mut func = make_func(vec![make_binding_with_ty("p", p_ty)], body);
+
+        let changed = super::apply_ptr_arith_recovery_pass(&mut func);
+
+        assert!(changed);
+        assert!(matches!(
+            &func.body[0],
+            HirStmt::Assign {
+                rhs:
+                    HirExpr::Index {
+                        base,
+                        index,
+                        elem_ty: index_elem_ty,
+                    },
+                ..
+            } if matches!(base.as_ref(), HirExpr::Var(name) if name == "p")
+                && matches!(index.as_ref(), HirExpr::Const(2, _))
+                && index_elem_ty == &elem_ty
+        ));
+    }
+
+    #[test]
+    fn leaves_const_pointer_offset_deref_when_pointee_size_mismatches_access() {
+        let pointee_ty = NirType::Int {
+            bits: 32,
+            signed: false,
+        };
+        let access_ty = NirType::Int {
+            bits: 8,
+            signed: false,
+        };
+        let p_ty = NirType::Ptr(Box::new(pointee_ty));
+        let body = vec![HirStmt::Assign {
+            lhs: HirLValue::Var("result".to_owned()),
+            rhs: HirExpr::Load {
+                ptr: Box::new(HirExpr::Binary {
+                    op: HirBinaryOp::Add,
+                    lhs: Box::new(HirExpr::Var("p".to_owned())),
+                    rhs: Box::new(HirExpr::Const(
+                        4,
+                        NirType::Int {
+                            bits: 64,
+                            signed: false,
+                        },
+                    )),
+                    ty: p_ty.clone(),
+                }),
+                ty: access_ty,
+            },
+        }];
+        let mut func = make_func(vec![make_binding_with_ty("p", p_ty)], body);
+
+        let changed = super::apply_ptr_arith_recovery_pass(&mut func);
+
+        assert!(!changed);
+        assert!(matches!(
+            &func.body[0],
+            HirStmt::Assign {
+                rhs: HirExpr::Load { ptr, .. },
+                ..
+            } if matches!(ptr.as_ref(), HirExpr::Binary { .. })
+        ));
     }
 
     #[test]
