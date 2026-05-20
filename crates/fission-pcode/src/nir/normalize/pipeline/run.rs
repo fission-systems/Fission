@@ -31,8 +31,8 @@ use super::super::global_opt::{
 };
 use super::super::idioms::{
     apply_bitstream_idioms, apply_branch_prefix_hoist_pass, apply_call_artifact_cleanup_pass,
-    apply_security_cookie_pass, remove_callee_save_prologue_epilogue,
-    remove_entry_stack_scaffold_stores,
+    apply_recurrence_to_self_recursive_call_pass, apply_security_cookie_pass,
+    remove_callee_save_prologue_epilogue, remove_entry_stack_scaffold_stores,
 };
 use super::super::memory::{
     apply_aggregate_alias_access_rewrite_pass, apply_aggregate_fields_pass,
@@ -849,6 +849,14 @@ pub(crate) fn normalize_hir_function(func: &mut HirFunction) {
         before != hir_shape(f)
     });
     run_pass_logged(func, "type_inference_final", perf, apply_type_inference_pass);
+    if run_pass_logged(
+        func,
+        "recurrence_to_self_recursive_call",
+        perf,
+        apply_recurrence_to_self_recursive_call_pass,
+    ) {
+        run_pass_logged(func, "type_inference_after_recurrence", perf, apply_type_inference_pass);
+    }
     if perf {
         let (final_stmts, final_locals) = hir_shape(func);
         eprintln!(
