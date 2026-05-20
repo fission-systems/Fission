@@ -23,6 +23,7 @@ mod pcode_topology;
 mod raw_pcode;
 #[cfg(not(feature = "native_decomp"))]
 mod rust_decomp;
+mod callgraph;
 mod script;
 mod strings;
 mod xrefs;
@@ -41,6 +42,7 @@ use pcode_topology::emit_pcode_topology;
 use raw_pcode::emit_raw_pcode;
 #[cfg(not(feature = "native_decomp"))]
 use rust_decomp::run_decompilation_rust_sleigh;
+use callgraph::run_callgraph;
 use strings::print_strings;
 use xrefs::run_xrefs;
 
@@ -231,6 +233,10 @@ fn execute_command(cli: &OneShotArgs) -> Result<()> {
         return Ok(run_xrefs(cli, &binary)?);
     }
 
+    if cli.callgraph_cmd {
+        return Ok(run_callgraph(cli, &binary)?);
+    }
+
     if cli.list {
         return Ok(print_function_list(&binary, cli.json)?);
     }
@@ -407,6 +413,7 @@ fn print_help() {
     println!("  fission_cli decomp <binary> (--addr <ADDR> | --all) [OPTIONS]");
     println!("  fission_cli strings <binary> [--min-len N] [--json]");
     println!("  fission_cli xrefs <binary> [--json] [--no-disassembly] [--function ADDR]");
+    println!("  fission_cli callgraph <binary> [--json]");
     println!("  fission_cli inventory <SUBCOMMAND> <binary> [OPTIONS]");
     println!("  fission_cli script check --script <FILE>");
     println!("  fission_cli script run <binary> --script <FILE> [--json]");
@@ -448,6 +455,7 @@ fn print_help() {
     println!("  decomp     Decompile one function or all discovered functions");
     println!("  strings    Extract strings");
     println!("  xrefs      Canonical xref index (loader + optional disassembly)");
+    println!("  callgraph  Call graph from xref analysis");
     println!("  inventory  Operator-oriented inventory and batch emitters");
     println!("  script     Rhai automation against read-only binary inventory");
     println!("  debug      Live process debugger (requires --features debugger)");

@@ -42,4 +42,8 @@ pub use xref_index::{
     XrefKind, XrefRecord, XrefSource, XrefSourceCategory, XrefSourceLayer, XrefTarget,
     build_xref_index, resolve_enclosing_function,
 };
+pub use string_xrefs::{
+    StringWithXrefs, StringXrefAnalysis, StringXrefStats, analyze_string_xrefs,
+};
+pub use strings::{ExtractedString, StringType, extract_strings, build_string_lookup};
 pub use xrefs::{OPERAND_INDEX_MNEMONIC, Xref, XrefDatabase, XrefType};

@@ -99,6 +99,8 @@ pub struct OneShotArgs {
     pub debug_decomp: bool,
     /// Write the same debug bundle to a JSON file (works without embedding).
     pub debug_decomp_bundle: Option<PathBuf>,
+    /// Canonical `callgraph` subcommand.
+    pub callgraph_cmd: bool,
 }
 
 impl Default for OneShotArgs {
@@ -166,6 +168,7 @@ impl Default for OneShotArgs {
             info_xrefs: false,
             debug_decomp: false,
             debug_decomp_bundle: None,
+            callgraph_cmd: false,
         }
     }
 }
@@ -237,7 +240,7 @@ struct CommonBinaryOutputArgs {
 #[command(version = env!("CARGO_PKG_VERSION"))]
 #[command(about = "Rust-native binary analysis and decompilation")]
 #[command(
-    long_about = "Fission is a headless-first binary analysis and decompilation tool with explicit one-shot subcommands.\n\nCanonical human-facing entrypoints:\n  fission_cli info binary.exe\n  fission_cli list binary.exe --json\n  fission_cli disasm binary.exe --addr 0x1400\n  fission_cli raw-pcode binary.exe --addr 0x1400\n  fission_cli pcode-stages binary.exe --addr 0x1400 --json\n  fission_cli nir-stats binary.exe --addr 0x1400 --json\n  fission_cli pcode-topology binary.exe --addr 0x1400 --json\n  fission_cli decomp binary.exe --addr 0x1400\n  fission_cli strings binary.exe --min-len 6\n  fission_cli xrefs binary.exe --json\n\nOperator-oriented inventory lives under:\n  fission_cli inventory <SUBCOMMAND> ...\n"
+    long_about = "Fission is a headless-first binary analysis and decompilation tool with explicit one-shot subcommands.\n\nCanonical human-facing entrypoints:\n  fission_cli info binary.exe\n  fission_cli list binary.exe --json\n  fission_cli disasm binary.exe --addr 0x1400\n  fission_cli raw-pcode binary.exe --addr 0x1400\n  fission_cli pcode-stages binary.exe --addr 0x1400 --json\n  fission_cli nir-stats binary.exe --addr 0x1400 --json\n  fission_cli pcode-topology binary.exe --addr 0x1400 --json\n  fission_cli decomp binary.exe --addr 0x1400\n  fission_cli strings binary.exe --min-len 6\n  fission_cli xrefs binary.exe --json\n  fission_cli callgraph binary.exe --json\n\nOperator-oriented inventory lives under:\n  fission_cli inventory <SUBCOMMAND> ...\n"
 )]
 #[command(arg_required_else_help = true)]
 struct CliArgs {
@@ -271,6 +274,8 @@ enum CliCommand {
     Strings(StringsArgs),
     /// Canonical cross-reference index (loader seeds + optional disassembly layer)
     Xrefs(XrefsArgs),
+    /// Call graph (caller/callee relationships from xref analysis)
+    Callgraph(CallgraphArgs),
     /// Operator-oriented inventory and batch emitters
     Inventory(InventoryArgs),
     /// Inspect resolved resource paths and bundle-root candidates
@@ -600,6 +605,19 @@ struct XrefsArgs {
     /// Include per-function xref slice for this function entry VA in JSON output
     #[arg(long, value_parser = parse_hex_address)]
     function: Option<u64>,
+
+    #[command(flatten)]
+    common: CommonBinaryOutputArgs,
+}
+
+#[derive(Args, Debug)]
+#[command(
+    long_about = "Build a call graph from cross-reference analysis.\n\nEdges are aggregated from call-type xrefs discovered in the binary. Output includes callers and callees per function.",
+    after_help = "Examples:\n  fission_cli callgraph app.exe\n  fission_cli callgraph app.exe --json"
+)]
+struct CallgraphArgs {
+    /// Path to the binary file to analyze
+    binary: PathBuf,
 
     #[command(flatten)]
     common: CommonBinaryOutputArgs,
@@ -1196,6 +1214,13 @@ fn normalize_canonical(cli: CliArgs) -> ParsedInvocation {
                     args.verbose = xrefs.common.verbose;
                     args
                 }
+                CliCommand::Callgraph(callgraph) => {
+                    let mut args = OneShotArgs::with_binary(callgraph.binary);
+                    args.callgraph_cmd = true;
+                    args.json = callgraph.common.json;
+                    args.verbose = callgraph.common.verbose;
+                    args
+                }
                 CliCommand::Inventory(inventory) => match inventory.command {
                     InventoryCommand::FunctionFacts(facts) => {
                         let mut args = OneShotArgs::with_binary(facts.binary);
@@ -1317,6 +1342,7 @@ fn normalize_legacy(cli: LegacyCliArgs) -> ParsedOneShotArgs {
         xref_no_disassembly: false,
         xref_function: None,
         info_xrefs: false,
+        callgraph_cmd: false,
     };
 
     ParsedOneShotArgs {
