@@ -41,8 +41,8 @@ Read in order:
 ## 5. Tests you can run locally today
 
 ```bash
-cargo test -p fission-pcode
-cargo test -p fission-loader
+cargo nextest run -p fission-pcode
+cargo nextest run -p fission-loader
 ```
 
 ## Next steps

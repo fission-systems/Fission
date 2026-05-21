@@ -18,6 +18,6 @@ Lift P-code blocks into HIR under `PreviewBuilder`: control flow, calls, memory,
 ## Validation
 
 ```bash
-cargo test -p fission-pcode
+cargo nextest run -p fission-pcode
 cargo check -p fission-pcode
 ```

@@ -300,7 +300,7 @@ cd crates/fission-tauri
 npm run tauri -- build
 
 # Full test suite
-cargo test --all
+cargo nextest run --workspace
 ```
 
 ---

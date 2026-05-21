@@ -57,7 +57,7 @@ Capture note-level anomalies (JSON shape shifts, crashers) in release notes **Kn
 
 Not strictly gated by `cd.yml`, but strongly recommended before tagging:
 
-- [ ] `cargo test -p fission-pcode` (and crates touched by the release).
+- [ ] `cargo nextest run -p fission-pcode` (and crates touched by the release; use `cargo test` only when doctests or harness-specific behavior must be checked).
 - [ ] `cargo run -p fission-automation -- nir-check --lane nir` with `--fail-on-stop` when automation semantics changed ([`crates/fission-automation/AGENTS.md`](../crates/fission-automation/AGENTS.md)).
 
 Heavy CI uploads automation artifacts under `benchmark/artifacts/automation/` — attach links or excerpts to the GitHub Release discussion when helpful.

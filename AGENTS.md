@@ -93,7 +93,7 @@ Read the nearest child file before editing those areas.
 cargo build -p fission-cli --release
 
 # Common decompiler validation
-cargo test -p fission-pcode
+cargo nextest run -p fission-pcode
 cargo check -p fission-pcode
 cargo check -p fission-decompiler
 cargo check -p fission-automation
@@ -107,9 +107,10 @@ python3 benchmark/source_semantic_benchmark/run_source_semantic_benchmark.py --h
 
 ## Workflow Bias
 
-- For NIR/structuring changes: targeted tests → `cargo test -p fission-pcode` → `cargo check -p fission-pcode`.
+- Use `cargo nextest run` as the default local Rust test runner. Use `cargo test` only when checking doctests, harness-specific behavior, or when nextest is unavailable.
+- For NIR/structuring changes: targeted nextest filter → `cargo nextest run -p fission-pcode` → `cargo check -p fission-pcode`.
 - For orchestration / Rust-Sleigh glue: also `cargo check -p fission-decompiler` (and CLI/Tauri surfaces as needed).
-- For resource path / bundle resolution changes: `cargo test -p fission-core` and smoke `fission_cli resources status`.
+- For resource path / bundle resolution changes: `cargo nextest run -p fission-core` and smoke `fission_cli resources status`.
 - If telemetry/reporting changes: also run `cargo check -p fission-automation`.
 - If benchmark/reporting changes: validate under `benchmark/source_semantic_benchmark/` and keep artifacts under `benchmark/artifacts/`.
 - Use `.github/workflows/ci.yml` and `ci-heavy.yml` as CI source of truth.
