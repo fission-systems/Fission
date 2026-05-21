@@ -293,6 +293,14 @@ fn zero_extended_return_candidate_type(
             else {
                 return None;
             };
+            // Sub-64-bit unsigned cast: the outer type is itself a narrow return candidate.
+            // (On x86-64, 32-bit values written to EAX implicitly zero-extend to RAX; the
+            // ZExt to u64 may have been stripped by an earlier normalization pass.)
+            if *outer_bits < 64 {
+                return Some(ty.clone());
+            }
+            // 64-bit unsigned cast (explicit ZExt): recurse into the inner expression to
+            // find the narrower source type.
             let inner_ty = match inner.as_ref() {
                 HirExpr::Var(name) | HirExpr::AddressOfGlobal(name) => {
                     zero_extended_return_candidate_type_for_binding(
@@ -318,10 +326,21 @@ fn zero_extended_return_candidate_type(
                 _ => None,
             }
         }
-        other => match expr_type(other) {
-            ty @ NirType::Int { bits, .. } if bits < 64 => Some(ty),
-            _ => None,
-        },
+        other => {
+            // 64-bit integer constant whose u64 value fits in 32 bits:
+            // treat as a zero-extended (or sign-extended) 32-bit return candidate.
+            if let HirExpr::Const(value, NirType::Int { bits: 64, .. }) = other {
+                let v = *value as u64;
+                if v <= 0xFFFF_FFFF {
+                    let signed = v >= 0x8000_0000;
+                    return Some(NirType::Int { bits: 32, signed });
+                }
+            }
+            match expr_type(other) {
+                ty @ NirType::Int { bits, .. } if bits < 64 => Some(ty),
+                _ => None,
+            }
+        }
     }
 }
 
@@ -464,6 +483,32 @@ fn strip_zero_extended_return_casts(stmts: &mut [HirStmt], narrowed_ty: &NirType
 
 fn strip_zero_extended_return_casts_stmt(stmt: &mut HirStmt, narrowed_ty: &NirType) -> bool {
     match stmt {
+        // Rewrite 64-bit integer constants to their narrowed 32-bit equivalent.
+        HirStmt::Return(Some(HirExpr::Const(value, const_ty))) => {
+            let NirType::Int { bits: 64, .. } = const_ty else {
+                return false;
+            };
+            let NirType::Int {
+                bits: 32,
+                signed: narrow_signed,
+            } = narrowed_ty
+            else {
+                return false;
+            };
+            let v = *value as u64;
+            if v <= 0xFFFF_FFFF {
+                let u32_val = v as u32;
+                *value = if *narrow_signed {
+                    (u32_val as i32) as i64
+                } else {
+                    u32_val as i64
+                };
+                *const_ty = narrowed_ty.clone();
+                true
+            } else {
+                false
+            }
+        }
         HirStmt::Return(Some(HirExpr::Cast { ty, expr })) => {
             let should_strip = matches!(
                 (ty, narrowed_ty),
@@ -1140,5 +1185,81 @@ mod tests {
 
         assert!(changed);
         assert_eq!(func.return_type, i32_ty);
+    }
+
+    /// `validate_input`-style: function with ulonglong return type where all return
+    /// expressions are 64-bit constants whose values fit in 32 bits and have bit 31
+    /// set (i.e., negative signed ints).  Expected: return type narrows to `int` and
+    /// constants are rewritten to their signed 32-bit equivalents.
+    #[test]
+    fn narrows_u64_constant_returns_to_signed_i32() {
+        let u64_ty = NirType::Int {
+            bits: 64,
+            signed: false,
+        };
+        let i32_ty = NirType::Int {
+            bits: 32,
+            signed: true,
+        };
+        // Simulates: return -1; return -2; return param1 + param2;
+        // After narrowing, constants should become -1, -2 and return type int.
+        let mut func = HirFunction {
+            name: "validate_input".to_owned(),
+            params: vec![
+                make_param("param_1", NirType::Int { bits: 32, signed: true }),
+                make_param("param_2", NirType::Int { bits: 32, signed: true }),
+            ],
+            locals: vec![],
+            return_type: u64_ty.clone(),
+            surface_return_type_name: None,
+            body: vec![
+                HirStmt::If {
+                    cond: HirExpr::Var("c1".to_owned()),
+                    then_body: vec![HirStmt::Return(Some(HirExpr::Const(
+                        4294967295, // 0xFFFFFFFF = -1 as u32
+                        u64_ty.clone(),
+                    )))],
+                    else_body: vec![],
+                },
+                HirStmt::If {
+                    cond: HirExpr::Var("c2".to_owned()),
+                    then_body: vec![HirStmt::Return(Some(HirExpr::Const(
+                        4294967294, // 0xFFFFFFFE = -2 as u32
+                        u64_ty.clone(),
+                    )))],
+                    else_body: vec![],
+                },
+                // Simulate: return (ulonglong)(uint)(int)(param_1 + param_2)
+                // The outer u64 ZExt cast is what the decompiler produces for x86-64.
+                HirStmt::Return(Some(HirExpr::Cast {
+                    ty: u64_ty.clone(),
+                    expr: Box::new(HirExpr::Cast {
+                        ty: NirType::Int { bits: 32, signed: false },
+                        expr: Box::new(HirExpr::Binary {
+                            op: HirBinaryOp::Add,
+                            lhs: Box::new(HirExpr::Var("param_1".to_owned())),
+                            rhs: Box::new(HirExpr::Var("param_2".to_owned())),
+                            ty: NirType::Int { bits: 32, signed: true },
+                        }),
+                    }),
+                })),
+            ],
+            ..Default::default()
+        };
+
+        let changed = super::apply_type_inference_pass(&mut func);
+
+        assert!(changed, "pass should change something");
+        assert_eq!(func.return_type, i32_ty, "return type should narrow to int");
+
+        // Verify constants were rewritten to their signed 32-bit values.
+        let HirStmt::If { then_body, .. } = &func.body[0] else {
+            panic!("expected if statement");
+        };
+        let HirStmt::Return(Some(HirExpr::Const(v, ty))) = &then_body[0] else {
+            panic!("expected return const");
+        };
+        assert_eq!(*v, -1i64, "0xFFFFFFFF should become -1");
+        assert_eq!(*ty, i32_ty);
     }
 }
