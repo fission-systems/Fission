@@ -53,6 +53,34 @@ impl<'a> PreviewBuilder<'a> {
         }
     }
 
+    pub(in crate::nir::builder) fn prior_materialized_local_wide_alias_name(
+        &self,
+        block_idx: usize,
+        op_idx: usize,
+        output: &Varnode,
+    ) -> Option<String> {
+        let (site, op) = self.lookup_def_site(output)?;
+        if site.block_idx != block_idx || site.op_idx >= op_idx {
+            return None;
+        }
+        let prior_output = op.output.as_ref()?;
+        if prior_output.size <= output.size
+            || !Self::prior_output_aliases_loop_carried_update(prior_output, output)
+        {
+            return None;
+        }
+        if matches!(
+            op.opcode,
+            PcodeOpcode::Copy | PcodeOpcode::Cast | PcodeOpcode::IntZExt | PcodeOpcode::IntSExt
+        ) {
+            return None;
+        }
+        self.materialized_vns
+            .get(&MaterializedVarnodeKey::new(prior_output, op))
+            .filter(|name| !name.starts_with("param_"))
+            .cloned()
+    }
+
     pub(in crate::nir::builder) fn loop_header_external_seed_binding_name_for_update(
         &self,
         block_idx: usize,

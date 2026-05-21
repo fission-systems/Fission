@@ -36,6 +36,11 @@ impl<'a> PreviewBuilder<'a> {
         if let Some(name) = self.prior_materialized_same_register_output_name(output) {
             return Some(name);
         }
+        if let Some(name) =
+            self.prior_materialized_local_wide_alias_name(block_idx, op_idx, output)
+        {
+            return Some(name);
+        }
         if self.abi_state().param_slot_for_varnode(output).is_some()
             && !self.loop_carried_output_has_prior_definition(output)
         {
@@ -95,6 +100,11 @@ impl<'a> PreviewBuilder<'a> {
             return Some(name);
         }
         if let Some(name) = self.prior_materialized_same_register_output_name(output) {
+            return Some(name);
+        }
+        if let Some(name) =
+            self.prior_materialized_local_wide_alias_name(block_idx, op_idx, output)
+        {
             return Some(name);
         }
         if self.abi_state().param_slot_for_varnode(output).is_some()

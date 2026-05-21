@@ -369,6 +369,57 @@ fn loop_carried_register_update_does_not_promote_prior_defined_abi_scratch() {
 }
 
 #[test]
+fn loop_carried_gpr32_update_with_prior_wide_def_does_not_rebind_param() {
+    let r8 = reg(0x80, 8);
+    let r8d = reg(0x80, 4);
+    let rax = reg(0x00, 8);
+    let rdx = reg(0x10, 8);
+    let mut blocks = vec![block_at(
+        0x1000,
+        0,
+        vec![
+            op(0, PcodeOpcode::Copy, Some(r8.clone()), vec![rdx]),
+            op(
+                1,
+                PcodeOpcode::IntSub,
+                Some(r8.clone()),
+                vec![r8.clone(), rax],
+            ),
+            op(
+                2,
+                PcodeOpcode::IntAnd,
+                Some(r8d.clone()),
+                vec![r8d.clone(), constant(4)],
+            ),
+            op(3, PcodeOpcode::Branch, None, vec![constant(0x1000)]),
+        ],
+    )];
+    blocks[0].successors = vec![0];
+    let pcode = pcode_function(blocks);
+    let mut options = test_options();
+    options.calling_convention = CallingConvention::WindowsX64;
+    let mut builder = PreviewBuilder::new(&pcode, &options, None);
+
+    let loop_body = builder
+        .lower_block_stmts(&pcode.blocks[0])
+        .expect("loop body lowering");
+
+    assert!(
+        !loop_body.iter().any(|stmt| lhs_var(stmt) == Some("param_3")),
+        "R8D mask derived from a prior R8 temp must not mutate param_3: {loop_body:?}"
+    );
+    let mask_stmt = loop_body
+        .iter()
+        .find(|stmt| lhs_var(stmt).is_some() && format!("{stmt:?}").contains("Const(4"))
+        .expect("materialized R8D mask");
+    assert_eq!(
+        lhs_var(mask_stmt),
+        loop_body.iter().find_map(lhs_var),
+        "R8D mask should keep the prior wide materialized binding instead of creating a fresh narrow temp: {loop_body:?}"
+    );
+}
+
+#[test]
 fn loop_carried_register_update_reuses_wide_prior_for_gpr32_update() {
     let rax = reg(0x00, 8);
     let eax = reg(0x00, 4);
