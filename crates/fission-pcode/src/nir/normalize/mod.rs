@@ -14,6 +14,7 @@ mod idioms;
 mod memory;
 mod pipeline;
 mod recovery;
+mod subvar_flow;
 mod types;
 pub(crate) mod wave_stats;
 

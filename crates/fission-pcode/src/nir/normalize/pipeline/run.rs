@@ -32,6 +32,7 @@ use super::super::global_opt::{
 use super::super::idioms::{
     apply_bitstream_idioms, apply_branch_prefix_hoist_pass, apply_call_artifact_cleanup_pass,
     apply_recurrence_to_self_recursive_call_pass, apply_security_cookie_pass,
+    apply_subflow_pruning,
     remove_callee_save_prologue_epilogue, remove_entry_stack_scaffold_stores,
 };
 use super::super::memory::{
@@ -43,6 +44,7 @@ use super::super::recovery::{
     apply_break_continue_pass, apply_flag_recovery_pass, apply_for_loop_folding,
     apply_iv_recovery_pass, copy_propagation_pass, join_coalescing_pass,
 };
+use super::super::subvar_flow::apply_subvar_flow_pass;
 use super::super::types::{
     apply_callsite_type_prop_pass, apply_entry_param_promotion_pass,
     apply_interproc_callsite_arity_pass, apply_type_inference_pass,
@@ -494,6 +496,17 @@ pub(crate) fn normalize_hir_function(func: &mut HirFunction) {
     // Module B: run def-driven, callsite-signature, and use-driven inference
     // to convergence (bounded). This avoids one-shot ordering sensitivity.
     apply_type_signature_fixed_point(func, diag, perf);
+    // Subflow / bitmask pruning: optimize redundant bit-widths and bitmasks (subflow.cc).
+    run_pass_logged(func, "subflow_pruning_early", perf, apply_subflow_pruning);
+    // Global subvariable flow analyzer: propagate active bitmasks globally to declare narrow subvariables.
+    if run_pass_logged(func, "subvar_flow_pass", perf, apply_subvar_flow_pass) {
+        run_cleanup_block(func, "cleanup_subvar_flow", perf, |f| {
+            cleanup_func_stmt_list(f);
+            defuse_dead_assignment_pass(f);
+            prune_unused_temp_bindings(f);
+            prune_unused_dead_local_bindings(f);
+        });
+    }
     // Cast elision: remove outer casts that are redundant given the binding's
     // declared type (assignment-context cast: `x = (T)y` where x.ty == T).
     // Runs after type inference so that NirBinding.ty is maximally populated.
@@ -743,8 +756,7 @@ pub(crate) fn normalize_hir_function(func: &mut HirFunction) {
         prune_unused_dead_local_bindings(func);
     }
     if run_pass_logged(func, "loop_condition_trailing_temp_inline", perf, |f| {
-        let preserved_temps = preserved_materialization_names(&f.locals);
-        inline_loop_condition_trailing_temps(f, &preserved_temps)
+        inline_loop_condition_trailing_temps(f)
     }) {
         run_pass_logged(
             func,
@@ -848,6 +860,8 @@ pub(crate) fn normalize_hir_function(func: &mut HirFunction) {
         prune_unused_dead_local_bindings(f);
         before != hir_shape(f)
     });
+    // Subflow / bitmask pruning: optimize redundant bit-widths and bitmasks (subflow.cc).
+    run_pass_logged(func, "subflow_pruning_final", perf, apply_subflow_pruning);
     run_pass_logged(func, "type_inference_final", perf, apply_type_inference_pass);
     if run_pass_logged(
         func,
@@ -1795,7 +1809,7 @@ fn cleanup_stmt_list_with_options_and_preserved(
     func_name: &str,
     depth: usize,
     options: CleanupStmtOptions,
-    preserved_temps: &HashSet<String>,
+    preserved_temps: &HashSet<&str>,
 ) {
     for stmt in stmts.iter_mut() {
         normalize_stmt(stmt);
