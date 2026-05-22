@@ -1,4 +1,7 @@
 use super::*;
+use super::utils::*;
+use crate::nir::*;
+use std::collections::HashSet;
 
 fn int(bits: u32) -> NirType {
     NirType::Int {
@@ -75,7 +78,7 @@ fn collapse_trivial_assign_returns_skips_preserved_temp() {
 
     assert!(!collapse_trivial_assign_returns(
         &mut stmts,
-        &HashSet::from([String::from("uVar0")]),
+        &HashSet::from(["uVar0"]),
     ));
     assert!(matches!(stmts[0], HirStmt::Assign { .. }));
     assert!(matches!(stmts[1], HirStmt::Return(Some(HirExpr::Var(_)))));
@@ -477,7 +480,7 @@ fn eliminate_dead_temp_assigns_removes_dead_preserved_temp() {
 
     assert!(eliminate_dead_temp_assigns(
         &mut stmts,
-        &HashSet::from([String::from("uVar0")]),
+        &HashSet::from(["uVar0"]),
     ));
     assert!(stmts.is_empty());
 }
@@ -724,7 +727,6 @@ fn inline_loop_condition_trailing_temps_substitutes_condition_chain() {
 
     assert!(inline_loop_condition_trailing_temps(
         &mut func,
-        &HashSet::new(),
     ));
     let HirStmt::DoWhile { body, cond } = &func.body[0] else {
         panic!("expected do-while");
