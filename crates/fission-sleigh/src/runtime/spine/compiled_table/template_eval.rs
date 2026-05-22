@@ -966,8 +966,9 @@ impl<'c> CompiledTableEmitter<'c> {
                 }
             }
             self.built_operands = saved_built;
-            if let Some(exported) = child.exported_handle.as_ref() {
-                if let Ok(varnode) = varnode_from_fixed_handle(&exported.fixed) {
+            if let Some(export_tpl) = child.constructor_template.result.as_ref() {
+                let tpl = CompiledVarnodeTpl::HandleTpl(Box::new(export_tpl.clone()));
+                if let Ok(varnode) = self.resolve_varnode_tpl(&tpl, child) {
                     let handle_key = exported_build_handle_key(operand_index)?;
                     self.exported_build_varnodes.insert(handle_key, varnode);
                 }

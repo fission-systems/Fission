@@ -45,35 +45,6 @@ pub(super) fn fixed_handle_from_resolved_varnode(
     }
 }
 
-pub(super) fn varnode_from_fixed_handle(handle: &RuntimeFixedHandle) -> Result<Varnode> {
-    if handle.offset_space.is_some() {
-        bail!("dynamic fixed handle cannot materialize into a direct varnode");
-    }
-    let space = handle
-        .space
-        .as_ref()
-        .ok_or_else(|| anyhow!("fixed handle missing space"))?;
-    let size = if handle.size > 0 {
-        handle.size
-    } else {
-        handle.offset_size
-    };
-    if space.name == "const" {
-        Ok(Varnode::constant(
-            u64_to_i64_bits(handle.offset_offset),
-            size,
-        ))
-    } else {
-        Ok(Varnode {
-            space_id: space.index,
-            offset: handle.offset_offset,
-            size,
-            is_constant: false,
-            constant_val: 0,
-        })
-    }
-}
-
 pub(super) fn handle_selector_index_in_space(
     space: &CompiledSpaceTpl,
     selector: CompiledHandleSelector,
