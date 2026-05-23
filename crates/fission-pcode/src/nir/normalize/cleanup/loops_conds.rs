@@ -537,3 +537,146 @@ pub(crate) fn canonicalize_minmax_conditional_returns(stmts: &mut Vec<HirStmt>) 
 
     changed
 }
+
+/// Ghidra `RuleConditionalMove` analog: convert
+/// `if (cond) { x = A; } else { x = B; }` → `x = cond ? A : B`
+/// when both branches are single, side-effect-free assignments to the
+/// same variable.
+///
+/// This improves readability for x86/x86-64 CMOVcc patterns.
+/// Returns true if any change was made.
+pub(crate) fn conditional_select_pass(stmts: &mut Vec<HirStmt>) -> bool {
+    let mut changed = false;
+    let mut idx = 0;
+    while idx < stmts.len() {
+        // Check for a convertible If, then decide.
+        let is_convertible = matches!(&stmts[idx], HirStmt::If { .. });
+        if is_convertible {
+            // Temporarily take ownership to avoid borrow conflicts.
+            let stmt = std::mem::replace(&mut stmts[idx], HirStmt::Break);
+            if let HirStmt::If { cond, then_body, else_body } = &stmt {
+                if let Some(replacement) = try_cmov_to_select(cond, then_body, else_body) {
+                    stmts[idx] = replacement;
+                    changed = true;
+                } else {
+                    // Restore and recurse.
+                    stmts[idx] = stmt;
+                    if let HirStmt::If { then_body, else_body, .. } = &mut stmts[idx] {
+                        changed |= conditional_select_pass(then_body);
+                        changed |= conditional_select_pass(else_body);
+                    }
+                }
+            } else {
+                stmts[idx] = stmt;
+            }
+        } else {
+            match &mut stmts[idx] {
+                HirStmt::While { body, .. }
+                | HirStmt::DoWhile { body, .. }
+                | HirStmt::Block(body) => {
+                    changed |= conditional_select_pass(body);
+                }
+                HirStmt::For { init, update, body, .. } => {
+                    if let Some(init) = init {
+                        if let HirStmt::Block(b) = init.as_mut() {
+                            changed |= conditional_select_pass(b);
+                        }
+                    }
+                    if let Some(update) = update {
+                        if let HirStmt::Block(b) = update.as_mut() {
+                            changed |= conditional_select_pass(b);
+                        }
+                    }
+                    changed |= conditional_select_pass(body);
+                }
+                HirStmt::Switch { cases, default, .. } => {
+                    for case in cases {
+                        changed |= conditional_select_pass(&mut case.body);
+                    }
+                    changed |= conditional_select_pass(default);
+                }
+                _ => {}
+            }
+        }
+        idx += 1;
+    }
+    changed
+}
+
+/// Try to recognize:
+///   `if (cond) { lhs = then_rhs; } else { lhs = else_rhs; }`
+/// where:
+///   - `then_body` and `else_body` are each a single assignment to the same variable
+///   - neither `then_rhs` nor `else_rhs` has side effects
+///   - `then_rhs` and `else_rhs` are cheap to inline (no calls)
+///
+/// Returns `HirStmt::Assign { lhs, rhs: Select { cond, then_expr, else_expr } }` if matched.
+fn try_cmov_to_select(
+    cond: &HirExpr,
+    then_body: &[HirStmt],
+    else_body: &[HirStmt],
+) -> Option<HirStmt> {
+    // Both branches must be a single assignment.
+    let (then_lhs, then_rhs) = single_assign(then_body)?;
+    let (else_lhs, else_rhs) = single_assign(else_body)?;
+
+    // Must assign to the same variable.
+    if then_lhs != else_lhs {
+        return None;
+    }
+
+    // Neither RHS may have side effects.
+    if expr_has_side_effects(then_rhs) || expr_has_side_effects(else_rhs) {
+        return None;
+    }
+
+    // The condition itself must not have side effects.
+    if expr_has_side_effects(cond) {
+        return None;
+    }
+
+    // Cheap inline candidates only (avoid large expressions in ternaries).
+    if !expr_is_low_cost_inline_candidate(then_rhs)
+        || !expr_is_low_cost_inline_candidate(else_rhs)
+    {
+        return None;
+    }
+
+    let result_ty = expr_nir_type(then_rhs).or_else(|| expr_nir_type(else_rhs))?;
+
+    Some(HirStmt::Assign {
+        lhs: HirLValue::Var(then_lhs.to_string()),
+        rhs: HirExpr::Select {
+            cond: Box::new(cond.clone()),
+            then_expr: Box::new(then_rhs.clone()),
+            else_expr: Box::new(else_rhs.clone()),
+            ty: result_ty,
+        },
+    })
+}
+
+fn single_assign(body: &[HirStmt]) -> Option<(&str, &HirExpr)> {
+    match body {
+        [HirStmt::Assign {
+            lhs: HirLValue::Var(name),
+            rhs,
+        }] => Some((name.as_str(), rhs)),
+        _ => None,
+    }
+}
+
+fn expr_nir_type(expr: &HirExpr) -> Option<NirType> {
+    match expr {
+        HirExpr::Const(_, ty) => Some(ty.clone()),
+        HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) => None,
+        HirExpr::Cast { ty, .. } => Some(ty.clone()),
+        HirExpr::Binary { ty, .. } => Some(ty.clone()),
+        HirExpr::Unary { ty, .. } => Some(ty.clone()),
+        HirExpr::Load { ty, .. } => Some(ty.clone()),
+        HirExpr::Select { ty, .. } => Some(ty.clone()),
+        HirExpr::Index { elem_ty, .. } => Some(elem_ty.clone()),
+        HirExpr::PtrOffset { .. } => None,
+        HirExpr::Call { ty, .. } => Some(ty.clone()),
+        HirExpr::AggregateCopy { .. } => None,
+    }
+}

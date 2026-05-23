@@ -14,6 +14,7 @@ use super::super::arith::{
 use super::super::cleanup::single_pred_label_inline;
 use super::super::cleanup::{
     canonicalize_minmax_conditional_returns, cast_elision_pass, cleanup_redundant_boundary_labels,
+    conditional_select_pass,
     collapse_common_exit_guard_chain, collapse_redundant_conditional_returns,
     collapse_trivial_assign_returns, collapse_trivial_pointer_alias_bindings,
     elide_unused_popcount_assigns, eliminate_dead_local_clobber_assigns,
@@ -2103,6 +2104,10 @@ fn cleanup_stmt_list_with_options_and_preserved(
         if canonicalize_minmax_conditional_returns(stmts) {
             changed = true;
             last_changed_pass = Some("canonicalize_minmax_conditional_returns");
+        }
+        if conditional_select_pass(stmts) {
+            changed = true;
+            last_changed_pass = Some("conditional_select_pass");
         }
         if collapse_redundant_conditional_returns(stmts) {
             changed = true;

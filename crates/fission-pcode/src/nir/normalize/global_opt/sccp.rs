@@ -262,6 +262,79 @@ fn eval_truth(expr: &HirExpr, env: &ConstEnv) -> Option<bool> {
     Some(v != 0)
 }
 
+/// Ghidra ActionConditionalConst analog: given a branch condition, derive
+/// constant bindings that are known to hold in the then/else branches.
+///
+/// Returns `(then_bindings, else_bindings)` where each binding is `(name, value, ty)`.
+///
+/// Handles:
+/// - `x == K`  → then: x=K
+/// - `x != K`  → else: x=K
+/// - `!(x == K)` → else: x=K (same as x != K)
+/// - `cond1 && cond2` → then: union of both
+fn derive_branch_constants(
+    cond: &HirExpr,
+) -> (Vec<(String, i64, NirType)>, Vec<(String, i64, NirType)>) {
+    let mut then_bindings: Vec<(String, i64, NirType)> = Vec::new();
+    let mut else_bindings: Vec<(String, i64, NirType)> = Vec::new();
+    extract_branch_constants(cond, false, &mut then_bindings, &mut else_bindings);
+    (then_bindings, else_bindings)
+}
+
+fn extract_branch_constants(
+    cond: &HirExpr,
+    negated: bool,
+    then_bindings: &mut Vec<(String, i64, NirType)>,
+    else_bindings: &mut Vec<(String, i64, NirType)>,
+) {
+    match cond {
+        // NOT: flip then/else roles.
+        HirExpr::Unary {
+            op: HirUnaryOp::Not,
+            expr: inner,
+            ..
+        } => {
+            extract_branch_constants(inner, !negated, then_bindings, else_bindings);
+        }
+        // x == K or K == x  → then: x=K ; x != K or K != x → else: x=K
+        HirExpr::Binary {
+            op: op @ (HirBinaryOp::Eq | HirBinaryOp::Ne),
+            lhs,
+            rhs,
+            ..
+        } => {
+            let (var_name, const_val, ty) = match (lhs.as_ref(), rhs.as_ref()) {
+                (HirExpr::Var(name), HirExpr::Const(k, ty)) => {
+                    (name.clone(), *k, ty.clone())
+                }
+                (HirExpr::Const(k, ty), HirExpr::Var(name)) => {
+                    (name.clone(), *k, ty.clone())
+                }
+                _ => return,
+            };
+            // For `==`: const holds in then-branch (unless negated → else-branch).
+            // For `!=`: const holds in else-branch.
+            let const_in_then = matches!(op, HirBinaryOp::Eq) ^ negated;
+            if const_in_then {
+                then_bindings.push((var_name, const_val, ty));
+            } else {
+                else_bindings.push((var_name, const_val, ty));
+            }
+        }
+        // cond_a && cond_b → then: both hold; else: nothing (either could be false).
+        HirExpr::Binary {
+            op: HirBinaryOp::And,
+            lhs,
+            rhs,
+            ..
+        } if !negated => {
+            extract_branch_constants(lhs, false, then_bindings, else_bindings);
+            extract_branch_constants(rhs, false, then_bindings, else_bindings);
+        }
+        _ => {}
+    }
+}
+
 fn sccp_transform_stmts(
     stmts: &mut Vec<HirStmt>,
     env: &mut ConstEnv,
@@ -333,8 +406,18 @@ fn sccp_stmt(stmt: &mut HirStmt, env: &mut ConstEnv, goto_targets: &HashSet<Stri
                         continue;
                     }
                     None => {
+                        // Ghidra ActionConditionalConst: derive constants from the branch condition.
+                        // Pattern: `if (x == K)` → inside then-branch, x=K
+                        // Pattern: `if (x != K)` → inside else-branch, x=K
+                        let (then_extra, else_extra) = derive_branch_constants(cond);
                         let mut e1 = pre.clone();
                         let mut e2 = pre.clone();
+                        for (name, val, ty) in then_extra {
+                            e1.insert(name, (val, ty));
+                        }
+                        for (name, val, ty) in else_extra {
+                            e2.insert(name, (val, ty));
+                        }
                         changed |= sccp_transform_stmts(then_body, &mut e1, goto_targets);
                         changed |= sccp_transform_stmts(else_body, &mut e2, goto_targets);
                         *env = merge_env(&e1, &e2);
