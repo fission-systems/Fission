@@ -1412,3 +1412,248 @@ fn multiblock_infloop_preview_lowers_two_block_infinite_loop() {
         "expected pointer store in loop body: {code}"
     );
 }
+
+#[test]
+fn for_loop_non_last_update_success() {
+    let counter = reg(0x18, 4);
+    let lt_cond = uniq(0x701, 1);
+    let ptr = uniq(0x702, 8);
+    let func = PcodeFunction {
+        blocks: vec![
+            // block 0: init — counter = 0; Branch(→ head)
+            PcodeBasicBlock {
+                index: 0,
+                start_address: 0x8000,
+                successors: vec![],
+                ops: vec![
+                    PcodeOp {
+                        seq_num: 0,
+                        opcode: PcodeOpcode::Copy,
+                        address: 0x8000,
+                        output: Some(counter.clone()),
+                        inputs: vec![cst(0, 4)],
+                        asm_mnemonic: None,
+                    },
+                    PcodeOp {
+                        seq_num: 1,
+                        opcode: PcodeOpcode::Branch,
+                        address: 0x8001,
+                        output: None,
+                        inputs: vec![cst(0x8010, 8)],
+                        asm_mnemonic: None,
+                    },
+                ],
+            },
+            // block 1: head — compare + CBranch(cond → exit, fallthrough → body)
+            PcodeBasicBlock {
+                index: 1,
+                start_address: 0x8010,
+                successors: vec![],
+                ops: vec![
+                    PcodeOp {
+                        seq_num: 0,
+                        opcode: PcodeOpcode::IntLessEqual,
+                        address: 0x8010,
+                        output: Some(lt_cond.clone()),
+                        inputs: vec![reg(0x08, 4), counter.clone()],
+                        asm_mnemonic: None,
+                    },
+                    PcodeOp {
+                        seq_num: 1,
+                        opcode: PcodeOpcode::CBranch,
+                        address: 0x8011,
+                        output: None,
+                        inputs: vec![cst(0x8030, 8), lt_cond.clone()],
+                        asm_mnemonic: None,
+                    },
+                ],
+            },
+            // block 2: body — update first, store second (no counter use)
+            PcodeBasicBlock {
+                index: 2,
+                start_address: 0x8020,
+                successors: vec![],
+                ops: vec![
+                    PcodeOp {
+                        seq_num: 0,
+                        opcode: PcodeOpcode::IntAdd,
+                        address: 0x8020,
+                        output: Some(counter.clone()),
+                        inputs: vec![counter.clone(), cst(1, 4)],
+                        asm_mnemonic: None,
+                    },
+                    PcodeOp {
+                        seq_num: 1,
+                        opcode: PcodeOpcode::IntAdd,
+                        address: 0x8021,
+                        output: Some(ptr.clone()),
+                        inputs: vec![reg(0x28, 8), cst(-0x10_i64, 8)],
+                        asm_mnemonic: None,
+                    },
+                    PcodeOp {
+                        seq_num: 2,
+                        opcode: PcodeOpcode::Store,
+                        address: 0x8022,
+                        output: None,
+                        inputs: vec![cst(0, 4), ptr.clone(), cst(42, 4)],
+                        asm_mnemonic: None,
+                    },
+                    PcodeOp {
+                        seq_num: 3,
+                        opcode: PcodeOpcode::Branch,
+                        address: 0x8023,
+                        output: None,
+                        inputs: vec![cst(0x8010, 8)],
+                        asm_mnemonic: None,
+                    },
+                ],
+            },
+            // block 3: exit
+            PcodeBasicBlock {
+                index: 3,
+                start_address: 0x8030,
+                successors: vec![],
+                ops: vec![PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::Return,
+                    address: 0x8030,
+                    output: None,
+                    inputs: vec![cst(0, 8), cst(0, 4)],
+                    asm_mnemonic: None,
+                }],
+            },
+        ],
+    };
+
+    let code = render_mlil_preview(&func, "non_last_update_success_fn", 0x8000, &preview_options())
+        .expect("preview render");
+    // Should be successfully folded into a C-style for loop!
+    assert!(code.contains("for ("), "expected for loop: {code}");
+    assert!(code.contains("rbx = rbx + 1") || code.contains("rbx++") || code.contains("rbx += 1"), "expected update in header: {code}");
+    assert!(code.contains("local_10 = 42;"), "expected body store: {code}");
+}
+
+#[test]
+fn for_loop_non_last_update_failure() {
+    let counter = reg(0x18, 4);
+    let lt_cond = uniq(0x701, 1);
+    let ptr = uniq(0x702, 8);
+    let func = PcodeFunction {
+        blocks: vec![
+            // block 0: init — counter = 0; Branch(→ head)
+            PcodeBasicBlock {
+                index: 0,
+                start_address: 0x9000,
+                successors: vec![],
+                ops: vec![
+                    PcodeOp {
+                        seq_num: 0,
+                        opcode: PcodeOpcode::Copy,
+                        address: 0x9000,
+                        output: Some(counter.clone()),
+                        inputs: vec![cst(0, 4)],
+                        asm_mnemonic: None,
+                    },
+                    PcodeOp {
+                        seq_num: 1,
+                        opcode: PcodeOpcode::Branch,
+                        address: 0x9001,
+                        output: None,
+                        inputs: vec![cst(0x9010, 8)],
+                        asm_mnemonic: None,
+                    },
+                ],
+            },
+            // block 1: head — compare + CBranch(cond → exit, fallthrough → body)
+            PcodeBasicBlock {
+                index: 1,
+                start_address: 0x9010,
+                successors: vec![],
+                ops: vec![
+                    PcodeOp {
+                        seq_num: 0,
+                        opcode: PcodeOpcode::IntLessEqual,
+                        address: 0x9010,
+                        output: Some(lt_cond.clone()),
+                        inputs: vec![reg(0x08, 4), counter.clone()],
+                        asm_mnemonic: None,
+                    },
+                    PcodeOp {
+                        seq_num: 1,
+                        opcode: PcodeOpcode::CBranch,
+                        address: 0x9011,
+                        output: None,
+                        inputs: vec![cst(0x9030, 8), lt_cond.clone()],
+                        asm_mnemonic: None,
+                    },
+                ],
+            },
+            // block 2: body — update first, store second (uses counter!)
+            PcodeBasicBlock {
+                index: 2,
+                start_address: 0x9020,
+                successors: vec![],
+                ops: vec![
+                    PcodeOp {
+                        seq_num: 0,
+                        opcode: PcodeOpcode::IntAdd,
+                        address: 0x9020,
+                        output: Some(counter.clone()),
+                        inputs: vec![counter.clone(), reg(0x10, 4)],
+                        asm_mnemonic: None,
+                    },
+                    PcodeOp {
+                        seq_num: 1,
+                        opcode: PcodeOpcode::IntAdd,
+                        address: 0x9021,
+                        output: Some(ptr.clone()),
+                        inputs: vec![reg(0x28, 8), cst(-0x10_i64, 8)],
+                        asm_mnemonic: None,
+                    },
+                    PcodeOp {
+                        seq_num: 2,
+                        opcode: PcodeOpcode::Store,
+                        address: 0x9022,
+                        output: None,
+                        // Stores counter, so counter is USED after update!
+                        inputs: vec![cst(0, 4), ptr.clone(), counter.clone()],
+                        asm_mnemonic: None,
+                    },
+                    PcodeOp {
+                        seq_num: 3,
+                        opcode: PcodeOpcode::Branch,
+                        address: 0x9023,
+                        output: None,
+                        inputs: vec![cst(0x9010, 8)],
+                        asm_mnemonic: None,
+                    },
+                ],
+            },
+            // block 3: exit
+            PcodeBasicBlock {
+                index: 3,
+                start_address: 0x9030,
+                successors: vec![],
+                ops: vec![PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::Return,
+                    address: 0x9030,
+                    output: None,
+                    inputs: vec![cst(0, 8), cst(0, 4)],
+                    asm_mnemonic: None,
+                }],
+            },
+        ],
+    };
+
+    let code = render_mlil_preview(&func, "non_last_update_failure_fn", 0x9000, &preview_options())
+        .expect("preview render");
+    // Should NOT have the update statement in the third clause of the for loop!
+    assert!(code.contains("for ("), "expected for loop: {code}");
+    assert!(code.contains("for (rbx = 0; rbx < param_1; )") || code.contains("for (rbx = 0; rbx < param_1;)"), "expected empty update in header: {code}");
+    // Verify that the update statement is still in the loop body!
+    assert!(code.contains("rbx += param_2") || code.contains("rbx = rbx + param_2"), "expected update statement in body: {code}");
+    assert!(code.contains("local_10 = rbx;"), "expected body store: {code}");
+}
+
+

@@ -607,6 +607,37 @@ fn is_iv_update(expr: &HirExpr, var: &str, loop_variant: &HashSet<String>) -> bo
         || is_affine_mul_add_update(expr, var, loop_variant)
 }
 
+/// Like `is_iv_update`, but resolves through intermediate variable definitions
+/// in the loop body.  For example, given `i = t` where `t = i + 1`, the direct
+/// check fails (the RHS is just `Var("t")`), but this function resolves `t`
+/// through its unique definition and finds the `i + 1` recurrence.
+fn is_iv_update_dataflow(
+    expr: &HirExpr,
+    var: &str,
+    loop_variant: &HashSet<String>,
+    body: &[HirStmt],
+    depth: usize,
+) -> bool {
+    if depth >= 4 {
+        return false;
+    }
+    // Direct check first.
+    if is_iv_update(expr, var, loop_variant) {
+        return true;
+    }
+    // If expr is a single variable (possibly wrapped in casts), resolve through
+    // its unique definition in the loop body.
+    match strip_casts(expr) {
+        HirExpr::Var(name) if name != var => {
+            if let Some(def_expr) = find_unique_definition_in_body(body, name) {
+                return is_iv_update_dataflow(def_expr, var, loop_variant, body, depth + 1);
+            }
+            false
+        }
+        _ => false,
+    }
+}
+
 /// Return true if `expr` is of the form `Var(v) op k` or `k op Var(v)` where
 /// `op ∈ {Add, Sub}` and `k` is loop-invariant.
 fn is_linear_update_of(expr: &HirExpr, var: &str, loop_variant: &HashSet<String>) -> bool {
@@ -1303,11 +1334,214 @@ fn rewrite_cursor_body_to_index(body: &mut [HirStmt], cursor: &str, index_name: 
         .all(|stmt| rewrite_cursor_stmt_to_index(stmt, cursor, index_name))
 }
 
+/// Simple check to find the single top-level assignment to a variable in the loop body.
+fn find_iv_update_simple(body: &[HirStmt], var: &str) -> Option<usize> {
+    let mut found: Option<usize> = None;
+    for (i, stmt) in body.iter().enumerate() {
+        if let HirStmt::Assign {
+            lhs: HirLValue::Var(lhs_name),
+            ..
+        } = stmt
+        {
+            if lhs_name == var {
+                if found.is_some() {
+                    return None; // multiple updates → bail
+                }
+                found = Some(i);
+            }
+        }
+    }
+    found
+}
+
+/// Find a unique definition of a variable inside the loop body,
+/// recursively checking top-level statements, nested blocks, and If statement branches.
+fn find_unique_definition_in_body<'a>(
+    body: &'a [HirStmt],
+    var: &str,
+) -> Option<&'a HirExpr> {
+    let mut found: Option<&'a HirExpr> = None;
+    for stmt in body {
+        if let Some(rhs) = find_assignment_in_stmt(stmt, var) {
+            if found.is_some() {
+                return None; // multiple definitions → not unique
+            }
+            found = Some(rhs);
+        }
+    }
+    found
+}
+
+fn find_assignment_in_stmt<'a>(stmt: &'a HirStmt, var: &str) -> Option<&'a HirExpr> {
+    match stmt {
+        HirStmt::Assign { lhs: HirLValue::Var(lhs_name), rhs } if lhs_name == var => Some(rhs),
+        HirStmt::Block(body) => {
+            let mut found: Option<&'a HirExpr> = None;
+            for s in body {
+                if let Some(rhs) = find_assignment_in_stmt(s, var) {
+                    if found.is_some() {
+                        return None;
+                    }
+                    found = Some(rhs);
+                }
+            }
+            found
+        }
+        HirStmt::If { then_body, else_body, .. } => {
+            let mut found: Option<&'a HirExpr> = None;
+            for s in then_body.iter().chain(else_body.iter()) {
+                if let Some(rhs) = find_assignment_in_stmt(s, var) {
+                    if found.is_some() {
+                        return None;
+                    }
+                    found = Some(rhs);
+                }
+            }
+            found
+        }
+        _ => None,
+    }
+}
+
+/// Recursively checks if `loop_var` feeds the `expr` (iterator statement RHS) using dataflow path-walking.
+fn test_iterate_form(
+    body: &[HirStmt],
+    update_idx: usize,
+    loop_var: &str,
+) -> bool {
+    let update_stmt = &body[update_idx];
+    let HirStmt::Assign { lhs: HirLValue::Var(lhs_name), rhs } = update_stmt else {
+        return false;
+    };
+    if lhs_name != loop_var {
+        return false;
+    }
+
+    let mut visited = HashSet::new();
+    test_iterate_form_expr(body, rhs, loop_var, &mut visited, 0)
+}
+
+fn test_iterate_form_expr(
+    body: &[HirStmt],
+    expr: &HirExpr,
+    loop_var: &str,
+    visited: &mut HashSet<String>,
+    depth: usize,
+) -> bool {
+    if depth >= 4 {
+        return false;
+    }
+
+    let mut vars = HashSet::new();
+    expr_vars(expr, &mut vars);
+
+    if vars.contains(loop_var) {
+        return true;
+    }
+
+    for var in vars {
+        if visited.insert(var.clone()) {
+            if let Some(def_expr) = find_unique_definition_in_body(body, &var) {
+                if test_iterate_form_expr(body, def_expr, loop_var, visited, depth + 1) {
+                    return true;
+                }
+            }
+            visited.remove(&var);
+        }
+    }
+
+    false
+}
+
+/// Robust dataflow path-walking starting from loop condition variables
+/// to identify the actual controlling loop induction variable.
+fn find_loop_variable_dataflow(
+    stmts: &[HirStmt],
+    loop_idx: usize,
+    body: &[HirStmt],
+    cond: &HirExpr,
+    loop_variant: &HashSet<String>,
+) -> Option<(String, usize)> {
+    let mut cond_vars = HashSet::new();
+    expr_vars(cond, &mut cond_vars);
+
+    for start_var in cond_vars {
+        let mut visited = HashSet::new();
+        if let Some(res) = path_walk_var(
+            stmts,
+            loop_idx,
+            body,
+            &start_var,
+            loop_variant,
+            &mut visited,
+            0,
+        ) {
+            return Some(res);
+        }
+    }
+    None
+}
+
+fn path_walk_var(
+    stmts: &[HirStmt],
+    loop_idx: usize,
+    body: &[HirStmt],
+    curr_var: &str,
+    loop_variant: &HashSet<String>,
+    visited: &mut HashSet<String>,
+    depth: usize,
+) -> Option<(String, usize)> {
+    if depth >= 4 {
+        return None;
+    }
+    if !visited.insert(curr_var.to_string()) {
+        return None;
+    }
+
+    let has_init = find_init_before(stmts, loop_idx, curr_var).is_some();
+    let has_update = find_iv_update_simple(body, curr_var).is_some();
+
+    if has_init && has_update {
+        let update_idx = find_iv_update_simple(body, curr_var).unwrap();
+        let update_stmt = &body[update_idx];
+        if let HirStmt::Assign { rhs, .. } = update_stmt {
+            if is_iv_update_dataflow(rhs, curr_var, loop_variant, body, 0) && test_iterate_form(body, update_idx, curr_var) {
+                return Some((curr_var.to_string(), update_idx));
+            }
+        }
+    }
+
+    // Otherwise, walk the definitions of curr_var to find its inputs.
+    if let Some(def_expr) = find_unique_definition_in_body(body, curr_var) {
+        let mut next_vars = HashSet::new();
+        expr_vars(def_expr, &mut next_vars);
+        for next_var in next_vars {
+            if let Some(res) = path_walk_var(
+                stmts,
+                loop_idx,
+                body,
+                &next_var,
+                loop_variant,
+                visited,
+                depth + 1,
+            ) {
+                return Some(res);
+            }
+        }
+    }
+
+    visited.remove(curr_var);
+    None
+}
+
 /// Try to upgrade a `While` loop at `stmts[loop_idx]` to a `For` loop using
 /// SCEV-lite IV detection.  Returns `true` if a transformation was applied.
 fn try_scev_upgrade(stmts: &mut Vec<HirStmt>, loop_idx: usize) -> bool {
-    let (cond, body) = match &stmts[loop_idx] {
-        HirStmt::While { cond, body } => (cond.clone(), body.clone()),
+    let (is_for, init, cond, body) = match &stmts[loop_idx] {
+        HirStmt::While { cond, body } => (false, None, cond.clone(), body.clone()),
+        HirStmt::For { init, cond, update, body } if update.is_none() => {
+            (true, init.clone(), cond.as_ref().cloned().unwrap(), body.clone())
+        }
         _ => return false,
     };
 
@@ -1316,27 +1550,40 @@ fn try_scev_upgrade(stmts: &mut Vec<HirStmt>, loop_idx: usize) -> bool {
         return false;
     }
 
-    let mut cond_vars = HashSet::new();
-    expr_vars(&cond, &mut cond_vars);
-    if cond_vars.is_empty() {
-        return false;
-    }
-
     let loop_variant = loop_variant_vars(&body);
 
-    for var in &cond_vars {
-        let (update_idx, is_last) = match find_iv_update(&body, var, &loop_variant) {
-            Some(v) => v,
-            None => continue,
-        };
-        // Update must be the last statement in body (or we'd change semantics).
-        if !is_last {
-            continue;
-        }
+    let (var, update_idx) = match find_loop_variable_dataflow(stmts, loop_idx, &body, &cond, &loop_variant) {
+        Some(res) => res,
+        None => return false,
+    };
 
-        let init_idx = match find_init_before(stmts, loop_idx, var) {
+    // Update must be the last statement in body (or we'd change semantics).
+    let is_last = update_idx == body.len() - 1;
+    if !is_last {
+        let has_subsequent_uses = body[update_idx + 1..]
+            .iter()
+            .any(|stmt| count_var_uses_in_stmt(stmt, &var) > 0);
+        if has_subsequent_uses {
+            return false;
+        }
+    }
+
+    if is_for {
+        let mut new_body = body.clone();
+        new_body.remove(update_idx);
+        let update_stmt = body[update_idx].clone();
+
+        stmts[loop_idx] = HirStmt::For {
+            init,
+            cond: Some(cond),
+            update: Some(Box::new(update_stmt)),
+            body: new_body,
+        };
+        return true;
+    } else {
+        let init_idx = match find_init_before(stmts, loop_idx, &var) {
             Some(i) => i,
-            None => continue,
+            None => return false,
         };
 
         // Apply transformation.
@@ -1358,7 +1605,6 @@ fn try_scev_upgrade(stmts: &mut Vec<HirStmt>, loop_idx: usize) -> bool {
         };
         return true;
     }
-    false
 }
 
 fn try_guarded_dowhile_pointer_iv_upgrade(
@@ -1933,5 +2179,109 @@ mod tests {
 
         assert!(!apply_iv_recovery_pass(&mut func));
         assert!(matches!(func.body[0], HirStmt::Label(_)));
+    }
+
+    #[test]
+    fn for_loop_dataflow_simple() {
+        // init: i = 0
+        // while (i < n) {
+        //   t = i + 1;
+        //   i = t;
+        // }
+        // The dataflow walk should trace i through t back to i + 1, verifying that i is loop-carried
+        // and has a valid linear iteration update!
+        let mut func = HirFunction {
+            name: "dataflow_loop".to_string(),
+            params: Vec::new(),
+            locals: Vec::new(),
+            return_type: NirType::Unknown,
+            surface_return_type_name: None,
+            body: vec![
+                HirStmt::Assign {
+                    lhs: HirLValue::Var("i".to_string()),
+                    rhs: const_i(0),
+                },
+                HirStmt::While {
+                    cond: HirExpr::Binary {
+                        op: HirBinaryOp::Lt,
+                        lhs: Box::new(var("i")),
+                        rhs: Box::new(var("n")),
+                        ty: NirType::Bool,
+                    },
+                    body: vec![
+                        HirStmt::Assign {
+                            lhs: HirLValue::Var("t".to_string()),
+                            rhs: add(var("i"), const_i(1), int(64, true)),
+                        },
+                        HirStmt::Assign {
+                            lhs: HirLValue::Var("i".to_string()),
+                            rhs: var("t"),
+                        },
+                    ],
+                },
+            ],
+            ..Default::default()
+        };
+
+        assert!(apply_iv_recovery_pass(&mut func));
+        let HirStmt::For { init, cond, update, body } = &func.body[0] else {
+            panic!("Expected loop to become a For loop!");
+        };
+        assert!(init.is_some());
+        assert!(cond.is_some());
+        assert!(update.is_some());
+        // The body should have had the update statement (i = t) removed, and only contain t = i + 1.
+        assert_eq!(body.len(), 1);
+        assert!(matches!(
+            &body[0],
+            HirStmt::Assign {
+                lhs: HirLValue::Var(lhs),
+                ..
+            } if lhs == "t"
+        ));
+    }
+
+    #[test]
+    fn for_loop_dataflow_invalid_no_loop_var() {
+        // init: i = 0
+        // while (i < n) {
+        //   t = 42;
+        //   i = t;
+        // }
+        // This is not a linear/affine recurrence of i, so it should fail to upgrade!
+        let mut func = HirFunction {
+            name: "invalid_dataflow_loop".to_string(),
+            params: Vec::new(),
+            locals: Vec::new(),
+            return_type: NirType::Unknown,
+            surface_return_type_name: None,
+            body: vec![
+                HirStmt::Assign {
+                    lhs: HirLValue::Var("i".to_string()),
+                    rhs: const_i(0),
+                },
+                HirStmt::While {
+                    cond: HirExpr::Binary {
+                        op: HirBinaryOp::Lt,
+                        lhs: Box::new(var("i")),
+                        rhs: Box::new(var("n")),
+                        ty: NirType::Bool,
+                    },
+                    body: vec![
+                        HirStmt::Assign {
+                            lhs: HirLValue::Var("t".to_string()),
+                            rhs: const_i(42),
+                        },
+                        HirStmt::Assign {
+                            lhs: HirLValue::Var("i".to_string()),
+                            rhs: var("t"),
+                        },
+                    ],
+                },
+            ],
+            ..Default::default()
+        };
+
+        assert!(!apply_iv_recovery_pass(&mut func));
     }
 }
