@@ -338,6 +338,391 @@ fn recover_condition_expr(expr: &mut HirExpr, binding_types: &HashMap<String, Ni
     changed
 }
 
+// ── PtrOffset chaining / folding ──────────────────────────────────────────────
+
+/// Fold `PtrOffset(PtrOffset(base, a), b)` → `PtrOffset(base, a+b)`.
+/// Also folds `PtrOffset(base, 0)` → `base`.
+/// Returns `true` if any rewrite occurred.
+fn fold_ptr_offset_chains(expr: &mut HirExpr) -> bool {
+    let mut changed = false;
+    // Recurse children first.
+    match expr {
+        HirExpr::PtrOffset { base, .. } => {
+            changed |= fold_ptr_offset_chains(base);
+        }
+        HirExpr::Binary { lhs, rhs, .. } => {
+            changed |= fold_ptr_offset_chains(lhs);
+            changed |= fold_ptr_offset_chains(rhs);
+        }
+        HirExpr::Cast { expr: inner, .. } | HirExpr::Unary { expr: inner, .. } => {
+            changed |= fold_ptr_offset_chains(inner);
+        }
+        HirExpr::Load { ptr, .. } => {
+            changed |= fold_ptr_offset_chains(ptr);
+        }
+        HirExpr::Index { base, index, .. } => {
+            changed |= fold_ptr_offset_chains(base);
+            changed |= fold_ptr_offset_chains(index);
+        }
+        HirExpr::Call { args, .. } => {
+            for a in args.iter_mut() {
+                changed |= fold_ptr_offset_chains(a);
+            }
+        }
+        _ => {}
+    }
+    // Now try to fold this node.
+    if let HirExpr::PtrOffset { base, offset } = expr {
+        // PtrOffset(base, 0) → base
+        if *offset == 0 {
+            let inner = *base.clone();
+            *expr = inner;
+            return true;
+        }
+        // PtrOffset(PtrOffset(inner, a), b) → PtrOffset(inner, a+b)
+        if let HirExpr::PtrOffset {
+            base: inner,
+            offset: inner_offset,
+        } = base.as_mut()
+        {
+            let combined = inner_offset.saturating_add(*offset);
+            let new_inner = *inner.clone();
+            *expr = HirExpr::PtrOffset {
+                base: Box::new(new_inner),
+                offset: combined,
+            };
+            changed = true;
+        }
+    }
+    changed
+}
+
+// ── Multi-level ADD tree flattening (Ghidra AddTreeState::spanAddTree analog) ─
+
+/// A term collected from a flattened ADD tree.
+#[derive(Debug, Clone)]
+enum AddTerm {
+    /// A compile-time constant byte offset (positive or negative).
+    Const(i64),
+    /// An index expression with a stride (bytes per element).
+    /// e.g. `Mul(i, 4)` → `Index { expr: i, stride: 4 }`.
+    Index { expr: HirExpr, stride: i64 },
+    /// Any other (non-constant, non-index) additive term.
+    Other(HirExpr),
+}
+
+/// Recursively collect all additive terms from an ADD/SUB tree.
+/// `neg` tracks whether the current subtree is negated.
+fn collect_add_terms(expr: &HirExpr, neg: bool, terms: &mut Vec<AddTerm>) {
+    match expr {
+        HirExpr::Binary {
+            op: HirBinaryOp::Add,
+            lhs,
+            rhs,
+            ..
+        } => {
+            collect_add_terms(lhs, neg, terms);
+            collect_add_terms(rhs, neg, terms);
+        }
+        HirExpr::Binary {
+            op: HirBinaryOp::Sub,
+            lhs,
+            rhs,
+            ..
+        } => {
+            collect_add_terms(lhs, neg, terms);
+            collect_add_terms(rhs, !neg, terms);
+        }
+        HirExpr::Const(k, _) => {
+            let v = if neg { k.wrapping_neg() } else { *k };
+            terms.push(AddTerm::Const(v));
+        }
+        HirExpr::Binary {
+            op: HirBinaryOp::Mul,
+            lhs,
+            rhs,
+            ..
+        } => {
+            // Recognise `idx * stride` or `stride * idx`.
+            let (idx, stride) = match (lhs.as_ref(), rhs.as_ref()) {
+                (_, HirExpr::Const(s, _)) => (lhs.as_ref().clone(), *s),
+                (HirExpr::Const(s, _), _) => (rhs.as_ref().clone(), *s),
+                _ => {
+                    terms.push(AddTerm::Other(if neg {
+                        HirExpr::Unary {
+                            op: HirUnaryOp::Neg,
+                            expr: Box::new(expr.clone()),
+                            ty: NirType::Unknown,
+                        }
+                    } else {
+                        expr.clone()
+                    }));
+                    return;
+                }
+            };
+            let s = if neg { stride.wrapping_neg() } else { stride };
+            terms.push(AddTerm::Index { expr: idx, stride: s });
+        }
+        other => {
+            terms.push(AddTerm::Other(if neg {
+                HirExpr::Unary {
+                    op: HirUnaryOp::Neg,
+                    expr: Box::new(other.clone()),
+                    ty: NirType::Unknown,
+                }
+            } else {
+                other.clone()
+            }));
+        }
+    }
+}
+
+/// Attempt to recover a multi-level pointer ADD tree as a compact pointer expression.
+///
+/// This is Fission's HIR analog of Ghidra's `AddTreeState::spanAddTree` + `buildTree()`.
+///
+/// Given `Add*(ptr, terms...)` where `ptr` is pointer-typed and `terms` come from a
+/// flattened ADD tree, we:
+/// 1. Fold all constant byte terms into one `const_offset`.
+/// 2. Select the best index term (stride matching elem size).
+/// 3. Build: `PtrOffset(ptr[index], field_offset)` or `PtrOffset(ptr, offset)`.
+///
+/// Returns `Some(new_expr)` if a more compact form was produced, `None` otherwise.
+fn try_recover_ptr_add_tree(
+    ptr_expr: &HirExpr,
+    ptr_ty: &NirType,
+    non_ptr_terms: &[HirExpr],
+    binding_types: &HashMap<String, NirType>,
+) -> Option<HirExpr> {
+    if non_ptr_terms.is_empty() {
+        return None;
+    }
+
+    // Collect all additive terms from the non-ptr side as a flat list.
+    let mut terms: Vec<AddTerm> = Vec::new();
+    for t in non_ptr_terms {
+        collect_add_terms(t, false, &mut terms);
+    }
+
+    // Sum constant byte terms.
+    let mut const_offset: i64 = 0;
+    let mut index_terms: Vec<(HirExpr, i64)> = Vec::new(); // (idx_expr, stride)
+    let mut other_terms: Vec<HirExpr> = Vec::new();
+
+    for term in terms {
+        match term {
+            AddTerm::Const(k) => const_offset = const_offset.wrapping_add(k),
+            AddTerm::Index { expr, stride } => index_terms.push((expr, stride)),
+            AddTerm::Other(e) => other_terms.push(e),
+        }
+    }
+
+    // We only transform when there are index terms or a non-trivial constant offset,
+    // AND we have more than one term (otherwise the single-level pass already handled it).
+    let has_index = !index_terms.is_empty();
+    let has_const = const_offset != 0;
+    let has_other = !other_terms.is_empty();
+
+    // Only proceed for multi-term combinations that the single-level pass can't handle.
+    if !has_index || (!has_const && !has_other) {
+        return None;
+    }
+
+    let elem_ty = match ptr_ty {
+        NirType::Ptr(inner) => inner.as_ref().clone(),
+        _ => NirType::Unknown,
+    };
+    let elem_size = type_byte_size(&elem_ty).unwrap_or(1) as i64;
+
+    // Build the index portion (ptr + index_expr) where stride matches elem size.
+    // Pick the first matching index term; fold the rest into other_terms.
+    let mut base = ptr_expr.clone();
+    let mut remaining_index_terms: Vec<(HirExpr, i64)> = Vec::new();
+
+    for (idx_expr, stride) in index_terms {
+        let abs_stride = stride.abs();
+        let neg = stride < 0;
+        if abs_stride == elem_size || (elem_size == 1) {
+            // This index term matches the element stride → fold into ptr + idx.
+            let idx = if neg {
+                HirExpr::Unary {
+                    op: HirUnaryOp::Neg,
+                    expr: Box::new(idx_expr),
+                    ty: NirType::Unknown,
+                }
+            } else {
+                idx_expr
+            };
+            base = HirExpr::Binary {
+                op: HirBinaryOp::Add,
+                lhs: Box::new(base),
+                rhs: Box::new(idx),
+                ty: ptr_ty.clone(),
+            };
+        } else {
+            remaining_index_terms.push((HirExpr::Const(0, NirType::Unknown), stride));
+            // Re-add as Other to be summed later.
+            other_terms.push(if neg {
+                HirExpr::Unary {
+                    op: HirUnaryOp::Neg,
+                    expr: Box::new(HirExpr::Const(abs_stride, NirType::Unknown)),
+                    ty: NirType::Unknown,
+                }
+            } else {
+                HirExpr::Const(abs_stride, NirType::Unknown)
+            });
+        }
+    }
+
+    // If the base didn't change and const_offset is all we have → fall through.
+    if std::ptr::eq(&base as *const _, ptr_expr as *const _)
+        && base.structural_eq(ptr_expr)
+        && other_terms.is_empty()
+    {
+        // Would just become PtrOffset which the single-level already handles.
+        return None;
+    }
+
+    // Apply remaining other terms as additions on top of base.
+    for other in other_terms {
+        base = HirExpr::Binary {
+            op: HirBinaryOp::Add,
+            lhs: Box::new(base),
+            rhs: Box::new(other),
+            ty: ptr_ty.clone(),
+        };
+    }
+
+    // Apply field/byte offset.
+    if const_offset != 0 {
+        // Scale to element offsets if possible.
+        if const_offset % elem_size == 0 && elem_size > 1 {
+            let elem_idx = const_offset / elem_size;
+            let op = if elem_idx > 0 {
+                HirBinaryOp::Add
+            } else {
+                HirBinaryOp::Sub
+            };
+            base = HirExpr::Binary {
+                op,
+                lhs: Box::new(base),
+                rhs: Box::new(HirExpr::Const(elem_idx.abs(), NirType::Int {
+                    bits: 64,
+                    signed: false,
+                })),
+                ty: ptr_ty.clone(),
+            };
+        } else {
+            // Byte offset → emit PtrOffset.
+            base = HirExpr::PtrOffset {
+                base: Box::new(base),
+                offset: const_offset,
+            };
+        }
+    }
+
+    Some(base)
+}
+
+/// Extension to `try_recover_ptr_arith` that handles multi-level ADD trees
+/// (e.g. `ptr + idx*4 + 8` via flattening).
+fn try_recover_ptr_arith_tree(
+    expr: &HirExpr,
+    binding_types: &HashMap<String, NirType>,
+) -> Option<HirExpr> {
+    // Only applies to Add/Sub trees.
+    if !matches!(
+        expr,
+        HirExpr::Binary {
+            op: HirBinaryOp::Add | HirBinaryOp::Sub,
+            ..
+        }
+    ) {
+        return None;
+    }
+
+    // Find the pointer base (must be a leaf or Cast(ptr8, leaf)).
+    // We walk the left-most Add chain looking for a pointer.
+    let mut ptr_side: Option<(HirExpr, NirType)> = None;
+    let mut non_ptr_accum: Vec<HirExpr> = Vec::new();
+    collect_add_terms_with_ptr(expr, false, binding_types, &mut ptr_side, &mut non_ptr_accum);
+
+    let (ptr_expr, ptr_ty) = ptr_side?;
+    if non_ptr_accum.is_empty() {
+        return None;
+    }
+
+    // Only proceed if there are at least 2 non-ptr terms (otherwise single-level handles it).
+    if non_ptr_accum.len() < 2 {
+        return None;
+    }
+
+    try_recover_ptr_add_tree(&ptr_expr, &ptr_ty, &non_ptr_accum, binding_types)
+}
+
+/// Collect additive terms from a possibly-nested ADD tree, separating out the
+/// pointer base from the non-pointer terms.
+fn collect_add_terms_with_ptr(
+    expr: &HirExpr,
+    neg: bool,
+    binding_types: &HashMap<String, NirType>,
+    ptr_side: &mut Option<(HirExpr, NirType)>,
+    non_ptr: &mut Vec<HirExpr>,
+) {
+    match expr {
+        HirExpr::Binary {
+            op: HirBinaryOp::Add,
+            lhs,
+            rhs,
+            ..
+        } => {
+            collect_add_terms_with_ptr(lhs, neg, binding_types, ptr_side, non_ptr);
+            collect_add_terms_with_ptr(rhs, neg, binding_types, ptr_side, non_ptr);
+        }
+        HirExpr::Binary {
+            op: HirBinaryOp::Sub,
+            lhs,
+            rhs,
+            ..
+        } => {
+            collect_add_terms_with_ptr(lhs, neg, binding_types, ptr_side, non_ptr);
+            collect_add_terms_with_ptr(rhs, !neg, binding_types, ptr_side, non_ptr);
+        }
+        other => {
+            // Check if this is the pointer base.
+            if ptr_side.is_none() && !neg {
+                if let Some((base, ty, _)) = typed_pointer_base(other, binding_types) {
+                    *ptr_side = Some((base, ty));
+                    return;
+                }
+            }
+            // Otherwise it's an additive non-pointer term.
+            if neg {
+                // Wrap in Neg so the term stays signed.
+                non_ptr.push(HirExpr::Unary {
+                    op: HirUnaryOp::Neg,
+                    expr: Box::new(other.clone()),
+                    ty: NirType::Unknown,
+                });
+            } else {
+                non_ptr.push(other.clone());
+            }
+        }
+    }
+}
+
+/// Structural equality helper used to avoid pointless rewrites.
+trait StructuralEq {
+    fn structural_eq(&self, other: &Self) -> bool;
+}
+
+impl StructuralEq for HirExpr {
+    fn structural_eq(&self, other: &Self) -> bool {
+        // Simple pointer-identity check is fine here; this only avoids a no-op path.
+        std::ptr::eq(self as *const _, other as *const _)
+    }
+}
+
 /// Attempt to convert a pointer-arithmetic expression to a PtrOffset or Index
 /// node.  Returns `Some(new_expr)` on success; `None` means leave unchanged.
 fn try_recover_ptr_arith(
@@ -527,9 +912,17 @@ fn try_recover_const_index_access(
 
 /// Recursively rewrite all pointer-arithmetic sub-expressions in `expr`.
 fn recover_in_expr(expr: &mut HirExpr, binding_types: &HashMap<String, NirType>) -> bool {
-    // Try the top-level pattern first.
+    // Try the top-level single-level pattern first.
     if let Some(new_expr) = try_recover_ptr_arith(expr, binding_types) {
         *expr = new_expr;
+        // After single-level recovery, try PtrOffset chain folding.
+        fold_ptr_offset_chains(expr);
+        return true;
+    }
+    // Try multi-level ADD tree (Ghidra AddTreeState::spanAddTree analog).
+    if let Some(new_expr) = try_recover_ptr_arith_tree(expr, binding_types) {
+        *expr = new_expr;
+        fold_ptr_offset_chains(expr);
         return true;
     }
     if let Some(new_expr) = cast_pointer_operands_for_integer_arith(expr, binding_types) {

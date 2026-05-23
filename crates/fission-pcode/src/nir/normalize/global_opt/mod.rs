@@ -1,5 +1,6 @@
 //! Function-wide dataflow optimizations (SCCP, LICM, CSE, memory SSA helpers, etc.).
 
+mod bit_consume;
 mod cse;
 mod dead_store;
 mod gvn_join;
@@ -9,6 +10,7 @@ mod post_assign;
 mod redundant_load;
 mod sccp;
 
+pub(crate) use bit_consume::apply_bit_consume_dead_code_pass;
 pub(crate) use cse::apply_cse_pass;
 pub(crate) use dead_store::apply_dead_store_elimination;
 pub(crate) use gvn_join::apply_gvn_join_hoist_pass;

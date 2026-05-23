@@ -26,7 +26,8 @@ use super::super::cleanup::{
 };
 use super::super::cleanup::{collapse_loop_exit_alias_returns, prune_unreachable_after_terminal};
 use super::super::global_opt::{
-    apply_cse_pass, apply_dead_store_elimination, apply_gvn_join_hoist_pass, apply_licm_pass,
+    apply_bit_consume_dead_code_pass, apply_cse_pass, apply_dead_store_elimination,
+    apply_gvn_join_hoist_pass, apply_licm_pass,
     apply_post_assign_value_representative_pass, apply_redundant_load_elimination, apply_sccp_pass,
 };
 use super::super::idioms::{
@@ -638,6 +639,28 @@ pub(crate) fn normalize_hir_function(func: &mut HirFunction) {
             perf,
             apply_wide_dead_assignment_pass,
         );
+    }
+    // Bit-level consumed-mask dead-code pass: eliminate dead OR-constant branches
+    // and redundant ZEXT operations by backward-propagating consumed bit masks.
+    // Mirrors Ghidra's ActionDeadCode (consumed-mask propagation) at the HIR level.
+    // Runs after subvar_flow (narrow variables confirmed) and cast_elision.
+    if run_pass_logged(
+        func,
+        "bit_consume_dead_code",
+        perf,
+        apply_bit_consume_dead_code_pass,
+    ) {
+        run_pass_logged(
+            func,
+            "defuse_dead_assignment_after_bit_consume",
+            perf,
+            apply_wide_dead_assignment_pass,
+        );
+        run_cleanup_block(func, "cleanup_bit_consume", perf, |f| {
+            cleanup_func_stmt_list(f);
+            prune_unused_temp_bindings(f);
+            prune_unused_dead_local_bindings(f);
+        });
     }
     if run_pass_logged(
         func,
