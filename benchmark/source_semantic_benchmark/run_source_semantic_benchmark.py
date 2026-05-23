@@ -731,6 +731,7 @@ def row_for_ghidra_function(
 
 
 def run_benchmark(args: argparse.Namespace) -> int:
+    os.environ["FISSION_FORCE_IN_PROCESS"] = "1"
     start = time.perf_counter()
     created_at = utc_now()
     manifest_path = resolve_path(args.manifest)

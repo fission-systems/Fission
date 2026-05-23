@@ -29,7 +29,6 @@ use std::sync::{
 };
 use tracing::warn;
 
-#[cfg(feature = "native_decomp")]
 use rayon::prelude::*;
 
 mod decompile_render;

@@ -1623,6 +1623,8 @@ dependencies = [
  "fission-pcode",
  "flate2",
  "libloading 0.8.9",
+ "memmap2",
+ "rkyv",
  "serde",
  "serde_json",
  "tempfile",

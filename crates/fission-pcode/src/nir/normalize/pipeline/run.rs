@@ -37,8 +37,8 @@ use super::super::idioms::{
 };
 use super::super::memory::{
     apply_aggregate_alias_access_rewrite_pass, apply_aggregate_fields_pass,
-    apply_memory_slot_surfacing, apply_memory_slot_surfacing_cheap, apply_ptr_arith_recovery_pass,
-    apply_zero_index_deref_pass, normalize_binding_initializers,
+    apply_memory_heritage, apply_memory_slot_surfacing, apply_memory_slot_surfacing_cheap,
+    apply_ptr_arith_recovery_pass, apply_zero_index_deref_pass, normalize_binding_initializers,
 };
 use super::super::recovery::{
     apply_break_continue_pass, apply_flag_recovery_pass, apply_for_loop_folding,
@@ -47,10 +47,11 @@ use super::super::recovery::{
 use super::super::subvar_flow::apply_subvar_flow_pass;
 use super::super::types::{
     apply_callsite_type_prop_pass, apply_entry_param_promotion_pass,
-    apply_interproc_callsite_arity_pass, apply_type_inference_pass,
-    apply_use_driven_type_infer_pass, apply_variadic_stack_region_pass,
+    apply_interproc_callsite_arity_pass, apply_type_constraint_propagation,
+    apply_type_inference_pass, apply_use_driven_type_infer_pass, apply_variadic_stack_region_pass,
 };
 use super::super::wave_stats;
+use super::super::apply_rule_normalization;
 use super::super::*;
 use crate::nir::vsa::{apply_jump_resolver_pass, jump_resolver_candidate_count};
 use std::time::Instant;
@@ -92,7 +93,13 @@ fn apply_type_signature_fixed_point(func: &mut HirFunction, diag: bool, perf: bo
             perf,
             apply_use_driven_type_infer_pass,
         );
-        let round_changed = def_changed || callsite_changed || use_changed;
+        let constraint_changed = run_pass_logged(
+            func,
+            "type_constraint_prop",
+            perf,
+            apply_type_constraint_propagation,
+        );
+        let round_changed = def_changed || callsite_changed || use_changed || constraint_changed;
 
         if callsite_changed {
             interproc_signature_rounds += 1;
@@ -100,12 +107,13 @@ fn apply_type_signature_fixed_point(func: &mut HirFunction, diag: bool, perf: bo
 
         if diag {
             eprintln!(
-                "[DIAG] normalize type-fp: {} round={} def_changed={} callsite_changed={} use_changed={}",
+                "[DIAG] normalize type-fp: {} round={} def_changed={} callsite_changed={} use_changed={} constraint_changed={}",
                 func.name,
                 round + 1,
                 def_changed,
                 callsite_changed,
                 use_changed,
+                constraint_changed,
             );
         }
 
@@ -140,13 +148,17 @@ pub(crate) fn normalize_function_body(body: &mut Vec<HirStmt>) {
 
 fn cleanup_func_stmt_list(func: &mut HirFunction) {
     let preserved_temps = preserved_materialization_names(&func.locals);
+    // Scale round_limit by body size: large bodies (>500 stmts) converge in
+    // fewer useful rounds; extra iterations mostly rescan unchanged trees.
+    let stmt_count = count_hir_stmts(&func.body);
+    let round_limit = if stmt_count > 500 { 6 } else { 16 };
     cleanup_stmt_list_with_options_and_preserved(
         &mut func.body,
         &func.name,
         0,
         CleanupStmtOptions {
             include_boundary_labels: true,
-            round_limit: 16,
+            round_limit,
         },
         &preserved_temps,
     );
@@ -231,6 +243,101 @@ fn contains_call_stmt(stmt: &HirStmt) -> bool {
     }
 }
 
+fn body_contains_popcount_call(body: &[HirStmt]) -> bool {
+    body.iter().any(stmt_contains_popcount_call)
+}
+
+fn stmt_contains_popcount_call(stmt: &HirStmt) -> bool {
+    match stmt {
+        HirStmt::Assign { lhs, rhs } => {
+            lvalue_contains_popcount_call(lhs) || expr_contains_popcount_call(rhs)
+        }
+        HirStmt::VaStart { va_list, .. } | HirStmt::Expr(va_list) => {
+            expr_contains_popcount_call(va_list)
+        }
+        HirStmt::Block(stmts)
+        | HirStmt::While { body: stmts, .. }
+        | HirStmt::DoWhile { body: stmts, .. } => {
+            stmts.iter().any(stmt_contains_popcount_call)
+        }
+        HirStmt::If {
+            cond,
+            then_body,
+            else_body,
+        } => {
+            expr_contains_popcount_call(cond)
+                || then_body.iter().any(stmt_contains_popcount_call)
+                || else_body.iter().any(stmt_contains_popcount_call)
+        }
+        HirStmt::For {
+            init,
+            cond,
+            update,
+            body,
+        } => {
+            init.as_deref().is_some_and(stmt_contains_popcount_call)
+                || cond.as_ref().is_some_and(expr_contains_popcount_call)
+                || update.as_deref().is_some_and(stmt_contains_popcount_call)
+                || body.iter().any(stmt_contains_popcount_call)
+        }
+        HirStmt::Switch {
+            expr,
+            cases,
+            default,
+        } => {
+            expr_contains_popcount_call(expr)
+                || cases.iter().any(|case| case.body.iter().any(stmt_contains_popcount_call))
+                || default.iter().any(stmt_contains_popcount_call)
+        }
+        HirStmt::Return(Some(expr)) => expr_contains_popcount_call(expr),
+        HirStmt::Return(None)
+        | HirStmt::Label(_)
+        | HirStmt::Goto(_)
+        | HirStmt::Break
+        | HirStmt::Continue => false,
+    }
+}
+
+fn lvalue_contains_popcount_call(lhs: &HirLValue) -> bool {
+    match lhs {
+        HirLValue::Var(_) => false,
+        HirLValue::Deref { ptr, .. } => expr_contains_popcount_call(ptr),
+        HirLValue::Index { base, index, .. } => {
+            expr_contains_popcount_call(base) || expr_contains_popcount_call(index)
+        }
+    }
+}
+
+fn expr_contains_popcount_call(expr: &HirExpr) -> bool {
+    match expr {
+        HirExpr::Call { target, args, .. } => {
+            target == "__popcount" || args.iter().any(expr_contains_popcount_call)
+        }
+        HirExpr::Cast { expr: inner, .. }
+        | HirExpr::Unary { expr: inner, .. }
+        | HirExpr::Load { ptr: inner, .. }
+        | HirExpr::PtrOffset { base: inner, .. }
+        | HirExpr::AggregateCopy { src: inner, .. } => expr_contains_popcount_call(inner),
+        HirExpr::Binary { lhs, rhs, .. } => {
+            expr_contains_popcount_call(lhs) || expr_contains_popcount_call(rhs)
+        }
+        HirExpr::Index { base, index, .. } => {
+            expr_contains_popcount_call(base) || expr_contains_popcount_call(index)
+        }
+        HirExpr::Select {
+            cond,
+            then_expr,
+            else_expr,
+            ..
+        } => {
+            expr_contains_popcount_call(cond)
+                || expr_contains_popcount_call(then_expr)
+                || expr_contains_popcount_call(else_expr)
+        }
+        HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) | HirExpr::Const(_, _) => false,
+    }
+}
+
 fn contains_call_stmts(stmts: &[HirStmt]) -> bool {
     stmts.iter().any(contains_call_stmt)
 }
@@ -277,14 +384,20 @@ pub(crate) fn normalize_hir_function(func: &mut HirFunction) {
     // Parity / popcount dead elimination: remove __popcount-based assignments
     // whose result is not consumed anywhere (e.g., dead parity flag variables
     // remaining after flag recovery or simple unused parity computations).
-    if run_pass_logged(
-        func,
-        "elide_unused_popcount",
-        perf,
-        elide_unused_popcount_assigns,
-    ) {
-        prune_unused_temp_bindings(func);
-        prune_unused_dead_local_bindings(func);
+    // Fast prefilter: skip entirely when the body has no __popcount calls,
+    // avoiding an expensive full-body DefUseMap build + 8-round scan.
+    if body_contains_popcount_call(&func.body) {
+        if run_pass_logged(
+            func,
+            "elide_unused_popcount",
+            perf,
+            elide_unused_popcount_assigns,
+        ) {
+            prune_unused_temp_bindings(func);
+            prune_unused_dead_local_bindings(func);
+        }
+    } else {
+        wave_stats::add_cleanup_budget_skips(1);
     }
     // Prologue/epilogue elimination: remove callee-saved register save/restore
     // pairs (`*spill = r15` / `r15 = *spill`) from the function body.
@@ -296,11 +409,8 @@ pub(crate) fn normalize_hir_function(func: &mut HirFunction) {
     ) {
         run_cleanup_block(func, "cleanup_defuse_entry_stack_scaffold", perf, |f| {
             cleanup_func_stmt_list(f);
-
             defuse_dead_assignment_pass(f);
-
             prune_unused_temp_bindings(f);
-
             prune_unused_dead_local_bindings(f);
         });
     }
@@ -597,6 +707,24 @@ pub(crate) fn normalize_hir_function(func: &mut HirFunction) {
             },
         );
     }
+    let heritage_changed = run_pass_logged(
+        func,
+        "memory_heritage",
+        perf,
+        apply_memory_heritage,
+    );
+    if heritage_changed {
+        run_cleanup_family_passes(
+            func,
+            "heritage_cleanup",
+            perf,
+            PassBudget {
+                stmt_limit: 600,
+                block_limit: 120,
+                round_limit: 12,
+            },
+        );
+    }
     let bitstream_changed = if allow_expensive_passes {
         run_pass_logged(func, "bitstream_idioms", perf, apply_bitstream_idioms)
     } else {
@@ -839,6 +967,14 @@ pub(crate) fn normalize_hir_function(func: &mut HirFunction) {
             cleanup_func_stmt_list(f);
 
             prune_unused_temp_bindings(f);
+        });
+    }
+    let rule_changed = run_pass_logged(func, "rule_normalization", perf, apply_rule_normalization);
+    if rule_changed {
+        run_cleanup_block(func, "cleanup_rule_normalization", perf, |f| {
+            cleanup_func_stmt_list(f);
+            prune_unused_temp_bindings(f);
+            prune_unused_dead_local_bindings(f);
         });
     }
     let stabilized_materializations = stabilize_repeated_pure_exprs(func);
@@ -1908,6 +2044,7 @@ fn cleanup_stmt_list_with_options_and_preserved(
     let diag = normalize_diag_enabled();
     let loop_start = Instant::now();
     let mut iterations = 0usize;
+    let mut last_stmt_count = count_hir_stmts(stmts);
     loop {
         iterations += 1;
         let mut changed = false;
@@ -1978,18 +2115,45 @@ fn cleanup_stmt_list_with_options_and_preserved(
         if iterations >= options.round_limit {
             break;
         }
-        if diag && iterations % 50 == 0 {
+        let current_count = count_hir_stmts(stmts);
+        // Diminishing-returns early exit: after 3+ rounds, if the stmt-count
+        // reduction in this round is less than 1% of the starting count,
+        // further rounds are unlikely to produce meaningful simplifications.
+        if iterations >= 3 {
+            if last_stmt_count > 100 {
+                let diff = if last_stmt_count >= current_count {
+                    last_stmt_count - current_count
+                } else {
+                    current_count - last_stmt_count
+                };
+                if diff * 100 < last_stmt_count {
+                    if diag {
+                        eprintln!(
+                            "[DIAG] normalize loop early exit: {} depth={} iterations={} diff={} (< 1%)",
+                            func_name, depth, iterations, diff
+                        );
+                    }
+                    break;
+                }
+            }
+            last_stmt_count = current_count;
+        }
+        if diag {
             eprintln!(
-                "[DIAG] normalize loop: {} depth={} iterations={} elapsed={:.3}s last_changed_pass={}",
+                "[DIAG] normalize loop: {} depth={} iterations={} elapsed={:.3}s stmt_count={} last_changed_pass={}",
                 func_name,
                 depth,
                 iterations,
                 loop_start.elapsed().as_secs_f64(),
+                current_count,
                 last_changed_pass.unwrap_or("<none>")
             );
         }
         for stmt in stmts.iter_mut() {
             normalize_stmt(stmt);
+        }
+        if iterations < 3 {
+            last_stmt_count = count_hir_stmts(stmts);
         }
     }
     if diag && (iterations > 1 || loop_start.elapsed().as_millis() > 100) {

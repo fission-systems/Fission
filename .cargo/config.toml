@@ -1,23 +1,25 @@
 # Cargo configuration for Fission development
 
 # Use sccache for faster rebuilds
-[build]
-rustc-wrapper = "sccache"
+#[build]
+#rustc-wrapper = "sccache"
 
 # Address Sanitizer configuration (for debugging memory issues)
 # Usage: RUSTFLAGS="-Zsanitizer=address" cargo +nightly run --target x86_64-apple-darwin
 [target.x86_64-apple-darwin]
 rustflags = [
+  "-C", "split-debuginfo=unpacked",
   # To use a high-speed linker on macOS, install zld or lld via brew and uncomment below:
   # "-C", "link-arg=-fuse-ld=zld",
-  # "-C", "link-arg=-fuse-ld=lld",
+  "-C", "link-arg=-fuse-ld=lld",
 ]
 
 [target.aarch64-apple-darwin]
 rustflags = [
+  "-C", "split-debuginfo=unpacked",
   # To use a high-speed linker on macOS, install zld or lld via brew and uncomment below:
   # "-C", "link-arg=-fuse-ld=zld",
-  # "-C", "link-arg=-fuse-ld=lld",
+  "-C", "link-arg=-fuse-ld=lld",
 ]
 
 # Test profile: balance compile speed vs runtime speed
@@ -33,6 +35,7 @@ codegen-units = 16
 [profile.dev]
 opt-level = 0
 debug = 1 # Reduced from default 2 to 1 for much faster compilation and linking
+codegen-units = 16
 # Faster linking with lld (if available)
 # linker = "clang"
 

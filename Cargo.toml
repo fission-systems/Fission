@@ -25,3 +25,6 @@ opt-level = 3
 lto = true
 strip = true
 codegen-units = 1
+
+[profile.dev.package."*"]
+opt-level = 3

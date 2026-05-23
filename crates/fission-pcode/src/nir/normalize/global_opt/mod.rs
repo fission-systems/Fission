@@ -16,3 +16,4 @@ pub(crate) use licm::apply_licm_pass;
 pub(crate) use post_assign::apply_post_assign_value_representative_pass;
 pub(crate) use redundant_load::apply_redundant_load_elimination;
 pub(crate) use sccp::apply_sccp_pass;
+pub(crate) use mem_ssa::{AliasKey, MemDef, MemUse, MemPhi, build_mem_ssa, nir_byte_size};

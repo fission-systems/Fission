@@ -88,7 +88,7 @@ fn inline_single_use_temps_recursive(
             continue;
         };
         let target_uses = count_var_uses_in_stmt(&stmts[target_idx], &name);
-        let total_uses = use_counts.get(&name).copied().unwrap_or(0);
+        let total_uses = use_counts.get(name.as_str()).copied().unwrap_or(0);
         if total_uses != target_uses {
             idx += 1;
             continue;
@@ -393,7 +393,7 @@ fn eliminate_dead_temp_assigns_recursive(
             _ => continue,
         };
 
-        let uses = use_counts.get(name).copied().unwrap_or(0);
+        let uses = use_counts.get(name.as_str()).copied().unwrap_or(0);
         let side_effects = expr_has_side_effects(rhs);
         if uses == 0 && !side_effects {
             to_remove[idx] = true;
@@ -679,6 +679,9 @@ pub(crate) fn prune_unused_dead_local_bindings(func: &mut HirFunction) -> bool {
 }
 
 pub(crate) fn elide_unused_popcount_assigns(func: &mut HirFunction) -> bool {
+    if !func.body.iter().any(has_popcount) {
+        return false;
+    }
     let use_map = DefUseMap::build(&func.body);
 
     let mut changed = false;
@@ -817,6 +820,34 @@ fn rhs_contains_popcount(expr: &HirExpr) -> bool {
             rhs_contains_popcount(lhs) || rhs_contains_popcount(rhs)
         }
         HirExpr::Call { args, .. } => args.iter().any(rhs_contains_popcount),
+        _ => false,
+    }
+}
+
+fn has_popcount(stmt: &HirStmt) -> bool {
+    match stmt {
+        HirStmt::Assign { rhs, .. } => rhs_contains_popcount(rhs),
+        HirStmt::Expr(expr) | HirStmt::Return(Some(expr)) => rhs_contains_popcount(expr),
+        HirStmt::Block(body) => body.iter().any(has_popcount),
+        HirStmt::If { cond, then_body, else_body } => {
+            rhs_contains_popcount(cond)
+                || then_body.iter().any(has_popcount)
+                || else_body.iter().any(has_popcount)
+        }
+        HirStmt::While { cond, body } | HirStmt::DoWhile { cond, body } => {
+            rhs_contains_popcount(cond) || body.iter().any(has_popcount)
+        }
+        HirStmt::For { init, cond, update, body } => {
+            init.as_deref().is_some_and(has_popcount)
+                || cond.as_ref().is_some_and(rhs_contains_popcount)
+                || update.as_deref().is_some_and(has_popcount)
+                || body.iter().any(has_popcount)
+        }
+        HirStmt::Switch { expr, cases, default } => {
+            rhs_contains_popcount(expr)
+                || cases.iter().any(|c| c.body.iter().any(has_popcount))
+                || default.iter().any(has_popcount)
+        }
         _ => false,
     }
 }

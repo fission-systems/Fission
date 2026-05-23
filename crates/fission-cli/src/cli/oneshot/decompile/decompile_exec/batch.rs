@@ -37,7 +37,6 @@ pub(crate) fn emit_preview_candidate_inventory(
     binary: &LoadedBinary,
     binary_data: &[u8],
 ) -> io::Result<()> {
-    let mut decomp = prepare_batch_decompiler(cli, binary, binary_data)?;
     let fact_store = FactStore::from_binary(binary);
     let binary_name = cli
         .binary
@@ -59,17 +58,22 @@ pub(crate) fn emit_preview_candidate_inventory(
         functions
     };
 
-    let mut candidates = Vec::with_capacity(functions.len());
-    for func in functions {
-        candidates.push(preview_candidate_entry_with_recovery(
-            &mut decomp,
-            binary,
-            &fact_store,
-            &binary_name,
-            func,
-            cli.timeout_ms,
-        ));
-    }
+    use rayon::prelude::*;
+    let candidates: Vec<PreviewCandidateEntry> = functions
+        .par_iter()
+        .map(|func| {
+            let mut thread_decomp = prepare_batch_decompiler(cli, binary, binary_data)
+                .expect("failed to prepare thread-local decompiler");
+            preview_candidate_entry_with_recovery(
+                &mut thread_decomp,
+                binary,
+                &fact_store,
+                &binary_name,
+                func,
+                cli.timeout_ms,
+            )
+        })
+        .collect();
 
     let report = PreviewCandidateInventory {
         binary: binary_name,
@@ -113,7 +117,6 @@ pub(crate) fn emit_preview_candidate_scan_batch(
     let quiet_batch_errors = cli.quiet_batch_errors || !cli.verbose;
     let _silencer = OutputSilencer::new_if(quiet_batch_errors);
 
-    let mut decomp = prepare_batch_decompiler(cli, binary, binary_data)?;
     let fact_store = FactStore::from_binary(binary);
     let binary_name = cli
         .binary
@@ -171,15 +174,24 @@ pub(crate) fn emit_preview_candidate_scan_batch(
         .collect::<Vec<_>>();
 
     for chunk in pending_functions.chunks(chunk_size) {
-        for func in chunk {
-            let entry = preview_candidate_entry_with_recovery(
-                &mut decomp,
-                binary,
-                &fact_store,
-                &binary_name,
-                func,
-                cli.timeout_ms,
-            );
+        use rayon::prelude::*;
+        let entries: Vec<PreviewCandidateEntry> = chunk
+            .par_iter()
+            .map(|func| {
+                let mut thread_decomp = prepare_batch_decompiler(cli, binary, binary_data)
+                    .expect("failed to prepare thread-local decompiler");
+                preview_candidate_entry_with_recovery(
+                    &mut thread_decomp,
+                    binary,
+                    &fact_store,
+                    &binary_name,
+                    func,
+                    cli.timeout_ms,
+                )
+            })
+            .collect();
+
+        for entry in entries {
             serde_json::to_writer(&mut writer, &entry)
                 .map_err(|e| io::Error::other(format!("JSON serialization failed: {e}")))?;
             writer.write_all(b"\n")?;

@@ -1,8 +1,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
+use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize)]
 pub struct CompiledSubtableDefinition {
     pub name: String,
     #[serde(default)]
@@ -13,7 +14,7 @@ pub struct CompiledSubtableDefinition {
     pub decision_tree: CompiledDecisionTree,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize)]
 pub struct CompiledFrontend {
     pub arch: String,
     pub default_context: u64,
@@ -106,7 +107,7 @@ impl CompiledFrontend {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize)]
 pub struct CompiledLanguageLayout {
     pub address_spaces: Vec<CompiledAddressSpace>,
     pub registers: Vec<CompiledRegister>,
@@ -116,19 +117,19 @@ pub struct CompiledLanguageLayout {
     pub display_templates: Vec<CompiledDisplayTemplate>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize)]
 pub struct CompiledAddressSpace {
     pub name: String,
     pub source: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize)]
 pub struct CompiledRegister {
     pub name: String,
     pub source: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize)]
 pub struct CompiledTokenField {
     pub name: String,
     pub bit_offset: u32,
@@ -136,7 +137,7 @@ pub struct CompiledTokenField {
     pub source: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize)]
 pub struct CompiledContextField {
     pub name: String,
     pub bit_offset: u32,
@@ -144,13 +145,13 @@ pub struct CompiledContextField {
     pub source: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize)]
 pub struct CompiledSubtable {
     pub name: String,
     pub source: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize)]
 pub struct CompiledDisplayTemplate {
     pub constructor_hash: u64,
     #[serde(default)]
@@ -162,27 +163,27 @@ pub struct CompiledDisplayTemplate {
     pub display: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize)]
 pub enum CompiledDisplayPiece {
     Literal(String),
     OperandRef(usize),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize)]
 pub struct CompiledSpecDefinition {
     pub kind: String,
     pub source: String,
     pub statement: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize)]
 pub struct CompiledMacro {
     pub name: String,
     pub source: String,
     pub body_line_count: usize,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize)]
 pub enum CompiledContextCommitTarget {
     OperandHandle { hand_index: u32 },
     InstStart,
@@ -195,7 +196,7 @@ pub enum CompiledContextCommitTarget {
 /// is decoded, `apply_context_commits()` resolves each commit's target address from the
 /// fixed handle of the referenced symbol and writes the context bits to the context
 /// cache for future instructions at that address.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize)]
 pub struct CompiledContextCommit {
     /// Symbol table ID of the target TripleSymbol (raw SLA `ATTR_ID`). Used for tracing.
     pub symbol_id: u32,
@@ -206,7 +207,7 @@ pub struct CompiledContextCommit {
     pub mask: u32,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize)]
 pub struct CompiledContextOp {
     pub bit_offset: u32,
     pub bit_width: u32,
@@ -217,7 +218,7 @@ pub struct CompiledContextOp {
     pub expr: Option<CompiledPatternExpression>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize)]
 pub struct CompiledConstructor {
     pub mnemonic: String,
     pub display: String,
@@ -231,7 +232,7 @@ pub struct CompiledConstructor {
     pub context_changes: Vec<CompiledContextOp>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize)]
 pub struct CompiledExecutableConstructor {
     pub constructor_id: u32,
     #[serde(default)]
@@ -264,7 +265,7 @@ pub struct CompiledExecutableConstructor {
     pub unsupported_template_kind: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize)]
 pub struct CompiledSlaConstructorIdentity {
     #[serde(default)]
     pub subtable_id: u32,
@@ -277,7 +278,7 @@ pub struct CompiledSlaConstructorIdentity {
     pub source_line: u64,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize)]
 pub enum CompiledSlaDecodeStatus {
     Decoded,
     Unsupported,
@@ -289,13 +290,13 @@ impl Default for CompiledSlaDecodeStatus {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize)]
 pub struct CompiledDisplayOperand {
     pub operand_index: usize,
     pub kind: CompiledDisplayOperandKind,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize)]
 pub enum CompiledDisplayOperandKind {
     Generic,
     Subtable,
@@ -324,7 +325,7 @@ impl CompiledDisplayTemplate {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize)]
 pub struct CompiledDecisionTree {
     pub root_node_index: usize,
     pub root_buckets: Vec<CompiledDecisionBucket>,
@@ -332,13 +333,13 @@ pub struct CompiledDecisionTree {
     pub decision_node_count: usize,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize)]
 pub struct CompiledDecisionBucket {
     pub key: String,
     pub node_index: usize,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize)]
 pub struct CompiledDecisionNode {
     pub probe: CompiledDecisionProbe,
     pub branches: Vec<CompiledDecisionEdge>,
@@ -346,13 +347,13 @@ pub struct CompiledDecisionNode {
     pub leaf_entries: Vec<CompiledDecisionLeafEntry>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize)]
 pub struct CompiledDecisionEdge {
     pub value: u8,
     pub next_node_index: usize,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize)]
 pub struct CompiledDecisionLeafEntry {
     #[serde(default)]
     pub subtable_id: u32,
@@ -362,7 +363,8 @@ pub struct CompiledDecisionLeafEntry {
     pub pattern: CompiledDisjointPattern,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize)]
+#[archive(bound(serialize = "__S: rkyv::ser::Serializer + rkyv::ser::ScratchSpace"))]
 pub enum CompiledDisjointPattern {
     Instruction(CompiledPatternBlock),
     Context(CompiledPatternBlock),
@@ -370,10 +372,10 @@ pub enum CompiledDisjointPattern {
         context: CompiledPatternBlock,
         instruction: CompiledPatternBlock,
     },
-    Or(Vec<CompiledDisjointPattern>),
+    Or(#[omit_bounds] Vec<CompiledDisjointPattern>),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize)]
 pub struct CompiledPatternBlock {
     pub offset: i32,
     pub nonzero_size: i32,
@@ -381,7 +383,7 @@ pub struct CompiledPatternBlock {
     pub value_words: Vec<u32>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize)]
 pub enum CompiledDecisionProbe {
     Terminal,
     InstructionBitSlice { offset: u8, mask: u8, shift: u8 },
@@ -391,13 +393,13 @@ pub enum CompiledDecisionProbe {
     TerminalPatternCheck,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize)]
 pub enum PatternConstraint {
     Instruction { offset: u32, mask: u64, value: u64 },
     Context { offset: u32, mask: u64, value: u64 },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize)]
 pub enum CompiledPatternMatcher {
     ExactBytes(Vec<u8>),
     RowCc { prefix: Vec<u8>, row: u8 },
@@ -450,7 +452,7 @@ fn default_offsetbase() -> i32 {
     -1
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize)]
 pub enum CompiledOperandSpec {
     SlaTokenField {
         big_endian: bool,
@@ -555,7 +557,7 @@ pub enum CompiledOperandSpec {
     },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize)]
 pub struct CompiledResolvedVarnode {
     pub name: String,
     pub space: CompiledSpaceRef,
@@ -563,7 +565,7 @@ pub struct CompiledResolvedVarnode {
     pub size: u32,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize)]
 pub struct CompiledConstructorTemplate {
     pub handles: Vec<CompiledHandleTemplate>,
     pub decode_steps: Vec<CompiledOperandDecodeStep>,
@@ -574,7 +576,7 @@ pub struct CompiledConstructorTemplate {
     pub template_source: CompiledTemplateSource,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize)]
 pub struct CompiledHandleTemplate {
     pub operand_index: usize,
     pub spec: CompiledOperandSpec,
@@ -584,7 +586,7 @@ pub struct CompiledHandleTemplate {
     pub minimum_length: u32,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize)]
 pub enum CompiledOperandDecodeStep {
     DecodeOperand {
         operand_index: usize,
@@ -595,7 +597,8 @@ pub enum CompiledOperandDecodeStep {
     },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize)]
+#[archive(bound(serialize = "__S: rkyv::ser::Serializer"))]
 pub enum CompiledPatternExpression {
     Constant(i64),
     InstStart,
@@ -622,46 +625,64 @@ pub enum CompiledPatternExpression {
         index: usize,
     },
     Add(
+        #[omit_bounds]
         Box<CompiledPatternExpression>,
+        #[omit_bounds]
         Box<CompiledPatternExpression>,
     ),
     Sub(
+        #[omit_bounds]
         Box<CompiledPatternExpression>,
+        #[omit_bounds]
         Box<CompiledPatternExpression>,
     ),
     Mul(
+        #[omit_bounds]
         Box<CompiledPatternExpression>,
+        #[omit_bounds]
         Box<CompiledPatternExpression>,
     ),
     Div(
+        #[omit_bounds]
         Box<CompiledPatternExpression>,
+        #[omit_bounds]
         Box<CompiledPatternExpression>,
     ),
     LeftShift(
+        #[omit_bounds]
         Box<CompiledPatternExpression>,
+        #[omit_bounds]
         Box<CompiledPatternExpression>,
     ),
     RightShift(
+        #[omit_bounds]
         Box<CompiledPatternExpression>,
+        #[omit_bounds]
         Box<CompiledPatternExpression>,
     ),
     And(
+        #[omit_bounds]
         Box<CompiledPatternExpression>,
+        #[omit_bounds]
         Box<CompiledPatternExpression>,
     ),
     Or(
+        #[omit_bounds]
         Box<CompiledPatternExpression>,
+        #[omit_bounds]
         Box<CompiledPatternExpression>,
     ),
     Xor(
+        #[omit_bounds]
         Box<CompiledPatternExpression>,
+        #[omit_bounds]
         Box<CompiledPatternExpression>,
     ),
-    Negate(Box<CompiledPatternExpression>),
-    Not(Box<CompiledPatternExpression>),
+    Negate(#[omit_bounds] Box<CompiledPatternExpression>),
+    Not(#[omit_bounds] Box<CompiledPatternExpression>),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize)]
 pub struct CompiledConstructTpl {
     pub constructor_hash: u64,
     pub num_labels: u32,
@@ -687,12 +708,12 @@ impl CompiledConstructTpl {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize)]
 pub enum CompiledTemplateSource {
     SpecDerived,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize)]
 pub struct CompiledOpTpl {
     /// Flat pcode opcode integer from SLA `ATTRIB_CODE` (Ghidra `PcodeOp` encoding).
     #[serde(default)]
@@ -703,7 +724,7 @@ pub struct CompiledOpTpl {
     pub label: Option<CompiledLabelRef>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize)]
 pub enum CompiledOpTplOpcode {
     Copy,
     Load,
@@ -782,7 +803,7 @@ pub enum CompiledOpTplOpcode {
     Unsupported,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize)]
 pub enum CompiledVarnodeTpl {
     Varnode {
         space: CompiledSpaceTpl,
@@ -792,7 +813,7 @@ pub enum CompiledVarnodeTpl {
     HandleTpl(Box<CompiledHandleTpl>),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize)]
 pub struct CompiledHandleTpl {
     pub space: Option<CompiledSpaceTpl>,
     pub size: Option<CompiledConstTpl>,
@@ -803,13 +824,13 @@ pub struct CompiledHandleTpl {
     pub temp_offset: Option<CompiledConstTpl>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize)]
 pub enum CompiledSpaceTpl {
     SpaceRef(CompiledSpaceRef),
     Const(Box<CompiledConstTpl>),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize)]
 pub enum CompiledConstTpl {
     Real {
         value: u64,
@@ -838,7 +859,7 @@ pub enum CompiledConstTpl {
     FlowDestSize,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize)]
 pub struct CompiledSpaceRef {
     pub name: String,
     pub index: u64,
@@ -952,12 +973,12 @@ mod tests {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize)]
 pub struct CompiledLabelRef {
     pub name: String,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize)]
 pub enum CompiledHandleSelector {
     Space,
     Offset,
@@ -1018,7 +1039,7 @@ impl CompiledHandleTpl {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize)]
 pub enum CompiledArithmeticOpcode {
     Add,
     Sub,
@@ -1033,7 +1054,7 @@ pub enum CompiledArithmeticOpcode {
     Dec,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize)]
 pub enum CompiledConstructTplKind {
     Generic,
 }
@@ -1165,20 +1186,20 @@ impl CompiledArithmeticOpcode {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize)]
 pub struct CompiledSemanticTemplate {
     pub status: String,
     pub action_hash: u64,
     pub op_count: usize,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize)]
 pub struct CompiledPcodeOp {
     pub name: String,
     pub defined_in: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize)]
 pub struct CompiledPatternNode {
     pub node_id: String,
     pub source: String,
@@ -1187,7 +1208,7 @@ pub struct CompiledPatternNode {
     pub control_flow: ControlFlowClass,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize)]
 pub enum ControlFlowClass {
     None,
     Branch,

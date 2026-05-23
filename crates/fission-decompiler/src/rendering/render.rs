@@ -357,7 +357,10 @@ pub(crate) fn render_nir_from_json_with_type_context(
     );
     refine_nir_type_context_with_callee_effect_summaries(binary, &pcode, &mut type_context);
     let should_use_worker =
-        options.target_profile().worker_eligible && !enforce_auto_gate && !auto_gate_eligible;
+        options.target_profile().worker_eligible
+            && !enforce_auto_gate
+            && !auto_gate_eligible
+            && std::env::var_os("FISSION_FORCE_IN_PROCESS").is_none();
     let request = make_nir_request(pcode_json, address, name, options, type_context);
 
     if should_use_worker {

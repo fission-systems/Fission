@@ -105,45 +105,6 @@ fn collect_expr_assigns(_expr: &HirExpr, _assigns: &mut Vec<AssignInfo>, _multi_
     // Inner expressions do not contain assignment statements in Fission's HIR.
 }
 
-/// Recursively scans statement trees to locate candidate narrow variables seeded by casts or masks.
-fn scan_candidates(body: &[HirStmt]) -> Vec<(String, u64)> {
-    let mut candidates = Vec::new();
-    let mut assigns = Vec::new();
-    let mut multi_def = HashSet::new();
-    collect_assignments(body, &mut assigns, &mut multi_def);
-
-    for assign in assigns {
-        if multi_def.contains(&assign.lhs) {
-            continue;
-        }
-        match &assign.rhs {
-            HirExpr::Binary { op: HirBinaryOp::And, lhs, rhs, .. } => {
-                if let (HirExpr::Var(name), HirExpr::Const(mask, _)) = (&**lhs, &**rhs) {
-                    if is_valid_subvar_mask(*mask as u64) {
-                        candidates.push((name.clone(), *mask as u64));
-                    }
-                }
-                if let (HirExpr::Const(mask, _), HirExpr::Var(name)) = (&**lhs, &**rhs) {
-                    if is_valid_subvar_mask(*mask as u64) {
-                        candidates.push((name.clone(), *mask as u64));
-                    }
-                }
-            }
-            HirExpr::Cast { ty, expr } => {
-                if let HirExpr::Var(name) = &**expr {
-                    if let NirType::Int { bits, .. } = ty {
-                        if *bits == 8 || *bits == 16 || *bits == 32 {
-                            let mask = (1u64 << bits) - 1;
-                            candidates.push((name.clone(), mask));
-                        }
-                    }
-                }
-            }
-            _ => {}
-        }
-    }
-    candidates
-}
 
 #[derive(Debug, Clone)]
 struct UseInfo {
@@ -795,27 +756,58 @@ fn rewrite_stmts(stmts: &mut [HirStmt], varmap: &HashMap<String, ReplaceVar>) {
 
 /// Pipeline entry point for the Global Subvariable Flow Analyzer normalization pass.
 pub(crate) fn apply_subvar_flow_pass(func: &mut HirFunction) -> bool {
-    let candidates = scan_candidates(&func.body);
+    let mut assigns = Vec::new();
+    let mut multi_defined = HashSet::new();
+    collect_assignments(&func.body, &mut assigns, &mut multi_defined);
+
+    let mut candidates = Vec::new();
+    for assign in &assigns {
+        if multi_defined.contains(&assign.lhs) {
+            continue;
+        }
+        match &assign.rhs {
+            HirExpr::Binary { op: HirBinaryOp::And, lhs, rhs, .. } => {
+                if let (HirExpr::Var(name), HirExpr::Const(mask, _)) = (&**lhs, &**rhs) {
+                    if is_valid_subvar_mask(*mask as u64) {
+                        candidates.push((name.clone(), *mask as u64));
+                    }
+                }
+                if let (HirExpr::Const(mask, _), HirExpr::Var(name)) = (&**lhs, &**rhs) {
+                    if is_valid_subvar_mask(*mask as u64) {
+                        candidates.push((name.clone(), *mask as u64));
+                    }
+                }
+            }
+            HirExpr::Cast { ty, expr } => {
+                if let HirExpr::Var(name) = &**expr {
+                    if let NirType::Int { bits, .. } = ty {
+                        if *bits == 8 || *bits == 16 || *bits == 32 {
+                            let mask = (1u64 << bits) - 1;
+                            candidates.push((name.clone(), mask));
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
     if candidates.is_empty() {
         return false;
     }
 
+    let mut def_map = HashMap::new();
+    for assign in assigns {
+        if !multi_defined.contains(&assign.lhs) {
+            def_map.insert(assign.lhs, assign.rhs);
+        }
+    }
+
     let mut changed = false;
     for (var_name, mask) in candidates {
-        let mut assigns = Vec::new();
-        let mut multi_defined = HashSet::new();
-        collect_assignments(&func.body, &mut assigns, &mut multi_defined);
-
-        let mut def_map = HashMap::new();
-        for assign in assigns {
-            if !multi_defined.contains(&assign.lhs) {
-                def_map.insert(assign.lhs, assign.rhs);
-            }
-        }
-
         let mut solver = SubvarFlowSolver {
-            def_map,
-            multi_defined,
+            def_map: def_map.clone(),
+            multi_defined: multi_defined.clone(),
             varmap: HashMap::new(),
             pull_points: HashSet::new(),
             worklist: vec![(var_name.clone(), mask)],

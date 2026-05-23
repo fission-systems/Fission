@@ -14,9 +14,12 @@ mod idioms;
 mod memory;
 mod pipeline;
 mod recovery;
+mod rule_normalizer;
 mod subvar_flow;
 mod types;
 pub(crate) mod wave_stats;
+
+pub(crate) use rule_normalizer::apply_rule_normalization;
 
 pub(crate) use types::is_known_api_signature;
 pub use types::{summarize_direct_tail_wrapper_from_ops, summarize_direct_tail_wrapper_from_pcode};

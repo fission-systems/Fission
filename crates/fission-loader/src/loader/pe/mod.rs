@@ -121,7 +121,7 @@ impl PeLoader {
 
         let pe_started = std::time::Instant::now();
         let pe_file = parse_pe_file(bytes)?;
-        println!("    [PE Profiler] parse_pe_file took: {:?}", pe_started.elapsed());
+        tracing::debug!("[PE Profiler] parse_pe_file took: {:?}", pe_started.elapsed());
 
         // Extract basic info
         let is_64bit = match pe_file.optional_header {
@@ -141,7 +141,7 @@ impl PeLoader {
         let (architecture, load_spec) =
             select_pe_load_spec(pe_file.file_header.machine, is_64bit, image_base)
                 .map_err(|e| err!(loader, "{}", e))?;
-        println!("    [PE Profiler] select_pe_load_spec took: {:?}", spec_started.elapsed());
+        tracing::debug!("[PE Profiler] select_pe_load_spec took: {:?}", spec_started.elapsed());
 
         // Sections
         let mut sections_info = Vec::new();
@@ -187,7 +187,7 @@ impl PeLoader {
                 functions_info.append(&mut exports);
             }
         }
-        println!("    [PE Profiler] parse_exports took: {:?}", export_started.elapsed());
+        tracing::debug!("[PE Profiler] parse_exports took: {:?}", export_started.elapsed());
 
         // Parse Imports
         // DataDirectory[1] is Import Table
@@ -206,7 +206,7 @@ impl PeLoader {
                 iat_symbols = symbols;
             }
         }
-        println!("    [PE Profiler] parse_imports took: {:?}", import_started.elapsed());
+        tracing::debug!("[PE Profiler] parse_imports took: {:?}", import_started.elapsed());
 
         // Parse Delay Imports
         // DataDirectory[13] is Delay Import Table
@@ -228,7 +228,7 @@ impl PeLoader {
                 iat_symbols.extend(delay_symbols);
             }
         }
-        println!("    [PE Profiler] parse_delay_imports took: {:?}", delay_started.elapsed());
+        tracing::debug!("[PE Profiler] parse_delay_imports took: {:?}", delay_started.elapsed());
 
         // Parse COFF Symbol Table (if present)
         let coff_started = std::time::Instant::now();
@@ -269,7 +269,7 @@ impl PeLoader {
                 global_symbols = coff_data_symbols;
             }
         }
-        println!("    [PE Profiler] parse_coff_symbols took: {:?}", coff_started.elapsed());
+        tracing::debug!("[PE Profiler] parse_coff_symbols took: {:?}", coff_started.elapsed());
 
         // Add entry point if not exists
         if entry_point != 0 && !functions_info.iter().any(|f| f.address == entry_point) {
@@ -331,7 +331,7 @@ impl PeLoader {
                 }
             }
         }
-        println!("    [PE Profiler] parse_pdata took: {:?}", pdata_started.elapsed());
+        tracing::debug!("[PE Profiler] parse_pdata took: {:?}", pdata_started.elapsed());
 
         let pdb_started = std::time::Instant::now();
         let pdb_debug_info = match &pe_file.optional_header {
@@ -341,7 +341,7 @@ impl PeLoader {
                 })
             }
         };
-        println!("    [PE Profiler] parse_pdb_debug_info took: {:?}", pdb_started.elapsed());
+        tracing::debug!("[PE Profiler] parse_pdb_debug_info took: {:?}", pdb_started.elapsed());
 
         let header_started = std::time::Instant::now();
         let (header_types, header_symbols) = generate_pe_header_types(
@@ -352,7 +352,7 @@ impl PeLoader {
             pe_file.section_headers.len() as u16,
         );
         global_symbols.extend(header_symbols);
-        println!("    [PE Profiler] generate_pe_header_types took: {:?}", header_started.elapsed());
+        tracing::debug!("[PE Profiler] generate_pe_header_types took: {:?}", header_started.elapsed());
 
         // Parse Base Relocations (Gap 3)
         let reloc_started = std::time::Instant::now();
@@ -369,11 +369,11 @@ impl PeLoader {
                 relocations = entries;
             }
         }
-        println!("    [PE Profiler] parse_relocations took: {:?}", reloc_started.elapsed());
+        tracing::debug!("[PE Profiler] parse_relocations took: {:?}", reloc_started.elapsed());
 
         let rich_started = std::time::Instant::now();
         let rich_records = parse_rich_header(bytes, pe_file.e_lfanew);
-        println!("    [PE Profiler] parse_rich_header took: {:?}", rich_started.elapsed());
+        tracing::debug!("[PE Profiler] parse_rich_header took: {:?}", rich_started.elapsed());
 
         let build_started = std::time::Instant::now();
         let mut builder = LoadedBinaryBuilder::new(path, data)
@@ -396,8 +396,8 @@ impl PeLoader {
         }
 
         let res = builder.build();
-        println!("    [PE Profiler] LoadedBinaryBuilder::build took: {:?}", build_started.elapsed());
-        println!("    [PE Profiler] TOTAL PeLoader::parse took: {:?}", main_started.elapsed());
+        tracing::debug!("[PE Profiler] LoadedBinaryBuilder::build took: {:?}", build_started.elapsed());
+        tracing::debug!("[PE Profiler] TOTAL PeLoader::parse took: {:?}", main_started.elapsed());
         res
     }
 }
