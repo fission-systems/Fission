@@ -42,6 +42,7 @@ Fission/
 - `crates/fission-pcode/src/nir/structuring/AGENTS.md`
 - `crates/fission-automation/AGENTS.md`
 - `crates/fission-cli/AGENTS.md`
+- `crates/fission-loader/AGENTS.md`
 
 Read the nearest child file before editing those areas.
 
@@ -61,6 +62,7 @@ Read the nearest child file before editing those areas.
 | Runtime resource paths (signatures, DiE, FID, patterns, typeinfo) | `crates/fission-core/src/core/path_config.rs`, `resource_roots.rs` | `PATHS` / `PathConfig::detect`; overrides: CLI `--resource-root`, `FISSION_RESOURCE_ROOT`; operator docs: `docs/CLI.md` § *Runtime resource bundle* |
 | Checked-in utility resources | `/Users/sjkim1127/Fission/utils` | Prefer existing resource/path config and utility loaders over hardcoded paths; use this tree when reusable signatures, type info, benchmark support data, or other checked-in resources already cover the need |
 | Loader identity / binary provenance hints | `crates/fission-loader/src/loader/identity/` | Evidence-backed `BinaryIdentityReport` on `LoadedBinary`; not an IR/decompiler repair layer |
+| Binary loaders (PE, ELF, Mach-O, TE, COFF, etc.) | `crates/fission-loader/src/loader/` | Format-specific byte parsing, section mapping, relocation, and symbol resolution |
 | Static facts and binary-derived analysis services | `crates/fission-static/src/analysis/` | Xrefs, discovery, patches, strings; fact extraction — not decompiler orchestration |
 | Decomp-facing facts / native prep surface | `crates/fission-static/src/analysis/decomp/` | `FactStore` and related helpers consumed by `fission-decompiler` |
 | Reference algorithms | `/Users/sjkim1127/Fission/vendor`, especially `/Users/sjkim1127/Fission/vendor/ghidra/` and `/Users/sjkim1127/Fission/vendor/retdec-5.0/` | Reference these often for invariants and behavior, but do not add runtime/build dependencies, bindings, or copied implementation shortcuts |

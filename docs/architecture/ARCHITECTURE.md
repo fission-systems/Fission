@@ -76,8 +76,8 @@ readers rather than primary binary loaders.
 
 Ghidra loader family coverage is staged. The implemented executable-loader group is
 `PeLoader`, `CoffLoader`/`MSCoffLoader`, `ElfLoader`, `MachoLoader`,
-`BinaryLoader` (explicit raw hint only), `IntelHexLoader`, `MotorolaHexLoader`,
-`MzLoader`/`NeLoader`, and `UnixAoutLoader`. Lower-priority or separate-wave
+`TeLoader`, `BinaryLoader` (explicit raw hint only), `IntelHexLoader`,
+`MotorolaHexLoader`, `MzLoader`/`NeLoader`, and `UnixAoutLoader`. Lower-priority or separate-wave
 families are `DyldCacheLoader`, `PefLoader`, `SomLoader`, `OmfLoader`,
 `Omf51Loader`, `DbgLoader`, `DefLoader`, `MapLoader`, `GdtLoader`, `GzfLoader`,
 and XML/debug helper loaders. Known but unsupported families must fail closed
@@ -100,6 +100,14 @@ entry, export, true import, import thunk, undefined external, debug-only symbol,
 or data-derived metadata. User-facing and decompile-seed function lists must go
 through `loader::function_view`; CLI and GUI must not reconstruct independent
 function/import/export filtering rules.
+
+**Loader Parity and Enrichment Features.** To achieve strict parity with Ghidra's binary analysis ecosystem, `fission-loader` implements advanced metadata enrichment and validation layers:
+- **PE Delay-Load Imports**: Classifies delayed import directories (`ImgDelayDescr`) and generates placeholder/import symbols to feed downstream call analysis.
+- **Rich Header Decryption**: Recovers and decrypts MSVC compiler telemetry headers, validating checksum matches against section/PE hashes to verify compiler/linker provenance.
+- **ELF Version Symbols**: Parses GNU/SVR4 dynamic version symbols (`.gnu.version`, `.gnu.version_r`) to map version-dependent dynamic symbols to their precise external libraries/libraries requirements.
+- **ELF RELRO Write Protection**: Detects and enforces Read-Only Relocations (`PT_GNU_RELRO`) block bounds and classifies section/segment write protection permissions accordingly.
+- **Relocations Database**: Maintains a decoupled, indexed database of all base relocation entries to support rapid lookup of relocation-backed pointers during static analysis.
+- **Virtual Header Structure Mapping**: Mapped structures (like ELF, PE, and TE headers) are registered as virtual structures in `InferredTypeInfo`, allowing symbol annotation and type context recovery.
 
 Language/runtime analyzers live outside format parsing. `loader/analyzers`
 contains post-load enrichment such as C++ RTTI, Go pclntab/type metadata, and
