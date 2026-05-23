@@ -123,6 +123,7 @@ Additional references:
 
 - **PE** (Windows x86, x64, ARM64) — Full support
 - **ELF** (Linux x86, x64, ARM, ARM64) — Core support
+- **TE** (UEFI Terse Executable) — Core support
 - **Mach-O** (macOS x64, ARM64) — Experimental
 
 ### Project Maturity Status

@@ -12,7 +12,7 @@ Declared in root [`Cargo.toml`](../Cargo.toml) `workspace.members`:
 |------------|----------------|
 | [`crates/fission-automation`](../crates/fission-automation) | Quality lanes (`nir-check`), reporting |
 | [`crates/fission-core`](../crates/fission-core) | Shared core types/utilities |
-| [`crates/fission-loader`](../crates/fission-loader) | Binary loading, sections, symbols; structured **`loader::identity`** report (entropy/overlay/PE hints + evidence) |
+| [`crates/fission-loader`](../crates/fission-loader) | Binary loading, sections, symbols, relocations, virtual types; structured **`loader::identity`** report (entropy/overlay/PE hints + evidence) |
 | [`crates/fission-pcode`](../crates/fission-pcode) | Canonical IR, NIR/HIR, structuring, CFG analysis, printer |
 | [`crates/fission-signatures`](../crates/fission-signatures) | Signature datasets / lookup |
 | [`crates/fission-static`](../crates/fission-static) | Static facts, orchestration helpers, analysis services (`analysis`, `utils`) |
