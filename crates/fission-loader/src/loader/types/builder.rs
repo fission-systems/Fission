@@ -27,6 +27,10 @@ impl LoadedBinaryBuilder {
             global_symbol_sizes: std::collections::HashMap::new(),
             relocation_symbols: std::collections::HashMap::new(),
             pdb_debug_info: None,
+            relocations: Vec::new(),
+            rich_header_records: None,
+            symbol_versions: std::collections::HashMap::new(),
+            inferred_types: Vec::new(),
         }
     }
 
@@ -137,6 +141,26 @@ impl LoadedBinaryBuilder {
         self
     }
 
+    pub fn add_relocations(mut self, relocations: impl IntoIterator<Item = super::RelocationEntry>) -> Self {
+        self.relocations.extend(relocations);
+        self
+    }
+
+    pub fn rich_header_records(mut self, records: Vec<super::RichHeaderRecord>) -> Self {
+        self.rich_header_records = Some(records);
+        self
+    }
+
+    pub fn add_symbol_versions(mut self, versions: std::collections::HashMap<u64, String>) -> Self {
+        self.symbol_versions.extend(versions);
+        self
+    }
+
+    pub fn add_inferred_types(mut self, types: impl IntoIterator<Item = super::InferredTypeInfo>) -> Self {
+        self.inferred_types.extend(types);
+        self
+    }
+
     pub fn build(self) -> Result<LoadedBinary> {
         let mut functions = self.functions;
         functions.sort_by_key(|f| f.address);
@@ -204,9 +228,12 @@ impl LoadedBinaryBuilder {
             function_addr_index,
             function_name_index,
             functions_sorted: true,
-            inferred_types: Vec::new(),
+            inferred_types: self.inferred_types,
             string_map,
             pdb_debug_info: self.pdb_debug_info,
+            relocations: self.relocations,
+            rich_header_records: self.rich_header_records,
+            symbol_versions: self.symbol_versions,
         };
 
         Ok(LoadedBinary::from_inner(inner))

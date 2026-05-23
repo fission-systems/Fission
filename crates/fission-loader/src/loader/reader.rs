@@ -85,6 +85,10 @@ impl<'a> ByteReader<'a> {
         })
     }
 
+    pub fn i64(&self, offset: usize) -> Result<i64> {
+        Ok(self.u64(offset)? as i64)
+    }
+
     pub fn fixed_string(&self, offset: usize, len: usize) -> Result<String> {
         let bytes = self.slice(offset, len)?;
         let end = bytes.iter().position(|&b| b == 0).unwrap_or(bytes.len());

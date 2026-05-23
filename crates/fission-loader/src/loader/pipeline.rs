@@ -1,6 +1,6 @@
 use super::{
     DataBuffer, LoadedBinary, coff, containers, elf,
-    formats::{aout, hex, mz_ne},
+    formats::{aout, hex, mz_ne, te},
     macho, pe,
 };
 use crate::prelude::*;
@@ -20,6 +20,7 @@ pub enum DetectedFormat {
     Mz,
     Ne,
     UnixAout,
+    Te,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -97,6 +98,7 @@ impl LoaderPipeline {
             DetectedFormat::Mz => mz_ne::MzLoader::parse(data, path),
             DetectedFormat::Ne => mz_ne::NeLoader::parse(data, path),
             DetectedFormat::UnixAout => aout::UnixAoutLoader::parse(data, path),
+            DetectedFormat::Te => te::TeLoader::parse(data, path),
         }
     }
 
@@ -117,6 +119,9 @@ impl LoaderPipeline {
     pub fn route(bytes: &[u8]) -> Result<LoaderRoute> {
         if bytes.len() < 4 {
             return Err(FissionError::loader("Binary too small"));
+        }
+        if looks_like_te(bytes) {
+            return Ok(LoaderRoute::Executable(DetectedFormat::Te));
         }
         if looks_like_pe(bytes) {
             return Ok(LoaderRoute::Executable(DetectedFormat::Pe));
@@ -155,6 +160,10 @@ impl LoaderPipeline {
             "UnsupportedFormat: unknown binary format",
         ))
     }
+}
+
+fn looks_like_te(bytes: &[u8]) -> bool {
+    bytes.starts_with(b"VZ")
 }
 
 fn looks_like_pe(bytes: &[u8]) -> bool {

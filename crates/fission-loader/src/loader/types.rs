@@ -239,6 +239,25 @@ pub struct PdbDebugInfo {
     pub has_codeview: bool,
 }
 
+#[derive(Debug, Clone, Archive, Deserialize, Serialize)]
+#[archive(check_bytes)]
+pub struct RelocationEntry {
+    pub address: u64,
+    pub r_type: u32,
+    pub size: u8,
+    pub addend: i64,
+    pub symbol_name: Option<String>,
+}
+
+#[derive(Debug, Clone, Archive, Deserialize, Serialize)]
+#[archive(check_bytes)]
+pub struct RichHeaderRecord {
+    pub comp_id: u32,
+    pub build_number: u16,
+    pub product_id: u16,
+    pub count: u32,
+}
+
 /// Inner data structure containing all binary information.
 /// This is wrapped in Arc for O(1) cloning with COW semantics.
 #[derive(Debug, Clone, Archive, Deserialize, Serialize)]
@@ -291,6 +310,12 @@ pub struct LoadedBinaryInner {
     pub string_map: std::collections::HashMap<u64, String>,
     /// PE CodeView / RSDS-backed PDB source metadata when present.
     pub pdb_debug_info: Option<PdbDebugInfo>,
+    /// Structured relocation database.
+    pub relocations: Vec<RelocationEntry>,
+    /// MSVC Rich Header records if present.
+    pub rich_header_records: Option<Vec<RichHeaderRecord>>,
+    /// ELF symbol versioning (address -> version name).
+    pub symbol_versions: std::collections::HashMap<u64, String>,
 }
 
 /// Parsed binary information with O(1) clone via Arc.
@@ -334,7 +359,13 @@ impl LoadedBinary {
     /// Get Ghidra-compatible compiler ID based on detections
     pub fn get_ghidra_compiler_id(&self) -> Option<String> {
         if let Some(load_spec) = &self.load_spec {
+            if load_spec.pair.compiler_spec_id.as_str() == "default" && self.rich_header_records.is_some() {
+                return Some("windows".to_string());
+            }
             return Some(load_spec.pair.compiler_spec_id.as_str().to_string());
+        }
+        if self.rich_header_records.is_some() {
+            return Some("windows".to_string());
         }
         let detection = crate::detector::detect(self);
         let is_pe = self.format.to_ascii_uppercase().starts_with("PE");
@@ -416,4 +447,8 @@ pub struct LoadedBinaryBuilder {
     global_symbol_sizes: std::collections::HashMap<u64, u64>,
     relocation_symbols: std::collections::HashMap<u64, String>,
     pdb_debug_info: Option<PdbDebugInfo>,
+    relocations: Vec<RelocationEntry>,
+    rich_header_records: Option<Vec<RichHeaderRecord>>,
+    symbol_versions: std::collections::HashMap<u64, String>,
+    inferred_types: Vec<InferredTypeInfo>,
 }

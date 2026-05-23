@@ -106,6 +106,8 @@ impl ElfLoader {
         let mut global_symbols = HashMap::new();
         let mut global_symbol_sizes = HashMap::new();
         let mut relocation_symbols = HashMap::new();
+        let mut relocs = Vec::new();
+        let mut symbol_versions = HashMap::new();
         let phdrs = read_program_headers_64(bytes, &header, endian);
         let mut image_base = if !is_relocatable {
             image_base_from_phdrs_64(&phdrs).unwrap_or(u64::MAX)
@@ -220,20 +222,37 @@ impl ElfLoader {
                 &mut relocation_symbols,
                 endian,
             );
-            if is_relocatable && header.machine == EM_RISCV {
-                let patches =
-                    riscv_relocation_patches_64(bytes, &shdrs, &section_addresses, endian);
+            let patches_riscv = if is_relocatable && header.machine == EM_RISCV {
+                Some(riscv_relocation_patches_64(bytes, &shdrs, &section_addresses, endian))
+            } else {
+                None
+            };
+            let patches_loong = if is_relocatable && header.machine == EM_LOONGARCH {
+                Some(loongarch_relocation_patches_64(bytes, &shdrs, &section_addresses, endian))
+            } else {
+                None
+            };
+            let patches_x86 = if is_relocatable && header.machine == EM_X86_64 {
+                Some(x86_64_relocation_patches_64(bytes, &shdrs, &section_addresses, endian))
+            } else {
+                None
+            };
+
+            if let Some(patches) = patches_riscv {
                 apply_u32_relocation_patches(&mut data, patches, endian);
-            } else if is_relocatable && header.machine == EM_LOONGARCH {
-                let patches =
-                    loongarch_relocation_patches_64(bytes, &shdrs, &section_addresses, endian);
+            }
+            if let Some(patches) = patches_loong {
                 apply_u32_relocation_patches(&mut data, patches, endian);
-            } else if is_relocatable && header.machine == EM_X86_64 {
-                let (patches_64, patches_32) =
-                    x86_64_relocation_patches_64(bytes, &shdrs, &section_addresses, endian);
+            }
+            if let Some((patches_64, patches_32)) = patches_x86 {
                 apply_u64_relocation_patches(&mut data, patches_64, endian);
                 apply_u32_relocation_patches(&mut data, patches_32, endian);
             }
+
+            let bytes_patched = data.as_slice();
+            relocs = parse_relocations_64(bytes_patched, &shdrs, &section_addresses, endian);
+            let ver_names = parse_gnu_versions_64(bytes_patched, &shdrs, endian);
+            symbol_versions = map_symbol_versions_64(bytes_patched, &shdrs, endian, &ver_names);
         } else if !is_relocatable {
             sections_info.extend(load_segments_as_sections_64(&phdrs));
         }
@@ -267,6 +286,32 @@ impl ElfLoader {
             });
         }
 
+        // Apply PT_GNU_RELRO protection (Gap 6)
+        let pt_gnu_relro = 0x6474e552;
+        for phdr in &phdrs {
+            if phdr.p_type == pt_gnu_relro {
+                let relro_start = phdr.p_vaddr;
+                let relro_end = phdr.p_vaddr.saturating_add(phdr.p_memsz);
+                for section in &mut sections_info {
+                    let sec_start = section.virtual_address;
+                    let sec_end = section.virtual_address.saturating_add(section.virtual_size);
+                    if sec_start < relro_end && sec_end > relro_start {
+                        section.is_writable = false;
+                    }
+                }
+            }
+        }
+
+        let (header_types, header_symbols) = generate_elf_header_types(
+            true,
+            image_base,
+            header.phoff,
+            header.phnum,
+            header.shoff,
+            header.shnum,
+        );
+        global_symbols.extend(header_symbols);
+
         LoadedBinaryBuilder::new(path, data)
             .format("ELF64")
             .architecture(architecture)
@@ -279,6 +324,9 @@ impl ElfLoader {
             .add_global_symbols(global_symbols)
             .add_global_symbol_sizes(global_symbol_sizes)
             .add_relocation_symbols(relocation_symbols)
+            .add_inferred_types(header_types)
+            .add_relocations(relocs)
+            .add_symbol_versions(symbol_versions)
             .build()
     }
 
@@ -299,6 +347,8 @@ impl ElfLoader {
         let mut global_symbols = HashMap::new();
         let mut global_symbol_sizes = HashMap::new();
         let mut relocation_symbols = HashMap::new();
+        let mut relocs = Vec::new();
+        let mut symbol_versions = HashMap::new();
         let phdrs = read_program_headers_32(bytes, &header, endian);
         let mut image_base = if !is_relocatable {
             image_base_from_phdrs_32(&phdrs).unwrap_or(u64::MAX)
@@ -400,14 +450,28 @@ impl ElfLoader {
                 &mut relocation_symbols,
                 endian,
             );
-            if is_relocatable && header.machine == EM_ARM {
-                let patches = arm_relocation_patches_32(bytes, &shdrs, &section_addresses, endian);
-                apply_u32_relocation_patches(&mut data, patches, endian);
-            } else if is_relocatable && header.machine == EM_LOONGARCH {
-                let patches =
-                    loongarch_relocation_patches_32(bytes, &shdrs, &section_addresses, endian);
+            let patches_arm = if is_relocatable && header.machine == EM_ARM {
+                Some(arm_relocation_patches_32(bytes, &shdrs, &section_addresses, endian))
+            } else {
+                None
+            };
+            let patches_loong = if is_relocatable && header.machine == EM_LOONGARCH {
+                Some(loongarch_relocation_patches_32(bytes, &shdrs, &section_addresses, endian))
+            } else {
+                None
+            };
+
+            if let Some(patches) = patches_arm {
                 apply_u32_relocation_patches(&mut data, patches, endian);
             }
+            if let Some(patches) = patches_loong {
+                apply_u32_relocation_patches(&mut data, patches, endian);
+            }
+
+            let bytes_patched = data.as_slice();
+            relocs = parse_relocations_32(bytes_patched, &shdrs, &section_addresses, endian);
+            let ver_names = parse_gnu_versions_32(bytes_patched, &shdrs, endian);
+            symbol_versions = map_symbol_versions_32(bytes_patched, &shdrs, endian, &ver_names);
         } else if !is_relocatable {
             sections_info.extend(load_segments_as_sections_32(&phdrs));
         }
@@ -441,6 +505,32 @@ impl ElfLoader {
             });
         }
 
+        // Apply PT_GNU_RELRO protection (Gap 6)
+        let pt_gnu_relro = 0x6474e552;
+        for phdr in &phdrs {
+            if phdr.p_type == pt_gnu_relro {
+                let relro_start = phdr.p_vaddr as u64;
+                let relro_end = (phdr.p_vaddr as u64).saturating_add(phdr.p_memsz as u64);
+                for section in &mut sections_info {
+                    let sec_start = section.virtual_address;
+                    let sec_end = section.virtual_address.saturating_add(section.virtual_size);
+                    if sec_start < relro_end && sec_end > relro_start {
+                        section.is_writable = false;
+                    }
+                }
+            }
+        }
+
+        let (header_types, header_symbols) = generate_elf_header_types(
+            false,
+            image_base,
+            header.phoff as u64,
+            header.phnum,
+            header.shoff as u64,
+            header.shnum,
+        );
+        global_symbols.extend(header_symbols);
+
         LoadedBinaryBuilder::new(path, data)
             .format("ELF32")
             .architecture(architecture)
@@ -453,6 +543,9 @@ impl ElfLoader {
             .add_global_symbols(global_symbols)
             .add_global_symbol_sizes(global_symbol_sizes)
             .add_relocation_symbols(relocation_symbols)
+            .add_inferred_types(header_types)
+            .add_relocations(relocs)
+            .add_symbol_versions(symbol_versions)
             .build()
     }
 
@@ -1767,6 +1860,558 @@ fn align_up(value: u64, alignment: u64) -> u64 {
     (value + alignment - 1) & !(alignment - 1)
 }
 
+fn generate_elf_header_types(
+    is_64bit: bool,
+    image_base: u64,
+    phoff: u64,
+    phnum: u16,
+    shoff: u64,
+    shnum: u16,
+) -> (Vec<crate::loader::types::InferredTypeInfo>, std::collections::HashMap<u64, String>) {
+    use crate::loader::types::{InferredTypeInfo, InferredFieldInfo};
+    let mut types = Vec::new();
+    let mut symbols = std::collections::HashMap::new();
+
+    // 1. ELF Header
+    let ehdr_name = if is_64bit { "Elf64_Ehdr" } else { "Elf32_Ehdr" };
+    let ehdr_size = if is_64bit { 64 } else { 52 };
+    let ehdr_fields = if is_64bit {
+        vec![
+            InferredFieldInfo { name: "e_ident".to_string(), type_name: "unsigned char[16]".to_string(), offset: 0, size: 16 },
+            InferredFieldInfo { name: "e_type".to_string(), type_name: "Elf64_Half".to_string(), offset: 16, size: 2 },
+            InferredFieldInfo { name: "e_machine".to_string(), type_name: "Elf64_Half".to_string(), offset: 18, size: 2 },
+            InferredFieldInfo { name: "e_version".to_string(), type_name: "Elf64_Word".to_string(), offset: 20, size: 4 },
+            InferredFieldInfo { name: "e_entry".to_string(), type_name: "Elf64_Addr".to_string(), offset: 24, size: 8 },
+            InferredFieldInfo { name: "e_phoff".to_string(), type_name: "Elf64_Off".to_string(), offset: 32, size: 8 },
+            InferredFieldInfo { name: "e_shoff".to_string(), type_name: "Elf64_Off".to_string(), offset: 40, size: 8 },
+            InferredFieldInfo { name: "e_flags".to_string(), type_name: "Elf64_Word".to_string(), offset: 48, size: 4 },
+            InferredFieldInfo { name: "e_ehsize".to_string(), type_name: "Elf64_Half".to_string(), offset: 52, size: 2 },
+            InferredFieldInfo { name: "e_phentsize".to_string(), type_name: "Elf64_Half".to_string(), offset: 54, size: 2 },
+            InferredFieldInfo { name: "e_phnum".to_string(), type_name: "Elf64_Half".to_string(), offset: 56, size: 2 },
+            InferredFieldInfo { name: "e_shentsize".to_string(), type_name: "Elf64_Half".to_string(), offset: 58, size: 2 },
+            InferredFieldInfo { name: "e_shnum".to_string(), type_name: "Elf64_Half".to_string(), offset: 60, size: 2 },
+            InferredFieldInfo { name: "e_shstrndx".to_string(), type_name: "Elf64_Half".to_string(), offset: 62, size: 2 },
+        ]
+    } else {
+        vec![
+            InferredFieldInfo { name: "e_ident".to_string(), type_name: "unsigned char[16]".to_string(), offset: 0, size: 16 },
+            InferredFieldInfo { name: "e_type".to_string(), type_name: "Elf32_Half".to_string(), offset: 16, size: 2 },
+            InferredFieldInfo { name: "e_machine".to_string(), type_name: "Elf32_Half".to_string(), offset: 18, size: 2 },
+            InferredFieldInfo { name: "e_version".to_string(), type_name: "Elf32_Word".to_string(), offset: 20, size: 4 },
+            InferredFieldInfo { name: "e_entry".to_string(), type_name: "Elf32_Addr".to_string(), offset: 24, size: 4 },
+            InferredFieldInfo { name: "e_phoff".to_string(), type_name: "Elf32_Off".to_string(), offset: 28, size: 4 },
+            InferredFieldInfo { name: "e_shoff".to_string(), type_name: "Elf32_Off".to_string(), offset: 32, size: 4 },
+            InferredFieldInfo { name: "e_flags".to_string(), type_name: "Elf32_Word".to_string(), offset: 36, size: 4 },
+            InferredFieldInfo { name: "e_ehsize".to_string(), type_name: "Elf32_Half".to_string(), offset: 40, size: 2 },
+            InferredFieldInfo { name: "e_phentsize".to_string(), type_name: "Elf32_Half".to_string(), offset: 42, size: 2 },
+            InferredFieldInfo { name: "e_phnum".to_string(), type_name: "Elf32_Half".to_string(), offset: 44, size: 2 },
+            InferredFieldInfo { name: "e_shentsize".to_string(), type_name: "Elf32_Half".to_string(), offset: 46, size: 2 },
+            InferredFieldInfo { name: "e_shnum".to_string(), type_name: "Elf32_Half".to_string(), offset: 48, size: 2 },
+            InferredFieldInfo { name: "e_shstrndx".to_string(), type_name: "Elf32_Half".to_string(), offset: 50, size: 2 },
+        ]
+    };
+    types.push(InferredTypeInfo {
+        name: ehdr_name.to_string(),
+        mangled_name: ehdr_name.to_string(),
+        kind: "struct".to_string(),
+        fields: ehdr_fields,
+        size: ehdr_size,
+        metadata_address: image_base,
+    });
+    symbols.insert(image_base, "ELF_HEADER".to_string());
+
+    // 2. Program Headers
+    if phoff != 0 && phnum > 0 {
+        let phdr_name = if is_64bit { "Elf64_Phdr" } else { "Elf32_Phdr" };
+        let phdr_size = if is_64bit { 56 } else { 32 };
+        let phdr_fields = if is_64bit {
+            vec![
+                InferredFieldInfo { name: "p_type".to_string(), type_name: "Elf64_Word".to_string(), offset: 0, size: 4 },
+                InferredFieldInfo { name: "p_flags".to_string(), type_name: "Elf64_Word".to_string(), offset: 4, size: 4 },
+                InferredFieldInfo { name: "p_offset".to_string(), type_name: "Elf64_Off".to_string(), offset: 8, size: 8 },
+                InferredFieldInfo { name: "p_vaddr".to_string(), type_name: "Elf64_Addr".to_string(), offset: 16, size: 8 },
+                InferredFieldInfo { name: "p_paddr".to_string(), type_name: "Elf64_Addr".to_string(), offset: 24, size: 8 },
+                InferredFieldInfo { name: "p_filesz".to_string(), type_name: "Elf64_Xword".to_string(), offset: 32, size: 8 },
+                InferredFieldInfo { name: "p_memsz".to_string(), type_name: "Elf64_Xword".to_string(), offset: 40, size: 8 },
+                InferredFieldInfo { name: "p_align".to_string(), type_name: "Elf64_Xword".to_string(), offset: 48, size: 8 },
+            ]
+        } else {
+            vec![
+                InferredFieldInfo { name: "p_type".to_string(), type_name: "Elf32_Word".to_string(), offset: 0, size: 4 },
+                InferredFieldInfo { name: "p_offset".to_string(), type_name: "Elf32_Off".to_string(), offset: 4, size: 4 },
+                InferredFieldInfo { name: "p_vaddr".to_string(), type_name: "Elf32_Addr".to_string(), offset: 8, size: 4 },
+                InferredFieldInfo { name: "p_paddr".to_string(), type_name: "Elf32_Addr".to_string(), offset: 12, size: 4 },
+                InferredFieldInfo { name: "p_filesz".to_string(), type_name: "Elf32_Word".to_string(), offset: 16, size: 4 },
+                InferredFieldInfo { name: "p_memsz".to_string(), type_name: "Elf32_Word".to_string(), offset: 20, size: 4 },
+                InferredFieldInfo { name: "p_flags".to_string(), type_name: "Elf32_Word".to_string(), offset: 24, size: 4 },
+                InferredFieldInfo { name: "p_align".to_string(), type_name: "Elf32_Word".to_string(), offset: 28, size: 4 },
+            ]
+        };
+        let phdr_va = image_base + phoff;
+        types.push(InferredTypeInfo {
+            name: phdr_name.to_string(),
+            mangled_name: phdr_name.to_string(),
+            kind: "struct".to_string(),
+            fields: phdr_fields,
+            size: phdr_size * phnum as u32,
+            metadata_address: phdr_va,
+        });
+        symbols.insert(phdr_va, "PROGRAM_HEADERS".to_string());
+    }
+
+    // 3. Section Headers
+    if shoff != 0 && shnum > 0 {
+        let shdr_name = if is_64bit { "Elf64_Shdr" } else { "Elf32_Shdr" };
+        let shdr_size = if is_64bit { 64 } else { 40 };
+        let shdr_fields = if is_64bit {
+            vec![
+                InferredFieldInfo { name: "sh_name".to_string(), type_name: "Elf64_Word".to_string(), offset: 0, size: 4 },
+                InferredFieldInfo { name: "sh_type".to_string(), type_name: "Elf64_Word".to_string(), offset: 4, size: 4 },
+                InferredFieldInfo { name: "sh_flags".to_string(), type_name: "Elf64_Xword".to_string(), offset: 8, size: 8 },
+                InferredFieldInfo { name: "sh_addr".to_string(), type_name: "Elf64_Addr".to_string(), offset: 16, size: 8 },
+                InferredFieldInfo { name: "sh_offset".to_string(), type_name: "Elf64_Off".to_string(), offset: 24, size: 8 },
+                InferredFieldInfo { name: "sh_size".to_string(), type_name: "Elf64_Xword".to_string(), offset: 32, size: 8 },
+                InferredFieldInfo { name: "sh_link".to_string(), type_name: "Elf64_Word".to_string(), offset: 40, size: 4 },
+                InferredFieldInfo { name: "sh_info".to_string(), type_name: "Elf64_Word".to_string(), offset: 44, size: 4 },
+                InferredFieldInfo { name: "sh_addralign".to_string(), type_name: "Elf64_Xword".to_string(), offset: 48, size: 8 },
+                InferredFieldInfo { name: "sh_entsize".to_string(), type_name: "Elf64_Xword".to_string(), offset: 56, size: 8 },
+            ]
+        } else {
+            vec![
+                InferredFieldInfo { name: "sh_name".to_string(), type_name: "Elf32_Word".to_string(), offset: 0, size: 4 },
+                InferredFieldInfo { name: "sh_type".to_string(), type_name: "Elf32_Word".to_string(), offset: 4, size: 4 },
+                InferredFieldInfo { name: "sh_flags".to_string(), type_name: "Elf32_Word".to_string(), offset: 8, size: 4 },
+                InferredFieldInfo { name: "sh_addr".to_string(), type_name: "Elf32_Addr".to_string(), offset: 12, size: 4 },
+                InferredFieldInfo { name: "sh_offset".to_string(), type_name: "Elf32_Off".to_string(), offset: 16, size: 4 },
+                InferredFieldInfo { name: "sh_size".to_string(), type_name: "Elf32_Word".to_string(), offset: 20, size: 4 },
+                InferredFieldInfo { name: "sh_link".to_string(), type_name: "Elf32_Word".to_string(), offset: 24, size: 4 },
+                InferredFieldInfo { name: "sh_info".to_string(), type_name: "Elf32_Word".to_string(), offset: 28, size: 4 },
+                InferredFieldInfo { name: "sh_addralign".to_string(), type_name: "Elf32_Word".to_string(), offset: 32, size: 4 },
+                InferredFieldInfo { name: "sh_entsize".to_string(), type_name: "Elf32_Word".to_string(), offset: 36, size: 4 },
+            ]
+        };
+        let shdr_va = image_base + shoff;
+        types.push(InferredTypeInfo {
+            name: shdr_name.to_string(),
+            mangled_name: shdr_name.to_string(),
+            kind: "struct".to_string(),
+            fields: shdr_fields,
+            size: shdr_size * shnum as u32,
+            metadata_address: shdr_va,
+        });
+        symbols.insert(shdr_va, "SECTION_HEADERS".to_string());
+    }
+
+    (types, symbols)
+}
+
+fn parse_relocations_64(
+    full_data: &[u8],
+    shdrs: &[Elf64Shdr],
+    section_addresses: &[u64],
+    endian: Endian,
+) -> Vec<crate::loader::types::RelocationEntry> {
+    let reader = ByteReader::new(full_data, endian);
+    let mut relocs = Vec::new();
+    for shdr in shdrs
+        .iter()
+        .filter(|shdr| matches!(shdr.sh_type, SHT_RELA | SHT_REL))
+    {
+        let Some(target_base) = section_addresses.get(shdr.sh_info as usize).copied() else {
+            continue;
+        };
+        let symtab = shdrs.get(shdr.sh_link as usize);
+        let strtab = symtab.and_then(|sym| symbol_string_table_64(full_data, shdrs, sym));
+        
+        let entry_size = if shdr.sh_entsize > 0 {
+            shdr.sh_entsize as usize
+        } else if shdr.sh_type == SHT_RELA {
+            24
+        } else {
+            16
+        };
+        let count = (shdr.sh_size as usize).checked_div(entry_size).unwrap_or(0);
+        let start = shdr.sh_offset as usize;
+        for index in 0..count {
+            let offset = start + index * entry_size;
+            if offset + entry_size > full_data.len() {
+                break;
+            }
+            let Ok(r_offset) = reader.u64(offset) else {
+                break;
+            };
+            let Ok(r_info) = reader.u64(offset + 8) else {
+                break;
+            };
+            let r_type = (r_info & 0xFFFFFFFF) as u32;
+            let sym_index = (r_info >> 32) as usize;
+            
+            let addend = if shdr.sh_type == SHT_RELA {
+                reader.i64(offset + 16).unwrap_or(0)
+            } else {
+                0
+            };
+
+            let symbol_name = symtab.and_then(|sym| {
+                strtab.and_then(|str_tab| {
+                    symbol_name_64(full_data, sym, str_tab, sym_index, endian)
+                })
+            });
+
+            let address = target_base.saturating_add(r_offset);
+            let size = match r_type {
+                1 => 8, // R_X86_64_64
+                2 | 10 | 11 => 4, // R_X86_64_PC32 / 32 / 32S
+                _ => 8,
+            };
+
+            relocs.push(crate::loader::types::RelocationEntry {
+                address,
+                r_type,
+                size,
+                addend,
+                symbol_name,
+            });
+        }
+    }
+    relocs
+}
+
+fn parse_relocations_32(
+    full_data: &[u8],
+    shdrs: &[Elf32Shdr],
+    section_addresses: &[u64],
+    endian: Endian,
+) -> Vec<crate::loader::types::RelocationEntry> {
+    let reader = ByteReader::new(full_data, endian);
+    let mut relocs = Vec::new();
+    for shdr in shdrs
+        .iter()
+        .filter(|shdr| matches!(shdr.sh_type, SHT_RELA | SHT_REL))
+    {
+        let Some(target_base) = section_addresses.get(shdr.sh_info as usize).copied() else {
+            continue;
+        };
+        let symtab = shdrs.get(shdr.sh_link as usize);
+        let strtab = symtab.and_then(|sym| symbol_string_table_32(full_data, shdrs, sym));
+        
+        let entry_size = if shdr.sh_entsize > 0 {
+            shdr.sh_entsize as usize
+        } else if shdr.sh_type == SHT_RELA {
+            12
+        } else {
+            8
+        };
+        let count = (shdr.sh_size as usize).checked_div(entry_size).unwrap_or(0);
+        let start = shdr.sh_offset as usize;
+        for index in 0..count {
+            let offset = start + index * entry_size;
+            if offset + entry_size > full_data.len() {
+                break;
+            }
+            let Ok(r_offset) = reader.u32(offset) else {
+                break;
+            };
+            let Ok(r_info) = reader.u32(offset + 4) else {
+                break;
+            };
+            let r_type = (r_info & 0xFF) as u32;
+            let sym_index = (r_info >> 8) as usize;
+            
+            let addend = if shdr.sh_type == SHT_RELA {
+                reader.i32(offset + 8).unwrap_or(0) as i64
+            } else {
+                0
+            };
+
+            let symbol_name = symtab.and_then(|sym| {
+                strtab.and_then(|str_tab| {
+                    symbol_name_32(full_data, sym, str_tab, sym_index, endian)
+                })
+            });
+
+            let address = target_base.saturating_add(r_offset as u64);
+            let size = match r_type {
+                2 => 4, // R_ARM_ABS32
+                _ => 4,
+            };
+
+            relocs.push(crate::loader::types::RelocationEntry {
+                address,
+                r_type,
+                size,
+                addend,
+                symbol_name,
+            });
+        }
+    }
+    relocs
+}
+
+fn parse_gnu_versions_64(
+    full_data: &[u8],
+    shdrs: &[Elf64Shdr],
+    endian: Endian,
+) -> HashMap<u32, String> {
+    let reader = ByteReader::new(full_data, endian);
+    let mut ver_names = HashMap::new();
+
+    // 1. Parse SHT_GNU_verdef
+    for shdr in shdrs.iter().filter(|s| s.sh_type == 0x6ffffffd) {
+        let Some(strtab_shdr) = shdrs.get(shdr.sh_link as usize) else { continue; };
+        let strtab_offset = strtab_shdr.sh_offset as usize;
+        let strtab_size = strtab_shdr.sh_size as usize;
+        if strtab_offset + strtab_size > full_data.len() { continue; }
+        let strtab_data = &full_data[strtab_offset..strtab_offset + strtab_size];
+
+        let mut offset = shdr.sh_offset as usize;
+        let end = offset + shdr.sh_size as usize;
+        
+        while offset + 20 <= end {
+            let Ok(vd_version) = reader.u16(offset) else { break; };
+            if vd_version == 0 { break; }
+            let Ok(vd_ndx) = reader.u16(offset + 4) else { break; };
+            let Ok(vd_aux) = reader.u32(offset + 12) else { break; };
+            let Ok(vd_next) = reader.u32(offset + 16) else { break; };
+            
+            let aux_offset = offset + vd_aux as usize;
+            if aux_offset + 8 <= full_data.len() {
+                let Ok(vda_name) = reader.u32(aux_offset) else { break; };
+                let ver_name = extract_cstring(strtab_data, vda_name as usize);
+                if !ver_name.is_empty() {
+                    ver_names.insert(vd_ndx as u32, ver_name);
+                }
+            }
+
+            if vd_next == 0 {
+                break;
+            }
+            offset += vd_next as usize;
+        }
+    }
+
+    // 2. Parse SHT_GNU_verneed
+    for shdr in shdrs.iter().filter(|s| s.sh_type == 0x6ffffffe) {
+        let Some(strtab_shdr) = shdrs.get(shdr.sh_link as usize) else { continue; };
+        let strtab_offset = strtab_shdr.sh_offset as usize;
+        let strtab_size = strtab_shdr.sh_size as usize;
+        if strtab_offset + strtab_size > full_data.len() { continue; }
+        let strtab_data = &full_data[strtab_offset..strtab_offset + strtab_size];
+
+        let mut offset = shdr.sh_offset as usize;
+        let end = offset + shdr.sh_size as usize;
+
+        while offset + 16 <= end {
+            let Ok(vn_version) = reader.u16(offset) else { break; };
+            if vn_version == 0 { break; }
+            let Ok(vn_cnt) = reader.u16(offset + 2) else { break; };
+            let Ok(vn_aux) = reader.u32(offset + 8) else { break; };
+            let Ok(vn_next) = reader.u32(offset + 12) else { break; };
+
+            let mut aux_offset = offset + vn_aux as usize;
+            for _ in 0..vn_cnt {
+                if aux_offset + 16 > full_data.len() {
+                    break;
+                }
+                let Ok(vna_other) = reader.u16(aux_offset + 6) else { break; };
+                let Ok(vna_name) = reader.u32(aux_offset + 8) else { break; };
+                let Ok(vna_next) = reader.u32(aux_offset + 12) else { break; };
+
+                let ver_name = extract_cstring(strtab_data, vna_name as usize);
+                if !ver_name.is_empty() {
+                    ver_names.insert(vna_other as u32, ver_name);
+                }
+
+                if vna_next == 0 {
+                    break;
+                }
+                aux_offset += vna_next as usize;
+            }
+
+            if vn_next == 0 {
+                break;
+            }
+            offset += vn_next as usize;
+        }
+    }
+
+    ver_names
+}
+
+fn map_symbol_versions_64(
+    full_data: &[u8],
+    shdrs: &[Elf64Shdr],
+    endian: Endian,
+    ver_names: &HashMap<u32, String>,
+) -> HashMap<u64, String> {
+    let reader = ByteReader::new(full_data, endian);
+    let mut symbol_versions = HashMap::new();
+
+    for shdr in shdrs.iter().filter(|s| s.sh_type == 0x6fffffff) {
+        let Some(symtab_shdr) = shdrs.get(shdr.sh_link as usize) else { continue; };
+        
+        let versym_offset = shdr.sh_offset as usize;
+        let versym_count = (shdr.sh_size as usize) / 2;
+
+        let symtab_offset = symtab_shdr.sh_offset as usize;
+        let symtab_entry_size = if symtab_shdr.sh_entsize > 0 { symtab_shdr.sh_entsize as usize } else { Elf64Sym::SIZE };
+        let symtab_count = (symtab_shdr.sh_size as usize) / symtab_entry_size;
+
+        let count = versym_count.min(symtab_count);
+        for idx in 0..count {
+            let Ok(ver_idx) = reader.u16(versym_offset + idx * 2) else { break; };
+            let clean_ver_idx = (ver_idx & 0x7FFF) as u32;
+
+            if clean_ver_idx >= 2 {
+                if let Some(ver_name) = ver_names.get(&clean_ver_idx) {
+                    let sym_offset = symtab_offset + idx * symtab_entry_size;
+                    if sym_offset + symtab_entry_size <= full_data.len() {
+                        if let Ok(sym_val) = reader.u64(sym_offset + 8) {
+                            if sym_val != 0 {
+                                symbol_versions.insert(sym_val, ver_name.clone());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    symbol_versions
+}
+
+fn parse_gnu_versions_32(
+    full_data: &[u8],
+    shdrs: &[Elf32Shdr],
+    endian: Endian,
+) -> HashMap<u32, String> {
+    let reader = ByteReader::new(full_data, endian);
+    let mut ver_names = HashMap::new();
+
+    // 1. Parse SHT_GNU_verdef
+    for shdr in shdrs.iter().filter(|s| s.sh_type == 0x6ffffffd) {
+        let Some(strtab_shdr) = shdrs.get(shdr.sh_link as usize) else { continue; };
+        let strtab_offset = strtab_shdr.sh_offset as usize;
+        let strtab_size = strtab_shdr.sh_size as usize;
+        if strtab_offset + strtab_size > full_data.len() { continue; }
+        let strtab_data = &full_data[strtab_offset..strtab_offset + strtab_size];
+
+        let mut offset = shdr.sh_offset as usize;
+        let end = offset + shdr.sh_size as usize;
+        
+        while offset + 20 <= end {
+            let Ok(vd_version) = reader.u16(offset) else { break; };
+            if vd_version == 0 { break; }
+            let Ok(vd_ndx) = reader.u16(offset + 4) else { break; };
+            let Ok(vd_aux) = reader.u32(offset + 12) else { break; };
+            let Ok(vd_next) = reader.u32(offset + 16) else { break; };
+            
+            let aux_offset = offset + vd_aux as usize;
+            if aux_offset + 8 <= full_data.len() {
+                let Ok(vda_name) = reader.u32(aux_offset) else { break; };
+                let ver_name = extract_cstring(strtab_data, vda_name as usize);
+                if !ver_name.is_empty() {
+                    ver_names.insert(vd_ndx as u32, ver_name);
+                }
+            }
+
+            if vd_next == 0 {
+                break;
+            }
+            offset += vd_next as usize;
+        }
+    }
+
+    // 2. Parse SHT_GNU_verneed
+    for shdr in shdrs.iter().filter(|s| s.sh_type == 0x6ffffffe) {
+        let Some(strtab_shdr) = shdrs.get(shdr.sh_link as usize) else { continue; };
+        let strtab_offset = strtab_shdr.sh_offset as usize;
+        let strtab_size = strtab_shdr.sh_size as usize;
+        if strtab_offset + strtab_size > full_data.len() { continue; }
+        let strtab_data = &full_data[strtab_offset..strtab_offset + strtab_size];
+
+        let mut offset = shdr.sh_offset as usize;
+        let end = offset + shdr.sh_size as usize;
+
+        while offset + 16 <= end {
+            let Ok(vn_version) = reader.u16(offset) else { break; };
+            if vn_version == 0 { break; }
+            let Ok(vn_cnt) = reader.u16(offset + 2) else { break; };
+            let Ok(vn_aux) = reader.u32(offset + 8) else { break; };
+            let Ok(vn_next) = reader.u32(offset + 12) else { break; };
+
+            let mut aux_offset = offset + vn_aux as usize;
+            for _ in 0..vn_cnt {
+                if aux_offset + 16 > full_data.len() {
+                    break;
+                }
+                let Ok(vna_other) = reader.u16(aux_offset + 6) else { break; };
+                let Ok(vna_name) = reader.u32(aux_offset + 8) else { break; };
+                let Ok(vna_next) = reader.u32(aux_offset + 12) else { break; };
+
+                let ver_name = extract_cstring(strtab_data, vna_name as usize);
+                if !ver_name.is_empty() {
+                    ver_names.insert(vna_other as u32, ver_name);
+                }
+
+                if vna_next == 0 {
+                    break;
+                }
+                aux_offset += vna_next as usize;
+            }
+
+            if vn_next == 0 {
+                break;
+            }
+            offset += vn_next as usize;
+        }
+    }
+
+    ver_names
+}
+
+fn map_symbol_versions_32(
+    full_data: &[u8],
+    shdrs: &[Elf32Shdr],
+    endian: Endian,
+    ver_names: &HashMap<u32, String>,
+) -> HashMap<u64, String> {
+    let reader = ByteReader::new(full_data, endian);
+    let mut symbol_versions = HashMap::new();
+
+    for shdr in shdrs.iter().filter(|s| s.sh_type == 0x6fffffff) {
+        let Some(symtab_shdr) = shdrs.get(shdr.sh_link as usize) else { continue; };
+        
+        let versym_offset = shdr.sh_offset as usize;
+        let versym_count = (shdr.sh_size as usize) / 2;
+
+        let symtab_offset = symtab_shdr.sh_offset as usize;
+        let symtab_entry_size = if symtab_shdr.sh_entsize > 0 { symtab_shdr.sh_entsize as usize } else { Elf32Sym::SIZE };
+        let symtab_count = (symtab_shdr.sh_size as usize) / symtab_entry_size;
+
+        let count = versym_count.min(symtab_count);
+        for idx in 0..count {
+            let Ok(ver_idx) = reader.u16(versym_offset + idx * 2) else { break; };
+            let clean_ver_idx = (ver_idx & 0x7FFF) as u32;
+
+            if clean_ver_idx >= 2 {
+                if let Some(ver_name) = ver_names.get(&clean_ver_idx) {
+                    let sym_offset = symtab_offset + idx * symtab_entry_size;
+                    if sym_offset + symtab_entry_size <= full_data.len() {
+                        if let Ok(sym_val) = reader.u32(sym_offset + 4) {
+                            if sym_val != 0 {
+                                symbol_versions.insert(sym_val as u64, ver_name.clone());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    symbol_versions
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2013,5 +2658,208 @@ mod tests {
         assert_eq!(entry1, [0x38, 0x00, 0x10, 0x00, 0x00, 0x00, 0x00, 0x00]);
         assert_eq!(entry2, [0x2c, 0x00, 0x10, 0x00, 0x00, 0x00, 0x00, 0x00]);
         assert_eq!(entry3, [0x33, 0x00, 0x10, 0x00, 0x00, 0x00, 0x00, 0x00]);
+    }
+
+    #[test]
+    fn test_parse_elf_relro_and_symbol_versions() {
+        let mut data = vec![0u8; 4096];
+
+        // 1. ELF Identification
+        data[0..4].copy_from_slice(&[0x7f, 0x45, 0x4c, 0x46]); // \x7fELF
+        data[4] = 2; // Class 64-bit
+        data[5] = 1; // Little Endian
+        data[6] = 1; // Version 1
+
+        // 2. ELF Header
+        // e_type = ET_EXEC (2)
+        data[16..18].copy_from_slice(&2u16.to_le_bytes());
+        // e_machine = EM_X86_64 (62)
+        data[18..20].copy_from_slice(&62u16.to_le_bytes());
+        // e_version = 1
+        data[20..24].copy_from_slice(&1u32.to_le_bytes());
+        // e_entry = 0x1000
+        data[24..32].copy_from_slice(&0x1000u64.to_le_bytes());
+        // e_phoff = 64
+        data[32..40].copy_from_slice(&64u64.to_le_bytes());
+        // e_shoff = 176 (64 + 2 * 56)
+        data[40..48].copy_from_slice(&176u64.to_le_bytes());
+        // e_ehsize = 64
+        data[52..54].copy_from_slice(&64u16.to_le_bytes());
+        // e_phentsize = 56
+        data[54..56].copy_from_slice(&56u16.to_le_bytes());
+        // e_phnum = 2
+        data[56..58].copy_from_slice(&2u16.to_le_bytes());
+        // e_shentsize = 64
+        data[58..60].copy_from_slice(&64u16.to_le_bytes());
+        // e_shnum = 7
+        data[60..62].copy_from_slice(&7u16.to_le_bytes());
+        // e_shstrndx = 6
+        data[62..64].copy_from_slice(&6u16.to_le_bytes());
+
+        // 3. Program Headers (at 64, size 56)
+        // Program Header 0 (PT_LOAD)
+        // p_type = 1
+        data[64..68].copy_from_slice(&1u32.to_le_bytes());
+        // p_flags = PF_R | PF_X (5)
+        data[68..72].copy_from_slice(&5u32.to_le_bytes());
+        // p_offset = 0
+        data[72..80].copy_from_slice(&0u64.to_le_bytes());
+        // p_vaddr = 0x1000
+        data[80..88].copy_from_slice(&0x1000u64.to_le_bytes());
+        // p_filesz = 1024
+        data[96..104].copy_from_slice(&1024u64.to_le_bytes());
+        // p_memsz = 1024
+        data[104..112].copy_from_slice(&1024u64.to_le_bytes());
+
+        // Program Header 1 (PT_GNU_RELRO)
+        // p_type = 0x6474e552
+        data[120..124].copy_from_slice(&0x6474e552u32.to_le_bytes());
+        // p_flags = 4 (R)
+        data[124..128].copy_from_slice(&4u32.to_le_bytes());
+        // p_offset = 0x300
+        data[128..136].copy_from_slice(&0x300u64.to_le_bytes());
+        // p_vaddr = 0x2000
+        data[136..144].copy_from_slice(&0x2000u64.to_le_bytes());
+        // p_filesz = 0x100
+        data[152..160].copy_from_slice(&0x100u64.to_le_bytes());
+        // p_memsz = 0x100
+        data[160..168].copy_from_slice(&0x100u64.to_le_bytes());
+
+        // 4. Section Headers (at 176, size 64 each)
+        // Section 0 (NULL) - stays all 0s
+
+        // Section 1 (.data.rel.ro) - at 240
+        // sh_name = 1 (offset into shstrtab)
+        data[240..244].copy_from_slice(&1u32.to_le_bytes());
+        // sh_type = 1 (SHT_PROGBITS)
+        data[244..248].copy_from_slice(&1u32.to_le_bytes());
+        // sh_flags = SHF_WRITE | SHF_ALLOC (3)
+        data[248..256].copy_from_slice(&3u64.to_le_bytes());
+        // sh_addr = 0x2000
+        data[256..264].copy_from_slice(&0x2000u64.to_le_bytes());
+        // sh_offset = 0x300
+        data[264..272].copy_from_slice(&0x300u64.to_le_bytes());
+        // sh_size = 0x100
+        data[272..280].copy_from_slice(&0x100u64.to_le_bytes());
+
+        // Section 2 (.dynsym) - at 304
+        // sh_name = 14
+        data[304..308].copy_from_slice(&14u32.to_le_bytes());
+        // sh_type = 11 (SHT_DYNSYM)
+        data[308..312].copy_from_slice(&11u32.to_le_bytes());
+        // sh_flags = SHF_ALLOC (2)
+        data[312..320].copy_from_slice(&2u64.to_le_bytes());
+        // sh_addr = 0x2100
+        data[320..328].copy_from_slice(&0x2100u64.to_le_bytes());
+        // sh_offset = 0x400
+        data[328..336].copy_from_slice(&0x400u64.to_le_bytes());
+        // sh_size = 48 (2 entries of 24 bytes)
+        data[336..344].copy_from_slice(&48u64.to_le_bytes());
+        // sh_link = 3 (link to .dynstr)
+        data[344..348].copy_from_slice(&3u32.to_le_bytes());
+        // sh_entsize = 24
+        data[360..368].copy_from_slice(&24u64.to_le_bytes());
+
+        // Section 3 (.dynstr) - at 368
+        // sh_name = 23
+        data[368..372].copy_from_slice(&23u32.to_le_bytes());
+        // sh_type = 3 (SHT_STRTAB)
+        data[372..376].copy_from_slice(&3u32.to_le_bytes());
+        // sh_flags = SHF_ALLOC (2)
+        data[376..384].copy_from_slice(&2u64.to_le_bytes());
+        // sh_addr = 0x2200
+        data[384..392].copy_from_slice(&0x2200u64.to_le_bytes());
+        // sh_offset = 0x500
+        data[392..400].copy_from_slice(&0x500u64.to_le_bytes());
+        // sh_size = 100
+        data[400..408].copy_from_slice(&100u64.to_le_bytes());
+
+        // Section 4 (.gnu.version) - at 432
+        // sh_name = 31
+        data[432..436].copy_from_slice(&31u32.to_le_bytes());
+        // sh_type = 0x6fffffff (SHT_GNU_versym)
+        data[436..440].copy_from_slice(&0x6fffffffu32.to_le_bytes());
+        // sh_flags = SHF_ALLOC (2)
+        data[440..448].copy_from_slice(&2u64.to_le_bytes());
+        // sh_addr = 0x2300
+        data[448..456].copy_from_slice(&0x2300u64.to_le_bytes());
+        // sh_offset = 0x600
+        data[456..464].copy_from_slice(&0x600u64.to_le_bytes());
+        // sh_size = 4 (2 entries of 2 bytes)
+        data[464..472].copy_from_slice(&4u64.to_le_bytes());
+        // sh_link = 2 (link to .dynsym)
+        data[472..476].copy_from_slice(&2u32.to_le_bytes());
+
+        // Section 5 (.gnu.version_d) - at 496
+        // sh_name = 45
+        data[496..500].copy_from_slice(&45u32.to_le_bytes());
+        // sh_type = 0x6ffffffd (SHT_GNU_verdef)
+        data[500..504].copy_from_slice(&0x6ffffffdu32.to_le_bytes());
+        // sh_flags = SHF_ALLOC (2)
+        data[504..512].copy_from_slice(&2u64.to_le_bytes());
+        // sh_addr = 0x2400
+        data[512..520].copy_from_slice(&0x2400u64.to_le_bytes());
+        // sh_offset = 0x700
+        data[520..528].copy_from_slice(&0x700u64.to_le_bytes());
+        // sh_size = 32
+        data[528..536].copy_from_slice(&32u64.to_le_bytes());
+        // sh_link = 3 (link to .dynstr)
+        data[536..540].copy_from_slice(&3u32.to_le_bytes());
+
+        // Section 6 (.shstrtab) - at 560
+        // sh_name = 60
+        data[560..564].copy_from_slice(&60u32.to_le_bytes());
+        // sh_type = 3 (SHT_STRTAB)
+        data[564..568].copy_from_slice(&3u32.to_le_bytes());
+        // sh_offset = 0x800
+        data[584..592].copy_from_slice(&0x800u64.to_le_bytes());
+        // sh_size = 100
+        data[592..600].copy_from_slice(&100u64.to_le_bytes());
+
+        // 5. Dynsym content (at 0x400)
+        // Entry 0: all zeroes
+        // Entry 1: symbol name = 0, address = 0x2020 (st_value is at offset 8, size 8)
+        data[0x400 + 24 + 8..0x400 + 24 + 16].copy_from_slice(&0x2020u64.to_le_bytes());
+        // shndx = 1 (offset 6, 2 bytes)
+        data[0x400 + 24 + 6..0x400 + 24 + 8].copy_from_slice(&1u16.to_le_bytes());
+
+        // 6. Dynstr content (at 0x500)
+        // Strtab index 0 starts with name: "GLIBC_2.2.5\0"
+        data[0x500..0x50c].copy_from_slice(b"GLIBC_2.2.5\0");
+
+        // 7. Versym content (at 0x600)
+        // Entry 0: 0
+        // Entry 1: 2
+        data[0x600..0x602].copy_from_slice(&0u16.to_le_bytes());
+        data[0x602..0x604].copy_from_slice(&2u16.to_le_bytes());
+
+        // 8. Verdef content (at 0x700)
+        // vd_version = 1
+        data[0x700..0x702].copy_from_slice(&1u16.to_le_bytes());
+        // vd_ndx = 2
+        data[0x704..0x706].copy_from_slice(&2u16.to_le_bytes());
+        // vd_cnt = 1
+        data[0x706..0x708].copy_from_slice(&1u16.to_le_bytes());
+        // vd_aux = 20
+        data[0x70C..0x710].copy_from_slice(&20u32.to_le_bytes());
+        // Aux structure (at 0x714): vda_name = 0
+        data[0x714..0x718].copy_from_slice(&0u32.to_le_bytes());
+
+        // 9. Shstrtab content (at 0x800)
+        // Section names
+        let shstr_data = b"\0.data.rel.ro\0.dynsym\0.dynstr\0.gnu.version\0.gnu.version_d\0.shstrtab\0";
+        data[0x800..0x800 + shstr_data.len()].copy_from_slice(shstr_data);
+
+        let result = ElfLoader::parse(DataBuffer::Heap(data), "synthetic_elf".to_string());
+        assert!(result.is_ok());
+        let bin = result.expect("synthetic elf should parse");
+
+        // Verify PT_GNU_RELRO marked writable = false
+        let relro_sec = bin.sections.iter().find(|s| s.name == ".data.rel.ro").expect("find .data.rel.ro");
+        assert_eq!(relro_sec.is_writable, false, ".data.rel.ro should be marked read-only by RELRO");
+
+        // Verify GNU Version parsed
+        let ver = bin.symbol_versions.get(&0x2020).expect("should find version for address 0x2020");
+        assert_eq!(ver, "GLIBC_2.2.5");
     }
 }
