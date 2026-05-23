@@ -319,6 +319,26 @@ mod tests {
     use super::*;
 
     #[test]
+    fn test_profile_loader_on_fixture() {
+        use std::time::Instant;
+        let fixture_path = std::path::Path::new("/Users/sjkim1127/Fission/benchmark/binary/x86-64/window/small/binary/c/test_functions.exe");
+        if !fixture_path.exists() {
+            println!("Fixture not found at {}", fixture_path.display());
+            return;
+        }
+
+        println!("=== Loader profiling on fixture (RUN 1 - COLD) ===");
+        let start1 = Instant::now();
+        let _binary1 = LoadedBinary::from_file(fixture_path).unwrap();
+        println!("LoadedBinary::from_file RUN 1 took: {:?}", start1.elapsed());
+
+        println!("=== Loader profiling on fixture (RUN 2 - WARM CACHED) ===");
+        let start2 = Instant::now();
+        let _binary2 = LoadedBinary::from_file(fixture_path).unwrap();
+        println!("LoadedBinary::from_file RUN 2 took: {:?}", start2.elapsed());
+    }
+
+    #[test]
     fn test_parse_self() {
         // Parse the test executable itself
         let Ok(exe_path) = std::env::current_exe() else {

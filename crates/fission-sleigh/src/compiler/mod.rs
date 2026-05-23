@@ -486,6 +486,86 @@ pub fn discover_all_entry_specs() -> Result<Vec<EntrySpec>> {
 }
 
 pub fn compile_frontend_for_entry_spec(entry_spec: &Path) -> Result<CompiledFrontend> {
+    let entry_id = entry_id_from_path(entry_spec)?;
+    let cache_dir = sleigh_build_cache_root().join("cache");
+    let cache_path = cache_dir.join(format!("{}.bin", entry_id));
+
+    // Try to load from cache
+    if let Ok(cache_file) = fs::File::open(&cache_path) {
+        let cache_metadata = cache_file.metadata().ok();
+        let cache_mtime = cache_metadata.and_then(|m| m.modified().ok());
+        if let Some(cache_time) = cache_mtime {
+            let reader = std::io::BufReader::new(cache_file);
+            if let Ok(compiled) = bincode::deserialize_from::<_, CompiledFrontend>(reader) {
+                // Verify if cache is up-to-date
+                let mut cache_valid = true;
+
+                // Check mtime of the entry_spec itself
+                if let Ok(spec_metadata) = fs::metadata(entry_spec) {
+                    if let Ok(spec_mtime) = spec_metadata.modified() {
+                        if spec_mtime > cache_time {
+                            tracing::debug!("Cache invalid for {}: spec file modified since cache creation", entry_id);
+                            cache_valid = false;
+                        }
+                    }
+                } else {
+                    cache_valid = false;
+                }
+
+                // Check mtime of all included files in include_manifest
+                if cache_valid {
+                    if let Some(spec_dir) = entry_spec.parent() {
+                        for include_file in &compiled.include_manifest {
+                            // Extract actual path before the '@depth' suffix
+                            let path_part = match include_file.rsplit_once('@') {
+                                Some((path, _depth)) => path,
+                                None => include_file.as_str(),
+                            };
+                            let include_path = spec_dir.join(path_part);
+                            if let Ok(inc_metadata) = fs::metadata(&include_path) {
+                                if let Ok(inc_mtime) = inc_metadata.modified() {
+                                    if inc_mtime > cache_time {
+                                        tracing::debug!("Cache invalid for {}: include file {} modified since cache creation", entry_id, include_file);
+                                        cache_valid = false;
+                                        break;
+                                    }
+                                }
+                            } else {
+                                cache_valid = false;
+                                break;
+                            }
+                        }
+                    } else {
+                        cache_valid = false;
+                    }
+                }
+
+                // Check mtime of the SLA file if applicable
+                if cache_valid {
+                    if let Ok(Some(sla_path)) = packaged_sla_for_entry_spec(entry_spec) {
+                        if let Ok(sla_metadata) = fs::metadata(&sla_path) {
+                            if let Ok(sla_mtime) = sla_metadata.modified() {
+                                if sla_mtime > cache_time {
+                                    tracing::debug!("Cache invalid for {}: SLA file modified since cache creation", entry_id);
+                                    cache_valid = false;
+                                }
+                            }
+                        } else {
+                            cache_valid = false;
+                        }
+                    }
+                }
+
+                if cache_valid {
+                    tracing::info!("Loaded compiled Sleigh frontend for {} from cache", entry_id);
+                    return Ok(compiled);
+                }
+            }
+        }
+    }
+
+    // Cache miss: perform full compilation
+    tracing::info!("Cache miss/invalid for {}, performing full compilation", entry_id);
     let arch = infer_arch_from_entry_spec(entry_spec)?;
     let expanded = preprocessor::expand_entry_spec(entry_spec)
         .with_context(|| format!("expand entry spec {}", entry_spec.display()))?;
@@ -505,6 +585,26 @@ pub fn compile_frontend_for_entry_spec(entry_spec: &Path) -> Result<CompiledFron
         ir::build_frontend_from_sla_native_model(&mut compiled, &library)
             .with_context(|| format!("lower compiled SLEIGH artifact {}", sla_path.display()))?;
     }
+
+    // Save to cache
+    if let Err(e) = fs::create_dir_all(&cache_dir) {
+        tracing::warn!("Failed to create Sleigh cache directory: {}", e);
+    } else {
+        match fs::File::create(&cache_path) {
+            Ok(file) => {
+                let writer = std::io::BufWriter::new(file);
+                if let Err(e) = bincode::serialize_into(writer, &compiled) {
+                    tracing::warn!("Failed to write Sleigh cache to bincode: {}", e);
+                } else {
+                    tracing::info!("Cached compiled Sleigh frontend for {}", entry_id);
+                }
+            }
+            Err(e) => {
+                tracing::warn!("Failed to create Sleigh cache file: {}", e);
+            }
+        }
+    }
+
     Ok(compiled)
 }
 
@@ -539,7 +639,20 @@ fn packaged_sla_for_entry_spec(entry_spec: &Path) -> Result<Option<PathBuf>> {
     };
     let wanted_name = format!("{stem}.sla");
     let mut matches = Vec::new();
-    find_named_file(&paths.processors_root, &wanted_name, &mut matches)?;
+
+    // Optimize search by looking in the specific architecture's subfolder first
+    if let Ok(arch) = infer_arch_from_entry_spec(entry_spec) {
+        let arch_dir = paths.processors_root.join(&arch);
+        if arch_dir.exists() {
+            find_named_file(&arch_dir, &wanted_name, &mut matches)?;
+        }
+    }
+
+    // Fallback to full search only if not found in the specific arch dir
+    if matches.is_empty() {
+        find_named_file(&paths.processors_root, &wanted_name, &mut matches)?;
+    }
+
     matches.sort();
     match matches.len() {
         0 => Ok(None),

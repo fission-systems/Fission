@@ -6,7 +6,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use super::{Confidence, Detection, DetectionResult, DetectionType};
 use crate::loader::{LoadedBinary, SectionInfo};
@@ -40,31 +40,131 @@ impl SignatureDatabase {
     ///
     /// Used by loader identity Phase 2 DIE subset evaluation to avoid scanning the full mirror at analyze time.
     pub fn load_pe_json_only() -> Option<Self> {
-        let path = fission_core::PATHS.get_die_signatures_path()?;
-        Self::load(&path).ok()
+        use std::sync::OnceLock;
+        static PE_JSON_DB: OnceLock<Option<SignatureDatabase>> = OnceLock::new();
+        PE_JSON_DB.get_or_init(|| {
+            let path = fission_core::PATHS.get_die_signatures_path()?;
+            
+            // Check disk cache
+            let cache_path = loader_cache_dir().map(|d| d.join("die_pe_json_cache.json"));
+            if let Some(ref cache_p) = cache_path {
+                if cache_p.exists() {
+                    if let (Ok(m_cache), Ok(m_src)) = (fs::metadata(cache_p), fs::metadata(&path)) {
+                        if let (Ok(t_cache), Ok(t_src)) = (m_cache.modified(), m_src.modified()) {
+                            if t_cache >= t_src {
+                                if let Ok(content) = fs::read_to_string(cache_p) {
+                                    if let Ok(db) = serde_json::from_str::<Self>(&content) {
+                                        return Some(db);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            if let Ok(db) = Self::load(&path) {
+                if let Some(ref cache_p) = cache_path {
+                    if let Ok(serialized) = serde_json::to_string(&db) {
+                        let _ = fs::write(cache_p, serialized);
+                    }
+                }
+                Some(db)
+            } else {
+                None
+            }
+        }).clone()
     }
 
     /// Load from default path using [`fission_core::PATHS`] / bundle resolution only (no cwd upward walks).
     pub fn load_default() -> Option<Self> {
-        if let Some(path) = fission_core::PATHS.get_die_signatures_path() {
-            if let Ok(mut db) = Self::load(&path) {
-                db.extend_from_detect_it_easy_mirror();
-                return Some(db);
-            }
-        }
+        use std::sync::OnceLock;
+        static DEFAULT_DB: OnceLock<Option<SignatureDatabase>> = OnceLock::new();
+        DEFAULT_DB.get_or_init(|| {
+            let path = fission_core::PATHS.get_die_signatures_path();
+            let mirror_root = detect_it_easy_mirror_root();
 
-        let mut db = SignatureDatabase {
-            format_version: "die-sg-v1".to_string(),
-            description: "Detect-It-Easy .sg signature mirror".to_string(),
-            source: "detect-it-easy-vendored".to_string(),
-            signatures: Vec::new(),
-        };
-        db.extend_from_detect_it_easy_mirror();
-        if db.signatures.is_empty() {
-            None
-        } else {
-            Some(db)
-        }
+            if path.is_none() && mirror_root.is_none() {
+                return None;
+            }
+
+            // Check disk cache
+            let cache_path = loader_cache_dir().map(|d| d.join("die_default_cache.json"));
+            if let Some(ref cache_p) = cache_path {
+                if cache_p.exists() {
+                    if let Ok(m_cache) = fs::metadata(cache_p) {
+                        if let Ok(t_cache) = m_cache.modified() {
+                            let mut cache_valid = true;
+                            
+                            if let Some(ref p) = path {
+                                if let Ok(m_src) = fs::metadata(p) {
+                                    if let Ok(t_src) = m_src.modified() {
+                                        if t_src > t_cache {
+                                            cache_valid = false;
+                                        }
+                                    }
+                                }
+                            }
+                            
+                            if cache_valid {
+                                if let Some(ref root) = mirror_root {
+                                    let mut sg_files = Vec::new();
+                                    for child in ["db", "db_extra", "db_custom"] {
+                                        collect_sg_files(&root.join(child), &mut sg_files);
+                                    }
+                                    for f in &sg_files {
+                                        if let Ok(m_src) = fs::metadata(f) {
+                                            if let Ok(t_src) = m_src.modified() {
+                                                if t_src > t_cache {
+                                                    cache_valid = false;
+                                                    break;
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            
+                            if cache_valid {
+                                if let Ok(content) = fs::read_to_string(cache_p) {
+                                    if let Ok(db) = serde_json::from_str::<Self>(&content) {
+                                        return Some(db);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            let mut db = if let Some(ref p) = path {
+                Self::load(p).ok().unwrap_or_else(|| SignatureDatabase {
+                    format_version: "die-sg-v1".to_string(),
+                    description: "Detect-It-Easy .sg signature mirror".to_string(),
+                    source: "detect-it-easy-vendored".to_string(),
+                    signatures: Vec::new(),
+                })
+            } else {
+                SignatureDatabase {
+                    format_version: "die-sg-v1".to_string(),
+                    description: "Detect-It-Easy .sg signature mirror".to_string(),
+                    source: "detect-it-easy-vendored".to_string(),
+                    signatures: Vec::new(),
+                }
+            };
+            db.extend_from_detect_it_easy_mirror();
+            
+            if db.signatures.is_empty() {
+                None
+            } else {
+                if let Some(ref cache_p) = cache_path {
+                    if let Ok(serialized) = serde_json::to_string(&db) {
+                        let _ = fs::write(cache_p, serialized);
+                    }
+                }
+                Some(db)
+            }
+        }).clone()
     }
 
     fn extend_from_detect_it_easy_mirror(&mut self) {
@@ -1227,6 +1327,16 @@ fn shannon_entropy(bytes: &[u8]) -> f64 {
             -p * p.log2()
         })
         .sum()
+}
+
+fn loader_cache_dir() -> Option<PathBuf> {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .ancestors()
+        .nth(2)
+        .map(|p| p.to_path_buf())?;
+    let cache_dir = root.join("target").join("fission-loader");
+    let _ = fs::create_dir_all(&cache_dir);
+    Some(cache_dir)
 }
 
 /// Detect using DIE signatures

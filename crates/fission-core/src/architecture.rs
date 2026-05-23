@@ -145,7 +145,7 @@ impl ArchitectureDescriptor {
 pub type ArchitectureSelectionResult =
     Result<(ArchitectureDescriptor, BinaryLoadSpec), ArchitectureSelectionError>;
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 struct OpinionQuery {
     loader: Option<String>,
     primary: Option<String>,
@@ -157,7 +157,7 @@ struct OpinionQuery {
     compiler_spec_id: Option<String>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 struct OpinionEntry {
     loader: String,
     primary: String,
@@ -165,7 +165,7 @@ struct OpinionEntry {
     query: OpinionQuery,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 struct LanguageDescription {
     processor: String,
     endian: String,
@@ -182,7 +182,7 @@ pub struct QueryResult {
     pub preferred: bool,
 }
 
-#[derive(Debug)]
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
 struct OpinionDatabase {
     opinions: Vec<OpinionEntry>,
     languages: Vec<LanguageDescription>,
@@ -213,23 +213,85 @@ struct OpinionSelectParams<'a> {
 
 static OPINION_DATABASE: OnceLock<Result<OpinionDatabase, String>> = OnceLock::new();
 
+fn opinion_cache_path() -> Option<PathBuf> {
+    let cache_dir = repo_root().join("target").join("fission-core");
+    let _ = fs::create_dir_all(&cache_dir);
+    Some(cache_dir.join("opinion_cache.json"))
+}
+
 impl OpinionDatabase {
     fn load() -> Result<Self, String> {
+        let cache_path = opinion_cache_path();
+        let opinion_paths = collect_files_with_extension(&ghidra_data_root(), "opinion");
+        let ldefs_paths = collect_files_with_extension(&sleigh_specs_root().join("languages"), "ldefs");
+
+        if let Some(ref cache_p) = cache_path {
+            if cache_p.exists() {
+                if let Ok(cache_metadata) = fs::metadata(cache_p) {
+                    if let Ok(cache_time) = cache_metadata.modified() {
+                        let mut cache_valid = true;
+                        
+                        // Check if any opinion file is newer than cache
+                        for p in &opinion_paths {
+                            if let Ok(m) = fs::metadata(p) {
+                                if let Ok(t) = m.modified() {
+                                    if t > cache_time {
+                                        cache_valid = false;
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                        
+                        // Check if any ldefs file is newer than cache
+                        if cache_valid {
+                            for p in &ldefs_paths {
+                                if let Ok(m) = fs::metadata(p) {
+                                    if let Ok(t) = m.modified() {
+                                        if t > cache_time {
+                                            cache_valid = false;
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        
+                        if cache_valid {
+                            if let Ok(content) = fs::read_to_string(cache_p) {
+                                if let Ok(db) = serde_json::from_str::<Self>(&content) {
+                                    tracing::info!("Loaded OpinionDatabase from cache");
+                                    return Ok(db);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         let mut db = Self {
             opinions: Vec::new(),
             languages: Vec::new(),
         };
 
-        for path in collect_files_with_extension(&ghidra_data_root(), "opinion") {
+        for path in opinion_paths {
             db.parse_opinion_file(&path)?;
         }
-        for path in collect_files_with_extension(&sleigh_specs_root().join("languages"), "ldefs") {
+        for path in ldefs_paths {
             db.parse_ldefs_file(&path)?;
         }
 
         if db.languages.is_empty() {
             return Err("no Ghidra language definitions were loaded".to_string());
         }
+
+        if let Some(ref cache_p) = cache_path {
+            if let Ok(serialized) = serde_json::to_string(&db) {
+                let _ = fs::write(cache_p, serialized);
+            }
+        }
+
         Ok(db)
     }
 
