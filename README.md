@@ -133,16 +133,15 @@ Additional references:
 - ✅ Quality assurance and regression testing
 - ✅ Automated source-semantic benchmarking against checked-in original source
 - ✅ Focused feature-shape canaries for pointer/array, control-flow, constants, calls, and global side effects
+- ✅ Pure SLA-native SLEIGH Lift engine supporting all 146 Ghidra processor specifications (with zero-allocation pooling and path backtraces)
 - ✅ Deterministic, reproducible output
 
 **In Active Development:**
 - 🔄 Large function readability and precision
-- 🔄 SLEIGH ConstructTpl lift completeness and compatibility-debt removal
 - 🔄 Advanced data abstraction: structures, pointers, arrays, field access, calling convention, parameter, and local recovery
 - 🔄 Rich type inference, FID, signature, and name recovery
 - 🔄 Dynamic/debugger and TTD-adjacent workflows
 - 🔄 Desktop UI polish and end-user experience
-- 🔄 Additional architecture targets (MIPS, PPC, etc.)
 
 > [!NOTE]
 > PE x64 has the strongest direct NIR coverage. Other architectures and formats are development targets and should not be treated as equivalent production-quality claims.
@@ -319,13 +318,11 @@ cargo nextest run --workspace
 
 | Area | Target | Timeline |
 |------|--------|----------|
-| **SLEIGH Lift Accuracy** | Complete ConstructTpl execution as the success source; remove legacy token cursor, BoundOperand fallback, and compatibility classifier debt | Q2 2026 |
 | **Type/Data Abstraction** | Structures, pointers, arrays, field access, calling convention, parameter, and local recovery | Q2 2026 |
 | **Large Function Handling** | >10K instruction functions | Q2 2026 |
 | **Name Recovery** | FID, signatures, symbols, and identifier inference | Q3 2026 |
 | **Dynamic / TTD Workflows** | Debugger-adjacent analysis, trace surfaces, plugin-facing runtime hooks | Q3 2026 |
 | **UI/UX Polish** | Desktop workflow optimization | Q3 2026 |
-| **Additional Targets** | MIPS, PPC, additional architectures | Q4 2026 |
 
 ### Known Limitations
 

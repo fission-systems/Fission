@@ -445,50 +445,101 @@ pub fn infer_entry_register_param_arity(
     abi: CallingConvention,
 ) -> Option<usize> {
     use crate::pcode::PcodeOpcode;
-    use std::collections::HashSet;
+    use std::collections::{HashMap, HashSet, VecDeque};
+
     let entry = pcode.blocks.first()?;
-    let mut defined_param_regs = HashSet::new();
-    let mut max_param_index = None::<usize>;
+    let num_params = abi.param_offsets().len();
+    if num_params == 0 {
+        return None;
+    }
 
-    for op in &entry.ops {
-        match op.opcode {
-            PcodeOpcode::Call
-            | PcodeOpcode::CallInd
-            | PcodeOpcode::CallOther
-            | PcodeOpcode::Branch
-            | PcodeOpcode::CBranch
-            | PcodeOpcode::BranchInd
-            | PcodeOpcode::Return => break,
-            _ => {}
-        }
+    let block_map: HashMap<u32, &crate::pcode::PcodeBasicBlock> = pcode
+        .blocks
+        .iter()
+        .map(|b| (b.index, b))
+        .collect();
 
-        for input in &op.inputs {
-            if input.is_constant || !is_register_varnode(input) {
-                continue;
-            }
-            let Some((_, Some(param_index))) =
-                register_name_with_param(input.offset, input.size, abi)
-            else {
-                continue;
-            };
-            if defined_param_regs.contains(&param_index) {
-                continue;
-            }
-            max_param_index = Some(max_param_index.map_or(param_index, |max| max.max(param_index)));
+    let has_no_succs = pcode.blocks.iter().all(|b| b.successors.is_empty());
+    let mut block_successors = HashMap::new();
+    if has_no_succs && pcode.blocks.len() > 1 {
+        let address_to_index = super::cfg::build_address_to_index_map(pcode);
+        let layout_fallthrough = super::cfg::build_layout_fallthrough_map(pcode);
+        let succ_indices = super::cfg::build_successor_index_map(pcode, &address_to_index, &layout_fallthrough);
+        for (idx, block) in pcode.blocks.iter().enumerate() {
+            let succs_for_block = succ_indices[idx].iter().map(|&s_idx| pcode.blocks[s_idx].index).collect::<Vec<u32>>();
+            block_successors.insert(block.index, succs_for_block);
         }
-
-        let Some(output) = &op.output else {
-            continue;
-        };
-        if output.is_constant || !is_register_varnode(output) {
-            continue;
-        }
-        if let Some((_, Some(param_index))) =
-            register_name_with_param(output.offset, output.size, abi)
-        {
-            defined_param_regs.insert(param_index);
+    } else {
+        for block in &pcode.blocks {
+            block_successors.insert(block.index, block.successors.clone());
         }
     }
 
-    max_param_index.map(|index| index + 1)
+    let mut detected_params = HashSet::new();
+    let mut visited_active_params: HashMap<u32, HashSet<usize>> = HashMap::new();
+    let mut queue = VecDeque::new();
+
+    let initial_active: HashSet<usize> = (0..num_params).collect();
+    visited_active_params.insert(entry.index, initial_active.clone());
+    queue.push_back((entry.index, initial_active));
+
+    while let Some((block_idx, active_params)) = queue.pop_front() {
+        let Some(block) = block_map.get(&block_idx) else {
+            continue;
+        };
+
+        let mut current_active = active_params;
+        for op in &block.ops {
+            // 1. Check inputs first
+            for input in &op.inputs {
+                if input.is_constant || !is_register_varnode(input) {
+                    continue;
+                }
+                if let Some((_, Some(param_index))) =
+                    register_name_with_param(input.offset, input.size, abi)
+                {
+                    if current_active.contains(&param_index) {
+                        detected_params.insert(param_index);
+                    }
+                }
+            }
+
+            // 2. If call, clobber scratch/parameter registers (remove from current_active)
+            if matches!(op.opcode, PcodeOpcode::Call | PcodeOpcode::CallInd) {
+                current_active.clear();
+            }
+
+            // 3. Check output to see if it writes/defines a parameter register
+            if let Some(output) = &op.output {
+                if !output.is_constant && is_register_varnode(output) {
+                    if let Some((_, Some(param_index))) =
+                        register_name_with_param(output.offset, output.size, abi)
+                    {
+                        current_active.remove(&param_index);
+                    }
+                }
+            }
+        }
+
+        // Propagate current_active to successors
+        if let Some(succs) = block_successors.get(&block_idx) {
+            for &succ_idx in succs {
+                let succ_visited = visited_active_params.entry(succ_idx).or_default();
+                let mut new_active = HashSet::new();
+                for &param in &current_active {
+                    if !succ_visited.contains(&param) {
+                        new_active.insert(param);
+                    }
+                }
+                if !new_active.is_empty() {
+                    for &param in &new_active {
+                        succ_visited.insert(param);
+                    }
+                    queue.push_back((succ_idx, new_active));
+                }
+            }
+        }
+    }
+
+    detected_params.iter().max().map(|&index| index + 1)
 }

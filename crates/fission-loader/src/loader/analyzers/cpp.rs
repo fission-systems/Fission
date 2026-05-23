@@ -362,38 +362,31 @@ impl<'a> CppAnalyzer<'a> {
                 InferredTypeInfo {
                     name: if !c.base_classes.is_empty() {
                         let mut base_name = format!("base@0x{:X}", c.base_classes[0]);
-                        // Try to find symbols for the base
-                        for (&addr, name) in &self.binary.iat_symbols {
-                            if addr == c.base_classes[0] {
-                                if name.starts_with("__ZTI") {
-                                    base_name = format!("{:?}", demangle(name));
-                                    break;
-                                } else if name.starts_with("??_R0") || name.starts_with(".?AV") {
-                                    base_name = msvc_demangler::demangle(
-                                        name,
-                                        msvc_demangler::DemangleFlags::NAME_ONLY,
-                                    )
-                                    .unwrap_or_else(|_| name.clone());
-                                    break;
-                                }
+                        // Try to find symbols for the base in O(1)
+                        if let Some(name) = self.binary.iat_symbols.get(&c.base_classes[0]) {
+                            if name.starts_with("__ZTI") {
+                                base_name = format!("{:?}", demangle(name));
+                            } else if name.starts_with("??_R0") || name.starts_with(".?AV") {
+                                base_name = msvc_demangler::demangle(
+                                    name,
+                                    msvc_demangler::DemangleFlags::NAME_ONLY,
+                                )
+                                .unwrap_or_else(|_| name.clone());
                             }
                         }
                         if base_name.starts_with("base@") {
-                            for sym in &self.binary.functions {
-                                if sym.address == c.base_classes[0] {
-                                    if sym.name.starts_with("__ZTI") {
-                                        base_name = format!("{:?}", demangle(&sym.name));
-                                        break;
-                                    } else if sym.name.starts_with("??_R0")
-                                        || sym.name.starts_with(".?AV")
-                                    {
-                                        base_name = msvc_demangler::demangle(
-                                            &sym.name,
-                                            msvc_demangler::DemangleFlags::NAME_ONLY,
-                                        )
-                                        .unwrap_or_else(|_| sym.name.clone());
-                                        break;
-                                    }
+                            if let Some(&idx) = self.binary.function_addr_index.get(&c.base_classes[0]) {
+                                let sym = &self.binary.functions[idx];
+                                if sym.name.starts_with("__ZTI") {
+                                    base_name = format!("{:?}", demangle(&sym.name));
+                                } else if sym.name.starts_with("??_R0")
+                                    || sym.name.starts_with(".?AV")
+                                {
+                                    base_name = msvc_demangler::demangle(
+                                        &sym.name,
+                                        msvc_demangler::DemangleFlags::NAME_ONLY,
+                                    )
+                                    .unwrap_or_else(|_| sym.name.clone());
                                 }
                             }
                         }

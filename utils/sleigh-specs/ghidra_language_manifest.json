@@ -18,7 +18,7 @@
         "6502.ldefs",
         "6502.pspec"
       ],
-      "runtime_status": "registered_compile_only",
+      "runtime_status": "executable_candidate",
       "language_aliases": []
     },
     {
@@ -37,7 +37,7 @@
         "6502.ldefs",
         "6502.pspec"
       ],
-      "runtime_status": "registered_compile_only",
+      "runtime_status": "executable_candidate",
       "language_aliases": []
     },
     {
@@ -60,7 +60,7 @@
         "68000.sinc",
         "68000_register.cspec"
       ],
-      "runtime_status": "registered_compile_only",
+      "runtime_status": "executable_candidate",
       "language_aliases": []
     },
     {
@@ -83,7 +83,7 @@
         "68000.sinc",
         "68000_register.cspec"
       ],
-      "runtime_status": "registered_compile_only",
+      "runtime_status": "executable_candidate",
       "language_aliases": []
     },
     {
@@ -106,7 +106,7 @@
         "68000.sinc",
         "68000_register.cspec"
       ],
-      "runtime_status": "registered_compile_only",
+      "runtime_status": "executable_candidate",
       "language_aliases": []
     },
     {
@@ -129,7 +129,7 @@
         "68000.sinc",
         "68000_register.cspec"
       ],
-      "runtime_status": "registered_compile_only",
+      "runtime_status": "executable_candidate",
       "language_aliases": []
     },
     {
@@ -148,7 +148,7 @@
         "8048.ldefs",
         "8048.pspec"
       ],
-      "runtime_status": "registered_compile_only",
+      "runtime_status": "executable_candidate",
       "language_aliases": []
     },
     {
@@ -179,7 +179,7 @@
         "old/8051v1.lang",
         "old/8051v1.trans"
       ],
-      "runtime_status": "registered_compile_only",
+      "runtime_status": "executable_candidate",
       "language_aliases": []
     },
     {
@@ -210,7 +210,7 @@
         "old/8051v1.lang",
         "old/8051v1.trans"
       ],
-      "runtime_status": "registered_compile_only",
+      "runtime_status": "executable_candidate",
       "language_aliases": []
     },
     {
@@ -241,7 +241,7 @@
         "old/8051v1.lang",
         "old/8051v1.trans"
       ],
-      "runtime_status": "registered_compile_only",
+      "runtime_status": "executable_candidate",
       "language_aliases": []
     },
     {
@@ -272,7 +272,7 @@
         "old/8051v1.lang",
         "old/8051v1.trans"
       ],
-      "runtime_status": "registered_compile_only",
+      "runtime_status": "executable_candidate",
       "language_aliases": []
     },
     {
@@ -291,7 +291,7 @@
         "8085.ldefs",
         "8085.pspec"
       ],
-      "runtime_status": "registered_compile_only",
+      "runtime_status": "executable_candidate",
       "language_aliases": []
     },
     {
@@ -1141,7 +1141,7 @@
         "avr8imgCraftV8.cspec",
         "avr8xmega.pspec"
       ],
-      "runtime_status": "registered_compile_only",
+      "runtime_status": "executable_candidate",
       "language_aliases": []
     },
     {
@@ -1184,7 +1184,7 @@
         "avr8imgCraftV8.cspec",
         "avr8xmega.pspec"
       ],
-      "runtime_status": "registered_compile_only",
+      "runtime_status": "executable_candidate",
       "language_aliases": []
     },
     {
@@ -1225,7 +1225,7 @@
         "avr8imgCraftV8.cspec",
         "avr8xmega.pspec"
       ],
-      "runtime_status": "registered_compile_only",
+      "runtime_status": "executable_candidate",
       "language_aliases": []
     },
     {
@@ -1269,7 +1269,7 @@
         "avr8imgCraftV8.cspec",
         "avr8xmega.pspec"
       ],
-      "runtime_status": "registered_compile_only",
+      "runtime_status": "executable_candidate",
       "language_aliases": []
     },
     {
@@ -1312,7 +1312,7 @@
         "avr8imgCraftV8.cspec",
         "avr8xmega.pspec"
       ],
-      "runtime_status": "registered_compile_only",
+      "runtime_status": "executable_candidate",
       "language_aliases": []
     },
     {
@@ -1332,7 +1332,7 @@
         "BPF.pspec",
         "BPF.sinc"
       ],
-      "runtime_status": "registered_compile_only",
+      "runtime_status": "executable_candidate",
       "language_aliases": []
     },
     {
@@ -1352,7 +1352,7 @@
         "CP1600.opinion",
         "CP1600.pspec"
       ],
-      "runtime_status": "registered_compile_only",
+      "runtime_status": "executable_candidate",
       "language_aliases": []
     },
     {
@@ -1374,7 +1374,7 @@
         "CR16B.sinc",
         "CR16C.sinc"
       ],
-      "runtime_status": "registered_compile_only",
+      "runtime_status": "executable_candidate",
       "language_aliases": []
     },
     {
@@ -1396,7 +1396,7 @@
         "CR16B.sinc",
         "CR16C.sinc"
       ],
-      "runtime_status": "registered_compile_only",
+      "runtime_status": "executable_candidate",
       "language_aliases": []
     },
     {
@@ -1418,7 +1418,7 @@
         "data.pspec",
         "data.sinc"
       ],
-      "runtime_status": "registered_compile_only",
+      "runtime_status": "executable_candidate",
       "language_aliases": []
     },
     {
@@ -1440,7 +1440,7 @@
         "data.pspec",
         "data.sinc"
       ],
-      "runtime_status": "registered_compile_only",
+      "runtime_status": "executable_candidate",
       "language_aliases": []
     },
     {
@@ -1487,7 +1487,7 @@
         "Dalvik_OpCode_FE_unused.sinc",
         "Dalvik_OpCode_FF_unused.sinc"
       ],
-      "runtime_status": "registered_compile_only",
+      "runtime_status": "executable_candidate",
       "language_aliases": []
     },
     {
@@ -1533,7 +1533,7 @@
         "Dalvik_OpCode_FE_unused.sinc",
         "Dalvik_OpCode_FF_unused.sinc"
       ],
-      "runtime_status": "registered_compile_only",
+      "runtime_status": "executable_candidate",
       "language_aliases": []
     },
     {
@@ -1579,7 +1579,7 @@
         "Dalvik_OpCode_FE_unused.sinc",
         "Dalvik_OpCode_FF_unused.sinc"
       ],
-      "runtime_status": "registered_compile_only",
+      "runtime_status": "executable_candidate",
       "language_aliases": []
     },
     {
@@ -1626,7 +1626,7 @@
         "Dalvik_OpCode_FE_unused.sinc",
         "Dalvik_OpCode_FF_unused.sinc"
       ],
-      "runtime_status": "registered_compile_only",
+      "runtime_status": "executable_candidate",
       "language_aliases": []
     },
     {
@@ -1672,7 +1672,7 @@
         "Dalvik_OpCode_FE_unused.sinc",
         "Dalvik_OpCode_FF_unused.sinc"
       ],
-      "runtime_status": "registered_compile_only",
+      "runtime_status": "executable_candidate",
       "language_aliases": []
     },
     {
@@ -1718,7 +1718,7 @@
         "Dalvik_OpCode_FE_unused.sinc",
         "Dalvik_OpCode_FF_unused.sinc"
       ],
-      "runtime_status": "registered_compile_only",
+      "runtime_status": "executable_candidate",
       "language_aliases": []
     },
     {
@@ -1764,7 +1764,7 @@
         "Dalvik_OpCode_FE_unused.sinc",
         "Dalvik_OpCode_FF_unused.sinc"
       ],
-      "runtime_status": "registered_compile_only",
+      "runtime_status": "executable_candidate",
       "language_aliases": []
     },
     {
@@ -1810,7 +1810,7 @@
         "Dalvik_OpCode_FE_unused.sinc",
         "Dalvik_OpCode_FF_unused.sinc"
       ],
-      "runtime_status": "registered_compile_only",
+      "runtime_status": "executable_candidate",
       "language_aliases": []
     },
     {
@@ -1856,7 +1856,7 @@
         "Dalvik_OpCode_FE_unused.sinc",
         "Dalvik_OpCode_FF_unused.sinc"
       ],
-      "runtime_status": "registered_compile_only",
+      "runtime_status": "executable_candidate",
       "language_aliases": []
     },
     {
@@ -1902,7 +1902,7 @@
         "Dalvik_OpCode_FE_unused.sinc",
         "Dalvik_OpCode_FF_unused.sinc"
       ],
-      "runtime_status": "registered_compile_only",
+      "runtime_status": "executable_candidate",
       "language_aliases": []
     },
     {
@@ -1948,7 +1948,7 @@
         "Dalvik_OpCode_FE_unused.sinc",
         "Dalvik_OpCode_FF_unused.sinc"
       ],
-      "runtime_status": "registered_compile_only",
+      "runtime_status": "executable_candidate",
       "language_aliases": []
     },
     {
@@ -1978,7 +1978,7 @@
         "HCS08.pspec",
         "HCS_HC.sinc"
       ],
-      "runtime_status": "registered_compile_only",
+      "runtime_status": "executable_candidate",
       "language_aliases": []
     },
     {
@@ -2008,7 +2008,7 @@
         "HCS08.pspec",
         "HCS_HC.sinc"
       ],
-      "runtime_status": "registered_compile_only",
+      "runtime_status": "executable_candidate",
       "language_aliases": []
     },
     {
@@ -2038,7 +2038,7 @@
         "HCS08.pspec",
         "HCS_HC.sinc"
       ],
-      "runtime_status": "registered_compile_only",
+      "runtime_status": "executable_candidate",
       "language_aliases": []
     },
     {
@@ -2064,7 +2064,7 @@
         "HCS_HC12.sinc",
         "XGATE.sinc"
       ],
-      "runtime_status": "registered_compile_only",
+      "runtime_status": "executable_candidate",
       "language_aliases": []
     },
     {
@@ -2090,7 +2090,7 @@
         "HCS_HC12.sinc",
         "XGATE.sinc"
       ],
-      "runtime_status": "registered_compile_only",
+      "runtime_status": "executable_candidate",
       "language_aliases": []
     },
     {
@@ -2117,7 +2117,7 @@
         "HCS_HC12.sinc",
         "XGATE.sinc"
       ],
-      "runtime_status": "registered_compile_only",
+      "runtime_status": "executable_candidate",
       "language_aliases": []
     },
     {
@@ -2137,7 +2137,7 @@
         "JVM.opinion",
         "JVM.pspec"
       ],
-      "runtime_status": "registered_compile_only",
+      "runtime_status": "executable_candidate",
       "language_aliases": []
     },
     {
@@ -2291,7 +2291,7 @@
         "M16C_80.ldefs",
         "M16C_80.pspec"
       ],
-      "runtime_status": "registered_compile_only",
+      "runtime_status": "executable_candidate",
       "language_aliases": []
     },
     {
@@ -2313,7 +2313,7 @@
         "M16C_80.ldefs",
         "M16C_80.pspec"
       ],
-      "runtime_status": "registered_compile_only",
+      "runtime_status": "executable_candidate",
       "language_aliases": []
     },
     {
@@ -2333,7 +2333,7 @@
         "m8c.opinion",
         "m8c.pspec"
       ],
-      "runtime_status": "registered_compile_only",
+      "runtime_status": "executable_candidate",
       "language_aliases": []
     },
     {
@@ -2359,7 +2359,7 @@
         "6x09_pull.sinc",
         "6x09_push.sinc"
       ],
-      "runtime_status": "registered_compile_only",
+      "runtime_status": "executable_candidate",
       "language_aliases": []
     },
     {
@@ -2385,7 +2385,7 @@
         "6x09_pull.sinc",
         "6x09_push.sinc"
       ],
-      "runtime_status": "registered_compile_only",
+      "runtime_status": "executable_candidate",
       "language_aliases": []
     },
     {
@@ -2411,7 +2411,7 @@
         "6x09_pull.sinc",
         "6x09_push.sinc"
       ],
-      "runtime_status": "registered_compile_only",
+      "runtime_status": "executable_candidate",
       "language_aliases": []
     },
     {
@@ -2431,7 +2431,7 @@
         "MCS96.pspec",
         "MCS96.sinc"
       ],
-      "runtime_status": "registered_compile_only",
+      "runtime_status": "executable_candidate",
       "language_aliases": []
     },
     {
@@ -2730,7 +2730,7 @@
         "nds32.pspec",
         "nds32.sinc"
       ],
-      "runtime_status": "registered_compile_only",
+      "runtime_status": "executable_candidate",
       "language_aliases": []
     },
     {
@@ -2753,7 +2753,7 @@
         "nds32.pspec",
         "nds32.sinc"
       ],
-      "runtime_status": "registered_compile_only",
+      "runtime_status": "executable_candidate",
       "language_aliases": []
     },
     {
@@ -2775,7 +2775,7 @@
         "pa-risc32.pspec",
         "pa-riscInstructions.sinc"
       ],
-      "runtime_status": "registered_compile_only",
+      "runtime_status": "executable_candidate",
       "language_aliases": []
     },
     {
@@ -2823,7 +2823,7 @@
         "pic18.sinc",
         "pic18_instructions.sinc"
       ],
-      "runtime_status": "registered_compile_only",
+      "runtime_status": "executable_candidate",
       "language_aliases": []
     },
     {
@@ -2871,7 +2871,7 @@
         "pic18.sinc",
         "pic18_instructions.sinc"
       ],
-      "runtime_status": "registered_compile_only",
+      "runtime_status": "executable_candidate",
       "language_aliases": []
     },
     {
@@ -2919,7 +2919,7 @@
         "pic18.sinc",
         "pic18_instructions.sinc"
       ],
-      "runtime_status": "registered_compile_only",
+      "runtime_status": "executable_candidate",
       "language_aliases": []
     },
     {
@@ -2967,7 +2967,7 @@
         "pic18.sinc",
         "pic18_instructions.sinc"
       ],
-      "runtime_status": "registered_compile_only",
+      "runtime_status": "executable_candidate",
       "language_aliases": []
     },
     {
@@ -3015,7 +3015,7 @@
         "pic18.sinc",
         "pic18_instructions.sinc"
       ],
-      "runtime_status": "registered_compile_only",
+      "runtime_status": "executable_candidate",
       "language_aliases": []
     },
     {
@@ -3063,7 +3063,7 @@
         "pic18.sinc",
         "pic18_instructions.sinc"
       ],
-      "runtime_status": "registered_compile_only",
+      "runtime_status": "executable_candidate",
       "language_aliases": []
     },
     {
@@ -3111,7 +3111,7 @@
         "pic18.sinc",
         "pic18_instructions.sinc"
       ],
-      "runtime_status": "registered_compile_only",
+      "runtime_status": "executable_candidate",
       "language_aliases": []
     },
     {
@@ -3159,7 +3159,7 @@
         "pic18.sinc",
         "pic18_instructions.sinc"
       ],
-      "runtime_status": "registered_compile_only",
+      "runtime_status": "executable_candidate",
       "language_aliases": []
     },
     {
@@ -3207,7 +3207,7 @@
         "pic18.sinc",
         "pic18_instructions.sinc"
       ],
-      "runtime_status": "registered_compile_only",
+      "runtime_status": "executable_candidate",
       "language_aliases": []
     },
     {
@@ -3255,7 +3255,7 @@
         "pic18.sinc",
         "pic18_instructions.sinc"
       ],
-      "runtime_status": "registered_compile_only",
+      "runtime_status": "executable_candidate",
       "language_aliases": []
     },
     {
@@ -3303,7 +3303,7 @@
         "pic18.sinc",
         "pic18_instructions.sinc"
       ],
-      "runtime_status": "registered_compile_only",
+      "runtime_status": "executable_candidate",
       "language_aliases": []
     },
     {
@@ -3351,7 +3351,7 @@
         "pic18.sinc",
         "pic18_instructions.sinc"
       ],
-      "runtime_status": "registered_compile_only",
+      "runtime_status": "executable_candidate",
       "language_aliases": []
     },
     {
@@ -3399,7 +3399,7 @@
         "pic18.sinc",
         "pic18_instructions.sinc"
       ],
-      "runtime_status": "registered_compile_only",
+      "runtime_status": "executable_candidate",
       "language_aliases": []
     },
     {
@@ -3457,7 +3457,7 @@
         "stswiInstructions.sinc",
         "vsx.sinc"
       ],
-      "runtime_status": "registered_compile_only",
+      "runtime_status": "executable_candidate",
       "language_aliases": [
         "powerpc"
       ]
@@ -3517,7 +3517,7 @@
         "stswiInstructions.sinc",
         "vsx.sinc"
       ],
-      "runtime_status": "registered_compile_only",
+      "runtime_status": "executable_candidate",
       "language_aliases": [
         "powerpc"
       ]
@@ -3637,7 +3637,7 @@
         "stswiInstructions.sinc",
         "vsx.sinc"
       ],
-      "runtime_status": "registered_compile_only",
+      "runtime_status": "executable_candidate",
       "language_aliases": [
         "powerpc"
       ]
@@ -3697,7 +3697,7 @@
         "stswiInstructions.sinc",
         "vsx.sinc"
       ],
-      "runtime_status": "registered_compile_only",
+      "runtime_status": "executable_candidate",
       "language_aliases": [
         "powerpc"
       ]
@@ -3757,7 +3757,7 @@
         "stswiInstructions.sinc",
         "vsx.sinc"
       ],
-      "runtime_status": "registered_compile_only",
+      "runtime_status": "executable_candidate",
       "language_aliases": [
         "powerpc"
       ]
@@ -3817,7 +3817,7 @@
         "stswiInstructions.sinc",
         "vsx.sinc"
       ],
-      "runtime_status": "registered_compile_only",
+      "runtime_status": "executable_candidate",
       "language_aliases": [
         "powerpc"
       ]
@@ -3938,7 +3938,7 @@
         "stswiInstructions.sinc",
         "vsx.sinc"
       ],
-      "runtime_status": "registered_compile_only",
+      "runtime_status": "executable_candidate",
       "language_aliases": [
         "powerpc"
       ]
@@ -3998,7 +3998,7 @@
         "stswiInstructions.sinc",
         "vsx.sinc"
       ],
-      "runtime_status": "registered_compile_only",
+      "runtime_status": "executable_candidate",
       "language_aliases": [
         "powerpc"
       ]
@@ -4241,7 +4241,7 @@
         "stswiInstructions.sinc",
         "vsx.sinc"
       ],
-      "runtime_status": "registered_compile_only",
+      "runtime_status": "executable_candidate",
       "language_aliases": [
         "powerpc"
       ]
@@ -4421,7 +4421,7 @@
         "stswiInstructions.sinc",
         "vsx.sinc"
       ],
-      "runtime_status": "registered_compile_only",
+      "runtime_status": "executable_candidate",
       "language_aliases": [
         "powerpc"
       ]
@@ -4540,7 +4540,7 @@
         "riscv64.cspec",
         "riscv64.dwarf"
       ],
-      "runtime_status": "registered_compile_only",
+      "runtime_status": "executable_candidate",
       "language_aliases": [
         "riscv"
       ]
@@ -4682,7 +4682,7 @@
         "SparcV9_64.cspec",
         "SparcVIS.sinc"
       ],
-      "runtime_status": "registered_compile_only",
+      "runtime_status": "executable_candidate",
       "language_aliases": []
     },
     {
@@ -4727,7 +4727,7 @@
         "superh.sinc",
         "superh2a.cspec"
       ],
-      "runtime_status": "registered_compile_only",
+      "runtime_status": "executable_candidate",
       "language_aliases": []
     },
     {
@@ -4748,7 +4748,7 @@
         "superh.sinc",
         "superh2a.cspec"
       ],
-      "runtime_status": "registered_compile_only",
+      "runtime_status": "executable_candidate",
       "language_aliases": []
     },
     {
@@ -4769,7 +4769,7 @@
         "superh.sinc",
         "superh2a.cspec"
       ],
-      "runtime_status": "registered_compile_only",
+      "runtime_status": "executable_candidate",
       "language_aliases": []
     },
     {
@@ -4795,7 +4795,7 @@
         "old/SuperH4-LE-16.lang",
         "old/SuperH4-LE-16.trans"
       ],
-      "runtime_status": "registered_compile_only",
+      "runtime_status": "executable_candidate",
       "language_aliases": []
     },
     {
@@ -4821,7 +4821,7 @@
         "old/SuperH4-LE-16.lang",
         "old/SuperH4-LE-16.trans"
       ],
-      "runtime_status": "registered_compile_only",
+      "runtime_status": "executable_candidate",
       "language_aliases": []
     },
     {
@@ -4846,7 +4846,7 @@
         "TI_MSP430X.dwarf",
         "ti_msp430.opinion"
       ],
-      "runtime_status": "registered_compile_only",
+      "runtime_status": "executable_candidate",
       "language_aliases": []
     },
     {
@@ -4871,7 +4871,7 @@
         "TI_MSP430X.dwarf",
         "ti_msp430.opinion"
       ],
-      "runtime_status": "registered_compile_only",
+      "runtime_status": "executable_candidate",
       "language_aliases": []
     },
     {
@@ -4907,7 +4907,7 @@
         "toy_builder.sinc",
         "toy_harvard.pspec"
       ],
-      "runtime_status": "registered_compile_only",
+      "runtime_status": "executable_candidate",
       "language_aliases": []
     },
     {
@@ -4943,7 +4943,7 @@
         "toy_builder.sinc",
         "toy_harvard.pspec"
       ],
-      "runtime_status": "registered_compile_only",
+      "runtime_status": "executable_candidate",
       "language_aliases": []
     },
     {
@@ -4979,7 +4979,7 @@
         "toy_builder.sinc",
         "toy_harvard.pspec"
       ],
-      "runtime_status": "registered_compile_only",
+      "runtime_status": "executable_candidate",
       "language_aliases": []
     },
     {
@@ -5015,7 +5015,7 @@
         "toy_builder.sinc",
         "toy_harvard.pspec"
       ],
-      "runtime_status": "registered_compile_only",
+      "runtime_status": "executable_candidate",
       "language_aliases": []
     },
     {
@@ -5051,7 +5051,7 @@
         "toy_builder.sinc",
         "toy_harvard.pspec"
       ],
-      "runtime_status": "registered_compile_only",
+      "runtime_status": "executable_candidate",
       "language_aliases": []
     },
     {
@@ -5087,7 +5087,7 @@
         "toy_builder.sinc",
         "toy_harvard.pspec"
       ],
-      "runtime_status": "registered_compile_only",
+      "runtime_status": "executable_candidate",
       "language_aliases": []
     },
     {
@@ -5123,7 +5123,7 @@
         "toy_builder.sinc",
         "toy_harvard.pspec"
       ],
-      "runtime_status": "registered_compile_only",
+      "runtime_status": "executable_candidate",
       "language_aliases": []
     },
     {
@@ -5159,7 +5159,7 @@
         "toy_builder.sinc",
         "toy_harvard.pspec"
       ],
-      "runtime_status": "registered_compile_only",
+      "runtime_status": "executable_candidate",
       "language_aliases": []
     },
     {
@@ -5195,7 +5195,7 @@
         "toy_builder.sinc",
         "toy_harvard.pspec"
       ],
-      "runtime_status": "registered_compile_only",
+      "runtime_status": "executable_candidate",
       "language_aliases": []
     },
     {
@@ -5231,7 +5231,7 @@
         "toy_builder.sinc",
         "toy_harvard.pspec"
       ],
-      "runtime_status": "registered_compile_only",
+      "runtime_status": "executable_candidate",
       "language_aliases": []
     },
     {
@@ -5267,7 +5267,7 @@
         "toy_builder.sinc",
         "toy_harvard.pspec"
       ],
-      "runtime_status": "registered_compile_only",
+      "runtime_status": "executable_candidate",
       "language_aliases": []
     },
     {
@@ -5303,7 +5303,7 @@
         "toy_builder.sinc",
         "toy_harvard.pspec"
       ],
-      "runtime_status": "registered_compile_only",
+      "runtime_status": "executable_candidate",
       "language_aliases": []
     },
     {
@@ -5339,7 +5339,7 @@
         "toy_builder.sinc",
         "toy_harvard.pspec"
       ],
-      "runtime_status": "registered_compile_only",
+      "runtime_status": "executable_candidate",
       "language_aliases": []
     },
     {
@@ -5370,7 +5370,7 @@
         "V850.opinion",
         "V850.pspec"
       ],
-      "runtime_status": "registered_compile_only",
+      "runtime_status": "executable_candidate",
       "language_aliases": []
     },
     {
@@ -5397,7 +5397,7 @@
         "xtensaMain.sinc",
         "xtensa_depbits.sinc"
       ],
-      "runtime_status": "registered_compile_only",
+      "runtime_status": "executable_candidate",
       "language_aliases": []
     },
     {
@@ -5424,7 +5424,7 @@
         "xtensaMain.sinc",
         "xtensa_depbits.sinc"
       ],
-      "runtime_status": "registered_compile_only",
+      "runtime_status": "executable_candidate",
       "language_aliases": []
     },
     {
@@ -5447,7 +5447,7 @@
         "z80.pspec",
         "z8401x.pspec"
       ],
-      "runtime_status": "registered_compile_only",
+      "runtime_status": "executable_candidate",
       "language_aliases": []
     },
     {
@@ -5470,7 +5470,7 @@
         "z80.pspec",
         "z8401x.pspec"
       ],
-      "runtime_status": "registered_compile_only",
+      "runtime_status": "executable_candidate",
       "language_aliases": []
     },
     {
@@ -5543,7 +5543,7 @@
         "tricore.pspec",
         "tricore.sinc"
       ],
-      "runtime_status": "registered_compile_only",
+      "runtime_status": "executable_candidate",
       "language_aliases": []
     },
     {

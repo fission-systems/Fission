@@ -1293,6 +1293,8 @@ impl<'a> PreviewBuilder<'a> {
         }
         let merge_target = self.block_target_key(merge_block_idx);
         let ty = type_from_size(output.size, false);
+
+        // Case 1: One of the direct predecessors has the CBranch
         for pred_addr in predecessor_blocks {
             let pred_idx = *self.address_to_index.get(pred_addr)?;
             let other_addr = predecessor_blocks
@@ -1302,28 +1304,62 @@ impl<'a> PreviewBuilder<'a> {
             let other_idx = *self.address_to_index.get(&other_addr)?;
             let other_target = self.block_target_key(other_idx);
             let false_target = self.next_block_address(pred_idx)?;
-            let (true_target, cond) = self.lower_cbranch_condition_for_block(pred_idx)?;
-            let true_expr = if true_target == merge_target {
-                incoming_by_pred.get(pred_addr)?.clone()
-            } else if true_target == other_target {
-                incoming_by_pred.get(&other_addr)?.clone()
-            } else {
-                continue;
-            };
-            let else_expr = if false_target == merge_target {
-                incoming_by_pred.get(pred_addr)?.clone()
-            } else if false_target == other_target {
-                incoming_by_pred.get(&other_addr)?.clone()
-            } else {
-                continue;
-            };
-            return Some(HirExpr::Select {
-                cond: Box::new(cond),
-                then_expr: Box::new(true_expr),
-                else_expr: Box::new(else_expr),
-                ty,
-            });
+            if let Some((true_target, cond)) = self.lower_cbranch_condition_for_block(pred_idx) {
+                let true_expr = if true_target == merge_target {
+                    incoming_by_pred.get(pred_addr)?.clone()
+                } else if true_target == other_target {
+                    incoming_by_pred.get(&other_addr)?.clone()
+                } else {
+                    continue;
+                };
+                let else_expr = if false_target == merge_target {
+                    incoming_by_pred.get(pred_addr)?.clone()
+                } else if false_target == other_target {
+                    incoming_by_pred.get(&other_addr)?.clone()
+                } else {
+                    continue;
+                };
+                return Some(HirExpr::Select {
+                    cond: Box::new(cond),
+                    then_expr: Box::new(true_expr),
+                    else_expr: Box::new(else_expr),
+                    ty,
+                });
+            }
         }
+
+        // Case 2: Diamond branch (the branch is a predecessor of the two direct predecessors)
+        let pred_addr_a = predecessor_blocks[0];
+        let pred_addr_b = predecessor_blocks[1];
+        let pred_idx_a = *self.address_to_index.get(&pred_addr_a)?;
+        let pred_idx_b = *self.address_to_index.get(&pred_addr_b)?;
+
+        if let Some((branch_idx, _)) =
+            self.find_diamond_branch_for_predecessors(pred_idx_a, pred_idx_b)
+        {
+            if let Some((true_target_key, cond)) = self.lower_cbranch_condition_for_block(branch_idx) {
+                let target_key_a = self.block_target_key(pred_idx_a);
+                let target_key_b = self.block_target_key(pred_idx_b);
+                let (true_addr, false_addr) = if true_target_key == target_key_a {
+                    (pred_addr_a, pred_addr_b)
+                } else if true_target_key == target_key_b {
+                    (pred_addr_b, pred_addr_a)
+                } else {
+                    return None;
+                };
+
+                let true_expr = incoming_by_pred.get(&true_addr)?.clone();
+                let false_expr = incoming_by_pred.get(&false_addr)?.clone();
+
+                return Some(HirExpr::Select {
+                    cond: Box::new(cond),
+                    then_expr: Box::new(true_expr),
+                    else_expr: Box::new(false_expr),
+                    ty,
+                });
+            }
+        }
+
         None
     }
 

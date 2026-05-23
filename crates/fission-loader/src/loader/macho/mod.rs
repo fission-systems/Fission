@@ -6,7 +6,7 @@ use crate::loader::types::{
 use crate::prelude::*;
 use fission_core::architecture::select_macho_load_spec;
 use fission_core::constants::binary_format::*;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 pub mod apple;
 pub mod schema;
@@ -214,6 +214,10 @@ impl MachoLoader {
                 let mut current_addr = image_base; // first entry is absolute VA
                 let mut i = 0usize;
                 let mut new_count = 0usize;
+                let mut known_addresses: HashSet<u64> = functions_info
+                    .iter()
+                    .map(|f| f.address)
+                    .collect();
                 while i < fs_data.len() {
                     // Decode one ULEB128 value
                     let mut delta: u64 = 0;
@@ -237,8 +241,8 @@ impl MachoLoader {
                     }
                     current_addr = current_addr.wrapping_add(delta);
                     // Only add if not already known
-                    let already_known = functions_info.iter().any(|f| f.address == current_addr);
-                    if !already_known && current_addr > image_base {
+                    if !known_addresses.contains(&current_addr) && current_addr > image_base {
+                        known_addresses.insert(current_addr);
                         functions_info.push(FunctionInfo {
                             name: String::new(),
                             address: current_addr,
@@ -504,6 +508,12 @@ impl MachoLoader {
             return;
         }
 
+        let mut import_addresses: HashSet<u64> = functions
+            .iter()
+            .filter(|f| f.is_import)
+            .map(|f| f.address)
+            .collect();
+
         // Parse __stubs section
         if let Some(stubs) = stubs_section {
             let num_stubs = (stubs.virtual_size / stub_size).min(dysymtab.nindirectsyms as u64);
@@ -518,7 +528,7 @@ impl MachoLoader {
                         if !name.is_empty() {
                             iat_symbols.insert(stub_addr, name);
                             if let Some(name) = iat_symbols.get(&stub_addr) {
-                                push_macho_import(functions, stub_addr, name.clone(), "__stubs");
+                                push_macho_import(functions, &mut import_addresses, stub_addr, name.clone(), "__stubs");
                             }
                         }
                     }
@@ -550,7 +560,7 @@ impl MachoLoader {
                         if !name.is_empty() {
                             iat_symbols.insert(got_addr, name);
                             if let Some(name) = iat_symbols.get(&got_addr) {
-                                push_macho_import(functions, got_addr, name.clone(), "__got");
+                                push_macho_import(functions, &mut import_addresses, got_addr, name.clone(), "__got");
                             }
                         }
                     }
@@ -641,6 +651,12 @@ impl MachoLoader {
             return;
         }
         let reader = ByteReader::new(data, endian);
+        let mut import_addresses: HashSet<u64> = functions
+            .iter()
+            .filter(|f| f.is_import)
+            .map(|f| f.address)
+            .collect();
+
         if let Some(stubs) = stubs_section {
             let stub_size = 6u64;
             let num_stubs = (stubs.virtual_size / stub_size).min(dysymtab.nindirectsyms as u64);
@@ -651,7 +667,7 @@ impl MachoLoader {
                         let name = Self::get_symbol_name_32(data, symtab, sym_idx, endian);
                         if !name.is_empty() {
                             iat_symbols.insert(stub_addr, name.clone());
-                            push_macho_import(functions, stub_addr, name, "__stubs");
+                            push_macho_import(functions, &mut import_addresses, stub_addr, name, "__stubs");
                         }
                     }
                 }
@@ -672,7 +688,7 @@ impl MachoLoader {
                         let name = Self::get_symbol_name_32(data, symtab, sym_idx, endian);
                         if !name.is_empty() {
                             iat_symbols.insert(got_addr, name.clone());
-                            push_macho_import(functions, got_addr, name, &got.name);
+                            push_macho_import(functions, &mut import_addresses, got_addr, name, &got.name);
                         }
                     }
                 }
@@ -1102,13 +1118,17 @@ mod tests {
     }
 }
 
-fn push_macho_import(functions: &mut Vec<FunctionInfo>, address: u64, name: String, section: &str) {
-    if functions
-        .iter()
-        .any(|function| function.address == address && function.is_import)
-    {
+fn push_macho_import(
+    functions: &mut Vec<FunctionInfo>,
+    import_addresses: &mut HashSet<u64>,
+    address: u64,
+    name: String,
+    section: &str,
+) {
+    if import_addresses.contains(&address) {
         return;
     }
+    import_addresses.insert(address);
     functions.push(FunctionInfo {
         name,
         address,

@@ -530,6 +530,17 @@ pub(super) fn decode_construct_templates(
             },
         );
     }
+    
+    let mut userops = BTreeMap::new();
+    for head in root.descendants_with_id(sla_format::ELEM_USEROP_HEAD) {
+        if let Some(index_val) = head.attr_unsigned(sla_format::ATTR_INDEX) {
+            if let Some(name_val) = head.attr_string(sla_format::ATTR_NAME) {
+                if let Ok(index) = u32::try_from(index_val) {
+                    userops.insert(index, name_val.to_string());
+                }
+            }
+        }
+    }
 
     let mut library = CompiledSlaTemplateLibrary {
         path: artifact.path.clone(),
@@ -540,6 +551,7 @@ pub(super) fn decode_construct_templates(
         register_space_index,
         uniqbase,
         uniqmask,
+        userops,
         constructors_by_source,
         subtables,
         native: SlaLanguage {

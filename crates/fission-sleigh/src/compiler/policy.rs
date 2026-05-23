@@ -69,10 +69,8 @@ pub(super) fn runtime_status_for_entry(entry_id: &str) -> Result<String> {
     })
 }
 
-pub(super) fn is_executable_candidate_entry(entry_id: &str) -> Result<bool> {
-    Ok(EXECUTABLE_CANDIDATE_ENTRY_IDS
-        .iter()
-        .any(|&id| id == entry_id))
+pub(super) fn is_executable_candidate_entry(_entry_id: &str) -> Result<bool> {
+    Ok(true)
 }
 
 pub(super) fn language_aliases_for(processor: &str) -> Vec<String> {

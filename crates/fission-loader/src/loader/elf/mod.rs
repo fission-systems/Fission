@@ -4,7 +4,7 @@ use crate::loader::types::{
 };
 use crate::prelude::*;
 use fission_core::architecture::select_elf_load_spec;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 pub mod schema;
 use schema::*;
@@ -33,6 +33,11 @@ const EM_PPC64: u16 = 21;
 const EM_ARM: u16 = 40;
 const EM_RISCV: u16 = 243;
 const EM_LOONGARCH: u16 = 258;
+const EM_X86_64: u16 = 62;
+const R_X86_64_64: u32 = 1;
+const R_X86_64_PC32: u32 = 2;
+const R_X86_64_32: u32 = 10;
+const R_X86_64_32S: u32 = 11;
 const R_ARM_PC24: u32 = 1;
 const R_ARM_ABS32: u32 = 2;
 const R_ARM_CALL: u32 = 28;
@@ -96,6 +101,8 @@ impl ElfLoader {
 
         let mut sections_info = Vec::new();
         let mut functions_info = Vec::new();
+        let mut existing_addresses = HashSet::new();
+        let mut existing_imports = HashSet::new();
         let mut global_symbols = HashMap::new();
         let mut global_symbol_sizes = HashMap::new();
         let mut relocation_symbols = HashMap::new();
@@ -196,6 +203,8 @@ impl ElfLoader {
                         is_relocatable,
                         shdr.sh_type == SHT_DYNSYM,
                         &mut functions_info,
+                        &mut existing_addresses,
+                        &mut existing_imports,
                         &mut global_symbols,
                         &mut global_symbol_sizes,
                         &ppc64_function_descriptors,
@@ -219,6 +228,11 @@ impl ElfLoader {
                 let patches =
                     loongarch_relocation_patches_64(bytes, &shdrs, &section_addresses, endian);
                 apply_u32_relocation_patches(&mut data, patches, endian);
+            } else if is_relocatable && header.machine == EM_X86_64 {
+                let (patches_64, patches_32) =
+                    x86_64_relocation_patches_64(bytes, &shdrs, &section_addresses, endian);
+                apply_u64_relocation_patches(&mut data, patches_64, endian);
+                apply_u32_relocation_patches(&mut data, patches_32, endian);
             }
         } else if !is_relocatable {
             sections_info.extend(load_segments_as_sections_64(&phdrs));
@@ -280,6 +294,8 @@ impl ElfLoader {
 
         let mut sections_info = Vec::new();
         let mut functions_info = Vec::new();
+        let mut existing_addresses = HashSet::new();
+        let mut existing_imports = HashSet::new();
         let mut global_symbols = HashMap::new();
         let mut global_symbol_sizes = HashMap::new();
         let mut relocation_symbols = HashMap::new();
@@ -368,6 +384,8 @@ impl ElfLoader {
                         is_relocatable,
                         shdr.sh_type == SHT_DYNSYM,
                         &mut functions_info,
+                        &mut existing_addresses,
+                        &mut existing_imports,
                         &mut global_symbols,
                         &mut global_symbol_sizes,
                         endian,
@@ -450,6 +468,8 @@ impl ElfLoader {
         is_relocatable: bool,
         is_dynamic_table: bool,
         out_funcs: &mut Vec<FunctionInfo>,
+        existing_addresses: &mut HashSet<u64>,
+        existing_imports: &mut HashSet<String>,
         out_globals: &mut HashMap<u64, String>,
         out_global_sizes: &mut HashMap<u64, u64>,
         function_descriptors: &HashMap<u64, u64>,
@@ -508,10 +528,12 @@ impl ElfLoader {
                 {
                     push_unique_function(
                         out_funcs,
+                        existing_addresses,
+                        existing_imports,
                         FunctionInfo {
                             name,
                             address: ELF_EXTERNAL_IMAGE_BASE
-                                + out_funcs.iter().filter(|f| f.is_import).count() as u64 * 8,
+                                + existing_imports.len() as u64 * 8,
                             size: 0,
                             is_export: false,
                             is_import: true,
@@ -561,6 +583,8 @@ impl ElfLoader {
 
             push_unique_function(
                 out_funcs,
+                existing_addresses,
+                existing_imports,
                 FunctionInfo {
                     name,
                     address,
@@ -597,6 +621,8 @@ impl ElfLoader {
         is_relocatable: bool,
         is_dynamic_table: bool,
         out_funcs: &mut Vec<FunctionInfo>,
+        existing_addresses: &mut HashSet<u64>,
+        existing_imports: &mut HashSet<String>,
         out_globals: &mut HashMap<u64, String>,
         out_global_sizes: &mut HashMap<u64, u64>,
         endian: Endian,
@@ -654,10 +680,12 @@ impl ElfLoader {
                 {
                     push_unique_function(
                         out_funcs,
+                        existing_addresses,
+                        existing_imports,
                         FunctionInfo {
                             name,
                             address: ELF_EXTERNAL_IMAGE_BASE
-                                + out_funcs.iter().filter(|f| f.is_import).count() as u64 * 8,
+                                + existing_imports.len() as u64 * 8,
                             size: 0,
                             is_export: false,
                             is_import: true,
@@ -705,6 +733,8 @@ impl ElfLoader {
 
             push_unique_function(
                 out_funcs,
+                existing_addresses,
+                existing_imports,
                 FunctionInfo {
                     name,
                     address,
@@ -1345,6 +1375,124 @@ fn apply_u32_relocation_patches(
     }
 }
 
+fn apply_u64_relocation_patches(
+    data: &mut DataBuffer,
+    patches: impl IntoIterator<Item = (usize, u64)>,
+    endian: Endian,
+) {
+    let bytes = data.to_mut_vec();
+    for (offset, value) in patches {
+        let Some(dst) = bytes.get_mut(offset..offset.saturating_add(8)) else {
+            continue;
+        };
+        let raw = match endian {
+            Endian::Little => value.to_le_bytes(),
+            Endian::Big => value.to_be_bytes(),
+        };
+        dst.copy_from_slice(&raw);
+    }
+}
+
+fn x86_64_relocation_patches_64(
+    full_data: &[u8],
+    shdrs: &[Elf64Shdr],
+    section_addresses: &[u64],
+    endian: Endian,
+) -> (Vec<(usize, u64)>, Vec<(usize, u32)>) {
+    let reader = ByteReader::new(full_data, endian);
+    let mut patches_64 = Vec::new();
+    let mut patches_32 = Vec::new();
+    for shdr in shdrs.iter().filter(|shdr| shdr.sh_type == SHT_RELA) {
+        let Some(target_section) = shdrs.get(shdr.sh_info as usize) else {
+            continue;
+        };
+        if (target_section.sh_flags & SHF_ALLOC) == 0 || target_section.sh_size == 0 {
+            continue;
+        }
+        let Some(symtab) = shdrs.get(shdr.sh_link as usize) else {
+            continue;
+        };
+        let entry_size = if shdr.sh_entsize > 0 {
+            shdr.sh_entsize as usize
+        } else {
+            24
+        };
+        let count = (shdr.sh_size as usize).checked_div(entry_size).unwrap_or(0);
+        let start = shdr.sh_offset as usize;
+        for index in 0..count {
+            let offset = start + index * entry_size;
+            if offset + entry_size > full_data.len() {
+                break;
+            }
+            let Ok(r_offset) = reader.u64(offset) else {
+                break;
+            };
+            let Ok(r_info) = reader.u64(offset + 8) else {
+                break;
+            };
+            let Ok(addend_raw) = reader.u64(offset + 16) else {
+                break;
+            };
+            let addend = addend_raw as i64;
+            let reloc_type = (r_info & 0xffff_ffff) as u32;
+            let symbol_index = (r_info >> 32) as usize;
+
+            // if reloc_type == R_X86_64_64 || reloc_type == R_X86_64_32 || reloc_type == R_X86_64_32S || reloc_type == R_X86_64_PC32 {
+            //     println!(
+            //         "[reloc-all] index: {}, type: {}, symbol_idx: {}, r_offset: 0x{:x}, addend: {}",
+            //         index, reloc_type, symbol_index, r_offset, addend
+            //     );
+            // }
+
+            let Some(symbol_value) =
+                symbol_value_64(full_data, symtab, section_addresses, symbol_index, endian)
+            else {
+                // if reloc_type == R_X86_64_64 || reloc_type == R_X86_64_32 || reloc_type == R_X86_64_32S || reloc_type == R_X86_64_PC32 {
+                //     println!("[reloc-fail] symbol_value_64 returned None for symbol_idx: {}", symbol_index);
+                // }
+                continue;
+            };
+
+            let patch_offset = target_section
+                .sh_offset
+                .checked_add(r_offset)
+                .and_then(|val| usize::try_from(val).ok());
+            let Some(patch_offset) = patch_offset else {
+                continue;
+            };
+
+            // if reloc_type == R_X86_64_64 || reloc_type == R_X86_64_32 || reloc_type == R_X86_64_32S || reloc_type == R_X86_64_PC32 {
+            //     let value = (symbol_value as i128).wrapping_add(addend as i128);
+            //     println!(
+            //         "[reloc-success] final_val: 0x{:x}, patch_offset: 0x{:x}",
+            //         value, patch_offset
+            //     );
+            // }
+
+            match reloc_type {
+                R_X86_64_64 => {
+                    let value = (symbol_value as i128).wrapping_add(addend as i128) as u64;
+                    patches_64.push((patch_offset, value));
+                }
+                R_X86_64_32 | R_X86_64_32S => {
+                    let value = (symbol_value as i128).wrapping_add(addend as i128) as u32;
+                    patches_32.push((patch_offset, value));
+                }
+                R_X86_64_PC32 => {
+                    let target_base = section_addresses[shdr.sh_info as usize];
+                    let place = target_base.saturating_add(r_offset);
+                    let value = (symbol_value as i128)
+                        .wrapping_add(addend as i128)
+                        .wrapping_sub(place as i128) as u32;
+                    patches_32.push((patch_offset, value));
+                }
+                _ => {}
+            }
+        }
+    }
+    (patches_64, patches_32)
+}
+
 fn parse_relocation_symbols_32(
     full_data: &[u8],
     shdrs: &[Elf32Shdr],
@@ -1462,12 +1610,21 @@ fn symbol_name_32(
     (!name.is_empty() && !is_elf_mapping_symbol(&name)).then_some(name)
 }
 
-fn push_unique_function(out: &mut Vec<FunctionInfo>, function: FunctionInfo) {
-    if out.iter().any(|existing| {
-        existing.address == function.address
-            || (existing.is_import && function.is_import && existing.name == function.name)
-    }) {
+fn push_unique_function(
+    out: &mut Vec<FunctionInfo>,
+    existing_addresses: &mut HashSet<u64>,
+    existing_imports: &mut HashSet<String>,
+    function: FunctionInfo,
+) {
+    if existing_addresses.contains(&function.address) {
         return;
+    }
+    if function.is_import && existing_imports.contains(&function.name) {
+        return;
+    }
+    existing_addresses.insert(function.address);
+    if function.is_import {
+        existing_imports.insert(function.name.clone());
     }
     out.push(function);
 }
@@ -1835,5 +1992,26 @@ mod tests {
             binary.view_bytes(op_add.address, 4).expect("op_add bytes"),
             [0x7c, 0x64, 0x1a, 0x14]
         );
+    }
+
+    #[test]
+    fn elf64_x86_64_relocatable_jump_table_patch_loaded_image() {
+        let fixture = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../benchmark/binary/x86-64/baremetal/small/binary/c/control_flow.o");
+        if !fixture.exists() {
+            eprintln!("skip: x86-64 control_flow fixture missing");
+            return;
+        }
+
+        let binary = LoadedBinary::from_file(&fixture).expect("load x86-64 relocatable object");
+        let entry0 = binary.view_bytes(0x100460, 8).expect("rodata entry 0");
+        let entry1 = binary.view_bytes(0x100468, 8).expect("rodata entry 1");
+        let entry2 = binary.view_bytes(0x100470, 8).expect("rodata entry 2");
+        let entry3 = binary.view_bytes(0x100478, 8).expect("rodata entry 3");
+
+        assert_eq!(entry0, [0x28, 0x00, 0x10, 0x00, 0x00, 0x00, 0x00, 0x00]);
+        assert_eq!(entry1, [0x38, 0x00, 0x10, 0x00, 0x00, 0x00, 0x00, 0x00]);
+        assert_eq!(entry2, [0x2c, 0x00, 0x10, 0x00, 0x00, 0x00, 0x00, 0x00]);
+        assert_eq!(entry3, [0x33, 0x00, 0x10, 0x00, 0x00, 0x00, 0x00, 0x00]);
     }
 }

@@ -48,6 +48,6 @@ pub(crate) fn decode_rust_sleigh_pcode(
         continue_past_indirect_branch,
         retry_on_decode_error,
     )
-    .map(|(p, _)| p)
+    .map(|(p, _, _)| p)
     .map_err(|f| f.message)
 }

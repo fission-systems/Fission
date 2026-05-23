@@ -33,7 +33,7 @@ pub(super) fn emit_raw_pcode(
     } else {
         DecodeContract::strict_function(instruction_limit)
     };
-    let memory_context = decode_memory_context(binary, decode_addr);
+    let memory_context = decode_memory_context(binary, decode_addr, max_bytes);
     let lifted = frontend
         .lift_raw_pcode_function_with_context_and_memory_context(
             bytes,
@@ -87,7 +87,7 @@ fn runtime_frontend_for_binary(binary: &LoadedBinary) -> io::Result<RuntimeSleig
     RuntimeSleighFrontend::new_for_load_spec(load_spec).map_err(to_io_error)
 }
 
-fn decode_memory_context(binary: &LoadedBinary, entry_address: u64) -> DecodeMemoryContext {
+fn decode_memory_context(binary: &LoadedBinary, entry_address: u64, max_bytes: usize) -> DecodeMemoryContext {
     let inner = binary.inner();
     let mut relative_address_bases = Vec::new();
     for section in &inner.sections {
@@ -101,8 +101,63 @@ fn decode_memory_context(binary: &LoadedBinary, entry_address: u64) -> DecodeMem
     if inner.image_base != 0 && !relative_address_bases.contains(&inner.image_base) {
         relative_address_bases.push(inner.image_base);
     }
+
+    let mut jump_table_targets = Vec::new();
+    let little_endian = !inner.arch_spec.contains("BE");
+
+    // Bound the function end address
+    let mut func_size = None;
+    if let Some(&idx) = inner.function_addr_index.get(&entry_address) {
+        if let Some(info) = inner.functions.get(idx) {
+            if info.size > 0 {
+                func_size = Some(info.size as u64);
+            }
+        }
+    }
+
+    let limit_addr = if let Some(size) = func_size {
+        entry_address.saturating_add(size)
+    } else {
+        let mut next_addr = entry_address.saturating_add(max_bytes as u64);
+        for info in &inner.functions {
+            if info.address > entry_address && info.address < next_addr {
+                next_addr = info.address;
+            }
+        }
+        next_addr
+    };
+
+    for &use_site in inner.relocation_symbols.keys() {
+        if let Some(raw_8) = binary.view_bytes(use_site, 8) {
+            let val = if little_endian {
+                u64::from_le_bytes(raw_8.try_into().unwrap())
+            } else {
+                u64::from_be_bytes(raw_8.try_into().unwrap())
+            };
+            if val >= entry_address && val < limit_addr {
+                if !jump_table_targets.contains(&val) {
+                    jump_table_targets.push(val);
+                }
+            }
+        }
+        if let Some(raw_4) = binary.view_bytes(use_site, 4) {
+            let val_32 = if little_endian {
+                u32::from_le_bytes(raw_4.try_into().unwrap())
+            } else {
+                u32::from_be_bytes(raw_4.try_into().unwrap())
+            };
+            let val = val_32 as u64;
+            if val >= entry_address && val < limit_addr {
+                if !jump_table_targets.contains(&val) {
+                    jump_table_targets.push(val);
+                }
+            }
+        }
+    }
+
     DecodeMemoryContext {
         relative_address_bases,
+        jump_table_targets,
     }
 }
 

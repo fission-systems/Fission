@@ -82,5 +82,6 @@ pub(super) fn test_options() -> MlilPreviewOptions {
         global_sizes: Default::default(),
         relocation_names: Default::default(),
         calling_convention: Default::default(),
+        ..Default::default()
     }
 }

@@ -7,15 +7,23 @@ rustc-wrapper = "sccache"
 # Address Sanitizer configuration (for debugging memory issues)
 # Usage: RUSTFLAGS="-Zsanitizer=address" cargo +nightly run --target x86_64-apple-darwin
 [target.x86_64-apple-darwin]
-rustflags = []
+rustflags = [
+  # To use a high-speed linker on macOS, install zld or lld via brew and uncomment below:
+  # "-C", "link-arg=-fuse-ld=zld",
+  # "-C", "link-arg=-fuse-ld=lld",
+]
 
 [target.aarch64-apple-darwin]
-rustflags = []
+rustflags = [
+  # To use a high-speed linker on macOS, install zld or lld via brew and uncomment below:
+  # "-C", "link-arg=-fuse-ld=zld",
+  # "-C", "link-arg=-fuse-ld=lld",
+]
 
 # Test profile: balance compile speed vs runtime speed
 [profile.test]
 opt-level = 1
-debug = true
+debug = 1 # Reduced from true (2) to 1 for much faster compilation and linking
 debug-assertions = true
 overflow-checks = true
 lto = false
@@ -23,6 +31,8 @@ codegen-units = 16
 
 # Linker settings for better performance
 [profile.dev]
+opt-level = 0
+debug = 1 # Reduced from default 2 to 1 for much faster compilation and linking
 # Faster linking with lld (if available)
 # linker = "clang"
 

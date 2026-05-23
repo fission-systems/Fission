@@ -7,24 +7,24 @@
 use crate::nir::{NirBinding, NirBindingOrigin};
 use std::collections::HashSet;
 
-pub(crate) fn preserved_materialization_names(bindings: &[NirBinding]) -> HashSet<String> {
+pub(crate) fn preserved_materialization_names(bindings: &[NirBinding]) -> HashSet<&str> {
     bindings
         .iter()
         .filter(|binding| binding.preserves_materialization())
-        .map(|binding| binding.name.clone())
+        .map(|binding| binding.name.as_str())
         .collect()
 }
 
 pub(crate) fn should_block_trivial_return_collapse(
     name: &str,
-    preserved_temps: &HashSet<String>,
+    preserved_temps: &HashSet<&str>,
 ) -> bool {
     preserved_temps.contains(name)
 }
 
 pub(crate) fn should_skip_inline_for_preserved_temp(
     name: &str,
-    preserved_temps: &HashSet<String>,
+    preserved_temps: &HashSet<&str>,
 ) -> bool {
     preserved_temps.contains(name)
 }
@@ -39,7 +39,7 @@ pub(crate) fn should_keep_unused_temp_binding(
 
 pub(crate) fn should_skip_copyprop_for_preserved_name(
     name: &str,
-    preserved_temps: &HashSet<String>,
+    preserved_temps: &HashSet<&str>,
 ) -> bool {
     preserved_temps.contains(name)
 }
@@ -72,10 +72,11 @@ mod tests {
 
     #[test]
     fn preserved_materialization_names_collects_only_preserved_bindings() {
-        let names = preserved_materialization_names(&[
+        let bindings = [
             temp_binding("uVar0", NirBindingOrigin::TempPreserved),
             temp_binding("uVar1", NirBindingOrigin::Temp),
-        ]);
+        ];
+        let names = preserved_materialization_names(&bindings);
         assert!(names.contains("uVar0"));
         assert!(!names.contains("uVar1"));
     }
@@ -89,7 +90,7 @@ mod tests {
 
     #[test]
     fn skip_copyprop_for_any_preserved_name() {
-        let preserved = HashSet::from([String::from("uVar0")]);
+        let preserved = HashSet::from(["uVar0"]);
         assert!(should_skip_copyprop_for_preserved_name("uVar0", &preserved));
         assert!(!should_skip_copyprop_for_preserved_name(
             "uVar1", &preserved

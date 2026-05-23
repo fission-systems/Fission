@@ -676,6 +676,10 @@ impl RuntimeSleighFrontend {
         }
 
         let mut decoded = BTreeMap::<u64, Vec<PcodeOp>>::new();
+        let mut decoded_contexts = BTreeMap::<u64, PackedContextOverride>::new();
+        let mut instruction_lengths = BTreeMap::<u64, u64>::new();
+        let mut template_sources = BTreeMap::<u64, String>::new();
+        let mut decode_counts = HashMap::<u64, usize>::new();
         let mut inferred_indirect_edges = BTreeMap::<u64, Vec<u64>>::new();
         let mut template_source_counts = BTreeMap::<String, usize>::new();
         let base_context_override = initial_context_override;
@@ -687,17 +691,6 @@ impl RuntimeSleighFrontend {
         let mut stop_reason = DecodeStopReason::InputExhausted;
 
         while let Some(current) = queue.pop_front() {
-            if decoded.contains_key(&current) {
-                continue;
-            }
-            if decoded.len() >= contract.instruction_limit {
-                stop_reason = DecodeStopReason::InstructionLimit;
-                break;
-            }
-            let Some(offset) = internal_byte_offset(entry_address, bytes.len(), current) else {
-                continue;
-            };
-            let remaining = &bytes[offset..];
             let context_override = match (
                 base_context_override,
                 context_overrides.get(&current).copied(),
@@ -707,14 +700,33 @@ impl RuntimeSleighFrontend {
                 (None, Some(pending)) => Some(pending),
                 (None, None) => None,
             };
+
+            let current_override_val = context_override.unwrap_or_default();
+            if decoded.contains_key(&current) {
+                if decoded_contexts.get(&current).copied().unwrap_or_default() == current_override_val {
+                    continue;
+                }
+            }
+
+            let count = decode_counts.entry(current).or_insert(0);
+            if *count >= 16 {
+                continue;
+            }
+            *count += 1;
+
+            if !decoded.contains_key(&current) && decoded.len() >= contract.instruction_limit {
+                stop_reason = DecodeStopReason::InstructionLimit;
+                break;
+            }
+
+            let Some(offset) = internal_byte_offset(entry_address, bytes.len(), current) else {
+                continue;
+            };
+            let remaining = &bytes[offset..];
+
             let (mut ins_ops, decoded_len, details) = self
                 .decode_and_lift_with_context_override(remaining, current, context_override)
                 .map_err(|err| anyhow!("decode failed at 0x{:x}: {:#}", current, err))?;
-            if let Some(source) = details.template_source {
-                *template_source_counts
-                    .entry(template_source_evidence_key(source).to_string())
-                    .or_insert(0) += 1;
-            }
 
             if decoded_len == 0 {
                 bail!("decoder returned zero length at 0x{:x}", current);
@@ -728,6 +740,21 @@ impl RuntimeSleighFrontend {
                     current
                 );
             }
+
+            // Remove old template source from counts if re-decoding
+            if let Some(old_source) = template_sources.remove(&current) {
+                if let Some(c) = template_source_counts.get_mut(&old_source) {
+                    *c = c.saturating_sub(1);
+                }
+            }
+            if let Some(source) = details.template_source {
+                let src_key = template_source_evidence_key(source).to_string();
+                *template_source_counts.entry(src_key.clone()).or_insert(0) += 1;
+                template_sources.insert(current, src_key);
+            }
+
+            decoded_contexts.insert(current, current_override_val);
+            instruction_lengths.insert(current, decoded_len);
 
             let terminal = ins_ops
                 .last()
@@ -747,7 +774,13 @@ impl RuntimeSleighFrontend {
 
             for (target_addr, word_index, mask, value) in &details.pending_context_commits {
                 let entry = context_overrides.entry(*target_addr).or_default();
+                let old_entry = *entry;
                 entry.merge_commit_word(*word_index, *mask, *value)?;
+                if *entry != old_entry {
+                    if !queue.contains(target_addr) {
+                        queue.push_back(*target_addr);
+                    }
+                }
             }
 
             match last_opcode {
@@ -812,7 +845,85 @@ impl RuntimeSleighFrontend {
                 _ => {}
             }
 
-            decoded.insert(current, std::mem::take(&mut ins_ops));
+            decoded.insert(current, ins_ops);
+        }
+
+        let mut reachable = BTreeSet::new();
+        let mut reach_queue = VecDeque::from([entry_address]);
+        while let Some(addr) = reach_queue.pop_front() {
+            if reachable.contains(&addr) {
+                continue;
+            }
+            if let Some(ins_ops) = decoded.get(&addr) {
+                reachable.insert(addr);
+                let terminal = ins_ops
+                    .last()
+                    .is_some_and(|op| contract.is_terminal_control_flow(op.opcode));
+                let last_opcode = ins_ops.last().map(|op| op.opcode);
+                let direct_target = ins_ops.last().and_then(direct_pcode_branch_target);
+                let decoded_len = *instruction_lengths.get(&addr).ok_or_else(|| {
+                    anyhow!("missing instruction length for 0x{:x}", addr)
+                })?;
+                let fallthrough = checked_instruction_fallthrough(addr, decoded_len)?;
+                let cbranch_exits_to_fallthrough =
+                    instruction_cbranch_exits_to_fallthrough(ins_ops, fallthrough);
+
+                match last_opcode {
+                    Some(PcodeOpcode::Branch) => {
+                        if let Some(target) = direct_target {
+                            if internal_byte_offset(entry_address, bytes.len(), target).is_some() {
+                                reach_queue.push_back(target);
+                            }
+                        }
+                    }
+                    Some(PcodeOpcode::CBranch) => {
+                        if let Some(target) = direct_target {
+                            if internal_byte_offset(entry_address, bytes.len(), target).is_some() {
+                                reach_queue.push_back(target);
+                            }
+                        }
+                        if internal_byte_offset(entry_address, bytes.len(), fallthrough).is_some() {
+                            reach_queue.push_back(fallthrough);
+                        }
+                    }
+                    Some(PcodeOpcode::Return) => {
+                        if cbranch_exits_to_fallthrough {
+                            if internal_byte_offset(entry_address, bytes.len(), fallthrough).is_some() {
+                                reach_queue.push_back(fallthrough);
+                            }
+                        }
+                    }
+                    Some(PcodeOpcode::BranchInd) => {
+                        if contract.stop_at_indirect_branch {
+                            if cbranch_exits_to_fallthrough {
+                                if internal_byte_offset(entry_address, bytes.len(), fallthrough).is_some() {
+                                    reach_queue.push_back(fallthrough);
+                                }
+                            }
+                        } else if let Some(targets) = inferred_indirect_edges.get(&addr) {
+                            for &target in targets {
+                                if internal_byte_offset(entry_address, bytes.len(), target).is_some() {
+                                    reach_queue.push_back(target);
+                                }
+                            }
+                        }
+                    }
+                    _ if !terminal => {
+                        if internal_byte_offset(entry_address, bytes.len(), fallthrough).is_some() {
+                            reach_queue.push_back(fallthrough);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        decoded.retain(|addr, _| reachable.contains(addr));
+        inferred_indirect_edges.retain(|addr, _| reachable.contains(addr));
+        template_sources.retain(|addr, _| reachable.contains(addr));
+        template_source_counts.clear();
+        for src in template_sources.values() {
+            *template_source_counts.entry(src.clone()).or_insert(0) += 1;
         }
 
         let instruction_count = decoded.len();
@@ -832,8 +943,15 @@ impl RuntimeSleighFrontend {
             bail!("failed to decode any instruction at 0x{:x}", entry_address);
         }
 
+        let mut indirect_targets: BTreeSet<u64> = inferred_indirect_edges
+            .values()
+            .flatten()
+            .copied()
+            .collect();
+        indirect_targets.extend(memory_context.jump_table_targets.iter().copied());
+
         let mut function = PcodeFunction {
-            blocks: build_cfg_blocks(entry_address, ops),
+            blocks: build_cfg_blocks(entry_address, ops, &indirect_targets),
         };
         attach_inferred_indirect_edges(&mut function, &inferred_indirect_edges);
         function

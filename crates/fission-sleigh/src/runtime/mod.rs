@@ -9,7 +9,7 @@ pub mod native;
 mod registry;
 mod spine;
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fmt;
 
 use anyhow::{anyhow, bail, Result};
@@ -137,6 +137,7 @@ pub struct DecodedPcodeFunction {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct DecodeMemoryContext {
     pub relative_address_bases: Vec<u64>,
+    pub jump_table_targets: Vec<u64>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -308,7 +309,7 @@ mod tests {
             ops.push(op);
         }
 
-        let blocks = build_cfg_blocks(0x1000, ops);
+        let blocks = build_cfg_blocks(0x1000, ops, &BTreeSet::new());
         assert!(
             blocks.iter().any(|block| block.start_address == 0x1020),
             "{blocks:?}"
@@ -355,60 +356,11 @@ mod tests {
 
         assert_eq!(manifest_processors.len(), 38);
         assert_eq!(registry_processors, manifest_processors);
-        assert_eq!(
-            registry
-                .frontends()
-                .iter()
-                .filter(|frontend| frontend.status == RuntimeFrontendStatus::ExecutableCandidate)
-                .map(|frontend| frontend.processor.as_str())
-                .collect::<Vec<_>>(),
-            vec![
-                "AARCH64",
-                "AARCH64",
-                "AARCH64",
-                "ARM",
-                "ARM",
-                "ARM",
-                "ARM",
-                "ARM",
-                "ARM",
-                "ARM",
-                "ARM",
-                "ARM",
-                "ARM",
-                "ARM",
-                "ARM",
-                "ARM",
-                "ARM",
-                "ARM",
-                "ARM",
-                "Loongarch",
-                "Loongarch",
-                "Loongarch",
-                "Loongarch",
-                "MIPS",
-                "MIPS",
-                "MIPS",
-                "MIPS",
-                "MIPS",
-                "MIPS",
-                "PowerPC",
-                "PowerPC",
-                "PowerPC",
-                "PowerPC",
-                "PowerPC",
-                "PowerPC",
-                "PowerPC",
-                "PowerPC",
-                "RISCV",
-                "RISCV",
-                "Sparc",
-                "eBPF",
-                "eBPF",
-                "x86",
-                "x86",
-            ]
-        );
+        // All 146 variants are promoted to ExecutableCandidate.
+        assert!(registry
+            .frontends()
+            .iter()
+            .all(|frontend| frontend.status == RuntimeFrontendStatus::ExecutableCandidate));
     }
 
     #[test]
@@ -970,7 +922,7 @@ mod tests {
             ),
         ];
 
-        let blocks = build_cfg_blocks(0x100, ops);
+        let blocks = build_cfg_blocks(0x100, ops, &BTreeSet::new());
         assert_eq!(blocks.len(), 3);
         assert_eq!(blocks[0].start_address, 0x100);
         assert_eq!(blocks[1].start_address, 0x108);
@@ -1012,7 +964,7 @@ mod tests {
             op(4, 0x104, PcodeOpcode::Return, None, vec![]),
         ];
 
-        let blocks = build_cfg_blocks(0x100, ops);
+        let blocks = build_cfg_blocks(0x100, ops, &BTreeSet::new());
         assert_eq!(blocks.len(), 3, "{blocks:?}");
         assert_eq!(blocks[0].ops.last().unwrap().opcode, PcodeOpcode::CBranch);
         assert_eq!(blocks[0].successors, vec![2, 1]);
@@ -1052,7 +1004,7 @@ mod tests {
             ),
         ];
 
-        let blocks = build_cfg_blocks(0x200, ops);
+        let blocks = build_cfg_blocks(0x200, ops, &BTreeSet::new());
         assert_eq!(blocks.len(), 3, "{blocks:?}");
         assert_eq!(blocks[0].successors, vec![2]);
         assert_eq!(blocks[2].ops[0].seq_num, 3);
@@ -1085,7 +1037,7 @@ mod tests {
             op(3, 0x110, PcodeOpcode::Return, None, vec![]),
         ];
 
-        let blocks = build_cfg_blocks(0x100, ops);
+        let blocks = build_cfg_blocks(0x100, ops, &BTreeSet::new());
         assert_eq!(blocks.len(), 3);
         assert_eq!(blocks[0].start_address, 0x100);
         assert_eq!(blocks[1].start_address, 0x108);

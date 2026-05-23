@@ -41,11 +41,11 @@ use std::collections::{HashMap, HashSet};
 pub(crate) fn copy_propagation_pass(func: &mut HirFunction) -> bool {
     let preserved_temps = preserved_materialization_names(&func.locals);
     // Step 1: collect names of pure temporaries.
-    let temp_names: HashSet<String> = func
+    let temp_names: HashSet<&str> = func
         .locals
         .iter()
         .filter(|b| b.is_temp_like())
-        .map(|b| b.name.clone())
+        .map(|b| b.name.as_str())
         .collect();
     if temp_names.is_empty() {
         return false;
@@ -65,7 +65,7 @@ pub(crate) fn copy_propagation_pass(func: &mut HirFunction) -> bool {
     // harms readability and can destabilize row-fidelity on control-heavy code.
     let mut predicate_vars = HashSet::new();
     collect_predicate_vars_in_stmts(&func.body, &mut predicate_vars);
-    copy_map.retain(|name, _| !predicate_vars.contains(name));
+    copy_map.retain(|name, _| !predicate_vars.contains(name.as_str()));
     let preserved_skip_count = copy_map
         .iter()
         .filter(|(name, source)| {
@@ -205,18 +205,22 @@ mod tests {
 
 /// Count definition sites (assignments to LHS Var(name)) for each name in
 /// `temp_names` across the entire body.
-fn count_definitions_in_stmts(
-    stmts: &[HirStmt],
-    temp_names: &HashSet<String>,
-) -> HashMap<String, usize> {
-    let mut counts: HashMap<String, usize> = HashMap::new();
+fn count_definitions_in_stmts<'a>(
+    stmts: &'a [HirStmt],
+    temp_names: &HashSet<&str>,
+) -> HashMap<&'a str, usize> {
+    let mut counts: HashMap<&'a str, usize> = HashMap::new();
     for stmt in stmts {
         count_defs_stmt(stmt, temp_names, &mut counts);
     }
     counts
 }
 
-fn count_defs_stmt(stmt: &HirStmt, temps: &HashSet<String>, counts: &mut HashMap<String, usize>) {
+fn count_defs_stmt<'a>(
+    stmt: &'a HirStmt,
+    temps: &HashSet<&str>,
+    counts: &mut HashMap<&'a str, usize>,
+) {
     match stmt {
         HirStmt::Assign {
             lhs: HirLValue::Var(name),
@@ -224,7 +228,7 @@ fn count_defs_stmt(stmt: &HirStmt, temps: &HashSet<String>, counts: &mut HashMap
         } => {
             // Count definitions for ALL variables (not just temps) so we can
             // validate the source variable y.
-            *counts.entry(name.clone()).or_default() += 1;
+            *counts.entry(name.as_str()).or_default() += 1;
         }
         HirStmt::Block(stmts) => {
             for s in stmts {
@@ -277,10 +281,10 @@ fn count_defs_stmt(stmt: &HirStmt, temps: &HashSet<String>, counts: &mut HashMap
 
 /// Collect copy assignments `x = Var(y)` where x is a pure temp with exactly
 /// one definition.
-fn collect_copies(
-    stmts: &[HirStmt],
-    temp_names: &HashSet<String>,
-    def_count: &HashMap<String, usize>,
+fn collect_copies<'a>(
+    stmts: &'a [HirStmt],
+    temp_names: &HashSet<&str>,
+    def_count: &HashMap<&'a str, usize>,
     copy_map: &mut HashMap<String, String>,
 ) {
     for stmt in stmts {
@@ -288,10 +292,10 @@ fn collect_copies(
     }
 }
 
-fn collect_copies_stmt(
-    stmt: &HirStmt,
-    temp_names: &HashSet<String>,
-    def_count: &HashMap<String, usize>,
+fn collect_copies_stmt<'a>(
+    stmt: &'a HirStmt,
+    temp_names: &HashSet<&str>,
+    def_count: &HashMap<&'a str, usize>,
     copy_map: &mut HashMap<String, String>,
 ) {
     match stmt {
@@ -337,13 +341,13 @@ fn collect_copies_stmt(
     }
 }
 
-fn collect_predicate_vars_in_stmts(stmts: &[HirStmt], out: &mut HashSet<String>) {
+fn collect_predicate_vars_in_stmts<'a>(stmts: &'a [HirStmt], out: &mut HashSet<&'a str>) {
     for stmt in stmts {
         collect_predicate_vars_in_stmt(stmt, out);
     }
 }
 
-fn collect_predicate_vars_in_stmt(stmt: &HirStmt, out: &mut HashSet<String>) {
+fn collect_predicate_vars_in_stmt<'a>(stmt: &'a HirStmt, out: &mut HashSet<&'a str>) {
     match stmt {
         HirStmt::If {
             cond,
@@ -402,10 +406,10 @@ fn collect_predicate_vars_in_stmt(stmt: &HirStmt, out: &mut HashSet<String>) {
     }
 }
 
-fn collect_vars_in_expr(expr: &HirExpr, out: &mut HashSet<String>) {
+fn collect_vars_in_expr<'a>(expr: &'a HirExpr, out: &mut HashSet<&'a str>) {
     match expr {
         HirExpr::Var(name) | HirExpr::AddressOfGlobal(name) => {
-            out.insert(name.clone());
+            out.insert(name.as_str());
         }
         HirExpr::Const(_, _) => {}
         HirExpr::Cast { expr, .. }

@@ -19,7 +19,7 @@ fn build_cfg_blocks(
     entry_address: u64,
     ops: Vec<fission_decompiler::PcodeOp>,
 ) -> Vec<fission_decompiler::PcodeBasicBlock> {
-    fission_sleigh::runtime::build_cfg_blocks(entry_address, ops)
+    fission_sleigh::runtime::build_cfg_blocks(entry_address, ops, &std::collections::BTreeSet::new())
 }
 
 fn maybe_record_debug_decomp(

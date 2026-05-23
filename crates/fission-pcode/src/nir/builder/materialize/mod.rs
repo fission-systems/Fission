@@ -2,6 +2,7 @@ use super::*;
 
 mod contracts;
 mod cross_block;
+mod incremental;
 mod loop_carried;
 mod no_consumer;
 mod same_block;
@@ -3260,3 +3261,8 @@ impl<'a> PreviewBuilder<'a> {
 #[cfg(test)]
 #[path = "mod_tests.rs"]
 mod materialize_tests;
+
+pub(super) fn test_refine_partitions(accesses: &[(i64, u32)]) -> Vec<(i64, u32)> {
+    self::incremental::refine_partitions(accesses)
+}
+

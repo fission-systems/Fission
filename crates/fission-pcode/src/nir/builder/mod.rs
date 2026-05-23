@@ -160,6 +160,8 @@ impl<'a> PreviewBuilder<'a> {
             return Err(MlilPreviewError::UnsupportedPattern("empty pcode"));
         }
 
+        self.run_incremental_heritage();
+
         let mut body = Vec::new();
         if self.pcode.blocks.len() == 1 {
             if preview_builder_diag_enabled() {
@@ -601,3 +603,8 @@ fn is_compiler_runtime_param_suppressed_name(name: &str) -> bool {
     let lower = name.to_ascii_lowercase();
     lower.contains("crtstartup") || lower.contains("__dyn_tls_")
 }
+
+pub(super) fn test_refine_partitions(accesses: &[(i64, u32)]) -> Vec<(i64, u32)> {
+    self::materialize::test_refine_partitions(accesses)
+}
+

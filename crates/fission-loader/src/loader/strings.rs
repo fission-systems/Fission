@@ -34,36 +34,7 @@ fn is_printable(b: u8) -> bool {
     matches!(b, 0x09 | 0x0a | 0x0d) || (b >= 0x20 && b <= 0x7e)
 }
 
-/// Check if the slice starting at `offset` looks like a null-terminated ASCII string.
-/// Returns the length (excluding null) if valid, otherwise None.
-fn looks_like_ascii_string(data: &[u8], offset: usize, section_size: usize) -> Option<usize> {
-    if offset >= section_size {
-        return None;
-    }
-    let mut len = 0usize;
-    let mut printable_count = 0usize;
-    while offset + len < section_size {
-        let b = data[offset + len];
-        if b == 0 {
-            break;
-        }
-        if is_printable(b) {
-            printable_count += 1;
-        }
-        len += 1;
-        if len >= MAX_STRING_LEN {
-            return None;
-        }
-    }
-    if len < MIN_STRING_LEN {
-        return None;
-    }
-    let ratio = printable_count as f64 / len as f64;
-    if ratio < MIN_PRINTABLE_RATIO {
-        return None;
-    }
-    Some(len)
-}
+
 
 /// Scan a byte slice for null-terminated ASCII strings.
 ///
@@ -76,24 +47,50 @@ fn looks_like_ascii_string(data: &[u8], offset: usize, section_size: usize) -> O
 pub fn scan_ascii_strings(data: &[u8], base_addr: u64) -> HashMap<u64, String> {
     let mut result = HashMap::new();
     let section_size = data.len();
-    let mut offset = 0usize;
 
-    while offset < section_size {
-        if let Some(len) = looks_like_ascii_string(data, offset, section_size) {
-            let va = base_addr + offset as u64;
-            let bytes = &data[offset..offset + len];
-            match std::str::from_utf8(bytes) {
-                Ok(s) => {
-                    result.insert(va, s.to_string());
+    let mut null_indices = Vec::new();
+    for (i, &b) in data.iter().enumerate() {
+        if b == 0 {
+            null_indices.push(i);
+        }
+    }
+    null_indices.push(section_size);
+
+    let mut start = 0usize;
+    for &end in &null_indices {
+        if end >= MIN_STRING_LEN + start {
+            let limit = start.max(end.saturating_sub(MAX_STRING_LEN - 1));
+            let mut best_offset = None;
+            let mut printable_count = 0usize;
+
+            for i in (limit..end).rev() {
+                if is_printable(data[i]) {
+                    printable_count += 1;
                 }
-                Err(_) => {
-                    result.insert(va, String::from_utf8_lossy(bytes).into_owned());
+                let len = end - i;
+                if len >= MIN_STRING_LEN {
+                    let ratio = printable_count as f64 / len as f64;
+                    if ratio >= MIN_PRINTABLE_RATIO {
+                        best_offset = Some(i);
+                    }
                 }
             }
-            offset += len + 1;
-        } else {
-            offset += 1;
+
+            if let Some(offset) = best_offset {
+                let len = end - offset;
+                let va = base_addr + offset as u64;
+                let bytes = &data[offset..offset + len];
+                match std::str::from_utf8(bytes) {
+                    Ok(s) => {
+                        result.insert(va, s.to_string());
+                    }
+                    Err(_) => {
+                        result.insert(va, String::from_utf8_lossy(bytes).into_owned());
+                    }
+                }
+            }
         }
+        start = end + 1;
     }
 
     result

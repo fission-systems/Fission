@@ -68,6 +68,8 @@ fn loop_carried_register_update_reuses_prior_binding_and_param() {
             0,
             vec![
                 op(0, PcodeOpcode::Copy, Some(rax.clone()), vec![constant(0)]),
+                // Dummy read of param_1 register rcx to establish param arity at entry
+                op(99, PcodeOpcode::Copy, Some(varnode(0x99)), vec![rcx.clone()]),
                 op(1, PcodeOpcode::Branch, None, vec![constant(0x1010)]),
             ],
         ),
@@ -233,7 +235,11 @@ fn win64_ecx_zext_then_shr_self_loop_uses_param_1() {
         block_at(
             0x1000,
             0,
-            vec![op(0, PcodeOpcode::Branch, None, vec![constant(0x1010)])],
+            vec![
+                // Dummy read of param_1 register ecx to establish param arity at entry
+                op(99, PcodeOpcode::Copy, Some(varnode(0x99)), vec![ecx.clone()]),
+                op(0, PcodeOpcode::Branch, None, vec![constant(0x1010)]),
+            ],
         ),
         block_at(
             0x1010,
@@ -287,7 +293,11 @@ fn win64_ecx_intzext_and_shr_in_loop_body_uses_param_1() {
         block_at(
             0x1000,
             0,
-            vec![op(0, PcodeOpcode::Branch, None, vec![constant(0x1010)])],
+            vec![
+                // Dummy read of param_1 register ecx to establish param arity at entry
+                op(99, PcodeOpcode::Copy, Some(varnode(0x99)), vec![ecx.clone()]),
+                op(0, PcodeOpcode::Branch, None, vec![constant(0x1010)]),
+            ],
         ),
         block_at(
             0x1010,

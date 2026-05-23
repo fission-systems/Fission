@@ -22,11 +22,13 @@ pub(crate) fn finish_rust_sleigh_render(
     name: &str,
     config: &RustSleighDecompileConfig,
     pcode: &PcodeFunction,
+    userops: std::collections::HashMap<u32, String>,
     evidence: &mut RustSleighPipelineEvidence,
 ) -> Result<RustSleighDecompileResult, String> {
     let mut options = NirRenderOptions::from_loaded_binary(binary);
     options.pe_x64_only = config.pe_x64_only;
     options.conservative_irreducible_fallback = config.conservative_irreducible_fallback;
+    options.userops = userops;
 
     let selection = select_nir_output_from_prebuilt_pcode(
         pcode,

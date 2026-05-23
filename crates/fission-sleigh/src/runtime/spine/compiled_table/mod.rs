@@ -52,6 +52,16 @@ mod tests;
 
 use crate::runtime::native::NativeBackend;
 use std::sync::Arc;
+use std::cell::RefCell;
+use std::collections::HashMap;
+
+thread_local! {
+    static BIND_CACHE: RefCell<HashMap<(u64, u64, u64), Result<RuntimeConstructState, String>>> = RefCell::new(HashMap::new());
+}
+
+pub(crate) fn clear_bind_cache() {
+    BIND_CACHE.with(|cache| cache.borrow_mut().clear());
+}
 
 pub(crate) fn decode_and_lift_with_details(
     compiled: &CompiledFrontend,
@@ -69,6 +79,7 @@ pub(crate) fn decode_and_lift_with_context_override(
     address: u64,
     context_override: Option<PackedContextOverride>,
 ) -> Result<(Vec<PcodeOp>, u64, RuntimeExecutionDetails)> {
+    clear_bind_cache();
     let mut ctx = CompiledInstructionContext::parse(bytes, address)?;
     ctx.context_register = compiled.default_context;
     ctx.context_known_mask = compiled.default_context_known_mask;
@@ -180,6 +191,7 @@ fn decode_instruction_inner(
     address: u64,
     ctx: CompiledInstructionContext<'_>,
 ) -> Result<DecodedInstruction> {
+    clear_bind_cache();
     let strategy = RuntimeDecodeStrategy::for_table(compiled, native, "instruction", &ctx);
     let candidates = candidate_selections(compiled, &strategy, &ctx, address)?;
     let mut first_error: Option<anyhow::Error> = None;
@@ -327,35 +339,47 @@ pub(super) fn try_bind_runtime_state_at(
     context_register: u64,
     context_known_mask: u64,
 ) -> Result<RuntimeConstructState> {
-    let offset = checked_memory_window_offset(memory_base, target_address)?;
-    let slice = memory_window.get(offset..).ok_or_else(|| {
-        anyhow!(
-            "bind target 0x{target_address:x} past memory window (base=0x{memory_base:x}, len={})",
-            memory_window.len()
-        )
-    })?;
-    let mut ctx = CompiledInstructionContext::parse(slice, target_address)?;
-    ctx.context_register = context_register;
-    ctx.context_known_mask = context_known_mask;
-    let strategy = RuntimeDecodeStrategy::for_table(compiled, native, "instruction", &ctx);
-    let candidates = candidate_selections(compiled, &strategy, &ctx, target_address)?;
-    let mut first_err: Option<anyhow::Error> = None;
-    for selection in candidates {
-        if !selection.constructor.runtime_ready {
-            continue;
-        }
+    let key = (target_address, context_register, context_known_mask);
+    if let Some(cached) = BIND_CACHE.with(|cache| cache.borrow().get(&key).cloned()) {
+        return cached.map_err(|err_str| anyhow!("{}", err_str));
+    }
+
+    let res = (|| -> Result<RuntimeConstructState> {
+        let offset = checked_memory_window_offset(memory_base, target_address)?;
+        let slice = memory_window.get(offset..).ok_or_else(|| {
+            anyhow!(
+                "bind target 0x{target_address:x} past memory window (base=0x{memory_base:x}, len={})",
+                memory_window.len()
+            )
+        })?;
+        let mut ctx = CompiledInstructionContext::parse(slice, target_address)?;
+        ctx.context_register = context_register;
+        ctx.context_known_mask = context_known_mask;
         let strategy = RuntimeDecodeStrategy::for_table(compiled, native, "instruction", &ctx);
-        match bind_instruction(compiled, strategy, &ctx, selection) {
-            Ok(state) => return Ok(state),
-            Err(err) => {
-                if first_err.is_none() {
-                    first_err = Some(err);
+        let candidates = candidate_selections(compiled, &strategy, &ctx, target_address)?;
+        let mut first_err: Option<anyhow::Error> = None;
+        for selection in candidates {
+            if !selection.constructor.runtime_ready {
+                continue;
+            }
+            let strategy = RuntimeDecodeStrategy::for_table(compiled, native, "instruction", &ctx);
+            match bind_instruction(compiled, strategy, &ctx, selection) {
+                Ok(state) => return Ok(state),
+                Err(err) => {
+                    if first_err.is_none() {
+                        first_err = Some(err);
+                    }
                 }
             }
         }
-    }
-    Err(first_err
-        .unwrap_or_else(|| anyhow!("decode bind failed at target_address=0x{target_address:x}")))
+        Err(first_err
+            .unwrap_or_else(|| anyhow!("decode bind failed at target_address=0x{target_address:x}")))
+    })();
+
+    BIND_CACHE.with(|cache| {
+        cache.borrow_mut().insert(key, res.as_ref().map(|s| s.clone()).map_err(|e| e.to_string()));
+    });
+    res
 }
 
 fn checked_memory_window_offset(memory_base: u64, target_address: u64) -> Result<usize> {

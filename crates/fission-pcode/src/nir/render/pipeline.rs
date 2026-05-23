@@ -1076,6 +1076,7 @@ mod global_decl_tests {
             global_sizes: HashMap::new(),
             relocation_names: HashMap::new(),
             calling_convention: CallingConvention::AArch64,
+            ..Default::default()
         }
     }
 

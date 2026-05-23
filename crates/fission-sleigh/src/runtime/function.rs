@@ -126,7 +126,11 @@ fn push_successor(successors: &mut Vec<u32>, succ: u32) {
     }
 }
 
-pub fn build_cfg_blocks(entry_address: u64, ops: Vec<PcodeOp>) -> Vec<PcodeBasicBlock> {
+pub fn build_cfg_blocks(
+    entry_address: u64,
+    ops: Vec<PcodeOp>,
+    indirect_targets: &BTreeSet<u64>,
+) -> Vec<PcodeBasicBlock> {
     if ops.is_empty() {
         return Vec::new();
     }
@@ -145,6 +149,12 @@ pub fn build_cfg_blocks(entry_address: u64, ops: Vec<PcodeOp>) -> Vec<PcodeBasic
 
     let mut block_starts: BTreeSet<usize> = BTreeSet::new();
     block_starts.insert(0);
+
+    for target in indirect_targets {
+        if let Some(&target_idx) = addr_to_op_idx.get(target) {
+            block_starts.insert(target_idx);
+        }
+    }
 
     for (idx, op) in ops.iter().enumerate() {
         if is_cfg_split_opcode(op.opcode) {

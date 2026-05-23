@@ -2,7 +2,9 @@ use super::super::*;
 use super::util::*;
 
 pub(crate) fn canonicalize_flag_intrinsics(expr: &HirExpr) -> Option<HirExpr> {
-    canonicalize_flag_intrinsic_call(expr).or_else(|| canonicalize_sborrow_compare(expr))
+    canonicalize_flag_intrinsic_call(expr)
+        .or_else(|| canonicalize_sborrow_compare(expr))
+        .or_else(|| canonicalize_arm_compound_flag_condition(expr))
 }
 
 pub(crate) fn normalize_boolean_logic(expr: &HirExpr) -> Option<HirExpr> {
@@ -403,6 +405,103 @@ pub(crate) fn canonicalize_condition_expr(expr: &HirExpr) -> Option<HirExpr> {
                 } else {
                     Some((**lhs).clone())
                 }
+            } else {
+                None
+            }
+        }
+        _ => None,
+    }
+}
+
+pub(crate) fn canonicalize_arm_compound_flag_condition(expr: &HirExpr) -> Option<HirExpr> {
+    let HirExpr::Binary {
+        op: HirBinaryOp::LogicalAnd,
+        lhs,
+        rhs,
+        ..
+    } = expr
+    else {
+        return None;
+    };
+
+    // Check if one side is a Ne comparison and the other is a SLe comparison
+    if let Some((ne_a, ne_b)) = match_ne_comparison(lhs) {
+        if let Some((sle_a, sle_b)) = match_sle_comparison(rhs) {
+            if (ne_a == sle_a && ne_b == sle_b) || (ne_a == sle_b && ne_b == sle_a) {
+                return Some(HirExpr::Binary {
+                    op: HirBinaryOp::SLt,
+                    lhs: Box::new(sle_a.clone()),
+                    rhs: Box::new(sle_b.clone()),
+                    ty: NirType::Bool,
+                });
+            }
+        }
+    }
+    if let Some((ne_a, ne_b)) = match_ne_comparison(rhs) {
+        if let Some((sle_a, sle_b)) = match_sle_comparison(lhs) {
+            if (ne_a == sle_a && ne_b == sle_b) || (ne_a == sle_b && ne_b == sle_a) {
+                return Some(HirExpr::Binary {
+                    op: HirBinaryOp::SLt,
+                    lhs: Box::new(sle_a.clone()),
+                    rhs: Box::new(sle_b.clone()),
+                    ty: NirType::Bool,
+                });
+            }
+        }
+    }
+
+    None
+}
+
+fn match_ne_comparison<'a>(expr: &'a HirExpr) -> Option<(&'a HirExpr, &'a HirExpr)> {
+    match expr {
+        HirExpr::Binary {
+            op: HirBinaryOp::Ne,
+            lhs,
+            rhs,
+            ..
+        } => {
+            if is_zero_const(rhs.as_ref()) {
+                if let HirExpr::Binary {
+                    op: HirBinaryOp::Sub,
+                    lhs: inner_lhs,
+                    rhs: inner_rhs,
+                    ..
+                } = lhs.as_ref() {
+                    return Some((inner_lhs.as_ref(), inner_rhs.as_ref()));
+                }
+            }
+            Some((lhs.as_ref(), rhs.as_ref()))
+        }
+        _ => None,
+    }
+}
+
+fn match_sle_comparison<'a>(expr: &'a HirExpr) -> Option<(&'a HirExpr, &'a HirExpr)> {
+    match expr {
+        HirExpr::Binary {
+            op: HirBinaryOp::SLe,
+            lhs,
+            rhs,
+            ..
+        } => Some((lhs.as_ref(), rhs.as_ref())),
+        HirExpr::Binary {
+            op: op @ (HirBinaryOp::Eq | HirBinaryOp::Ne),
+            lhs,
+            rhs,
+            ..
+        } => {
+            let (a, b, sign_test) = if let Some((a, b)) = match_sborrow_call(lhs) {
+                (a, b, match_signed_diff_sign_test(rhs, a, b)?)
+            } else if let Some((a, b)) = match_sborrow_call(rhs) {
+                (a, b, match_signed_diff_sign_test(lhs, a, b)?)
+            } else {
+                return None;
+            };
+            if *op == HirBinaryOp::Eq && sign_test == SignedDiffSignTest::Positive {
+                Some((a, b))
+            } else if *op == HirBinaryOp::Eq && sign_test == SignedDiffSignTest::Negative {
+                Some((b, a))
             } else {
                 None
             }

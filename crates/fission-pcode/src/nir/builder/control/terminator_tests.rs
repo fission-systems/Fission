@@ -97,7 +97,7 @@ fn selector_upper_bound_keeps_false_arm_hi_equality_case() {
     );
 
     assert_eq!(
-        extract_selector_upper_bound_from_cond(&cond, &selector, false),
+        extract_selector_upper_bound_from_cond(&cond, &|expr| super::strip_casts(expr) == selector, false),
         Some(3)
     );
 }
@@ -225,6 +225,7 @@ fn x64_cbranch_condition_recovers_cmp_jnz_from_fresh_zero_flag() {
         global_sizes: Default::default(),
         relocation_names: Default::default(),
         calling_convention: CallingConvention::WindowsX64,
+        ..Default::default()
     };
     let mut builder = PreviewBuilder::new(&pcode, &options, None);
     let (_, cond) = builder
@@ -315,6 +316,7 @@ fn return_recovery_keeps_return_register_before_side_effect_store() {
         global_sizes: Default::default(),
         relocation_names: Default::default(),
         calling_convention: CallingConvention::AArch64,
+        ..Default::default()
     };
     let code = render_mlil_preview(&pcode, "store_then_return", 0x1000, &options)
         .expect("preview render");
@@ -392,6 +394,7 @@ fn x64_return_recovery_uses_eax_source_for_zero_extended_rax() {
         global_sizes: Default::default(),
         relocation_names: Default::default(),
         calling_convention: CallingConvention::WindowsX64,
+        ..Default::default()
     };
     let code = render_mlil_preview(&pcode, "narrow_return", 0x1400_1000, &options)
         .expect("preview render");
@@ -472,6 +475,7 @@ fn arm32_return_target_register_uses_r0_value_not_lr_target() {
         global_sizes: Default::default(),
         relocation_names: Default::default(),
         calling_convention: CallingConvention::Arm32,
+        ..Default::default()
     };
     let code =
         render_mlil_preview(&pcode, "return_r0", 0x1000, &options).expect("preview render");
@@ -554,6 +558,7 @@ fn arm32_pair_return_options(is_big_endian: bool) -> MlilPreviewOptions {
         global_sizes: Default::default(),
         relocation_names: Default::default(),
         calling_convention: CallingConvention::Arm32,
+        ..Default::default()
     }
 }
 

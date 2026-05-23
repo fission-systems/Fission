@@ -31,7 +31,7 @@ impl<'a> PreviewBuilder<'a> {
         };
     }
 
-    fn classify_stack_slot_origin(&self, base: StackBase, offset: i64) -> NirBindingOrigin {
+    pub(in crate::nir::builder) fn classify_stack_slot_origin(&self, base: StackBase, offset: i64) -> NirBindingOrigin {
         self.abi_state().classify_stack_slot_origin(base, offset)
     }
 
@@ -55,9 +55,13 @@ impl<'a> PreviewBuilder<'a> {
             );
         }
         let abi = self.abi_state();
+        let entry_arity = self.entry_arity;
         if is_register_varnode(vn)
             && let Some(param_index) = self.register_param_aliases.get(&vn.offset).copied()
         {
+            if param_index >= entry_arity {
+                return None;
+            }
             let alias_name = abi.param_name(param_index);
             self.params
                 .entry(param_index)
@@ -74,6 +78,9 @@ impl<'a> PreviewBuilder<'a> {
         let Some(index) = abi.param_slot_for_varnode(vn) else {
             return None;
         };
+        if index >= entry_arity {
+            return None;
+        }
         let name = abi.param_name(index);
         self.params.entry(index).or_insert_with(|| NirBinding {
             name: name.clone(),
@@ -610,7 +617,7 @@ impl<'a> PreviewBuilder<'a> {
         Some((entry.name.clone(), entry.ty.clone()))
     }
 
-    fn unique_stack_slot_binding_name(&self, base_name: &str, id: StackSlotId) -> String {
+    pub(in crate::nir::builder) fn unique_stack_slot_binding_name(&self, base_name: &str, id: StackSlotId) -> String {
         if !self.binding_name_in_use(base_name) {
             return base_name.to_string();
         }
@@ -629,7 +636,7 @@ impl<'a> PreviewBuilder<'a> {
             || self.temps.contains_key(name)
     }
 
-    fn rsp_local_display_offset(&self, offset: i64) -> i64 {
+    pub(in crate::nir::builder) fn rsp_local_display_offset(&self, offset: i64) -> i64 {
         if offset >= 0 && self.stack_frame_size > offset {
             self.stack_frame_size - offset
         } else {

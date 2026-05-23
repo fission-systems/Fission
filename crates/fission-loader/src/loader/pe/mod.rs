@@ -204,18 +204,23 @@ impl PeLoader {
                 file_header.number_of_symbols,
                 image_base,
             ) {
+                // Pre-populate address mapping to avoid O(N^2) linear scans
+                let mut address_to_index = std::collections::HashMap::new();
+                for (idx, f) in functions_info.iter().enumerate() {
+                    address_to_index.insert(f.address, idx);
+                }
+
                 // Merge COFF symbols with existing functions, preferring COFF names over generated ones
                 for coff_func in coff_functions {
-                    if let Some(existing) = functions_info
-                        .iter_mut()
-                        .find(|f| f.address == coff_func.address)
-                    {
+                    if let Some(&index) = address_to_index.get(&coff_func.address) {
+                        let existing = &mut functions_info[index];
                         // Replace generated name with real COFF symbol name
                         if existing.name.starts_with("FUN_0x") || existing.name.starts_with("sub_")
                         {
                             existing.name = coff_func.name;
                         }
                     } else {
+                        address_to_index.insert(coff_func.address, functions_info.len());
                         functions_info.push(coff_func);
                     }
                 }
@@ -263,8 +268,28 @@ impl PeLoader {
                 if let Ok(pdata_functions) =
                     loader.parse_pdata(exception_dir_rva.0, exception_dir_rva.1, image_base)
                 {
+                    // Pre-populate address mapping to avoid O(N^2) linear scans
+                    let mut address_to_index = std::collections::HashMap::new();
+                    for (idx, f) in functions_info.iter().enumerate() {
+                        address_to_index.insert(f.address, idx);
+                    }
+
                     for pdata_func in pdata_functions {
-                        merge_pdata_function(&mut functions_info, pdata_func);
+                        if let Some(&index) = address_to_index.get(&pdata_func.address) {
+                            let existing = &mut functions_info[index];
+                            if existing.size == 0 {
+                                existing.size = pdata_func.size;
+                            }
+                            if existing.kind.is_none() {
+                                existing.kind = pdata_func.kind.clone();
+                            }
+                            if existing.source_section.is_none() {
+                                existing.source_section = pdata_func.source_section.clone();
+                            }
+                        } else {
+                            address_to_index.insert(pdata_func.address, functions_info.len());
+                            functions_info.push(pdata_func);
+                        }
                     }
                 }
             }
@@ -294,6 +319,7 @@ impl PeLoader {
     }
 }
 
+#[cfg(test)]
 fn merge_pdata_function(
     functions: &mut Vec<crate::loader::types::FunctionInfo>,
     pdata_func: crate::loader::types::FunctionInfo,

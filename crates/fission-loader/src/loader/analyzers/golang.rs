@@ -449,6 +449,13 @@ impl<'a> GoAnalyzer<'a> {
         let ptr_size = if is_64bit { 8usize } else { 4usize };
         let struct_size = ptr_size * 2; // {ptr, len}
 
+        let section_views: Vec<(u64, u64, &[u8])> = self.binary.sections.iter()
+            .filter_map(|s| {
+                let data = self.binary.view_bytes(s.virtual_address, s.virtual_size as usize)?;
+                Some((s.virtual_address, s.virtual_address + s.virtual_size, data))
+            })
+            .collect();
+
         for section in &self.binary.sections {
             // Only scan readable, non-executable data sections
             if section.is_executable {
@@ -499,16 +506,30 @@ impl<'a> GoAnalyzer<'a> {
                 let len_valid = len_val >= 4 && len_val < 4096;
 
                 if ptr_valid && len_valid {
-                    // Try to read the string content
-                    if let Some(str_bytes) = self.binary.get_bytes(ptr_val, len_val as usize) {
-                        if let Ok(s) = std::str::from_utf8(&str_bytes) {
-                            // Valid UTF-8 GoString found
-                            let struct_addr = va + offset as u64;
-                            let label = format!("GoStr_{:x}", struct_addr);
-                            // Store as "GoStr_<addr>":"<content>" entry
-                            let display = format!("\"{}\"", s.escape_default());
-                            results.insert(struct_addr, display);
-                            let _ = label; // will be used by caller as key
+                    // Try to read the string content using pre-built section views (zero-copy)
+                    let idx = section_views.binary_search_by(|&(start, end, _)| {
+                        if ptr_val < start {
+                            std::cmp::Ordering::Greater
+                        } else if ptr_val >= end {
+                            std::cmp::Ordering::Less
+                        } else {
+                            std::cmp::Ordering::Equal
+                        }
+                    });
+                    if let Ok(i) = idx {
+                        let (start, _, sec_data) = &section_views[i];
+                        let offset_in_sec = (ptr_val - start) as usize;
+                        if offset_in_sec + len_val as usize <= sec_data.len() {
+                            let str_bytes = &sec_data[offset_in_sec..offset_in_sec + len_val as usize];
+                            if let Ok(s) = std::str::from_utf8(str_bytes) {
+                                // Valid UTF-8 GoString found
+                                let struct_addr = va + offset as u64;
+                                let label = format!("GoStr_{:x}", struct_addr);
+                                // Store as "GoStr_<addr>":"<content>" entry
+                                let display = format!("\"{}\"", s.escape_default());
+                                results.insert(struct_addr, display);
+                                let _ = label; // will be used by caller as key
+                            }
                         }
                     }
                 }

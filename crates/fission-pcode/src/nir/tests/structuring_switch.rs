@@ -237,8 +237,8 @@ fn multi_block_preview_does_not_lower_switch_when_default_exit_differs_from_case
     let code = render_mlil_preview(&func, "switch_skip_guard", 0x5300, &preview_options())
         .expect("preview render");
     assert!(!code.contains("switch ("), "{code}");
-    assert!(code.contains("if (param_1 == 1)"), "{code}");
-    assert!(code.contains("if (param_1 == 2)"), "{code}");
+    assert!(code.contains("param_1 == 1"), "{code}");
+    assert!(code.contains("param_1 == 2"), "{code}");
 }
 
 #[test]

@@ -47,6 +47,10 @@ pub use self::normalize::{
 };
 pub use self::render::render_contracted_wrapper_summary;
 
+pub fn test_refine_partitions(accesses: &[(i64, u32)]) -> Vec<(i64, u32)> {
+    self::builder::test_refine_partitions(accesses)
+}
+
 pub fn render_mlil_preview(
     pcode: &PcodeFunction,
     name: &str,

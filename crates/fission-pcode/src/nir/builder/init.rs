@@ -75,8 +75,10 @@ impl<'a> PreviewBuilder<'a> {
         let cfg_facts = crate::nir::structuring::CfgFactCache::analyze(&successors, &predecessors);
         dom_tree = cfg_facts.dominators().clone();
 
-        let register_param_aliases =
+        let entry_arity = infer_entry_register_param_arity(pcode, options.calling_convention).unwrap_or(0);
+        let mut register_param_aliases =
             entry_analysis::collect_entry_register_param_aliases(pcode, options.calling_convention);
+        register_param_aliases.retain(|_, idx| *idx < entry_arity);
         let stack_frame_size = entry_analysis::infer_entry_stack_frame_size(pcode, options);
         if preview_builder_diag_enabled() {
             let duplicate_starts = duplicate_block_start_count(pcode);
@@ -124,6 +126,7 @@ impl<'a> PreviewBuilder<'a> {
             selector_representatives: BuilderCacheMap::default(),
             current_lowering_site: None,
             register_param_aliases,
+            entry_arity,
             suppress_entry_register_params: false,
             stack_frame_size,
             linear_exit_cache: BuilderCacheMap::default(),

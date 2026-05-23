@@ -1,4 +1,36 @@
 use super::*;
+use std::cell::RefCell;
+
+struct DecodePool {
+    handles: Vec<Option<RuntimeHandle>>,
+    operand_absolute_offsets: Vec<Option<usize>>,
+    operand_relative_lengths: Vec<Option<usize>>,
+    handle_reference_bitmap: Vec<bool>,
+}
+
+thread_local! {
+    static DECODE_POOL: RefCell<Vec<DecodePool>> = RefCell::new(Vec::new());
+    static WALK_STACK: RefCell<Vec<String>> = RefCell::new(Vec::new());
+}
+
+pub(super) struct WalkStackGuard;
+
+impl WalkStackGuard {
+    fn new(desc: String) -> Self {
+        WALK_STACK.with(|stack| {
+            stack.borrow_mut().push(desc);
+        });
+        Self
+    }
+}
+
+impl Drop for WalkStackGuard {
+    fn drop(&mut self) {
+        WALK_STACK.with(|stack| {
+            stack.borrow_mut().pop();
+        });
+    }
+}
 
 pub(super) fn bind_instruction<'a>(
     compiled: &'a CompiledFrontend,
@@ -6,8 +38,52 @@ pub(super) fn bind_instruction<'a>(
     ctx: &CompiledInstructionContext<'_>,
     selection: RuntimeSelection<'a>,
 ) -> Result<RuntimeConstructState> {
-    constructor_matches(ctx, selection.constructor)?;
-    CompiledParserWalker::new(compiled, strategy, ctx, selection)?.walk()
+    let result = (|| {
+        constructor_matches(ctx, selection.constructor)?;
+        CompiledParserWalker::new(compiled, strategy, ctx, selection)?.walk()
+    })();
+
+    match result {
+        Ok(state) => Ok(state),
+        Err(err) => {
+            let err_str = format!("{err:?}");
+            if err_str.contains("sleigh parser path:") {
+                Err(err)
+            } else {
+                let backtrace = WALK_STACK.with(|stack| stack.borrow().join(" -> "));
+                if backtrace.is_empty() {
+                    Err(err)
+                } else {
+                    Err(err.context(format!("sleigh parser path: {backtrace}")))
+                }
+            }
+        }
+    }
+}
+
+pub(super) struct PoolGuard {
+    handles: Vec<Option<RuntimeHandle>>,
+    operand_absolute_offsets: Vec<Option<usize>>,
+    operand_relative_lengths: Vec<Option<usize>>,
+    handle_reference_bitmap: Vec<bool>,
+}
+
+impl Drop for PoolGuard {
+    fn drop(&mut self) {
+        let handles = std::mem::take(&mut self.handles);
+        let operand_absolute_offsets = std::mem::take(&mut self.operand_absolute_offsets);
+        let operand_relative_lengths = std::mem::take(&mut self.operand_relative_lengths);
+        let handle_reference_bitmap = std::mem::take(&mut self.handle_reference_bitmap);
+
+        DECODE_POOL.with(|pool| {
+            pool.borrow_mut().push(DecodePool {
+                handles,
+                operand_absolute_offsets,
+                operand_relative_lengths,
+                handle_reference_bitmap,
+            });
+        });
+    }
 }
 
 pub(super) struct CompiledParserWalker<'a, 'b> {
@@ -19,11 +95,21 @@ pub(super) struct CompiledParserWalker<'a, 'b> {
     context_register: u64,
     context_known_mask: u64,
     cursor: usize,
-    handles: Vec<Option<RuntimeHandle>>,
-    operand_absolute_offsets: Vec<Option<usize>>,
-    operand_relative_lengths: Vec<Option<usize>>,
-    handle_reference_bitmap: Vec<bool>,
+    pool_guard: PoolGuard,
     walker: spine::RuntimeParserWalker,
+}
+
+impl<'a, 'b> std::ops::Deref for CompiledParserWalker<'a, 'b> {
+    type Target = PoolGuard;
+    fn deref(&self) -> &Self::Target {
+        &self.pool_guard
+    }
+}
+
+impl<'a, 'b> std::ops::DerefMut for CompiledParserWalker<'a, 'b> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.pool_guard
+    }
 }
 
 pub(super) struct OperandBinding {
@@ -281,6 +367,7 @@ mod construct_state_offset_tests {
     }
 }
 
+
 impl<'a, 'b> CompiledParserWalker<'a, 'b> {
     fn new(
         compiled: &'a CompiledFrontend,
@@ -316,14 +403,36 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
             selection.constructor.minimum_length,
             "constructor minimum length",
         )?;
-        let handles = vec![None; selection.constructor.constructor_template.handles.len()];
-        let operand_absolute_offsets =
-            vec![None; selection.constructor.constructor_template.handles.len()];
-        let operand_relative_lengths =
-            vec![None; selection.constructor.constructor_template.handles.len()];
-        let handle_reference_bitmap = constructor_template_handle_reference_bitmap(
+        let cursor = ctx
+            .cursor
+            .checked_add(opcode_len)
+            .ok_or_else(|| anyhow!("constructor cursor overflowed"))?;
+
+        let mut pool_item = DECODE_POOL.with(|pool| {
+            pool.borrow_mut().pop()
+        }).unwrap_or_else(|| DecodePool {
+            handles: Vec::new(),
+            operand_absolute_offsets: Vec::new(),
+            operand_relative_lengths: Vec::new(),
+            handle_reference_bitmap: Vec::new(),
+        });
+
+        let target_len = selection.constructor.constructor_template.handles.len();
+
+        pool_item.handles.clear();
+        pool_item.handles.resize(target_len, None);
+
+        pool_item.operand_absolute_offsets.clear();
+        pool_item.operand_absolute_offsets.resize(target_len, None);
+
+        pool_item.operand_relative_lengths.clear();
+        pool_item.operand_relative_lengths.resize(target_len, None);
+
+        constructor_template_handle_reference_bitmap(
             &selection.constructor.constructor_template,
+            &mut pool_item.handle_reference_bitmap,
         )?;
+
         Ok(Self {
             compiled,
             strategy,
@@ -332,19 +441,24 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
             minimum_length,
             context_register: ctx.context_register,
             context_known_mask: ctx.context_known_mask,
-            cursor: ctx
-                .cursor
-                .checked_add(opcode_len)
-                .ok_or_else(|| anyhow!("constructor cursor overflowed"))?,
-            handles,
-            operand_absolute_offsets,
-            operand_relative_lengths,
-            handle_reference_bitmap,
+            cursor,
+            pool_guard: PoolGuard {
+                handles: pool_item.handles,
+                operand_absolute_offsets: pool_item.operand_absolute_offsets,
+                operand_relative_lengths: pool_item.operand_relative_lengths,
+                handle_reference_bitmap: pool_item.handle_reference_bitmap,
+            },
             walker: spine::RuntimeParserWalker::new(ctx.cursor, opcode_len),
         })
     }
 
     fn walk(mut self) -> Result<RuntimeConstructState> {
+        let _guard = WalkStackGuard::new(format!(
+            "constructor({}::{})",
+            self.selection.constructor.source,
+            self.selection.constructor.mnemonic
+        ));
+
         for change in self.selection.constructor.context_changes.clone() {
             self.apply_context_change(&change)?;
         }
@@ -399,10 +513,11 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
             }
         }
 
-        let mut handles = std::mem::take(&mut self.handles)
-            .into_iter()
-            .collect::<Option<Vec<_>>>()
-            .ok_or_else(|| anyhow!("incomplete handle decode"))?;
+        let mut handles = Vec::with_capacity(self.handles.len());
+        for opt in &mut self.handles {
+            let handle = opt.take().ok_or_else(|| anyhow!("incomplete handle decode"))?;
+            handles.push(handle);
+        }
         handles.sort_by_key(|handle| handle.operand_index);
         let exported_handle = self.materialize_export_handle(&handles)?;
         let operands = handles
@@ -697,6 +812,7 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
             .get(operand_index)
             .ok_or_else(|| anyhow!("missing handle template {operand_index}"))?
             .clone();
+        let _guard = WalkStackGuard::new(format!("operand({})", operand_index));
         let operand_absolute_offset = self.operand_absolute_offset(&template.spec)?;
         let binding = self.bind_operand(&template, operand_absolute_offset)?;
         let handle_index = operand_index;
@@ -1487,6 +1603,7 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
         offsetbase: Option<i32>,
         operand_absolute_offset: Option<usize>,
     ) -> Result<RuntimeConstructState> {
+        let _guard = WalkStackGuard::new(format!("subtable({})", table_name));
         let mut sub_ctx = (*self.ctx).clone();
         sub_ctx.cursor = if let Some(offset) = operand_absolute_offset {
             offset
@@ -1740,4 +1857,57 @@ fn pattern_shift_amount(value: i64) -> Result<u32> {
         bail!("pattern expression shift amount {amount} exceeds i64 width");
     }
     Ok(amount)
+}
+
+#[cfg(test)]
+mod sleigh_parity_gaps_tests {
+    use super::*;
+    use crate::compiler::{compile_x86_64_frontend, discovery};
+
+    #[test]
+    fn test_decode_pool_reuses_allocations() {
+        if !discovery::ghidra_packaged_sla_available() {
+            return;
+        }
+        let compiled = compile_x86_64_frontend().expect("compile x86-64 frontend");
+        
+        let initial_pool_len = DECODE_POOL.with(|p| p.borrow().len());
+
+        let _decoded = crate::runtime::spine::compiled_table::decode_instruction(
+            &compiled,
+            None,
+            &[0x57],
+            0x1000,
+        )
+        .expect("decode push rdi");
+
+        let post_pool_len = DECODE_POOL.with(|p| p.borrow().len());
+        assert!(post_pool_len > initial_pool_len, "Pool should have received the dropped walker vectors");
+
+        let mut pool_item = DECODE_POOL.with(|p| p.borrow_mut().pop()).unwrap();
+        assert!(pool_item.handles.capacity() > 0, "Capacity of handles vector should be preserved");
+    }
+
+    #[test]
+    fn test_walk_stack_backtrace_on_failure() {
+        if !discovery::ghidra_packaged_sla_available() {
+            return;
+        }
+        let compiled = compile_x86_64_frontend().expect("compile x86-64 frontend");
+
+        let result = crate::runtime::spine::compiled_table::decode_instruction(
+            &compiled,
+            None,
+            &[0x48, 0x89],
+            0x1000,
+        );
+        
+        if let Err(err) = result {
+            let err_str = format!("{err:?}");
+            assert!(
+                err_str.contains("sleigh parser path:") || err_str.contains("constructor("),
+                "Error should contain sleigh parser path backtrace: {err_str}"
+            );
+        }
+    }
 }

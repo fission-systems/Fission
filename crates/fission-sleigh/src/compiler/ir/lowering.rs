@@ -136,6 +136,7 @@ pub fn compile_frontend(
         sla_register_space_index: u64::MAX,
         sla_uniqbase: 0,
         sla_uniqmask: 0,
+        userops: BTreeMap::new(),
     })
 }
 
@@ -231,6 +232,7 @@ pub fn build_frontend_from_sla_native_model(
     compiled.sla_register_space_index = library.register_space_index;
     compiled.sla_uniqbase = library.uniqbase;
     compiled.sla_uniqmask = library.uniqmask;
+    compiled.userops = library.userops.clone();
     // Once a packaged .sla library is available, runtime execution must be
     // driven by that constructor identity domain only.
     compiled.subtables.clear();

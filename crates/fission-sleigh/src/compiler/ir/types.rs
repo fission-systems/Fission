@@ -46,6 +46,9 @@ pub struct CompiledFrontend {
     /// Ghidra unique allocation mask (`ATTR_UNIQMASK`); used with instruction PC for temp bases.
     #[serde(default = "default_sla_uniqmask")]
     pub sla_uniqmask: u64,
+    /// User-defined p-code operations (`<userop_head>` index -> name)
+    #[serde(default)]
+    pub userops: BTreeMap<u32, String>,
 }
 
 fn default_sla_uniqmask() -> u64 {
@@ -886,6 +889,7 @@ mod tests {
             sla_register_space_index: 0,
             sla_uniqbase: 0,
             sla_uniqmask: default_sla_uniqmask(),
+            userops: BTreeMap::new(),
         }
     }
 

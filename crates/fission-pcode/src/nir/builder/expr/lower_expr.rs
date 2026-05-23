@@ -38,7 +38,14 @@ impl<'a> PreviewBuilder<'a> {
                     }
                 }
                 register_name_with_param(vn.offset, vn.size, self.options.calling_convention)
-                    .map(|(name, _)| name)
+                    .and_then(|(name, idx)| {
+                        if let Some(idx) = idx {
+                            (idx < self.entry_arity).then_some(name)
+                        } else {
+                            Some(name)
+                        }
+                    })
+                    .or_else(|| register_hardware_name_for_abi(vn.offset, vn.size, self.options.calling_convention))
                     .or_else(|| Some(register_name(vn.offset, vn.size)))
             }
             _ => None,
@@ -289,26 +296,50 @@ impl<'a> PreviewBuilder<'a> {
         let mut resolved_site: Option<LoweringSite> = None;
         if let Some(site) = scope {
             if let Some(defs_in_block) = self.block_defs.get(site.block_idx) {
-                for candidate_key in &candidate_keys {
-                    if let Some(def_indices) = defs_in_block.get(candidate_key) {
-                        let mut prior_count = def_indices.partition_point(|idx| *idx < site.op_idx);
-                        while prior_count > 0 {
-                            let def_idx = def_indices[prior_count - 1];
-                            let candidate_op = &self.pcode.blocks[site.block_idx].ops[def_idx];
-                            if Self::is_identity_copy_def(candidate_op) {
-                                prior_count -= 1;
-                                continue;
+                // 1. Try exact key match block-locally first
+                if let Some(def_indices) = defs_in_block.get(&key) {
+                    let mut prior_count = def_indices.partition_point(|idx| *idx < site.op_idx);
+                    while prior_count > 0 {
+                        let def_idx = def_indices[prior_count - 1];
+                        let candidate_op = &self.pcode.blocks[site.block_idx].ops[def_idx];
+                        if Self::is_identity_copy_def(candidate_op) {
+                            prior_count -= 1;
+                            continue;
+                        }
+                        resolved_site = Some(LoweringSite {
+                            block_idx: site.block_idx,
+                            op_idx: def_idx,
+                        });
+                        break;
+                    }
+                }
+
+                // 2. Try wider candidate keys block-locally only if exact match not found
+                if resolved_site.is_none() {
+                    for candidate_key in &candidate_keys {
+                        if candidate_key == &key {
+                            continue;
+                        }
+                        if let Some(def_indices) = defs_in_block.get(candidate_key) {
+                            let mut prior_count = def_indices.partition_point(|idx| *idx < site.op_idx);
+                            while prior_count > 0 {
+                                let def_idx = def_indices[prior_count - 1];
+                                let candidate_op = &self.pcode.blocks[site.block_idx].ops[def_idx];
+                                if Self::is_identity_copy_def(candidate_op) {
+                                    prior_count -= 1;
+                                    continue;
+                                }
+                                let candidate = LoweringSite {
+                                    block_idx: site.block_idx,
+                                    op_idx: def_idx,
+                                };
+                                if resolved_site
+                                    .is_none_or(|resolved| candidate.op_idx > resolved.op_idx)
+                                {
+                                    resolved_site = Some(candidate);
+                                }
+                                break;
                             }
-                            let candidate = LoweringSite {
-                                block_idx: site.block_idx,
-                                op_idx: def_idx,
-                            };
-                            if resolved_site
-                                .is_none_or(|resolved| candidate.op_idx > resolved.op_idx)
-                            {
-                                resolved_site = Some(candidate);
-                            }
-                            break;
                         }
                     }
                 }
@@ -317,52 +348,107 @@ impl<'a> PreviewBuilder<'a> {
 
         if resolved_site.is_none() {
             if let Some(scope_site) = scope {
-                resolved_site = candidate_keys
-                    .iter()
-                    .filter_map(|candidate_key| self.def_sites.get(candidate_key))
-                    .flat_map(|sites| sites.iter())
-                    .filter_map(|site| {
-                        let candidate = LoweringSite {
-                            block_idx: site.block_idx,
-                            op_idx: site.op_idx,
-                        };
-                        let candidate_op =
-                            &self.pcode.blocks[candidate.block_idx].ops[candidate.op_idx];
-                        if Self::is_identity_copy_def(candidate_op) {
-                            return None;
-                        }
-                        if candidate.block_idx == scope_site.block_idx {
-                            return (candidate.op_idx < scope_site.op_idx).then_some((
-                                usize::MAX,
-                                candidate.op_idx,
-                                candidate,
-                            ));
-                        }
-                        self.dom_tree
-                            .dominates(candidate.block_idx, scope_site.block_idx)
-                            .then_some((
-                                self.dom_tree.dominance_depth(candidate.block_idx),
-                                candidate.op_idx,
-                                candidate,
-                            ))
-                    })
-                    .max_by_key(|(dom_depth, op_idx, candidate)| {
-                        (*dom_depth, candidate.block_idx, *op_idx)
-                    })
-                    .map(|(_, _, candidate)| candidate);
+                // 1. Try exact key match across blocks first
+                if let Some(sites) = self.def_sites.get(&key) {
+                    resolved_site = sites
+                        .iter()
+                        .filter_map(|site| {
+                            let candidate = LoweringSite {
+                                block_idx: site.block_idx,
+                                op_idx: site.op_idx,
+                            };
+                            let candidate_op =
+                                &self.pcode.blocks[candidate.block_idx].ops[candidate.op_idx];
+                            if Self::is_identity_copy_def(candidate_op) {
+                                return None;
+                            }
+                            if candidate.block_idx == scope_site.block_idx {
+                                return (candidate.op_idx < scope_site.op_idx).then_some((
+                                    usize::MAX,
+                                    candidate.op_idx,
+                                    candidate,
+                                ));
+                            }
+                            self.dom_tree
+                                .dominates(candidate.block_idx, scope_site.block_idx)
+                                .then_some((
+                                    self.dom_tree.dominance_depth(candidate.block_idx),
+                                    candidate.op_idx,
+                                    candidate,
+                                ))
+                        })
+                        .max_by_key(|(dom_depth, op_idx, candidate)| {
+                            (*dom_depth, candidate.block_idx, *op_idx)
+                        })
+                        .map(|(_, _, candidate)| candidate);
+                }
+
+                // 2. Try wider candidate keys across blocks only if exact match not found
+                if resolved_site.is_none() {
+                    resolved_site = candidate_keys
+                        .iter()
+                        .filter(|candidate_key| *candidate_key != &key)
+                        .filter_map(|candidate_key| self.def_sites.get(candidate_key))
+                        .flat_map(|sites| sites.iter())
+                        .filter_map(|site| {
+                            let candidate = LoweringSite {
+                                block_idx: site.block_idx,
+                                op_idx: site.op_idx,
+                            };
+                            let candidate_op =
+                                &self.pcode.blocks[candidate.block_idx].ops[candidate.op_idx];
+                            if Self::is_identity_copy_def(candidate_op) {
+                                return None;
+                            }
+                            if candidate.block_idx == scope_site.block_idx {
+                                return (candidate.op_idx < scope_site.op_idx).then_some((
+                                    usize::MAX,
+                                    candidate.op_idx,
+                                    candidate,
+                                ));
+                            }
+                            self.dom_tree
+                                .dominates(candidate.block_idx, scope_site.block_idx)
+                                .then_some((
+                                    self.dom_tree.dominance_depth(candidate.block_idx),
+                                    candidate.op_idx,
+                                    candidate,
+                                ))
+                        })
+                        .max_by_key(|(dom_depth, op_idx, candidate)| {
+                            (*dom_depth, candidate.block_idx, *op_idx)
+                        })
+                        .map(|(_, _, candidate)| candidate);
+                }
             } else {
-                resolved_site = candidate_keys
-                    .iter()
-                    .filter_map(|candidate_key| self.defs.get(candidate_key))
-                    .filter_map(|def| {
-                        let site = LoweringSite {
-                            block_idx: def.block_idx,
-                            op_idx: def.op_idx,
-                        };
-                        let op = &self.pcode.blocks[site.block_idx].ops[site.op_idx];
-                        (!Self::is_identity_copy_def(op)).then_some(site)
-                    })
-                    .max_by_key(|site| (site.block_idx, site.op_idx));
+                // 1. Try exact key first when scope is None
+                if let Some(def) = self.defs.get(&key) {
+                    let site = LoweringSite {
+                        block_idx: def.block_idx,
+                        op_idx: def.op_idx,
+                    };
+                    let op = &self.pcode.blocks[site.block_idx].ops[site.op_idx];
+                    if !Self::is_identity_copy_def(op) {
+                        resolved_site = Some(site);
+                    }
+                }
+
+                // 2. Try wider candidate keys only if exact match not found
+                if resolved_site.is_none() {
+                    resolved_site = candidate_keys
+                        .iter()
+                        .filter(|candidate_key| *candidate_key != &key)
+                        .filter_map(|candidate_key| self.defs.get(candidate_key))
+                        .filter_map(|def| {
+                            let site = LoweringSite {
+                                block_idx: def.block_idx,
+                                op_idx: def.op_idx,
+                            };
+                            let op = &self.pcode.blocks[site.block_idx].ops[site.op_idx];
+                            (!Self::is_identity_copy_def(op)).then_some(site)
+                        })
+                        .max_by_key(|site| (site.block_idx, site.op_idx));
+                }
             }
         }
 
@@ -1200,7 +1286,13 @@ impl<'a> PreviewBuilder<'a> {
             .inputs
             .first()
             .and_then(callother_index)
-            .map(|index| format!("__pcodeop_{index}"))
+            .map(|index| {
+                self.options
+                    .userops
+                    .get(&(index as u32))
+                    .cloned()
+                    .unwrap_or_else(|| format!("__pcodeop_{index}"))
+            })
             .unwrap_or_else(|| "__pcodeop_unknown".to_string());
         let args = if let Some(recovered_args) = recovered_args {
             recovered_args
@@ -1457,7 +1549,9 @@ impl<'a> PreviewBuilder<'a> {
                     target.size,
                     self.options.calling_convention,
                 )
-                .and_then(|(name, param_index)| param_index.map(|_| name.to_string()));
+                .and_then(|(name, param_index)| {
+                    param_index.filter(|&idx| idx < self.entry_arity).map(|_| name.to_string())
+                });
             }
             Err(_) => return None,
         };
@@ -1489,7 +1583,9 @@ impl<'a> PreviewBuilder<'a> {
         }
         if is_register_space_id(ptr.space_id) {
             return register_name_with_param(ptr.offset, ptr.size, self.options.calling_convention)
-                .and_then(|(name, param_index)| param_index.map(|_| name.to_string()));
+                .and_then(|(name, param_index)| {
+                    param_index.filter(|&idx| idx < self.entry_arity).map(|_| name.to_string())
+                });
         }
         if ptr.is_constant {
             return None;
@@ -1795,18 +1891,6 @@ impl<'a> PreviewBuilder<'a> {
             {
                 return Ok(HirExpr::Var(name.to_string()));
             }
-            if self.options.calling_convention == CallingConvention::Arm32
-                && is_register_space_id(vn.space_id)
-            {
-                let name =
-                    register_name_with_param(vn.offset, vn.size, self.options.calling_convention)
-                        .map(|(name, _)| name)
-                        .or_else(|| arm32_ghidra_reg_name(vn.offset, vn.size));
-                if let Some(name) = name {
-                    let name = self.ensure_live_register_binding(name, vn.size);
-                    return Ok(HirExpr::Var(name));
-                }
-            }
             if !self.options.is_64bit
                 && is_register_space_id(vn.space_id)
                 && matches!(
@@ -1826,11 +1910,21 @@ impl<'a> PreviewBuilder<'a> {
                     ))
                     || self.suppress_entry_register_params
                 {
-                    register_name(vn.offset, vn.size)
+                    register_hardware_name_for_abi(vn.offset, vn.size, self.options.calling_convention)
+                        .unwrap_or_else(|| register_name(vn.offset, vn.size))
                 } else {
                     register_name_with_param(vn.offset, vn.size, self.options.calling_convention)
-                        .map(|(name, _)| name)
-                        .unwrap_or_else(|| register_name(vn.offset, vn.size))
+                        .and_then(|(name, idx)| {
+                            if let Some(idx) = idx {
+                                (idx < self.entry_arity).then_some(name)
+                            } else {
+                                Some(name)
+                            }
+                        })
+                        .unwrap_or_else(|| {
+                            register_hardware_name_for_abi(vn.offset, vn.size, self.options.calling_convention)
+                                .unwrap_or_else(|| register_name(vn.offset, vn.size))
+                        })
                 };
                 let name = self.ensure_live_register_binding(name, vn.size);
                 return Ok(HirExpr::Var(name));
@@ -2094,7 +2188,7 @@ impl<'a> PreviewBuilder<'a> {
         }))
     }
 
-    fn find_diamond_branch_for_predecessors(
+    pub(in crate::nir::builder) fn find_diamond_branch_for_predecessors(
         &self,
         pred_a: usize,
         pred_b: usize,

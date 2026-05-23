@@ -1071,3 +1071,59 @@ fn normalize_hir_function_inlines_multi_use_temp_within_single_if_condition() {
     let rendered = print_hir_function(&func);
     assert!(rendered.contains("if (eax)"), "rendered:\n{}", rendered);
 }
+
+#[test]
+fn compound_arm_flag_canonicalizes_to_signed_greater_than() {
+    let a = HirExpr::Var("a".to_string());
+    let b = HirExpr::Var("b".to_string());
+    let sub = HirExpr::Binary {
+        op: HirBinaryOp::Sub,
+        lhs: Box::new(a.clone()),
+        rhs: Box::new(b.clone()),
+        ty: NirType::Int {
+            bits: 32,
+            signed: true,
+        },
+    };
+    let ne = HirExpr::Binary {
+        op: HirBinaryOp::Ne,
+        lhs: Box::new(sub.clone()),
+        rhs: Box::new(HirExpr::Const(
+            0,
+            NirType::Int {
+                bits: 32,
+                signed: true,
+            },
+        )),
+        ty: NirType::Bool,
+    };
+    let eq = HirExpr::Binary {
+        op: HirBinaryOp::Eq,
+        lhs: Box::new(HirExpr::Binary {
+            op: HirBinaryOp::SLt,
+            lhs: Box::new(sub.clone()),
+            rhs: Box::new(HirExpr::Const(
+                0,
+                NirType::Int {
+                    bits: 32,
+                    signed: true,
+                },
+            )),
+            ty: NirType::Bool,
+        }),
+        rhs: Box::new(HirExpr::Call {
+            target: "__sborrow".to_string(),
+            args: vec![a.clone(), b.clone()],
+            ty: NirType::Bool,
+        }),
+        ty: NirType::Bool,
+    };
+    let mut stmt = HirStmt::Return(Some(HirExpr::Binary {
+        op: HirBinaryOp::LogicalAnd,
+        lhs: Box::new(ne),
+        rhs: Box::new(eq),
+        ty: NirType::Bool,
+    }));
+    normalize_stmt(&mut stmt);
+    assert_eq!(print_stmt(&stmt), "return b < a;");
+}

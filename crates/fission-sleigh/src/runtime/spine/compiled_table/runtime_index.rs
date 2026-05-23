@@ -2,15 +2,17 @@ use super::*;
 
 pub(super) fn constructor_template_handle_reference_bitmap(
     template: &crate::compiler::CompiledConstructorTemplate,
-) -> Result<Vec<bool>> {
-    let mut refs = vec![false; template.handles.len()];
+    refs: &mut Vec<bool>,
+) -> Result<()> {
+    refs.clear();
+    refs.resize(template.handles.len(), false);
     if let Some(handle) = &template.result {
-        mark_handle_tpl_references(handle, &mut refs)?;
+        mark_handle_tpl_references(handle, refs)?;
     }
     for op in &template.ops {
-        mark_op_references(op, &mut refs)?;
+        mark_op_references(op, refs)?;
     }
-    Ok(refs)
+    Ok(())
 }
 
 pub(super) fn constructor_template_references_handle(
@@ -122,7 +124,8 @@ mod tests {
             template_source: CompiledTemplateSource::SpecDerived,
         };
 
-        let error = constructor_template_handle_reference_bitmap(&template)
+        let mut refs = Vec::new();
+        let error = constructor_template_handle_reference_bitmap(&template, &mut refs)
             .expect_err("missing operand handle must fail closed");
         assert!(
             error
@@ -167,7 +170,8 @@ mod tests {
             template_source: CompiledTemplateSource::SpecDerived,
         };
 
-        let error = constructor_template_handle_reference_bitmap(&template)
+        let mut refs = Vec::new();
+        let error = constructor_template_handle_reference_bitmap(&template, &mut refs)
             .expect_err("negative operand handle must fail closed");
         assert!(
             error

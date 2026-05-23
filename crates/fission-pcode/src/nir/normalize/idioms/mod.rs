@@ -6,6 +6,7 @@ mod call_artifact;
 mod prologue;
 mod recurrence;
 mod security_cookie;
+mod subflow;
 
 pub(crate) use bitstream::apply_bitstream_idioms;
 pub(crate) use branch_hoist::apply_branch_prefix_hoist_pass;
@@ -15,3 +16,4 @@ pub(crate) use prologue::{
 };
 pub(crate) use recurrence::apply_recurrence_to_self_recursive_call_pass;
 pub(crate) use security_cookie::apply_security_cookie_pass;
+pub(crate) use subflow::apply_subflow_pruning;

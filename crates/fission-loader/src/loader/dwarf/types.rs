@@ -163,7 +163,67 @@ impl<'a> super::analyzer::DwarfAnalyzer<'a> {
             size,
         }))
     }
+}
 
+struct TypeDieInfo {
+    tag: DwTag,
+    name: Option<String>,
+    type_ref: Option<UnitOffset<usize>>,
+}
+
+fn resolve_type_name(
+    offset: UnitOffset<usize>,
+    all_types: &HashMap<UnitOffset<usize>, TypeDieInfo>,
+    resolved: &mut HashMap<UnitOffset<usize>, Option<String>>,
+    visiting: &mut std::collections::HashSet<UnitOffset<usize>>,
+) -> Option<String> {
+    if let Some(cached) = resolved.get(&offset) {
+        return cached.clone();
+    }
+    if visiting.contains(&offset) {
+        return None;
+    }
+    visiting.insert(offset);
+
+    let die_info = all_types.get(&offset)?;
+    let result = match die_info.tag {
+        DwTag(0x0f) => { // DW_TAG_pointer_type
+            let base = if let Some(ref_offset) = die_info.type_ref {
+                resolve_type_name(ref_offset, all_types, resolved, visiting)
+                    .unwrap_or_else(|| format!("ptr_0x{:x}", ref_offset.0))
+            } else {
+                "void".to_string()
+            };
+            Some(format!("{}*", base))
+        }
+        DwTag(0x26) => { // DW_TAG_const_type
+            let base = if let Some(ref_offset) = die_info.type_ref {
+                resolve_type_name(ref_offset, all_types, resolved, visiting)
+            } else {
+                None
+            };
+            base.map(|b| format!("const {}", b))
+        }
+        DwTag(0x35) => { // DW_TAG_volatile_type
+            let base = if let Some(ref_offset) = die_info.type_ref {
+                resolve_type_name(ref_offset, all_types, resolved, visiting)
+            } else {
+                None
+            };
+            base.map(|b| format!("volatile {}", b))
+        }
+        _ => {
+            // typedef, base_type, struct, class, union, enum
+            die_info.name.clone()
+        }
+    };
+
+    visiting.remove(&offset);
+    resolved.insert(offset, result.clone());
+    result
+}
+
+impl<'a> super::analyzer::DwarfAnalyzer<'a> {
     /// Collect all type names in a compilation unit for cross-referencing
     pub(super) fn collect_type_names(
         &self,
@@ -171,92 +231,52 @@ impl<'a> super::analyzer::DwarfAnalyzer<'a> {
         dwarf: &gimli::Dwarf<EndianSlice<'a, RunTimeEndian>>,
         cache: &mut HashMap<UnitOffset<usize>, String>,
     ) -> Result<(), gimli::Error> {
+        let mut all_types = HashMap::new();
         let mut entries = unit.entries();
         while let Some((_, entry)) = entries.next_dfs()? {
             match entry.tag() {
                 DwTag(0x13) | DwTag(0x02) | DwTag(0x17) | DwTag(0x04) | DwTag(0x16)
-                | DwTag(0x24) | DwTag(0x0f) => {
-                    // struct, class, union, enum, typedef, base_type, pointer_type
-                    if let Some(name) = self.get_type_display_name(entry, unit, dwarf, cache)? {
-                        cache.insert(entry.offset(), name);
-                    }
+                | DwTag(0x24) | DwTag(0x0f) | DwTag(0x26) | DwTag(0x35) => {
+                    let name = self.get_attr_string(entry, DwAt(0x03), unit, dwarf)?;
+                    let type_ref = match entry.attr_value(DwAt(0x49))? {
+                        Some(AttributeValue::UnitRef(ref_offset)) => Some(ref_offset),
+                        _ => None,
+                    };
+                    all_types.insert(entry.offset(), TypeDieInfo {
+                        tag: entry.tag(),
+                        name,
+                        type_ref,
+                    });
                 }
                 _ => {}
             }
         }
-        Ok(())
-    }
 
-    /// Get a display name for a type DIE
-    pub(super) fn get_type_display_name(
-        &self,
-        entry: &DebuggingInformationEntry<EndianSlice<'a, RunTimeEndian>, usize>,
-        unit: &gimli::Unit<EndianSlice<'a, RunTimeEndian>, usize>,
-        dwarf: &gimli::Dwarf<EndianSlice<'a, RunTimeEndian>>,
-        cache: &HashMap<UnitOffset<usize>, String>,
-    ) -> Result<Option<String>, gimli::Error> {
-        match entry.tag() {
-            DwTag(0x0f) => {
-                // DW_TAG_pointer_type → resolve base type + "*"
-                if let Some(AttributeValue::UnitRef(ref_offset)) = entry.attr_value(DwAt(0x49))? {
-                    if let Some(base_name) = cache.get(&ref_offset) {
-                        Ok(Some(format!("{}*", base_name)))
-                    } else {
-                        Ok(Some(format!("ptr_0x{:x}", ref_offset.0)))
-                    }
-                } else {
-                    Ok(Some("void*".to_string()))
-                }
-            }
-            DwTag(0x24) | DwTag(0x16) => {
-                // DW_TAG_base_type | DW_TAG_typedef
-                Ok(self.get_attr_string(entry, DwAt(0x03), unit, dwarf)?)
-            }
-            _ => Ok(self.get_attr_string(entry, DwAt(0x03), unit, dwarf)?),
+        let mut resolved = HashMap::new();
+        let mut visiting = std::collections::HashSet::new();
+        for &offset in all_types.keys() {
+            resolve_type_name(offset, &all_types, &mut resolved, &mut visiting);
         }
+
+        for (offset, name_opt) in resolved {
+            if let Some(name) = name_opt {
+                cache.insert(offset, name);
+            }
+        }
+
+        Ok(())
     }
 
     /// Resolve DW_AT_type attribute to a human-readable type name
     pub(super) fn resolve_type_ref(
         &self,
         entry: &DebuggingInformationEntry<EndianSlice<'a, RunTimeEndian>, usize>,
-        unit: &gimli::Unit<EndianSlice<'a, RunTimeEndian>, usize>,
+        _unit: &gimli::Unit<EndianSlice<'a, RunTimeEndian>, usize>,
         type_cache: &HashMap<UnitOffset<usize>, String>,
     ) -> Result<Option<String>, gimli::Error> {
         match entry.attr_value(DwAt(0x49))? {
             Some(AttributeValue::UnitRef(ref_offset)) => {
-                if let Some(name) = type_cache.get(&ref_offset) {
-                    return Ok(Some(name.clone()));
-                }
-                // Fallback: read the referenced DIE directly and chase pointer chains
-                if let Ok(ref_entry) = unit.entry(ref_offset) {
-                    if ref_entry.tag() == DwTag(0x0f) {
-                        // Pointer — resolve its base type
-                        if let Some(base) = self.resolve_type_ref(&ref_entry, unit, type_cache)? {
-                            return Ok(Some(format!("{}*", base)));
-                        }
-                        return Ok(Some("void*".to_string()));
-                    }
-                    if ref_entry.tag() == DwTag(0x35) {
-                        // DW_TAG_volatile_type
-                        if let Some(base) = self.resolve_type_ref(&ref_entry, unit, type_cache)? {
-                            return Ok(Some(format!("volatile {}", base)));
-                        }
-                    }
-                    if ref_entry.tag() == DwTag(0x26) {
-                        // DW_TAG_const_type
-                        if let Some(base) = self.resolve_type_ref(&ref_entry, unit, type_cache)? {
-                            return Ok(Some(format!("const {}", base)));
-                        }
-                    }
-                    // Try to get name attribute directly
-                    if let Some(attr) = ref_entry.attr(DwAt(0x03))? {
-                        if let AttributeValue::String(s) = attr.value() {
-                            return Ok(Some(s.to_string_lossy().to_string()));
-                        }
-                    }
-                }
-                Ok(None)
+                Ok(type_cache.get(&ref_offset).cloned())
             }
             _ => Ok(None),
         }

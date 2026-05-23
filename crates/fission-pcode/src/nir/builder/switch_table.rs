@@ -64,13 +64,28 @@ fn recover_absolute_switch_selector(
     };
 
     // Extract (table_base_addr, selector_expr, _scale) from the address.
-    let (table_base, selector_expr, entry_size, scaled_by_mul) =
+    let (mut table_base, selector_expr, entry_size, scaled_by_mul) =
         extract_table_base_and_selector(addr_expr)?;
 
     // Validate: table_base must be a mapped section address (jump table lives
     // in .rdata / .text, not on the stack).
+    //
+    // Relocatable object files (.o) may have an implicit table_base of 0
+    // because the x86-64 R_X86_64_32S relocation that encodes the .rodata
+    // section address hasn't been applied to the instruction bytes.  In that
+    // case the address expression is just `selector * scale` with no constant
+    // addend.  When table_base == 0 and not mapped, try the first read-only
+    // section as the actual table base.
     if !options.is_mapped_global(table_base) {
-        return None;
+        if table_base == 0 && scaled_by_mul {
+            if let Some(rodata_base) = options.first_rodata_section_base() {
+                table_base = rodata_base;
+            } else {
+                return None;
+            }
+        } else {
+            return None;
+        }
     }
 
     // Peel an outer zero-extension or narrowing cast from the selector — the
@@ -161,6 +176,7 @@ fn recover_relative_switch_selector(
 /// Const(base) + selector << Const(log2_scale)
 /// Const(base) + selector                        (scale == 1)
 /// selector * Const(scale) + Const(base)         (commuted)
+/// selector * Const(scale)                        (relocatable: implicit base 0)
 /// ```
 fn extract_table_base_and_selector(addr: &HirExpr) -> Option<(u64, &HirExpr, u64, bool)> {
     let mut const_base = 0u64;
@@ -171,7 +187,16 @@ fn extract_table_base_and_selector(addr: &HirExpr) -> Option<(u64, &HirExpr, u64
     }
     let selector_term = selector_term?;
     let (selector, entry_size, scaled_by_mul) = extract_unscaled_selector(selector_term)?;
-    saw_const.then_some((const_base, selector, entry_size, scaled_by_mul))
+    // Accept both explicit const base and implicit base 0 (relocatable objects
+    // where the table displacement was not patched into the instruction bytes).
+    // For the implicit-zero case, require the selector to be scaled by a
+    // multiplication (entry_size >= 4), which is a strong signal of a jump
+    // table address pattern.
+    if saw_const || (scaled_by_mul && entry_size >= 4) {
+        Some((const_base, selector, entry_size, scaled_by_mul))
+    } else {
+        None
+    }
 }
 
 fn collect_additive_switch_terms<'a>(
@@ -409,6 +434,7 @@ mod tests {
             global_sizes: Default::default(),
             relocation_names: Default::default(),
             calling_convention: Default::default(),
+            ..Default::default()
         }
     }
 

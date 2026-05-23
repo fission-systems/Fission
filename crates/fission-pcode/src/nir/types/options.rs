@@ -1,6 +1,6 @@
 use super::*;
 
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, Default)]
 pub struct NirRenderOptions {
     pub pe_x64_only: bool,
     pub is_64bit: bool,
@@ -30,6 +30,9 @@ pub struct NirRenderOptions {
     /// Auto-detected from binary format in `from_loaded_binary`; can be overridden.
     #[serde(default)]
     pub calling_convention: CallingConvention,
+    /// User-defined p-code operations (<userop_head> index -> name)
+    #[serde(default)]
+    pub userops: HashMap<u32, String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -218,6 +221,7 @@ impl NirRenderOptions {
         let sections = inner
             .sections
             .iter()
+            .filter(|section| section.is_readable || section.is_executable)
             .map(|section| {
                 (
                     section.virtual_address,
@@ -289,6 +293,7 @@ impl NirRenderOptions {
             global_sizes: inner.global_symbol_sizes.clone(),
             relocation_names: inner.relocation_symbols.clone(),
             calling_convention,
+            userops: HashMap::new(),
         }
     }
 
@@ -320,6 +325,24 @@ impl NirRenderOptions {
         self.sections
             .iter()
             .any(|(start, end)| address >= *start && address < *end)
+    }
+
+    /// Find the base address of the first mapped section that does not contain
+    /// `image_base`.  In a relocatable object (.o) the code section (.text)
+    /// starts at `image_base` and the read-only data section (.rodata) follows
+    /// immediately after.  This heuristic returns the `.rodata` base when the
+    /// jump table displacement has not been patched into instruction bytes.
+    pub(in crate::nir) fn first_rodata_section_base(&self) -> Option<u64> {
+        self.sections
+            .iter()
+            .filter(|(start, end)| {
+                // Exclude the section that contains image_base (likely .text)
+                // and skip zero-sized sections.
+                *end > *start
+                    && !(self.image_base >= *start && self.image_base < *end)
+            })
+            .map(|(start, _)| *start)
+            .next()
     }
 }
 

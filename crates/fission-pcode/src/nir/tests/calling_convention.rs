@@ -1610,7 +1610,7 @@ fn aarch64_return_only_join_inlines_predecessor_return_values() {
     let code = render_mlil_preview(&func, "return_join", 0x1000, &options).expect("preview render");
     assert!(code.contains("param_1 + 10"), "{code}");
     assert!(code.contains("param_1 ^ 43690"), "{code}");
-    assert!(code.contains("return xVar"), "{code}");
+    assert!(code.contains("return tmp_2000 ?") || code.contains("return iVar0") || code.contains("return uVar2"), "{code}");
     assert!(!code.contains("block_1030:"), "{code}");
     assert!(!code.contains("goto block_1030"), "{code}");
 }

@@ -32,7 +32,7 @@ pub(crate) fn pcode_op_count(pcode: &PcodeFunction) -> usize {
     pcode.blocks.iter().map(|b| b.ops.len()).sum()
 }
 
-fn decode_memory_context(binary: &LoadedBinary, entry_address: u64) -> DecodeMemoryContext {
+fn decode_memory_context(binary: &LoadedBinary, entry_address: u64, max_bytes: usize) -> DecodeMemoryContext {
     let inner = binary.inner();
     let mut relative_address_bases = Vec::new();
     for section in &inner.sections {
@@ -46,8 +46,63 @@ fn decode_memory_context(binary: &LoadedBinary, entry_address: u64) -> DecodeMem
     if inner.image_base != 0 && !relative_address_bases.contains(&inner.image_base) {
         relative_address_bases.push(inner.image_base);
     }
+
+    let mut jump_table_targets = Vec::new();
+    let little_endian = !inner.arch_spec.contains("BE");
+
+    // Bound the function end address
+    let mut func_size = None;
+    if let Some(&idx) = inner.function_addr_index.get(&entry_address) {
+        if let Some(info) = inner.functions.get(idx) {
+            if info.size > 0 {
+                func_size = Some(info.size as u64);
+            }
+        }
+    }
+
+    let limit_addr = if let Some(size) = func_size {
+        entry_address.saturating_add(size)
+    } else {
+        let mut next_addr = entry_address.saturating_add(max_bytes as u64);
+        for info in &inner.functions {
+            if info.address > entry_address && info.address < next_addr {
+                next_addr = info.address;
+            }
+        }
+        next_addr
+    };
+
+    for &use_site in inner.relocation_symbols.keys() {
+        if let Some(raw_8) = binary.view_bytes(use_site, 8) {
+            let val = if little_endian {
+                u64::from_le_bytes(raw_8.try_into().unwrap())
+            } else {
+                u64::from_be_bytes(raw_8.try_into().unwrap())
+            };
+            if val >= entry_address && val < limit_addr {
+                if !jump_table_targets.contains(&val) {
+                    jump_table_targets.push(val);
+                }
+            }
+        }
+        if let Some(raw_4) = binary.view_bytes(use_site, 4) {
+            let val_32 = if little_endian {
+                u32::from_le_bytes(raw_4.try_into().unwrap())
+            } else {
+                u32::from_be_bytes(raw_4.try_into().unwrap())
+            };
+            let val = val_32 as u64;
+            if val >= entry_address && val < limit_addr {
+                if !jump_table_targets.contains(&val) {
+                    jump_table_targets.push(val);
+                }
+            }
+        }
+    }
+
     DecodeMemoryContext {
         relative_address_bases,
+        jump_table_targets,
     }
 }
 
@@ -59,7 +114,7 @@ pub(crate) fn decode_rust_sleigh_pcode(
     instruction_limit: usize,
     continue_past_indirect_branch: bool,
     retry_on_decode_error: bool,
-) -> Result<(PcodeFunction, DecodeDiag), DecodeFailure> {
+) -> Result<(PcodeFunction, DecodeDiag, std::collections::HashMap<u32, String>), DecodeFailure> {
     let load_spec = binary.load_spec().ok_or_else(|| DecodeFailure {
         message: format!(
             "rust_sleigh: missing Ghidra load spec for '{}'",
@@ -94,6 +149,15 @@ pub(crate) fn decode_rust_sleigh_pcode(
             template_source_counts: Default::default(),
         },
     })?;
+    let userops = lifter
+        .compiled_frontend()
+        .map(|c| {
+            c.userops
+                .iter()
+                .map(|(&k, v)| (k, v.clone()))
+                .collect::<std::collections::HashMap<u32, String>>()
+        })
+        .unwrap_or_default();
     let address_state = lifter.normalize_low_bit_code_address(entry_address);
     let decode_entry_address = address_state.address;
     let initial_context_override = address_state.context_override;
@@ -115,7 +179,7 @@ pub(crate) fn decode_rust_sleigh_pcode(
     } else {
         DecodeContract::strict_function(instruction_limit)
     };
-    let memory_context = decode_memory_context(binary, decode_entry_address);
+    let memory_context = decode_memory_context(binary, decode_entry_address, max_bytes);
     let result = lifter.lift_raw_pcode_function_with_context_and_memory_context(
         bytes,
         decode_entry_address,
@@ -133,6 +197,7 @@ pub(crate) fn decode_rust_sleigh_pcode(
                     stop_reason: "success_first_lift".into(),
                     template_source_counts,
                 },
+                userops.clone(),
             ))
         }
         Err(first_err) => {
@@ -147,7 +212,7 @@ pub(crate) fn decode_rust_sleigh_pcode(
                         continue;
                     };
                     let variant_memory_context =
-                        decode_memory_context(binary, variant_decode_entry_address);
+                        decode_memory_context(binary, variant_decode_entry_address, max_bytes);
                     if let Ok(retry) = variant_lifter
                         .lift_raw_pcode_function_with_context_and_memory_context(
                             variant_bytes,
@@ -168,6 +233,7 @@ pub(crate) fn decode_rust_sleigh_pcode(
                                 ),
                                 template_source_counts,
                             },
+                            userops.clone(),
                         ));
                     }
                 }
@@ -190,6 +256,7 @@ pub(crate) fn decode_rust_sleigh_pcode(
                                 stop_reason: "success_after_strict_indirect_retry".into(),
                                 template_source_counts,
                             },
+                            userops.clone(),
                         ));
                     }
                 }
@@ -216,6 +283,7 @@ pub(crate) fn decode_rust_sleigh_pcode(
                                     stop_reason: "success_after_truncated_retry".into(),
                                     template_source_counts,
                                 },
+                                userops.clone(),
                             ));
                         }
                         return Err(DecodeFailure {
@@ -268,7 +336,7 @@ mod tests {
         }
 
         let binary = LoadedBinary::from_file(fixture).expect("load ARM4_be control_flow fixture");
-        let (pcode, diag) =
+        let (pcode, diag, _userops) =
             decode_rust_sleigh_pcode(&binary, "run_control_flow", 0x100150, 616, 512, true, true)
                 .expect("indirect branch should not fall through into inline jump-table data");
 
@@ -304,7 +372,7 @@ mod tests {
         }
 
         let binary = LoadedBinary::from_file(fixture).expect("load ARM5_be control_flow fixture");
-        let (pcode, diag) =
+        let (pcode, diag, _userops) =
             decode_rust_sleigh_pcode(&binary, "test_switch", 0x100000, 92, 512, true, true)
                 .expect("conditional bx return should not end the function early");
 

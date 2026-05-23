@@ -282,6 +282,7 @@ pub(super) struct CompiledTableEmitter<'c> {
     pcode_build_secnum: i32,
     in_delay_slot: bool,
     uniq_mask: u64,
+    crossbuild_depth: u32,
 }
 
 #[derive(Debug, Clone)]
@@ -319,6 +320,7 @@ impl<'c> CompiledTableEmitter<'c> {
             pcode_build_secnum: -1,
             in_delay_slot: false,
             uniq_mask: compiled.sla_uniqmask,
+            crossbuild_depth: 0,
         }
     }
 
@@ -802,6 +804,12 @@ impl<'c> CompiledTableEmitter<'c> {
                         self.pcode_build_secnum
                     );
                 }
+                if self.crossbuild_depth >= 8 {
+                    bail!(
+                        "CROSSBUILD recursion limit (8) exceeded (depth={})",
+                        self.crossbuild_depth
+                    );
+                }
                 if op.inputs.len() < 2 {
                     bail!("CROSSBUILD (PTRSUB) requires two varnode inputs");
                 }
@@ -826,6 +834,7 @@ impl<'c> CompiledTableEmitter<'c> {
                 let saved_labels = std::mem::take(&mut self.label_positions);
                 let saved_built = std::mem::take(&mut self.built_operands);
                 self.emitter.set_emit_context(target_pc, unique_seed);
+                self.crossbuild_depth += 1;
                 let emit_result = (|| -> Result<()> {
                     let Some(Some(named)) = cross_state.named_templates.get(section) else {
                         bail!(
@@ -837,6 +846,7 @@ impl<'c> CompiledTableEmitter<'c> {
                     }
                     Ok(())
                 })();
+                self.crossbuild_depth -= 1;
                 self.built_operands = saved_built;
                 self.label_positions = saved_labels;
                 self.emitter.set_emit_context(saved_emit.0, saved_emit.1);
@@ -1665,6 +1675,7 @@ mod tests {
             sla_register_space_index: 0,
             sla_uniqbase: 0,
             sla_uniqmask: u64::MAX,
+            userops: std::collections::BTreeMap::new(),
         }
     }
 

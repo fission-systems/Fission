@@ -74,7 +74,7 @@ pub fn decompile_with_rust_sleigh(
         return Ok(summary_result);
     }
 
-    let (pcode, diag) = match decode_rust_sleigh_pcode(
+    let (pcode, diag, userops) = match decode_rust_sleigh_pcode(
         binary,
         name,
         entry_address,
@@ -103,7 +103,7 @@ pub fn decompile_with_rust_sleigh(
         .pipeline_stage_status
         .insert("decode".into(), "ok".into());
 
-    match finish_rust_sleigh_render(binary, entry_address, name, config, &pcode, &mut evidence) {
+    match finish_rust_sleigh_render(binary, entry_address, name, config, &pcode, userops.clone(), &mut evidence) {
         Ok(result) => Ok(result),
         Err(err)
             if config.continue_past_indirect_branch
@@ -114,7 +114,7 @@ pub fn decompile_with_rust_sleigh(
                 .pipeline_stage_status
                 .insert("nir_render".into(), "retry_strict_decode".into());
 
-            let (strict_pcode, diag2) = match decode_rust_sleigh_pcode(
+            let (strict_pcode, diag2, strict_userops) = match decode_rust_sleigh_pcode(
                 binary,
                 name,
                 entry_address,
@@ -153,6 +153,7 @@ pub fn decompile_with_rust_sleigh(
                 name,
                 config,
                 &strict_pcode,
+                strict_userops,
                 &mut evidence,
             )
         }

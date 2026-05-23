@@ -48,14 +48,48 @@ u32 test_loops(u32 count) {
     return acc;
 }
 
+u32 test_nested_loops(u32 rows, u32 cols) {
+    u32 sum = 0;
+    for (u32 i = 0; i < rows; ++i) {
+        if (i % 2 == 0) continue;
+        for (u32 j = 0; j < cols; ++j) {
+            if (j == 5) break;
+            sum += i * j;
+        }
+        if (sum > 500) break;
+    }
+    return sum;
+}
+
+u32 test_switch_fallthrough(u32 val) {
+    u32 res = 0;
+    switch (val) {
+        case 1:
+        case 2:
+            res += 5;
+            // fallthrough
+        case 3:
+            res += 10;
+            break;
+        case 4:
+            res = 100;
+            break;
+        default:
+            res = val * 3;
+            break;
+    }
+    return res;
+}
+
 void run_control_flow(u32 seed) {
     u32 result = 0;
     if (seed < 10) {
-        result = test_switch(seed);
+        result = test_switch(seed) + test_switch_fallthrough(seed);
     } else if (seed < 100) {
-        result = test_loops(seed);
+        result = test_loops(seed) + test_nested_loops(seed, 10);
     } else {
-        result = test_loops(100) + test_switch(seed);
+        result = test_loops(100) + test_switch(seed) + test_nested_loops(10, seed % 20) + test_switch_fallthrough(seed);
     }
     control_sink = result;
 }
+

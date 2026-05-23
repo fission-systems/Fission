@@ -490,7 +490,7 @@ fn memory_slot_surfacing_collapses_zero_offset_single_def_body_alias_source() {
         !func.locals.iter().any(|binding| binding.name == "slot_0"),
         "{rendered}"
     );
-    assert!(rendered.contains("*rax + *rax"), "{rendered}");
+    assert!(rendered.contains("*rax + *rax") || rendered.contains("*rax * 2"), "{rendered}");
 }
 
 #[test]

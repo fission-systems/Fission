@@ -148,6 +148,7 @@ mod tests {
                 global_sizes: Default::default(),
                 relocation_names: Default::default(),
                 calling_convention: Default::default(),
+                userops: Default::default(),
             },
             type_context: NirTypeContext {
                 call_targets: HashMap::from([(0x140001234, "MessageBoxW".to_string())]),

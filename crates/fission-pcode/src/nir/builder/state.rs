@@ -45,6 +45,7 @@ pub(crate) struct PreviewBuilder<'a> {
     pub(crate) selector_representatives: BuilderCacheMap<(usize, u64, u64), HirExpr>,
     pub(crate) current_lowering_site: Option<LoweringSite>,
     pub(crate) register_param_aliases: HashMap<u64, usize>,
+    pub(crate) entry_arity: usize,
     pub(crate) suppress_entry_register_params: bool,
     pub(crate) stack_frame_size: i64,
     pub(crate) linear_exit_cache: BuilderCacheMap<usize, Option<LinearExit>>,

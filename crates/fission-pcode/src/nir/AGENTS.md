@@ -42,6 +42,25 @@ nir/
 - Do not add alternate telemetry payloads outside `NirBuildStats`.
 - Do not fix structuring bugs only in `printer.rs`.
 - Do not skip large-sample validation when changing rejection/acceptance logic.
+- Do not prevent regressions with downstream workarounds or sample-specific heuristics (address guards, hard-coded function names, etc.). Fix the root cause at the canonical owner (builder, normalize, or structuring) using invariant-based algorithms (CFG, dominance, def-use chains, type-system rules). A builder-level fix that stops the wrong binding from being created is better than a normalize pass that tries to clean it up later.
+
+## Regression Prevention
+
+Every semantic fix must pass **both** the targeted unit test and the broader gate. Do not claim success from one targeted test if crate-level regression remains.
+
+1. **Anchor the row:** Before fixing, record source file, binary, address, function name, current behavior status, semantic/static scores, and top missing features.
+2. **Add builder-level synthetic regression tests:** When a real binary sample reveals a bug, add the smallest invariant-based test that captures it (e.g., `loop_carried_gpr32_update_with_prior_wide_def_does_not_rebind_param`).
+3. **Gate on crate-level tests:** Run `cargo nextest run -p fission-pcode`. If a pre-existing failure blocks the gate, mark it `#[ignore]` with a ticket or maintain an allowlist so new regressions are never masked.
+4. **Gate on smoke benchmark rows:** Add the fixed sample to the smoke manifest under `benchmark/config/`. Re-run the exact row with no stale decompilation cache, diff behavior status, case progress, and scores.
+5. **Check for cross-sample regressions:** After a focused improvement, run the broader smoke manifest or automation lane. Existing pass rows must not regress.
+
+### Pre-merge checklist
+
+- [ ] Targeted unit test passes (`cargo nextest run --filter ...`)
+- [ ] Crate-level unit tests pass (pre-existing failures explicitly called out)
+- [ ] Smoke benchmark row for the fixed sample shows improvement with no stale cache
+- [ ] No regression in other smoke rows (diff artifacts)
+- [ ] `cargo check -p fission-pcode` and `cargo build -p fission-cli --release` are clean (modulo existing warnings)
 
 ## Validation
 

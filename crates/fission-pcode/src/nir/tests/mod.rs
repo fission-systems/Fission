@@ -65,6 +65,7 @@ fn preview_options() -> MlilPreviewOptions {
         global_sizes: Default::default(),
         relocation_names: Default::default(),
         calling_convention: Default::default(),
+        ..Default::default()
     }
 }
 
@@ -85,6 +86,7 @@ fn preview_options_x86() -> MlilPreviewOptions {
         global_sizes: Default::default(),
         relocation_names: Default::default(),
         calling_convention: Default::default(),
+        ..Default::default()
     }
 }
 

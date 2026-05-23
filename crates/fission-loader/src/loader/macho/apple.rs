@@ -586,7 +586,7 @@ impl<'a> AppleAnalyzer<'a> {
             return result;
         };
 
-        let mut name_map: std::collections::HashMap<u64, String> = std::collections::HashMap::new();
+        let mut name_map: std::collections::BTreeMap<u64, String> = std::collections::BTreeMap::new();
         let mut offset = 0usize;
         while offset < methnames_data.len() {
             // Find the end of this null-terminated string
@@ -636,15 +636,10 @@ impl<'a> AppleAnalyzer<'a> {
             if let Some(name) = name_map.get(&target_va) {
                 let symbol_name = format!("sel_{}", name);
                 result.insert(selref_va, symbol_name);
-            } else {
-                // Fall back: walk backwards to find the string that contains target_va
-                // (target_va may point into the middle of a string — rare but possible)
-                for (&str_va, name) in &name_map {
-                    if str_va <= target_va && target_va < str_va + name.len() as u64 + 1 {
-                        let symbol_name = format!("sel_{}", name);
-                        result.insert(selref_va, symbol_name);
-                        break;
-                    }
+            } else if let Some((&str_va, name)) = name_map.range(..=target_va).next_back() {
+                if target_va < str_va + name.len() as u64 + 1 {
+                    let symbol_name = format!("sel_{}", name);
+                    result.insert(selref_va, symbol_name);
                 }
             }
         }
