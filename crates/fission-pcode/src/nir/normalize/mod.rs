@@ -12,7 +12,7 @@ mod cleanup;
 pub(crate) mod global_opt;
 mod idioms;
 mod memory;
-mod pipeline;
+pub(crate) mod pipeline;
 pub(crate) mod recovery;
 mod rule_normalizer;
 mod subvar_flow;

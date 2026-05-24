@@ -891,3 +891,73 @@ fn switch_norm_folds_range_check_guard() {
     assert_eq!(default.len(), 1);
     assert!(matches!(&default[0], HirStmt::Return(Some(HirExpr::Const(20, _)))));
 }
+
+#[test]
+fn constant_ptr_recovery_recovers_symbolic_addresses() {
+    use crate::nir::normalize::pipeline::{GLOBAL_SYMBOL_CONTEXT, GlobalSymbolContext};
+    use crate::nir::normalize::memory::apply_constant_ptr_recovery_pass;
+    use std::collections::HashMap;
+
+    let mut names = HashMap::new();
+    names.insert(0x140003000, "g_data".to_string());
+    names.insert(0x140004000, "g_exact".to_string());
+
+    let mut sizes = HashMap::new();
+    sizes.insert(0x140003000, 100);
+    sizes.insert(0x140004000, 10);
+
+    let context = GlobalSymbolContext { names, sizes };
+    GLOBAL_SYMBOL_CONTEXT.with(|ctx| {
+        *ctx.borrow_mut() = Some(context);
+    });
+
+    let mut func = HirFunction {
+        name: "test_constant_ptr".to_string(),
+        body: vec![
+            // Exact match
+            HirStmt::Assign {
+                lhs: HirLValue::Var("p1".to_string()),
+                rhs: HirExpr::Const(0x140004000, int(64)),
+            },
+            // Inside bounds (offset 8)
+            HirStmt::Assign {
+                lhs: HirLValue::Var("p2".to_string()),
+                rhs: HirExpr::Const(0x140003008, int(64)),
+            },
+            // Outside any bounds / no match
+            HirStmt::Assign {
+                lhs: HirLValue::Var("p3".to_string()),
+                rhs: HirExpr::Const(0x140005000, int(64)),
+            },
+        ],
+        params: Vec::new(),
+        locals: Vec::new(),
+        return_type: NirType::Unknown,
+        surface_return_type_name: None,
+        calling_convention: Default::default(),
+        is_64bit: true,
+        suppress_entry_register_params: false,
+        callee_observed_max_arity: Default::default(),
+        callee_summaries: Default::default(),
+    };
+
+    assert!(apply_constant_ptr_recovery_pass(&mut func));
+
+    GLOBAL_SYMBOL_CONTEXT.with(|ctx| {
+        *ctx.borrow_mut() = None;
+    });
+
+    assert_eq!(func.body.len(), 3);
+
+    // Assert exact match: AddressOfGlobal("g_exact")
+    let HirStmt::Assign { rhs: rhs1, .. } = &func.body[0] else { panic!(); };
+    assert_eq!(rhs1, &HirExpr::AddressOfGlobal("g_exact".to_string()));
+
+    // Assert offset match: PtrOffset { base: AddressOfGlobal("g_data"), offset: 8 }
+    let HirStmt::Assign { rhs: rhs2, .. } = &func.body[1] else { panic!(); };
+    assert!(matches!(rhs2, HirExpr::PtrOffset { base, offset: 8 } if matches!(base.as_ref(), HirExpr::AddressOfGlobal(name) if name == "g_data")));
+
+    // Assert no match: stays Const(0x140005000)
+    let HirStmt::Assign { rhs: rhs3, .. } = &func.body[2] else { panic!(); };
+    assert_eq!(rhs3, &HirExpr::Const(0x140005000, int(64)));
+}

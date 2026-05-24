@@ -44,7 +44,7 @@ use super::super::memory::{
     apply_aggregate_alias_access_rewrite_pass, apply_aggregate_fields_pass,
     apply_memory_heritage, apply_memory_slot_surfacing, apply_memory_slot_surfacing_cheap,
     apply_ptr_arith_recovery_pass, apply_zero_index_deref_pass, normalize_binding_initializers,
-    apply_split_datatype_pass,
+    apply_split_datatype_pass, apply_constant_ptr_recovery_pass,
 };
 use super::super::recovery::{
     apply_break_continue_pass, apply_flag_recovery_pass, apply_for_loop_folding,
@@ -349,6 +349,19 @@ fn contains_call_stmts(stmts: &[HirStmt]) -> bool {
     stmts.iter().any(contains_call_stmt)
 }
 
+use std::cell::RefCell;
+use std::collections::HashMap;
+
+thread_local! {
+    pub(crate) static GLOBAL_SYMBOL_CONTEXT: RefCell<Option<GlobalSymbolContext>> = RefCell::new(None);
+}
+
+#[derive(Clone)]
+pub(crate) struct GlobalSymbolContext {
+    pub(crate) names: HashMap<u64, String>,
+    pub(crate) sizes: HashMap<u64, u64>,
+}
+
 pub(crate) fn normalize_hir_function(func: &mut HirFunction) {
     wave_stats::reset_normalize_wave_stats();
     let diag = normalize_diag_enabled();
@@ -456,6 +469,17 @@ pub(crate) fn normalize_hir_function(func: &mut HirFunction) {
 
             prune_unused_temp_bindings(f);
 
+        });
+    }
+    if run_pass_logged(
+        func,
+        "constant_ptr_recovery",
+        perf,
+        apply_constant_ptr_recovery_pass,
+    ) {
+        run_cleanup_block(func, "cleanup_constant_ptr", perf, |f| {
+            cleanup_func_stmt_list(f);
+            prune_unused_temp_bindings(f);
             prune_unused_dead_local_bindings(f);
         });
     }

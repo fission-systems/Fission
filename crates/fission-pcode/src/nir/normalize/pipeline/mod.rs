@@ -4,5 +4,5 @@ mod run;
 
 pub(crate) use run::{
     is_large_hir_function, normalize_expr, normalize_function_body, normalize_hir_function,
-    normalize_stmt,
+    normalize_stmt, GLOBAL_SYMBOL_CONTEXT, GlobalSymbolContext,
 };

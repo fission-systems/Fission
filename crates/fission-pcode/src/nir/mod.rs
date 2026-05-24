@@ -173,7 +173,17 @@ pub fn render_mlil_preview_with_binary_and_context(
     }
     debug_log("normalize_start");
     let normalize_start = Instant::now();
+    let context = normalize::pipeline::GlobalSymbolContext {
+        names: options.global_names.clone(),
+        sizes: options.global_sizes.clone(),
+    };
+    normalize::pipeline::GLOBAL_SYMBOL_CONTEXT.with(|ctx| {
+        *ctx.borrow_mut() = Some(context);
+    });
     normalize_hir_function(&mut hir);
+    normalize::pipeline::GLOBAL_SYMBOL_CONTEXT.with(|ctx| {
+        *ctx.borrow_mut() = None;
+    });
     record_ghidra_action_stage(&mut build_stats, GhidraActionConcept::Normalize);
     record_ghidra_action_stage(&mut build_stats, GhidraActionConcept::PrototypeTypes);
     build_stats.merge_assign(&normalize::take_normalize_wave_stats());
