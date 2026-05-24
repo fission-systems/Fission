@@ -6,6 +6,9 @@ mod div_mod;
 mod flags_cond;
 mod simplify_algebraic;
 mod util;
+mod double_precision;
+mod three_way;
+mod conditional_move;
 
 pub(crate) use cast_wide::{
     canonicalize_integer_expr, recognize_hi_lo_extract, recognize_wide_integer_recombine,
@@ -24,3 +27,7 @@ pub(crate) use flags_cond::{
 pub(crate) use simplify_algebraic::{
     simplify_double_add, simplify_factor_common_mul, simplify_negated_const,
 };
+pub(crate) use double_precision::apply_double_precision_reconstruction_pass;
+pub(crate) use three_way::apply_three_way_compare_pass;
+pub(crate) use conditional_move::apply_conditional_move_pass;
+

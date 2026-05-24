@@ -376,10 +376,11 @@ fn multi_block_preview_lowers_canonical_if_else() {
 
     let code = render_mlil_preview(&func, "if_else_fn", 0x3500, &preview_options())
         .expect("preview render");
-    assert!(code.contains("if (!param_1) {") || code.contains("if (param_1) {"));
-    assert!(code.contains("local_10 = 1;"));
-    assert!(code.contains("} else {"));
-    assert!(code.contains("local_10 = 2;"));
+    println!("CODE IS:\n{}", code);
+    let is_ternary = code.contains("local_10 = !param_1 ? 1 : 2;") || code.contains("local_10 = param_1 ? 2 : 1;");
+    let is_ifelse = (code.contains("if (!param_1) {") && code.contains("local_10 = 1;"))
+        || (code.contains("if (param_1) {") && code.contains("local_10 = 2;"));
+    assert!(is_ternary || is_ifelse, "Expected ternary select or canonical if-else. Code:\n{}", code);
     assert!(!code.contains("goto block_3510;"));
     assert!(!code.contains("goto block_3520;"));
 }

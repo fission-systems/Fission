@@ -6,6 +6,7 @@ mod partition;
 mod ptr_arith;
 mod slots;
 mod typed_facts;
+mod split_datatype;
 
 pub(crate) use aggregate_fields::{
     apply_aggregate_alias_access_rewrite_pass, apply_aggregate_fields_pass,
@@ -16,3 +17,4 @@ pub(crate) use ptr_arith::{apply_ptr_arith_recovery_pass, apply_zero_index_deref
 pub(crate) use slots::{
     apply_memory_slot_surfacing, apply_memory_slot_surfacing_cheap, normalize_binding_initializers,
 };
+pub(crate) use split_datatype::apply_split_datatype_pass;

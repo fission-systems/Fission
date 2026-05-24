@@ -7,13 +7,13 @@
 use super::*;
 
 mod analysis;
-mod arith;
+pub(crate) mod arith;
 mod cleanup;
-mod global_opt;
+pub(crate) mod global_opt;
 mod idioms;
 mod memory;
 mod pipeline;
-mod recovery;
+pub(crate) mod recovery;
 mod rule_normalizer;
 mod subvar_flow;
 mod types;

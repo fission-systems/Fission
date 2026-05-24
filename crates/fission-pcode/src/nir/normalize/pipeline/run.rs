@@ -9,7 +9,8 @@ use super::super::arith::{
     normalize_boolean_logic, recognize_compiler_runtime_division, recognize_hi_lo_extract,
     recognize_magic_number_division, recognize_mod_div_power_of_two,
     recognize_wide_integer_recombine, simplify_double_add, simplify_factor_common_mul,
-    simplify_negated_const, simplify_subpiece_chain,
+    simplify_negated_const, simplify_subpiece_chain, apply_double_precision_reconstruction_pass,
+    apply_three_way_compare_pass, apply_conditional_move_pass,
 };
 use super::super::cleanup::single_pred_label_inline;
 use super::super::cleanup::{
@@ -28,23 +29,26 @@ use super::super::cleanup::{
 use super::super::cleanup::{collapse_loop_exit_alias_returns, prune_unreachable_after_terminal};
 use super::super::global_opt::{
     apply_bit_consume_dead_code_pass, apply_cse_pass, apply_dead_store_elimination,
-    apply_gvn_join_hoist_pass, apply_licm_pass,
+    apply_gvn_join_hoist_pass, apply_licm_pass, apply_nz_mask_simplification_pass,
     apply_post_assign_value_representative_pass, apply_redundant_load_elimination, apply_sccp_pass,
+    apply_conditional_const_pass,
 };
 use super::super::idioms::{
     apply_bitstream_idioms, apply_branch_prefix_hoist_pass, apply_call_artifact_cleanup_pass,
     apply_recurrence_to_self_recursive_call_pass, apply_security_cookie_pass,
-    apply_subflow_pruning,
+    apply_split_flow_pass, apply_subflow_pruning,
     remove_callee_save_prologue_epilogue, remove_entry_stack_scaffold_stores,
 };
 use super::super::memory::{
     apply_aggregate_alias_access_rewrite_pass, apply_aggregate_fields_pass,
     apply_memory_heritage, apply_memory_slot_surfacing, apply_memory_slot_surfacing_cheap,
     apply_ptr_arith_recovery_pass, apply_zero_index_deref_pass, normalize_binding_initializers,
+    apply_split_datatype_pass,
 };
 use super::super::recovery::{
     apply_break_continue_pass, apply_flag_recovery_pass, apply_for_loop_folding,
     apply_iv_recovery_pass, copy_propagation_pass, join_coalescing_pass,
+    apply_variable_merge_pass,
 };
 use super::super::subvar_flow::apply_subvar_flow_pass;
 use super::super::types::{
@@ -454,6 +458,15 @@ pub(crate) fn normalize_hir_function(func: &mut HirFunction) {
             prune_unused_dead_local_bindings(f);
         });
     }
+    if run_pass_logged(func, "conditional_const", perf, apply_conditional_const_pass) {
+        run_cleanup_block(func, "cleanup_conditional_const", perf, |f| {
+            cleanup_func_stmt_list(f);
+            constant_folding_pass(&mut f.body);
+            eliminate_dead_local_clobber_assigns(f);
+            prune_unused_temp_bindings(f);
+            prune_unused_dead_local_bindings(f);
+        });
+    }
     // ABI-aware entry spill → param_k promotion (HIR, after early cleanup).
     if run_pass_logged(
         func,
@@ -608,11 +621,23 @@ pub(crate) fn normalize_hir_function(func: &mut HirFunction) {
     // Module B: run def-driven, callsite-signature, and use-driven inference
     // to convergence (bounded). This avoids one-shot ordering sensitivity.
     apply_type_signature_fixed_point(func, diag, perf);
+    // Nonzero Mask propagation & simplification: calculate globally propagated non-zero masks for variables
+    // and prune redundant AND masks early (ActionNonzeroMask analog).
+    run_pass_logged(func, "nz_mask_simplification", perf, apply_nz_mask_simplification_pass);
     // Subflow / bitmask pruning: optimize redundant bit-widths and bitmasks (subflow.cc).
     run_pass_logged(func, "subflow_pruning_early", perf, apply_subflow_pruning);
     // Global subvariable flow analyzer: propagate active bitmasks globally to declare narrow subvariables.
     if run_pass_logged(func, "subvar_flow_pass", perf, apply_subvar_flow_pass) {
         run_cleanup_block(func, "cleanup_subvar_flow", perf, |f| {
+            cleanup_func_stmt_list(f);
+            defuse_dead_assignment_pass(f);
+            prune_unused_temp_bindings(f);
+            prune_unused_dead_local_bindings(f);
+        });
+    }
+    // SplitFlow: identify and split artificially joined local variables.
+    if run_pass_logged(func, "split_flow_pass", perf, apply_split_flow_pass) {
+        run_cleanup_block(func, "cleanup_split_flow", perf, |f| {
             cleanup_func_stmt_list(f);
             defuse_dead_assignment_pass(f);
             prune_unused_temp_bindings(f);
@@ -658,6 +683,18 @@ pub(crate) fn normalize_hir_function(func: &mut HirFunction) {
             apply_wide_dead_assignment_pass,
         );
         run_cleanup_block(func, "cleanup_bit_consume", perf, |f| {
+            cleanup_func_stmt_list(f);
+            prune_unused_temp_bindings(f);
+            prune_unused_dead_local_bindings(f);
+        });
+    }
+    if run_pass_logged(
+        func,
+        "conditional_move",
+        perf,
+        apply_conditional_move_pass,
+    ) {
+        run_cleanup_block(func, "cleanup_conditional_move", perf, |f| {
             cleanup_func_stmt_list(f);
             prune_unused_temp_bindings(f);
             prune_unused_dead_local_bindings(f);
@@ -852,6 +889,31 @@ pub(crate) fn normalize_hir_function(func: &mut HirFunction) {
         prune_unused_temp_bindings(func);
         prune_unused_dead_local_bindings(func);
     }
+    if run_pass_logged(
+        func,
+        "double_precision_reconstruction",
+        perf,
+        apply_double_precision_reconstruction_pass,
+    ) {
+        run_cleanup_block(func, "cleanup_double_precision", perf, |f| {
+            cleanup_func_stmt_list(f);
+            prune_unused_temp_bindings(f);
+            prune_unused_dead_local_bindings(f);
+        });
+    }
+    if run_pass_logged(
+        func,
+        "three_way_compare",
+        perf,
+        apply_three_way_compare_pass,
+    ) {
+        run_cleanup_block(func, "cleanup_three_way_compare", perf, |f| {
+            cleanup_func_stmt_list(f);
+            constant_folding_pass(&mut f.body);
+            prune_unused_temp_bindings(f);
+            prune_unused_dead_local_bindings(f);
+        });
+    }
     // Windows x64 stack-tail / variadic region lattice hook (stats; optional future folds).
     let _ = run_pass_logged(
         func,
@@ -885,6 +947,18 @@ pub(crate) fn normalize_hir_function(func: &mut HirFunction) {
                 perf,
                 apply_ptr_arith_recovery_pass,
             );
+            if run_pass_logged(func, "split_datatype", perf, apply_split_datatype_pass) {
+                run_cleanup_family_passes(
+                    func,
+                    "split_datatype_cleanup",
+                    perf,
+                    PassBudget {
+                        stmt_limit: 600,
+                        block_limit: 120,
+                        round_limit: 12,
+                    },
+                );
+            }
         }
     } else {
         wave_stats::add_memory_fact_prefilter_skip(1);
@@ -896,6 +970,7 @@ pub(crate) fn normalize_hir_function(func: &mut HirFunction) {
         perf,
         apply_zero_index_deref_pass,
     );
+    let _ = run_pass_logged(func, "variable_merge", perf, apply_variable_merge_pass);
     // Single-predecessor label inlining: reduce goto/label pairs by inlining
     // blocks that are targeted by exactly one forward unconditional goto.
     // Runs last so all other structural passes have already had their say.

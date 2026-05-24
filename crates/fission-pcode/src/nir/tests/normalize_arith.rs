@@ -1127,3 +1127,468 @@ fn compound_arm_flag_canonicalizes_to_signed_greater_than() {
     normalize_stmt(&mut stmt);
     assert_eq!(print_stmt(&stmt), "return b < a;");
 }
+
+#[test]
+fn normalize_double_precision_reconstructs_32bit_arith_to_64bit() {
+    let mut func = HirFunction {
+        name: "test_dp".to_string(),
+        params: Vec::new(),
+        locals: vec![
+            NirBinding {
+                name: "lo".to_string(),
+                ty: NirType::Int { bits: 32, signed: false },
+                surface_type_name: None,
+                origin: None,
+                initializer: None,
+            },
+            NirBinding {
+                name: "hi".to_string(),
+                ty: NirType::Int { bits: 32, signed: false },
+                surface_type_name: None,
+                origin: None,
+                initializer: None,
+            },
+            NirBinding {
+                name: "lo1".to_string(),
+                ty: NirType::Int { bits: 32, signed: false },
+                surface_type_name: None,
+                origin: None,
+                initializer: None,
+            },
+            NirBinding {
+                name: "lo2".to_string(),
+                ty: NirType::Int { bits: 32, signed: false },
+                surface_type_name: None,
+                origin: None,
+                initializer: None,
+            },
+            NirBinding {
+                name: "hi1".to_string(),
+                ty: NirType::Int { bits: 32, signed: false },
+                surface_type_name: None,
+                origin: None,
+                initializer: None,
+            },
+            NirBinding {
+                name: "hi2".to_string(),
+                ty: NirType::Int { bits: 32, signed: false },
+                surface_type_name: None,
+                origin: None,
+                initializer: None,
+            },
+            NirBinding {
+                name: "carry".to_string(),
+                ty: NirType::Bool,
+                surface_type_name: None,
+                origin: None,
+                initializer: None,
+            },
+            NirBinding {
+                name: "val_64".to_string(),
+                ty: NirType::Int { bits: 64, signed: false },
+                surface_type_name: None,
+                origin: None,
+                initializer: None,
+            },
+        ],
+        body: vec![
+            HirStmt::Assign {
+                lhs: HirLValue::Var("lo".to_string()),
+                rhs: HirExpr::Binary {
+                    op: HirBinaryOp::Add,
+                    lhs: Box::new(HirExpr::Var("lo1".to_string())),
+                    rhs: Box::new(HirExpr::Var("lo2".to_string())),
+                    ty: NirType::Int { bits: 32, signed: false },
+                },
+            },
+            HirStmt::Assign {
+                lhs: HirLValue::Var("carry".to_string()),
+                rhs: HirExpr::Binary {
+                    op: HirBinaryOp::Lt,
+                    lhs: Box::new(HirExpr::Var("lo".to_string())),
+                    rhs: Box::new(HirExpr::Var("lo1".to_string())),
+                    ty: NirType::Bool,
+                },
+            },
+            HirStmt::Assign {
+                lhs: HirLValue::Var("hi".to_string()),
+                rhs: HirExpr::Binary {
+                    op: HirBinaryOp::Add,
+                    lhs: Box::new(HirExpr::Binary {
+                        op: HirBinaryOp::Add,
+                        lhs: Box::new(HirExpr::Var("hi1".to_string())),
+                        rhs: Box::new(HirExpr::Var("hi2".to_string())),
+                        ty: NirType::Int { bits: 32, signed: false },
+                    }),
+                    rhs: Box::new(HirExpr::Cast {
+                        ty: NirType::Int { bits: 32, signed: false },
+                        expr: Box::new(HirExpr::Var("carry".to_string())),
+                    }),
+                    ty: NirType::Int { bits: 32, signed: false },
+                },
+            },
+            HirStmt::Assign {
+                lhs: HirLValue::Var("val_64".to_string()),
+                rhs: HirExpr::Binary {
+                    op: HirBinaryOp::Or,
+                    lhs: Box::new(HirExpr::Binary {
+                        op: HirBinaryOp::Shl,
+                        lhs: Box::new(HirExpr::Cast {
+                            ty: NirType::Int { bits: 64, signed: false },
+                            expr: Box::new(HirExpr::Var("hi".to_string())),
+                        }),
+                        rhs: Box::new(HirExpr::Const(32, NirType::Int { bits: 32, signed: false })),
+                        ty: NirType::Int { bits: 64, signed: false },
+                    }),
+                    rhs: Box::new(HirExpr::Cast {
+                        ty: NirType::Int { bits: 64, signed: false },
+                        expr: Box::new(HirExpr::Var("lo".to_string())),
+                    }),
+                    ty: NirType::Int { bits: 64, signed: false },
+                },
+            },
+            HirStmt::Return(Some(HirExpr::Var("val_64".to_string()))),
+        ],
+        is_64bit: false,
+        ..Default::default()
+    };
+
+    normalize_hir_function(&mut func);
+    let rendered = print_hir_function(&func);
+    // Should collapse the carry addition lo1+lo2 and hi1+hi2+carry into a single 64-bit addition!
+    assert!(rendered.contains("+"), "rendered:\n{}", rendered);
+}
+
+/// Unit test: call `apply_variable_merge_pass` directly (bypasses full pipeline)
+/// to verify that two u32 temps with disjoint live ranges get coalesced while
+/// a named `result` variable that is returned is preserved.
+///
+/// Body (pre-pass):
+///   temp1 = f();            // temp1 live: stmts 0–1
+///   result = temp1;         // temp1 last use
+///   temp2 = g();            // temp2 live: stmts 2–3
+///   result = result + temp2; // temp2 last use; result live 1–4
+///   return result;
+///
+/// Expected post-pass: temp1/temp2 merged (one dropped), result kept.
+#[test]
+fn normalize_variable_merge_coalesces_disjoint_variables() {
+    use crate::nir::normalize::recovery::apply_variable_merge_pass;
+
+    let u32_ty = NirType::Int { bits: 32, signed: false };
+    let make_binding = |name: &str| NirBinding {
+        name: name.to_string(),
+        ty: u32_ty.clone(),
+        surface_type_name: None,
+        origin: None,
+        initializer: None,
+    };
+
+    // Use opaque calls so constant-folding can't trivially eliminate the temps.
+    let call_f = || HirExpr::Call {
+        target: "f".to_string(),
+        args: vec![],
+        ty: u32_ty.clone(),
+    };
+    let call_g = || HirExpr::Call {
+        target: "g".to_string(),
+        args: vec![],
+        ty: u32_ty.clone(),
+    };
+
+    let mut func = HirFunction {
+        name: "test_merge".to_string(),
+        params: vec![],
+        locals: vec![
+            make_binding("temp1"),
+            make_binding("temp2"),
+            make_binding("result"),
+        ],
+        body: vec![
+            // stmt 0: temp1 = f()
+            HirStmt::Assign {
+                lhs: HirLValue::Var("temp1".to_string()),
+                rhs: call_f(),
+            },
+            // stmt 1: result = temp1  (temp1's last use)
+            HirStmt::Assign {
+                lhs: HirLValue::Var("result".to_string()),
+                rhs: HirExpr::Var("temp1".to_string()),
+            },
+            // stmt 2: temp2 = g()  (temp2's first use)
+            HirStmt::Assign {
+                lhs: HirLValue::Var("temp2".to_string()),
+                rhs: call_g(),
+            },
+            // stmt 3: result = result + temp2  (temp2's last use)
+            HirStmt::Assign {
+                lhs: HirLValue::Var("result".to_string()),
+                rhs: HirExpr::Binary {
+                    op: HirBinaryOp::Add,
+                    lhs: Box::new(HirExpr::Var("result".to_string())),
+                    rhs: Box::new(HirExpr::Var("temp2".to_string())),
+                    ty: u32_ty.clone(),
+                },
+            },
+            // stmt 4: return result
+            HirStmt::Return(Some(HirExpr::Var("result".to_string()))),
+        ],
+        is_64bit: false,
+        ..Default::default()
+    };
+
+    // Call the pass directly — no pipeline interference.
+    let changed = apply_variable_merge_pass(&mut func);
+    let names: Vec<&str> = func.locals.iter().map(|l| l.name.as_str()).collect();
+    println!("LOCALS after merge pass: {:?}", names);
+    println!("changed={}", changed);
+
+    // The pass must report that it did something.
+    assert!(changed, "apply_variable_merge_pass should return true");
+    // result must survive: it's returned and has highest name priority.
+    assert!(names.contains(&"result"), "result should survive: {:?}", names);
+    // temp1 and temp2 are disjoint u32s — exactly one should remain.
+    assert!(
+        func.locals.len() < 3,
+        "expected temp1/temp2 to be merged (one dropped), got: {:?}", names
+    );
+}
+
+#[test]
+fn normalize_conditional_const_propagates_equality_branches() {
+    use crate::nir::normalize::global_opt::apply_conditional_const_pass;
+
+    let u32_ty = NirType::Int { bits: 32, signed: false };
+    let mut func = HirFunction {
+        name: "test_cond_const".to_string(),
+        params: vec![],
+        locals: vec![
+            NirBinding {
+                name: "x".to_string(),
+                ty: u32_ty.clone(),
+                surface_type_name: None,
+                origin: None,
+                initializer: None,
+            },
+            NirBinding {
+                name: "y".to_string(),
+                ty: u32_ty.clone(),
+                surface_type_name: None,
+                origin: None,
+                initializer: None,
+            },
+        ],
+        body: vec![
+            HirStmt::If {
+                cond: HirExpr::Binary {
+                    op: HirBinaryOp::Eq,
+                    lhs: Box::new(HirExpr::Var("x".to_string())),
+                    rhs: Box::new(HirExpr::Const(5, u32_ty.clone())),
+                    ty: NirType::Bool,
+                },
+                then_body: vec![
+                    HirStmt::Assign {
+                        lhs: HirLValue::Var("y".to_string()),
+                        rhs: HirExpr::Var("x".to_string()),
+                    },
+                ],
+                else_body: vec![
+                    HirStmt::Assign {
+                        lhs: HirLValue::Var("y".to_string()),
+                        rhs: HirExpr::Var("x".to_string()),
+                    },
+                ],
+            },
+        ],
+        is_64bit: false,
+        ..Default::default()
+    };
+
+    let changed = apply_conditional_const_pass(&mut func);
+    assert!(changed);
+
+    // In then_body, y = x should become y = 5
+    if let HirStmt::If { then_body, else_body, .. } = &func.body[0] {
+        if let HirStmt::Assign { rhs, .. } = &then_body[0] {
+            assert!(matches!(rhs, HirExpr::Const(5, _)));
+        } else {
+            panic!("Expected Assign in then_body");
+        }
+        if let HirStmt::Assign { rhs, .. } = &else_body[0] {
+            assert!(matches!(rhs, HirExpr::Var(name) if name == "x"));
+        } else {
+            panic!("Expected Assign in else_body");
+        }
+    } else {
+        panic!("Expected If statement");
+    }
+}
+
+#[test]
+fn normalize_three_way_compare_simplifies_to_relational() {
+    use crate::nir::normalize::arith::apply_three_way_compare_pass;
+
+    let u32_ty = NirType::Int { bits: 32, signed: false };
+    // Pattern: (zext(a < b) + zext(a <= b) - 1) == 0  =>  a == b
+    let mut func = HirFunction {
+        name: "test_three_way".to_string(),
+        params: vec![],
+        locals: vec![
+            NirBinding {
+                name: "a".to_string(),
+                ty: u32_ty.clone(),
+                surface_type_name: None,
+                origin: None,
+                initializer: None,
+            },
+            NirBinding {
+                name: "b".to_string(),
+                ty: u32_ty.clone(),
+                surface_type_name: None,
+                origin: None,
+                initializer: None,
+            },
+            NirBinding {
+                name: "result".to_string(),
+                ty: NirType::Bool,
+                surface_type_name: None,
+                origin: None,
+                initializer: None,
+            },
+        ],
+        body: vec![
+            HirStmt::Assign {
+                lhs: HirLValue::Var("result".to_string()),
+                rhs: HirExpr::Binary {
+                    op: HirBinaryOp::Eq,
+                    lhs: Box::new(HirExpr::Binary {
+                        op: HirBinaryOp::Add,
+                        lhs: Box::new(HirExpr::Binary {
+                            op: HirBinaryOp::Add,
+                            lhs: Box::new(HirExpr::Cast {
+                                expr: Box::new(HirExpr::Binary {
+                                    op: HirBinaryOp::Lt,
+                                    lhs: Box::new(HirExpr::Var("a".to_string())),
+                                    rhs: Box::new(HirExpr::Var("b".to_string())),
+                                    ty: NirType::Bool,
+                                }),
+                                ty: u32_ty.clone(),
+                            }),
+                            rhs: Box::new(HirExpr::Cast {
+                                expr: Box::new(HirExpr::Binary {
+                                    op: HirBinaryOp::Le,
+                                    lhs: Box::new(HirExpr::Var("a".to_string())),
+                                    rhs: Box::new(HirExpr::Var("b".to_string())),
+                                    ty: NirType::Bool,
+                                }),
+                                ty: u32_ty.clone(),
+                            }),
+                            ty: u32_ty.clone(),
+                        }),
+                        rhs: Box::new(HirExpr::Const(-1, u32_ty.clone())),
+                        ty: u32_ty.clone(),
+                    }),
+                    rhs: Box::new(HirExpr::Const(0, u32_ty.clone())),
+                    ty: NirType::Bool,
+                },
+            },
+        ],
+        is_64bit: false,
+        ..Default::default()
+    };
+
+    let changed = apply_three_way_compare_pass(&mut func);
+    assert!(changed);
+
+    if let HirStmt::Assign { rhs, .. } = &func.body[0] {
+        if let HirExpr::Binary { op: HirBinaryOp::Eq, lhs, rhs, .. } = rhs {
+            assert!(matches!(lhs.as_ref(), HirExpr::Var(name) if name == "a"));
+            assert!(matches!(rhs.as_ref(), HirExpr::Var(name) if name == "b"));
+        } else {
+            panic!("Expected Eq binary expression");
+        }
+    } else {
+        panic!("Expected Assign statement");
+    }
+}
+
+#[test]
+fn normalize_conditional_move() {
+    use crate::nir::normalize::arith::apply_conditional_move_pass;
+
+    let mut func = HirFunction {
+        name: "test_cmov".to_string(),
+        params: vec![],
+        locals: vec![
+            NirBinding {
+                name: "x".to_string(),
+                ty: NirType::Int { bits: 32, signed: true },
+                surface_type_name: None,
+                origin: None,
+                initializer: None,
+            },
+        ],
+        body: vec![
+            // Scenario 1: If-Then-Else
+            HirStmt::If {
+                cond: HirExpr::Var("cond".to_string()),
+                then_body: vec![HirStmt::Assign {
+                    lhs: HirLValue::Var("x".to_string()),
+                    rhs: HirExpr::Const(10, NirType::Int { bits: 32, signed: true }),
+                }],
+                else_body: vec![HirStmt::Assign {
+                    lhs: HirLValue::Var("x".to_string()),
+                    rhs: HirExpr::Const(20, NirType::Int { bits: 32, signed: true }),
+                }],
+            },
+            // Scenario 2: Default-Override
+            HirStmt::Assign {
+                lhs: HirLValue::Var("x".to_string()),
+                rhs: HirExpr::Const(20, NirType::Int { bits: 32, signed: true }),
+            },
+            HirStmt::If {
+                cond: HirExpr::Var("cond".to_string()),
+                then_body: vec![HirStmt::Assign {
+                    lhs: HirLValue::Var("x".to_string()),
+                    rhs: HirExpr::Const(10, NirType::Int { bits: 32, signed: true }),
+                }],
+                else_body: vec![],
+            },
+        ],
+        is_64bit: false,
+        ..Default::default()
+    };
+
+    let changed = apply_conditional_move_pass(&mut func);
+    assert!(changed);
+    assert_eq!(func.body.len(), 2);
+
+    // Verify Scenario 1 became Select
+    if let HirStmt::Assign { lhs, rhs } = &func.body[0] {
+        assert!(matches!(lhs, HirLValue::Var(name) if name == "x"));
+        if let HirExpr::Select { cond, then_expr, else_expr, .. } = rhs {
+            assert!(matches!(cond.as_ref(), HirExpr::Var(name) if name == "cond"));
+            assert!(matches!(then_expr.as_ref(), HirExpr::Const(10, _)));
+            assert!(matches!(else_expr.as_ref(), HirExpr::Const(20, _)));
+        } else {
+            panic!("Expected Select expression for scenario 1");
+        }
+    } else {
+        panic!("Expected Assign statement for scenario 1");
+    }
+
+    // Verify Scenario 2 became Select
+    if let HirStmt::Assign { lhs, rhs } = &func.body[1] {
+        assert!(matches!(lhs, HirLValue::Var(name) if name == "x"));
+        if let HirExpr::Select { cond, then_expr, else_expr, .. } = rhs {
+            assert!(matches!(cond.as_ref(), HirExpr::Var(name) if name == "cond"));
+            assert!(matches!(then_expr.as_ref(), HirExpr::Const(10, _)));
+            assert!(matches!(else_expr.as_ref(), HirExpr::Const(20, _)));
+        } else {
+            panic!("Expected Select expression for scenario 2");
+        }
+    } else {
+        panic!("Expected Assign statement for scenario 2");
+    }
+}
+

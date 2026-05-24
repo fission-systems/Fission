@@ -367,6 +367,7 @@ fn analyze_lvalue_use(lhs: &HirLValue, var_name: &str, uses: &mut Vec<UseInfo>) 
 /// Global Subvariable Flow solver executing worklist bit constraint propagation backward and forward.
 struct SubvarFlowSolver {
     def_map: HashMap<String, HirExpr>,
+    type_map: HashMap<String, NirType>,
     multi_defined: HashSet<String>,
     varmap: HashMap<String, ReplaceVar>,
     pull_points: HashSet<String>,
@@ -389,8 +390,17 @@ impl SubvarFlowSolver {
                 None => return false,
             };
 
+            let is_signed = if let Some(ty) = self.type_map.get(&var_name) {
+                match ty {
+                    NirType::Int { signed, .. } => *signed,
+                    _ => false,
+                }
+            } else {
+                false
+            };
+
             let new_name = format!("{}_sub{}", var_name, bitsize);
-            let new_type = NirType::Int { bits: bitsize, signed: false };
+            let new_type = NirType::Int { bits: bitsize, signed: is_signed };
             self.varmap.insert(
                 var_name.clone(),
                 ReplaceVar {
@@ -760,7 +770,14 @@ pub(crate) fn apply_subvar_flow_pass(func: &mut HirFunction) -> bool {
     let mut multi_defined = HashSet::new();
     collect_assignments(&func.body, &mut assigns, &mut multi_defined);
 
-    let mut candidates = Vec::new();
+    let mut type_map = HashMap::new();
+    for binding in func.params.iter().chain(func.locals.iter()) {
+        type_map.insert(binding.name.clone(), binding.ty.clone());
+    }
+
+    let nz_masks = crate::nir::normalize::global_opt::compute_nz_masks(func);
+    let mut candidate_set = HashSet::new();
+
     for assign in &assigns {
         if multi_defined.contains(&assign.lhs) {
             continue;
@@ -769,12 +786,12 @@ pub(crate) fn apply_subvar_flow_pass(func: &mut HirFunction) -> bool {
             HirExpr::Binary { op: HirBinaryOp::And, lhs, rhs, .. } => {
                 if let (HirExpr::Var(name), HirExpr::Const(mask, _)) = (&**lhs, &**rhs) {
                     if is_valid_subvar_mask(*mask as u64) {
-                        candidates.push((name.clone(), *mask as u64));
+                        candidate_set.insert((name.clone(), *mask as u64));
                     }
                 }
                 if let (HirExpr::Const(mask, _), HirExpr::Var(name)) = (&**lhs, &**rhs) {
                     if is_valid_subvar_mask(*mask as u64) {
-                        candidates.push((name.clone(), *mask as u64));
+                        candidate_set.insert((name.clone(), *mask as u64));
                     }
                 }
             }
@@ -783,7 +800,7 @@ pub(crate) fn apply_subvar_flow_pass(func: &mut HirFunction) -> bool {
                     if let NirType::Int { bits, .. } = ty {
                         if *bits == 8 || *bits == 16 || *bits == 32 {
                             let mask = (1u64 << bits) - 1;
-                            candidates.push((name.clone(), mask));
+                            candidate_set.insert((name.clone(), mask));
                         }
                     }
                 }
@@ -791,6 +808,22 @@ pub(crate) fn apply_subvar_flow_pass(func: &mut HirFunction) -> bool {
             _ => {}
         }
     }
+
+    for (name, mask) in &nz_masks {
+        if is_valid_subvar_mask(*mask) {
+            if let Some(ty) = type_map.get(name) {
+                if let NirType::Int { bits: w, .. } = ty {
+                    if let Some((bitsize, _)) = compute_sizes(*mask) {
+                        if *w > bitsize {
+                            candidate_set.insert((name.clone(), *mask));
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    let candidates: Vec<(String, u64)> = candidate_set.into_iter().collect();
 
     if candidates.is_empty() {
         return false;
@@ -807,6 +840,7 @@ pub(crate) fn apply_subvar_flow_pass(func: &mut HirFunction) -> bool {
     for (var_name, mask) in candidates {
         let mut solver = SubvarFlowSolver {
             def_map: def_map.clone(),
+            type_map: type_map.clone(),
             multi_defined: multi_defined.clone(),
             varmap: HashMap::new(),
             pull_points: HashSet::new(),

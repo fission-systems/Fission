@@ -12,6 +12,13 @@ from benchmark.source_semantic_benchmark.utils import (
 
 
 def file_cache_fingerprint(path: Path) -> str:
+    import os
+    if os.environ.get("FISSION_IGNORE_DECOMP_FINGERPRINT") == "1" and "fission_cli" in path.name:
+        try:
+            resolved = path.resolve()
+        except OSError:
+            resolved = path
+        return f"{resolved}:static-fingerprint"
     try:
         resolved = path.resolve()
         stat = resolved.stat()

@@ -732,6 +732,8 @@ def row_for_ghidra_function(
 
 def run_benchmark(args: argparse.Namespace) -> int:
     os.environ["FISSION_FORCE_IN_PROCESS"] = "1"
+    if args.ignore_decomp_fingerprint:
+        os.environ["FISSION_IGNORE_DECOMP_FINGERPRINT"] = "1"
     start = time.perf_counter()
     created_at = utc_now()
     manifest_path = resolve_path(args.manifest)
@@ -776,10 +778,22 @@ def run_benchmark(args: argparse.Namespace) -> int:
     total_entry_count = len(entries)
     total_fn_processed = 0
     _stderr = sys.stderr
-    for entry_index, entry in enumerate(entries):
+    print_lock = threading.Lock()
+    rows_lock = threading.Lock()
+    ghidra_rows_lock = threading.Lock()
+    stats_lock = threading.Lock()
+
+    def setup_and_prewarm_entry(entry_idx_and_entry: tuple[int, BenchmarkEntry]) -> dict[str, Any] | None:
+        entry_index, entry = entry_idx_and_entry
         entry_start = time.perf_counter()
         entry_label = entry.binary_path.name
-        all_source_functions = extract_source_functions(entry.source_path, entry.language)
+        try:
+            all_source_functions = extract_source_functions(entry.source_path, entry.language)
+        except Exception as e:
+            with print_lock:
+                print(f"[{entry_index + 1}/{total_entry_count}] Error extracting source functions for {entry_label}: {e}", file=_stderr)
+            return None
+
         source_functions = filter_source_functions(all_source_functions, args.function_name)
         source_functions_by_name = {
             normalize_name(func.name): func
@@ -795,7 +809,6 @@ def run_benchmark(args: argparse.Namespace) -> int:
             list_cache_stats,
         )
         list_elapsed = time.perf_counter() - list_start
-        phase_list_sec += list_elapsed
         source_functions, suppressed_for_entry = filter_inlined_static_source_functions(
             source_functions,
             all_source_functions,
@@ -803,38 +816,18 @@ def run_benchmark(args: argparse.Namespace) -> int:
             explicit_function_filter=bool(args.function_name),
             fission_error=fission_error,
         )
-        for suppressed in suppressed_for_entry:
-            suppressed_static_inline_rows.append(
-                {
-                    "entry_id": entry.id,
-                    "source_path": rel(entry.source_path),
-                    "binary_path": rel(entry.binary_path),
-                    **suppressed,
-                }
-            )
         source_functions = select_source_functions(
             source_functions,
             fission_funcs,
             args.limit_functions,
             fission_error,
         )
-        source_row_selection_entries.append(
-            {
-                "entry_id": entry.id,
-                "source_path": rel(entry.source_path),
-                "binary_path": rel(entry.binary_path),
-                "extracted_source_function_count": len(all_source_functions),
-                "extracted_static_source_function_count": sum(1 for func in all_source_functions if func.is_static),
-                "filtered_source_function_count": len(filter_source_functions(all_source_functions, args.function_name)),
-                "suppressed_static_inline_helper_count": len(suppressed_for_entry),
-                "selected_source_function_count": len(source_functions),
-                "listed_binary_function_count": len(fission_funcs),
-                "list_error": fission_error,
-            }
-        )
-        ghidra_funcs: list[FissionFunction] = []
-        ghidra_by_address: dict[str, dict[str, Any]] = {}
-        ghidra_error: str | None = None
+
+        ghidra_funcs = []
+        ghidra_by_address = {}
+        ghidra_error = None
+        ghidra_export_record = None
+        ghidra_rows_local = []
         if args.include_ghidra_reference and ghidra_home is not None:
             ghidra_export = run_ghidra_reference_export(
                 entry.binary_path,
@@ -843,25 +836,23 @@ def run_benchmark(args: argparse.Namespace) -> int:
                 output_dir,
                 entry.id,
             )
-            ghidra_reference_exports.append(
-                {
-                    "entry_id": entry.id,
-                    "binary_path": rel(entry.binary_path),
-                    "success": ghidra_export.get("success"),
-                    "failure_kind": ghidra_export.get("failure_kind"),
-                    "failure_detail": ghidra_export.get("failure_detail"),
-                    "function_count": ghidra_export.get("function_count", 0),
-                    "artifact_path": ghidra_export.get("artifact_path"),
-                    "wall_sec": ghidra_export.get("wall_sec"),
-                    "command": ghidra_export.get("command"),
-                }
-            )
+            ghidra_export_record = {
+                "entry_id": entry.id,
+                "binary_path": rel(entry.binary_path),
+                "success": ghidra_export.get("success"),
+                "failure_kind": ghidra_export.get("failure_kind"),
+                "failure_detail": ghidra_export.get("failure_detail"),
+                "function_count": ghidra_export.get("function_count", 0),
+                "artifact_path": ghidra_export.get("artifact_path"),
+                "wall_sec": ghidra_export.get("wall_sec"),
+                "command": ghidra_export.get("command"),
+            }
             if ghidra_export.get("success"):
                 ghidra_funcs, ghidra_by_address = ghidra_function_index(ghidra_export.get("functions") or [])
             else:
                 ghidra_error = str(ghidra_export.get("failure_kind") or "ghidra_reference_failed")
             for func in source_functions:
-                ghidra_rows.append(
+                ghidra_rows_local.append(
                     row_for_ghidra_function(
                         entry,
                         func,
@@ -879,6 +870,7 @@ def run_benchmark(args: argparse.Namespace) -> int:
                         fuzz_cases=args.fuzz_cases,
                     )
                 )
+
         prewarm_decomp_cache_for_entry(
             entry,
             source_functions,
@@ -892,110 +884,176 @@ def run_benchmark(args: argparse.Namespace) -> int:
             decomp_cache_lock,
             decomp_cache_stats,
         )
-        fn_count = len(source_functions)
-        print(f"[{entry_index + 1}/{total_entry_count}] {entry_label}: {fn_count} functions  list={list_elapsed:.2f}s", file=_stderr)
-        if jobs == 1 or fn_count <= 1:
-            for fn_idx, func in enumerate(source_functions):
-                fn_start = time.perf_counter()
-                row = row_for_function(
-                    entry,
-                    func,
-                    source_functions_by_name,
-                    fission_funcs,
-                    fission_error,
-                    fission_bin,
-                    args.timeout_sec,
-                    host_execution,
-                    decomp_cache,
-                    decomp_cache_lock,
-                    decomp_cache_stats,
-                    behavior_cache,
-                    behavior_cache_lock,
-                    behavior_cache_stats,
-                    args.include_debug_decomp,
-                    output_dir,
-                    enable_sanitizer=args.enable_sanitizer,
-                    fuzz_cases=args.fuzz_cases,
-                )
-                rows.append(row)
-                fn_elapsed = time.perf_counter() - fn_start
-                d_sec = float(row.get("decomp_wall_sec") or 0.0)
-                b_sec = float((row.get("behavior") or {}).get("wall_sec") or 0.0)
-                phase_decomp_sec += d_sec
-                phase_behavior_sec += b_sec
-                total_fn_processed += 1
-                sem_pct = row.get("semantic_score_percent", "?")
-                beh_st = (row.get("behavior") or {}).get("status", "?")
-                addr = row.get("address") or "unmapped"
-                print(
-                    f"  [{fn_idx + 1}/{fn_count}] {func.name} @ {addr}"
-                    f"  decomp={d_sec:.2f}s  behavior={b_sec:.2f}s  total={fn_elapsed:.2f}s"
-                    f"  semantic={sem_pct}  behavior_status={beh_st}",
-                    file=_stderr,
-                )
-            entry_elapsed = time.perf_counter() - entry_start
-            entry_pass = sum(1 for r in rows[-fn_count:] if (r.get("behavior") or {}).get("status") == "pass")
-            print(
-                f"[{entry_index + 1}/{total_entry_count}] ✓ {entry_label}"
-                f"  {entry_pass}/{fn_count} pass  entry_time={entry_elapsed:.2f}s",
-                file=_stderr,
-            )
-            continue
 
-        entry_rows: list[tuple[int, dict[str, Any]]] = []
+        source_row_selection_entry = {
+            "entry_id": entry.id,
+            "source_path": rel(entry.source_path),
+            "binary_path": rel(entry.binary_path),
+            "extracted_source_function_count": len(all_source_functions),
+            "extracted_static_source_function_count": sum(1 for func in all_source_functions if func.is_static),
+            "filtered_source_function_count": len(filter_source_functions(all_source_functions, args.function_name)),
+            "suppressed_static_inline_helper_count": len(suppressed_for_entry),
+            "selected_source_function_count": len(source_functions),
+            "listed_binary_function_count": len(fission_funcs),
+            "list_error": fission_error,
+        }
+
+        suppressed_rows_for_entry = []
+        for suppressed in suppressed_for_entry:
+            suppressed_rows_for_entry.append({
+                "entry_id": entry.id,
+                "source_path": rel(entry.source_path),
+                "binary_path": rel(entry.binary_path),
+                **suppressed,
+            })
+
+        fn_count = len(source_functions)
+        with print_lock:
+            print(f"[{entry_index + 1}/{total_entry_count}] {entry_label}: {fn_count} functions  list={list_elapsed:.2f}s", file=_stderr)
+
+        return {
+            "entry_index": entry_index,
+            "entry": entry,
+            "source_functions": source_functions,
+            "source_functions_by_name": source_functions_by_name,
+            "fission_funcs": fission_funcs,
+            "fission_error": fission_error,
+            "ghidra_rows": ghidra_rows_local,
+            "ghidra_export_record": ghidra_export_record,
+            "source_row_selection_entry": source_row_selection_entry,
+            "suppressed_rows": suppressed_rows_for_entry,
+            "list_elapsed": list_elapsed,
+            "entry_start": entry_start,
+        }
+
+    # 1. Setup and prewarm all entries in parallel
+    setup_results = []
+    with ThreadPoolExecutor(max_workers=jobs) as executor:
+        futures = {
+            executor.submit(setup_and_prewarm_entry, (idx, entry)): idx
+            for idx, entry in enumerate(entries)
+        }
+        for future in as_completed(futures):
+            res = future.result()
+            if res is not None:
+                setup_results.append(res)
+
+    setup_results.sort(key=lambda x: x["entry_index"])
+
+    for res in setup_results:
+        phase_list_sec += res["list_elapsed"]
+        if res["ghidra_export_record"] is not None:
+            ghidra_reference_exports.append(res["ghidra_export_record"])
+        ghidra_rows.extend(res["ghidra_rows"])
+        source_row_selection_entries.append(res["source_row_selection_entry"])
+        suppressed_static_inline_rows.extend(res["suppressed_rows"])
+
+    # 2. Build task list
+    eval_tasks = []
+    entry_fn_counts = {}
+    entry_start_times = {}
+    for res in setup_results:
+        entry_idx = res["entry_index"]
+        entry_fn_counts[entry_idx] = len(res["source_functions"])
+        entry_start_times[entry_idx] = res["entry_start"]
+        for fn_idx, func in enumerate(res["source_functions"]):
+            eval_tasks.append({
+                "entry_index": entry_idx,
+                "entry": res["entry"],
+                "func": func,
+                "source_functions_by_name": res["source_functions_by_name"],
+                "fission_funcs": res["fission_funcs"],
+                "fission_error": res["fission_error"],
+                "fn_idx": fn_idx,
+            })
+
+    total_functions = len(eval_tasks)
+    collected_rows = []
+    entry_completed_counts = Counter()
+    entry_passed_counts = Counter()
+
+    def eval_worker(task):
+        entry_index = task["entry_index"]
+        entry = task["entry"]
+        func = task["func"]
+        source_functions_by_name = task["source_functions_by_name"]
+        fission_funcs = task["fission_funcs"]
+        fission_error = task["fission_error"]
+        fn_idx = task["fn_idx"]
+
+        fn_start = time.perf_counter()
+        row = row_for_function(
+            entry,
+            func,
+            source_functions_by_name,
+            fission_funcs,
+            fission_error,
+            fission_bin,
+            args.timeout_sec,
+            host_execution,
+            decomp_cache,
+            decomp_cache_lock,
+            decomp_cache_stats,
+            behavior_cache,
+            behavior_cache_lock,
+            behavior_cache_stats,
+            args.include_debug_decomp,
+            output_dir,
+            enable_sanitizer=args.enable_sanitizer,
+            fuzz_cases=args.fuzz_cases,
+        )
+        fn_elapsed = time.perf_counter() - fn_start
+        return entry_index, fn_idx, row, fn_elapsed
+
+    if eval_tasks:
         with ThreadPoolExecutor(max_workers=jobs) as executor:
-            futures = {
-                executor.submit(
-                    row_for_function,
-                    entry,
-                    func,
-                    source_functions_by_name,
-                    fission_funcs,
-                    fission_error,
-                    fission_bin,
-                    args.timeout_sec,
-                    host_execution,
-                    decomp_cache,
-                    decomp_cache_lock,
-                    decomp_cache_stats,
-                    behavior_cache,
-                    behavior_cache_lock,
-                    behavior_cache_stats,
-                    args.include_debug_decomp,
-                    output_dir,
-                    enable_sanitizer=args.enable_sanitizer,
-                    fuzz_cases=args.fuzz_cases,
-                ): index
-                for index, func in enumerate(source_functions)
-            }
+            futures = {executor.submit(eval_worker, task): task for task in eval_tasks}
             for future in as_completed(futures):
-                idx = futures[future]
-                row = future.result()
-                entry_rows.append((idx, row))
+                entry_index, fn_idx, row, fn_elapsed = future.result()
                 d_sec = float(row.get("decomp_wall_sec") or 0.0)
                 b_sec = float((row.get("behavior") or {}).get("wall_sec") or 0.0)
-                phase_decomp_sec += d_sec
-                phase_behavior_sec += b_sec
-                total_fn_processed += 1
+
+                with stats_lock:
+                    phase_decomp_sec += d_sec
+                    phase_behavior_sec += b_sec
+                    total_fn_processed += 1
+                    current_processed = total_fn_processed
+
+                    entry_completed_counts[entry_index] += 1
+                    if (row.get("behavior") or {}).get("status") == "pass":
+                        entry_passed_counts[entry_index] += 1
+                    is_entry_done = (entry_completed_counts[entry_index] == entry_fn_counts[entry_index])
+
                 fn_name = row.get("function_name", "?")
                 addr = row.get("address") or "unmapped"
                 sem_pct = row.get("semantic_score_percent", "?")
                 beh_st = (row.get("behavior") or {}).get("status", "?")
-                print(
-                    f"  [{len(entry_rows)}/{fn_count}] {fn_name} @ {addr}"
-                    f"  decomp={d_sec:.2f}s  behavior={b_sec:.2f}s"
-                    f"  semantic={sem_pct}  behavior_status={beh_st}",
-                    file=_stderr,
-                )
-        sorted_entry_rows = sorted(entry_rows, key=lambda item: item[0])
-        rows.extend(row for _index, row in sorted_entry_rows)
-        entry_elapsed = time.perf_counter() - entry_start
-        entry_pass = sum(1 for _, r in sorted_entry_rows if (r.get("behavior") or {}).get("status") == "pass")
-        print(
-            f"[{entry_index + 1}/{total_entry_count}] ✓ {entry_label}"
-            f"  {entry_pass}/{fn_count} pass  entry_time={entry_elapsed:.2f}s",
-            file=_stderr,
-        )
+                entry_label = entries[entry_index].binary_path.name
+
+                with print_lock:
+                    print(
+                        f"  [{current_processed}/{total_functions}] {entry_label}:{fn_name} @ {addr}"
+                        f"  decomp={d_sec:.2f}s  behavior={b_sec:.2f}s  total={fn_elapsed:.2f}s"
+                        f"  semantic={sem_pct}  behavior_status={beh_st}",
+                        file=_stderr,
+                    )
+
+                if is_entry_done:
+                    fn_count = entry_fn_counts[entry_index]
+                    entry_pass = entry_passed_counts[entry_index]
+                    entry_elapsed = time.perf_counter() - entry_start_times[entry_index]
+                    with print_lock:
+                        print(
+                            f"[{entry_index + 1}/{total_entry_count}] ✓ {entry_label}"
+                            f"  {entry_pass}/{fn_count} pass  entry_time={entry_elapsed:.2f}s",
+                            file=_stderr,
+                        )
+
+                with rows_lock:
+                    collected_rows.append((entry_index, fn_idx, row))
+
+        collected_rows.sort(key=lambda x: (x[0], x[1]))
+        rows = [r for _, _, r in collected_rows]
 
     attach_debug_repro_commands(rows, fission_bin, output_dir)
     summary = summarize(rows, manifest_name, entries)
@@ -1995,6 +2053,11 @@ def parse_args() -> argparse.Namespace:
         "--no-decomp-cache",
         action="store_true",
         help="Disable the persistent decompile-result cache; the in-run memory cache remains enabled",
+    )
+    parser.add_argument(
+        "--ignore-decomp-fingerprint",
+        action="store_true",
+        help="Ignore fission_cli binary size/mtime changes in cache keys to force-reuse cached decompile results",
     )
     parser.add_argument(
         "--list-cache-file",
