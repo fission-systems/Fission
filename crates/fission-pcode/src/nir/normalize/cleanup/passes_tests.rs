@@ -776,3 +776,118 @@ fn inline_single_use_temps_keeps_unknown_call_out_of_predicate() {
     assert!(!inline_single_use_temps(&mut stmts, &HashSet::new()));
     assert_eq!(stmts.len(), 2);
 }
+
+#[test]
+fn xor_swap_recovers_three_xor_statements() {
+    let mut func = HirFunction {
+        name: "test_xor_swap".to_string(),
+        locals: vec![
+            NirBinding {
+                name: "a".to_string(),
+                ty: int(32),
+                surface_type_name: None,
+                origin: None,
+                initializer: None,
+            },
+            NirBinding {
+                name: "b".to_string(),
+                ty: int(32),
+                surface_type_name: None,
+                origin: None,
+                initializer: None,
+            },
+        ],
+        body: vec![
+            HirStmt::Assign {
+                lhs: HirLValue::Var("a".to_string()),
+                rhs: HirExpr::Binary {
+                    op: HirBinaryOp::Xor,
+                    lhs: Box::new(HirExpr::Var("a".to_string())),
+                    rhs: Box::new(HirExpr::Var("b".to_string())),
+                    ty: int(32),
+                },
+            },
+            HirStmt::Assign {
+                lhs: HirLValue::Var("b".to_string()),
+                rhs: HirExpr::Binary {
+                    op: HirBinaryOp::Xor,
+                    lhs: Box::new(HirExpr::Var("b".to_string())),
+                    rhs: Box::new(HirExpr::Var("a".to_string())),
+                    ty: int(32),
+                },
+            },
+            HirStmt::Assign {
+                lhs: HirLValue::Var("a".to_string()),
+                rhs: HirExpr::Binary {
+                    op: HirBinaryOp::Xor,
+                    lhs: Box::new(HirExpr::Var("a".to_string())),
+                    rhs: Box::new(HirExpr::Var("b".to_string())),
+                    ty: int(32),
+                },
+            },
+        ],
+        params: Vec::new(),
+        return_type: NirType::Unknown,
+        surface_return_type_name: None,
+        calling_convention: Default::default(),
+        is_64bit: true,
+        suppress_entry_register_params: false,
+        callee_observed_max_arity: Default::default(),
+        callee_summaries: Default::default(),
+    };
+
+    assert!(crate::nir::normalize::idioms::apply_xor_swap_pass(&mut func));
+    assert_eq!(func.body.len(), 3);
+    assert_eq!(func.locals.len(), 3); // a, b, and tmp_swap_2
+    assert!(matches!(&func.body[0], HirStmt::Assign { lhs: HirLValue::Var(tmp), rhs: HirExpr::Var(a) } if tmp == "tmp_swap_2" && a == "a"));
+    assert!(matches!(&func.body[1], HirStmt::Assign { lhs: HirLValue::Var(a), rhs: HirExpr::Var(b) } if a == "a" && b == "b"));
+    assert!(matches!(&func.body[2], HirStmt::Assign { lhs: HirLValue::Var(b), rhs: HirExpr::Var(tmp) } if b == "b" && tmp == "tmp_swap_2"));
+}
+
+#[test]
+fn switch_norm_folds_range_check_guard() {
+    let mut func = HirFunction {
+        name: "test_switch_norm".to_string(),
+        body: vec![
+            HirStmt::If {
+                cond: HirExpr::Binary {
+                    op: HirBinaryOp::Lt,
+                    lhs: Box::new(HirExpr::Var("x".to_string())),
+                    rhs: Box::new(HirExpr::Const(5, int(32))),
+                    ty: NirType::Bool,
+                },
+                then_body: vec![
+                    HirStmt::Switch {
+                        expr: HirExpr::Var("x".to_string()),
+                        cases: vec![
+                            HirSwitchCase { values: vec![1], body: vec![HirStmt::Return(Some(HirExpr::Const(10, int(32))))] }
+                        ],
+                        default: Vec::new(),
+                    }
+                ],
+                else_body: vec![
+                    HirStmt::Return(Some(HirExpr::Const(20, int(32))))
+                ],
+            }
+        ],
+        params: Vec::new(),
+        locals: Vec::new(),
+        return_type: NirType::Unknown,
+        surface_return_type_name: None,
+        calling_convention: Default::default(),
+        is_64bit: true,
+        suppress_entry_register_params: false,
+        callee_observed_max_arity: Default::default(),
+        callee_summaries: Default::default(),
+    };
+
+    assert!(apply_switch_norm_pass(&mut func));
+    assert_eq!(func.body.len(), 1);
+    let HirStmt::Switch { expr, cases, default } = &func.body[0] else {
+        panic!("expected switch statement");
+    };
+    assert_eq!(expr, &HirExpr::Var("x".to_string()));
+    assert_eq!(cases.len(), 1);
+    assert_eq!(default.len(), 1);
+    assert!(matches!(&default[0], HirStmt::Return(Some(HirExpr::Const(20, _)))));
+}

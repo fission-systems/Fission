@@ -8,6 +8,7 @@ mod recurrence;
 mod security_cookie;
 mod split_flow;
 mod subflow;
+mod xor_swap;
 
 pub(crate) use bitstream::apply_bitstream_idioms;
 pub(crate) use branch_hoist::apply_branch_prefix_hoist_pass;
@@ -19,3 +20,4 @@ pub(crate) use recurrence::apply_recurrence_to_self_recursive_call_pass;
 pub(crate) use security_cookie::apply_security_cookie_pass;
 pub(crate) use split_flow::apply_split_flow_pass;
 pub(crate) use subflow::apply_subflow_pruning;
+pub(crate) use xor_swap::apply_xor_swap_pass;

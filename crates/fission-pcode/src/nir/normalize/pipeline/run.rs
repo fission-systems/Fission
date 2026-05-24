@@ -25,7 +25,7 @@ use super::super::cleanup::{
     inline_single_use_temps, promote_guarded_jump_target_tail, prune_unused_dead_local_bindings,
     prune_unused_temp_bindings, remove_unreferenced_leading_labels,
     simplify_empty_and_constant_ifs, simplify_empty_and_constant_ifs_recursive,
-    simplify_fallthrough_edges, strip_redundant_assign_casts,
+    simplify_fallthrough_edges, strip_redundant_assign_casts, apply_switch_norm_pass,
 };
 use super::super::cleanup::{collapse_loop_exit_alias_returns, prune_unreachable_after_terminal};
 use super::super::global_opt::{
@@ -38,7 +38,7 @@ use super::super::idioms::{
     apply_bitstream_idioms, apply_branch_prefix_hoist_pass, apply_call_artifact_cleanup_pass,
     apply_recurrence_to_self_recursive_call_pass, apply_security_cookie_pass,
     apply_split_flow_pass, apply_subflow_pruning,
-    remove_callee_save_prologue_epilogue, remove_entry_stack_scaffold_stores,
+    remove_callee_save_prologue_epilogue, remove_entry_stack_scaffold_stores, apply_xor_swap_pass,
 };
 use super::super::memory::{
     apply_aggregate_alias_access_rewrite_pass, apply_aggregate_fields_pass,
@@ -696,6 +696,30 @@ pub(crate) fn normalize_hir_function(func: &mut HirFunction) {
         apply_conditional_move_pass,
     ) {
         run_cleanup_block(func, "cleanup_conditional_move", perf, |f| {
+            cleanup_func_stmt_list(f);
+            prune_unused_temp_bindings(f);
+            prune_unused_dead_local_bindings(f);
+        });
+    }
+    if run_pass_logged(
+        func,
+        "xor_swap",
+        perf,
+        apply_xor_swap_pass,
+    ) {
+        run_cleanup_block(func, "cleanup_xor_swap", perf, |f| {
+            cleanup_func_stmt_list(f);
+            prune_unused_temp_bindings(f);
+            prune_unused_dead_local_bindings(f);
+        });
+    }
+    if run_pass_logged(
+        func,
+        "switch_norm",
+        perf,
+        apply_switch_norm_pass,
+    ) {
+        run_cleanup_block(func, "cleanup_switch_norm", perf, |f| {
             cleanup_func_stmt_list(f);
             prune_unused_temp_bindings(f);
             prune_unused_dead_local_bindings(f);

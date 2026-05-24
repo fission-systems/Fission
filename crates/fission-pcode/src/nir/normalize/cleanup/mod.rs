@@ -5,6 +5,7 @@ mod temp_var;
 mod casts;
 mod loops_conds;
 mod control_flow;
+mod switch_norm;
 
 // Re-export all public passes from submodules so the cleanup module's
 // public API surface remains unchanged.
@@ -31,6 +32,7 @@ pub(crate) use control_flow::{
 
 // Re-export utility functions used by other modules outside cleanup.
 pub(crate) use utils::expr_has_side_effects;
+pub(crate) use switch_norm::apply_switch_norm_pass;
 
 #[cfg(test)]
 #[path = "passes_tests.rs"]
