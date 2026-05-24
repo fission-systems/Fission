@@ -189,6 +189,131 @@ While Fission succeeds in 100% control-flow and structured block recovery for th
 2. **Variable/Stack Merging**: Minor differences in how multi-SSA variables are merged compared to Ghidra's `HighVariable` merger.
 3. **Literal Formatting**: Differences in constant folding and hex/decimal representations.
 
+### Actual Decompilation Output Comparison
+
+Here are side-by-side pseudocode comparisons demonstrating Fission's current capabilities and gaps.
+
+#### Example 1: `bit_reverse` in `bitops_and_control_flow.exe` (x86-64 PE, 60.87% similarity)
+A helper function containing a `do-while` loop. Fission successfully recovers the control flow graph, the loop structure, the division/modulo arithmetic, and the function prototype.
+
+**Fission Output:**
+```c
+uint bit_reverse(uint param_1)
+{
+    ulonglong home_0;
+    ulonglong rax;
+    uint uVar9;
+    ulonglong xVar0;
+
+    xVar0 = 32;
+    rax = 0;
+    do {
+        uVar9 = param_1;
+        rax *= 2;
+        param_1 /= 2;
+        uVar9 %= 2;
+        rax |= uVar9;
+        xVar0--;
+    } while (xVar0 != 1);
+    return rax;
+}
+```
+
+**Ghidra Output:**
+```c
+uint32_t bit_reverse(uint32_t value)
+{
+  uint uVar1;
+  int iVar2;
+  
+  iVar2 = 0x20;
+  uVar1 = 0;
+  do {
+    uVar1 = uVar1 * 2 | value & 1;
+    iVar2 = iVar2 + -1;
+    value = value >> 1;
+  } while (iVar2 != 0);
+  return uVar1;
+}
+```
+
+#### Example 2: `authenticate` in `fauxware` (i386 ELF, 50.13% similarity)
+A function showing structural and naming differences. Fission recovers the basic local stack frame and check blocks, but displays typical decompiler gaps such as:
+- Unresolved PLT symbols (`sub_80483e0` instead of `strcmp`, etc.)
+- Brittle parameter/arguments extraction (using registers directly instead of function arguments)
+- Fallback to labels (`goto`) instead of nested `if-else` structuring.
+
+**Fission Output:**
+```c
+void authenticate(void)
+{
+    uint local_30;
+    uint local_2c;
+    uint local_1c;
+    uchar local_d;
+    uint param_8;
+    uint param_c;
+    uint * slot_14 = (uint *)((uint8_t *)(a1) + 20);
+
+    local_2c = param_8;
+    local_30 = param_c;
+    param_c = *slot_14;
+    local_d = 0;
+    sub_80483e0(local_30);
+    if (local_30) {
+        goto block_8048564;
+    }
+    goto block_80485b6;
+block_8048564:
+    sub_8048450(local_2c);
+    local_1c = local_2c;
+    param_8 = 8;
+    sub_80483f0(local_1c);
+    sub_80483e0(local_30);
+block_80485b6:
+    local_2c = param_c ^ *slot_14;
+    if (!local_2c) {
+        return;
+    }
+    sub_8048410();
+}
+```
+
+**Ghidra Output:**
+```c
+undefined4 authenticate(char *param_1,char *param_2)
+{
+  int iVar1;
+  undefined4 uVar2;
+  int in_GS_OFFSET;
+  char local_19 [8];
+  undefined1 local_11;
+  int local_10;
+  
+  local_10 = *(int *)(in_GS_OFFSET + 0x14);
+  local_11 = 0;
+  iVar1 = strcmp(param_2,sneaky);
+  if (iVar1 == 0) {
+    uVar2 = 1;
+  }
+  else {
+    iVar1 = open(param_1,0);
+    read(iVar1,local_19,8);
+    iVar1 = strcmp(param_2,local_19);
+    if (iVar1 == 0) {
+      uVar2 = 1;
+    }
+    else {
+      uVar2 = 0;
+    }
+  }
+  if (local_10 != *(int *)(in_GS_OFFSET + 0x14)) {
+    __stack_chk_fail();
+  }
+  return uVar2;
+}
+```
+
 ---
 
 ## Repository Layout
