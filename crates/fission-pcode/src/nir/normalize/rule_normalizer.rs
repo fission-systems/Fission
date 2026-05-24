@@ -255,6 +255,39 @@ impl Rule for RuleCollapseZeroOffset {
     }
 }
 
+struct RuleSimplifyMulToShl;
+
+impl Rule for RuleSimplifyMulToShl {
+    fn name(&self) -> &'static str { "simplify_mul_to_shl" }
+
+    fn apply_expr(&self, expr: &mut HirExpr) -> bool {
+        if let HirExpr::Binary { op: HirBinaryOp::Mul, lhs, rhs, ty } = expr {
+            match (lhs.as_ref(), rhs.as_ref()) {
+                (other, HirExpr::Const(2, _)) => {
+                    *expr = HirExpr::Binary {
+                        op: HirBinaryOp::Shl,
+                        lhs: Box::new(other.clone()),
+                        rhs: Box::new(HirExpr::Const(1, ty.clone())),
+                        ty: ty.clone(),
+                    };
+                    return true;
+                }
+                (HirExpr::Const(2, _), other) => {
+                    *expr = HirExpr::Binary {
+                        op: HirBinaryOp::Shl,
+                        lhs: Box::new(other.clone()),
+                        rhs: Box::new(HirExpr::Const(1, ty.clone())),
+                        ty: ty.clone(),
+                    };
+                    return true;
+                }
+                _ => {}
+            }
+        }
+        false
+    }
+}
+
 /// Applies a list of rules to the function AST iteratively until convergence.
 pub(crate) fn apply_rule_normalization(func: &mut HirFunction) -> bool {
     let rules: Vec<Box<dyn Rule>> = vec![
@@ -263,6 +296,7 @@ pub(crate) fn apply_rule_normalization(func: &mut HirFunction) -> bool {
         Box::new(RuleBitwiseIdentities),
         Box::new(RuleLogicalIdentities),
         Box::new(RuleCollapseZeroOffset),
+        Box::new(RuleSimplifyMulToShl),
     ];
 
     let mut changed = false;

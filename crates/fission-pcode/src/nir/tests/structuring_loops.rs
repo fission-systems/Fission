@@ -332,10 +332,10 @@ fn do_while_preview_lowers_multi_block_body() {
 
     let code = render_mlil_preview(&func, "do_while_chain_fn", 0x4200, &preview_options())
         .expect("preview render");
-    assert!(code.contains("do {"));
-    assert!(code.contains("local_10 = 5;"));
-    assert!(code.contains("local_14 = 6;"));
-    assert!(code.contains("} while (param_1);"));
+    assert!(code.contains("do {"), "{code}");
+    assert!(code.contains("local_10 = 5;"), "{code}");
+    assert!(code.contains("local_14 = 6;"), "{code}");
+    assert!(code.contains("} while (param_1);"), "{code}");
 }
 
 #[test]

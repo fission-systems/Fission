@@ -236,6 +236,114 @@ pub(crate) fn inline_loop_condition_trailing_temps(
     changed
 }
 
+/// Repair the `do { ... v = v - c; } while (v != c)` → `do { ... v = v - c; } while (v != 0)`
+/// pattern that arises when `canonicalize_condition_expr` folds `(v - c) != 0` → `v != c`
+/// before the decrement has been recognized as a loop counter update.
+///
+/// The invariant: if the do-while body's last statement is `v = v - c` (linear decrement by
+/// loop-invariant constant `c > 0`) and the condition is `v != c`, the semantically correct
+/// condition is `v != 0` (check the post-decrement value against zero).
+pub(crate) fn normalize_dowhile_decrement_condition(stmts: &mut Vec<HirStmt>) -> bool {
+    let mut changed = false;
+    for stmt in stmts.iter_mut() {
+        match stmt {
+            HirStmt::DoWhile { body, cond } => {
+                if try_repair_dowhile_dec_cond(body, cond) {
+                    changed = true;
+                }
+                // Recurse into nested statements.
+                changed |= normalize_dowhile_decrement_condition(body);
+            }
+            HirStmt::While { body, .. }
+            | HirStmt::For { body, .. }
+            | HirStmt::Block(body) => {
+                changed |= normalize_dowhile_decrement_condition(body);
+            }
+            HirStmt::If {
+                then_body,
+                else_body,
+                ..
+            } => {
+                changed |= normalize_dowhile_decrement_condition(then_body);
+                changed |= normalize_dowhile_decrement_condition(else_body);
+            }
+            HirStmt::Switch { cases, default, .. } => {
+                for case in cases.iter_mut() {
+                    changed |= normalize_dowhile_decrement_condition(&mut case.body);
+                }
+                changed |= normalize_dowhile_decrement_condition(default);
+            }
+            _ => {}
+        }
+    }
+    changed
+}
+
+/// Check whether `body` ends with `v = v - c` (or `v = v + (-c)`) and `cond` is `v != c`.
+/// If so, rewrite cond to `v != 0`.
+fn try_repair_dowhile_dec_cond(body: &[HirStmt], cond: &mut HirExpr) -> bool {
+    // Condition must be `v != c` where c is a positive constant.
+    let (cond_var, cond_const) = match cond {
+        HirExpr::Binary {
+            op: HirBinaryOp::Ne,
+            lhs,
+            rhs,
+            ..
+        } => match (lhs.as_ref(), rhs.as_ref()) {
+            (HirExpr::Var(name), HirExpr::Const(c, _)) if *c > 0 => {
+                // Clone to owned so we can mutably borrow `cond` later.
+                (name.clone(), *c)
+            }
+            _ => return false,
+        },
+        _ => return false,
+    };
+
+    // Body must end with `cond_var = cond_var - cond_const`.
+    let Some(last) = body.last() else {
+        return false;
+    };
+    let decrement_matches = match last {
+        HirStmt::Assign {
+            lhs: HirLValue::Var(lhs_name),
+            rhs,
+        } if lhs_name == &cond_var => match rhs {
+            HirExpr::Binary {
+                op: HirBinaryOp::Sub,
+                lhs: inner_lhs,
+                rhs: inner_rhs,
+                ..
+            } => {
+                matches!(inner_lhs.as_ref(), HirExpr::Var(n) if n == &cond_var)
+                    && matches!(inner_rhs.as_ref(), HirExpr::Const(c, _) if *c == cond_const)
+            }
+            _ => false,
+        },
+        _ => false,
+    };
+
+    if !decrement_matches {
+        return false;
+    }
+
+    // Rewrite: condition `v != c` → `v != 0`
+    // Extract the type from the existing rhs (an integer Const), then zero it.
+    if let HirExpr::Binary {
+        op: HirBinaryOp::Ne,
+        rhs,
+        ..
+    } = cond
+    {
+        let zero_ty = match rhs.as_ref() {
+            HirExpr::Const(_, ty) => ty.clone(),
+            _ => NirType::Unknown,
+        };
+        *rhs = Box::new(HirExpr::Const(0, zero_ty));
+        return true;
+    }
+    false
+}
+
 fn inline_loop_condition_trailing_temps_in_stmts(
     stmts: &mut Vec<HirStmt>,
     read_counts: &HashMap<String, usize>,

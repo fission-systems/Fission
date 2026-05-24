@@ -58,6 +58,11 @@ pub(crate) fn simplify_negated_const(expr: &HirExpr) -> Option<HirExpr> {
     }
 }
 
+/// Recognize `x + x` → `x << 1`.
+///
+/// Compilers often emit `ADD reg, reg` instead of `SHL reg, 1`; prefer the
+/// bitwise form to match Ghidra's RuleShl canonicalization and to avoid
+/// subsequent arithmetic-normalization passes lifting this back to `* 2`.
 pub(crate) fn simplify_double_add(expr: &HirExpr) -> Option<HirExpr> {
     match expr {
         HirExpr::Binary {
@@ -74,6 +79,7 @@ pub(crate) fn simplify_double_add(expr: &HirExpr) -> Option<HirExpr> {
         _ => None,
     }
 }
+
 
 /// Factor common multiplicand: `x + x*c` -> `x*(c+1)` and `x*c + x` -> `x*(c+1)`.
 pub(crate) fn simplify_factor_common_mul(expr: &HirExpr) -> Option<HirExpr> {

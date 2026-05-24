@@ -3,10 +3,11 @@ use super::util::*;
 
 pub(crate) fn recognize_mod_div_power_of_two(expr: &HirExpr) -> Option<HirExpr> {
     normalize_signed_power_of_two_mod(expr)
-        .or_else(|| normalize_unsigned_power_of_two_mod(expr))
         .or_else(|| normalize_signed_power_of_two_div(expr))
+        .or_else(|| normalize_unsigned_power_of_two_mod(expr))
         .or_else(|| normalize_unsigned_power_of_two_div(expr))
 }
+
 
 pub(crate) fn recognize_compiler_runtime_division(expr: &HirExpr) -> Option<HirExpr> {
     let HirExpr::Call {
@@ -74,6 +75,10 @@ fn normalize_unsigned_power_of_two_mod(expr: &HirExpr) -> Option<HirExpr> {
     if divisor <= 1 || (divisor & (divisor - 1)) != 0 {
         return None;
     }
+    // Do not normalize `x & 1` to `x % 2` to preserve bitwise operations.
+    if divisor == 2 {
+        return None;
+    }
     Some(HirExpr::Binary {
         op: HirBinaryOp::Mod,
         lhs: lhs.clone(),
@@ -129,6 +134,10 @@ fn normalize_unsigned_power_of_two_div(expr: &HirExpr) -> Option<HirExpr> {
         return None;
     }
     let divisor = 1_i64.checked_shl(*shift_amount as u32)?;
+    // Do not normalize `x >> 1` to `x / 2` to preserve bitwise operations.
+    if *shift_amount == 1 {
+        return None;
+    }
     Some(HirExpr::Binary {
         op: HirBinaryOp::Div,
         lhs: lhs.clone(),

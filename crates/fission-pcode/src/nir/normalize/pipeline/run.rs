@@ -21,6 +21,7 @@ use super::super::cleanup::{
     elide_unused_popcount_assigns, eliminate_dead_local_clobber_assigns,
     eliminate_dead_temp_assigns, eliminate_redundant_var_assigns,
     fuse_single_predecessor_boundaries, inline_loop_condition_trailing_temps,
+    normalize_dowhile_decrement_condition,
     inline_single_use_temps, promote_guarded_jump_target_tail, prune_unused_dead_local_bindings,
     prune_unused_temp_bindings, remove_unreferenced_leading_labels,
     simplify_empty_and_constant_ifs, simplify_empty_and_constant_ifs_recursive,
@@ -982,6 +983,9 @@ pub(crate) fn normalize_hir_function(func: &mut HirFunction) {
         prune_unused_temp_bindings(func);
         prune_unused_dead_local_bindings(func);
     }
+    run_pass_logged(func, "dowhile_decrement_condition_norm", perf, |f| {
+        normalize_dowhile_decrement_condition(&mut f.body)
+    });
     if run_pass_logged(func, "loop_condition_trailing_temp_inline", perf, |f| {
         inline_loop_condition_trailing_temps(f)
     }) {

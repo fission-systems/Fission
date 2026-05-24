@@ -19,7 +19,7 @@ pub(crate) use casts::{
 pub(crate) use loops_conds::{
     canonicalize_minmax_conditional_returns, collapse_loop_exit_alias_returns,
     collapse_redundant_conditional_returns, conditional_select_pass,
-    inline_loop_condition_trailing_temps,
+    inline_loop_condition_trailing_temps, normalize_dowhile_decrement_condition,
 };
 pub(crate) use control_flow::{
     cleanup_redundant_boundary_labels, collapse_common_exit_guard_chain,
