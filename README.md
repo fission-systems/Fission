@@ -234,8 +234,20 @@ uint32_t bit_reverse(uint32_t value)
     value = value >> 1;
   } while (iVar2 != 0);
   return uVar1;
-}
 ```
+
+##### Comparative Analysis of `bit_reverse` Outputs
+While both decompilers successfully recovered the core 32-bit bit-reversal logic, they exhibit key differences in precision, arithmetic representation, and variable cleanup:
+
+- **Loop Iteration Count & Correctness (Critical Gap)**:
+  - **Fission**: Begins with `xVar0 = 32`, decrements it using `xVar0--`, and checks `while (xVar0 != 1)`. This results in **31 iterations** (from 32 down to 2), which leaves the final bit unprocessed and results in incorrect execution.
+  - **Ghidra**: Begins with `iVar2 = 32` (0x20), decrements it, and checks `while (iVar2 != 0)`. This executes exactly **32 iterations**, correctly processing all 32 bits.
+- **Bitwise vs. Arithmetic Expression**:
+  - **Fission**: Recovers bitwise shifts and masks as arithmetic operations: `param_1 /= 2` (instead of `>> 1`), `uVar9 %= 2` (instead of `& 1`), and `rax *= 2` (instead of `<< 1`). While mathematically equivalent under unsigned conditions, this makes the high-level bitwise intent less clear.
+  - **Ghidra**: Employs standard bitwise operators (`|`, `&`, `>>`), which much better reflects the idiomatic bit-reversal algorithm.
+- **Data Types & Register Leakage**:
+  - **Fission**: Registers leakage from the 64-bit architecture is visible (e.g., variable named `rax` and use of `ulonglong` instead of strict `uint32_t`). It also includes an unused variable `ulonglong home_0` that was not successfully pruned.
+  - **Ghidra**: Correctly refines all internal variable types to 32-bit (`uint`, `int`) matching the signature, and cleans up all unused variables.
 
 #### Example 2: `authenticate` in `fauxware` (i386 ELF, 50.13% similarity)
 A function showing structural and naming differences. Fission recovers the basic local stack frame and check blocks, but displays typical decompiler gaps such as:
