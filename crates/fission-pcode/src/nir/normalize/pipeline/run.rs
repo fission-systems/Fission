@@ -28,7 +28,7 @@ use super::super::cleanup::{
     simplify_empty_and_constant_ifs, simplify_empty_and_constant_ifs_recursive,
     simplify_fallthrough_edges, strip_redundant_assign_casts, apply_switch_norm_pass,
 };
-use super::super::cleanup::{collapse_loop_exit_alias_returns, prune_unreachable_after_terminal, apply_condexe_folding_pass};
+use super::super::cleanup::{collapse_loop_exit_alias_returns, prune_unreachable_after_terminal, apply_condexe_folding_pass, apply_expand_load_pass};
 use super::super::global_opt::{
     apply_bit_consume_dead_code_pass, apply_cse_pass, apply_dead_store_elimination,
     apply_gvn_join_hoist_pass, apply_licm_pass, apply_nz_mask_simplification_pass,
@@ -695,6 +695,17 @@ pub(crate) fn normalize_hir_function(func: &mut HirFunction) {
         run_pass_logged(
             func,
             "defuse_dead_assignment_after_cast_elision",
+            perf,
+            apply_wide_dead_assignment_pass,
+        );
+    }
+    // ExpandLoad: collapse Cast<narrow>(Load<wide>(ptr)) → Load<narrow>(ptr) for natural
+    // LSB truncations, and widen AND-comparison constants when the Load type is wider.
+    // Mirrors Ghidra's RuleExpandLoad. Runs after cast_elision so type annotations are fresh.
+    if run_pass_logged(func, "expand_load", perf, apply_expand_load_pass) {
+        run_pass_logged(
+            func,
+            "defuse_dead_assignment_after_expand_load",
             perf,
             apply_wide_dead_assignment_pass,
         );
