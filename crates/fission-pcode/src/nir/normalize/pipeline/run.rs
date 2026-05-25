@@ -33,7 +33,7 @@ use super::super::global_opt::{
     apply_bit_consume_dead_code_pass, apply_cse_pass, apply_dead_store_elimination,
     apply_gvn_join_hoist_pass, apply_licm_pass, apply_nz_mask_simplification_pass,
     apply_post_assign_value_representative_pass, apply_redundant_load_elimination, apply_sccp_pass,
-    apply_conditional_const_pass,
+    apply_conditional_const_pass, apply_likely_trash_pass,
 };
 use super::super::idioms::{
     apply_bitstream_idioms, apply_branch_prefix_hoist_pass, apply_call_artifact_cleanup_pass,
@@ -652,6 +652,13 @@ pub(crate) fn normalize_hir_function(func: &mut HirFunction) {
     run_pass_logged(func, "nz_mask_simplification", perf, apply_nz_mask_simplification_pass);
     // Subflow / bitmask pruning: optimize redundant bit-widths and bitmasks (subflow.cc).
     run_pass_logged(func, "subflow_pruning_early", perf, apply_subflow_pruning);
+    if run_pass_logged(func, "likely_trash", perf, apply_likely_trash_pass) {
+        run_cleanup_block(func, "cleanup_likely_trash", perf, |f| {
+            cleanup_func_stmt_list(f);
+            prune_unused_temp_bindings(f);
+            prune_unused_dead_local_bindings(f);
+        });
+    }
     // Global subvariable flow analyzer: propagate active bitmasks globally to declare narrow subvariables.
     if run_pass_logged(func, "subvar_flow_pass", perf, apply_subvar_flow_pass) {
         run_cleanup_block(func, "cleanup_subvar_flow", perf, |f| {
