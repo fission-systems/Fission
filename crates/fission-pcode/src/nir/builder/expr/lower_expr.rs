@@ -2492,7 +2492,11 @@ impl<'a> PreviewBuilder<'a> {
             | PcodeOpcode::FloatAdd
             | PcodeOpcode::FloatDiv
             | PcodeOpcode::FloatMult
-            | PcodeOpcode::FloatSub => self.lower_binary_op(op, visiting),
+            | PcodeOpcode::FloatSub
+            | PcodeOpcode::FloatEqual
+            | PcodeOpcode::FloatNotEqual
+            | PcodeOpcode::FloatLess
+            | PcodeOpcode::FloatLessEqual => self.lower_binary_op(op, visiting),
             PcodeOpcode::FloatInt2Float => {
                 let output = op
                     .output
@@ -2503,6 +2507,14 @@ impl<'a> PreviewBuilder<'a> {
                     ty: float_type_from_size(output.size),
                     expr: Box::new(expr),
                 })
+            }
+            PcodeOpcode::FloatNan => {
+                self.lower_intrinsic_call(
+                    op,
+                    visiting,
+                    "__isnan",
+                    NirType::Bool,
+                )
             }
             PcodeOpcode::IntNegate | PcodeOpcode::BoolNegate | PcodeOpcode::Int2Comp => {
                 let expr = self.lower_varnode(&op.inputs[0], visiting)?;

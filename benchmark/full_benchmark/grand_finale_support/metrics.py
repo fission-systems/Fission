@@ -401,7 +401,8 @@ def collect_code_metrics(code: str, struct_ptr_aliases: dict[str, str]) -> dict[
     # ── Phase 4 pass quality indicators ──────────────────────────────────────
     # Detect whether the function's return type is still "undefined" (i.e.
     # return-type inference did not fire or produced no result).
-    signature_line = code.split("{", 1)[0] if "{" in code else code.splitlines()[0]
+    code_lines = code.splitlines()
+    signature_line = code.split("{", 1)[0] if "{" in code else (code_lines[0] if code_lines else "")
     metrics["undefined_return_type"] = bool(
         re.match(r"^\s*undefined\b", signature_line.strip())
     )

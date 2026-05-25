@@ -9,6 +9,11 @@ mod util;
 mod double_precision;
 mod three_way;
 mod conditional_move;
+mod subfloat;
+
+mod or_compare;
+mod float_sign;
+mod ignore_nan;
 
 pub(crate) use cast_wide::{
     canonicalize_integer_expr, recognize_hi_lo_extract, recognize_wide_integer_recombine,
@@ -30,4 +35,9 @@ pub(crate) use simplify_algebraic::{
 pub(crate) use double_precision::apply_double_precision_reconstruction_pass;
 pub(crate) use three_way::apply_three_way_compare_pass;
 pub(crate) use conditional_move::apply_conditional_move_pass;
+pub(crate) use subfloat::apply_subfloat_flow_pass;
+pub(crate) use or_compare::apply_or_compare_pass;
+pub(crate) use float_sign::apply_float_sign_pass;
+pub(crate) use ignore_nan::apply_ignore_nan_pass;
+
 

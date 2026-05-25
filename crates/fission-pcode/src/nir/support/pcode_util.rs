@@ -117,6 +117,11 @@ pub(crate) fn is_materializable_output_opcode(opcode: PcodeOpcode) -> bool {
             | PcodeOpcode::FloatMult
             | PcodeOpcode::FloatSub
             | PcodeOpcode::FloatInt2Float
+            | PcodeOpcode::FloatEqual
+            | PcodeOpcode::FloatNotEqual
+            | PcodeOpcode::FloatLess
+            | PcodeOpcode::FloatLessEqual
+            | PcodeOpcode::FloatNan
             | PcodeOpcode::IntNegate
             | PcodeOpcode::BoolNegate
             | PcodeOpcode::Int2Comp

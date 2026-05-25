@@ -8,6 +8,7 @@ mod slots;
 mod typed_facts;
 mod split_datatype;
 mod constant_ptr;
+mod union_resolve;
 
 pub(crate) use aggregate_fields::{
     apply_aggregate_alias_access_rewrite_pass, apply_aggregate_fields_pass,
@@ -20,3 +21,4 @@ pub(crate) use slots::{
 };
 pub(crate) use split_datatype::apply_split_datatype_pass;
 pub(crate) use constant_ptr::apply_constant_ptr_recovery_pass;
+pub(crate) use union_resolve::apply_union_resolve_pass;

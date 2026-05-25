@@ -961,3 +961,130 @@ fn constant_ptr_recovery_recovers_symbolic_addresses() {
     let HirStmt::Assign { rhs: rhs3, .. } = &func.body[2] else { panic!(); };
     assert_eq!(rhs3, &HirExpr::Const(0x140005000, int(64)));
 }
+
+#[test]
+fn condexe_folding_merges_sequential_siblings() {
+    use crate::nir::normalize::cleanup::apply_condexe_folding_pass;
+
+    let mut func = HirFunction {
+        name: "test_condexe_siblings".to_string(),
+        body: vec![
+            HirStmt::If {
+                cond: HirExpr::Var("a".to_string()),
+                then_body: vec![HirStmt::Assign {
+                    lhs: HirLValue::Var("x".to_string()),
+                    rhs: HirExpr::Const(1, int(32)),
+                }],
+                else_body: Vec::new(),
+            },
+            HirStmt::If {
+                cond: HirExpr::Var("a".to_string()),
+                then_body: vec![HirStmt::Assign {
+                    lhs: HirLValue::Var("y".to_string()),
+                    rhs: HirExpr::Const(2, int(32)),
+                }],
+                else_body: Vec::new(),
+            },
+        ],
+        params: Vec::new(),
+        locals: Vec::new(),
+        return_type: NirType::Unknown,
+        surface_return_type_name: None,
+        calling_convention: Default::default(),
+        is_64bit: true,
+        suppress_entry_register_params: false,
+        callee_observed_max_arity: Default::default(),
+        callee_summaries: Default::default(),
+    };
+
+    assert!(apply_condexe_folding_pass(&mut func.body));
+    assert_eq!(func.body.len(), 1);
+    let HirStmt::If { cond, then_body, else_body } = &func.body[0] else { panic!(); };
+    assert_eq!(cond, &HirExpr::Var("a".to_string()));
+    assert_eq!(then_body.len(), 2);
+    assert!(else_body.is_empty());
+}
+
+#[test]
+fn condexe_folding_merges_nested_ifs() {
+    use crate::nir::normalize::cleanup::apply_condexe_folding_pass;
+
+    let mut func = HirFunction {
+        name: "test_condexe_nested".to_string(),
+        body: vec![
+            HirStmt::If {
+                cond: HirExpr::Var("a".to_string()),
+                then_body: vec![
+                    HirStmt::If {
+                        cond: HirExpr::Var("a".to_string()),
+                        then_body: vec![HirStmt::Assign {
+                            lhs: HirLValue::Var("x".to_string()),
+                            rhs: HirExpr::Const(1, int(32)),
+                        }],
+                        else_body: Vec::new(),
+                    }
+                ],
+                else_body: Vec::new(),
+            },
+        ],
+        params: Vec::new(),
+        locals: Vec::new(),
+        return_type: NirType::Unknown,
+        surface_return_type_name: None,
+        calling_convention: Default::default(),
+        is_64bit: true,
+        suppress_entry_register_params: false,
+        callee_observed_max_arity: Default::default(),
+        callee_summaries: Default::default(),
+    };
+
+    assert!(apply_condexe_folding_pass(&mut func.body));
+    assert_eq!(func.body.len(), 1);
+    let HirStmt::If { cond, then_body, else_body } = &func.body[0] else { panic!(); };
+    assert_eq!(cond, &HirExpr::Var("a".to_string()));
+    assert_eq!(then_body.len(), 1);
+    assert!(else_body.is_empty());
+    
+    let HirStmt::Assign { lhs, .. } = &then_body[0] else { panic!(); };
+    assert_eq!(lhs, &HirLValue::Var("x".to_string()));
+}
+
+#[test]
+fn condexe_folding_preserves_safety_on_assignment() {
+    use crate::nir::normalize::cleanup::apply_condexe_folding_pass;
+
+    let mut func = HirFunction {
+        name: "test_condexe_safety".to_string(),
+        body: vec![
+            HirStmt::If {
+                cond: HirExpr::Var("a".to_string()),
+                then_body: vec![HirStmt::Assign {
+                    lhs: HirLValue::Var("a".to_string()),
+                    rhs: HirExpr::Const(0, int(32)),
+                }],
+                else_body: Vec::new(),
+            },
+            HirStmt::If {
+                cond: HirExpr::Var("a".to_string()),
+                then_body: vec![HirStmt::Assign {
+                    lhs: HirLValue::Var("x".to_string()),
+                    rhs: HirExpr::Const(1, int(32)),
+                }],
+                else_body: Vec::new(),
+            },
+        ],
+        params: Vec::new(),
+        locals: Vec::new(),
+        return_type: NirType::Unknown,
+        surface_return_type_name: None,
+        calling_convention: Default::default(),
+        is_64bit: true,
+        suppress_entry_register_params: false,
+        callee_observed_max_arity: Default::default(),
+        callee_summaries: Default::default(),
+    };
+
+    // Should not fold/merge because "a" is modified in the first then_body
+    assert!(!apply_condexe_folding_pass(&mut func.body));
+    assert_eq!(func.body.len(), 2);
+}

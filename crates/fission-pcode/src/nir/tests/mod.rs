@@ -6,6 +6,7 @@ mod calling_convention;
 mod entry_param_promotion;
 mod normalize_arith;
 mod normalize_bitstream;
+mod normalize_idioms;
 mod normalize_defuse;
 mod normalize_flag_recovery;
 mod normalize_slots;

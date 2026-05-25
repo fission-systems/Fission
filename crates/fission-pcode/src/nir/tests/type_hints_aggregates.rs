@@ -773,3 +773,63 @@ fn preview_type_hints_fold_qword_lane_aggregate_store_back_to_local() {
         rendered
     );
 }
+
+#[test]
+fn union_resolve_scores_and_selects_dominant_float_access_type() {
+    use crate::nir::normalize::memory::apply_union_resolve_pass;
+
+    let float32 = NirType::Float { bits: 32 };
+    let int32 = NirType::Int { bits: 32, signed: true };
+
+    let mut func = HirFunction {
+        name: "test_union_resolve".to_string(),
+        params: vec![NirBinding {
+            name: "param_1".to_string(),
+            ty: NirType::Ptr(Box::new(NirType::Aggregate {
+                size: 8,
+                fields: vec![StructField {
+                    offset: 0,
+                    ty: int32.clone(), // Initial type is int32
+                    name: "field_0".to_string(),
+                }],
+            })),
+            surface_type_name: None,
+            origin: Some(NirBindingOrigin::ParamIndex(0)),
+            initializer: None,
+        }],
+        locals: vec![],
+        return_type: NirType::Unknown,
+        surface_return_type_name: None,
+        body: vec![
+            // A statement doing a float load and binary float addition:
+            // res = (float_load_at_offset_0) + 1.0f
+            HirStmt::Return(Some(HirExpr::Binary {
+                op: HirBinaryOp::Add,
+                lhs: Box::new(HirExpr::Load {
+                    ptr: Box::new(HirExpr::PtrOffset {
+                        base: Box::new(HirExpr::Var("param_1".to_string())),
+                        offset: 0,
+                    }),
+                    ty: float32.clone(),
+                }),
+                rhs: Box::new(HirExpr::Const(1, float32.clone())),
+                ty: float32.clone(),
+            })),
+        ],
+        ..Default::default()
+    };
+
+    // Before run, type of field_0 is int32
+    let NirType::Ptr(inner) = &func.params[0].ty else { panic!(); };
+    let NirType::Aggregate { fields, .. } = inner.as_ref() else { panic!(); };
+    assert_eq!(fields[0].ty, int32);
+
+    // Apply union resolve pass
+    assert!(apply_union_resolve_pass(&mut func));
+
+    // After run, type should be resolved to float32 due to float binary addition context!
+    let NirType::Ptr(inner) = &func.params[0].ty else { panic!(); };
+    let NirType::Aggregate { fields, .. } = inner.as_ref() else { panic!(); };
+    assert_eq!(fields[0].ty, float32);
+}
+

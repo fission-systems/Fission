@@ -10,7 +10,8 @@ use super::super::arith::{
     recognize_magic_number_division, recognize_mod_div_power_of_two,
     recognize_wide_integer_recombine, simplify_double_add, simplify_factor_common_mul,
     simplify_negated_const, simplify_subpiece_chain, apply_double_precision_reconstruction_pass,
-    apply_three_way_compare_pass, apply_conditional_move_pass,
+    apply_three_way_compare_pass, apply_conditional_move_pass, apply_subfloat_flow_pass,
+    apply_or_compare_pass, apply_float_sign_pass, apply_ignore_nan_pass,
 };
 use super::super::cleanup::single_pred_label_inline;
 use super::super::cleanup::{
@@ -27,7 +28,7 @@ use super::super::cleanup::{
     simplify_empty_and_constant_ifs, simplify_empty_and_constant_ifs_recursive,
     simplify_fallthrough_edges, strip_redundant_assign_casts, apply_switch_norm_pass,
 };
-use super::super::cleanup::{collapse_loop_exit_alias_returns, prune_unreachable_after_terminal};
+use super::super::cleanup::{collapse_loop_exit_alias_returns, prune_unreachable_after_terminal, apply_condexe_folding_pass};
 use super::super::global_opt::{
     apply_bit_consume_dead_code_pass, apply_cse_pass, apply_dead_store_elimination,
     apply_gvn_join_hoist_pass, apply_licm_pass, apply_nz_mask_simplification_pass,
@@ -37,14 +38,14 @@ use super::super::global_opt::{
 use super::super::idioms::{
     apply_bitstream_idioms, apply_branch_prefix_hoist_pass, apply_call_artifact_cleanup_pass,
     apply_recurrence_to_self_recursive_call_pass, apply_security_cookie_pass,
-    apply_split_flow_pass, apply_subflow_pruning,
+    apply_split_flow_pass, apply_string_copy_pass, apply_subflow_pruning,
     remove_callee_save_prologue_epilogue, remove_entry_stack_scaffold_stores, apply_xor_swap_pass,
 };
 use super::super::memory::{
     apply_aggregate_alias_access_rewrite_pass, apply_aggregate_fields_pass,
     apply_memory_heritage, apply_memory_slot_surfacing, apply_memory_slot_surfacing_cheap,
     apply_ptr_arith_recovery_pass, apply_zero_index_deref_pass, normalize_binding_initializers,
-    apply_split_datatype_pass, apply_constant_ptr_recovery_pass,
+    apply_split_datatype_pass, apply_constant_ptr_recovery_pass, apply_union_resolve_pass,
 };
 use super::super::recovery::{
     apply_break_continue_pass, apply_flag_recovery_pass, apply_for_loop_folding,
@@ -739,6 +740,18 @@ pub(crate) fn normalize_hir_function(func: &mut HirFunction) {
     }
     if run_pass_logged(
         func,
+        "string_copy",
+        perf,
+        apply_string_copy_pass,
+    ) {
+        run_cleanup_block(func, "cleanup_string_copy", perf, |f| {
+            cleanup_func_stmt_list(f);
+            prune_unused_temp_bindings(f);
+            prune_unused_dead_local_bindings(f);
+        });
+    }
+    if run_pass_logged(
+        func,
         "switch_norm",
         perf,
         apply_switch_norm_pass,
@@ -963,6 +976,58 @@ pub(crate) fn normalize_hir_function(func: &mut HirFunction) {
             prune_unused_dead_local_bindings(f);
         });
     }
+    if run_pass_logged(
+        func,
+        "or_compare",
+        perf,
+        apply_or_compare_pass,
+    ) {
+        run_cleanup_block(func, "cleanup_or_compare", perf, |f| {
+            cleanup_func_stmt_list(f);
+            constant_folding_pass(&mut f.body);
+            prune_unused_temp_bindings(f);
+            prune_unused_dead_local_bindings(f);
+        });
+    }
+    if run_pass_logged(
+        func,
+        "float_sign",
+        perf,
+        apply_float_sign_pass,
+    ) {
+        run_cleanup_block(func, "cleanup_float_sign", perf, |f| {
+            cleanup_func_stmt_list(f);
+            constant_folding_pass(&mut f.body);
+            prune_unused_temp_bindings(f);
+            prune_unused_dead_local_bindings(f);
+        });
+    }
+    if run_pass_logged(
+        func,
+        "ignore_nan",
+        perf,
+        apply_ignore_nan_pass,
+    ) {
+        run_cleanup_block(func, "cleanup_ignore_nan", perf, |f| {
+            cleanup_func_stmt_list(f);
+            constant_folding_pass(&mut f.body);
+            prune_unused_temp_bindings(f);
+            prune_unused_dead_local_bindings(f);
+        });
+    }
+    if run_pass_logged(
+        func,
+        "subfloat_flow",
+        perf,
+        apply_subfloat_flow_pass,
+    ) {
+        run_cleanup_block(func, "cleanup_subfloat_flow", perf, |f| {
+            cleanup_func_stmt_list(f);
+            constant_folding_pass(&mut f.body);
+            prune_unused_temp_bindings(f);
+            prune_unused_dead_local_bindings(f);
+        });
+    }
     // Windows x64 stack-tail / variadic region lattice hook (stats; optional future folds).
     let _ = run_pass_logged(
         func,
@@ -990,6 +1055,7 @@ pub(crate) fn normalize_hir_function(func: &mut HirFunction) {
             prune_unused_temp_bindings(func);
         }
         if run_pass_logged(func, "aggregate_fields", perf, apply_aggregate_fields_pass) {
+            let _ = run_pass_logged(func, "union_resolve", perf, apply_union_resolve_pass);
             run_pass_logged(
                 func,
                 "ptr_arith_recovery_after_aggregate_fields",
@@ -2235,6 +2301,10 @@ fn cleanup_stmt_list_with_options_and_preserved(
         if conditional_select_pass(stmts) {
             changed = true;
             last_changed_pass = Some("conditional_select_pass");
+        }
+        if apply_condexe_folding_pass(stmts) {
+            changed = true;
+            last_changed_pass = Some("apply_condexe_folding_pass");
         }
         if collapse_redundant_conditional_returns(stmts) {
             changed = true;
