@@ -401,13 +401,23 @@ fn print_expr_prec(expr: &HirExpr, parent_prec: u8, depth: usize) -> String {
             (format!("{cond} ? {then_expr} : {else_expr}"), prec)
         }
         HirExpr::Call { target, args, ty } => {
-            let target = print_callable_target(target, args, ty, None);
-            let args = args
-                .iter()
-                .map(|arg| print_expr_prec(arg, 0, depth + 1))
-                .collect::<Vec<_>>()
-                .join(", ");
-            (format!("{target}({args})"), 120)
+            if target == "__fission_callind_opaque" && !args.is_empty() {
+                let fn_ptr = print_expr_prec(&args[0], 0, depth + 1);
+                let remaining_args = args[1..]
+                    .iter()
+                    .map(|arg| print_expr_prec(arg, 0, depth + 1))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                (format!("(*({fn_ptr}))({remaining_args})"), 120)
+            } else {
+                let target = print_callable_target(target, args, ty, None);
+                let args = args
+                    .iter()
+                    .map(|arg| print_expr_prec(arg, 0, depth + 1))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                (format!("{target}({args})"), 120)
+            }
         }
         HirExpr::Load { ptr, ty } => {
             if let Some(target) = peel_simple_deref_target(ptr) {
@@ -692,13 +702,23 @@ fn print_expr_prec_ctx(
             (format!("{cond} ? {then_expr} : {else_expr}"), prec)
         }
         HirExpr::Call { target, args, ty } => {
-            let target = print_callable_target(target, args, ty, Some(ctx));
-            let args = args
-                .iter()
-                .map(|arg| print_expr_prec_ctx(arg, 0, depth + 1, ctx))
-                .collect::<Vec<_>>()
-                .join(", ");
-            (format!("{target}({args})"), 120)
+            if target == "__fission_callind_opaque" && !args.is_empty() {
+                let fn_ptr = print_expr_prec_ctx(&args[0], 0, depth + 1, ctx);
+                let remaining_args = args[1..]
+                    .iter()
+                    .map(|arg| print_expr_prec_ctx(arg, 0, depth + 1, ctx))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                (format!("(*({fn_ptr}))({remaining_args})"), 120)
+            } else {
+                let target = print_callable_target(target, args, ty, Some(ctx));
+                let args = args
+                    .iter()
+                    .map(|arg| print_expr_prec_ctx(arg, 0, depth + 1, ctx))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                (format!("{target}({args})"), 120)
+            }
         }
         HirExpr::Load { ptr, ty } => {
             // Check if `ptr` is a PtrOffset with a known field.

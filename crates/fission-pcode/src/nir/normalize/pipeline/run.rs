@@ -28,7 +28,7 @@ use super::super::cleanup::{
     simplify_empty_and_constant_ifs, simplify_empty_and_constant_ifs_recursive,
     simplify_fallthrough_edges, strip_redundant_assign_casts, apply_switch_norm_pass,
 };
-use super::super::cleanup::{collapse_loop_exit_alias_returns, prune_unreachable_after_terminal, apply_condexe_folding_pass, apply_expand_load_pass};
+use super::super::cleanup::{collapse_loop_exit_alias_returns, prune_unreachable_after_terminal, apply_condexe_folding_pass, apply_expand_load_pass, apply_deindirect_pass};
 use super::super::global_opt::{
     apply_bit_consume_dead_code_pass, apply_cse_pass, apply_dead_store_elimination,
     apply_gvn_join_hoist_pass, apply_licm_pass, apply_nz_mask_simplification_pass,
@@ -775,6 +775,18 @@ pub(crate) fn normalize_hir_function(func: &mut HirFunction) {
         apply_switch_norm_pass,
     ) {
         run_cleanup_block(func, "cleanup_switch_norm", perf, |f| {
+            cleanup_func_stmt_list(f);
+            prune_unused_temp_bindings(f);
+            prune_unused_dead_local_bindings(f);
+        });
+    }
+    if run_pass_logged(
+        func,
+        "deindirect",
+        perf,
+        apply_deindirect_pass,
+    ) {
+        run_cleanup_block(func, "cleanup_deindirect", perf, |f| {
             cleanup_func_stmt_list(f);
             prune_unused_temp_bindings(f);
             prune_unused_dead_local_bindings(f);

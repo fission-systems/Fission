@@ -1088,3 +1088,151 @@ fn condexe_folding_preserves_safety_on_assignment() {
     assert!(!apply_condexe_folding_pass(&mut func.body));
     assert_eq!(func.body.len(), 2);
 }
+
+#[test]
+fn deindirect_resolves_const_address_to_symbol() {
+    use crate::nir::normalize::cleanup::apply_deindirect_pass;
+    use indexmap::IndexMap;
+
+    let mut callee_summaries = IndexMap::new();
+    callee_summaries.insert(
+        "target_func".to_string(),
+        CallSummary {
+            target: CallTargetRef {
+                address: Some(0x401000),
+                symbol: "target_func".to_string(),
+                provenance: CallTargetProvenance::Reference,
+                edge_kind: CallEdgeKind::Reference,
+                confidence: 128,
+            },
+            prototype: PrototypeSummary {
+                min_arity: 1,
+                max_arity: 1,
+                locked_exact_arity: None,
+                return_lattice: NirType::Unknown,
+                param_lattices: vec![NirType::Unknown],
+                soundness: SummarySoundness::Optimistic,
+            },
+            effect_summary: CallEffectSummary {
+                reads_memory: None,
+                writes_memory: None,
+                escapes_args: None,
+                regions: Vec::new(),
+                wrapper_class: WrapperClass::None,
+                wrapper_of: None,
+                confidence: 160,
+            },
+        },
+    );
+
+    let mut func = HirFunction {
+        name: "test_deindirect_const".to_string(),
+        body: vec![HirStmt::Expr(HirExpr::Call {
+            target: "__fission_callind_opaque".to_string(),
+            args: vec![
+                HirExpr::Const(0x401000, int(64)),
+                HirExpr::Var("param_1".to_string()),
+            ],
+            ty: NirType::Unknown,
+        })],
+        callee_summaries,
+        ..Default::default()
+    };
+
+    assert!(apply_deindirect_pass(&mut func));
+    let HirStmt::Expr(expr) = &func.body[0] else {
+        panic!("expected expression statement");
+    };
+    let HirExpr::Call { target, args, .. } = expr else {
+        panic!("expected call expression");
+    };
+    assert_eq!(target, "target_func");
+    assert_eq!(args.len(), 1);
+    assert_eq!(args[0], HirExpr::Var("param_1".to_string()));
+}
+
+#[test]
+fn deindirect_resolves_var_initializer_to_symbol() {
+    use crate::nir::normalize::cleanup::apply_deindirect_pass;
+    use indexmap::IndexMap;
+
+    let mut callee_summaries = IndexMap::new();
+    callee_summaries.insert(
+        "target_func".to_string(),
+        CallSummary {
+            target: CallTargetRef {
+                address: Some(0x401000),
+                symbol: "target_func".to_string(),
+                provenance: CallTargetProvenance::Reference,
+                edge_kind: CallEdgeKind::Reference,
+                confidence: 128,
+            },
+            prototype: PrototypeSummary {
+                min_arity: 0,
+                max_arity: 0,
+                locked_exact_arity: None,
+                return_lattice: NirType::Unknown,
+                param_lattices: vec![],
+                soundness: SummarySoundness::Optimistic,
+            },
+            effect_summary: CallEffectSummary {
+                reads_memory: None,
+                writes_memory: None,
+                escapes_args: None,
+                regions: Vec::new(),
+                wrapper_class: WrapperClass::None,
+                wrapper_of: None,
+                confidence: 160,
+            },
+        },
+    );
+
+    let mut func = HirFunction {
+        name: "test_deindirect_var".to_string(),
+        locals: vec![NirBinding {
+            name: "fn_ptr".to_string(),
+            ty: int(64),
+            surface_type_name: None,
+            origin: None,
+            initializer: Some(HirExpr::Const(0x401000, int(64))),
+        }],
+        body: vec![HirStmt::Expr(HirExpr::Call {
+            target: "__fission_callind_opaque".to_string(),
+            args: vec![
+                HirExpr::Var("fn_ptr".to_string()),
+            ],
+            ty: NirType::Unknown,
+        })],
+        callee_summaries,
+        ..Default::default()
+    };
+
+    assert!(apply_deindirect_pass(&mut func));
+    let HirStmt::Expr(expr) = &func.body[0] else {
+        panic!("expected expression statement");
+    };
+    let HirExpr::Call { target, args, .. } = expr else {
+        panic!("expected call expression");
+    };
+    assert_eq!(target, "target_func");
+    assert!(args.is_empty());
+}
+
+#[test]
+fn printer_renders_callind_opaque_as_pointer_call() {
+    use crate::nir::render::print_expr;
+
+    let expr = HirExpr::Call {
+        target: "__fission_callind_opaque".to_string(),
+        args: vec![
+            HirExpr::Var("fn_ptr".to_string()),
+            HirExpr::Var("arg1".to_string()),
+            HirExpr::Var("arg2".to_string()),
+        ],
+        ty: NirType::Unknown,
+    };
+
+    let rendered = print_expr(&expr);
+    assert_eq!(rendered, "(*(fn_ptr))(arg1, arg2)");
+}
+

@@ -1256,7 +1256,7 @@ impl<'a> PreviewBuilder<'a> {
         } else {
             "callee".to_string()
         };
-        let args = if let Some(recovered_args) = recovered_args {
+        let mut args = if let Some(recovered_args) = recovered_args {
             recovered_args
         } else {
             op.inputs
@@ -1265,6 +1265,13 @@ impl<'a> PreviewBuilder<'a> {
                 .map(|input| self.lower_varnode(input, visiting))
                 .collect::<Result<Vec<_>, _>>()?
         };
+        if target == "__fission_callind_opaque" {
+            if let Some(target_vn) = op.inputs.first() {
+                if let Ok(target_expr) = self.lower_varnode(target_vn, visiting) {
+                    args.insert(0, target_expr);
+                }
+            }
+        }
         Ok(HirExpr::Call {
             target,
             args,
