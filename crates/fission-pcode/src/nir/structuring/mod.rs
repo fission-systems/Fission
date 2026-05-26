@@ -33,6 +33,7 @@ pub(crate) use graph::{
     surface_structure_graph, StructureEdgeFlags, StructureGraph, StructureNode, StructureNodeKind,
 };
 pub(crate) use linear::LinearBodyCachedOutcome;
+pub(crate) use switch::SWITCH_FALLTHROUGH_SENTINEL;
 pub(crate) use regions::{
     BlockGraphLegalityReason, BlockGraphRegionKind, BlockGraphRegionProof, EmitReadyDecision,
     EmitReadyFailureFamily, RegionKind, RegionLegality, RegionProof, RegionRejectionReason,

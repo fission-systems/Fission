@@ -142,6 +142,9 @@ pub(in crate::nir) fn print_stmt(stmt: &HirStmt) -> String {
         ),
         HirStmt::Expr(expr) => format!("{};", print_expr(expr_fallback(expr, 0))),
         HirStmt::Label(label) => format!("{}:", label),
+        HirStmt::Goto(label) if label == crate::nir::structuring::SWITCH_FALLTHROUGH_SENTINEL => {
+            "/* fallthrough */".to_string()
+        }
         HirStmt::Goto(label) => format!("goto {};", label),
         HirStmt::Block(_) => "{ ... }".to_string(),
         HirStmt::Switch { .. } => "switch (...) { ... }".to_string(),
@@ -920,6 +923,9 @@ fn print_stmt_ctx(stmt: &HirStmt, ctx: &PrintCtx<'_>) -> String {
         HirStmt::Break => "break;".to_string(),
         HirStmt::Continue => "continue;".to_string(),
         HirStmt::Label(label) => format!("{}:", label),
+        HirStmt::Goto(label) if label == crate::nir::structuring::SWITCH_FALLTHROUGH_SENTINEL => {
+            "/* fallthrough */".to_string()
+        }
         HirStmt::Goto(label) => format!("goto {};", label),
         _ => print_stmt(stmt),
     }

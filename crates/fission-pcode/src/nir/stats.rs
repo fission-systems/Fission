@@ -253,6 +253,8 @@ fn merge_structuring_stats(target: &mut NirBuildStats, other: &NirBuildStats) {
             condition_fold_and_count,
             condition_fold_or_count,
             condition_fold_rejected_side_effect,
+            fas_virtual_goto_count,
+            switch_fallthrough_detected_count,
         ]
     );
 }

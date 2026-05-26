@@ -73,6 +73,7 @@ impl<'a> PreviewBuilder<'a> {
             });
         }
         merge_equivalent_switch_cases(&mut cases);
+        let ft_count = detect_and_patch_case_fallthrough(&mut cases);
         let Some((mut default_body, default_skip)) =
             self.lower_linear_body(parsed.default_idx, exit)?
         else {
@@ -86,6 +87,7 @@ impl<'a> PreviewBuilder<'a> {
         max_skip = max_skip.max(default_skip).max(parsed.default_idx + 1);
 
         self.active_switch_targets = old_targets;
+        self.telemetry.structuring.switch_fallthrough_detected_count += ft_count;
 
         let skip_to = match exit {
             LinearExit::Join(join_idx) => join_idx,
@@ -206,6 +208,7 @@ impl<'a> PreviewBuilder<'a> {
             return Ok(None);
         }
         merge_equivalent_switch_cases(&mut cases);
+        let ft_count = detect_and_patch_case_fallthrough(&mut cases);
 
         let default = if let Some(default_target) = default_target {
             let Some(default_idx) = self.find_block_index_by_address(default_target) else {
@@ -226,6 +229,7 @@ impl<'a> PreviewBuilder<'a> {
         };
 
         self.active_switch_targets = old_targets;
+        self.telemetry.structuring.switch_fallthrough_detected_count += ft_count;
 
         let skip_to = match exit {
             LinearExit::Join(join_idx) => join_idx,
@@ -604,6 +608,59 @@ pub(super) fn merge_equivalent_switch_cases(cases: &mut Vec<HirSwitchCase>) {
     *cases = merged;
 }
 
+/// The sentinel label used to mark a switch-case fallthrough edge.
+/// The printer recognises this label and renders it as `/* fallthrough */`.
+pub(crate) const SWITCH_FALLTHROUGH_SENTINEL: &str = "__fallthrough";
+
+/// Detect consecutive switch cases where case `i` ends with a `Goto` targeting
+/// the label at the start of case `i+1` (i.e. a C-style fallthrough), and replace
+/// that final `Goto` with `Goto(SWITCH_FALLTHROUGH_SENTINEL)`.
+///
+/// This must be called **after** `merge_equivalent_switch_cases` so we operate on
+/// the final deduplicated case list.
+///
+/// Returns the number of fallthroughs detected and patched.
+pub(super) fn detect_and_patch_case_fallthrough(cases: &mut Vec<HirSwitchCase>) -> usize {
+    let mut patched = 0usize;
+    let n = cases.len();
+    if n < 2 {
+        return 0;
+    }
+
+    // Collect the first label of each case upfront so we can borrow mutably below.
+    let next_labels: Vec<Option<String>> = (0..n)
+        .map(|i| {
+            cases[i]
+                .body
+                .iter()
+                .find_map(|s| {
+                    if let HirStmt::Label(l) = s {
+                        Some(l.clone())
+                    } else {
+                        None
+                    }
+                })
+        })
+        .collect();
+
+    for i in 0..(n - 1) {
+        let Some(ref next_label) = next_labels[i + 1] else {
+            continue;
+        };
+        // Check if the last non-empty statement in case[i] is a Goto targeting next_label.
+        let last_stmt = cases[i].body.iter_mut().rev().find(|s| {
+            !matches!(s, HirStmt::Label(_))
+        });
+        if let Some(HirStmt::Goto(label)) = last_stmt {
+            if label == next_label {
+                *label = SWITCH_FALLTHROUGH_SENTINEL.to_string();
+                patched += 1;
+            }
+        }
+    }
+    patched
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -717,5 +774,64 @@ mod tests {
         let recovered =
             extract_range_guard_for_chain(&cond, true).expect("normalized range guard selector");
         assert_eq!(recovered, selector);
+    }
+
+    /// A switch with two cases where case 0 ends with a goto targeting case 1's label.
+    /// The goto should be replaced with the __fallthrough sentinel.
+    #[test]
+    fn test_switch_fallthrough_detection_patches_goto_to_next_label() {
+        let next_label = "block_0x1000".to_string();
+        let mut cases = vec![
+            HirSwitchCase {
+                values: vec![0],
+                body: vec![
+                    HirStmt::Label("block_0x0000".to_string()),
+                    HirStmt::Goto(next_label.clone()),
+                ],
+            },
+            HirSwitchCase {
+                values: vec![1],
+                body: vec![
+                    HirStmt::Label(next_label.clone()),
+                    HirStmt::Return(None),
+                ],
+            },
+        ];
+
+        let patched = detect_and_patch_case_fallthrough(&mut cases);
+        assert_eq!(patched, 1, "Expected 1 fallthrough patched");
+        // The goto in case[0] should now be the sentinel.
+        assert!(
+            matches!(&cases[0].body[1], HirStmt::Goto(lbl) if lbl == SWITCH_FALLTHROUGH_SENTINEL),
+            "Expected __fallthrough sentinel, got: {:?}",
+            &cases[0].body[1]
+        );
+        // Case[1] should be unchanged.
+        assert!(
+            matches!(&cases[1].body[0], HirStmt::Label(lbl) if lbl == &next_label),
+        );
+    }
+
+    /// A switch where case 0's goto targets a label NOT in case 1 — must not be patched.
+    #[test]
+    fn test_switch_fallthrough_detection_ignores_non_adjacent_goto() {
+        let mut cases = vec![
+            HirSwitchCase {
+                values: vec![0],
+                body: vec![
+                    HirStmt::Label("block_a".to_string()),
+                    HirStmt::Goto("block_x".to_string()), // points somewhere else
+                ],
+            },
+            HirSwitchCase {
+                values: vec![1],
+                body: vec![
+                    HirStmt::Label("block_b".to_string()),
+                    HirStmt::Return(None),
+                ],
+            },
+        ];
+        let patched = detect_and_patch_case_fallthrough(&mut cases);
+        assert_eq!(patched, 0, "Expected 0 fallthroughs for non-adjacent goto");
     }
 }
