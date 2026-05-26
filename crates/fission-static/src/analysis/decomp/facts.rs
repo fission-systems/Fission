@@ -2,7 +2,12 @@ use fission_loader::loader::LoadedBinary;
 use fission_loader::loader::types::{
     DwarfFunctionInfo, InferredFieldInfo, InferredTypeInfo, PdbFunctionInfo,
 };
+use fission_signatures::{
+    FidDatabaseSet, FidFunctionView, FidMatcher, FidRelocationView,
+    dissect_x86_function_to_fid_units,
+};
 use std::collections::HashMap;
+
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum FactProvenance {
@@ -129,7 +134,68 @@ impl FactStore {
     /// The previous prologue byte-pattern matcher is intentionally not used here:
     /// approximate pattern hits must not be promoted to `StrongFid`.
     fn ingest_signature_matches(&mut self, binary: &LoadedBinary) {
-        let _ = binary;
+        // Only support PE/ELF/Mach-O or format specification with x86 architecture for FID matching
+        let is_x86 = binary.arch_spec.to_lowercase().contains("x86")
+            || binary.arch_spec.to_lowercase().contains("x64")
+            || binary.arch_spec.to_lowercase().contains("amd64");
+        if !is_x86 {
+            return;
+        }
+
+        let compiler_id = binary.get_ghidra_compiler_id();
+        let db_set = FidDatabaseSet::discover_for_load_spec(
+            binary.sleigh_language_id(),
+            compiler_id.as_deref(),
+            Some(&binary.format),
+            binary.is_64bit,
+        );
+
+        if db_set.databases.is_empty() {
+            return;
+        }
+
+        let matcher = FidMatcher::new(db_set);
+        let binary_data = binary.data.as_slice();
+
+        for func in &binary.functions {
+            // Skip imports/exports and already resolved PDB/Dwarf metadata
+            let has_strong_name = func.is_import || func.is_export || self.pdb_functions.contains_key(&func.address);
+            if has_strong_name {
+                continue;
+            }
+
+            // Calculate offset into the file
+            let offset = if func.address >= binary.image_base {
+                (func.address - binary.image_base) as usize
+            } else {
+                continue;
+            };
+
+            if offset >= binary_data.len() {
+                continue;
+            }
+
+            // Determine size: use func.size or fallback to 512 bytes limit
+            let size = if func.size > 0 {
+                (func.size as usize).min(1024)
+            } else {
+                512
+            };
+            let end_offset = (offset + size).min(binary_data.len());
+            let func_bytes = &binary_data[offset..end_offset];
+
+            // Dissect instructions into FidHashUnits
+            let units = dissect_x86_function_to_fid_units(func_bytes, func.address, &binary.relocation_symbols);
+            let view = FidFunctionView { units };
+
+            // Attempt matching
+            if let Ok(matches) = matcher.identify_function(&view, &FidRelocationView) {
+                if let Some(best_match) = matches.first() {
+                    // Ingest matched name fact with tiered priority: FactProvenance::StrongFid
+                    self.ingest_name_fact(func.address, best_match.name.clone(), FactProvenance::StrongFid);
+                }
+            }
+        }
     }
 
     pub fn ingest_name_fact(&mut self, address: u64, name: String, provenance: FactProvenance) {

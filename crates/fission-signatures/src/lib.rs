@@ -47,6 +47,7 @@ pub use api_types::{ApiSignature, ApiTypeDatabase, ApiTypeError, ParamInfo};
 pub use fid::{
     FidDatabaseSet, FidFunctionView, FidHashError, FidHashQuad, FidHashUnit, FidHasher,
     FidInstructionOperand, FidMatchError, FidMatcher, FidOperandValue, FidRelocationView,
+    dissect_x86_function_to_fid_units,
 };
 pub use fidbf::{
     FidbfDatabase, FidbfFunction, FidbfLibrary, FidbfMatch, FidbfRelation, discover_fidbf_paths,
