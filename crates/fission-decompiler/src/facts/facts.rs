@@ -4,6 +4,7 @@ use crate::{
     NirCallEffectSummary, NirCallParamRule, NirCallPrototypeSummary, NirFunctionHints,
     NirRenderOptions, NirTypeContext, PcodeFunction, PcodeOpcode, infer_entry_register_param_arity,
 };
+use fission_core::core::ghidra_no_return::{binary_format_to_ghidra_format, ghidra_no_return_index};
 use fission_core::{normalize_named_type_identity, sanitize_symbol_name};
 use fission_loader::loader::LoadedBinary;
 use fission_loader::loader::types::DwarfLocation;
@@ -95,7 +96,7 @@ pub(crate) fn build_nir_type_context(
         call_target_refs: call_target_refs.clone(),
         iat_target_refs: iat_target_refs.clone(),
         ambiguous_call_targets: resolved_index.ambiguous_call_targets,
-        call_effect_summaries: build_nir_call_effect_summaries(&all_target_refs),
+        call_effect_summaries: build_nir_call_effect_summaries(&all_target_refs, binary),
         call_prototype_summaries: HashMap::new(),
         call_param_rules: build_nir_call_param_rules(&all_target_refs),
         function_hints: build_nir_function_hints(fact_store, address),
@@ -244,23 +245,68 @@ fn is_generic_symbol_with_prefix(name: &str, prefix: &str) -> bool {
 
 fn build_nir_call_effect_summaries(
     call_target_refs: &HashMap<u64, CallTargetRef>,
+    binary: &LoadedBinary,
 ) -> HashMap<String, NirCallEffectSummary> {
-    call_target_refs
-        .values()
-        .map(|target_ref| {
-            (
-                target_ref.symbol.clone(),
-                NirCallEffectSummary {
-                    reads_memory: None,
-                    writes_memory: None,
-                    escapes_args: None,
-                    may_call_unknown: None,
-                    may_exit: None,
-                    source: Some(CallEffectSummarySource::CallTargetRef),
-                },
-            )
-        })
-        .collect()
+    let ghidra_format = binary_format_to_ghidra_format(&binary.format);
+    let compiler_key = ghidra_no_return_compiler_key(binary);
+    let no_return_idx = ghidra_no_return_index();
+
+    let mut result: HashMap<String, NirCallEffectSummary> = HashMap::new();
+
+    for (&address, target_ref) in call_target_refs {
+        let library_name: Option<&str> = binary
+            .function_at_exact(address)
+            .and_then(|f| f.external_library.as_deref());
+
+        let may_exit = ghidra_format.and_then(|fmt| {
+            if no_return_idx.is_no_return(
+                fmt,
+                compiler_key,
+                library_name,
+                &target_ref.symbol,
+            ) {
+                Some(true)
+            } else {
+                None
+            }
+        });
+
+        let source = if may_exit.is_some() {
+            Some(CallEffectSummarySource::GhidraNoReturnData)
+        } else {
+            Some(CallEffectSummarySource::CallTargetRef)
+        };
+
+        let entry = result.entry(target_ref.symbol.clone()).or_insert(NirCallEffectSummary {
+            reads_memory: None,
+            writes_memory: None,
+            escapes_args: None,
+            may_call_unknown: None,
+            may_exit,
+            source,
+        });
+        // Upgrade to may_exit=true if a later address for the same symbol name provides evidence.
+        if entry.may_exit.is_none() && may_exit.is_some() {
+            entry.may_exit = may_exit;
+            entry.source = source;
+        }
+    }
+
+    result
+}
+
+fn ghidra_no_return_compiler_key(binary: &LoadedBinary) -> Option<&'static str> {
+    let lang = binary
+        .identity_report
+        .as_ref()?
+        .summary
+        .likely_language
+        .as_deref()?;
+    match lang.to_ascii_lowercase().as_str() {
+        "go" | "golang" => Some("golang"),
+        "rust" => Some("rustc"),
+        _ => None,
+    }
 }
 
 pub(crate) fn refine_nir_type_context_with_callee_effect_summaries(

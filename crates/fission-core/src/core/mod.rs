@@ -15,6 +15,7 @@ pub mod config_store;
 pub mod constants;
 pub mod errors;
 pub mod evidence_policy;
+pub mod ghidra_no_return;
 pub mod logging;
 pub mod models;
 pub mod path_config;

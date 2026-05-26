@@ -337,6 +337,10 @@ pub enum CallEffectSummarySource {
     ImportSignature,
     FactStore,
     PreviewCalleeAnalysis,
+    /// `may_exit = true` was derived from Ghidra's no-return fact data
+    /// (`noReturnFunctionConstraints.xml`, `*FunctionsThatDoNotReturn`, or
+    /// DLL-specific `.hints` files in `utils/ghidra-data`).
+    GhidraNoReturnData,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
