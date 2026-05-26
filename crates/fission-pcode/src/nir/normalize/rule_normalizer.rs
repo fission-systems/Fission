@@ -288,6 +288,32 @@ impl Rule for RuleSimplifyMulToShl {
     }
 }
 
+struct RuleSimplifySelect;
+
+impl Rule for RuleSimplifySelect {
+    fn name(&self) -> &'static str { "simplify_select" }
+
+    fn apply_expr(&self, expr: &mut HirExpr) -> bool {
+        if let HirExpr::Select { cond, then_expr, else_expr, .. } = expr {
+            // Rule 1: cond ? A : A -> A
+            if then_expr == else_expr {
+                *expr = (**then_expr).clone();
+                return true;
+            }
+            // Rule 2: true ? A : B -> A, false ? A : B -> B
+            if let HirExpr::Const(val, _) = cond.as_ref() {
+                if *val != 0 {
+                    *expr = (**then_expr).clone();
+                } else {
+                    *expr = (**else_expr).clone();
+                }
+                return true;
+            }
+        }
+        false
+    }
+}
+
 /// Applies a list of rules to the function AST iteratively until convergence.
 pub(crate) fn apply_rule_normalization(func: &mut HirFunction) -> bool {
     let rules: Vec<Box<dyn Rule>> = vec![
@@ -297,6 +323,7 @@ pub(crate) fn apply_rule_normalization(func: &mut HirFunction) -> bool {
         Box::new(RuleLogicalIdentities),
         Box::new(RuleCollapseZeroOffset),
         Box::new(RuleSimplifyMulToShl),
+        Box::new(RuleSimplifySelect),
     ];
 
     let mut changed = false;
@@ -417,4 +444,25 @@ fn apply_rules_to_expr(expr: &mut HirExpr, rules: &[Box<dyn Rule>]) -> bool {
     }
 
     changed
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_rule_simplify_select() {
+        let cond = HirExpr::Var("cond".to_string());
+        let val = HirExpr::Var("val".to_string());
+        let mut select_expr = HirExpr::Select {
+            cond: Box::new(cond.clone()),
+            then_expr: Box::new(val.clone()),
+            else_expr: Box::new(val.clone()),
+            ty: NirType::Int { bits: 32, signed: false },
+        };
+        let rule = RuleSimplifySelect;
+        let changed = rule.apply_expr(&mut select_expr);
+        assert!(changed);
+        assert_eq!(select_expr, val);
+    }
 }

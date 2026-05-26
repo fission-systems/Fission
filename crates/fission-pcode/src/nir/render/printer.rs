@@ -195,13 +195,36 @@ fn print_stmt_with_indent(stmt: &HirStmt, indent: usize, depth: usize, out: &mut
         } => {
             out.push_str(&pad);
             out.push_str(&format!("switch ({}) {{\n", print_expr(expr)));
-            for case in cases {
+            for (c_idx, case) in cases.iter().enumerate() {
+                let next_label = if c_idx + 1 < cases.len() {
+                    cases[c_idx + 1].body.first().and_then(|s| match s {
+                        HirStmt::Label(l) => Some(l.as_str()),
+                        _ => None,
+                    })
+                } else if !default.is_empty() {
+                    default.first().and_then(|s| match s {
+                        HirStmt::Label(l) => Some(l.as_str()),
+                        _ => None,
+                    })
+                } else {
+                    None
+                };
+
                 for value in &case.values {
                     out.push_str(&pad);
                     out.push_str("    ");
                     out.push_str(&format!("case {}:\n", value));
                 }
-                for stmt in &case.body {
+                for (s_idx, stmt) in case.body.iter().enumerate() {
+                    if s_idx + 1 == case.body.len() {
+                        if let HirStmt::Goto(label) = stmt {
+                            if Some(label.as_str()) == next_label {
+                                out.push_str(&pad);
+                                out.push_str("        /* fallthrough */\n");
+                                continue;
+                            }
+                        }
+                    }
                     print_stmt_with_indent(stmt, indent + 2, depth + 1, out);
                 }
                 if !matches!(
@@ -947,13 +970,40 @@ fn print_stmt_with_indent_ctx(
         } => {
             out.push_str(&pad);
             out.push_str(&format!("switch ({}) {{\n", print_expr_with_ctx(expr, ctx)));
-            for case in cases {
+            for (c_idx, case) in cases.iter().enumerate() {
+                let next_label = if c_idx + 1 < cases.len() {
+                    let next_case_body = &cases[c_idx + 1].body;
+                    next_case_body.first().and_then(|s| match s {
+                        HirStmt::Label(l) => Some(l.as_str()),
+                        _ => None,
+                    })
+                } else if !default.is_empty() {
+                    default.first().and_then(|s| match s {
+                        HirStmt::Label(l) => Some(l.as_str()),
+                        _ => None,
+                    })
+                } else {
+                    None
+                };
+
                 for value in &case.values {
                     out.push_str(&pad);
                     out.push_str("    ");
                     out.push_str(&format!("case {}:\n", value));
                 }
-                for s in &case.body {
+                for (s_idx, s) in case.body.iter().enumerate() {
+                    if s_idx == 0 && matches!(s, HirStmt::Label(_)) {
+                        continue;
+                    }
+                    if s_idx + 1 == case.body.len() {
+                        if let HirStmt::Goto(label) = s {
+                            if Some(label.as_str()) == next_label {
+                                out.push_str(&pad);
+                                out.push_str("        /* fallthrough */\n");
+                                continue;
+                            }
+                        }
+                    }
                     print_stmt_with_indent_ctx(s, indent + 2, depth + 1, ctx, out);
                 }
                 if !matches!(
@@ -967,7 +1017,10 @@ fn print_stmt_with_indent_ctx(
             if !default.is_empty() {
                 out.push_str(&pad);
                 out.push_str("    default:\n");
-                for s in default {
+                for (s_idx, s) in default.iter().enumerate() {
+                    if s_idx == 0 && matches!(s, HirStmt::Label(_)) {
+                        continue;
+                    }
                     print_stmt_with_indent_ctx(s, indent + 2, depth + 1, ctx, out);
                 }
                 if !matches!(

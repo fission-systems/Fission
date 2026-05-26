@@ -1528,10 +1528,23 @@ impl<'a> PreviewBuilder<'a> {
                                     );
                                     err
                                 })?;
+                            let false_target = {
+                                let mut f_target = this.next_block_address(idx);
+                                if let Some(succs) = this.successors.get(idx) {
+                                    for succ_idx in succs {
+                                        let succ_addr = this.block_target_key(*succ_idx);
+                                        if succ_addr != true_target {
+                                            f_target = Some(succ_addr);
+                                            break;
+                                        }
+                                    }
+                                }
+                                f_target
+                            };
                             Ok(LoweredTerminator::Cond {
                                 cond,
                                 true_target,
-                                false_target: this.next_block_address(idx),
+                                false_target,
                             })
                         }
                         PcodeOpcode::BranchInd => {

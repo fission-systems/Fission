@@ -143,28 +143,66 @@ fn collect_assignment_copy_constraints(
     known_binding_types: &HashMap<String, NirType>,
     out: &mut HashMap<String, Vec<UseConstraint>>,
 ) {
-    let HirLValue::Var(lhs_name) = lhs else {
-        return;
-    };
+    match lhs {
+        HirLValue::Var(lhs_name) => {
+            if let Some(lhs_ty) = known_binding_types.get(lhs_name) {
+                if let HirExpr::Var(rhs_name) = rhs {
+                    out.entry(rhs_name.clone())
+                        .or_default()
+                        .push(copy_constraint_from_type(lhs_ty));
+                }
+            }
+            if let Some(lhs_ty) = known_binding_types.get(lhs_name) {
+                if matches!(lhs_ty, NirType::Ptr(_)) {
+                    collect_pointer_assignment_base_constraints(rhs, lhs_ty, out);
+                }
+            }
 
-    if let Some(lhs_ty) = known_binding_types.get(lhs_name) {
-        if let HirExpr::Var(rhs_name) = rhs {
-            out.entry(rhs_name.clone())
-                .or_default()
-                .push(copy_constraint_from_type(lhs_ty));
-        }
-    }
-    if let Some(lhs_ty) = known_binding_types.get(lhs_name) {
-        if matches!(lhs_ty, NirType::Ptr(_)) {
-            collect_pointer_assignment_base_constraints(rhs, lhs_ty, out);
-        }
-    }
+            if let HirExpr::Var(rhs_name) = rhs {
+                if let Some(rhs_ty) = known_binding_types.get(rhs_name) {
+                    out.entry(lhs_name.clone())
+                        .or_default()
+                        .push(copy_constraint_from_type(rhs_ty));
+                }
+            }
 
-    if let HirExpr::Var(rhs_name) = rhs {
-        if let Some(rhs_ty) = known_binding_types.get(rhs_name) {
-            out.entry(lhs_name.clone())
-                .or_default()
-                .push(copy_constraint_from_type(rhs_ty));
+            if let HirExpr::AddressOfGlobal(_) = rhs {
+                out.entry(lhs_name.clone())
+                    .or_default()
+                    .push(UseConstraint::Ptr(NirType::Unknown));
+            }
+
+            if let HirExpr::PtrOffset { .. } = rhs {
+                out.entry(lhs_name.clone())
+                    .or_default()
+                    .push(UseConstraint::Ptr(NirType::Unknown));
+            }
+
+            if let HirExpr::Load { ty, .. } = rhs {
+                out.entry(lhs_name.clone())
+                    .or_default()
+                    .push(UseConstraint::Exact(ty.clone()));
+            }
+
+            if let HirExpr::Cast { ty: NirType::Ptr(pointee), .. } = rhs {
+                out.entry(lhs_name.clone())
+                    .or_default()
+                    .push(UseConstraint::Ptr(pointee.as_ref().clone()));
+            }
+        }
+        HirLValue::Deref { ty, .. } => {
+            if let HirExpr::Var(rhs_name) = rhs {
+                out.entry(rhs_name.clone())
+                    .or_default()
+                    .push(UseConstraint::Exact(ty.clone()));
+            }
+        }
+        HirLValue::Index { elem_ty, .. } => {
+            if let HirExpr::Var(rhs_name) = rhs {
+                out.entry(rhs_name.clone())
+                    .or_default()
+                    .push(UseConstraint::Exact(elem_ty.clone()));
+            }
         }
     }
 }
@@ -265,13 +303,17 @@ fn collect_constraints_cast_source(
     if let HirExpr::Cast { ty, expr: inner } = expr {
         if let HirExpr::Var(name) = inner.as_ref() {
             // The variable is being cast; constrain it to the source type of the
-            // cast.  Only scalar types — do not propagate Ptr here (the cast might
-            // be an explicit reinterpretation).
+            // cast.
             match ty {
                 NirType::Int { .. } | NirType::Bool => {
                     out.entry(name.clone())
                         .or_default()
                         .push(UseConstraint::Exact(ty.clone()));
+                }
+                NirType::Ptr(pointee) => {
+                    out.entry(name.clone())
+                        .or_default()
+                        .push(UseConstraint::Ptr(pointee.as_ref().clone()));
                 }
                 _ => {}
             }
@@ -327,7 +369,7 @@ fn collect_constraints_expr(
                             .push(UseConstraint::Signed { bits });
                     }
                 }
-                HirBinaryOp::Add | HirBinaryOp::Sub | HirBinaryOp::Mul => {
+                HirBinaryOp::Add | HirBinaryOp::Sub | HirBinaryOp::Mul | HirBinaryOp::And | HirBinaryOp::Or | HirBinaryOp::Xor | HirBinaryOp::Shl | HirBinaryOp::Shr => {
                     collect_arithmetic_result_constraints(lhs, rhs, ty, known_binding_types, out);
                 }
                 _ => {}
@@ -352,7 +394,15 @@ fn collect_constraints_expr(
                 collect_constraints_expr(arg, return_type, known_binding_types, out);
             }
         }
-        HirExpr::PtrOffset { base, .. } | HirExpr::AggregateCopy { src: base, .. } => {
+        HirExpr::PtrOffset { base, .. } => {
+            if let HirExpr::Var(base_name) = base.as_ref() {
+                out.entry(base_name.clone())
+                    .or_default()
+                    .push(UseConstraint::Ptr(NirType::Unknown));
+            }
+            collect_constraints_expr(base, return_type, known_binding_types, out);
+        }
+        HirExpr::AggregateCopy { src: base, .. } => {
             collect_constraints_expr(base, return_type, known_binding_types, out);
         }
         HirExpr::Index {
@@ -365,6 +415,11 @@ fn collect_constraints_expr(
                 out.entry(name.clone())
                     .or_default()
                     .push(UseConstraint::Ptr(elem_ty.clone()));
+            }
+            if let HirExpr::Var(name) = index.as_ref() {
+                out.entry(name.clone())
+                    .or_default()
+                    .push(UseConstraint::Exact(NirType::Int { bits: 32, signed: false }));
             }
             collect_constraints_expr(base, return_type, known_binding_types, out);
             collect_constraints_expr(index, return_type, known_binding_types, out);

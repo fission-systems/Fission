@@ -56,6 +56,12 @@ def parse_args() -> argparse.Namespace:
         help="Path to fission_cli binary",
     )
     parser.add_argument(
+        "--function-discovery-profile",
+        type=str,
+        default=None,
+        help="Function discovery profile for fission_cli list",
+    )
+    parser.add_argument(
         "--verbose",
         action="store_true",
         help="Print timing for each function",
@@ -97,9 +103,11 @@ def make_fission_env(fission_bin: Path) -> dict[str, str]:
     return env
 
 
-def get_function_addresses(binary: Path, fission_bin: Path, limit: int) -> list[dict]:
+def get_function_addresses(binary: Path, fission_bin: Path, limit: int, profile: str | None = None) -> list[dict]:
     """Get first N function addresses via `fission_cli list <binary> --json`."""
     cmd = [str(fission_bin), "list", str(binary), "--json"]
+    if profile:
+        cmd.extend(["--function-discovery-profile", profile])
     env = make_fission_env(fission_bin)
     result = subprocess.run(
         cmd,
@@ -189,7 +197,7 @@ def main() -> int:
     print(f"[*] Limit: {args.limit} functions, per-function timeout: {args.timeout}s")
     print()
 
-    funcs = get_function_addresses(binary, fission_bin, args.limit)
+    funcs = get_function_addresses(binary, fission_bin, args.limit, args.function_discovery_profile)
     print(f"[*] Testing {len(funcs)} functions...")
     print()
 

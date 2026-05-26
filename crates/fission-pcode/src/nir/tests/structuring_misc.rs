@@ -263,7 +263,7 @@ fn redundant_adjacent_labels_are_folded_to_canonical_target() {
         HirStmt::Goto("block_1000".to_string()),
     ];
 
-    let cleaned = cleanup_redundant_labels(body);
+    let cleaned = cleanup_redundant_labels(body, None);
     assert_eq!(
         cleaned,
         vec![

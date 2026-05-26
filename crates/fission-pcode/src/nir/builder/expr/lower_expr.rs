@@ -296,159 +296,90 @@ impl<'a> PreviewBuilder<'a> {
         let mut resolved_site: Option<LoweringSite> = None;
         if let Some(site) = scope {
             if let Some(defs_in_block) = self.block_defs.get(site.block_idx) {
-                // 1. Try exact key match block-locally first
-                if let Some(def_indices) = defs_in_block.get(&key) {
-                    let mut prior_count = def_indices.partition_point(|idx| *idx < site.op_idx);
-                    while prior_count > 0 {
-                        let def_idx = def_indices[prior_count - 1];
-                        let candidate_op = &self.pcode.blocks[site.block_idx].ops[def_idx];
-                        if Self::is_identity_copy_def(candidate_op) {
-                            prior_count -= 1;
-                            continue;
-                        }
-                        resolved_site = Some(LoweringSite {
-                            block_idx: site.block_idx,
-                            op_idx: def_idx,
-                        });
-                        break;
-                    }
-                }
-
-                // 2. Try wider candidate keys block-locally only if exact match not found
-                if resolved_site.is_none() {
-                    for candidate_key in &candidate_keys {
-                        if candidate_key == &key {
-                            continue;
-                        }
-                        if let Some(def_indices) = defs_in_block.get(candidate_key) {
-                            let mut prior_count = def_indices.partition_point(|idx| *idx < site.op_idx);
-                            while prior_count > 0 {
-                                let def_idx = def_indices[prior_count - 1];
+                // Find the most recent definition among all candidate keys (exact and aliased) block-locally
+                let mut best_def_idx: Option<usize> = None;
+                for candidate_key in &candidate_keys {
+                    if let Some(def_indices) = defs_in_block.get(candidate_key) {
+                        let prior_count = def_indices.partition_point(|idx| *idx < site.op_idx);
+                        if prior_count > 0 {
+                            let mut idx = prior_count - 1;
+                            while idx < prior_count {
+                                let def_idx = def_indices[idx];
                                 let candidate_op = &self.pcode.blocks[site.block_idx].ops[def_idx];
                                 if Self::is_identity_copy_def(candidate_op) {
-                                    prior_count -= 1;
+                                    if idx == 0 {
+                                        break;
+                                    }
+                                    idx -= 1;
                                     continue;
                                 }
-                                let candidate = LoweringSite {
-                                    block_idx: site.block_idx,
-                                    op_idx: def_idx,
-                                };
-                                if resolved_site
-                                    .is_none_or(|resolved| candidate.op_idx > resolved.op_idx)
-                                {
-                                    resolved_site = Some(candidate);
+                                if best_def_idx.is_none_or(|best| def_idx > best) {
+                                    best_def_idx = Some(def_idx);
                                 }
                                 break;
                             }
                         }
                     }
                 }
+                if let Some(def_idx) = best_def_idx {
+                    resolved_site = Some(LoweringSite {
+                        block_idx: site.block_idx,
+                        op_idx: def_idx,
+                    });
+                }
             }
         }
 
         if resolved_site.is_none() {
             if let Some(scope_site) = scope {
-                // 1. Try exact key match across blocks first
-                if let Some(sites) = self.def_sites.get(&key) {
-                    resolved_site = sites
-                        .iter()
-                        .filter_map(|site| {
-                            let candidate = LoweringSite {
-                                block_idx: site.block_idx,
-                                op_idx: site.op_idx,
-                            };
-                            let candidate_op =
-                                &self.pcode.blocks[candidate.block_idx].ops[candidate.op_idx];
-                            if Self::is_identity_copy_def(candidate_op) {
-                                return None;
-                            }
-                            if candidate.block_idx == scope_site.block_idx {
-                                return (candidate.op_idx < scope_site.op_idx).then_some((
-                                    usize::MAX,
-                                    candidate.op_idx,
-                                    candidate,
-                                ));
-                            }
-                            self.dom_tree
-                                .dominates(candidate.block_idx, scope_site.block_idx)
-                                .then_some((
-                                    self.dom_tree.dominance_depth(candidate.block_idx),
-                                    candidate.op_idx,
-                                    candidate,
-                                ))
-                        })
-                        .max_by_key(|(dom_depth, op_idx, candidate)| {
-                            (*dom_depth, candidate.block_idx, *op_idx)
-                        })
-                        .map(|(_, _, candidate)| candidate);
-                }
-
-                // 2. Try wider candidate keys across blocks only if exact match not found
-                if resolved_site.is_none() {
-                    resolved_site = candidate_keys
-                        .iter()
-                        .filter(|candidate_key| *candidate_key != &key)
-                        .filter_map(|candidate_key| self.def_sites.get(candidate_key))
-                        .flat_map(|sites| sites.iter())
-                        .filter_map(|site| {
-                            let candidate = LoweringSite {
-                                block_idx: site.block_idx,
-                                op_idx: site.op_idx,
-                            };
-                            let candidate_op =
-                                &self.pcode.blocks[candidate.block_idx].ops[candidate.op_idx];
-                            if Self::is_identity_copy_def(candidate_op) {
-                                return None;
-                            }
-                            if candidate.block_idx == scope_site.block_idx {
-                                return (candidate.op_idx < scope_site.op_idx).then_some((
-                                    usize::MAX,
-                                    candidate.op_idx,
-                                    candidate,
-                                ));
-                            }
-                            self.dom_tree
-                                .dominates(candidate.block_idx, scope_site.block_idx)
-                                .then_some((
-                                    self.dom_tree.dominance_depth(candidate.block_idx),
-                                    candidate.op_idx,
-                                    candidate,
-                                ))
-                        })
-                        .max_by_key(|(dom_depth, op_idx, candidate)| {
-                            (*dom_depth, candidate.block_idx, *op_idx)
-                        })
-                        .map(|(_, _, candidate)| candidate);
-                }
+                // Find the most dominating/recent definition among all candidate keys across blocks
+                resolved_site = candidate_keys
+                    .iter()
+                    .filter_map(|candidate_key| self.def_sites.get(candidate_key))
+                    .flat_map(|sites| sites.iter())
+                    .filter_map(|site| {
+                        let candidate = LoweringSite {
+                            block_idx: site.block_idx,
+                            op_idx: site.op_idx,
+                        };
+                        let candidate_op =
+                            &self.pcode.blocks[candidate.block_idx].ops[candidate.op_idx];
+                        if Self::is_identity_copy_def(candidate_op) {
+                            return None;
+                        }
+                        if candidate.block_idx == scope_site.block_idx {
+                            return (candidate.op_idx < scope_site.op_idx).then_some((
+                                usize::MAX,
+                                candidate.op_idx,
+                                candidate,
+                            ));
+                        }
+                        self.dom_tree
+                            .dominates(candidate.block_idx, scope_site.block_idx)
+                            .then_some((
+                                self.dom_tree.dominance_depth(candidate.block_idx),
+                                candidate.op_idx,
+                                candidate,
+                            ))
+                    })
+                    .max_by_key(|(dom_depth, op_idx, candidate)| {
+                        (*dom_depth, candidate.block_idx, *op_idx)
+                    })
+                    .map(|(_, _, candidate)| candidate);
             } else {
-                // 1. Try exact key first when scope is None
-                if let Some(def) = self.defs.get(&key) {
-                    let site = LoweringSite {
-                        block_idx: def.block_idx,
-                        op_idx: def.op_idx,
-                    };
-                    let op = &self.pcode.blocks[site.block_idx].ops[site.op_idx];
-                    if !Self::is_identity_copy_def(op) {
-                        resolved_site = Some(site);
-                    }
-                }
-
-                // 2. Try wider candidate keys only if exact match not found
-                if resolved_site.is_none() {
-                    resolved_site = candidate_keys
-                        .iter()
-                        .filter(|candidate_key| *candidate_key != &key)
-                        .filter_map(|candidate_key| self.defs.get(candidate_key))
-                        .filter_map(|def| {
-                            let site = LoweringSite {
-                                block_idx: def.block_idx,
-                                op_idx: def.op_idx,
-                            };
-                            let op = &self.pcode.blocks[site.block_idx].ops[site.op_idx];
-                            (!Self::is_identity_copy_def(op)).then_some(site)
-                        })
-                        .max_by_key(|site| (site.block_idx, site.op_idx));
-                }
+                // Find the most recent definition when scope is None
+                resolved_site = candidate_keys
+                    .iter()
+                    .filter_map(|candidate_key| self.defs.get(candidate_key))
+                    .filter_map(|def| {
+                        let site = LoweringSite {
+                            block_idx: def.block_idx,
+                            op_idx: def.op_idx,
+                        };
+                        let op = &self.pcode.blocks[site.block_idx].ops[site.op_idx];
+                        (!Self::is_identity_copy_def(op)).then_some(site)
+                    })
+                    .max_by_key(|site| (site.block_idx, site.op_idx));
             }
         }
 

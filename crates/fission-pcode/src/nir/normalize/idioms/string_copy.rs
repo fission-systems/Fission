@@ -55,7 +55,7 @@ fn process_statement_list(stmts: &mut Vec<HirStmt>, is_64bit: bool) -> bool {
             collected.push((offset, val, size, i));
 
             let mut j = i + 1;
-            let mut base_vars = get_expr_vars(&base);
+            let base_vars = get_expr_vars(&base);
             
             while j < stmts.len() {
                 if let Some((next_base, next_offset, next_val, next_size)) = match_char_store(&stmts[j]) {

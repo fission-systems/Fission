@@ -11,10 +11,32 @@ pub(crate) fn rename_vars_in_stmts(body: &mut [HirStmt], renames: &[(String, Str
             }
             HirStmt::VaStart { va_list, .. } => rename_var_in_expr(va_list, renames),
             HirStmt::Expr(expr) | HirStmt::Return(Some(expr)) => rename_var_in_expr(expr, renames),
-            HirStmt::Block(stmts)
-            | HirStmt::While { body: stmts, .. }
-            | HirStmt::DoWhile { body: stmts, .. }
-            | HirStmt::For { body: stmts, .. } => rename_vars_in_stmts(stmts, renames),
+            HirStmt::Block(stmts) => rename_vars_in_stmts(stmts, renames),
+            HirStmt::While { cond, body } => {
+                rename_var_in_expr(cond, renames);
+                rename_vars_in_stmts(body, renames);
+            }
+            HirStmt::DoWhile { body, cond } => {
+                rename_vars_in_stmts(body, renames);
+                rename_var_in_expr(cond, renames);
+            }
+            HirStmt::For {
+                init,
+                cond,
+                update,
+                body,
+            } => {
+                if let Some(init_stmt) = init {
+                    rename_vars_in_stmts(std::slice::from_mut(init_stmt.as_mut()), renames);
+                }
+                if let Some(cond_expr) = cond {
+                    rename_var_in_expr(cond_expr, renames);
+                }
+                if let Some(update_stmt) = update {
+                    rename_vars_in_stmts(std::slice::from_mut(update_stmt.as_mut()), renames);
+                }
+                rename_vars_in_stmts(body, renames);
+            }
             HirStmt::Switch {
                 expr,
                 cases,

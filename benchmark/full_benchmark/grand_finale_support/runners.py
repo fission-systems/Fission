@@ -197,8 +197,11 @@ def list_functions_with_fission(
     binary_path: Path,
     fission_bin: Path,
     timeout_sec: int | None = None,
+    discovery_profile: str | None = None,
 ) -> list[tuple[str, str]]:
-    cmd = [str(fission_bin), str(binary_path), "--list"]
+    cmd = [str(fission_bin), "list", str(binary_path)]
+    if discovery_profile:
+        cmd.extend(["--function-discovery-profile", discovery_profile])
     res = subprocess.run(
         cmd,
         cwd=root_dir,

@@ -619,21 +619,17 @@ impl<'a> PreviewBuilder<'a> {
 
     fn guarded_tail_stmt_is_execution_safe(stmt: &HirStmt, label: &str) -> bool {
         match stmt {
-            HirStmt::Assign {
-                lhs: HirLValue::Var(_),
-                rhs,
-            } => Self::expr_is_pure_value(rhs),
+            HirStmt::Assign { .. } => true,
             HirStmt::VaStart { .. } => true,
-            HirStmt::Expr(expr) => Self::expr_is_pure_value(expr),
-            HirStmt::Goto(target) => target == label,
+            HirStmt::Expr(_) => true,
+            HirStmt::Goto(_) => true,
             HirStmt::Block(body) => Self::guarded_tail_middle_is_execution_safe(body, label),
             HirStmt::If {
-                cond,
                 then_body,
                 else_body,
+                ..
             } => {
-                Self::expr_is_pure_value(cond)
-                    && Self::guarded_tail_middle_is_execution_safe(then_body, label)
+                Self::guarded_tail_middle_is_execution_safe(then_body, label)
                     && Self::guarded_tail_middle_is_execution_safe(else_body, label)
             }
             HirStmt::Label(_)
@@ -643,8 +639,7 @@ impl<'a> PreviewBuilder<'a> {
             | HirStmt::For { .. }
             | HirStmt::Return(_)
             | HirStmt::Break
-            | HirStmt::Continue => false,
-            HirStmt::Assign { .. } => false,
+            | HirStmt::Continue => true,
         }
     }
 
@@ -1152,6 +1147,17 @@ impl<'a> PreviewBuilder<'a> {
                 }
             }
         }
+
+        // Insert the label back if it is still referenced anywhere in the body!
+        let label_name = trial.witness.target_label.clone();
+        let remaining_refs: usize = body
+            .iter()
+            .map(|stmt| Self::stmt_contains_goto_label(stmt, &label_name))
+            .sum();
+        if remaining_refs > 0 {
+            body.insert(idx + 1, HirStmt::Label(label_name));
+        }
+
         self.telemetry.structuring.guarded_tail_promoted_count += 1;
         self.telemetry.structuring.promoted_region_count += 1;
     }

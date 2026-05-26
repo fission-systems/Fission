@@ -177,6 +177,10 @@ struct ListArgs {
     /// Path to the binary file to analyze
     binary: PathBuf,
 
+    /// Function discovery profile (conservative|balanced|aggressive)
+    #[arg(long = "function-discovery-profile", value_enum)]
+    function_discovery_profile: Option<FunctionDiscoveryProfileArg>,
+
     #[command(flatten)]
     common: CommonBinaryOutputArgs,
 }
@@ -539,6 +543,7 @@ fn normalize_canonical(cli: CliArgs) -> ParsedInvocation {
                     args.list = true;
                     args.json = list.common.json;
                     args.verbose = list.common.verbose;
+                    args.function_discovery_profile = list.function_discovery_profile;
                     args
                 }
                 CliCommand::Disasm(disasm) => {

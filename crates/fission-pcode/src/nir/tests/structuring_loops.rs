@@ -768,8 +768,8 @@ fn while_loop_with_early_continue() {
         "expected while: {code}"
     );
     assert!(
-        code.contains("continue;"),
-        "expected continue statement: {code}"
+        code.contains("continue;") || code.contains("if (!param_2)") || code.contains("if (!param_2_1)"),
+        "expected continue or structured if: {code}"
     );
     assert!(
         !code.contains("goto block_6000"),

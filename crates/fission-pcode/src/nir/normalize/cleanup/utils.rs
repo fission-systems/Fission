@@ -501,7 +501,7 @@ pub(super) fn var_is_assigned_in_stmt(stmt: &HirStmt, name: &str) -> bool {
     }
 }
 
-pub(super) fn collect_referenced_labels(stmts: &[HirStmt]) -> HashSet<String> {
+pub(crate) fn collect_referenced_labels(stmts: &[HirStmt]) -> HashSet<String> {
     let mut referenced = HashSet::new();
     for stmt in stmts {
         collect_stmt_referenced_labels(stmt, &mut referenced);

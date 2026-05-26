@@ -141,7 +141,9 @@ impl<'a> PreviewBuilder<'a> {
             materialize_owner_repartition: std::cell::RefCell::new(
                 super::materialize::MaterializeOwnerRepartition::default(),
             ),
+            active_switch_targets: HashSet::new(),
             telemetry: super::telemetry::BuilderTelemetry::default(),
+            structuring_start: None,
         }
     }
 }

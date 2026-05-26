@@ -146,6 +146,6 @@ impl<'a> PreviewBuilder<'a> {
         self.telemetry
             .structuring
             .region_linearize_structuring_count += 1;
-        Ok(Some((cleanup_redundant_labels(body), skip_to)))
+        Ok(Some((cleanup_redundant_labels(body, None), skip_to)))
     }
 }

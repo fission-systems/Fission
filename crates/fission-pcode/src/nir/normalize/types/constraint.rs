@@ -147,10 +147,27 @@ fn collect_constraints(
             HirStmt::Expr(expr) | HirStmt::Return(Some(expr)) => {
                 collect_constraints_expr(expr, field_accesses);
             }
-            HirStmt::Block(body)
-            | HirStmt::While { body, .. }
-            | HirStmt::DoWhile { body, .. }
-            | HirStmt::For { body, .. } => {
+            HirStmt::Block(body) => {
+                collect_constraints(body, field_accesses, assignments);
+            }
+            HirStmt::While { cond, body } => {
+                collect_constraints_expr(cond, field_accesses);
+                collect_constraints(body, field_accesses, assignments);
+            }
+            HirStmt::DoWhile { body, cond } => {
+                collect_constraints(body, field_accesses, assignments);
+                collect_constraints_expr(cond, field_accesses);
+            }
+            HirStmt::For { init, cond, update, body } => {
+                if let Some(init_stmt) = init {
+                    collect_constraints(std::slice::from_ref(init_stmt.as_ref()), field_accesses, assignments);
+                }
+                if let Some(cond_expr) = cond {
+                    collect_constraints_expr(cond_expr, field_accesses);
+                }
+                if let Some(update_stmt) = update {
+                    collect_constraints(std::slice::from_ref(update_stmt.as_ref()), field_accesses, assignments);
+                }
                 collect_constraints(body, field_accesses, assignments);
             }
             HirStmt::If { cond, then_body, else_body } => {
@@ -317,10 +334,27 @@ fn update_ast_types(stmts: &mut [HirStmt], var_types: &HashMap<String, NirType>)
             HirStmt::Expr(expr) | HirStmt::Return(Some(expr)) => {
                 update_ast_expr(expr, var_types);
             }
-            HirStmt::Block(body)
-            | HirStmt::While { body, .. }
-            | HirStmt::DoWhile { body, .. }
-            | HirStmt::For { body, .. } => {
+            HirStmt::Block(body) => {
+                update_ast_types(body, var_types);
+            }
+            HirStmt::While { cond, body } => {
+                update_ast_expr(cond, var_types);
+                update_ast_types(body, var_types);
+            }
+            HirStmt::DoWhile { body, cond } => {
+                update_ast_types(body, var_types);
+                update_ast_expr(cond, var_types);
+            }
+            HirStmt::For { init, cond, update, body } => {
+                if let Some(init_stmt) = init {
+                    update_ast_types(std::slice::from_mut(init_stmt.as_mut()), var_types);
+                }
+                if let Some(cond_expr) = cond {
+                    update_ast_expr(cond_expr, var_types);
+                }
+                if let Some(update_stmt) = update {
+                    update_ast_types(std::slice::from_mut(update_stmt.as_mut()), var_types);
+                }
                 update_ast_types(body, var_types);
             }
             HirStmt::If { cond, then_body, else_body } => {

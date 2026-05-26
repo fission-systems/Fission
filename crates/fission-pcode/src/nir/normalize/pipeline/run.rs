@@ -160,6 +160,7 @@ fn cleanup_func_stmt_list(func: &mut HirFunction) {
     // fewer useful rounds; extra iterations mostly rescan unchanged trees.
     let stmt_count = count_hir_stmts(&func.body);
     let round_limit = if stmt_count > 500 { 6 } else { 16 };
+    let global_refs = crate::nir::normalize::cleanup::utils::collect_referenced_labels(&func.body);
     cleanup_stmt_list_with_options_and_preserved(
         &mut func.body,
         &func.name,
@@ -169,6 +170,7 @@ fn cleanup_func_stmt_list(func: &mut HirFunction) {
             round_limit,
         },
         &preserved_temps,
+        Some(&global_refs),
     );
 }
 
@@ -1732,7 +1734,10 @@ fn run_cleanup_family_passes(
                 func,
                 &format!("cleanup_boundary_label_{stage}"),
                 perf,
-                |f| cleanup_boundary_labels_recursive(&mut f.body),
+                |f| {
+                    let global_refs = crate::nir::normalize::cleanup::utils::collect_referenced_labels(&f.body);
+                    cleanup_boundary_labels_recursive(&mut f.body, &global_refs)
+                },
             );
         } else {
             wave_stats::add_cleanup_budget_skips(1);
@@ -2159,6 +2164,11 @@ struct CleanupStmtOptions {
 
 fn cleanup_stmt_list(stmts: &mut Vec<HirStmt>, func_name: &str, depth: usize) {
     let preserved_temps = HashSet::new();
+    let global_refs = if depth == 0 {
+        Some(crate::nir::normalize::cleanup::utils::collect_referenced_labels(stmts))
+    } else {
+        None
+    };
     cleanup_stmt_list_with_options_and_preserved(
         stmts,
         func_name,
@@ -2168,6 +2178,7 @@ fn cleanup_stmt_list(stmts: &mut Vec<HirStmt>, func_name: &str, depth: usize) {
             round_limit: 16,
         },
         &preserved_temps,
+        global_refs.as_ref(),
     );
 }
 
@@ -2178,12 +2189,18 @@ fn cleanup_stmt_list_with_options(
     options: CleanupStmtOptions,
 ) {
     let preserved_temps = HashSet::new();
+    let global_refs = if depth == 0 {
+        Some(crate::nir::normalize::cleanup::utils::collect_referenced_labels(stmts))
+    } else {
+        None
+    };
     cleanup_stmt_list_with_options_and_preserved(
         stmts,
         func_name,
         depth,
         options,
         &preserved_temps,
+        global_refs.as_ref(),
     );
 }
 
@@ -2193,6 +2210,7 @@ fn cleanup_stmt_list_with_options_and_preserved(
     depth: usize,
     options: CleanupStmtOptions,
     preserved_temps: &HashSet<&str>,
+    global_refs: Option<&HashSet<String>>,
 ) {
     for stmt in stmts.iter_mut() {
         normalize_stmt(stmt);
@@ -2204,6 +2222,7 @@ fn cleanup_stmt_list_with_options_and_preserved(
                     depth + 1,
                     options,
                     preserved_temps,
+                    global_refs,
                 )
             }
             HirStmt::For {
@@ -2217,6 +2236,7 @@ fn cleanup_stmt_list_with_options_and_preserved(
                             depth + 1,
                             options,
                             preserved_temps,
+                            global_refs,
                         );
                     }
                 }
@@ -2228,6 +2248,7 @@ fn cleanup_stmt_list_with_options_and_preserved(
                             depth + 1,
                             options,
                             preserved_temps,
+                            global_refs,
                         );
                     }
                 }
@@ -2237,6 +2258,7 @@ fn cleanup_stmt_list_with_options_and_preserved(
                     depth + 1,
                     options,
                     preserved_temps,
+                    global_refs,
                 )
             }
             HirStmt::If {
@@ -2250,6 +2272,7 @@ fn cleanup_stmt_list_with_options_and_preserved(
                     depth + 1,
                     options,
                     preserved_temps,
+                    global_refs,
                 );
                 cleanup_stmt_list_with_options_and_preserved(
                     else_body,
@@ -2257,6 +2280,7 @@ fn cleanup_stmt_list_with_options_and_preserved(
                     depth + 1,
                     options,
                     preserved_temps,
+                    global_refs,
                 );
             }
             HirStmt::Switch { cases, default, .. } => {
@@ -2267,6 +2291,7 @@ fn cleanup_stmt_list_with_options_and_preserved(
                         depth + 1,
                         options,
                         preserved_temps,
+                        global_refs,
                     );
                 }
                 cleanup_stmt_list_with_options_and_preserved(
@@ -2275,6 +2300,7 @@ fn cleanup_stmt_list_with_options_and_preserved(
                     depth + 1,
                     options,
                     preserved_temps,
+                    global_refs,
                 );
             }
             HirStmt::Assign { .. }
@@ -2356,11 +2382,22 @@ fn cleanup_stmt_list_with_options_and_preserved(
             changed = true;
             last_changed_pass = Some("promote_guarded_jump_target_tail");
         }
-        if options.include_boundary_labels && cleanup_redundant_boundary_labels(stmts) {
+        let current_refs = if depth == 0 {
+            Some(crate::nir::normalize::cleanup::utils::collect_referenced_labels(stmts))
+        } else {
+            None
+        };
+        let active_refs = if depth == 0 {
+            current_refs.as_ref()
+        } else {
+            global_refs
+        };
+
+        if options.include_boundary_labels && cleanup_redundant_boundary_labels(stmts, active_refs) {
             changed = true;
             last_changed_pass = Some("cleanup_redundant_boundary_labels");
         }
-        if remove_unreferenced_leading_labels(stmts) {
+        if remove_unreferenced_leading_labels(stmts, active_refs) {
             changed = true;
             last_changed_pass = Some("remove_unreferenced_leading_labels");
         }
@@ -2422,30 +2459,30 @@ fn cleanup_stmt_list_with_options_and_preserved(
     }
 }
 
-fn cleanup_boundary_labels_recursive(stmts: &mut Vec<HirStmt>) -> bool {
+fn cleanup_boundary_labels_recursive(stmts: &mut Vec<HirStmt>, global_refs: &HashSet<String>) -> bool {
     let mut changed =
-        cleanup_redundant_boundary_labels(stmts) || remove_unreferenced_leading_labels(stmts);
+        cleanup_redundant_boundary_labels(stmts, Some(global_refs)) || remove_unreferenced_leading_labels(stmts, Some(global_refs));
     for stmt in stmts.iter_mut() {
         match stmt {
             HirStmt::Block(body)
             | HirStmt::While { body, .. }
             | HirStmt::DoWhile { body, .. }
             | HirStmt::For { body, .. } => {
-                changed |= cleanup_boundary_labels_recursive(body);
+                changed |= cleanup_boundary_labels_recursive(body, global_refs);
             }
             HirStmt::If {
                 then_body,
                 else_body,
                 ..
             } => {
-                changed |= cleanup_boundary_labels_recursive(then_body);
-                changed |= cleanup_boundary_labels_recursive(else_body);
+                changed |= cleanup_boundary_labels_recursive(then_body, global_refs);
+                changed |= cleanup_boundary_labels_recursive(else_body, global_refs);
             }
             HirStmt::Switch { cases, default, .. } => {
                 for case in cases {
-                    changed |= cleanup_boundary_labels_recursive(&mut case.body);
+                    changed |= cleanup_boundary_labels_recursive(&mut case.body, global_refs);
                 }
-                changed |= cleanup_boundary_labels_recursive(default);
+                changed |= cleanup_boundary_labels_recursive(default, global_refs);
             }
             HirStmt::Assign { .. }
             | HirStmt::VaStart { .. }

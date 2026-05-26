@@ -102,13 +102,24 @@ def ghidra_headless_path(ghidra_home: Path) -> Path:
 
 def run_ghidra_reference_export(
     binary_path: Path,
-    script_dir: Path,
-    export_script: str,
     ghidra_home: Path,
     timeout_sec: int,
     output_dir: Path,
-) -> tuple[list[dict[str, Any]], str | None]:
+    entry_id: str,
+    script_dir: Path | None = None,
+    export_script: str | None = None,
+) -> dict[str, Any]:
+    from benchmark.source_semantic_benchmark.config import (
+        DEFAULT_GHIDRA_SCRIPT_DIR,
+        DEFAULT_GHIDRA_EXPORT_SCRIPT,
+    )
+    if script_dir is None:
+        script_dir = DEFAULT_GHIDRA_SCRIPT_DIR
+    if export_script is None:
+        export_script = DEFAULT_GHIDRA_EXPORT_SCRIPT
+
     headless = ghidra_headless_path(ghidra_home)
+    start = time.perf_counter()
     with tempfile.TemporaryDirectory(prefix="ghidra-bench-proj-") as tmp:
         proj_dir = Path(tmp)
         out_json_file = proj_dir / "ghidra_export.json"
@@ -127,7 +138,6 @@ def run_ghidra_reference_export(
             "-readOnly",
             "-deleteProject",
         ]
-        start = time.perf_counter()
         try:
             res = subprocess.run(
                 cmd,
@@ -140,20 +150,75 @@ def run_ghidra_reference_export(
             )
         except subprocess.TimeoutExpired as exc:
             detail = getattr(exc, "stderr", "") or getattr(exc, "stdout", "") or str(exc)
-            return [], f"ghidra_timeout: {detail[-2000:]}"
+            return {
+                "success": False,
+                "failure_kind": "timeout",
+                "failure_detail": f"ghidra_timeout: {detail[-2000:]}",
+                "functions": [],
+                "function_count": 0,
+                "artifact_path": None,
+                "wall_sec": round(time.perf_counter() - start, 6),
+                "command": " ".join(shlex.quote(c) for c in cmd),
+            }
         except subprocess.CalledProcessError as exc:
             detail = getattr(exc, "stderr", "") or getattr(exc, "stdout", "") or str(exc)
-            return [], f"ghidra_failed: {detail[-2000:]}"
+            return {
+                "success": False,
+                "failure_kind": "command_failed",
+                "failure_detail": f"ghidra_failed: {detail[-2000:]}",
+                "functions": [],
+                "function_count": 0,
+                "artifact_path": None,
+                "wall_sec": round(time.perf_counter() - start, 6),
+                "command": " ".join(shlex.quote(c) for c in cmd),
+            }
 
         if not out_json_file.exists():
-            return [], f"ghidra_no_output_file: {res.stderr[-2000:]}"
+            return {
+                "success": False,
+                "failure_kind": "empty_output",
+                "failure_detail": f"ghidra_no_output_file: {res.stderr[-2000:]}",
+                "functions": [],
+                "function_count": 0,
+                "artifact_path": None,
+                "wall_sec": round(time.perf_counter() - start, 6),
+                "command": " ".join(shlex.quote(c) for c in cmd),
+            }
 
         try:
             data = json.loads(out_json_file.read_text(encoding="utf-8"))
         except json.JSONDecodeError as exc:
-            return [], f"ghidra_invalid_json: {exc}"
+            return {
+                "success": False,
+                "failure_kind": "invalid_json",
+                "failure_detail": f"ghidra_invalid_json: {exc}",
+                "functions": [],
+                "function_count": 0,
+                "artifact_path": None,
+                "wall_sec": round(time.perf_counter() - start, 6),
+                "command": " ".join(shlex.quote(c) for c in cmd),
+            }
 
-        return data.get("functions") or [], None
+        dest_json_file = output_dir / f"ghidra_export_{entry_id}.json"
+        dest_json_file.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            shutil.copy2(out_json_file, dest_json_file)
+            artifact_path = rel(dest_json_file)
+        except Exception:
+            artifact_path = str(dest_json_file)
+
+        funcs = data.get("functions") or []
+        return {
+            "success": True,
+            "failure_kind": None,
+            "failure_detail": None,
+            "functions": funcs,
+            "function_count": len(funcs),
+            "artifact_path": artifact_path,
+            "wall_sec": round(time.perf_counter() - start, 6),
+            "command": " ".join(shlex.quote(c) for c in cmd),
+        }
+
 
 
 def ghidra_function_index(functions: list[dict[str, Any]]) -> tuple[list[FissionFunction], dict[str, dict[str, Any]]]:

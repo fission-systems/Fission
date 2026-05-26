@@ -5,7 +5,7 @@ pub(crate) use goto::eliminate_redundant_gotos;
 
 pub(crate) fn finalize_structured_body(mut body: Vec<HirStmt>) -> Vec<HirStmt> {
     body = eliminate_redundant_gotos(body);
-    body = cleanup_redundant_labels(body);
+    body = cleanup_redundant_labels(body, None);
     let referenced = collect_referenced_labels(&body);
     while matches!(body.first(), Some(HirStmt::Label(label)) if !referenced.contains(label)) {
         body.remove(0);
@@ -17,10 +17,18 @@ pub(crate) fn finalize_structured_body(mut body: Vec<HirStmt>) -> Vec<HirStmt> {
 // Existing label-cleanup utilities
 // ---------------------------------------------------------------------------
 
-pub(crate) fn cleanup_redundant_labels(body: Vec<HirStmt>) -> Vec<HirStmt> {
+pub(crate) fn cleanup_redundant_labels(
+    body: Vec<HirStmt>,
+    global_refs: Option<&HashSet<String>>,
+) -> Vec<HirStmt> {
     let aliases = adjacent_label_aliases(&body);
     let body = rewrite_stmt_labels(body, &aliases);
-    let referenced = collect_referenced_labels(&body);
+    let local_refs = if global_refs.is_none() {
+        Some(collect_referenced_labels(&body))
+    } else {
+        None
+    };
+    let referenced = global_refs.unwrap_or_else(|| local_refs.as_ref().unwrap());
     let mut cleaned = Vec::with_capacity(body.len());
     let mut seen_labels = HashSet::new();
 
@@ -42,9 +50,9 @@ pub(crate) fn cleanup_redundant_labels(body: Vec<HirStmt>) -> Vec<HirStmt> {
 }
 
 pub(super) fn normalize_guarded_tail_layout(body: Vec<HirStmt>) -> (Vec<HirStmt>, usize) {
-    let cleaned = cleanup_redundant_labels(body);
+    let cleaned = cleanup_redundant_labels(body, None);
     let (canonicalized, rewritten_aliases) = canonicalize_top_level_forward_label_aliases(cleaned);
-    let cleaned = cleanup_redundant_labels(canonicalized);
+    let cleaned = cleanup_redundant_labels(canonicalized, None);
     (cleaned, rewritten_aliases)
 }
 

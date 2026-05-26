@@ -22,9 +22,9 @@ pub(crate) fn is_register_varnode(vn: &Varnode) -> bool {
 
 pub(crate) const CONDITION_RECOVERY_BUDGET_MS: f64 = 10.0;
 pub(crate) const CONDITION_RECOVERY_SUBCALL_LIMIT: usize = 512;
-pub(crate) const BRANCH_CONDITION_RECOVERY_BUDGET_MIN: usize = 48;
-pub(crate) const BRANCH_CONDITION_RECOVERY_BUDGET_PER_BLOCK: usize = 4;
-pub(crate) const BRANCH_CONDITION_RECOVERY_BUDGET_MAX: usize = 1024;
+pub(crate) const BRANCH_CONDITION_RECOVERY_BUDGET_MIN: usize = 2048;
+pub(crate) const BRANCH_CONDITION_RECOVERY_BUDGET_PER_BLOCK: usize = 32;
+pub(crate) const BRANCH_CONDITION_RECOVERY_BUDGET_MAX: usize = 32768;
 pub(crate) const PASSTHROUGH_PEEL_MAX_STEPS: usize = 48;
 pub(crate) const SWITCH_CHAIN_PARSE_BUDGET_MAX: usize = 16;
 
@@ -150,6 +150,7 @@ pub(crate) struct IfLoweringBudget {
     pub(crate) idx: usize,
     pub(crate) block_addr: u64,
     pub(crate) label: &'static str,
+    pub(crate) structuring_start: Option<Instant>,
 }
 
 #[derive(Debug, Clone)]

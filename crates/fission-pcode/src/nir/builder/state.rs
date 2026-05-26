@@ -59,5 +59,7 @@ pub(crate) struct PreviewBuilder<'a> {
     pub(crate) lowering_site_depth: usize,
     pub(in crate::nir::builder) materialize_owner_repartition:
         RefCell<super::materialize::MaterializeOwnerRepartition>,
+    pub(crate) active_switch_targets: HashSet<usize>,
     pub(crate) telemetry: super::telemetry::BuilderTelemetry,
+    pub(crate) structuring_start: Option<std::time::Instant>,
 }

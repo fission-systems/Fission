@@ -1,6 +1,6 @@
 //! Statement and function-level cleanup passes (labels, temps, casts).
 
-mod utils;
+pub(crate) mod utils;
 mod temp_var;
 mod casts;
 mod loops_conds;

@@ -542,22 +542,35 @@ fn common_exit_guard_chain(
         .filter(|(_, count, conds)| *count > 1 && !conds.is_empty())
 }
 
-pub(crate) fn cleanup_redundant_boundary_labels(stmts: &mut Vec<HirStmt>) -> bool {
+pub(crate) fn cleanup_redundant_boundary_labels(
+    stmts: &mut Vec<HirStmt>,
+    global_refs: Option<&HashSet<String>>,
+) -> bool {
     let original = stmts.clone();
-    let cleaned = cleanup_redundant_labels(std::mem::take(stmts));
+    let cleaned = cleanup_redundant_labels(std::mem::take(stmts), global_refs);
     let changed = cleaned != original;
     *stmts = cleaned;
     changed
 }
 
-pub(crate) fn remove_unreferenced_leading_labels(stmts: &mut Vec<HirStmt>) -> bool {
-    let referenced = collect_referenced_labels(stmts);
+pub(crate) fn remove_unreferenced_leading_labels(
+    stmts: &mut Vec<HirStmt>,
+    global_refs: Option<&HashSet<String>>,
+) -> bool {
+    let local_refs = if global_refs.is_none() {
+        Some(collect_referenced_labels(stmts))
+    } else {
+        None
+    };
+    let referenced = global_refs.unwrap_or_else(|| local_refs.as_ref().unwrap());
     let mut changed = false;
-    while matches!(stmts.first(), Some(HirStmt::Label(label)) if !referenced.contains(label))
-        && !should_preserve_unreferenced_leading_labels(stmts)
-    {
-        stmts.remove(0);
-        changed = true;
+    while let Some(HirStmt::Label(label)) = stmts.first() {
+        if !referenced.contains(label) && !should_preserve_unreferenced_leading_labels(stmts) {
+            stmts.remove(0);
+            changed = true;
+        } else {
+            break;
+        }
     }
     changed
 }

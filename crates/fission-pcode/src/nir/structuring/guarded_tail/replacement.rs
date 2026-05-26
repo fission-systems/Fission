@@ -104,12 +104,22 @@ impl<'a> PreviewBuilder<'a> {
                 Self::replace_var_in_expr(va_list, name, replacement)
             }
             HirStmt::Expr(expr) => Self::replace_var_in_expr(expr, name, replacement),
-            HirStmt::Block(stmts)
-            | HirStmt::While { body: stmts, .. }
-            | HirStmt::DoWhile { body: stmts, .. } => {
+            HirStmt::Block(stmts) => {
                 for stmt in stmts {
                     Self::replace_var_in_stmt(stmt, name, replacement);
                 }
+            }
+            HirStmt::While { cond, body } => {
+                Self::replace_var_in_expr(cond, name, replacement);
+                for stmt in body {
+                    Self::replace_var_in_stmt(stmt, name, replacement);
+                }
+            }
+            HirStmt::DoWhile { body, cond } => {
+                for stmt in body {
+                    Self::replace_var_in_stmt(stmt, name, replacement);
+                }
+                Self::replace_var_in_expr(cond, name, replacement);
             }
             HirStmt::Switch {
                 expr,
@@ -140,7 +150,10 @@ impl<'a> PreviewBuilder<'a> {
                 }
             }
             HirStmt::For {
-                init, cond, update, ..
+                init,
+                cond,
+                update,
+                body,
             } => {
                 if let Some(init_stmt) = init {
                     Self::replace_var_in_stmt(init_stmt, name, replacement);
@@ -150,6 +163,9 @@ impl<'a> PreviewBuilder<'a> {
                 }
                 if let Some(update_stmt) = update {
                     Self::replace_var_in_stmt(update_stmt, name, replacement);
+                }
+                for stmt in body {
+                    Self::replace_var_in_stmt(stmt, name, replacement);
                 }
             }
             HirStmt::Return(Some(expr)) => Self::replace_var_in_expr(expr, name, replacement),
@@ -275,12 +291,16 @@ impl<'a> PreviewBuilder<'a> {
             }
             HirStmt::VaStart { va_list, .. } => Self::count_var_reads_expr(va_list, name),
             HirStmt::Expr(expr) => Self::count_var_reads_expr(expr, name),
-            HirStmt::Block(stmts)
-            | HirStmt::While { body: stmts, .. }
-            | HirStmt::DoWhile { body: stmts, .. } => stmts
+            HirStmt::Block(stmts) | HirStmt::While { body: stmts, .. } => stmts
                 .iter()
                 .map(|stmt| Self::count_var_reads_stmt(stmt, name))
                 .sum(),
+            HirStmt::DoWhile { body, cond } => {
+                body.iter()
+                    .map(|stmt| Self::count_var_reads_stmt(stmt, name))
+                    .sum::<usize>()
+                    + Self::count_var_reads_expr(cond, name)
+            }
             HirStmt::Switch {
                 expr,
                 cases,
@@ -428,11 +448,19 @@ impl<'a> PreviewBuilder<'a> {
                 Some(GuardedTailReadKind::ReturnExpr)
             }
             HirStmt::Return(_) => None,
-            HirStmt::Block(stmts)
-            | HirStmt::While { body: stmts, .. }
-            | HirStmt::DoWhile { body: stmts, .. } => stmts
+            HirStmt::Block(stmts) | HirStmt::While { body: stmts, .. } => stmts
                 .iter()
                 .find_map(|stmt| Self::classify_stmt_read_kind(stmt, name)),
+            HirStmt::DoWhile { body, cond } => body
+                .iter()
+                .find_map(|stmt| Self::classify_stmt_read_kind(stmt, name))
+                .or_else(|| {
+                    if Self::expr_contains_var(cond, name) {
+                        Some(GuardedTailReadKind::ConditionExpr)
+                    } else {
+                        None
+                    }
+                }),
             HirStmt::Switch { cases, default, .. } => cases
                 .iter()
                 .flat_map(|case| case.body.iter())

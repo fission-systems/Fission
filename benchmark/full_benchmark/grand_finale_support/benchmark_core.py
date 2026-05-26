@@ -167,6 +167,15 @@ def _surface_tokens(pattern: re.Pattern[str], code: str) -> list[str]:
         lowered = value.lower()
         if pattern is CALL_NAME_RE and lowered in CALL_KEYWORDS:
             continue
+        if pattern is CALL_NAME_RE:
+            if lowered.startswith("sub_") or lowered.startswith("fun_"):
+                parts = lowered.split("_", 1)
+                if len(parts) == 2:
+                    try:
+                        addr = int(parts[1], 16)
+                        lowered = f"fn_{addr:x}"
+                    except ValueError:
+                        pass
         tokens.append(lowered)
     return tokens
 
@@ -2926,12 +2935,14 @@ def build_seeded_function_set(
     limit: int | None,
     timeout_sec: int,
     required_functions: list[tuple[str, str]] | None = None,
+    discovery_profile: str | None = None,
 ) -> list[tuple[str, str]]:
     discovered = list_functions_with_fission(
         ROOT_DIR,
         binary_path,
         fission_bin,
         timeout_sec=timeout_sec,
+        discovery_profile=discovery_profile,
     )
     if not discovered:
         return _normalize_row_target_pairs(required_functions)
@@ -6326,26 +6337,9 @@ def run_single_benchmark(
         limit=effective_limit,
         timeout_sec=args.timeout,
         required_functions=row_fidelity_targets_filter,
+        discovery_profile=args.function_discovery_profile,
     )
     print(f"[*] Seeded function set: {len(seeded_functions)} canonical functions")
-
-    fission = run_fission_full(
-        binary_path=binary_path,
-        fission_bin=fission_bin,
-        output_dir=output_dir,
-        timeout_sec=args.timeout,
-        profile=args.profile,
-        function_discovery_profile=args.function_discovery_profile,
-        compiler_id=args.compiler_id,
-        struct_ptr_aliases=struct_ptr_aliases,
-        public_engine="fission",
-        limit=effective_limit,
-        seeded_functions=seeded_functions,
-    )
-    print(
-        f"[*] Fission complete: functions={len(fission['entries'])}, "
-        f"wall={float(fission['meta'].get('wall_clock_sec', 0.0)):.3f}s"
-    )
 
     ghidra = run_ghidra_full(
         binary_path=binary_path,
@@ -6364,6 +6358,59 @@ def run_single_benchmark(
         f"[*] Ghidra complete: functions={len(ghidra['entries'])}, "
         f"wall={float(ghidra['meta'].get('wall_clock_sec', 0.0)):.3f}s"
         + (" (from cache)" if ghidra["meta"].get("from_cache") else "")
+    )
+
+    # Map from raw target seed to Ghidra canonical parent entry address
+    seed_to_parent = {}
+    for addr_str, entry in ghidra.get("entries", {}).items():
+        raw_addr = canonical_address(addr_str)
+        resolved_addr = entry.get("resolved_address")
+        if resolved_addr:
+            seed_to_parent[raw_addr] = canonical_address(resolved_addr)
+        else:
+            seed_to_parent[raw_addr] = raw_addr
+
+    # Unify/Deduplicate Ghidra entries by parent address
+    unified_ghidra_entries = {}
+    for addr_str, entry in ghidra.get("entries", {}).items():
+        raw_addr = canonical_address(addr_str)
+        parent_addr = seed_to_parent.get(raw_addr, raw_addr)
+        if parent_addr in unified_ghidra_entries:
+            existing = unified_ghidra_entries[parent_addr]
+            if not existing.get("success") and entry.get("success"):
+                entry["address"] = parent_addr
+                unified_ghidra_entries[parent_addr] = entry
+        else:
+            entry["address"] = parent_addr
+            unified_ghidra_entries[parent_addr] = entry
+    ghidra["entries"] = unified_ghidra_entries
+
+    # Deduplicate Fission seeded functions using parent addresses
+    unique_parent_addrs = set()
+    deduped_seeded_functions = []
+    for addr_str, name in seeded_functions:
+        raw_addr = canonical_address(addr_str)
+        parent_addr = seed_to_parent.get(raw_addr, raw_addr)
+        if parent_addr not in unique_parent_addrs:
+            unique_parent_addrs.add(parent_addr)
+            deduped_seeded_functions.append((parent_addr, name))
+
+    fission = run_fission_full(
+        binary_path=binary_path,
+        fission_bin=fission_bin,
+        output_dir=output_dir,
+        timeout_sec=args.timeout,
+        profile=args.profile,
+        function_discovery_profile=args.function_discovery_profile,
+        compiler_id=args.compiler_id,
+        struct_ptr_aliases=struct_ptr_aliases,
+        public_engine="fission",
+        limit=effective_limit,
+        seeded_functions=deduped_seeded_functions,
+    )
+    print(
+        f"[*] Fission complete: functions={len(fission['entries'])}, "
+        f"wall={float(fission['meta'].get('wall_clock_sec', 0.0)):.3f}s"
     )
 
     benchmark = build_comparison(

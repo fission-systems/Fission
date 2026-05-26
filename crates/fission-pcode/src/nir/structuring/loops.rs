@@ -11,23 +11,53 @@ struct LoopControlRewriteStats {
     skipped_nested_scope_count: usize,
 }
 
-fn rewrite_loop_control_gotos_in_stmts(
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum ScopeFrame {
+    Loop {
+        continue_labels: std::collections::HashSet<String>,
+        break_labels: std::collections::HashSet<String>,
+    },
+    Switch {
+        break_labels: std::collections::HashSet<String>,
+    },
+}
+
+fn rewrite_loop_control_gotos_with_stack(
     stmts: &mut [HirStmt],
-    continue_label: Option<&str>,
-    break_label: Option<&str>,
+    stack: &mut Vec<ScopeFrame>,
     stats: &mut LoopControlRewriteStats,
 ) {
     for stmt in stmts.iter_mut() {
         match stmt {
             HirStmt::Goto(label) => {
-                if break_label.is_some_and(|target| label == target) {
-                    *stmt = HirStmt::Break;
-                    stats.break_rewrites += 1;
+                let target_label = label.clone();
+                // 1. try matching continue: scan top-to-bottom for the innermost Loop frame
+                let mut continue_matched = false;
+                for frame in stack.iter().rev() {
+                    if let ScopeFrame::Loop { continue_labels, .. } = frame {
+                        if continue_labels.contains(&target_label) {
+                            *stmt = HirStmt::Continue;
+                            stats.continue_rewrites += 1;
+                            continue_matched = true;
+                        }
+                        break;
+                    }
+                }
+                if continue_matched {
                     continue;
                 }
-                if continue_label.is_some_and(|target| label == target) {
-                    *stmt = HirStmt::Continue;
-                    stats.continue_rewrites += 1;
+
+                // 2. try matching break: only check the innermost frame (top of stack)
+                if let Some(innermost) = stack.last() {
+                    let break_matched = match innermost {
+                        ScopeFrame::Loop { break_labels, .. } => break_labels.contains(&target_label),
+                        ScopeFrame::Switch { break_labels } => break_labels.contains(&target_label),
+                    };
+                    if break_matched {
+                        *stmt = HirStmt::Break;
+                        stats.break_rewrites += 1;
+                        continue;
+                    }
                 }
             }
             HirStmt::If {
@@ -35,17 +65,41 @@ fn rewrite_loop_control_gotos_in_stmts(
                 else_body,
                 ..
             } => {
-                rewrite_loop_control_gotos_in_stmts(then_body, continue_label, break_label, stats);
-                rewrite_loop_control_gotos_in_stmts(else_body, continue_label, break_label, stats);
+                rewrite_loop_control_gotos_with_stack(then_body, stack, stats);
+                rewrite_loop_control_gotos_with_stack(else_body, stack, stats);
             }
             HirStmt::Block(body) => {
-                rewrite_loop_control_gotos_in_stmts(body, continue_label, break_label, stats);
+                rewrite_loop_control_gotos_with_stack(body, stack, stats);
             }
-            HirStmt::While { .. }
-            | HirStmt::DoWhile { .. }
-            | HirStmt::For { .. }
-            | HirStmt::Switch { .. } => {
+            HirStmt::While { body, .. }
+            | HirStmt::DoWhile { body, .. } => {
                 stats.skipped_nested_scope_count += 1;
+                stack.push(ScopeFrame::Loop {
+                    continue_labels: std::collections::HashSet::new(),
+                    break_labels: std::collections::HashSet::new(),
+                });
+                rewrite_loop_control_gotos_with_stack(body, stack, stats);
+                stack.pop();
+            }
+            HirStmt::For { body, .. } => {
+                stats.skipped_nested_scope_count += 1;
+                stack.push(ScopeFrame::Loop {
+                    continue_labels: std::collections::HashSet::new(),
+                    break_labels: std::collections::HashSet::new(),
+                });
+                rewrite_loop_control_gotos_with_stack(body, stack, stats);
+                stack.pop();
+            }
+            HirStmt::Switch { cases, default, .. } => {
+                stats.skipped_nested_scope_count += 1;
+                stack.push(ScopeFrame::Switch {
+                    break_labels: std::collections::HashSet::new(),
+                });
+                for case in cases {
+                    rewrite_loop_control_gotos_with_stack(&mut case.body, stack, stats);
+                }
+                rewrite_loop_control_gotos_with_stack(default, stack, stats);
+                stack.pop();
             }
             HirStmt::Assign { .. }
             | HirStmt::VaStart { .. }
@@ -58,55 +112,41 @@ fn rewrite_loop_control_gotos_in_stmts(
     }
 }
 
-/// CFG-aware variant: rewrites gotos to any label in `break_labels` as `Break`,
-/// and gotos to any label in `continue_labels` as `Continue`.
-/// Used for multi-exit loops where all exits share the same post-loop region.
+fn rewrite_loop_control_gotos_in_stmts(
+    stmts: &mut [HirStmt],
+    continue_label: Option<&str>,
+    break_label: Option<&str>,
+    stats: &mut LoopControlRewriteStats,
+) {
+    let mut continue_labels = std::collections::HashSet::new();
+    if let Some(cl) = continue_label {
+        continue_labels.insert(cl.to_string());
+    }
+    let mut break_labels = std::collections::HashSet::new();
+    if let Some(bl) = break_label {
+        break_labels.insert(bl.to_string());
+    }
+
+    let mut stack = vec![ScopeFrame::Loop {
+        continue_labels,
+        break_labels,
+    }];
+    rewrite_loop_control_gotos_with_stack(stmts, &mut stack, stats);
+}
+
 fn rewrite_loop_control_gotos_multi(
     stmts: &mut [HirStmt],
     continue_labels: &std::collections::HashSet<String>,
     break_labels: &std::collections::HashSet<String>,
     stats: &mut LoopControlRewriteStats,
 ) {
-    for stmt in stmts.iter_mut() {
-        match stmt {
-            HirStmt::Goto(label) => {
-                if break_labels.contains(label.as_str()) {
-                    *stmt = HirStmt::Break;
-                    stats.break_rewrites += 1;
-                    continue;
-                }
-                if continue_labels.contains(label.as_str()) {
-                    *stmt = HirStmt::Continue;
-                    stats.continue_rewrites += 1;
-                }
-            }
-            HirStmt::If {
-                then_body,
-                else_body,
-                ..
-            } => {
-                rewrite_loop_control_gotos_multi(then_body, continue_labels, break_labels, stats);
-                rewrite_loop_control_gotos_multi(else_body, continue_labels, break_labels, stats);
-            }
-            HirStmt::Block(body) => {
-                rewrite_loop_control_gotos_multi(body, continue_labels, break_labels, stats);
-            }
-            HirStmt::While { .. }
-            | HirStmt::DoWhile { .. }
-            | HirStmt::For { .. }
-            | HirStmt::Switch { .. } => {
-                stats.skipped_nested_scope_count += 1;
-            }
-            HirStmt::Assign { .. }
-            | HirStmt::VaStart { .. }
-            | HirStmt::Expr(_)
-            | HirStmt::Label(_)
-            | HirStmt::Return(_)
-            | HirStmt::Break
-            | HirStmt::Continue => {}
-        }
-    }
+    let mut stack = vec![ScopeFrame::Loop {
+        continue_labels: continue_labels.clone(),
+        break_labels: break_labels.clone(),
+    }];
+    rewrite_loop_control_gotos_with_stack(stmts, &mut stack, stats);
 }
+
 
 fn collect_defined_labels(stmts: &[HirStmt], labels: &mut HashSet<String>) {
     for stmt in stmts {
@@ -320,7 +360,13 @@ impl<'a> PreviewBuilder<'a> {
     ) -> Result<Option<(HirStmt, usize)>, MlilPreviewError> {
         let diag = structuring_diag_enabled();
         let block_addr = self.block_start_address(idx);
-        let mut budget = IfLoweringBudget::new(self.options, idx, block_addr, "try_lower_while");
+        let mut budget = IfLoweringBudget::new(
+            self.options,
+            idx,
+            block_addr,
+            "try_lower_while",
+            self.structuring_start,
+        );
         if diag {
             eprintln!(
                 "[DIAG] try_lower_while start: idx={} block=0x{:x} x86_guard={}",
@@ -1241,14 +1287,77 @@ mod tests {
         let HirStmt::Switch { cases, default, .. } = &body[1] else {
             panic!("expected switch statement");
         };
+        // Inside switch, outer loop break target is shielded (Goto)
         assert!(
             matches!(cases[0].body.as_slice(), [HirStmt::Goto(label)] if label == "block_exit")
         );
-        assert!(matches!(default.as_slice(), [HirStmt::Goto(label)] if label == "block_header"));
+        // Inside switch, outer loop continue target is propagated (Continue)
+        assert!(matches!(default.as_slice(), [HirStmt::Continue]));
         assert_eq!(stats.break_rewrites, 0);
-        assert_eq!(stats.continue_rewrites, 0);
+        assert_eq!(stats.continue_rewrites, 1); // 1 continue propagated through switch
         assert_eq!(stats.skipped_nested_scope_count, 2);
     }
+
+    #[test]
+    fn rewrite_loop_control_gotos_with_nested_switch_converts_continue_but_preserves_break() {
+        let mut body = vec![
+            HirStmt::Switch {
+                expr: HirExpr::Const(1, NirType::Bool),
+                cases: vec![HirSwitchCase {
+                    values: vec![1],
+                    body: vec![
+                        HirStmt::Goto("outer_continue".to_string()),
+                        HirStmt::Goto("outer_break".to_string()),
+                    ],
+                }],
+                default: Vec::new(),
+            }
+        ];
+
+        let mut stats = LoopControlRewriteStats::default();
+        rewrite_loop_control_gotos_in_stmts(
+            &mut body,
+            Some("outer_continue"),
+            Some("outer_break"),
+            &mut stats,
+        );
+
+        let HirStmt::Switch { cases, .. } = &body[0] else {
+            panic!("expected switch");
+        };
+        let case_body = &cases[0].body;
+        assert!(matches!(case_body[0], HirStmt::Continue)); // Outer continue is permitted in switch
+        assert!(matches!(case_body[1], HirStmt::Goto(ref l) if l == "outer_break")); // Outer break is shielded by switch
+    }
+
+    #[test]
+    fn rewrite_loop_control_gotos_with_nested_loop_preserves_both() {
+        let mut body = vec![
+            HirStmt::While {
+                cond: HirExpr::Const(1, NirType::Bool),
+                body: vec![
+                    HirStmt::Goto("outer_continue".to_string()),
+                    HirStmt::Goto("outer_break".to_string()),
+                ],
+            }
+        ];
+
+        let mut stats = LoopControlRewriteStats::default();
+        rewrite_loop_control_gotos_in_stmts(
+            &mut body,
+            Some("outer_continue"),
+            Some("outer_break"),
+            &mut stats,
+        );
+
+        let HirStmt::While { body: inner_body, .. } = &body[0] else {
+            panic!("expected while");
+        };
+        // Both are shielded by the inner loop frame
+        assert!(matches!(inner_body[0], HirStmt::Goto(ref l) if l == "outer_continue"));
+        assert!(matches!(inner_body[1], HirStmt::Goto(ref l) if l == "outer_break"));
+    }
+
 
     #[test]
     fn undefined_goto_guard_rejects_missing_label_in_structured_loop_body() {

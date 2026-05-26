@@ -49,25 +49,43 @@ impl<'a> PreviewBuilder<'a> {
             return Ok(None);
         };
 
+        let mut case_targets = std::collections::HashSet::new();
+        for case_idx in &exits {
+            case_targets.insert(*case_idx);
+        }
+        let old_targets = std::mem::replace(&mut self.active_switch_targets, case_targets);
+
         let mut cases = Vec::new();
         let mut max_skip = 0usize;
         for (value, case_idx) in parsed.cases {
-            let Some((case_body, skip_to)) = self.lower_linear_body(case_idx, exit)? else {
+            let Some((mut case_body, skip_to)) = self.lower_linear_body(case_idx, exit)? else {
+                self.active_switch_targets = old_targets;
                 return Ok(None);
             };
-            max_skip = max_skip.max(skip_to);
+            max_skip = max_skip.max(skip_to).max(case_idx + 1);
+            if !case_body.iter().any(|s| matches!(s, HirStmt::Label(_))) {
+                let target_addr = self.pcode_block(case_idx).start_address;
+                case_body.insert(0, HirStmt::Label(crate::nir::builder::block_label(target_addr)));
+            }
             cases.push(HirSwitchCase {
                 values: vec![value],
                 body: case_body,
             });
         }
         merge_equivalent_switch_cases(&mut cases);
-        let Some((default_body, default_skip)) =
+        let Some((mut default_body, default_skip)) =
             self.lower_linear_body(parsed.default_idx, exit)?
         else {
+            self.active_switch_targets = old_targets;
             return Ok(None);
         };
-        max_skip = max_skip.max(default_skip);
+        if !default_body.iter().any(|s| matches!(s, HirStmt::Label(_))) {
+            let target_addr = self.pcode_block(parsed.default_idx).start_address;
+            default_body.insert(0, HirStmt::Label(crate::nir::builder::block_label(target_addr)));
+        }
+        max_skip = max_skip.max(default_skip).max(parsed.default_idx + 1);
+
+        self.active_switch_targets = old_targets;
 
         let skip_to = match exit {
             LinearExit::Join(join_idx) => join_idx,
@@ -130,46 +148,88 @@ impl<'a> PreviewBuilder<'a> {
             return Ok(None);
         }
 
+        let mut exits = Vec::new();
+        for (_, target) in &case_values {
+            let Some(case_idx) = self.find_block_index_by_address(*target) else {
+                return Ok(None);
+            };
+            let canon = self.canonicalize_switch_target(case_idx);
+            if !exits.contains(&canon) {
+                exits.push(canon);
+            }
+        }
+        if let Some(default_target) = default_target {
+            let Some(default_idx) = self.find_block_index_by_address(default_target) else {
+                return Ok(None);
+            };
+            let canon = self.canonicalize_switch_target(default_idx);
+            if !exits.contains(&canon) {
+                exits.push(canon);
+            }
+        }
+        let Some(exit) = self.shared_exit_for_indices(&exits)? else {
+            return Ok(None);
+        };
+
+        let mut case_targets = std::collections::HashSet::new();
+        for case_idx in &exits {
+            case_targets.insert(*case_idx);
+        }
+        let old_targets = std::mem::replace(&mut self.active_switch_targets, case_targets);
+
         let mut cases = Vec::new();
         let mut max_skip = idx + 1;
+        let mut success = true;
         for (value, target) in case_values {
             if Some(target) == default_target {
                 continue;
             }
             let Some(case_idx) = self.find_block_index_by_address(target) else {
-                return Ok(None);
+                success = false;
+                break;
             };
             let case_idx = self.canonicalize_switch_target(case_idx);
             let Some((case_body, skip_to)) =
-                self.lower_linear_body(case_idx, LinearExit::Return)?
+                self.lower_linear_body(case_idx, exit)?
             else {
-                return Ok(None);
+                success = false;
+                break;
             };
-            max_skip = max_skip.max(skip_to);
+            max_skip = max_skip.max(skip_to).max(case_idx + 1);
             cases.push(HirSwitchCase {
                 values: vec![value],
                 body: case_body,
             });
         }
-        if cases.len() < 2 {
+        if !success || cases.len() < 2 {
+            self.active_switch_targets = old_targets;
             return Ok(None);
         }
         merge_equivalent_switch_cases(&mut cases);
 
         let default = if let Some(default_target) = default_target {
             let Some(default_idx) = self.find_block_index_by_address(default_target) else {
+                self.active_switch_targets = old_targets;
                 return Ok(None);
             };
             let default_idx = self.canonicalize_switch_target(default_idx);
             let Some((default_body, skip_to)) =
-                self.lower_linear_body(default_idx, LinearExit::Return)?
+                self.lower_linear_body(default_idx, exit)?
             else {
+                self.active_switch_targets = old_targets;
                 return Ok(None);
             };
-            max_skip = max_skip.max(skip_to);
+            max_skip = max_skip.max(skip_to).max(default_idx + 1);
             default_body
         } else {
             Vec::new()
+        };
+
+        self.active_switch_targets = old_targets;
+
+        let skip_to = match exit {
+            LinearExit::Join(join_idx) => join_idx,
+            LinearExit::Return | LinearExit::End => max_skip,
         };
 
         if used_proof_payload {
@@ -184,7 +244,7 @@ impl<'a> PreviewBuilder<'a> {
                 cases,
                 default,
             },
-            max_skip,
+            skip_to,
         )))
     }
 
@@ -218,22 +278,69 @@ impl<'a> PreviewBuilder<'a> {
             else {
                 return Ok(None);
             };
-            let Some(next_idx) = self.fallthrough_index(current_idx) else {
-                return Ok(None);
-            };
-            let next_addr = self.block_target_key(next_idx);
-            let (case_target, case_on_true) = if false_target == Some(next_addr) {
-                (true_target, true)
-            } else if true_target == next_addr {
-                let Some(false_target) = false_target else {
+
+            let mut case_target = None;
+            let mut next_compare_target = None;
+            let mut case_on_true = true;
+            let mut matched_case = None;
+
+            if let Some((case_selector, value)) = extract_eq_const_for_case(&cond, true) {
+                case_target = Some(true_target);
+                next_compare_target = false_target;
+                case_on_true = true;
+                matched_case = Some((case_selector, value));
+            } else if let Some((case_selector, value)) = extract_eq_const_for_case(&cond, false) {
+                case_target = false_target;
+                next_compare_target = Some(true_target);
+                case_on_true = false;
+                matched_case = Some((case_selector, value));
+            } else if !saw_range_guard {
+                if let Some(range_selector) = extract_range_guard_for_chain(&cond, true) {
+                    case_target = false_target;
+                    next_compare_target = Some(true_target);
+                    case_on_true = false;
+                    
+                    if let Some(existing) = &selector {
+                        if strip_casts(existing) != strip_casts(&range_selector) {
+                            return Ok(None);
+                        }
+                    } else {
+                        selector = Some(range_selector);
+                    }
+                    let Some(default_idx) = self.find_block_index_by_address(case_target.unwrap()) else {
+                        return Ok(None);
+                    };
+                    guarded_default_idx = Some(self.canonicalize_switch_target(default_idx));
+                    saw_range_guard = true;
+                } else if let Some(range_selector) = extract_range_guard_for_chain(&cond, false) {
+                    case_target = Some(true_target);
+                    next_compare_target = false_target;
+                    case_on_true = true;
+                    
+                    if let Some(existing) = &selector {
+                        if strip_casts(existing) != strip_casts(&range_selector) {
+                            return Ok(None);
+                        }
+                    } else {
+                        selector = Some(range_selector);
+                    }
+                    let Some(default_idx) = self.find_block_index_by_address(case_target.unwrap()) else {
+                        return Ok(None);
+                    };
+                    guarded_default_idx = Some(self.canonicalize_switch_target(default_idx));
+                    saw_range_guard = true;
+                } else {
                     return Ok(None);
-                };
-                (false_target, false)
+                }
             } else {
                 return Ok(None);
-            };
-            if let Some((case_selector, value)) = extract_eq_const_for_case(&cond, case_on_true) {
-                let Some(case_idx) = self.find_block_index_by_address(case_target) else {
+            }
+
+            if let Some((case_selector, value)) = matched_case {
+                let Some(case_target_addr) = case_target else {
+                    return Ok(None);
+                };
+                let Some(case_idx) = self.find_block_index_by_address(case_target_addr) else {
                     return Ok(None);
                 };
                 let case_idx = self.canonicalize_switch_target(case_idx);
@@ -245,26 +352,14 @@ impl<'a> PreviewBuilder<'a> {
                     selector = Some(case_selector);
                 }
                 cases.push((value, case_idx));
-            } else if cases.is_empty() && !saw_range_guard {
-                let Some(range_selector) = extract_range_guard_for_chain(&cond, !case_on_true)
-                else {
-                    return Ok(None);
-                };
-                if let Some(existing) = &selector {
-                    if strip_casts(existing) != strip_casts(&range_selector) {
-                        return Ok(None);
-                    }
-                } else {
-                    selector = Some(range_selector);
-                }
-                let Some(default_idx) = self.find_block_index_by_address(case_target) else {
-                    return Ok(None);
-                };
-                guarded_default_idx = Some(self.canonicalize_switch_target(default_idx));
-                saw_range_guard = true;
-            } else {
-                return Ok(None);
             }
+
+            let Some(next_compare_addr) = next_compare_target else {
+                return Ok(None);
+            };
+            let Some(next_idx) = self.find_block_index_by_address(next_compare_addr) else {
+                return Ok(None);
+            };
 
             let next_term = self.lower_block_terminator(next_idx)?;
             match next_term {

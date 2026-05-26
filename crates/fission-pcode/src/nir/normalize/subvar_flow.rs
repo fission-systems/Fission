@@ -187,8 +187,16 @@ fn find_uses(stmts: &[HirStmt], var_name: &str, uses: &mut Vec<UseInfo>) {
                 }
             }
             HirStmt::Return(None) => {}
-            HirStmt::Block(body) | HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
+            HirStmt::Block(body) => {
                 find_uses(body, var_name, uses);
+            }
+            HirStmt::While { cond, body } => {
+                analyze_expr_use(cond, var_name, None, uses);
+                find_uses(body, var_name, uses);
+            }
+            HirStmt::DoWhile { body, cond } => {
+                find_uses(body, var_name, uses);
+                analyze_expr_use(cond, var_name, None, uses);
             }
             HirStmt::For { init, cond, update, body } => {
                 if let Some(i) = init {
@@ -727,8 +735,16 @@ fn rewrite_stmt(stmt: &mut HirStmt, varmap: &HashMap<String, ReplaceVar>) {
         HirStmt::VaStart { va_list, .. } => {
             rewrite_expr(va_list, varmap);
         }
-        HirStmt::Block(body) | HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
+        HirStmt::Block(body) => {
             rewrite_stmts(body, varmap);
+        }
+        HirStmt::While { cond, body } => {
+            rewrite_expr(cond, varmap);
+            rewrite_stmts(body, varmap);
+        }
+        HirStmt::DoWhile { body, cond } => {
+            rewrite_stmts(body, varmap);
+            rewrite_expr(cond, varmap);
         }
         HirStmt::For { init, cond, update, body } => {
             if let Some(i) = init {

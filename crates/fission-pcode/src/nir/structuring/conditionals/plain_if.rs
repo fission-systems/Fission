@@ -16,10 +16,6 @@ impl<'a> PreviewBuilder<'a> {
         if budget.checkpoint("cond_prefix_post") {
             return Ok(None);
         }
-        if !cond_prefix.iter().all(Self::is_trivial_structuring_stmt) {
-            self.log_try_lower_if_reject(diag, idx, block_addr, "rejected_nontrivial_prefix");
-            return Ok(None);
-        }
 
         let Some(next_idx) = self.fallthrough_index(idx) else {
             self.log_try_lower_if_reject(diag, idx, block_addr, "rejected_no_unique_follow");
@@ -50,7 +46,8 @@ impl<'a> PreviewBuilder<'a> {
                     return Ok(None);
                 };
                 let expected = LinearExit::Join(join_idx);
-                if self.linear_exit_with_budget(next_idx, Some(budget))? != Some(expected) {
+                let actual = self.linear_exit_with_budget(next_idx, Some(budget))?;
+                if actual != Some(expected) && actual != Some(LinearExit::Return) {
                     self.log_try_lower_if_reject(diag, idx, block_addr, "rejected_open_body_tail");
                     return Ok(None);
                 }
@@ -78,7 +75,8 @@ impl<'a> PreviewBuilder<'a> {
                 return Ok(None);
             };
             let exit = LinearExit::Join(join_idx);
-            if self.linear_exit_with_budget(next_idx, Some(budget))? != Some(exit) {
+            let actual = self.linear_exit_with_budget(next_idx, Some(budget))?;
+            if actual != Some(exit) && actual != Some(LinearExit::Return) {
                 self.log_try_lower_if_reject(diag, idx, block_addr, "rejected_open_body_tail");
                 return Ok(None);
             }
@@ -107,6 +105,7 @@ impl<'a> PreviewBuilder<'a> {
             idx,
             self.block_start_address(idx),
             "try_lower_if",
+            self.structuring_start,
         );
         if diag {
             eprintln!(

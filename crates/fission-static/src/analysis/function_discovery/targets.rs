@@ -13,6 +13,18 @@ pub(crate) fn normalize_target(binary: &LoadedBinary, target: u64) -> u64 {
     }
 }
 
+fn same_section(binary: &LoadedBinary, addr1: u64, addr2: u64) -> bool {
+    for section in &binary.sections {
+        let start = section.virtual_address;
+        let size = section.virtual_size;
+        let end = start.saturating_add(size);
+        if addr1 >= start && addr1 < end && addr2 >= start && addr2 < end {
+            return true;
+        }
+    }
+    false
+}
+
 /// Accumulate direct CFG targets from one decoded instruction (including PC-relative operands).
 pub(crate) fn collect_instruction_targets(
     binary: &LoadedBinary,
@@ -28,7 +40,16 @@ pub(crate) fn collect_instruction_targets(
         }
         DecodedFlowKind::Jump | DecodedFlowKind::ConditionalJump => {
             if let Some(target) = instruction.direct_target {
-                jump_targets.insert(normalize_target(binary, target));
+                let norm_target = normalize_target(binary, target);
+                let inst_addr = instruction.address;
+                let distance = if inst_addr > norm_target {
+                    inst_addr - norm_target
+                } else {
+                    norm_target - inst_addr
+                };
+                if distance > 512 || !same_section(binary, inst_addr, norm_target) {
+                    jump_targets.insert(norm_target);
+                }
             }
         }
         DecodedFlowKind::None
@@ -43,17 +64,44 @@ pub(crate) fn collect_instruction_targets(
                 call_targets.insert(normalize_target(binary, reference.target));
             }
             DecodedReferenceKind::BranchTarget => {
-                jump_targets.insert(normalize_target(binary, reference.target));
+                let norm_target = normalize_target(binary, reference.target);
+                let inst_addr = instruction.address;
+                let distance = if inst_addr > norm_target {
+                    inst_addr - norm_target
+                } else {
+                    norm_target - inst_addr
+                };
+                if distance > 512 || !same_section(binary, inst_addr, norm_target) {
+                    jump_targets.insert(norm_target);
+                }
             }
             DecodedReferenceKind::RipRelativeAddress => match instruction.flow_kind {
                 DecodedFlowKind::Call => {
                     call_targets.insert(normalize_target(binary, reference.target));
                 }
                 DecodedFlowKind::Jump | DecodedFlowKind::ConditionalJump => {
-                    jump_targets.insert(normalize_target(binary, reference.target));
+                    let norm_target = normalize_target(binary, reference.target);
+                    let inst_addr = instruction.address;
+                    let distance = if inst_addr > norm_target {
+                        inst_addr - norm_target
+                    } else {
+                        norm_target - inst_addr
+                    };
+                    if distance > 512 || !same_section(binary, inst_addr, norm_target) {
+                        jump_targets.insert(norm_target);
+                    }
                 }
                 DecodedFlowKind::None if instruction.mnemonic.eq_ignore_ascii_case("jmp") => {
-                    jump_targets.insert(normalize_target(binary, reference.target));
+                    let norm_target = normalize_target(binary, reference.target);
+                    let inst_addr = instruction.address;
+                    let distance = if inst_addr > norm_target {
+                        inst_addr - norm_target
+                    } else {
+                        norm_target - inst_addr
+                    };
+                    if distance > 512 || !same_section(binary, inst_addr, norm_target) {
+                        jump_targets.insert(norm_target);
+                    }
                 }
                 _ => {}
             },

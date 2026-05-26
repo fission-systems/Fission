@@ -238,7 +238,7 @@ impl<'a> PreviewBuilder<'a> {
             }
             idx += 1;
         }
-        let mut body = cleanup_redundant_labels(body);
+        let mut body = cleanup_redundant_labels(body, None);
         while self.promote_single_entry_guarded_tail_regions(&mut body) {}
         self.discover_guarded_tail_candidates(&body);
         Ok(finalize_structured_body(body))
@@ -376,9 +376,21 @@ impl<'a> PreviewBuilder<'a> {
         if !self.active_linear_body_keys.insert(key) {
             return Ok(None);
         }
-        if let Some(budget) = budget.as_deref_mut()
-            && budget.checkpoint("lower_linear_body_start")
-        {
+        let mut auto_budget = None;
+        let budget_ref = if let Some(b) = budget {
+            b
+        } else {
+            let start_addr = self.block_start_address(start_idx);
+            auto_budget = Some(IfLoweringBudget::new(
+                self.options,
+                start_idx,
+                start_addr,
+                "lower_linear_body_auto",
+                self.structuring_start,
+            ));
+            auto_budget.as_mut().unwrap()
+        };
+        if budget_ref.checkpoint("lower_linear_body_start") {
             self.active_linear_body_keys.remove(&key);
             return Ok(None);
         }
@@ -386,7 +398,7 @@ impl<'a> PreviewBuilder<'a> {
             start_idx,
             exit,
             0,
-            budget.as_deref_mut(),
+            Some(budget_ref),
             false,
         )?;
         let result = match &detailed {
@@ -394,7 +406,7 @@ impl<'a> PreviewBuilder<'a> {
             LinearBodyLoweringOutcome::Rejected(_) => None,
         };
         self.active_linear_body_keys.remove(&key);
-        let should_cache = budget.as_deref().is_none_or(|budget| !budget.tripped);
+        let should_cache = !budget_ref.tripped;
         if should_cache {
             let cached = match &detailed {
                 LinearBodyLoweringOutcome::Lowered(lowered) => {
@@ -451,9 +463,21 @@ impl<'a> PreviewBuilder<'a> {
                 LinearBodyRejectReason::RevisitCycle,
             ));
         }
-        if let Some(budget) = budget.as_deref_mut()
-            && budget.checkpoint("lower_linear_body_start")
-        {
+        let mut auto_budget = None;
+        let budget_ref = if let Some(b) = budget {
+            b
+        } else {
+            let start_addr = self.block_start_address(start_idx);
+            auto_budget = Some(IfLoweringBudget::new(
+                self.options,
+                start_idx,
+                start_addr,
+                "lower_linear_body_detailed_auto",
+                self.structuring_start,
+            ));
+            auto_budget.as_mut().unwrap()
+        };
+        if budget_ref.checkpoint("lower_linear_body_start") {
             self.active_linear_body_keys.remove(&key);
             return Ok(LinearBodyLoweringOutcome::Rejected(
                 LinearBodyRejectReason::BudgetTripped,
@@ -463,11 +487,11 @@ impl<'a> PreviewBuilder<'a> {
             start_idx,
             exit,
             0,
-            budget.as_deref_mut(),
+            Some(budget_ref),
             region_recovery,
         )?;
         self.active_linear_body_keys.remove(&key);
-        let should_cache = budget.as_deref().is_none_or(|budget| !budget.tripped);
+        let should_cache = !budget_ref.tripped;
         if should_cache {
             let cached = match &result {
                 LinearBodyLoweringOutcome::Lowered(lowered) => {
@@ -509,6 +533,12 @@ impl<'a> PreviewBuilder<'a> {
             ));
         }
 
+        if let LinearExit::Join(join_idx) = exit {
+            if start_idx == join_idx {
+                return Ok(LinearBodyLoweringOutcome::Lowered((Vec::new(), start_idx)));
+            }
+        }
+
         let mut idx = start_idx;
         let mut visited = HashSet::new();
         let mut body = Vec::new();
@@ -531,11 +561,6 @@ impl<'a> PreviewBuilder<'a> {
             body.extend(self.lower_block_stmts(&block)?);
             match self.lower_block_terminator(idx)? {
                 LoweredTerminator::Return(expr) => {
-                    if exit != LinearExit::Return {
-                        return Ok(LinearBodyLoweringOutcome::Rejected(
-                            LinearBodyRejectReason::ExitMismatch,
-                        ));
-                    }
                     body.push(HirStmt::Return(expr));
                     return Ok(LinearBodyLoweringOutcome::Lowered((body, idx + 1)));
                 }
@@ -551,6 +576,10 @@ impl<'a> PreviewBuilder<'a> {
                         {
                             body.push(HirStmt::Return(Some(expr)));
                         }
+                        return Ok(LinearBodyLoweringOutcome::Lowered((body, next_idx)));
+                    }
+                    if self.active_switch_targets.contains(&next_idx) {
+                        body.push(HirStmt::Goto(block_label(target)));
                         return Ok(LinearBodyLoweringOutcome::Lowered((body, next_idx)));
                     }
                     if body.is_empty()
@@ -641,6 +670,12 @@ impl<'a> PreviewBuilder<'a> {
                     .rule_block_if_no_exit_accepted_count += 1;
                 Some(lhs)
             }
+            (LinearExit::Join(idx), LinearExit::Return) | (LinearExit::Return, LinearExit::Join(idx)) => {
+                Some(LinearExit::Join(idx))
+            }
+            (LinearExit::End, LinearExit::Return) | (LinearExit::Return, LinearExit::End) => {
+                Some(LinearExit::End)
+            }
             _ => None,
         }
     }
@@ -670,19 +705,45 @@ impl<'a> PreviewBuilder<'a> {
         let Some(first) = iter.next() else {
             return Ok(None);
         };
-        let shared = self.linear_exit(first)?;
+        let mut shared = self.linear_exit(first)?;
         for idx in iter {
+            if shared == Some(LinearExit::Join(idx)) {
+                continue;
+            }
             let exit = self.linear_exit(idx)?;
+            if exit == Some(LinearExit::Join(first)) {
+                shared = Some(LinearExit::Join(first));
+                continue;
+            }
             if shared.is_some() && shared == exit {
                 continue;
             }
-            if let (Some(s_exit), Some(c_exit)) = (shared, exit)
-                && self.merge_terminal_exits(s_exit, c_exit).is_some()
-            {
-                continue;
+            if let (Some(s_exit), Some(c_exit)) = (shared, exit) {
+                if let Some(merged) = self.merge_terminal_exits(s_exit, c_exit) {
+                    shared = Some(merged);
+                    continue;
+                }
             }
             return Ok(None);
         }
+
+        let mut exits_set = std::collections::HashSet::new();
+        for idx in indices {
+            exits_set.insert(*idx);
+        }
+
+        while let Some(LinearExit::Join(target)) = shared {
+            if exits_set.contains(&target) {
+                let next_exit = self.linear_exit(target)?;
+                if next_exit == shared {
+                    break;
+                }
+                shared = next_exit;
+            } else {
+                break;
+            }
+        }
+
         Ok(shared)
     }
 

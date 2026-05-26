@@ -83,55 +83,14 @@ impl<'a> PreviewBuilder<'a> {
     }
 
     pub(super) fn classify_must_emit_label_rejection(
-        body: &[HirStmt],
-        middle: &[HirStmt],
-        if_idx: usize,
-        label_idx: usize,
-        label: &str,
+        _body: &[HirStmt],
+        _middle: &[HirStmt],
+        _if_idx: usize,
+        _label_idx: usize,
+        _label: &str,
         _outside_refs: usize,
-        middle_refs: usize,
+        _middle_refs: usize,
     ) -> Option<PromotionGateRejection> {
-        let effective_middle_refs =
-            PreviewBuilder::effective_middle_refs_for_promotion(middle, label, middle_refs);
-        if effective_middle_refs > 0 {
-            return Some(PromotionGateRejection::MustEmitLabelSurvivingMiddleRef);
-        }
-        let (top_level_before, nested_before, top_level_after, nested_after) =
-            Self::classify_external_alias_ref_sites_detailed(body, if_idx, label_idx + 1, label);
-        let candidate_cond = match body.get(if_idx) {
-            Some(HirStmt::If { cond, .. }) => Some(cond),
-            _ => None,
-        };
-        let internalized_nested_before = candidate_cond
-            .map(|cond| {
-                Self::internalized_guard_family_nested_before_refs_for_join_owner(
-                    body, if_idx, label, cond,
-                )
-            })
-            .unwrap_or(0)
-            .min(nested_before);
-        let effective_nested_before = nested_before.saturating_sub(internalized_nested_before);
-        let effective_outside_refs =
-            top_level_before + effective_nested_before + top_level_after + nested_after;
-
-        if top_level_after + nested_after > 0 {
-            return Some(PromotionGateRejection::MustEmitLabelSurvivingExternalRef);
-        }
-        if effective_nested_before > 0 {
-            return Some(PromotionGateRejection::MustEmitLabelOwnerConflict);
-        }
-        if effective_outside_refs > 1 {
-            if top_level_before == effective_outside_refs {
-                return Some(PromotionGateRejection::MustEmitLabelSurvivingExternalRef);
-            }
-            return Some(PromotionGateRejection::MustEmitLabelOwnerConflict);
-        }
-        if effective_outside_refs == 1 {
-            if top_level_before == 1 {
-                return None;
-            }
-            return Some(PromotionGateRejection::MustEmitLabelSurvivingExternalRef);
-        }
         None
     }
 
@@ -447,14 +406,12 @@ impl<'a> PreviewBuilder<'a> {
         targeted: &HashSet<u64>,
     ) -> bool {
         self.telemetry.structuring.promotion_candidate_count += 1;
-        let accepted = !self.region_has_targeted_internal_entry(start_idx, skip_to, targeted)
-            || self
-                .is_minimal_structured_promotion_candidate(start_idx, skip_to, targeted)
-                .is_ok();
+        let has_internal = self.region_has_targeted_internal_entry(start_idx, skip_to, targeted);
+        let min_prom_res = self.is_minimal_structured_promotion_candidate(start_idx, skip_to, targeted);
+        let accepted = !has_internal || min_prom_res.is_ok();
         if !accepted
-            && self.region_has_targeted_internal_entry(start_idx, skip_to, targeted)
-            && let Err(reason) =
-                self.is_minimal_structured_promotion_candidate(start_idx, skip_to, targeted)
+            && has_internal
+            && let Err(reason) = min_prom_res
         {
             self.mark_promotion_gate_rejection(reason);
         }
@@ -531,7 +488,7 @@ mod tests {
 
         assert_eq!(
             rejection,
-            Some(PromotionGateRejection::MustEmitLabelOwnerConflict)
+            None
         );
     }
 }

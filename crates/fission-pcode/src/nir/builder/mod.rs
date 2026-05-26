@@ -500,6 +500,7 @@ impl<'a> PreviewBuilder<'a> {
         self.terminator_cache.clear();
         self.selector_representatives.clear();
         self.linear_body_cache.clear();
+        self.x86_branch_recovery_attempts = 0;
     }
 
     pub(super) fn ensure_temp_binding_for_output(

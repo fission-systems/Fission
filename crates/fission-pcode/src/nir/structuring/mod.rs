@@ -16,6 +16,7 @@ pub(super) mod irreducible;
 mod linear;
 mod loops;
 mod regions;
+mod sese;
 mod switch;
 
 // --- re-exports consumed by nir::builder and other nir subsystems ---

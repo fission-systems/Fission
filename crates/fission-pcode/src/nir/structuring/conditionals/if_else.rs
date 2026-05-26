@@ -55,9 +55,6 @@ impl<'a> PreviewBuilder<'a> {
     ) -> Result<Option<(HirStmt, usize)>, MlilPreviewError> {
         let cond_block = self.pcode_block(idx).clone();
         let cond_prefix = self.lower_block_stmts(&cond_block)?;
-        if !cond_prefix.iter().all(Self::is_trivial_structuring_stmt) {
-            return Ok(None);
-        }
         if idx + 2 >= self.block_count() {
             return Ok(None);
         }
@@ -140,9 +137,6 @@ impl<'a> PreviewBuilder<'a> {
 
         let cond_block = self.pcode_block(idx).clone();
         let cond_prefix = self.lower_block_stmts(&cond_block)?;
-        if !cond_prefix.iter().all(Self::is_trivial_structuring_stmt) {
-            return Ok(None);
-        }
 
         let LoweredTerminator::Cond {
             cond,
