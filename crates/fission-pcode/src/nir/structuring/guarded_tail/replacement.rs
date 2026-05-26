@@ -388,9 +388,7 @@ impl<'a> PreviewBuilder<'a> {
                 } if name == binding_name && Self::expr_is_pure_value(rhs) => {
                     return Some(rhs.clone());
                 }
-                HirStmt::Label(_)
-                | HirStmt::Goto(_)
-                | HirStmt::Return(_)
+                HirStmt::Return(_)
                 | HirStmt::Break
                 | HirStmt::Continue
                 | HirStmt::If { .. }
@@ -398,7 +396,9 @@ impl<'a> PreviewBuilder<'a> {
                 | HirStmt::While { .. }
                 | HirStmt::DoWhile { .. }
                 | HirStmt::For { .. } => return None,
-                HirStmt::Assign { .. }
+                HirStmt::Label(_)
+                | HirStmt::Goto(_)
+                | HirStmt::Assign { .. }
                 | HirStmt::VaStart { .. }
                 | HirStmt::Expr(_)
                 | HirStmt::Block(_) => {}

@@ -16,6 +16,7 @@ pub(crate) use temp_var::{
     collapse_trivial_assign_returns, eliminate_dead_local_clobber_assigns,
     eliminate_dead_temp_assigns, eliminate_redundant_var_assigns, elide_unused_popcount_assigns,
     inline_single_use_temps, prune_unused_dead_local_bindings, prune_unused_temp_bindings,
+    rescue_undeclared_bindings,
 };
 pub(crate) use casts::{
     cast_elision_pass, collapse_trivial_pointer_alias_bindings, strip_redundant_assign_casts,

@@ -1011,7 +1011,21 @@ impl<'a> PreviewBuilder<'a> {
                     let true_is_continue = true_target == head_addr;
                     let false_is_continue = false_target == Some(head_addr);
 
-                    if true_is_break && !false_is_break {
+                    if true_is_break && false_is_continue {
+                        result_stmts.push(HirStmt::If {
+                            cond,
+                            then_body: vec![HirStmt::Break],
+                            else_body: vec![HirStmt::Continue],
+                        });
+                        self.telemetry.structuring.loop_multi_exit_break_count += 1;
+                    } else if false_is_break && true_is_continue {
+                        result_stmts.push(HirStmt::If {
+                            cond: negate_expr(cond),
+                            then_body: vec![HirStmt::Break],
+                            else_body: vec![HirStmt::Continue],
+                        });
+                        self.telemetry.structuring.loop_multi_exit_break_count += 1;
+                    } else if true_is_break && !false_is_break {
                         // `if (cond) break;` then continue with false arm
                         result_stmts.push(HirStmt::If {
                             cond,

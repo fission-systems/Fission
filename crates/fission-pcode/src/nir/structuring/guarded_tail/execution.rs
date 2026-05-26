@@ -255,20 +255,26 @@ impl<'a> PreviewBuilder<'a> {
             let mut read_sites = Vec::new();
             let mut follow_redefined = false;
             let mut nondominated_reads = 0usize;
-            for (stmt_idx, stmt) in follow_tail.iter().enumerate() {
-                let reads_here = Self::classify_stmt_read_kind(stmt, binding_name);
-                let defs_here = Self::count_var_defs_stmt(stmt, binding_name);
-                if follow_redefined {
-                    if reads_here.is_some() {
-                        nondominated_reads += 1;
+            let always_terminates = statement_sequence_always_terminates(middle);
+            if Self::guarded_tail_diag_enabled() {
+                eprintln!("[GT-DEBUG] binding_name={} middle={:?} always_terminates={}", binding_name, middle, always_terminates);
+            }
+            if !always_terminates {
+                for (stmt_idx, stmt) in follow_tail.iter().enumerate() {
+                    let reads_here = Self::classify_stmt_read_kind(stmt, binding_name);
+                    let defs_here = Self::count_var_defs_stmt(stmt, binding_name);
+                    if follow_redefined {
+                        if reads_here.is_some() {
+                            nondominated_reads += 1;
+                        }
+                        continue;
                     }
-                    continue;
-                }
-                if let Some(kind) = reads_here {
-                    read_sites.push(GuardedTailReplacementRead { stmt_idx, kind });
-                }
-                if defs_here > 0 {
-                    follow_redefined = true;
+                    if let Some(kind) = reads_here {
+                        read_sites.push(GuardedTailReplacementRead { stmt_idx, kind });
+                    }
+                    if defs_here > 0 {
+                        follow_redefined = true;
+                    }
                 }
             }
             if read_sites.is_empty() {
@@ -1236,5 +1242,30 @@ impl<'a> PreviewBuilder<'a> {
             self.telemetry.structuring.guarded_tail_candidate_count += 1;
             self.telemetry.structuring.promotion_candidate_count += 1;
         }
+    }
+}
+
+fn statement_sequence_always_terminates(stmts: &[HirStmt]) -> bool {
+    for stmt in stmts {
+        if stmt_always_terminates(stmt) {
+            return true;
+        }
+    }
+    false
+}
+
+fn stmt_always_terminates(stmt: &HirStmt) -> bool {
+    match stmt {
+        HirStmt::Return(_) | HirStmt::Break | HirStmt::Continue => true,
+        HirStmt::Block(inner) => statement_sequence_always_terminates(inner),
+        HirStmt::If { then_body, else_body, .. } => {
+            statement_sequence_always_terminates(then_body)
+                && statement_sequence_always_terminates(else_body)
+        }
+        HirStmt::Switch { cases, default, .. } => {
+            cases.iter().all(|case| statement_sequence_always_terminates(&case.body))
+                && statement_sequence_always_terminates(default)
+        }
+        _ => false,
     }
 }

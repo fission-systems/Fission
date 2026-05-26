@@ -679,6 +679,227 @@ pub(crate) fn prune_unused_dead_local_bindings(func: &mut HirFunction) -> bool {
     changed
 }
 
+/// Safety-net: ensure every variable name used or assigned in the body has a
+/// matching declaration in `params` or `locals`.  If a variable appears in
+/// the body without a binding (e.g. because a normalization pass created a
+/// name then a later pass destructured the scope), add a rescue binding to
+/// `locals` so the emitted C compiles.
+fn is_rescue_candidate_name(name: &str) -> bool {
+    if name.starts_with("iVar") || name.starts_with("uVar") || name.starts_with("bVar") || name.starts_with("xVar") {
+        let suffix = &name[4..];
+        !suffix.is_empty() && suffix.chars().all(|c| c.is_ascii_digit())
+    } else if name.starts_with("tmp_") {
+        let suffix = &name[4..];
+        !suffix.is_empty() && suffix.chars().all(|c| c.is_ascii_hexdigit())
+    } else {
+        false
+    }
+}
+
+pub(crate) fn rescue_undeclared_bindings(func: &mut HirFunction) -> bool {
+    use crate::nir::support::expr_type;
+
+    let mut declared: HashSet<String> = func
+        .params
+        .iter()
+        .chain(func.locals.iter())
+        .map(|b| b.name.clone())
+        .collect();
+
+    // Collect every variable name that appears anywhere in the body.
+    let mut body_names: HashSet<String> = HashSet::new();
+    collect_all_body_names_stmts(&func.body, &mut body_names);
+
+    // Find undeclared names and try to infer their type from the first
+    // assignment RHS in the body.
+    let mut changed = false;
+    for name in &body_names {
+        if declared.contains(name.as_str()) {
+            continue;
+        }
+        // Only rescue compiler/decompiler-generated temporary/index variables.
+        if !is_rescue_candidate_name(name) {
+            continue;
+        }
+        let inferred_ty = infer_type_from_first_assign(&func.body, name);
+        func.locals.push(NirBinding {
+            name: name.clone(),
+            ty: inferred_ty,
+            surface_type_name: None,
+            origin: Some(NirBindingOrigin::Temp),
+            initializer: None,
+        });
+        declared.insert(name.clone());
+        changed = true;
+    }
+    changed
+}
+
+fn collect_all_body_names_expr(expr: &HirExpr, out: &mut HashSet<String>) {
+    match expr {
+        HirExpr::Var(name) => { out.insert(name.clone()); }
+        HirExpr::Const(_, _) | HirExpr::AddressOfGlobal(_) => {}
+        HirExpr::Unary { expr, .. } | HirExpr::Cast { expr, .. } => {
+            collect_all_body_names_expr(expr, out);
+        }
+        HirExpr::Binary { lhs, rhs, .. } => {
+            collect_all_body_names_expr(lhs, out);
+            collect_all_body_names_expr(rhs, out);
+        }
+        HirExpr::Call { target, args, .. } => {
+            // target is a function name String, not HirExpr.
+            for arg in args {
+                collect_all_body_names_expr(arg, out);
+            }
+        }
+        HirExpr::Select { cond, then_expr, else_expr, .. } => {
+            collect_all_body_names_expr(cond, out);
+            collect_all_body_names_expr(then_expr, out);
+            collect_all_body_names_expr(else_expr, out);
+        }
+        HirExpr::Load { ptr, .. } => {
+            collect_all_body_names_expr(ptr, out);
+        }
+        HirExpr::PtrOffset { base, .. } => {
+            collect_all_body_names_expr(base, out);
+        }
+        HirExpr::Index { base, index, .. } => {
+            collect_all_body_names_expr(base, out);
+            collect_all_body_names_expr(index, out);
+        }
+        HirExpr::FieldAccess { base, .. } => {
+            collect_all_body_names_expr(base, out);
+        }
+        HirExpr::AggregateCopy { src, .. } => {
+            collect_all_body_names_expr(src, out);
+        }
+    }
+}
+
+fn collect_all_body_names_lvalue(lhs: &HirLValue, out: &mut HashSet<String>) {
+    match lhs {
+        HirLValue::Var(name) => { out.insert(name.clone()); }
+        HirLValue::Deref { ptr, .. } => collect_all_body_names_expr(ptr, out),
+        HirLValue::Index { base, index, .. } => {
+            collect_all_body_names_expr(base, out);
+            collect_all_body_names_expr(index, out);
+        }
+        HirLValue::FieldAccess { base, .. } => {
+            collect_all_body_names_expr(base, out);
+        }
+    }
+}
+
+fn collect_all_body_names_stmt(stmt: &HirStmt, out: &mut HashSet<String>) {
+    match stmt {
+        HirStmt::Assign { lhs, rhs } => {
+            collect_all_body_names_lvalue(lhs, out);
+            collect_all_body_names_expr(rhs, out);
+        }
+        HirStmt::VaStart { va_list, .. } | HirStmt::Expr(va_list) => {
+            collect_all_body_names_expr(va_list, out);
+        }
+        HirStmt::Return(Some(expr)) => collect_all_body_names_expr(expr, out),
+        HirStmt::Block(body) | HirStmt::While { body, .. } => {
+            collect_all_body_names_stmts(body, out);
+        }
+        HirStmt::DoWhile { body, cond } => {
+            collect_all_body_names_stmts(body, out);
+            collect_all_body_names_expr(cond, out);
+        }
+        HirStmt::For { init, cond, update, body } => {
+            if let Some(init) = init {
+                collect_all_body_names_stmt(init, out);
+            }
+            if let Some(cond) = cond {
+                collect_all_body_names_expr(cond, out);
+            }
+            if let Some(update) = update {
+                collect_all_body_names_stmt(update, out);
+            }
+            collect_all_body_names_stmts(body, out);
+        }
+        HirStmt::If { cond, then_body, else_body } => {
+            collect_all_body_names_expr(cond, out);
+            collect_all_body_names_stmts(then_body, out);
+            collect_all_body_names_stmts(else_body, out);
+        }
+        HirStmt::Switch { expr, cases, default } => {
+            collect_all_body_names_expr(expr, out);
+            for case in cases {
+                collect_all_body_names_stmts(&case.body, out);
+            }
+            collect_all_body_names_stmts(default, out);
+        }
+        HirStmt::Return(None)
+        | HirStmt::Label(_)
+        | HirStmt::Goto(_)
+        | HirStmt::Break
+        | HirStmt::Continue => {}
+    }
+}
+
+fn collect_all_body_names_stmts(stmts: &[HirStmt], out: &mut HashSet<String>) {
+    for stmt in stmts {
+        collect_all_body_names_stmt(stmt, out);
+    }
+}
+
+/// Try to infer the type of a variable from its first assignment RHS in the body.
+fn infer_type_from_first_assign(stmts: &[HirStmt], name: &str) -> NirType {
+    use crate::nir::support::expr_type;
+    for stmt in stmts {
+        if let Some(ty) = infer_type_from_stmt(stmt, name) {
+            return ty;
+        }
+    }
+    NirType::Unknown
+}
+
+fn infer_type_from_stmt(stmt: &HirStmt, name: &str) -> Option<NirType> {
+    use crate::nir::support::expr_type;
+    match stmt {
+        HirStmt::Assign {
+            lhs: HirLValue::Var(lhs_name),
+            rhs,
+        } if lhs_name == name => {
+            let ty = expr_type(rhs);
+            Some(if ty == NirType::Unknown {
+                NirType::Int { bits: 32, signed: true }
+            } else {
+                ty
+            })
+        }
+        HirStmt::Block(body) | HirStmt::While { body, .. } => {
+            infer_type_from_first_assign_stmts(body, name)
+        }
+        HirStmt::DoWhile { body, .. } => infer_type_from_first_assign_stmts(body, name),
+        HirStmt::For { body, .. } => infer_type_from_first_assign_stmts(body, name),
+        HirStmt::If { then_body, else_body, .. } => {
+            infer_type_from_first_assign_stmts(then_body, name)
+                .or_else(|| infer_type_from_first_assign_stmts(else_body, name))
+        }
+        HirStmt::Switch { cases, default, .. } => {
+            for case in cases {
+                if let Some(ty) = infer_type_from_first_assign_stmts(&case.body, name) {
+                    return Some(ty);
+                }
+            }
+            infer_type_from_first_assign_stmts(default, name)
+        }
+        _ => None,
+    }
+}
+
+fn infer_type_from_first_assign_stmts(stmts: &[HirStmt], name: &str) -> Option<NirType> {
+    for stmt in stmts {
+        if let Some(ty) = infer_type_from_stmt(stmt, name) {
+            return Some(ty);
+        }
+    }
+    None
+}
+
 pub(crate) fn elide_unused_popcount_assigns(func: &mut HirFunction) -> bool {
     if !func.body.iter().any(has_popcount) {
         return false;

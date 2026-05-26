@@ -27,6 +27,7 @@ use super::super::cleanup::{
     prune_unused_temp_bindings, remove_unreferenced_leading_labels,
     simplify_empty_and_constant_ifs, simplify_empty_and_constant_ifs_recursive,
     simplify_fallthrough_edges, strip_redundant_assign_casts, apply_switch_norm_pass,
+    rescue_undeclared_bindings,
 };
 use super::super::cleanup::{collapse_loop_exit_alias_returns, prune_unreachable_after_terminal, apply_condexe_folding_pass, apply_expand_load_pass, apply_deindirect_pass};
 use super::super::global_opt::{
@@ -1298,6 +1299,7 @@ pub(crate) fn normalize_hir_function(func: &mut HirFunction) {
     ) {
         run_pass_logged(func, "type_inference_after_recurrence", perf, apply_type_inference_pass);
     }
+    run_pass_logged(func, "rescue_undeclared_bindings", perf, rescue_undeclared_bindings);
     if perf {
         let (final_stmts, final_locals) = hir_shape(func);
         eprintln!(

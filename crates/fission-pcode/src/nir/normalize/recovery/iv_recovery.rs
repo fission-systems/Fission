@@ -1662,8 +1662,8 @@ fn try_guarded_dowhile_pointer_iv_upgrade(
     let index_name = fresh_index_name(locals, stmts);
     let mut indexed_body = new_body.clone();
     if cursor_body_uses > 0
-        && rewrite_cursor_body_to_index(&mut indexed_body, cursor, &index_name)
         && is_cursor_increment_by_one(&update_stmt, cursor)
+        && rewrite_cursor_body_to_index(&mut indexed_body, cursor, &index_name)
     {
         let index_ty = index_type_for_count(&count_expr);
         locals.push(NirBinding {

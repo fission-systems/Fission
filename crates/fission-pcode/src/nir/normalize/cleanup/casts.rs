@@ -445,29 +445,33 @@ fn try_strip_outer_cast(expr: &HirExpr, binding_ty: &NirType) -> Option<HirExpr>
     else {
         return None;
     };
-    if cast_ty != binding_ty {
-        return None;
+    if cast_ty == binding_ty {
+        let inner_ty = expr_type(inner);
+        let compatible = match (&inner_ty, binding_ty) {
+            (NirType::Unknown, _) => true,
+            (a, b) if a == b => true,
+            (NirType::Bool, NirType::Int { .. }) => true,
+            (
+                NirType::Int {
+                    bits: inner_bits, ..
+                },
+                NirType::Int {
+                    bits: outer_bits, ..
+                },
+            ) => inner_bits <= outer_bits,
+            _ => false,
+        };
+        if compatible {
+            return Some((**inner).clone());
+        }
+    } else if is_scalar_non_unknown(cast_ty) && is_scalar_non_unknown(binding_ty) {
+        if let (Some(cast_bits), Some(binding_bits)) = (scalar_bit_width(cast_ty), scalar_bit_width(binding_ty)) {
+            if cast_bits >= binding_bits {
+                return Some((**inner).clone());
+            }
+        }
     }
-    let inner_ty = expr_type(inner);
-    let compatible = match (&inner_ty, binding_ty) {
-        (NirType::Unknown, _) => true,
-        (a, b) if a == b => true,
-        (NirType::Bool, NirType::Int { .. }) => true,
-        (
-            NirType::Int {
-                bits: inner_bits, ..
-            },
-            NirType::Int {
-                bits: outer_bits, ..
-            },
-        ) => inner_bits <= outer_bits,
-        _ => false,
-    };
-    if compatible {
-        Some((**inner).clone())
-    } else {
-        None
-    }
+    None
 }
 
 fn try_strip_return_outer_cast(expr: &HirExpr, return_type: &NirType) -> Option<HirExpr> {
@@ -480,6 +484,13 @@ fn try_strip_return_outer_cast(expr: &HirExpr, return_type: &NirType) -> Option<
     };
     if cast_ty == return_type && is_scalar_non_unknown(cast_ty) {
         Some((**inner).clone())
+    } else if is_scalar_non_unknown(cast_ty) && is_scalar_non_unknown(return_type) {
+        if let (Some(cast_bits), Some(return_bits)) = (scalar_bit_width(cast_ty), scalar_bit_width(return_type)) {
+            if cast_bits >= return_bits {
+                return Some((**inner).clone());
+            }
+        }
+        None
     } else {
         None
     }
