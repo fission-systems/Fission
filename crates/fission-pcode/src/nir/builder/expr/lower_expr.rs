@@ -1721,7 +1721,7 @@ impl<'a> PreviewBuilder<'a> {
     ) -> Result<HirExpr, MlilPreviewError> {
         if vn.is_constant {
             if let Some(name) = self.options.global_names.get(&(vn.constant_val as u64)) {
-                return Ok(HirExpr::Var(name.clone()));
+                return Ok(HirExpr::AddressOfGlobal(name.clone()));
             }
             return Ok(HirExpr::Const(
                 vn.constant_val,

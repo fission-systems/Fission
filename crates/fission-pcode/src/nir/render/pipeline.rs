@@ -917,7 +917,13 @@ fn collect_global_decls_from_expr(
             let ty = global_decl_types
                 .get(name)
                 .cloned()
-                .unwrap_or_else(|| infer_global_decl_expr_type(expr, binding_types));
+                .unwrap_or_else(|| {
+                    if matches!(expr, HirExpr::AddressOfGlobal(_)) {
+                        NirType::Unknown
+                    } else {
+                        infer_global_decl_expr_type(expr, binding_types)
+                    }
+                });
             merge_global_decl_type(decls, name, ty);
         }
         HirExpr::Cast { expr, .. }
