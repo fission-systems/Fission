@@ -408,6 +408,7 @@ fn collect_call_hints_from_expr(
         | HirExpr::Unary { expr, .. }
         | HirExpr::Load { ptr: expr, .. }
         | HirExpr::PtrOffset { base: expr, .. }
+        | HirExpr::FieldAccess { base: expr, .. }
         | HirExpr::AggregateCopy { src: expr, .. } => {
             collect_call_hints_from_expr(expr, context, pointer_hints);
         }
@@ -540,6 +541,9 @@ fn peel_surface_var_name_from_expr(expr: &HirExpr) -> Option<&str> {
         | HirExpr::Load { ptr: expr, .. }
         | HirExpr::AggregateCopy { src: expr, .. } => peel_surface_var_name_from_expr(expr),
         HirExpr::PtrOffset { base, offset } if *offset == 0 => {
+            peel_surface_var_name_from_expr(base)
+        }
+        HirExpr::FieldAccess { base, offset, .. } if *offset == 0 => {
             peel_surface_var_name_from_expr(base)
         }
         HirExpr::Index { base, index, .. } if matches!(index.as_ref(), HirExpr::Const(0, _)) => {

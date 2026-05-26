@@ -46,6 +46,13 @@ fn rle_stmt(stmt: &mut HirStmt, cache: &mut LoadCache) -> bool {
                         cache.remove(&key);
                     }
                 }
+                HirLValue::FieldAccess { base, ty, .. } => {
+                    let key = alias_key_for_pointer_expr(base, nir_byte_size(ty));
+                    if matches!(&key, AliasKey::Partition(partition) if partition.is_promotable_stack_like())
+                    {
+                        cache.remove(&key);
+                    }
+                }
                 HirLValue::Index { base, elem_ty, .. } => {
                     let key = alias_key_for_pointer_expr(base, nir_byte_size(elem_ty));
                     if matches!(&key, AliasKey::Partition(partition) if partition.is_promotable_stack_like())
@@ -163,7 +170,9 @@ fn rewrite_loads_in_expr(expr: &mut HirExpr, cache: &LoadCache, changed: &mut bo
             }
             rewrite_loads_in_expr(ptr.as_mut(), cache, changed);
         }
-        HirExpr::Cast { expr: inner, .. } | HirExpr::Unary { expr: inner, .. } => {
+        HirExpr::Cast { expr: inner, .. }
+        | HirExpr::Unary { expr: inner, .. }
+        | HirExpr::FieldAccess { base: inner, .. } => {
             rewrite_loads_in_expr(inner.as_mut(), cache, changed)
         }
         HirExpr::Binary { lhs, rhs, .. } => {

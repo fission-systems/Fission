@@ -30,7 +30,7 @@ fn expr_uses_home_slot(expr: &HirExpr, home_slots: &HashMap<String, i64>) -> boo
     match expr {
         HirExpr::Var(name) | HirExpr::AddressOfGlobal(name) => home_slots.contains_key(name),
         HirExpr::Load { ptr, .. } => expr_uses_home_slot(ptr, home_slots),
-        HirExpr::PtrOffset { base, .. } => expr_uses_home_slot(base, home_slots),
+        HirExpr::PtrOffset { base, .. } | HirExpr::FieldAccess { base, .. } => expr_uses_home_slot(base, home_slots),
         HirExpr::Cast { expr, .. } => expr_uses_home_slot(expr, home_slots),
         HirExpr::Unary { expr, .. } => expr_uses_home_slot(expr, home_slots),
         HirExpr::Binary { lhs, rhs, .. } => {

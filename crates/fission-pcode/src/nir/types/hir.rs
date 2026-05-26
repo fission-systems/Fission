@@ -61,6 +61,12 @@ pub enum HirLValue {
         index: Box<HirExpr>,
         elem_ty: NirType,
     },
+    FieldAccess {
+        base: Box<HirExpr>,
+        field_name: String,
+        offset: u32,
+        ty: NirType,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -106,6 +112,12 @@ pub enum HirExpr {
         base: Box<HirExpr>,
         index: Box<HirExpr>,
         elem_ty: NirType,
+    },
+    FieldAccess {
+        base: Box<HirExpr>,
+        field_name: String,
+        offset: u32,
+        ty: NirType,
     },
     AggregateCopy {
         src: Box<HirExpr>,

@@ -254,6 +254,7 @@ fn count_ptr_in_stmt(stmt: &HirStmt, name: &str) -> usize {
                     count_ptr_in_expr(base, name) + count_ptr_in_expr(index, name)
                 }
                 HirLValue::Var(_) => 0,
+                HirLValue::FieldAccess { base, .. } => count_ptr_in_expr(base, name),
             };
             lhs_uses + count_ptr_in_expr(rhs, name)
         }
@@ -324,7 +325,8 @@ fn count_ptr_in_expr(expr: &HirExpr, name: &str) -> usize {
         | HirExpr::Unary { expr: inner, .. }
         | HirExpr::Load { ptr: inner, .. }
         | HirExpr::PtrOffset { base: inner, .. }
-        | HirExpr::AggregateCopy { src: inner, .. } => count_ptr_in_expr(inner, name),
+        | HirExpr::AggregateCopy { src: inner, .. }
+        | HirExpr::FieldAccess { base: inner, .. } => count_ptr_in_expr(inner, name),
         HirExpr::Binary { lhs, rhs, .. } => {
             count_ptr_in_expr(lhs, name) + count_ptr_in_expr(rhs, name)
         }

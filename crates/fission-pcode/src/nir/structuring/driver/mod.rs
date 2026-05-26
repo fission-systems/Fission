@@ -1,4 +1,4 @@
-use super::irreducible::compute_node_splits;
+use super::irreducible::{compute_fas_virtual_gotos, compute_node_splits};
 use super::*;
 
 mod admission;
@@ -258,6 +258,25 @@ impl<'a> PreviewBuilder<'a> {
                 self.predecessors = split.new_predecessors;
                 self.virtual_block_map = split.virtual_to_original;
                 self.refresh_cfg_fact_cache();
+            } else {
+                // Node-splitting budget exceeded (blocks too large or too many splits).
+                // Attempt FAS-based edge virtualization: compute the Minimum Feedback
+                // Arc Set and mark only those edges as forced gotos, leaving the rest
+                // of the CFG structurable via the normal graph-collapse pass.
+                let fas_edges =
+                    compute_fas_virtual_gotos(&self.successors, &self.predecessors);
+                if !fas_edges.is_empty() {
+                    if diag {
+                        eprintln!(
+                            "[DIAG] FAS edge virtualization: {} edges virtualized as gotos: {:?}",
+                            fas_edges.len(),
+                            fas_edges
+                        );
+                    }
+                    self.fas_virtual_edges = fas_edges;
+                    self.telemetry.structuring.fas_virtual_goto_count +=
+                        self.fas_virtual_edges.len();
+                }
             }
         }
         if diag {

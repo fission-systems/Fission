@@ -133,6 +133,7 @@ impl DefUseMap {
                 self.count_expr(base);
                 self.count_expr(index);
             }
+            HirLValue::FieldAccess { base, .. } => self.count_expr(base),
         }
     }
 
@@ -147,6 +148,7 @@ impl DefUseMap {
             | HirExpr::Load { ptr: expr, .. }
             | HirExpr::PtrOffset { base: expr, .. }
             | HirExpr::AggregateCopy { src: expr, .. } => self.count_expr(expr),
+            HirExpr::FieldAccess { base, .. } => self.count_expr(base),
             HirExpr::Binary { lhs, rhs, .. } => {
                 self.count_expr(lhs);
                 self.count_expr(rhs);
@@ -267,6 +269,9 @@ fn fold_lvalue(lhs: &mut HirLValue) {
             fold_expr(base);
             fold_expr(index);
         }
+        HirLValue::FieldAccess { base, .. } => {
+            fold_expr(base);
+        }
     }
 }
 
@@ -284,6 +289,9 @@ fn fold_expr(expr: &mut HirExpr) -> bool {
         }
         HirExpr::Load { ptr, .. } | HirExpr::PtrOffset { base: ptr, .. } => {
             changed |= fold_expr(ptr);
+        }
+        HirExpr::FieldAccess { base, .. } => {
+            changed |= fold_expr(base);
         }
         HirExpr::Index { base, index, .. } => {
             changed |= fold_expr(base);
@@ -358,6 +366,7 @@ pub(crate) fn eval_hir_expr_with_const_env(
         | HirExpr::PtrOffset { .. }
         | HirExpr::Index { .. }
         | HirExpr::Select { .. }
+        | HirExpr::FieldAccess { .. }
         | HirExpr::AggregateCopy { .. } => None,
     }
 }
@@ -943,6 +952,7 @@ fn count_mention_lhs(lhs: &HirLValue, name: &str) -> usize {
         HirLValue::Index { base, index, .. } => {
             count_mention_expr(base, name) + count_mention_expr(index, name)
         }
+        HirLValue::FieldAccess { base, .. } => count_mention_expr(base, name),
     }
 }
 
@@ -955,6 +965,7 @@ fn count_mention_expr(expr: &HirExpr, name: &str) -> usize {
         | HirExpr::Load { ptr: expr, .. }
         | HirExpr::PtrOffset { base: expr, .. }
         | HirExpr::AggregateCopy { src: expr, .. } => count_mention_expr(expr, name),
+        HirExpr::FieldAccess { base, .. } => count_mention_expr(base, name),
         HirExpr::Binary { lhs, rhs, .. } => {
             count_mention_expr(lhs, name) + count_mention_expr(rhs, name)
         }
@@ -1148,7 +1159,8 @@ fn collect_repeated_pure_exprs(
         | HirExpr::Unary { expr, .. }
         | HirExpr::Load { ptr: expr, .. }
         | HirExpr::PtrOffset { base: expr, .. }
-        | HirExpr::AggregateCopy { src: expr, .. } => collect_repeated_pure_exprs(expr, counts),
+        | HirExpr::AggregateCopy { src: expr, .. }
+        | HirExpr::FieldAccess { base: expr, .. } => collect_repeated_pure_exprs(expr, counts),
         HirExpr::Binary { lhs, rhs, .. } => {
             collect_repeated_pure_exprs(lhs, counts);
             collect_repeated_pure_exprs(rhs, counts);
@@ -1241,6 +1253,12 @@ fn replace_matching_pure_expr(expr: &HirExpr, needle: &HirExpr, replacement: &Hi
             else_expr: Box::new(replace_matching_pure_expr(else_expr, needle, replacement)),
             ty: ty.clone(),
         },
+        HirExpr::FieldAccess { base, field_name, offset, ty } => HirExpr::FieldAccess {
+            base: Box::new(replace_matching_pure_expr(base, needle, replacement)),
+            field_name: field_name.clone(),
+            offset: *offset,
+            ty: ty.clone(),
+        },
     }
 }
 
@@ -1280,7 +1298,8 @@ fn count_nonconst_leaf_inputs(expr: &HirExpr) -> usize {
         | HirExpr::Unary { expr, .. }
         | HirExpr::Load { ptr: expr, .. }
         | HirExpr::PtrOffset { base: expr, .. }
-        | HirExpr::AggregateCopy { src: expr, .. } => count_nonconst_leaf_inputs(expr),
+        | HirExpr::AggregateCopy { src: expr, .. }
+        | HirExpr::FieldAccess { base: expr, .. } => count_nonconst_leaf_inputs(expr),
         HirExpr::Binary { lhs, rhs, .. } => {
             count_nonconst_leaf_inputs(lhs) + count_nonconst_leaf_inputs(rhs)
         }
@@ -1308,7 +1327,8 @@ fn expr_node_count(expr: &HirExpr) -> usize {
         | HirExpr::Unary { expr, .. }
         | HirExpr::Load { ptr: expr, .. }
         | HirExpr::PtrOffset { base: expr, .. }
-        | HirExpr::AggregateCopy { src: expr, .. } => 1 + expr_node_count(expr),
+        | HirExpr::AggregateCopy { src: expr, .. }
+        | HirExpr::FieldAccess { base: expr, .. } => 1 + expr_node_count(expr),
         HirExpr::Binary { lhs, rhs, .. } => 1 + expr_node_count(lhs) + expr_node_count(rhs),
         HirExpr::Call { args, .. } => 1 + args.iter().map(expr_node_count).sum::<usize>(),
         HirExpr::Index { base, index, .. } => 1 + expr_node_count(base) + expr_node_count(index),

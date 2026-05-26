@@ -238,7 +238,8 @@ fn expand_load_in_expr(expr: &mut HirExpr) -> bool {
         HirExpr::Unary { expr: inner, .. }
         | HirExpr::Cast { expr: inner, .. }
         | HirExpr::PtrOffset { base: inner, .. }
-        | HirExpr::AggregateCopy { src: inner, .. } => {
+        | HirExpr::AggregateCopy { src: inner, .. }
+        | HirExpr::FieldAccess { base: inner, .. } => {
             changed |= expand_load_in_expr(inner);
         }
         HirExpr::Load { ptr, .. } => {

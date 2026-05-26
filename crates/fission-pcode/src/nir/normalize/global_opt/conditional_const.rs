@@ -136,7 +136,8 @@ fn substitute_expr(expr: &mut HirExpr, env: &HashMap<String, HirExpr>) -> bool {
         | HirExpr::Unary { expr: inner, .. }
         | HirExpr::Load { ptr: inner, .. }
         | HirExpr::PtrOffset { base: inner, .. }
-        | HirExpr::AggregateCopy { src: inner, .. } => {
+        | HirExpr::AggregateCopy { src: inner, .. }
+        | HirExpr::FieldAccess { base: inner, .. } => {
             changed |= substitute_expr(inner, env);
         }
         HirExpr::Binary { lhs, rhs, .. } => {
@@ -172,6 +173,9 @@ fn substitute_lvalue(lval: &mut HirLValue, env: &HashMap<String, HirExpr>) -> bo
         HirLValue::Index { base, index, .. } => {
             changed |= substitute_expr(base, env);
             changed |= substitute_expr(index, env);
+        }
+        HirLValue::FieldAccess { base, .. } => {
+            changed |= substitute_expr(base, env);
         }
     }
     changed
@@ -309,6 +313,9 @@ fn collect_written_vars_lvalue(lval: &HirLValue, written: &mut HashSet<String>) 
             collect_written_vars_expr(base, written);
             collect_written_vars_expr(index, written);
         }
+        HirLValue::FieldAccess { base, .. } => {
+            collect_written_vars_expr(base, written);
+        }
     }
 }
 
@@ -318,7 +325,8 @@ fn collect_written_vars_expr(expr: &HirExpr, written: &mut HashSet<String>) {
         | HirExpr::Unary { expr: inner, .. }
         | HirExpr::Load { ptr: inner, .. }
         | HirExpr::PtrOffset { base: inner, .. }
-        | HirExpr::AggregateCopy { src: inner, .. } => {
+        | HirExpr::AggregateCopy { src: inner, .. }
+        | HirExpr::FieldAccess { base: inner, .. } => {
             collect_written_vars_expr(inner, written);
         }
         HirExpr::Binary { lhs, rhs, .. } => {

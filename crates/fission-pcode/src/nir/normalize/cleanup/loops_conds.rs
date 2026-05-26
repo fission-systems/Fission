@@ -433,7 +433,9 @@ fn expr_is_low_cost_inline_candidate(expr: &HirExpr) -> bool {
         HirExpr::Call { target, args, .. } if is_low_cost_flag_intrinsic(target) => {
             args.iter().all(expr_is_low_cost_inline_candidate)
         }
-        HirExpr::Cast { expr, .. } | HirExpr::Unary { expr, .. } => {
+        HirExpr::Cast { expr, .. }
+        | HirExpr::Unary { expr, .. }
+        | HirExpr::FieldAccess { base: expr, .. } => {
             expr_is_low_cost_inline_candidate(expr)
         }
         HirExpr::Binary { op, lhs, rhs, .. } => {
@@ -783,7 +785,7 @@ fn expr_nir_type(expr: &HirExpr) -> Option<NirType> {
         HirExpr::Load { ty, .. } => Some(ty.clone()),
         HirExpr::Select { ty, .. } => Some(ty.clone()),
         HirExpr::Index { elem_ty, .. } => Some(elem_ty.clone()),
-        HirExpr::PtrOffset { .. } => None,
+        HirExpr::PtrOffset { .. } | HirExpr::FieldAccess { .. } => None,
         HirExpr::Call { ty, .. } => Some(ty.clone()),
         HirExpr::AggregateCopy { .. } => None,
     }

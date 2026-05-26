@@ -233,6 +233,11 @@ impl DispatcherTelemetry {
 #[derive(Debug, Default)]
 pub(crate) struct StructuringTelemetry {
     pub(crate) forced_linear_structuring_count: usize,
+    /// Back-edges virtualized as explicit gotos by the FAS fallback when node-splitting
+    /// exceeds budget (irreducible SCCs too large to split).
+    pub(crate) fas_virtual_goto_count: usize,
+    /// Switch cases patched with `/* fallthrough */` instead of an explicit goto.
+    pub(crate) switch_fallthrough_detected_count: usize,
     pub(crate) structuring_force_linear_explicit_count: usize,
     pub(crate) structuring_force_linear_irreducible_budget_count: usize,
     pub(crate) structuring_force_linear_extreme_budget_count: usize,
@@ -354,6 +359,8 @@ pub(crate) struct StructuringTelemetry {
 impl StructuringTelemetry {
     fn apply_to_public_stats(&self, stats: &mut PreviewBuildStats) {
         stats.forced_linear_structuring_count = self.forced_linear_structuring_count;
+        stats.fas_virtual_goto_count = self.fas_virtual_goto_count;
+        stats.switch_fallthrough_detected_count = self.switch_fallthrough_detected_count;
         stats.structuring_force_linear_explicit_count =
             self.structuring_force_linear_explicit_count;
         stats.structuring_force_linear_irreducible_budget_count =

@@ -67,7 +67,8 @@ fn collect_vars_in_expr(expr: &HirExpr, vars: &mut HashSet<String>) {
         | HirExpr::Unary { expr: inner, .. }
         | HirExpr::Load { ptr: inner, .. }
         | HirExpr::PtrOffset { base: inner, .. }
-        | HirExpr::AggregateCopy { src: inner, .. } => {
+        | HirExpr::AggregateCopy { src: inner, .. }
+        | HirExpr::FieldAccess { base: inner, .. } => {
             collect_vars_in_expr(inner, vars);
         }
         HirExpr::Binary { lhs, rhs, .. } => {
@@ -114,6 +115,10 @@ fn collect_real_uses_and_deps(
                     HirLValue::Index { base, index, .. } => {
                         collect_vars_in_expr(base, alive);
                         collect_vars_in_expr(index, alive);
+                        collect_vars_in_expr(rhs, alive);
+                    }
+                    HirLValue::FieldAccess { base, .. } => {
+                        collect_vars_in_expr(base, alive);
                         collect_vars_in_expr(rhs, alive);
                     }
                 }
@@ -246,6 +251,7 @@ fn check_statement_uses_allowed(
             HirLValue::Var(name) => t.contains(name),
             HirLValue::Deref { ptr, .. } => contains_t(ptr, t),
             HirLValue::Index { base, index, .. } => contains_t(base, t) || contains_t(index, t),
+            HirLValue::FieldAccess { base, .. } => contains_t(base, t),
         }
     }
 
@@ -349,6 +355,9 @@ fn replace_trash_uses(
                     replace_trash_in_expr(base, t, var_types, changed);
                     replace_trash_in_expr(index, t, var_types, changed);
                 }
+                HirLValue::FieldAccess { base, .. } => {
+                    replace_trash_in_expr(base, t, var_types, changed);
+                }
             }
         }
         HirStmt::Expr(expr) => {
@@ -429,7 +438,8 @@ fn replace_trash_in_expr(
         | HirExpr::Unary { expr: inner, .. }
         | HirExpr::Load { ptr: inner, .. }
         | HirExpr::PtrOffset { base: inner, .. }
-        | HirExpr::AggregateCopy { src: inner, .. } => {
+        | HirExpr::AggregateCopy { src: inner, .. }
+        | HirExpr::FieldAccess { base: inner, .. } => {
             replace_trash_in_expr(inner, t, var_types, changed);
         }
         HirExpr::Binary { lhs, rhs, .. } => {
@@ -467,6 +477,9 @@ fn collect_all_reads(stmts: &[HirStmt], vars: &mut HashSet<String>) {
                     HirLValue::Index { base, index, .. } => {
                         collect_vars_in_expr(base, vars);
                         collect_vars_in_expr(index, vars);
+                    }
+                    HirLValue::FieldAccess { base, .. } => {
+                        collect_vars_in_expr(base, vars);
                     }
                 }
             }

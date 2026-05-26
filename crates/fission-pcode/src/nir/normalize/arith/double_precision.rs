@@ -136,6 +136,7 @@ fn rewrite_lvalue(lval: &mut HirLValue, defs: &HashMap<String, HirExpr>) -> bool
             changed |= rewrite_expr(index, defs);
             changed
         }
+        HirLValue::FieldAccess { base, .. } => rewrite_expr(base, defs),
     }
 }
 
@@ -148,7 +149,8 @@ fn rewrite_expr(expr: &mut HirExpr, defs: &HashMap<String, HirExpr>) -> bool {
         | HirExpr::Unary { expr: inner, .. }
         | HirExpr::Load { ptr: inner, .. }
         | HirExpr::PtrOffset { base: inner, .. }
-        | HirExpr::AggregateCopy { src: inner, .. } => {
+        | HirExpr::AggregateCopy { src: inner, .. }
+        | HirExpr::FieldAccess { base: inner, .. } => {
             changed |= rewrite_expr(inner, defs);
         }
         HirExpr::Binary { lhs, rhs, .. } => {

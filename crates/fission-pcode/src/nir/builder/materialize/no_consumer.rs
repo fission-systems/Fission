@@ -24,6 +24,7 @@ impl<'a> PreviewBuilder<'a> {
             HirExpr::Cast { expr, .. } | HirExpr::Unary { expr, .. } => {
                 Self::no_consumer_flag_rhs_is_pure(expr)
             }
+            HirExpr::FieldAccess { base, .. } => Self::no_consumer_flag_rhs_is_pure(base),
             HirExpr::Binary { lhs, rhs, .. } => {
                 Self::no_consumer_flag_rhs_is_pure(lhs) && Self::no_consumer_flag_rhs_is_pure(rhs)
             }
@@ -154,6 +155,7 @@ impl<'a> PreviewBuilder<'a> {
             HirExpr::PtrOffset { .. } => NoConsumerSuppressionRhsKind::PtrOffset,
             HirExpr::Index { .. } => NoConsumerSuppressionRhsKind::Index,
             HirExpr::Select { .. } => NoConsumerSuppressionRhsKind::Select,
+            HirExpr::FieldAccess { .. } => NoConsumerSuppressionRhsKind::FieldAccess,
         }
     }
 

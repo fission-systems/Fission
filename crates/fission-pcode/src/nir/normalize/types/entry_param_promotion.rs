@@ -118,7 +118,8 @@ fn expr_contains_var(expr: &HirExpr, target: &str) -> bool {
         HirExpr::Cast { expr, .. }
         | HirExpr::Unary { expr, .. }
         | HirExpr::Load { ptr: expr, .. }
-        | HirExpr::AggregateCopy { src: expr, .. } => expr_contains_var(expr, target),
+        | HirExpr::AggregateCopy { src: expr, .. }
+        | HirExpr::FieldAccess { base: expr, .. } => expr_contains_var(expr, target),
         HirExpr::Binary { lhs, rhs, .. } => {
             expr_contains_var(lhs, target) || expr_contains_var(rhs, target)
         }

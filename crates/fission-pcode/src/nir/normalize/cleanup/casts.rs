@@ -87,7 +87,8 @@ fn strip_redundant_casts_in_expr(expr: &mut HirExpr, type_map: &HashMap<String, 
         HirExpr::Unary { expr: inner, .. }
         | HirExpr::Load { ptr: inner, .. }
         | HirExpr::PtrOffset { base: inner, .. }
-        | HirExpr::AggregateCopy { src: inner, .. } => {
+        | HirExpr::AggregateCopy { src: inner, .. }
+        | HirExpr::FieldAccess { base: inner, .. } => {
             changed |= strip_redundant_casts_in_expr(inner, type_map);
         }
         HirExpr::Binary { lhs, rhs, .. } => {
@@ -256,6 +257,7 @@ fn lvalue_uses_var_as_index_base(lhs: &HirLValue, name: &str) -> bool {
         }
         HirLValue::Deref { ptr, .. } => expr_uses_var_as_index_base(ptr, name),
         HirLValue::Var(_) => false,
+        HirLValue::FieldAccess { base, .. } => expr_uses_var_as_index_base(base, name),
     }
 }
 
@@ -270,7 +272,8 @@ fn expr_uses_var_as_index_base(expr: &HirExpr, name: &str) -> bool {
         | HirExpr::Unary { expr, .. }
         | HirExpr::Load { ptr: expr, .. }
         | HirExpr::PtrOffset { base: expr, .. }
-        | HirExpr::AggregateCopy { src: expr, .. } => expr_uses_var_as_index_base(expr, name),
+        | HirExpr::AggregateCopy { src: expr, .. }
+        | HirExpr::FieldAccess { base: expr, .. } => expr_uses_var_as_index_base(expr, name),
         HirExpr::Binary { lhs, rhs, .. } => {
             expr_uses_var_as_index_base(lhs, name) || expr_uses_var_as_index_base(rhs, name)
         }

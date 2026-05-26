@@ -375,6 +375,10 @@ impl MirProjector {
                 self.project_expr(index);
                 self.push_memory_region(StorageClass::Aggregate, true);
             }
+            HirLValue::FieldAccess { base, .. } => {
+                self.project_expr(base);
+                self.push_memory_region(StorageClass::Aggregate, true);
+            }
         }
     }
 
@@ -416,6 +420,11 @@ impl MirProjector {
             }
             HirExpr::AggregateCopy { src, .. } => {
                 self.project_expr(src);
+                self.push_memory_region(StorageClass::Aggregate, false);
+                self.push_value(MirValueKind::Expr)
+            }
+            HirExpr::FieldAccess { base, .. } => {
+                self.project_expr(base);
                 self.push_memory_region(StorageClass::Aggregate, false);
                 self.push_value(MirValueKind::Expr)
             }

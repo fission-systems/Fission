@@ -63,6 +63,10 @@ fn collect_assignments(stmts: &[HirStmt], assigns: &mut Vec<AssignInfo>, multi_d
                 collect_expr_assigns(index, assigns, multi_def);
                 collect_expr_assigns(rhs, assigns, multi_def);
             }
+            HirStmt::Assign { lhs: HirLValue::FieldAccess { base, .. }, rhs } => {
+                collect_expr_assigns(base, assigns, multi_def);
+                collect_expr_assigns(rhs, assigns, multi_def);
+            }
             HirStmt::Expr(expr) | HirStmt::Return(Some(expr)) => {
                 collect_expr_assigns(expr, assigns, multi_def);
             }
@@ -150,7 +154,8 @@ fn expr_contains_var(expr: &HirExpr, var_name: &str) -> bool {
         | HirExpr::Unary { expr, .. }
         | HirExpr::Load { ptr: expr, .. }
         | HirExpr::PtrOffset { base: expr, .. }
-        | HirExpr::AggregateCopy { src: expr, .. } => expr_contains_var(expr, var_name),
+        | HirExpr::AggregateCopy { src: expr, .. }
+        | HirExpr::FieldAccess { base: expr, .. } => expr_contains_var(expr, var_name),
         HirExpr::Binary { lhs, rhs, .. } => expr_contains_var(lhs, var_name) || expr_contains_var(rhs, var_name),
         HirExpr::Call { args, .. } => args.iter().any(|arg| expr_contains_var(arg, var_name)),
         HirExpr::Index { base, index, .. } => expr_contains_var(base, var_name) || expr_contains_var(index, var_name),
@@ -366,6 +371,11 @@ fn analyze_lvalue_use(lhs: &HirLValue, var_name: &str, uses: &mut Vec<UseInfo>) 
         }
         HirLValue::Index { base, index, .. } => {
             if expr_contains_var(base, var_name) || expr_contains_var(index, var_name) {
+                uses.push(UseInfo { context: UseContext::Incompatible });
+            }
+        }
+        HirLValue::FieldAccess { base, .. } => {
+            if expr_contains_var(base, var_name) {
                 uses.push(UseInfo { context: UseContext::Incompatible });
             }
         }
@@ -681,7 +691,8 @@ where
         | HirExpr::Unary { expr: inner, .. }
         | HirExpr::Load { ptr: inner, .. }
         | HirExpr::PtrOffset { base: inner, .. }
-        | HirExpr::AggregateCopy { src: inner, .. } => {
+        | HirExpr::AggregateCopy { src: inner, .. }
+        | HirExpr::FieldAccess { base: inner, .. } => {
             f(inner);
         }
         HirExpr::Binary { lhs, rhs, .. } => {
@@ -719,6 +730,9 @@ fn rewrite_lvalue(lhs: &mut HirLValue, varmap: &HashMap<String, ReplaceVar>) {
         HirLValue::Index { base, index, .. } => {
             rewrite_expr(base, varmap);
             rewrite_expr(index, varmap);
+        }
+        HirLValue::FieldAccess { base, .. } => {
+            rewrite_expr(base, varmap);
         }
     }
 }

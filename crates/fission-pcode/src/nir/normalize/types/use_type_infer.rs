@@ -172,7 +172,7 @@ fn collect_assignment_copy_constraints(
                     .push(UseConstraint::Ptr(NirType::Unknown));
             }
 
-            if let HirExpr::PtrOffset { .. } = rhs {
+            if let HirExpr::PtrOffset { .. } | HirExpr::FieldAccess { .. } = rhs {
                 out.entry(lhs_name.clone())
                     .or_default()
                     .push(UseConstraint::Ptr(NirType::Unknown));
@@ -202,6 +202,13 @@ fn collect_assignment_copy_constraints(
                 out.entry(rhs_name.clone())
                     .or_default()
                     .push(UseConstraint::Exact(elem_ty.clone()));
+            }
+        }
+        HirLValue::FieldAccess { ty, .. } => {
+            if let HirExpr::Var(rhs_name) = rhs {
+                out.entry(rhs_name.clone())
+                    .or_default()
+                    .push(UseConstraint::Exact(ty.clone()));
             }
         }
     }
@@ -291,6 +298,13 @@ fn collect_constraints_lvalue(lhs: &HirLValue, out: &mut HashMap<String, Vec<Use
             }
         }
         HirLValue::Var(_) => {}
+        HirLValue::FieldAccess { base, ty, .. } => {
+            if let HirExpr::Var(name) = base.as_ref() {
+                out.entry(name.clone())
+                    .or_default()
+                    .push(UseConstraint::Ptr(ty.clone()));
+            }
+        }
     }
 }
 
@@ -394,7 +408,7 @@ fn collect_constraints_expr(
                 collect_constraints_expr(arg, return_type, known_binding_types, out);
             }
         }
-        HirExpr::PtrOffset { base, .. } => {
+        HirExpr::PtrOffset { base, .. } | HirExpr::FieldAccess { base, .. } => {
             if let HirExpr::Var(base_name) = base.as_ref() {
                 out.entry(base_name.clone())
                     .or_default()
@@ -520,7 +534,8 @@ fn expr_int_bits(expr: &HirExpr, known_binding_types: &HashMap<String, NirType>)
         | HirExpr::Load { ty, .. }
         | HirExpr::Index { elem_ty: ty, .. }
         | HirExpr::Cast { ty, .. }
-        | HirExpr::Select { ty, .. } => nir_type_bits(ty),
+        | HirExpr::Select { ty, .. }
+        | HirExpr::FieldAccess { ty, .. } => nir_type_bits(ty),
         HirExpr::Binary { ty, .. } => nir_type_bits(ty),
         HirExpr::PtrOffset { .. } | HirExpr::AggregateCopy { .. } => None,
     }
@@ -769,7 +784,8 @@ fn count_var_uses_expr(expr: &HirExpr, out: &mut HashMap<String, usize>) {
         | HirExpr::Unary { expr, .. }
         | HirExpr::Load { ptr: expr, .. }
         | HirExpr::PtrOffset { base: expr, .. }
-        | HirExpr::AggregateCopy { src: expr, .. } => count_var_uses_expr(expr, out),
+        | HirExpr::AggregateCopy { src: expr, .. }
+        | HirExpr::FieldAccess { base: expr, .. } => count_var_uses_expr(expr, out),
         HirExpr::Binary { lhs, rhs, .. } => {
             count_var_uses_expr(lhs, out);
             count_var_uses_expr(rhs, out);
@@ -803,6 +819,9 @@ fn count_var_uses_lvalue(lhs: &HirLValue, out: &mut HashMap<String, usize>) {
         HirLValue::Index { base, index, .. } => {
             count_var_uses_expr(base, out);
             count_var_uses_expr(index, out);
+        }
+        HirLValue::FieldAccess { base, .. } => {
+            count_var_uses_expr(base, out);
         }
     }
 }
@@ -1009,6 +1028,7 @@ fn collect_wrapping_narrow_return_vars(
         | HirExpr::PtrOffset { .. }
         | HirExpr::Index { .. }
         | HirExpr::Select { .. }
+        | HirExpr::FieldAccess { .. }
         | HirExpr::AggregateCopy { .. } => {}
     }
 }

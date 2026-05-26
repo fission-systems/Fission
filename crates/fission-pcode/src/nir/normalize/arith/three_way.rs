@@ -73,6 +73,9 @@ fn simplify_lvalue(lval: &mut HirLValue) -> bool {
             changed |= simplify_expr(base);
             changed |= simplify_expr(index);
         }
+        HirLValue::FieldAccess { base, .. } => {
+            changed |= simplify_expr(base);
+        }
     }
     changed
 }

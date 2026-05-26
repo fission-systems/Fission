@@ -502,7 +502,7 @@ fn preview_type_hints_fold_subpiece_lane_aggregate_store_back_to_local() {
     .expect("preview render should succeed");
 
     assert!(
-        rendered.contains("LPRECT param_2"),
+        rendered.contains("RECT* param_2"),
         "rendered:\n{}",
         rendered
     );
@@ -622,7 +622,7 @@ fn preview_type_hints_fold_full_register_aggregate_store_back_to_local() {
     .expect("preview render should succeed");
 
     assert!(
-        rendered.contains("LPRECT param_2"),
+        rendered.contains("RECT* param_2"),
         "rendered:\n{}",
         rendered
     );
@@ -758,7 +758,7 @@ fn preview_type_hints_fold_qword_lane_aggregate_store_back_to_local() {
     .expect("preview render should succeed");
 
     assert!(
-        rendered.contains("LPRECT param_2"),
+        rendered.contains("RECT* param_2"),
         "rendered:\n{}",
         rendered
     );

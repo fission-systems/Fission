@@ -17,6 +17,9 @@ pub(crate) fn strip_inferred_structs(code: &str) -> String {
     for line in code.lines() {
         let trimmed = line.trim();
         if trimmed.starts_with("typedef struct") || trimmed.starts_with("// Inferred Structure") {
+            if trimmed.ends_with(';') {
+                continue;
+            }
             in_struct_block = true;
             continue;
         }

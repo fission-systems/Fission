@@ -11,7 +11,8 @@ fn expr_uses_var(expr: &HirExpr, name: &str) -> bool {
         HirExpr::Cast { expr, .. }
         | HirExpr::Unary { expr, .. }
         | HirExpr::Load { ptr: expr, .. }
-        | HirExpr::AggregateCopy { src: expr, .. } => expr_uses_var(expr, name),
+        | HirExpr::AggregateCopy { src: expr, .. }
+        | HirExpr::FieldAccess { base: expr, .. } => expr_uses_var(expr, name),
         HirExpr::Binary { lhs, rhs, .. } => expr_uses_var(lhs, name) || expr_uses_var(rhs, name),
         HirExpr::Call { args, .. } => args.iter().any(|arg| expr_uses_var(arg, name)),
         HirExpr::PtrOffset { base, .. } => expr_uses_var(base, name),

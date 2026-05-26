@@ -74,6 +74,7 @@ fn rename_var_in_lvalue(lvalue: &mut HirLValue, renames: &[(String, String)]) {
             rename_var_in_expr(base, renames);
             rename_var_in_expr(index, renames);
         }
+        HirLValue::FieldAccess { base, .. } => rename_var_in_expr(base, renames),
     }
 }
 
@@ -108,6 +109,7 @@ fn rename_var_in_expr(expr: &mut HirExpr, renames: &[(String, String)]) {
             rename_var_in_expr(base, renames);
             rename_var_in_expr(index, renames);
         }
+        HirExpr::FieldAccess { base, .. } => rename_var_in_expr(base, renames),
         HirExpr::Const(_, _) => {}
     }
 }

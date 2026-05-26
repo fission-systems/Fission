@@ -195,7 +195,8 @@ fn collect_vars(expr: &HirExpr, vars: &mut HashSet<String>) {
         | HirExpr::Unary { expr, .. }
         | HirExpr::Load { ptr: expr, .. }
         | HirExpr::PtrOffset { base: expr, .. }
-        | HirExpr::AggregateCopy { src: expr, .. } => {
+        | HirExpr::AggregateCopy { src: expr, .. }
+        | HirExpr::FieldAccess { base: expr, .. } => {
             collect_vars(expr, vars);
         }
         HirExpr::Binary { lhs, rhs, .. }
@@ -223,6 +224,9 @@ fn lvalue_contains_var(lval: &HirLValue, var_name: &str) -> bool {
         HirLValue::Index { base, index, .. } => {
             expr_contains_var(base, var_name) || expr_contains_var(index, var_name)
         }
+        HirLValue::FieldAccess { base, .. } => {
+            expr_contains_var(base, var_name)
+        }
     }
 }
 
@@ -234,7 +238,8 @@ fn expr_contains_var(expr: &HirExpr, var_name: &str) -> bool {
         | HirExpr::Unary { expr, .. }
         | HirExpr::Load { ptr: expr, .. }
         | HirExpr::PtrOffset { base: expr, .. }
-        | HirExpr::AggregateCopy { src: expr, .. } => expr_contains_var(expr, var_name),
+        | HirExpr::AggregateCopy { src: expr, .. }
+        | HirExpr::FieldAccess { base: expr, .. } => expr_contains_var(expr, var_name),
         HirExpr::Binary { lhs, rhs, .. } => {
             expr_contains_var(lhs, var_name) || expr_contains_var(rhs, var_name)
         }
@@ -277,7 +282,8 @@ fn expr_contains_call(expr: &HirExpr) -> bool {
         | HirExpr::Unary { expr, .. }
         | HirExpr::Load { ptr: expr, .. }
         | HirExpr::PtrOffset { base: expr, .. }
-        | HirExpr::AggregateCopy { src: expr, .. } => expr_contains_call(expr),
+        | HirExpr::AggregateCopy { src: expr, .. }
+        | HirExpr::FieldAccess { base: expr, .. } => expr_contains_call(expr),
         HirExpr::Binary { lhs, rhs, .. }
         | HirExpr::Index { base: lhs, index: rhs, .. } => {
             expr_contains_call(lhs) || expr_contains_call(rhs)
@@ -300,7 +306,8 @@ fn expr_reads_memory_of(expr: &HirExpr, base: &HirExpr) -> bool {
         HirExpr::Cast { expr, .. }
         | HirExpr::Unary { expr, .. }
         | HirExpr::PtrOffset { base: expr, .. }
-        | HirExpr::AggregateCopy { src: expr, .. } => expr_reads_memory_of(expr, base),
+        | HirExpr::AggregateCopy { src: expr, .. }
+        | HirExpr::FieldAccess { base: expr, .. } => expr_reads_memory_of(expr, base),
         HirExpr::Binary { lhs, rhs, .. } => {
             expr_reads_memory_of(lhs, base) || expr_reads_memory_of(rhs, base)
         }

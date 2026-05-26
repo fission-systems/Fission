@@ -76,7 +76,7 @@ fn preview_type_hints_resolve_indirect_import_call_through_entry_param_alias() {
     )
     .expect("preview render should succeed");
 
-    assert!(rendered.contains("LPRECT param_2"));
+    assert!(rendered.contains("RECT* param_2"));
     assert!(rendered.contains("GetClientRect(param_1, param_2)"));
 }
 
@@ -173,7 +173,7 @@ fn preview_type_hints_recover_indirect_import_args_from_block_register_setup() {
     )
     .expect("preview render should succeed");
 
-    assert!(rendered.contains("LPRECT param_2"));
+    assert!(rendered.contains("RECT* param_2"));
     assert!(rendered.contains("GetClientRect(param_1, param_2)"));
 }
 

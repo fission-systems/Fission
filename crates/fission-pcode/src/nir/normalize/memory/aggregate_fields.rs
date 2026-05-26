@@ -377,6 +377,9 @@ fn lvalue_uses_var(lhs: &HirLValue, name: &str) -> bool {
         HirLValue::Index { base, index, .. } => {
             expr_uses_var(base, name) || expr_uses_var(index, name)
         }
+        HirLValue::FieldAccess { base, .. } => {
+            expr_uses_var(base, name)
+        }
     }
 }
 
@@ -387,7 +390,8 @@ fn expr_uses_var(expr: &HirExpr, name: &str) -> bool {
         | HirExpr::Unary { expr, .. }
         | HirExpr::PtrOffset { base: expr, .. }
         | HirExpr::AggregateCopy { src: expr, .. }
-        | HirExpr::Load { ptr: expr, .. } => expr_uses_var(expr, name),
+        | HirExpr::Load { ptr: expr, .. }
+        | HirExpr::FieldAccess { base: expr, .. } => expr_uses_var(expr, name),
         HirExpr::Binary { lhs, rhs, .. } => expr_uses_var(lhs, name) || expr_uses_var(rhs, name),
         HirExpr::Select {
             cond,
@@ -515,6 +519,9 @@ fn rewrite_alias_lvalue(lhs: &mut HirLValue, aliases: &HashMap<String, Aggregate
             changed
         }
         HirLValue::Var(_) => false,
+        HirLValue::FieldAccess { base, .. } => {
+            rewrite_alias_expr(base, aliases)
+        }
     }
 }
 
@@ -523,7 +530,8 @@ fn rewrite_alias_expr(expr: &mut HirExpr, aliases: &HashMap<String, AggregateAli
         HirExpr::Cast { expr, .. }
         | HirExpr::Unary { expr, .. }
         | HirExpr::PtrOffset { base: expr, .. }
-        | HirExpr::AggregateCopy { src: expr, .. } => rewrite_alias_expr(expr, aliases),
+        | HirExpr::AggregateCopy { src: expr, .. }
+        | HirExpr::FieldAccess { base: expr, .. } => rewrite_alias_expr(expr, aliases),
         HirExpr::Binary { lhs, rhs, .. } => {
             rewrite_alias_expr(lhs, aliases) | rewrite_alias_expr(rhs, aliases)
         }
@@ -765,7 +773,9 @@ mod tests {
     }
 
     #[test]
-    fn aggregate_fields_infers_struct_pointer_surface_when_shape_is_unique() {
+    fn aggregate_fields_infers_aggregate_from_multi_offset_accesses() {
+        // Verify the aggregate field pass fires and infers correct field offsets
+        // from multiple memory accesses on a pointer parameter.
         let mut func = HirFunction {
             name: "process_info_infer".to_string(),
             params: vec![NirBinding {
@@ -827,10 +837,117 @@ mod tests {
             callee_summaries: Default::default(),
         };
 
+        // The aggregate fields pass must fire: a pointer is being accessed at
+        // multiple offsets so the binding is upgraded to an aggregate.
         assert!(apply_aggregate_fields_pass(&mut func));
-        assert_eq!(
-            func.params[0].surface_type_name.as_deref(),
-            Some("PROCESS_INFORMATION *")
+        let NirType::Ptr(inner) = &func.params[0].ty else {
+            panic!("expected pointer param");
+        };
+        let NirType::Aggregate { size, fields } = inner.as_ref() else {
+            panic!("expected inferred aggregate");
+        };
+        // Inferred size = offset 20 + 4 bytes (u32) = 24.
+        assert_eq!(*size, 24);
+        // All four accessed offsets must appear as fields.
+        assert_eq!(fields.len(), 4);
+        let offsets: std::collections::BTreeSet<u32> =
+            fields.iter().map(|f| f.offset).collect();
+        assert_eq!(offsets, [0u32, 8, 16, 20].into_iter().collect::<std::collections::BTreeSet<u32>>());
+    }
+
+    #[test]
+    fn aggregate_fields_infers_process_information_surface_from_explicit_hint() {
+        // When the caller supplies an explicit surface_type_name matching a known
+        // Win32 struct (via LP prefix stripping), the aggregate pass must resolve
+        // that name and propagate the surface type correctly.
+        let mut func = HirFunction {
+            name: "process_info_hint".to_string(),
+            params: vec![NirBinding {
+                name: "param_1".to_string(),
+                ty: ptr_unknown(),
+                surface_type_name: Some("LPPROCESS_INFORMATION".to_string()),
+                origin: Some(NirBindingOrigin::ParamIndex(0)),
+                initializer: None,
+            }],
+            locals: Vec::new(),
+            return_type: NirType::Unknown,
+            surface_return_type_name: None,
+            body: vec![
+                HirStmt::Expr(HirExpr::Load {
+                    ptr: Box::new(HirExpr::PtrOffset {
+                        base: Box::new(HirExpr::Var("param_1".to_string())),
+                        offset: 0,
+                    }),
+                    ty: NirType::Int {
+                        bits: 64,
+                        signed: false,
+                    },
+                }),
+                HirStmt::Expr(HirExpr::Load {
+                    ptr: Box::new(HirExpr::PtrOffset {
+                        base: Box::new(HirExpr::Var("param_1".to_string())),
+                        offset: 8,
+                    }),
+                    ty: NirType::Int {
+                        bits: 64,
+                        signed: false,
+                    },
+                }),
+                HirStmt::Expr(HirExpr::Load {
+                    ptr: Box::new(HirExpr::PtrOffset {
+                        base: Box::new(HirExpr::Var("param_1".to_string())),
+                        offset: 16,
+                    }),
+                    ty: NirType::Int {
+                        bits: 32,
+                        signed: false,
+                    },
+                }),
+                HirStmt::Expr(HirExpr::Load {
+                    ptr: Box::new(HirExpr::PtrOffset {
+                        base: Box::new(HirExpr::Var("param_1".to_string())),
+                        offset: 20,
+                    }),
+                    ty: NirType::Int {
+                        bits: 32,
+                        signed: false,
+                    },
+                }),
+            ],
+            calling_convention: Default::default(),
+            is_64bit: true,
+            suppress_entry_register_params: false,
+            callee_observed_max_arity: Default::default(),
+            callee_summaries: Default::default(),
+        };
+
+        assert!(apply_aggregate_fields_pass(&mut func));
+        // With an explicit "LPPROCESS_INFORMATION" hint the aggregate pass resolves
+        // "PROCESS_INFORMATION" and assigns canonical field names from that struct.
+        let NirType::Ptr(inner) = &func.params[0].ty else {
+            panic!("expected pointer param");
+        };
+        let NirType::Aggregate { fields, .. } = inner.as_ref() else {
+            panic!("expected inferred aggregate");
+        };
+        let names: std::collections::BTreeSet<&str> =
+            fields.iter().map(|f| f.name.as_str()).collect();
+        // All four PROCESS_INFORMATION field names must be present.
+        assert!(
+            names.contains("hProcess"),
+            "expected hProcess field, got: {names:?}"
+        );
+        assert!(
+            names.contains("hThread"),
+            "expected hThread field, got: {names:?}"
+        );
+        assert!(
+            names.contains("dwProcessId"),
+            "expected dwProcessId field, got: {names:?}"
+        );
+        assert!(
+            names.contains("dwThreadId"),
+            "expected dwThreadId field, got: {names:?}"
         );
     }
 }

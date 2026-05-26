@@ -199,6 +199,9 @@ fn verify_reads_in_stmt(stmt: &HirStmt, x_name: &str, shift_bits: u32, valid: &m
                     verify_reads(base, x_name, shift_bits, valid);
                     verify_reads(index, x_name, shift_bits, valid);
                 }
+                HirLValue::FieldAccess { base, .. } => {
+                    verify_reads(base, x_name, shift_bits, valid);
+                }
             }
             verify_reads(rhs, x_name, shift_bits, valid);
         }
@@ -353,6 +356,9 @@ fn rewrite_stmt(
                 HirLValue::Index { base, index, .. } => {
                     rewrite_expr(base, x_name, x_low, x_high, shift_bits);
                     rewrite_expr(index, x_name, x_low, x_high, shift_bits);
+                }
+                HirLValue::FieldAccess { base, .. } => {
+                    rewrite_expr(base, x_name, x_low, x_high, shift_bits);
                 }
                 _ => {}
             }

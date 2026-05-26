@@ -131,6 +131,7 @@ fn stabilize_lvalue(lhs: &mut HirLValue, reps: &PureExprMap) -> bool {
             let index_changed = stabilize_expr(index, reps);
             base_changed || index_changed
         }
+        HirLValue::FieldAccess { base, .. } => stabilize_expr(base, reps),
     }
 }
 
@@ -148,7 +149,8 @@ fn stabilize_expr(expr: &mut HirExpr, reps: &PureExprMap) -> bool {
         | HirExpr::Unary { expr, .. }
         | HirExpr::Load { ptr: expr, .. }
         | HirExpr::PtrOffset { base: expr, .. }
-        | HirExpr::AggregateCopy { src: expr, .. } => {
+        | HirExpr::AggregateCopy { src: expr, .. }
+        | HirExpr::FieldAccess { base: expr, .. } => {
             changed |= stabilize_expr(expr, reps);
         }
         HirExpr::Binary { lhs, rhs, .. } => {

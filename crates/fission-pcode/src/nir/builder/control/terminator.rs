@@ -408,6 +408,9 @@ impl<'a> PreviewBuilder<'a> {
             HirExpr::Cast { expr, .. } | HirExpr::Unary { expr, .. } => {
                 self.arm32_return_pair_part_is_address_like(expr)
             }
+            HirExpr::FieldAccess { base, ty, .. } => {
+                matches!(ty, NirType::Ptr(_)) || self.arm32_return_pair_part_is_address_like(base)
+            }
             HirExpr::Binary { lhs, rhs, .. } => {
                 self.arm32_return_pair_part_is_address_like(lhs)
                     || self.arm32_return_pair_part_is_address_like(rhs)
@@ -2107,7 +2110,8 @@ impl<'a> PreviewBuilder<'a> {
             | HirExpr::Unary { expr, .. }
             | HirExpr::Load { ptr: expr, .. }
             | HirExpr::PtrOffset { base: expr, .. }
-            | HirExpr::AggregateCopy { src: expr, .. } => Self::expr_contains_call(expr),
+            | HirExpr::AggregateCopy { src: expr, .. }
+            | HirExpr::FieldAccess { base: expr, .. } => Self::expr_contains_call(expr),
             HirExpr::Binary { lhs, rhs, .. } => {
                 Self::expr_contains_call(lhs) || Self::expr_contains_call(rhs)
             }
@@ -2134,7 +2138,8 @@ impl<'a> PreviewBuilder<'a> {
             | HirExpr::Unary { expr, .. }
             | HirExpr::Load { ptr: expr, .. }
             | HirExpr::PtrOffset { base: expr, .. }
-            | HirExpr::AggregateCopy { src: expr, .. } => 1 + Self::expr_node_count(expr),
+            | HirExpr::AggregateCopy { src: expr, .. }
+            | HirExpr::FieldAccess { base: expr, .. } => 1 + Self::expr_node_count(expr),
             HirExpr::Binary { lhs, rhs, .. } => {
                 1 + Self::expr_node_count(lhs) + Self::expr_node_count(rhs)
             }
@@ -2658,7 +2663,8 @@ impl<'a> PreviewBuilder<'a> {
             | HirExpr::Load { ty, .. }
             | HirExpr::Cast { ty, .. }
             | HirExpr::Unary { ty, .. }
-            | HirExpr::Binary { ty, .. } => Self::nir_type_width(ty),
+            | HirExpr::Binary { ty, .. }
+            | HirExpr::FieldAccess { ty, .. } => Self::nir_type_width(ty),
             HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) => None,
             HirExpr::Call { ty, .. } => Self::nir_type_width(ty),
             HirExpr::PtrOffset { .. } => None,
@@ -2686,7 +2692,8 @@ impl<'a> PreviewBuilder<'a> {
             | HirExpr::Unary { expr, .. }
             | HirExpr::Load { ptr: expr, .. }
             | HirExpr::PtrOffset { base: expr, .. }
-            | HirExpr::AggregateCopy { src: expr, .. } => {
+            | HirExpr::AggregateCopy { src: expr, .. }
+            | HirExpr::FieldAccess { base: expr, .. } => {
                 Self::selector_expr_is_side_effect_free(expr)
             }
             HirExpr::Binary { lhs, rhs, .. } => {

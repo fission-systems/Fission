@@ -416,7 +416,8 @@ fn collect_vars_in_expr<'a>(expr: &'a HirExpr, out: &mut HashSet<&'a str>) {
         | HirExpr::Unary { expr, .. }
         | HirExpr::Load { ptr: expr, .. }
         | HirExpr::PtrOffset { base: expr, .. }
-        | HirExpr::AggregateCopy { src: expr, .. } => collect_vars_in_expr(expr, out),
+        | HirExpr::AggregateCopy { src: expr, .. }
+        | HirExpr::FieldAccess { base: expr, .. } => collect_vars_in_expr(expr, out),
         HirExpr::Binary { lhs, rhs, .. } => {
             collect_vars_in_expr(lhs, out);
             collect_vars_in_expr(rhs, out);
@@ -600,6 +601,9 @@ fn substitute_copies_lvalue(
             substitute_copies_expr(base, copy_map, changed);
             substitute_copies_expr(index, copy_map, changed);
         }
+        HirLValue::FieldAccess { base, .. } => {
+            substitute_copies_expr(base, copy_map, changed);
+        }
     }
 }
 
@@ -620,7 +624,8 @@ fn substitute_copies_expr(
         | HirExpr::Unary { expr: inner, .. }
         | HirExpr::Load { ptr: inner, .. }
         | HirExpr::PtrOffset { base: inner, .. }
-        | HirExpr::AggregateCopy { src: inner, .. } => {
+        | HirExpr::AggregateCopy { src: inner, .. }
+        | HirExpr::FieldAccess { base: inner, .. } => {
             substitute_copies_expr(inner, copy_map, changed);
         }
         HirExpr::Binary { lhs, rhs, .. } => {
@@ -886,7 +891,8 @@ fn count_var_in_expr(expr: &HirExpr, name: &str) -> usize {
         | HirExpr::Unary { expr, .. }
         | HirExpr::Load { ptr: expr, .. }
         | HirExpr::PtrOffset { base: expr, .. }
-        | HirExpr::AggregateCopy { src: expr, .. } => count_var_in_expr(expr, name),
+        | HirExpr::AggregateCopy { src: expr, .. }
+        | HirExpr::FieldAccess { base: expr, .. } => count_var_in_expr(expr, name),
         HirExpr::Binary { lhs, rhs, .. } => {
             count_var_in_expr(lhs, name) + count_var_in_expr(rhs, name)
         }
@@ -1013,6 +1019,9 @@ fn apply_join_renames_lvalue(
             apply_join_renames_expr(base, rename_map, changed);
             apply_join_renames_expr(index, rename_map, changed);
         }
+        HirLValue::FieldAccess { base, .. } => {
+            apply_join_renames_expr(base, rename_map, changed);
+        }
     }
 }
 
@@ -1033,7 +1042,8 @@ fn apply_join_renames_expr(
         | HirExpr::Unary { expr: inner, .. }
         | HirExpr::Load { ptr: inner, .. }
         | HirExpr::PtrOffset { base: inner, .. }
-        | HirExpr::AggregateCopy { src: inner, .. } => {
+        | HirExpr::AggregateCopy { src: inner, .. }
+        | HirExpr::FieldAccess { base: inner, .. } => {
             apply_join_renames_expr(inner, rename_map, changed);
         }
         HirExpr::Binary { lhs, rhs, .. } => {

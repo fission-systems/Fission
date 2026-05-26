@@ -12,7 +12,8 @@ fn count_mentions_in_expr(expr: &HirExpr, name: &str) -> usize {
         HirExpr::Cast { expr, .. }
         | HirExpr::Unary { expr, .. }
         | HirExpr::Load { ptr: expr, .. }
-        | HirExpr::AggregateCopy { src: expr, .. } => count_mentions_in_expr(expr, name),
+        | HirExpr::AggregateCopy { src: expr, .. }
+        | HirExpr::FieldAccess { base: expr, .. } => count_mentions_in_expr(expr, name),
         HirExpr::Binary { lhs, rhs, .. } => {
             count_mentions_in_expr(lhs, name) + count_mentions_in_expr(rhs, name)
         }
@@ -47,6 +48,7 @@ fn count_mentions_in_stmt(stmt: &HirStmt, name: &str) -> usize {
                 HirLValue::Index { base, index, .. } => {
                     count_mentions_in_expr(base, name) + count_mentions_in_expr(index, name)
                 }
+                HirLValue::FieldAccess { base, .. } => count_mentions_in_expr(base, name),
             };
             lhs_mentions + count_mentions_in_expr(rhs, name)
         }
@@ -111,7 +113,8 @@ fn substitute_var_in_expr(expr: &mut HirExpr, name: &str, replacement: &HirExpr)
         HirExpr::Cast { expr, .. }
         | HirExpr::Unary { expr, .. }
         | HirExpr::Load { ptr: expr, .. }
-        | HirExpr::AggregateCopy { src: expr, .. } => {
+        | HirExpr::AggregateCopy { src: expr, .. }
+        | HirExpr::FieldAccess { base: expr, .. } => {
             substitute_var_in_expr(expr, name, replacement)
         }
         HirExpr::Binary { lhs, rhs, .. } => {

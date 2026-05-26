@@ -90,6 +90,9 @@ fn process_lvalue(lval: &mut HirLValue, context: &GlobalSymbolContext, changed: 
             process_expr(index, context, changed);
         }
         HirLValue::Var(_) => {}
+        HirLValue::FieldAccess { base, .. } => {
+            process_expr(base, context, changed);
+        }
     }
 }
 
@@ -100,7 +103,8 @@ fn process_expr(expr: &mut HirExpr, context: &GlobalSymbolContext, changed: &mut
         | HirExpr::Unary { expr: inner, .. }
         | HirExpr::Load { ptr: inner, .. }
         | HirExpr::PtrOffset { base: inner, .. }
-        | HirExpr::AggregateCopy { src: inner, .. } => {
+        | HirExpr::AggregateCopy { src: inner, .. }
+        | HirExpr::FieldAccess { base: inner, .. } => {
             process_expr(inner, context, changed);
         }
         HirExpr::Binary { lhs, rhs, .. }

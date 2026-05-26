@@ -531,6 +531,9 @@ fn rewrite_memory_slot_lvalue(
             changed |= rewrite_memory_slot_expr(index, aliases);
             changed
         }
+        HirLValue::FieldAccess { base, .. } => {
+            rewrite_memory_slot_expr(base, aliases)
+        }
     }
 }
 
@@ -574,7 +577,7 @@ fn rewrite_memory_slot_expr(
                 changed |= rewrite_memory_slot_expr(arg, aliases);
             }
         }
-        HirExpr::PtrOffset { base, .. } => {
+        HirExpr::PtrOffset { base, .. } | HirExpr::FieldAccess { base, .. } => {
             changed |= rewrite_memory_slot_expr(base, aliases);
         }
         HirExpr::Index { base, index, .. } => {
@@ -635,6 +638,10 @@ fn collect_address_parts(expr: &HirExpr, parts: &mut AddressParts, sign: i64) ->
         HirExpr::Cast { expr, .. } => collect_address_parts(expr, parts, sign),
         HirExpr::PtrOffset { base, offset } => {
             parts.const_offset += sign * *offset;
+            collect_address_parts(base, parts, sign)
+        }
+        HirExpr::FieldAccess { base, offset, .. } => {
+            parts.const_offset += sign * i64::from(*offset);
             collect_address_parts(base, parts, sign)
         }
         HirExpr::Binary {

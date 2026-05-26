@@ -144,6 +144,7 @@ impl<'a> PreviewBuilder<'a> {
             active_switch_targets: HashSet::new(),
             telemetry: super::telemetry::BuilderTelemetry::default(),
             structuring_start: None,
+            fas_virtual_edges: Vec::new(),
         }
     }
 }

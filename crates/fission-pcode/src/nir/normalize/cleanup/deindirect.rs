@@ -165,6 +165,7 @@ fn deindirect_in_lvalue(
             changed |= deindirect_in_expr(index, initializers, addr_to_symbol);
             changed
         }
+        HirLValue::FieldAccess { base, .. } => deindirect_in_expr(base, initializers, addr_to_symbol),
     }
 }
 
@@ -179,7 +180,8 @@ fn deindirect_in_expr(
     match expr {
         HirExpr::Cast { expr: inner, .. }
         | HirExpr::Unary { expr: inner, .. }
-        | HirExpr::AggregateCopy { src: inner, .. } => {
+        | HirExpr::AggregateCopy { src: inner, .. }
+        | HirExpr::FieldAccess { base: inner, .. } => {
             changed |= deindirect_in_expr(inner, initializers, addr_to_symbol);
         }
         HirExpr::Binary { lhs, rhs, .. } => {

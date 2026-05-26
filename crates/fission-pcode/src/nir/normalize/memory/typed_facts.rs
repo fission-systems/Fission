@@ -141,7 +141,12 @@ fn infer_struct_name_from_offsets(
     is_64bit: bool,
     structures: &WindowsStructures,
 ) -> (Option<String>, usize) {
-    let mut matches = structures
+    let accessed_offsets: std::collections::HashSet<u32> = accesses.keys().copied().collect();
+
+    // Collect candidates where every accessed offset maps to a declared field.
+    // Score each by how many struct fields are NOT covered by the accesses (extra_fields).
+    // The struct with the fewest extra fields is the most specific match.
+    let mut candidates: Vec<(String, usize)> = structures
         .structures
         .iter()
         .filter_map(|(name, def)| {
@@ -153,22 +158,47 @@ fn infer_struct_name_from_offsets(
             if struct_size == 0 || struct_size != inferred_size {
                 return None;
             }
-            let all_offsets_match = accesses.keys().all(|offset| {
+            let all_match = accessed_offsets.iter().all(|offset| {
                 def.fields.iter().any(|field| {
-                    let field_offset = if is_64bit {
+                    let fo = if is_64bit {
                         field.offset_64 as u32
                     } else {
                         field.offset_32 as u32
                     };
-                    field_offset == *offset
+                    fo == *offset
                 })
             });
-            all_offsets_match.then(|| name.clone())
+            if !all_match {
+                return None;
+            }
+            // Count struct fields whose offset is NOT in the access set (extra).
+            let extra = def
+                .fields
+                .iter()
+                .filter(|f| {
+                    let fo = if is_64bit {
+                        f.offset_64 as u32
+                    } else {
+                        f.offset_32 as u32
+                    };
+                    !accessed_offsets.contains(&fo)
+                })
+                .count();
+            Some((name.clone(), extra))
         })
-        .collect::<Vec<_>>();
-    let conflict_count = matches.len().saturating_sub(1);
-    if matches.len() == 1 {
-        (matches.pop(), conflict_count)
+        .collect();
+
+    if candidates.is_empty() {
+        return (None, 0);
+    }
+
+    // Keep only the most-specific tier (fewest extra fields).
+    let min_extra = candidates.iter().map(|(_, e)| *e).min().unwrap_or(0);
+    candidates.retain(|(_, e)| *e == min_extra);
+
+    let conflict_count = candidates.len().saturating_sub(1);
+    if candidates.len() == 1 {
+        (Some(candidates.remove(0).0), conflict_count)
     } else {
         (None, conflict_count)
     }

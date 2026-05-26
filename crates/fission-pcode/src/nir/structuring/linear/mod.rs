@@ -1711,7 +1711,7 @@ impl<'a> PreviewBuilder<'a> {
                 Self::expr_has_call(lhs) || Self::expr_has_call(rhs)
             }
             HirExpr::Load { ptr, .. } => Self::expr_has_call(ptr),
-            HirExpr::PtrOffset { base, .. } => Self::expr_has_call(base),
+            HirExpr::PtrOffset { base, .. } | HirExpr::FieldAccess { base, .. } => Self::expr_has_call(base),
             HirExpr::Index { base, index, .. } => {
                 Self::expr_has_call(base) || Self::expr_has_call(index)
             }

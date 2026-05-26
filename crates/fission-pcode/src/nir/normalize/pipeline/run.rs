@@ -181,7 +181,8 @@ fn contains_call_expr(expr: &HirExpr) -> bool {
         | HirExpr::Unary { expr, .. }
         | HirExpr::Load { ptr: expr, .. }
         | HirExpr::PtrOffset { base: expr, .. }
-        | HirExpr::AggregateCopy { src: expr, .. } => contains_call_expr(expr),
+        | HirExpr::AggregateCopy { src: expr, .. }
+        | HirExpr::FieldAccess { base: expr, .. } => contains_call_expr(expr),
         HirExpr::Binary { lhs, rhs, .. } => contains_call_expr(lhs) || contains_call_expr(rhs),
         HirExpr::Index { base, index, .. } => contains_call_expr(base) || contains_call_expr(index),
         HirExpr::Select {
@@ -205,6 +206,7 @@ fn contains_call_lvalue(lhs: &HirLValue) -> bool {
         HirLValue::Index { base, index, .. } => {
             contains_call_expr(base) || contains_call_expr(index)
         }
+        HirLValue::FieldAccess { base, .. } => contains_call_expr(base),
     }
 }
 
@@ -315,6 +317,7 @@ fn lvalue_contains_popcount_call(lhs: &HirLValue) -> bool {
         HirLValue::Index { base, index, .. } => {
             expr_contains_popcount_call(base) || expr_contains_popcount_call(index)
         }
+        HirLValue::FieldAccess { base, .. } => expr_contains_popcount_call(base),
     }
 }
 
@@ -327,7 +330,8 @@ fn expr_contains_popcount_call(expr: &HirExpr) -> bool {
         | HirExpr::Unary { expr: inner, .. }
         | HirExpr::Load { ptr: inner, .. }
         | HirExpr::PtrOffset { base: inner, .. }
-        | HirExpr::AggregateCopy { src: inner, .. } => expr_contains_popcount_call(inner),
+        | HirExpr::AggregateCopy { src: inner, .. }
+        | HirExpr::FieldAccess { base: inner, .. } => expr_contains_popcount_call(inner),
         HirExpr::Binary { lhs, rhs, .. } => {
             expr_contains_popcount_call(lhs) || expr_contains_popcount_call(rhs)
         }
@@ -1117,7 +1121,45 @@ pub(crate) fn normalize_hir_function(func: &mut HirFunction) {
         perf,
         apply_zero_index_deref_pass,
     );
-    let _ = run_pass_logged(func, "variable_merge", perf, apply_variable_merge_pass);
+    // Fixed-Point Iterative Variable Merge and Type Propagation Loop
+    for round in 0..4 {
+        let (before_stmts, before_locals) = if perf { hir_shape(func) } else { (0, 0) };
+        let round_start = if perf { Some(Instant::now()) } else { None };
+
+        // Pass 1: Run type propagation/inference passes to convergence
+        apply_type_signature_fixed_point(func, diag, perf);
+
+        // Pass 2: Run variable merge pass
+        let merge_changed = run_pass_logged(func, "variable_merge", perf, apply_variable_merge_pass);
+
+        if diag {
+            eprintln!(
+                "[DIAG] merge-type-loop: {} round={} merge_changed={}",
+                func.name,
+                round + 1,
+                merge_changed,
+            );
+        }
+
+        if let Some(start) = round_start {
+            let (after_stmts, after_locals) = hir_shape(func);
+            eprintln!(
+                "[PERF] merge-type-loop-round: fn={} round={} changed={} elapsed_ms={:.3} stmts={}=>{} locals={}=>{}",
+                func.name,
+                round + 1,
+                merge_changed,
+                start.elapsed().as_secs_f64() * 1000.0,
+                before_stmts,
+                after_stmts,
+                before_locals,
+                after_locals,
+            );
+        }
+
+        if !merge_changed {
+            break;
+        }
+    }
     // Single-predecessor label inlining: reduce goto/label pairs by inlining
     // blocks that are targeted by exactly one forward unconditional goto.
     // Runs last so all other structural passes have already had their say.
@@ -1501,6 +1543,10 @@ fn lvalue_has_memory_surface_interest(lhs: &HirLValue) -> bool {
             let _ = (base, index);
             true
         }
+        HirLValue::FieldAccess { base, .. } => {
+            let _ = base;
+            true
+        }
     }
 }
 
@@ -1511,7 +1557,7 @@ fn expr_has_memory_surface_interest(expr: &HirExpr) -> bool {
             let _ = ptr;
             true
         }
-        HirExpr::PtrOffset { base, .. } => {
+        HirExpr::PtrOffset { base, .. } | HirExpr::FieldAccess { base, .. } => {
             let _ = base;
             true
         }
@@ -1547,7 +1593,8 @@ fn expr_contains_const(expr: &HirExpr) -> bool {
         | HirExpr::Unary { expr, .. }
         | HirExpr::Load { ptr: expr, .. }
         | HirExpr::PtrOffset { base: expr, .. }
-        | HirExpr::AggregateCopy { src: expr, .. } => expr_contains_const(expr),
+        | HirExpr::AggregateCopy { src: expr, .. }
+        | HirExpr::FieldAccess { base: expr, .. } => expr_contains_const(expr),
         HirExpr::Binary { lhs, rhs, .. } => expr_contains_const(lhs) || expr_contains_const(rhs),
         HirExpr::Call { args, .. } => args.iter().any(expr_contains_const),
         HirExpr::Index { base, index, .. } => {
@@ -2553,7 +2600,9 @@ pub(crate) fn normalize_expr(expr: &mut HirExpr) {
                 normalize_expr(arg);
             }
         }
-        HirExpr::Load { ptr, .. } | HirExpr::PtrOffset { base: ptr, .. } => normalize_expr(ptr),
+        HirExpr::Load { ptr, .. }
+        | HirExpr::PtrOffset { base: ptr, .. }
+        | HirExpr::FieldAccess { base: ptr, .. } => normalize_expr(ptr),
         HirExpr::Index { base, index, .. } => {
             normalize_expr(base);
             normalize_expr(index);

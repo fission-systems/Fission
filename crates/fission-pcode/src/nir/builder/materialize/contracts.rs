@@ -1287,6 +1287,7 @@ pub(super) enum NoConsumerSuppressionRhsKind {
     PtrOffset,
     Index,
     Select,
+    FieldAccess,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -94,6 +94,13 @@ pub struct NirBuildStats {
     pub procedure_summary_import_thunk_count: usize,
     #[serde(default)]
     pub forced_linear_structuring_count: usize,
+    /// Back-edges virtualized as explicit gotos by the FAS fallback when node-splitting
+    /// exceeds budget (irreducible SCCs too large to split).
+    #[serde(default)]
+    pub fas_virtual_goto_count: usize,
+    /// Switch cases where a goto-to-next-case was rewritten as `/* fallthrough */`.
+    #[serde(default)]
+    pub switch_fallthrough_detected_count: usize,
     #[serde(default)]
     pub structuring_force_linear_explicit_count: usize,
     #[serde(default)]

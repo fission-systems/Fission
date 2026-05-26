@@ -163,7 +163,8 @@ fn collect_accesses_from_expr(expr: &HirExpr, accesses: &mut Vec<PartitionedMemo
         }
         HirExpr::Cast { expr, .. }
         | HirExpr::Unary { expr, .. }
-        | HirExpr::AggregateCopy { src: expr, .. } => collect_accesses_from_expr(expr, accesses),
+        | HirExpr::AggregateCopy { src: expr, .. }
+        | HirExpr::FieldAccess { base: expr, .. } => collect_accesses_from_expr(expr, accesses),
         HirExpr::Binary { lhs, rhs, .. } => {
             collect_accesses_from_expr(lhs, accesses);
             collect_accesses_from_expr(rhs, accesses);
@@ -243,7 +244,9 @@ fn classify_base_object(base: &HirExpr) -> MemoryAccessClass {
                 MemoryAccessClass::Unknown
             }
         }
-        HirExpr::PtrOffset { base, .. } | HirExpr::Cast { expr: base, .. } => {
+        HirExpr::PtrOffset { base, .. }
+        | HirExpr::Cast { expr: base, .. }
+        | HirExpr::FieldAccess { base, .. } => {
             classify_base_object(base)
         }
         _ => MemoryAccessClass::HeapLike,
@@ -272,6 +275,10 @@ fn collect_address_parts(expr: &HirExpr, parts: &mut AddressParts, sign: i64) ->
         HirExpr::Cast { expr, .. } => collect_address_parts(expr, parts, sign),
         HirExpr::PtrOffset { base, offset } => {
             parts.const_offset += sign * *offset;
+            collect_address_parts(base, parts, sign)
+        }
+        HirExpr::FieldAccess { base, offset, .. } => {
+            parts.const_offset += sign * i64::from(*offset);
             collect_address_parts(base, parts, sign)
         }
         HirExpr::Binary {

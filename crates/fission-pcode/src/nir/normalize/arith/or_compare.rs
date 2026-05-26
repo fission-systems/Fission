@@ -77,6 +77,9 @@ fn simplify_lvalue(lval: &mut HirLValue) -> bool {
             changed |= simplify_expr(base);
             changed |= simplify_expr(index);
         }
+        HirLValue::FieldAccess { base, .. } => {
+            changed |= simplify_expr(base);
+        }
     }
     changed
 }
@@ -90,7 +93,8 @@ fn simplify_expr(expr: &mut HirExpr) -> bool {
         | HirExpr::Unary { expr: inner, .. }
         | HirExpr::Load { ptr: inner, .. }
         | HirExpr::PtrOffset { base: inner, .. }
-        | HirExpr::AggregateCopy { src: inner, .. } => {
+        | HirExpr::AggregateCopy { src: inner, .. }
+        | HirExpr::FieldAccess { base: inner, .. } => {
             changed |= simplify_expr(inner);
         }
         HirExpr::Binary { lhs, rhs, .. } => {

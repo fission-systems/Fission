@@ -39,7 +39,7 @@ fn expr_contains_shr(expr: &HirExpr) -> bool {
         HirExpr::Unary { expr, .. } | HirExpr::Cast { expr, .. } => expr_contains_shr(expr),
         HirExpr::Call { args, .. } => args.iter().any(expr_contains_shr),
         HirExpr::Load { ptr, .. } => expr_contains_shr(ptr),
-        HirExpr::PtrOffset { base, .. } => expr_contains_shr(base),
+        HirExpr::PtrOffset { base, .. } | HirExpr::FieldAccess { base, .. } => expr_contains_shr(base),
         HirExpr::Index { base, index, .. } => {
             expr_contains_shr(base) || expr_contains_shr(index)
         }

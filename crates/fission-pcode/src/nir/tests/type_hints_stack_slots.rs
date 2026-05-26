@@ -87,7 +87,7 @@ fn preview_type_hints_name_rsp_aggregate_slot_as_local() {
     .expect("preview render should succeed");
 
     assert!(
-        rendered.contains("LPRECT param_2"),
+        rendered.contains("RECT* param_2"),
         "rendered:\n{}",
         rendered
     );

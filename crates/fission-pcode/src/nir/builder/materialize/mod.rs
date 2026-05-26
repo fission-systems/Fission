@@ -800,6 +800,7 @@ impl<'a> PreviewBuilder<'a> {
             | HirExpr::PtrOffset { .. }
             | HirExpr::Index { .. }
             | HirExpr::AggregateCopy { .. }
+            | HirExpr::FieldAccess { .. }
             | HirExpr::Select { .. } => false,
         }
     }

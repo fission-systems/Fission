@@ -15,6 +15,7 @@ impl<'a> PreviewBuilder<'a> {
             | HirExpr::Unary { expr, .. }
             | HirExpr::Load { ptr: expr, .. }
             | HirExpr::PtrOffset { base: expr, .. }
+            | HirExpr::FieldAccess { base: expr, .. }
             | HirExpr::AggregateCopy { src: expr, .. } => Self::expr_contains_var(expr, name),
             HirExpr::Binary { lhs, rhs, .. } => {
                 Self::expr_contains_var(lhs, name) || Self::expr_contains_var(rhs, name)
@@ -43,6 +44,7 @@ impl<'a> PreviewBuilder<'a> {
             HirLValue::Index { base, index, .. } => {
                 Self::expr_contains_var(base, name) || Self::expr_contains_var(index, name)
             }
+            HirLValue::FieldAccess { base, .. } => Self::expr_contains_var(base, name),
         }
     }
 
@@ -54,6 +56,7 @@ impl<'a> PreviewBuilder<'a> {
             | HirExpr::Unary { expr, .. }
             | HirExpr::Load { ptr: expr, .. }
             | HirExpr::PtrOffset { base: expr, .. }
+            | HirExpr::FieldAccess { base: expr, .. }
             | HirExpr::AggregateCopy { src: expr, .. } => {
                 Self::replace_var_in_expr(expr, name, replacement);
             }
@@ -90,6 +93,9 @@ impl<'a> PreviewBuilder<'a> {
             HirLValue::Index { base, index, .. } => {
                 Self::replace_var_in_expr(base, name, replacement);
                 Self::replace_var_in_expr(index, name, replacement);
+            }
+            HirLValue::FieldAccess { base, .. } => {
+                Self::replace_var_in_expr(base, name, replacement);
             }
         }
     }
@@ -250,6 +256,7 @@ impl<'a> PreviewBuilder<'a> {
             | HirExpr::Unary { expr, .. }
             | HirExpr::Load { ptr: expr, .. }
             | HirExpr::PtrOffset { base: expr, .. }
+            | HirExpr::FieldAccess { base: expr, .. }
             | HirExpr::AggregateCopy { src: expr, .. } => Self::count_var_reads_expr(expr, name),
             HirExpr::Binary { lhs, rhs, .. } => {
                 Self::count_var_reads_expr(lhs, name) + Self::count_var_reads_expr(rhs, name)
@@ -281,6 +288,7 @@ impl<'a> PreviewBuilder<'a> {
             HirLValue::Index { base, index, .. } => {
                 Self::count_var_reads_expr(base, name) + Self::count_var_reads_expr(index, name)
             }
+            HirLValue::FieldAccess { base, .. } => Self::count_var_reads_expr(base, name),
         }
     }
 

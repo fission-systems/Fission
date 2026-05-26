@@ -227,6 +227,9 @@ fn optimize_lvalue(
             changed |= optimize_expr(base, type_map, nz_masks);
             changed |= optimize_expr(index, type_map, nz_masks);
         }
+        HirLValue::FieldAccess { base, .. } => {
+            changed |= optimize_expr(base, type_map, nz_masks);
+        }
     }
     changed
 }
@@ -244,7 +247,8 @@ fn optimize_expr(
         | HirExpr::Unary { expr: inner, .. }
         | HirExpr::Load { ptr: inner, .. }
         | HirExpr::PtrOffset { base: inner, .. }
-        | HirExpr::AggregateCopy { src: inner, .. } => {
+        | HirExpr::AggregateCopy { src: inner, .. }
+        | HirExpr::FieldAccess { base: inner, .. } => {
             changed |= optimize_expr(inner, type_map, nz_masks);
         }
         HirExpr::Binary { lhs, rhs, .. } => {

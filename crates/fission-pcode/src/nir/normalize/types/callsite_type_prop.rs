@@ -442,7 +442,8 @@ fn rewrite_call_targets_expr(expr: &mut HirExpr, rewrites: &HashMap<String, Stri
         | HirExpr::Unary { expr, .. }
         | HirExpr::Load { ptr: expr, .. }
         | HirExpr::PtrOffset { base: expr, .. }
-        | HirExpr::AggregateCopy { src: expr, .. } => {
+        | HirExpr::AggregateCopy { src: expr, .. }
+        | HirExpr::FieldAccess { base: expr, .. } => {
             changed |= rewrite_call_targets_expr(expr, rewrites);
         }
         HirExpr::Index { base, index, .. } => {
@@ -783,7 +784,8 @@ fn prune_known_api_call_args_expr(
         | HirExpr::Unary { expr, .. }
         | HirExpr::Load { ptr: expr, .. }
         | HirExpr::PtrOffset { base: expr, .. }
-        | HirExpr::AggregateCopy { src: expr, .. } => {
+        | HirExpr::AggregateCopy { src: expr, .. }
+        | HirExpr::FieldAccess { base: expr, .. } => {
             pruned += prune_known_api_call_args_expr(expr, summaries);
         }
         HirExpr::Index { base, index, .. } => {
@@ -872,7 +874,8 @@ fn prune_self_call_args_expr(expr: &mut HirExpr, func_name: &str, arity: usize) 
         | HirExpr::Unary { expr, .. }
         | HirExpr::Load { ptr: expr, .. }
         | HirExpr::PtrOffset { base: expr, .. }
-        | HirExpr::AggregateCopy { src: expr, .. } => {
+        | HirExpr::AggregateCopy { src: expr, .. }
+        | HirExpr::FieldAccess { base: expr, .. } => {
             pruned += prune_self_call_args_expr(expr, func_name, arity);
         }
         HirExpr::Index { base, index, .. } => {
@@ -1007,7 +1010,7 @@ fn collect_callsites_expr(
             collect_callsites_expr(inner, out);
         }
         HirExpr::Load { ptr, .. } => collect_callsites_expr(ptr, out),
-        HirExpr::PtrOffset { base, .. } => collect_callsites_expr(base, out),
+        HirExpr::PtrOffset { base, .. } | HirExpr::FieldAccess { base, .. } => collect_callsites_expr(base, out),
         HirExpr::Index { base, index, .. } => {
             collect_callsites_expr(base, out);
             collect_callsites_expr(index, out);
@@ -1064,7 +1067,7 @@ mod tests {
 
         assert!(apply_callsite_type_prop_pass(&mut func));
         assert_eq!(func.locals[0].name, "lpRect");
-        assert_eq!(func.locals[0].surface_type_name.as_deref(), Some("LPRECT"));
+        assert_eq!(func.locals[0].surface_type_name.as_deref(), Some("RECT*"));
     }
 
     #[test]

@@ -197,6 +197,10 @@ impl Builder {
                         self.add_def(key);
                     }
                     HirLValue::Var(_) => {} // Not a memory write.
+                    HirLValue::FieldAccess { base, ty, .. } => {
+                        let key = self.alias_key_for_ptr(base, nir_byte_size(ty));
+                        self.add_def(key);
+                    }
                 }
             }
             HirStmt::If {
@@ -302,6 +306,7 @@ impl Builder {
                 self.scan_expr_uses(index);
             }
             HirExpr::AggregateCopy { src, .. } => self.scan_expr_uses(src),
+            HirExpr::FieldAccess { base, .. } => self.scan_expr_uses(base),
             _ => {}
         }
     }

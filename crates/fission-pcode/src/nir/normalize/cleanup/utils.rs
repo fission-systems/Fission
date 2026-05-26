@@ -17,7 +17,8 @@ pub(crate) fn expr_has_side_effects(expr: &HirExpr) -> bool {
         | HirExpr::Unary { expr, .. }
         | HirExpr::Load { ptr: expr, .. }
         | HirExpr::PtrOffset { base: expr, .. }
-        | HirExpr::AggregateCopy { src: expr, .. } => expr_has_side_effects(expr),
+        | HirExpr::AggregateCopy { src: expr, .. }
+        | HirExpr::FieldAccess { base: expr, .. } => expr_has_side_effects(expr),
         HirExpr::Binary { lhs, rhs, .. } => {
             expr_has_side_effects(lhs) || expr_has_side_effects(rhs)
         }
@@ -189,6 +190,7 @@ pub(super) fn count_var_uses_in_lvalue(lhs: &HirLValue, name: &str) -> usize {
         HirLValue::Index { base, index, .. } => {
             count_var_uses(base, name) + count_var_uses(index, name)
         }
+        HirLValue::FieldAccess { base, .. } => count_var_uses(base, name),
     }
 }
 
@@ -206,6 +208,7 @@ pub(super) fn count_var_uses(expr: &HirExpr, name: &str) -> usize {
             count_var_uses(base, name) + count_var_uses(index, name)
         }
         HirExpr::AggregateCopy { src, .. } => count_var_uses(src, name),
+        HirExpr::FieldAccess { base, .. } => count_var_uses(base, name),
         HirExpr::Select {
             cond,
             then_expr,
@@ -301,7 +304,7 @@ pub(super) fn stmt_assigns_any_expr_var(stmt: &HirStmt, expr: &HirExpr) -> bool 
 pub(super) fn lvalue_assigns_any_expr_var(lhs: &HirLValue, expr: &HirExpr) -> bool {
     match lhs {
         HirLValue::Var(name) => expr_contains_var(expr, name),
-        HirLValue::Deref { .. } | HirLValue::Index { .. } => false,
+        HirLValue::Deref { .. } | HirLValue::Index { .. } | HirLValue::FieldAccess { .. } => false,
     }
 }
 
@@ -313,7 +316,8 @@ pub(super) fn expr_contains_var(expr: &HirExpr, name: &str) -> bool {
         | HirExpr::Unary { expr, .. }
         | HirExpr::Load { ptr: expr, .. }
         | HirExpr::PtrOffset { base: expr, .. }
-        | HirExpr::AggregateCopy { src: expr, .. } => expr_contains_var(expr, name),
+        | HirExpr::AggregateCopy { src: expr, .. }
+        | HirExpr::FieldAccess { base: expr, .. } => expr_contains_var(expr, name),
         HirExpr::Binary { lhs, rhs, .. } => {
             expr_contains_var(lhs, name) || expr_contains_var(rhs, name)
         }
@@ -423,6 +427,7 @@ pub(super) fn replace_var_in_lvalue(lhs: &mut HirLValue, name: &str, replacement
             replace_var_in_expr(base, name, replacement);
             replace_var_in_expr(index, name, replacement);
         }
+        HirLValue::FieldAccess { base, .. } => replace_var_in_expr(base, name, replacement),
     }
 }
 
@@ -448,6 +453,7 @@ pub(super) fn replace_var_in_expr(expr: &mut HirExpr, name: &str, replacement: &
             replace_var_in_expr(index, name, replacement);
         }
         HirExpr::AggregateCopy { src, .. } => replace_var_in_expr(src, name, replacement),
+        HirExpr::FieldAccess { base, .. } => replace_var_in_expr(base, name, replacement),
         HirExpr::Select {
             cond,
             then_expr,

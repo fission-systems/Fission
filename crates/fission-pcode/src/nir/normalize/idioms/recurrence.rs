@@ -250,7 +250,8 @@ fn summarize_expr(expr: &HirExpr, func_name: &str, summary: &mut RecurrenceSumma
         HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) | HirExpr::Const(_, _) => {}
         HirExpr::Cast { expr, .. }
         | HirExpr::Unary { expr, .. }
-        | HirExpr::AggregateCopy { src: expr, .. } => summarize_expr(expr, func_name, summary),
+        | HirExpr::AggregateCopy { src: expr, .. }
+        | HirExpr::FieldAccess { base: expr, .. } => summarize_expr(expr, func_name, summary),
         HirExpr::Binary { lhs, rhs, .. } => {
             summarize_expr(lhs, func_name, summary);
             summarize_expr(rhs, func_name, summary);

@@ -281,7 +281,8 @@ fn seed_expr_fully(expr: &HirExpr, consumed: &mut HashMap<String, u64>) {
         | HirExpr::Unary { expr: inner, .. }
         | HirExpr::Load { ptr: inner, .. }
         | HirExpr::PtrOffset { base: inner, .. }
-        | HirExpr::AggregateCopy { src: inner, .. } => seed_expr_fully(inner, consumed),
+        | HirExpr::AggregateCopy { src: inner, .. }
+        | HirExpr::FieldAccess { base: inner, .. } => seed_expr_fully(inner, consumed),
         HirExpr::Binary { lhs, rhs, .. } => {
             seed_expr_fully(lhs, consumed);
             seed_expr_fully(rhs, consumed);
@@ -317,6 +318,7 @@ fn seed_lvalue_fully(lhs: &HirLValue, consumed: &mut HashMap<String, u64>) {
             seed_expr_fully(base, consumed);
             seed_expr_fully(index, consumed);
         }
+        HirLValue::FieldAccess { base, .. } => seed_expr_fully(base, consumed),
     }
 }
 
@@ -456,6 +458,9 @@ fn backward_propagate_inner(expr: &HirExpr, out_consume: u64, result: &mut Vec<(
         // x = -y  or  x = ~y → consumed[y] |= consumed[x]
         HirExpr::Unary { expr: inner, .. } => {
             backward_propagate_inner(inner, out_consume, result);
+        }
+        HirExpr::FieldAccess { base, .. } => {
+            backward_propagate_inner(base, out_consume, result);
         }
 
         // x = y + z  → conservative (carry propagation makes it hard to be precise)
@@ -636,7 +641,9 @@ fn simplify_expr(
             simplify_expr(lhs, consumed, any_changed);
             simplify_expr(rhs, consumed, any_changed);
         }
-        HirExpr::Cast { expr: inner, .. } | HirExpr::Unary { expr: inner, .. } => {
+        HirExpr::Cast { expr: inner, .. }
+        | HirExpr::Unary { expr: inner, .. }
+        | HirExpr::FieldAccess { base: inner, .. } => {
             simplify_expr(inner, consumed, any_changed);
         }
         HirExpr::Load { ptr, .. } | HirExpr::PtrOffset { base: ptr, .. } => {
@@ -678,6 +685,7 @@ fn simplify_lvalue(
             simplify_expr(base, consumed, any_changed);
             simplify_expr(index, consumed, any_changed);
         }
+        HirLValue::FieldAccess { base, .. } => simplify_expr(base, consumed, any_changed),
     }
 }
 

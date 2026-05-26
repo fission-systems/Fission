@@ -305,6 +305,7 @@ fn infer_state_from_lvalue(
         HirLValue::Deref { ptr, .. } => infer_state_from_expr(ptr, state_roots),
         HirLValue::Index { base, index, .. } => infer_state_from_expr(base, state_roots)
             .or_else(|| infer_state_from_expr(index, state_roots)),
+        HirLValue::FieldAccess { base, .. } => infer_state_from_expr(base, state_roots),
     }
 }
 
@@ -318,7 +319,8 @@ fn infer_state_from_expr(
         | HirExpr::Unary { expr, .. }
         | HirExpr::Load { ptr: expr, .. }
         | HirExpr::PtrOffset { base: expr, .. }
-        | HirExpr::AggregateCopy { src: expr, .. } => infer_state_from_expr(expr, state_roots),
+        | HirExpr::AggregateCopy { src: expr, .. }
+        | HirExpr::FieldAccess { base: expr, .. } => infer_state_from_expr(expr, state_roots),
         HirExpr::Binary { lhs, rhs, .. } => infer_state_from_expr(lhs, state_roots)
             .or_else(|| infer_state_from_expr(rhs, state_roots)),
         HirExpr::Call { args, .. } => {
@@ -464,7 +466,7 @@ fn lvalue_location_key(lhs: &HirLValue) -> Option<String> {
         HirLValue::Index { base, index, .. } => {
             Some(format!("{}[{}]", print_expr(base), print_expr(index)))
         }
-        HirLValue::Deref { .. } => None,
+        HirLValue::Deref { .. } | HirLValue::FieldAccess { .. } => None,
     }
 }
 

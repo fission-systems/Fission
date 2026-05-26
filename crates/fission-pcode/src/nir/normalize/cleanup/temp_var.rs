@@ -345,6 +345,7 @@ fn expr_prefers_stable_materialization(expr: &HirExpr) -> bool {
         | HirExpr::Index { .. }
         | HirExpr::Select { .. }
         | HirExpr::AggregateCopy { .. }
+        | HirExpr::FieldAccess { .. }
         | HirExpr::Call { .. } => true,
         HirExpr::Binary { op, .. } => matches!(
             op,

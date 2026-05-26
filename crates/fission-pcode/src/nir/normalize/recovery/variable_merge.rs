@@ -2,6 +2,50 @@ use super::super::*;// For accessing normalizer structures
 use crate::nir::var_rename::rename_vars_in_stmts;
 use std::collections::HashMap;
 
+fn collect_direct_copies(stmts: &[HirStmt]) -> std::collections::HashSet<(String, String)> {
+    let mut copies = std::collections::HashSet::new();
+    fn visit(stmts: &[HirStmt], copies: &mut std::collections::HashSet<(String, String)>) {
+        for stmt in stmts {
+            match stmt {
+                HirStmt::Assign {
+                    lhs: HirLValue::Var(lhs_name),
+                    rhs: HirExpr::Var(rhs_name),
+                } => {
+                    copies.insert((lhs_name.clone(), rhs_name.clone()));
+                    copies.insert((rhs_name.clone(), lhs_name.clone()));
+                }
+                HirStmt::Block(body)
+                | HirStmt::While { body, .. }
+                | HirStmt::DoWhile { body, .. } => {
+                    visit(body, copies);
+                }
+                HirStmt::If { then_body, else_body, .. } => {
+                    visit(then_body, copies);
+                    visit(else_body, copies);
+                }
+                HirStmt::For { init, update, body, .. } => {
+                    if let Some(init_stmt) = init {
+                        visit(std::slice::from_ref(init_stmt), copies);
+                    }
+                    if let Some(update_stmt) = update {
+                        visit(std::slice::from_ref(update_stmt), copies);
+                    }
+                    visit(body, copies);
+                }
+                HirStmt::Switch { cases, default, .. } => {
+                    for case in cases {
+                        visit(&case.body, copies);
+                    }
+                    visit(default, copies);
+                }
+                _ => {}
+            }
+        }
+    }
+    visit(stmts, &mut copies);
+    copies
+}
+
 pub(crate) fn apply_variable_merge_pass(func: &mut HirFunction) -> bool {
     let mut changed = false;
 
@@ -88,12 +132,15 @@ pub(crate) fn apply_variable_merge_pass(func: &mut HirFunction) -> bool {
         }
     }
 
+    let direct_copies = collect_direct_copies(&func.body);
+
     // Step 2: Speculatively merge variables with disjoint live ranges and compatible types
     let mut live_ranges = LiveRangeCollector {
         stmt_counter: 0,
         ranges: HashMap::new(),
         labels: HashMap::new(),
         backedges: Vec::new(),
+        control_intervals: Vec::new(),
     };
     live_ranges.visit_stmts(&func.body);
 
@@ -142,6 +189,25 @@ pub(crate) fn apply_variable_merge_pass(func: &mut HirFunction) -> bool {
             let Some(&(start2, end2)) = live_ranges.ranges.get(&b2_name) else {
                 continue;
             };
+
+            // Disjoint Domain Restriction: At least one variable must be a hardware temporary
+            let is_temp1 = current_locals[i].is_temp_like() || name_priority(&current_locals[i].name) <= 1;
+            let is_temp2 = current_locals[j].is_temp_like() || name_priority(&current_locals[j].name) <= 1;
+            if !is_temp1 && !is_temp2 {
+                continue;
+            }
+
+            // Control-Flow Boundaries: Reject merges across major loop scopes or switch boundaries.
+            // If one variable is loop-local and the other is not (inside != inside), reject the merge.
+            let crosses_boundary = live_ranges.control_intervals.iter().any(|&(c_start, c_end)| {
+                let in1 = start1 >= c_start && end1 <= c_end;
+                let in2 = start2 >= c_start && end2 <= c_end;
+                in1 != in2
+            });
+
+            if crosses_boundary {
+                continue;
+            }
 
             let span2 = get_stack_span_from_parts(current_locals[j].origin, &b2_ty);
             if let (Some((off1, _, _)), Some((off2, _, _))) = (span1, span2) {
@@ -237,6 +303,7 @@ struct LiveRangeCollector {
     ranges: HashMap<String, (usize, usize)>,
     labels: HashMap<String, usize>,
     backedges: Vec<(usize, usize)>,
+    control_intervals: Vec<(usize, usize)>,
 }
 
 impl LiveRangeCollector {
@@ -264,6 +331,7 @@ impl LiveRangeCollector {
                 self.visit_expr(cond);
                 self.visit_stmts(body);
                 let loop_end = self.stmt_counter;
+                self.control_intervals.push((loop_start, loop_end));
                 self.extend_loop_ranges(loop_start, loop_end);
             }
             HirStmt::DoWhile { body, cond } => {
@@ -271,6 +339,7 @@ impl LiveRangeCollector {
                 self.visit_stmts(body);
                 self.visit_expr(cond);
                 let loop_end = self.stmt_counter;
+                self.control_intervals.push((loop_start, loop_end));
                 self.extend_loop_ranges(loop_start, loop_end);
             }
             HirStmt::For { init, cond, update, body } => {
@@ -286,14 +355,18 @@ impl LiveRangeCollector {
                 }
                 self.visit_stmts(body);
                 let loop_end = self.stmt_counter;
+                self.control_intervals.push((loop_start, loop_end));
                 self.extend_loop_ranges(loop_start, loop_end);
             }
             HirStmt::Switch { expr, cases, default } => {
+                let switch_start = self.stmt_counter;
                 self.visit_expr(expr);
                 for case in cases {
                     self.visit_stmts(&case.body);
                 }
                 self.visit_stmts(default);
+                let switch_end = self.stmt_counter;
+                self.control_intervals.push((switch_start, switch_end));
             }
             HirStmt::If { cond, then_body, else_body } => {
                 self.visit_expr(cond);
@@ -329,6 +402,9 @@ impl LiveRangeCollector {
                 self.visit_expr(base);
                 self.visit_expr(index);
             }
+            HirLValue::FieldAccess { base, .. } => {
+                self.visit_expr(base);
+            }
         }
     }
 
@@ -341,7 +417,8 @@ impl LiveRangeCollector {
             | HirExpr::Unary { expr: inner, .. }
             | HirExpr::Load { ptr: inner, .. }
             | HirExpr::PtrOffset { base: inner, .. }
-            | HirExpr::AggregateCopy { src: inner, .. } => {
+            | HirExpr::AggregateCopy { src: inner, .. }
+            | HirExpr::FieldAccess { base: inner, .. } => {
                 self.visit_expr(inner);
             }
             HirExpr::Binary { lhs, rhs, .. } => {
@@ -385,7 +462,7 @@ fn name_priority(name: &str) -> usize {
     if name.starts_with("uVar_dp_") {
         return 0; // lowest priority (dp temp variables)
     }
-    if name.starts_with("uVar") || name.starts_with("iVar") || name.starts_with("xVar") || name.starts_with("bVar") {
+    if name.starts_with("uVar") || name.starts_with("iVar") || name.starts_with("xVar") || name.starts_with("bVar") || name.starts_with("temp_") || name.starts_with("temp") {
         return 1;
     }
     if name.starts_with("slot_") {
@@ -425,7 +502,15 @@ fn is_hardware_register_variable(name: &str) -> bool {
 }
 
 fn is_eligible_for_speculative_merge(binding: &NirBinding) -> bool {
-    !is_hardware_register_variable(&binding.name)
+    if is_hardware_register_variable(&binding.name) {
+        return false;
+    }
+    // Symbolic Priority Preservation: Exclude variables with priority >= 2
+    // (e.g. result, retval, or meaningful recovered symbols).
+    if name_priority(&binding.name) >= 2 {
+        return false;
+    }
+    true
 }
 
 fn get_stack_span_from_parts(origin: Option<NirBindingOrigin>, ty: &NirType) -> Option<(i64, u32, bool)> {
@@ -732,6 +817,136 @@ mod tests {
         // They should NOT be merged because temp_1 is live across the entire unstructured loop body,
         // which overlaps with temp_2.
         assert!(!changed);
+        assert_eq!(func.locals.len(), 2);
+    }
+
+    #[test]
+    fn test_speculative_merging_symbolic_priority_guard() {
+        let b1 = NirBinding {
+            name: "result".to_string(),
+            ty: NirType::Int { bits: 32, signed: false },
+            surface_type_name: None,
+            origin: Some(NirBindingOrigin::Temp),
+            initializer: None,
+        };
+
+        let b2 = NirBinding {
+            name: "retval".to_string(),
+            ty: NirType::Int { bits: 32, signed: false },
+            surface_type_name: None,
+            origin: Some(NirBindingOrigin::Temp),
+            initializer: None,
+        };
+
+        let mut func = HirFunction {
+            name: "test_pri_fn".to_string(),
+            params: vec![],
+            locals: vec![b1, b2],
+            body: vec![
+                HirStmt::Assign {
+                    lhs: HirLValue::Var("result".to_string()),
+                    rhs: HirExpr::Const(1, NirType::Int { bits: 32, signed: false }),
+                },
+                HirStmt::Assign {
+                    lhs: HirLValue::Var("retval".to_string()),
+                    rhs: HirExpr::Const(2, NirType::Int { bits: 32, signed: false }),
+                },
+            ],
+            ..Default::default()
+        };
+
+        let changed = apply_variable_merge_pass(&mut func);
+        // Should NOT merge because both result and retval have priority >= 2.
+        assert!(!changed);
+        assert_eq!(func.locals.len(), 2);
+    }
+
+    #[test]
+    fn test_speculative_merging_disjoint_domain_guard() {
+        let b1 = NirBinding {
+            name: "local_10".to_string(),
+            ty: NirType::Int { bits: 32, signed: false },
+            surface_type_name: None,
+            origin: Some(NirBindingOrigin::StackOffset(-16)),
+            initializer: None,
+        };
+
+        let b2 = NirBinding {
+            name: "local_20".to_string(),
+            ty: NirType::Int { bits: 32, signed: false },
+            surface_type_name: None,
+            origin: Some(NirBindingOrigin::StackOffset(-32)),
+            initializer: None,
+        };
+
+        let mut func = HirFunction {
+            name: "test_domain_fn".to_string(),
+            params: vec![],
+            locals: vec![b1, b2],
+            body: vec![
+                HirStmt::Assign {
+                    lhs: HirLValue::Var("local_10".to_string()),
+                    rhs: HirExpr::Const(1, NirType::Int { bits: 32, signed: false }),
+                },
+                HirStmt::Assign {
+                    lhs: HirLValue::Var("local_20".to_string()),
+                    rhs: HirExpr::Const(2, NirType::Int { bits: 32, signed: false }),
+                },
+            ],
+            ..Default::default()
+        };
+
+        let changed = apply_variable_merge_pass(&mut func);
+        // Should NOT merge because neither variable is a hardware temporary (both are stack slots).
+        assert!(!changed);
+        assert_eq!(func.locals.len(), 2);
+    }
+
+    #[test]
+    fn test_speculative_merging_control_flow_boundary_guard() {
+        let b1 = NirBinding {
+            name: "temp_1".to_string(),
+            ty: NirType::Int { bits: 32, signed: false },
+            surface_type_name: None,
+            origin: Some(NirBindingOrigin::Temp),
+            initializer: None,
+        };
+
+        let b2 = NirBinding {
+            name: "temp_2".to_string(),
+            ty: NirType::Int { bits: 32, signed: false },
+            surface_type_name: None,
+            origin: Some(NirBindingOrigin::Temp),
+            initializer: None,
+        };
+
+        let mut func = HirFunction {
+            name: "test_ctrl_fn".to_string(),
+            params: vec![],
+            locals: vec![b1, b2],
+            body: vec![
+                // temp_1 defined before the loop
+                HirStmt::Assign {
+                    lhs: HirLValue::Var("temp_1".to_string()),
+                    rhs: HirExpr::Const(1, NirType::Int { bits: 32, signed: false }),
+                },
+                HirStmt::While {
+                    cond: HirExpr::Const(1, NirType::Bool),
+                    body: vec![
+                        // temp_2 defined inside the loop
+                        HirStmt::Assign {
+                            lhs: HirLValue::Var("temp_2".to_string()),
+                            rhs: HirExpr::Const(2, NirType::Int { bits: 32, signed: false }),
+                        },
+                    ],
+                },
+            ],
+            ..Default::default()
+        };
+
+        let changed1 = apply_variable_merge_pass(&mut func);
+        // Should NOT merge because temp_2 starts inside the loop, and no direct copy links them.
+        assert!(!changed1);
         assert_eq!(func.locals.len(), 2);
     }
 }

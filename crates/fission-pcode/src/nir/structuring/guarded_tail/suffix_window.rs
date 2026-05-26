@@ -223,7 +223,9 @@ impl<'a> PreviewBuilder<'a> {
                 Self::expr_contains_load(lhs) || Self::expr_contains_load(rhs)
             }
             HirExpr::Call { args, .. } => args.iter().any(Self::expr_contains_load),
-            HirExpr::PtrOffset { base, .. } => Self::expr_contains_load(base),
+            HirExpr::PtrOffset { base, .. } | HirExpr::FieldAccess { base, .. } => {
+                Self::expr_contains_load(base)
+            }
             HirExpr::Index { base, index, .. } => {
                 Self::expr_contains_load(base) || Self::expr_contains_load(index)
             }
@@ -250,7 +252,9 @@ impl<'a> PreviewBuilder<'a> {
             HirExpr::Binary { lhs, rhs, .. } => {
                 Self::suffix_expr_contains_call(lhs) || Self::suffix_expr_contains_call(rhs)
             }
-            HirExpr::Load { ptr, .. } | HirExpr::PtrOffset { base: ptr, .. } => {
+            HirExpr::Load { ptr, .. }
+            | HirExpr::PtrOffset { base: ptr, .. }
+            | HirExpr::FieldAccess { base: ptr, .. } => {
                 Self::suffix_expr_contains_call(ptr)
             }
             HirExpr::Index { base, index, .. } => {

@@ -10,6 +10,7 @@ pub(crate) fn expr_type(expr: &HirExpr) -> NirType {
         | HirExpr::Select { ty, .. }
         | HirExpr::Call { ty, .. }
         | HirExpr::Load { ty, .. }
+        | HirExpr::FieldAccess { ty, .. }
         | HirExpr::Index { elem_ty: ty, .. } => ty.clone(),
         HirExpr::Cast { ty, .. } => ty.clone(),
         HirExpr::PtrOffset { .. } => NirType::Ptr(Box::new(NirType::Unknown)),

@@ -62,4 +62,8 @@ pub(crate) struct PreviewBuilder<'a> {
     pub(crate) active_switch_targets: HashSet<usize>,
     pub(crate) telemetry: super::telemetry::BuilderTelemetry,
     pub(crate) structuring_start: Option<std::time::Instant>,
+    /// FAS-computed back-edges to virtualize as gotos when node-splitting is
+    /// over budget. These edges are skipped during normal block terminator
+    /// lowering and emitted as explicit `HirStmt::Goto` stmts instead.
+    pub(crate) fas_virtual_edges: Vec<(usize, usize)>,
 }

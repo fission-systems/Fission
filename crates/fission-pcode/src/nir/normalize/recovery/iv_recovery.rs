@@ -536,7 +536,7 @@ fn expr_vars(expr: &HirExpr, out: &mut HashSet<String>) {
             expr_vars(rhs, out);
         }
         HirExpr::Load { ptr, .. } => expr_vars(ptr, out),
-        HirExpr::PtrOffset { base, .. } => expr_vars(base, out),
+        HirExpr::PtrOffset { base, .. } | HirExpr::FieldAccess { base, .. } => expr_vars(base, out),
         HirExpr::Index { base, index, .. } => {
             expr_vars(base, out);
             expr_vars(index, out);
@@ -1031,6 +1031,9 @@ fn count_var_uses_in_lvalue(lhs: &HirLValue, name: &str) -> usize {
         HirLValue::Index { base, index, .. } => {
             count_var_uses(base, name) + count_var_uses(index, name)
         }
+        HirLValue::FieldAccess { base, .. } => {
+            count_var_uses(base, name)
+        }
     }
 }
 
@@ -1042,7 +1045,8 @@ fn count_var_uses(expr: &HirExpr, name: &str) -> usize {
         | HirExpr::Unary { expr, .. }
         | HirExpr::Load { ptr: expr, .. }
         | HirExpr::PtrOffset { base: expr, .. }
-        | HirExpr::AggregateCopy { src: expr, .. } => count_var_uses(expr, name),
+        | HirExpr::AggregateCopy { src: expr, .. }
+        | HirExpr::FieldAccess { base: expr, .. } => count_var_uses(expr, name),
         HirExpr::Binary { lhs, rhs, .. } => count_var_uses(lhs, name) + count_var_uses(rhs, name),
         HirExpr::Call { args, .. } => args.iter().map(|arg| count_var_uses(arg, name)).sum(),
         HirExpr::Index { base, index, .. } => {
@@ -1070,6 +1074,9 @@ fn collect_names_in_lvalue(lhs: &HirLValue, out: &mut HashSet<String>) {
         HirLValue::Index { base, index, .. } => {
             expr_vars(base, out);
             expr_vars(index, out);
+        }
+        HirLValue::FieldAccess { base, .. } => {
+            expr_vars(base, out);
         }
     }
 }
@@ -1239,7 +1246,9 @@ fn rewrite_cursor_expr_to_index(expr: &mut HirExpr, cursor: &str, index_name: &s
             *expr = cursor_index_expr(cursor, index_name, ty.clone());
             true
         }
-        HirExpr::Load { ptr, .. } | HirExpr::PtrOffset { base: ptr, .. } => {
+        HirExpr::Load { ptr, .. }
+        | HirExpr::PtrOffset { base: ptr, .. }
+        | HirExpr::FieldAccess { base: ptr, .. } => {
             rewrite_cursor_expr_to_index(ptr, cursor, index_name)
         }
         HirExpr::Index { base, index, .. } => {
@@ -1264,6 +1273,9 @@ fn rewrite_cursor_lvalue_to_index(lhs: &mut HirLValue, cursor: &str, index_name:
         HirLValue::Index { base, index, .. } => {
             rewrite_cursor_expr_to_index(base, cursor, index_name)
                 && rewrite_cursor_expr_to_index(index, cursor, index_name)
+        }
+        HirLValue::FieldAccess { base, .. } => {
+            rewrite_cursor_expr_to_index(base, cursor, index_name)
         }
     }
 }

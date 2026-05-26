@@ -13,8 +13,6 @@ const MAX_PRINT_EXPR_DEPTH: usize = 512;
 struct PrintCtx<'a> {
     /// variable name → declared type
     var_types: HashMap<&'a str, &'a NirType>,
-    /// variable name → pointer-pointee type (Aggregate with fields)
-    agg_ptr: HashMap<&'a str, &'a NirType>,
     return_type: &'a NirType,
     inline_guard_goto: bool,
 }
@@ -22,37 +20,14 @@ struct PrintCtx<'a> {
 impl<'a> PrintCtx<'a> {
     fn build(func: &'a HirFunction) -> Self {
         let mut var_types = HashMap::new();
-        let mut agg_ptr = HashMap::new();
         for b in func.locals.iter().chain(func.params.iter()) {
             var_types.insert(b.name.as_str(), &b.ty);
-            if let NirType::Ptr(inner) = &b.ty {
-                if let NirType::Aggregate { fields, .. } = inner.as_ref() {
-                    if !fields.is_empty() {
-                        agg_ptr.insert(b.name.as_str(), inner.as_ref());
-                    }
-                }
-            }
         }
         Self {
             var_types,
-            agg_ptr,
             return_type: &func.return_type,
             inline_guard_goto: func.body.len() <= 6,
         }
-    }
-
-    /// If `base_name` is a known Ptr(Aggregate{fields}) and `offset` matches a
-    /// field, return the field name; otherwise return None.
-    fn field_name(&self, base_name: &str, offset: i64) -> Option<&str> {
-        if offset < 0 {
-            return None;
-        }
-        let agg = self.agg_ptr.get(base_name)?;
-        let NirType::Aggregate { fields, .. } = agg else {
-            return None;
-        };
-        let f = fields.iter().find(|f| f.offset as i64 == offset)?;
-        Some(f.name.as_str())
     }
 
     fn expr_is_pointer(&self, expr: &HirExpr) -> bool {
@@ -356,6 +331,12 @@ fn print_lvalue(lhs: &HirLValue, depth: usize) -> String {
                 _ => format!("(({} *)({inner}))[{index}]", print_type(elem_ty)),
             }
         }
+        HirLValue::FieldAccess { base, field_name, .. } => {
+            let inner = print_expr_prec(base, 110, depth + 1);
+            let is_ptr = matches!(expr_type(base), NirType::Ptr(_));
+            let op = if is_ptr { "->" } else { "." };
+            format!("{inner}{op}{field_name}")
+        }
     }
 }
 
@@ -476,6 +457,12 @@ fn print_expr_prec(expr: &HirExpr, parent_prec: u8, depth: usize) -> String {
                 _ => format!("(({} *)({inner}))[{index}]", print_type(elem_ty)),
             };
             (text, 120)
+        }
+        HirExpr::FieldAccess { base, field_name, .. } => {
+            let inner = print_expr_prec(base, 110, depth + 1);
+            let is_ptr = matches!(expr_type(base), NirType::Ptr(_));
+            let op = if is_ptr { "->" } else { "." };
+            (format!("{inner}{op}{field_name}"), 110)
         }
         HirExpr::AggregateCopy { src, size } => {
             let inner = print_expr_prec(src, 0, depth + 1);
@@ -639,6 +626,7 @@ fn callable_arg_type_name(arg: &HirExpr, ctx: Option<&PrintCtx<'_>>) -> String {
         | HirExpr::Binary { ty, .. }
         | HirExpr::Call { ty, .. }
         | HirExpr::Load { ty, .. }
+        | HirExpr::FieldAccess { ty, .. }
         | HirExpr::Select { ty, .. } => {
             if matches!(ty, NirType::Unknown) {
                 "uint".to_string()
@@ -671,14 +659,6 @@ fn print_expr_prec_ctx(
     }
     let (text, prec) = match expr {
         HirExpr::PtrOffset { base, offset } => {
-            // If the base is a known Ptr(Aggregate{fields}) variable and the
-            // offset matches a field, render as `base->field_X`.
-            if let HirExpr::Var(name) = base.as_ref() {
-                if let Some(field_name) = ctx.field_name(name, *offset) {
-                    return format!("{name}->{field_name}");
-                }
-            }
-            // Fallback: raw byte-offset form.
             let inner = print_expr_prec_ctx(base, 0, depth + 1, ctx);
             let text = if *offset == 0 {
                 inner
@@ -688,6 +668,12 @@ fn print_expr_prec_ctx(
                 format!("(uint8_t *)({inner}) - {}", offset.unsigned_abs())
             };
             (text, 60)
+        }
+        HirExpr::FieldAccess { base, field_name, .. } => {
+            let inner = print_expr_prec_ctx(base, 110, depth + 1, ctx);
+            let is_ptr = ctx.expr_is_pointer(base);
+            let op = if is_ptr { "->" } else { "." };
+            (format!("{inner}{op}{field_name}"), 110)
         }
         HirExpr::AddressOfGlobal(name) => (format!("&{name}"), 110),
         HirExpr::Var(name) => (name.clone(), 120),
@@ -747,14 +733,6 @@ fn print_expr_prec_ctx(
             }
         }
         HirExpr::Load { ptr, ty } => {
-            // Check if `ptr` is a PtrOffset with a known field.
-            if let HirExpr::PtrOffset { base, offset } = ptr.as_ref() {
-                if let HirExpr::Var(name) = base.as_ref() {
-                    if let Some(field_name) = ctx.field_name(name, *offset) {
-                        return format!("{name}->{field_name}");
-                    }
-                }
-            }
             if let Some(target) = peel_simple_deref_target(ptr) {
                 (format!("*{target}"), 110)
             } else {
@@ -822,15 +800,13 @@ fn print_lvalue_ctx(lhs: &HirLValue, depth: usize, ctx: &PrintCtx<'_>) -> String
     }
     match lhs {
         HirLValue::Var(name) => name.clone(),
+        HirLValue::FieldAccess { base, field_name, .. } => {
+            let inner = print_expr_prec_ctx(base, 110, depth + 1, ctx);
+            let is_ptr = ctx.expr_is_pointer(base);
+            let op = if is_ptr { "->" } else { "." };
+            format!("{inner}{op}{field_name}")
+        }
         HirLValue::Deref { ptr, ty } => {
-            // Check for struct member store: `*(&base->field_X) = ...`
-            if let HirExpr::PtrOffset { base, offset } = ptr.as_ref() {
-                if let HirExpr::Var(name) = base.as_ref() {
-                    if let Some(field_name) = ctx.field_name(name, *offset) {
-                        return format!("{name}->{field_name}");
-                    }
-                }
-            }
             if let Some(target) = peel_simple_deref_target(ptr) {
                 format!("*{target}")
             } else {

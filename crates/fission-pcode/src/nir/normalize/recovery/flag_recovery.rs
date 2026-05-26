@@ -546,6 +546,9 @@ fn count_uses_in_stmt(stmt: &HirStmt, uses: &mut HashMap<String, usize>) {
                     count_uses_in_expr(index, uses);
                 }
                 HirLValue::Var(_) => {}
+                HirLValue::FieldAccess { base, .. } => {
+                    count_uses_in_expr(base, uses);
+                }
             }
             count_uses_in_expr(rhs, uses);
         }
@@ -610,7 +613,8 @@ fn count_uses_in_expr(expr: &HirExpr, uses: &mut HashMap<String, usize>) {
         | HirExpr::Unary { expr: inner, .. }
         | HirExpr::Load { ptr: inner, .. }
         | HirExpr::PtrOffset { base: inner, .. }
-        | HirExpr::AggregateCopy { src: inner, .. } => count_uses_in_expr(inner, uses),
+        | HirExpr::AggregateCopy { src: inner, .. }
+        | HirExpr::FieldAccess { base: inner, .. } => count_uses_in_expr(inner, uses),
         HirExpr::Binary { lhs, rhs, .. } => {
             count_uses_in_expr(lhs, uses);
             count_uses_in_expr(rhs, uses);

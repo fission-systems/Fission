@@ -118,6 +118,9 @@ fn collect_opaque_pcodeop_stubs_from_lvalue(
             collect_opaque_pcodeop_stubs_from_expr(base, stubs);
             collect_opaque_pcodeop_stubs_from_expr(index, stubs);
         }
+        HirLValue::FieldAccess { base, .. } => {
+            collect_opaque_pcodeop_stubs_from_expr(base, stubs);
+        }
     }
 }
 
@@ -128,7 +131,8 @@ fn collect_opaque_pcodeop_stubs_from_expr(expr: &HirExpr, stubs: &mut BTreeMap<S
         | HirExpr::Unary { expr, .. }
         | HirExpr::Load { ptr: expr, .. }
         | HirExpr::PtrOffset { base: expr, .. }
-        | HirExpr::AggregateCopy { src: expr, .. } => {
+        | HirExpr::AggregateCopy { src: expr, .. }
+        | HirExpr::FieldAccess { base: expr, .. } => {
             collect_opaque_pcodeop_stubs_from_expr(expr, stubs);
         }
         HirExpr::Binary { lhs, rhs, .. }
@@ -329,6 +333,10 @@ fn collect_aggregate_sizes_from_lvalue(lhs: &HirLValue, sizes: &mut BTreeSet<u32
             collect_aggregate_sizes_from_expr(base, sizes);
             collect_aggregate_sizes_from_expr(index, sizes);
         }
+        HirLValue::FieldAccess { base, ty, .. } => {
+            collect_aggregate_sizes_from_type(ty, sizes);
+            collect_aggregate_sizes_from_expr(base, sizes);
+        }
     }
 }
 
@@ -376,6 +384,10 @@ fn collect_aggregate_sizes_from_expr(expr: &HirExpr, sizes: &mut BTreeSet<u32>) 
             collect_aggregate_sizes_from_expr(cond, sizes);
             collect_aggregate_sizes_from_expr(then_expr, sizes);
             collect_aggregate_sizes_from_expr(else_expr, sizes);
+        }
+        HirExpr::FieldAccess { base, ty, .. } => {
+            collect_aggregate_sizes_from_type(ty, sizes);
+            collect_aggregate_sizes_from_expr(base, sizes);
         }
     }
 }
@@ -522,6 +534,9 @@ fn recover_global_symbol_accesses_in_lvalue(
             recover_global_symbol_accesses_in_expr(index, globals, aliases);
         }
         HirLValue::Var(_) => {}
+        HirLValue::FieldAccess { base, .. } => {
+            recover_global_symbol_accesses_in_expr(base, globals, aliases);
+        }
     }
 }
 
@@ -542,7 +557,8 @@ fn recover_global_symbol_accesses_in_expr(
         HirExpr::Cast { expr: inner, .. }
         | HirExpr::Unary { expr: inner, .. }
         | HirExpr::PtrOffset { base: inner, .. }
-        | HirExpr::AggregateCopy { src: inner, .. } => {
+        | HirExpr::AggregateCopy { src: inner, .. }
+        | HirExpr::FieldAccess { base: inner, .. } => {
             recover_global_symbol_accesses_in_expr(inner, globals, aliases);
         }
         HirExpr::Binary { lhs, rhs, .. } => {
@@ -877,6 +893,15 @@ fn collect_global_decls_from_lvalue(
             );
         }
         HirLValue::Var(_) => {}
+        HirLValue::FieldAccess { base, .. } => {
+            collect_global_decls_from_expr(
+                base,
+                global_names,
+                global_decl_types,
+                binding_types,
+                decls,
+            );
+        }
     }
 }
 
@@ -966,7 +991,9 @@ fn collect_global_decls_from_expr(
                 );
             }
         }
-        HirExpr::PtrOffset { base, .. } | HirExpr::AggregateCopy { src: base, .. } => {
+        HirExpr::PtrOffset { base, .. }
+        | HirExpr::AggregateCopy { src: base, .. }
+        | HirExpr::FieldAccess { base, .. } => {
             collect_global_decls_from_expr(
                 base,
                 global_names,
@@ -997,6 +1024,7 @@ fn infer_global_decl_expr_type(
         HirExpr::Index { elem_ty, .. } => elem_ty.clone(),
         HirExpr::Const(_, ty) => ty.clone(),
         HirExpr::PtrOffset { .. } => expr_type(expr),
+        HirExpr::FieldAccess { ty, .. } => ty.clone(),
         HirExpr::AggregateCopy { size, .. } => NirType::Aggregate {
             size: *size,
             fields: Vec::new(),

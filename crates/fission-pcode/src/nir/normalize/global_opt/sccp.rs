@@ -171,6 +171,7 @@ fn sccp_subst_expr(expr: &mut HirExpr, env: &ConstEnv) -> bool {
         HirExpr::Cast { expr: inner, .. } => changed |= sccp_subst_expr(inner, env),
         HirExpr::Load { ptr, .. } => changed |= sccp_subst_expr(ptr, env),
         HirExpr::PtrOffset { base, .. } => changed |= sccp_subst_expr(base, env),
+        HirExpr::FieldAccess { base, .. } => changed |= sccp_subst_expr(base, env),
         HirExpr::Index { base, index, .. } => {
             changed |= sccp_subst_expr(base, env);
             changed |= sccp_subst_expr(index, env);
