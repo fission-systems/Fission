@@ -1904,7 +1904,6 @@ impl<'a> PreviewBuilder<'a> {
                 && Some(site) != self.current_lowering_site
             {
                 let mut prior_visiting = visiting.clone();
-                prior_visiting.remove(&key);
                 return self
                     .with_lowering_site(site, |this| this.lower_def_op(op, &mut prior_visiting))
                     .map(|expr| self.project_alias_def_expr(vn, op, expr))
@@ -1927,9 +1926,13 @@ impl<'a> PreviewBuilder<'a> {
             }
             let cycle_name = if is_unique_space_id(vn.space_id) {
                 unique_register_name(vn.offset, vn.size)
-                    .map_or_else(|| format!("tmp_{:x}", vn.offset), ToString::to_string)
+                    .map_or_else(|| {
+                        let name = format!("tmp_{:x}", vn.offset);
+                        self.ensure_live_register_binding(&name, vn.size)
+                    }, ToString::to_string)
             } else {
-                format!("tmp_{:x}", vn.offset)
+                let name = format!("tmp_{:x}", vn.offset);
+                self.ensure_live_register_binding(&name, vn.size)
             };
             return Ok(HirExpr::Var(cycle_name));
         }
@@ -1962,12 +1965,18 @@ impl<'a> PreviewBuilder<'a> {
                     .clone(),
             )),
             None if is_unique_space_id(vn.space_id) => {
-                Ok(HirExpr::Var(format!("tmp_{:x}", vn.offset)))
+                let name = format!("tmp_{:x}", vn.offset);
+                let name = self.ensure_live_register_binding(&name, vn.size);
+                Ok(HirExpr::Var(name))
             }
             None if self.options.is_mapped_global(vn.offset) => {
                 Ok(HirExpr::Var(format!("DAT_{:x}", vn.offset)))
             }
-            None => Ok(HirExpr::Var(format!("var_{:x}", vn.offset))),
+            None => {
+                let name = format!("var_{:x}", vn.offset);
+                let name = self.ensure_live_register_binding(&name, vn.size);
+                Ok(HirExpr::Var(name))
+            }
         };
         visiting.remove(&key);
         result
@@ -2058,6 +2067,10 @@ impl<'a> PreviewBuilder<'a> {
         if !is_register_space_id(vn.space_id) {
             return Ok(None);
         }
+        let key = VarnodeKey::from(vn);
+        if visiting.contains(&key) {
+            return Ok(None);
+        }
         let Some(site) = self.current_lowering_site else {
             return Ok(None);
         };
@@ -2099,13 +2112,20 @@ impl<'a> PreviewBuilder<'a> {
         } else {
             return Ok(None);
         };
-        let Some(true_expr) = self.lower_predecessor_incoming_value(true_succ_idx, vn, visiting)?
-        else {
+
+        visiting.insert(key.clone());
+        let true_res = self.lower_predecessor_incoming_value(true_succ_idx, vn, visiting);
+        let false_res = if true_res.is_ok() {
+            self.lower_predecessor_incoming_value(false_succ_idx, vn, visiting)
+        } else {
+            Err(MlilPreviewError::LoweringFailed)
+        };
+        visiting.remove(&key);
+
+        let Some(true_expr) = true_res? else {
             return Ok(None);
         };
-        let Some(false_expr) =
-            self.lower_predecessor_incoming_value(false_succ_idx, vn, visiting)?
-        else {
+        let Some(false_expr) = false_res? else {
             return Ok(None);
         };
         if strip_casts(&true_expr) == strip_casts(&false_expr) {

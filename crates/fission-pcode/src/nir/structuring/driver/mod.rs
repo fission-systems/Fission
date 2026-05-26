@@ -327,7 +327,7 @@ impl<'a> PreviewBuilder<'a> {
         let sese_result = super::sese::structure_cfg_via_sese(self, total_blocks);
 
         match sese_result {
-            Ok(body) => {
+        Ok(body) => {
                 if diag {
                     eprintln!(
                         "[DIAG] structuring done (SESE): elapsed={:.3}s stmts={}",
@@ -335,11 +335,30 @@ impl<'a> PreviewBuilder<'a> {
                         body.len()
                     );
                 }
+                let finalized = finalize_structured_body(body);
+                // Validate that every Goto target has a matching Label in the
+                // output.  If not, the SESE/GuardedTail emitter omitted a
+                // back-edge label (common when an inner loop can't be
+                // structured).  Fall back to linear rather than emitting broken
+                // pseudocode that will fail to compile.
+                if has_orphan_goto_labels(&finalized) {
+                    if diag {
+                        eprintln!(
+                            "[DIAG] SESE result has orphan goto labels, falling back to linear"
+                        );
+                    }
+                    self.telemetry.structuring.forced_linear_structuring_count += 1;
+                    self.telemetry
+                        .structuring
+                        .structuring_sese_orphan_goto_fallback_count += 1;
+                    return self.build_proof_first_linear_multiblock_body();
+                }
                 metrics::histogram!("fission.structuring.total_ms")
                     .record(total_start.elapsed().as_secs_f64() * 1000.0);
                 metrics::counter!("fission.structuring.invocations_total").increment(1);
-                Ok(finalize_structured_body(body))
+                Ok(finalized)
             }
+
             Err(err) => {
                 if diag {
                     eprintln!(

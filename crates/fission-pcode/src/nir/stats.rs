@@ -255,6 +255,7 @@ fn merge_structuring_stats(target: &mut NirBuildStats, other: &NirBuildStats) {
             condition_fold_rejected_side_effect,
             fas_virtual_goto_count,
             switch_fallthrough_detected_count,
+            structuring_sese_orphan_goto_fallback_count,
         ]
     );
 }

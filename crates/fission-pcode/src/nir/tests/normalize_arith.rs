@@ -1017,7 +1017,13 @@ fn repeated_integer_bitwise_identity_simplifies() {
 fn normalize_hir_function_inlines_multi_use_temp_within_single_if_condition() {
     let mut func = HirFunction {
         name: "inline_condition_temp".to_string(),
-        params: vec![],
+        params: vec![NirBinding {
+            name: "eax".to_string(),
+            ty: NirType::Int { bits: 32, signed: false },
+            surface_type_name: None,
+            origin: None,
+            initializer: None,
+        }],
         locals: vec![NirBinding {
             name: "uVar1".to_string(),
             ty: NirType::Int {

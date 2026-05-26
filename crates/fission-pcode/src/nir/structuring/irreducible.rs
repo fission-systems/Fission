@@ -222,13 +222,75 @@ pub(crate) fn compute_fas_virtual_gotos(
             }
         }
 
-        // Score each candidate edge by the source's excess out-degree.
-        // Higher excess = more likely to break cycles efficiently.
-        candidate_edges.sort_by(|&(a_src, _), &(b_src, _)| {
-            let a_score = successors[a_src].len() as i64 - predecessors[a_src].len() as i64;
-            let b_score = successors[b_src].len() as i64 - predecessors[b_src].len() as i64;
-            b_score.cmp(&a_score)
-        });
+        // Score and sort each candidate edge using H2 (post-dominator maximization) and H3 (simple return).
+        let node_count = successors.len();
+        if node_count <= 64 && candidate_edges.len() <= 16 {
+            // Inside the scale gate: compute post-dominator counts
+            let mut edge_scores = Vec::new();
+            for &(src, dst) in &candidate_edges {
+                let mut temp_succs = successors.to_vec();
+                let mut temp_preds = predecessors.to_vec();
+
+                // Remove the edge (src -> dst)
+                if let Some(pos) = temp_succs[src].iter().position(|&x| x == dst) {
+                    temp_succs[src].remove(pos);
+                }
+                if let Some(pos) = temp_preds[dst].iter().position(|&x| x == src) {
+                    temp_preds[dst].remove(pos);
+                }
+
+                let postdom = super::PostDomTree::analyze(&temp_succs, &temp_preds);
+                let postdom_score: usize = postdom.postdominators().values().map(|set| set.len()).sum();
+                edge_scores.push(((src, dst), postdom_score));
+            }
+
+            candidate_edges.sort_by(|&a, &b| {
+                let a_score = edge_scores.iter().find(|&&((s, d), _)| s == a.0 && d == a.1).map(|&(_, s)| s).unwrap_or(0);
+                let b_score = edge_scores.iter().find(|&&((s, d), _)| s == b.0 && d == b.1).map(|&(_, s)| s).unwrap_or(0);
+
+                if a_score != b_score {
+                    // Key 1: Post-dominator relationship count (higher is better)
+                    b_score.cmp(&a_score)
+                } else {
+                    let a_is_ret = successors[a.1].is_empty();
+                    let b_is_ret = successors[b.1].is_empty();
+                    if a_is_ret != b_is_ret {
+                        // Key 2: Destination is a simple return block (true is preferred)
+                        b_is_ret.cmp(&a_is_ret)
+                    } else {
+                        // Key 3: Source node excess out-degree score (higher is better)
+                        let a_excess = successors[a.0].len() as i64 - predecessors[a.0].len() as i64;
+                        let b_excess = successors[b.0].len() as i64 - predecessors[b.0].len() as i64;
+                        if a_excess != b_excess {
+                            b_excess.cmp(&a_excess)
+                        } else {
+                            // Key 4: Deterministic tie-breaker
+                            a.0.cmp(&b.0).then_with(|| a.1.cmp(&b.1))
+                        }
+                    }
+                }
+            });
+        } else {
+            // Outside the scale gate: fall back to H3 + excess out-degree + deterministic tie-breaker
+            candidate_edges.sort_by(|&a, &b| {
+                let a_is_ret = successors[a.1].is_empty();
+                let b_is_ret = successors[b.1].is_empty();
+                if a_is_ret != b_is_ret {
+                    // Key 1: Destination is simple return block (true is preferred)
+                    b_is_ret.cmp(&a_is_ret)
+                } else {
+                    // Key 2: Source node excess out-degree score (higher is better)
+                    let a_excess = successors[a.0].len() as i64 - predecessors[a.0].len() as i64;
+                    let b_excess = successors[b.0].len() as i64 - predecessors[b.0].len() as i64;
+                    if a_excess != b_excess {
+                        b_excess.cmp(&a_excess)
+                    } else {
+                        // Key 3: Deterministic tie-breaker
+                        a.0.cmp(&b.0).then_with(|| a.1.cmp(&b.1))
+                    }
+                }
+            });
+        }
 
         // Greedily select edges until the component is acyclic.
         let mut removed_edges: std::collections::HashSet<(usize, usize)> =
@@ -493,6 +555,44 @@ mod tests {
         // (This test verifies the size gate fires, not that the algo is perfect.)
         // Either empty (gate fired) or small (algorithm was efficient enough).
         // We simply assert it doesn't panic and returns a reasonable result.
+        assert!(fas.len() <= MAX_FAS_VIRTUAL_GOTOS);
+    }
+
+    #[test]
+    fn test_fas_prioritizes_postdom_maximizing_edge() {
+        // Nodes: 0, 1 (irreducible SCC), 2 (exit), 3 (entry to 0 and 1)
+        // 0 -> 1, 0 -> 2
+        // 1 -> 0
+        // 2 is exit (empty succs)
+        // 3 -> 0, 3 -> 1
+        let succs = vec![
+            vec![1, 2], // 0 -> 1 (back-edge), 0 -> 2 (exit)
+            vec![0],    // 1 -> 0 (back-edge)
+            vec![],     // 2 (exit)
+            vec![0, 1], // 3 (entry)
+        ];
+        let preds = build_preds(&succs);
+        let fas = compute_fas_virtual_gotos(&succs, &preds);
+        // Removing (0, 1) maximizes post-dominators in the remaining graph.
+        assert_eq!(fas, vec![(0, 1)]);
+    }
+
+    #[test]
+    fn test_fas_scale_gate_fallback() {
+        // If candidate_edges > 16, it should fall back to out-degree scoring and not crash.
+        // We construct a graph with 20 candidate edges.
+        let mut succs = vec![Vec::new(); 20];
+        // Create 20-node complete graph (or tournament) to get > 16 candidate edges inside SCC
+        for i in 0..20 {
+            for j in 0..20 {
+                if i != j {
+                    succs[i].push(j);
+                }
+            }
+        }
+        let preds = build_preds(&succs);
+        let fas = compute_fas_virtual_gotos(&succs, &preds);
+        // It should complete successfully using fallback out-degree scoring
         assert!(fas.len() <= MAX_FAS_VIRTUAL_GOTOS);
     }
 }

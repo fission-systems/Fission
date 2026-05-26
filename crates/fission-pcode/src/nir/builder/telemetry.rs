@@ -354,6 +354,9 @@ pub(crate) struct StructuringTelemetry {
     pub(crate) condition_fold_and_count: usize,
     pub(crate) condition_fold_or_count: usize,
     pub(crate) condition_fold_rejected_side_effect: usize,
+    /// SESE structuring succeeded but produced orphan goto labels (Goto without matching Label),
+    /// indicating a back-edge label was omitted. Fell back to linear structuring.
+    pub(crate) structuring_sese_orphan_goto_fallback_count: usize,
 }
 
 impl StructuringTelemetry {
@@ -538,5 +541,7 @@ impl StructuringTelemetry {
         stats.condition_fold_and_count = self.condition_fold_and_count;
         stats.condition_fold_or_count = self.condition_fold_or_count;
         stats.condition_fold_rejected_side_effect = self.condition_fold_rejected_side_effect;
+        stats.structuring_sese_orphan_goto_fallback_count =
+            self.structuring_sese_orphan_goto_fallback_count;
     }
 }

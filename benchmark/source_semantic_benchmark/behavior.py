@@ -229,6 +229,7 @@ typedef unsigned char byte;
 typedef unsigned char uchar;
 typedef signed char schar;
 typedef unsigned char undefined1;
+typedef unsigned char undefined;
 typedef unsigned short ushort;
 typedef unsigned short word;
 typedef unsigned short undefined2;

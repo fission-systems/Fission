@@ -79,6 +79,9 @@ mod tests {
             load_spec: None,
             pdb_debug_info: None,
             string_map: HashMap::new(),
+            relocations: vec![],
+            rich_header_records: None,
+            symbol_versions: HashMap::new(),
         }
     }
 

@@ -23,7 +23,7 @@ mod switch;
 pub(crate) use cfg_analysis::{
     CfgAnalysis, CfgFactCache, DomTree, EdgeClass, PostDomTree, SccAnalysis,
 };
-pub(crate) use cleanup::{cleanup_redundant_labels, finalize_structured_body};
+pub(crate) use cleanup::{cleanup_redundant_labels, finalize_structured_body, has_orphan_goto_labels};
 pub(crate) use driver::{
     collapse::{ACTIVE_COLLAPSE_RULES, CollapseCandidate, CollapseRule},
     discover_guarded_tail_candidates_for_stats,

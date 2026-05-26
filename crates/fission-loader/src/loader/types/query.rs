@@ -14,12 +14,6 @@ impl LoadedBinary {
 
     /// Get a slice of bytes at a given address (zero-copy)
     pub fn view_bytes(&self, address: u64, size: usize) -> Option<&[u8]> {
-        if address >= 0x100400 && address <= 0x100500 {
-            println!("[view_bytes] address: 0x{:x}, size: {}", address, size);
-            for s in &self.sections {
-                println!("  section: {}, VA: 0x{:x}, Size: 0x{:x}, FileOffset: 0x{:x}", s.name, s.virtual_address, s.virtual_size, s.file_offset);
-            }
-        }
         let idx = self.sections.binary_search_by(|section| {
             if address < section.virtual_address {
                 std::cmp::Ordering::Greater
@@ -35,15 +29,8 @@ impl LoadedBinary {
             let offset_in_section = address - section.virtual_address;
             let file_offset = section.file_offset as usize + offset_in_section as usize;
 
-            if address >= 0x100400 && address <= 0x100500 {
-                println!("  [view_bytes] Selected section: {}, offset_in_section: 0x{:x}, file_offset: 0x{:x}", section.name, offset_in_section, file_offset);
-            }
-
             if file_offset + size <= self.data.as_slice().len() {
                 let res = &self.data.as_slice()[file_offset..file_offset + size];
-                if address >= 0x100400 && address <= 0x100500 {
-                    println!("  [view_bytes] Result bytes: {:?}", res);
-                }
                 return Some(res);
             }
         }

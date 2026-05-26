@@ -616,6 +616,10 @@ pub struct NirBuildStats {
     pub structuring_reason_switch_shape_count: usize,
     #[serde(default)]
     pub structuring_reason_budget_count: usize,
+    /// SESE structuring succeeded but produced orphan goto labels (Goto without matching Label),
+    /// indicating a back-edge label was omitted by the emitter. Fell back to linear structuring.
+    #[serde(default)]
+    pub structuring_sese_orphan_goto_fallback_count: usize,
     #[serde(default)]
     pub pass_metrics: std::collections::BTreeMap<String, PassAggregate>,
 }

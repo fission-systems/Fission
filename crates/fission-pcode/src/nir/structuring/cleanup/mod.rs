@@ -13,6 +13,76 @@ pub(crate) fn finalize_structured_body(mut body: Vec<HirStmt>) -> Vec<HirStmt> {
     body
 }
 
+/// Returns true if the body contains any `Goto(label)` whose corresponding
+/// `Label(label)` is absent from the body.  Such "orphan" gotos indicate
+/// a structuring failure where a back-edge or cross-edge target was referenced
+/// but the emitter never placed the matching label statement.
+pub(crate) fn has_orphan_goto_labels(body: &[HirStmt]) -> bool {
+    let goto_targets = collect_referenced_labels(body);
+    if goto_targets.is_empty() {
+        return false;
+    }
+    let declared = collect_declared_labels(body);
+    goto_targets.iter().any(|label| !declared.contains(label))
+}
+
+/// Collects the set of label names that are *declared* (i.e. `Label(name)`)
+/// anywhere in the body, recursing into nested statement blocks.
+fn collect_declared_labels(body: &[HirStmt]) -> HashSet<String> {
+    let mut declared = HashSet::new();
+    for stmt in body {
+        collect_stmt_declared_labels(stmt, &mut declared);
+    }
+    declared
+}
+
+fn collect_stmt_declared_labels(stmt: &HirStmt, declared: &mut HashSet<String>) {
+    match stmt {
+        HirStmt::Label(label) => {
+            declared.insert(label.clone());
+        }
+        HirStmt::Block(body)
+        | HirStmt::While { body, .. }
+        | HirStmt::DoWhile { body, .. }
+        | HirStmt::For { body, .. } => {
+            for s in body {
+                collect_stmt_declared_labels(s, declared);
+            }
+        }
+        HirStmt::Switch { cases, default, .. } => {
+            for case in cases {
+                for s in &case.body {
+                    collect_stmt_declared_labels(s, declared);
+                }
+            }
+            for s in default {
+                collect_stmt_declared_labels(s, declared);
+            }
+        }
+        HirStmt::If {
+            then_body,
+            else_body,
+            ..
+        } => {
+            for s in then_body {
+                collect_stmt_declared_labels(s, declared);
+            }
+            for s in else_body {
+                collect_stmt_declared_labels(s, declared);
+            }
+        }
+        HirStmt::Assign { .. }
+        | HirStmt::VaStart { .. }
+        | HirStmt::Expr(_)
+        | HirStmt::Goto(_)
+        | HirStmt::Return(_)
+        | HirStmt::Break
+        | HirStmt::Continue => {}
+    }
+}
+
+
+
 // ---------------------------------------------------------------------------
 // Existing label-cleanup utilities
 // ---------------------------------------------------------------------------
