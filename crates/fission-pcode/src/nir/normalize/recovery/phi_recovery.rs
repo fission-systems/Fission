@@ -26,7 +26,7 @@ use super::super::analysis::preservation::{
 /// Detects if-else structures where both branches end by assigning to the
 /// *same* set of variables and renames join-point uses to the shared variable.
 /// This models the classical SSA out-of-SSA transformation for 2-way joins.
-use super::super::cleanup::prune_unused_temp_bindings;
+use super::super::cleanup::{prune_unused_dead_local_bindings, prune_unused_temp_bindings};
 use super::super::wave_stats;
 use super::super::*;
 use std::collections::{HashMap, HashSet};
@@ -39,72 +39,82 @@ use std::collections::{HashMap, HashSet};
 ///
 /// Returns `true` if any substitution was made.
 pub(crate) fn copy_propagation_pass(func: &mut HirFunction) -> bool {
+    let mut changed = false;
+    let loop_preservation_vars = collect_loop_preservation_vars(&func.body);
+
+    // --- Phase 1: Standard Copy Propagation ---
     let preserved_temps = preserved_materialization_names(&func.locals);
-    // Step 1: collect names of pure temporaries.
     let temp_names: HashSet<&str> = func
         .locals
         .iter()
         .filter(|b| b.is_temp_like())
         .map(|b| b.name.as_str())
         .collect();
-    if temp_names.is_empty() {
-        return false;
+
+    if !temp_names.is_empty() {
+        let def_count = count_definitions_in_stmts(&func.body, &temp_names);
+        let mut copy_map: HashMap<String, String> = HashMap::new();
+        collect_copies(&func.body, &temp_names, &def_count, &mut copy_map);
+
+        if !copy_map.is_empty() {
+            let mut predicate_vars = HashSet::new();
+            collect_predicate_vars_in_stmts(&func.body, &mut predicate_vars);
+            copy_map.retain(|name, _| !predicate_vars.contains(name.as_str()));
+            let preserved_skip_count = copy_map
+                .iter()
+                .filter(|(name, source)| {
+                    should_skip_copyprop_for_preserved_name(name, &preserved_temps)
+                        || should_skip_copyprop_for_preserved_name(source, &preserved_temps)
+                })
+                .count();
+            copy_map.retain(|name, source| {
+                !should_skip_copyprop_for_preserved_name(name, &preserved_temps)
+                    && !should_skip_copyprop_for_preserved_name(source, &preserved_temps)
+                    && !loop_preservation_vars.contains(name.as_str())
+                    && !loop_preservation_vars.contains(source.as_str())
+            });
+            wave_stats::add_preserved_temp_copyprop_skip(preserved_skip_count);
+
+            if !copy_map.is_empty() {
+                copy_map.retain(|_x, y| {
+                    let y_def_count = def_count.get(y.as_str()).copied().unwrap_or(0);
+                    y_def_count <= 1
+                });
+
+                if !copy_map.is_empty() {
+                    remove_copy_assigns(&mut func.body, &copy_map, &mut changed);
+                    substitute_copies_in_stmts(&mut func.body, &copy_map, &mut changed);
+                }
+            }
+        }
     }
 
-    // Step 2: build a map of single-definition copies: temp_name → rhs_name.
-    //   Only consider assignments `x = Var(y)` where x is a pure temp.
-    let def_count = count_definitions_in_stmts(&func.body, &temp_names);
-    let mut copy_map: HashMap<String, String> = HashMap::new();
-    collect_copies(&func.body, &temp_names, &def_count, &mut copy_map);
-
-    if copy_map.is_empty() {
-        return false;
-    }
-
-    // Keep predicate-carried temporaries explicit. Replacing these aggressively
-    // harms readability and can destabilize row-fidelity on control-heavy code.
-    let mut predicate_vars = HashSet::new();
-    collect_predicate_vars_in_stmts(&func.body, &mut predicate_vars);
-    copy_map.retain(|name, _| !predicate_vars.contains(name.as_str()));
-    let preserved_skip_count = copy_map
+    // --- Phase 2: Constant Propagation for Primitive Variables ---
+    let eligible_vars: HashSet<&str> = func
+        .locals
         .iter()
-        .filter(|(name, source)| {
-            should_skip_copyprop_for_preserved_name(name, &preserved_temps)
-                || should_skip_copyprop_for_preserved_name(source, &preserved_temps)
+        .filter(|b| {
+            matches!(b.ty, NirType::Int { .. } | NirType::Float { .. } | NirType::Bool)
+                && !should_skip_copyprop_for_preserved_name(&b.name, &preserved_temps)
+                && !loop_preservation_vars.contains(b.name.as_str())
         })
-        .count();
-    copy_map.retain(|name, source| {
-        !should_skip_copyprop_for_preserved_name(name, &preserved_temps)
-            && !should_skip_copyprop_for_preserved_name(source, &preserved_temps)
-    });
-    wave_stats::add_preserved_temp_copyprop_skip(preserved_skip_count);
+        .map(|b| b.name.as_str())
+        .collect();
 
-    if copy_map.is_empty() {
-        return false;
+    if !eligible_vars.is_empty() {
+        let def_count = count_definitions_in_stmts(&func.body, &eligible_vars);
+        let mut const_map = HashMap::new();
+        collect_constants(&func.body, &eligible_vars, &def_count, &mut const_map);
+
+        if !const_map.is_empty() {
+            remove_constant_assigns(&mut func.body, &const_map, &mut changed);
+            substitute_constants_in_stmts(&mut func.body, &const_map, &mut changed);
+        }
     }
-
-    // Step 3: validate that the source variable `y` is not re-assigned
-    // between the copy definition and any of its uses (conservative guard:
-    // reject `y` if it is itself a pure temp with >1 definition, since that
-    // means it could be re-defined on some paths).
-    copy_map.retain(|_x, y| {
-        let y_def_count = def_count.get(y.as_str()).copied().unwrap_or(0);
-        // Allow if y is never re-defined (0 or 1 definition and y is not a
-        // pure temp with multiple writes that could create a hazard).
-        y_def_count <= 1
-    });
-
-    if copy_map.is_empty() {
-        return false;
-    }
-
-    // Step 4: remove the copy assignments from the body and substitute y for x.
-    let mut changed = false;
-    remove_copy_assigns(&mut func.body, &copy_map, &mut changed);
-    substitute_copies_in_stmts(&mut func.body, &copy_map, &mut changed);
 
     if changed {
         prune_unused_temp_bindings(func);
+        prune_unused_dead_local_bindings(func);
     }
     changed
 }
@@ -200,6 +210,39 @@ mod tests {
             &func.body[1],
             HirStmt::Return(Some(HirExpr::Var(name))) if name == "uVar1"
         ));
+    }
+
+    #[test]
+    fn constant_propagation_eliminates_unused_local_constant() {
+        let mut func = HirFunction {
+            name: "test_const_prop".to_string(),
+            params: vec![],
+            locals: vec![NirBinding {
+                name: "local_c".to_string(),
+                ty: int(32),
+                surface_type_name: None,
+                origin: Some(NirBindingOrigin::StackOffset(12)),
+                initializer: None,
+            }],
+            return_type: int(32),
+            surface_return_type_name: None,
+            body: vec![
+                HirStmt::Assign {
+                    lhs: HirLValue::Var("local_c".to_string()),
+                    rhs: HirExpr::Const(0, int(32)),
+                },
+                HirStmt::Return(Some(HirExpr::Var("local_c".to_string()))),
+            ],
+            ..Default::default()
+        };
+
+        assert!(copy_propagation_pass(&mut func));
+        assert_eq!(func.body.len(), 1);
+        assert!(matches!(
+            &func.body[0],
+            HirStmt::Return(Some(HirExpr::Const(0, _)))
+        ));
+        assert!(func.locals.is_empty());
     }
 }
 
@@ -1069,5 +1112,414 @@ fn apply_join_renames_expr(
             apply_join_renames_expr(then_expr, rename_map, changed);
             apply_join_renames_expr(else_expr, rename_map, changed);
         }
+    }
+}
+
+// ── Constant Propagation Helpers ──────────────────────────────────────────────
+
+fn collect_constants<'a>(
+    stmts: &'a [HirStmt],
+    eligible_vars: &HashSet<&str>,
+    def_count: &HashMap<&'a str, usize>,
+    const_map: &mut HashMap<String, HirExpr>,
+) {
+    for stmt in stmts {
+        collect_constants_stmt(stmt, eligible_vars, def_count, const_map);
+    }
+}
+
+fn collect_constants_stmt<'a>(
+    stmt: &'a HirStmt,
+    eligible_vars: &HashSet<&str>,
+    def_count: &HashMap<&'a str, usize>,
+    const_map: &mut HashMap<String, HirExpr>,
+) {
+    match stmt {
+        HirStmt::Assign {
+            lhs: HirLValue::Var(name),
+            rhs: const_expr @ HirExpr::Const(_, _),
+        } if eligible_vars.contains(name.as_str())
+            && def_count.get(name.as_str()).copied().unwrap_or(0) == 1 =>
+        {
+            const_map.insert(name.clone(), const_expr.clone());
+        }
+        HirStmt::Block(stmts) => collect_constants(stmts, eligible_vars, def_count, const_map),
+        HirStmt::If {
+            then_body,
+            else_body,
+            ..
+        } => {
+            collect_constants(then_body, eligible_vars, def_count, const_map);
+            collect_constants(else_body, eligible_vars, def_count, const_map);
+        }
+        HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
+            collect_constants(body, eligible_vars, def_count, const_map);
+        }
+        HirStmt::For {
+            init, update, body, ..
+        } => {
+            if let Some(i) = init {
+                collect_constants_stmt(i, eligible_vars, def_count, const_map);
+            }
+            if let Some(u) = update {
+                collect_constants_stmt(u, eligible_vars, def_count, const_map);
+            }
+            collect_constants(body, eligible_vars, def_count, const_map);
+        }
+        HirStmt::Switch { cases, default, .. } => {
+            for case in cases {
+                collect_constants(&case.body, eligible_vars, def_count, const_map);
+            }
+            collect_constants(default, eligible_vars, def_count, const_map);
+        }
+        _ => {}
+    }
+}
+
+fn remove_constant_assigns(
+    stmts: &mut Vec<HirStmt>,
+    const_map: &HashMap<String, HirExpr>,
+    changed: &mut bool,
+) {
+    for stmt in stmts.iter_mut() {
+        remove_constant_assigns_nested(stmt, const_map, changed);
+    }
+    stmts.retain(|stmt| {
+        if let HirStmt::Assign {
+            lhs: HirLValue::Var(name),
+            rhs: HirExpr::Const(_, _),
+        } = stmt
+        {
+            if const_map.contains_key(name.as_str()) {
+                *changed = true;
+                return false;
+            }
+        }
+        true
+    });
+}
+
+fn remove_constant_assigns_nested(
+    stmt: &mut HirStmt,
+    const_map: &HashMap<String, HirExpr>,
+    changed: &mut bool,
+) {
+    match stmt {
+        HirStmt::Block(stmts) => remove_constant_assigns(stmts, const_map, changed),
+        HirStmt::If {
+            then_body,
+            else_body,
+            ..
+        } => {
+            remove_constant_assigns(then_body, const_map, changed);
+            remove_constant_assigns(else_body, const_map, changed);
+        }
+        HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
+            remove_constant_assigns(body, const_map, changed);
+        }
+        HirStmt::For {
+            init, update, body, ..
+        } => {
+            if let Some(i) = init {
+                remove_constant_assigns_nested(i, const_map, changed);
+            }
+            if let Some(u) = update {
+                remove_constant_assigns_nested(u, const_map, changed);
+            }
+            remove_constant_assigns(body, const_map, changed);
+        }
+        HirStmt::Switch { cases, default, .. } => {
+            for case in cases.iter_mut() {
+                remove_constant_assigns(&mut case.body, const_map, changed);
+            }
+            remove_constant_assigns(default, const_map, changed);
+        }
+        _ => {}
+    }
+}
+
+fn substitute_constants_in_stmts(
+    stmts: &mut Vec<HirStmt>,
+    const_map: &HashMap<String, HirExpr>,
+    changed: &mut bool,
+) {
+    for stmt in stmts.iter_mut() {
+        substitute_constants_in_stmt(stmt, const_map, changed);
+    }
+}
+
+fn substitute_constants_in_stmt(
+    stmt: &mut HirStmt,
+    const_map: &HashMap<String, HirExpr>,
+    changed: &mut bool,
+) {
+    match stmt {
+        HirStmt::Assign { lhs, rhs } => {
+            substitute_constants_lvalue(lhs, const_map, changed);
+            substitute_constants_expr(rhs, const_map, changed);
+        }
+        HirStmt::VaStart { va_list, .. } => {
+            substitute_constants_expr(va_list, const_map, changed);
+        }
+        HirStmt::Expr(expr) | HirStmt::Return(Some(expr)) => {
+            substitute_constants_expr(expr, const_map, changed);
+        }
+        _ => {}
+    }
+    match stmt {
+        HirStmt::Block(stmts) => substitute_constants_in_stmts(stmts, const_map, changed),
+        HirStmt::If {
+            cond,
+            then_body,
+            else_body,
+        } => {
+            substitute_constants_expr(cond, const_map, changed);
+            substitute_constants_in_stmts(then_body, const_map, changed);
+            substitute_constants_in_stmts(else_body, const_map, changed);
+        }
+        HirStmt::While { cond, body } => {
+            substitute_constants_expr(cond, const_map, changed);
+            substitute_constants_in_stmts(body, const_map, changed);
+        }
+        HirStmt::DoWhile { body, cond } => {
+            substitute_constants_in_stmts(body, const_map, changed);
+            substitute_constants_expr(cond, const_map, changed);
+        }
+        HirStmt::For {
+            init,
+            cond,
+            update,
+            body,
+        } => {
+            if let Some(i) = init {
+                substitute_constants_in_stmt(i, const_map, changed);
+            }
+            if let Some(c) = cond {
+                substitute_constants_expr(c, const_map, changed);
+            }
+            if let Some(u) = update {
+                substitute_constants_in_stmt(u, const_map, changed);
+            }
+            substitute_constants_in_stmts(body, const_map, changed);
+        }
+        HirStmt::Switch {
+            expr,
+            cases,
+            default,
+        } => {
+            substitute_constants_expr(expr, const_map, changed);
+            for case in cases.iter_mut() {
+                substitute_constants_in_stmts(&mut case.body, const_map, changed);
+            }
+            substitute_constants_in_stmts(default, const_map, changed);
+        }
+        _ => {}
+    }
+}
+
+fn substitute_constants_lvalue(
+    lhs: &mut HirLValue,
+    const_map: &HashMap<String, HirExpr>,
+    changed: &mut bool,
+) {
+    match lhs {
+        HirLValue::Var(_) => {}
+        HirLValue::Deref { ptr, .. } => substitute_constants_expr(ptr, const_map, changed),
+        HirLValue::Index { base, index, .. } => {
+            substitute_constants_expr(base, const_map, changed);
+            substitute_constants_expr(index, const_map, changed);
+        }
+        HirLValue::FieldAccess { base, .. } => {
+            substitute_constants_expr(base, const_map, changed);
+        }
+    }
+}
+
+fn substitute_constants_expr(
+    expr: &mut HirExpr,
+    const_map: &HashMap<String, HirExpr>,
+    changed: &mut bool,
+) {
+    if let HirExpr::Var(name) = expr {
+        if let Some(c) = const_map.get(name.as_str()) {
+            *expr = c.clone();
+            *changed = true;
+            return;
+        }
+    }
+    match expr {
+        HirExpr::Cast { expr: inner, .. }
+        | HirExpr::Unary { expr: inner, .. }
+        | HirExpr::Load { ptr: inner, .. }
+        | HirExpr::PtrOffset { base: inner, .. }
+        | HirExpr::AggregateCopy { src: inner, .. }
+        | HirExpr::FieldAccess { base: inner, .. } => {
+            substitute_constants_expr(inner, const_map, changed);
+        }
+        HirExpr::Binary { lhs, rhs, .. } => {
+            substitute_constants_expr(lhs, const_map, changed);
+            substitute_constants_expr(rhs, const_map, changed);
+        }
+        HirExpr::Call { args, .. } => {
+            for a in args.iter_mut() {
+                substitute_constants_expr(a, const_map, changed);
+            }
+        }
+        HirExpr::Index { base, index, .. } => {
+            substitute_constants_expr(base, const_map, changed);
+            substitute_constants_expr(index, const_map, changed);
+        }
+        HirExpr::Select {
+            cond,
+            then_expr,
+            else_expr,
+            ..
+        } => {
+            substitute_constants_expr(cond, const_map, changed);
+            substitute_constants_expr(then_expr, const_map, changed);
+            substitute_constants_expr(else_expr, const_map, changed);
+        }
+        _ => {}
+    }
+}
+
+// ── Loop-carried/Preheader Preservation Helpers ──────────────────────────────
+
+fn collect_loop_preservation_vars(stmts: &[HirStmt]) -> HashSet<String> {
+    let mut defined_outside: HashSet<String> = HashSet::new();
+    let mut used_inside: HashSet<String> = HashSet::new();
+    collect_defs_outside_loops(stmts, &mut defined_outside);
+    collect_uses_inside_loops(stmts, &mut used_inside);
+    defined_outside.intersection(&used_inside).cloned().collect()
+}
+
+fn collect_defs_outside_loops(stmts: &[HirStmt], out: &mut HashSet<String>) {
+    for stmt in stmts {
+        match stmt {
+            HirStmt::Assign { lhs, .. } => {
+                if let HirLValue::Var(name) = lhs {
+                    out.insert(name.clone());
+                }
+            }
+            HirStmt::Block(body) => collect_defs_outside_loops(body, out),
+            HirStmt::If { then_body, else_body, .. } => {
+                collect_defs_outside_loops(then_body, out);
+                collect_defs_outside_loops(else_body, out);
+            }
+            HirStmt::Switch { cases, default, .. } => {
+                for case in cases {
+                    collect_defs_outside_loops(&case.body, out);
+                }
+                collect_defs_outside_loops(default, out);
+            }
+            _ => {}
+        }
+    }
+}
+
+fn collect_uses_inside_loops(stmts: &[HirStmt], out: &mut HashSet<String>) {
+    // Collect via a local &str set, then promote to String at the boundary so
+    // we can reuse the shared helpers (collect_vars_in_expr, etc.) without
+    // changing their signatures.
+    fn inner<'a>(stmts: &'a [HirStmt], inner_out: &mut HashSet<&'a str>) {
+        for stmt in stmts {
+            match stmt {
+                HirStmt::While { cond, body } => {
+                    collect_vars_in_expr(cond, inner_out);
+                    collect_all_vars_in_stmts(body, inner_out);
+                }
+                HirStmt::DoWhile { body, cond } => {
+                    collect_all_vars_in_stmts(body, inner_out);
+                    collect_vars_in_expr(cond, inner_out);
+                }
+                HirStmt::For { init, cond, update, body } => {
+                    if let Some(i) = init {
+                        collect_all_vars_in_stmt(i, inner_out);
+                    }
+                    if let Some(c) = cond {
+                        collect_vars_in_expr(c, inner_out);
+                    }
+                    if let Some(u) = update {
+                        collect_all_vars_in_stmt(u, inner_out);
+                    }
+                    collect_all_vars_in_stmts(body, inner_out);
+                }
+                HirStmt::Block(body) => inner(body, inner_out),
+                HirStmt::If { then_body, else_body, .. } => {
+                    inner(then_body, inner_out);
+                    inner(else_body, inner_out);
+                }
+                HirStmt::Switch { cases, default, .. } => {
+                    for case in cases {
+                        inner(&case.body, inner_out);
+                    }
+                    inner(default, inner_out);
+                }
+                _ => {}
+            }
+        }
+    }
+    let mut local: HashSet<&str> = HashSet::new();
+    inner(stmts, &mut local);
+    out.extend(local.into_iter().map(str::to_owned));
+}
+
+fn collect_all_vars_in_stmts<'a>(stmts: &'a [HirStmt], out: &mut HashSet<&'a str>) {
+    for stmt in stmts {
+        collect_all_vars_in_stmt(stmt, out);
+    }
+}
+
+fn collect_all_vars_in_stmt<'a>(stmt: &'a HirStmt, out: &mut HashSet<&'a str>) {
+    match stmt {
+        HirStmt::Assign { lhs, rhs } => {
+            collect_vars_in_lvalue(lhs, out);
+            collect_vars_in_expr(rhs, out);
+        }
+        HirStmt::Expr(expr) | HirStmt::Return(Some(expr)) | HirStmt::VaStart { va_list: expr, .. } => {
+            collect_vars_in_expr(expr, out);
+        }
+        HirStmt::Block(body)
+        | HirStmt::While { body, .. }
+        | HirStmt::DoWhile { body, .. } => collect_all_vars_in_stmts(body, out),
+        HirStmt::If { then_body, else_body, cond } => {
+            collect_vars_in_expr(cond, out);
+            collect_all_vars_in_stmts(then_body, out);
+            collect_all_vars_in_stmts(else_body, out);
+        }
+        HirStmt::For { init, cond, update, body } => {
+            if let Some(i) = init {
+                collect_all_vars_in_stmt(i, out);
+            }
+            if let Some(c) = cond {
+                collect_vars_in_expr(c, out);
+            }
+            if let Some(u) = update {
+                collect_all_vars_in_stmt(u, out);
+            }
+            collect_all_vars_in_stmts(body, out);
+        }
+        HirStmt::Switch { cases, default, expr } => {
+            collect_vars_in_expr(expr, out);
+            for case in cases {
+                collect_all_vars_in_stmts(&case.body, out);
+            }
+            collect_all_vars_in_stmts(default, out);
+        }
+        _ => {}
+    }
+}
+
+fn collect_vars_in_lvalue<'a>(lhs: &'a HirLValue, out: &mut HashSet<&'a str>) {
+    match lhs {
+        HirLValue::Var(name) => {
+            out.insert(name.as_str());
+        }
+        HirLValue::Deref { ptr, .. } => collect_vars_in_expr(ptr, out),
+        HirLValue::Index { base, index, .. } => {
+            collect_vars_in_expr(base, out);
+            collect_vars_in_expr(index, out);
+        }
+        HirLValue::FieldAccess { base, .. } => collect_vars_in_expr(base, out),
     }
 }

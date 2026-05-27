@@ -48,8 +48,12 @@ fn stack_slot_recovery_names_locals() {
 
     let code =
         render_mlil_preview(&func, "stack_fn", 0x1000, &preview_options()).expect("preview render");
-    assert!(code.contains("local_10"));
-    // SCCP may fold `return local_10` to `return 7` once `local_10` is known constant.
+    // The stack slot may appear as a named local, or SCCP may fold it to a constant.
+    // Either way the return value must be correct.
+    assert!(
+        code.contains("local_10") || code.contains("return 7;"),
+        "expected stack slot name or folded constant in output, got:\n{code}"
+    );
     assert!(
         code.contains("return local_10;") || code.contains("return 7;"),
         "expected return of stack slot value, got:\n{code}"
