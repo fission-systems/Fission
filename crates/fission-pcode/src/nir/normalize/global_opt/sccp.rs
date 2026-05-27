@@ -14,15 +14,23 @@ use std::collections::{HashMap, HashSet};
 type ConstEnv = HashMap<String, (i64, NirType)>;
 
 pub(crate) fn apply_sccp_pass(func: &mut HirFunction) -> bool {
+    if func.name == "sum_array" {
+        println!("[fission-debug] sccp start for sum_array. body:\n{:#?}", func.body);
+    }
     let max_rounds = if is_large_hir_function(func) { 2 } else { 8 };
     let goto_targets = collect_goto_targets(&func.body);
+    let mut all_xvars = HashSet::new();
+    collect_xvars_in_stmts(&func.body, &mut all_xvars);
     let mut any = false;
     for _ in 0..max_rounds {
         let mut env = ConstEnv::new();
-        if !sccp_transform_stmts(&mut func.body, &mut env, &goto_targets) {
+        if !sccp_transform_stmts(&mut func.body, &mut env, &goto_targets, &all_xvars) {
             break;
         }
         any = true;
+    }
+    if func.name == "sum_array" {
+        println!("[fission-debug] sccp end for sum_array. body:\n{:#?}", func.body);
     }
     any
 }
@@ -106,10 +114,13 @@ fn env_without_vars(env: &ConstEnv, vars: &HashSet<String>) -> ConstEnv {
     out
 }
 
-fn loop_variant_vars(body: &[HirStmt]) -> HashSet<String> {
+fn loop_variant_vars(body: &[HirStmt], all_xvars: &HashSet<String>) -> HashSet<String> {
     let mut vars = HashSet::new();
     for stmt in body {
         loop_variant_stmt(stmt, &mut vars);
+    }
+    for xvar in all_xvars {
+        vars.insert(xvar.clone());
     }
     vars
 }
@@ -159,6 +170,7 @@ fn sccp_subst_expr(expr: &mut HirExpr, env: &ConstEnv) -> bool {
     match expr {
         HirExpr::Var(name) | HirExpr::AddressOfGlobal(name) => {
             if let Some((v, ty)) = env.get(name) {
+                println!("[fission-debug] sccp_subst_expr: replacing {} with const {} under env: {:?}", name, v, env);
                 *expr = HirExpr::Const(*v, ty.clone());
                 changed = true;
             }
@@ -340,17 +352,23 @@ fn sccp_transform_stmts(
     stmts: &mut Vec<HirStmt>,
     env: &mut ConstEnv,
     goto_targets: &HashSet<String>,
+    all_xvars: &HashSet<String>,
 ) -> bool {
     let mut changed = false;
     let mut i = 0;
     while i < stmts.len() {
-        changed |= sccp_stmt(&mut stmts[i], env, goto_targets);
+        changed |= sccp_stmt(&mut stmts[i], env, goto_targets, all_xvars);
         i += 1;
     }
     changed
 }
 
-fn sccp_stmt(stmt: &mut HirStmt, env: &mut ConstEnv, goto_targets: &HashSet<String>) -> bool {
+fn sccp_stmt(
+    stmt: &mut HirStmt,
+    env: &mut ConstEnv,
+    goto_targets: &HashSet<String>,
+    all_xvars: &HashSet<String>,
+) -> bool {
     let mut changed = false;
     loop {
         match stmt {
@@ -384,7 +402,7 @@ fn sccp_stmt(stmt: &mut HirStmt, env: &mut ConstEnv, goto_targets: &HashSet<Stri
                 break;
             }
             HirStmt::Block(stmts) => {
-                changed |= sccp_transform_stmts(stmts, env, goto_targets);
+                changed |= sccp_transform_stmts(stmts, env, goto_targets, all_xvars);
                 break;
             }
             HirStmt::If {
@@ -419,8 +437,8 @@ fn sccp_stmt(stmt: &mut HirStmt, env: &mut ConstEnv, goto_targets: &HashSet<Stri
                         for (name, val, ty) in else_extra {
                             e2.insert(name, (val, ty));
                         }
-                        changed |= sccp_transform_stmts(then_body, &mut e1, goto_targets);
-                        changed |= sccp_transform_stmts(else_body, &mut e2, goto_targets);
+                        changed |= sccp_transform_stmts(then_body, &mut e1, goto_targets, all_xvars);
+                        changed |= sccp_transform_stmts(else_body, &mut e2, goto_targets, all_xvars);
                         *env = merge_env(&e1, &e2);
                     }
                 }
@@ -428,20 +446,20 @@ fn sccp_stmt(stmt: &mut HirStmt, env: &mut ConstEnv, goto_targets: &HashSet<Stri
             }
             HirStmt::While { cond, body } => {
                 let pre = env.clone();
-                let modified = loop_variant_vars(body);
+                let modified = loop_variant_vars(body, all_xvars);
                 let loop_entry = env_without_vars(&pre, &modified);
                 changed |= sccp_subst_expr(cond, &loop_entry);
                 changed |= fold_expr_hir(cond);
                 let mut inner = loop_entry;
-                changed |= sccp_transform_stmts(body, &mut inner, goto_targets);
+                changed |= sccp_transform_stmts(body, &mut inner, goto_targets, all_xvars);
                 *env = env_without_vars(&pre, &modified);
                 break;
             }
             HirStmt::DoWhile { body, cond } => {
                 let pre = env.clone();
-                let modified = loop_variant_vars(body);
+                let modified = loop_variant_vars(body, all_xvars);
                 let mut inner = env_without_vars(&pre, &modified);
-                changed |= sccp_transform_stmts(body, &mut inner, goto_targets);
+                changed |= sccp_transform_stmts(body, &mut inner, goto_targets, all_xvars);
                 let cond_env = env_without_vars(&inner, &modified);
                 changed |= sccp_subst_expr(cond, &cond_env);
                 changed |= fold_expr_hir(cond);
@@ -455,10 +473,10 @@ fn sccp_stmt(stmt: &mut HirStmt, env: &mut ConstEnv, goto_targets: &HashSet<Stri
                 body,
             } => {
                 if let Some(i) = init.as_mut() {
-                    changed |= sccp_stmt(i, env, goto_targets);
+                    changed |= sccp_stmt(i, env, goto_targets, all_xvars);
                 }
                 let loop_entry = env.clone();
-                let mut modified = loop_variant_vars(body);
+                let mut modified = loop_variant_vars(body, all_xvars);
                 if let Some(u) = update {
                     if let HirStmt::Assign {
                         lhs: HirLValue::Var(n),
@@ -474,11 +492,11 @@ fn sccp_stmt(stmt: &mut HirStmt, env: &mut ConstEnv, goto_targets: &HashSet<Stri
                     changed |= fold_expr_hir(c);
                 }
                 let mut inner = loop_body_entry;
-                changed |= sccp_transform_stmts(body, &mut inner, goto_targets);
+                changed |= sccp_transform_stmts(body, &mut inner, goto_targets, all_xvars);
                 *env = env_without_vars(&loop_entry, &modified);
                 if let Some(u) = update.as_mut() {
                     let mut update_env = env_without_vars(&inner, &modified);
-                    changed |= sccp_stmt(u, &mut update_env, goto_targets);
+                    changed |= sccp_stmt(u, &mut update_env, goto_targets, all_xvars);
                 }
                 break;
             }
@@ -506,14 +524,14 @@ fn sccp_stmt(stmt: &mut HirStmt, env: &mut ConstEnv, goto_targets: &HashSet<Stri
                 let mut acc: Option<ConstEnv> = None;
                 for case in cases.iter_mut() {
                     let mut e = pre.clone();
-                    changed |= sccp_transform_stmts(&mut case.body, &mut e, goto_targets);
+                    changed |= sccp_transform_stmts(&mut case.body, &mut e, goto_targets, all_xvars);
                     acc = Some(match acc {
                         None => e,
                         Some(a) => merge_env(&a, &e),
                     });
                 }
                 let mut ed = pre.clone();
-                changed |= sccp_transform_stmts(default, &mut ed, goto_targets);
+                changed |= sccp_transform_stmts(default, &mut ed, goto_targets, all_xvars);
                 *env = merge_env(acc.as_ref().unwrap_or(&pre), &ed);
                 break;
             }
@@ -530,4 +548,114 @@ fn sccp_stmt(stmt: &mut HirStmt, env: &mut ConstEnv, goto_targets: &HashSet<Stri
         }
     }
     changed
+}
+
+fn collect_xvars_in_stmts(stmts: &[HirStmt], out: &mut HashSet<String>) {
+    for stmt in stmts {
+        collect_xvars_in_stmt(stmt, out);
+    }
+}
+
+fn collect_xvars_in_stmt(stmt: &HirStmt, out: &mut HashSet<String>) {
+    match stmt {
+        HirStmt::Assign { lhs, rhs } => {
+            collect_xvars_in_lvalue(lhs, out);
+            collect_xvars_in_expr(rhs, out);
+        }
+        HirStmt::VaStart { va_list, .. } => {
+            collect_xvars_in_expr(va_list, out);
+        }
+        HirStmt::Expr(expr) | HirStmt::Return(Some(expr)) => {
+            collect_xvars_in_expr(expr, out);
+        }
+        HirStmt::Block(body) | HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
+            collect_xvars_in_stmts(body, out);
+        }
+        HirStmt::For { init, cond, update, body } => {
+            if let Some(s) = init {
+                collect_xvars_in_stmt(s, out);
+            }
+            if let Some(e) = cond {
+                collect_xvars_in_expr(e, out);
+            }
+            if let Some(s) = update {
+                collect_xvars_in_stmt(s, out);
+            }
+            collect_xvars_in_stmts(body, out);
+        }
+        HirStmt::If { cond, then_body, else_body } => {
+            collect_xvars_in_expr(cond, out);
+            collect_xvars_in_stmts(then_body, out);
+            collect_xvars_in_stmts(else_body, out);
+        }
+        HirStmt::Switch { expr, cases, default } => {
+            collect_xvars_in_expr(expr, out);
+            for case in cases {
+                collect_xvars_in_stmts(&case.body, out);
+            }
+            collect_xvars_in_stmts(default, out);
+        }
+        _ => {}
+    }
+}
+
+fn collect_xvars_in_lvalue(lhs: &HirLValue, out: &mut HashSet<String>) {
+    match lhs {
+        HirLValue::Var(name) => {
+            if name.starts_with("xVar") {
+                out.insert(name.clone());
+            }
+        }
+        HirLValue::Deref { ptr, .. } => {
+            collect_xvars_in_expr(ptr, out);
+        }
+        HirLValue::Index { base, index, .. } => {
+            collect_xvars_in_expr(base, out);
+            collect_xvars_in_expr(index, out);
+        }
+        HirLValue::FieldAccess { base, .. } => {
+            collect_xvars_in_expr(base, out);
+        }
+    }
+}
+
+fn collect_xvars_in_expr(expr: &HirExpr, out: &mut HashSet<String>) {
+    match expr {
+        HirExpr::Var(name) | HirExpr::AddressOfGlobal(name) => {
+            if name.starts_with("xVar") {
+                out.insert(name.clone());
+            }
+        }
+        HirExpr::Cast { expr: inner, .. }
+        | HirExpr::Unary { expr: inner, .. }
+        | HirExpr::Load { ptr: inner, .. }
+        | HirExpr::FieldAccess { base: inner, .. } => {
+            collect_xvars_in_expr(inner, out);
+        }
+        HirExpr::PtrOffset { base, .. } => {
+            collect_xvars_in_expr(base, out);
+        }
+        HirExpr::AggregateCopy { src, .. } => {
+            collect_xvars_in_expr(src, out);
+        }
+        HirExpr::Binary { lhs, rhs, .. } => {
+            collect_xvars_in_expr(lhs, out);
+            collect_xvars_in_expr(rhs, out);
+        }
+        HirExpr::Index { base, index, .. } => {
+            collect_xvars_in_expr(base, out);
+            collect_xvars_in_expr(index, out);
+        }
+        HirExpr::Call { args, .. } => {
+            for arg in args {
+                collect_xvars_in_expr(arg, out);
+            }
+        }
+        HirExpr::Select { cond, then_expr, else_expr, .. } => {
+            collect_xvars_in_expr(cond, out);
+            collect_xvars_in_expr(then_expr, out);
+            collect_xvars_in_expr(else_expr, out);
+        }
+        HirExpr::Const(_, _) => {}
+    }
 }

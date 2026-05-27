@@ -1,4 +1,4 @@
-use super::{print_hir_function, print_type};
+use super::{print_hir_function, print_hir_function_with_global_names, print_type};
 use crate::nir::{
     HirExpr, HirFunction, HirLValue, HirStmt, MlilPreviewOptions, NirBinding, NirBindingOrigin,
     NirType, expr_type,
@@ -13,7 +13,7 @@ pub(crate) fn render_hir_function_with_global_decls(
     let aggregate_typedefs = collect_referenced_aggregate_type_sizes(hir, decls.values());
     let opaque_pcodeop_stubs = collect_opaque_pcodeop_stubs(hir);
     if decls.is_empty() && aggregate_typedefs.is_empty() && opaque_pcodeop_stubs.is_empty() {
-        return print_hir_function(hir);
+        return print_hir_function_with_global_names(hir, &options.global_names);
     }
 
     let mut rendered = String::new();
@@ -29,7 +29,7 @@ pub(crate) fn render_hir_function_with_global_decls(
         rendered.push_str(&format!("{} {};\n", print_type(&ty), name));
     }
     rendered.push('\n');
-    rendered.push_str(&print_hir_function(hir));
+    rendered.push_str(&print_hir_function_with_global_names(hir, &options.global_names));
     rendered
 }
 

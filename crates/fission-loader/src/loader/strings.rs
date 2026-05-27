@@ -16,6 +16,7 @@ const DATA_SECTION_NAMES: &[&str] = &[
     ".data",        // PE/ELF writable data (may contain string literals)
     "__const",      // Mach-O read-only constants
     "__DATA_CONST", // Mach-O data const
+    "__cstring",    // Mach-O null-terminated string literals
     ".data.rel.ro", // ELF RELRO (read-only after relocation)
 ];
 

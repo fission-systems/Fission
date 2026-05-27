@@ -694,12 +694,59 @@ impl<'a> PreviewBuilder<'a> {
                 })
     }
 
+    fn find_loop_carried_variable_for_register(
+        &self,
+        vn: &Varnode,
+        loop_body: &crate::nir::structuring::loop_analysis::LoopBody,
+    ) -> Option<String> {
+        let output_key = VarnodeKey::from(vn);
+        let mut candidates = std::collections::BTreeSet::new();
+        for (mkey, name) in &self.materialized_vns {
+            if !Self::varnode_key_may_alias_output(&mkey.varnode, &output_key)
+                || mkey.varnode.size != output_key.size
+                || name.starts_with("param_")
+            {
+                continue;
+            }
+            if let Some(sites) = self.def_sites.get(&mkey.varnode) {
+                for site in sites {
+                    if loop_body.body.contains(&site.block_idx) {
+                        let op = &self.pcode.blocks[site.block_idx].ops[site.op_idx];
+                        if op.address == mkey.def_addr && op.seq_num == mkey.def_seq {
+                            candidates.insert(name.clone());
+                        }
+                    }
+                }
+            }
+        }
+        if candidates.len() == 1 {
+            candidates.into_iter().next()
+        } else {
+            None
+        }
+    }
+
     fn loop_exit_materialized_register_binding(&mut self, vn: &Varnode) -> Option<HirExpr> {
         if vn.is_constant || !is_register_space_id(vn.space_id) || vn.size < 4 {
             return None;
         }
         let site = self.current_lowering_site?;
         let predecessor_idxs = self.predecessors.get(site.block_idx)?.clone();
+
+        // Single predecessor path: check if predecessor is inside a loop, and we are exiting it.
+        if predecessor_idxs.len() == 1 {
+            let pred_idx = predecessor_idxs[0];
+            if pred_idx != site.block_idx {
+                for loop_body in &self.loop_bodies {
+                    if loop_body.body.contains(&pred_idx) && !loop_body.body.contains(&site.block_idx) {
+                        if let Some(name) = self.find_loop_carried_variable_for_register(vn, loop_body) {
+                            return Some(HirExpr::Var(name));
+                        }
+                    }
+                }
+            }
+        }
+
         if predecessor_idxs.len() < 2 || predecessor_idxs.contains(&site.block_idx) {
             return None;
         }
@@ -1746,6 +1793,8 @@ impl<'a> PreviewBuilder<'a> {
                 );
             }
         }
+
+
 
         let key = VarnodeKey::from(vn);
         if let Some(site) = self.current_lowering_site {

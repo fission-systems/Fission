@@ -1802,6 +1802,9 @@ impl<'a> PreviewBuilder<'a> {
                 }
             }
         }
+        for &(_, dst) in &self.irreducible_edges {
+            targets.insert(self.block_target_key(dst));
+        }
         self.jump_targets_cache = Some(targets.clone());
         Ok(targets)
     }

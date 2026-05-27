@@ -1073,3 +1073,99 @@ fn has_popcount(stmt: &HirStmt) -> bool {
         _ => false,
     }
 }
+
+// ---------------------------------------------------------------------------
+// Coerce pointer-typed variables used in integer-only bit operations
+// ---------------------------------------------------------------------------
+
+/// Collect variable names that appear as the LHS of an assignment where the RHS
+/// is a bitwise-integer-only binary operation (And, Or, Xor, Shl, Shr, Sar).
+/// These variables must have an integer (not pointer) type to compile as valid C.
+fn collect_bitop_lhs_vars_stmts(stmts: &[HirStmt], out: &mut HashSet<String>) {
+    for stmt in stmts {
+        collect_bitop_lhs_vars_stmt(stmt, out);
+    }
+}
+
+fn collect_bitop_lhs_vars_stmt(stmt: &HirStmt, out: &mut HashSet<String>) {
+    match stmt {
+        HirStmt::Assign {
+            lhs: HirLValue::Var(name),
+            rhs,
+        } => {
+            if rhs_is_integer_bitop(rhs) {
+                out.insert(name.clone());
+            }
+        }
+        HirStmt::Block(body)
+        | HirStmt::While { body, .. }
+        | HirStmt::DoWhile { body, .. }
+        | HirStmt::For { body, .. } => {
+            collect_bitop_lhs_vars_stmts(body, out);
+        }
+        HirStmt::If {
+            then_body,
+            else_body,
+            ..
+        } => {
+            collect_bitop_lhs_vars_stmts(then_body, out);
+            collect_bitop_lhs_vars_stmts(else_body, out);
+        }
+        HirStmt::Switch { cases, default, .. } => {
+            for case in cases {
+                collect_bitop_lhs_vars_stmts(&case.body, out);
+            }
+            collect_bitop_lhs_vars_stmts(default, out);
+        }
+        _ => {}
+    }
+}
+
+fn rhs_is_integer_bitop(expr: &HirExpr) -> bool {
+    match expr {
+        HirExpr::Binary { op, .. } => matches!(
+            op,
+            HirBinaryOp::And
+                | HirBinaryOp::Or
+                | HirBinaryOp::Xor
+                | HirBinaryOp::Shl
+                | HirBinaryOp::Shr
+                | HirBinaryOp::Sar
+        ),
+        HirExpr::Cast { expr: inner, .. } => rhs_is_integer_bitop(inner),
+        _ => false,
+    }
+}
+
+/// Safety-net pass: if a local binding has `NirType::Ptr(_)` but is used as the
+/// destination of a bitwise-integer-only operation, coerce its type to `ulonglong`
+/// so that the generated C compiles cleanly.
+///
+/// This handles x86-64 idioms where a pointer difference is computed, stored in
+/// a pointer-typed slot, and then bit-masked (e.g. `ptr_diff &= 4`).
+pub(crate) fn coerce_ptr_typed_bitop_vars(func: &mut HirFunction) -> bool {
+    // Collect all LHS names that receive a bitwise-integer RHS.
+    let mut bitop_lhs: HashSet<String> = HashSet::new();
+    collect_bitop_lhs_vars_stmts(&func.body, &mut bitop_lhs);
+    if bitop_lhs.is_empty() {
+        return false;
+    }
+
+    let int64_ty = NirType::Int {
+        bits: 64,
+        signed: false,
+    };
+
+    let mut changed = false;
+    for binding in &mut func.locals {
+        if bitop_lhs.contains(&binding.name) && matches!(binding.ty, NirType::Ptr(_)) {
+            binding.ty = int64_ty.clone();
+            // Drop any pointer initializer so it doesn't conflict with the new integer type.
+            if binding.initializer.is_some() {
+                binding.initializer = None;
+            }
+            changed = true;
+        }
+    }
+    changed
+}

@@ -670,6 +670,8 @@ fn single_pred_label_inline_flat(stmts: &mut Vec<HirStmt>) -> bool {
                 continue;
             }
 
+            println!("[DEBUG-INLINE] inlining label={} at i={}, j={}, drained_count={}",
+                     goto_label, i, j, j - (i + 1));
             stmts.remove(j);
             if j > i + 1 {
                 stmts.drain(i + 1..j);

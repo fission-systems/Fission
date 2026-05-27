@@ -929,6 +929,54 @@ impl<'a> PreviewBuilder<'a> {
 
         let mut result_stmts: Vec<HirStmt> = Vec::new();
         let mut emitted_labels: HashSet<u64> = HashSet::new();
+        // Addresses within body_set that must have a label emitted regardless of `targeted`.
+        // Pre-populated by scanning:
+        //   (a) terminator_cache for already-lowered terminators, and
+        //   (b) raw CFG successors (always available) for body-internal edges.
+        // This handles both forward and backward jump references before blocks are lowered.
+        let mut force_labels: HashSet<u64> = HashSet::new();
+        {
+            let body_addrs: HashSet<u64> = body_set
+                .iter()
+                .filter_map(|&bi| self.pcode.blocks.get(bi).map(|b| b.start_address))
+                .collect();
+            for &bi in body_set.iter() {
+                // (a) Check terminator cache (already-lowered terminators).
+                if let Some(term) = self.terminator_cache.get(&bi) {
+                    let add_if_body = |addr: u64, fl: &mut HashSet<u64>| {
+                        if body_addrs.contains(&addr) {
+                            fl.insert(addr);
+                        }
+                    };
+                    match term {
+                        LoweredTerminator::Goto(t) | LoweredTerminator::Fallthrough(Some(t)) => {
+                            add_if_body(*t, &mut force_labels);
+                        }
+                        LoweredTerminator::Cond { true_target, false_target, .. } => {
+                            add_if_body(*true_target, &mut force_labels);
+                            if let Some(ft) = false_target {
+                                add_if_body(*ft, &mut force_labels);
+                            }
+                        }
+                        LoweredTerminator::Switch { targets, default_target, .. } => {
+                            for &t in targets.iter() { add_if_body(t, &mut force_labels); }
+                            if let Some(dt) = default_target { add_if_body(*dt, &mut force_labels); }
+                        }
+                        _ => {}
+                    }
+                }
+                // (b) Check raw CFG successors (always available, pre-dominates terminator cache).
+                // If a body block has a successor that is also in body_set, mark it for a label,
+                // because a goto may be emitted during fallback lowering.
+                for &succ_idx in &self.successors[bi] {
+                    if body_set.contains(&succ_idx) {
+                        if let Some(succ_block) = self.pcode.blocks.get(succ_idx) {
+                            force_labels.insert(succ_block.start_address);
+                        }
+                    }
+                }
+            }
+        }
         let mut last_structuring_failure = None;
         let mut pos = start_pos;
 
@@ -976,7 +1024,7 @@ impl<'a> PreviewBuilder<'a> {
             // --- Fallback: emit block with loop-context-aware terminator ---
             let block = self.pcode_block(idx).clone();
             let block_key = self.block_target_key(idx);
-            if (idx == start_idx || targeted.contains(&block_key))
+            if (idx == start_idx || targeted.contains(&block_key) || force_labels.contains(&block_key))
                 && emitted_labels.insert(block_key)
             {
                 result_stmts.push(HirStmt::Label(block_label(block_key)));
@@ -994,6 +1042,12 @@ impl<'a> PreviewBuilder<'a> {
                     } else if target == head_addr {
                         result_stmts.push(HirStmt::Continue);
                     } else if self.next_block_address(idx) != Some(target) {
+                        // Track this target as requiring a label if it is in the body.
+                        if let Some(target_idx) = self.find_block_index_by_address(target) {
+                            if body_set.contains(&target_idx) {
+                                force_labels.insert(target);
+                            }
+                        }
                         result_stmts.push(HirStmt::Goto(block_label(target)));
                     }
                 }
@@ -1058,10 +1112,22 @@ impl<'a> PreviewBuilder<'a> {
                         let then_body = if next_addr == Some(true_target) {
                             Vec::new()
                         } else {
+                            // Track this as requiring a label if it is in the body.
+                            if let Some(target_idx) = self.find_block_index_by_address(true_target) {
+                                if body_set.contains(&target_idx) {
+                                    force_labels.insert(true_target);
+                                }
+                            }
                             vec![HirStmt::Goto(block_label(true_target))]
                         };
                         let else_body = match false_target {
                             Some(ft) if Some(ft) != next_addr => {
+                                // Track this as requiring a label if it is in the body.
+                                if let Some(target_idx) = self.find_block_index_by_address(ft) {
+                                    if body_set.contains(&target_idx) {
+                                        force_labels.insert(ft);
+                                    }
+                                }
                                 vec![HirStmt::Goto(block_label(ft))]
                             }
                             _ => Vec::new(),

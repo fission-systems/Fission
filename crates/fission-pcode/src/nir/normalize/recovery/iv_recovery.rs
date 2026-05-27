@@ -460,7 +460,21 @@ fn try_tail_label_loop_to_for(
             return false;
         }
 
+        // Side-entry check: Reject loop recovery if there are jumps from outside into the body.
+        let body_labels = collect_loop_body_labels(body_slice);
+        let mut internal_goto_counts = HashMap::new();
+        count_goto_targets(body_slice, &mut internal_goto_counts);
+        for label_in_body in &body_labels {
+            let global_gotos = goto_counts.get(label_in_body).copied().unwrap_or(0);
+            let internal_gotos = internal_goto_counts.get(label_in_body).copied().unwrap_or(0);
+            if global_gotos > internal_gotos {
+                return false;
+            }
+        }
+
         let mut body = body_slice.to_vec();
+        println!("[DEBUG-FIB-IV] matched try_tail_label_loop_to_for: label={}, label_idx={}, tail_idx={}, body_len={}",
+                 label, label_idx, tail_idx, body.len());
         body.push(HirStmt::If {
             cond: invert_condition(continue_cond),
             then_body: vec![HirStmt::Break],
@@ -1192,6 +1206,20 @@ fn is_one(expr: &HirExpr) -> bool {
     matches!(strip_casts(expr), HirExpr::Const(1, _))
 }
 
+fn type_size_bytes(ty: &NirType) -> u32 {
+    match ty {
+        NirType::Bool => 1,
+        NirType::Int { bits, .. } | NirType::Float { bits } => (*bits / 8).max(1),
+        NirType::Ptr(_) => 8,
+        NirType::Aggregate { size, .. } => *size,
+        NirType::Unknown => 1,
+    }
+}
+
+fn is_const_val(expr: &HirExpr, val: i64) -> bool {
+    matches!(strip_casts(expr), HirExpr::Const(v, _) if *v == val)
+}
+
 fn is_cursor_increment_by_one(stmt: &HirStmt, cursor: &str) -> bool {
     let HirStmt::Assign {
         lhs: HirLValue::Var(lhs),
@@ -1207,13 +1235,17 @@ fn is_cursor_increment_by_one(stmt: &HirStmt, cursor: &str) -> bool {
         op: HirBinaryOp::Add,
         lhs,
         rhs,
-        ..
+        ty,
     } = strip_casts(rhs)
     else {
         return false;
     };
-    (direct_cursor_var(lhs, cursor) && is_one(rhs))
-        || (direct_cursor_var(rhs, cursor) && is_one(lhs))
+    let element_size = match ty {
+        NirType::Ptr(pointee) => type_size_bytes(pointee) as i64,
+        _ => 1,
+    };
+    (direct_cursor_var(lhs, cursor) && (is_const_val(rhs, element_size) || is_const_val(rhs, 1)))
+        || (direct_cursor_var(rhs, cursor) && (is_const_val(lhs, element_size) || is_const_val(lhs, 1)))
 }
 
 fn rewrite_cursor_expr_to_index(expr: &mut HirExpr, cursor: &str, index_name: &str) -> bool {
@@ -1619,10 +1651,65 @@ fn try_scev_upgrade(stmts: &mut Vec<HirStmt>, loop_idx: usize) -> bool {
     }
 }
 
+fn extract_pointer_cursor_and_count(
+    cond: &HirExpr,
+    stmts: &[HirStmt],
+    loop_idx: usize,
+) -> Option<(String, HirExpr)> {
+    let HirExpr::Binary {
+        op: HirBinaryOp::Ne,
+        lhs,
+        rhs,
+        ..
+    } = cond
+    else {
+        return None;
+    };
+
+    let match_addition = |expr: &HirExpr, cursor: &str| -> Option<HirExpr> {
+        let stripped = strip_casts(expr);
+        if let HirExpr::Binary {
+            op: HirBinaryOp::Add,
+            lhs: add_lhs,
+            rhs: add_rhs,
+            ..
+        } = stripped
+        {
+            if matches!(strip_casts(add_lhs.as_ref()), HirExpr::Var(name) if name == cursor) {
+                return Some(*add_rhs.clone());
+            }
+            if matches!(strip_casts(add_rhs.as_ref()), HirExpr::Var(name) if name == cursor) {
+                return Some(*add_lhs.clone());
+            }
+        }
+        None
+    };
+
+    if let HirExpr::Var(cursor) = strip_casts(lhs.as_ref()) {
+        if let Some(count_expr) = match_addition(rhs.as_ref(), cursor) {
+            return Some((cursor.clone(), count_expr));
+        }
+    }
+    if let HirExpr::Var(cursor) = strip_casts(rhs.as_ref()) {
+        if let Some(count_expr) = match_addition(lhs.as_ref(), cursor) {
+            return Some((cursor.clone(), count_expr));
+        }
+    }
+
+    match (strip_casts(lhs.as_ref()), strip_casts(rhs.as_ref())) {
+        (HirExpr::Var(cursor), HirExpr::Var(end)) => {
+            let (_, count_expr) = find_pointer_end_assignment_before(stmts, loop_idx, cursor, end)?;
+            Some((cursor.clone(), count_expr))
+        }
+        _ => None,
+    }
+}
+
 fn try_guarded_dowhile_pointer_iv_upgrade(
     stmts: &mut [HirStmt],
     locals: &mut Vec<NirBinding>,
     loop_idx: usize,
+    active_guards: &[HirExpr],
 ) -> bool {
     let (cond, body) = match &stmts[loop_idx] {
         HirStmt::DoWhile { cond, body } => (cond.clone(), body.clone()),
@@ -1631,22 +1718,24 @@ fn try_guarded_dowhile_pointer_iv_upgrade(
     if super::for_loops::stmt_list_contains_continue_pub(&body) {
         return false;
     }
-    let Some((cursor, end)) = pointer_cursor_condition(&cond) else {
+    let Some((cursor_str, count_expr)) = extract_pointer_cursor_and_count(&cond, stmts, loop_idx) else {
         return false;
     };
+    let cursor = &cursor_str;
     let loop_variant = loop_variant_vars(&body);
     let Some((update_idx, true)) = find_iv_update(&body, cursor, &loop_variant) else {
         return false;
     };
-    let Some((_end_idx, count_expr)) =
-        find_pointer_end_assignment_before(stmts, loop_idx, cursor, end)
-    else {
-        return false;
-    };
     let after_labels = labels_after(stmts, loop_idx);
-    let Some(count_cmp) =
-        positive_count_entry_guard_cmp(stmts, loop_idx, &count_expr, &after_labels)
-    else {
+    let count_cmp = positive_count_entry_guard_cmp(stmts, loop_idx, &count_expr, &after_labels)
+        .or_else(|| {
+            if !active_guards.is_empty() {
+                Some(HirBinaryOp::SLt)
+            } else {
+                None
+            }
+        });
+    let Some(count_cmp) = count_cmp else {
         return false;
     };
     if cursor_used_after_loop(stmts, loop_idx, cursor) {
@@ -1710,44 +1799,47 @@ fn try_guarded_dowhile_pointer_iv_upgrade(
     true
 }
 
-fn apply_scev_upgrade_in_stmts(stmts: &mut Vec<HirStmt>, locals: &mut Vec<NirBinding>) -> bool {
+fn apply_scev_upgrade_in_stmts(
+    stmts: &mut Vec<HirStmt>,
+    locals: &mut Vec<NirBinding>,
+    active_guards: &mut Vec<HirExpr>,
+) -> bool {
     let mut changed = false;
     let mut i = 0;
     while i < stmts.len() {
         if matches!(&stmts[i], HirStmt::While { .. }) {
             if try_scev_upgrade(stmts, i) {
                 changed = true;
-                // Don't advance i — re-check this position (the For may enable
-                // another pass, but more likely just continue).
                 continue;
             }
         } else if matches!(&stmts[i], HirStmt::DoWhile { .. })
-            && try_guarded_dowhile_pointer_iv_upgrade(stmts, locals, i)
+            && try_guarded_dowhile_pointer_iv_upgrade(stmts, locals, i, active_guards)
         {
             changed = true;
             continue;
         }
-        // Recurse into nested constructs.
         match &mut stmts[i] {
             HirStmt::If {
                 then_body,
                 else_body,
-                ..
+                cond,
             } => {
-                changed |= apply_scev_upgrade_in_stmts(then_body, locals);
-                changed |= apply_scev_upgrade_in_stmts(else_body, locals);
+                active_guards.push(cond.clone());
+                changed |= apply_scev_upgrade_in_stmts(then_body, locals, active_guards);
+                active_guards.pop();
+                changed |= apply_scev_upgrade_in_stmts(else_body, locals, active_guards);
             }
             HirStmt::Block(body)
             | HirStmt::While { body, .. }
             | HirStmt::DoWhile { body, .. }
             | HirStmt::For { body, .. } => {
-                changed |= apply_scev_upgrade_in_stmts(body, locals);
+                changed |= apply_scev_upgrade_in_stmts(body, locals, active_guards);
             }
             HirStmt::Switch { cases, default, .. } => {
                 for case in cases.iter_mut() {
-                    changed |= apply_scev_upgrade_in_stmts(&mut case.body, locals);
+                    changed |= apply_scev_upgrade_in_stmts(&mut case.body, locals, active_guards);
                 }
-                changed |= apply_scev_upgrade_in_stmts(default, locals);
+                changed |= apply_scev_upgrade_in_stmts(default, locals, active_guards);
             }
             _ => {}
         }
@@ -1763,8 +1855,9 @@ fn apply_scev_upgrade_in_stmts(stmts: &mut Vec<HirStmt>, locals: &mut Vec<NirBin
 pub(crate) fn apply_iv_recovery_pass(func: &mut HirFunction) -> bool {
     let mut goto_counts: HashMap<String, usize> = HashMap::new();
     count_goto_targets(&func.body, &mut goto_counts);
+    let mut active_guards = Vec::new();
     apply_tail_label_loop_recovery_in_stmts(&mut func.body, &goto_counts)
-        | apply_scev_upgrade_in_stmts(&mut func.body, &mut func.locals)
+        | apply_scev_upgrade_in_stmts(&mut func.body, &mut func.locals, &mut active_guards)
 }
 
 /// Apply break/continue recovery across the entire function body.

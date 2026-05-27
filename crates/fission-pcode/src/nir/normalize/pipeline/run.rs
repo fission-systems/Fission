@@ -500,7 +500,6 @@ pub(crate) fn normalize_hir_function(func: &mut HirFunction) {
             prune_unused_dead_local_bindings(f);
         });
     }
-    // ABI-aware entry spill → param_k promotion (HIR, after early cleanup).
     if run_pass_logged(
         func,
         "entry_param_promotion",

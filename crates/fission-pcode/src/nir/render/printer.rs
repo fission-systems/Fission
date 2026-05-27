@@ -15,6 +15,7 @@ struct PrintCtx<'a> {
     var_types: HashMap<&'a str, &'a NirType>,
     return_type: &'a NirType,
     inline_guard_goto: bool,
+    global_names: Option<&'a HashMap<u64, String>>,
 }
 
 impl<'a> PrintCtx<'a> {
@@ -27,6 +28,7 @@ impl<'a> PrintCtx<'a> {
             var_types,
             return_type: &func.return_type,
             inline_guard_goto: func.body.len() <= 6,
+            global_names: None,
         }
     }
 
@@ -48,6 +50,19 @@ impl<'a> PrintCtx<'a> {
 
 pub(in crate::nir) fn print_hir_function(func: &HirFunction) -> String {
     let ctx = PrintCtx::build(func);
+    print_hir_function_impl(func, ctx)
+}
+
+pub(in crate::nir) fn print_hir_function_with_global_names(
+    func: &HirFunction,
+    global_names: &HashMap<u64, String>,
+) -> String {
+    let mut ctx = PrintCtx::build(func);
+    ctx.global_names = Some(global_names);
+    print_hir_function_impl(func, ctx)
+}
+
+fn print_hir_function_impl(func: &HirFunction, ctx: PrintCtx<'_>) -> String {
     let mut out = String::new();
     let return_type = func
         .surface_return_type_name
@@ -349,7 +364,13 @@ fn print_expr_prec(expr: &HirExpr, parent_prec: u8, depth: usize) -> String {
         return "0 /* [FISSION] RECURSION TOO DEEP (expression printer guard) */".to_string();
     }
     let (text, prec) = match expr {
-        HirExpr::AddressOfGlobal(name) => (format!("&{name}"), 110),
+        HirExpr::AddressOfGlobal(name) => {
+            if name.starts_with('"') {
+                (name.clone(), 120)
+            } else {
+                (format!("&{name}"), 110)
+            }
+        }
         HirExpr::Var(name) => (name.clone(), 120),
         HirExpr::Const(value, _) => (value.to_string(), 120),
         HirExpr::Cast { ty, expr } => {
@@ -675,9 +696,24 @@ fn print_expr_prec_ctx(
             let op = if is_ptr { "->" } else { "." };
             (format!("{inner}{op}{field_name}"), 110)
         }
-        HirExpr::AddressOfGlobal(name) => (format!("&{name}"), 110),
+        HirExpr::AddressOfGlobal(name) => {
+            if name.starts_with('"') {
+                (name.clone(), 120)
+            } else {
+                (format!("&{name}"), 110)
+            }
+        }
         HirExpr::Var(name) => (name.clone(), 120),
-        HirExpr::Const(value, _) => (value.to_string(), 120),
+        HirExpr::Const(value, _) => {
+            let name = ctx.global_names.and_then(|names| {
+                names.get(&((*value) as u64)).cloned()
+            });
+            if let Some(name) = name {
+                (name, 120)
+            } else {
+                (value.to_string(), 120)
+            }
+        }
         HirExpr::Cast { ty, expr } => {
             if let Some(pointer_diff) = print_pointer_diff_cast(ty, expr, depth, ctx) {
                 return pointer_diff;
@@ -832,6 +868,14 @@ fn print_lvalue_ctx(lhs: &HirLValue, depth: usize, ctx: &PrintCtx<'_>) -> String
     }
 }
 
+fn is_integer_bitop(op: HirBinaryOp) -> bool {
+    matches!(
+        op,
+        HirBinaryOp::And | HirBinaryOp::Or | HirBinaryOp::Xor
+            | HirBinaryOp::Shl | HirBinaryOp::Shr | HirBinaryOp::Sar
+    )
+}
+
 fn try_compound_assignment(lhs: &HirLValue, rhs: &HirExpr, ctx: &PrintCtx<'_>) -> Option<String> {
     let HirLValue::Var(var_name) = lhs else {
         return None;
@@ -845,6 +889,34 @@ fn try_compound_assignment(lhs: &HirLValue, rhs: &HirExpr, ctx: &PrintCtx<'_>) -
     if var_name != lhs_name {
         return None;
     }
+
+    // If the LHS variable is a pointer type and the operation is a bitwise integer op,
+    // we cannot emit `ptr &= val` (invalid C). Instead emit:
+    //   var = (ptr_ty)((ulonglong)var OP val);
+    let var_is_ptr = ctx
+        .var_types
+        .get(var_name.as_str())
+        .is_some_and(|ty| matches!(ty, NirType::Ptr(_)));
+    if var_is_ptr && is_integer_bitop(*op) {
+        let ptr_ty = ctx
+            .var_types
+            .get(var_name.as_str())
+            .map(|ty| print_type(ty))
+            .unwrap_or_else(|| "void *".to_string());
+        let op_str = match op {
+            HirBinaryOp::And => "&",
+            HirBinaryOp::Or => "|",
+            HirBinaryOp::Xor => "^",
+            HirBinaryOp::Shl => "<<",
+            HirBinaryOp::Shr | HirBinaryOp::Sar => ">>",
+            _ => return None,
+        };
+        let rhs_str = print_expr_with_ctx(rhs_expr, ctx);
+        return Some(format!(
+            "{var_name} = ({ptr_ty})((ulonglong){var_name} {op_str} {rhs_str});"
+        ));
+    }
+
     if matches!(op, HirBinaryOp::Add) && matches!(rhs_expr.as_ref(), HirExpr::Const(1, _)) {
         return Some(format!("{}++;", var_name));
     }
