@@ -503,48 +503,76 @@ fn redundant_assign_rhs_equal(lhs: &HirExpr, rhs: &HirExpr) -> bool {
 }
 
 pub(crate) fn eliminate_dead_local_clobber_assigns(func: &mut HirFunction) -> bool {
-    eliminate_dead_local_clobber_assigns_in_stmts(&mut func.body, &func.params, &func.locals)
+    // Build a whole-function use map so sibling branches / nested blocks are
+    // correctly accounted for.  Using a scoped `count_uses_in_stmt_list` on
+    // each nested slice risks counting only the local slice and incorrectly
+    // classifying a variable as dead when it is live in a sibling scope.
+    let use_map = DefUseMap::build(&func.body);
+    let local_types: HashMap<&str, &NirType> = func
+        .locals
+        .iter()
+        .map(|b| (b.name.as_str(), &b.ty))
+        .collect();
+    let param_names: HashSet<&str> = func
+        .params
+        .iter()
+        .map(|b| b.name.as_str())
+        .collect();
+    // Stack-backed locals (StackOffset / DerivedFromStackOffset origin) must
+    // NEVER be silently removed even when their name is never read, because the
+    // write itself may be observable through aliased pointers.
+    let stack_backed_names: HashSet<&str> = func
+        .locals
+        .iter()
+        .filter(|b| matches!(
+            b.origin,
+            Some(NirBindingOrigin::StackOffset(_))
+                | Some(NirBindingOrigin::DerivedFromStackOffset(_))
+        ))
+        .map(|b| b.name.as_str())
+        .collect();
+    eliminate_dead_local_clobber_assigns_in_stmts(
+        &mut func.body,
+        &param_names,
+        &local_types,
+        &stack_backed_names,
+        &use_map,
+    )
 }
 
 fn eliminate_dead_local_clobber_assigns_in_stmts(
     stmts: &mut Vec<HirStmt>,
-    params: &[NirBinding],
-    locals: &[NirBinding],
+    param_names: &HashSet<&str>,
+    local_types: &HashMap<&str, &NirType>,
+    stack_backed_names: &HashSet<&str>,
+    use_map: &DefUseMap,
 ) -> bool {
+    // Recurse into nested bodies first (the use_map is already whole-function).
     for stmt in stmts.iter_mut() {
         match stmt {
             HirStmt::Block(body)
             | HirStmt::While { body, .. }
             | HirStmt::DoWhile { body, .. }
             | HirStmt::For { body, .. } => {
-                eliminate_dead_local_clobber_assigns_in_stmts(body, params, locals);
+                eliminate_dead_local_clobber_assigns_in_stmts(body, param_names, local_types, stack_backed_names, use_map);
             }
             HirStmt::If {
                 then_body,
                 else_body,
                 ..
             } => {
-                eliminate_dead_local_clobber_assigns_in_stmts(then_body, params, locals);
-                eliminate_dead_local_clobber_assigns_in_stmts(else_body, params, locals);
+                eliminate_dead_local_clobber_assigns_in_stmts(then_body, param_names, local_types, stack_backed_names, use_map);
+                eliminate_dead_local_clobber_assigns_in_stmts(else_body, param_names, local_types, stack_backed_names, use_map);
             }
             HirStmt::Switch { cases, default, .. } => {
                 for case in cases {
-                    eliminate_dead_local_clobber_assigns_in_stmts(&mut case.body, params, locals);
+                    eliminate_dead_local_clobber_assigns_in_stmts(&mut case.body, param_names, local_types, stack_backed_names, use_map);
                 }
-                eliminate_dead_local_clobber_assigns_in_stmts(default, params, locals);
+                eliminate_dead_local_clobber_assigns_in_stmts(default, param_names, local_types, stack_backed_names, use_map);
             }
             _ => {}
         }
     }
-
-    let local_types = locals
-        .iter()
-        .map(|binding| (binding.name.as_str(), &binding.ty))
-        .collect::<HashMap<_, _>>();
-    let param_names = params
-        .iter()
-        .map(|binding| binding.name.as_str())
-        .collect::<HashSet<_>>();
 
     let mut changed = false;
     let mut to_remove = vec![false; stmts.len()];
@@ -563,13 +591,23 @@ fn eliminate_dead_local_clobber_assigns_in_stmts(
         {
             continue;
         }
+        // Stack-backed locals (StackOffset / DerivedFromStackOffset) must never
+        // be removed even when unused: their writes may be observable through
+        // aliased pointers.  This is the authoritative semantic guard that
+        // replaces the old hex-offset cut-off.
+        if stack_backed_names.contains(name) {
+            continue;
+        }
         if matches!(
             local_types.get(name).copied(),
             Some(NirType::Aggregate { .. } | NirType::Ptr(_))
         ) {
             continue;
         }
-        if count_uses_in_stmt_list(stmts, name) == 0 {
+        // Use the whole-function use map — not a local slice — so sibling
+        // branches that read this name are correctly counted.
+        let uses = use_map.use_count.get(name).copied().unwrap_or(0);
+        if uses == 0 {
             to_remove[idx] = true;
             changed = true;
         }
@@ -579,6 +617,7 @@ fn eliminate_dead_local_clobber_assigns_in_stmts(
     }
     changed
 }
+
 
 pub(crate) fn prune_unused_temp_bindings(func: &mut HirFunction) -> bool {
     let mut changed = false;

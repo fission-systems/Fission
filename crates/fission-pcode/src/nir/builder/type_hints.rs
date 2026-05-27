@@ -276,9 +276,6 @@ fn ensure_missing_hinted_params(
     hints: &PreviewFunctionHints,
     stats: &mut PreviewHintStats,
 ) {
-    if !func.params.is_empty() {
-        return;
-    }
     let max_param = hints.param_names.len().max(
         hints
             .param_type_names
@@ -287,7 +284,15 @@ fn ensure_missing_hinted_params(
             .max()
             .unwrap_or(0),
     );
+    let mut added = false;
     for index in 0..max_param {
+        if func
+            .params
+            .iter()
+            .any(|p| p.origin == Some(NirBindingOrigin::ParamIndex(index)))
+        {
+            continue;
+        }
         let default_name = format!("param_{}", index + 1);
         let name = hints
             .param_names
@@ -317,8 +322,16 @@ fn ensure_missing_hinted_params(
             origin: Some(NirBindingOrigin::ParamIndex(index)),
             initializer: None,
         });
+        added = true;
+    }
+    if added {
+        func.params.sort_by_key(|b| match b.origin {
+            Some(NirBindingOrigin::ParamIndex(idx)) => idx,
+            _ => 999,
+        });
     }
 }
+
 
 fn stack_origin_offset(origin: Option<NirBindingOrigin>) -> Option<(i64, bool)> {
     match origin {

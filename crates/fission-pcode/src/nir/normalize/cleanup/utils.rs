@@ -63,9 +63,13 @@ pub(super) fn is_dead_local_clobber_name(name: &str) -> bool {
     let Some(hex) = name.strip_prefix("local_") else {
         return false;
     };
-    u64::from_str_radix(hex, 16)
-        .map(|offset| offset <= 0x0c)
-        .unwrap_or(false)
+    // Accept any stack-slot name of the form `local_<hex>` as a dead-store
+    // candidate.  The safety guards in the callers (Ptr, Aggregate,
+    // side-effecting RHS, `slot_` prefix, and param name membership) are
+    // sufficient to protect memory-observable slots — an arbitrary hex offset
+    // cut-off is not needed and incorrectly excluded large offsets such as
+    // local_10 / local_20 / local_28 on AArch64 or larger x86 frames.
+    u64::from_str_radix(hex, 16).is_ok()
 }
 
 pub(super) fn retain_unmarked_stmts(stmts: &mut Vec<HirStmt>, to_remove: &[bool]) {

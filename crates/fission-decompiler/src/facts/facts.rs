@@ -14,6 +14,24 @@ use fission_static::analysis::decomp::facts::FactProvenance;
 use fission_static::analysis::decomp::facts::FactStore;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
+fn get_well_known_function_hints(name: &str) -> Option<NirFunctionHints> {
+    match name {
+        "main" => {
+            let mut param_type_names = HashMap::new();
+            param_type_names.insert(0, "int".to_string());
+            param_type_names.insert(1, "char **".to_string());
+            Some(NirFunctionHints {
+                param_names: vec!["argc".to_string(), "argv".to_string()],
+                param_type_names,
+                stack_local_names: HashMap::new(),
+                stack_local_type_names: HashMap::new(),
+                return_type_name: Some("int".to_string()),
+            })
+        }
+        _ => None,
+    }
+}
+
 pub(crate) fn build_nir_type_context(
     binary: &LoadedBinary,
     fact_store: &FactStore,
@@ -91,6 +109,17 @@ pub(crate) fn build_nir_type_context(
         .map(|(address, target_ref)| (*address, target_ref.clone()))
         .collect::<HashMap<_, _>>();
 
+    let mut function_hints = build_nir_function_hints(fact_store, address);
+    if function_hints.is_none() {
+        let name = all_target_refs
+            .get(&address)
+            .map(|tr| tr.symbol.as_str())
+            .unwrap_or("");
+        if let Some(well_known) = get_well_known_function_hints(name) {
+            function_hints = Some(well_known);
+        }
+    }
+
     NirTypeContext {
         call_targets,
         call_target_refs: call_target_refs.clone(),
@@ -99,7 +128,7 @@ pub(crate) fn build_nir_type_context(
         call_effect_summaries: build_nir_call_effect_summaries(&all_target_refs, binary),
         call_prototype_summaries: HashMap::new(),
         call_param_rules: build_nir_call_param_rules(&all_target_refs),
-        function_hints: build_nir_function_hints(fact_store, address),
+        function_hints,
     }
 }
 

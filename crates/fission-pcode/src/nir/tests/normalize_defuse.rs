@@ -1011,6 +1011,80 @@ fn defuse_does_not_remove_stack_slot_assignment() {
     );
 }
 
+#[test]
+fn defuse_removes_dead_local_with_large_hex_offset_no_stack_origin() {
+    // local_10 / local_20 / local_28 — no StackOffset origin, never read →
+    // must be removed.  This was the bug: the old 0x0c threshold kept them.
+    let make_non_stack = |name: &str| NirBinding {
+        name: name.to_string(),
+        ty: int(64),
+        surface_type_name: None,
+        origin: None,  // not a stack-backed slot
+        initializer: None,
+    };
+    let mut func = HirFunction {
+        name: "test_dead_local_large_offset".to_string(),
+        params: vec![],
+        locals: vec![
+            make_non_stack("local_c"),
+            make_non_stack("local_10"),
+            make_non_stack("local_20"),
+            make_non_stack("local_28"),
+        ],
+        return_type: int(32),
+        body: vec![
+            assign("local_c", const_expr(0, 32)),
+            assign("local_10", HirExpr::Var("x1".to_string())),
+            assign("local_20", HirExpr::Var("x2".to_string())),
+            assign("local_28", HirExpr::Var("x3".to_string())),
+            return_expr(varexpr("local_c")),
+        ],
+        ..Default::default()
+    };
+    normalize_hir_function(&mut func);
+    let code = print_hir_function(&func);
+    assert!(
+        !code.contains("local_10"),
+        "dead non-stack local_10 should be eliminated; got: {code}"
+    );
+    assert!(
+        !code.contains("local_20"),
+        "dead non-stack local_20 should be eliminated; got: {code}"
+    );
+    assert!(
+        !code.contains("local_28"),
+        "dead non-stack local_28 should be eliminated; got: {code}"
+    );
+}
+
+#[test]
+fn defuse_preserves_live_local_with_large_hex_offset() {
+    // local_20 with no stack origin but actually used → must be kept.
+    let mut func = HirFunction {
+        name: "test_live_local_large_offset".to_string(),
+        params: vec![],
+        locals: vec![NirBinding {
+            name: "local_20".to_string(),
+            ty: int(32),
+            surface_type_name: None,
+            origin: None,
+            initializer: None,
+        }],
+        return_type: int(32),
+        body: vec![
+            assign("local_20", const_expr(42, 32)),
+            return_expr(varexpr("local_20")),
+        ],
+        ..Default::default()
+    };
+    normalize_hir_function(&mut func);
+    let code = print_hir_function(&func);
+    assert!(
+        code.contains("42") || code.contains("local_20"),
+        "live local_20 or its folded value should remain; got: {code}"
+    );
+}
+
 // ── Copy propagation (via normalize_hir_function) ────────────────────────────
 
 #[test]
