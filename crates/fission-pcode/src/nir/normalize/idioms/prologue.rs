@@ -423,7 +423,7 @@ pub(crate) fn remove_callee_save_prologue_epilogue(func: &mut HirFunction) -> bo
     }
 
     if candidate_pairs.is_empty() {
-        return false;
+        return remove_orphaned_slot_epilogue_restores(func);
     }
 
     // ── Step 2: Validate each candidate pair.
@@ -461,7 +461,7 @@ pub(crate) fn remove_callee_save_prologue_epilogue(func: &mut HirFunction) -> bo
     }
 
     if confirmed.is_empty() {
-        return false;
+        return remove_orphaned_slot_epilogue_restores(func);
     }
 
     // ── Step 3: Remove all confirmed save and restore statements.
@@ -474,6 +474,10 @@ pub(crate) fn remove_callee_save_prologue_epilogue(func: &mut HirFunction) -> bo
         func.locals
             .retain(|b| !eliminated_ptrs.contains(b.name.as_str()));
     }
+
+    // ── Step 5: Also remove orphaned stack-slot epilogue restores that were
+    // left behind by `remove_entry_stack_scaffold_stores`.
+    changed |= remove_orphaned_slot_epilogue_restores(func);
 
     changed
 }
@@ -544,9 +548,166 @@ fn count_restores_for_ptr(stmts: &[HirStmt], ptr: &str) -> usize {
     count
 }
 
+// ── Orphaned stack-slot epilogue restore removal ──────────────────────────────
+//
+// When `remove_entry_stack_scaffold_stores` strips a prologue save of the form
+// `home_X = callee_saved_reg`, it leaves the matching epilogue restore
+// `callee_saved_reg = home_X` in place.  Because the definition of `home_X` is
+// gone, that restore reads an uninitialized slot and is dead.  This sub-pass
+// detects and removes such orphaned restores.
+
+/// Match `callee_saved_reg = home_slot_var` (plain `Var` on RHS, no deref).
+/// Returns `(slot_var_name, reg_name)` on success.
+fn match_slot_epilogue_restore(stmt: &HirStmt) -> Option<(String, String)> {
+    let HirStmt::Assign { lhs, rhs } = stmt else {
+        return None;
+    };
+    let reg = match lhs {
+        HirLValue::Var(r) if is_callee_saved(r) => r.as_str(),
+        _ => return None,
+    };
+    let slot_var = match rhs {
+        HirExpr::Var(v) if looks_like_stack_slot_name(v) => v.as_str(),
+        HirExpr::Cast { expr: inner, .. } => match inner.as_ref() {
+            HirExpr::Var(v) if looks_like_stack_slot_name(v) => v.as_str(),
+            _ => return None,
+        },
+        _ => return None,
+    };
+    Some((slot_var.to_string(), reg.to_string()))
+}
+
+fn collect_slot_restores(stmts: &[HirStmt], out: &mut Vec<(String, String)>) {
+    for stmt in stmts {
+        if let Some(pair) = match_slot_epilogue_restore(stmt) {
+            out.push(pair);
+        }
+        match stmt {
+            HirStmt::Block(body) => collect_slot_restores(body, out),
+            HirStmt::If { then_body, else_body, .. } => {
+                collect_slot_restores(then_body, out);
+                collect_slot_restores(else_body, out);
+            }
+            HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
+                collect_slot_restores(body, out)
+            }
+            HirStmt::For { body, .. } => collect_slot_restores(body, out),
+            HirStmt::Switch { cases, default, .. } => {
+                for case in cases {
+                    collect_slot_restores(&case.body, out);
+                }
+                collect_slot_restores(default, out);
+            }
+            _ => {}
+        }
+    }
+}
+
+/// Count how many times `var` appears as the `Var` LHS of an assignment.
+fn count_var_definitions(stmts: &[HirStmt], var: &str) -> usize {
+    stmts.iter().map(|s| count_var_defs_in_stmt(s, var)).sum()
+}
+
+fn count_var_defs_in_stmt(stmt: &HirStmt, var: &str) -> usize {
+    match stmt {
+        HirStmt::Assign { lhs: HirLValue::Var(lhs), .. } if lhs == var => 1,
+        HirStmt::Block(body) => count_var_definitions(body, var),
+        HirStmt::If { then_body, else_body, .. } => {
+            count_var_definitions(then_body, var) + count_var_definitions(else_body, var)
+        }
+        HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
+            count_var_definitions(body, var)
+        }
+        HirStmt::For { init, body, update, .. } => {
+            let i = init.as_ref().map(|s| count_var_defs_in_stmt(s, var)).unwrap_or(0);
+            let u = update.as_ref().map(|s| count_var_defs_in_stmt(s, var)).unwrap_or(0);
+            i + u + count_var_definitions(body, var)
+        }
+        HirStmt::Switch { cases, default, .. } => {
+            let c: usize = cases.iter().map(|c| count_var_definitions(&c.body, var)).sum();
+            c + count_var_definitions(default, var)
+        }
+        _ => 0,
+    }
+}
+
+fn remove_orphaned_slot_restores_from_stmts(
+    stmts: &mut Vec<HirStmt>,
+    slots: &HashSet<String>,
+    changed: &mut bool,
+) {
+    for stmt in stmts.iter_mut() {
+        remove_orphaned_slot_restore_nested(stmt, slots, changed);
+    }
+    stmts.retain(|stmt| {
+        if let Some((slot, _)) = match_slot_epilogue_restore(stmt) {
+            if slots.contains(&slot) {
+                *changed = true;
+                return false;
+            }
+        }
+        true
+    });
+}
+
+fn remove_orphaned_slot_restore_nested(
+    stmt: &mut HirStmt,
+    slots: &HashSet<String>,
+    changed: &mut bool,
+) {
+    match stmt {
+        HirStmt::Block(body) => remove_orphaned_slot_restores_from_stmts(body, slots, changed),
+        HirStmt::If { then_body, else_body, .. } => {
+            remove_orphaned_slot_restores_from_stmts(then_body, slots, changed);
+            remove_orphaned_slot_restores_from_stmts(else_body, slots, changed);
+        }
+        HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
+            remove_orphaned_slot_restores_from_stmts(body, slots, changed)
+        }
+        HirStmt::For { body, .. } => {
+            remove_orphaned_slot_restores_from_stmts(body, slots, changed)
+        }
+        HirStmt::Switch { cases, default, .. } => {
+            for case in cases.iter_mut() {
+                remove_orphaned_slot_restores_from_stmts(&mut case.body, slots, changed);
+            }
+            remove_orphaned_slot_restores_from_stmts(default, slots, changed);
+        }
+        _ => {}
+    }
+}
+
+/// Remove epilogue restores of the form `callee_saved_reg = home_slot_var` where
+/// `home_slot_var` has no remaining definition in the function body (its prologue
+/// save was already stripped by `remove_entry_stack_scaffold_stores`).
+fn remove_orphaned_slot_epilogue_restores(func: &mut HirFunction) -> bool {
+    let mut candidates: Vec<(String, String)> = Vec::new();
+    collect_slot_restores(&func.body, &mut candidates);
+
+    let orphaned_slots: HashSet<String> = candidates
+        .iter()
+        .filter(|(slot, _)| count_var_definitions(&func.body, slot) == 0)
+        .map(|(slot, _)| slot.clone())
+        .collect();
+
+    if orphaned_slots.is_empty() {
+        return false;
+    }
+
+    let mut changed = false;
+    remove_orphaned_slot_restores_from_stmts(&mut func.body, &orphaned_slots, &mut changed);
+
+    if changed {
+        func.locals.retain(|b| !orphaned_slots.contains(&b.name));
+    }
+
+    changed
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::nir::types::NirBinding;
 
     fn u64_ty() -> NirType {
         NirType::Int {
@@ -819,5 +980,119 @@ mod tests {
 
         assert!(!remove_entry_stack_scaffold_stores(&mut func));
         assert_eq!(func.body.len(), 3);
+    }
+
+    // ── Orphaned stack-slot epilogue restore tests ─────────────────────────────
+
+    fn slot_restore(reg: &str, slot: &str) -> HirStmt {
+        HirStmt::Assign {
+            lhs: HirLValue::Var(reg.to_owned()),
+            rhs: HirExpr::Var(slot.to_owned()),
+        }
+    }
+
+    #[test]
+    fn removes_orphaned_slot_epilogue_restore_when_no_definition() {
+        // home_0 has no definition — its prologue save was already stripped.
+        // `rbx = home_0` is an orphaned epilogue restore and should be removed.
+        let mut func = HirFunction {
+            name: "test".to_owned(),
+            body: vec![
+                HirStmt::Expr(HirExpr::Const(42, u64_ty())),
+                slot_restore("rbx", "home_0"),
+                HirStmt::Return(None),
+            ],
+            locals: vec![NirBinding {
+                name: "home_0".to_owned(),
+                ty: u64_ty(),
+                surface_type_name: None,
+                origin: None,
+                initializer: None,
+            }],
+            ..Default::default()
+        };
+
+        assert!(remove_callee_save_prologue_epilogue(&mut func));
+        assert_eq!(func.body.len(), 2, "orphaned restore should be removed");
+        assert!(!func.locals.iter().any(|b| b.name == "home_0"), "home_0 local should be removed");
+    }
+
+    #[test]
+    fn removes_multiple_orphaned_slot_restores() {
+        // Both home_0 and home_8 have no definitions (prologue saves stripped).
+        let mut func = HirFunction {
+            name: "test".to_owned(),
+            body: vec![
+                HirStmt::Expr(HirExpr::Const(1, u64_ty())),
+                slot_restore("rbx", "home_0"),
+                slot_restore("rsi", "home_8"),
+                HirStmt::Return(None),
+            ],
+            locals: vec![
+                NirBinding { name: "home_0".to_owned(), ty: u64_ty(), surface_type_name: None, origin: None, initializer: None },
+                NirBinding { name: "home_8".to_owned(), ty: u64_ty(), surface_type_name: None, origin: None, initializer: None },
+            ],
+            ..Default::default()
+        };
+
+        assert!(remove_callee_save_prologue_epilogue(&mut func));
+        assert_eq!(func.body.len(), 2, "both orphaned restores should be removed");
+        assert!(func.locals.is_empty(), "home locals should be removed");
+    }
+
+    #[test]
+    fn keeps_slot_restore_when_slot_has_definition() {
+        // home_0 IS defined in the body — not orphaned, must NOT be removed.
+        let mut func = HirFunction {
+            name: "test".to_owned(),
+            body: vec![
+                HirStmt::Assign {
+                    lhs: HirLValue::Var("home_0".to_owned()),
+                    rhs: HirExpr::Var("param_1".to_owned()),
+                },
+                slot_restore("rbx", "home_0"),
+                HirStmt::Return(None),
+            ],
+            locals: vec![NirBinding {
+                name: "home_0".to_owned(),
+                ty: u64_ty(),
+                surface_type_name: None,
+                origin: None,
+                initializer: None,
+            }],
+            ..Default::default()
+        };
+
+        assert!(!remove_callee_save_prologue_epilogue(&mut func));
+        assert_eq!(func.body.len(), 3, "slot restore with live definition must be kept");
+    }
+
+    #[test]
+    fn removes_orphaned_slot_restore_inside_nested_block() {
+        // Orphaned restores inside nested blocks are also removed.
+        let mut func = HirFunction {
+            name: "test".to_owned(),
+            body: vec![
+                HirStmt::If {
+                    cond: HirExpr::Const(1, u64_ty()),
+                    then_body: vec![slot_restore("rsi", "home_0")],
+                    else_body: vec![],
+                },
+                HirStmt::Return(None),
+            ],
+            locals: vec![NirBinding {
+                name: "home_0".to_owned(),
+                ty: u64_ty(),
+                surface_type_name: None,
+                origin: None,
+                initializer: None,
+            }],
+            ..Default::default()
+        };
+
+        assert!(remove_callee_save_prologue_epilogue(&mut func));
+        if let HirStmt::If { then_body, .. } = &func.body[0] {
+            assert!(then_body.is_empty(), "orphaned restore inside if-branch should be removed");
+        }
     }
 }
