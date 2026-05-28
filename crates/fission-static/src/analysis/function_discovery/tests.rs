@@ -81,8 +81,8 @@ fn jmp_with_rip_reference_flow_none() -> DecodedInstruction {
 #[test]
 fn collect_instruction_targets_treats_rip_relative_as_call_on_call_flow() {
     let binary = pe64_executable_shell();
-    let mut calls = std::collections::BTreeSet::new();
-    let mut jumps = std::collections::BTreeSet::new();
+    let mut calls = Vec::new();
+    let mut jumps = Vec::new();
     collect_instruction_targets(&binary, &call_with_rip_reference(), &mut calls, &mut jumps);
     assert!(calls.contains(&SAMPLE_RIP_TARGET));
     assert!(jumps.is_empty());
@@ -91,8 +91,8 @@ fn collect_instruction_targets_treats_rip_relative_as_call_on_call_flow() {
 #[test]
 fn collect_instruction_targets_treats_rip_relative_as_jump_for_jmp_mnemonic() {
     let binary = pe64_executable_shell();
-    let mut calls = std::collections::BTreeSet::new();
-    let mut jumps = std::collections::BTreeSet::new();
+    let mut calls = Vec::new();
+    let mut jumps = Vec::new();
     collect_instruction_targets(
         &binary,
         &jmp_with_rip_reference_flow_none(),
@@ -105,10 +105,10 @@ fn collect_instruction_targets_treats_rip_relative_as_jump_for_jmp_mnemonic() {
 
 #[test]
 fn discovery_candidate_targets_balanced_excludes_jump_only() {
-    let calls = std::collections::BTreeSet::from([0x401000_u64]);
-    let jumps = std::collections::BTreeSet::from([0x402200_u64]);
+    let calls = vec![0x401000_u64];
+    let jumps = vec![0x402200_u64];
     let balanced = discovery_candidate_targets(FunctionDiscoveryProfile::Balanced, calls, &jumps);
-    assert_eq!(balanced, std::collections::BTreeSet::from([0x401000]));
+    assert_eq!(balanced, vec![0x401000]);
     let aggressive =
         discovery_candidate_targets(FunctionDiscoveryProfile::Aggressive, balanced, &jumps);
     assert!(aggressive.contains(&0x401000));
@@ -120,8 +120,8 @@ fn discover_accepts_call_target_inside_executable_when_not_known() {
     let binary = pe64_executable_shell();
     assert!(binary.function_addr_index.get(&SAMPLE_RIP_TARGET).is_none());
 
-    let mut calls = std::collections::BTreeSet::new();
-    let mut jumps = std::collections::BTreeSet::new();
+    let mut calls = Vec::new();
+    let mut jumps = Vec::new();
     collect_instruction_targets(&binary, &call_with_rip_reference(), &mut calls, &mut jumps);
 
     let candidates = discovery_candidate_targets(FunctionDiscoveryProfile::Balanced, calls, &jumps);
@@ -140,8 +140,8 @@ fn discover_accepts_call_target_inside_executable_when_not_known() {
 #[test]
 fn discover_balanced_skips_jump_only_even_when_executable() {
     let binary = pe64_executable_shell();
-    let mut calls = std::collections::BTreeSet::new();
-    let mut jumps = std::collections::BTreeSet::new();
+    let mut calls = Vec::new();
+    let mut jumps = Vec::new();
     collect_instruction_targets(
         &binary,
         &jmp_with_rip_reference_flow_none(),
@@ -156,8 +156,8 @@ fn discover_balanced_skips_jump_only_even_when_executable() {
 #[test]
 fn discover_aggressive_accepts_jump_target_inside_executable() {
     let binary = pe64_executable_shell();
-    let mut calls = std::collections::BTreeSet::new();
-    let mut jumps = std::collections::BTreeSet::new();
+    let mut calls = Vec::new();
+    let mut jumps = Vec::new();
     collect_instruction_targets(
         &binary,
         &jmp_with_rip_reference_flow_none(),

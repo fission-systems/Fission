@@ -128,6 +128,8 @@ pub struct ResourceAvailability {
     pub win32_typeinfo_present: bool,
     pub fid_dir: Option<String>,
     pub fid_present: bool,
+    pub fidb_java_dir: Option<String>,
+    pub fidb_java_present: bool,
     pub die_dir: Option<String>,
     pub die_corpus_present: bool,
     pub patterns_dir: Option<String>,
@@ -136,6 +138,12 @@ pub struct ResourceAvailability {
     pub die_pe_json_present: bool,
     pub win_api_pipe_text: Option<String>,
     pub win_api_pipe_text_present: bool,
+    pub generic_clib_pipe_text: Option<String>,
+    pub generic_clib_pipe_text_present: bool,
+    pub generic_clib_64_pipe_text: Option<String>,
+    pub generic_clib_64_pipe_text_present: bool,
+    pub mac_osx_pipe_text: Option<String>,
+    pub mac_osx_pipe_text_present: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -184,6 +192,9 @@ pub fn resource_status_snapshot() -> ResourceStatusSnapshot {
     let die_pe = cfg.get_die_signatures_path();
     let die_corpus_present = cfg.die_dir.as_ref().is_some_and(|p| p.exists()) || die_pe.is_some();
     let win_api = cfg.get_win_api_signatures_path();
+    let clib = cfg.get_generic_clib_signatures_path();
+    let clib64 = cfg.get_generic_clib_64_signatures_path();
+    let mac = cfg.get_mac_osx_signatures_path();
     let resources = ResourceAvailability {
         signatures_base: cfg.signatures_base.as_ref().map(path_display),
         workspace_root: cfg.workspace_root.as_ref().map(path_display),
@@ -191,6 +202,8 @@ pub fn resource_status_snapshot() -> ResourceStatusSnapshot {
         win32_typeinfo_present: cfg.gdt_dir.as_ref().is_some_and(|p| p.exists()),
         fid_dir: cfg.fid_dir.as_ref().map(path_display),
         fid_present: cfg.fid_dir.as_ref().is_some_and(|p| p.exists()),
+        fidb_java_dir: cfg.fidb_java_dir.as_ref().map(path_display),
+        fidb_java_present: cfg.fidb_java_dir.as_ref().is_some_and(|p| p.exists()),
         die_dir: cfg.die_dir.as_ref().map(path_display),
         die_corpus_present,
         patterns_dir: cfg.patterns_dir.as_ref().map(path_display),
@@ -199,6 +212,12 @@ pub fn resource_status_snapshot() -> ResourceStatusSnapshot {
         die_pe_json_present: die_pe.is_some(),
         win_api_pipe_text: win_api.as_ref().map(path_display),
         win_api_pipe_text_present: win_api.is_some(),
+        generic_clib_pipe_text: clib.as_ref().map(path_display),
+        generic_clib_pipe_text_present: clib.is_some(),
+        generic_clib_64_pipe_text: clib64.as_ref().map(path_display),
+        generic_clib_64_pipe_text_present: clib64.is_some(),
+        mac_osx_pipe_text: mac.as_ref().map(path_display),
+        mac_osx_pipe_text_present: mac.is_some(),
     };
     ResourceStatusSnapshot {
         resource_roots: roots,

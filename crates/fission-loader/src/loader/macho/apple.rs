@@ -162,7 +162,7 @@ impl<'a> AppleAnalyzer<'a> {
         &self,
         va: u64,
         size: usize,
-        field_names: &[String],
+        _field_names: &[String],
         _type_refs: &[String],
     ) -> Result<Vec<SwiftTypeInfo>> {
         let mut types = Vec::new();
@@ -170,89 +170,93 @@ impl<'a> AppleAnalyzer<'a> {
             return Ok(types);
         };
 
-        // Parse FieldDescriptor header
-        if data.len() < 12 {
-            return Ok(types);
-        }
+        let mut offset = 0usize;
+        while offset + 16 <= data.len() {
+            let desc_offset = offset;
+            let mangled_type_offset = i32::from_le_bytes([data[offset], data[offset + 1], data[offset + 2], data[offset + 3]]);
+            let _superclass_offset = i32::from_le_bytes([data[offset + 4], data[offset + 5], data[offset + 6], data[offset + 7]]);
+            let kind_raw = u16::from_le_bytes([data[offset + 8], data[offset + 9]]);
+            let field_record_size = u16::from_le_bytes([data[offset + 10], data[offset + 11]]) as usize;
+            let num_fields = u32::from_le_bytes([data[offset + 12], data[offset + 13], data[offset + 14], data[offset + 15]]) as usize;
 
-        let _mangled_type_offset = i32::from_le_bytes([data[0], data[1], data[2], data[3]]);
-        let _superclass_offset = i32::from_le_bytes([data[4], data[5], data[6], data[7]]);
-        let kind_raw = u16::from_le_bytes([data[8], data[9]]);
-        let field_record_size = u16::from_le_bytes([data[10], data[11]]) as usize;
-        let num_fields = u32::from_le_bytes([data[12], data[13], data[14], data[15]]) as usize;
+            let kind = match kind_raw & 0x1F {
+                0 => SwiftTypeKind::Struct,
+                1 => SwiftTypeKind::Class,
+                2 => SwiftTypeKind::Enum,
+                _ => SwiftTypeKind::Unknown,
+            };
 
-        let kind = match kind_raw & 0x1F {
-            0 => SwiftTypeKind::Struct,
-            1 => SwiftTypeKind::Class,
-            2 => SwiftTypeKind::Enum,
-            _ => SwiftTypeKind::Unknown,
-        };
+            let record_size = if field_record_size > 0 {
+                field_record_size
+            } else {
+                12
+            };
 
-        // Parse field records
-        let mut fields = Vec::new();
-        let records_start = 16;
-
-        // Each FieldRecord is typically 12 bytes: flags(4) + typeref(4) + name_offset(4)
-        let record_size = if field_record_size > 0 {
-            field_record_size
-        } else {
-            12
-        };
-
-        for i in 0..num_fields {
-            let offset = records_start + i * record_size;
-            if offset + 12 > data.len() {
+            let fields_end = desc_offset + 16 + num_fields * record_size;
+            if fields_end > data.len() {
                 break;
             }
 
-            let _flags = u32::from_le_bytes([
-                data[offset],
-                data[offset + 1],
-                data[offset + 2],
-                data[offset + 3],
-            ]);
-            let type_ref_offset = i32::from_le_bytes([
-                data[offset + 4],
-                data[offset + 5],
-                data[offset + 6],
-                data[offset + 7],
-            ]);
-            let name_ref_offset = i32::from_le_bytes([
-                data[offset + 8],
-                data[offset + 9],
-                data[offset + 10],
-                data[offset + 11],
-            ]);
+            let mut fields = Vec::new();
+            let records_start = desc_offset + 16;
 
-            // Resolve field name (relative offset from current position)
-            let name_va = ((va as i64) + (offset as i64) + 8 + (name_ref_offset as i64)) as u64;
-            let field_name = self
-                .read_string_at(name_va)
-                .unwrap_or_else(|| format!("field_{}", i));
+            for i in 0..num_fields {
+                let rec_offset = records_start + i * record_size;
+                if rec_offset + 12 > data.len() {
+                    break;
+                }
 
-            // Resolve type name
-            let type_va = ((va as i64) + (offset as i64) + 4 + (type_ref_offset as i64)) as u64;
-            let type_name = self
-                .read_string_at(type_va)
-                .unwrap_or_else(|| "Unknown".to_string());
+                let _flags = u32::from_le_bytes([
+                    data[rec_offset],
+                    data[rec_offset + 1],
+                    data[rec_offset + 2],
+                    data[rec_offset + 3],
+                ]);
+                let type_ref_offset = i32::from_le_bytes([
+                    data[rec_offset + 4],
+                    data[rec_offset + 5],
+                    data[rec_offset + 6],
+                    data[rec_offset + 7],
+                ]);
+                let name_ref_offset = i32::from_le_bytes([
+                    data[rec_offset + 8],
+                    data[rec_offset + 9],
+                    data[rec_offset + 10],
+                    data[rec_offset + 11],
+                ]);
 
-            fields.push(SwiftFieldInfo {
-                name: field_name,
-                type_name,
-                offset: (i * 8 + 16) as u32, // Rough estimate: 16 bytes for object header
-            });
-        }
+                // Resolve field name (relative offset from current position)
+                let name_va = ((va as i64) + (rec_offset as i64) + 8 + (name_ref_offset as i64)) as u64;
+                let field_name = self
+                    .read_string_at(name_va)
+                    .unwrap_or_else(|| format!("field_{}", i));
 
-        // If we found fields, try to get the type name from field_names list
-        let type_name = if !field_names.is_empty() {
-            // The type name often appears before field names in reflstr
-            // For now, we'll derive it from the binary name
-            "SwiftType".to_string()
-        } else {
-            "SwiftType".to_string()
-        };
+                // Resolve type name
+                let type_va = ((va as i64) + (rec_offset as i64) + 4 + (type_ref_offset as i64)) as u64;
+                let type_name = self
+                    .read_string_at(type_va)
+                    .unwrap_or_else(|| "Unknown".to_string());
 
-        if !fields.is_empty() {
+                fields.push(SwiftFieldInfo {
+                    name: field_name,
+                    type_name,
+                    offset: (i * 8 + 16) as u32,
+                });
+            }
+
+            // Resolve nominal type name from mangled_type_offset
+            let mut type_name = String::new();
+            if mangled_type_offset != 0 {
+                let mangled_type_va = ((va as i64) + (desc_offset as i64) + 0 + (mangled_type_offset as i64)) as u64;
+                if let Some(mangled) = self.read_string_at(mangled_type_va) {
+                    type_name = crate::loader::demangle::demangle(&mangled);
+                }
+            }
+
+            if type_name.is_empty() {
+                type_name = format!("SwiftType_{:x}", va + desc_offset as u64);
+            }
+
             types.push(SwiftTypeInfo {
                 name: type_name,
                 mangled_name: String::new(),
@@ -260,6 +264,10 @@ impl<'a> AppleAnalyzer<'a> {
                 fields,
                 size: 0,
             });
+
+            offset = fields_end;
+            // Pad offset to 4-byte boundary since FieldDescriptors are typically 4-byte aligned
+            offset = (offset + 3) & !3;
         }
 
         Ok(types)
@@ -282,29 +290,45 @@ impl<'a> AppleAnalyzer<'a> {
 
     fn analyze_objc(&self) -> Result<Vec<FunctionInfo>> {
         let mut functions = Vec::new();
+        let ptr_size = if self.binary.is_64bit { 8 } else { 4 };
 
-        // Find __objc_classlist section
-        let Some(classlist_section) = self
+        // 1. Parse standard classes from __objc_classlist
+        if let Some(classlist_section) = self
             .binary
             .sections
             .iter()
             .find(|s| s.name == "__objc_classlist")
-        else {
-            return Ok(functions);
-        };
+        {
+            if let Some(data) = self.binary.get_bytes(
+                classlist_section.virtual_address,
+                classlist_section.virtual_size as usize,
+            ) {
+                for i in 0..(data.len() / ptr_size) {
+                    let class_ptr = self.read_ptr(&data, i * ptr_size, ptr_size);
+                    if let Ok(class_funcs) = self.parse_objc_class(class_ptr) {
+                        functions.extend(class_funcs);
+                    }
+                }
+            }
+        }
 
-        let ptr_size = if self.binary.is_64bit { 8 } else { 4 };
-        let Some(data) = self.binary.get_bytes(
-            classlist_section.virtual_address,
-            classlist_section.virtual_size as usize,
-        ) else {
-            return Ok(functions);
-        };
-
-        for i in 0..(data.len() / ptr_size) {
-            let class_ptr = self.read_ptr(&data, i * ptr_size, ptr_size);
-            if let Ok(class_funcs) = self.parse_objc_class(class_ptr) {
-                functions.extend(class_funcs);
+        // 2. Parse categories from __objc_catlist
+        if let Some(catlist_section) = self
+            .binary
+            .sections
+            .iter()
+            .find(|s| s.name == "__objc_catlist")
+        {
+            if let Some(data) = self.binary.get_bytes(
+                catlist_section.virtual_address,
+                catlist_section.virtual_size as usize,
+            ) {
+                for i in 0..(data.len() / ptr_size) {
+                    let cat_ptr = self.read_ptr(&data, i * ptr_size, ptr_size);
+                    if let Ok(cat_funcs) = self.parse_objc_category(cat_ptr) {
+                        functions.extend(cat_funcs);
+                    }
+                }
             }
         }
 
@@ -318,7 +342,8 @@ impl<'a> AppleAnalyzer<'a> {
         let Some(class_data) = self.binary.get_bytes(addr, 40) else {
             return Ok(functions);
         };
-        let ro_data_ptr = self.read_ptr(&class_data, 32, ptr_size);
+        let isa_ptr = self.read_ptr(&class_data, 0, ptr_size) & !0x7;
+        let ro_data_ptr = self.read_ptr(&class_data, 32, ptr_size) & !0x7;
 
         let Some(ro_data) = self.binary.get_bytes(ro_data_ptr, 64) else {
             return Ok(functions);
@@ -328,9 +353,76 @@ impl<'a> AppleAnalyzer<'a> {
             .read_string(class_name_ptr)
             .unwrap_or_else(|| "Unknown".to_string());
 
+        // Parse instance methods
         let base_methods_ptr = self.read_ptr(&ro_data, 32, ptr_size);
         if base_methods_ptr != 0 {
-            if let Ok(method_funcs) = self.parse_objc_method_list(base_methods_ptr, &class_name) {
+            if let Ok(method_funcs) = self.parse_objc_method_list(base_methods_ptr, &class_name, false) {
+                functions.extend(method_funcs);
+            }
+        }
+
+        // Parse class methods from metaclass
+        if isa_ptr != 0 && isa_ptr != addr {
+            if let Some(metaclass_data) = self.binary.get_bytes(isa_ptr, 40) {
+                let meta_ro_data_ptr = self.read_ptr(&metaclass_data, 32, ptr_size) & !0x7;
+                if meta_ro_data_ptr != 0 {
+                    if let Some(meta_ro_data) = self.binary.get_bytes(meta_ro_data_ptr, 64) {
+                        let meta_methods_ptr = self.read_ptr(&meta_ro_data, 32, ptr_size);
+                        if meta_methods_ptr != 0 {
+                            if let Ok(method_funcs) = self.parse_objc_method_list(meta_methods_ptr, &class_name, true) {
+                                functions.extend(method_funcs);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(functions)
+    }
+
+    fn parse_objc_category(&self, addr: u64) -> Result<Vec<FunctionInfo>> {
+        let mut functions = Vec::new();
+        let ptr_size = if self.binary.is_64bit { 8 } else { 4 };
+
+        let Some(cat_data) = self.binary.get_bytes(addr, 48) else {
+            return Ok(functions);
+        };
+
+        let cat_name_ptr = self.read_ptr(&cat_data, 0, ptr_size);
+        let class_ptr = self.read_ptr(&cat_data, ptr_size, ptr_size);
+        let instance_methods_ptr = self.read_ptr(&cat_data, ptr_size * 2, ptr_size);
+        let class_methods_ptr = self.read_ptr(&cat_data, ptr_size * 3, ptr_size);
+
+        // Get class name
+        let mut class_name = String::new();
+        if class_ptr != 0 {
+            if let Some(class_data) = self.binary.get_bytes(class_ptr, 40) {
+                let ro_data_ptr = self.read_ptr(&class_data, 32, ptr_size) & !0x7;
+                if let Some(ro_data) = self.binary.get_bytes(ro_data_ptr, 64) {
+                    let class_name_ptr = self.read_ptr(&ro_data, 24, ptr_size);
+                    if let Some(name) = self.read_string(class_name_ptr) {
+                        class_name = name;
+                    }
+                }
+            }
+        }
+        if class_name.is_empty() {
+            class_name = "UnknownClass".to_string();
+        }
+
+        // Get category name
+        let cat_name = self.read_string(cat_name_ptr).unwrap_or_else(|| "Category".to_string());
+        let class_and_cat = format!("{}({})", class_name, cat_name);
+
+        if instance_methods_ptr != 0 {
+            if let Ok(method_funcs) = self.parse_objc_method_list(instance_methods_ptr, &class_and_cat, false) {
+                functions.extend(method_funcs);
+            }
+        }
+
+        if class_methods_ptr != 0 {
+            if let Ok(method_funcs) = self.parse_objc_method_list(class_methods_ptr, &class_and_cat, true) {
                 functions.extend(method_funcs);
             }
         }
@@ -509,18 +601,22 @@ impl<'a> AppleAnalyzer<'a> {
         ivars
     }
 
-    fn parse_objc_method_list(&self, addr: u64, class_name: &str) -> Result<Vec<FunctionInfo>> {
+    fn parse_objc_method_list(&self, addr: u64, class_name: &str, is_class_method: bool) -> Result<Vec<FunctionInfo>> {
         let mut functions = Vec::new();
+        let ptr_size = if self.binary.is_64bit { 8 } else { 4 };
+        let prefix = if is_class_method { "+" } else { "-" };
 
         let Some(list_header) = self.binary.get_bytes(addr, 8) else {
             return Ok(functions);
         };
-        let entsize = u32::from_le_bytes([
+        let entsize_raw = u32::from_le_bytes([
             list_header[0],
             list_header[1],
             list_header[2],
             list_header[3],
-        ]) & 0xFFFC;
+        ]);
+        let flags = entsize_raw & 0xFFFF_0000;
+        let entsize = (entsize_raw & 0xFFFF) & 0xFFFC;
         let count = u32::from_le_bytes([
             list_header[4],
             list_header[5],
@@ -528,20 +624,59 @@ impl<'a> AppleAnalyzer<'a> {
             list_header[7],
         ]);
 
+        if count == 0 || count > 10000 || entsize == 0 {
+            return Ok(functions);
+        }
+
         let Some(method_data) = self.binary.get_bytes(addr + 8, (count * entsize) as usize) else {
             return Ok(functions);
         };
 
+        let is_relative = (flags & 0x8000_0000) != 0 || entsize == 12;
+
         for i in 0..count as usize {
             let m_off = i * entsize as usize;
 
-            if entsize >= 24 {
-                let name_ptr = self.read_ptr(&method_data, m_off, 8);
-                let imp_ptr = self.read_ptr(&method_data, m_off + 16, 8);
+            if is_relative {
+                if m_off + 12 > method_data.len() {
+                    break;
+                }
+                let name_rel = i32::from_le_bytes([
+                    method_data[m_off],
+                    method_data[m_off + 1],
+                    method_data[m_off + 2],
+                    method_data[m_off + 3],
+                ]);
+                let imp_rel = i32::from_le_bytes([
+                    method_data[m_off + 8],
+                    method_data[m_off + 9],
+                    method_data[m_off + 10],
+                    method_data[m_off + 11],
+                ]);
+
+                let name_va = ((addr + 8 + m_off as u64) as i64 + name_rel as i64) as u64;
+                let imp_va = ((addr + 8 + m_off as u64 + 8) as i64 + imp_rel as i64) as u64;
+
+                if let Some(sel_name) = self.read_string(name_va) {
+                    functions.push(FunctionInfo {
+                        name: format!("{}[{} {}]", prefix, class_name, sel_name),
+                        address: imp_va,
+                        size: 0,
+                        is_export: false,
+                        is_import: false,
+                        ..Default::default()
+                    });
+                }
+            } else if entsize >= ptr_size as u32 * 3 {
+                if m_off + (ptr_size * 3) > method_data.len() {
+                    break;
+                }
+                let name_ptr = self.read_ptr(&method_data, m_off, ptr_size);
+                let imp_ptr = self.read_ptr(&method_data, m_off + ptr_size * 2, ptr_size);
 
                 if let Some(sel_name) = self.read_string(name_ptr) {
                     functions.push(FunctionInfo {
-                        name: format!("-[{} {}]", class_name, sel_name),
+                        name: format!("{}[{} {}]", prefix, class_name, sel_name),
                         address: imp_ptr,
                         size: 0,
                         is_export: false,

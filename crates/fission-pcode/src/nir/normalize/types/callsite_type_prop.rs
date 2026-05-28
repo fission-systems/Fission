@@ -522,6 +522,8 @@ fn is_known_variadic_runtime_symbol(target: &str) -> bool {
             | "wscanf_s"
             | "fwscanf_s"
             | "swscanf_s"
+            | "wsprintf"
+            | "wsprintfw"
     )
 }
 

@@ -1,5 +1,3 @@
-use std::collections::BTreeSet;
-
 use fission_loader::{FunctionInfo, LoadedBinary};
 use fission_sleigh::runtime::{RuntimeFrontendStatus, RuntimeSleighFrontend};
 
@@ -27,9 +25,13 @@ pub fn discover_functions_with_runtime(
     }
 
     let executable_ranges = executable_ranges(binary);
-    let mut call_targets = BTreeSet::new();
-    let mut jump_targets = BTreeSet::new();
 
+    struct ScanChunk<'a> {
+        bytes: &'a [u8],
+        virtual_address: u64,
+    }
+
+    let mut chunks = Vec::new();
     for section in binary
         .sections
         .iter()
@@ -47,17 +49,59 @@ pub fn discover_functions_with_runtime(
             continue;
         };
         let bytes = &binary.data.as_slice()[file_start..file_end];
-        report.decoded_instruction_count += collect_section_targets(
-            binary,
-            &frontend,
-            profile,
-            bytes,
-            section.virtual_address,
-            &mut call_targets,
-            &mut jump_targets,
-        );
+
+        const DISCOVERY_CHUNK_SIZE: usize = 512 * 1024; // 512KB chunks
+        let mut offset = 0;
+        while offset < bytes.len() {
+            let chunk_end = (offset + DISCOVERY_CHUNK_SIZE).min(bytes.len());
+            let chunk_bytes = &bytes[offset..chunk_end];
+            let chunk_va = section.virtual_address + offset as u64;
+            chunks.push(ScanChunk {
+                bytes: chunk_bytes,
+                virtual_address: chunk_va,
+            });
+            offset = chunk_end;
+        }
     }
 
+    use rayon::prelude::*;
+
+    let (total_decoded, call_targets, jump_targets) = chunks
+        .into_par_iter()
+        .map(|chunk| {
+            let mut local_calls = Vec::with_capacity(4096);
+            let mut local_jumps = Vec::with_capacity(4096);
+            let count = collect_section_targets(
+                binary,
+                &frontend,
+                profile,
+                chunk.bytes,
+                chunk.virtual_address,
+                &mut local_calls,
+                &mut local_jumps,
+            );
+            local_calls.sort_unstable();
+            local_calls.dedup();
+            local_jumps.sort_unstable();
+            local_jumps.dedup();
+            (count, local_calls, local_jumps)
+        })
+        .reduce(
+            || (0usize, Vec::new(), Vec::new()),
+            |(count_a, mut calls_a, mut jumps_a), (count_b, mut calls_b, mut jumps_b)| {
+                calls_a.append(&mut calls_b);
+                calls_a.sort_unstable();
+                calls_a.dedup();
+
+                jumps_a.append(&mut jumps_b);
+                jumps_a.sort_unstable();
+                jumps_a.dedup();
+
+                (count_a + count_b, calls_a, jumps_a)
+            },
+        );
+
+    report.decoded_instruction_count = total_decoded;
     report.call_target_count = call_targets.len();
     report.jump_target_count = jump_targets.len();
 
@@ -99,8 +143,8 @@ fn collect_section_targets(
     profile: FunctionDiscoveryProfile,
     bytes: &[u8],
     base_address: u64,
-    call_targets: &mut BTreeSet<u64>,
-    jump_targets: &mut BTreeSet<u64>,
+    call_targets: &mut Vec<u64>,
+    jump_targets: &mut Vec<u64>,
 ) -> usize {
     if profile == FunctionDiscoveryProfile::Conservative {
         let Ok(decoded) = frontend.decode_window(bytes, base_address, bytes.len()) else {
@@ -128,8 +172,8 @@ fn collect_section_targets_resync(
     frontend: &RuntimeSleighFrontend,
     bytes: &[u8],
     base_address: u64,
-    call_targets: &mut BTreeSet<u64>,
-    jump_targets: &mut BTreeSet<u64>,
+    call_targets: &mut Vec<u64>,
+    jump_targets: &mut Vec<u64>,
 ) -> usize {
     let mut decoded_count = 0usize;
     let mut offset = 0usize;

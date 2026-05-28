@@ -48,20 +48,40 @@ pub struct ApiTypeDatabase {
 
 impl ApiTypeDatabase {
     pub fn from_utils_signatures() -> Result<Self, ApiTypeError> {
-        let path = api_signature_path().ok_or(ApiTypeError::NotFound)?;
-        Self::from_path(&path)
+        let mut db = Self::default();
+        if let Some(path) = ResourceProvider::global().win_api_signatures_txt() {
+            db.merge_path(&path)?;
+        }
+        if let Some(path) = ResourceProvider::global().ntoskrnl_signatures_txt() {
+            db.merge_path(&path)?;
+        }
+        if let Some(path) = ResourceProvider::global().generic_clib_signatures_txt() {
+            db.merge_path(&path)?;
+        }
+        if let Some(path) = ResourceProvider::global().generic_clib_64_signatures_txt() {
+            db.merge_path(&path)?;
+        }
+        if let Some(path) = ResourceProvider::global().mac_osx_signatures_txt() {
+            db.merge_path(&path)?;
+        }
+        Ok(db)
     }
 
     pub fn from_path(path: &Path) -> Result<Self, ApiTypeError> {
+        let mut db = Self::default();
+        db.merge_path(path)?;
+        Ok(db)
+    }
+
+    pub fn merge_path(&mut self, path: &Path) -> Result<(), ApiTypeError> {
         let content = fs::read_to_string(path).map_err(|source| ApiTypeError::Read {
             path: path.to_path_buf(),
             source,
         })?;
-        Self::from_pipe_text(path, &content)
+        self.merge_pipe_text(path, &content)
     }
 
-    fn from_pipe_text(path: &Path, content: &str) -> Result<Self, ApiTypeError> {
-        let mut db = Self::default();
+    fn merge_pipe_text(&mut self, path: &Path, content: &str) -> Result<(), ApiTypeError> {
         for (line_idx, raw_line) in content.lines().enumerate() {
             let line_no = line_idx + 1;
             let line = raw_line.trim();
@@ -93,6 +113,9 @@ impl ApiTypeDatabase {
                     if param.is_empty() {
                         continue;
                     }
+                    if param == "..." {
+                        continue;
+                    }
                     let Some((param_name, type_name)) = param.split_once(':') else {
                         return Err(ApiTypeError::Parse {
                             path: path.to_path_buf(),
@@ -107,7 +130,7 @@ impl ApiTypeDatabase {
                     });
                 }
             }
-            db.signatures.insert(
+            self.signatures.insert(
                 name.to_string(),
                 ApiSignature {
                     name: name.to_string(),
@@ -116,7 +139,7 @@ impl ApiTypeDatabase {
                 },
             );
         }
-        Ok(db)
+        Ok(())
     }
 
     pub fn get(&self, name: &str) -> Option<&ApiSignature> {
@@ -136,10 +159,6 @@ impl ApiTypeDatabase {
     }
 }
 
-fn api_signature_path() -> Option<PathBuf> {
-    ResourceProvider::global().win_api_signatures_txt()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -154,5 +173,38 @@ mod tests {
         assert!(db.get("GetWindowRect").is_some());
         assert!(db.get("GetMessageW").is_some());
         assert!(db.len() > 100);
+    }
+
+    #[test]
+    fn loads_ntoskrnl_signatures_with_correct_arity() {
+        let db = ApiTypeDatabase::from_utils_signatures().expect("load utils api signatures");
+        let ps_lookup = db
+            .get("PsLookupProcessByProcessId")
+            .expect("PsLookupProcessByProcessId");
+        assert_eq!(ps_lookup.params.len(), 2);
+        let zw_term = db
+            .get("ZwTerminateProcess")
+            .expect("ZwTerminateProcess");
+        assert_eq!(zw_term.params.len(), 2);
+        let ke_attach = db
+            .get("KeStackAttachProcess")
+            .expect("KeStackAttachProcess");
+        assert_eq!(ke_attach.params.len(), 2);
+        let ke_detach = db
+            .get("KeUnstackDetachProcess")
+            .expect("KeUnstackDetachProcess");
+        assert_eq!(ke_detach.params.len(), 1);
+        let obf_deref = db
+            .get("ObfDereferenceObject")
+            .expect("ObfDereferenceObject");
+        assert_eq!(obf_deref.params.len(), 1);
+        let mm_copy = db
+            .get("MmCopyVirtualMemory")
+            .expect("MmCopyVirtualMemory");
+        assert_eq!(mm_copy.params.len(), 7);
+        let ob_reg = db
+            .get("ObRegisterCallbacks")
+            .expect("ObRegisterCallbacks");
+        assert_eq!(ob_reg.params.len(), 2);
     }
 }

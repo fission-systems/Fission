@@ -23,6 +23,7 @@
 pub mod api_types;
 pub mod fid;
 pub mod fidbf;
+pub mod golang_typeinfo;
 pub mod import_flat;
 pub mod provider;
 pub mod win_constants;

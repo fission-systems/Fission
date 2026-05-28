@@ -73,220 +73,228 @@ impl LoadedBinary {
             );
         }
 
-        if detection.language().map_or(false, |d| d.name == "Go") {
-            let analyzer = golang::GoAnalyzer::new(&binary);
-            if let Ok(go_functions) = analyzer.analyze() {
-                // Merge Go functions into binary using a map for O(N) performance
-                use std::collections::HashMap;
-                let mut addr_to_existing = HashMap::new();
-                for (idx, func) in binary.inner().functions.iter().enumerate() {
-                    addr_to_existing.insert(func.address, idx);
-                }
+        let format_ref = &format;
+        let binary_ref = &binary;
+        let detection_ref = &detection;
 
-                for go_func in go_functions {
-                    if let Some(&idx) = addr_to_existing.get(&go_func.address) {
-                        let existing = &mut binary.inner_mut().functions[idx];
-                        if existing.name.starts_with("FUN_")
-                            || existing.name.starts_with("sub_")
-                            || existing.name.is_empty()
-                        {
-                            existing.name = go_func.name;
-                        }
-                    } else {
-                        binary.inner_mut().functions.push(go_func);
-                    }
-                }
-                binary.rebuild_indices();
-            }
-
-            // GAP-6: Go non-null-terminated string struct detection.
-            // Equivalent to Ghidra's GolangStringAnalyzer which scans .rodata
-            // for {ptr, len} GoString structs and creates labeled data entries.
-            {
-                let analyzer = golang::GoAnalyzer::new(&binary);
-                let go_strings = analyzer.scan_go_strings();
-                if !go_strings.is_empty() {
-                    tracing::info!(
-                        "[Loader] GoString scanner found {} string structs",
-                        go_strings.len()
-                    );
-                    for (addr, content) in go_strings {
-                        let inner = binary.inner_mut();
-                        inner.global_symbols.entry(addr).or_insert(content.clone());
-                        inner.string_map.entry(addr).or_insert(content);
-                    }
-                }
-            }
-        }
-
-        // Apple (ObjC/Swift) Analysis
-        if format.starts_with("Mach-O") {
-            // ObjC function analysis
-            {
-                let analyzer = macho::apple::AppleAnalyzer::new(&binary);
-                if let Ok(apple_functions) = analyzer.analyze() {
-                    for apple_func in apple_functions {
-                        if let Some(existing) = binary
-                            .inner_mut()
-                            .functions
-                            .iter_mut()
-                            .find(|f| f.address == apple_func.address)
-                        {
-                            if existing.name.starts_with("sub_") || existing.name.is_empty() {
-                                existing.name = apple_func.name;
-                            }
-                        } else {
-                            binary.inner_mut().functions.push(apple_func);
-                        }
-                    }
-                    binary.rebuild_indices();
-                }
-            }
-
-            // Swift type metadata analysis (separate scope to avoid borrow conflict)
-            {
-                let analyzer = macho::apple::AppleAnalyzer::new(&binary);
-                if let Ok(swift_types) = analyzer.analyze_swift_types() {
-                    for ty in swift_types {
-                        let inferred = types::InferredTypeInfo {
-                            name: ty.name,
-                            mangled_name: ty.mangled_name,
-                            kind: format!("{:?}", ty.kind),
-                            fields: ty
-                                .fields
-                                .into_iter()
-                                .map(|f| types::InferredFieldInfo {
-                                    name: f.name,
-                                    type_name: f.type_name,
-                                    offset: f.offset,
-                                    size: 0,
-                                })
-                                .collect(),
-                            size: ty.size,
-                            metadata_address: 0,
-                        };
-                        binary.inner_mut().inferred_types.push(inferred);
-                    }
-                }
-            }
-
-            // Objective-C ivar analysis (separate scope)
-            {
-                let analyzer = macho::apple::AppleAnalyzer::new(&binary);
-                let objc_classes = analyzer.analyze_objc_ivars();
-                for class_info in objc_classes {
-                    binary
-                        .inner_mut()
-                        .inferred_types
-                        .push(class_info.to_inferred_type());
-                }
-            }
-
-            // GAP-7: ObjC objc_msgSend selector resolution
-            // Registers each __objc_selrefs slot as a named "sel_<method>" global
-            // symbol so the decompiler shows resolved selector names instead of raw
-            // pointer values (mirrors Ghidra's ObjectiveC2_MessageAnalyzer).
-            {
-                let analyzer = macho::apple::AppleAnalyzer::new(&binary);
-                let selectors = analyzer.resolve_msg_send_selectors();
-                if !selectors.is_empty() {
-                    tracing::info!(
-                        "[Loader] ObjC selector resolution: {} selrefs resolved",
-                        selectors.len()
-                    );
-                    for (addr, name) in selectors {
-                        binary
-                            .inner_mut()
-                            .global_symbols
-                            .entry(addr)
-                            .or_insert(name);
-                    }
-                }
-            }
-        }
-
-        // Go Type Analysis (works for any format with Go reflection data)
-        if detection.language().map_or(false, |d| d.name == "Go") {
-            let analyzer = golang::GoAnalyzer::new(&binary);
-            let go_types = analyzer.analyze_types();
-            for ty in go_types {
-                binary
-                    .inner_mut()
-                    .inferred_types
-                    .push(ty.to_inferred_type());
-            }
-        }
-
-        // Rust VTable Analysis
-        if detection.language().map_or(false, |d| d.name == "Rust") {
-            let analyzer = rust::RustAnalyzer::new(&binary);
-            let rust_vtables = analyzer.analyze_vtables();
-            for vtable in rust_vtables {
-                binary
-                    .inner_mut()
-                    .inferred_types
-                    .push(vtable.to_inferred_type());
-            }
-        }
-
-        // DWARF Debug Information Analysis (works for ELF and Mach-O with debug info)
-        {
-            // Phase 1: Extract all DWARF data (immutable borrow)
-            let (dwarf_types, dwarf_funcs) = {
-                let dwarf_analyzer = dwarf::DwarfAnalyzer::new(&binary);
-                if dwarf_analyzer.has_debug_info() {
-                    tracing::info!(
-                        "[Loader] Found DWARF debug info, extracting types and functions..."
-                    );
-                    let types = dwarf_analyzer.analyze_types();
-                    let funcs = dwarf_analyzer.analyze_functions();
-                    (types, funcs)
+        // Run Go, Apple/ObjC/Swift, DWARF, Rust, and C++ RTTI analyzers concurrently using Rayon!
+        let (
+            (go_ver, go_functions_result, go_strings, go_types),
+            (
+                (apple_funcs_res, swift_types_res, objc_classes_res, objc_selectors_res),
+                (
+                    (dwarf_types_res, dwarf_funcs_res),
+                    (rust_vtables_res, cpp_types_res)
+                )
+            )
+        ) = rayon::join(
+            || {
+                if detection_ref.language().map_or(false, |d| d.name == "Go") {
+                    let analyzer = golang::GoAnalyzer::new(binary_ref);
+                    let go_ver = analyzer.detect_go_version();
+                    let go_funcs = analyzer.analyze();
+                    let go_strings = analyzer.scan_go_strings();
+                    let go_types = analyzer.analyze_types();
+                    (go_ver, Some(go_funcs), go_strings, go_types)
                 } else {
-                    (Vec::new(), Vec::new())
+                    (None, None, std::collections::HashMap::new(), Vec::new())
                 }
-            };
+            },
+            || rayon::join(
+                || {
+                    if format_ref.starts_with("Mach-O") {
+                        let analyzer = macho::apple::AppleAnalyzer::new(binary_ref);
+                        let apple_funcs = analyzer.analyze();
+                        let swift_types = analyzer.analyze_swift_types();
+                        let objc_classes = analyzer.analyze_objc_ivars();
+                        let objc_selectors = analyzer.resolve_msg_send_selectors();
+                        (Some(apple_funcs), Some(swift_types), objc_classes, objc_selectors)
+                    } else {
+                        (None, None, Vec::new(), std::collections::HashMap::new())
+                    }
+                },
+                || rayon::join(
+                    || {
+                        let dwarf_analyzer = dwarf::DwarfAnalyzer::new(binary_ref);
+                        if dwarf_analyzer.has_debug_info() {
+                            let types = dwarf_analyzer.analyze_types();
+                            let funcs = dwarf_analyzer.analyze_functions();
+                            (types, funcs)
+                        } else {
+                            (Vec::new(), Vec::new())
+                        }
+                    },
+                    || rayon::join(
+                        || {
+                            if detection_ref.language().map_or(false, |d| d.name == "Rust") {
+                                let analyzer = rust::RustAnalyzer::new(binary_ref);
+                                analyzer.analyze_vtables()
+                            } else {
+                                Vec::new()
+                            }
+                        },
+                        || {
+                            let analyzer = cpp::CppAnalyzer::new(binary_ref);
+                            analyzer.to_inferred_types()
+                        }
+                    )
+                )
+            )
+        );
 
-            // Phase 2: Apply extracted data (mutable borrow)
-            for ty in dwarf_types {
-                binary
-                    .inner_mut()
-                    .inferred_types
-                    .push(ty.to_inferred_type());
+        // ====================================================================
+        // Thread-safe Merge Phase on Main Thread
+        // ====================================================================
+
+        // 1. Merge Go Results
+        binary.go_version = go_ver;
+        if let Some(Ok(go_functions)) = go_functions_result {
+            // Merge Go functions into binary using a map for O(N) performance
+            use std::collections::HashMap;
+            let mut addr_to_existing = HashMap::new();
+            for (idx, func) in binary.inner().functions.iter().enumerate() {
+                addr_to_existing.insert(func.address, idx);
             }
 
-            if !dwarf_funcs.is_empty() {
-                tracing::info!(
-                    "[Loader] DWARF: {} functions with debug info extracted",
-                    dwarf_funcs.len()
-                );
-
-                // Update function names from DWARF if better than symbol table names
-                for func_info in &dwarf_funcs {
-                    if let Some(idx) = binary.function_addr_index.get(&func_info.address).copied() {
-                        let current_name = &binary.functions[idx].name;
-                        if current_name.is_empty()
-                            || current_name.starts_with("FUN_")
-                            || current_name.starts_with("sub_")
-                        {
-                            binary.inner_mut().functions[idx].name = func_info.name.clone();
-                        }
+            for go_func in go_functions {
+                if let Some(&idx) = addr_to_existing.get(&go_func.address) {
+                    let existing = &mut binary.inner_mut().functions[idx];
+                    if existing.name.starts_with("FUN_")
+                        || existing.name.starts_with("sub_")
+                        || existing.name.is_empty()
+                    {
+                        existing.name = go_func.name;
                     }
+                } else {
+                    binary.inner_mut().functions.push(go_func);
                 }
+            }
+            binary.rebuild_indices();
+        }
 
-                // Store DWARF function info for post-processing (param/local name substitution)
-                for func_info in dwarf_funcs {
-                    binary.dwarf_functions.insert(func_info.address, func_info);
-                }
+        if !go_strings.is_empty() {
+            tracing::info!(
+                "[Loader] GoString scanner found {} string structs",
+                go_strings.len()
+            );
+            for (addr, content) in go_strings {
+                let inner = binary.inner_mut();
+                inner.global_symbols.entry(addr).or_insert(content.clone());
+                inner.string_map.entry(addr).or_insert(content);
             }
         }
 
-        // C++ RTTI Analysis
-        {
-            let analyzer = cpp::CppAnalyzer::new(&binary);
-            let cpp_types = analyzer.to_inferred_types();
-            for ty in cpp_types {
-                binary.inner_mut().inferred_types.push(ty);
+        for ty in go_types {
+            binary.inner_mut().inferred_types.push(ty.to_inferred_type());
+        }
+
+        // 2. Merge Apple/ObjC/Swift Results
+        if let Some(Ok(apple_functions)) = apple_funcs_res {
+            for apple_func in apple_functions {
+                if let Some(existing) = binary
+                    .inner_mut()
+                    .functions
+                    .iter_mut()
+                    .find(|f| f.address == apple_func.address)
+                {
+                    if existing.name.starts_with("sub_") || existing.name.is_empty() {
+                        existing.name = apple_func.name;
+                    }
+                } else {
+                    binary.inner_mut().functions.push(apple_func);
+                }
             }
+            binary.rebuild_indices();
+        }
+
+        if let Some(Ok(swift_types)) = swift_types_res {
+            for ty in swift_types {
+                let inferred = types::InferredTypeInfo {
+                    name: ty.name,
+                    mangled_name: ty.mangled_name,
+                    kind: format!("{:?}", ty.kind),
+                    fields: ty
+                        .fields
+                        .into_iter()
+                        .map(|f| types::InferredFieldInfo {
+                            name: f.name,
+                            type_name: f.type_name,
+                            offset: f.offset,
+                            size: 0,
+                        })
+                        .collect(),
+                    size: ty.size,
+                    metadata_address: 0,
+                };
+                binary.inner_mut().inferred_types.push(inferred);
+            }
+        }
+
+        for class_info in objc_classes_res {
+            binary
+                .inner_mut()
+                .inferred_types
+                .push(class_info.to_inferred_type());
+        }
+
+        if !objc_selectors_res.is_empty() {
+            tracing::info!(
+                "[Loader] ObjC selector resolution: {} selrefs resolved",
+                objc_selectors_res.len()
+            );
+            for (addr, name) in objc_selectors_res {
+                binary
+                    .inner_mut()
+                    .global_symbols
+                    .entry(addr)
+                    .or_insert(name);
+            }
+        }
+
+        // 3. Merge Rust Results
+        for vtable in rust_vtables_res {
+            binary
+                .inner_mut()
+                .inferred_types
+                .push(vtable.to_inferred_type());
+        }
+
+        // 4. Merge DWARF Results
+        for ty in dwarf_types_res {
+            binary
+                .inner_mut()
+                .inferred_types
+                .push(ty.to_inferred_type());
+        }
+
+        if !dwarf_funcs_res.is_empty() {
+            tracing::info!(
+                "[Loader] DWARF: {} functions with debug info extracted",
+                dwarf_funcs_res.len()
+            );
+
+            // Update function names from DWARF if better than symbol table names
+            for func_info in &dwarf_funcs_res {
+                if let Some(idx) = binary.function_addr_index.get(&func_info.address).copied() {
+                    let current_name = &binary.functions[idx].name;
+                    if current_name.is_empty()
+                        || current_name.starts_with("FUN_")
+                        || current_name.starts_with("sub_")
+                    {
+                        binary.inner_mut().functions[idx].name = func_info.name.clone();
+                    }
+                }
+            }
+
+            // Store DWARF function info for post-processing (param/local name substitution)
+            for func_info in dwarf_funcs_res {
+                binary.dwarf_functions.insert(func_info.address, func_info);
+            }
+        }
+
+        // 5. Merge C++ Results
+        for ty in cpp_types_res {
+            binary.inner_mut().inferred_types.push(ty);
         }
 
         Ok(binary)

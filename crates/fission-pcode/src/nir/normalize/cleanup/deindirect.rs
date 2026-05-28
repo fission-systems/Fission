@@ -255,6 +255,17 @@ fn resolve_call_target(
         HirExpr::AddressOfGlobal(symbol_name) => {
             return Some(symbol_name.clone());
         }
+        // Load through a known IAT slot address: *(IAT_addr).
+        // This is the pattern emitted by x86-64 Sleigh for `CALL qword ptr [IAT_addr]`
+        // where the IAT slot address is a statically known constant.
+        HirExpr::Load { ptr, .. } => {
+            if let HirExpr::Const(iat_addr, _) = ptr.as_ref() {
+                let slot_addr = *iat_addr as u64;
+                if let Some(symbol) = addr_to_symbol.get(&slot_addr) {
+                    return Some(symbol.clone());
+                }
+            }
+        }
         // Local variable reference, trace to its definition initializer.
         HirExpr::Var(var_name) => {
             if let Some(init_expr) = initializers.get(var_name) {

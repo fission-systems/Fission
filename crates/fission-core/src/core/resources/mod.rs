@@ -60,6 +60,26 @@ impl ResourceProvider {
     }
 
     #[must_use]
+    pub fn ntoskrnl_signatures_txt(&self) -> Option<PathBuf> {
+        self.paths.get_ntoskrnl_signatures_path()
+    }
+
+    #[must_use]
+    pub fn generic_clib_signatures_txt(&self) -> Option<PathBuf> {
+        self.paths.get_generic_clib_signatures_path()
+    }
+
+    #[must_use]
+    pub fn generic_clib_64_signatures_txt(&self) -> Option<PathBuf> {
+        self.paths.get_generic_clib_64_signatures_path()
+    }
+
+    #[must_use]
+    pub fn mac_osx_signatures_txt(&self) -> Option<PathBuf> {
+        self.paths.get_mac_osx_signatures_path()
+    }
+
+    #[must_use]
     pub fn win32_typeinfo_json_path(&self, filename: &str) -> Option<PathBuf> {
         self.paths.get_win32_typeinfo_json_path(filename)
     }

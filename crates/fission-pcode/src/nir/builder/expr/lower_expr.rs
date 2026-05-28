@@ -241,6 +241,18 @@ impl<'a> PreviewBuilder<'a> {
             }
             return Some(target_ref.symbol.clone());
         }
+        // Fallback: the address may be an IAT slot VA reached via a constant
+        // (e.g. Windows x64 `COPY rcx <- const(0x1400082b8)` followed by
+        // `CALLIND rcx` where 0x1400082b8 is the IAT slot for CreateFileA).
+        if let Some(target_ref) = ctx.iat_target_refs.get(&addr) {
+            self.telemetry
+                .call_targets
+                .call_target_iat_slot_resolved_count += 1;
+            self.telemetry
+                .call_targets
+                .call_target_import_resolved_count += 1;
+            return Some(target_ref.symbol.clone());
+        }
         if ctx.ambiguous_call_targets.contains(&addr) {
             self.telemetry
                 .call_targets
@@ -252,6 +264,7 @@ impl<'a> PreviewBuilder<'a> {
         }
         None
     }
+
 
     fn resolve_call_target_by_iat_slot(&mut self, addr: u64) -> Option<String> {
         let Some(ctx) = self.type_context else {
@@ -1454,6 +1467,33 @@ impl<'a> PreviewBuilder<'a> {
             self.record_call_target_const_reject(CallTargetConstReject::NoDef);
             return None;
         };
+        // Rust-Sleigh Copy-from-RAM idiom: `CALL qword ptr [IAT_addr]` is lowered as
+        //   Copy unique <- v(ram:IAT_addr)
+        //   CallInd unique
+        // rather than the standard Load + CallInd pcode. Detect by checking whether the
+        // Copy source is in a memory space (not constant, not register, not unique) and
+        // treat its offset as the IAT slot address.
+        if producer.opcode == PcodeOpcode::Copy {
+            let Some(output) = producer.output.as_ref() else {
+                self.record_call_target_const_reject(CallTargetConstReject::NoDef);
+                return None;
+            };
+            if output.size != self.options.pointer_size {
+                self.telemetry
+                    .call_targets
+                    .call_target_indirect_rejected_width_mismatch_count += 1;
+                return None;
+            }
+            let Some(src) = producer.inputs.first() else {
+                self.record_call_target_const_reject(CallTargetConstReject::NoDef);
+                return None;
+            };
+            if !src.is_constant && !is_register_space_id(src.space_id) {
+                return self.resolve_call_target_by_iat_slot(src.offset);
+            }
+            self.record_call_target_const_reject(CallTargetConstReject::UnsupportedOpcode);
+            return None;
+        }
         if producer.opcode != PcodeOpcode::Load {
             self.record_call_target_const_reject(CallTargetConstReject::UnsupportedOpcode);
             return None;

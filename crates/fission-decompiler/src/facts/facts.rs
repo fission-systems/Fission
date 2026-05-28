@@ -8,29 +8,59 @@ use fission_core::core::ghidra_no_return::{binary_format_to_ghidra_format, ghidr
 use fission_core::{normalize_named_type_identity, sanitize_symbol_name};
 use fission_loader::loader::LoadedBinary;
 use fission_loader::loader::types::DwarfLocation;
+use fission_core::PATHS;
 use fission_signatures::SIGNATURE_RESOURCES;
+use fission_signatures::golang_typeinfo::GoTypeinfoDatabase;
 use fission_signatures::win_types::WindowsStructures;
 use fission_static::analysis::decomp::facts::FactProvenance;
 use fission_static::analysis::decomp::facts::FactStore;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 fn get_well_known_function_hints(name: &str) -> Option<NirFunctionHints> {
-    match name {
-        "main" => {
-            let mut param_type_names = HashMap::new();
-            param_type_names.insert(0, "int".to_string());
-            param_type_names.insert(1, "char **".to_string());
-            Some(NirFunctionHints {
-                param_names: vec!["argc".to_string(), "argv".to_string()],
-                param_type_names,
-                stack_local_names: HashMap::new(),
-                stack_local_type_names: HashMap::new(),
-                return_type_name: Some("int".to_string()),
-            })
-        }
-        _ => None,
+    let sigs_iter = SIGNATURE_RESOURCES.api_signatures().ok()?;
+    let matched_sig = sigs_iter.into_iter().find(|sig| sig.name == name)?;
+
+    let mut param_names = Vec::new();
+    let mut param_type_names = HashMap::new();
+    for (index, param) in matched_sig.params.iter().enumerate() {
+        param_names.push(param.name.clone());
+        param_type_names.insert(index, param.type_name.clone());
     }
+
+    Some(NirFunctionHints {
+        param_names,
+        param_type_names,
+        stack_local_names: HashMap::new(),
+        stack_local_type_names: HashMap::new(),
+        return_type_name: Some(matched_sig.return_type.clone()),
+    })
 }
+
+fn get_go_function_hints(name: &str, binary: &LoadedBinary) -> Option<NirFunctionHints> {
+    let go_ver = binary.go_version.as_deref()?;
+    let typeinfo_dir = PATHS.get_golang_typeinfo_dir()?;
+    let goos = GoTypeinfoDatabase::goos_from_format(&binary.format);
+    let goarch = GoTypeinfoDatabase::goarch_from_spec(binary.is_64bit, &binary.arch_spec);
+    let db = GoTypeinfoDatabase::get_cached(go_ver, goos, goarch, &typeinfo_dir)?;
+    let sig = db.get_func(name)?;
+
+    let mut param_names = Vec::new();
+    let mut param_type_names = HashMap::new();
+    for (index, (pname, ptype)) in sig.params.iter().enumerate() {
+        param_names.push(pname.clone());
+        param_type_names.insert(index, ptype.clone());
+    }
+    let return_type_name = sig.results.first().map(|(_, t)| t.clone());
+
+    Some(NirFunctionHints {
+        param_names,
+        param_type_names,
+        stack_local_names: HashMap::new(),
+        stack_local_type_names: HashMap::new(),
+        return_type_name,
+    })
+}
+
 
 pub(crate) fn build_nir_type_context(
     binary: &LoadedBinary,
@@ -117,6 +147,8 @@ pub(crate) fn build_nir_type_context(
             .unwrap_or("");
         if let Some(well_known) = get_well_known_function_hints(name) {
             function_hints = Some(well_known);
+        } else if let Some(go_hints) = get_go_function_hints(name, binary) {
+            function_hints = Some(go_hints);
         }
     }
 
@@ -819,8 +851,146 @@ fn resolve_nir_struct_name(type_name: &str, structures: &WindowsStructures) -> O
 
 #[cfg(test)]
 mod tests {
-    use super::summarize_preview_callee_effects;
-    use crate::{PcodeBasicBlock, PcodeFunction, PcodeOp, PcodeOpcode, Varnode};
+    use super::{build_nir_call_param_rules, resolve_nir_struct_name, summarize_preview_callee_effects};
+    use crate::{CallTargetProvenance, CallEdgeKind, CallTargetRef, PcodeBasicBlock, PcodeFunction, PcodeOp, PcodeOpcode, Varnode};
+    use fission_signatures::win_types::WindowsStructures;
+    use std::collections::HashMap;
+
+    // -------------------------------------------------------------------------
+    // GDT pattern matching: resolve_nir_struct_name
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn gdt_pattern_match_lp_prefix_resolves_to_struct() {
+        let ws = WindowsStructures::try_new()
+            .expect("structures.json must be loadable from workspace");
+        assert_eq!(
+            resolve_nir_struct_name("PSECURITY_DESCRIPTOR", &ws),
+            Some("SECURITY_DESCRIPTOR".to_string()),
+            "PSECURITY_DESCRIPTOR -> SECURITY_DESCRIPTOR via P-prefix strip"
+        );
+    }
+
+    #[test]
+    fn gdt_pattern_match_p_prefix_resolves_sid() {
+        let ws = WindowsStructures::try_new()
+            .expect("structures.json must be loadable from workspace");
+        assert_eq!(
+            resolve_nir_struct_name("PSID", &ws),
+            Some("SID".to_string()),
+            "PSID -> SID via P-prefix strip"
+        );
+    }
+
+    #[test]
+    fn gdt_pattern_match_lp_prefix_resolves_critical_section() {
+        let ws = WindowsStructures::try_new()
+            .expect("structures.json must be loadable from workspace");
+        assert_eq!(
+            resolve_nir_struct_name("LPCRITICAL_SECTION", &ws),
+            Some("CRITICAL_SECTION".to_string()),
+            "LPCRITICAL_SECTION -> CRITICAL_SECTION via LP-prefix strip"
+        );
+    }
+
+    #[test]
+    fn gdt_pattern_match_pointer_star_returns_none() {
+        let ws = WindowsStructures::try_new()
+            .expect("structures.json must be loadable from workspace");
+        assert_eq!(
+            resolve_nir_struct_name("SECURITY_DESCRIPTOR*", &ws),
+            None,
+            "pointer-star types must be rejected"
+        );
+    }
+
+    #[test]
+    fn gdt_pattern_match_bare_type_no_prefix_returns_none() {
+        let ws = WindowsStructures::try_new()
+            .expect("structures.json must be loadable from workspace");
+        assert_eq!(
+            resolve_nir_struct_name("UINT", &ws),
+            None,
+            "bare scalar type without LP/P prefix must not match"
+        );
+    }
+
+    #[test]
+    fn gdt_pattern_match_p_prefix_unknown_struct_returns_none() {
+        let ws = WindowsStructures::try_new()
+            .expect("structures.json must be loadable from workspace");
+        assert_eq!(
+            resolve_nir_struct_name("PVOID", &ws),
+            None,
+            "PVOID -> VOID is not a known struct"
+        );
+    }
+
+    // -------------------------------------------------------------------------
+    // GDT pattern matching: build_nir_call_param_rules (end-to-end)
+    // -------------------------------------------------------------------------
+
+    fn make_call_target_refs(entries: &[(u64, &str)]) -> HashMap<u64, CallTargetRef> {
+        entries
+            .iter()
+            .map(|&(addr, name)| {
+                (
+                    addr,
+                    CallTargetRef {
+                        address: Some(addr),
+                        symbol: name.to_string(),
+                        provenance: CallTargetProvenance::Import,
+                        edge_kind: CallEdgeKind::Import,
+                        confidence: 255,
+                    },
+                )
+            })
+            .collect()
+    }
+
+    #[test]
+    fn gdt_call_param_rules_generated_for_known_win32_api() {
+        let refs = make_call_target_refs(&[(0x1000, "AccessCheckAndAuditAlarmA")]);
+        let rules = build_nir_call_param_rules(&refs);
+        assert!(
+            !rules.is_empty(),
+            "expected at least one NirCallParamRule for AccessCheckAndAuditAlarmA \
+             (has PSECURITY_DESCRIPTOR param)"
+        );
+        let sd_rule = rules.iter().find(|r| {
+            r.callee_name == "AccessCheckAndAuditAlarmA"
+                && r.pointee_alias == "SECURITY_DESCRIPTOR"
+        });
+        assert!(
+            sd_rule.is_some(),
+            "expected a rule for SECURITY_DESCRIPTOR param of AccessCheckAndAuditAlarmA"
+        );
+    }
+
+    #[test]
+    fn gdt_call_param_rules_empty_for_unknown_function() {
+        let refs = make_call_target_refs(&[(0x2000, "NonExistentFunctionXYZ")]);
+        let rules = build_nir_call_param_rules(&refs);
+        let matched: Vec<_> = rules
+            .iter()
+            .filter(|r| r.callee_name == "NonExistentFunctionXYZ")
+            .collect();
+        assert!(
+            matched.is_empty(),
+            "unknown function must produce no param rules"
+        );
+    }
+
+    #[test]
+    fn gdt_call_param_rules_no_address_when_not_in_refs() {
+        let refs = HashMap::new();
+        let rules = build_nir_call_param_rules(&refs);
+        let no_addr_rules: Vec<_> = rules.iter().filter(|r| r.callee_address.is_none()).collect();
+        assert!(
+            !no_addr_rules.is_empty(),
+            "rules without a resolved address must still be emitted for signature-only coverage"
+        );
+    }
 
     fn op(seq_num: u32, opcode: PcodeOpcode) -> PcodeOp {
         PcodeOp {

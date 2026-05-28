@@ -1186,3 +1186,78 @@ fn preview_callind_load_from_non_iat_slot_keeps_existing_surface() {
     assert_eq!(stats.call_target_indirect_load_resolved_count, 0);
     assert_eq!(stats.call_target_indirect_rejected_non_iat_load_count, 1);
 }
+
+#[test]
+fn preview_builder_resolves_callind_through_copy_from_ram_space_iat_slot() {
+    // Regression test: Rust-Sleigh emits `CALL qword ptr [IAT_addr]` as
+    //   Copy unique <- v(space=UNIQUE_SPACE_ID, off=IAT_addr)   ← RAM-space varnode
+    //   CallInd unique
+    // NOT as Copy(const) + CallInd. resolve_iat_load_call_target must handle
+    // PcodeOpcode::Copy with a memory-space (non-register, non-constant) source.
+    const IAT_ADDR: u64 = 0x1400082c8;
+
+    let func = PcodeFunction {
+        blocks: vec![PcodeBasicBlock {
+            index: 0,
+            start_address: 0x140001450,
+            successors: vec![],
+            ops: vec![
+                PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::Copy,
+                    address: 0x14000145f,
+                    output: Some(uniq(0x79600, 8)),
+                    inputs: vec![uniq(IAT_ADDR, 8)],
+                    asm_mnemonic: Some("COPY".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 1,
+                    opcode: PcodeOpcode::CallInd,
+                    address: 0x14000145f,
+                    output: None,
+                    inputs: vec![uniq(0x79600, 8), reg(0x08, 8)],
+                    asm_mnemonic: Some("CALL qword ptr [0x1400082c8]".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 2,
+                    opcode: PcodeOpcode::Return,
+                    address: 0x140001465,
+                    output: None,
+                    inputs: vec![cst(1, 8)],
+                    asm_mnemonic: Some("RET".to_string()),
+                },
+            ],
+        }],
+    };
+
+    let mut context = PreviewTypeContext::default();
+    context.iat_target_refs.insert(
+        IAT_ADDR,
+        CallTargetRef {
+            address: Some(IAT_ADDR),
+            symbol: "InitializeCriticalSection".to_string(),
+            provenance: CallTargetProvenance::Import,
+            edge_kind: CallEdgeKind::Import,
+            confidence: 255,
+        },
+    );
+
+    let rendered = render_mlil_preview_with_context(
+        &func,
+        "setup_sync",
+        0x140001450,
+        &preview_options(),
+        Some(&context),
+    )
+    .expect("preview render should succeed");
+    let stats = take_last_nir_build_stats().expect("build stats");
+
+    assert!(
+        rendered.contains("InitializeCriticalSection"),
+        "IAT symbol must be resolved from RAM-space Copy source; got:\n{rendered}"
+    );
+    assert_eq!(
+        stats.call_target_iat_slot_resolved_count, 1,
+        "iat_slot_resolved_count must be 1"
+    );
+}

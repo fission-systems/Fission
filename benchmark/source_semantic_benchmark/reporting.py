@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from benchmark.source_semantic_benchmark.models import BenchmarkEntry
+from benchmark.source_semantic_benchmark.cli import run_command_capture
 from benchmark.source_semantic_benchmark.config import (
     ROOT_DIR,
     DEFAULT_ARTIFACT_ROOT,

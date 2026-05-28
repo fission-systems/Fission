@@ -26,6 +26,10 @@ pub fn print_resources_status(json: bool) -> Result<()> {
     );
     println!("  fid_dir: {:?} (present={})", res.fid_dir, res.fid_present);
     println!(
+        "  fidb_java_dir: {:?} (present={})",
+        res.fidb_java_dir, res.fidb_java_present
+    );
+    println!(
         "  die_dir: {:?} (die_corpus_present={})",
         res.die_dir, res.die_corpus_present
     );
@@ -40,6 +44,18 @@ pub fn print_resources_status(json: bool) -> Result<()> {
     println!(
         "  win_api_pipe_text: {:?} (present={})",
         res.win_api_pipe_text, res.win_api_pipe_text_present
+    );
+    println!(
+        "  generic_clib_pipe_text: {:?} (present={})",
+        res.generic_clib_pipe_text, res.generic_clib_pipe_text_present
+    );
+    println!(
+        "  generic_clib_64_pipe_text: {:?} (present={})",
+        res.generic_clib_64_pipe_text, res.generic_clib_64_pipe_text_present
+    );
+    println!(
+        "  mac_osx_pipe_text: {:?} (present={})",
+        res.mac_osx_pipe_text, res.mac_osx_pipe_text_present
     );
 
     Ok(())

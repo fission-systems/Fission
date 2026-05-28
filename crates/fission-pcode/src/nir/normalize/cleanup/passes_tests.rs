@@ -1219,6 +1219,84 @@ fn deindirect_resolves_var_initializer_to_symbol() {
 }
 
 #[test]
+fn deindirect_resolves_iat_load_to_symbol() {
+    // Regression test: x86-64 Sleigh emits `CALL qword ptr [IAT_addr]` as
+    //   Copy unique <- [ram:IAT_addr]   (Load from IAT slot)
+    //   CallInd unique
+    // which the builder lowers to:
+    //   __fission_callind_opaque(Load { ptr: Const(IAT_addr) }, ...)
+    // The deindirect pass must resolve this to a named direct call.
+    use crate::nir::normalize::cleanup::apply_deindirect_pass;
+    use indexmap::IndexMap;
+
+    const IAT_SLOT_ADDR: u64 = 0x1400082c8;
+
+    let mut callee_summaries = IndexMap::new();
+    callee_summaries.insert(
+        "InitializeCriticalSection".to_string(),
+        CallSummary {
+            target: CallTargetRef {
+                address: Some(IAT_SLOT_ADDR),
+                symbol: "InitializeCriticalSection".to_string(),
+                provenance: CallTargetProvenance::Import,
+                edge_kind: CallEdgeKind::Import,
+                confidence: 255,
+            },
+            prototype: PrototypeSummary {
+                min_arity: 1,
+                max_arity: 1,
+                locked_exact_arity: None,
+                return_lattice: NirType::Unknown,
+                param_lattices: vec![NirType::Unknown],
+                soundness: SummarySoundness::Optimistic,
+            },
+            effect_summary: CallEffectSummary {
+                reads_memory: None,
+                writes_memory: None,
+                escapes_args: None,
+                regions: Vec::new(),
+                wrapper_class: WrapperClass::None,
+                wrapper_of: None,
+                confidence: 255,
+            },
+        },
+    );
+
+    let iat_load = HirExpr::Load {
+        ptr: Box::new(HirExpr::Const(IAT_SLOT_ADDR as i64, int(64))),
+        ty: NirType::Unknown,
+    };
+
+    let mut func = HirFunction {
+        name: "test_deindirect_iat_load".to_string(),
+        body: vec![HirStmt::Expr(HirExpr::Call {
+            target: "__fission_callind_opaque".to_string(),
+            args: vec![iat_load, HirExpr::Var("param_1".to_string())],
+            ty: NirType::Unknown,
+        })],
+        callee_summaries,
+        ..Default::default()
+    };
+
+    assert!(
+        apply_deindirect_pass(&mut func),
+        "deindirect pass must rewrite IAT-load indirect call"
+    );
+    let HirStmt::Expr(expr) = &func.body[0] else {
+        panic!("expected expression statement");
+    };
+    let HirExpr::Call { target, args, .. } = expr else {
+        panic!("expected call expression after deindirect");
+    };
+    assert_eq!(
+        target, "InitializeCriticalSection",
+        "call target must be resolved from IAT slot"
+    );
+    assert_eq!(args.len(), 1);
+    assert_eq!(args[0], HirExpr::Var("param_1".to_string()));
+}
+
+#[test]
 fn printer_renders_callind_opaque_as_pointer_call() {
     use crate::nir::render::print_expr;
 

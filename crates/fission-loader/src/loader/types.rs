@@ -337,6 +337,9 @@ pub struct LoadedBinary {
     pub pdb_functions: std::collections::HashMap<u64, PdbFunctionInfo>,
     /// Structured compiler/packer/language hints with evidence (not an rkyv snapshot field).
     pub identity_report: Option<super::identity::BinaryIdentityReport>,
+    /// Go compiler version string detected from the `.go.buildinfo` section (e.g. `"go1.22.3"`).
+    /// Not serialized — populated by `GoAnalyzer::detect_go_version` during post-load.
+    pub go_version: Option<String>,
 }
 
 impl LoadedBinary {
@@ -347,6 +350,7 @@ impl LoadedBinary {
             dwarf_functions: std::collections::HashMap::new(),
             pdb_functions: std::collections::HashMap::new(),
             identity_report: None,
+            go_version: None,
         }
     }
 

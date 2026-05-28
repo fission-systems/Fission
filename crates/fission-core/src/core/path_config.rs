@@ -19,6 +19,16 @@ const FID_SEARCH_DIRS: &[&str] = &[
     "../../utils/signatures/fid/",
 ];
 
+/// Search directories for Java-packed FID databases (.fidb, Ghidra original format)
+const FIDB_JAVA_SEARCH_DIRS: &[&str] = &[
+    "./signatures/fidb_java/",
+    "../signatures/fidb_java/",
+    "../../signatures/fidb_java/",
+    "./utils/signatures/fidb_java/",
+    "../utils/signatures/fidb_java/",
+    "../../utils/signatures/fidb_java/",
+];
+
 /// Search directories for DIE signatures
 const DIE_SEARCH_DIRS: &[&str] = &[
     "./signatures/die/",
@@ -79,8 +89,10 @@ const GCC_FID_FILES_X86: &[&str] = &["gcc-x86.LE.32.default.fidbf", "gcc-ARM.LE.
 pub struct PathConfig {
     /// Base directory for signatures
     pub signatures_base: Option<PathBuf>,
-    /// FID database directory
+    /// FID database directory (`.fidbf` files, both raw and Java-packed)
     pub fid_dir: Option<PathBuf>,
+    /// Java-packed FID database directory (`.fidb` files, Ghidra original format)
+    pub fidb_java_dir: Option<PathBuf>,
     /// GDT (type info) directory
     pub gdt_dir: Option<PathBuf>,
     /// DIE signatures directory
@@ -169,6 +181,12 @@ impl PathConfig {
             .filter(|p| p.exists())
             .or_else(|| crate::core::utils::find_existing_dir(FID_SEARCH_DIRS));
 
+        let fidb_java_dir = signatures_base
+            .as_ref()
+            .map(|base| base.join("fidb_java"))
+            .filter(|p| p.exists())
+            .or_else(|| crate::core::utils::find_existing_dir(FIDB_JAVA_SEARCH_DIRS));
+
         let gdt_dir = signatures_base
             .as_ref()
             .map(|base| base.join("typeinfo").join("win32"))
@@ -191,6 +209,7 @@ impl PathConfig {
         Self {
             signatures_base,
             fid_dir,
+            fidb_java_dir,
             gdt_dir,
             die_dir,
             patterns_dir,
@@ -221,6 +240,115 @@ impl PathConfig {
                 .join("win32")
                 .join(filename);
             path.exists().then_some(path)
+        })
+    }
+
+    /// `ntoskrnl_signatures.txt` (Windows kernel ntoskrnl/HAL API signatures), if present.
+    pub fn get_ntoskrnl_signatures_path(&self) -> Option<PathBuf> {
+        let filename = "ntoskrnl_signatures.txt";
+        if let Some(ref gdt_dir) = self.gdt_dir {
+            let path = gdt_dir.join(filename);
+            if path.exists() {
+                return Some(path);
+            }
+        }
+        if let Some(ref base) = self.signatures_base {
+            let path = base.join("typeinfo").join("win32").join(filename);
+            if path.exists() {
+                return Some(path);
+            }
+        }
+        self.workspace_root.as_ref().and_then(|root| {
+            let path = root
+                .join("utils")
+                .join("signatures")
+                .join("typeinfo")
+                .join("win32")
+                .join(filename);
+            path.exists().then_some(path)
+        })
+    }
+
+    /// `generic_clib_signatures.txt` (pipe-separated generic C library signatures), if present.
+    pub fn get_generic_clib_signatures_path(&self) -> Option<PathBuf> {
+        let filename = "generic_clib_signatures.txt";
+        if let Some(ref gdt_dir) = self.gdt_dir {
+            let path = gdt_dir.join(filename);
+            if path.exists() {
+                return Some(path);
+            }
+        }
+        if let Some(ref base) = self.signatures_base {
+            let path = base.join("typeinfo").join("generic").join(filename);
+            if path.exists() {
+                return Some(path);
+            }
+        }
+        self.workspace_root.as_ref().and_then(|root| {
+            let path = root
+                .join("utils")
+                .join("signatures")
+                .join("typeinfo")
+                .join("generic")
+                .join(filename);
+            path.exists().then_some(path)
+        })
+    }
+
+    /// `generic_clib_64_signatures.txt` (x86-64 generic C library signatures), if present.
+    pub fn get_generic_clib_64_signatures_path(&self) -> Option<PathBuf> {
+        let filename = "generic_clib_64_signatures.txt";
+        if let Some(ref base) = self.signatures_base {
+            let path = base.join("typeinfo").join("generic").join(filename);
+            if path.exists() {
+                return Some(path);
+            }
+        }
+        self.workspace_root.as_ref().and_then(|root| {
+            let path = root
+                .join("utils")
+                .join("signatures")
+                .join("typeinfo")
+                .join("generic")
+                .join(filename);
+            path.exists().then_some(path)
+        })
+    }
+
+    /// `mac_osx_signatures.txt` (macOS API signatures), if present.
+    pub fn get_mac_osx_signatures_path(&self) -> Option<PathBuf> {
+        let filename = "mac_osx_signatures.txt";
+        if let Some(ref base) = self.signatures_base {
+            let path = base.join("typeinfo").join("mac_10.9").join(filename);
+            if path.exists() {
+                return Some(path);
+            }
+        }
+        self.workspace_root.as_ref().and_then(|root| {
+            let path = root
+                .join("utils")
+                .join("signatures")
+                .join("typeinfo")
+                .join("mac_10.9")
+                .join(filename);
+            path.exists().then_some(path)
+        })
+    }
+
+    /// Parent directory for Go API snapshot JSON files (`typeinfo/golang/`).
+    ///
+    /// Pass the result into [`fission_signatures::golang_typeinfo::GoTypeinfoDatabase::load_for_binary`]
+    /// as `typeinfo_dir` (it will append `golang/` itself).
+    pub fn get_golang_typeinfo_dir(&self) -> Option<PathBuf> {
+        if let Some(ref base) = self.signatures_base {
+            let path = base.join("typeinfo");
+            if path.join("golang").exists() {
+                return Some(path);
+            }
+        }
+        self.workspace_root.as_ref().and_then(|root| {
+            let path = root.join("utils").join("signatures").join("typeinfo");
+            path.join("golang").exists().then_some(path)
         })
     }
 
@@ -368,7 +496,8 @@ impl PathConfig {
             .collect()
     }
 
-    /// Find a specific FID file
+    /// Find a specific FID file. Looks for `.fidbf` in `fid_dir` first, then
+    /// falls back to `fidb_java_dir` with the `.fidb` extension (same basename).
     pub fn find_fid_file(&self, filename: &str) -> Option<PathBuf> {
         if let Some(ref fid_dir) = self.fid_dir {
             let path = fid_dir.join(filename);
@@ -376,7 +505,20 @@ impl PathConfig {
                 return Some(path);
             }
         }
-        Self::find_file_in_dirs(FID_SEARCH_DIRS, filename)
+        if let Some(ref java_dir) = self.fidb_java_dir {
+            let fidb_name = filename.strip_suffix(".fidbf").unwrap_or(filename);
+            let fidb_name = format!("{fidb_name}.fidb");
+            let path = java_dir.join(&fidb_name);
+            if path.exists() {
+                return Some(path);
+            }
+        }
+        if let Some(p) = Self::find_file_in_dirs(FID_SEARCH_DIRS, filename) {
+            return Some(p);
+        }
+        let fidb_name = filename.strip_suffix(".fidbf").unwrap_or(filename);
+        let fidb_name = format!("{fidb_name}.fidb");
+        Self::find_file_in_dirs(FIDB_JAVA_SEARCH_DIRS, &fidb_name)
     }
 
     /// Get FID filename based on compiler and architecture
@@ -408,7 +550,7 @@ impl PathConfig {
     // GDT Resolution
     // ========================================================================
 
-    /// Get GDT (Ghidra Data Type) file path
+    /// Get primary GDT (Ghidra Data Type) file path.
     pub fn get_gdt_path(&self, is_64bit: bool) -> Option<PathBuf> {
         let filename = if is_64bit {
             "windows_vs12_64.gdt"
@@ -423,7 +565,6 @@ impl PathConfig {
             }
         }
 
-        // Fallback search
         for prefix in GDT_SEARCH_PREFIXES {
             let path = Path::new(prefix).join(filename);
             if path.exists() {
@@ -431,6 +572,98 @@ impl PathConfig {
             }
         }
         None
+    }
+
+    /// Discover all applicable GDT files for the target platform and compiler.
+    ///
+    /// Returns an ordered list: primary platform GDT first, then supplementary
+    /// GDTs (generic C, Rust, Go, macOS) if present in the typeinfo tree.
+    pub fn get_all_gdt_paths(
+        &self,
+        is_64bit: bool,
+        format: Option<&str>,
+        compiler_id: Option<&str>,
+    ) -> Vec<PathBuf> {
+        let mut paths = Vec::new();
+
+        let is_pe = format.map(|f| f.to_ascii_uppercase().starts_with("PE")).unwrap_or(false);
+        let is_macho = format
+            .map(|f| {
+                f.to_ascii_uppercase().starts_with("MACH")
+                    || f.to_ascii_uppercase().starts_with("MACHO")
+            })
+            .unwrap_or(false);
+        let compiler = compiler_id.unwrap_or("").to_ascii_lowercase();
+
+        // Primary platform GDT
+        if is_pe {
+            if let Some(p) = self.get_gdt_path(is_64bit) {
+                paths.push(p);
+            }
+        }
+
+        // Generic C library GDT — applicable to all platforms
+        let generic_name = if is_64bit {
+            "generic_clib_64.gdt"
+        } else {
+            "generic_clib.gdt"
+        };
+        if let Some(p) = self.find_typeinfo_file(generic_name) {
+            paths.push(p);
+        }
+
+        // Rust
+        if compiler.contains("rust") || compiler.contains("rustc") {
+            if let Some(p) = self.find_typeinfo_file("rust-common.gdt") {
+                paths.push(p);
+            }
+        }
+
+        // Go
+        if compiler.contains("go") || compiler.contains("golang") {
+            // Pick the latest golang GDT available (version-agnostic naming).
+            if let Some(p) = self.find_typeinfo_file("golang_1.25_anybit_any.gdt") {
+                paths.push(p);
+            } else if let Some(p) = self.find_typeinfo_file("golang_1.24_anybit_any.gdt") {
+                paths.push(p);
+            }
+        }
+
+        // macOS
+        if is_macho {
+            if let Some(p) = self.find_typeinfo_file("mac_osx.gdt") {
+                paths.push(p);
+            }
+        }
+
+        paths
+    }
+
+    /// Search all `typeinfo/` subdirectories for a specific GDT or JSON file.
+    fn find_typeinfo_file(&self, filename: &str) -> Option<PathBuf> {
+        let subdirs = ["win32", "generic", "golang", "mac_10.9", "rust"];
+        if let Some(ref base) = self.signatures_base {
+            for subdir in &subdirs {
+                let path = base.join("typeinfo").join(subdir).join(filename);
+                if path.exists() {
+                    return Some(path);
+                }
+            }
+        }
+        self.workspace_root.as_ref().and_then(|root| {
+            for subdir in &subdirs {
+                let path = root
+                    .join("utils")
+                    .join("signatures")
+                    .join("typeinfo")
+                    .join(subdir)
+                    .join(filename);
+                if path.exists() {
+                    return Some(path);
+                }
+            }
+            None
+        })
     }
 
     // ========================================================================

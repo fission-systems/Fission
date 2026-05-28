@@ -89,8 +89,12 @@ impl<'a> PreviewBuilder<'a> {
         if !matches!(
             self.options.calling_convention,
             CallingConvention::WindowsX64 | CallingConvention::SystemVAmd64
-        ) || self.abi_state().param_slot_for_varnode(output).is_none()
-        {
+        ) {
+            return None;
+        }
+        let is_param = self.abi_state().param_slot_for_varnode(output).is_some();
+        let is_return_reg = is_register_space_id(output.space_id) && output.offset == 0x00;
+        if !is_param && !is_return_reg {
             return None;
         }
         let output_key = VarnodeKey::from(output);

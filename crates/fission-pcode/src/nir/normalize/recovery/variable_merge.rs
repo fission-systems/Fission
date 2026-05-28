@@ -106,7 +106,7 @@ pub(crate) fn apply_variable_merge_pass(func: &mut HirFunction) -> bool {
                     (j, i, b2_name.clone(), b1_name.clone(), b2_ty.clone(), b1_ty.clone())
                 };
 
-                println!("DEBUG STACK MERGE: merging {} into {}", merge_name, keep_name);
+                eprintln!("DEBUG STACK MERGE: merging {} into {}", merge_name, keep_name);
                 stack_renames.push((merge_name, keep_name));
 
                 let unified_ty = force_unify_types_for_merge(&keep_ty, &merge_ty);

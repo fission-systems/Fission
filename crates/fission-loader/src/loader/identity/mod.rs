@@ -424,6 +424,7 @@ mod tests {
             workspace_root: Some(tmp.path().to_path_buf()),
             signatures_base: Some(sig.clone()),
             fid_dir: Some(sig.join("fid")),
+            fidb_java_dir: None,
             gdt_dir: Some(sig.join("typeinfo").join("win32")),
             die_dir: Some(sig.join("die")),
             patterns_dir: Some(sig.join("patterns")),

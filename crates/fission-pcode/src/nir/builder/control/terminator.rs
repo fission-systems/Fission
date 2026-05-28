@@ -507,7 +507,7 @@ impl<'a> PreviewBuilder<'a> {
         block: &crate::pcode::PcodeBasicBlock,
         term_idx: usize,
     ) -> Result<Option<HirExpr>, MlilPreviewError> {
-        println!("[fission-debug] materialized_vns: {:?}", self.materialized_vns);
+        eprintln!("[fission-debug] materialized_vns: {:?}", self.materialized_vns);
         if let Some(expr) =
             self.lower_arm32_return_pair_expr_from_block(block_idx, block, term_idx)?
         {
@@ -516,7 +516,7 @@ impl<'a> PreviewBuilder<'a> {
         let Some((ret_op_idx, ret_vn)) =
             self.last_primary_return_def_after_barrier(block, term_idx)
         else {
-            println!("[fission-debug] lower_primary_return_expr_from_block: no primary return def in block_idx={}", block_idx);
+            eprintln!("[fission-debug] lower_primary_return_expr_from_block: no primary return def in block_idx={}", block_idx);
             return Ok(None);
         };
         let ret_vn = self
@@ -530,7 +530,7 @@ impl<'a> PreviewBuilder<'a> {
             |this| this.lower_wrapped_varnode(&ret_vn, &mut HashSet::new()),
         )
         .map(Some);
-        println!("[fission-debug] lower_primary_return_expr_from_block: block_idx={} ret_vn={:?} res={:?}", block_idx, ret_vn, res);
+        eprintln!("[fission-debug] lower_primary_return_expr_from_block: block_idx={} ret_vn={:?} res={:?}", block_idx, ret_vn, res);
         res
     }
 
@@ -913,9 +913,9 @@ impl<'a> PreviewBuilder<'a> {
         block: &crate::pcode::PcodeBasicBlock,
         term_idx: usize,
     ) -> Result<Option<HirExpr>, MlilPreviewError> {
-        println!("[fission-debug] lower_return_terminator: start idx={} term_idx={}", idx, term_idx);
+        eprintln!("[fission-debug] lower_return_terminator: start idx={} term_idx={}", idx, term_idx);
         let res = self.lower_return_terminator_impl(idx, block, term_idx);
-        println!("[fission-debug] lower_return_terminator: end idx={} res={:?}", idx, res);
+        eprintln!("[fission-debug] lower_return_terminator: end idx={} res={:?}", idx, res);
         res
     }
 

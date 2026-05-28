@@ -15,7 +15,7 @@ type ConstEnv = HashMap<String, (i64, NirType)>;
 
 pub(crate) fn apply_sccp_pass(func: &mut HirFunction) -> bool {
     if func.name == "sum_array" {
-        println!("[fission-debug] sccp start for sum_array. body:\n{:#?}", func.body);
+        eprintln!("[fission-debug] sccp start for sum_array. body:\n{:#?}", func.body);
     }
     let max_rounds = if is_large_hir_function(func) { 2 } else { 8 };
     let goto_targets = collect_goto_targets(&func.body);
@@ -30,7 +30,7 @@ pub(crate) fn apply_sccp_pass(func: &mut HirFunction) -> bool {
         any = true;
     }
     if func.name == "sum_array" {
-        println!("[fission-debug] sccp end for sum_array. body:\n{:#?}", func.body);
+        eprintln!("[fission-debug] sccp end for sum_array. body:\n{:#?}", func.body);
     }
     any
 }
@@ -170,7 +170,7 @@ fn sccp_subst_expr(expr: &mut HirExpr, env: &ConstEnv) -> bool {
     match expr {
         HirExpr::Var(name) | HirExpr::AddressOfGlobal(name) => {
             if let Some((v, ty)) = env.get(name) {
-                println!("[fission-debug] sccp_subst_expr: replacing {} with const {} under env: {:?}", name, v, env);
+                eprintln!("[fission-debug] sccp_subst_expr: replacing {} with const {} under env: {:?}", name, v, env);
                 *expr = HirExpr::Const(*v, ty.clone());
                 changed = true;
             }

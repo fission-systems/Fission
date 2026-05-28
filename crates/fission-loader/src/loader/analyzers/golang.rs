@@ -1,6 +1,10 @@
 use crate::loader::{FunctionInfo, LoadedBinary};
 use crate::prelude::*;
 
+/// Magic bytes at the start of the `.go.buildinfo` section (Ghidra: GoBuildInfo.java).
+/// ISO-8859-1 bytes for "\xff Go buildinf:"
+const GO_BUILDINFO_MAGIC: &[u8] = b"\xff Go buildinf:";
+
 const GO_1_2_MAGIC: u32 = 0xfffffffb;
 const GO_1_16_MAGIC: u32 = 0xfffffffa;
 const GO_1_18_MAGIC: u32 = 0xfffffff0;
@@ -433,6 +437,118 @@ impl<'a> GoAnalyzer<'a> {
         }
     }
 
+    /// Detect the Go compiler version string from the `.go.buildinfo` section.
+    ///
+    /// Follows the same format as Ghidra's `GoBuildInfo.java`:
+    /// - 14-byte magic `\xff Go buildinf:`
+    /// - 1 byte pointer size
+    /// - 1 byte flags  (bit 1 = FLAG_INLINE_STRING: version stored inline as varint+bytes)
+    /// - version string (inline varint-len + utf8 bytes, or pointer-based for Go <1.18)
+    ///
+    /// Returns a string like `"go1.22.3"` if found.
+    pub fn detect_go_version(&self) -> Option<String> {
+        let section_names = [
+            ".go.buildinfo",
+            "go.buildinfo",
+            "go_buildinfo",
+            "__go_buildinfo",
+        ];
+        for section in &self.binary.sections {
+            if !section_names.contains(&section.name.as_str()) {
+                continue;
+            }
+            if let Some(data) = self.binary.view_bytes(section.virtual_address, section.virtual_size as usize) {
+                if let Some(ver) = Self::parse_buildinfo_version(data, section.virtual_address, self.binary) {
+                    return Some(ver);
+                }
+            }
+        }
+        // PE fallback: scan .data section
+        for section in &self.binary.sections {
+            if section.name != ".data" && section.name != "__data" {
+                continue;
+            }
+            let vsize = (section.virtual_size as usize).min(65536);
+            if let Some(data) = self.binary.view_bytes(section.virtual_address, vsize) {
+                if let Some(offset) = Self::find_buildinfo_magic(data) {
+                    if let Some(ver) = Self::parse_buildinfo_version(&data[offset..], section.virtual_address + offset as u64, self.binary) {
+                        return Some(ver);
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    fn find_buildinfo_magic(data: &[u8]) -> Option<usize> {
+        let magic = GO_BUILDINFO_MAGIC;
+        data.windows(magic.len()).position(|w| w == magic)
+    }
+
+    fn parse_buildinfo_version(data: &[u8], _va: u64, _binary: &LoadedBinary) -> Option<String> {
+        if data.len() < GO_BUILDINFO_MAGIC.len() + 2 {
+            return None;
+        }
+        if &data[..GO_BUILDINFO_MAGIC.len()] != GO_BUILDINFO_MAGIC {
+            return None;
+        }
+        let ptr_size = data[GO_BUILDINFO_MAGIC.len()] as usize;
+        let flags = data[GO_BUILDINFO_MAGIC.len() + 1];
+        const FLAG_INLINE_STRING: u8 = 1 << 1;
+        let inline = (flags & FLAG_INLINE_STRING) != 0;
+
+        let content_start = GO_BUILDINFO_MAGIC.len() + 2;
+        if inline {
+            // varint-length-prefixed UTF-8 string is stored after the ver and info pointers
+            let inline_start = content_start + 2 * ptr_size;
+            if inline_start < data.len() {
+                let (ver_str, _) = Self::read_varint_string(&data[inline_start..])?;
+                if ver_str.starts_with("go1.") || ver_str.starts_with("devel ") {
+                    return Some(ver_str);
+                }
+            }
+        } else {
+            // Pointer-based: scan forward for "go1." in a 256-byte window
+            let window = &data[content_start..content_start.saturating_add(256).min(data.len())];
+            if let Some(pos) = window.windows(4).position(|w| w == b"go1.") {
+                let end = window[pos..].iter().position(|&b| b == 0 || b == b'\n').unwrap_or(32).min(32);
+                if let Ok(s) = std::str::from_utf8(&window[pos..pos + end]) {
+                    return Some(s.to_string());
+                }
+            }
+        }
+        None
+    }
+
+    /// Read a varint-length-prefixed UTF-8 string. Returns (string, bytes_consumed).
+    fn read_varint_string(data: &[u8]) -> Option<(String, usize)> {
+        let (len, varint_bytes) = Self::read_uvarint(data)?;
+        let start = varint_bytes;
+        let end = start + len as usize;
+        if end > data.len() {
+            return None;
+        }
+        let s = std::str::from_utf8(&data[start..end]).ok()?;
+        Some((s.to_string(), end))
+    }
+
+    /// Decode a protobuf-style unsigned varint. Returns (value, bytes_consumed).
+    fn read_uvarint(data: &[u8]) -> Option<(u64, usize)> {
+        let mut x: u64 = 0;
+        let mut shift: u32 = 0;
+        for (i, &b) in data.iter().enumerate() {
+            if shift >= 64 {
+                return None;
+            }
+            x |= ((b & 0x7f) as u64) << shift;
+            shift += 7;
+            if b & 0x80 == 0 {
+                return Some((x, i + 1));
+            }
+        }
+        None
+    }
+
     /// Scan .rodata / __rodata for inline GoString structs {*data, len}.
     ///
     /// Equivalent to Ghidra's GolangStringAnalyzer which detects non-null-
@@ -578,5 +694,39 @@ impl GoTypeInfo {
             size: self.size,
             metadata_address: 0,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Load the Go test binary built at /tmp/go_test_bin/go_test_binary and
+    /// verify that detect_go_version() returns a valid "go1.X.Y" string.
+    #[test]
+    fn test_detect_go_version_real_binary() {
+        let path = std::path::Path::new("/tmp/go_test_bin/go_test_binary");
+        if !path.exists() {
+            eprintln!("skipped: /tmp/go_test_bin/go_test_binary not found (run: cd /tmp/go_test_bin && go build -o go_test_binary .)");
+            return;
+        }
+        let binary = LoadedBinary::from_file(path)
+            .expect("should load Go binary");
+
+        eprintln!("format: {}", binary.format);
+        eprintln!("go_version: {:?}", binary.go_version);
+
+        let ver = binary.go_version.as_deref().unwrap_or("");
+        assert!(
+            ver.starts_with("go1."),
+            "expected go version starting with go1., got: {:?}",
+            ver
+        );
+        eprintln!("detected Go version: {}", ver);
+
+        // Verify GoAnalyzer also sees it directly
+        let analyzer = GoAnalyzer::new(&binary);
+        let detected = analyzer.detect_go_version();
+        assert_eq!(detected.as_deref(), binary.go_version.as_deref());
     }
 }

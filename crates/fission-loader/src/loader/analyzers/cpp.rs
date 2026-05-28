@@ -100,6 +100,10 @@ impl<'a> CppAnalyzer<'a> {
 
     fn analyze_msvc_classes(&self) -> Vec<CppClassInfo> {
         let mut classes = Vec::new();
+        if !self.binary.format.starts_with("PE") {
+            return classes;
+        }
+
         let mut cols = HashMap::new();
 
         // 1. Find Complete Object Locators (COL) via symbols
@@ -115,33 +119,61 @@ impl<'a> CppAnalyzer<'a> {
             }
         }
 
-        // 2. If no symbols, scan .rdata for potential COLs
+        // 2. If no symbols, scan .rdata/.data for potential COLs
         if cols.is_empty() {
+            let image_base = self.binary.image_base;
+            let max_va = self.binary.sections.iter()
+                .map(|s| s.virtual_address + s.virtual_size)
+                .max()
+                .unwrap_or(0);
+            let max_rva = max_va.saturating_sub(image_base) as u32;
+
             for section in &self.binary.sections {
                 if section.name == ".rdata" || section.name == ".data" {
-                    let data = match self
-                        .binary
-                        .view_bytes(section.virtual_address, section.virtual_size as usize)
-                    {
-                        Some(d) => d,
-                        None => continue,
+                    let Some(data) = self.binary.view_bytes(section.virtual_address, section.virtual_size as usize) else {
+                        continue;
                     };
 
                     let step = 4;
-                    for i in (0..(data.len().saturating_sub(24))).step_by(step) {
-                        // Safe: loop bounds ensure i+4 is valid
-                        let signature = match data.get(i..i + 4) {
-                            Some(bytes) => {
-                                u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]])
-                            }
-                            None => continue, // Skip if bounds check fails
+                    let len = data.len();
+                    if len < 24 {
+                        continue;
+                    }
+                    for i in (0..=len - 24).step_by(step) {
+                        let signature = u32::from_le_bytes([data[i], data[i + 1], data[i + 2], data[i + 3]]);
+                        if signature != 0 && signature != 1 {
+                            continue;
+                        }
+
+                        // Validate COL fields directly from section slice (zero-copy)
+                        let offset = u32::from_le_bytes([data[i + 4], data[i + 5], data[i + 6], data[i + 7]]);
+                        let cd_offset = u32::from_le_bytes([data[i + 8], data[i + 9], data[i + 10], data[i + 11]]);
+                        let td_val = u32::from_le_bytes([data[i + 12], data[i + 13], data[i + 14], data[i + 15]]);
+                        let chd_val = u32::from_le_bytes([data[i + 16], data[i + 17], data[i + 18], data[i + 19]]);
+
+                        // Simple heuristics: offset and cd_offset are usually small
+                        if offset > 0x100000 || cd_offset > 0x100000 {
+                            continue;
+                        }
+
+                        let valid = if signature == 1 {
+                            // x64: td_val and chd_val are RVAs
+                            td_val > 0 && td_val < max_rva && chd_val > 0 && chd_val < max_rva
+                        } else {
+                            // x86: td_val and chd_val are absolute VAs
+                            let td_val64 = td_val as u64;
+                            let chd_val64 = chd_val as u64;
+                            td_val64 > image_base && td_val64 < max_va && chd_val64 > image_base && chd_val64 < max_va
                         };
-                        if signature == 0 || signature == 1 {
-                            // Potential COL
-                            let addr = section.virtual_address + i as u64;
-                            if self.parse_msvc_col(addr).is_ok() {
-                                cols.insert(addr, format!("??_R4_auto_{:x}", addr));
-                            }
+
+                        if !valid {
+                            continue;
+                        }
+
+                        // Potential COL found! Verify and parse it.
+                        let addr = section.virtual_address + i as u64;
+                        if self.parse_msvc_col(addr).is_ok() {
+                            cols.insert(addr, format!("??_R4_auto_{:x}", addr));
                         }
                     }
                 }

@@ -473,7 +473,7 @@ fn try_tail_label_loop_to_for(
         }
 
         let mut body = body_slice.to_vec();
-        println!("[DEBUG-FIB-IV] matched try_tail_label_loop_to_for: label={}, label_idx={}, tail_idx={}, body_len={}",
+        eprintln!("[DEBUG-FIB-IV] matched try_tail_label_loop_to_for: label={}, label_idx={}, tail_idx={}, body_len={}",
                  label, label_idx, tail_idx, body.len());
         body.push(HirStmt::If {
             cond: invert_condition(continue_cond),
