@@ -1799,6 +1799,132 @@ fn try_guarded_dowhile_pointer_iv_upgrade(
     true
 }
 
+/// Replace `goto label` with `continue` within `stmts`, without recursing into
+/// nested loops (where `continue` would bind to the inner loop, not the outer).
+fn replace_gotos_with_continue_shallow(stmts: &mut Vec<HirStmt>, label: &str) {
+    for stmt in stmts.iter_mut() {
+        match stmt {
+            HirStmt::Goto(target) if target == label => {
+                *stmt = HirStmt::Continue;
+            }
+            HirStmt::If { then_body, else_body, .. } => {
+                replace_gotos_with_continue_shallow(then_body, label);
+                replace_gotos_with_continue_shallow(else_body, label);
+            }
+            HirStmt::Block(body) => replace_gotos_with_continue_shallow(body, label),
+            HirStmt::Switch { cases, default, .. } => {
+                for case in cases.iter_mut() {
+                    replace_gotos_with_continue_shallow(&mut case.body, label);
+                }
+                replace_gotos_with_continue_shallow(default, label);
+            }
+            // Do NOT recurse into nested loops: continue binds to the inner loop there.
+            _ => {}
+        }
+    }
+}
+
+/// Try to upgrade a `for (;;)` loop at `stmts[loop_idx]` to a proper counted
+/// `for` loop when the body ends with the tail pattern:
+///
+/// ```text
+/// Label(L)              ← update-section label (forward goto target)
+/// iv_var = iv_var ± k   ← IV increment
+/// if (break_cond) break ← exit check
+/// ```
+///
+/// The body may also contain `goto L` (acting as `continue`), which are
+/// replaced with `continue` statements after the transformation.
+/// An init assignment `iv_var = <val>` must immediately precede the loop.
+fn try_upgrade_infinite_for_with_tail_update(
+    stmts: &mut Vec<HirStmt>,
+    loop_idx: usize,
+) -> bool {
+    let body = match &stmts[loop_idx] {
+        HirStmt::For {
+            init: None,
+            cond: None,
+            update: None,
+            body,
+        } => body.clone(),
+        _ => return false,
+    };
+
+    let n = body.len();
+    if n < 3 {
+        return false;
+    }
+
+    // body[n-3]: Label(L)  body[n-2]: iv_update  body[n-1]: if(break_cond) break;
+    let update_label = match &body[n - 3] {
+        HirStmt::Label(l) => l.clone(),
+        _ => return false,
+    };
+
+    let iv_update = body[n - 2].clone();
+    let iv_name = match &iv_update {
+        HirStmt::Assign {
+            lhs: HirLValue::Var(name),
+            ..
+        } => name.clone(),
+        _ => return false,
+    };
+
+    let break_cond = match &body[n - 1] {
+        HirStmt::If {
+            cond,
+            then_body,
+            else_body,
+        } if else_body.is_empty() && matches!(then_body.as_slice(), [HirStmt::Break]) => {
+            cond.clone()
+        }
+        _ => return false,
+    };
+
+    // Safety: no explicit `continue` in the body (hoisting the update would change semantics).
+    if super::for_loops::stmt_list_contains_continue_pub(&body) {
+        return false;
+    }
+
+    // Validate that iv_update is a linear recurrence on iv_name.
+    let loop_variant = loop_variant_vars(&body);
+    let update_ok = match &iv_update {
+        HirStmt::Assign { rhs, .. } => {
+            is_iv_update_dataflow(rhs, &iv_name, &loop_variant, &body, 0)
+        }
+        _ => false,
+    };
+    if !update_ok {
+        return false;
+    }
+
+    // Find the init assignment immediately before the loop.
+    let init_idx = match find_init_before(stmts, loop_idx, &iv_name) {
+        Some(i) => i,
+        None => return false,
+    };
+
+    // Build the new body: strip the tail 3 statements and replace goto→continue.
+    let mut new_body = body[..n - 3].to_vec();
+    replace_gotos_with_continue_shallow(&mut new_body, &update_label);
+
+    // Negate the break condition to get the loop-continuation condition.
+    let loop_cond = invert_condition(break_cond);
+
+    // Apply transformation: lift init out of stmts, adjust loop_idx, rebuild For.
+    let init_stmt = stmts[init_idx].clone();
+    stmts.remove(init_idx);
+    let loop_idx = loop_idx - 1; // shifted after init removal
+
+    stmts[loop_idx] = HirStmt::For {
+        init: Some(Box::new(init_stmt)),
+        cond: Some(loop_cond),
+        update: Some(Box::new(iv_update)),
+        body: new_body,
+    };
+    true
+}
+
 fn apply_scev_upgrade_in_stmts(
     stmts: &mut Vec<HirStmt>,
     locals: &mut Vec<NirBinding>,
@@ -1814,6 +1940,11 @@ fn apply_scev_upgrade_in_stmts(
             }
         } else if matches!(&stmts[i], HirStmt::DoWhile { .. })
             && try_guarded_dowhile_pointer_iv_upgrade(stmts, locals, i, active_guards)
+        {
+            changed = true;
+            continue;
+        } else if matches!(&stmts[i], HirStmt::For { cond: None, update: None, .. })
+            && try_upgrade_infinite_for_with_tail_update(stmts, i)
         {
             changed = true;
             continue;
@@ -2388,5 +2519,162 @@ mod tests {
         };
 
         assert!(!apply_iv_recovery_pass(&mut func));
+    }
+
+    // ── for(;;) with tail-label update pattern ─────────────────────────────
+
+    fn eq_expr(lhs: HirExpr, rhs: HirExpr) -> HirExpr {
+        HirExpr::Binary {
+            op: HirBinaryOp::Eq,
+            lhs: Box::new(lhs),
+            rhs: Box::new(rhs),
+            ty: NirType::Bool,
+        }
+    }
+
+    /// Build:
+    ///   i = 0;
+    ///   for (;;) {
+    ///       <work_stmts>
+    ///   update_label:
+    ///       i = i + 1;
+    ///       if (i == limit) break;
+    ///   }
+    fn make_infinite_for_with_tail(
+        work_stmts: Vec<HirStmt>,
+        iv: &str,
+        limit: &str,
+        update_label: &str,
+    ) -> (Vec<HirStmt>, NirType) {
+        let ty = int(64, false);
+        let body = {
+            let mut b = work_stmts;
+            b.push(HirStmt::Label(update_label.to_string()));
+            b.push(HirStmt::Assign {
+                lhs: HirLValue::Var(iv.to_string()),
+                rhs: add(var(iv), const_i(1), ty.clone()),
+            });
+            b.push(HirStmt::If {
+                cond: eq_expr(var(iv), var(limit)),
+                then_body: vec![HirStmt::Break],
+                else_body: vec![],
+            });
+            b
+        };
+        let stmts = vec![
+            HirStmt::Assign {
+                lhs: HirLValue::Var(iv.to_string()),
+                rhs: const_i(0),
+            },
+            HirStmt::For {
+                init: None,
+                cond: None,
+                update: None,
+                body,
+            },
+        ];
+        (stmts, ty)
+    }
+
+    #[test]
+    fn upgrades_infinite_for_with_tail_update_no_inner_goto() {
+        // Simple case: for(;;) body has no goto to the update label.
+        // Expected: for (i = 0; i != limit; i = i + 1) { work }
+        let (mut stmts, _ty) = make_infinite_for_with_tail(
+            vec![HirStmt::Expr(HirExpr::Const(42, int(64, false)))],
+            "i",
+            "limit",
+            "update_lbl",
+        );
+
+        assert!(try_upgrade_infinite_for_with_tail_update(&mut stmts, 1));
+        assert_eq!(stmts.len(), 1, "init should be absorbed into for-init");
+
+        let HirStmt::For { init, cond, update, body } = &stmts[0] else {
+            panic!("expected For");
+        };
+        assert!(init.is_some(), "init should be set");
+        assert!(cond.is_some(), "cond should be set");
+        assert!(update.is_some(), "update should be set");
+        assert_eq!(body.len(), 1, "body should have work stmt only");
+
+        // Condition should be the negation: i != limit
+        let cond = cond.as_ref().unwrap();
+        assert!(
+            matches!(cond, HirExpr::Binary { op: HirBinaryOp::Ne, .. }),
+            "cond should be Ne (inverted from Eq), got: {cond:?}"
+        );
+    }
+
+    #[test]
+    fn upgrades_infinite_for_and_replaces_inner_goto_with_continue() {
+        // for(;;) body contains `if (early) goto update_lbl` — should become `continue`.
+        let work_stmts = vec![
+            HirStmt::If {
+                cond: var("early"),
+                then_body: vec![HirStmt::Goto("update_lbl".to_string())],
+                else_body: vec![],
+            },
+            HirStmt::Expr(HirExpr::Const(99, int(64, false))),
+        ];
+        let (mut stmts, _ty) =
+            make_infinite_for_with_tail(work_stmts, "i", "limit", "update_lbl");
+
+        assert!(try_upgrade_infinite_for_with_tail_update(&mut stmts, 1));
+
+        let HirStmt::For { body, .. } = &stmts[0] else {
+            panic!("expected For");
+        };
+        // Body should have the if-continue and the expr, no label or break-if.
+        assert_eq!(body.len(), 2);
+        let HirStmt::If { then_body, .. } = &body[0] else {
+            panic!("expected If");
+        };
+        assert_eq!(
+            then_body.as_slice(),
+            [HirStmt::Continue],
+            "goto should have been replaced with continue"
+        );
+    }
+
+    #[test]
+    fn does_not_upgrade_infinite_for_when_no_init_before_loop() {
+        // No assignment to `i` immediately before the loop → no transformation.
+        let body = vec![
+            HirStmt::Label("lbl".to_string()),
+            HirStmt::Assign {
+                lhs: HirLValue::Var("i".to_string()),
+                rhs: add(var("i"), const_i(1), int(64, false)),
+            },
+            HirStmt::If {
+                cond: eq_expr(var("i"), var("limit")),
+                then_body: vec![HirStmt::Break],
+                else_body: vec![],
+            },
+        ];
+        let mut stmts = vec![
+            HirStmt::Expr(HirExpr::Const(0, int(64, false))), // unrelated stmt, not an init for i
+            HirStmt::For {
+                init: None,
+                cond: None,
+                update: None,
+                body,
+            },
+        ];
+
+        assert!(!try_upgrade_infinite_for_with_tail_update(&mut stmts, 1));
+    }
+
+    #[test]
+    fn does_not_upgrade_when_body_has_explicit_continue() {
+        // An existing `continue` in the body blocks the transformation.
+        let work_stmts = vec![
+            HirStmt::Continue, // existing continue — safety check must reject
+            HirStmt::Expr(HirExpr::Const(1, int(64, false))),
+        ];
+        let (mut stmts, _) =
+            make_infinite_for_with_tail(work_stmts, "i", "limit", "update_lbl");
+
+        assert!(!try_upgrade_infinite_for_with_tail_update(&mut stmts, 1));
     }
 }
