@@ -18,11 +18,15 @@ impl<'a> PreviewBuilder<'a> {
         op: &PcodeOp,
         output: &Varnode,
     ) -> Option<String> {
-        if !Self::is_loop_carried_register_update_candidate(output) {
+        let is_candidate = Self::is_loop_carried_register_update_candidate(output);
+        let block_idx = self.address_to_index.get(&block.start_address).copied();
+        let is_update = block_idx.is_some_and(|b_idx| self.output_is_loop_carried_register_update(b_idx, op_idx, op, output));
+
+        if !is_candidate {
             return None;
         }
-        let block_idx = self.address_to_index.get(&block.start_address).copied()?;
-        if !self.output_is_loop_carried_register_update(block_idx, op_idx, op, output) {
+        let block_idx = block_idx?;
+        if !is_update {
             return None;
         }
         if let Some(name) = self.prior_materialized_loop_carried_output_name(output) {

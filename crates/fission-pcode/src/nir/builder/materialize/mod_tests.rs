@@ -260,8 +260,101 @@ fn direct_successor_accumulator_merge_rejects_partial_register_output() {
     );
 }
 
+/// Mirrors `conditional_loop_exit_accumulator_merge_uses_seeded_edge_binding` but
+/// uses EAX (size=4, offset=0) instead of r10 (size=8). This is the canonical
+/// pattern for a C `int`-returning loop accumulator in x86-64, e.g.:
+///   `int sum_array(int *arr, int n) { int s = 0; for (...) s += ...; return s; }`
+/// The fix to allow `size == 4` for the primary ABI return register must accept this.
+#[test]
+fn conditional_loop_exit_accumulator_merge_accepts_32bit_return_register_eax() {
+    let eax = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0x00, 4);
+    let rax = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0x00, 8);
+    let cond = register(UNIQUE_SPACE_ID, 0x300, 1);
+    let pcode = pcode_function(vec![
+        PcodeBasicBlock {
+            index: 0,
+            start_address: 0x1000,
+            successors: vec![1],
+            ops: vec![
+                op(1, PcodeOpcode::Copy, Some(eax.clone()), vec![constant(0)]),
+                op(2, PcodeOpcode::IntZExt, Some(rax.clone()), vec![eax.clone()]),
+                op(3, PcodeOpcode::Branch, None, vec![constant(0x1010)]),
+            ],
+        },
+        PcodeBasicBlock {
+            index: 1,
+            start_address: 0x1010,
+            successors: vec![2, 3],
+            ops: vec![op(4, PcodeOpcode::CBranch, None, vec![constant(0x1020), cond.clone()])],
+        },
+        PcodeBasicBlock {
+            index: 2,
+            start_address: 0x1020,
+            successors: Vec::new(),
+            ops: vec![op(5, PcodeOpcode::Return, None, vec![rax.clone()])],
+        },
+        PcodeBasicBlock {
+            index: 3,
+            start_address: 0x1030,
+            successors: vec![1, 2],
+            ops: vec![
+                op(6, PcodeOpcode::IntAdd, Some(eax.clone()), vec![eax.clone(), constant(1)]),
+                op(7, PcodeOpcode::CBranch, None, vec![constant(0x1010), cond]),
+            ],
+        },
+    ]);
+    let options = crate::nir::builder::materialize::test_support::test_options();
+    let mut builder = PreviewBuilder::new(&pcode, &options, None);
+    builder.successors[3] = vec![1, 2];
+    builder.predecessors[1] = vec![0, 3];
+    builder.predecessors[2] = vec![1, 3];
+    builder.loop_bodies = vec![crate::nir::structuring::loop_analysis::LoopBody {
+        head: 1,
+        tails: vec![3],
+        body: vec![1, 3],
+        exit_idx: Some(2),
+        all_exits: vec![2],
+    }];
+    let rhs = HirExpr::Binary {
+        op: HirBinaryOp::Add,
+        lhs: Box::new(HirExpr::Var("rax".to_string())),
+        rhs: Box::new(HirExpr::Const(1, type_from_size(4, false))),
+        ty: type_from_size(4, false),
+    };
+
+    assert_eq!(builder.canonical_x86_gpr64_name_for_value(&eax), Some(("rax", 0)));
+    assert!(builder.loop_header_external_predecessors_seed_zero(
+        1, &builder.loop_bodies[0], 0, false
+    ));
+    assert!(builder.block_reads_merge_input_before_redefinition(&pcode.blocks[2], &eax));
+    assert!(!builder.loop_body_has_side_entry_or_irreducible_edge(&builder.loop_bodies[0]));
+    assert!(builder
+        .last_redefinition_index_before_terminator(&pcode.blocks[3], &eax)
+        .is_some());
+
+    let name = builder.with_lowering_site(
+        LoweringSite { block_idx: 3, op_idx: 0 },
+        |builder| {
+            builder
+                .merge_binding_name_for_direct_successor_accumulator(&pcode.blocks[3], &eax, &rhs)
+                .expect("EAX (32-bit return register) must be accepted as a loop accumulator")
+        },
+    );
+
+    assert_eq!(
+        builder.explicit_merge_bindings.get(&(2, VarnodeKey::from(&eax))),
+        Some(&name)
+    );
+    // Initializer must be 32-bit zero (output.size=4), not 64-bit (pointer_size=8)
+    assert_eq!(
+        builder.temps.get(&name).and_then(|b| b.initializer.as_ref()),
+        Some(&HirExpr::Const(0, type_from_size(4, false)))
+    );
+}
+
 #[test]
 fn conditional_loop_exit_accumulator_merge_uses_seeded_edge_binding() {
+
     let r10d = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0x90, 4);
     let r10 = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0x90, 8);
     let cond = register(UNIQUE_SPACE_ID, 0x300, 1);
@@ -328,7 +421,8 @@ fn conditional_loop_exit_accumulator_merge_uses_seeded_edge_binding() {
     assert!(builder.loop_header_external_predecessors_seed_zero(
         1,
         &builder.loop_bodies[0],
-        10
+        10,
+        false
     ));
     assert!(builder.block_reads_merge_input_before_redefinition(&pcode.blocks[2], &r10));
     assert!(!builder.block_reads_merge_input_before_redefinition(&pcode.blocks[1], &r10));

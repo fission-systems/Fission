@@ -870,9 +870,16 @@ impl<'a> PreviewBuilder<'a> {
         output: &Varnode,
         rhs: &HirExpr,
     ) -> Option<String> {
+        // Allow full-width registers (size == pointer_size) and also the 32-bit primary
+        // return register (e.g. EAX in x86-64, size=4, offset=0). In x86-64, a 32-bit
+        // write zero-extends to the full 64-bit register, so EAX and RAX are semantically
+        // equivalent for accumulation. Other partial registers (r12d, etc.) remain rejected.
+        let is_32bit_return_reg = self.options.is_64bit
+            && output.size == 4
+            && is_primary_return_register_for_abi(output, self.options.calling_convention);
         if output.is_constant
             || !is_register_space_id(output.space_id)
-            || output.size != self.options.pointer_size
+            || (output.size != self.options.pointer_size && !is_32bit_return_reg)
             || !Self::rhs_is_safe_scalar_live_register_merge(rhs)
             || !matches!(
                 self.options.calling_convention,
@@ -911,6 +918,18 @@ impl<'a> PreviewBuilder<'a> {
             );
             return None;
         };
+        // The 32-bit return-register exception is ONLY valid for the conditional-exit
+        // (multi-successor) path handled by merge_binding_name_for_conditional_loop_exit_accumulator.
+        // For single-successor blocks (self-loops, simple backedge loops) the loop_carried
+        // mechanism is the correct owner; reject here so it reaches that path unchanged.
+        if is_32bit_return_reg {
+            self.trace_direct_successor_accumulator_merge_rejected(
+                block.start_address,
+                output,
+                "shape_or_abi_single_successor",
+            );
+            return None;
+        }
         let Some(predecessor_idxs) = self.predecessors.get(succ_idx) else {
             self.trace_direct_successor_accumulator_merge_rejected(
                 block.start_address,
@@ -986,9 +1005,14 @@ impl<'a> PreviewBuilder<'a> {
         output: &Varnode,
         rhs: &HirExpr,
     ) -> Option<String> {
+        // Allow the 32-bit primary return register (EAX in x86-64) in addition to full-width
+        // registers. See the corresponding guard in merge_binding_name_for_direct_successor_accumulator.
+        let is_32bit_return_reg = self.options.is_64bit
+            && output.size == 4
+            && is_primary_return_register_for_abi(output, self.options.calling_convention);
         if output.is_constant
             || !is_register_space_id(output.space_id)
-            || output.size != self.options.pointer_size
+            || (output.size != self.options.pointer_size && !is_32bit_return_reg)
             || !Self::rhs_is_safe_scalar_live_register_merge(rhs)
             || !matches!(
                 self.options.calling_convention,
@@ -1102,7 +1126,7 @@ impl<'a> PreviewBuilder<'a> {
             );
             return None;
         }
-        if Self::has_aliasing_side_effect_between_ops(block, def_idx + 1, block.ops.len()) {
+        if self.has_call_between_ops(block, def_idx + 1, block.ops.len()) {
             self.trace_direct_successor_accumulator_merge_rejected(
                 block.start_address,
                 output,
@@ -1116,6 +1140,7 @@ impl<'a> PreviewBuilder<'a> {
                 non_read_succ_idx,
                 loop_body,
                 family_idx,
+                false,
             );
         let external_seed_shape = self
             .conditional_loop_exit_external_seed_shape(
@@ -1142,7 +1167,7 @@ impl<'a> PreviewBuilder<'a> {
         {
             binding.initializer = Some(HirExpr::Const(
                 0,
-                type_from_size(self.options.pointer_size, false),
+                type_from_size(output.size, false),
             ));
         }
         let predecessor_addrs = preds
@@ -1216,7 +1241,7 @@ impl<'a> PreviewBuilder<'a> {
             return false;
         };
         Self::output_def_is_safe_direct_successor_merge(&pred_block.ops[def_idx])
-            && !Self::has_aliasing_side_effect_between_ops(pred_block, def_idx + 1, pred_block.ops.len())
+            && !self.has_call_between_ops(pred_block, def_idx + 1, pred_block.ops.len())
     }
 
     fn rewrite_block_entry_accumulator_rhs_with_live_gpr(
@@ -1374,7 +1399,7 @@ impl<'a> PreviewBuilder<'a> {
         let Some(block) = self.pcode.blocks.get(block_idx) else {
             return None;
         };
-        if Self::has_aliasing_side_effect_between_ops(block, 0, op_idx) {
+        if self.has_call_between_ops(block, 0, op_idx) {
             self.trace_block_entry_partial_gpr_merge_rejected(
                 block_idx,
                 op_seq,
@@ -1531,6 +1556,7 @@ impl<'a> PreviewBuilder<'a> {
         if live_name == "rsp" || self.abi_state().param_slot_for_name(live_name).is_some() {
             return None;
         }
+
         self.partial_gpr_join_family_needs_live_binding(family_idx)
             .then(|| (live_name.to_string(), self.options.pointer_size))
     }
@@ -1553,7 +1579,7 @@ impl<'a> PreviewBuilder<'a> {
                     .get(block_idx)
                     .is_some_and(|preds| preds.len() >= 2)
                     && block.ops.iter().enumerate().any(|(op_idx, op)| {
-                        !Self::has_aliasing_side_effect_between_ops(block, 0, op_idx)
+                        !self.has_call_between_ops(block, 0, op_idx)
                             && !block
                                 .ops
                                 .iter()
@@ -1600,7 +1626,7 @@ impl<'a> PreviewBuilder<'a> {
         depth: usize,
         visiting: &mut HashSet<usize>,
     ) -> Result<HirExpr, &'static str> {
-        if depth > 8 || pred_idx == target_idx || !visiting.insert(pred_idx) {
+        if depth > 8 || (pred_idx == target_idx && depth > 0) || !visiting.insert(pred_idx) {
             return Err("ambiguous_predecessor_path");
         }
         let Some(block) = self.pcode.blocks.get(pred_idx) else {
@@ -1619,11 +1645,11 @@ impl<'a> PreviewBuilder<'a> {
                     })
                 })
                 .unwrap_or(false);
-            if Self::has_call_between_ops(block, def_idx + 1, block.ops.len()) {
+            if self.has_call_between_ops(block, def_idx + 1, block.ops.len()) {
                 visiting.remove(&pred_idx);
                 return Err("side_effect_after_pred_definition");
             }
-            if Self::has_aliasing_side_effect_between_ops(block, def_idx + 1, block.ops.len())
+            if self.has_call_between_ops(block, def_idx + 1, block.ops.len())
                 && !has_materialized_def
             {
                 visiting.remove(&pred_idx);
@@ -1641,7 +1667,7 @@ impl<'a> PreviewBuilder<'a> {
             visiting.remove(&pred_idx);
             return Err("unsafe_pred_definition");
         }
-        if Self::has_call_between_ops(block, 0, block.ops.len()) {
+        if self.has_call_between_ops(block, 0, block.ops.len()) {
             visiting.remove(&pred_idx);
             return Err("side_effect_on_passthrough_path");
         }
@@ -1767,7 +1793,7 @@ impl<'a> PreviewBuilder<'a> {
         let Some(block) = self.pcode.blocks.get(block_idx) else {
             return Err("missing_block");
         };
-        if Self::has_aliasing_side_effect_between_ops(block, 0, op_idx) {
+        if self.has_call_between_ops(block, 0, op_idx) {
             return Err("side_effect_before_read");
         }
         if block
@@ -1803,7 +1829,7 @@ impl<'a> PreviewBuilder<'a> {
             return Err("side_entry_or_irreducible");
         }
         if predecessors.iter().all(|pred| {
-            self.pred_path_has_live_accumulator_def(*pred, block_idx, loop_body, family_idx)
+            self.pred_path_has_live_accumulator_def(*pred, block_idx, loop_body, family_idx, false)
         }) {
             Ok(())
         } else {
@@ -1824,7 +1850,7 @@ impl<'a> PreviewBuilder<'a> {
         let Some(block) = self.pcode.blocks.get(block_idx) else {
             return Err("missing_block");
         };
-        if Self::has_aliasing_side_effect_between_ops(block, 0, op_idx) {
+        if self.has_call_between_ops(block, 0, op_idx) {
             return Err("side_effect_before_read");
         }
         if block
@@ -1856,7 +1882,7 @@ impl<'a> PreviewBuilder<'a> {
         if self.loop_body_has_side_entry_or_irreducible_edge(&loop_body) {
             return Err("side_entry_or_irreducible");
         }
-        if !self.pred_path_has_live_accumulator_def(loop_pred, block_idx, &loop_body, family_idx) {
+        if !self.pred_path_has_live_accumulator_def(loop_pred, block_idx, &loop_body, family_idx, false) {
             return Err("missing_loop_exit_live_def");
         }
         let body = loop_body.body.iter().copied().collect::<HashSet<_>>();
@@ -1868,6 +1894,7 @@ impl<'a> PreviewBuilder<'a> {
             family_idx,
             0,
             &mut visiting,
+            false,
         ) {
             return Err("missing_external_zero_seed");
         }
@@ -2111,7 +2138,7 @@ impl<'a> PreviewBuilder<'a> {
                 .filter(|pred| loop_body.body.contains(pred))
                 .any(|pred| {
                     self.pred_path_has_live_accumulator_def(
-                        *pred, block_idx, &loop_body, family_idx,
+                        *pred, block_idx, &loop_body, family_idx, true,
                     )
                 })
         } else {
@@ -2129,11 +2156,11 @@ impl<'a> PreviewBuilder<'a> {
         }
         let value_is_zero = self.varnode_known_const_zero(value, 8);
         let external_zero_seed = store_is_loop_header
-            && self.loop_header_external_predecessors_seed_zero(block_idx, &loop_body, family_idx);
+            && self.loop_header_external_predecessors_seed_zero(block_idx, &loop_body, family_idx, true);
         let zero_entry_default = value_is_zero || external_zero_seed;
         let all_external_preds_have_live_def = store_is_loop_header
             && self.loop_header_external_predecessors_have_live_accumulator_def(
-                block_idx, &loop_body, family_idx,
+                block_idx, &loop_body, family_idx, true,
             );
         if !zero_entry_default && !all_external_preds_have_live_def {
             let external_preds = self
@@ -2182,6 +2209,7 @@ impl<'a> PreviewBuilder<'a> {
         header_idx: usize,
         loop_body: &crate::nir::structuring::loop_analysis::LoopBody,
         family_idx: usize,
+        conservative_mem_check: bool,
     ) -> bool {
         let body = loop_body.body.iter().copied().collect::<HashSet<_>>();
         let incoming = self
@@ -2202,6 +2230,7 @@ impl<'a> PreviewBuilder<'a> {
                     family_idx,
                     0,
                     &mut visiting,
+                    conservative_mem_check,
                 )
             })
     }
@@ -2211,6 +2240,7 @@ impl<'a> PreviewBuilder<'a> {
         header_idx: usize,
         loop_body: &crate::nir::structuring::loop_analysis::LoopBody,
         family_idx: usize,
+        conservative_mem_check: bool,
     ) -> bool {
         let body = loop_body.body.iter().copied().collect::<HashSet<_>>();
         let incoming = self
@@ -2231,6 +2261,7 @@ impl<'a> PreviewBuilder<'a> {
                     family_idx,
                     0,
                     &mut visiting,
+                    conservative_mem_check,
                 )
             })
     }
@@ -2243,13 +2274,21 @@ impl<'a> PreviewBuilder<'a> {
         family_idx: usize,
         depth: usize,
         visiting: &mut HashSet<usize>,
+        conservative_mem_check: bool,
     ) -> bool {
         if depth > 8 || idx == header_idx || loop_body.contains(&idx) || !visiting.insert(idx) {
             return false;
         }
         let result = self.pcode.blocks.get(idx).is_some_and(|block| {
+            let has_side_effect = |block: &crate::pcode::PcodeBasicBlock, start: usize, end: usize| {
+                if conservative_mem_check {
+                    Self::has_aliasing_side_effect_between_ops(block, start, end)
+                } else {
+                    self.has_call_between_ops(block, start, end)
+                }
+            };
             if let Some(def_idx) = self.last_x86_gpr_family_definition(block, family_idx) {
-                return !Self::has_aliasing_side_effect_between_ops(
+                return !has_side_effect(
                     block,
                     def_idx + 1,
                     block.ops.len(),
@@ -2283,6 +2322,7 @@ impl<'a> PreviewBuilder<'a> {
                         family_idx,
                         depth + 1,
                         visiting,
+                        conservative_mem_check,
                     )
                 })
         });
@@ -2298,20 +2338,28 @@ impl<'a> PreviewBuilder<'a> {
         family_idx: usize,
         depth: usize,
         visiting: &mut HashSet<usize>,
+        conservative_mem_check: bool,
     ) -> bool {
         if depth > 8 || idx == header_idx || loop_body.contains(&idx) || !visiting.insert(idx) {
             return false;
         }
         let result = self.pcode.blocks.get(idx).is_some_and(|block| {
+            let has_side_effect = |block: &crate::pcode::PcodeBasicBlock, start: usize, end: usize| {
+                if conservative_mem_check {
+                    Self::has_aliasing_side_effect_between_ops(block, start, end)
+                } else {
+                    self.has_call_between_ops(block, start, end)
+                }
+            };
             if let Some(def_idx) = self.last_x86_gpr_family_definition(block, family_idx) {
                 return self.x86_gpr_definition_is_zero_in_block(block, def_idx, 4)
-                    && !Self::has_aliasing_side_effect_between_ops(
+                    && !has_side_effect(
                         block,
                         def_idx + 1,
                         block.ops.len(),
                     );
             }
-            if Self::has_aliasing_side_effect_between_ops(block, 0, block.ops.len()) {
+            if has_side_effect(block, 0, block.ops.len()) {
                 return false;
             }
             let incoming = self
@@ -2331,6 +2379,7 @@ impl<'a> PreviewBuilder<'a> {
                         family_idx,
                         depth + 1,
                         visiting,
+                        conservative_mem_check,
                     )
                 })
         });
@@ -2371,7 +2420,7 @@ impl<'a> PreviewBuilder<'a> {
             })
     }
 
-    fn canonical_x86_gpr64_name_for_value(&self, value: &Varnode) -> Option<(&'static str, usize)> {
+    pub(super) fn canonical_x86_gpr64_name_for_value(&self, value: &Varnode) -> Option<(&'static str, usize)> {
         let raw_name = register_hardware_name_for_abi(
             value.offset,
             value.size,
@@ -2458,6 +2507,7 @@ impl<'a> PreviewBuilder<'a> {
         target_idx: usize,
         loop_body: &crate::nir::structuring::loop_analysis::LoopBody,
         family_idx: usize,
+        conservative_mem_check: bool,
     ) -> bool {
         let body = loop_body.body.iter().copied().collect::<HashSet<_>>();
         let mut visiting = HashSet::new();
@@ -2468,6 +2518,7 @@ impl<'a> PreviewBuilder<'a> {
             family_idx,
             0,
             &mut visiting,
+            conservative_mem_check,
         )
     }
 
@@ -2479,19 +2530,27 @@ impl<'a> PreviewBuilder<'a> {
         family_idx: usize,
         depth: usize,
         visiting: &mut HashSet<usize>,
+        conservative_mem_check: bool,
     ) -> bool {
         if depth > 8 || idx == target_idx || !loop_body.contains(&idx) || !visiting.insert(idx) {
             return false;
         }
         let result = self.pcode.blocks.get(idx).is_some_and(|block| {
+            let has_side_effect = |block: &crate::pcode::PcodeBasicBlock, start: usize, end: usize| {
+                if conservative_mem_check {
+                    Self::has_aliasing_side_effect_between_ops(block, start, end)
+                } else {
+                    self.has_call_between_ops(block, start, end)
+                }
+            };
             if let Some(def_idx) = self.last_x86_gpr_family_definition(block, family_idx) {
-                return !Self::has_aliasing_side_effect_between_ops(
+                return !has_side_effect(
                     block,
                     def_idx + 1,
                     block.ops.len(),
                 );
             }
-            if Self::has_aliasing_side_effect_between_ops(block, 0, block.ops.len()) {
+            if has_side_effect(block, 0, block.ops.len()) {
                 return false;
             }
             let incoming = self
@@ -2511,6 +2570,7 @@ impl<'a> PreviewBuilder<'a> {
                         family_idx,
                         depth + 1,
                         visiting,
+                        conservative_mem_check,
                     )
                 })
         });
@@ -2618,16 +2678,52 @@ impl<'a> PreviewBuilder<'a> {
     }
 
     fn has_call_between_ops(
+        &self,
         block: &crate::pcode::PcodeBasicBlock,
         start: usize,
         end: usize,
     ) -> bool {
-        block.ops[start..end.min(block.ops.len())].iter().any(|op| {
-            matches!(
-                op.opcode,
-                PcodeOpcode::Call | PcodeOpcode::CallInd | PcodeOpcode::CallOther
-            )
-        })
+        let res = block.ops[start..end.min(block.ops.len())].iter().any(|op| {
+            if matches!(op.opcode, PcodeOpcode::Call | PcodeOpcode::CallInd) {
+                let mut target_name = None;
+                if op.opcode == PcodeOpcode::Call {
+                    if let Some(name) = self.options.relocation_names.get(&op.address) {
+                        target_name = Some(name.as_str());
+                    }
+                }
+                if target_name.is_none() {
+                    if let Some(target_vn) = op.inputs.first() {
+                        if target_vn.is_constant {
+                            let addr = if target_vn.offset != 0 {
+                                target_vn.offset
+                            } else {
+                                target_vn.constant_val as u64
+                            };
+                            if let Some(ctx) = self.type_context {
+                                if let Some(target_ref) = ctx.call_target_refs.get(&addr) {
+                                    target_name = Some(target_ref.symbol.as_str());
+                                }
+                            }
+                        }
+                    }
+                }
+                if let Some(name) = target_name {
+                    if Self::materialize_call_target_is_known_pure_intrinsic(name) {
+                        return false;
+                    }
+                }
+                true
+            } else {
+                false
+            }
+        });
+        if res {
+            eprintln!("[DEBUG-CALL] has_call_between_ops: true for block 0x{:x} range {}..{}", block.start_address, start, end);
+            for op in &block.ops[start..end.min(block.ops.len())] {
+                eprintln!("  op: {:?}", op.opcode);
+            }
+        }
+        res
     }
 
     fn varnode_known_const_zero(&self, value: &Varnode, budget: usize) -> bool {

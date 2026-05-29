@@ -1669,4 +1669,167 @@ fn for_loop_non_last_update_failure() {
     assert!(code.contains("local_10 = rbx;"), "expected body store: {code}");
 }
 
+/// Regression test: x86-64 loop accumulator ZExt passthrough look-through.
+///
+/// In x86-64, writing a 32-bit result (EAX) implicitly zero-extends into the 64-bit parent
+/// (RAX). P-code represents this as two successive ops at sequential seq_nums:
+///
+/// ```text
+///   EAX = IntAdd(EAX, tmp)   ; seq N     ← actual narrow accumulator def
+///   RAX = IntZExt(EAX)       ; seq N+1   ← higher op_idx wins alias resolution without fix
+/// ```
+///
+/// Without the two-layer fix, `lookup_def_site(EAX)` picks the `RAX=IntZExt` op (larger
+/// op_idx), causing:
+///   - Layer 1 (`binding.rs`): loop-carried name for the accumulator resolves to a stale
+///     pre-loop snapshot temp ("xVar27") instead of "rax", so the body uses "xVar27 += ..."
+///   - Layer 2 (`lower_expr.rs`): the return-value expression also resolves to that same
+///     stale temp, producing "return xVar27" (stuck at the initial zero) instead of "return rax"
+///
+/// Invariant tested: when the def found by `lookup_def_site` for a narrow register is a
+/// passthrough op (ZExt/SExt/Copy) whose sole input is exactly that narrow register, the
+/// look-through scan backwards in the same block must find the actual narrow-register def
+/// and return its materialized name rather than a snapshot of the wide alias.
+///
+/// CFG:
+/// ```text
+///   block_0 (0xa000): EAX = IntXor(EAX, EAX)=0; RAX = IntZExt(EAX); Branch → 0xa010
+///   block_1 (0xa010): tmp = Load(RCX);
+///                     EAX = IntAdd(EAX, tmp);  ← accumulate
+///                     RAX = IntZExt(EAX);       ← x86-64 zero-extend artifact
+///                     RCX = IntAdd(RCX, 4);
+///                     cond = IntNotEqual(RCX, RDX);
+///                     CBranch(→ 0xa010 if cond, fall-through → 0xa020)
+///   block_2 (0xa020): Return  ← return value resolved from predecessor block_1
+/// ```
+#[test]
+fn do_while_x86_zext_passthrough_accumulator_naming() {
+    let tmp_load = uniq(0xA01, 4); // loaded dword from one array element
+    let loop_cond = uniq(0xA02, 1); // loop-continue flag
 
+    let func = PcodeFunction {
+        blocks: vec![
+            // block_0: init — EAX = 0 (XOR self), RAX = ZExt(EAX), Branch → loop body
+            PcodeBasicBlock {
+                index: 0,
+                start_address: 0xA000,
+                successors: vec![],
+                ops: vec![
+                    PcodeOp {
+                        seq_num: 0,
+                        opcode: PcodeOpcode::IntXor,
+                        address: 0xA000,
+                        output: Some(reg(0x00, 4)), // EAX = EAX ^ EAX = 0
+                        inputs: vec![reg(0x00, 4), reg(0x00, 4)],
+                        asm_mnemonic: None,
+                    },
+                    PcodeOp {
+                        seq_num: 1,
+                        opcode: PcodeOpcode::IntZExt,
+                        address: 0xA001,
+                        output: Some(reg(0x00, 8)), // RAX = ZExt(EAX) — zero-extend artifact
+                        inputs: vec![reg(0x00, 4)],
+                        asm_mnemonic: None,
+                    },
+                    PcodeOp {
+                        seq_num: 2,
+                        opcode: PcodeOpcode::Branch,
+                        address: 0xA002,
+                        output: None,
+                        inputs: vec![cst(0xA010, 8)],
+                        asm_mnemonic: None,
+                    },
+                ],
+            },
+            // block_1: do-while body — EAX accumulates, ZExt follows, ptr advances, loop test
+            PcodeBasicBlock {
+                index: 1,
+                start_address: 0xA010,
+                successors: vec![],
+                ops: vec![
+                    PcodeOp {
+                        seq_num: 0,
+                        opcode: PcodeOpcode::Load,
+                        address: 0xA010,
+                        output: Some(tmp_load.clone()), // tmp = *RCX (one array element)
+                        inputs: vec![cst(0, 4), reg(0x08, 8)],
+                        asm_mnemonic: None,
+                    },
+                    PcodeOp {
+                        seq_num: 1,
+                        opcode: PcodeOpcode::IntAdd,
+                        address: 0xA011,
+                        output: Some(reg(0x00, 4)), // EAX += tmp
+                        inputs: vec![reg(0x00, 4), tmp_load.clone()],
+                        asm_mnemonic: None,
+                    },
+                    PcodeOp {
+                        // x86-64 zero-extend side-effect: higher seq_num than the EAX def
+                        // above, so without the fix lookup_def_site returns this op for EAX
+                        seq_num: 2,
+                        opcode: PcodeOpcode::IntZExt,
+                        address: 0xA012,
+                        output: Some(reg(0x00, 8)), // RAX = ZExt(EAX)
+                        inputs: vec![reg(0x00, 4)],
+                        asm_mnemonic: None,
+                    },
+                    PcodeOp {
+                        seq_num: 3,
+                        opcode: PcodeOpcode::IntAdd,
+                        address: 0xA013,
+                        output: Some(reg(0x08, 8)), // RCX += 4 (advance array pointer)
+                        inputs: vec![reg(0x08, 8), cst(4, 8)],
+                        asm_mnemonic: None,
+                    },
+                    PcodeOp {
+                        seq_num: 4,
+                        opcode: PcodeOpcode::IntNotEqual,
+                        address: 0xA014,
+                        output: Some(loop_cond.clone()), // cond = (RCX != RDX/end)
+                        inputs: vec![reg(0x08, 8), reg(0x10, 8)],
+                        asm_mnemonic: None,
+                    },
+                    PcodeOp {
+                        seq_num: 5,
+                        opcode: PcodeOpcode::CBranch,
+                        address: 0xA015,
+                        output: None,
+                        inputs: vec![cst(0xA010, 8), loop_cond.clone()], // back-edge if cond
+                        asm_mnemonic: None,
+                    },
+                ],
+            },
+            // block_2: exit — return picks up accumulated EAX/RAX from predecessor
+            PcodeBasicBlock {
+                index: 2,
+                start_address: 0xA020,
+                successors: vec![],
+                ops: vec![PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::Return,
+                    address: 0xA020,
+                    output: None,
+                    inputs: vec![cst(0, 8), cst(0, 4)],
+                    asm_mnemonic: None,
+                }],
+            },
+        ],
+    };
+
+    let code = render_mlil_preview(&func, "zext_accumulator_fn", 0xA000, &preview_options())
+        .expect("preview render");
+
+    // Primary invariant: the return must carry the accumulated loop value ("rax"), not a
+    // pre-loop snapshot temp (e.g., "xVar27") that was stuck at the initial zero.
+    assert!(
+        code.contains("return rax"),
+        "expected 'return rax' (accumulated value), got stale temp or zero: {code}"
+    );
+
+    // Secondary invariant: the loop body must assign *into* rax, not into a temp.
+    // Without the Layer-1 fix, the loop body would use an unnamed temp as the LHS.
+    assert!(
+        code.contains("rax +=") || code.contains("rax = rax +"),
+        "expected rax as the loop accumulator in the body: {code}"
+    );
+}

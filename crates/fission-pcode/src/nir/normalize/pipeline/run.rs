@@ -40,7 +40,8 @@ use super::super::idioms::{
     apply_bitstream_idioms, apply_branch_prefix_hoist_pass, apply_call_artifact_cleanup_pass,
     apply_recurrence_to_self_recursive_call_pass, apply_security_cookie_pass,
     apply_split_flow_pass, apply_string_copy_pass, apply_subflow_pruning,
-    remove_callee_save_prologue_epilogue, remove_entry_stack_scaffold_stores, apply_xor_swap_pass,
+    remove_callee_save_prologue_epilogue, remove_dead_callee_saved_param_loads,
+    remove_entry_stack_scaffold_stores, apply_xor_swap_pass,
 };
 use super::super::memory::{
     apply_aggregate_alias_access_rewrite_pass, apply_aggregate_fields_pass,
@@ -591,6 +592,16 @@ pub(crate) fn normalize_hir_function(func: &mut HirFunction) {
             defuse_dead_assignment_pass,
         );
     }
+    // Remove dead callee-saved register assignments whose uses were all
+    // copy-propagated away (e.g. `rbx = param_3` after every `rbx` use
+    // was substituted with `param_3`). Runs unconditionally so it catches
+    // cases where copy propagation fired in an earlier pipeline wave.
+    run_pass_logged(
+        func,
+        "remove_dead_callee_param_loads",
+        perf,
+        remove_dead_callee_saved_param_loads,
+    );
     // Join-variable coalescing: unify parallel temporaries assigned in both
     // branches of an if-else (SSA out-of-SSA for 2-way joins).
     run_pass_logged(func, "join_coalescing", perf, join_coalescing_pass);
@@ -624,6 +635,12 @@ pub(crate) fn normalize_hir_function(func: &mut HirFunction) {
         );
         prune_unused_temp_bindings(func);
         prune_unused_dead_local_bindings(func);
+        run_pass_logged(
+            func,
+            "remove_dead_callee_param_loads_after_branch_hoist",
+            perf,
+            remove_dead_callee_saved_param_loads,
+        );
     }
     // GVN-lite at 2-way joins: duplicate pure RHS, different LHS → hoist temp.
     if run_pass_logged(func, "gvn_join_hoist", perf, apply_gvn_join_hoist_pass) {
@@ -649,6 +666,12 @@ pub(crate) fn normalize_hir_function(func: &mut HirFunction) {
         );
         prune_unused_temp_bindings(func);
         prune_unused_dead_local_bindings(func);
+        run_pass_logged(
+            func,
+            "remove_dead_callee_param_loads_after_gvn",
+            perf,
+            remove_dead_callee_saved_param_loads,
+        );
     }
     // Module B: run def-driven, callsite-signature, and use-driven inference
     // to convergence (bounded). This avoids one-shot ordering sensitivity.
@@ -1284,6 +1307,7 @@ pub(crate) fn normalize_hir_function(func: &mut HirFunction) {
     run_pass_logged(func, "prune_unused_bindings_final", perf, |f| {
         let before = hir_shape(f);
         prune_unused_temp_bindings(f);
+        remove_dead_callee_saved_param_loads(f);
         prune_unused_dead_local_bindings(f);
         before != hir_shape(f)
     });

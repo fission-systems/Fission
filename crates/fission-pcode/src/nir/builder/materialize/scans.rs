@@ -33,7 +33,14 @@ impl<'a> PreviewBuilder<'a> {
                 .as_ref()
                 .is_some_and(|output| Self::varnode_matches_key(output, &key))
             {
-                break;
+                let is_false_redef = matches!(
+                    candidate.opcode,
+                    PcodeOpcode::IntZExt | PcodeOpcode::IntSExt | PcodeOpcode::Cast | PcodeOpcode::Copy
+                ) && candidate.inputs.first().is_some_and(|first_input| Self::varnode_matches_key(first_input, &key));
+
+                if !is_false_redef {
+                    break;
+                }
             }
             if candidate
                 .inputs
@@ -66,10 +73,23 @@ impl<'a> PreviewBuilder<'a> {
             .enumerate()
             .skip(start_idx)
             .find(|(_, candidate)| {
-                candidate
-                    .output
-                    .as_ref()
-                    .is_some_and(|output| Self::varnode_matches_key(output, &key))
+                let Some(candidate_output) = candidate.output.as_ref() else {
+                    return false;
+                };
+                if !Self::varnode_matches_key(candidate_output, &key) {
+                    return false;
+                }
+                if matches!(
+                    candidate.opcode,
+                    PcodeOpcode::IntZExt | PcodeOpcode::IntSExt | PcodeOpcode::Cast | PcodeOpcode::Copy
+                ) {
+                    if let Some(first_input) = candidate.inputs.first() {
+                        if Self::varnode_matches_key(first_input, &key) {
+                            return false;
+                        }
+                    }
+                }
+                true
             })
     }
 
@@ -148,5 +168,18 @@ mod tests {
         let redef = PreviewBuilder::first_output_redefinition_in_block_from(&block, 1, &x20)
             .expect("w20 should redefine the overlapping x20 range");
         assert_eq!(redef.0, 2);
+    }
+
+    #[test]
+    fn materialize_scans_ignores_false_redefinition_hazards() {
+        let x20 = reg(0x40a0, 8);
+        let w20 = reg(0x40a0, 4);
+        let block = block(vec![
+            op(0, PcodeOpcode::IntAdd, Some(w20.clone()), vec![w20.clone(), constant(1)]),
+            op(1, PcodeOpcode::IntZExt, Some(x20.clone()), vec![w20.clone()]),
+        ]);
+
+        let redef = PreviewBuilder::first_output_redefinition_in_block_from(&block, 1, &w20);
+        assert!(redef.is_none(), "ZExt of the same register should be recognized as a false redefinition hazard and ignored");
     }
 }

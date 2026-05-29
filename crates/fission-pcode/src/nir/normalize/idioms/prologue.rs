@@ -423,7 +423,9 @@ pub(crate) fn remove_callee_save_prologue_epilogue(func: &mut HirFunction) -> bo
     }
 
     if candidate_pairs.is_empty() {
-        return remove_orphaned_slot_epilogue_restores(func);
+        let a = remove_orphaned_slot_epilogue_restores(func);
+        let b = remove_dead_callee_saved_param_loads(func);
+        return a | b;
     }
 
     // ── Step 2: Validate each candidate pair.
@@ -461,7 +463,9 @@ pub(crate) fn remove_callee_save_prologue_epilogue(func: &mut HirFunction) -> bo
     }
 
     if confirmed.is_empty() {
-        return remove_orphaned_slot_epilogue_restores(func);
+        let a = remove_orphaned_slot_epilogue_restores(func);
+        let b = remove_dead_callee_saved_param_loads(func);
+        return a | b;
     }
 
     // ── Step 3: Remove all confirmed save and restore statements.
@@ -478,6 +482,10 @@ pub(crate) fn remove_callee_save_prologue_epilogue(func: &mut HirFunction) -> bo
     // ── Step 5: Also remove orphaned stack-slot epilogue restores that were
     // left behind by `remove_entry_stack_scaffold_stores`.
     changed |= remove_orphaned_slot_epilogue_restores(func);
+
+    // ── Step 6: Remove dead callee-saved-register assignments whose uses were
+    // all copy-propagated away, leaving an undeclared write with no reads.
+    changed |= remove_dead_callee_saved_param_loads(func);
 
     changed
 }
@@ -702,6 +710,127 @@ fn remove_orphaned_slot_epilogue_restores(func: &mut HirFunction) -> bool {
     }
 
     changed
+}
+
+/// Remove dead assignments `callee_saved_reg = expr` where:
+/// 1. `callee_saved_reg` is a known callee-saved register name.
+/// 2. `callee_saved_reg` has no `NirBinding` in `func.locals` (was never
+///    materialized as a named local).
+/// 3. `callee_saved_reg` has zero rvalue uses anywhere in the function body.
+///
+/// This arises when the compiler stores a parameter in a callee-saved register
+/// (`rbx = param_3`) to keep it across calls, but a copy-propagation pass
+/// later replaces every use of `rbx` with the original parameter, leaving the
+/// initial assignment dead and the register name undeclared in the output.
+pub(crate) fn remove_dead_callee_saved_param_loads(func: &mut HirFunction) -> bool {
+    let mut candidates: HashSet<String> = HashSet::new();
+    collect_callee_assign_targets_no_slot_rhs(&func.body, &mut candidates);
+
+    for b in &func.locals {
+        if is_callee_saved(&b.name) {
+            candidates.insert(b.name.clone());
+        }
+    }
+
+    if candidates.is_empty() {
+        return false;
+    }
+
+    // Keep only those with zero rvalue uses in the entire body.
+    candidates.retain(|name| {
+        let uses = count_ptr_var_rvalue_uses(&func.body, name);
+        uses == 0
+    });
+
+    if candidates.is_empty() {
+        return false;
+    }
+
+    let mut changed = false;
+    remove_dead_callee_assigns_from_stmts(&mut func.body, &candidates, &mut changed);
+
+    // Also remove any corresponding NirBinding from locals (may have been
+    // declared but later recognized as write-only by a prior pass).
+    let before_locals = func.locals.len();
+    func.locals.retain(|b| !candidates.contains(&b.name));
+    if func.locals.len() != before_locals {
+        changed = true;
+    }
+
+    changed
+}
+
+/// Collect all top-level `callee_reg = expr` assignments where the RHS is
+/// NOT a stack-slot variable (to avoid touching epilogue-restore patterns).
+fn collect_callee_assign_targets_no_slot_rhs(
+    stmts: &[HirStmt],
+    out: &mut HashSet<String>,
+) {
+    for stmt in stmts {
+        match stmt {
+            HirStmt::Assign { lhs: HirLValue::Var(name), rhs }
+                if is_callee_saved(name) =>
+            {
+                let rhs_is_slot = var_name_through_cast(rhs)
+                    .is_some_and(looks_like_stack_slot_name);
+                if !rhs_is_slot {
+                    out.insert(name.clone());
+                }
+            }
+            HirStmt::If { then_body, else_body, .. } => {
+                collect_callee_assign_targets_no_slot_rhs(then_body, out);
+                collect_callee_assign_targets_no_slot_rhs(else_body, out);
+            }
+            HirStmt::Block(body)
+            | HirStmt::While { body, .. }
+            | HirStmt::DoWhile { body, .. }
+            | HirStmt::For { body, .. } => {
+                collect_callee_assign_targets_no_slot_rhs(body, out);
+            }
+            HirStmt::Switch { cases, default, .. } => {
+                for case in cases {
+                    collect_callee_assign_targets_no_slot_rhs(&case.body, out);
+                }
+                collect_callee_assign_targets_no_slot_rhs(default, out);
+            }
+            _ => {}
+        }
+    }
+}
+
+fn remove_dead_callee_assigns_from_stmts(
+    stmts: &mut Vec<HirStmt>,
+    dead: &HashSet<String>,
+    changed: &mut bool,
+) {
+    for stmt in stmts.iter_mut() {
+        match stmt {
+            HirStmt::If { then_body, else_body, .. } => {
+                remove_dead_callee_assigns_from_stmts(then_body, dead, changed);
+                remove_dead_callee_assigns_from_stmts(else_body, dead, changed);
+            }
+            HirStmt::Block(body)
+            | HirStmt::While { body, .. }
+            | HirStmt::DoWhile { body, .. }
+            | HirStmt::For { body, .. } => {
+                remove_dead_callee_assigns_from_stmts(body, dead, changed);
+            }
+            HirStmt::Switch { cases, default, .. } => {
+                for case in cases.iter_mut() {
+                    remove_dead_callee_assigns_from_stmts(&mut case.body, dead, changed);
+                }
+                remove_dead_callee_assigns_from_stmts(default, dead, changed);
+            }
+            _ => {}
+        }
+    }
+    let before = stmts.len();
+    stmts.retain(|stmt| {
+        !matches!(stmt, HirStmt::Assign { lhs: HirLValue::Var(name), .. } if dead.contains(name))
+    });
+    if stmts.len() < before {
+        *changed = true;
+    }
 }
 
 #[cfg(test)]
@@ -1094,5 +1223,104 @@ mod tests {
         if let HirStmt::If { then_body, .. } = &func.body[0] {
             assert!(then_body.is_empty(), "orphaned restore inside if-branch should be removed");
         }
+    }
+
+    // ── remove_dead_callee_saved_param_loads ──────────────────────────────────
+
+    fn assign_var(lhs: &str, rhs: HirExpr) -> HirStmt {
+        HirStmt::Assign {
+            lhs: HirLValue::Var(lhs.to_owned()),
+            rhs,
+        }
+    }
+
+    fn var(name: &str) -> HirExpr {
+        HirExpr::Var(name.to_owned())
+    }
+
+    #[test]
+    fn removes_dead_undeclared_callee_saved_assignment() {
+        // rbx = param_3  but rbx has no binding and is never read → remove.
+        let mut func = HirFunction {
+            name: "test".to_owned(),
+            body: vec![
+                assign_var("rbx", var("param_3")),
+                HirStmt::Return(None),
+            ],
+            locals: vec![],  // rbx has no NirBinding
+            ..Default::default()
+        };
+
+        assert!(remove_callee_save_prologue_epilogue(&mut func));
+        assert_eq!(func.body, vec![HirStmt::Return(None)]);
+    }
+
+    #[test]
+    fn keeps_live_callee_saved_assignment_that_is_read() {
+        // rsi = param_2, but rsi IS read in the condition → keep.
+        let mut func = HirFunction {
+            name: "test".to_owned(),
+            body: vec![
+                assign_var("rsi", var("param_2")),
+                HirStmt::If {
+                    cond: var("rsi"),
+                    then_body: vec![HirStmt::Return(None)],
+                    else_body: vec![],
+                },
+            ],
+            locals: vec![],  // undeclared but has reads
+            ..Default::default()
+        };
+
+        assert!(!remove_callee_save_prologue_epilogue(&mut func));
+        assert_eq!(func.body.len(), 2, "live assignment must not be removed");
+    }
+
+    #[test]
+    fn removes_declared_callee_saved_assignment_when_dead() {
+        // rbx = param_3, rbx IS declared in locals but is never read.
+        // The new strategy: 0 rvalue uses → remove assignment AND binding.
+        let mut func = HirFunction {
+            name: "test".to_owned(),
+            body: vec![
+                assign_var("rbx", var("param_3")),
+                HirStmt::Return(None),
+            ],
+            locals: vec![NirBinding {
+                name: "rbx".to_owned(),
+                ty: u64_ty(),
+                surface_type_name: None,
+                origin: None,
+                initializer: None,
+            }],
+            ..Default::default()
+        };
+
+        assert!(remove_callee_save_prologue_epilogue(&mut func));
+        assert_eq!(func.body, vec![HirStmt::Return(None)], "dead assignment removed");
+        assert!(func.locals.is_empty(), "dead binding also removed from locals");
+    }
+
+    #[test]
+    fn removes_declared_dead_callee_saved_assignment_already_deleted_by_prior_pass() {
+        // rbx has already been deleted from body, but remains in locals.
+        // It has 0 rvalue uses and should be pruned.
+        let mut func = HirFunction {
+            name: "fill_matrix".to_owned(),
+            body: vec![
+                HirStmt::Return(None),
+            ],
+            locals: vec![NirBinding {
+                name: "rbx".to_owned(),
+                ty: u64_ty(),
+                surface_type_name: None,
+                origin: None,
+                initializer: None,
+            }],
+            ..Default::default()
+        };
+
+        assert!(remove_dead_callee_saved_param_loads(&mut func));
+        assert!(func.locals.is_empty(), "rbx local should be removed even if assignment was already deleted");
     }
 }

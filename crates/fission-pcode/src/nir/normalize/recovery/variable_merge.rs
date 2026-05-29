@@ -503,6 +503,16 @@ fn is_hardware_register_variable(name: &str) -> bool {
 
 fn is_eligible_for_speculative_merge(binding: &NirBinding) -> bool {
     if is_hardware_register_variable(&binding.name) {
+        // Permit speculative merging for hardware registers if they represent
+        // temporary variables (Temp or TempPreserved) and are not stack/frame pointers.
+        let name_lower = binding.name.to_lowercase();
+        let is_sp_or_bp = matches!(
+            name_lower.as_str(),
+            "rsp" | "rbp" | "esp" | "ebp" | "sp" | "bp"
+        );
+        if !is_sp_or_bp && binding.is_temp_like() {
+            return true;
+        }
         return false;
     }
     // Symbolic Priority Preservation: Exclude variables with priority >= 2

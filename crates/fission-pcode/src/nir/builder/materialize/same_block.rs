@@ -1130,7 +1130,7 @@ impl<'a> PreviewBuilder<'a> {
         }
     }
 
-    fn materialize_call_target_is_known_pure_intrinsic(target: &str) -> bool {
+    pub(super) fn materialize_call_target_is_known_pure_intrinsic(target: &str) -> bool {
         matches!(
             target,
             "__popcount" | "__lzcnt" | "__carry" | "__scarry" | "__sborrow"

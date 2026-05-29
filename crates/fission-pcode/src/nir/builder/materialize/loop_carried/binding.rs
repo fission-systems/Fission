@@ -26,6 +26,50 @@ impl<'a> PreviewBuilder<'a> {
         {
             return None;
         }
+        // When the prior op is a passthrough (ZExt/SExt/Copy/Cast) whose input is
+        // exactly the narrow register we are looking for, look through the passthrough
+        // to the real narrow-register definition earlier in the same block.
+        //
+        // Example: in x86-64, an init block often contains
+        //   EAX = XOR(EAX, EAX)   ; seq N   (materialized as "rax")
+        //   RAX = IntZExt(EAX)     ; seq N+1 (materialized as some wider temp)
+        //
+        // `lookup_def_site` picks RAX(seq N+1) over EAX(seq N) because op_idx N+1 > N.
+        // Without the look-through, the loop-carried EAX accumulator would inherit the
+        // wider temp's name instead of "rax", causing the return to capture the pre-loop
+        // snapshot value rather than the accumulated result.
+        if matches!(
+            op.opcode,
+            PcodeOpcode::IntZExt | PcodeOpcode::IntSExt | PcodeOpcode::Copy | PcodeOpcode::Cast
+        ) {
+            if let Some(input_vn) = op.inputs.first() {
+                if !input_vn.is_constant
+                    && input_vn.space_id == output.space_id
+                    && input_vn.offset == output.offset
+                    && input_vn.size == output.size
+                {
+                    if let Some(block) = self.pcode.blocks.get(site.block_idx) {
+                        for prior_op_idx in (0..site.op_idx).rev() {
+                            let prior_op2 = &block.ops[prior_op_idx];
+                            if let Some(prior_output2) = &prior_op2.output {
+                                if prior_output2.space_id == output.space_id
+                                    && prior_output2.offset == output.offset
+                                    && prior_output2.size == output.size
+                                {
+                                    // Found the narrow-register definition. Return its
+                                    // materialized name if available, or None to prevent
+                                    // the wide passthrough from hijacking this slot.
+                                    return self
+                                        .materialized_vns
+                                        .get(&MaterializedVarnodeKey::new(prior_output2, prior_op2))
+                                        .cloned();
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
         self.materialized_vns
             .get(&MaterializedVarnodeKey::new(prior_output, op))
             .cloned()
@@ -139,7 +183,7 @@ impl<'a> PreviewBuilder<'a> {
                     break;
                 };
                 if !Self::output_def_is_safe_direct_successor_merge(pred_op)
-                    || Self::has_aliasing_side_effect_between_ops(pred_block, def_idx + 1, term_idx)
+                    || self.has_call_between_ops(pred_block, def_idx + 1, term_idx)
                 {
                     complete = false;
                     break;

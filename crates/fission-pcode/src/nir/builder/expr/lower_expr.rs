@@ -1979,6 +1979,46 @@ impl<'a> PreviewBuilder<'a> {
             if let Some(name) = self.materialized_vns.get(&materialized_key) {
                 return Ok(HirExpr::Var(name.clone()));
             }
+            // Look-through passthrough: when the best def op is a widening passthrough
+            // (ZExt/SExt/Copy/Cast) that reads exactly `vn` (same space/offset/size), the
+            // passthrough was only picked over the real narrow-register def because it has a
+            // higher op_idx in the same block (x86-64 implicit zero-extension pattern).
+            // Scan backwards to find the actual narrow-register definition and return its
+            // materialized name, avoiding projection through the wider temp (e.g. "xVar27")
+            // instead of the accumulated register name (e.g. "rax").
+            if matches!(
+                op.opcode,
+                PcodeOpcode::IntZExt
+                    | PcodeOpcode::IntSExt
+                    | PcodeOpcode::Copy
+                    | PcodeOpcode::Cast
+            ) && op.inputs.first().is_some_and(|input| {
+                !input.is_constant
+                    && input.space_id == vn.space_id
+                    && input.offset == vn.offset
+                    && input.size == vn.size
+            }) {
+                if let Some((site, _)) = def_site {
+                    if let Some(block) = self.pcode.blocks.get(site.block_idx) {
+                        for prior_idx in (0..site.op_idx).rev() {
+                            let prior_op = &block.ops[prior_idx];
+                            if let Some(prior_output) = prior_op.output.as_ref() {
+                                if prior_output.space_id == vn.space_id
+                                    && prior_output.offset == vn.offset
+                                    && prior_output.size == vn.size
+                                {
+                                    let narrow_key =
+                                        MaterializedVarnodeKey::new(prior_output, prior_op);
+                                    if let Some(name) = self.materialized_vns.get(&narrow_key) {
+                                        return Ok(HirExpr::Var(name.clone()));
+                                    }
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
             if let Some(output) = op.output.as_ref()
                 && self.varnode_aliases_value(output, vn)
             {
