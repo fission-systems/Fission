@@ -242,6 +242,14 @@ fn count_ptr_var_rvalue_uses(stmts: &[HirStmt], ptr_var: &str) -> usize {
 }
 
 fn count_ptr_in_stmt(stmt: &HirStmt, name: &str) -> usize {
+    let count = count_ptr_in_stmt_inner(stmt, name);
+    if count > 0 && name == "rbx" {
+        eprintln!("[DBG-COUNT] stmt={:?} count={}", stmt, count);
+    }
+    count
+}
+
+fn count_ptr_in_stmt_inner(stmt: &HirStmt, name: &str) -> usize {
     match stmt {
         HirStmt::Assign { lhs, rhs } => {
             let lhs_uses = match lhs {

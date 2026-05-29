@@ -455,6 +455,7 @@ const CANONICAL_SUBCOMMANDS: &[&str] = &[
     "decomp",
     "strings",
     "xrefs",
+    "callgraph",
     "inventory",
     "resources",
     "script",

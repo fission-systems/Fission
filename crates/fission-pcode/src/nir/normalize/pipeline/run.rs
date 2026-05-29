@@ -372,6 +372,7 @@ pub(crate) struct GlobalSymbolContext {
 }
 
 pub(crate) fn normalize_hir_function(func: &mut HirFunction) {
+    eprintln!("[fission-debug] INITIAL HIR for {}:\n{:#?}", func.name, func);
     wave_stats::reset_normalize_wave_stats();
     let diag = normalize_diag_enabled();
     let perf = normalize_perf_enabled();
