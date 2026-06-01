@@ -113,8 +113,6 @@ benchmark_results/
 !benchmark/IMPLEMENTATION_SUMMARY.md
 !/scripts/benchmark/
 
-# Private product/API layer
-/crates/fission-ai/
 
 # Local benchmark scratch file
 /test_bench.json
