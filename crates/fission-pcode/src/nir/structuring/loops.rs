@@ -699,9 +699,6 @@ impl<'a> PreviewBuilder<'a> {
         else {
             return Ok(None);
         };
-        if has_goto_to_undefined_label(&lowered) {
-            return Ok(None);
-        }
 
         self.telemetry.structuring.loop_while_subgraph_lowered_count += 1;
 
@@ -915,6 +912,13 @@ impl<'a> PreviewBuilder<'a> {
             })
             .filter(|exits: &HashSet<u64>| !exits.is_empty())
             .unwrap_or_else(|| break_addr.into_iter().collect());
+            
+        let break_indices: HashSet<usize> = self
+            .get_loop_body(head_idx)
+            .map(|lb| lb.all_exits.iter().copied().collect())
+            .filter(|exits: &HashSet<usize>| !exits.is_empty())
+            .unwrap_or_else(|| break_idx.into_iter().collect());
+
         let head_addr: u64 = self.block_target_key(head_idx);
 
         let targeted = self.collect_jump_targets()?;
@@ -982,7 +986,7 @@ impl<'a> PreviewBuilder<'a> {
 
         // Helper closure: is the skip_to index within the body set or equal to break_idx?
         let is_valid_skip =
-            |skip_to: usize| -> bool { body_set.contains(&skip_to) || Some(skip_to) == break_idx };
+            |skip_to: usize| -> bool { body_set.contains(&skip_to) || break_indices.contains(&skip_to) };
 
         while pos < sorted_body.len() {
             let idx = sorted_body[pos];
@@ -997,8 +1001,8 @@ impl<'a> PreviewBuilder<'a> {
                             && self.accept_structured_region(idx, skip_to, &targeted)
                         {
                             result_stmts.push(stmt);
-                            // Advance pos to the block at skip_to (or end if skip_to == break_idx)
-                            if Some(skip_to) == break_idx {
+                            // Advance pos to the block at skip_to (or end if skip_to is an exit)
+                            if break_indices.contains(&skip_to) {
                                 // The structured region consumed everything up to the break exit.
                                 return Ok(Some(result_stmts));
                             }

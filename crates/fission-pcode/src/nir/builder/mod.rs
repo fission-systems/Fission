@@ -596,7 +596,48 @@ impl<'a> PreviewBuilder<'a> {
         }
 
         let ty = type_from_size(output.size, false);
-        let name = next_temp_name(&ty, &mut self.temp_next_id);
+        // For x86-64 loop headers: prefer the hardware register name over a fresh
+        // temp for GPR-family varnodes. This prevents a RAX=ZExt(EAX) passthrough
+        // in the loop body from being given an opaque temp name (e.g. xVar1) that
+        // then propagates back into EAX bindings via loop_header_explicit_merge_binding_name.
+        // We use `register_hardware_name_for_abi` for the narrow canonical name (EAX→"rax").
+        let hw_name: Option<String> = if !output.is_constant
+            && is_register_space_id(output.space_id)
+            && matches!(
+                self.options.calling_convention,
+                CallingConvention::WindowsX64 | CallingConvention::SystemVAmd64
+            ) {
+            // Only promote when this block is a loop head and the output is a
+            // known x86-64 GPR family member (xor-family check via gpr_family_index).
+            let output_key = VarnodeKey::from(output);
+            let is_gpr = self.gpr_family_index_for_key(&output_key).is_some();
+            let is_loop_head = self.loop_bodies.iter().any(|lb| lb.head == block_idx);
+            if is_gpr && is_loop_head {
+                register_hardware_name_for_abi(
+                    output.offset,
+                    output.size,
+                    self.options.calling_convention,
+                )
+                .map(|s| s.to_string())
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+        let name = if let Some(hw) = hw_name {
+            // Reuse an existing binding with the same hardware name if present.
+            if self.temps.contains_key(&hw)
+                || self.params.values().any(|b| b.name == hw)
+                || self.locals.values().any(|s| s.name == hw)
+            {
+                hw
+            } else {
+                hw
+            }
+        } else {
+            next_temp_name(&ty, &mut self.temp_next_id)
+        };
         let binding = NirBinding {
             name: name.clone(),
             ty,

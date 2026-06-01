@@ -19,28 +19,19 @@ impl<'a> PreviewBuilder<'a> {
         if !Self::prior_output_aliases_loop_carried_update(prior_output, output) {
             return None;
         }
-        // Reject wide→narrow reuse when the wide binding was created inside the
-        // same loop body. This prevents a temporary RCX binding (e.g. from IntZExt)
-        // from hijacking a later ECX loop-carried update in the same block.
-        if self
-            .loop_bodies
-            .iter()
-            .any(|lb| lb.body.contains(&site.block_idx) && site.block_idx != lb.head)
-        {
-            return None;
-        }
         // When the prior op is a passthrough (ZExt/SExt/Copy/Cast) whose input is
         // exactly the narrow register we are looking for, look through the passthrough
         // to the real narrow-register definition earlier in the same block.
         //
-        // Example: in x86-64, an init block often contains
-        //   EAX = XOR(EAX, EAX)   ; seq N   (materialized as "rax")
-        //   RAX = IntZExt(EAX)     ; seq N+1 (materialized as some wider temp)
+        // This check is intentionally placed BEFORE the loop-body guard below.
+        // In x86-64 loop bodies, the accumulator pattern is:
+        //   EAX = IntAdd(EAX, tmp)   ; seq N   ← actual narrow accumulator update
+        //   RAX = IntZExt(EAX)       ; seq N+1 ← zero-extend side-effect
         //
-        // `lookup_def_site` picks RAX(seq N+1) over EAX(seq N) because op_idx N+1 > N.
-        // Without the look-through, the loop-carried EAX accumulator would inherit the
-        // wider temp's name instead of "rax", causing the return to capture the pre-loop
-        // snapshot value rather than the accumulated result.
+        // `lookup_def_site(EAX)` picks RAX(seq N+1) because op_idx N+1 > N.
+        // The wide def site is inside the loop body, so the guard below would return
+        // None — but we can safely look through the passthrough to find the real
+        // narrow definition and return its materialized name ("rax").
         if matches!(
             op.opcode,
             PcodeOpcode::IntZExt | PcodeOpcode::IntSExt | PcodeOpcode::Copy | PcodeOpcode::Cast
@@ -72,6 +63,17 @@ impl<'a> PreviewBuilder<'a> {
                     }
                 }
             }
+        }
+        // Reject wide→narrow reuse when the wide binding was created inside the
+        // same loop body. This prevents a temporary RCX binding (e.g. from IntZExt
+        // on a non-accumulator register) from hijacking a later ECX loop-carried
+        // update in the same block. Passthrough ops are already handled above.
+        if self
+            .loop_bodies
+            .iter()
+            .any(|lb| lb.body.contains(&site.block_idx) && site.block_idx != lb.head)
+        {
+            return None;
         }
         self.materialized_vns
             .get(&MaterializedVarnodeKey::new(prior_output, op))
