@@ -1,5 +1,8 @@
 //! Session types shared between providers and the pipeline.
 
+pub mod context_manager;
+pub use context_manager::{ContextManager, ReversingFocus};
+
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 

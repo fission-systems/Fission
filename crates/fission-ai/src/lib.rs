@@ -30,8 +30,7 @@ pub use pipeline::AiPipeline;
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::auth::{OAuthOptions, ResolvedAuth};
+    use crate::auth::ResolvedAuth;
     use crate::provider::{ProviderKind, ProviderConfig, build_provider};
     use crate::session::SessionContext;
 
@@ -110,6 +109,55 @@ mod tests {
         session.clear();
         let msgs = session.full_messages();
         assert!(msgs.is_empty());
+    }
+
+    #[test]
+    fn test_context_truncation() {
+        use crate::session::ContextManager;
+        let cm = ContextManager::new(1000, 50);
+        let long_output = "A".repeat(100);
+        let processed = cm.process_tool_output("disasm", long_output);
+        assert!(processed.contains("Truncated"));
+        assert!(processed.len() > 50);
+        assert!(processed.contains("disasm"));
+    }
+
+    #[test]
+    fn test_context_compaction() {
+        use crate::session::{ContextManager, Message};
+        let cm = ContextManager::new(50, 50);
+        
+        let mut messages = vec![
+            Message::system("System prompt"),
+            Message::user("Hello 1"),
+            Message::assistant("Hi 1"),
+            Message::user("Hello 2"),
+            Message::assistant("Hi 2"),
+            Message::user("Hello 3"),
+            Message::assistant("Hi 3"),
+            Message::user("Hello 4"),
+            Message::assistant("Hi 4"),
+        ];
+        
+        let compacted = cm.compact_history(&mut messages);
+        assert!(compacted);
+        // Should keep system prompt (index 0) + compaction sentinel (index 1) + last 4 messages = 6
+        assert_eq!(messages.len(), 6);
+        assert_eq!(messages[0].content.as_deref(), Some("System prompt"));
+        assert!(messages[1].content.as_ref().unwrap().contains("compacted"));
+        assert_eq!(messages[2].content.as_deref(), Some("Hello 3")); // part of the last 4
+    }
+
+    #[test]
+    fn test_reversing_focus_formatting() {
+        use crate::session::ContextManager;
+        let mut cm = ContextManager::new(1000, 50);
+        cm.focus.active_function_addr = Some("0x140001000".to_string());
+        cm.focus.active_function_name = Some("main".to_string());
+        
+        let prompt = cm.format_focus_prompt();
+        assert!(prompt.contains("0x140001000"));
+        assert!(prompt.contains("main"));
     }
 
     // ── Build provider (smoke) ────────────────────────────────────────────────

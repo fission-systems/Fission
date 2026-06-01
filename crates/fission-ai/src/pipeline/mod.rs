@@ -20,6 +20,7 @@ pub struct AiPipeline {
     provider: SharedAiProvider,
     session: Arc<Mutex<SessionContext>>,
     pub tool_registry: Arc<ToolRegistry>,
+    pub context_manager: Arc<Mutex<crate::session::ContextManager>>,
 }
 
 impl AiPipeline {
@@ -51,7 +52,14 @@ impl AiPipeline {
         tool_registry.register(crate::tools::execution::DisasmTool);
         tool_registry.register(crate::tools::execution::XrefsTool);
         
-        Ok(Self { provider, session: Arc::new(Mutex::new(SessionContext::new(system_prompt, binary_path))), tool_registry: Arc::new(tool_registry) })
+        let context_manager = crate::session::ContextManager::new(32000, 6000);
+        
+        Ok(Self {
+            provider,
+            session: Arc::new(Mutex::new(SessionContext::new(system_prompt, binary_path))),
+            tool_registry: Arc::new(tool_registry),
+            context_manager: Arc::new(Mutex::new(context_manager)),
+        })
     }
 
     /// Send a user message and return a streaming chunk stream.
@@ -65,8 +73,23 @@ impl AiPipeline {
     
     pub async fn send_internal(&self) -> ProviderResult<ChunkStream> {
         let msgs = {
-            let session = self.session.lock().unwrap();
-            session.full_messages()
+            let mut session = self.session.lock().unwrap();
+            let cm = self.context_manager.lock().unwrap();
+            
+            // 1. Apply history compaction if message budget exceeded
+            cm.compact_history(&mut session.messages);
+            
+            // 2. Format dynamic focus prompt and combine it with the standard system prompt
+            let focus_prompt = cm.format_focus_prompt();
+            let mut base_prompt = session.system_prompt.clone().unwrap_or_else(|| {
+                "You are Fission AI, a professional reverse engineering assistant.".to_string()
+            });
+            base_prompt.push_str(&focus_prompt);
+            
+            let mut msgs = Vec::new();
+            msgs.push(crate::session::Message::system(base_prompt));
+            msgs.extend(session.messages.iter().cloned());
+            msgs
         };
         
         let tools = self.tool_registry.get_model_visible_tools();
@@ -77,6 +100,7 @@ impl AiPipeline {
         
         let session_clone = self.session.clone();
         let tool_registry_clone = self.tool_registry.clone();
+        let context_manager_clone = self.context_manager.clone();
         
         // Return a wrapped stream that intercepts tool calls.
         let stream = async_stream::stream! {
@@ -180,22 +204,69 @@ impl AiPipeline {
                         tool_result = format!("Error: Tool {} not found", func_name);
                     }
                     
+                    // Process output through ContextManager (truncating if it exceeds size limits)
+                    let processed_result = {
+                        let cm = context_manager_clone.lock().unwrap();
+                        cm.process_tool_output(&func_name, tool_result)
+                    };
+                    
+                    // Update the active focus state based on tool arguments
+                    {
+                        let mut cm = context_manager_clone.lock().unwrap();
+                        if func_name == "disasm" || func_name == "fission__disasm" {
+                            if let Ok(args_json) = serde_json::from_str::<serde_json::Value>(&func_args) {
+                                if let Some(addr_val) = args_json.get("addr") {
+                                    if let Some(addr_str) = addr_val.as_str() {
+                                        cm.focus.active_function_addr = Some(addr_str.to_string());
+                                        let clean_addr = addr_str.trim_start_matches("0x").trim_start_matches("0X");
+                                        if let Ok(start) = u64::from_str_radix(clean_addr, 16) {
+                                            let count = args_json.get("count").and_then(|c| c.as_u64()).unwrap_or(20);
+                                            cm.focus.last_disasm_range = Some((start, start + count * 4));
+                                        }
+                                    }
+                                }
+                            }
+                        } else if func_name == "xrefs" || func_name == "fission__xrefs" {
+                            if let Ok(args_json) = serde_json::from_str::<serde_json::Value>(&func_args) {
+                                if let Some(addr_val) = args_json.get("addr") {
+                                    if let Some(addr_str) = addr_val.as_str() {
+                                        cm.focus.active_function_addr = Some(addr_str.to_string());
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    
                     yield Ok(crate::provider::ResponseChunk {
-                        delta: format!("> [Tool] Result: {} bytes\n\n", tool_result.len()),
+                        delta: format!("> [Tool] Result: {} bytes\n\n", processed_result.len()),
                         tool_calls: None,
                         done: false,
                     });
                     
                     {
                         let mut session = session_clone.lock().unwrap();
-                        session.push_message(crate::session::Message::tool_response(id, func_name, tool_result));
+                        session.push_message(crate::session::Message::tool_response(id, func_name, processed_result));
                     }
                 }
                 
                 // Now restart the stream
                 let new_msgs = {
-                    let session = session_clone.lock().unwrap();
-                    session.full_messages()
+                    let mut session = session_clone.lock().unwrap();
+                    let cm = context_manager_clone.lock().unwrap();
+                    
+                    // Compact history on restarts if needed
+                    cm.compact_history(&mut session.messages);
+                    
+                    let focus_prompt = cm.format_focus_prompt();
+                    let mut base_prompt = session.system_prompt.clone().unwrap_or_else(|| {
+                        "You are Fission AI, a professional reverse engineering assistant.".to_string()
+                    });
+                    base_prompt.push_str(&focus_prompt);
+                    
+                    let mut msgs = Vec::new();
+                    msgs.push(crate::session::Message::system(base_prompt));
+                    msgs.extend(session.messages.iter().cloned());
+                    msgs
                 };
                 let tools2 = tool_registry_clone.get_model_visible_tools();
                 let tools_ref2 = if tools2.is_empty() { None } else { Some(tools2.as_slice()) };
@@ -225,6 +296,8 @@ impl AiPipeline {
     pub fn new_session(&self) {
         let mut session = self.session.lock().unwrap();
         session.clear();
+        let mut cm = self.context_manager.lock().unwrap();
+        cm.focus = crate::session::ReversingFocus::default();
     }
 
     /// Reference to the active provider.
