@@ -17,6 +17,10 @@ use fission_static::analysis::decomp::facts::FactStore;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 fn get_well_known_function_hints(name: &str) -> Option<NirFunctionHints> {
+    let lower = name.to_ascii_lowercase();
+    if lower == "main" || lower == "wmain" || lower == "winmain" || lower == "wwinmain" {
+        return None;
+    }
     let sigs_iter = SIGNATURE_RESOURCES.api_signatures().ok()?;
     let matched_sig = sigs_iter.into_iter().find(|sig| sig.name == name)?;
 

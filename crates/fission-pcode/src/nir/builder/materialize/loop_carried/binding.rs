@@ -9,9 +9,12 @@ impl<'a> PreviewBuilder<'a> {
         }
         let prior_output = op.output.as_ref()?;
         if VarnodeKey::from(prior_output) == VarnodeKey::from(output) {
-            return self.materialized_vns
+            if let Some(name) = self.materialized_vns
                 .get(&MaterializedVarnodeKey::new(prior_output, op))
-                .cloned();
+                .cloned() {
+                eprintln!("[fission-debug] prior_materialized_loop_carried_output_name({:?}): returning {}", output, name);
+                return Some(name);
+            }
         }
         if !Self::prior_output_aliases_loop_carried_update(prior_output, output) {
             return None;
@@ -22,7 +25,7 @@ impl<'a> PreviewBuilder<'a> {
         if self
             .loop_bodies
             .iter()
-            .any(|lb| lb.body.contains(&site.block_idx))
+            .any(|lb| lb.body.contains(&site.block_idx) && site.block_idx != lb.head)
         {
             return None;
         }
@@ -138,7 +141,8 @@ impl<'a> PreviewBuilder<'a> {
         }
         let is_param = self.abi_state().param_slot_for_varnode(output).is_some();
         let is_return_reg = is_register_space_id(output.space_id) && output.offset == 0x00;
-        if !is_param && !is_return_reg {
+        let is_gpr = Self::is_loop_carried_register_update_candidate(output);
+        if !is_param && !is_return_reg && !is_gpr {
             return None;
         }
         let output_key = VarnodeKey::from(output);
@@ -165,45 +169,19 @@ impl<'a> PreviewBuilder<'a> {
             let mut names = BTreeSet::new();
             let mut complete = true;
             for pred_idx in external_preds {
-                let Some(pred_block) = self.pcode.blocks.get(pred_idx) else {
-                    complete = false;
-                    break;
-                };
-                let term_idx = self
-                    .block_terminator_index(pred_block)
-                    .unwrap_or(pred_block.ops.len());
-                let Some((def_idx, pred_op)) =
-                    self.last_register_redefinition_before(pred_block, term_idx, output)
-                else {
-                    complete = false;
-                    break;
-                };
-                let Some(pred_output) = pred_op.output.as_ref() else {
-                    complete = false;
-                    break;
-                };
-                if !Self::output_def_is_safe_direct_successor_merge(pred_op)
-                    || self.has_call_between_ops(pred_block, def_idx + 1, term_idx)
-                {
+                let mut visiting = HashSet::new();
+                if !self.collect_external_seed_names_on_path(
+                    pred_idx,
+                    block_idx,
+                    output,
+                    &output_key,
+                    0,
+                    &mut visiting,
+                    &mut names,
+                ) {
                     complete = false;
                     break;
                 }
-                let pred_key = VarnodeKey::from(pred_output);
-                if !Self::varnode_key_may_alias_output(&pred_key, &output_key)
-                    && !Self::prior_output_aliases_loop_carried_update(pred_output, output)
-                {
-                    complete = false;
-                    break;
-                }
-                let Some(name) = self
-                    .materialized_vns
-                    .get(&MaterializedVarnodeKey::new(pred_output, pred_op))
-                    .filter(|name| !name.starts_with("param_"))
-                else {
-                    complete = false;
-                    break;
-                };
-                names.insert(name.clone());
             }
             if complete && names.len() == 1 {
                 loop_candidates.extend(names);
@@ -214,5 +192,150 @@ impl<'a> PreviewBuilder<'a> {
         } else {
             None
         }
+    }
+
+    fn collect_external_seed_names_on_path(
+        &self,
+        pred_idx: usize,
+        succ_idx: usize,
+        output: &Varnode,
+        output_key: &VarnodeKey,
+        depth: usize,
+        visiting: &mut HashSet<usize>,
+        names: &mut BTreeSet<String>,
+    ) -> bool {
+        if depth > 8 || pred_idx == succ_idx || !visiting.insert(pred_idx) {
+            return false;
+        }
+        
+        let Some(pred_block) = self.pcode.blocks.get(pred_idx) else {
+            visiting.remove(&pred_idx);
+            return false;
+        };
+
+        let term_idx = self
+            .block_terminator_index(pred_block)
+            .unwrap_or(pred_block.ops.len());
+
+        if let Some((def_idx, pred_op)) =
+            self.last_register_redefinition_before(pred_block, term_idx, output)
+        {
+            if let Some(pred_output) = pred_op.output.as_ref() {
+                if !Self::output_def_is_safe_direct_successor_merge(pred_op)
+                    || self.has_call_between_ops(pred_block, def_idx + 1, term_idx)
+                {
+                    visiting.remove(&pred_idx);
+                    return false;
+                }
+                
+                let pred_key = VarnodeKey::from(pred_output);
+                if !Self::varnode_key_may_alias_output(&pred_key, output_key)
+                    && !Self::prior_output_aliases_loop_carried_update(pred_output, output)
+                {
+                    visiting.remove(&pred_idx);
+                    return false;
+                }
+                
+                if let Some(name) = self
+                    .materialized_vns
+                    .get(&MaterializedVarnodeKey::new(pred_output, pred_op))
+                    .filter(|name| !name.starts_with("param_"))
+                {
+                    names.insert(name.clone());
+                    visiting.remove(&pred_idx);
+                    return true;
+                }
+            }
+            visiting.remove(&pred_idx);
+            return false;
+        }
+
+        // When tracing register value provenance (e.g. RAX) across predecessor
+        // blocks, only Call instructions can clobber registers in an
+        // unanalysable way. Memory Store/Load operations do NOT overwrite
+        // register values, so they must not act as a barrier here.
+        if self.has_call_between_ops(pred_block, 0, term_idx) {
+            visiting.remove(&pred_idx);
+            return false;
+        }
+
+        let incoming = self
+            .predecessors
+            .get(pred_idx)
+            .into_iter()
+            .flatten()
+            .copied()
+            .filter(|incoming_idx| *incoming_idx != succ_idx)
+            .collect::<Vec<_>>();
+
+        if incoming.is_empty() {
+            visiting.remove(&pred_idx);
+            return false;
+        }
+
+        for incoming_idx in incoming {
+            if !self.collect_external_seed_names_on_path(
+                incoming_idx,
+                pred_idx,
+                output,
+                output_key,
+                depth + 1,
+                visiting,
+                names,
+            ) {
+                visiting.remove(&pred_idx);
+                return false;
+            }
+        }
+        
+        visiting.remove(&pred_idx);
+        true
+    }
+
+    pub(in crate::nir::builder) fn prior_materialized_loop_carried_input_name(
+        &self,
+        op: &PcodeOp,
+        output: &Varnode,
+    ) -> Option<String> {
+        let output_key = VarnodeKey::from(output);
+        for input in &op.inputs {
+            if input.is_constant || !is_register_space_id(input.space_id) {
+                continue;
+            }
+            let input_key = VarnodeKey::from(input);
+            if Self::varnode_key_may_alias_output(&input_key, &output_key) {
+                if let Some(name) = self.prior_materialized_loop_carried_output_name(input) {
+                    return Some(name);
+                }
+            }
+        }
+        None
+    }
+
+    pub(in crate::nir::builder) fn loop_header_explicit_merge_binding_name(
+        &self,
+        block_idx: usize,
+        output: &Varnode,
+    ) -> Option<String> {
+        let loop_head = self
+            .loop_bodies
+            .iter()
+            .filter(|body| body.body.contains(&block_idx))
+            .min_by_key(|body| body.body.len())
+            .map(|body| body.head)?;
+        eprintln!("[fission-debug] loop_header_explicit_merge_binding_name: block_idx={}, loop_head={:?}", block_idx, loop_head); let key = VarnodeKey::from(output);
+        if let Some(name) = self.explicit_merge_bindings.get(&(loop_head, key.clone())) {
+            return Some(name.clone());
+        }
+        self.explicit_merge_bindings
+            .iter()
+            .find(|((b_idx, candidate_key), _)| {
+                *b_idx == loop_head
+                    && (Self::register_key_covers(candidate_key, &key)
+                        || self.register_key_zero_extends(candidate_key, &key)
+                        || self.register_key_cross_space_covers(candidate_key, &key)
+                        || self.register_key_cross_space_zero_extends(candidate_key, &key))
+            })
+            .map(|(_, name)| name.clone())
     }
 }

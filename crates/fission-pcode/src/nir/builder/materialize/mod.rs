@@ -596,15 +596,8 @@ impl<'a> PreviewBuilder<'a> {
             );
         }
         let preserve_materialization = Self::should_preserve_materialized_expr(&rhs);
-        let lhs_name = if let Some(name) = direct_successor_merge_lhs_name {
-            self.bind_materialized_output_to_existing_name(
-                op,
-                output,
-                &name,
-                preserve_materialization,
-            );
-            name
-        } else if let Some(name) = loop_carried_lhs_name {
+        let lhs_name = if let Some(name) = loop_carried_lhs_name {
+            eprintln!("[fission-debug] lhs_name chosen from loop_carried_lhs_name = {}", name);
             self.seed_loop_carried_binding_initializer_from_edge_zero(block, output, &name);
             self.bind_materialized_output_to_existing_name(
                 op,
@@ -613,7 +606,17 @@ impl<'a> PreviewBuilder<'a> {
                 preserve_materialization,
             );
             name
+        } else if let Some(name) = direct_successor_merge_lhs_name {
+            eprintln!("[fission-debug] lhs_name chosen from direct_successor_merge_lhs_name = {}", name);
+            self.bind_materialized_output_to_existing_name(
+                op,
+                output,
+                &name,
+                preserve_materialization,
+            );
+            name
         } else if let Some(name) = merge_lhs_name {
+            eprintln!("[fission-debug] lhs_name chosen from merge_lhs_name = {}", name);
             self.bind_materialized_output_to_existing_name(
                 op,
                 output,
@@ -624,12 +627,14 @@ impl<'a> PreviewBuilder<'a> {
         } else if let Some((name, binding_size)) =
             self.live_register_lhs_name_for_partial_gpr_join_family(output)
         {
+            eprintln!("[fission-debug] lhs_name chosen from live_register_lhs_name_for_partial_gpr_join_family = {}", name);
             self.ensure_live_register_binding(&name, binding_size);
             self.bind_materialized_output_to_existing_name(op, output, &name, true);
             name
         } else if let Some((name, binding_size)) = self
             .live_register_lhs_name_for_passthrough_join_store_producer(block, op_idx, output, &rhs)
         {
+            eprintln!("[fission-debug] lhs_name chosen from live_register_lhs_name_for_passthrough_join_store_producer = {}", name);
             self.ensure_live_register_binding(&name, binding_size);
             self.bind_materialized_output_to_existing_name(op, output, &name, true);
             name
@@ -643,12 +648,14 @@ impl<'a> PreviewBuilder<'a> {
                 replacement_plan,
             )
         {
+            eprintln!("[fission-debug] lhs_name chosen from live_register_lhs_name_for_safe_missing_merge = {}", name);
             self.ensure_live_register_binding(&name, binding_size);
             self.bind_materialized_output_to_existing_name(op, output, &name, true);
             name
         } else {
-            self.ensure_temp_binding_for_output(op, output, preserve_materialization)
-                .name
+            let fallback_name = self.ensure_temp_binding_for_output(op, output, preserve_materialization).name;
+            eprintln!("[fission-debug] lhs_name chosen from fallback ensure_temp_binding_for_output = {}", fallback_name);
+            fallback_name
         };
         if self.emit_ready_trace_enabled_for_current_fn() {
             self.emit_ready_trace(format!(
@@ -730,6 +737,9 @@ impl<'a> PreviewBuilder<'a> {
             || !is_register_space_id(output.space_id)
             || !Self::rhs_is_safe_scalar_live_register_merge(rhs)
         {
+            if is_register_space_id(output.space_id) {
+                eprintln!("[fission-debug] live_register_lhs_name_for_safe_missing_merge early exit: rejection={:?} is_safe={:?}", replacement_plan.rejection_reason(), Self::rhs_is_safe_scalar_live_register_merge(rhs));
+            }
             return None;
         }
         let proof = self.describe_missing_merge_binding_proof(block, op_idx, output, rhs)?;
@@ -745,6 +755,7 @@ impl<'a> PreviewBuilder<'a> {
                     | DisallowedSingleConsumerConsumerKind::Predicate
                     | DisallowedSingleConsumerConsumerKind::StoreValue
             );
+        eprintln!("[fission-debug] live_register_lhs_name_for_safe_missing_merge proof={:?} join={} loop={}", proof, live_register_join, live_register_loop_carried);
         if !live_register_join && !live_register_loop_carried {
             return None;
         }
@@ -835,7 +846,7 @@ impl<'a> PreviewBuilder<'a> {
             return None;
         }
         let (merge_idx, merge_addr, _, _) =
-            self.first_output_use_site_outside_block_by_index(block_idx, output)?;
+            self.first_output_use_site_outside_block_by_index(block_idx, op_idx, output)?;
         if merge_addr == proof.merge_block
             && let Some(name) = self.explicit_merge_bindings.get(&(merge_idx, key.clone()))
         {
@@ -1997,6 +2008,7 @@ impl<'a> PreviewBuilder<'a> {
         matches!(
             op.opcode,
             PcodeOpcode::Copy
+                | PcodeOpcode::Load
                 | PcodeOpcode::SubPiece
                 | PcodeOpcode::IntZExt
                 | PcodeOpcode::Cast
@@ -2092,6 +2104,28 @@ impl<'a> PreviewBuilder<'a> {
             );
             return None;
         }
+        self.current_stack_home_ptr = op.inputs.get(1).cloned();
+        let res = self.stack_home_accumulator_store_rhs_inner(
+            block,
+            op,
+            slot_name,
+            value,
+            &live_name,
+            family_idx,
+        );
+        self.current_stack_home_ptr = None;
+        res
+    }
+
+    fn stack_home_accumulator_store_rhs_inner(
+        &mut self,
+        block: &crate::pcode::PcodeBasicBlock,
+        op: &PcodeOp,
+        slot_name: &str,
+        value: &Varnode,
+        live_name: &str,
+        family_idx: usize,
+    ) -> Option<HirExpr> {
         let block_idx = self.lowering_block_index(block);
         let Some((loop_body, store_is_loop_header)) =
             self.stack_home_accumulator_loop_context(block_idx)
@@ -2282,7 +2316,7 @@ impl<'a> PreviewBuilder<'a> {
         let result = self.pcode.blocks.get(idx).is_some_and(|block| {
             let has_side_effect = |block: &crate::pcode::PcodeBasicBlock, start: usize, end: usize| {
                 if conservative_mem_check {
-                    Self::has_aliasing_side_effect_between_ops(block, start, end)
+                    self.has_aliasing_side_effect_between_ops(block, start, end)
                 } else {
                     self.has_call_between_ops(block, start, end)
                 }
@@ -2346,7 +2380,7 @@ impl<'a> PreviewBuilder<'a> {
         let result = self.pcode.blocks.get(idx).is_some_and(|block| {
             let has_side_effect = |block: &crate::pcode::PcodeBasicBlock, start: usize, end: usize| {
                 if conservative_mem_check {
-                    Self::has_aliasing_side_effect_between_ops(block, start, end)
+                    self.has_aliasing_side_effect_between_ops(block, start, end)
                 } else {
                     self.has_call_between_ops(block, start, end)
                 }
@@ -2538,7 +2572,7 @@ impl<'a> PreviewBuilder<'a> {
         let result = self.pcode.blocks.get(idx).is_some_and(|block| {
             let has_side_effect = |block: &crate::pcode::PcodeBasicBlock, start: usize, end: usize| {
                 if conservative_mem_check {
-                    Self::has_aliasing_side_effect_between_ops(block, start, end)
+                    self.has_aliasing_side_effect_between_ops(block, start, end)
                 } else {
                     self.has_call_between_ops(block, start, end)
                 }
@@ -2661,20 +2695,44 @@ impl<'a> PreviewBuilder<'a> {
     }
 
     fn has_aliasing_side_effect_between_ops(
+        &self,
         block: &crate::pcode::PcodeBasicBlock,
         start: usize,
         end: usize,
     ) -> bool {
         block.ops[start..end.min(block.ops.len())].iter().any(|op| {
-            matches!(
-                op.opcode,
-                PcodeOpcode::Load
-                    | PcodeOpcode::Store
-                    | PcodeOpcode::Call
-                    | PcodeOpcode::CallInd
-                    | PcodeOpcode::CallOther
-            )
+            if matches!(op.opcode, PcodeOpcode::Load | PcodeOpcode::Store) {
+                if let Some(ptr) = op.inputs.get(1) {
+                    if let Some(sh_ptr) = &self.current_stack_home_ptr {
+                        if self.memory_ops_may_alias(ptr, sh_ptr) {
+                            return true;
+                        }
+                    } else {
+                        return false;
+                    }
+                }
+                false
+            } else {
+                matches!(
+                    op.opcode,
+                    PcodeOpcode::Call | PcodeOpcode::CallInd | PcodeOpcode::CallOther
+                )
+            }
         })
+    }
+
+    fn memory_ops_may_alias(&self, ptr1: &Varnode, ptr2: &Varnode) -> bool {
+        if VarnodeKey::from(ptr1) == VarnodeKey::from(ptr2) {
+            return true;
+        }
+        let addr1 = self.resolve_stack_address(ptr1);
+        let addr2 = self.resolve_stack_address(ptr2);
+        match (addr1, addr2) {
+            (Some((base1, offset1)), Some((base2, offset2))) => {
+                base1 == base2 && offset1 == offset2
+            }
+            _ => false,
+        }
     }
 
     fn has_call_between_ops(

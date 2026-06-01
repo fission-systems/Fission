@@ -878,7 +878,7 @@ impl<'a> PreviewBuilder<'a> {
         result
     }
 
-    fn block_has_aliasing_side_effect_range(
+    pub(in crate::nir::builder) fn block_has_aliasing_side_effect_range(
         block: &crate::pcode::PcodeBasicBlock,
         start: usize,
         end: usize,

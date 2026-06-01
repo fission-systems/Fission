@@ -29,17 +29,30 @@ impl<'a> PreviewBuilder<'a> {
         if !is_update {
             return None;
         }
+        let loop_head = self.loop_bodies.iter().filter(|body| body.body.contains(&block_idx)).min_by_key(|body| body.body.len()).map(|body| body.head)?;
+        
+        if let Some(name) = self.loop_header_explicit_merge_binding_name(loop_head, output) {
+            eprintln!("[fission-debug] loop_carried_output_binding_name({:?}): found loop_header_explicit_merge_binding_name = {}", output, name);
+            return Some(name);
+        }
         if let Some(name) = self.prior_materialized_loop_carried_output_name(output) {
+            return Some(name);
+        }
+        if let Some(name) = self.prior_materialized_loop_carried_input_name(op, output) {
+            eprintln!("[fission-debug] loop_carried_output_binding_name({:?}): found prior_materialized_loop_carried_input_name = {}", output, name);
             return Some(name);
         }
         if let Some(name) =
             self.loop_header_external_seed_binding_name_for_update(block_idx, output)
         {
+            eprintln!("[fission-debug] loop_carried_output_binding_name({:?}): found loop_header_external_seed_binding_name_for_update = {}", output, name);
             return Some(name);
         }
         if let Some(name) = self.prior_materialized_same_register_output_name(output) {
+            eprintln!("[fission-debug] loop_carried_output_binding_name({:?}): found prior_materialized_same_register_output_name = {}", output, name);
             return Some(name);
         }
+        eprintln!("[fission-debug] loop_carried_output_binding_name({:?}): NO fallback found!", output);
         if let Some(name) =
             self.prior_materialized_local_wide_alias_name(block_idx, op_idx, output)
         {
@@ -96,6 +109,9 @@ impl<'a> PreviewBuilder<'a> {
             return None;
         }
         if let Some(name) = self.prior_materialized_loop_carried_output_name(output) {
+            return Some(name);
+        }
+        if let Some(name) = self.prior_materialized_loop_carried_input_name(op, output) {
             return Some(name);
         }
         if let Some(name) =

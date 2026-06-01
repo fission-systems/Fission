@@ -135,6 +135,10 @@ impl<'a> PreviewBuilder<'a> {
         if is_compiler_runtime_param_suppressed_name(name) {
             return true;
         }
+        let lower = name.to_ascii_lowercase();
+        if lower == "main" || lower == "wmain" || lower == "winmain" || lower == "wwinmain" {
+            return true;
+        }
         self.binary
             .is_some_and(|binary| binary.entry_point != 0 && binary.entry_point == address)
     }
@@ -533,18 +537,41 @@ impl<'a> PreviewBuilder<'a> {
 
 
         let ty = pcode_output_type_from_size(op.opcode, output.size);
-        let name = next_temp_name(&ty, &mut self.temp_next_id);
-        let binding = NirBinding {
-            name: name.clone(),
-            ty,
-            surface_type_name: None,
-            origin: Some(if preserve_materialization {
-                NirBindingOrigin::TempPreserved
-            } else {
-                NirBindingOrigin::Temp
-            }),
-            initializer: None,
+        
+        let mut name = None;
+        if is_register_space_id(output.space_id) {
+            let candidate = crate::nir::support::register_name_32(output.offset, output.size)
+                .or_else(|| crate::nir::support::unique_register_name(output.offset, output.size))
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| crate::nir::support::register_name(output.offset, output.size).to_string());
+            if !self.params.values().any(|b| b.name == candidate) && !self.locals.values().any(|s| s.name == candidate) {
+                name = Some(candidate);
+            }
+        }
+        let name = name.unwrap_or_else(|| next_temp_name(&ty, &mut self.temp_next_id));
+
+        let origin = if preserve_materialization {
+            NirBindingOrigin::TempPreserved
+        } else {
+            NirBindingOrigin::Temp
         };
+
+        let binding = if let Some(existing) = self.temps.get(&name) {
+            let mut updated = existing.clone();
+            if preserve_materialization && !existing.preserves_materialization() {
+                updated.origin = Some(NirBindingOrigin::TempPreserved);
+            }
+            updated
+        } else {
+            NirBinding {
+                name: name.clone(),
+                ty,
+                surface_type_name: None,
+                origin: Some(origin),
+                initializer: None,
+            }
+        };
+
         if preserve_materialization {
             self.telemetry
                 .materialization

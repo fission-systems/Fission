@@ -429,16 +429,18 @@ impl<'a> PreviewBuilder<'a> {
     pub(super) fn first_output_use_site_outside_block(
         &self,
         current_block_addr: u64,
+        def_op_idx: usize,
         output: &Varnode,
     ) -> Option<(u64, usize, u32)> {
         let current_block_idx = self.address_to_index.get(&current_block_addr).copied()?;
-        self.first_output_use_site_outside_block_by_index(current_block_idx, output)
+        self.first_output_use_site_outside_block_by_index(current_block_idx, def_op_idx, output)
             .map(|(_, block_addr, op_idx, seq_num)| (block_addr, op_idx, seq_num))
     }
 
     pub(super) fn first_output_use_site_outside_block_by_index(
         &self,
         current_block_idx: usize,
+        def_op_idx: usize,
         output: &Varnode,
     ) -> Option<(usize, u64, usize, u32)> {
         let key = VarnodeKey::from(output);
@@ -446,12 +448,23 @@ impl<'a> PreviewBuilder<'a> {
             .blocks
             .iter()
             .enumerate()
-            .filter(|(candidate_block_idx, _)| *candidate_block_idx != current_block_idx)
+            .filter(|(candidate_block_idx, _)| {
+                *candidate_block_idx != current_block_idx
+                    || self.block_can_reach(current_block_idx, current_block_idx, usize::MAX)
+            })
             .filter(|(candidate_block_idx, _)| {
                 self.block_can_reach(current_block_idx, *candidate_block_idx, usize::MAX)
             })
             .find_map(|(block_idx, block)| {
                 for (idx, candidate) in block.ops.iter().enumerate() {
+                    if block_idx == current_block_idx {
+                        if idx >= def_op_idx {
+                            if idx > def_op_idx && candidate.output.as_ref().is_some_and(|out| Self::varnode_matches_key(out, &key)) {
+                                return None;
+                            }
+                            continue;
+                        }
+                    }
                     if candidate
                         .inputs
                         .iter()
@@ -462,7 +475,7 @@ impl<'a> PreviewBuilder<'a> {
                     if candidate
                         .output
                         .as_ref()
-                        .is_some_and(|output| Self::varnode_matches_key(output, &key))
+                        .is_some_and(|out| Self::varnode_matches_key(out, &key))
                     {
                         return None;
                     }
@@ -539,13 +552,16 @@ impl<'a> PreviewBuilder<'a> {
     pub(super) fn describe_missing_merge_binding_proof(
         &self,
         block: &crate::pcode::PcodeBasicBlock,
-        _op_idx: usize,
+        op_idx: usize,
         output: &Varnode,
         rhs: &HirExpr,
     ) -> Option<MissingMergeBindingProof> {
         let def_block_idx = self.lowering_block_index(block);
-        let (merge_block_idx, merge_block_addr, consumer_op_idx, _) =
-            self.first_output_use_site_outside_block_by_index(def_block_idx, output)?;
+        let first_use = self.first_output_use_site_outside_block_by_index(def_block_idx, op_idx, output);
+        if first_use.is_none() && is_register_space_id(output.space_id) {
+            eprintln!("[fission-debug] describe_missing_merge_binding_proof failed at first_use for op_idx={} output={:?}", op_idx, output);
+        }
+        let (merge_block_idx, merge_block_addr, consumer_op_idx, _) = first_use?;
         let merge_block = self.pcode.blocks.get(merge_block_idx)?;
         let consumer_op = merge_block.ops.get(consumer_op_idx)?;
         let key = VarnodeKey::from(output);
@@ -762,7 +778,7 @@ impl<'a> PreviewBuilder<'a> {
         }
         let def_block_idx = self.lowering_block_index(block);
         let (merge_block_idx, merge_block_addr, _, _) =
-            self.first_output_use_site_outside_block_by_index(def_block_idx, output)?;
+            self.first_output_use_site_outside_block_by_index(def_block_idx, op_idx, output)?;
         if merge_block_addr != proof.merge_block {
             return None;
         }
@@ -865,7 +881,7 @@ impl<'a> PreviewBuilder<'a> {
         let proof = self.describe_join_merge_missing_proof(block, op_idx, output, rhs)?;
         let def_block_idx = self.lowering_block_index(block);
         let (merge_block_idx, merge_block_addr, _, _) =
-            self.first_output_use_site_outside_block_by_index(def_block_idx, output)?;
+            self.first_output_use_site_outside_block_by_index(def_block_idx, op_idx, output)?;
         if merge_block_addr != proof.merge_block {
             return None;
         }
@@ -2140,7 +2156,7 @@ impl<'a> PreviewBuilder<'a> {
             Self::collect_output_use_sites_in_block_unbounded(block, op_idx, output);
         let first_same_block_consumer = same_block_consumers.first().copied();
         let first_cross_block_consumer =
-            self.first_output_use_site_outside_block(block.start_address, output);
+            self.first_output_use_site_outside_block(block.start_address, op_idx, output);
         let relation = Self::classify_malformed_def_use_window_relation(
             op_idx,
             terminator_idx,
@@ -2184,7 +2200,7 @@ impl<'a> PreviewBuilder<'a> {
         output: &Varnode,
     ) -> Option<(Option<u64>, Option<u32>, CrossBlockConsumerProvenance)> {
         let (consumer_block_addr, consumer_idx, consumer_op_seq) =
-            self.first_output_use_site_outside_block(block.start_address, output)?;
+            self.first_output_use_site_outside_block(block.start_address, op_idx, output)?;
         let def_block_idx = self.address_to_index.get(&block.start_address).copied()?;
         let consumer_block_idx = self.address_to_index.get(&consumer_block_addr).copied()?;
         let consumer_block = self.pcode.blocks.get(consumer_block_idx)?;
@@ -2252,7 +2268,7 @@ impl<'a> PreviewBuilder<'a> {
             self.describe_cross_block_consumer_provenance(block, op_idx, output)?;
         let def_block_idx = self.address_to_index.get(&block.start_address).copied()?;
         let (consumer_block_addr, _, _) =
-            self.first_output_use_site_outside_block(block.start_address, output)?;
+            self.first_output_use_site_outside_block(block.start_address, op_idx, output)?;
         let consumer_block_idx = self.address_to_index.get(&consumer_block_addr).copied()?;
         let dominates_consumer = self.dom_tree.dominates(def_block_idx, consumer_block_idx);
         let rhs_low_cost = Self::expr_is_low_cost_builder_inline_candidate(rhs);
@@ -2499,7 +2515,7 @@ impl<'a> PreviewBuilder<'a> {
         }
         let redef_op = block.ops.get(redef.redef_op_idx)?;
         let (consumer_block_addr, _, _) =
-            self.first_output_use_site_outside_block(block.start_address, output)?;
+            self.first_output_use_site_outside_block(block.start_address, op_idx, output)?;
         let consumer_block_idx = self.address_to_index.get(&consumer_block_addr).copied()?;
         let consumer_block = self.pcode.blocks.get(consumer_block_idx)?;
         let (_consumer_idx, consumer_op) =
@@ -2548,7 +2564,7 @@ impl<'a> PreviewBuilder<'a> {
         }
         let redef_op = block.ops.get(redef.redef_op_idx)?;
         let (consumer_block_addr, _, _) =
-            self.first_output_use_site_outside_block(block.start_address, output)?;
+            self.first_output_use_site_outside_block(block.start_address, op_idx, output)?;
         let consumer_block_idx = self.address_to_index.get(&consumer_block_addr).copied()?;
         let consumer_block = self.pcode.blocks.get(consumer_block_idx)?;
         let (_consumer_idx, consumer_op) =
