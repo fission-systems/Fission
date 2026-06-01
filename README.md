@@ -650,7 +650,7 @@ Fission includes a modular, zero-setup AI-assisted analysis subsystem (**`fissio
 
 ### 🔑 Key Features
 - **Zero API-Key Setup**: By supporting **Codex OAuth** and **GitHub Copilot Auth**, Fission allows developers to securely reuse their existing, active AI agent platform tokens. You do not need to configure separate paid API keys or manage usage bills.
-- **Intelligent Analysis Pipeline**: Integrates a robust tool-calling pipeline that allows the AI provider to inspect disassembly (`disasm`), resolve cross-references (`xrefs`), and request specific decompiler contexts safely and dynamically.
+- **Intelligent Analysis Pipeline**: Integrates a robust tool-calling pipeline that allows the AI provider to inspect disassembly (`disasm`), resolve cross-references (`xrefs`), and apply persistent metadata renames (`apply_patch`) using sidecar `.fission.json` project structures. Renamed symbols dynamically propagate to the `FactStore` and override low-level symbols with top priority in subsequent decompiler runs.
 - **Seamless CLI & GUI Integration**: Accessible directly through `fission_cli` and soon to be fully surfaced in the Tauri-based desktop GUI.
 
 ### 🚀 Quick Start with AI
