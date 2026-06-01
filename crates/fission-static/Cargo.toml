@@ -39,7 +39,7 @@ rayon = "1.10"
 cc = "1.0"
 
 [dev-dependencies]
-proptest = "1.4"
+proptest = "1.11"
 insta = { version = "1.47", features = ["yaml"] }
 fission-pcode = { path = "../fission-pcode" }
 fission-loader = { path = "../fission-loader" }
