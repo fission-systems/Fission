@@ -718,11 +718,7 @@ pub(crate) fn prune_unused_dead_local_bindings(func: &mut HirFunction) -> bool {
     changed
 }
 
-/// Safety-net: ensure every variable name used or assigned in the body has a
-/// matching declaration in `params` or `locals`.  If a variable appears in
-/// the body without a binding (e.g. because a normalization pass created a
-/// name then a later pass destructured the scope), add a rescue binding to
-/// `locals` so the emitted C compiles.
+
 fn is_rescue_candidate_name(name: &str) -> bool {
     if name.starts_with("iVar") || name.starts_with("uVar") || name.starts_with("bVar") || name.starts_with("xVar") {
         let suffix = &name[4..];
@@ -730,6 +726,8 @@ fn is_rescue_candidate_name(name: &str) -> bool {
     } else if name.starts_with("tmp_") {
         let suffix = &name[4..];
         !suffix.is_empty() && suffix.chars().all(|c| c.is_ascii_hexdigit())
+    } else if name.starts_with('r') || name.starts_with('e') {
+        name != "reg" && name != "rsp" && name != "rbp" && name != "esp" && name != "ebp"
     } else {
         false
     }
@@ -756,8 +754,7 @@ pub(crate) fn rescue_undeclared_bindings(func: &mut HirFunction) -> bool {
         if declared.contains(name.as_str()) {
             continue;
         }
-        // Only rescue compiler/decompiler-generated temporary/index variables.
-        if !is_rescue_candidate_name(name) {
+        if !is_rescue_candidate_name(name.as_str()) {
             continue;
         }
         let inferred_ty = infer_type_from_first_assign(&func.body, name);

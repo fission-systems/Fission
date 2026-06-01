@@ -12,7 +12,6 @@ impl<'a> PreviewBuilder<'a> {
             if let Some(name) = self.materialized_vns
                 .get(&MaterializedVarnodeKey::new(prior_output, op))
                 .cloned() {
-                eprintln!("[fission-debug] prior_materialized_loop_carried_output_name({:?}): returning {}", output, name);
                 return Some(name);
             }
         }
@@ -325,7 +324,7 @@ impl<'a> PreviewBuilder<'a> {
             .filter(|body| body.body.contains(&block_idx))
             .min_by_key(|body| body.body.len())
             .map(|body| body.head)?;
-        eprintln!("[fission-debug] loop_header_explicit_merge_binding_name: block_idx={}, loop_head={:?}", block_idx, loop_head); let key = VarnodeKey::from(output);
+        let key = VarnodeKey::from(output);
         if let Some(name) = self.explicit_merge_bindings.get(&(loop_head, key.clone())) {
             return Some(name.clone());
         }

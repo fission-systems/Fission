@@ -559,7 +559,6 @@ impl<'a> PreviewBuilder<'a> {
         let def_block_idx = self.lowering_block_index(block);
         let first_use = self.first_output_use_site_outside_block_by_index(def_block_idx, op_idx, output);
         if first_use.is_none() && is_register_space_id(output.space_id) {
-            eprintln!("[fission-debug] describe_missing_merge_binding_proof failed at first_use for op_idx={} output={:?}", op_idx, output);
         }
         let (merge_block_idx, merge_block_addr, consumer_op_idx, _) = first_use?;
         let merge_block = self.pcode.blocks.get(merge_block_idx)?;

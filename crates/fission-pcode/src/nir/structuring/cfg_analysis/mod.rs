@@ -7,11 +7,13 @@ mod edge;
 mod postdom;
 mod scc;
 mod util;
+mod trace_dag;
 
 pub(crate) use dom::{DomTree, DominanceFrontier, ImmDomTree};
 pub(crate) use edge::{CfgAnalysis, EdgeClass};
 pub(crate) use postdom::{ImmPostDomTree, PostDomTree};
 pub(crate) use scc::SccAnalysis;
+pub(crate) use trace_dag::{TraceDag, TraceDagError};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct CfgFactCache {

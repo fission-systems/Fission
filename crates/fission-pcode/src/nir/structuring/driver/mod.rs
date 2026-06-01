@@ -397,12 +397,28 @@ impl<'a> PreviewBuilder<'a> {
         let imm_postdom = self.cfg_fact_cache().immediate_postdominators();
 
         let total_blocks_for_follow = self.pcode.blocks.len() + self.virtual_block_map.len();
+        let dom_tree = self.cfg_facts.dominators();
         let follow_blocks: Vec<Option<usize>> = (0..total_blocks_for_follow)
             .map(|i| {
                 let succs = self.successors.get(i)?;
                 if succs.len() < 2 {
                     return None;
                 }
+                
+                if total_blocks_for_follow <= 500 {
+                    let mut trace_dag = crate::nir::structuring::cfg_analysis::TraceDag::new(
+                        &self.successors,
+                        &self.predecessors,
+                        dom_tree,
+                    );
+                    
+                    if let Ok(Some(exitblock)) = trace_dag.find_follow_block(i) {
+                        if exitblock > i {
+                            return Some(exitblock);
+                        }
+                    }
+                }
+
                 let follow = imm_postdom.nearest_common_postdominator(succs)?;
                 if follow <= i {
                     return None;

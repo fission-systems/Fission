@@ -597,7 +597,6 @@ impl<'a> PreviewBuilder<'a> {
         }
         let preserve_materialization = Self::should_preserve_materialized_expr(&rhs);
         let lhs_name = if let Some(name) = loop_carried_lhs_name {
-            eprintln!("[fission-debug] lhs_name chosen from loop_carried_lhs_name = {}", name);
             self.seed_loop_carried_binding_initializer_from_edge_zero(block, output, &name);
             self.bind_materialized_output_to_existing_name(
                 op,
@@ -607,7 +606,6 @@ impl<'a> PreviewBuilder<'a> {
             );
             name
         } else if let Some(name) = direct_successor_merge_lhs_name {
-            eprintln!("[fission-debug] lhs_name chosen from direct_successor_merge_lhs_name = {}", name);
             self.bind_materialized_output_to_existing_name(
                 op,
                 output,
@@ -616,7 +614,6 @@ impl<'a> PreviewBuilder<'a> {
             );
             name
         } else if let Some(name) = merge_lhs_name {
-            eprintln!("[fission-debug] lhs_name chosen from merge_lhs_name = {}", name);
             self.bind_materialized_output_to_existing_name(
                 op,
                 output,
@@ -627,14 +624,12 @@ impl<'a> PreviewBuilder<'a> {
         } else if let Some((name, binding_size)) =
             self.live_register_lhs_name_for_partial_gpr_join_family(output)
         {
-            eprintln!("[fission-debug] lhs_name chosen from live_register_lhs_name_for_partial_gpr_join_family = {}", name);
             self.ensure_live_register_binding(&name, binding_size);
             self.bind_materialized_output_to_existing_name(op, output, &name, true);
             name
         } else if let Some((name, binding_size)) = self
             .live_register_lhs_name_for_passthrough_join_store_producer(block, op_idx, output, &rhs)
         {
-            eprintln!("[fission-debug] lhs_name chosen from live_register_lhs_name_for_passthrough_join_store_producer = {}", name);
             self.ensure_live_register_binding(&name, binding_size);
             self.bind_materialized_output_to_existing_name(op, output, &name, true);
             name
@@ -648,13 +643,11 @@ impl<'a> PreviewBuilder<'a> {
                 replacement_plan,
             )
         {
-            eprintln!("[fission-debug] lhs_name chosen from live_register_lhs_name_for_safe_missing_merge = {}", name);
             self.ensure_live_register_binding(&name, binding_size);
             self.bind_materialized_output_to_existing_name(op, output, &name, true);
             name
         } else {
             let fallback_name = self.ensure_temp_binding_for_output(op, output, preserve_materialization).name;
-            eprintln!("[fission-debug] lhs_name chosen from fallback ensure_temp_binding_for_output = {}", fallback_name);
             fallback_name
         };
         if self.emit_ready_trace_enabled_for_current_fn() {
@@ -738,7 +731,6 @@ impl<'a> PreviewBuilder<'a> {
             || !Self::rhs_is_safe_scalar_live_register_merge(rhs)
         {
             if is_register_space_id(output.space_id) {
-                eprintln!("[fission-debug] live_register_lhs_name_for_safe_missing_merge early exit: rejection={:?} is_safe={:?}", replacement_plan.rejection_reason(), Self::rhs_is_safe_scalar_live_register_merge(rhs));
             }
             return None;
         }
@@ -755,7 +747,6 @@ impl<'a> PreviewBuilder<'a> {
                     | DisallowedSingleConsumerConsumerKind::Predicate
                     | DisallowedSingleConsumerConsumerKind::StoreValue
             );
-        eprintln!("[fission-debug] live_register_lhs_name_for_safe_missing_merge proof={:?} join={} loop={}", proof, live_register_join, live_register_loop_carried);
         if !live_register_join && !live_register_loop_carried {
             return None;
         }
@@ -2775,12 +2766,6 @@ impl<'a> PreviewBuilder<'a> {
                 false
             }
         });
-        if res {
-            eprintln!("[DEBUG-CALL] has_call_between_ops: true for block 0x{:x} range {}..{}", block.start_address, start, end);
-            for op in &block.ops[start..end.min(block.ops.len())] {
-                eprintln!("  op: {:?}", op.opcode);
-            }
-        }
         res
     }
 
