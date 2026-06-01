@@ -130,6 +130,12 @@ fn run() -> Result<()> {
                 );
             }
         }
+        ParsedInvocation::Ai(inv) => {
+            // AI subcommands run on a tokio multi-thread runtime.
+            let rt = tokio::runtime::Runtime::new()
+                .context("failed to create tokio runtime for AI subcommand")?;
+            rt.block_on(crate::cli::ai::run_ai(inv))
+        }
         ParsedInvocation::OneShot(parsed) => run_oneshot_inner(parsed),
     }
 }

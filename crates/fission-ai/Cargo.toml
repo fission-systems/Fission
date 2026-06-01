@@ -3,7 +3,7 @@ name = "fission-ai"
 version = "0.1.0"
 edition = "2024"
 authors = ["Fission Dev Team"]
-description = "Fission AI agent platform abstractions"
+description = "Fission AI agent platform: multi-provider pipeline, Codex OAuth, interactive session"
 repository = "https://github.com/sjkim1127/Fission"
 readme = "../../README.md"
 keywords = ["fission", "ai", "agent", "llm"]
@@ -11,15 +11,17 @@ categories = ["development-tools"]
 
 [features]
 default = []
-dynamic = ["dep:fission-dynamic"]
-openai = []
-local-model = []
 
 [dependencies]
 fission-core = { path = "../fission-core" }
-fission-static = { path = "../fission-static" }
-fission-dynamic = { path = "../fission-dynamic", optional = true, default-features = false }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 thiserror = "1.0"
 tracing = "0.1"
+tokio = { version = "1", features = ["rt", "macros", "sync", "time", "fs", "net", "io-util"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream"] }
+async-trait = "0.1"
+futures = "0.3"
+dirs = "5"
+sha2 = "0.11.0"
+base64 = "0.22.1"

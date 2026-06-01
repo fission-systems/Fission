@@ -18,6 +18,8 @@ members = [
     "crates/fission-cli",
     "crates/fission-tauri/src-tauri",
     "crates/fission-sleigh",
+    "crates/fission-ai",
+    "crates/fission-tui",
 ]
 
 [profile.release]

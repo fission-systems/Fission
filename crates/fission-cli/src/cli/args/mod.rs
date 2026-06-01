@@ -48,6 +48,24 @@ pub enum ParsedInvocation {
     Script(ScriptInvocation),
     ResourcesStatus { json: bool, verbose: bool },
     Debug(DebugCommand),
+    /// AI chat / authentication subcommand.
+    Ai(AiInvocation),
+}
+
+/// The AI subcommand action to perform.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum AiInvocation {
+    /// Launch interactive TUI chat session.
+    Chat {
+        provider: Option<String>,
+        model: Option<String>,
+    },
+    /// Run Codex Device Code OAuth login.
+    Login,
+    /// Show authentication status.
+    Status,
+    /// Remove stored auth token.
+    Logout,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -129,6 +147,43 @@ enum CliCommand {
     Script(ScriptArgs),
     /// Live process debugger (Windows only)
     Debug(DebugArgs),
+    /// AI chat session and authentication (Codex OAuth / OpenAI / Ollama)
+    Ai(AiArgs),
+}
+
+// ── AI subcommand types ───────────────────────────────────────────────────────
+
+#[derive(Args, Debug)]
+#[command(
+    about = "Interactive AI chat and authentication",
+    long_about = "Launch an interactive AI chat session or manage authentication.\n\nProvider priority: stored Codex OAuth token > FISSION_AI_API_KEY > OPENAI_API_KEY > Ollama (local)",
+    after_help = "Examples:\n  fission_cli ai login              # Codex OAuth (no API key needed)\n  fission_cli ai chat               # Launch TUI chat\n  fission_cli ai chat --provider openai --model gpt-4o\n  fission_cli ai status             # Show auth status\n  fission_cli ai logout             # Remove stored token"
+)]
+pub struct AiArgs {
+    #[command(subcommand)]
+    command: Option<AiCommand>,
+}
+
+#[derive(Subcommand, Debug)]
+enum AiCommand {
+    /// Launch interactive TUI chat session
+    Chat(AiChatArgs),
+    /// Login with Codex OAuth (Device Code — no API key required)
+    Login,
+    /// Show current authentication status
+    Status,
+    /// Remove stored authentication token
+    Logout,
+}
+
+#[derive(Args, Debug)]
+struct AiChatArgs {
+    /// AI provider to use: codex | openai | ollama
+    #[arg(long)]
+    provider: Option<String>,
+    /// Model name override (e.g. gpt-4o, llama3)
+    #[arg(long)]
+    model: Option<String>,
 }
 
 #[derive(Args, Debug)]
@@ -459,6 +514,7 @@ const CANONICAL_SUBCOMMANDS: &[&str] = &[
     "inventory",
     "resources",
     "script",
+    "ai",
 ];
 
 fn should_use_canonical_parser(argv: &[OsString]) -> bool {
@@ -690,6 +746,20 @@ fn normalize_canonical(cli: CliArgs) -> ParsedInvocation {
                 },
                 CliCommand::Debug(debug) => {
                     return ParsedInvocation::Debug(debug.command);
+                }
+                CliCommand::Ai(ai_args) => {
+                    let inv = match ai_args.command {
+                        None | Some(AiCommand::Chat(AiChatArgs { provider: None, model: None })) => {
+                            AiInvocation::Chat { provider: None, model: None }
+                        }
+                        Some(AiCommand::Chat(AiChatArgs { provider, model })) => {
+                            AiInvocation::Chat { provider, model }
+                        }
+                        Some(AiCommand::Login) => AiInvocation::Login,
+                        Some(AiCommand::Status) => AiInvocation::Status,
+                        Some(AiCommand::Logout) => AiInvocation::Logout,
+                    };
+                    return ParsedInvocation::Ai(inv);
                 }
                 CliCommand::Script(_) => unreachable!("script branch handled above"),
                 CliCommand::Resources(_) => unreachable!("resources branch handled above"),
