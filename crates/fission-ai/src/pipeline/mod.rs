@@ -51,6 +51,7 @@ impl AiPipeline {
         let mut tool_registry = ToolRegistry::new();
         tool_registry.register(crate::tools::execution::DisasmTool);
         tool_registry.register(crate::tools::execution::XrefsTool);
+        tool_registry.register(crate::tools::execution::ApplyPatchTool);
         
         let context_manager = crate::session::ContextManager::new(32000, 6000);
         

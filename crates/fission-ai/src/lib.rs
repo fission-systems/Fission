@@ -160,6 +160,39 @@ mod tests {
         assert!(prompt.contains("main"));
     }
 
+    #[tokio::test]
+    async fn test_apply_patch_tool_executes() {
+        use crate::tools::execution::{AiTool, ApplyPatchTool};
+        use std::fs;
+        
+        let path = std::env::temp_dir().join("fission_mock_binary_patch.exe");
+        fs::write(&path, b"mock exe contents").unwrap();
+        
+        let tool = ApplyPatchTool;
+        let args = serde_json::json!({
+            "addr": "0x401000",
+            "action": "rename_function",
+            "value": "target_func"
+        });
+        
+        let result = tool.execute(&args, Some(&path)).await.unwrap();
+        assert!(result.contains("Successfully applied patch"));
+        
+        // Verify sidecar was created and has correct contents
+        let sidecar_path = path.with_extension("fission.json");
+        assert!(sidecar_path.exists());
+        let sidecar_content = fs::read_to_string(&sidecar_path).unwrap();
+        let project: serde_json::Value = serde_json::from_str(&sidecar_content).unwrap();
+        assert_eq!(
+            project["user_function_names"]["4198400"],
+            serde_json::json!("target_func")
+        );
+        
+        // Clean up
+        let _ = fs::remove_file(path);
+        let _ = fs::remove_file(sidecar_path);
+    }
+
     // ── Build provider (smoke) ────────────────────────────────────────────────
 
     #[test]

@@ -125,6 +125,27 @@ impl FactStore {
 
         store.ingest_signature_matches(binary);
 
+        // Load user-defined renames from sidecar patch file (<binary_name>.fission.json) if it exists
+        let sidecar_path = std::path::Path::new(&binary.path).with_extension("fission.json");
+        if let Ok(content) = std::fs::read_to_string(&sidecar_path) {
+            #[derive(serde::Deserialize)]
+            struct SidecarProject {
+                #[serde(default)]
+                user_function_names: std::collections::HashMap<String, String>,
+            }
+            if let Ok(sidecar) = serde_json::from_str::<SidecarProject>(&content) {
+                for (addr_str, name) in sidecar.user_function_names {
+                    let parsed_addr = addr_str.parse::<u64>().ok().or_else(|| {
+                        let clean = addr_str.trim_start_matches("0x").trim_start_matches("0X");
+                        u64::from_str_radix(clean, 16).ok()
+                    });
+                    if let Some(addr) = parsed_addr {
+                        store.ingest_name_fact(addr, name, FactProvenance::UserRename);
+                    }
+                }
+            }
+        }
+
         store
     }
 
@@ -537,5 +558,62 @@ mod tests {
         let snapshot = store.function_facts_snapshot(0x401000);
         assert_eq!(snapshot.dwarf_type_fact_count(), 3);
         assert_eq!(snapshot.pdb_type_fact_count(), 0);
+    }
+
+    #[test]
+    fn test_load_sidecar_user_renames() {
+        use std::fs;
+        use std::collections::HashMap;
+        use std::sync::Arc;
+        use fission_loader::loader::types::{LoadedBinaryInner, DataBuffer};
+
+        let binary_path = std::env::temp_dir().join("fission_test_bin_sidecar.exe");
+        fs::write(&binary_path, b"mock").unwrap();
+
+        let sidecar_path = binary_path.with_extension("fission.json");
+        let sidecar_json = serde_json::json!({
+            "binary_path": binary_path.display().to_string(),
+            "user_function_names": {
+                "4198400": "custom_name_from_sidecar",
+                "0x402000": "hex_name_from_sidecar"
+            }
+        });
+        fs::write(&sidecar_path, serde_json::to_string(&sidecar_json).unwrap()).unwrap();
+
+        let inner = LoadedBinaryInner {
+            path: binary_path.display().to_string(),
+            hash: "123".to_string(),
+            data: Arc::new(DataBuffer::Heap(vec![])),
+            arch_spec: "x86:LE:64:default".to_string(),
+            load_spec: None,
+            architecture: None,
+            entry_point: 0,
+            image_base: 0,
+            functions: Vec::new(),
+            sections: Vec::new(),
+            is_64bit: true,
+            format: "PE".to_string(),
+            iat_symbols: HashMap::new(),
+            global_symbols: HashMap::new(),
+            global_symbol_sizes: HashMap::new(),
+            relocation_symbols: HashMap::new(),
+            function_addr_index: HashMap::new(),
+            function_name_index: HashMap::new(),
+            functions_sorted: true,
+            inferred_types: Vec::new(),
+            string_map: HashMap::new(),
+            pdb_debug_info: None,
+            relocations: Vec::new(),
+            rich_header_records: None,
+            symbol_versions: HashMap::new(),
+        };
+        let binary = LoadedBinary::from_inner(inner);
+        let store = FactStore::from_binary(&binary);
+
+        assert_eq!(store.resolved_name(4198400), Some("custom_name_from_sidecar"));
+        assert_eq!(store.resolved_name(0x402000), Some("hex_name_from_sidecar"));
+
+        let _ = fs::remove_file(binary_path);
+        let _ = fs::remove_file(sidecar_path);
     }
 }
