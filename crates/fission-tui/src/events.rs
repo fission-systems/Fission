@@ -18,6 +18,10 @@ pub enum AppAction {
     ScrollUp,
     /// Arrow-down / scroll down.
     ScrollDown,
+    /// Scroll source pane up.
+    ScrollSourceUp,
+    /// Scroll source pane down.
+    ScrollSourceDown,
     /// Toggle help overlay.
     ToggleHelp,
     /// No-op (e.g. unhandled key or tick timeout).
@@ -48,9 +52,14 @@ fn map_key(code: KeyCode, modifiers: KeyModifiers) -> AppAction {
         KeyCode::Enter => AppAction::Submit,
         // Delete
         KeyCode::Backspace => AppAction::DeleteBack,
-        // Scroll
-        KeyCode::Up | KeyCode::PageUp => AppAction::ScrollUp,
-        KeyCode::Down | KeyCode::PageDown => AppAction::ScrollDown,
+        // Scroll Source (left pane)
+        KeyCode::PageUp => AppAction::ScrollSourceUp,
+        KeyCode::PageDown => AppAction::ScrollSourceDown,
+        KeyCode::Up if modifiers.contains(KeyModifiers::CONTROL) => AppAction::ScrollSourceUp,
+        KeyCode::Down if modifiers.contains(KeyModifiers::CONTROL) => AppAction::ScrollSourceDown,
+        // Scroll Chat (right pane)
+        KeyCode::Up => AppAction::ScrollUp,
+        KeyCode::Down => AppAction::ScrollDown,
         // Regular chars
         KeyCode::Char(c) if modifiers.is_empty() || modifiers == KeyModifiers::SHIFT => {
             AppAction::InsertChar(c)

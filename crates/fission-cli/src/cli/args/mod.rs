@@ -808,6 +808,7 @@ mod tests {
                 panic!("expected one-shot canonical parse")
             }
             ParsedInvocation::Debug(_) => panic!("expected one-shot canonical parse"),
+            ParsedInvocation::Ai(_) => panic!("expected one-shot canonical parse"),
         }
     }
 
@@ -819,6 +820,7 @@ mod tests {
                 panic!("legacy parser cannot emit resources status")
             }
             ParsedInvocation::Debug(_) => panic!("legacy parser cannot emit debug"),
+            ParsedInvocation::Ai(_) => panic!("legacy parser cannot emit AI"),
         }
     }
 

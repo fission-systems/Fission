@@ -91,6 +91,62 @@ fn run_event_loop(
             }
         }
 
+        // ── Sync Active Reversing Focus with App Source View ──────────────────
+        let current_focus_addr = {
+            let cm = pipeline.context_manager.lock().unwrap();
+            cm.focus.active_function_addr.clone()
+        };
+        if current_focus_addr != app.last_synced_addr {
+            app.last_synced_addr = current_focus_addr.clone();
+            if let Some(addr_str) = current_focus_addr {
+                let binary_path_opt = {
+                    let session = pipeline.session.lock().unwrap();
+                    session.binary_path.clone()
+                };
+                if let Some(bin_path) = binary_path_opt {
+                    let cli_exe = std::env::current_exe().unwrap_or_else(|_| "fission_cli".into());
+                    
+                    // Attempt to run 'decomp' for the address
+                    if let Ok(output) = std::process::Command::new(&cli_exe)
+                        .arg("decomp")
+                        .arg(&bin_path)
+                        .arg("--addr")
+                        .arg(&addr_str)
+                        .output()
+                    {
+                        if output.status.success() {
+                            let decomp_code = String::from_utf8_lossy(&output.stdout).into_owned();
+                            app.active_source = decomp_code;
+                            app.active_source_title = format!("Decompiled View - Address {}", addr_str);
+                        } else {
+                            // If decomp fails, attempt a fallback to disasm
+                            if let Ok(output_disasm) = std::process::Command::new(&cli_exe)
+                                .arg("disasm")
+                                .arg(&bin_path)
+                                .arg("--addr")
+                                .arg(&addr_str)
+                                .output()
+                            {
+                                if output_disasm.status.success() {
+                                    let disasm_code = String::from_utf8_lossy(&output_disasm.stdout).into_owned();
+                                    app.active_source = disasm_code;
+                                    app.active_source_title = format!("Disassembly View - Address {}", addr_str);
+                                } else {
+                                    app.active_source = format!(
+                                        "Error decompiling/disassembling at address {}:\n{}",
+                                        addr_str,
+                                        String::from_utf8_lossy(&output_disasm.stderr)
+                                    );
+                                    app.active_source_title = "Error".to_string();
+                                }
+                            }
+                        }
+                    }
+                    app.source_scroll = 0; // Reset scroll on focus switch
+                }
+            }
+        }
+
         // ── Render ────────────────────────────────────────────────────────────
         terminal.draw(|frame| ui::render(frame, &app))?;
 
@@ -107,6 +163,8 @@ fn run_event_loop(
             AppAction::DeleteBack if !app.streaming => app.delete_char_before_cursor(),
             AppAction::ScrollUp => app.scroll_up(),
             AppAction::ScrollDown => app.scroll_down(),
+            AppAction::ScrollSourceUp => app.scroll_source_up(),
+            AppAction::ScrollSourceDown => app.scroll_source_down(),
             AppAction::Submit if !app.streaming && !app.input.trim().is_empty() => {
                 let user_text = app.take_input();
                 app.push_user(user_text.clone());

@@ -18,7 +18,7 @@ use std::sync::Mutex;
 #[derive(Clone)]
 pub struct AiPipeline {
     provider: SharedAiProvider,
-    session: Arc<Mutex<SessionContext>>,
+    pub session: Arc<Mutex<SessionContext>>,
     pub tool_registry: Arc<ToolRegistry>,
     pub context_manager: Arc<Mutex<crate::session::ContextManager>>,
 }

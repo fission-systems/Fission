@@ -26,10 +26,33 @@ pub struct App {
     pub scroll: u16,
     /// Whether to show the help overlay.
     pub show_help: bool,
+    /// Active decompiled or disassembled code shown in the left pane.
+    pub active_source: String,
+    /// Title of the source view.
+    pub active_source_title: String,
+    /// Last address that we synced from the focus context.
+    pub last_synced_addr: Option<String>,
+    /// Vertical scroll offset for the source viewport.
+    pub source_scroll: u16,
 }
 
 impl App {
     pub fn new(status_label: String) -> Self {
+        let welcome_banner = String::from(
+            " ███████╗██╗███████╗███████╗██╗ ██████╗ ███╗   ██╗\n\
+             ██╔════╝██║██╔════╝██╔════╝██║██╔═══██╗████╗  ██║\n\
+             █████╗  ██║███████╗███████╗██║██║   ██║██╔██╗ ██║\n\
+             ██╔══╝  ██║╚════██║╚════██║██║██║   ██║██║╚██╗██║\n\
+             ██║     ██║███████║███████║██║╚██████╔╝██║ ╚████║\n\
+             ╚═╝     ╚═╝╚══════╝╚══════╝╚═╝ ╚═════╝ ╚═╝  ╚═══╝\n\n\
+             -- Interactive AI Reversing Assistant --\n\n\
+             Welcome to Fission AI Split-Pane TUI!\n\n\
+             - Ask the AI assistant to analyze, decompile, or disassemble.\n\
+             - Type '0x140001000 주변 어셈블리어 보여줘' to execute AI tools.\n\
+             - Renamed functions (apply_patch) will automatically update here.\n\n\
+             Press '?' to show help overlay."
+        );
+
         Self {
             entries: Vec::new(),
             input: String::new(),
@@ -39,6 +62,10 @@ impl App {
             streaming: false,
             scroll: 0,
             show_help: false,
+            active_source: welcome_banner,
+            active_source_title: "Welcome View".to_string(),
+            last_synced_addr: None,
+            source_scroll: 0,
         }
     }
 
@@ -114,5 +141,13 @@ impl App {
 
     pub fn scroll_to_bottom(&mut self) {
         self.scroll = u16::MAX;
+    }
+
+    pub fn scroll_source_up(&mut self) {
+        self.source_scroll = self.source_scroll.saturating_sub(3);
+    }
+
+    pub fn scroll_source_down(&mut self) {
+        self.source_scroll = self.source_scroll.saturating_add(3);
     }
 }
