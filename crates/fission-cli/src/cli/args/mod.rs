@@ -56,12 +56,11 @@ pub enum ParsedInvocation {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum AiInvocation {
     /// Launch interactive TUI chat session.
-    Chat {
-        provider: Option<String>,
-        model: Option<String>,
-    },
-    /// Run Codex Device Code OAuth login.
+    Chat(crate::cli::args::AiChatArgs),
+    /// Run Codex Browser OAuth login.
     Login,
+    /// Run GitHub Copilot Device Code OAuth login.
+    CopilotLogin,
     /// Show authentication status.
     Status,
     /// Remove stored auth token.
@@ -156,8 +155,8 @@ enum CliCommand {
 #[derive(Args, Debug)]
 #[command(
     about = "Interactive AI chat and authentication",
-    long_about = "Launch an interactive AI chat session or manage authentication.\n\nProvider priority: stored Codex OAuth token > FISSION_AI_API_KEY > OPENAI_API_KEY > Ollama (local)",
-    after_help = "Examples:\n  fission_cli ai login              # Codex OAuth (no API key needed)\n  fission_cli ai chat               # Launch TUI chat\n  fission_cli ai chat --provider openai --model gpt-4o\n  fission_cli ai status             # Show auth status\n  fission_cli ai logout             # Remove stored token"
+    long_about = "Launch an interactive AI chat session or manage authentication.\n\nProvider priority: stored OAuth token (Copilot or Codex) > FISSION_AI_API_KEY > OPENAI_API_KEY > Ollama (local)",
+    after_help = "Examples:\n  fission_cli ai copilot-login      # GitHub Copilot OAuth ($10/mo, recommended)\n  fission_cli ai login              # Codex/ChatGPT OAuth (Plus required)\n  fission_cli ai chat               # Launch TUI chat\n  fission_cli ai chat --provider copilot --model gpt-4o\n  fission_cli ai chat --provider openai --model gpt-4o\n  fission_cli ai status             # Show auth status\n  fission_cli ai logout             # Remove stored token"
 )]
 pub struct AiArgs {
     #[command(subcommand)]
@@ -168,22 +167,27 @@ pub struct AiArgs {
 enum AiCommand {
     /// Launch interactive TUI chat session
     Chat(AiChatArgs),
-    /// Login with Codex OAuth (Device Code — no API key required)
+    /// Login with Codex/ChatGPT Browser OAuth (ChatGPT Plus required)
     Login,
+    /// Login with GitHub Copilot Device Code OAuth (Copilot Individual $10/mo)
+    CopilotLogin,
     /// Show current authentication status
     Status,
     /// Remove stored authentication token
     Logout,
 }
 
-#[derive(Args, Debug)]
-struct AiChatArgs {
+#[derive(Args, Clone, Debug, PartialEq, Eq)]
+pub struct AiChatArgs {
+    /// Optional binary to load into the AI context
+    pub binary: Option<PathBuf>,
+
     /// AI provider to use: codex | openai | ollama
     #[arg(long)]
-    provider: Option<String>,
+    pub provider: Option<String>,
     /// Model name override (e.g. gpt-4o, llama3)
     #[arg(long)]
-    model: Option<String>,
+    pub model: Option<String>,
 }
 
 #[derive(Args, Debug)]
@@ -749,15 +753,18 @@ fn normalize_canonical(cli: CliArgs) -> ParsedInvocation {
                 }
                 CliCommand::Ai(ai_args) => {
                     let inv = match ai_args.command {
-                        None | Some(AiCommand::Chat(AiChatArgs { provider: None, model: None })) => {
-                            AiInvocation::Chat { provider: None, model: None }
+                        None => AiInvocation::Chat(crate::cli::args::AiChatArgs {
+                            binary: None,
+                            provider: None,
+                            model: None,
+                        }),
+                        Some(AiCommand::Chat(args)) => {
+                            AiInvocation::Chat(args)
                         }
-                        Some(AiCommand::Chat(AiChatArgs { provider, model })) => {
-                            AiInvocation::Chat { provider, model }
-                        }
-                        Some(AiCommand::Login) => AiInvocation::Login,
-                        Some(AiCommand::Status) => AiInvocation::Status,
-                        Some(AiCommand::Logout) => AiInvocation::Logout,
+                        Some(AiCommand::Login)        => AiInvocation::Login,
+                        Some(AiCommand::CopilotLogin) => AiInvocation::CopilotLogin,
+                        Some(AiCommand::Status)       => AiInvocation::Status,
+                        Some(AiCommand::Logout)       => AiInvocation::Logout,
                     };
                     return ParsedInvocation::Ai(inv);
                 }

@@ -37,7 +37,7 @@ impl AiProvider for CodexProvider {
         true
     }
 
-    async fn chat_stream(&self, messages: &[Message]) -> ProviderResult<ChunkStream> {
-        self.inner.chat_stream(messages).await
+    async fn chat_stream(&self, messages: &[Message], tools: Option<&[crate::tools::ToolDefinition]>) -> ProviderResult<ChunkStream> {
+        self.inner.chat_stream(messages, tools).await
     }
 }

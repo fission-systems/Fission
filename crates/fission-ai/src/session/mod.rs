@@ -1,6 +1,7 @@
 //! Session types shared between providers and the pipeline.
 
 use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
 
 /// Chat message role.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -9,24 +10,56 @@ pub enum Role {
     System,
     User,
     Assistant,
+    Tool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolCallFunction {
+    pub name: String,
+    pub arguments: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolCall {
+    pub id: String,
+    #[serde(rename = "type")]
+    pub kind: String, // usually "function"
+    pub function: ToolCallFunction,
 }
 
 /// A single message in a chat session.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Message {
     pub role: Role,
-    pub content: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub content: Option<String>,
+    
+    // For assistant messages calling tools
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_calls: Option<Vec<ToolCall>>,
+    
+    // For tool response messages
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_call_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
 }
 
 impl Message {
     pub fn system(content: impl Into<String>) -> Self {
-        Self { role: Role::System, content: content.into() }
+        Self { role: Role::System, content: Some(content.into()), tool_calls: None, tool_call_id: None, name: None }
     }
     pub fn user(content: impl Into<String>) -> Self {
-        Self { role: Role::User, content: content.into() }
+        Self { role: Role::User, content: Some(content.into()), tool_calls: None, tool_call_id: None, name: None }
     }
     pub fn assistant(content: impl Into<String>) -> Self {
-        Self { role: Role::Assistant, content: content.into() }
+        Self { role: Role::Assistant, content: Some(content.into()), tool_calls: None, tool_call_id: None, name: None }
+    }
+    pub fn assistant_tool_calls(tool_calls: Vec<ToolCall>) -> Self {
+        Self { role: Role::Assistant, content: None, tool_calls: Some(tool_calls), tool_call_id: None, name: None }
+    }
+    pub fn tool_response(tool_call_id: String, name: String, content: String) -> Self {
+        Self { role: Role::Tool, content: Some(content), tool_calls: None, tool_call_id: Some(tool_call_id), name: Some(name) }
     }
 }
 
@@ -35,12 +68,13 @@ impl Message {
 pub struct SessionContext {
     pub messages: Vec<Message>,
     pub system_prompt: Option<String>,
+    pub binary_path: Option<PathBuf>,
 }
 
 impl SessionContext {
-    /// Create a new session with an optional system prompt.
-    pub fn new(system_prompt: Option<String>) -> Self {
-        Self { messages: Vec::new(), system_prompt }
+    /// Create a new session with an optional system prompt and binary.
+    pub fn new(system_prompt: Option<String>, binary_path: Option<PathBuf>) -> Self {
+        Self { messages: Vec::new(), system_prompt, binary_path }
     }
 
     /// Returns the full message list including the system prompt prepended.
@@ -59,6 +93,10 @@ impl SessionContext {
 
     pub fn push_assistant(&mut self, content: impl Into<String>) {
         self.messages.push(Message::assistant(content));
+    }
+    
+    pub fn push_message(&mut self, message: Message) {
+        self.messages.push(message);
     }
 
     pub fn clear(&mut self) {

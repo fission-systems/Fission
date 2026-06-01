@@ -73,7 +73,7 @@ impl AiProvider for OllamaProvider {
         false
     }
 
-    async fn chat_stream(&self, messages: &[Message]) -> ProviderResult<ChunkStream> {
+    async fn chat_stream(&self, messages: &[Message], _tools: Option<&[crate::tools::ToolDefinition]>) -> ProviderResult<ChunkStream> {
         use crate::session::Role;
 
         let url = format!("{}/api/chat", self.base_url.trim_end_matches('/'));
@@ -84,8 +84,9 @@ impl AiProvider for OllamaProvider {
                     Role::System => "system",
                     Role::User => "user",
                     Role::Assistant => "assistant",
+                    Role::Tool => "tool",
                 },
-                content: &m.content,
+                content: m.content.as_deref().unwrap_or_default(),
             })
             .collect();
 
@@ -113,7 +114,7 @@ impl AiProvider for OllamaProvider {
                         .filter_map(|line| {
                             serde_json::from_str::<OllamaChunk>(line)
                                 .ok()
-                                .map(|c| Ok(ResponseChunk { delta: c.message.content, done: c.done }))
+                                .map(|c| Ok(ResponseChunk { delta: c.message.content, tool_calls: None, done: c.done }))
                         })
                         .collect()
                 }

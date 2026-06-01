@@ -8,6 +8,7 @@
 
 pub mod api_key;
 pub mod codex_oauth;
+pub mod copilot_oauth;
 pub mod token_store;
 
 use std::path::PathBuf;
@@ -17,6 +18,9 @@ use thiserror::Error;
 pub const CODEX_AUTH_BASE_URL: &str = "https://auth.openai.com";
 /// OpenAI client ID used by OpenCode — supports localhost redirect URI for Browser OAuth.
 pub const CODEX_CLIENT_ID: &str = "app_EMoamEEZ73f0CkXaXp7hrann";
+
+/// GitHub Copilot OAuth client ID (from OpenCode reference).
+pub use copilot_oauth::COPILOT_CLIENT_ID;
 
 /// Environment variable names recognised by fission-ai.
 pub const ENV_FISSION_AI_API_KEY: &str = "FISSION_AI_API_KEY";

@@ -24,6 +24,7 @@ pub mod auth;
 pub mod pipeline;
 pub mod provider;
 pub mod session;
+pub mod tools;
 
 pub use pipeline::AiPipeline;
 
@@ -91,7 +92,7 @@ mod tests {
 
     #[test]
     fn session_roundtrip() {
-        let mut session = SessionContext::new(Some("system prompt".to_string()));
+        let mut session = SessionContext::new(Some("system prompt".to_string()), None);
         session.push_user("hello");
         session.push_assistant("world".to_string());
         let msgs = session.full_messages();
@@ -104,7 +105,7 @@ mod tests {
 
     #[test]
     fn session_clear_resets_history() {
-        let mut session = SessionContext::new(None);
+        let mut session = SessionContext::new(None, None);
         session.push_user("hello");
         session.clear();
         let msgs = session.full_messages();

@@ -80,10 +80,10 @@ For deeper visual maps, see [`docs/architecture/DIAGRAMS.md`](./docs/architectur
 | **fission-dynamic** | Dynamic analysis and debugger-adjacent support | Runtime analysis layer |
 | **fission-ttd** | Time-travel / trace-adjacent support | Trace layer |
 | **fission-plugin** | Plugin contracts, hooks, and runtime extension points | Extension layer |
+| **fission-ai** | AI provider orchestration, Codex OAuth & GitHub Copilot auth integrations | AI layer |
 | **fission-automation** | Quality lanes, regression testing, telemetry reporting | Quality layer |
 | **fission-cli** | Headless CLI (one-shot subcommands), Rhai `script`, operator `inventory` | Product layer |
 | **fission-tauri** | Desktop GUI, interactive analysis, visualization | Product layer |
-
 ---
 
 ## Documentation Hub
@@ -141,6 +141,7 @@ Additional references:
 - 🔄 Large function readability and precision
 - 🔄 Advanced data abstraction: structures, pointers, arrays, field access, calling convention, parameter, and local recovery
 - 🔄 Rich type inference, FID, signature, and name recovery
+- 🔄 AI-assisted reverse engineering and decompilation workflows (early-stage Codex & Copilot auth integrations)
 - 🔄 Dynamic/debugger and TTD-adjacent workflows
 - 🔄 Desktop UI polish and end-user experience
 
@@ -398,6 +399,7 @@ To bridge this quality gap, Fission's active development plan includes:
 | [`crates/fission-dynamic`](./crates/fission-dynamic) | Dynamic analysis and debugger-adjacent support |
 | [`crates/fission-ttd`](./crates/fission-ttd) | Time-travel / trace-adjacent support |
 | [`crates/fission-plugin`](./crates/fission-plugin) | Plugin contracts, hooks, and runtime extension points |
+| [`crates/fission-ai`](./crates/fission-ai) | AI provider orchestration, Codex/Copilot auth, and analysis assistance |
 
 ### Product Surfaces
 
@@ -639,6 +641,32 @@ benchmark/artifacts/full_benchmark/      # Ghidra reference/comparison runs
 ### Extended Architecture
 
 For detailed system design, read [`docs/architecture/ARCHITECTURE.md`](./docs/architecture/ARCHITECTURE.md) and [`docs/architecture/DIAGRAMS.md`](./docs/architecture/DIAGRAMS.md).
+
+---
+
+## AI-Assisted Analysis
+
+Fission includes a modular, zero-setup AI-assisted analysis subsystem (**`fission-ai`**) designed to lower the barrier to entry for reverse engineering and enhance binary comprehension.
+
+### 🔑 Key Features
+- **Zero API-Key Setup**: By supporting **Codex OAuth** and **GitHub Copilot Auth**, Fission allows developers to securely reuse their existing, active AI agent platform tokens. You do not need to configure separate paid API keys or manage usage bills.
+- **Intelligent Analysis Pipeline**: Integrates a robust tool-calling pipeline that allows the AI provider to inspect disassembly (`disasm`), resolve cross-references (`xrefs`), and request specific decompiler contexts safely and dynamically.
+- **Seamless CLI & GUI Integration**: Accessible directly through `fission_cli` and soon to be fully surfaced in the Tauri-based desktop GUI.
+
+### 🚀 Quick Start with AI
+
+To trigger an AI-assisted analysis using your GitHub Copilot subscription, authenticate and run:
+
+```bash
+# Authenticate using your GitHub Copilot account
+./target/release/fission_cli ai auth login --provider copilot
+
+# Analyze a decompiled function with AI guidance
+./target/release/fission_cli ai analyze <binary> --addr <address>
+```
+
+> [!NOTE]
+> This is an early-stage feature under active development. The underlying architecture is designed to support custom prompt engineering and multi-agent reversing loops.
 
 ---
 

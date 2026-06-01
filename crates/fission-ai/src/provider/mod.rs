@@ -4,6 +4,7 @@
 //! [`ProviderConfig`] / environment variables.
 
 pub mod codex;
+pub mod copilot;
 pub mod ollama;
 pub mod openai;
 
@@ -15,14 +16,31 @@ use futures::Stream;
 use thiserror::Error;
 
 use crate::session::Message;
+use crate::tools::ToolDefinition;
 
 // ── Streaming response chunk ──────────────────────────────────────────────────
+
+#[derive(Debug, Clone)]
+pub struct ProviderToolCallFunctionDelta {
+    pub name: Option<String>,
+    pub arguments: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ProviderToolCallDelta {
+    pub index: usize,
+    pub id: Option<String>,
+    pub kind: Option<String>,
+    pub function: Option<ProviderToolCallFunctionDelta>,
+}
 
 /// A single token/delta from a streaming AI response.
 #[derive(Debug, Clone)]
 pub struct ResponseChunk {
     /// The delta text from this chunk.
     pub delta: String,
+    /// Tool call fragments.
+    pub tool_calls: Option<Vec<ProviderToolCallDelta>>,
     /// Whether this is the final chunk in the stream.
     pub done: bool,
 }
@@ -66,13 +84,13 @@ pub trait AiProvider: fmt::Debug + Send + Sync {
     }
 
     /// Send a chat completion request and return a streaming response.
-    async fn chat_stream(&self, messages: &[Message]) -> ProviderResult<ChunkStream>;
+    async fn chat_stream(&self, messages: &[Message], tools: Option<&[ToolDefinition]>) -> ProviderResult<ChunkStream>;
 
     /// Return a one-shot (non-streaming) response.  Default implementation
     /// collects the stream into a single string.
-    async fn chat(&self, messages: &[Message]) -> ProviderResult<String> {
+    async fn chat(&self, messages: &[Message], tools: Option<&[ToolDefinition]>) -> ProviderResult<String> {
         use futures::StreamExt;
-        let mut stream = self.chat_stream(messages).await?;
+        let mut stream = self.chat_stream(messages, tools).await?;
         let mut out = String::new();
         while let Some(chunk) = stream.next().await {
             out.push_str(&chunk?.delta);
@@ -88,6 +106,8 @@ pub trait AiProvider: fmt::Debug + Send + Sync {
 pub enum ProviderKind {
     /// Codex/ChatGPT via OAuth — no API key required.
     Codex,
+    /// GitHub Copilot via OAuth — requires Copilot Individual/Business subscription.
+    Copilot,
     /// OpenAI-compatible endpoint (OpenAI, Azure, local vLLM, etc.).
     OpenAi,
     /// Local Ollama server.
@@ -98,6 +118,7 @@ impl fmt::Display for ProviderKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Codex => write!(f, "codex"),
+            Self::Copilot => write!(f, "copilot"),
             Self::OpenAi => write!(f, "openai"),
             Self::Ollama => write!(f, "ollama"),
         }
@@ -109,9 +130,10 @@ impl std::str::FromStr for ProviderKind {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.to_lowercase().as_str() {
             "codex" | "chatgpt" => Ok(Self::Codex),
+            "copilot" | "github-copilot" | "github_copilot" => Ok(Self::Copilot),
             "openai" => Ok(Self::OpenAi),
             "ollama" => Ok(Self::Ollama),
-            other => Err(format!("unknown provider: {other}. Use codex|openai|ollama")),
+            other => Err(format!("unknown provider: {other}. Use codex|copilot|openai|ollama")),
         }
     }
 }
@@ -146,6 +168,10 @@ pub fn build_provider(cfg: ProviderConfig) -> SharedAiProvider {
         ProviderKind::Codex => Arc::new(codex::CodexProvider::new(
             cfg.bearer_token,
             cfg.model.unwrap_or_else(|| "gpt-4o".into()),
+        )),
+        ProviderKind::Copilot => Arc::new(copilot::CopilotProvider::new(
+            cfg.bearer_token,
+            cfg.model.unwrap_or_else(|| "claude-sonnet-4.5".into()),
         )),
         ProviderKind::OpenAi => Arc::new(openai::OpenAiProvider::new(
             cfg.bearer_token,
