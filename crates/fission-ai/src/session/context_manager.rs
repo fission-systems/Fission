@@ -72,10 +72,13 @@ pub struct ReversingFocus {
     pub xrefs_callees: Vec<String>,
     /// Most recent decompiled C pseudocode snippet for the focused function (truncated).
     pub decomp_snippet: Option<String>,
+    /// Most recent disassembled assembly snippet for the focused function (truncated).
+    pub disasm_snippet: Option<String>,
 }
 
 impl ReversingFocus {
     pub const MAX_DECOMP_SNIPPET_LEN: usize = 2000;
+    pub const MAX_DISASM_SNIPPET_LEN: usize = 4000;
 
     /// Reset xrefs and decomp when the focus address changes.
     pub fn set_focus(&mut self, addr: String, name: Option<String>) {
@@ -84,6 +87,7 @@ impl ReversingFocus {
             self.xrefs_callers.clear();
             self.xrefs_callees.clear();
             self.decomp_snippet = None;
+            self.disasm_snippet = None;
         }
         self.active_function_addr = Some(addr);
         if name.is_some() {
@@ -100,6 +104,18 @@ impl ReversingFocus {
             ));
         } else {
             self.decomp_snippet = Some(snippet);
+        }
+    }
+
+    /// Store a disassembled snippet, truncating if necessary.
+    pub fn set_disasm_snippet(&mut self, snippet: String) {
+        if snippet.len() > Self::MAX_DISASM_SNIPPET_LEN {
+            self.disasm_snippet = Some(format!(
+                "{}... [truncated]",
+                &snippet[..Self::MAX_DISASM_SNIPPET_LEN]
+            ));
+        } else {
+            self.disasm_snippet = Some(snippet);
         }
     }
 }
