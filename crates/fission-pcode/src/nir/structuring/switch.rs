@@ -311,7 +311,10 @@ impl<'a> PreviewBuilder<'a> {
                     } else {
                         selector = Some(range_selector);
                     }
-                    let Some(default_idx) = self.find_block_index_by_address(case_target.unwrap()) else {
+                    let Some(case_target_addr) = case_target else {
+                        return Ok(None);
+                    };
+                    let Some(default_idx) = self.find_block_index_by_address(case_target_addr) else {
                         return Ok(None);
                     };
                     guarded_default_idx = Some(self.canonicalize_switch_target(default_idx));
@@ -328,7 +331,10 @@ impl<'a> PreviewBuilder<'a> {
                     } else {
                         selector = Some(range_selector);
                     }
-                    let Some(default_idx) = self.find_block_index_by_address(case_target.unwrap()) else {
+                    let Some(case_target_addr) = case_target else {
+                        return Ok(None);
+                    };
+                    let Some(default_idx) = self.find_block_index_by_address(case_target_addr) else {
                         return Ok(None);
                     };
                     guarded_default_idx = Some(self.canonicalize_switch_target(default_idx));

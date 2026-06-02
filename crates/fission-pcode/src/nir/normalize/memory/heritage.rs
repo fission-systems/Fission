@@ -308,7 +308,11 @@ impl<'a> Rewriter<'a> {
                 if let Some(s) = init {
                     let mut dummy = vec![(**s).clone()];
                     self.rewrite_stmts(&mut dummy);
-                    *s = Box::new(dummy.remove(0));
+                    if dummy.len() == 1 {
+                        *s = Box::new(dummy.remove(0));
+                    } else if !dummy.is_empty() {
+                        *s = Box::new(HirStmt::Block(dummy));
+                    }
                 }
                 if let Some(e) = cond {
                     self.rewrite_expr(e);
@@ -328,7 +332,11 @@ impl<'a> Rewriter<'a> {
                 if let Some(s) = update {
                     let mut dummy = vec![(**s).clone()];
                     self.rewrite_stmts(&mut dummy);
-                    *s = Box::new(dummy.remove(0));
+                    if dummy.len() == 1 {
+                        *s = Box::new(dummy.remove(0));
+                    } else if !dummy.is_empty() {
+                        *s = Box::new(HirStmt::Block(dummy));
+                    }
                 }
 
                 for phi in merge_phis {
