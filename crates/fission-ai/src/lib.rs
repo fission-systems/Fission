@@ -332,4 +332,71 @@ mod tests {
         let _ = fs::remove_file(path);
         let _ = fs::remove_file(sidecar_path);
     }
+
+    #[derive(Debug)]
+    struct MockProvider;
+
+    #[async_trait::async_trait]
+    impl crate::provider::AiProvider for MockProvider {
+        fn name(&self) -> &str { "mock" }
+        fn model(&self) -> &str { "mock-model" }
+        async fn chat_stream(&self, _messages: &[crate::session::Message], _tools: Option<&[crate::tools::ToolDefinition]>) -> crate::provider::ProviderResult<crate::provider::ChunkStream> {
+            Err(crate::provider::ProviderError::Other("Not implemented".to_string()))
+        }
+        async fn chat(&self, _messages: &[crate::session::Message], _tools: Option<&[crate::tools::ToolDefinition]>) -> crate::provider::ProviderResult<String> {
+            Ok("# Consolidated Mock Report\n\n- Match found.\n- Code is consolidated.".to_string())
+        }
+    }
+
+    #[tokio::test]
+    async fn test_consolidate_analysis_report() {
+        use crate::pipeline::AiPipeline;
+        use crate::session::SessionContext;
+        use crate::tools::registry::ToolRegistry;
+        use crate::session::ContextManager;
+        use std::fs;
+
+        let path = std::env::temp_dir().join("fission_mock_binary_consolidate.exe");
+        fs::write(&path, b"mock exe contents").unwrap();
+
+        // Write a mock sidecar with some cache
+        let sidecar_path = path.with_extension("fission.json");
+        let project = serde_json::json!({
+            "binary_path": path.display().to_string(),
+            "decompilation_cache": {
+                "4198400": {
+                    "name": "target_func",
+                    "code": "void target_func() {\n    int key = 0xbeef;\n}",
+                    "timestamp": 123456789
+                }
+            },
+            "annotations": {
+                "4198400": "This is an important function."
+            }
+        });
+        fs::write(&sidecar_path, serde_json::to_string_pretty(&project).unwrap()).unwrap();
+
+        // Reconstruct pipeline with MockProvider
+        let provider = std::sync::Arc::new(MockProvider);
+        let pipeline = AiPipeline {
+            provider,
+            session: std::sync::Arc::new(std::sync::Mutex::new(SessionContext::new(None, Some(path.clone())))),
+            tool_registry: std::sync::Arc::new(ToolRegistry::new()),
+            context_manager: std::sync::Arc::new(std::sync::Mutex::new(ContextManager::new(1000, 50))),
+        };
+
+        let result = pipeline.consolidate_analysis_report().await.unwrap();
+        assert!(result.is_some());
+        let report_path = result.unwrap();
+        assert!(report_path.exists());
+
+        let content = fs::read_to_string(&report_path).unwrap();
+        assert!(content.contains("# Consolidated Mock Report"));
+        assert!(content.contains("- Code is consolidated."));
+
+        // Clean up
+        let _ = fs::remove_file(path);
+        let _ = fs::remove_file(sidecar_path);
+        let _ = fs::remove_file(report_path);
+    }
 }

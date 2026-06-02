@@ -17,7 +17,7 @@ use std::sync::Mutex;
 /// session state for multi-turn conversations.
 #[derive(Clone)]
 pub struct AiPipeline {
-    provider: SharedAiProvider,
+    pub(crate) provider: SharedAiProvider,
     pub session: Arc<Mutex<SessionContext>>,
     pub tool_registry: Arc<ToolRegistry>,
     pub context_manager: Arc<Mutex<crate::session::ContextManager>>,
@@ -433,6 +433,133 @@ impl AiPipeline {
     /// Returns a human-readable label for the status bar.
     pub fn status_label(&self) -> String {
         format!("{}:{}", self.provider.name(), self.provider.model())
+    }
+
+    /// Read sidecar JSON for the loaded binary, and use LLM to consolidate it
+    /// with the existing [binary].analysis.md report.
+    pub async fn consolidate_analysis_report(&self) -> anyhow::Result<Option<std::path::PathBuf>> {
+        let binary_path = {
+            let session = self.session.lock().unwrap();
+            session.binary_path.clone()
+        };
+        let Some(binary) = binary_path else {
+            return Ok(None);
+        };
+
+        let sidecar_path = binary.with_extension("fission.json");
+        if !sidecar_path.exists() {
+            return Ok(None);
+        }
+
+        let sidecar_content = std::fs::read_to_string(&sidecar_path)?;
+        let project: serde_json::Value = serde_json::from_str(&sidecar_content).unwrap_or_else(|_| serde_json::json!({}));
+
+        let decomp_cache = project.get("decompilation_cache");
+        let annotations = project.get("annotations");
+        let user_names = project.get("user_function_names");
+
+        let has_decomp = decomp_cache.and_then(|c| c.as_object()).map(|o| !o.is_empty()).unwrap_or(false);
+        let has_ann = annotations.and_then(|a| a.as_object()).map(|o| !o.is_empty()).unwrap_or(false);
+
+        if !has_decomp && !has_ann {
+            return Ok(None); // Nothing to consolidate
+        }
+
+        let report_path = binary.with_extension("analysis.md");
+        let existing_report = if report_path.exists() {
+            std::fs::read_to_string(&report_path).ok()
+        } else {
+            None
+        };
+
+        let mut cache_prompt = String::new();
+        if let Some(cache_obj) = decomp_cache.and_then(|c| c.as_object()) {
+            cache_prompt.push_str("### Cached Decompiled Functions\n\n");
+            for (addr_str, val) in cache_obj {
+                let parsed_addr = addr_str.parse::<u64>().unwrap_or(0);
+                let name = val.get("name").and_then(|n| n.as_str()).unwrap_or("unknown");
+                let code = val.get("code").and_then(|c| c.as_str()).unwrap_or("");
+                
+                cache_prompt.push_str(&format!("#### Function: {} ({:#x})\n", name, parsed_addr));
+                cache_prompt.push_str("```c\n");
+                cache_prompt.push_str(code);
+                cache_prompt.push_str("\n```\n\n");
+            }
+        }
+
+        let mut ann_prompt = String::new();
+        if let Some(ann_obj) = annotations.and_then(|a| a.as_object()) {
+            ann_prompt.push_str("### Function Analysis Annotations / Notes\n\n");
+            for (addr_str, val) in ann_obj {
+                let parsed_addr = addr_str.parse::<u64>().unwrap_or(0);
+                let notes = val.as_str().unwrap_or("");
+                ann_prompt.push_str(&format!("#### Address: {:#x}\n**Notes:**\n{}\n\n", parsed_addr, notes));
+            }
+        }
+
+        let mut names_prompt = String::new();
+        if let Some(names_obj) = user_names.and_then(|n| n.as_object()) {
+            names_prompt.push_str("### Custom Function Renames\n\n");
+            for (addr_str, val) in names_obj {
+                let parsed_addr = addr_str.parse::<u64>().unwrap_or(0);
+                let name = val.as_str().unwrap_or("");
+                names_prompt.push_str(&format!("- {:#x} -> {}\n", parsed_addr, name));
+            }
+        }
+
+        let system_prompt = "You are a professional reverse engineer and technical writer. \
+                             Your task is to consolidate and update a comprehensive reverse engineering analysis report for a binary. \
+                             You will be provided with: \
+                             1. The existing report (if any). \
+                             2. The cached decompiled code for functions analyzed. \
+                             3. Custom function names and analysis notes (annotations). \
+                             \
+                             Your goal is to produce or update the markdown analysis report. \
+                             You MUST preserve previous user modifications, manual analysis notes, and structural updates in the existing report, \
+                             while incrementally integrating the newly decompiled functions, renames, and annotations. \
+                             Output ONLY the updated, valid markdown document without enclosing it in extra conversational text or markdown code block quotes (like ```markdown). Start directly with the title.";
+        
+        let mut user_content = String::new();
+        if let Some(report) = &existing_report {
+            user_content.push_str("## Existing Analysis Report\n\n");
+            user_content.push_str(report);
+            user_content.push_str("\n\n---\n\n");
+        } else {
+            user_content.push_str("## Existing Analysis Report\n*(No existing report found. Create a new one.)*\n\n---\n\n");
+        }
+        
+        user_content.push_str("## Session Cache Data to Integrate\n\n");
+        user_content.push_str(&names_prompt);
+        user_content.push_str(&ann_prompt);
+        user_content.push_str(&cache_prompt);
+
+        let messages = vec![
+            crate::session::Message::system(system_prompt),
+            crate::session::Message::user(user_content)
+        ];
+
+        let response = self.provider.chat(&messages, None).await;
+        match response {
+            Ok(text) => {
+                let trimmed = text.trim();
+                let mut final_text = trimmed;
+                if final_text.starts_with("```markdown") {
+                    final_text = final_text.trim_start_matches("```markdown");
+                    if final_text.ends_with("```") {
+                        final_text = final_text.trim_end_matches("```");
+                    }
+                } else if final_text.starts_with("```") {
+                    final_text = final_text.trim_start_matches("```");
+                    if final_text.ends_with("```") {
+                        final_text = final_text.trim_end_matches("```");
+                    }
+                }
+                let final_text = final_text.trim().to_string();
+                std::fs::write(&report_path, final_text)?;
+                Ok(Some(report_path))
+            }
+            Err(e) => Err(anyhow::anyhow!("AI provider error during consolidation: {:?}", e)),
+        }
     }
 }
 

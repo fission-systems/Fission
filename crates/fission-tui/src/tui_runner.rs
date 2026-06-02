@@ -57,6 +57,29 @@ pub fn run_tui(mut pipeline: AiPipeline) -> Result<()> {
     disable_raw_mode().ok();
     terminal.show_cursor().ok();
 
+    // ── Consolidate Analysis Report ──────────────────────────────────────────
+    if let Ok(handle) = tokio::runtime::Handle::try_current() {
+        println!("Consolidating reverse engineering analysis report...");
+        match handle.block_on(pipeline.consolidate_analysis_report()) {
+            Ok(Some(path)) => println!("✓ Report updated at: {}", path.display()),
+            Ok(None) => {}
+            Err(e) => eprintln!("⚠ Failed to consolidate report: {}", e),
+        }
+    } else {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .ok();
+        if let Some(r) = rt {
+            println!("Consolidating reverse engineering analysis report...");
+            match r.block_on(pipeline.consolidate_analysis_report()) {
+                Ok(Some(path)) => println!("✓ Report updated at: {}", path.display()),
+                Ok(None) => {}
+                Err(e) => eprintln!("⚠ Failed to consolidate report: {}", e),
+            }
+        }
+    }
+
     result
 }
 
