@@ -157,13 +157,13 @@ fn render_chat(frame: &mut Frame, app: &App, area: Rect) {
 
     text_lines.extend(entries_lines);
 
-    let total_lines = text_lines.len() as u16;
+    let total_lines: u16 = text_lines.iter().map(|l| {
+        let w = l.width() as u16;
+        if w == 0 { 1 } else { (w + width as u16 - 1) / (width as u16) }
+    }).sum();
+
     let max_scroll = total_lines.saturating_sub(area.height);
-    let effective_scroll = if app.scroll == u16::MAX {
-        max_scroll
-    } else {
-        app.scroll.min(max_scroll)
-    };
+    let effective_scroll = max_scroll.saturating_sub(app.offset_from_bottom);
 
     let para = Paragraph::new(Text::from(text_lines))
         .wrap(Wrap { trim: false })

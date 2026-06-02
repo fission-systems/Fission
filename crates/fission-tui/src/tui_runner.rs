@@ -389,6 +389,9 @@ fn run_event_loop(
                 } else if trim_cmd == "/history" {
                     app.load_session_history();
                     continue;
+                } else if trim_cmd == "/export" {
+                    app.export_to_markdown();
+                    continue;
                 } else if trim_cmd == "/model" {
                     app.toggle_model_menu();
                     if app.show_model_menu {

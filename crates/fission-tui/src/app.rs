@@ -52,8 +52,8 @@ pub struct App {
     pub should_quit: bool,
     /// Whether a streaming response is in progress.
     pub streaming: bool,
-    /// Vertical scroll offset for the chat viewport.
-    pub scroll: u16,
+    /// Vertical scroll offset from the bottom for the chat viewport.
+    pub offset_from_bottom: u16,
     /// Whether to show the help overlay.
     pub show_help: bool,
     
@@ -96,7 +96,7 @@ impl App {
             status_label,
             should_quit: false,
             streaming: false,
-            scroll: 0,
+            offset_from_bottom: 0,
             show_help: false,
             show_provider_menu: false,
             provider_options: Vec::new(),
@@ -147,7 +147,7 @@ impl App {
             if last.is_streaming {
                 last.content.push_str(delta);
                 // Always track the bottom while streaming.
-                self.scroll = u16::MAX;
+                self.offset_from_bottom = 0;
             }
         }
     }
@@ -261,15 +261,15 @@ impl App {
     }
 
     pub fn scroll_up(&mut self) {
-        self.scroll = self.scroll.saturating_sub(3);
+        self.offset_from_bottom = self.offset_from_bottom.saturating_add(3);
     }
 
     pub fn scroll_down(&mut self) {
-        self.scroll = self.scroll.saturating_add(3);
+        self.offset_from_bottom = self.offset_from_bottom.saturating_sub(3);
     }
 
     pub fn scroll_to_bottom(&mut self) {
-        self.scroll = u16::MAX;
+        self.offset_from_bottom = 0;
     }
 
     // ── Mentions ──────────────────────────────────────────────────────────────
@@ -348,18 +348,19 @@ impl App {
     // ── Slash Commands ───────────────────────────────────────────────────────
 
     pub fn start_slash_command(&mut self) {
-        let commands = vec![
+        let options = vec![
             "clear".to_string(),
-            "quit".to_string(),
             "help".to_string(),
+            "quit".to_string(),
+            "history".to_string(),
             "provider".to_string(),
             "model".to_string(),
-            "history".to_string(),
+            "export".to_string(),
         ];
         self.slash_state = Some(SlashCommandState {
             start_cursor: self.input_cursor, // just after the `/`
             query: String::new(),
-            options: commands,
+            options,
             selected_idx: 0,
         });
     }
@@ -587,6 +588,35 @@ impl App {
             if let Ok(json) = serde_json::to_string_pretty(&messages) {
                 let _ = std::fs::write(path, json);
             }
+        }
+    }
+
+    pub fn export_to_markdown(&mut self) {
+        if self.entries.is_empty() { return; }
+        
+        let timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        
+        let filename = format!("fission_export_{}.md", timestamp);
+        
+        let mut md = String::new();
+        md.push_str(&format!("# Fission AI Export - {}\n\n", timestamp));
+        
+        for entry in &self.entries {
+            md.push_str(&format!("### {}\n\n", entry.role_label));
+            md.push_str(&entry.content);
+            md.push_str("\n\n---\n\n");
+        }
+        
+        if std::fs::write(&filename, md).is_ok() {
+            self.entries.push(ChatEntry {
+                role_label: "System".to_string(),
+                content: format!("Conversation successfully exported to `{}`.", filename),
+                is_streaming: false,
+            });
+            self.scroll_to_bottom();
         }
     }
 }
