@@ -176,9 +176,26 @@ fn run_event_loop(
                 app.show_help = false;
                 app.show_provider_menu = false;
                 app.show_model_menu = false;
+                app.cancel_mention();
             }
-            AppAction::InsertChar(c) if !app.streaming && !app.show_provider_menu && !app.show_model_menu => app.insert_char(c),
-            AppAction::DeleteBack if !app.streaming && !app.show_provider_menu && !app.show_model_menu => app.delete_char_before_cursor(),
+            AppAction::InsertChar(c) if !app.streaming && !app.show_provider_menu && !app.show_model_menu => {
+                app.insert_char(c);
+                if c == '@' {
+                    app.start_mention();
+                } else if app.mention_state.is_some() {
+                    if c == ' ' {
+                        app.cancel_mention();
+                    } else {
+                        app.update_mention_query();
+                    }
+                }
+            }
+            AppAction::DeleteBack if !app.streaming && !app.show_provider_menu && !app.show_model_menu => {
+                app.delete_char_before_cursor();
+                if app.mention_state.is_some() {
+                    app.update_mention_query();
+                }
+            }
             AppAction::ScrollUp => {
                 app.scroll_up();
             }
@@ -186,7 +203,9 @@ fn run_event_loop(
                 app.scroll_down();
             }
             AppAction::CursorUp => {
-                if app.show_provider_menu {
+                if app.mention_state.is_some() {
+                    app.mention_up();
+                } else if app.show_provider_menu {
                     app.provider_menu_up();
                 } else if app.show_model_menu {
                     app.model_menu_up();
@@ -195,7 +214,9 @@ fn run_event_loop(
                 }
             }
             AppAction::CursorDown => {
-                if app.show_provider_menu {
+                if app.mention_state.is_some() {
+                    app.mention_down();
+                } else if app.show_provider_menu {
                     app.provider_menu_down();
                 } else if app.show_model_menu {
                     app.model_menu_down();
@@ -223,6 +244,9 @@ fn run_event_loop(
             }
             AppAction::CursorLeft if !app.streaming && !app.show_provider_menu && !app.show_model_menu => app.cursor_left(),
             AppAction::CursorRight if !app.streaming && !app.show_provider_menu && !app.show_model_menu => app.cursor_right(),
+            AppAction::Submit if app.mention_state.is_some() => {
+                app.commit_mention();
+            }
             AppAction::Submit if app.show_provider_menu => {
                 if let Some(kind) = app.get_selected_provider() {
                     match rt.block_on(pipeline.switch_provider(kind)) {

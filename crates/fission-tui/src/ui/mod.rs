@@ -59,6 +59,10 @@ pub fn render(frame: &mut Frame, app: &App) {
     } else if app.show_model_menu {
         render_model_menu(frame, app, area);
     }
+
+    if app.mention_state.is_some() {
+        render_mention_popup(frame, app, outer[2]);
+    }
 }
 
 // ── Chat viewport ─────────────────────────────────────────────────────────────
@@ -250,6 +254,62 @@ fn render_input(frame: &mut Frame, app: &App, area: Rect) {
         if inner_x < area.x + area.width.saturating_sub(1) && inner_y < area.y + area.height.saturating_sub(1) {
             frame.set_cursor_position((inner_x, inner_y));
         }
+    }
+}
+
+// ── Mention Popup ─────────────────────────────────────────────────────────────
+
+fn render_mention_popup(frame: &mut Frame, app: &App, input_area: Rect) {
+    if let Some(ref state) = app.mention_state {
+        let max_items = 8;
+        let item_count = state.options.len().min(max_items) as u16;
+        
+        let width = 40;
+        let height = item_count + 2; // +2 for borders
+        
+        // Position it right above the input cursor
+        let cursor_line = app.input[..app.input_cursor].matches('\n').count() as u16;
+        let text_before = &app.input[..app.input_cursor];
+        let last_nl = text_before.rfind('\n').map(|i| i + 1).unwrap_or(0);
+        let cursor_col = app.input[last_nl..app.input_cursor].chars().count() as u16;
+        
+        let x = (input_area.x + 1 + cursor_col).min(input_area.x + input_area.width.saturating_sub(width));
+        
+        // Calculate Y so it sits just above the current cursor line
+        let y = input_area.y
+            .saturating_add(cursor_line)
+            .saturating_sub(height);
+            
+        let area = Rect {
+            x,
+            y,
+            width,
+            height,
+        };
+
+        frame.render_widget(Clear, area);
+
+        let items: Vec<Line> = if state.options.is_empty() {
+            vec![Line::from(Span::styled("  No results found", Style::default().fg(C_DIM)))]
+        } else {
+            state.options.iter().enumerate().take(max_items).map(|(i, opt)| {
+                let (prefix, style) = if i == state.selected_idx {
+                    ("> ", Style::default().fg(Color::Black).bg(C_ACCENT))
+                } else {
+                    ("  ", Style::default().fg(C_WHITE).bg(Color::Black))
+                };
+                Line::from(Span::styled(format!("{prefix}{opt}"), style))
+            }).collect()
+        };
+
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(C_ACCENT))
+            .title(format!(" Mentions (@{}) ", state.query))
+            .style(Style::default().bg(Color::Black));
+            
+        let paragraph = Paragraph::new(items).block(block);
+        frame.render_widget(paragraph, area);
     }
 }
 

@@ -15,6 +15,15 @@ pub struct ProviderOption {
     pub description: &'static str,
 }
 
+/// State for the interactive `@` mention system.
+#[derive(Debug, Clone)]
+pub struct MentionState {
+    pub query: String,
+    pub options: Vec<String>,
+    pub selected_idx: usize,
+    pub start_cursor: usize,
+}
+
 /// Top-level application state.
 pub struct App {
     /// Chat history entries for display.
@@ -53,6 +62,9 @@ pub struct App {
     pub context_ready: bool,
     /// Whether context collection is currently in progress.
     pub context_loading: bool,
+
+    // ── Mentions ─────────────────────────────────────────────────────────────
+    pub mention_state: Option<MentionState>,
 }
 
 impl App {
@@ -76,6 +88,7 @@ impl App {
             agent_mode: fission_ai::session::AgentMode::default(),
             context_ready: false,
             context_loading: false,
+            mention_state: None,
         }
     }
 
@@ -237,6 +250,79 @@ impl App {
         self.scroll = u16::MAX;
     }
 
+    // ── Mentions ──────────────────────────────────────────────────────────────
+
+    pub fn start_mention(&mut self) {
+        let options = get_workspace_files();
+        self.mention_state = Some(MentionState {
+            query: String::new(),
+            options,
+            selected_idx: 0,
+            start_cursor: self.input_cursor, // byte offset where `@` is located
+        });
+    }
+
+    pub fn cancel_mention(&mut self) {
+        self.mention_state = None;
+    }
+
+    pub fn update_mention_query(&mut self) {
+        if let Some(ref mut state) = self.mention_state {
+            // The query is the text between start_cursor and current input_cursor
+            if self.input_cursor >= state.start_cursor {
+                state.query = self.input[state.start_cursor..self.input_cursor].to_string();
+                
+                // Refilter options (naive approach: just search for query as a substring)
+                // In a real app we'd cache the full list, but doing it fast is fine.
+                let all = get_workspace_files();
+                state.options = all.into_iter()
+                    .filter(|f| f.to_lowercase().contains(&state.query.to_lowercase()))
+                    .take(20) // limit items
+                    .collect();
+                state.selected_idx = 0;
+            } else {
+                // We backspaced before the `@`
+                self.mention_state = None;
+            }
+        }
+    }
+
+    pub fn mention_up(&mut self) {
+        if let Some(ref mut state) = self.mention_state {
+            if state.options.is_empty() { return; }
+            if state.selected_idx > 0 {
+                state.selected_idx -= 1;
+            } else {
+                state.selected_idx = state.options.len() - 1;
+            }
+        }
+    }
+
+    pub fn mention_down(&mut self) {
+        if let Some(ref mut state) = self.mention_state {
+            if state.options.is_empty() { return; }
+            if state.selected_idx + 1 < state.options.len() {
+                state.selected_idx += 1;
+            } else {
+                state.selected_idx = 0;
+            }
+        }
+    }
+
+    pub fn commit_mention(&mut self) {
+        if let Some(state) = self.mention_state.take() {
+            if let Some(selected) = state.options.get(state.selected_idx) {
+                let prefix = self.input[..state.start_cursor.saturating_sub(1)].to_string();
+                let suffix = self.input[self.input_cursor..].to_string();
+                
+                let insert_text = format!("@{} ", selected);
+                self.input = format!("{}{}{}", prefix, insert_text, suffix);
+                
+                self.input_cursor = prefix.len() + insert_text.len();
+            }
+        }
+    }
+
     // ── Provider Menu ─────────────────────────────────────────────────────────
 
     pub fn toggle_provider_menu(&mut self) {
@@ -322,4 +408,37 @@ impl App {
     pub fn get_selected_model(&self) -> Option<String> {
         self.model_options.get(self.selected_model_idx).cloned()
     }
+}
+
+/// Recursively scans the current directory to populate the mention options.
+fn get_workspace_files() -> Vec<String> {
+    let mut results = Vec::new();
+    let mut dirs_to_visit = vec![std::path::PathBuf::from(".")];
+    let ignores = [".git", "target", "node_modules", "vendor", "artifacts"];
+
+    while let Some(dir) = dirs_to_visit.pop() {
+        if let Ok(entries) = std::fs::read_dir(&dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if let Some(file_name) = path.file_name().and_then(|n| n.to_str()) {
+                    if ignores.contains(&file_name) {
+                        continue;
+                    }
+                }
+                
+                if path.is_dir() {
+                    dirs_to_visit.push(path);
+                } else if path.is_file() {
+                    if let Some(path_str) = path.to_str() {
+                        let clean_path = path_str.strip_prefix("./").unwrap_or(path_str).to_string();
+                        results.push(clean_path);
+                    }
+                }
+            }
+        }
+    }
+    
+    // Sort for stable display
+    results.sort();
+    results
 }
