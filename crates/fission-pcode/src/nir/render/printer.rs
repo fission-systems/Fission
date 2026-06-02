@@ -718,8 +718,17 @@ fn print_expr_prec_ctx(
             if let Some(pointer_diff) = print_pointer_diff_cast(ty, expr, depth, ctx) {
                 return pointer_diff;
             }
+            // If casting from a pointer type to a non-pointer integer type (e.g. (uint)ptr),
+            // insert an intermediate (ulonglong) cast to avoid invalid C (pointer-to-int truncation
+            // without going through a pointer-sized integer is UB/error in strict C11).
+            let expr_is_ptr = ctx.expr_is_pointer(expr);
+            let target_is_int = !matches!(ty, NirType::Ptr(_));
             let inner = print_expr_prec_ctx(expr, 110, depth + 1, ctx);
-            (format!("({}){}", print_type(ty), inner), 110)
+            if expr_is_ptr && target_is_int {
+                (format!("({})(ulonglong){}", print_type(ty), inner), 110)
+            } else {
+                (format!("({}){}", print_type(ty), inner), 110)
+            }
         }
         HirExpr::Unary { op, expr, .. } => {
             let symbol = match op {
@@ -732,10 +741,17 @@ fn print_expr_prec_ctx(
         }
         HirExpr::Binary { op, lhs, rhs, .. } => {
             let prec = binary_precedence(*op);
-            let lhs = print_expr_prec_ctx(lhs, prec, depth + 1, ctx);
+            let lhs_str = print_expr_prec_ctx(lhs, prec, depth + 1, ctx);
             let rhs_parent_prec = binary_rhs_parent_precedence(*op, rhs, prec + 1);
-            let rhs = print_expr_prec_ctx(rhs, rhs_parent_prec, depth + 1, ctx);
-            (format!("{lhs} {} {rhs}", print_binary_op(*op)), prec)
+            let mut rhs_str = print_expr_prec_ctx(rhs, rhs_parent_prec, depth + 1, ctx);
+            
+            // If both sides are pointers and the operation is Add, this is invalid in C.
+            // Cast the rhs to ulonglong to avoid compilation failure.
+            if *op == HirBinaryOp::Add && ctx.expr_is_pointer(lhs) && ctx.expr_is_pointer(rhs) {
+                rhs_str = format!("(ulonglong){rhs_str}");
+            }
+            
+            (format!("{lhs_str} {} {rhs_str}", print_binary_op(*op)), prec)
         }
         HirExpr::Select {
             cond,
@@ -936,11 +952,17 @@ fn try_compound_assignment(lhs: &HirLValue, rhs: &HirExpr, ctx: &PrintCtx<'_>) -
         HirBinaryOp::Shr => ">>=",
         _ => return None,
     };
+    
+    let mut rhs_str = print_expr_with_ctx(rhs_expr, ctx);
+    if matches!(op, HirBinaryOp::Add) && ctx.expr_is_pointer(lhs_expr) && ctx.expr_is_pointer(rhs_expr) {
+        rhs_str = format!("(ulonglong){rhs_str}");
+    }
+    
     Some(format!(
         "{} {} {};",
         var_name,
         op_str,
-        print_expr_with_ctx(rhs_expr, ctx)
+        rhs_str
     ))
 }
 
