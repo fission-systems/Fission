@@ -6,7 +6,7 @@ mod dom;
 mod edge;
 mod postdom;
 mod scc;
-mod util;
+pub(crate) mod util;
 mod trace_dag;
 
 pub(crate) use dom::{DomTree, DominanceFrontier, ImmDomTree};

@@ -389,7 +389,7 @@ fn compute_scc(successors: &[Vec<usize>]) -> Vec<Vec<usize>> {
     };
     for node in 0..n {
         if state.indices[node].is_none() {
-            tarjan_dfs(node, successors, &mut state);
+            tarjan_dfs_iterative(node, successors, &mut state);
         }
     }
     state.components
@@ -404,33 +404,64 @@ struct TarjanState {
     components: Vec<Vec<usize>>,
 }
 
-fn tarjan_dfs(v: usize, succs: &[Vec<usize>], s: &mut TarjanState) {
-    s.indices[v] = Some(s.index);
-    s.lowlink[v] = s.index;
-    s.index += 1;
-    s.stack.push(v);
-    s.on_stack[v] = true;
-
-    for &w in &succs[v] {
-        if s.indices[w].is_none() {
-            tarjan_dfs(w, succs, s);
-            s.lowlink[v] = s.lowlink[v].min(s.lowlink[w]);
-        } else if s.on_stack[w] {
-            s.lowlink[v] = s.lowlink[v].min(s.indices[w].unwrap());
-        }
+fn tarjan_dfs_iterative(start: usize, succs: &[Vec<usize>], s: &mut TarjanState) {
+    // Iterative Tarjan SCC using an explicit work stack.
+    // Each frame is (node, successor_iterator_index).
+    // We simulate the recursive call stack on the heap to avoid stack overflow
+    // on large / deeply-nested CFGs.
+    struct Frame {
+        v: usize,
+        succ_idx: usize,
     }
 
-    if s.lowlink[v] == s.indices[v].unwrap() {
-        let mut component = Vec::new();
-        loop {
-            let w = s.stack.pop().unwrap();
-            s.on_stack[w] = false;
-            component.push(w);
-            if w == v {
-                break;
+    let mut call_stack: Vec<Frame> = Vec::new();
+
+    // "Enter" the start node.
+    s.indices[start] = Some(s.index);
+    s.lowlink[start] = s.index;
+    s.index += 1;
+    s.stack.push(start);
+    s.on_stack[start] = true;
+    call_stack.push(Frame { v: start, succ_idx: 0 });
+
+    while let Some(frame) = call_stack.last_mut() {
+        let v = frame.v;
+        if frame.succ_idx < succs[v].len() {
+            let w = succs[v][frame.succ_idx];
+            frame.succ_idx += 1;
+
+            if s.indices[w].is_none() {
+                // Recurse into w.
+                s.indices[w] = Some(s.index);
+                s.lowlink[w] = s.index;
+                s.index += 1;
+                s.stack.push(w);
+                s.on_stack[w] = true;
+                call_stack.push(Frame { v: w, succ_idx: 0 });
+            } else if s.on_stack[w] {
+                s.lowlink[v] = s.lowlink[v].min(s.indices[w].unwrap());
+            }
+        } else {
+            // All successors processed — pop frame and propagate lowlink.
+            call_stack.pop();
+            if let Some(parent) = call_stack.last() {
+                let pv = parent.v;
+                s.lowlink[pv] = s.lowlink[pv].min(s.lowlink[v]);
+            }
+            // Check if v is an SCC root.
+            if s.lowlink[v] == s.indices[v].unwrap() {
+                let mut component = Vec::new();
+                loop {
+                    let w = s.stack.pop().unwrap();
+                    s.on_stack[w] = false;
+                    component.push(w);
+                    if w == v {
+                        break;
+                    }
+                }
+                s.components.push(component);
             }
         }
-        s.components.push(component);
     }
 }
 

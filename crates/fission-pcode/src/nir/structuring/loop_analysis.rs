@@ -243,6 +243,10 @@ impl LoopBody {
             let bl = self.body[i];
             i += 1;
 
+            if bl >= successors.len() {
+                continue;
+            }
+
             for &succ in &successors[bl] {
                 if irreducible_edges.contains(&(bl, succ)) {
                     continue;

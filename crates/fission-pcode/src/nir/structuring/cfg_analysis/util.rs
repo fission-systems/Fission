@@ -39,7 +39,7 @@ pub(super) fn cooper_intersect(
 }
 
 /// Compute RPO order of `start` in the graph defined by `succs`.
-pub(super) fn compute_rpo(start: usize, succs: &[Vec<usize>], node_count: usize) -> Vec<usize> {
+pub(crate) fn compute_rpo(start: usize, succs: &[Vec<usize>], node_count: usize) -> Vec<usize> {
     let mut visited = vec![false; node_count];
     let mut postorder = Vec::with_capacity(node_count);
     dfs_postorder(start, succs, &mut visited, &mut postorder);
@@ -53,20 +53,43 @@ pub(super) fn compute_rpo(start: usize, succs: &[Vec<usize>], node_count: usize)
     postorder
 }
 
-pub(super) fn dfs_postorder(
-    node: usize,
+pub(crate) fn dfs_postorder(
+    start_node: usize,
     succs: &[Vec<usize>],
     visited: &mut [bool],
     postorder: &mut Vec<usize>,
 ) {
-    if node >= visited.len() || visited[node] {
+    if start_node >= visited.len() || visited[start_node] {
         return;
     }
-    visited[node] = true;
-    for &s in &succs[node] {
-        dfs_postorder(s, succs, visited, postorder);
+    struct Frame {
+        node: usize,
+        succ_idx: usize,
     }
-    postorder.push(node);
+    let mut stack = Vec::new();
+    visited[start_node] = true;
+    stack.push(Frame {
+        node: start_node,
+        succ_idx: 0,
+    });
+
+    while let Some(frame) = stack.last_mut() {
+        let node = frame.node;
+        if frame.succ_idx < succs[node].len() {
+            let s = succs[node][frame.succ_idx];
+            frame.succ_idx += 1;
+            if s < visited.len() && !visited[s] {
+                visited[s] = true;
+                stack.push(Frame {
+                    node: s,
+                    succ_idx: 0,
+                });
+            }
+        } else {
+            postorder.push(node);
+            stack.pop();
+        }
+    }
 }
 
 pub(super) fn nearest_common_from_sets(
@@ -122,7 +145,11 @@ pub(super) fn compute_dominator_sets(
     root: usize,
 ) -> HashMap<usize, HashSet<usize>> {
     let mut dom = HashMap::default();
-    for node in nodes.iter().copied() {
+
+    let mut sorted_nodes: Vec<usize> = nodes.iter().copied().collect();
+    sorted_nodes.sort_unstable();
+
+    for node in sorted_nodes.iter().copied() {
         if node == root {
             dom.insert(node, HashSet::from([root]));
         } else {
@@ -136,7 +163,7 @@ pub(super) fn compute_dominator_sets(
     while changed && iterations < max_iterations {
         iterations += 1;
         changed = false;
-        for node in nodes.iter().copied() {
+        for node in sorted_nodes.iter().copied() {
             if node == root {
                 continue;
             }
@@ -174,7 +201,11 @@ pub(super) fn compute_postdominator_sets_for_exit(
     exit: usize,
 ) -> HashMap<usize, HashSet<usize>> {
     let mut postdom = HashMap::default();
-    for node in nodes.iter().copied() {
+
+    let mut sorted_nodes: Vec<usize> = nodes.iter().copied().collect();
+    sorted_nodes.sort_unstable();
+
+    for node in sorted_nodes.iter().copied() {
         if node == exit {
             postdom.insert(node, HashSet::from([exit]));
         } else {
@@ -188,7 +219,7 @@ pub(super) fn compute_postdominator_sets_for_exit(
     while changed && iterations < max_iterations {
         iterations += 1;
         changed = false;
-        for node in nodes.iter().copied() {
+        for node in sorted_nodes.iter().copied() {
             if node == exit {
                 continue;
             }

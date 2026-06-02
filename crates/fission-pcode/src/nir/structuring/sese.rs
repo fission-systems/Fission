@@ -22,27 +22,12 @@ pub(crate) struct SeseRegionTree {
 
 /// Computes RPO (Reverse Post-Order) mapping for node indexing order checking.
 pub(crate) fn compute_rpo_map(successors: &[Vec<usize>]) -> Vec<usize> {
-    let mut visited = HashSet::new();
-    let mut post_order = Vec::new();
-    fn dfs(
-        curr: usize,
-        successors: &[Vec<usize>],
-        visited: &mut HashSet<usize>,
-        post_order: &mut Vec<usize>,
-    ) {
-        visited.insert(curr);
-        if let Some(succs) = successors.get(curr) {
-            for &succ in succs {
-                if !visited.contains(&succ) {
-                    dfs(succ, successors, visited, post_order);
-                }
-            }
-        }
-        post_order.push(curr);
-    }
-    dfs(0, successors, &mut visited, &mut post_order);
     let mut rpo_map = vec![usize::MAX; successors.len()];
-    for (pos, &n) in post_order.iter().rev().enumerate() {
+    if successors.is_empty() {
+        return rpo_map;
+    }
+    let post_order = crate::nir::structuring::cfg_analysis::util::compute_rpo(0, successors, successors.len());
+    for (pos, &n) in post_order.iter().enumerate() {
         if n < rpo_map.len() {
             rpo_map[n] = pos;
         }
@@ -169,23 +154,21 @@ pub(crate) fn build_sese_tree(mut regions: Vec<SeseRegion>, total_nodes: usize) 
     let mut nested_regions: Vec<SeseRegion> = Vec::new();
 
     for region in regions {
-        let mut child_indices = Vec::new();
         let mut new_region = region;
+        let mut children = Vec::new();
+        let mut remaining = Vec::new();
+
         // Find which existing nested regions are strictly contained inside new_region.
-        for (idx, r) in nested_regions.iter().enumerate() {
+        for r in nested_regions {
             if r.members.is_subset(&new_region.members) && r.members.len() < new_region.members.len() {
-                child_indices.push(idx);
+                children.push(r);
+            } else {
+                remaining.push(r);
             }
         }
 
-        // Add them as children of the new region, and remove them from the top-level nested list.
-        let mut children = Vec::new();
-        // Remove from highest index to lowest to avoid shifting issues.
-        child_indices.sort_by(|a, b| b.cmp(a));
-        for idx in child_indices {
-            children.push(nested_regions.remove(idx));
-        }
         new_region.children = children;
+        nested_regions = remaining;
         nested_regions.push(new_region);
     }
 

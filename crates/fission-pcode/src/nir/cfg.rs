@@ -251,6 +251,9 @@ pub(super) fn fold_logical_chain(mut exprs: Vec<HirExpr>, op: HirBinaryOp) -> Hi
         op,
         HirBinaryOp::LogicalAnd | HirBinaryOp::LogicalOr
     ));
+    if exprs.is_empty() {
+        return HirExpr::Const(if op == HirBinaryOp::LogicalAnd { 1 } else { 0 }, NirType::Bool);
+    }
     let first = exprs.remove(0);
     exprs.into_iter().fold(first, |lhs, rhs| HirExpr::Binary {
         op,
