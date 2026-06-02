@@ -150,7 +150,8 @@ fn run_event_loop(
                     app.finish_assistant_stream();
                     pipeline.record_assistant_response(full);
                     app.save_current_session(&pipeline);
-                    // Sync Code Explorer panels with the latest tool output.
+                    // Silently sync Code Explorer panels — never change the view mode here.
+                    // The user controls the view via F2 only; auto-switching would interrupt chat.
                     let (label, disasm, decomp) = pipeline.get_explorer_snapshot();
                     if disasm.is_some() || decomp.is_some() {
                         app.update_explorer_content(label, disasm, decomp);
@@ -174,14 +175,12 @@ fn run_event_loop(
                         // Fallback hardcoded if empty
                         app.model_options = vec!["gpt-4o".into(), "claude-3.5-sonnet".into(), "llama3".into()];
                     }
-                    app.selected_model_idx = 0;
+                    app.selected_model_idx =0;
                 }
+                // ExplorerContent is kept as an extension point but never auto-switches view.
                 TuiMsg::ExplorerContent { label, disasm, decomp } => {
                     app.update_explorer_content(label, disasm, decomp);
-                    // Auto-switch to Code Explorer if we just got content.
-                    if app.view_mode == crate::app::ViewMode::Chat {
-                        app.view_mode = crate::app::ViewMode::CodeExplorer;
-                    }
+                    // NOTE: do NOT auto-switch view_mode here — let the user press F2.
                 }
             }
         }
