@@ -91,6 +91,8 @@ impl AiPipeline {
         tool_registry.register(crate::tools::execution::ScriptTool);
         tool_registry.register(crate::tools::execution::RawPcodeTool);
         tool_registry.register(crate::tools::execution::PcodeTopologyTool);
+        tool_registry.register(crate::tools::execution::AnnotateFunctionTool);
+        tool_registry.register(crate::tools::execution::SearchMemoryTool);
         
         let context_manager = crate::session::ContextManager::new(32000, 6000);
         

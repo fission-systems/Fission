@@ -79,7 +79,7 @@ impl ReversingFocus {
 
     /// Reset xrefs and decomp when the focus address changes.
     pub fn set_focus(&mut self, addr: String, name: Option<String>) {
-        if self.active_function_addr.as_deref() != Some(&addr) {
+        if self.active_function_addr.as_ref() != Some(&addr) {
             // Address changed: clear stale xrefs and decomp
             self.xrefs_callers.clear();
             self.xrefs_callees.clear();

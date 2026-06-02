@@ -220,4 +220,116 @@ mod tests {
         assert_eq!(provider.name(), "codex");
         assert_eq!(provider.model(), "gpt-4o");
     }
+
+    #[test]
+    fn test_extract_function_name() {
+        let code = r#"
+        // Some comments
+        /* More comments */
+        void my_fancy_func(int a, char* b) {
+            return;
+        }
+        "#;
+        let name = super::tools::execution::extract_function_name(code, 0x401000);
+        assert_eq!(name, "my_fancy_func");
+
+        // Pointer return type
+        let code_ptr = r#"
+        char* get_string_ptr() {
+            return "hello";
+        }
+        "#;
+        let name_ptr = super::tools::execution::extract_function_name(code_ptr, 0x401000);
+        assert_eq!(name_ptr, "get_string_ptr");
+
+        // Fallback
+        let name_fail = super::tools::execution::extract_function_name("invalid code", 0x401000);
+        assert_eq!(name_fail, "func_0x401000");
+    }
+
+    #[tokio::test]
+    async fn test_annotate_and_search_memory_tools() {
+        use crate::tools::execution::{AiTool, AnnotateFunctionTool, SearchMemoryTool};
+        use std::fs;
+
+        let path = std::env::temp_dir().join("fission_mock_binary_mem.exe");
+        fs::write(&path, b"mock exe contents").unwrap();
+
+        // 1. Write an annotation
+        let ann_tool = AnnotateFunctionTool;
+        let ann_args = serde_json::json!({
+            "addr": "0x401000",
+            "notes": "This function handles user authentication and decrypts the main key."
+        });
+        let result = ann_tool.execute(&ann_args, Some(&path)).await.unwrap();
+        assert!(result.contains("Successfully saved analysis annotation"));
+
+        // Verify sidecar
+        let sidecar_path = path.with_extension("fission.json");
+        assert!(sidecar_path.exists());
+        let sidecar_content = fs::read_to_string(&sidecar_path).unwrap();
+        let project: serde_json::Value = serde_json::from_str(&sidecar_content).unwrap();
+        assert_eq!(
+            project["annotations"]["4198400"],
+            serde_json::json!("This function handles user authentication and decrypts the main key.")
+        );
+
+        // 2. Perform a search
+        let search_tool = SearchMemoryTool;
+        let search_args = serde_json::json!({
+            "query": "authentication"
+        });
+        let search_result = search_tool.execute(&search_args, Some(&path)).await.unwrap();
+        assert!(search_result.contains("Found 1 matches"));
+        assert!(search_result.contains("0x401000"));
+        assert!(search_result.contains("user authentication"));
+
+        // Search failure query
+        let search_args_fail = serde_json::json!({
+            "query": "non_existent_pattern"
+        });
+        let search_result_fail = search_tool.execute(&search_args_fail, Some(&path)).await.unwrap();
+        assert!(search_result_fail.contains("No matches found"));
+
+        // Clean up
+        let _ = fs::remove_file(path);
+        let _ = fs::remove_file(sidecar_path);
+    }
+
+    #[tokio::test]
+    async fn test_search_decompilation_cache() {
+        use crate::tools::execution::{AiTool, SearchMemoryTool};
+        use std::fs;
+
+        let path = std::env::temp_dir().join("fission_mock_binary_decomp_cache.exe");
+        fs::write(&path, b"mock exe contents").unwrap();
+
+        // Create a mock sidecar with decompilation cache
+        let sidecar_path = path.with_extension("fission.json");
+        let project = serde_json::json!({
+            "binary_path": path.display().to_string(),
+            "decompilation_cache": {
+                "4198400": {
+                    "name": "target_func",
+                    "code": "void target_func() {\n    int key = 0xbeef;\n}",
+                    "timestamp": 123456789
+                }
+            }
+        });
+        fs::write(&sidecar_path, serde_json::to_string_pretty(&project).unwrap()).unwrap();
+
+        let search_tool = SearchMemoryTool;
+        let search_args = serde_json::json!({
+            "query": "0xbeef"
+        });
+        let result = search_tool.execute(&search_args, Some(&path)).await.unwrap();
+        assert!(result.contains("Found 1 matches"));
+        assert!(result.contains("target_func"));
+        assert!(result.contains("0x401000"));
+        assert!(result.contains("0xbeef"));
+
+        // Clean up
+        let _ = fs::remove_file(path);
+        let _ = fs::remove_file(sidecar_path);
+    }
 }
