@@ -1,5 +1,23 @@
 //! App state machine for the Fission TUI.
 
+/// Which top-level view is currently displayed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ViewMode {
+    /// Chat pane (default).
+    #[default]
+    Chat,
+    /// Code explorer: top = disassembly, bottom = decompiled C.
+    CodeExplorer,
+}
+
+/// Which panel inside Code Explorer has keyboard focus.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ActivePanel {
+    #[default]
+    Disasm,
+    Decomp,
+}
+
 /// A rendered chat bubble (user or assistant).
 #[derive(Debug, Clone)]
 pub struct ChatEntry {
@@ -85,6 +103,22 @@ pub struct App {
 
     // ── Session History ──────────────────────────────────────────────────────
     pub session_history: Option<SessionHistoryState>,
+
+    // ── Hybrid Code Explorer ─────────────────────────────────────────────────
+    /// Current top-level view mode.
+    pub view_mode: ViewMode,
+    /// Which panel is focused in Code Explorer.
+    pub active_panel: ActivePanel,
+    /// Scroll offset (rows from top) for the Disassembly panel.
+    pub disasm_scroll: u16,
+    /// Scroll offset (rows from top) for the Decompiled-C panel.
+    pub decomp_scroll: u16,
+    /// Latest disassembly snippet cached by the pipeline.
+    pub disasm_content: String,
+    /// Latest decompiled-C content cached by the pipeline.
+    pub decomp_content: String,
+    /// Optional function name / address label for the explorer header.
+    pub explorer_label: Option<String>,
 }
 
 impl App {
@@ -111,6 +145,65 @@ impl App {
             mention_state: None,
             slash_state: None,
             session_history: None,
+            view_mode: ViewMode::Chat,
+            active_panel: ActivePanel::Disasm,
+            disasm_scroll: 0,
+            decomp_scroll: 0,
+            disasm_content: String::new(),
+            decomp_content: String::new(),
+            explorer_label: None,
+        }
+    }
+
+    // ── View / Code Explorer helpers ──────────────────────────────────────────
+
+    /// Toggle between Chat and Code Explorer views.
+    pub fn toggle_view_mode(&mut self) {
+        self.view_mode = match self.view_mode {
+            ViewMode::Chat => ViewMode::CodeExplorer,
+            ViewMode::CodeExplorer => ViewMode::Chat,
+        };
+    }
+
+    /// Toggle focus between Disasm and Decomp panels.
+    pub fn toggle_panel(&mut self) {
+        self.active_panel = match self.active_panel {
+            ActivePanel::Disasm => ActivePanel::Decomp,
+            ActivePanel::Decomp => ActivePanel::Disasm,
+        };
+    }
+
+    /// Scroll the focused panel up by `n` rows.
+    pub fn explorer_scroll_up(&mut self, n: u16) {
+        match self.active_panel {
+            ActivePanel::Disasm => self.disasm_scroll = self.disasm_scroll.saturating_sub(n),
+            ActivePanel::Decomp => self.decomp_scroll = self.decomp_scroll.saturating_sub(n),
+        }
+    }
+
+    /// Scroll the focused panel down by `n` rows.
+    pub fn explorer_scroll_down(&mut self, n: u16) {
+        match self.active_panel {
+            ActivePanel::Disasm => self.disasm_scroll = self.disasm_scroll.saturating_add(n),
+            ActivePanel::Decomp => self.decomp_scroll = self.decomp_scroll.saturating_add(n),
+        }
+    }
+
+    /// Update cached disasm/decomp content (called from pipeline interceptor via TuiMsg).
+    pub fn update_explorer_content(
+        &mut self,
+        label: Option<String>,
+        disasm: Option<String>,
+        decomp: Option<String>,
+    ) {
+        if let Some(l) = label { self.explorer_label = Some(l); }
+        if let Some(d) = disasm {
+            self.disasm_content = d;
+            self.disasm_scroll = 0;
+        }
+        if let Some(d) = decomp {
+            self.decomp_content = d;
+            self.decomp_scroll = 0;
         }
     }
 

@@ -16,7 +16,7 @@ use ratatui::{
     widgets::{Block, Borders, Clear, Paragraph, Wrap},
 };
 
-use crate::app::App;
+use crate::app::{App, ViewMode, ActivePanel};
 use crate::markdown::render_markdown;
 
 // ── Palette ───────────────────────────────────────────────────────────────────
@@ -34,6 +34,15 @@ const SPINNER_FRAMES: [&str; 8] = ["⣾", "⣽", "⣻", "⢿", "⡿", "⣟", "�
 pub fn render(frame: &mut Frame, app: &App) {
     let area = frame.area();
 
+    match app.view_mode {
+        ViewMode::Chat => render_chat_layout(frame, app, area),
+        ViewMode::CodeExplorer => render_code_explorer(frame, app, area),
+    }
+}
+
+// ── Chat layout (top-level shell) ────────────────────────────────────────────
+
+fn render_chat_layout(frame: &mut Frame, app: &App, area: Rect) {
     let input_lines = app.input.matches('\n').count() as u16 + 1;
     let input_height = (input_lines + 2).min(10); // max 10 lines tall
 
@@ -69,6 +78,203 @@ pub fn render(frame: &mut Frame, app: &App) {
     if app.session_history.is_some() {
         render_session_history(frame, app, area);
     }
+}
+
+// ── Code Explorer (Disasm + Decomp dual-pane) ─────────────────────────────
+
+fn render_code_explorer(frame: &mut Frame, app: &App, area: Rect) {
+    // ── Outer layout: header (1) | panes (fill) | status (1) ──────────────
+    let outer = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(1),   // View-mode header bar
+            Constraint::Min(4),      // Two stacked panels
+            Constraint::Length(1),   // Status / key-hint bar
+        ])
+        .split(area);
+
+    // ── Header bar ──────────────────────────────────────────────────────────
+    let label = app.explorer_label.as_deref().unwrap_or("No function selected");
+    let header = Line::from(vec![
+        Span::styled(" 🔬 Code Explorer ", Style::default().fg(C_ACCENT).add_modifier(Modifier::BOLD)),
+        Span::styled("│ ", Style::default().fg(C_DIM)),
+        Span::styled(label, Style::default().fg(C_WHITE)),
+        Span::styled("  F2 back to Chat", Style::default().fg(C_DIM)),
+    ]);
+    frame.render_widget(
+        Paragraph::new(header).style(Style::default().bg(Color::Black)),
+        outer[0],
+    );
+
+    // ── Split pane area: top (disasm) | bottom (decomp) ────────────────────
+    let panes = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Percentage(50), // Disassembly
+            Constraint::Percentage(50), // Decompiled C
+        ])
+        .split(outer[1]);
+
+    // ── Disassembly panel ──────────────────────────────────────────────────
+    let disasm_focused = app.active_panel == ActivePanel::Disasm;
+    let disasm_border_color = if disasm_focused { C_ACCENT } else { C_DIM };
+    let disasm_title_mod = if disasm_focused {
+        Modifier::BOLD
+    } else {
+        Modifier::empty()
+    };
+
+    let disasm_block = Block::default()
+        .title(if disasm_focused {
+            " ▶ Disassembly (Tab to switch) "
+        } else {
+            "   Disassembly "
+        })
+        .title_style(Style::default().fg(disasm_border_color).add_modifier(disasm_title_mod))
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(disasm_border_color));
+
+    let disasm_text: Vec<Line> = if app.disasm_content.is_empty() {
+        vec![
+            Line::from(""),
+            Line::from(Span::styled(
+                "  No disassembly loaded. Ask the AI: 'disassemble <address>'",
+                Style::default().fg(C_DIM),
+            )),
+        ]
+    } else {
+        app.disasm_content
+            .lines()
+            .map(|l| render_disasm_line(l))
+            .collect()
+    };
+
+    let disasm_para = Paragraph::new(Text::from(disasm_text))
+        .block(disasm_block)
+        .wrap(Wrap { trim: false })
+        .scroll((app.disasm_scroll, 0));
+    frame.render_widget(disasm_para, panes[0]);
+
+    // ── Decompiled C panel ─────────────────────────────────────────────────
+    let decomp_focused = app.active_panel == ActivePanel::Decomp;
+    let decomp_border_color = if decomp_focused { C_ACCENT } else { C_DIM };
+    let decomp_title_mod = if decomp_focused {
+        Modifier::BOLD
+    } else {
+        Modifier::empty()
+    };
+
+    let decomp_block = Block::default()
+        .title(if decomp_focused {
+            " ▶ Decompiled C (Tab to switch) "
+        } else {
+            "   Decompiled C "
+        })
+        .title_style(Style::default().fg(decomp_border_color).add_modifier(decomp_title_mod))
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(decomp_border_color));
+
+    let decomp_text: Vec<Line> = if app.decomp_content.is_empty() {
+        vec![
+            Line::from(""),
+            Line::from(Span::styled(
+                "  No decompiled output. Ask the AI: 'decompile <address>'",
+                Style::default().fg(C_DIM),
+            )),
+        ]
+    } else {
+        let width = panes[1].width.saturating_sub(4) as usize;
+        render_markdown(&app.decomp_content, width)
+    };
+
+    let decomp_para = Paragraph::new(Text::from(decomp_text))
+        .block(decomp_block)
+        .wrap(Wrap { trim: false })
+        .scroll((app.decomp_scroll, 0));
+    frame.render_widget(decomp_para, panes[1]);
+
+    // ── Bottom key-hint bar ────────────────────────────────────────────────
+    let hint = Line::from(vec![
+        Span::styled(" Tab ", Style::default().fg(C_ACCENT)),
+        Span::styled("focus  ", Style::default().fg(C_DIM)),
+        Span::styled("↑↓/PgUp/PgDn ", Style::default().fg(C_ACCENT)),
+        Span::styled("scroll  ", Style::default().fg(C_DIM)),
+        Span::styled("F2 ", Style::default().fg(C_ACCENT)),
+        Span::styled("back to Chat  ", Style::default().fg(C_DIM)),
+        Span::styled("q ", Style::default().fg(C_ACCENT)),
+        Span::styled("quit", Style::default().fg(C_DIM)),
+    ]);
+    frame.render_widget(
+        Paragraph::new(hint).style(Style::default().bg(Color::Black)),
+        outer[2],
+    );
+}
+
+/// Syntax-highlight a single disassembly line with ANSI palette colors.
+fn render_disasm_line(line: &str) -> Line<'static> {
+    // Typical format: "  0x00401234  push    rbp"
+    // We colorise: address (cyan), mnemonic (yellow), operands (white), comments (dark gray).
+    let line = line.to_string();
+
+    // Split on semicolon for inline comments.
+    let (code_part, comment_part) = if let Some(idx) = line.find(';') {
+        (&line[..idx], Some(&line[idx..]))
+    } else {
+        (line.as_str(), None)
+    };
+
+    let mut spans: Vec<Span<'static>> = Vec::new();
+
+    // Try to detect an address token at the start.
+    let trimmed = code_part.trim_start();
+    let leading_ws = &code_part[..code_part.len() - trimmed.len()];
+    if !leading_ws.is_empty() {
+        spans.push(Span::raw(leading_ws.to_string()));
+    }
+
+    // Address token (hex starting with 0x or pure hex followed by ':').
+    let rest = if trimmed.starts_with("0x") || (trimmed.len() > 8 && trimmed.chars().next().map(|c| c.is_ascii_hexdigit()).unwrap_or(false)) {
+        let addr_end = trimmed.find(|c: char| c.is_whitespace()).unwrap_or(trimmed.len());
+        let addr = &trimmed[..addr_end];
+        spans.push(Span::styled(addr.to_string(), Style::default().fg(C_DIM)));
+        &trimmed[addr_end..]
+    } else {
+        trimmed
+    };
+
+    // Mnemonic (first non-whitespace word after address).
+    let rest2 = rest.trim_start();
+    let leading2 = &rest[..rest.len() - rest2.len()];
+    if !leading2.is_empty() {
+        spans.push(Span::raw(leading2.to_string()));
+    }
+
+    if !rest2.is_empty() {
+        let mnem_end = rest2.find(|c: char| c.is_whitespace()).unwrap_or(rest2.len());
+        let mnem = &rest2[..mnem_end];
+        // Keywords / interesting mnemonics highlighted brighter.
+        let mnem_color = match mnem {
+            "call" | "ret" | "jmp" | "je" | "jne" | "jz" | "jnz" | "jl" | "jle"
+            | "jg" | "jge" | "ja" | "jae" | "jb" | "jbe" => Color::Magenta,
+            "push" | "pop" => Color::Green,
+            "mov" | "lea" | "movsx" | "movzx" | "movaps" | "movups" => Color::Yellow,
+            "add" | "sub" | "imul" | "idiv" | "xor" | "and" | "or" | "not"
+            | "shl" | "shr" | "sar" => Color::Cyan,
+            _ => C_WHITE,
+        };
+        spans.push(Span::styled(mnem.to_string(), Style::default().fg(mnem_color).add_modifier(Modifier::BOLD)));
+        let operands = &rest2[mnem_end..];
+        if !operands.is_empty() {
+            spans.push(Span::styled(operands.to_string(), Style::default().fg(C_WHITE)));
+        }
+    }
+
+    // Comment part.
+    if let Some(comment) = comment_part {
+        spans.push(Span::styled(comment.to_string(), Style::default().fg(C_DIM).add_modifier(Modifier::ITALIC)));
+    }
+
+    Line::from(spans)
 }
 
 // ── Chat viewport ─────────────────────────────────────────────────────────────
@@ -402,8 +608,8 @@ fn render_session_history(frame: &mut Frame, app: &App, area: Rect) {
 // ── Help overlay ──────────────────────────────────────────────────────────────
 
 fn render_help_overlay(frame: &mut Frame, area: Rect) {
-    let width = 54u16.min(area.width);
-    let height = 16u16.min(area.height);
+    let width = 60u16.min(area.width);
+    let height = 18u16.min(area.height);
     let overlay_area = centered_rect(width, height, area);
 
     frame.render_widget(Clear, overlay_area);
@@ -419,9 +625,11 @@ fn render_help_overlay(frame: &mut Frame, area: Rect) {
         hint_line("Backspace", "Delete character"),
         hint_line("← / →", "Move cursor left/right"),
         hint_line("↑ / ↓ / PgUp / PgDn", "Scroll chat"),
+        hint_line("F2", "Toggle Code Explorer view"),
+        hint_line("Tab (in explorer)", "Switch Disasm/Decomp focus"),
         hint_line("Ctrl+P", "Choose AI provider"),
         hint_line("Ctrl+O", "Choose model"),
-        hint_line("Tab", "Toggle agent mode"),
+        hint_line("Tab (in chat)", "Toggle agent mode"),
         hint_line("Esc", "Close menu/overlay"),
         hint_line("q / Ctrl+C", "Quit"),
         hint_line("?", "Toggle this help"),

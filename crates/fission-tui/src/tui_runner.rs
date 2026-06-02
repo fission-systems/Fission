@@ -93,6 +93,13 @@ enum TuiMsg {
     ContextReady,
     /// Fired when available models are fetched from the API.
     ModelsFetched(Vec<String>),
+    /// Update Code Explorer content (label, disasm, decomp — any may be None).
+    #[allow(dead_code)]
+    ExplorerContent {
+        label: Option<String>,
+        disasm: Option<String>,
+        decomp: Option<String>,
+    },
 }
 
 // ── Event loop ────────────────────────────────────────────────────────────────
@@ -143,6 +150,11 @@ fn run_event_loop(
                     app.finish_assistant_stream();
                     pipeline.record_assistant_response(full);
                     app.save_current_session(&pipeline);
+                    // Sync Code Explorer panels with the latest tool output.
+                    let (label, disasm, decomp) = pipeline.get_explorer_snapshot();
+                    if disasm.is_some() || decomp.is_some() {
+                        app.update_explorer_content(label, disasm, decomp);
+                    }
                 }
                 TuiMsg::Error(e) => {
                     app.finish_assistant_stream();
@@ -164,6 +176,13 @@ fn run_event_loop(
                     }
                     app.selected_model_idx = 0;
                 }
+                TuiMsg::ExplorerContent { label, disasm, decomp } => {
+                    app.update_explorer_content(label, disasm, decomp);
+                    // Auto-switch to Code Explorer if we just got content.
+                    if app.view_mode == crate::app::ViewMode::Chat {
+                        app.view_mode = crate::app::ViewMode::CodeExplorer;
+                    }
+                }
             }
         }
 
@@ -180,9 +199,17 @@ fn run_event_loop(
 
         match action {
             AppAction::Quit => break,
+            AppAction::ToggleViewMode => {
+                app.toggle_view_mode();
+            }
             AppAction::ToggleMode => {
-                app.toggle_mode();
-                pipeline.set_agent_mode(app.agent_mode);
+                // In code explorer, Tab switches panel focus.
+                if app.view_mode == crate::app::ViewMode::CodeExplorer {
+                    app.toggle_panel();
+                } else {
+                    app.toggle_mode();
+                    pipeline.set_agent_mode(app.agent_mode);
+                }
             }
             AppAction::ToggleHelp => app.show_help = !app.show_help,
             AppAction::ToggleProviderMenu => {
@@ -247,13 +274,23 @@ fn run_event_loop(
                 }
             }
             AppAction::ScrollUp => {
-                app.scroll_up();
+                if app.view_mode == crate::app::ViewMode::CodeExplorer {
+                    app.explorer_scroll_up(3);
+                } else {
+                    app.scroll_up();
+                }
             }
             AppAction::ScrollDown => {
-                app.scroll_down();
+                if app.view_mode == crate::app::ViewMode::CodeExplorer {
+                    app.explorer_scroll_down(3);
+                } else {
+                    app.scroll_down();
+                }
             }
             AppAction::CursorUp => {
-                if app.mention_state.is_some() {
+                if app.view_mode == crate::app::ViewMode::CodeExplorer {
+                    app.explorer_scroll_up(1);
+                } else if app.mention_state.is_some() {
                     app.mention_up();
                 } else if app.slash_state.is_some() {
                     app.slash_up();
@@ -268,7 +305,9 @@ fn run_event_loop(
                 }
             }
             AppAction::CursorDown => {
-                if app.mention_state.is_some() {
+                if app.view_mode == crate::app::ViewMode::CodeExplorer {
+                    app.explorer_scroll_down(1);
+                } else if app.mention_state.is_some() {
                     app.mention_down();
                 } else if app.slash_state.is_some() {
                     app.slash_down();

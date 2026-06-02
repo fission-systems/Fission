@@ -324,6 +324,7 @@ impl AiPipeline {
                                     }
                                 }
                             }
+                            cm.focus.set_disasm_snippet(processed_result.clone());
                         } else if func_name == "xrefs" || func_name == "fission__xrefs" {
                             if let Ok(args_json) = serde_json::from_str::<serde_json::Value>(&func_args) {
                                 if let Some(addr_val) = args_json.get("addr") {
@@ -333,7 +334,7 @@ impl AiPipeline {
                                     }
                                 }
                             }
-                        } else if func_name == "decomp" || func_name == "fission__decomp" {
+                        } else if func_name == "decomp" || func_name == "decompile" || func_name == "fission__decomp" || func_name == "fission__decompile" {
                             cm.focus.set_decomp_snippet(processed_result.clone());
                         }
                     }
@@ -433,6 +434,21 @@ impl AiPipeline {
     /// Returns a human-readable label for the status bar.
     pub fn status_label(&self) -> String {
         format!("{}:{}", self.provider.name(), self.provider.model())
+    }
+
+    /// Snapshot the current Code Explorer state (label, disasm, decomp).
+    /// Returns `None` for each field that hasn't been populated yet.
+    pub fn get_explorer_snapshot(&self) -> (Option<String>, Option<String>, Option<String>) {
+        let cm = self.context_manager.lock().unwrap();
+        let focus = &cm.focus;
+        let label = match (&focus.active_function_name, &focus.active_function_addr) {
+            (Some(name), Some(addr)) => Some(format!("{} @ {}", name, addr)),
+            (None, Some(addr)) => Some(addr.clone()),
+            _ => None,
+        };
+        let disasm = focus.disasm_snippet.clone();
+        let decomp = focus.decomp_snippet.clone();
+        (label, disasm, decomp)
     }
 
     /// Read sidecar JSON for the loaded binary, and use LLM to consolidate it

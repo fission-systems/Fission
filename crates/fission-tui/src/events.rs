@@ -32,6 +32,10 @@ pub enum AppAction {
     CycleProviderPrev,
     /// Toggle Agent Mode (Tab)
     ToggleMode,
+    /// Toggle view between Chat and Code Explorer (Ctrl+Tab / F2).
+    ToggleViewMode,
+    /// Toggle focused panel within Code Explorer (Tab when in code explorer).
+    TogglePanel,
     /// Escape pressed (to close menus/overlays).
     Escape,
     /// Move cursor left
@@ -86,7 +90,10 @@ fn map_key(code: KeyCode, modifiers: KeyModifiers) -> AppAction {
         KeyCode::Char('h') if modifiers.contains(KeyModifiers::CONTROL) => AppAction::ToggleHistoryMenu,
         // Close menus
         KeyCode::Esc => AppAction::Escape,
-        // Toggle Mode
+        // Toggle View Mode (Ctrl+Tab sends BackTab on some terminals; F2 is the explicit binding)
+        KeyCode::F(2) => AppAction::ToggleViewMode,
+        KeyCode::BackTab if modifiers.contains(KeyModifiers::CONTROL) => AppAction::ToggleViewMode,
+        // Tab — context-sensitive (toggle panel in explorer, toggle agent mode in chat)
         KeyCode::Tab => AppAction::ToggleMode,
         // Help
         KeyCode::Char('?') | KeyCode::F(1) => AppAction::ToggleHelp,
