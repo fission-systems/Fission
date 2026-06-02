@@ -11,6 +11,8 @@ use ratatui::{
     backend::CrosstermBackend,
     Terminal, TerminalOptions, Viewport,
 };
+use crossterm::event::{EnableMouseCapture, DisableMouseCapture};
+use crossterm::execute;
 use tokio::sync::mpsc;
 use std::io;
 
@@ -26,7 +28,9 @@ use crate::ui;
 pub fn run_tui(mut pipeline: AiPipeline) -> Result<()> {
     // ── Terminal setup ────────────────────────────────────────────────────────
     enable_raw_mode().map_err(|e| anyhow::anyhow!("enable raw mode: {e}"))?;
-    let backend = CrosstermBackend::new(io::stdout());
+    let mut stdout = io::stdout();
+    execute!(stdout, EnableMouseCapture).ok();
+    let backend = CrosstermBackend::new(stdout);
 
     // Detect terminal height dynamically, like Codex. Fall back to 24 if size
     // query fails (e.g. piped stdin). We leave 1 line of scrollback so the
@@ -49,6 +53,7 @@ pub fn run_tui(mut pipeline: AiPipeline) -> Result<()> {
     let result = run_event_loop(&mut terminal, &mut pipeline);
 
     // ── Terminal restore ──────────────────────────────────────────────────────
+    execute!(io::stdout(), DisableMouseCapture).ok();
     disable_raw_mode().ok();
     terminal.show_cursor().ok();
 

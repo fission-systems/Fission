@@ -63,6 +63,13 @@ pub fn poll_event() -> std::io::Result<Option<AppAction>> {
         }
         Event::Key(_) => Ok(Some(AppAction::Tick)), // ignore Release events
         Event::Resize(w, h) => Ok(Some(AppAction::Resize(w, h))),
+        Event::Mouse(mouse_event) => {
+            match mouse_event.kind {
+                crossterm::event::MouseEventKind::ScrollUp => Ok(Some(AppAction::ScrollUp)),
+                crossterm::event::MouseEventKind::ScrollDown => Ok(Some(AppAction::ScrollDown)),
+                _ => Ok(Some(AppAction::Tick)),
+            }
+        },
         _ => Ok(Some(AppAction::Tick)),
     }
 }
