@@ -1,5 +1,63 @@
 use serde::{Deserialize, Serialize};
 
+// ── Binary Snapshot ───────────────────────────────────────────────────────────
+
+/// One-shot snapshot of static binary facts collected when binary_path is set.
+/// Injected as a prefix in the system prompt so the AI has constant background knowledge.
+#[derive(Debug, Clone, Default)]
+pub struct BinarySnapshot {
+    /// One-line summary: arch, entry, file type, etc.
+    pub meta: String,
+    /// Up to N function names/addresses (symbols).
+    pub functions: Vec<String>,
+    /// Up to N interesting strings from the binary.
+    pub strings: Vec<String>,
+}
+
+impl BinarySnapshot {
+    pub const MAX_FUNCTIONS: usize = 10;
+    pub const MAX_STRINGS: usize = 20;
+
+    /// Format this snapshot as a system-prompt section.
+    pub fn format_prompt(&self) -> String {
+        if self.meta.is_empty() && self.functions.is_empty() && self.strings.is_empty() {
+            return String::new();
+        }
+
+        let mut out = String::from("\n### Binary Context Snapshot\n");
+
+        if !self.meta.is_empty() {
+            out.push_str(&format!("**Metadata:**\n```\n{}\n```\n\n", self.meta));
+        }
+
+        if !self.functions.is_empty() {
+            out.push_str(&format!(
+                "**Known Functions (top {}):**\n",
+                self.functions.len()
+            ));
+            for f in &self.functions {
+                out.push_str(&format!("- {}\n", f));
+            }
+            out.push('\n');
+        }
+
+        if !self.strings.is_empty() {
+            out.push_str(&format!(
+                "**Notable Strings (top {}):**\n",
+                self.strings.len()
+            ));
+            for s in &self.strings {
+                out.push_str(&format!("- `{}`\n", s));
+            }
+            out.push('\n');
+        }
+
+        out
+    }
+}
+
+// ── Reversing Focus ───────────────────────────────────────────────────────────
+
 /// Tracks the active reverse engineering focus state in the current session.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ReversingFocus {
@@ -7,7 +65,46 @@ pub struct ReversingFocus {
     pub active_function_name: Option<String>,
     pub last_disasm_range: Option<(u64, u64)>,
     pub verified_types: Vec<String>,
+
+    /// Functions that call the currently focused function (callers).
+    pub xrefs_callers: Vec<String>,
+    /// Functions that the currently focused function calls (callees).
+    pub xrefs_callees: Vec<String>,
+    /// Most recent decompiled C pseudocode snippet for the focused function (truncated).
+    pub decomp_snippet: Option<String>,
 }
+
+impl ReversingFocus {
+    pub const MAX_DECOMP_SNIPPET_LEN: usize = 2000;
+
+    /// Reset xrefs and decomp when the focus address changes.
+    pub fn set_focus(&mut self, addr: String, name: Option<String>) {
+        if self.active_function_addr.as_deref() != Some(&addr) {
+            // Address changed: clear stale xrefs and decomp
+            self.xrefs_callers.clear();
+            self.xrefs_callees.clear();
+            self.decomp_snippet = None;
+        }
+        self.active_function_addr = Some(addr);
+        if name.is_some() {
+            self.active_function_name = name;
+        }
+    }
+
+    /// Store a decompiled snippet, truncating if necessary.
+    pub fn set_decomp_snippet(&mut self, snippet: String) {
+        if snippet.len() > Self::MAX_DECOMP_SNIPPET_LEN {
+            self.decomp_snippet = Some(format!(
+                "{}... [truncated]",
+                &snippet[..Self::MAX_DECOMP_SNIPPET_LEN]
+            ));
+        } else {
+            self.decomp_snippet = Some(snippet);
+        }
+    }
+}
+
+// ── Context Manager ───────────────────────────────────────────────────────────
 
 /// Zero-dependency context manager that dynamically budgets prompts,
 /// truncates excessive tool outputs, and compacts message histories.
@@ -16,6 +113,8 @@ pub struct ContextManager {
     pub max_char_budget: usize,
     pub max_tool_output_len: usize,
     pub focus: ReversingFocus,
+    /// Snapshot of binary-level static facts. Set once when binary_path is resolved.
+    pub snapshot: Option<BinarySnapshot>,
 }
 
 impl ContextManager {
@@ -25,6 +124,7 @@ impl ContextManager {
             max_char_budget,
             max_tool_output_len,
             focus: ReversingFocus::default(),
+            snapshot: None,
         }
     }
 
@@ -40,6 +140,11 @@ impl ContextManager {
         } else {
             output
         }
+    }
+
+    /// Return the snapshot system-prompt prefix (empty string if no snapshot yet).
+    pub fn format_binary_snapshot(&self) -> String {
+        self.snapshot.as_ref().map(|s| s.format_prompt()).unwrap_or_default()
     }
 
     /// Formats the active focus state into a structured Markdown prompt to keep the LLM grounded.
@@ -64,6 +169,26 @@ impl ContextManager {
             for t in &self.focus.verified_types {
                 prompt.push_str(&format!("  - {}\n", t));
             }
+            has_focus = true;
+        }
+        if !self.focus.xrefs_callers.is_empty() {
+            prompt.push_str("- **Called By (Callers)**:\n");
+            for c in &self.focus.xrefs_callers {
+                prompt.push_str(&format!("  - {}\n", c));
+            }
+            has_focus = true;
+        }
+        if !self.focus.xrefs_callees.is_empty() {
+            prompt.push_str("- **Calls (Callees)**:\n");
+            for c in &self.focus.xrefs_callees {
+                prompt.push_str(&format!("  - {}\n", c));
+            }
+            has_focus = true;
+        }
+        if let Some(snippet) = &self.focus.decomp_snippet {
+            prompt.push_str("- **Decompiled Pseudocode (current function)**:\n```c\n");
+            prompt.push_str(snippet);
+            prompt.push_str("\n```\n");
             has_focus = true;
         }
 

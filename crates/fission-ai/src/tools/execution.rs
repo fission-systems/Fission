@@ -206,3 +206,41 @@ impl AiTool for ApplyPatchTool {
         ))
     }
 }
+
+/// Tool to load a new binary into the current analysis session.
+pub struct LoadBinaryTool;
+
+#[async_trait::async_trait]
+impl AiTool for LoadBinaryTool {
+    fn definition(&self) -> ToolDefinition {
+        ToolDefinition::new(
+            "load_binary",
+            "Load a new binary executable into the current analysis session.",
+            serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "The absolute or relative path to the binary file to load (e.g. 'benchmark/binary/target.exe')."
+                    }
+                },
+                "required": ["path"]
+            })
+        )
+    }
+
+    async fn execute(&self, args: &JsonValue, _context_binary: Option<&Path>) -> Result<String> {
+        let path_str = args.get("path").and_then(|v| v.as_str()).context("Missing or invalid 'path'")?;
+        let path = PathBuf::from(path_str);
+        
+        if !path.exists() {
+            return Ok(format!("Error: File '{}' does not exist.", path_str));
+        }
+        if !path.is_file() {
+            return Ok(format!("Error: '{}' is not a file.", path_str));
+        }
+
+        // We just return success here. The actual state modification happens in AiPipeline::send_internal
+        Ok(format!("[✓] Successfully loaded binary from '{}'. You can now use disasm, xrefs, and other tools on it.", path_str))
+    }
+}

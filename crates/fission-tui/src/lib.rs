@@ -2,6 +2,7 @@
 
 pub mod app;
 pub mod events;
+pub mod markdown;
 pub mod ui;
 
 mod tui_runner;

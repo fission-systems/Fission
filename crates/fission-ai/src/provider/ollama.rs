@@ -10,6 +10,18 @@ use crate::auth::ENV_FISSION_AI_OLLAMA_URL;
 
 const DEFAULT_OLLAMA_URL: &str = "http://localhost:11434";
 
+// ── Ollama Models API types ───────────────────────────────────────────────────
+
+#[derive(Deserialize)]
+struct OllamaTagsResponse {
+    models: Vec<OllamaModelObj>,
+}
+
+#[derive(Deserialize)]
+struct OllamaModelObj {
+    name: String,
+}
+
 // ── Ollama chat API types ─────────────────────────────────────────────────────
 
 #[derive(Serialize)]
@@ -71,6 +83,22 @@ impl AiProvider for OllamaProvider {
 
     fn requires_auth(&self) -> bool {
         false
+    }
+
+    async fn fetch_models(&self) -> ProviderResult<Vec<String>> {
+        let url = format!("{}/api/tags", self.base_url.trim_end_matches('/'));
+
+        let resp = self.client.get(&url).send().await?;
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            return Err(ProviderError::Other(format!("Ollama HTTP {status}: {body}")));
+        }
+
+        let tags_resp: OllamaTagsResponse = resp.json().await?;
+        let mut names: Vec<String> = tags_resp.models.into_iter().map(|m| m.name).collect();
+        names.sort();
+        Ok(names)
     }
 
     async fn chat_stream(&self, messages: &[Message], _tools: Option<&[crate::tools::ToolDefinition]>) -> ProviderResult<ChunkStream> {

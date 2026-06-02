@@ -4,14 +4,13 @@
 //! `fission_cli ai chat`.
 
 use anyhow::Result;
-use crossterm::{
-    execute,
-    terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
-};
+use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
 use fission_ai::pipeline::AiPipeline;
 use futures::StreamExt;
-use ratatui::Terminal;
-use ratatui::prelude::CrosstermBackend;
+use ratatui::{
+    backend::CrosstermBackend,
+    Terminal, TerminalOptions, Viewport,
+};
 use tokio::sync::mpsc;
 use std::io;
 
@@ -21,25 +20,36 @@ use crate::ui;
 
 /// Launch the interactive TUI chat session.
 ///
-/// Takes ownership of the terminal for the session duration and restores it
-/// on exit or panic.
+/// Uses ANSI 16-color palette (ui/mod.rs) to avoid the iTerm2 GPU Font Atlas
+/// Cache Corruption bug. Color::Rgb creates unique atlas entries per (glyph,
+/// color) pair, exhausting the cache. Named ANSI colors share atlas entries.
 pub fn run_tui(mut pipeline: AiPipeline) -> Result<()> {
     // ── Terminal setup ────────────────────────────────────────────────────────
     enable_raw_mode().map_err(|e| anyhow::anyhow!("enable raw mode: {e}"))?;
-    let mut stdout = io::stdout();
-    execute!(stdout, EnterAlternateScreen)
-        .map_err(|e| anyhow::anyhow!("enter alternate screen: {e}"))?;
-
     let backend = CrosstermBackend::new(io::stdout());
-    let mut terminal =
-        Terminal::new(backend).map_err(|e| anyhow::anyhow!("create terminal: {e}"))?;
+
+    // Detect terminal height dynamically, like Codex. Fall back to 24 if size
+    // query fails (e.g. piped stdin). We leave 1 line of scrollback so the
+    // shell prompt is visible above the TUI after exit.
+    let term_height = crossterm::terminal::size()
+        .map(|(_, h)| h.saturating_sub(1).max(8))
+        .unwrap_or(24);
+
+    // Use Viewport::Inline(height) — draws directly to the primary buffer,
+    // NOT the alternate screen. VSCode aggressively destroys alternate-screen
+    // buffers on tab-reparenting; inline mode is immune to that.
+    let mut terminal = Terminal::with_options(
+        backend,
+        TerminalOptions { viewport: Viewport::Inline(term_height) },
+    )
+    .map_err(|e| anyhow::anyhow!("create terminal: {e}"))?;
+
     terminal.clear().map_err(|e| anyhow::anyhow!("clear terminal: {e}"))?;
 
     let result = run_event_loop(&mut terminal, &mut pipeline);
 
     // ── Terminal restore ──────────────────────────────────────────────────────
     disable_raw_mode().ok();
-    execute!(io::stdout(), LeaveAlternateScreen).ok();
     terminal.show_cursor().ok();
 
     result
@@ -51,6 +61,10 @@ enum TuiMsg {
     Delta(String),
     Done(String),    // full response text for history
     Error(String),
+    /// Fired when background context collection finishes.
+    ContextReady,
+    /// Fired when available models are fetched from the API.
+    ModelsFetched(Vec<String>),
 }
 
 // ── Event loop ────────────────────────────────────────────────────────────────
@@ -62,15 +76,33 @@ fn run_event_loop(
     let status_label = pipeline.status_label();
     let mut app = App::new(status_label);
 
-    // Unbounded channel: streaming task → main event loop.
-    let (tx, mut rx) = mpsc::unbounded_channel::<TuiMsg>();
-
     // Dedicated tokio runtime for driving async streaming tasks.
     let rt = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(2)
         .enable_all()
         .build()
         .map_err(|e| anyhow::anyhow!("streaming runtime: {e}"))?;
+
+    // Unbounded channel: streaming task → main event loop.
+    let (tx, mut rx) = mpsc::unbounded_channel::<TuiMsg>();
+
+    // ── Bootstrap binary context snapshot ────────────────────────────────────
+    // If a binary path is already set on the pipeline session (passed via CLI),
+    // kick off background collection immediately so the AI has full context
+    // from the very first message.
+    let initial_binary_path = {
+        let session = pipeline.session.lock().unwrap();
+        session.binary_path.clone()
+    };
+    if let Some(bin_path) = initial_binary_path {
+        app.context_loading = true;
+        let pipeline_clone = pipeline.clone();
+        let tx_ctx = tx.clone();
+        rt.spawn(async move {
+            pipeline_clone.init_binary_context(bin_path).await;
+            let _ = tx_ctx.send(TuiMsg::ContextReady);
+        });
+    }
 
     loop {
         // ── Drain incoming stream deltas ──────────────────────────────────────
@@ -85,67 +117,28 @@ fn run_event_loop(
                 }
                 TuiMsg::Error(e) => {
                     app.finish_assistant_stream();
-                    app.append_stream_delta(&format!("\n⚠ Error: {e}"));
+                    app.append_stream_delta(&format!("\n⚠ {e}"));
                     app.finish_assistant_stream();
+                }
+                TuiMsg::ContextReady => {
+                    app.context_loading = false;
+                    // Update status label to reflect context is ready.
+                    app.status_label = pipeline.status_label();
+                }
+                TuiMsg::ModelsFetched(models) => {
+                    app.is_fetching_models = false;
+                    if !models.is_empty() {
+                        app.model_options = models;
+                    } else {
+                        // Fallback hardcoded if empty
+                        app.model_options = vec!["gpt-4o".into(), "claude-3.5-sonnet".into(), "llama3".into()];
+                    }
+                    app.selected_model_idx = 0;
                 }
             }
         }
 
-        // ── Sync Active Reversing Focus with App Source View ──────────────────
-        let current_focus_addr = {
-            let cm = pipeline.context_manager.lock().unwrap();
-            cm.focus.active_function_addr.clone()
-        };
-        if current_focus_addr != app.last_synced_addr {
-            app.last_synced_addr = current_focus_addr.clone();
-            if let Some(addr_str) = current_focus_addr {
-                let binary_path_opt = {
-                    let session = pipeline.session.lock().unwrap();
-                    session.binary_path.clone()
-                };
-                if let Some(bin_path) = binary_path_opt {
-                    let cli_exe = std::env::current_exe().unwrap_or_else(|_| "fission_cli".into());
-                    
-                    // Attempt to run 'decomp' for the address
-                    if let Ok(output) = std::process::Command::new(&cli_exe)
-                        .arg("decomp")
-                        .arg(&bin_path)
-                        .arg("--addr")
-                        .arg(&addr_str)
-                        .output()
-                    {
-                        if output.status.success() {
-                            let decomp_code = String::from_utf8_lossy(&output.stdout).into_owned();
-                            app.active_source = decomp_code;
-                            app.active_source_title = format!("Decompiled View - Address {}", addr_str);
-                        } else {
-                            // If decomp fails, attempt a fallback to disasm
-                            if let Ok(output_disasm) = std::process::Command::new(&cli_exe)
-                                .arg("disasm")
-                                .arg(&bin_path)
-                                .arg("--addr")
-                                .arg(&addr_str)
-                                .output()
-                            {
-                                if output_disasm.status.success() {
-                                    let disasm_code = String::from_utf8_lossy(&output_disasm.stdout).into_owned();
-                                    app.active_source = disasm_code;
-                                    app.active_source_title = format!("Disassembly View - Address {}", addr_str);
-                                } else {
-                                    app.active_source = format!(
-                                        "Error decompiling/disassembling at address {}:\n{}",
-                                        addr_str,
-                                        String::from_utf8_lossy(&output_disasm.stderr)
-                                    );
-                                    app.active_source_title = "Error".to_string();
-                                }
-                            }
-                        }
-                    }
-                    app.source_scroll = 0; // Reset scroll on focus switch
-                }
-            }
-        }
+        // (Source view synchronization removed for clean linear layout)
 
         // ── Render ────────────────────────────────────────────────────────────
         terminal.draw(|frame| ui::render(frame, &app))?;
@@ -158,14 +151,115 @@ fn run_event_loop(
 
         match action {
             AppAction::Quit => break,
+            AppAction::ToggleMode => {
+                app.toggle_mode();
+                pipeline.set_agent_mode(app.agent_mode);
+            }
             AppAction::ToggleHelp => app.show_help = !app.show_help,
-            AppAction::InsertChar(c) if !app.streaming => app.insert_char(c),
-            AppAction::DeleteBack if !app.streaming => app.delete_char_before_cursor(),
-            AppAction::ScrollUp => app.scroll_up(),
-            AppAction::ScrollDown => app.scroll_down(),
-            AppAction::ScrollSourceUp => app.scroll_source_up(),
-            AppAction::ScrollSourceDown => app.scroll_source_down(),
-            AppAction::Submit if !app.streaming && !app.input.trim().is_empty() => {
+            AppAction::ToggleProviderMenu => {
+                app.show_model_menu = false;
+                app.toggle_provider_menu();
+            },
+            AppAction::ToggleModelMenu => {
+                app.show_provider_menu = false;
+                app.toggle_model_menu();
+                if app.show_model_menu {
+                    let tx2 = tx.clone();
+                    let pipeline_clone = pipeline.clone();
+                    rt.spawn(async move {
+                        let models = pipeline_clone.fetch_models().await.unwrap_or_else(|_| vec![]);
+                        let _ = tx2.send(TuiMsg::ModelsFetched(models));
+                    });
+                }
+            },
+            AppAction::Escape => {
+                app.show_help = false;
+                app.show_provider_menu = false;
+                app.show_model_menu = false;
+            }
+            AppAction::InsertChar(c) if !app.streaming && !app.show_provider_menu && !app.show_model_menu => app.insert_char(c),
+            AppAction::DeleteBack if !app.streaming && !app.show_provider_menu && !app.show_model_menu => app.delete_char_before_cursor(),
+            AppAction::ScrollUp => {
+                app.scroll_up();
+            }
+            AppAction::ScrollDown => {
+                app.scroll_down();
+            }
+            AppAction::CursorUp => {
+                if app.show_provider_menu {
+                    app.provider_menu_up();
+                } else if app.show_model_menu {
+                    app.model_menu_up();
+                } else if !app.streaming {
+                    app.cursor_up();
+                }
+            }
+            AppAction::CursorDown => {
+                if app.show_provider_menu {
+                    app.provider_menu_down();
+                } else if app.show_model_menu {
+                    app.model_menu_down();
+                } else if !app.streaming {
+                    app.cursor_down();
+                }
+            }
+            AppAction::CycleProviderNext => {
+                app.provider_menu_down();
+                if let Some(kind) = app.get_selected_provider() {
+                    match rt.block_on(pipeline.switch_provider(kind)) {
+                        Ok(_) => { app.status_label = pipeline.status_label(); }
+                        Err(_) => {} // Ignore silently on quick cycle
+                    }
+                }
+            }
+            AppAction::CycleProviderPrev => {
+                app.provider_menu_up();
+                if let Some(kind) = app.get_selected_provider() {
+                    match rt.block_on(pipeline.switch_provider(kind)) {
+                        Ok(_) => { app.status_label = pipeline.status_label(); }
+                        Err(_) => {} // Ignore silently on quick cycle
+                    }
+                }
+            }
+            AppAction::CursorLeft if !app.streaming && !app.show_provider_menu && !app.show_model_menu => app.cursor_left(),
+            AppAction::CursorRight if !app.streaming && !app.show_provider_menu && !app.show_model_menu => app.cursor_right(),
+            AppAction::Submit if app.show_provider_menu => {
+                if let Some(kind) = app.get_selected_provider() {
+                    match rt.block_on(pipeline.switch_provider(kind)) {
+                        Ok(_) => {
+                            app.status_label = pipeline.status_label();
+                        }
+                        Err(e) => {
+                            app.push_user("Switched Provider".to_string());
+                            app.begin_assistant_stream();
+                            app.append_stream_delta(&format!("\n⚠ Auth Error: {e}"));
+                            app.finish_assistant_stream();
+                            app.scroll_to_bottom();
+                        }
+                    }
+                }
+                app.show_provider_menu = false;
+            }
+            AppAction::Submit if app.show_model_menu => {
+                if !app.is_fetching_models {
+                    if let Some(model) = app.get_selected_model() {
+                        match rt.block_on(pipeline.switch_model(model)) {
+                            Ok(_) => {
+                                app.status_label = pipeline.status_label();
+                            }
+                            Err(e) => {
+                                app.push_user("Switched Model".to_string());
+                                app.begin_assistant_stream();
+                                app.append_stream_delta(&format!("\n⚠ Auth Error: {e}"));
+                                app.finish_assistant_stream();
+                                app.scroll_to_bottom();
+                            }
+                        }
+                    }
+                    app.show_model_menu = false;
+                }
+            }
+            AppAction::Submit if !app.streaming && !app.input.trim().is_empty() && !app.show_provider_menu && !app.show_model_menu => {
                 let user_text = app.take_input();
                 app.push_user(user_text.clone());
                 app.begin_assistant_stream();
@@ -205,6 +299,17 @@ fn run_event_loop(
                         app.finish_assistant_stream();
                     }
                 }
+            }
+            AppAction::Resize(_w, h) => {
+                // When the terminal is resized, resize the inline viewport to the
+                // new height and force a full repaint.
+                let new_height = h.saturating_sub(1).max(8);
+                let _ = terminal.resize(ratatui::layout::Rect {
+                    x: 0, y: 0,
+                    width: _w,
+                    height: new_height,
+                });
+                let _ = terminal.clear();
             }
             _ => {}
         }

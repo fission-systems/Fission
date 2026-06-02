@@ -12,6 +12,19 @@ use super::{AiProvider, ChunkStream, ProviderError, ProviderResult, ResponseChun
 
 const DEFAULT_BASE_URL: &str = "https://api.openai.com/v1";
 
+// ── Models API types ──────────────────────────────────────────────────────────
+
+#[derive(Deserialize)]
+struct OpenAiModelsResponse {
+    data: Vec<OpenAiModelObj>,
+}
+
+#[derive(Deserialize)]
+struct OpenAiModelObj {
+    id: String,
+}
+
+
 // ── Request / response types ──────────────────────────────────────────────────
 
 #[derive(Serialize)]
@@ -119,6 +132,28 @@ impl AiProvider for OpenAiProvider {
 
     fn model(&self) -> &str {
         &self.model
+    }
+
+    async fn fetch_models(&self) -> ProviderResult<Vec<String>> {
+        let token = self.bearer_token.as_deref().ok_or(ProviderError::NotAuthenticated)?;
+        let url = format!("{}/models", self.base_url.trim_end_matches('/'));
+
+        let mut req = self.client.get(&url).bearer_auth(token);
+        for (k, v) in &self.extra_headers {
+            req = req.header(k.as_str(), v.as_str());
+        }
+
+        let resp = req.send().await?;
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            return Err(ProviderError::Other(format!("HTTP {status}: {body}")));
+        }
+
+        let models_resp: OpenAiModelsResponse = resp.json().await?;
+        let mut ids: Vec<String> = models_resp.data.into_iter().map(|m| m.id).collect();
+        ids.sort();
+        Ok(ids)
     }
 
     async fn chat_stream(&self, messages: &[Message], tools: Option<&[ToolDefinition]>) -> ProviderResult<ChunkStream> {

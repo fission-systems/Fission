@@ -37,6 +37,10 @@ impl AiProvider for CodexProvider {
         true
     }
 
+    async fn fetch_models(&self) -> ProviderResult<Vec<String>> {
+        self.inner.fetch_models().await
+    }
+
     async fn chat_stream(&self, messages: &[Message], tools: Option<&[crate::tools::ToolDefinition]>) -> ProviderResult<ChunkStream> {
         self.inner.chat_stream(messages, tools).await
     }

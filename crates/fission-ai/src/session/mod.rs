@@ -66,18 +66,36 @@ impl Message {
     }
 }
 
+/// Agent specialization mode for system prompt.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum AgentMode {
+    #[default]
+    Analyst,
+    Editor,
+}
+
+impl AgentMode {
+    pub fn system_prompt_prefix(&self) -> &'static str {
+        match self {
+            AgentMode::Analyst => "You are Fission AI, a professional reverse engineering Analyst. Your goal is to explore, analyze, and explain code/binaries. You are read-only. You must not attempt to modify files. Provide deep insights.",
+            AgentMode::Editor => "You are Fission AI, a professional reverse engineering Editor. Your goal is to modify binaries, write patches, or generate scripts. You have full write access. Focus on correct modifications.",
+        }
+    }
+}
+
 /// In-session conversation history.
 #[derive(Debug, Clone, Default)]
 pub struct SessionContext {
     pub messages: Vec<Message>,
     pub system_prompt: Option<String>,
     pub binary_path: Option<PathBuf>,
+    pub mode: AgentMode,
 }
 
 impl SessionContext {
     /// Create a new session with an optional system prompt and binary.
     pub fn new(system_prompt: Option<String>, binary_path: Option<PathBuf>) -> Self {
-        Self { messages: Vec::new(), system_prompt, binary_path }
+        Self { messages: Vec::new(), system_prompt, binary_path, mode: AgentMode::default() }
     }
 
     /// Returns the full message list including the system prompt prepended.

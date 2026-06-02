@@ -83,6 +83,11 @@ pub trait AiProvider: fmt::Debug + Send + Sync {
         true
     }
 
+    /// Dynamically fetch available models from the provider's API.
+    async fn fetch_models(&self) -> ProviderResult<Vec<String>> {
+        Ok(vec![])
+    }
+
     /// Send a chat completion request and return a streaming response.
     async fn chat_stream(&self, messages: &[Message], tools: Option<&[ToolDefinition]>) -> ProviderResult<ChunkStream>;
 

@@ -129,9 +129,26 @@ impl FactStore {
         let sidecar_path = std::path::Path::new(&binary.path).with_extension("fission.json");
         if let Ok(content) = std::fs::read_to_string(&sidecar_path) {
             #[derive(serde::Deserialize)]
+            struct SidecarField {
+                name: String,
+                type_name: String,
+                offset: u32,
+                size: u32,
+            }
+
+            #[derive(serde::Deserialize)]
+            struct SidecarStruct {
+                name: String,
+                size: u32,
+                fields: Vec<SidecarField>,
+            }
+
+            #[derive(serde::Deserialize)]
             struct SidecarProject {
                 #[serde(default)]
                 user_function_names: std::collections::HashMap<String, String>,
+                #[serde(default)]
+                user_structs: Vec<SidecarStruct>,
             }
             if let Ok(sidecar) = serde_json::from_str::<SidecarProject>(&content) {
                 for (addr_str, name) in sidecar.user_function_names {
@@ -142,6 +159,23 @@ impl FactStore {
                     if let Some(addr) = parsed_addr {
                         store.ingest_name_fact(addr, name, FactProvenance::UserRename);
                     }
+                }
+
+                for user_struct in sidecar.user_structs {
+                    let info = InferredTypeInfo {
+                        name: user_struct.name,
+                        mangled_name: String::new(),
+                        kind: "struct".to_string(),
+                        fields: user_struct.fields.into_iter().map(|f| InferredFieldInfo {
+                            name: f.name,
+                            type_name: f.type_name,
+                            offset: f.offset,
+                            size: f.size,
+                        }).collect(),
+                        size: user_struct.size,
+                        metadata_address: 0,
+                    };
+                    store.loader_type_facts.push(info);
                 }
             }
         }
