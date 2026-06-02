@@ -244,3 +244,354 @@ impl AiTool for LoadBinaryTool {
         Ok(format!("[✓] Successfully loaded binary from '{}'. You can now use disasm, xrefs, and other tools on it.", path_str))
     }
 }
+
+/// Tool to decompile a function to C-like pseudocode.
+pub struct DecompileTool;
+
+#[async_trait::async_trait]
+impl AiTool for DecompileTool {
+    fn definition(&self) -> ToolDefinition {
+        ToolDefinition::new(
+            "decompile",
+            "Decompile a function at a specific memory address to C-like pseudocode.",
+            serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "addr": {
+                        "type": "string",
+                        "description": "The memory address of the function to decompile (e.g. '0x140001000')."
+                    }
+                },
+                "required": ["addr"]
+            })
+        )
+    }
+
+    async fn execute(&self, args: &JsonValue, context_binary: Option<&Path>) -> Result<String> {
+        let binary = context_binary.context("No binary context available. Cannot run decompile.")?;
+        let addr = args.get("addr").and_then(|v| v.as_str()).context("Missing or invalid 'addr'")?;
+
+        let output = tokio::task::spawn_blocking({
+            let binary = binary.to_path_buf();
+            let addr = addr.to_string();
+            move || {
+                Command::new(current_cli_exe())
+                    .arg("decomp")
+                    .arg(binary)
+                    .arg("--addr")
+                    .arg(addr)
+                    .output()
+            }
+        }).await??;
+
+        if output.status.success() {
+            Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+        } else {
+            Ok(format!("Error: {}", String::from_utf8_lossy(&output.stderr)))
+        }
+    }
+}
+
+/// Tool to list all discovered functions in the binary.
+pub struct ListFunctionsTool;
+
+#[async_trait::async_trait]
+impl AiTool for ListFunctionsTool {
+    fn definition(&self) -> ToolDefinition {
+        ToolDefinition::new(
+            "list_functions",
+            "List all discovered functions in the currently loaded binary.",
+            serde_json::json!({
+                "type": "object",
+                "properties": {}
+            })
+        )
+    }
+
+    async fn execute(&self, _args: &JsonValue, context_binary: Option<&Path>) -> Result<String> {
+        let binary = context_binary.context("No binary context available. Cannot run list_functions.")?;
+
+        let output = tokio::task::spawn_blocking({
+            let binary = binary.to_path_buf();
+            move || {
+                Command::new(current_cli_exe())
+                    .arg("list")
+                    .arg(binary)
+                    .output()
+            }
+        }).await??;
+
+        if output.status.success() {
+            Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+        } else {
+            Ok(format!("Error: {}", String::from_utf8_lossy(&output.stderr)))
+        }
+    }
+}
+
+/// Tool to extract strings from the binary.
+pub struct StringsTool;
+
+#[async_trait::async_trait]
+impl AiTool for StringsTool {
+    fn definition(&self) -> ToolDefinition {
+        ToolDefinition::new(
+            "strings",
+            "Extract printable strings embedded in the binary.",
+            serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "min_len": {
+                        "type": "integer",
+                        "description": "Minimum string length (default 6)."
+                    }
+                }
+            })
+        )
+    }
+
+    async fn execute(&self, args: &JsonValue, context_binary: Option<&Path>) -> Result<String> {
+        let binary = context_binary.context("No binary context available. Cannot run strings.")?;
+        let min_len = args.get("min_len").and_then(|v| v.as_u64()).unwrap_or(6);
+
+        let output = tokio::task::spawn_blocking({
+            let binary = binary.to_path_buf();
+            move || {
+                Command::new(current_cli_exe())
+                    .arg("strings")
+                    .arg(binary)
+                    .arg("--min-len")
+                    .arg(min_len.to_string())
+                    .output()
+            }
+        }).await??;
+
+        if output.status.success() {
+            Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+        } else {
+            Ok(format!("Error: {}", String::from_utf8_lossy(&output.stderr)))
+        }
+    }
+}
+
+/// Tool to retrieve basic metadata and inventory of the binary.
+pub struct BinaryInfoTool;
+
+#[async_trait::async_trait]
+impl AiTool for BinaryInfoTool {
+    fn definition(&self) -> ToolDefinition {
+        ToolDefinition::new(
+            "binary_info",
+            "Retrieve basic metadata, architecture, and section info about the loaded binary.",
+            serde_json::json!({
+                "type": "object",
+                "properties": {}
+            })
+        )
+    }
+
+    async fn execute(&self, _args: &JsonValue, context_binary: Option<&Path>) -> Result<String> {
+        let binary = context_binary.context("No binary context available. Cannot run binary_info.")?;
+
+        let output = tokio::task::spawn_blocking({
+            let binary = binary.to_path_buf();
+            move || {
+                Command::new(current_cli_exe())
+                    .arg("info")
+                    .arg(binary)
+                    .output()
+            }
+        }).await??;
+
+        if output.status.success() {
+            Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+        } else {
+            Ok(format!("Error: {}", String::from_utf8_lossy(&output.stderr)))
+        }
+    }
+}
+
+/// Tool to generate a callgraph for the entire binary.
+pub struct CallgraphTool;
+
+#[async_trait::async_trait]
+impl AiTool for CallgraphTool {
+    fn definition(&self) -> ToolDefinition {
+        ToolDefinition::new(
+            "callgraph",
+            "Generate caller/callee relationships from xref analysis for the entire binary.",
+            serde_json::json!({
+                "type": "object",
+                "properties": {}
+            })
+        )
+    }
+
+    async fn execute(&self, _args: &JsonValue, context_binary: Option<&Path>) -> Result<String> {
+        let binary = context_binary.context("No binary context available. Cannot run callgraph.")?;
+
+        let output = tokio::task::spawn_blocking({
+            let binary = binary.to_path_buf();
+            move || {
+                Command::new(current_cli_exe())
+                    .arg("callgraph")
+                    .arg(binary)
+                    .output()
+            }
+        }).await??;
+
+        if output.status.success() {
+            Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+        } else {
+            Ok(format!("Error: {}", String::from_utf8_lossy(&output.stderr)))
+        }
+    }
+}
+
+/// Tool to execute arbitrary Rhai scripts over the Fission binary inventory.
+pub struct ScriptTool;
+
+#[async_trait::async_trait]
+impl AiTool for ScriptTool {
+    fn definition(&self) -> ToolDefinition {
+        ToolDefinition::new(
+            "run_script",
+            "Execute an arbitrary Rhai script over the Fission binary inventory. Use this for complex, custom programmatic queries.",
+            serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "script_content": {
+                        "type": "string",
+                        "description": "The full source code of the Rhai script to execute."
+                    }
+                },
+                "required": ["script_content"]
+            })
+        )
+    }
+
+    async fn execute(&self, args: &JsonValue, context_binary: Option<&Path>) -> Result<String> {
+        let binary = context_binary.context("No binary context available. Cannot run script.")?;
+        let script_content = args.get("script_content").and_then(|v| v.as_str()).context("Missing or invalid 'script_content'")?;
+
+        let temp_dir = std::env::temp_dir();
+        let script_path = temp_dir.join(format!("fission_ai_script_{}.rhai", std::process::id()));
+        tokio::fs::write(&script_path, script_content).await?;
+
+        let output = tokio::task::spawn_blocking({
+            let binary = binary.to_path_buf();
+            let script_path_clone = script_path.clone();
+            move || {
+                Command::new(current_cli_exe())
+                    .arg("script")
+                    .arg("run")
+                    .arg(binary)
+                    .arg("--script")
+                    .arg(script_path_clone)
+                    .output()
+            }
+        }).await??;
+
+        let _ = tokio::fs::remove_file(&script_path).await; // Clean up temp file
+
+        if output.status.success() {
+            Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+        } else {
+            Ok(format!("Error: {}", String::from_utf8_lossy(&output.stderr)))
+        }
+    }
+}
+
+/// Tool to emit raw Rust-Sleigh p-code for a function.
+pub struct RawPcodeTool;
+
+#[async_trait::async_trait]
+impl AiTool for RawPcodeTool {
+    fn definition(&self) -> ToolDefinition {
+        ToolDefinition::new(
+            "raw_pcode",
+            "Emit the Rust-Sleigh raw p-code for a function at a specific memory address.",
+            serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "addr": {
+                        "type": "string",
+                        "description": "The memory address of the function to emit raw p-code for (e.g. '0x140001000')."
+                    }
+                },
+                "required": ["addr"]
+            })
+        )
+    }
+
+    async fn execute(&self, args: &JsonValue, context_binary: Option<&Path>) -> Result<String> {
+        let binary = context_binary.context("No binary context available. Cannot run raw_pcode.")?;
+        let addr = args.get("addr").and_then(|v| v.as_str()).context("Missing or invalid 'addr'")?;
+
+        let output = tokio::task::spawn_blocking({
+            let binary = binary.to_path_buf();
+            let addr = addr.to_string();
+            move || {
+                Command::new(current_cli_exe())
+                    .arg("raw-pcode")
+                    .arg(binary)
+                    .arg("--addr")
+                    .arg(addr)
+                    .output()
+            }
+        }).await??;
+
+        if output.status.success() {
+            Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+        } else {
+            Ok(format!("Error: {}", String::from_utf8_lossy(&output.stderr)))
+        }
+    }
+}
+
+/// Tool to emit raw p-code CFG topology diagnostics for a function.
+pub struct PcodeTopologyTool;
+
+#[async_trait::async_trait]
+impl AiTool for PcodeTopologyTool {
+    fn definition(&self) -> ToolDefinition {
+        ToolDefinition::new(
+            "pcode_topology",
+            "Emit raw p-code CFG/topology diagnostics for a function.",
+            serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "addr": {
+                        "type": "string",
+                        "description": "The memory address of the function to emit topology for (e.g. '0x140001000')."
+                    }
+                },
+                "required": ["addr"]
+            })
+        )
+    }
+
+    async fn execute(&self, args: &JsonValue, context_binary: Option<&Path>) -> Result<String> {
+        let binary = context_binary.context("No binary context available. Cannot run pcode_topology.")?;
+        let addr = args.get("addr").and_then(|v| v.as_str()).context("Missing or invalid 'addr'")?;
+
+        let output = tokio::task::spawn_blocking({
+            let binary = binary.to_path_buf();
+            let addr = addr.to_string();
+            move || {
+                Command::new(current_cli_exe())
+                    .arg("pcode-topology")
+                    .arg(binary)
+                    .arg("--addr")
+                    .arg(addr)
+                    .output()
+            }
+        }).await??;
+
+        if output.status.success() {
+            Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+        } else {
+            Ok(format!("Error: {}", String::from_utf8_lossy(&output.stderr)))
+        }
+    }
+}

@@ -62,6 +62,12 @@ pub fn render(frame: &mut Frame, app: &App) {
 
     if app.mention_state.is_some() {
         render_mention_popup(frame, app, outer[2]);
+    } else if app.slash_state.is_some() {
+        render_slash_popup(frame, app, outer[2]);
+    }
+
+    if app.session_history.is_some() {
+        render_session_history(frame, app, area);
     }
 }
 
@@ -310,6 +316,86 @@ fn render_mention_popup(frame: &mut Frame, app: &App, input_area: Rect) {
             
         let paragraph = Paragraph::new(items).block(block);
         frame.render_widget(paragraph, area);
+    }
+}
+
+// ── Slash Command Popup ───────────────────────────────────────────────────────
+
+fn render_slash_popup(frame: &mut Frame, app: &App, input_area: Rect) {
+    if let Some(ref state) = app.slash_state {
+        let max_items = 8;
+        let item_count = state.options.len().min(max_items) as u16;
+        
+        let width = 30;
+        let height = item_count + 2; // +2 for borders
+        
+        let cursor_line = app.input[..app.input_cursor].matches('\n').count() as u16;
+        let text_before = &app.input[..app.input_cursor];
+        let last_nl = text_before.rfind('\n').map(|i| i + 1).unwrap_or(0);
+        let cursor_col = app.input[last_nl..app.input_cursor].chars().count() as u16;
+        
+        let x = (input_area.x + 1 + cursor_col).min(input_area.x + input_area.width.saturating_sub(width));
+        
+        let y = input_area.y
+            .saturating_add(cursor_line)
+            .saturating_sub(height);
+            
+        let area = Rect { x, y, width, height };
+
+        frame.render_widget(Clear, area);
+
+        let items: Vec<Line> = if state.options.is_empty() {
+            vec![Line::from(Span::styled("  No commands found", Style::default().fg(C_DIM)))]
+        } else {
+            state.options.iter().enumerate().take(max_items).map(|(i, opt)| {
+                let (prefix, style) = if i == state.selected_idx {
+                    ("> ", Style::default().fg(Color::Black).bg(C_ACCENT))
+                } else {
+                    ("  ", Style::default().fg(C_WHITE).bg(Color::Black))
+                };
+                Line::from(Span::styled(format!("{prefix}/{opt}"), style))
+            }).collect()
+        };
+
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(C_ACCENT))
+            .title(" Commands ")
+            .style(Style::default().bg(Color::Black));
+            
+        let paragraph = Paragraph::new(items).block(block);
+        frame.render_widget(paragraph, area);
+    }
+}
+
+// ── Session History Popup ─────────────────────────────────────────────────────
+
+fn render_session_history(frame: &mut Frame, app: &App, area: Rect) {
+    if let Some(ref state) = app.session_history {
+        let block = Block::default()
+            .title(" Session History ")
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(C_ACCENT))
+            .style(Style::default().bg(Color::Black));
+            
+        let popup_area = centered_rect(60, 50, area);
+        frame.render_widget(Clear, popup_area);
+
+        let items: Vec<Line> = if state.options.is_empty() {
+            vec![Line::from(Span::styled("  No saved sessions found", Style::default().fg(C_DIM)))]
+        } else {
+            state.options.iter().enumerate().map(|(i, (_path, name))| {
+                let (prefix, style) = if i == state.selected_idx {
+                    ("> ", Style::default().fg(Color::Black).bg(C_ACCENT).add_modifier(Modifier::BOLD))
+                } else {
+                    ("  ", Style::default().fg(C_WHITE).bg(Color::Black))
+                };
+                Line::from(Span::styled(format!("{prefix}{name}"), style))
+            }).collect()
+        };
+
+        let list = Paragraph::new(items).block(block);
+        frame.render_widget(list, popup_area);
     }
 }
 

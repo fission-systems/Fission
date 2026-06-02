@@ -1885,6 +1885,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "crossterm",
+ "dirs 5.0.1",
  "fission-ai",
  "fission-core",
  "futures",

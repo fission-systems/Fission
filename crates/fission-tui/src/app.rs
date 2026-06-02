@@ -24,6 +24,20 @@ pub struct MentionState {
     pub start_cursor: usize,
 }
 
+#[derive(Debug, Clone)]
+pub struct SlashCommandState {
+    pub start_cursor: usize,
+    pub query: String,
+    pub options: Vec<String>,
+    pub selected_idx: usize,
+}
+
+#[derive(Debug, Clone)]
+pub struct SessionHistoryState {
+    pub options: Vec<(std::path::PathBuf, String)>,
+    pub selected_idx: usize,
+}
+
 /// Top-level application state.
 pub struct App {
     /// Chat history entries for display.
@@ -65,6 +79,12 @@ pub struct App {
 
     // ── Mentions ─────────────────────────────────────────────────────────────
     pub mention_state: Option<MentionState>,
+    
+    // ── Slash Commands ───────────────────────────────────────────────────────
+    pub slash_state: Option<SlashCommandState>,
+
+    // ── Session History ──────────────────────────────────────────────────────
+    pub session_history: Option<SessionHistoryState>,
 }
 
 impl App {
@@ -89,6 +109,8 @@ impl App {
             context_ready: false,
             context_loading: false,
             mention_state: None,
+            slash_state: None,
+            session_history: None,
         }
     }
 
@@ -323,6 +345,78 @@ impl App {
         }
     }
 
+    // ── Slash Commands ───────────────────────────────────────────────────────
+
+    pub fn start_slash_command(&mut self) {
+        let commands = vec![
+            "clear".to_string(),
+            "quit".to_string(),
+            "help".to_string(),
+            "provider".to_string(),
+            "model".to_string(),
+            "history".to_string(),
+        ];
+        self.slash_state = Some(SlashCommandState {
+            start_cursor: self.input_cursor, // just after the `/`
+            query: String::new(),
+            options: commands,
+            selected_idx: 0,
+        });
+    }
+
+    pub fn cancel_slash_command(&mut self) {
+        self.slash_state = None;
+    }
+
+    pub fn update_slash_query(&mut self) {
+        if let Some(state) = &mut self.slash_state {
+            let query_str = &self.input[state.start_cursor..self.input_cursor];
+            state.query = query_str.to_string();
+
+            let all_commands = vec!["clear", "quit", "help", "provider", "model", "history"];
+            state.options = all_commands
+                .into_iter()
+                .filter(|cmd| cmd.to_lowercase().contains(&state.query.to_lowercase()))
+                .map(String::from)
+                .collect();
+            state.selected_idx = 0;
+        }
+    }
+
+    pub fn slash_up(&mut self) {
+        if let Some(state) = &mut self.slash_state {
+            if state.selected_idx > 0 {
+                state.selected_idx -= 1;
+            } else if !state.options.is_empty() {
+                state.selected_idx = state.options.len() - 1;
+            }
+        }
+    }
+
+    pub fn slash_down(&mut self) {
+        if let Some(state) = &mut self.slash_state {
+            if state.selected_idx + 1 < state.options.len() {
+                state.selected_idx += 1;
+            } else {
+                state.selected_idx = 0;
+            }
+        }
+    }
+
+    pub fn commit_slash_command(&mut self) {
+        if let Some(state) = self.slash_state.take() {
+            if let Some(selected) = state.options.get(state.selected_idx) {
+                let prefix = self.input[..state.start_cursor.saturating_sub(1)].to_string();
+                let suffix = self.input[self.input_cursor..].to_string();
+                
+                let insert_text = format!("/{} ", selected);
+                self.input = format!("{}{}{}", prefix, insert_text, suffix);
+                
+                self.input_cursor = prefix.len() + insert_text.len();
+            }
+        }
+    }
+
     // ── Provider Menu ─────────────────────────────────────────────────────────
 
     pub fn toggle_provider_menu(&mut self) {
@@ -407,6 +501,93 @@ impl App {
 
     pub fn get_selected_model(&self) -> Option<String> {
         self.model_options.get(self.selected_model_idx).cloned()
+    }
+
+    // ── Session History ──────────────────────────────────────────────────────
+
+    pub fn load_session_history(&mut self) {
+        let mut options = Vec::new();
+        if let Some(data_dir) = dirs::data_local_dir() {
+            let session_dir = data_dir.join("fission").join("sessions");
+            if session_dir.exists() {
+                if let Ok(entries) = std::fs::read_dir(&session_dir) {
+                    for entry in entries.flatten() {
+                        if let Ok(meta) = entry.metadata() {
+                            if meta.is_file() && entry.path().extension().map(|s| s == "json").unwrap_or(false) {
+                                let filename = entry.file_name().to_string_lossy().to_string();
+                                let mut name = filename.replace(".json", "");
+                                // Extract first few words if we saved them
+                                if name.starts_with("session_") {
+                                    name = name.replacen("session_", "", 1);
+                                }
+                                options.push((entry.path(), name));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        // Sort descending by name (which starts with timestamp if we use UNIX time)
+        options.sort_by(|a, b| b.1.cmp(&a.1));
+
+        self.session_history = Some(SessionHistoryState {
+            options,
+            selected_idx: 0,
+        });
+    }
+
+    pub fn close_session_history(&mut self) {
+        self.session_history = None;
+    }
+
+    pub fn session_history_up(&mut self) {
+        if let Some(state) = &mut self.session_history {
+            if state.selected_idx > 0 {
+                state.selected_idx -= 1;
+            } else if !state.options.is_empty() {
+                state.selected_idx = state.options.len() - 1;
+            }
+        }
+    }
+
+    pub fn session_history_down(&mut self) {
+        if let Some(state) = &mut self.session_history {
+            if state.selected_idx + 1 < state.options.len() {
+                state.selected_idx += 1;
+            } else {
+                state.selected_idx = 0;
+            }
+        }
+    }
+
+    pub fn get_selected_session(&self) -> Option<std::path::PathBuf> {
+        self.session_history.as_ref().and_then(|state| {
+            state.options.get(state.selected_idx).map(|(p, _)| p.clone())
+        })
+    }
+
+    pub fn save_current_session(&self, pipeline: &fission_ai::pipeline::AiPipeline) {
+        if let Some(data_dir) = dirs::data_local_dir() {
+            let session_dir = data_dir.join("fission").join("sessions");
+            let _ = std::fs::create_dir_all(&session_dir);
+            
+            let messages = {
+                let session = pipeline.session.lock().unwrap();
+                if session.messages.is_empty() { return; }
+                session.messages.clone()
+            };
+
+            let timestamp = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs();
+            
+            let path = session_dir.join(format!("session_{}.json", timestamp));
+            if let Ok(json) = serde_json::to_string_pretty(&messages) {
+                let _ = std::fs::write(path, json);
+            }
+        }
     }
 }
 

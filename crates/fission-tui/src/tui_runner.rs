@@ -114,6 +114,7 @@ fn run_event_loop(
                 TuiMsg::Done(full) => {
                     app.finish_assistant_stream();
                     pipeline.record_assistant_response(full);
+                    app.save_current_session(&pipeline);
                 }
                 TuiMsg::Error(e) => {
                     app.finish_assistant_stream();
@@ -172,28 +173,49 @@ fn run_event_loop(
                     });
                 }
             },
+            AppAction::ToggleHistoryMenu => {
+                app.show_provider_menu = false;
+                app.show_model_menu = false;
+                if app.session_history.is_none() {
+                    app.load_session_history();
+                } else {
+                    app.close_session_history();
+                }
+            },
             AppAction::Escape => {
                 app.show_help = false;
                 app.show_provider_menu = false;
                 app.show_model_menu = false;
+                app.close_session_history();
                 app.cancel_mention();
+                app.cancel_slash_command();
             }
-            AppAction::InsertChar(c) if !app.streaming && !app.show_provider_menu && !app.show_model_menu => {
+            AppAction::InsertChar(c) if !app.streaming && !app.show_provider_menu && !app.show_model_menu && app.session_history.is_none() => {
                 app.insert_char(c);
                 if c == '@' {
                     app.start_mention();
+                } else if c == '/' && app.input.trim() == "/" {
+                    app.start_slash_command();
                 } else if app.mention_state.is_some() {
                     if c == ' ' {
                         app.cancel_mention();
                     } else {
                         app.update_mention_query();
                     }
+                } else if app.slash_state.is_some() {
+                    if c == ' ' {
+                        app.cancel_slash_command();
+                    } else {
+                        app.update_slash_query();
+                    }
                 }
             }
-            AppAction::DeleteBack if !app.streaming && !app.show_provider_menu && !app.show_model_menu => {
+            AppAction::DeleteBack if !app.streaming && !app.show_provider_menu && !app.show_model_menu && app.session_history.is_none() => {
                 app.delete_char_before_cursor();
                 if app.mention_state.is_some() {
                     app.update_mention_query();
+                } else if app.slash_state.is_some() {
+                    app.update_slash_query();
                 }
             }
             AppAction::ScrollUp => {
@@ -205,6 +227,10 @@ fn run_event_loop(
             AppAction::CursorUp => {
                 if app.mention_state.is_some() {
                     app.mention_up();
+                } else if app.slash_state.is_some() {
+                    app.slash_up();
+                } else if app.session_history.is_some() {
+                    app.session_history_up();
                 } else if app.show_provider_menu {
                     app.provider_menu_up();
                 } else if app.show_model_menu {
@@ -216,6 +242,10 @@ fn run_event_loop(
             AppAction::CursorDown => {
                 if app.mention_state.is_some() {
                     app.mention_down();
+                } else if app.slash_state.is_some() {
+                    app.slash_down();
+                } else if app.session_history.is_some() {
+                    app.session_history_down();
                 } else if app.show_provider_menu {
                     app.provider_menu_down();
                 } else if app.show_model_menu {
@@ -242,8 +272,11 @@ fn run_event_loop(
                     }
                 }
             }
-            AppAction::CursorLeft if !app.streaming && !app.show_provider_menu && !app.show_model_menu => app.cursor_left(),
-            AppAction::CursorRight if !app.streaming && !app.show_provider_menu && !app.show_model_menu => app.cursor_right(),
+            AppAction::CursorLeft if !app.streaming && !app.show_provider_menu && !app.show_model_menu && app.session_history.is_none() => app.cursor_left(),
+            AppAction::CursorRight if !app.streaming && !app.show_provider_menu && !app.show_model_menu && app.session_history.is_none() => app.cursor_right(),
+            AppAction::Submit if app.slash_state.is_some() => {
+                app.commit_slash_command();
+            }
             AppAction::Submit if app.mention_state.is_some() => {
                 app.commit_mention();
             }
@@ -283,8 +316,92 @@ fn run_event_loop(
                     app.show_model_menu = false;
                 }
             }
-            AppAction::Submit if !app.streaming && !app.input.trim().is_empty() && !app.show_provider_menu && !app.show_model_menu => {
+            AppAction::Submit if app.session_history.is_some() => {
+                if let Some(path) = app.get_selected_session() {
+                    // Load the JSON file into the pipeline
+                    if let Ok(json) = std::fs::read_to_string(&path) {
+                        if let Ok(messages) = serde_json::from_str::<Vec<fission_ai::session::Message>>(&json) {
+                            // Update pipeline
+                            {
+                                let mut session = pipeline.session.lock().unwrap();
+                                session.messages = messages.clone();
+                            }
+                            // Rebuild UI entries
+                            app.entries.clear();
+                            for msg in messages {
+                                match msg.role {
+                                    fission_ai::session::Role::User => {
+                                        if let Some(c) = msg.content {
+                                            app.push_user(c);
+                                        }
+                                    }
+                                    fission_ai::session::Role::Assistant => {
+                                        if let Some(c) = msg.content {
+                                            app.entries.push(crate::app::ChatEntry {
+                                                role_label: "Fission AI".to_string(),
+                                                content: c,
+                                                is_streaming: false,
+                                            });
+                                        } else if let Some(tc) = msg.tool_calls {
+                                            for call in tc {
+                                                app.entries.push(crate::app::ChatEntry {
+                                                    role_label: "Fission AI (Tool)".to_string(),
+                                                    content: format!("Called tool: {} with {}", call.function.name, call.function.arguments),
+                                                    is_streaming: false,
+                                                });
+                                            }
+                                        }
+                                    }
+                                    fission_ai::session::Role::Tool => {
+                                        if let Some(c) = msg.content {
+                                            app.entries.push(crate::app::ChatEntry {
+                                                role_label: "Tool Response".to_string(),
+                                                content: c,
+                                                is_streaming: false,
+                                            });
+                                        }
+                                    }
+                                    _ => {}
+                                }
+                            }
+                            app.scroll_to_bottom();
+                        }
+                    }
+                    app.close_session_history();
+                }
+            }
+            AppAction::Submit if !app.streaming && !app.input.trim().is_empty() && !app.show_provider_menu && !app.show_model_menu && app.session_history.is_none() => {
                 let user_text = app.take_input();
+                
+                let trim_cmd = user_text.trim();
+                if trim_cmd == "/quit" {
+                    break;
+                } else if trim_cmd == "/clear" {
+                    app.entries.clear();
+                    pipeline.session.lock().unwrap().clear();
+                    continue;
+                } else if trim_cmd == "/help" {
+                    app.show_help = true;
+                    continue;
+                } else if trim_cmd == "/provider" {
+                    app.toggle_provider_menu();
+                    continue;
+                } else if trim_cmd == "/history" {
+                    app.load_session_history();
+                    continue;
+                } else if trim_cmd == "/model" {
+                    app.toggle_model_menu();
+                    if app.show_model_menu {
+                        let tx2 = tx.clone();
+                        let pipeline_clone = pipeline.clone();
+                        rt.spawn(async move {
+                            let models = pipeline_clone.fetch_models().await.unwrap_or_else(|_| vec![]);
+                            let _ = tx2.send(TuiMsg::ModelsFetched(models));
+                        });
+                    }
+                    continue;
+                }
+                
                 app.push_user(user_text.clone());
                 app.begin_assistant_stream();
                 app.scroll_to_bottom();

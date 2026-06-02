@@ -83,6 +83,14 @@ impl AiPipeline {
         tool_registry.register(crate::tools::execution::XrefsTool);
         tool_registry.register(crate::tools::execution::ApplyPatchTool);
         tool_registry.register(crate::tools::execution::LoadBinaryTool);
+        tool_registry.register(crate::tools::execution::DecompileTool);
+        tool_registry.register(crate::tools::execution::ListFunctionsTool);
+        tool_registry.register(crate::tools::execution::StringsTool);
+        tool_registry.register(crate::tools::execution::BinaryInfoTool);
+        tool_registry.register(crate::tools::execution::CallgraphTool);
+        tool_registry.register(crate::tools::execution::ScriptTool);
+        tool_registry.register(crate::tools::execution::RawPcodeTool);
+        tool_registry.register(crate::tools::execution::PcodeTopologyTool);
         
         let context_manager = crate::session::ContextManager::new(32000, 6000);
         

@@ -24,6 +24,8 @@ pub enum AppAction {
     ToggleProviderMenu,
     /// Toggle model menu (Ctrl+O).
     ToggleModelMenu,
+    /// Toggle history menu (Ctrl+H).
+    ToggleHistoryMenu,
     /// Cycle to the next provider (Ctrl+Right)
     CycleProviderNext,
     /// Cycle to the prev provider (Ctrl+Left)
@@ -73,6 +75,8 @@ fn map_key(code: KeyCode, modifiers: KeyModifiers) -> AppAction {
         KeyCode::Char('p') if modifiers.contains(KeyModifiers::CONTROL) => AppAction::ToggleProviderMenu,
         // Toggle Model Menu
         KeyCode::Char('o') if modifiers.contains(KeyModifiers::CONTROL) => AppAction::ToggleModelMenu,
+        // Toggle History Menu
+        KeyCode::Char('h') if modifiers.contains(KeyModifiers::CONTROL) => AppAction::ToggleHistoryMenu,
         // Close menus
         KeyCode::Esc => AppAction::Escape,
         // Toggle Mode
