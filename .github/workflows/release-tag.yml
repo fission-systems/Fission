@@ -34,7 +34,7 @@ jobs:
     steps:
       - name: Resolve ref and check ci.yml runs
         id: gate
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         with:
           script: |
             const ref = `${{ inputs.ref }}`.trim() || "main";
