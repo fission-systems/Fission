@@ -296,19 +296,22 @@ impl App {
     pub fn cursor_up(&mut self) {
         let text_before = &self.input[..self.input_cursor];
         let current_line_idx = text_before.matches('\n').count();
-        
+
         if current_line_idx == 0 {
             self.scroll_up();
             return;
         }
-        
-        let line_start_byte = text_before.rfind('\n').map(|i| i + 1).unwrap_or(0);
+
+        // Byte position of the '\n' that ends the previous line.
+        let prev_nl_pos = text_before.rfind('\n').unwrap(); // safe: count > 0
+        let line_start_byte = prev_nl_pos + 1;
         let current_col = self.input[line_start_byte..self.input_cursor].chars().count();
-        
-        let text_before_prev = &self.input[..line_start_byte.saturating_sub(1)];
-        let prev_line_start = text_before_prev.rfind('\n').map(|i| i + 1).unwrap_or(0);
-        let prev_line_text = &self.input[prev_line_start..line_start_byte.saturating_sub(1)];
-        
+
+        // Find start of the line *before* prev_nl_pos.
+        let before_prev = &self.input[..prev_nl_pos];
+        let prev_line_start = before_prev.rfind('\n').map(|i| i + 1).unwrap_or(0);
+        let prev_line_text = &self.input[prev_line_start..prev_nl_pos];
+
         let mut target_byte = prev_line_start;
         for (i, c) in prev_line_text.char_indices().take(current_col) {
             target_byte = prev_line_start + i + c.len_utf8();
@@ -383,16 +386,22 @@ impl App {
 
     pub fn update_mention_query(&mut self) {
         if let Some(ref mut state) = self.mention_state {
-            // The query is the text between start_cursor and current input_cursor
             if self.input_cursor >= state.start_cursor {
-                state.query = self.input[state.start_cursor..self.input_cursor].to_string();
-                
-                // Refilter options (naive approach: just search for query as a substring)
-                // In a real app we'd cache the full list, but doing it fast is fine.
+                // Guard: both indices must be valid char boundaries.
+                let start = state.start_cursor.min(self.input.len());
+                let end = self.input_cursor.min(self.input.len());
+                if self.input.is_char_boundary(start) && self.input.is_char_boundary(end) {
+                    state.query = self.input[start..end].to_string();
+                } else {
+                    // Cursor moved to a non-boundary (shouldn't happen) — cancel safely.
+                    self.mention_state = None;
+                    return;
+                }
+
                 let all = get_workspace_files();
                 state.options = all.into_iter()
                     .filter(|f| f.to_lowercase().contains(&state.query.to_lowercase()))
-                    .take(20) // limit items
+                    .take(20)
                     .collect();
                 state.selected_idx = 0;
             } else {
@@ -427,12 +436,22 @@ impl App {
     pub fn commit_mention(&mut self) {
         if let Some(state) = self.mention_state.take() {
             if let Some(selected) = state.options.get(state.selected_idx) {
-                let prefix = self.input[..state.start_cursor.saturating_sub(1)].to_string();
-                let suffix = self.input[self.input_cursor..].to_string();
-                
+                // Go back one *char* (the `@`) from start_cursor safely.
+                let prefix_end = self.input[..state.start_cursor]
+                    .char_indices()
+                    .last()
+                    .map(|(i, _)| i)
+                    .unwrap_or(0);
+                let prefix = self.input[..prefix_end].to_string();
+                let suffix_start = self.input_cursor.min(self.input.len());
+                let suffix = if self.input.is_char_boundary(suffix_start) {
+                    self.input[suffix_start..].to_string()
+                } else {
+                    String::new()
+                };
+
                 let insert_text = format!("@{} ", selected);
                 self.input = format!("{}{}{}", prefix, insert_text, suffix);
-                
                 self.input_cursor = prefix.len() + insert_text.len();
             }
         }
@@ -500,12 +519,22 @@ impl App {
     pub fn commit_slash_command(&mut self) {
         if let Some(state) = self.slash_state.take() {
             if let Some(selected) = state.options.get(state.selected_idx) {
-                let prefix = self.input[..state.start_cursor.saturating_sub(1)].to_string();
-                let suffix = self.input[self.input_cursor..].to_string();
-                
+                // Go back one *char* (the `/`) from start_cursor safely.
+                let prefix_end = self.input[..state.start_cursor]
+                    .char_indices()
+                    .last()
+                    .map(|(i, _)| i)
+                    .unwrap_or(0);
+                let prefix = self.input[..prefix_end].to_string();
+                let suffix_start = self.input_cursor.min(self.input.len());
+                let suffix = if self.input.is_char_boundary(suffix_start) {
+                    self.input[suffix_start..].to_string()
+                } else {
+                    String::new()
+                };
+
                 let insert_text = format!("/{} ", selected);
                 self.input = format!("{}{}{}", prefix, insert_text, suffix);
-                
                 self.input_cursor = prefix.len() + insert_text.len();
             }
         }
@@ -661,23 +690,33 @@ impl App {
         })
     }
 
+    /// Save the current session to a stable, binary-scoped JSON file.
+    /// Uses one canonical path per binary (or a single fallback), so this
+    /// can be called after every `Done` message without creating new files.
     pub fn save_current_session(&self, pipeline: &fission_ai::pipeline::AiPipeline) {
         if let Some(data_dir) = dirs::data_local_dir() {
             let session_dir = data_dir.join("fission").join("sessions");
             let _ = std::fs::create_dir_all(&session_dir);
-            
-            let messages = {
+
+            let (messages, binary_path) = {
                 let session = pipeline.session.lock().unwrap();
                 if session.messages.is_empty() { return; }
-                session.messages.clone()
+                (session.messages.clone(), session.binary_path.clone())
             };
 
-            let timestamp = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_secs();
-            
-            let path = session_dir.join(format!("session_{}.json", timestamp));
+            // Derive a stable filename from the binary name, or use "session.json".
+            let stem = binary_path
+                .as_ref()
+                .and_then(|p| p.file_name())
+                .and_then(|n| n.to_str())
+                .unwrap_or("session");
+            // Sanitise: keep only alphanumeric, dash, underscore, dot.
+            let safe_stem: String = stem
+                .chars()
+                .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' || c == '.' { c } else { '_' })
+                .collect();
+            let path = session_dir.join(format!("{}.json", safe_stem));
+
             if let Ok(json) = serde_json::to_string_pretty(&messages) {
                 let _ = std::fs::write(path, json);
             }

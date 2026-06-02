@@ -158,8 +158,8 @@ fn run_event_loop(
                     }
                 }
                 TuiMsg::Error(e) => {
-                    app.finish_assistant_stream();
-                    app.append_stream_delta(&format!("\n⚠ {e}"));
+                    // append first (while is_streaming=true), then finish once.
+                    app.append_stream_delta(&format!("\n\n⚠ Error: {e}"));
                     app.finish_assistant_stream();
                 }
                 TuiMsg::ContextReady => {
@@ -504,8 +504,8 @@ fn run_event_loop(
                         });
                     }
                     Err(e) => {
-                        app.finish_assistant_stream();
-                        app.append_stream_delta(&format!("\n⚠ {e}"));
+                        // append first (while is_streaming=true), then finish once.
+                        app.append_stream_delta(&format!("\n\n⚠ Error: {e}"));
                         app.finish_assistant_stream();
                     }
                 }
