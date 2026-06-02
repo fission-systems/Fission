@@ -336,6 +336,8 @@ impl AiPipeline {
                             }
                         } else if func_name == "decomp" || func_name == "decompile" || func_name == "fission__decomp" || func_name == "fission__decompile" {
                             cm.focus.set_decomp_snippet(processed_result.clone());
+                        } else if func_name == "disasm" || func_name == "disassemble" || func_name == "fission__disasm" || func_name == "fission__disassemble" {
+                            cm.focus.set_disasm_snippet(processed_result.clone());
                         }
                     }
                     
