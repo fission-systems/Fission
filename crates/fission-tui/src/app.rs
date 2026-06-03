@@ -119,6 +119,18 @@ pub struct App {
     pub decomp_content: String,
     /// Optional function name / address label for the explorer header.
     pub explorer_label: Option<String>,
+    /// Whether layout split is horizontal (side-by-side) or vertical (stacked).
+    pub explorer_horizontal_split: bool,
+    /// Whether search input mode is active in the explorer.
+    pub explorer_search_mode: bool,
+    /// Buffer for the current explorer search query.
+    pub explorer_search_input: String,
+    /// Cursor offset (in bytes) within explorer search input.
+    pub explorer_search_cursor: usize,
+    /// Area tracking for Disassembly pane.
+    pub disasm_area: std::cell::Cell<ratatui::layout::Rect>,
+    /// Area tracking for Decompiled-C pane.
+    pub decomp_area: std::cell::Cell<ratatui::layout::Rect>,
 }
 
 impl App {
@@ -152,6 +164,12 @@ impl App {
             disasm_content: String::new(),
             decomp_content: String::new(),
             explorer_label: None,
+            explorer_horizontal_split: false,
+            explorer_search_mode: false,
+            explorer_search_input: String::new(),
+            explorer_search_cursor: 0,
+            disasm_area: std::cell::Cell::new(ratatui::layout::Rect::default()),
+            decomp_area: std::cell::Cell::new(ratatui::layout::Rect::default()),
         }
     }
 
@@ -186,6 +204,106 @@ impl App {
         match self.active_panel {
             ActivePanel::Disasm => self.disasm_scroll = self.disasm_scroll.saturating_add(n),
             ActivePanel::Decomp => self.decomp_scroll = self.decomp_scroll.saturating_add(n),
+        }
+    }
+
+    pub fn toggle_split_direction(&mut self) {
+        self.explorer_horizontal_split = !self.explorer_horizontal_split;
+    }
+
+    pub fn handle_explorer_scroll_up(&mut self, x: u16, y: u16, n: u16) {
+        let disasm = self.disasm_area.get();
+        let decomp = self.decomp_area.get();
+        if x >= disasm.x && x < disasm.x + disasm.width && y >= disasm.y && y < disasm.y + disasm.height {
+            self.disasm_scroll = self.disasm_scroll.saturating_sub(n);
+        } else if x >= decomp.x && x < decomp.x + decomp.width && y >= decomp.y && y < decomp.y + decomp.height {
+            self.decomp_scroll = self.decomp_scroll.saturating_sub(n);
+        } else {
+            self.explorer_scroll_up(n);
+        }
+    }
+
+    pub fn handle_explorer_scroll_down(&mut self, x: u16, y: u16, n: u16) {
+        let disasm = self.disasm_area.get();
+        let decomp = self.decomp_area.get();
+        if x >= disasm.x && x < disasm.x + disasm.width && y >= disasm.y && y < disasm.y + disasm.height {
+            self.disasm_scroll = self.disasm_scroll.saturating_add(n);
+        } else if x >= decomp.x && x < decomp.x + decomp.width && y >= decomp.y && y < decomp.y + decomp.height {
+            self.decomp_scroll = self.decomp_scroll.saturating_add(n);
+        } else {
+            self.explorer_scroll_down(n);
+        }
+    }
+
+    pub fn start_explorer_search(&mut self) {
+        self.explorer_search_mode = true;
+        self.explorer_search_input = String::new();
+        self.explorer_search_cursor = 0;
+    }
+
+    pub fn commit_explorer_search(&mut self) {
+        self.explorer_search_mode = false;
+        if self.explorer_search_input.is_empty() {
+            return;
+        }
+        let query = self.explorer_search_input.to_lowercase();
+        match self.active_panel {
+            ActivePanel::Disasm => {
+                for (idx, line) in self.disasm_content.lines().enumerate() {
+                    if line.to_lowercase().contains(&query) {
+                        self.disasm_scroll = idx as u16;
+                        break;
+                    }
+                }
+            }
+            ActivePanel::Decomp => {
+                for (idx, line) in self.decomp_content.lines().enumerate() {
+                    if line.to_lowercase().contains(&query) {
+                        self.decomp_scroll = idx as u16;
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    pub fn cancel_explorer_search(&mut self) {
+        self.explorer_search_mode = false;
+    }
+
+    pub fn explorer_search_insert_char(&mut self, ch: char) {
+        self.explorer_search_input.insert(self.explorer_search_cursor, ch);
+        self.explorer_search_cursor += ch.len_utf8();
+    }
+
+    pub fn explorer_search_delete_char_before_cursor(&mut self) {
+        if self.explorer_search_cursor > 0 {
+            let prev = self.explorer_search_input[..self.explorer_search_cursor]
+                .char_indices()
+                .last()
+                .map(|(i, _)| i)
+                .unwrap_or(0);
+            self.explorer_search_input.remove(prev);
+            self.explorer_search_cursor = prev;
+        }
+    }
+
+    pub fn explorer_search_cursor_left(&mut self) {
+        if self.explorer_search_cursor > 0 {
+            let prev = self.explorer_search_input[..self.explorer_search_cursor]
+                .char_indices()
+                .last()
+                .map(|(idx, _)| idx)
+                .unwrap_or(0);
+            self.explorer_search_cursor = prev;
+        }
+    }
+
+    pub fn explorer_search_cursor_right(&mut self) {
+        if self.explorer_search_cursor < self.explorer_search_input.len() {
+            if let Some(ch) = self.explorer_search_input[self.explorer_search_cursor..].chars().next() {
+                self.explorer_search_cursor += ch.len_utf8();
+            }
         }
     }
 
@@ -437,7 +555,8 @@ impl App {
         if let Some(state) = self.mention_state.take() {
             if let Some(selected) = state.options.get(state.selected_idx) {
                 // Go back one *char* (the `@`) from start_cursor safely.
-                let prefix_end = self.input[..state.start_cursor]
+                let limit = state.start_cursor.min(self.input.len());
+                let prefix_end = self.input[..limit]
                     .char_indices()
                     .last()
                     .map(|(i, _)| i)
@@ -482,17 +601,28 @@ impl App {
     }
 
     pub fn update_slash_query(&mut self) {
-        if let Some(state) = &mut self.slash_state {
-            let query_str = &self.input[state.start_cursor..self.input_cursor];
-            state.query = query_str.to_string();
+        if let Some(ref mut state) = self.slash_state {
+            if self.input_cursor >= state.start_cursor {
+                let start = state.start_cursor.min(self.input.len());
+                let end = self.input_cursor.min(self.input.len());
+                if self.input.is_char_boundary(start) && self.input.is_char_boundary(end) {
+                    state.query = self.input[start..end].to_string();
+                } else {
+                    self.slash_state = None;
+                    return;
+                }
 
-            let all_commands = vec!["clear", "quit", "help", "provider", "model", "history"];
-            state.options = all_commands
-                .into_iter()
-                .filter(|cmd| cmd.to_lowercase().contains(&state.query.to_lowercase()))
-                .map(String::from)
-                .collect();
-            state.selected_idx = 0;
+                let all_commands = vec!["clear", "quit", "help", "provider", "model", "history", "export"];
+                state.options = all_commands
+                    .into_iter()
+                    .filter(|cmd| cmd.to_lowercase().contains(&state.query.to_lowercase()))
+                    .map(String::from)
+                    .collect();
+                state.selected_idx = 0;
+            } else {
+                // We backspaced before the `/`
+                self.slash_state = None;
+            }
         }
     }
 
@@ -520,7 +650,8 @@ impl App {
         if let Some(state) = self.slash_state.take() {
             if let Some(selected) = state.options.get(state.selected_idx) {
                 // Go back one *char* (the `/`) from start_cursor safely.
-                let prefix_end = self.input[..state.start_cursor]
+                let limit = state.start_cursor.min(self.input.len());
+                let prefix_end = self.input[..limit]
                     .char_indices()
                     .last()
                     .map(|(i, _)| i)

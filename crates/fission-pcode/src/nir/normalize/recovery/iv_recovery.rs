@@ -838,19 +838,36 @@ fn find_pointer_end_assignment_before(
         match &stmts[scan] {
             HirStmt::Assign {
                 lhs: HirLValue::Var(name),
-                rhs:
-                    HirExpr::Binary {
-                        op: HirBinaryOp::Add,
-                        lhs,
-                        rhs,
-                        ..
-                    },
+                rhs,
             } if name == end => {
-                if matches!(lhs.as_ref(), HirExpr::Var(name) if name == cursor) {
-                    return Some((scan, rhs.as_ref().clone()));
+                let mut found_count_expr = None;
+                if let HirExpr::Binary {
+                    op: HirBinaryOp::Add,
+                    lhs,
+                    rhs: add_rhs,
+                    ..
+                } = strip_casts(rhs)
+                {
+                    if matches!(strip_casts(lhs), HirExpr::Var(name) if name == cursor) {
+                        found_count_expr = Some(add_rhs.as_ref().clone());
+                    } else if matches!(strip_casts(add_rhs), HirExpr::Var(name) if name == cursor) {
+                        found_count_expr = Some(lhs.as_ref().clone());
+                    }
                 }
-                if matches!(rhs.as_ref(), HirExpr::Var(name) if name == cursor) {
-                    return Some((scan, lhs.as_ref().clone()));
+                
+                if let Some(mut expr) = found_count_expr {
+                    let mut backtrack = scan;
+                    while backtrack > 0 {
+                        backtrack -= 1;
+                        if let HirStmt::Assign { lhs: HirLValue::Var(v), rhs: val } = &stmts[backtrack] {
+                            if count_var_uses(&expr, v) > 0 {
+                                substitute_var_in_expr(&mut expr, v, val);
+                            }
+                        } else if matches!(&stmts[backtrack], HirStmt::Label(_) | HirStmt::Goto(_) | HirStmt::While {..} | HirStmt::DoWhile {..} | HirStmt::For {..} | HirStmt::Switch {..} | HirStmt::Block(_) | HirStmt::Return(_) | HirStmt::Break | HirStmt::Continue) {
+                            break;
+                        }
+                    }
+                    return Some((scan, expr));
                 }
                 return None;
             }
@@ -1655,7 +1672,7 @@ fn extract_pointer_cursor_and_count(
     cond: &HirExpr,
     stmts: &[HirStmt],
     loop_idx: usize,
-) -> Option<(String, HirExpr)> {
+) -> Option<(String, HirExpr, Option<usize>)> {
     let HirExpr::Binary {
         op: HirBinaryOp::Ne,
         lhs,
@@ -1687,19 +1704,19 @@ fn extract_pointer_cursor_and_count(
 
     if let HirExpr::Var(cursor) = strip_casts(lhs.as_ref()) {
         if let Some(count_expr) = match_addition(rhs.as_ref(), cursor) {
-            return Some((cursor.clone(), count_expr));
+            return Some((cursor.clone(), count_expr, None));
         }
     }
     if let HirExpr::Var(cursor) = strip_casts(rhs.as_ref()) {
         if let Some(count_expr) = match_addition(lhs.as_ref(), cursor) {
-            return Some((cursor.clone(), count_expr));
+            return Some((cursor.clone(), count_expr, None));
         }
     }
 
     match (strip_casts(lhs.as_ref()), strip_casts(rhs.as_ref())) {
         (HirExpr::Var(cursor), HirExpr::Var(end)) => {
-            let (_, count_expr) = find_pointer_end_assignment_before(stmts, loop_idx, cursor, end)?;
-            Some((cursor.clone(), count_expr))
+            let (scan_idx, count_expr) = find_pointer_end_assignment_before(stmts, loop_idx, cursor, end)?;
+            Some((cursor.clone(), count_expr, Some(scan_idx)))
         }
         _ => None,
     }
@@ -1711,19 +1728,28 @@ fn try_guarded_dowhile_pointer_iv_upgrade(
     loop_idx: usize,
     active_guards: &[HirExpr],
 ) -> bool {
-    let (cond, body) = match &stmts[loop_idx] {
-        HirStmt::DoWhile { cond, body } => (cond.clone(), body.clone()),
-        _ => return false,
+    eprintln!("[DEBUG-FIB-IV] Entered try_guarded_dowhile_pointer_iv_upgrade for loop_idx {}", loop_idx);
+    let (cond, body) = {
+        let HirStmt::DoWhile { cond, body } = &stmts[loop_idx] else {
+            eprintln!("[DEBUG-FIB-IV] Not a DoWhile");
+            return false;
+        };
+        (cond.clone(), body.clone())
     };
+
     if super::for_loops::stmt_list_contains_continue_pub(&body) {
+        eprintln!("[DEBUG-FIB-IV] contains continue");
         return false;
     }
-    let Some((cursor_str, count_expr)) = extract_pointer_cursor_and_count(&cond, stmts, loop_idx) else {
+
+    let Some((cursor_str, count_expr, end_ptr_idx_opt)) = extract_pointer_cursor_and_count(&cond, stmts, loop_idx) else {
+        eprintln!("[DEBUG-FIB-IV] extract_pointer_cursor_and_count returned None");
         return false;
     };
     let cursor = &cursor_str;
     let loop_variant = loop_variant_vars(&body);
     let Some((update_idx, true)) = find_iv_update(&body, cursor, &loop_variant) else {
+        eprintln!("[DEBUG-FIB-IV] find_iv_update returned false");
         return false;
     };
     let after_labels = labels_after(stmts, loop_idx);
@@ -1736,9 +1762,11 @@ fn try_guarded_dowhile_pointer_iv_upgrade(
             }
         });
     let Some(count_cmp) = count_cmp else {
+        eprintln!("[DEBUG-FIB-IV] count_cmp is None");
         return false;
     };
     if cursor_used_after_loop(stmts, loop_idx, cursor) {
+        eprintln!("[DEBUG-FIB-IV] cursor_used_after_loop is true");
         return false;
     }
 
@@ -1787,6 +1815,9 @@ fn try_guarded_dowhile_pointer_iv_upgrade(
             update: Some(Box::new(update_stmt)),
             body: indexed_body,
         };
+        if let Some(end_ptr_idx) = end_ptr_idx_opt {
+            stmts[end_ptr_idx] = HirStmt::Block(Vec::new());
+        }
         return true;
     }
 
@@ -1796,6 +1827,14 @@ fn try_guarded_dowhile_pointer_iv_upgrade(
         update: Some(Box::new(update_stmt)),
         body: new_body,
     };
+    eprintln!("[DEBUG-FIB-IV] Replacing end_ptr_idx: {:?}", end_ptr_idx_opt);
+    if let Some(end_ptr_idx) = end_ptr_idx_opt {
+        stmts[end_ptr_idx] = HirStmt::Block(Vec::new());
+    }
+    eprintln!("[DEBUG-FIB-IV] End of try_guarded_dowhile_pointer_iv_upgrade. stmts[end_ptr_idx_opt]: {:?}", end_ptr_idx_opt);
+    for (idx, stmt) in stmts.iter().enumerate() {
+        eprintln!("[DEBUG-FIB-IV] stmts[{}] = {:?}", idx, stmt);
+    }
     true
 }
 
@@ -2676,5 +2715,44 @@ mod tests {
             make_infinite_for_with_tail(work_stmts, "i", "limit", "update_lbl");
 
         assert!(!try_upgrade_infinite_for_with_tail_update(&mut stmts, 1));
+    }
+}
+
+fn substitute_var_in_expr(expr: &mut HirExpr, name: &str, replacement: &HirExpr) -> bool {
+    match expr {
+        HirExpr::Var(var) if var == name => {
+            *expr = replacement.clone();
+            true
+        }
+        HirExpr::Cast { expr, .. }
+        | HirExpr::Unary { expr, .. }
+        | HirExpr::Load { ptr: expr, .. }
+        | HirExpr::AggregateCopy { src: expr, .. }
+        | HirExpr::FieldAccess { base: expr, .. } => {
+            substitute_var_in_expr(expr, name, replacement)
+        }
+        HirExpr::Binary { lhs, rhs, .. } => {
+            substitute_var_in_expr(lhs, name, replacement)
+                | substitute_var_in_expr(rhs, name, replacement)
+        }
+        HirExpr::Call { args, .. } => args
+            .iter_mut()
+            .any(|arg| substitute_var_in_expr(arg, name, replacement)),
+        HirExpr::PtrOffset { base, .. } => substitute_var_in_expr(base, name, replacement),
+        HirExpr::Index { base, index, .. } => {
+            substitute_var_in_expr(base, name, replacement)
+                | substitute_var_in_expr(index, name, replacement)
+        }
+        HirExpr::Select {
+            cond,
+            then_expr,
+            else_expr,
+            ..
+        } => {
+            substitute_var_in_expr(cond, name, replacement)
+                | substitute_var_in_expr(then_expr, name, replacement)
+                | substitute_var_in_expr(else_expr, name, replacement)
+        }
+        _ => false,
     }
 }

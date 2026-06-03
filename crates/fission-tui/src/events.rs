@@ -14,10 +14,12 @@ pub enum AppAction {
     DeleteBack,
     /// Enter pressed — submit the current input.
     Submit,
-    /// Arrow-up / scroll up.
-    ScrollUp,
-    /// Arrow-down / scroll down.
-    ScrollDown,
+    /// Arrow-up / scroll up with mouse (col, row) coordinates.
+    ScrollUp(u16, u16),
+    /// Arrow-down / scroll down with mouse (col, row) coordinates.
+    ScrollDown(u16, u16),
+    /// Toggle horizontal/vertical split in code explorer.
+    ToggleSplitDirection,
     /// Toggle help overlay.
     ToggleHelp,
     /// Toggle provider menu (Ctrl+P).
@@ -69,8 +71,8 @@ pub fn poll_event() -> std::io::Result<Option<AppAction>> {
         Event::Resize(w, h) => Ok(Some(AppAction::Resize(w, h))),
         Event::Mouse(mouse_event) => {
             match mouse_event.kind {
-                crossterm::event::MouseEventKind::ScrollUp => Ok(Some(AppAction::ScrollUp)),
-                crossterm::event::MouseEventKind::ScrollDown => Ok(Some(AppAction::ScrollDown)),
+                crossterm::event::MouseEventKind::ScrollUp => Ok(Some(AppAction::ScrollUp(mouse_event.column, mouse_event.row))),
+                crossterm::event::MouseEventKind::ScrollDown => Ok(Some(AppAction::ScrollDown(mouse_event.column, mouse_event.row))),
                 _ => Ok(Some(AppAction::Tick)),
             }
         },
@@ -93,6 +95,8 @@ fn map_key(code: KeyCode, modifiers: KeyModifiers) -> AppAction {
         // Toggle View Mode (Ctrl+Tab sends BackTab on some terminals; F2 is the explicit binding)
         KeyCode::F(2) => AppAction::ToggleViewMode,
         KeyCode::BackTab if modifiers.contains(KeyModifiers::CONTROL) => AppAction::ToggleViewMode,
+        // Toggle Layout Split direction in code explorer
+        KeyCode::F(3) => AppAction::ToggleSplitDirection,
         // Tab — context-sensitive (toggle panel in explorer, toggle agent mode in chat)
         KeyCode::Tab => AppAction::ToggleMode,
         // Help
@@ -103,8 +107,8 @@ fn map_key(code: KeyCode, modifiers: KeyModifiers) -> AppAction {
         // Delete
         KeyCode::Backspace => AppAction::DeleteBack,
         // Scroll / Cursor Navigation
-        KeyCode::PageUp => AppAction::ScrollUp,
-        KeyCode::PageDown => AppAction::ScrollDown,
+        KeyCode::PageUp => AppAction::ScrollUp(0, 0),
+        KeyCode::PageDown => AppAction::ScrollDown(0, 0),
         KeyCode::Up => AppAction::CursorUp,
         KeyCode::Down => AppAction::CursorDown,
         // Cycle Providers

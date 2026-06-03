@@ -13,7 +13,7 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span, Text},
-    widgets::{Block, Borders, Clear, Paragraph, Wrap},
+    widgets::{Block, Borders, Clear, Paragraph, Wrap, Scrollbar, ScrollbarOrientation, ScrollbarState},
 };
 
 use crate::app::{App, ViewMode, ActivePanel};
@@ -84,13 +84,23 @@ fn render_chat_layout(frame: &mut Frame, app: &App, area: Rect) {
 
 fn render_code_explorer(frame: &mut Frame, app: &App, area: Rect) {
     // ── Outer layout: header (1) | panes (fill) | status (1) ──────────────
-    let outer = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
+    let constraints = if app.explorer_search_mode {
+        vec![
+            Constraint::Length(1),   // View-mode header bar
+            Constraint::Min(4),      // Two stacked panels
+            Constraint::Length(3),   // Search input bar
+            Constraint::Length(1),   // Status / key-hint bar
+        ]
+    } else {
+        vec![
             Constraint::Length(1),   // View-mode header bar
             Constraint::Min(4),      // Two stacked panels
             Constraint::Length(1),   // Status / key-hint bar
-        ])
+        ]
+    };
+    let outer = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints(constraints)
         .split(area);
 
     // ── Header bar ──────────────────────────────────────────────────────────
@@ -107,13 +117,28 @@ fn render_code_explorer(frame: &mut Frame, app: &App, area: Rect) {
     );
 
     // ── Split pane area: top (disasm) | bottom (decomp) ────────────────────
+    let split_dir = if app.explorer_horizontal_split {
+        Direction::Horizontal
+    } else {
+        Direction::Vertical
+    };
     let panes = Layout::default()
-        .direction(Direction::Vertical)
+        .direction(split_dir)
         .constraints([
             Constraint::Percentage(50), // Disassembly
             Constraint::Percentage(50), // Decompiled C
         ])
         .split(outer[1]);
+
+    // Record dynamic layouts for mouse coordinate detection
+    app.disasm_area.set(panes[0]);
+    app.decomp_area.set(panes[1]);
+
+    let query = if !app.explorer_search_input.is_empty() {
+        Some(app.explorer_search_input.to_lowercase())
+    } else {
+        None
+    };
 
     // ── Disassembly panel ──────────────────────────────────────────────────
     let disasm_focused = app.active_panel == ActivePanel::Disasm;
@@ -123,16 +148,6 @@ fn render_code_explorer(frame: &mut Frame, app: &App, area: Rect) {
     } else {
         Modifier::empty()
     };
-
-    let disasm_block = Block::default()
-        .title(if disasm_focused {
-            " ▶ Disassembly (Tab to switch) "
-        } else {
-            "   Disassembly "
-        })
-        .title_style(Style::default().fg(disasm_border_color).add_modifier(disasm_title_mod))
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(disasm_border_color));
 
     let disasm_text: Vec<Line> = if app.disasm_content.is_empty() {
         vec![
@@ -145,15 +160,50 @@ fn render_code_explorer(frame: &mut Frame, app: &App, area: Rect) {
     } else {
         app.disasm_content
             .lines()
-            .map(|l| render_disasm_line(l))
+            .map(|l| {
+                let mut line = render_disasm_line(l);
+                if let Some(ref q) = query {
+                    if l.to_lowercase().contains(q) {
+                        for span in &mut line.spans {
+                            span.style = span.style.bg(Color::Yellow).fg(Color::Black);
+                        }
+                    }
+                }
+                line
+            })
             .collect()
     };
+
+    let disasm_total = disasm_text.len();
+    let disasm_current = if disasm_total == 0 { 0 } else { (app.disasm_scroll as usize + 1).min(disasm_total) };
+
+    let disasm_title = if disasm_focused {
+        format!(" ▶ Disassembly [{}/{}] (Tab to switch) ", disasm_current, disasm_total)
+    } else {
+        format!("   Disassembly [{}/{}] ", disasm_current, disasm_total)
+    };
+
+    let disasm_block = Block::default()
+        .title(disasm_title)
+        .title_style(Style::default().fg(disasm_border_color).add_modifier(disasm_title_mod))
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(disasm_border_color));
 
     let disasm_para = Paragraph::new(Text::from(disasm_text))
         .block(disasm_block)
         .wrap(Wrap { trim: false })
         .scroll((app.disasm_scroll, 0));
     frame.render_widget(disasm_para, panes[0]);
+
+    let mut disasm_scrollbar_state = ScrollbarState::new(disasm_total).position(app.disasm_scroll as usize);
+    frame.render_stateful_widget(
+        Scrollbar::default()
+            .orientation(ScrollbarOrientation::VerticalRight)
+            .begin_symbol(Some("↑"))
+            .end_symbol(Some("↓")),
+        panes[0],
+        &mut disasm_scrollbar_state,
+    );
 
     // ── Decompiled C panel ─────────────────────────────────────────────────
     let decomp_focused = app.active_panel == ActivePanel::Decomp;
@@ -163,16 +213,6 @@ fn render_code_explorer(frame: &mut Frame, app: &App, area: Rect) {
     } else {
         Modifier::empty()
     };
-
-    let decomp_block = Block::default()
-        .title(if decomp_focused {
-            " ▶ Decompiled C (Tab to switch) "
-        } else {
-            "   Decompiled C "
-        })
-        .title_style(Style::default().fg(decomp_border_color).add_modifier(decomp_title_mod))
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(decomp_border_color));
 
     let decomp_text: Vec<Line> = if app.decomp_content.is_empty() {
         vec![
@@ -184,14 +224,50 @@ fn render_code_explorer(frame: &mut Frame, app: &App, area: Rect) {
         ]
     } else {
         let width = panes[1].width.saturating_sub(4) as usize;
-        render_markdown(&app.decomp_content, width)
+        let mut lines = render_markdown(&app.decomp_content, width);
+        if let Some(ref q) = query {
+            for line in &mut lines {
+                let line_str: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
+                if line_str.to_lowercase().contains(q) {
+                    for span in &mut line.spans {
+                        span.style = span.style.bg(Color::Yellow).fg(Color::Black);
+                    }
+                }
+            }
+        }
+        lines
     };
+
+    let decomp_total = decomp_text.len();
+    let decomp_current = if decomp_total == 0 { 0 } else { (app.decomp_scroll as usize + 1).min(decomp_total) };
+
+    let decomp_title = if decomp_focused {
+        format!(" ▶ Decompiled C [{}/{}] (Tab to switch) ", decomp_current, decomp_total)
+    } else {
+        format!("   Decompiled C [{}/{}] ", decomp_current, decomp_total)
+    };
+
+    let decomp_block = Block::default()
+        .title(decomp_title)
+        .title_style(Style::default().fg(decomp_border_color).add_modifier(decomp_title_mod))
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(decomp_border_color));
 
     let decomp_para = Paragraph::new(Text::from(decomp_text))
         .block(decomp_block)
         .wrap(Wrap { trim: false })
         .scroll((app.decomp_scroll, 0));
     frame.render_widget(decomp_para, panes[1]);
+
+    let mut decomp_scrollbar_state = ScrollbarState::new(decomp_total).position(app.decomp_scroll as usize);
+    frame.render_stateful_widget(
+        Scrollbar::default()
+            .orientation(ScrollbarOrientation::VerticalRight)
+            .begin_symbol(Some("↑"))
+            .end_symbol(Some("↓")),
+        panes[1],
+        &mut decomp_scrollbar_state,
+    );
 
     // ── Bottom key-hint bar ────────────────────────────────────────────────
     let hint = Line::from(vec![
@@ -201,12 +277,44 @@ fn render_code_explorer(frame: &mut Frame, app: &App, area: Rect) {
         Span::styled("scroll  ", Style::default().fg(C_DIM)),
         Span::styled("F2 ", Style::default().fg(C_ACCENT)),
         Span::styled("back to Chat  ", Style::default().fg(C_DIM)),
+        Span::styled("F3 ", Style::default().fg(C_ACCENT)),
+        Span::styled("toggle split  ", Style::default().fg(C_DIM)),
+        Span::styled("/ ", Style::default().fg(C_ACCENT)),
+        Span::styled("search  ", Style::default().fg(C_DIM)),
         Span::styled("q ", Style::default().fg(C_ACCENT)),
         Span::styled("quit", Style::default().fg(C_DIM)),
     ]);
+
+    let status_area = if app.explorer_search_mode {
+        // Render search block at outer[2]
+        let search_block = Block::default()
+            .title(" Search / Go to Line/Address ")
+            .title_style(Style::default().fg(C_ACCENT))
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(C_ACCENT));
+        
+        let search_para = Paragraph::new(app.explorer_search_input.as_str())
+            .block(search_block)
+            .style(Style::default().fg(C_WHITE));
+        
+        frame.render_widget(search_para, outer[2]);
+        
+        // Show blinking block cursor
+        let cursor_col = app.explorer_search_input[..app.explorer_search_cursor].chars().count() as u16;
+        let inner_x = outer[2].x + 1 + cursor_col;
+        let inner_y = outer[2].y + 1;
+        if inner_x < outer[2].x + outer[2].width.saturating_sub(1) {
+            frame.set_cursor_position((inner_x, inner_y));
+        }
+
+        outer[3]
+    } else {
+        outer[2]
+    };
+
     frame.render_widget(
         Paragraph::new(hint).style(Style::default().bg(Color::Black)),
-        outer[2],
+        status_area,
     );
 }
 

@@ -74,7 +74,8 @@ impl<'a> PreviewBuilder<'a> {
 
     fn is_callee_saved_register_varnode(&self, vn: &Varnode) -> bool {
         let reg_name = if is_register_varnode(vn) {
-            register_name(vn.offset, vn.size)
+            register_hardware_name_for_abi(vn.offset, vn.size, self.options.calling_convention)
+                .unwrap_or_else(|| register_name(vn.offset, vn.size))
         } else if vn.space_id == UNIQUE_SPACE_ID {
             unique_register_name(vn.offset, vn.size).unwrap_or("")
         } else {

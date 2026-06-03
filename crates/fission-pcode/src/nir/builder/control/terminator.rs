@@ -3162,7 +3162,9 @@ fn extract_modulo_bound(expr: &HirExpr) -> Option<u64> {
                     }
                 }
                 for size in [1, 2, 4, 8] {
-                    selector_names.insert(register_name(current_vn.offset, size).to_string());
+                    let name = register_hardware_name_for_abi(current_vn.offset, size, self.options.calling_convention)
+                        .unwrap_or_else(|| register_name(current_vn.offset, size));
+                    selector_names.insert(name.to_string());
                 }
             }
 

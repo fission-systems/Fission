@@ -209,6 +209,66 @@
       "language": "x86:LE:64:default",
       "compiler": "windows",
       "no_analyze": true
+    },
+    {
+      "name": "feature-matrix-sse",
+      "feature_group": "sse",
+      "feature": "x86_64_sse_instructions",
+      "owner": "semantic_emitter",
+      "binary": "benchmark/binary/x86-64/window/small/binary/c/instruction_matrix.exe",
+      "addr": "0x140001450",
+      "count": 8,
+      "language": "x86:LE:64:default",
+      "compiler": "windows",
+      "no_analyze": true
+    },
+    {
+      "name": "feature-matrix-avx",
+      "feature_group": "avx",
+      "feature": "x86_64_avx_instructions",
+      "owner": "semantic_emitter",
+      "binary": "benchmark/binary/x86-64/window/small/binary/c/instruction_matrix.exe",
+      "addr": "0x140001470",
+      "count": 6,
+      "language": "x86:LE:64:default",
+      "compiler": "windows",
+      "no_analyze": true
+    },
+    {
+      "name": "feature-matrix-rep",
+      "feature_group": "rep_prefix",
+      "feature": "x86_64_rep_prefix",
+      "owner": "semantic_emitter",
+      "binary": "benchmark/binary/x86-64/window/small/binary/c/instruction_matrix.exe",
+      "addr": "0x140001490",
+      "count": 16,
+      "language": "x86:LE:64:default",
+      "compiler": "windows",
+      "no_analyze": true
+    },
+    {
+      "name": "feature-matrix-syscall",
+      "feature_group": "syscall",
+      "feature": "x86_64_syscall",
+      "owner": "semantic_emitter",
+      "binary": "benchmark/binary/x86-64/window/small/binary/c/instruction_matrix.exe",
+      "addr": "0x1400014c0",
+      "count": 4,
+      "language": "x86:LE:64:default",
+      "compiler": "windows",
+      "no_analyze": true
+    },
+    {
+      "name": "feature-matrix-atomic",
+      "feature_group": "atomic_lock",
+      "feature": "x86_64_atomic_lock",
+      "owner": "semantic_emitter",
+      "binary": "benchmark/binary/x86-64/window/small/binary/c/instruction_matrix.exe",
+      "addr": "0x1400014d0",
+      "count": 4,
+      "language": "x86:LE:64:default",
+      "compiler": "windows",
+      "no_analyze": true
     }
   ]
 }

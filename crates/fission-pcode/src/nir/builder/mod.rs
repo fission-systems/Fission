@@ -540,12 +540,34 @@ impl<'a> PreviewBuilder<'a> {
         
         let mut name = None;
         if is_register_space_id(output.space_id) {
-            let candidate = crate::nir::support::register_name_32(output.offset, output.size)
-                .or_else(|| crate::nir::support::unique_register_name(output.offset, output.size))
-                .map(|s| s.to_string())
-                .unwrap_or_else(|| crate::nir::support::register_name(output.offset, output.size).to_string());
-            if !self.params.values().any(|b| b.name == candidate) && !self.locals.values().any(|s| s.name == candidate) {
-                name = Some(candidate);
+            let is_param_reg = crate::nir::support::register_name_with_param(
+                output.offset,
+                output.size,
+                self.options.calling_convention,
+            )
+            .is_some_and(|(_, idx)| idx.is_some());
+
+            let is_ret_reg = crate::nir::support::is_primary_return_register_for_abi(
+                output,
+                self.options.calling_convention,
+            );
+
+            if !is_param_reg && !is_ret_reg {
+                let candidate = crate::nir::support::register_name_32(output.offset, output.size)
+                    .or_else(|| crate::nir::support::unique_register_name(output.offset, output.size))
+                    .map(|s| s.to_string())
+                    .unwrap_or_else(|| {
+                        crate::nir::support::register_hardware_name_for_abi(
+                            output.offset,
+                            output.size,
+                            self.options.calling_convention,
+                        )
+                        .unwrap_or_else(|| crate::nir::support::register_name(output.offset, output.size))
+                        .to_string()
+                    });
+                if !self.params.values().any(|b| b.name == candidate) && !self.locals.values().any(|s| s.name == candidate) {
+                    name = Some(candidate);
+                }
             }
         }
         let name = name.unwrap_or_else(|| next_temp_name(&ty, &mut self.temp_next_id));

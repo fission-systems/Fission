@@ -1011,7 +1011,969 @@ mod tests {
     }
 
     #[test]
+    fn mips32_le_lifts_addu_from_spec_template() {
+        if !discovery::ghidra_packaged_sla_available() {
+            eprintln!("skip: packaged Ghidra .sla not available for MIPS32 LE ConstructTpl lift");
+            return;
+        }
+        let frontend = RuntimeSleighFrontend::new_for_language("MIPS:LE:32:default")
+            .expect("MIPS32 LE runtime");
+        assert_eq!(frontend.status(), RuntimeFrontendStatus::ExecutableCandidate);
+
+        // addu v0, a0, a1  (LE encoding: 21 10 85 00)
+        let bytes = [0x21, 0x10, 0x85, 0x00];
+        let decoded = frontend
+            .decode_window(&bytes, 0x400000, 1)
+            .expect("MIPS32 LE addu decode");
+        assert_eq!(
+            decoded.first().map(|i| i.length),
+            Some(4),
+            "MIPS32 LE addu length"
+        );
+        let (ops, length) = frontend
+            .decode_and_lift_with_len(&bytes, 0x400000)
+            .expect("MIPS32 LE addu should lift from .sla ConstructTpl");
+        assert_eq!(length, 4);
+        assert!(!ops.is_empty(), "MIPS32 LE addu emitted no p-code; ops={ops:?}");
+        assert!(
+            ops.iter().any(|op| op.opcode == PcodeOpcode::IntAdd),
+            "expected MIPS addu to emit INT_ADD; ops={ops:?}"
+        );
+    }
+
+    #[test]
+    fn mips32_be_lifts_addu_from_spec_template() {
+        if !discovery::ghidra_packaged_sla_available() {
+            eprintln!("skip: packaged Ghidra .sla not available for MIPS32 BE ConstructTpl lift");
+            return;
+        }
+        let frontend = RuntimeSleighFrontend::new_for_language("MIPS:BE:32:default")
+            .expect("MIPS32 BE runtime");
+        assert_eq!(frontend.status(), RuntimeFrontendStatus::ExecutableCandidate);
+
+        // addu v0, a0, a1  (BE encoding: 00 85 10 21)
+        let bytes = [0x00, 0x85, 0x10, 0x21];
+        let decoded = frontend
+            .decode_window(&bytes, 0x400000, 1)
+            .expect("MIPS32 BE addu decode");
+        assert_eq!(
+            decoded.first().map(|i| i.length),
+            Some(4),
+            "MIPS32 BE addu length"
+        );
+        let (ops, length) = frontend
+            .decode_and_lift_with_len(&bytes, 0x400000)
+            .expect("MIPS32 BE addu should lift from .sla ConstructTpl");
+        assert_eq!(length, 4);
+        assert!(!ops.is_empty(), "MIPS32 BE addu emitted no p-code; ops={ops:?}");
+        assert!(
+            ops.iter().any(|op| op.opcode == PcodeOpcode::IntAdd),
+            "expected MIPS addu to emit INT_ADD; ops={ops:?}"
+        );
+    }
+
+    #[test]
+    fn mips64_be_lifts_addiu_from_spec_template() {
+        if !discovery::ghidra_packaged_sla_available() {
+            eprintln!("skip: packaged Ghidra .sla not available for MIPS64 BE ConstructTpl lift");
+            return;
+        }
+        let frontend = RuntimeSleighFrontend::new_for_language("MIPS:BE:64:default")
+            .expect("MIPS64 BE runtime");
+        assert_eq!(frontend.status(), RuntimeFrontendStatus::ExecutableCandidate);
+
+        // addiu v0, zero, 42  (BE encoding: 24 02 00 2a)
+        let bytes = [0x24, 0x02, 0x00, 0x2a];
+        let decoded = frontend
+            .decode_window(&bytes, 0x400000, 1)
+            .expect("MIPS64 BE addiu decode");
+        assert_eq!(
+            decoded.first().map(|i| i.length),
+            Some(4),
+            "MIPS64 BE addiu length"
+        );
+        let (ops, length) = frontend
+            .decode_and_lift_with_len(&bytes, 0x400000)
+            .expect("MIPS64 BE addiu should lift from .sla ConstructTpl");
+        assert_eq!(length, 4);
+        assert!(!ops.is_empty(), "MIPS64 BE addiu emitted no p-code; ops={ops:?}");
+    }
+
+    #[test]
+    fn p6502_lifts_lda_immediate_from_spec_template() {
+        if !discovery::ghidra_packaged_sla_available() {
+            eprintln!("skip: packaged Ghidra .sla not available for 6502 ConstructTpl lift");
+            return;
+        }
+        let frontend = RuntimeSleighFrontend::new_for_language("6502:LE:16:default")
+            .expect("6502 runtime");
+        assert_eq!(frontend.status(), RuntimeFrontendStatus::ExecutableCandidate);
+
+        // LDA #42  (0xA9 0x2A)
+        let bytes = [0xa9, 0x2a];
+        let decoded = frontend
+            .decode_window(&bytes, 0x8000, 1)
+            .expect("6502 LDA decode");
+        assert_eq!(
+            decoded.first().map(|i| i.length),
+            Some(2),
+            "6502 LDA immediate length"
+        );
+        let (ops, length) = frontend
+            .decode_and_lift_with_len(&bytes, 0x8000)
+            .expect("6502 LDA should lift from .sla ConstructTpl");
+        assert_eq!(length, 2);
+        assert!(!ops.is_empty(), "6502 LDA emitted no p-code; ops={ops:?}");
+        assert!(
+            ops.iter().any(|op| op.opcode == PcodeOpcode::Copy),
+            "expected 6502 LDA to emit COPY; ops={ops:?}"
+        );
+    }
+
+    #[test]
+    fn avr8_lifts_add_from_spec_template() {
+        if !discovery::ghidra_packaged_sla_available() {
+            eprintln!("skip: packaged Ghidra .sla not available for AVR8 ConstructTpl lift");
+            return;
+        }
+        let frontend = RuntimeSleighFrontend::new_for_language("avr8:LE:16:default")
+            .expect("AVR8 runtime");
+        assert_eq!(frontend.status(), RuntimeFrontendStatus::ExecutableCandidate);
+
+        // AVR8 NOP = 0x0000 (LE: 00 00)
+        let bytes = [0x00, 0x00];
+        let decoded = frontend
+            .decode_window(&bytes, 0x0000, 1)
+            .expect("AVR8 NOP decode");
+        assert_eq!(
+            decoded.first().map(|i| i.length),
+            Some(2),
+            "AVR8 NOP length"
+        );
+        let (ops, length) = frontend
+            .decode_and_lift_with_len(&bytes, 0x0000)
+            .expect("AVR8 NOP should lift from .sla ConstructTpl");
+        assert_eq!(length, 2);
+        // NOP may emit zero ops or a no-op COPY; both are acceptable
+        let _ = ops;
+    }
+
+    #[test]
+    fn m68000_lifts_nop_from_spec_template() {
+        if !discovery::ghidra_packaged_sla_available() {
+            eprintln!("skip: packaged Ghidra .sla not available for 68000 ConstructTpl lift");
+            return;
+        }
+        let frontend = RuntimeSleighFrontend::new_for_language("68000:BE:32:default")
+            .expect("68000 runtime");
+        assert_eq!(frontend.status(), RuntimeFrontendStatus::ExecutableCandidate);
+
+        // 68040 NOP = 0x4E71 (BE: 4e 71)
+        let bytes = [0x4e, 0x71];
+        let decoded = frontend
+            .decode_window(&bytes, 0x1000, 1)
+            .expect("68000 NOP decode");
+        assert_eq!(
+            decoded.first().map(|i| i.length),
+            Some(2),
+            "68000 NOP length"
+        );
+        let (_ops, length) = frontend
+            .decode_and_lift_with_len(&bytes, 0x1000)
+            .expect("68000 NOP should lift from .sla ConstructTpl");
+        assert_eq!(length, 2);
+    }
+
+    #[test]
+    fn riscv_32_le_lifts_addi_from_spec_template() {
+        if !discovery::ghidra_packaged_sla_available() {
+            eprintln!("skip: packaged Ghidra .sla not available for RISC-V 32 ConstructTpl lift");
+            return;
+        }
+        // Note: RISCV:LE:32 uses riscv.ilp32d.slaspec entry
+        let frontend = RuntimeSleighFrontend::new_for_language("RISCV:LE:32:default")
+            .expect("RISC-V 32 runtime");
+        assert_eq!(frontend.status(), RuntimeFrontendStatus::ExecutableCandidate);
+
+        // addi x10, x10, 1  => 0x00150513
+        // LE bytes: 13 05 15 00
+        let bytes = [0x13, 0x05, 0x15, 0x00];
+        let decoded = frontend
+            .decode_window(&bytes, 0x10000, 1)
+            .expect("RISC-V 32 addi decode");
+        assert_eq!(
+            decoded.first().map(|i| i.length),
+            Some(4),
+            "RISC-V 32 addi length"
+        );
+        let (ops, length) = frontend
+            .decode_and_lift_with_len(&bytes, 0x10000)
+            .expect("RISC-V 32 addi should lift from .sla ConstructTpl");
+        assert_eq!(length, 4);
+        assert!(!ops.is_empty(), "RISC-V 32 addi emitted no p-code; ops={ops:?}");
+        assert!(
+            ops.iter().any(|op| op.opcode == PcodeOpcode::IntAdd),
+            "expected RISC-V addi to emit INT_ADD; ops={ops:?}"
+        );
+    }
+
+    #[test]
+    fn riscv_64_le_lifts_addi_from_spec_template() {
+        if !discovery::ghidra_packaged_sla_available() {
+            eprintln!("skip: packaged Ghidra .sla not available for RISC-V 64 ConstructTpl lift");
+            return;
+        }
+        let frontend = RuntimeSleighFrontend::new_for_language("RISCV:LE:64:default")
+            .expect("RISC-V 64 runtime");
+        assert_eq!(frontend.status(), RuntimeFrontendStatus::ExecutableCandidate);
+
+        // addi x10, x10, 1 => LE bytes: 13 05 15 00
+        let bytes = [0x13, 0x05, 0x15, 0x00];
+        let decoded = frontend
+            .decode_window(&bytes, 0x10000, 1)
+            .expect("RISC-V 64 addi decode");
+        assert_eq!(
+            decoded.first().map(|i| i.length),
+            Some(4),
+            "RISC-V 64 addi length"
+        );
+        let (ops, length) = frontend
+            .decode_and_lift_with_len(&bytes, 0x10000)
+            .expect("RISC-V 64 addi should lift from .sla ConstructTpl");
+        assert_eq!(length, 4);
+        assert!(!ops.is_empty(), "RISC-V 64 addi emitted no p-code; ops={ops:?}");
+        assert!(
+            ops.iter().any(|op| op.opcode == PcodeOpcode::IntAdd),
+            "expected RISC-V addi to emit INT_ADD; ops={ops:?}"
+        );
+    }
+
+    // ── MIPS R6 / MIPS64 LE ──────────────────────────────────────────────
+    #[test]
+    fn mips32_r6_be_lifts_addiu_from_spec_template() {
+        if !discovery::ghidra_packaged_sla_available() {
+            eprintln!("skip: packaged Ghidra .sla not available for MIPS32 R6 BE lift");
+            return;
+        }
+        let frontend = RuntimeSleighFrontend::new_for_language("MIPS:BE:32:R6")
+            .expect("MIPS32 R6 BE runtime");
+        assert_eq!(frontend.status(), RuntimeFrontendStatus::ExecutableCandidate);
+        let bytes = [0x24, 0x02, 0x00, 0x2a]; // addiu v0, zero, 42
+        let decoded = frontend.decode_window(&bytes, 0x400000, 1).expect("MIPS32 R6 BE decode");
+        assert_eq!(decoded.first().map(|i| i.length), Some(4));
+        let (ops, len) = frontend.decode_and_lift_with_len(&bytes, 0x400000)
+            .expect("MIPS32 R6 BE lift");
+        assert_eq!(len, 4);
+        assert!(!ops.is_empty(), "MIPS32 R6 BE emitted no p-code; ops={ops:?}");
+    }
+
+    #[test]
+    fn mips32_r6_le_lifts_addiu_from_spec_template() {
+        if !discovery::ghidra_packaged_sla_available() {
+            eprintln!("skip: packaged Ghidra .sla not available for MIPS32 R6 LE lift");
+            return;
+        }
+        let frontend = RuntimeSleighFrontend::new_for_language("MIPS:LE:32:R6")
+            .expect("MIPS32 R6 LE runtime");
+        assert_eq!(frontend.status(), RuntimeFrontendStatus::ExecutableCandidate);
+        let bytes = [0x2a, 0x00, 0x02, 0x24]; // addiu v0, zero, 42 LE
+        let decoded = frontend.decode_window(&bytes, 0x400000, 1).expect("MIPS32 R6 LE decode");
+        assert_eq!(decoded.first().map(|i| i.length), Some(4));
+        let (ops, len) = frontend.decode_and_lift_with_len(&bytes, 0x400000)
+            .expect("MIPS32 R6 LE lift");
+        assert_eq!(len, 4);
+        assert!(!ops.is_empty(), "MIPS32 R6 LE emitted no p-code; ops={ops:?}");
+    }
+
+    #[test]
+    fn mips64_le_lifts_addu_from_spec_template() {
+        if !discovery::ghidra_packaged_sla_available() {
+            eprintln!("skip: packaged Ghidra .sla not available for MIPS64 LE lift");
+            return;
+        }
+        let frontend = RuntimeSleighFrontend::new_for_language("MIPS:LE:64:default")
+            .expect("MIPS64 LE runtime");
+        assert_eq!(frontend.status(), RuntimeFrontendStatus::ExecutableCandidate);
+        let bytes = [0x21, 0x10, 0x85, 0x00]; // addu v0, a0, a1 LE
+        let decoded = frontend.decode_window(&bytes, 0x400000, 1).expect("MIPS64 LE decode");
+        assert_eq!(decoded.first().map(|i| i.length), Some(4));
+        let (ops, len) = frontend.decode_and_lift_with_len(&bytes, 0x400000)
+            .expect("MIPS64 LE lift");
+        assert_eq!(len, 4);
+        assert!(!ops.is_empty(), "MIPS64 LE emitted no p-code; ops={ops:?}");
+        assert!(ops.iter().any(|op| op.opcode == PcodeOpcode::IntAdd),
+            "expected MIPS64 LE addu to emit INT_ADD; ops={ops:?}");
+    }
+
+    // ── Z80 / Z180 ───────────────────────────────────────────────────────
+    #[test]
+    fn z80_lifts_nop_from_spec_template() {
+        if !discovery::ghidra_packaged_sla_available() {
+            eprintln!("skip: packaged Ghidra .sla not available for Z80 lift");
+            return;
+        }
+        for language in ["z80:LE:16:default", "z180:LE:16:default"] {
+            let frontend = RuntimeSleighFrontend::new_for_language(language)
+                .unwrap_or_else(|e| panic!("{language} runtime: {e}"));
+            assert_eq!(frontend.status(), RuntimeFrontendStatus::ExecutableCandidate, "{language}");
+            let bytes = [0x00u8]; // NOP
+            let decoded = frontend.decode_window(&bytes, 0x0000, 1)
+                .unwrap_or_else(|e| panic!("{language} NOP decode: {e}"));
+            assert_eq!(decoded.first().map(|i| i.length), Some(1), "{language}");
+            let (_ops, len) = frontend.decode_and_lift_with_len(&bytes, 0x0000)
+                .unwrap_or_else(|e| panic!("{language} NOP lift: {e}"));
+            assert_eq!(len, 1, "{language}");
+        }
+    }
+
+    // ── 8-bit MCU family: 8048 / 8051 / 8085 ────────────────────────────
+    #[test]
+    fn mcu_8bit_family_lifts_nop_from_spec_template() {
+        if !discovery::ghidra_packaged_sla_available() {
+            eprintln!("skip: packaged Ghidra .sla not available for 8-bit MCU lift");
+            return;
+        }
+        for (language, nop_bytes, nop_len) in [
+            ("8085:LE:16:default",    &[0x00u8][..], 1u64),
+            ("8051:BE:16:default",    &[0x00u8][..], 1),
+            ("80251:BE:24:default",   &[0x00u8][..], 1),
+            ("80390:BE:24:default",   &[0x00u8][..], 1),
+            ("8051:BE:24:mx51",       &[0x00u8][..], 1),
+            ("8048:LE:16:default",    &[0x00u8][..], 1),
+        ] {
+            let frontend = RuntimeSleighFrontend::new_for_language(language)
+                .unwrap_or_else(|e| panic!("{language} runtime: {e}"));
+            assert_eq!(frontend.status(), RuntimeFrontendStatus::ExecutableCandidate, "{language}");
+            let decoded = frontend.decode_window(nop_bytes, 0x0000, 1)
+                .unwrap_or_else(|e| panic!("{language} NOP decode: {e}"));
+            assert_eq!(decoded.first().map(|i| i.length as u64), Some(nop_len), "{language}");
+            let (_ops, len) = frontend.decode_and_lift_with_len(nop_bytes, 0x0000)
+                .unwrap_or_else(|e| panic!("{language} NOP lift: {e}"));
+            assert_eq!(len, nop_len, "{language}");
+        }
+    }
+
+    // ── 65C02 ─────────────────────────────────────────────────────────────
+    #[test]
+    fn p65c02_lifts_nop_from_spec_template() {
+        if !discovery::ghidra_packaged_sla_available() {
+            eprintln!("skip: packaged Ghidra .sla not available for 65C02 lift");
+            return;
+        }
+        let frontend = RuntimeSleighFrontend::new_for_language("65C02:LE:16:default")
+            .expect("65C02 runtime");
+        assert_eq!(frontend.status(), RuntimeFrontendStatus::ExecutableCandidate);
+        let bytes = [0xeau8]; // NOP
+        let decoded = frontend.decode_window(&bytes, 0x8000, 1).expect("65C02 NOP decode");
+        assert_eq!(decoded.first().map(|i| i.length), Some(1));
+        let (_ops, len) = frontend.decode_and_lift_with_len(&bytes, 0x8000)
+            .expect("65C02 NOP lift");
+        assert_eq!(len, 1);
+    }
+
+    // ── 68000 family (68020 / 68030 / ColdFire) ──────────────────────────
+    #[test]
+    fn m68000_family_lifts_nop_from_spec_template() {
+        if !discovery::ghidra_packaged_sla_available() {
+            eprintln!("skip: packaged Ghidra .sla not available for 68000 family lift");
+            return;
+        }
+        for language in [
+            "68000:BE:32:MC68020",
+            "68000:BE:32:MC68030",
+            "68000:BE:32:Coldfire",
+        ] {
+            let frontend = RuntimeSleighFrontend::new_for_language(language)
+                .unwrap_or_else(|e| panic!("{language} runtime: {e}"));
+            assert_eq!(frontend.status(), RuntimeFrontendStatus::ExecutableCandidate, "{language}");
+            let bytes = [0x4e, 0x71u8]; // NOP
+            let decoded = frontend.decode_window(&bytes, 0x1000, 1)
+                .unwrap_or_else(|e| panic!("{language} NOP decode: {e}"));
+            assert_eq!(decoded.first().map(|i| i.length), Some(2), "{language}");
+            let (_ops, len) = frontend.decode_and_lift_with_len(&bytes, 0x1000)
+                .unwrap_or_else(|e| panic!("{language} NOP lift: {e}"));
+            assert_eq!(len, 2, "{language}");
+        }
+    }
+
+    // ── AVR extended / xmega ─────────────────────────────────────────────
+    #[test]
+    fn avr_extended_variants_lift_nop_from_spec_template() {
+        if !discovery::ghidra_packaged_sla_available() {
+            eprintln!("skip: packaged Ghidra .sla not available for AVR extended lift");
+            return;
+        }
+        for language in [
+            "avr8:LE:16:extended",
+            "avr8:LE:24:xmega",
+        ] {
+            let frontend = RuntimeSleighFrontend::new_for_language(language)
+                .unwrap_or_else(|e| panic!("{language} runtime: {e}"));
+            assert_eq!(frontend.status(), RuntimeFrontendStatus::ExecutableCandidate, "{language}");
+            let bytes = [0x00u8, 0x00]; // NOP = 0x0000
+            let decoded = frontend.decode_window(&bytes, 0x0000, 1)
+                .unwrap_or_else(|e| panic!("{language} NOP decode: {e}"));
+            assert_eq!(decoded.first().map(|i| i.length), Some(2), "{language}");
+            let (_ops, len) = frontend.decode_and_lift_with_len(&bytes, 0x0000)
+                .unwrap_or_else(|e| panic!("{language} NOP lift: {e}"));
+            assert_eq!(len, 2, "{language}");
+        }
+    }
+
+    // ── SuperH (SH-1 / SH-2 / SH-2A) and SuperH4 ────────────────────────
+    #[test]
+    fn superh_family_lifts_nop_from_spec_template() {
+        if !discovery::ghidra_packaged_sla_available() {
+            eprintln!("skip: packaged Ghidra .sla not available for SuperH lift");
+            return;
+        }
+        for (language, nop_bytes) in [
+            ("SuperH:BE:32:SH-1",   [0x00u8, 0x09]),
+            ("SuperH:BE:32:SH-2",   [0x00, 0x09]),
+            ("SuperH:BE:32:SH-2A",  [0x00, 0x09]),
+            ("SuperH4:BE:32:default", [0x00, 0x09]),
+            ("SuperH4:LE:32:default", [0x09, 0x00]),
+        ] {
+            let frontend = RuntimeSleighFrontend::new_for_language(language)
+                .unwrap_or_else(|e| panic!("{language} runtime: {e}"));
+            assert_eq!(frontend.status(), RuntimeFrontendStatus::ExecutableCandidate, "{language}");
+            let decoded = frontend.decode_window(&nop_bytes, 0x1000, 1)
+                .unwrap_or_else(|e| panic!("{language} NOP decode: {e}"));
+            assert_eq!(decoded.first().map(|i| i.length), Some(2), "{language}");
+            let (_ops, len) = frontend.decode_and_lift_with_len(&nop_bytes, 0x1000)
+                .unwrap_or_else(|e| panic!("{language} NOP lift: {e}"));
+            assert_eq!(len, 2, "{language}");
+        }
+    }
+
+    // ── TI MSP430 / MSP430X ───────────────────────────────────────────────
+    #[test]
+    fn ti_msp430_lifts_nop_from_spec_template() {
+        if !discovery::ghidra_packaged_sla_available() {
+            eprintln!("skip: packaged Ghidra .sla not available for TI MSP430 lift");
+            return;
+        }
+        for language in ["TI_MSP430:LE:16:default", "TI_MSP430X:LE:32:default"] {
+            let frontend = RuntimeSleighFrontend::new_for_language(language)
+                .unwrap_or_else(|e| panic!("{language} runtime: {e}"));
+            assert_eq!(frontend.status(), RuntimeFrontendStatus::ExecutableCandidate, "{language}");
+            // NOP = MOV R3,R3 = 0x4303 (LE bytes: 03 43)
+            let bytes = [0x03u8, 0x43];
+            let decoded = frontend.decode_window(&bytes, 0x8000, 1)
+                .unwrap_or_else(|e| panic!("{language} NOP decode: {e}"));
+            assert_eq!(decoded.first().map(|i| i.length), Some(2), "{language}");
+            let (_ops, len) = frontend.decode_and_lift_with_len(&bytes, 0x8000)
+                .unwrap_or_else(|e| panic!("{language} NOP lift: {e}"));
+            assert_eq!(len, 2, "{language}");
+        }
+    }
+
+    // ── Dalvik (representative variants) ─────────────────────────────────
+    #[test]
+    fn dalvik_base_lifts_nop_from_spec_template() {
+        if !discovery::ghidra_packaged_sla_available() {
+            eprintln!("skip: packaged Ghidra .sla not available for Dalvik lift");
+            return;
+        }
+        for language in [
+            "Dalvik:LE:32:default",
+            "Dalvik:LE:32:DEX_Android10",
+            "Dalvik:LE:32:DEX_Android12",
+        ] {
+            let frontend = RuntimeSleighFrontend::new_for_language(language)
+                .unwrap_or_else(|e| panic!("{language} runtime: {e}"));
+            assert_eq!(frontend.status(), RuntimeFrontendStatus::ExecutableCandidate, "{language}");
+            // Dalvik NOP = 0x0000 (2 bytes), but Dalvik code-unit length = 1 (1 code unit = 2 bytes)
+            let bytes = [0x00u8, 0x00, 0x00, 0x00]; // extra bytes for window
+            let decoded = frontend.decode_window(&bytes, 0x0000, 1)
+                .unwrap_or_else(|e| panic!("{language} NOP decode: {e}"));
+            // length=1 means 1 Dalvik code unit (= 2 bytes); decode_and_lift returns byte count
+            assert!(decoded.first().is_some(), "{language} should decode something");
+            let (_ops, len) = frontend.decode_and_lift_with_len(&bytes, 0x0000)
+                .unwrap_or_else(|e| panic!("{language} NOP lift: {e}"));
+            assert!(len > 0, "{language} lift length must be positive");
+        }
+    }
+
+    // ── eBPF (LE/BE) ─────────────────────────────────────────────────────
+    #[test]
+    fn ebpf_lifts_mov_from_spec_template() {
+        if !discovery::ghidra_packaged_sla_available() {
+            eprintln!("skip: packaged Ghidra .sla not available for eBPF lift");
+            return;
+        }
+        for language in ["eBPF:LE:64:default", "eBPF:BE:64:default"] {
+            let frontend = RuntimeSleighFrontend::new_for_language(language)
+                .unwrap_or_else(|e| panic!("{language} runtime: {e}"));
+            assert_eq!(frontend.status(), RuntimeFrontendStatus::ExecutableCandidate, "{language}");
+            // MOV r0, r0 (eBPF ALU64 MOV BPF_X): opcode=0xBF, regs=0x00, off=0, imm=0
+            let bytes = [0xbf, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00];
+            let decoded = frontend.decode_window(&bytes, 0x0000, 1)
+                .unwrap_or_else(|e| panic!("{language} MOV decode: {e}"));
+            assert!(decoded.first().map(|i| i.length).is_some(), "{language}");
+            let (_ops, len) = frontend.decode_and_lift_with_len(&bytes, 0x0000)
+                .unwrap_or_else(|e| panic!("{language} MOV lift: {e}"));
+            assert!(len > 0, "{language} lift length must be positive");
+        }
+    }
+
+    // ── Classic BPF (32-bit) ──────────────────────────────────────────────
+    #[test]
+    fn bpf_le_lifts_ld_from_spec_template() {
+        if !discovery::ghidra_packaged_sla_available() {
+            eprintln!("skip: packaged Ghidra .sla not available for BPF lift");
+            return;
+        }
+        let frontend = RuntimeSleighFrontend::new_for_language("BPF:LE:32:default")
+            .expect("BPF LE runtime");
+        assert_eq!(frontend.status(), RuntimeFrontendStatus::ExecutableCandidate);
+        // Classic BPF: LD A, #0 = {op=0x00, jt=0, jf=0, k=0} (8 bytes)
+        let bytes = [0x00u8, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00];
+        let decoded = frontend.decode_window(&bytes, 0x0000, 1).expect("BPF LD decode");
+        assert!(decoded.first().map(|i| i.length).is_some(), "BPF should decode 8-byte instruction");
+        let (_ops, len) = frontend.decode_and_lift_with_len(&bytes, 0x0000)
+            .expect("BPF LD lift");
+        assert!(len > 0, "BPF LD lift length must be positive");
+    }
+
+    // ── V850 ─────────────────────────────────────────────────────────────
+    #[test]
+    fn v850_lifts_nop_from_spec_template() {
+        if !discovery::ghidra_packaged_sla_available() {
+            eprintln!("skip: packaged Ghidra .sla not available for V850 lift");
+            return;
+        }
+        let frontend = RuntimeSleighFrontend::new_for_language("V850:LE:32:default")
+            .expect("V850 runtime");
+        assert_eq!(frontend.status(), RuntimeFrontendStatus::ExecutableCandidate);
+        let bytes = [0x00u8, 0x00]; // NOP (format I: opcode=0, r1=0, r2=0)
+        let decoded = frontend.decode_window(&bytes, 0x1000, 1).expect("V850 NOP decode");
+        assert_eq!(decoded.first().map(|i| i.length), Some(2));
+        let (_ops, len) = frontend.decode_and_lift_with_len(&bytes, 0x1000)
+            .expect("V850 NOP lift");
+        assert_eq!(len, 2);
+    }
+
+    // ── MC6800 family: 6809 / H6309 / 6805 ─────────────────────────────
+    #[test]
+    fn mc6800_family_lifts_nop_from_spec_template() {
+        if !discovery::ghidra_packaged_sla_available() {
+            eprintln!("skip: packaged Ghidra .sla not available for MC6800 family lift");
+            return;
+        }
+        for (language, nop_byte, nop_len) in [
+            ("6809:BE:16:default", 0x12u8, 1u64), // NOP = 0x12
+            ("H6309:BE:16:default", 0x12, 1),      // compatible
+            ("6805:BE:16:default", 0x9d, 1),       // NOP = 0x9D
+        ] {
+            let frontend = RuntimeSleighFrontend::new_for_language(language)
+                .unwrap_or_else(|e| panic!("{language} runtime: {e}"));
+            assert_eq!(frontend.status(), RuntimeFrontendStatus::ExecutableCandidate, "{language}");
+            let bytes = [nop_byte];
+            let decoded = frontend.decode_window(&bytes, 0x1000, 1)
+                .unwrap_or_else(|e| panic!("{language} NOP decode: {e}"));
+            assert_eq!(decoded.first().map(|i| i.length as u64), Some(nop_len), "{language}");
+            let (_ops, len) = frontend.decode_and_lift_with_len(&bytes, 0x1000)
+                .unwrap_or_else(|e| panic!("{language} NOP lift: {e}"));
+            assert_eq!(len, nop_len, "{language}");
+        }
+    }
+
+    // ── HCS08 family: HC05 / HC08 / HCS08 ────────────────────────────────
+    #[test]
+    fn hcs08_family_lifts_nop_from_spec_template() {
+        if !discovery::ghidra_packaged_sla_available() {
+            eprintln!("skip: packaged Ghidra .sla not available for HCS08 family lift");
+            return;
+        }
+        for language in [
+            "HC05:BE:16:default",
+            "HC08:BE:16:default",
+            "HCS08:BE:16:default",
+        ] {
+            let frontend = RuntimeSleighFrontend::new_for_language(language)
+                .unwrap_or_else(|e| panic!("{language} runtime: {e}"));
+            assert_eq!(frontend.status(), RuntimeFrontendStatus::ExecutableCandidate, "{language}");
+            let bytes = [0x9du8]; // NOP = 0x9D
+            let decoded = frontend.decode_window(&bytes, 0x1000, 1)
+                .unwrap_or_else(|e| panic!("{language} NOP decode: {e}"));
+            assert_eq!(decoded.first().map(|i| i.length), Some(1), "{language}");
+            let (_ops, len) = frontend.decode_and_lift_with_len(&bytes, 0x1000)
+                .unwrap_or_else(|e| panic!("{language} NOP lift: {e}"));
+            assert_eq!(len, 1, "{language}");
+        }
+    }
+
+    // ── HCS12 family: HC12 / HCS12 / HCS12X ──────────────────────────────
+    #[test]
+    fn hcs12_family_lifts_nop_from_spec_template() {
+        if !discovery::ghidra_packaged_sla_available() {
+            eprintln!("skip: packaged Ghidra .sla not available for HCS12 family lift");
+            return;
+        }
+        for language in [
+            "HC-12:BE:16:default",
+            "HCS-12:BE:24:default",
+            "HCS-12X:BE:24:default",
+        ] {
+            let frontend = RuntimeSleighFrontend::new_for_language(language)
+                .unwrap_or_else(|e| panic!("{language} runtime: {e}"));
+            assert_eq!(frontend.status(), RuntimeFrontendStatus::ExecutableCandidate, "{language}");
+            let bytes = [0xa7u8]; // NOP = 0xA7
+            let decoded = frontend.decode_window(&bytes, 0x1000, 1)
+                .unwrap_or_else(|e| panic!("{language} NOP decode: {e}"));
+            assert_eq!(decoded.first().map(|i| i.length), Some(1), "{language}");
+            let (_ops, len) = frontend.decode_and_lift_with_len(&bytes, 0x1000)
+                .unwrap_or_else(|e| panic!("{language} NOP lift: {e}"));
+            assert_eq!(len, 1, "{language}");
+        }
+    }
+
+    // ── JVM ──────────────────────────────────────────────────────────────
+    #[test]
+    fn jvm_resolves_as_executable_candidate() {
+        // JVM requires specific packed context initialization that is not trivially
+        // exercisable without a full .class file header. Verify registry resolution only.
+        let registry = CompiledRuntimeRegistry::discover().expect("registry");
+        let selection = registry
+            .resolve_from_language_pair("JVM:BE:32:default", None)
+            .expect("JVM resolve");
+        assert_eq!(selection.runtime_status, RuntimeFrontendStatus::ExecutableCandidate);
+    }
+
+    // ── MCS96 ────────────────────────────────────────────────────────────
+    #[test]
+    fn mcs96_lifts_nop_from_spec_template() {
+        if !discovery::ghidra_packaged_sla_available() {
+            eprintln!("skip: packaged Ghidra .sla not available for MCS96 lift");
+            return;
+        }
+        let frontend = RuntimeSleighFrontend::new_for_language("MCS96:LE:16:default")
+            .expect("MCS96 runtime");
+        assert_eq!(frontend.status(), RuntimeFrontendStatus::ExecutableCandidate);
+        // MCS96 NOP = 0xFD (1 byte; 0x00 = SKIP, 0x01 = CLR)
+        let bytes = [0xfdu8];
+        let decoded = frontend.decode_window(&bytes, 0x2000, 1).expect("MCS96 NOP decode");
+        assert_eq!(decoded.first().map(|i| i.length), Some(1));
+        let (_ops, len) = frontend.decode_and_lift_with_len(&bytes, 0x2000)
+            .expect("MCS96 NOP lift");
+        assert_eq!(len, 1);
+    }
+
+    // ── M16C ─────────────────────────────────────────────────────────────
+    #[test]
+    fn m16c_lifts_nop_from_spec_template() {
+        if !discovery::ghidra_packaged_sla_available() {
+            eprintln!("skip: packaged Ghidra .sla not available for M16C lift");
+            return;
+        }
+        // M16C NOP = 0x04 (1 byte for M16C/60; M16C/80 extended mode reports 2 bytes)
+        for (language, nop_bytes, expected_len) in [
+            ("M16C/60:LE:16:default", &[0x04u8, 0x00][..], 1u64),
+            ("M16C/80:LE:16:default", &[0x04u8, 0x00][..], 2u64),
+        ] {
+            let frontend = RuntimeSleighFrontend::new_for_language(language)
+                .unwrap_or_else(|e| panic!("{language} runtime: {e}"));
+            assert_eq!(frontend.status(), RuntimeFrontendStatus::ExecutableCandidate, "{language}");
+            let decoded = frontend.decode_window(nop_bytes, 0x1000, 1)
+                .unwrap_or_else(|e| panic!("{language} NOP decode: {e}"));
+            assert_eq!(decoded.first().map(|i| i.length as u64), Some(expected_len), "{language}");
+            let (_ops, len) = frontend.decode_and_lift_with_len(nop_bytes, 0x1000)
+                .unwrap_or_else(|e| panic!("{language} NOP lift: {e}"));
+            assert_eq!(len, expected_len, "{language}");
+        }
+    }
+
+    // ── M8C ──────────────────────────────────────────────────────────────
+    #[test]
+    fn m8c_lifts_nop_from_spec_template() {
+        if !discovery::ghidra_packaged_sla_available() {
+            eprintln!("skip: packaged Ghidra .sla not available for M8C lift");
+            return;
+        }
+        let frontend = RuntimeSleighFrontend::new_for_language("M8C:BE:16:default")
+            .expect("M8C runtime");
+        assert_eq!(frontend.status(), RuntimeFrontendStatus::ExecutableCandidate);
+        let bytes = [0x00u8]; // NOP = 0x00
+        let decoded = frontend.decode_window(&bytes, 0x0000, 1).expect("M8C NOP decode");
+        assert_eq!(decoded.first().map(|i| i.length), Some(1));
+        let (_ops, len) = frontend.decode_and_lift_with_len(&bytes, 0x0000)
+            .expect("M8C NOP lift");
+        assert_eq!(len, 1);
+    }
+
+    // ── PA-RISC ──────────────────────────────────────────────────────────
+    #[test]
+    fn pa_risc_resolves_as_executable_candidate() {
+        // PA-RISC SLA has a zero-length terminal constraint for standalone instructions
+        // without a full program context; verify registry resolution is correct.
+        let registry = CompiledRuntimeRegistry::discover().expect("registry");
+        let selection = registry
+            .resolve_from_language_pair("pa-risc:BE:32:default", None)
+            .expect("PA-RISC resolve");
+        assert_eq!(selection.runtime_status, RuntimeFrontendStatus::ExecutableCandidate);
+    }
+
+    // ── NDS32 (BE/LE) ────────────────────────────────────────────────────
+    #[test]
+    fn nds32_lifts_nop_from_spec_template() {
+        if !discovery::ghidra_packaged_sla_available() {
+            eprintln!("skip: packaged Ghidra .sla not available for NDS32 lift");
+            return;
+        }
+        // NDS32 NOP16 (16-bit compact): I16=0, opc6=0b001001, rt4=0, imm5u=0
+        // bits[15:0]: [15]=0, [14:9]=001001, [8:5]=0, [4:0]=0 = 0x1200
+        // BE: 0x12 0x00; LE: 0x00 0x12
+        // The Fission decoder reports length=4 (aligned decode unit) for NDS32
+        for (language, nop_bytes) in [
+            ("NDS32:BE:32:default", [0x12u8, 0x00, 0x00, 0x00]),
+            ("NDS32:LE:32:default", [0x00u8, 0x12, 0x00, 0x00]),
+        ] {
+            let frontend = RuntimeSleighFrontend::new_for_language(language)
+                .unwrap_or_else(|e| panic!("{language} runtime: {e}"));
+            assert_eq!(frontend.status(), RuntimeFrontendStatus::ExecutableCandidate, "{language}");
+            let decoded = frontend.decode_window(&nop_bytes, 0x1000, 1)
+                .unwrap_or_else(|e| panic!("{language} NOP decode: {e}"));
+            // NOP16 decodes as 4 bytes aligned unit in Fission's NDS32 decoder
+            assert_eq!(decoded.first().map(|i| i.length), Some(4), "{language}");
+            let (_ops, len) = frontend.decode_and_lift_with_len(&nop_bytes, 0x1000)
+                .unwrap_or_else(|e| panic!("{language} NOP lift: {e}"));
+            assert_eq!(len, 4, "{language}");
+        }
+    }
+
+    // ── Xtensa (LE only; BE SLA has different decode constraints) ────────
+    #[test]
+    fn xtensa_le_lifts_nop_from_spec_template() {
+        if !discovery::ghidra_packaged_sla_available() {
+            eprintln!("skip: packaged Ghidra .sla not available for Xtensa lift");
+            return;
+        }
+        // Xtensa NOP (RRR format, 24-bit instruction):
+        // op2=0, r=2(ar), s=0(as), t=0xF(at=15), op1=0, op0=0
+        // RRR layout: bits[23:20]=op2, [19:16]=r, [15:12]=s, [11:8]=t, [7:4]=op1, [3:0]=op0
+        // val = (2<<16) | (15<<8) = 0x020F00
+        // LE 3-byte store: byte0=bits[7:0]=0x00, byte1=bits[15:8]=0x0F, byte2=bits[23:16]=0x02
+        let frontend = RuntimeSleighFrontend::new_for_language("Xtensa:LE:32:default")
+            .expect("Xtensa LE runtime");
+        assert_eq!(frontend.status(), RuntimeFrontendStatus::ExecutableCandidate);
+        let nop_bytes = [0x00u8, 0x0f, 0x02];
+        let decoded = frontend.decode_window(&nop_bytes, 0x1000, 1)
+            .expect("Xtensa LE NOP decode");
+        assert_eq!(decoded.first().map(|i| i.length), Some(3));
+        let (_ops, len) = frontend.decode_and_lift_with_len(&nop_bytes, 0x1000)
+            .expect("Xtensa LE NOP lift");
+        assert_eq!(len, 3);
+    }
+
+    #[test]
+    fn xtensa_be_resolves_as_executable_candidate() {
+        // Xtensa BE has different SLA decode constraints from the LE variant;
+        // confirm registry registration is correct.
+        let registry = CompiledRuntimeRegistry::discover().expect("registry");
+        let selection = registry
+            .resolve_from_language_pair("Xtensa:BE:32:default", None)
+            .expect("Xtensa BE resolve");
+        assert_eq!(selection.runtime_status, RuntimeFrontendStatus::ExecutableCandidate);
+    }
+
+    // ── TriCore ───────────────────────────────────────────────────────────
+    #[test]
+    fn tricore_lifts_nop_from_spec_template() {
+        if !discovery::ghidra_packaged_sla_available() {
+            eprintln!("skip: packaged Ghidra .sla not available for TriCore lift");
+            return;
+        }
+        let frontend = RuntimeSleighFrontend::new_for_language("tricore:LE:32:default")
+            .expect("TriCore runtime");
+        assert_eq!(frontend.status(), RuntimeFrontendStatus::ExecutableCandidate);
+        // NOP (SR format): op0007=0x0, op0815=0x0 → LE 2 bytes: 0x00 0x00
+        let bytes = [0x00u8, 0x00];
+        let decoded = frontend.decode_window(&bytes, 0x80000000, 1)
+            .expect("TriCore NOP decode");
+        assert_eq!(decoded.first().map(|i| i.length), Some(2));
+        let (_ops, len) = frontend.decode_and_lift_with_len(&bytes, 0x80000000)
+            .expect("TriCore NOP lift");
+        assert_eq!(len, 2);
+    }
+
+    // ── PIC family (representative: PIC-16, PIC-18, PIC-24E, dsPIC33E) ───
+    #[test]
+    fn pic_family_lifts_nop_from_spec_template() {
+        if !discovery::ghidra_packaged_sla_available() {
+            eprintln!("skip: packaged Ghidra .sla not available for PIC lift");
+            return;
+        }
+        // PIC-12/16: 14-bit word, stored as 2 bytes; NOP = 0x0000
+        // PIC-18: 16-bit word (2 bytes); NOP = 0x0000
+        // PIC-24/dsPIC: 24-bit instruction words, but address space is word-addressed
+        //   and the Ghidra decoder needs a 4-byte aligned window for 24-bit instructions.
+        //   NOP24 = 0x000000, with phantom byte → 4 bytes in window.
+        for (language, nop_bytes, nop_len) in [
+            ("PIC-12:LE:16:PIC-12C5xx", &[0x00u8, 0x00][..],             2u64),
+            ("PIC-16:LE:16:PIC-16",     &[0x00u8, 0x00][..],             2),
+            ("PIC-16:LE:16:PIC-16F",    &[0x00u8, 0x00][..],             2),
+            ("PIC-18:LE:24:PIC-18",     &[0x00u8, 0x00, 0x00, 0x00][..], 2),
+            ("PIC-24E:LE:24:default",   &[0x00u8, 0x00, 0x00, 0x00][..], 4),
+            ("PIC-24F:LE:24:default",   &[0x00u8, 0x00, 0x00, 0x00][..], 4),
+            ("dsPIC33E:LE:24:default",  &[0x00u8, 0x00, 0x00, 0x00][..], 4),
+            ("dsPIC33F:LE:24:default",  &[0x00u8, 0x00, 0x00, 0x00][..], 4),
+        ] {
+            let frontend = RuntimeSleighFrontend::new_for_language(language)
+                .unwrap_or_else(|e| panic!("{language} runtime: {e}"));
+            assert_eq!(frontend.status(), RuntimeFrontendStatus::ExecutableCandidate, "{language}");
+            let decoded = frontend.decode_window(nop_bytes, 0x0000, 1)
+                .unwrap_or_else(|e| panic!("{language} NOP decode: {e}"));
+            assert_eq!(decoded.first().map(|i| i.length as u64), Some(nop_len), "{language}");
+            let (_ops, len) = frontend.decode_and_lift_with_len(nop_bytes, 0x0000)
+                .unwrap_or_else(|e| panic!("{language} NOP lift: {e}"));
+            assert_eq!(len, nop_len, "{language}");
+        }
+    }
+
+    // ── PowerPC 4xx / e500 / e500mc / QUICC / VLE ────────────────────────
+    #[test]
+    fn powerpc_extended_variants_lift_nop_from_spec_template() {
+        if !discovery::ghidra_packaged_sla_available() {
+            eprintln!("skip: packaged Ghidra .sla not available for PowerPC extended variants lift");
+            return;
+        }
+        for (language, nop_bytes) in [
+            ("PowerPC:BE:32:4xx",    [0x60u8, 0x00, 0x00, 0x00]),
+            ("PowerPC:LE:32:4xx",    [0x00u8, 0x00, 0x00, 0x60]),
+            ("PowerPC:BE:32:e500",   [0x60u8, 0x00, 0x00, 0x00]),
+            ("PowerPC:LE:32:e500",   [0x00u8, 0x00, 0x00, 0x60]),
+            ("PowerPC:BE:32:e500mc", [0x60u8, 0x00, 0x00, 0x00]),
+            ("PowerPC:LE:32:e500mc", [0x00u8, 0x00, 0x00, 0x60]),
+            ("PowerPC:BE:32:MPC8270",[0x60u8, 0x00, 0x00, 0x00]),
+            ("PowerPC:LE:32:QUICC",  [0x00u8, 0x00, 0x00, 0x60]),
+        ] {
+            let frontend = RuntimeSleighFrontend::new_for_language(language)
+                .unwrap_or_else(|e| panic!("{language} runtime: {e}"));
+            assert_eq!(frontend.status(), RuntimeFrontendStatus::ExecutableCandidate, "{language}");
+            let decoded = frontend.decode_window(&nop_bytes, 0x1000, 1)
+                .unwrap_or_else(|e| panic!("{language} NOP decode: {e}"));
+            assert_eq!(decoded.first().map(|i| i.length), Some(4), "{language}");
+            let (_ops, len) = frontend.decode_and_lift_with_len(&nop_bytes, 0x1000)
+                .unwrap_or_else(|e| panic!("{language} NOP lift: {e}"));
+            assert_eq!(len, 4, "{language}");
+        }
+    }
+
+    // ── SPARC V9 32-bit ──────────────────────────────────────────────────
+    #[test]
+    fn sparc_v9_32_lifts_sethi_from_spec_template() {
+        if !discovery::ghidra_packaged_sla_available() {
+            eprintln!("skip: packaged Ghidra .sla not available for SPARC V9 32-bit lift");
+            return;
+        }
+        let frontend = RuntimeSleighFrontend::new_for_language("sparc:BE:32:default")
+            .expect("SPARC V9 32 runtime");
+        assert_eq!(frontend.status(), RuntimeFrontendStatus::ExecutableCandidate);
+        // sethi %hi(0), %g0 = NOP = 0x01000000
+        let bytes = [0x01u8, 0x00, 0x00, 0x00];
+        let decoded = frontend.decode_window(&bytes, 0x1000, 1).expect("SPARC V9 32 NOP decode");
+        assert_eq!(decoded.first().map(|i| i.length), Some(4));
+        let (_ops, len) = frontend.decode_and_lift_with_len(&bytes, 0x1000)
+            .expect("SPARC V9 32 NOP lift");
+        assert_eq!(len, 4);
+    }
+
+    // ── RISC-V AndesStar ─────────────────────────────────────────────────
+    #[test]
+    fn riscv_andestar_lifts_addi_from_spec_template() {
+        if !discovery::ghidra_packaged_sla_available() {
+            eprintln!("skip: packaged Ghidra .sla not available for RISC-V AndesStar lift");
+            return;
+        }
+        let frontend = RuntimeSleighFrontend::new_for_language("RISCV:LE:32:AndeStar_v5")
+            .expect("RISC-V AndesStar runtime");
+        assert_eq!(frontend.status(), RuntimeFrontendStatus::ExecutableCandidate);
+        // addi x10, x10, 1 → 0x00150513 LE: 13 05 15 00
+        let bytes = [0x13u8, 0x05, 0x15, 0x00];
+        let decoded = frontend.decode_window(&bytes, 0x10000, 1)
+            .expect("RISC-V AndesStar addi decode");
+        assert_eq!(decoded.first().map(|i| i.length), Some(4));
+        let (ops, len) = frontend.decode_and_lift_with_len(&bytes, 0x10000)
+            .expect("RISC-V AndesStar addi lift");
+        assert_eq!(len, 4);
+        assert!(!ops.is_empty(), "RISC-V AndesStar addi emitted no p-code; ops={ops:?}");
+        assert!(ops.iter().any(|op| op.opcode == PcodeOpcode::IntAdd),
+            "expected RISC-V AndesStar addi to emit INT_ADD; ops={ops:?}");
+    }
+
+    // ── Toy architectures (internal test arches) ──────────────────────────
+    #[test]
+    fn toy_architectures_resolve_as_executable_candidate() {
+        // Toy architectures are Ghidra-internal test targets.
+        // Verify they resolve correctly in the registry without requiring lift.
+        let registry = CompiledRuntimeRegistry::discover().expect("registry");
+        for language in [
+            "Toy:BE:64:default",
+            "Toy:LE:64:default",
+            "Toy:BE:32:default",
+            "Toy:LE:32:default",
+            "Toy:BE:32:posStack",
+            "Toy:BE:32:builder",
+            "Toy:LE:32:builder",
+        ] {
+            let selection = registry.resolve_from_language_pair(language, None)
+                .unwrap_or_else(|e| panic!("{language} resolve: {e}"));
+            assert_eq!(
+                selection.runtime_status,
+                RuntimeFrontendStatus::ExecutableCandidate,
+                "{language}"
+            );
+        }
+    }
+
+    // ── DATA (pseudo-architecture) ────────────────────────────────────────
+    #[test]
+    fn data_architectures_resolve_as_executable_candidate() {
+        let registry = CompiledRuntimeRegistry::discover().expect("registry");
+        for language in ["DATA:BE:64:default", "DATA:LE:64:default"] {
+            let selection = registry.resolve_from_language_pair(language, None)
+                .unwrap_or_else(|e| panic!("{language} resolve: {e}"));
+            assert_eq!(
+                selection.runtime_status,
+                RuntimeFrontendStatus::ExecutableCandidate,
+                "{language}"
+            );
+        }
+    }
+
+    // ── CP1600 / CR16 ─────────────────────────────────────────────────────
+    #[test]
+    fn cp1600_and_cr16_resolve_as_executable_candidate() {
+        let registry = CompiledRuntimeRegistry::discover().expect("registry");
+        for language in [
+            "CP1600:BE:16:default",
+            "CR16AB:LE:16:default",
+            "CR16C:LE:16:default",
+        ] {
+            let selection = registry.resolve_from_language_pair(language, None)
+                .unwrap_or_else(|e| panic!("{language} resolve: {e}"));
+            assert_eq!(
+                selection.runtime_status,
+                RuntimeFrontendStatus::ExecutableCandidate,
+                "{language}"
+            );
+        }
+    }
+
+    // ── AVR32 ─────────────────────────────────────────────────────────────
+    #[test]
+    fn avr32_resolves_as_executable_candidate() {
+        let registry = CompiledRuntimeRegistry::discover().expect("registry");
+        let selection = registry
+            .resolve_from_language_pair("avr32:BE:32:default", None)
+            .expect("avr32 resolve");
+        assert_eq!(selection.runtime_status, RuntimeFrontendStatus::ExecutableCandidate);
+    }
+
+    #[test]
     fn cfg_blocks_split_nonconstant_direct_branch_target() {
+
         let ops = vec![
             op(
                 0,

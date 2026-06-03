@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Compare Ghidra and Fission disassembly rows.
+"""Compare Ghidra and Fission disassembly rows in parallel.
 
 This is a loader/decode diagnostic lane. It reports address, byte, and textual
 instruction parity without following thunks or repairing semantic output.
@@ -14,6 +14,8 @@ import os
 import subprocess
 import sys
 import time
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
@@ -74,38 +76,40 @@ def java_bytes_to_hex(raw: Any) -> str:
     return " ".join(f"{int(byte) & 0xff:02x}" for byte in raw)
 
 
-def dump_ghidra_asm(binary: Path, addr: int, count: int, ghidra_dir: Path) -> dict[str, Any]:
-    pyghidra.start(install_dir=ghidra_dir)
-    with pyghidra.open_program(binary, analyze=True) as flat:
-        program = flat.getCurrentProgram()
-        address_space = program.getAddressFactory().getDefaultAddressSpace()
-        listing = program.getListing()
-        current = address_space.getAddress(addr)
-        instructions: list[dict[str, Any]] = []
-        for _ in range(count):
+def dump_ghidra_asm(flat: Any, program: Any, addr: int, count: int) -> dict[str, Any]:
+    address_space = program.getAddressFactory().getDefaultAddressSpace()
+    listing = program.getListing()
+    current = address_space.getAddress(addr)
+    instructions: list[dict[str, Any]] = []
+    for _ in range(count):
+        instr = listing.getInstructionAt(current)
+        if instr is None:
+            # Dynamically disassemble the current address range if Ghidra has not done so yet
+            flat.disassemble(current)
             instr = listing.getInstructionAt(current)
-            if instr is None:
-                instructions.append(
-                    {
-                        "address": f"0x{int(current.getOffset()):x}",
-                        "status": "error",
-                        "error": f"no instruction at 0x{int(current.getOffset()):x}",
-                    }
-                )
-                break
+
+        if instr is None:
             instructions.append(
                 {
-                    "address": f"0x{int(instr.getAddress().getOffset()):x}",
-                    "status": "ok",
-                    "bytes": java_bytes_to_hex(instr.getBytes()),
-                    "instruction": instruction_text(instr),
-                    "mnemonic": str(instr.getMnemonicString()),
-                    "flow_type": str(instr.getFlowType()),
-                    "flows": [f"0x{int(flow.getOffset()):x}" for flow in instr.getFlows()],
+                    "address": f"0x{int(current.getOffset()):x}",
+                    "status": "error",
+                    "error": f"no instruction at 0x{int(current.getOffset()):x}",
                 }
             )
-            current = instr.getAddress().add(instr.getLength())
-        return {"tool": "ghidra", "instructions": instructions}
+            break
+        instructions.append(
+            {
+                "address": f"0x{int(instr.getAddress().getOffset()):x}",
+                "status": "ok",
+                "bytes": java_bytes_to_hex(instr.getBytes()),
+                "instruction": instruction_text(instr),
+                "mnemonic": str(instr.getMnemonicString()),
+                "flow_type": str(instr.getFlowType()),
+                "flows": [f"0x{int(flow.getOffset()):x}" for flow in instr.getFlows()],
+            }
+        )
+        current = instr.getAddress().add(instr.getLength())
+    return {"tool": "ghidra", "instructions": instructions}
 
 
 def extract_json(stdout: str) -> Any:
@@ -240,51 +244,84 @@ def similarity_summary(comparisons: list[dict[str, Any]]) -> dict[str, float]:
     }
 
 
-def run_row(
-    entry: dict[str, Any],
-    row: dict[str, Any],
-    ghidra_dir: Path,
-    fission_bin: Path,
-    output_dir: Path,
-) -> dict[str, Any]:
+def resolve_address(program: Any, addr_value: Any) -> int:
+    addr_str = str(addr_value).strip()
+    try:
+        return int(addr_str, 0)
+    except ValueError:
+        memory = program.getMemory()
+        block = memory.getBlock(addr_str)
+        if block:
+            return int(block.getStart().getOffset())
+        raise ValueError(f"Could not parse address or find memory block for: '{addr_str}'")
+
+
+def run_worker_mode(args: argparse.Namespace) -> int:
+    manifest = json.loads(args.manifest.read_text())
+    entry = None
+    for e in manifest.get("entries", []):
+        if e.get("id") == args.entry_id:
+            entry = e
+            break
+    if not entry:
+        print(f"Error: Entry ID {args.entry_id} not found in manifest", file=sys.stderr)
+        return 1
+
+    ghidra_dir = resolve_ghidra_dir(args.ghidra_dir)
+    pyghidra.start(install_dir=ghidra_dir)
+
     binary = Path(entry["binary_path"])
-    addr = parse_int(row["address"])
-    count = int(row.get("count", 1))
-    started_at = time.perf_counter()
-    ghidra = dump_ghidra_asm(binary, addr, count, ghidra_dir)
-    fission = dump_fission_asm(fission_bin, binary, addr, count)
-    elapsed = time.perf_counter() - started_at
-    comparisons = []
-    max_len = max(len(ghidra["instructions"]), len(fission["instructions"]))
-    for idx in range(max_len):
-        comparisons.append(
-            compare_instruction(
-                ghidra["instructions"][idx] if idx < len(ghidra["instructions"]) else None,
-                fission["instructions"][idx] if idx < len(fission["instructions"]) else None,
-            )
-        )
-    bucket_totals: dict[str, int] = {}
-    for comparison in comparisons:
-        bucket_totals[comparison["bucket"]] = bucket_totals.get(comparison["bucket"], 0) + 1
-    row_similarity = similarity_summary(comparisons)
-    report = {
-        "entry_id": entry.get("id"),
-        "row_id": row.get("id"),
-        "role": row.get("role"),
-        "binary": str(binary),
-        "address": row["address"],
-        "count": count,
-        "elapsed_sec": elapsed,
-        "bucket_totals": bucket_totals,
-        **row_similarity,
-        "ghidra": ghidra,
-        "fission": fission,
-        "comparisons": comparisons,
-    }
-    row_dir = output_dir / str(entry.get("id", "entry")) / str(row.get("id", f"0x{addr:x}"))
-    row_dir.mkdir(parents=True, exist_ok=True)
-    (row_dir / "asm_parity_report.json").write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
-    return report
+    flat_program = pyghidra.open_program(binary, analyze=True)
+    
+    with flat_program as flat:
+        program = flat.getCurrentProgram()
+        for row in entry.get("rows", []):
+            started_at = time.perf_counter()
+            addr = resolve_address(program, row["address"])
+            count = int(row.get("count", 1))
+            
+            ghidra = dump_ghidra_asm(flat, program, addr, count)
+            fission = dump_fission_asm(args.fission_bin, binary, addr, count)
+            elapsed = time.perf_counter() - started_at
+            
+            comparisons = []
+            max_len = max(len(ghidra["instructions"]), len(fission["instructions"]))
+            for idx in range(max_len):
+                comparisons.append(
+                    compare_instruction(
+                        ghidra["instructions"][idx] if idx < len(ghidra["instructions"]) else None,
+                        fission["instructions"][idx] if idx < len(fission["instructions"]) else None,
+                    )
+                )
+            
+            bucket_totals: dict[str, int] = {}
+            for comparison in comparisons:
+                bucket_totals[comparison["bucket"]] = bucket_totals.get(comparison["bucket"], 0) + 1
+            row_similarity = similarity_summary(comparisons)
+            
+            report = {
+                "entry_id": entry.get("id"),
+                "row_id": row.get("id"),
+                "role": row.get("role"),
+                "binary": str(binary),
+                "address": row["address"],
+                "count": count,
+                "elapsed_sec": elapsed,
+                "bucket_totals": bucket_totals,
+                **row_similarity,
+                "ghidra": ghidra,
+                "fission": fission,
+                "comparisons": comparisons,
+            }
+            
+            row_dir = args.output_dir / str(entry.get("id", "entry")) / str(row.get("id", f"0x{addr:x}"))
+            row_dir.mkdir(parents=True, exist_ok=True)
+            (row_dir / "asm_parity_report.json").write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
+            
+            # Flush a standard progress flag back to the orchestrator stdout
+            print(f"PROGRESS:{entry.get('id')}:{row.get('id')}:{elapsed:.4f}", flush=True)
+            
+    return 0
 
 
 def main() -> int:
@@ -293,14 +330,96 @@ def main() -> int:
     parser.add_argument("--ghidra-dir", type=Path, default=None)
     parser.add_argument("--fission-bin", type=Path, default=ROOT / "target" / "release" / "fission_cli")
     parser.add_argument("--output-dir", required=True, type=Path)
+    parser.add_argument("--jobs", "-j", type=int, default=4, help="Number of concurrent worker threads")
+    parser.add_argument("--entry-id", type=str, default=None, help="Process only this entry ID (worker mode)")
     args = parser.parse_args()
 
+    # If entry-id is specified, we run as an isolated worker subprocess
+    if args.entry_id is not None:
+        return run_worker_mode(args)
+
+    # Otherwise, we act as the Orchestrator
     manifest = json.loads(args.manifest.read_text())
-    ghidra_dir = resolve_ghidra_dir(args.ghidra_dir)
+    entries = manifest.get("entries", [])
+    total_rows = sum(len(entry.get("rows", [])) for entry in entries)
+    
+    if not entries:
+        print("No entries in manifest.", file=sys.stderr)
+        return 0
+
+    print(f"Starting parallel asm parity benchmark across {len(entries)} binaries ({total_rows} rows total)...", file=sys.stderr)
+
+    processed_count = 0
+    progress_lock = threading.Lock()
+    
+    def update_progress(entry_id: str, row_id: str, elapsed: float):
+        nonlocal processed_count
+        with progress_lock:
+            processed_count += 1
+            pct = (processed_count / total_rows) * 100
+            bar_len = 30
+            filled_len = int(round(bar_len * processed_count / total_rows))
+            # Green color codes for a premium terminal feel
+            green_bar = "\033[92m" + "█" * filled_len + "\033[0m"
+            empty_bar = "░" * (bar_len - filled_len)
+            
+            # Print interactive real-time updating progress line to stderr
+            msg = f"\rProgress: |{green_bar}{empty_bar}| {pct:5.1f}% [{processed_count}/{total_rows}] Completed: {row_id} ({elapsed:.2f}s)   "
+            sys.stderr.write(msg)
+            sys.stderr.flush()
+            if processed_count == total_rows:
+                sys.stderr.write("\n")
+                sys.stderr.flush()
+
+    def run_worker(entry: dict[str, Any]):
+        entry_id = entry.get("id")
+        cmd = [
+            sys.executable,
+            os.path.abspath(__file__),
+            "--manifest", str(args.manifest),
+            "--output-dir", str(args.output_dir),
+            "--fission-bin", str(args.fission_bin),
+            "--entry-id", entry_id,
+        ]
+        if args.ghidra_dir:
+            cmd.extend(["--ghidra-dir", str(args.ghidra_dir)])
+            
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+        
+        output_lines = []
+        for line in proc.stdout:
+            output_lines.append(line)
+            line_str = line.strip()
+            if line_str.startswith("PROGRESS:"):
+                parts = line_str.split(":", 3)
+                if len(parts) == 4:
+                    _, w_entry_id, w_row_id, w_elapsed = parts
+                    update_progress(w_entry_id, w_row_id, float(w_elapsed))
+                    
+        proc.wait()
+        if proc.returncode != 0:
+            print(f"\nWorker {entry_id} failed with exit code {proc.returncode}.", file=sys.stderr)
+            print("Worker output:\n" + "".join(output_lines), file=sys.stderr)
+
+    with ThreadPoolExecutor(max_workers=args.jobs) as executor:
+        list(executor.map(run_worker, entries))
+
+    # Read individual reports to build aggregate
     rows: list[dict[str, Any]] = []
-    for entry in manifest.get("entries", []):
+    for entry in entries:
+        entry_id = entry.get("id")
         for row in entry.get("rows", []):
-            rows.append(run_row(entry, row, ghidra_dir, args.fission_bin, args.output_dir))
+            row_id = row.get("id")
+            report_file = args.output_dir / str(entry_id) / str(row_id) / "asm_parity_report.json"
+            if report_file.exists():
+                try:
+                    rows.append(json.loads(report_file.read_text()))
+                except Exception as e:
+                    print(f"Failed to read report for {entry_id}:{row_id}: {e}", file=sys.stderr)
+                    
+    if not rows:
+        print("Error: No row reports were successfully generated.", file=sys.stderr)
+        return 1
 
     aggregate: dict[str, Any] = {
         "manifest": manifest.get("name"),

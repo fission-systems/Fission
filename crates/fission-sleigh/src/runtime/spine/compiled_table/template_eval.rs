@@ -431,7 +431,7 @@ impl<'c> CompiledTableEmitter<'c> {
                         let label_pos = i64::try_from(label_op_count)
                             .map_err(|_| anyhow!("label op index exceeds i64"))?;
                         let relative = label_pos - branch_op;
-                        ops[i].inputs[0] = Varnode::constant(relative, 8);
+                        ops[i].inputs[0] = Varnode::constant(relative, target_vn.size);
                     }
                 }
             }
@@ -1046,7 +1046,11 @@ impl<'c> CompiledTableEmitter<'c> {
         state: &RuntimeConstructState,
         _mnemonic: &str,
     ) -> Result<Varnode> {
-        self.template_write_target(template, state)
+        if let Some(target) = self.dynamic_memory_target(template, state)? {
+            Ok(target.temp)
+        } else {
+            self.template_write_target(template, state)
+        }
     }
 
     fn commit_template_write_target(
@@ -1056,8 +1060,12 @@ impl<'c> CompiledTableEmitter<'c> {
         state: &RuntimeConstructState,
         mnemonic: &str,
     ) -> Result<()> {
-        let _ = (value, mnemonic);
-        self.template_write_target(template, state).map(|_| ())
+        if let Some(target) = self.dynamic_memory_target(template, state)? {
+            self.emitter.emit_store(target.space, target.ptr, value, mnemonic)
+        } else {
+            let _ = (value, mnemonic);
+            self.template_write_target(template, state).map(|_| ())
+        }
     }
 
     fn write_template_target(
@@ -1441,12 +1449,10 @@ impl<'c> CompiledTableEmitter<'c> {
                 // `inst_next` = address of the instruction after the current one.
                 // `delay_slot_length` = actual length of the instruction in the delay slot,
                 // pre-decoded in `precompute_delay_slot_length`.
+                let fall_offset = self.inst_next_fall_offset(state)?;
                 let inst_next = self
                     .address
-                    .checked_add(
-                        u64::try_from(state.length)
-                            .map_err(|_| anyhow!("InstNext2 state length exceeds u64"))?,
-                    )
+                    .checked_add(fall_offset)
                     .ok_or_else(|| anyhow!("InstNext2 base address overflowed"))?;
                 let delay_len = self
                     .delay_slot_length
@@ -1496,13 +1502,14 @@ impl<'c> CompiledTableEmitter<'c> {
     }
 
     fn inst_next_fall_offset(&self, state: &RuntimeConstructState) -> Result<u64> {
+        if let Some(instruction_length) = self.flow.instruction_length {
+            return Ok(instruction_length);
+        }
         if state.length > 0 {
             return u64::try_from(state.length)
                 .map_err(|_| anyhow!("InstNext state length exceeds u64"));
         }
-        self.flow
-            .instruction_length
-            .ok_or_else(|| anyhow!("InstNext requires decoded instruction length"))
+        bail!("InstNext requires decoded instruction length")
     }
 
     fn resolve_fixed_handle_selector(

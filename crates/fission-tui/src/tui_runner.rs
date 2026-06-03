@@ -1,7 +1,4 @@
-//! Fission TUI — interactive AI chat interface.
-//!
-//! This module provides `run_tui`, the public entry point called by
-//! `fission_cli ai chat`.
+//! This module provides `run_tui`, the public entry point.
 
 use anyhow::Result;
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
@@ -243,52 +240,69 @@ fn run_event_loop(
                 app.close_session_history();
                 app.cancel_mention();
                 app.cancel_slash_command();
+                if app.view_mode == crate::app::ViewMode::CodeExplorer {
+                    app.cancel_explorer_search();
+                }
             }
             AppAction::InsertChar(c) if !app.streaming && !app.show_provider_menu && !app.show_model_menu && app.session_history.is_none() => {
-                app.insert_char(c);
-                if c == '@' {
-                    app.start_mention();
-                } else if c == '/' && app.input.trim() == "/" {
-                    app.start_slash_command();
-                } else if app.mention_state.is_some() {
-                    if c == ' ' {
-                        app.cancel_mention();
-                    } else {
-                        app.update_mention_query();
+                if app.view_mode == crate::app::ViewMode::CodeExplorer {
+                    if app.explorer_search_mode {
+                        app.explorer_search_insert_char(c);
+                    } else if c == '/' {
+                        app.start_explorer_search();
                     }
-                } else if app.slash_state.is_some() {
-                    if c == ' ' {
-                        app.cancel_slash_command();
-                    } else {
-                        app.update_slash_query();
+                } else {
+                    app.insert_char(c);
+                    if c == '@' {
+                        app.start_mention();
+                    } else if c == '/' && app.input.trim() == "/" {
+                        app.start_slash_command();
+                    } else if app.mention_state.is_some() {
+                        if c == ' ' {
+                            app.cancel_mention();
+                        } else {
+                            app.update_mention_query();
+                        }
+                    } else if app.slash_state.is_some() {
+                        if c == ' ' {
+                            app.cancel_slash_command();
+                        } else {
+                            app.update_slash_query();
+                        }
                     }
                 }
             }
             AppAction::DeleteBack if !app.streaming && !app.show_provider_menu && !app.show_model_menu && app.session_history.is_none() => {
-                app.delete_char_before_cursor();
-                if app.mention_state.is_some() {
-                    app.update_mention_query();
-                } else if app.slash_state.is_some() {
-                    app.update_slash_query();
+                if app.view_mode == crate::app::ViewMode::CodeExplorer {
+                    if app.explorer_search_mode {
+                        app.explorer_search_delete_char_before_cursor();
+                    }
+                } else {
+                    app.delete_char_before_cursor();
+                    if app.mention_state.is_some() {
+                        app.update_mention_query();
+                    } else if app.slash_state.is_some() {
+                        app.update_slash_query();
+                    }
                 }
             }
-            AppAction::ScrollUp => {
+            AppAction::ScrollUp(x, y) => {
                 if app.view_mode == crate::app::ViewMode::CodeExplorer {
-                    app.explorer_scroll_up(3);
+                    app.handle_explorer_scroll_up(x, y, 3);
                 } else {
                     app.scroll_up();
                 }
             }
-            AppAction::ScrollDown => {
+            AppAction::ScrollDown(x, y) => {
                 if app.view_mode == crate::app::ViewMode::CodeExplorer {
-                    app.explorer_scroll_down(3);
+                    app.handle_explorer_scroll_down(x, y, 3);
                 } else {
                     app.scroll_down();
                 }
             }
             AppAction::CursorUp => {
                 if app.view_mode == crate::app::ViewMode::CodeExplorer {
-                    app.explorer_scroll_up(1);
+                    app.handle_explorer_scroll_up(0, 0, 1);
                 } else if app.mention_state.is_some() {
                     app.mention_up();
                 } else if app.slash_state.is_some() {
@@ -305,7 +319,7 @@ fn run_event_loop(
             }
             AppAction::CursorDown => {
                 if app.view_mode == crate::app::ViewMode::CodeExplorer {
-                    app.explorer_scroll_down(1);
+                    app.handle_explorer_scroll_down(0, 0, 1);
                 } else if app.mention_state.is_some() {
                     app.mention_down();
                 } else if app.slash_state.is_some() {
@@ -318,6 +332,11 @@ fn run_event_loop(
                     app.model_menu_down();
                 } else if !app.streaming {
                     app.cursor_down();
+                }
+            }
+            AppAction::ToggleSplitDirection => {
+                if app.view_mode == crate::app::ViewMode::CodeExplorer {
+                    app.toggle_split_direction();
                 }
             }
             AppAction::CycleProviderNext => {
@@ -338,8 +357,27 @@ fn run_event_loop(
                     }
                 }
             }
-            AppAction::CursorLeft if !app.streaming && !app.show_provider_menu && !app.show_model_menu && app.session_history.is_none() => app.cursor_left(),
-            AppAction::CursorRight if !app.streaming && !app.show_provider_menu && !app.show_model_menu && app.session_history.is_none() => app.cursor_right(),
+            AppAction::CursorLeft if !app.streaming && !app.show_provider_menu && !app.show_model_menu && app.session_history.is_none() => {
+                if app.view_mode == crate::app::ViewMode::CodeExplorer {
+                    if app.explorer_search_mode {
+                        app.explorer_search_cursor_left();
+                    }
+                } else {
+                    app.cursor_left();
+                }
+            }
+            AppAction::CursorRight if !app.streaming && !app.show_provider_menu && !app.show_model_menu && app.session_history.is_none() => {
+                if app.view_mode == crate::app::ViewMode::CodeExplorer {
+                    if app.explorer_search_mode {
+                        app.explorer_search_cursor_right();
+                    }
+                } else {
+                    app.cursor_right();
+                }
+            }
+            AppAction::Submit if app.view_mode == crate::app::ViewMode::CodeExplorer && app.explorer_search_mode => {
+                app.commit_explorer_search();
+            }
             AppAction::Submit if app.slash_state.is_some() => {
                 app.commit_slash_command();
             }
