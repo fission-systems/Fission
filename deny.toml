@@ -84,16 +84,14 @@ ignore = [
     "RUSTSEC-2024-0418",
     "RUSTSEC-2024-0419",
     "RUSTSEC-2024-0420",
-    # glib-rs Iterator unsoundness (GTK/WebKit transitive via Tauri on Linux).
-    "RUSTSEC-2024-0429",
-    "RUSTSEC-2025-0057",
     "RUSTSEC-2025-0075",
     "RUSTSEC-2025-0080",
     "RUSTSEC-2025-0081",
     "RUSTSEC-2025-0098",
     "RUSTSEC-2025-0100",
-    # rand custom logger unsoundness — transitive via Tauri HTML stack + proptest dev-deps.
-    "RUSTSEC-2026-0097",
+    # unmaintained packages baseline
+    "RUSTSEC-2025-0141", # bincode unmaintained
+    "RUSTSEC-2024-0436", # paste unmaintained
 ]
 # If this is true, then cargo deny will use the git executable to fetch advisory database.
 # If this is false, then it uses a built-in git library.
