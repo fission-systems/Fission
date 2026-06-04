@@ -26,6 +26,7 @@ use std::path::Path;
 
 pub mod ldefs;
 pub mod loader;
+pub mod pspec;
 
 
 /// A name → (offset_in_register_space, size_in_bytes) lookup table.

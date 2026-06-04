@@ -34,12 +34,22 @@ pub struct LdefsEntry {
     pub language_dir: PathBuf,
     /// `.cspec` filename including extension, e.g. `"x86-64-gcc.cspec"`.
     pub cspec_filename: String,
+    /// `.pspec` filename from `processorspec="..."` on `<language>`, if present.
+    /// e.g. `"x86-64.pspec"`, `"AARCH64.pspec"`, `"ARMCortex.pspec"`.
+    pub pspec_filename: Option<String>,
 }
 
 impl LdefsEntry {
     /// Absolute path to the `.cspec` file.
     pub fn cspec_path(&self) -> PathBuf {
         self.language_dir.join(&self.cspec_filename)
+    }
+
+    /// Absolute path to the `.pspec` file, or `None` if no `processorspec` was declared.
+    pub fn pspec_path(&self) -> Option<PathBuf> {
+        self.pspec_filename
+            .as_deref()
+            .map(|name| self.language_dir.join(name))
     }
 }
 
@@ -104,6 +114,8 @@ fn scan_processor_dir(dir: &Path, index: &mut LdefsIndex) {
 /// We use a minimal hand-written state machine — no XML library dependency.
 fn parse_ldefs_into_index(contents: &str, dir: &Path, index: &mut LdefsIndex) {
     let mut current_language_id: Option<String> = None;
+    // `processorspec` attribute from `<language>` — shared by all `<compiler>` children.
+    let mut current_pspec_filename: Option<String> = None;
 
     let mut rest = contents;
     loop {
@@ -127,14 +139,17 @@ fn parse_ldefs_into_index(contents: &str, dir: &Path, index: &mut LdefsIndex) {
 
         match tag {
             "language" => {
-                // Extract `id="..."` attribute
+                // Extract `id="..."` and `processorspec="..."` attributes.
                 let close = rest.find('>').unwrap_or(rest.len());
                 let segment = &rest[..close];
                 current_language_id = extract_attr(segment, "id").map(str::to_string);
+                current_pspec_filename =
+                    extract_attr(segment, "processorspec").map(str::to_string);
                 rest = &rest[close.min(rest.len())..];
             }
             "/language" => {
                 current_language_id = None;
+                current_pspec_filename = None;
                 rest = &rest[tag_end.min(rest.len())..];
             }
             "compiler" => {
@@ -149,6 +164,7 @@ fn parse_ldefs_into_index(contents: &str, dir: &Path, index: &mut LdefsIndex) {
                             LdefsEntry {
                                 language_dir: dir.to_path_buf(),
                                 cspec_filename: spec.to_string(),
+                                pspec_filename: current_pspec_filename.clone(),
                             },
                         );
                     }

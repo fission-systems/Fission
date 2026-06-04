@@ -53,6 +53,35 @@ pub struct NirRenderOptions {
     /// Covers all architectures uniformly (x86, AARCH64, ARM, MIPS, PowerPC, RISC-V, etc.).
     #[serde(default, skip)]
     pub sla_register_map: Option<HashMap<(u64, u32), String>>,
+
+    // ── .pspec-derived fields ─────────────────────────────────────────────────
+
+    /// Authoritative program counter register name from `.pspec` `<programcounter register="..."/>`.
+    ///
+    /// Examples: `"RIP"` (x86-64), `"pc"` (ARM/MIPS/AArch64), `"PC"` (PowerPC).
+    /// Used to recognize and rewrite PC-relative addressing patterns in NIR output.
+    #[serde(default, skip)]
+    pub pspec_programcounter: Option<String>,
+
+    /// Tracked register constants from `.pspec` `<context_data><tracked_set>`.
+    ///
+    /// Ghidra propagates these as constants throughout all functions.  The canonical
+    /// case is `("DF", 0)` on x86/x86-64, which collapses direction-flag-dependent
+    /// string operations (e.g. `MOVSD`/`MOVSB` in REP form) to their single-direction
+    /// form.  Set by `fission-decompiler` alongside the `.cspec` overrides.
+    ///
+    /// Format: `(register_name, constant_value)` pairs.
+    #[serde(default, skip)]
+    pub pspec_tracked_context: Vec<(String, u64)>,
+
+    /// Hidden register names from `.pspec` `<register_data><register hidden="true"/>`.
+    ///
+    /// These are SLEIGH-internal context variables (e.g. `bit64`, `segover`,
+    /// `repneprefx`, `rexWprefix`, `rexBprefix`, `xmmTmp1`) that should never
+    /// appear in decompiled output.  The NIR builder uses this set to filter
+    /// register-space varnodes that map to hidden registers.
+    #[serde(default, skip)]
+    pub pspec_hidden_registers: std::collections::HashSet<String>,
 }
 
 
@@ -328,6 +357,9 @@ impl NirRenderOptions {
             cspec_param_offsets: None,
             cspec_stack_arg_base: None,
             sla_register_map: None,
+            pspec_programcounter: None,
+            pspec_tracked_context: Vec::new(),
+            pspec_hidden_registers: std::collections::HashSet::new(),
         }
 
     }

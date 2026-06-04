@@ -16,23 +16,26 @@ pub(crate) fn should_retry_with_strict_indirect_stop(error: &str) -> bool {
         || lower.contains("unsupported opcode")
 }
 
-/// Attempt to resolve the `.cspec` prototype for `binary` and inject
-/// register-based ABI overrides into `options`.
+/// Attempt to resolve the `.cspec` and `.pspec` specs for `binary` and inject
+/// Ghidra-style overrides into `options`.
 ///
-/// Uses the Ghidra-style `.ldefs` index to resolve the exact `.cspec` filename for
-/// the binary's `(language_id, compiler_spec_id)` pair — covering all architectures
-/// in `utils/sleigh-specs/languages/` (AARCH64, ARM, MIPS, PowerPC, RISC-V, Sparc,
-/// LoongArch, x86/x64 with all compiler variants, etc.).
+/// Uses the Ghidra-style `.ldefs` index to resolve the exact `.cspec` and `.pspec`
+/// filenames for the binary's `(language_id, compiler_spec_id)` pair — covering all
+/// architectures in `utils/sleigh-specs/languages/`.
 ///
-/// Populates:
+/// ## `.cspec` populates:
 /// - `cspec_param_offsets` — integer parameter register REGISTER-space offsets
 /// - `cspec_stack_arg_base` — stack argument base offset
 /// - `sla_register_map` — inverted SLA `(offset, size)` → name for all registers
 ///
-/// Best-effort, zero-regression: if the SLA register map or `.cspec` is unavailable
-/// (e.g., no Ghidra install or no `.ldefs` match), options are returned unchanged and
-/// the pipeline falls back to the hardcoded `CallingConvention` tables.
-fn apply_cspec_overrides(binary: &LoadedBinary, options: &mut NirRenderOptions) {
+/// ## `.pspec` populates:
+/// - `pspec_programcounter` — authoritative PC register name (`RIP`, `pc`, …)
+/// - `pspec_tracked_context` — register constants (e.g. `DF=0` on x86-64)
+/// - `pspec_hidden_registers` — internal SLEIGH context variables to suppress
+///
+/// Best-effort, zero-regression: if any spec is unavailable, options are returned
+/// unchanged and the pipeline falls back to hardcoded `CallingConvention` tables.
+fn apply_spec_overrides(binary: &LoadedBinary, options: &mut NirRenderOptions) {
     let Some(load_spec) = binary.load_spec() else {
         return;
     };
@@ -49,7 +52,7 @@ fn apply_cspec_overrides(binary: &LoadedBinary, options: &mut NirRenderOptions) 
     // `x64_ghidra_reg_name` / `aarch64_ghidra_reg_name` / … tables.
     //
     // When multiple names map to the same (offset, size) (e.g. "RAX" and "rax"),
-    // prefer lowercase names as Ghidra uses lowercase for display.
+    // prefer shorter/lowercase names as Ghidra uses lowercase for display.
     let mut inverted: std::collections::HashMap<(u64, u32), String> =
         std::collections::HashMap::new();
     for (name, (offset, size)) in &reg_map {
@@ -68,26 +71,45 @@ fn apply_cspec_overrides(binary: &LoadedBinary, options: &mut NirRenderOptions) 
     }
     options.sla_register_map = Some(inverted);
 
-    // Step 3: Ghidra-style exact .cspec lookup via .ldefs index.
     let language_id = load_spec.pair.language_id.as_str();
     let compiler_spec_id = load_spec.pair.compiler_spec_id.as_str();
     let languages_root = fission_sleigh::compiler::sleigh_languages_root();
 
-    let Some(resolved) = fission_pcode::nir::cspec::loader::load_cspec_for_pair(
+    // Step 3: Ghidra-style exact .cspec lookup via .ldefs index.
+    if let Some(resolved) = fission_pcode::nir::cspec::loader::load_cspec_for_pair(
         &languages_root,
         language_id,
         compiler_spec_id,
         &reg_map,
-    ) else {
-        return;
-    };
-
-    if let Some(proto) = &resolved.default_proto {
-        if !proto.int_param_offsets.is_empty() {
-            options.cspec_param_offsets = Some(proto.int_param_offsets.clone());
+    ) {
+        if let Some(proto) = &resolved.default_proto {
+            if !proto.int_param_offsets.is_empty() {
+                options.cspec_param_offsets = Some(proto.int_param_offsets.clone());
+            }
+            if let Some(base) = proto.stack_arg_base {
+                options.cspec_stack_arg_base = Some(base);
+            }
         }
-        if let Some(base) = proto.stack_arg_base {
-            options.cspec_stack_arg_base = Some(base);
+    }
+
+    // Step 4: Ghidra-style .pspec lookup via the same .ldefs index.
+    //
+    // `.pspec` is language-level (not compiler-variant-level), but the `.ldefs` index
+    // stores `processorspec="..."` per language, so any compiler_spec_id that maps to
+    // the same language_id yields the same pspec.  We use the first hit.
+    if let Some(pspec) = fission_pcode::nir::cspec::pspec::load_pspec_for_pair(
+        &languages_root,
+        language_id,
+        compiler_spec_id,
+    ) {
+        if let Some(pc) = pspec.programcounter {
+            options.pspec_programcounter = Some(pc);
+        }
+        if !pspec.tracked_set.is_empty() {
+            options.pspec_tracked_context = pspec.tracked_set;
+        }
+        if !pspec.hidden_registers.is_empty() {
+            options.pspec_hidden_registers = pspec.hidden_registers;
         }
     }
 }
@@ -106,7 +128,7 @@ pub(crate) fn finish_rust_sleigh_render(
     options.pe_x64_only = config.pe_x64_only;
     options.conservative_irreducible_fallback = config.conservative_irreducible_fallback;
     options.userops = userops;
-    apply_cspec_overrides(binary, &mut options);
+    apply_spec_overrides(binary, &mut options);
 
     let selection = select_nir_output_from_prebuilt_pcode(
         pcode,
