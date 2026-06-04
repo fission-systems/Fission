@@ -951,6 +951,8 @@ pub(crate) fn promote_single_entry_guarded_tail_regions_for_test(
         relocation_names: Default::default(),
         calling_convention: Default::default(),
         userops: Default::default(),
+        cspec_param_offsets: None,
+        cspec_stack_arg_base: None,
     };
     let mut builder = PreviewBuilder::new(&dummy, &options, None);
     while builder.promote_single_entry_guarded_tail_regions(body) {}
@@ -981,6 +983,8 @@ pub(crate) fn discover_guarded_tail_candidates_for_stats(body: &[HirStmt]) -> Pr
         relocation_names: Default::default(),
         calling_convention: Default::default(),
         userops: Default::default(),
+        cspec_param_offsets: None,
+        cspec_stack_arg_base: None,
     };
     let mut builder = PreviewBuilder::new(&dummy, &options, None);
     builder.discover_guarded_tail_candidates(body);
@@ -1060,6 +1064,8 @@ mod tests {
             relocation_names: Default::default(),
             calling_convention: Default::default(),
             userops: Default::default(),
+            cspec_param_offsets: None,
+            cspec_stack_arg_base: None,
         }));
         PreviewBuilder::new(dummy, options, None)
     }

@@ -33,6 +33,18 @@ pub struct NirRenderOptions {
     /// User-defined p-code operations (<userop_head> index -> name)
     #[serde(default)]
     pub userops: HashMap<u32, String>,
+    /// Ghidra-style .cspec-resolved integer parameter register offsets (REGISTER-space).
+    ///
+    /// When populated, overrides `calling_convention.param_offsets()` for parameter
+    /// identification. Set by `fission-decompiler` after resolving `.cspec` prototype
+    /// register names against the SLA `ELEM_VARNODE_SYM` register map.
+    /// Order matches the prototype `<input>` pentry order (float slots excluded).
+    #[serde(default)]
+    pub cspec_param_offsets: Option<Vec<u64>>,
+    /// Stack base offset where stack arguments begin (from .cspec `<addr space="stack" offset=...>`).
+    /// When set, used instead of the ABI-specific hardcoded base.
+    #[serde(default)]
+    pub cspec_stack_arg_base: Option<i64>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -268,6 +280,16 @@ impl NirRenderOptions {
             } else {
                 CallingConvention::Mips32
             }
+        } else if lang_upper.starts_with("X86:") {
+            if binary.is_64bit {
+                if fmt_upper.starts_with("ELF") || fmt_upper.starts_with("MACHO") {
+                    CallingConvention::SystemVAmd64
+                } else {
+                    CallingConvention::WindowsX64
+                }
+            } else {
+                CallingConvention::X86_32
+            }
         } else if fmt_upper.starts_with("ELF") || fmt_upper.starts_with("MACHO") {
             CallingConvention::SystemVAmd64
         } else {
@@ -294,6 +316,8 @@ impl NirRenderOptions {
             relocation_names: inner.relocation_symbols.clone(),
             calling_convention,
             userops: HashMap::new(),
+            cspec_param_offsets: None,
+            cspec_stack_arg_base: None,
         }
     }
 

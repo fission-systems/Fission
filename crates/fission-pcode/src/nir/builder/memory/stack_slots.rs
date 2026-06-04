@@ -500,6 +500,11 @@ impl<'a> PreviewBuilder<'a> {
                     0x14 if !self.options.is_64bit => Some((StackBase::Rbp, 0)),
                     _ => None,
                 },
+                CallingConvention::X86_32 => match ptr.offset {
+                    0x10 => Some((StackBase::Rsp, 0)),
+                    0x14 => Some((StackBase::Rbp, 0)),
+                    _ => None,
+                },
             };
         }
         if ptr.space_id == UNIQUE_SPACE_ID

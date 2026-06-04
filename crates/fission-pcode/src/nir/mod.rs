@@ -14,6 +14,7 @@ mod abstract_location;
 mod action_pipeline;
 mod builder;
 mod cfg;
+pub mod cspec;
 mod mir;
 mod normalize;
 mod piece;

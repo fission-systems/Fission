@@ -351,6 +351,9 @@ pub(crate) fn register_name_with_param(
         CallingConvention::WindowsX64 | CallingConvention::SystemVAmd64 => {
             x64_ghidra_reg_name(offset)?
         }
+        CallingConvention::X86_32 => {
+            register_name_32(offset, _size)?
+        }
     };
     let param_idx = match abi {
         CallingConvention::AArch64 => aarch64_gpr_family_index(hw_name).and_then(|name_family| {
@@ -408,7 +411,7 @@ pub(crate) fn register_name_with_param(
                         .is_some_and(|family| family == name_family)
                 })
             }),
-        CallingConvention::WindowsX64 | CallingConvention::SystemVAmd64 => abi
+        CallingConvention::WindowsX64 | CallingConvention::SystemVAmd64 | CallingConvention::X86_32 => abi
             .param_offsets()
             .iter()
             .position(|&param_offset| param_offset == offset),
@@ -452,6 +455,9 @@ pub(crate) fn register_hardware_name_for_abi(
         CallingConvention::WindowsX64 | CallingConvention::SystemVAmd64 => {
             x64_ghidra_reg_name(offset)
         }
+        CallingConvention::X86_32 => {
+            register_name_32(offset, size)
+        }
     }
 }
 
@@ -479,8 +485,10 @@ pub(crate) fn is_primary_return_register_for_abi(vn: &Varnode, abi: CallingConve
         CallingConvention::LoongArch64 => is_register_space_id(vn.space_id) && vn.offset == 0x120,
         CallingConvention::Mips32 => is_register_space_id(vn.space_id) && vn.offset == 0x08,
         CallingConvention::Mips64 => is_register_space_id(vn.space_id) && vn.offset == 0x10,
-        CallingConvention::WindowsX64 | CallingConvention::SystemVAmd64 => {
-            is_primary_return_register(vn)
+        CallingConvention::WindowsX64 | CallingConvention::SystemVAmd64 | CallingConvention::X86_32 => {
+            (is_register_space_id(vn.space_id) && vn.offset == 0x00)
+                || (vn.space_id == UNIQUE_SPACE_ID
+                    && unique_register_name(vn.offset, vn.size).is_some_and(|name| name == "rax" || name == "eax"))
         }
     }
 }
@@ -504,7 +512,7 @@ pub(crate) fn is_return_target_register_for_abi(vn: &Varnode, abi: CallingConven
         CallingConvention::Mips32 | CallingConvention::Mips64 => {
             mips_ghidra_reg_name_for_abi(vn.offset, vn.size, abi) == Some("ra")
         }
-        CallingConvention::WindowsX64 | CallingConvention::SystemVAmd64 => false,
+        CallingConvention::WindowsX64 | CallingConvention::SystemVAmd64 | CallingConvention::X86_32 => false,
     }
 }
 
@@ -652,7 +660,7 @@ pub(crate) fn primary_return_registers(pointer_size: u32, abi: CallingConvention
                 constant_val: 0,
             },
         ],
-        CallingConvention::WindowsX64 | CallingConvention::SystemVAmd64 => vec![
+        CallingConvention::WindowsX64 | CallingConvention::SystemVAmd64 | CallingConvention::X86_32 => vec![
             Varnode {
                 space_id: REGISTER_SPACE_ID,
                 offset: 0x00,

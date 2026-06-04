@@ -16,6 +16,84 @@ pub(crate) fn should_retry_with_strict_indirect_stop(error: &str) -> bool {
         || lower.contains("unsupported opcode")
 }
 
+/// Attempt to resolve the `.cspec` prototype for `binary` and inject
+/// register-based ABI overrides into `options`.
+///
+/// Reads the SLA register map (Ghidra `ELEM_VARNODE_SYM`) and the `.cspec` XML
+/// for the binary's `(language_id, compiler_spec_id)` pair. On success, populates
+/// `cspec_param_offsets` and `cspec_stack_arg_base` so that `AbiState` uses
+/// dynamic cspec-based resolution instead of hardcoded ABI tables.
+///
+/// This is a best-effort, zero-regression helper: if the SLA or cspec is not
+/// available (e.g., no Ghidra install), the options are returned unchanged.
+fn apply_cspec_overrides(binary: &LoadedBinary, options: &mut NirRenderOptions) {
+    let Some(load_spec) = binary.load_spec() else {
+        return;
+    };
+
+    // Step 1: Get register name → (offset, size) from SLA ELEM_VARNODE_SYM.
+    let Some(reg_map) = fission_sleigh::runtime::register_map_for_load_spec(load_spec) else {
+        return;
+    };
+
+    // Step 2: Find the .cspec file in the utils/sleigh-specs/languages tree.
+    let compiler_spec_id = load_spec.pair.compiler_spec_id.as_str();
+    let language_id = load_spec.pair.language_id.as_str();
+
+    // Derive the processor subdir from the language_id, e.g. "x86:LE:64:default" → "x86"
+    let processor = language_id.split(':').next().unwrap_or("");
+    if processor.is_empty() {
+        return;
+    }
+
+    let languages_root = fission_sleigh::compiler::sleigh_languages_root();
+    let language_dir = fission_pcode::nir::cspec::loader::find_language_dir(
+        &languages_root,
+        processor,
+    );
+    let Some(language_dir) = language_dir else {
+        return;
+    };
+
+    // Build candidate cspec stems in preference order:
+    //   1. "<proc>-<bits>-<compiler_spec_id>"  e.g. "x86-64-gcc", "x86-64-windows"
+    //   2. "<proc>-<bits>-<alias>"             e.g. "x86-64-win" (alias for "windows")
+    //   3. "<compiler_spec_id>"                 e.g. "gcc"
+    //   4. "default"
+    let bits = if binary.is_64bit { "64" } else { "32" };
+    let proc_lower = processor.to_ascii_lowercase();
+    let specific_stem = format!("{proc_lower}-{bits}-{compiler_spec_id}");
+    // Build short alias: "windows" → "win", "gcc" stays "gcc", etc.
+    let alias = match compiler_spec_id {
+        "windows" => Some("win"),
+        "macosx" => Some("osx"),
+        _ => None,
+    };
+    let alias_stem = alias.map(|a| format!("{proc_lower}-{bits}-{a}"));
+    let mut preferred_stems: Vec<&str> = vec![specific_stem.as_str(), compiler_spec_id];
+    if let Some(ref a) = alias_stem {
+        preferred_stems.push(a.as_str());
+    }
+    preferred_stems.push("default");
+
+    let Some(resolved) = fission_pcode::nir::cspec::loader::load_default_cspec_resolved(
+        &language_dir,
+        &preferred_stems,
+        &reg_map,
+    ) else {
+        return;
+    };
+
+    if let Some(proto) = &resolved.default_proto {
+        if !proto.int_param_offsets.is_empty() {
+            options.cspec_param_offsets = Some(proto.int_param_offsets.clone());
+        }
+        if let Some(base) = proto.stack_arg_base {
+            options.cspec_stack_arg_base = Some(base);
+        }
+    }
+}
+
 pub(crate) fn finish_rust_sleigh_render(
     binary: &LoadedBinary,
     entry_address: u64,
@@ -29,6 +107,7 @@ pub(crate) fn finish_rust_sleigh_render(
     options.pe_x64_only = config.pe_x64_only;
     options.conservative_irreducible_fallback = config.conservative_irreducible_fallback;
     options.userops = userops;
+    apply_cspec_overrides(binary, &mut options);
 
     let selection = select_nir_output_from_prebuilt_pcode(
         pcode,

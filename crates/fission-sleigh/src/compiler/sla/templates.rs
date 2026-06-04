@@ -118,6 +118,9 @@ pub(super) fn decode_construct_templates(
     let display_symbols =
         decode_display_symbols(&root, &spaces, &symbol_names, &subtable_names_by_id)?;
     let operand_symbols = decode_operand_symbols(&root, &display_symbols)?;
+    // Build the Ghidra-canonical register name → varnode map from ELEM_VARNODE_SYM elements.
+    // This is consumed by .cspec prototype resolution to convert register names to offsets.
+    let register_map = decode_register_map(&root, &spaces, &symbol_names);
 
     // Helper to parse a constructor
     let trace_sla_parse = std::env::var_os("FISSION_TRACE_SLA_PARSE").is_some();
@@ -554,6 +557,7 @@ pub(super) fn decode_construct_templates(
         userops,
         constructors_by_source,
         subtables,
+        register_map,
         native: SlaLanguage {
             path: artifact.path.clone(),
             version: artifact.version,

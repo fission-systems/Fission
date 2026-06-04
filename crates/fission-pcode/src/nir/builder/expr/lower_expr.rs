@@ -30,7 +30,7 @@ impl<'a> PreviewBuilder<'a> {
         match vn.space_id {
             UNIQUE_SPACE_ID => unique_register_name(vn.offset, vn.size),
             space_id if is_register_space_id(space_id) => {
-                if !self.options.is_64bit && self.options.pointer_size == 4 && vn.size == 4 {
+                if self.options.calling_convention == CallingConvention::X86_32 && vn.size == 4 {
                     match vn.offset {
                         0x10 => return Some("esp"),
                         0x14 => return Some("ebp"),
@@ -573,6 +573,9 @@ impl<'a> PreviewBuilder<'a> {
                 }
                 CallingConvention::WindowsX64 | CallingConvention::SystemVAmd64 => {
                     x64_ghidra_reg_name(key.offset).and_then(crate::arch::x86::x86_gpr_family_index)
+                }
+                CallingConvention::X86_32 => {
+                    register_name_32(key.offset, 4).and_then(crate::arch::x86::x86_gpr_family_index)
                 }
             };
         }

@@ -26,6 +26,8 @@ pub enum CallingConvention {
     Mips32,
     /// MIPS 64-bit ELF ABI: first four integer args in a0-a3, return in v0.
     Mips64,
+    /// x86 32-bit cdecl/stdcall calling convention (arguments passed on stack).
+    X86_32,
 }
 
 impl Default for CallingConvention {
@@ -120,6 +122,7 @@ impl CallingConvention {
                 0x30, // a2 → param_3
                 0x38, // a3 → param_4
             ],
+            Self::X86_32 => &[],
         }
     }
 
@@ -209,6 +212,7 @@ impl CallingConvention {
                 (0x30, 8), // a2
                 (0x38, 8), // a3
             ],
+            Self::X86_32 => &[],
         }
     }
 }

@@ -119,12 +119,17 @@ pub(crate) trait AbiProvider {
     ) -> NirBindingOrigin;
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub(crate) struct AbiState {
     pub(crate) abi: CallingConvention,
     pub(crate) is_64bit: bool,
     pub(crate) pointer_size: u32,
     pub(crate) stack_frame_size: i64,
+    /// Ghidra-style .cspec-resolved integer param register offsets.
+    /// When `Some`, overrides `abi.param_offsets()` for parameter slot lookup.
+    pub(crate) cspec_param_offsets: Option<Vec<u64>>,
+    /// Stack argument base offset from .cspec (overrides ABI-specific default).
+    pub(crate) cspec_stack_arg_base: Option<i64>,
 }
 
 impl AbiState {
@@ -139,6 +144,52 @@ impl AbiState {
             is_64bit,
             pointer_size,
             stack_frame_size,
+            cspec_param_offsets: None,
+            cspec_stack_arg_base: None,
+        }
+    }
+
+    /// Creates an `AbiState` with Ghidra-style .cspec overrides applied.
+    pub(crate) fn new_with_cspec(
+        abi: CallingConvention,
+        is_64bit: bool,
+        pointer_size: u32,
+        stack_frame_size: i64,
+        cspec_param_offsets: Option<Vec<u64>>,
+        cspec_stack_arg_base: Option<i64>,
+    ) -> Self {
+        Self {
+            abi,
+            is_64bit,
+            pointer_size,
+            stack_frame_size,
+            cspec_param_offsets,
+            cspec_stack_arg_base,
+        }
+    }
+
+    /// Returns effective parameter offsets: cspec override if present, else ABI table.
+    pub(crate) fn effective_param_offsets(&self) -> &[u64] {
+        if let Some(offsets) = &self.cspec_param_offsets {
+            offsets.as_slice()
+        } else {
+            self.abi.param_offsets()
+        }
+    }
+
+    /// Returns effective `(offset, size)` parameter slots.
+    ///
+    /// When cspec offsets are available, size defaults to `pointer_size` (the natural
+    /// integer argument width for this ABI). Falls back to the hardcoded
+    /// `CallingConvention::param_reg_slots()` table otherwise.
+    pub(crate) fn effective_param_reg_slots(&self) -> Vec<(u64, u32)> {
+        if let Some(offsets) = &self.cspec_param_offsets {
+            offsets
+                .iter()
+                .map(|&off| (off, self.pointer_size))
+                .collect()
+        } else {
+            self.abi.param_reg_slots().to_vec()
         }
     }
 
@@ -157,6 +208,13 @@ impl AbiState {
             )
         {
             return None;
+        }
+        // Ghidra-style: if .cspec offsets are loaded, use direct offset comparison.
+        if self.cspec_param_offsets.is_some() && is_register_varnode(vn) {
+            return self
+                .effective_param_offsets()
+                .iter()
+                .position(|&off| off == vn.offset);
         }
         self.provider().param_slot_for_varnode(vn)
     }
@@ -187,6 +245,13 @@ impl AbiState {
     pub(crate) fn stack_argument_index(&self, offset: i64) -> Option<usize> {
         if !self.is_64bit {
             return None;
+        }
+        // If .cspec resolved a stack arg base, use it.
+        if let Some(base) = self.cspec_stack_arg_base {
+            if offset < base || (offset - base) % i64::from(self.pointer_size) != 0 {
+                return None;
+            }
+            return Some(((offset - base) / i64::from(self.pointer_size)) as usize);
         }
         self.provider()
             .stack_argument_index(self.pointer_size, offset)
@@ -398,7 +463,7 @@ impl AbiProvider for GenericAbiProvider {
             CallingConvention::Mips32 | CallingConvention::Mips64 => {
                 mips_param_slot_for_name_family(name, self.abi)
             }
-            CallingConvention::WindowsX64 | CallingConvention::SystemVAmd64 => {
+            CallingConvention::WindowsX64 | CallingConvention::SystemVAmd64 | CallingConvention::X86_32 => {
                 x64_param_slot_for_name_family(name, self.abi)
             }
         }
@@ -419,7 +484,7 @@ impl AbiProvider for GenericAbiProvider {
             }
             CallingConvention::Mips32 => mips_ghidra_reg_name_for_abi(offset, 4, self.abi),
             CallingConvention::Mips64 => mips_ghidra_reg_name_for_abi(offset, 8, self.abi),
-            CallingConvention::WindowsX64 | CallingConvention::SystemVAmd64 => {
+            CallingConvention::WindowsX64 | CallingConvention::SystemVAmd64 | CallingConvention::X86_32 => {
                 x64_ghidra_reg_name(offset)
             }
         }

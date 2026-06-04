@@ -30,6 +30,65 @@ pub use registry::{
 };
 pub use spine::{LanguageRuntime, ProcessorRuntimeProfile, RuntimeAttemptReport, RuntimeEndian};
 
+/// Extract the register name → (offset, size) map for the given `BinaryLoadSpec`.
+///
+/// Reads the packaged `.sla` file (Ghidra's canonical `ELEM_VARNODE_SYM` table) and converts
+/// it into the flat `HashMap<String, (u64, u32)>` expected by `fission-pcode`'s `SlaRegisterMap`.
+///
+/// Returns `None` if the SLA file is unavailable or the library cannot be decoded.
+/// Callers should fall back to hardcoded ABI tables when `None` is returned.
+pub fn register_map_for_load_spec(
+    load_spec: &BinaryLoadSpec,
+) -> Option<std::collections::HashMap<String, (u64, u32)>> {
+    use crate::compiler::{resolve_ghidra_install_paths, sla::load_construct_templates_from_sla};
+
+    let language_id = load_spec.pair.language_id.as_str();
+
+    // Try to find the entry spec for this language.
+    let entries = discover_all_entry_specs().ok()?;
+    let entry = entries
+        .into_iter()
+        .find(|e| frontend::entry_matches_language_name(e, language_id))?;
+
+    // Find the packaged SLA file in the Ghidra installation.
+    let paths = resolve_ghidra_install_paths()?;
+    let stem = entry.path.file_stem()?.to_str()?.to_string();
+    let wanted = format!("{}.sla", stem);
+
+    let arch = entry.arch.clone();
+    let arch_dir = paths.processors_root.join(&arch);
+    let sla_path = find_sla_in_dir(&arch_dir, &wanted)
+        .or_else(|| find_sla_in_dir(&paths.processors_root, &wanted))?;
+
+    let library = load_construct_templates_from_sla(&sla_path).ok()?;
+
+    let map = library
+        .register_map
+        .into_iter()
+        .map(|(name, varnode)| (name, (varnode.offset, varnode.size)))
+        .collect();
+
+    Some(map)
+}
+
+fn find_sla_in_dir(root: &std::path::Path, name: &str) -> Option<std::path::PathBuf> {
+    fn walk(dir: &std::path::Path, name: &str) -> Option<std::path::PathBuf> {
+        let rd = std::fs::read_dir(dir).ok()?;
+        for entry in rd.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                if let Some(found) = walk(&path, name) {
+                    return Some(found);
+                }
+            } else if path.file_name().and_then(|n| n.to_str()) == Some(name) {
+                return Some(path);
+            }
+        }
+        None
+    }
+    walk(root, name)
+}
+
 const DEFAULT_FUNCTION_INSTRUCTION_LIMIT: usize = 512;
 
 pub const UNIQUE_SPACE_ID: u64 = 3;

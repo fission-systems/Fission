@@ -180,7 +180,7 @@ fn win64_pointer_swap_does_not_synthesize_stale_eax_return() {
 #[test]
 fn x86_32_stack_pushes_become_call_arguments() {
     let mut options = preview_options_x86();
-    options.calling_convention = CallingConvention::WindowsX64;
+    options.calling_convention = CallingConvention::X86_32;
 
     let stack_a = uniq(0x1000, 4);
     let stack_b = uniq(0x1004, 4);

@@ -3,11 +3,13 @@ use std::collections::HashSet;
 
 impl<'a> PreviewBuilder<'a> {
     pub(in crate::nir::builder) fn abi_state(&self) -> AbiState {
-        AbiState::new(
+        AbiState::new_with_cspec(
             self.options.calling_convention,
             self.options.is_64bit,
             self.options.pointer_size,
             self.stack_frame_size,
+            self.options.cspec_param_offsets.clone(),
+            self.options.cspec_stack_arg_base,
         )
     }
 
@@ -193,10 +195,7 @@ impl<'a> PreviewBuilder<'a> {
 
     fn x86_32_stack_call_args_enabled(&self) -> bool {
         self.options.pointer_size == 4
-            && matches!(
-                self.options.calling_convention,
-                CallingConvention::WindowsX64 | CallingConvention::SystemVAmd64
-            )
+            && self.options.calling_convention == CallingConvention::X86_32
     }
 
     fn recover_x86_32_stack_args_from_block(
@@ -310,8 +309,7 @@ impl<'a> PreviewBuilder<'a> {
     }
 
     fn is_x86_32_esp(&self, vn: &Varnode) -> bool {
-        self.options.pointer_size == 4
-            && !self.options.is_64bit
+        self.options.calling_convention == CallingConvention::X86_32
             && is_register_space_id(vn.space_id)
             && vn.offset == 0x10
             && vn.size == 4
@@ -353,7 +351,7 @@ impl<'a> PreviewBuilder<'a> {
         }
 
         let abi = self.abi_state();
-        let param_slots = self.options.calling_convention.param_reg_slots();
+        let param_slots = abi.effective_param_reg_slots();
         let param_count = param_slots.len();
         let mut recovered: Vec<Option<HirExpr>> = vec![None; param_count];
         let scan_end = call_idx.min(block.ops.len());

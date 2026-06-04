@@ -63,6 +63,10 @@ pub struct CompiledSlaTemplateLibrary {
     pub constructors_by_source: BTreeMap<String, Vec<CompiledSlaConstructorTemplate>>,
     pub subtables: BTreeMap<String, CompiledSlaSubtable>,
     pub native: SlaLanguage,
+    /// Maps register names (e.g. "RAX", "RDI") to their resolved varnode (space, offset, size).
+    /// Populated from ELEM_VARNODE_SYM in the .sla file, which is the Ghidra-canonical
+    /// source for the name→offset mapping consumed by .cspec prototype resolution.
+    pub register_map: BTreeMap<String, CompiledResolvedVarnode>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -154,6 +158,56 @@ pub(super) struct SlaSpaceDecodeResult {
     pub spaces: BTreeMap<u64, CompiledSpaceRef>,
     pub unique_space_index: u64,
     pub register_space_index: u64,
+}
+
+/// Extracts a `name → CompiledResolvedVarnode` map from all `ELEM_VARNODE_SYM` elements
+/// in the root SLA element.
+///
+/// This is the Ghidra-canonical source of register name→(space, offset, size) facts.
+/// `.cspec` calling convention specs reference registers by name; this map is used to
+/// resolve those names to concrete REGISTER-space offsets at runtime.
+pub(super) fn decode_register_map(
+    root: &PackedElement,
+    spaces: &BTreeMap<u64, CompiledSpaceRef>,
+    symbol_names: &BTreeMap<u32, String>,
+) -> BTreeMap<String, CompiledResolvedVarnode> {
+    let mut out = BTreeMap::new();
+    for symbol in root.descendants_with_id(sla_format::ELEM_VARNODE_SYM) {
+        let Some(id_val) = symbol.attr_unsigned(sla_format::ATTR_ID) else {
+            continue;
+        };
+        let Ok(id) = u32::try_from(id_val) else {
+            continue;
+        };
+        let Some(name) = symbol_names.get(&id).cloned() else {
+            continue;
+        };
+        let Some(space_index) = symbol.attr_unsigned(sla_format::ATTR_SPACE) else {
+            continue;
+        };
+        let Some(space) = spaces.get(&space_index).cloned() else {
+            continue;
+        };
+        let Some(offset) = symbol.attr_unsigned(sla_format::ATTR_OFF) else {
+            continue;
+        };
+        let Some(size_val) = symbol.attr_signed(sla_format::ATTR_SIZE) else {
+            continue;
+        };
+        let Ok(size) = u32::try_from(size_val) else {
+            continue;
+        };
+        out.insert(
+            name.clone(),
+            CompiledResolvedVarnode {
+                name,
+                space,
+                offset,
+                size,
+            },
+        );
+    }
+    out
 }
 
 pub(super) fn decode_spaces(root: &PackedElement) -> Result<SlaSpaceDecodeResult> {
