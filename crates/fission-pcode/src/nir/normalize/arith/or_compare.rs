@@ -118,6 +118,59 @@ fn simplify_expr(expr: &mut HirExpr) -> bool {
         _ => {}
     }
 
+    // Match OR-of-zero (RuleOrPredicate):
+    // (cond ? val : 0) | other  =>  cond ? (val | other) : other
+    // (cond ? 0 : val) | other  =>  cond ? other : (val | other)
+    if let HirExpr::Binary { op: HirBinaryOp::Or, lhs, rhs, ty } = expr {
+        let mut target = None;
+        if let HirExpr::Select { cond, then_expr, else_expr, .. } = lhs.as_ref() {
+            if is_zero_const(then_expr) {
+                target = Some((true, cond.clone(), then_expr.clone(), else_expr.clone(), rhs.clone()));
+            } else if is_zero_const(else_expr) {
+                target = Some((false, cond.clone(), then_expr.clone(), else_expr.clone(), rhs.clone()));
+            }
+        }
+        if target.is_none() {
+            if let HirExpr::Select { cond, then_expr, else_expr, .. } = rhs.as_ref() {
+                if is_zero_const(then_expr) {
+                    target = Some((true, cond.clone(), then_expr.clone(), else_expr.clone(), lhs.clone()));
+                } else if is_zero_const(else_expr) {
+                    target = Some((false, cond.clone(), then_expr.clone(), else_expr.clone(), lhs.clone()));
+                }
+            }
+        }
+        if let Some((then_is_zero, cond, then_expr, else_expr, other)) = target {
+            let new_then = if then_is_zero {
+                other.clone()
+            } else {
+                Box::new(HirExpr::Binary {
+                    op: HirBinaryOp::Or,
+                    lhs: then_expr,
+                    rhs: other.clone(),
+                    ty: ty.clone(),
+                })
+            };
+            let new_else = if then_is_zero {
+                Box::new(HirExpr::Binary {
+                    op: HirBinaryOp::Or,
+                    lhs: else_expr,
+                    rhs: other,
+                    ty: ty.clone(),
+                })
+            } else {
+                other
+            };
+            *expr = HirExpr::Select {
+                cond,
+                then_expr: new_then,
+                else_expr: new_else,
+                ty: ty.clone(),
+            };
+            changed = true;
+            simplify_expr(expr);
+        }
+    }
+
     // Match comparison with zero
     if let HirExpr::Binary { op: cmp_op @ (HirBinaryOp::Eq | HirBinaryOp::Ne), lhs, rhs, .. } = expr {
         let (or_expr, is_lhs) = if is_zero_const(rhs) {

@@ -31,6 +31,7 @@ pub(crate) use flags_cond::{
 };
 pub(crate) use simplify_algebraic::{
     simplify_double_add, simplify_factor_common_mul, simplify_negated_const,
+    simplify_nested_adds_subs, simplify_collect_mul_terms,
 };
 pub(crate) use double_precision::apply_double_precision_reconstruction_pass;
 pub(crate) use three_way::apply_three_way_compare_pass;

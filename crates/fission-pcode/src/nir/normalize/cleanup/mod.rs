@@ -9,6 +9,7 @@ mod switch_norm;
 mod condexe;
 mod expand_load;
 mod deindirect;
+mod subvar_trim;
 
 // Re-export all public passes from submodules so the cleanup module's
 // public API surface remains unchanged.
@@ -40,6 +41,7 @@ pub(crate) use switch_norm::apply_switch_norm_pass;
 pub(crate) use condexe::{apply_condexe_folding_pass, apply_iblock_phi_elimination};
 pub(crate) use expand_load::apply_expand_load_pass;
 pub(crate) use deindirect::apply_deindirect_pass;
+pub(crate) use subvar_trim::apply_subvar_trim_pass;
 
 #[cfg(test)]
 #[path = "passes_tests.rs"]

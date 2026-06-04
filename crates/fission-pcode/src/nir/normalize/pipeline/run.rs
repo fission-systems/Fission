@@ -9,7 +9,8 @@ use super::super::arith::{
     normalize_boolean_logic, recognize_compiler_runtime_division, recognize_hi_lo_extract,
     recognize_magic_number_division, recognize_mod_div_power_of_two,
     recognize_wide_integer_recombine, simplify_double_add, simplify_factor_common_mul,
-    simplify_negated_const, simplify_subpiece_chain, apply_double_precision_reconstruction_pass,
+    simplify_negated_const, simplify_nested_adds_subs, simplify_collect_mul_terms,
+    simplify_subpiece_chain, apply_double_precision_reconstruction_pass,
     apply_three_way_compare_pass, apply_conditional_move_pass, apply_subfloat_flow_pass,
     apply_or_compare_pass, apply_float_sign_pass, apply_ignore_nan_pass,
 };
@@ -29,7 +30,7 @@ use super::super::cleanup::{
     simplify_fallthrough_edges, strip_redundant_assign_casts, apply_switch_norm_pass,
     rescue_undeclared_bindings,
 };
-use super::super::cleanup::{collapse_loop_exit_alias_returns, prune_unreachable_after_terminal, apply_condexe_folding_pass, apply_iblock_phi_elimination, apply_expand_load_pass, apply_deindirect_pass};
+use super::super::cleanup::{collapse_loop_exit_alias_returns, prune_unreachable_after_terminal, apply_condexe_folding_pass, apply_iblock_phi_elimination, apply_expand_load_pass, apply_deindirect_pass, apply_subvar_trim_pass};
 use super::super::global_opt::{
     apply_bit_consume_dead_code_pass, apply_cse_pass, apply_dead_store_elimination,
     apply_gvn_join_hoist_pass, apply_licm_pass, apply_nz_mask_simplification_pass,
@@ -724,6 +725,16 @@ pub(crate) fn normalize_hir_function(func: &mut HirFunction) {
         run_pass_logged(
             func,
             "defuse_dead_assignment_after_cast_elision",
+            perf,
+            apply_wide_dead_assignment_pass,
+        );
+    }
+    // Sub-word data flow cast trimming: eliminate redundant casts of sub-word data flow variables.
+    if run_pass_logged(func, "subvar_trim", perf, apply_subvar_trim_pass) {
+        cleanup_func_stmt_list(func);
+        run_pass_logged(
+            func,
+            "defuse_dead_assignment_after_subvar_trim",
             perf,
             apply_wide_dead_assignment_pass,
         );
@@ -2656,6 +2667,8 @@ pub(crate) fn normalize_expr(expr: &mut HirExpr) {
             .or_else(|| simplify_negated_const(&current))
             .or_else(|| simplify_double_add(&current))
             .or_else(|| simplify_factor_common_mul(&current))
+            .or_else(|| simplify_nested_adds_subs(&current))
+            .or_else(|| simplify_collect_mul_terms(&current))
             .or_else(|| recognize_compiler_runtime_division(&current))
             .or_else(|| recognize_mod_div_power_of_two(&current))
             .or_else(|| recognize_magic_number_division(&current))

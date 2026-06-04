@@ -1872,6 +1872,192 @@ fn normalize_or_compare_simplifies_zero_comparisons() {
 }
 
 #[test]
+fn normalize_or_compare_simplifies_or_of_zero() {
+    use crate::nir::normalize::arith::apply_or_compare_pass;
+
+    let u32_ty = NirType::Int { bits: 32, signed: false };
+    let bool_ty = NirType::Bool;
+
+    let mut func = HirFunction {
+        name: "test_or_of_zero".to_string(),
+        params: vec![],
+        locals: vec![
+            NirBinding {
+                name: "cond".to_string(),
+                ty: bool_ty.clone(),
+                surface_type_name: None,
+                origin: None,
+                initializer: None,
+            },
+            NirBinding {
+                name: "val".to_string(),
+                ty: u32_ty.clone(),
+                surface_type_name: None,
+                origin: None,
+                initializer: None,
+            },
+            NirBinding {
+                name: "other".to_string(),
+                ty: u32_ty.clone(),
+                surface_type_name: None,
+                origin: None,
+                initializer: None,
+            },
+            NirBinding {
+                name: "res".to_string(),
+                ty: u32_ty.clone(),
+                surface_type_name: None,
+                origin: None,
+                initializer: None,
+            },
+        ],
+        body: vec![
+            // res = (cond ? val : 0) | other
+            HirStmt::Assign {
+                lhs: HirLValue::Var("res".to_string()),
+                rhs: HirExpr::Binary {
+                    op: HirBinaryOp::Or,
+                    lhs: Box::new(HirExpr::Select {
+                        cond: Box::new(HirExpr::Var("cond".to_string())),
+                        then_expr: Box::new(HirExpr::Var("val".to_string())),
+                        else_expr: Box::new(HirExpr::Const(0, u32_ty.clone())),
+                        ty: u32_ty.clone(),
+                    }),
+                    rhs: Box::new(HirExpr::Var("other".to_string())),
+                    ty: u32_ty.clone(),
+                },
+            },
+        ],
+        ..Default::default()
+    };
+
+    assert!(apply_or_compare_pass(&mut func));
+    assert_eq!(func.body.len(), 1);
+
+    // Expected: res = cond ? (val | other) : other
+    let HirStmt::Assign { rhs, .. } = &func.body[0] else { panic!(); };
+    if let HirExpr::Select { cond, then_expr, else_expr, ty } = rhs {
+        assert_eq!(ty, &u32_ty);
+        assert_eq!(cond.as_ref(), &HirExpr::Var("cond".to_string()));
+        assert_eq!(else_expr.as_ref(), &HirExpr::Var("other".to_string()));
+
+        if let HirExpr::Binary { op, lhs, rhs, ty: or_ty } = then_expr.as_ref() {
+            assert_eq!(*op, HirBinaryOp::Or);
+            assert_eq!(or_ty, &u32_ty);
+            assert_eq!(lhs.as_ref(), &HirExpr::Var("val".to_string()));
+            assert_eq!(rhs.as_ref(), &HirExpr::Var("other".to_string()));
+        } else {
+            panic!("expected Or expression in then branch, got {:?}", then_expr);
+        }
+    } else {
+        panic!("expected Select expression, got {:?}", rhs);
+    }
+}
+
+#[test]
+fn normalize_nested_adds_subs_simplifies_constants() {
+    use crate::nir::normalize::arith::simplify_nested_adds_subs;
+
+    let u32_ty = NirType::Int { bits: 32, signed: false };
+
+    // Case 1: (a + 10) + 20 => a + 30
+    let expr1 = HirExpr::Binary {
+        op: HirBinaryOp::Add,
+        lhs: Box::new(HirExpr::Binary {
+            op: HirBinaryOp::Add,
+            lhs: Box::new(HirExpr::Var("a".to_string())),
+            rhs: Box::new(HirExpr::Const(10, u32_ty.clone())),
+            ty: u32_ty.clone(),
+        }),
+        rhs: Box::new(HirExpr::Const(20, u32_ty.clone())),
+        ty: u32_ty.clone(),
+    };
+    let res1 = simplify_nested_adds_subs(&expr1).unwrap();
+    if let HirExpr::Binary { op, lhs, rhs, .. } = res1 {
+        assert_eq!(op, HirBinaryOp::Add);
+        assert_eq!(lhs.as_ref(), &HirExpr::Var("a".to_string()));
+        assert!(matches!(rhs.as_ref(), HirExpr::Const(30, _)));
+    } else {
+        panic!("expected add, got {:?}", res1);
+    }
+
+    // Case 2: (a - 10) + 30 => a + 20
+    let expr2 = HirExpr::Binary {
+        op: HirBinaryOp::Add,
+        lhs: Box::new(HirExpr::Binary {
+            op: HirBinaryOp::Sub,
+            lhs: Box::new(HirExpr::Var("a".to_string())),
+            rhs: Box::new(HirExpr::Const(10, u32_ty.clone())),
+            ty: u32_ty.clone(),
+        }),
+        rhs: Box::new(HirExpr::Const(30, u32_ty.clone())),
+        ty: u32_ty.clone(),
+    };
+    let res2 = simplify_nested_adds_subs(&expr2).unwrap();
+    if let HirExpr::Binary { op, lhs, rhs, .. } = res2 {
+        assert_eq!(op, HirBinaryOp::Add);
+        assert_eq!(lhs.as_ref(), &HirExpr::Var("a".to_string()));
+        assert!(matches!(rhs.as_ref(), HirExpr::Const(20, _)));
+    } else {
+        panic!("expected add, got {:?}", res2);
+    }
+}
+
+#[test]
+fn normalize_collect_mul_terms_simplifies_constants() {
+    use crate::nir::normalize::arith::simplify_collect_mul_terms;
+
+    let u32_ty = NirType::Int { bits: 32, signed: false };
+
+    // Case 1: (a * 5) + (a * 2) => a * 7
+    let expr1 = HirExpr::Binary {
+        op: HirBinaryOp::Add,
+        lhs: Box::new(HirExpr::Binary {
+            op: HirBinaryOp::Mul,
+            lhs: Box::new(HirExpr::Var("a".to_string())),
+            rhs: Box::new(HirExpr::Const(5, u32_ty.clone())),
+            ty: u32_ty.clone(),
+        }),
+        rhs: Box::new(HirExpr::Binary {
+            op: HirBinaryOp::Mul,
+            lhs: Box::new(HirExpr::Var("a".to_string())),
+            rhs: Box::new(HirExpr::Const(2, u32_ty.clone())),
+            ty: u32_ty.clone(),
+        }),
+        ty: u32_ty.clone(),
+    };
+    let res1 = simplify_collect_mul_terms(&expr1).unwrap();
+    if let HirExpr::Binary { op, lhs, rhs, .. } = res1 {
+        assert_eq!(op, HirBinaryOp::Mul);
+        assert_eq!(lhs.as_ref(), &HirExpr::Var("a".to_string()));
+        assert!(matches!(rhs.as_ref(), HirExpr::Const(7, _)));
+    } else {
+        panic!("expected mul, got {:?}", res1);
+    }
+
+    // Case 2: (a * 5) - a => a * 4
+    let expr2 = HirExpr::Binary {
+        op: HirBinaryOp::Sub,
+        lhs: Box::new(HirExpr::Binary {
+            op: HirBinaryOp::Mul,
+            lhs: Box::new(HirExpr::Var("a".to_string())),
+            rhs: Box::new(HirExpr::Const(5, u32_ty.clone())),
+            ty: u32_ty.clone(),
+        }),
+        rhs: Box::new(HirExpr::Var("a".to_string())),
+        ty: u32_ty.clone(),
+    };
+    let res2 = simplify_collect_mul_terms(&expr2).unwrap();
+    if let HirExpr::Binary { op, lhs, rhs, .. } = res2 {
+        assert_eq!(op, HirBinaryOp::Mul);
+        assert_eq!(lhs.as_ref(), &HirExpr::Var("a".to_string()));
+        assert!(matches!(rhs.as_ref(), HirExpr::Const(4, _)));
+    } else {
+        panic!("expected mul, got {:?}", res2);
+    }
+}
+
+#[test]
 fn normalize_float_sign_simplifies_manipulations() {
     use crate::nir::normalize::arith::apply_float_sign_pass;
 

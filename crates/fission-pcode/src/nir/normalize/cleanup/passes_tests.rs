@@ -1314,3 +1314,116 @@ fn printer_renders_callind_opaque_as_pointer_call() {
     assert_eq!(rendered, "(*(fn_ptr))(arg1, arg2)");
 }
 
+#[test]
+fn subvar_trim_eliminates_redundant_casts() {
+    use crate::nir::normalize::cleanup::apply_subvar_trim_pass;
+
+    // We want to test two cases:
+    // Case 1: (u8)(u32)b  where b: u8
+    // Case 2: (u8)(y & 0xff)
+    let u8_ty = int(8);
+    let u32_ty = int(32);
+
+    let mut func = HirFunction {
+        name: "test_subvar_trim".to_string(),
+        locals: vec![
+            NirBinding {
+                name: "b".to_string(),
+                ty: u8_ty.clone(),
+                surface_type_name: None,
+                origin: None,
+                initializer: None,
+            },
+            NirBinding {
+                name: "x".to_string(),
+                ty: u32_ty.clone(),
+                surface_type_name: None,
+                origin: Some(NirBindingOrigin::Temp),
+                initializer: None,
+            },
+            NirBinding {
+                name: "y".to_string(),
+                ty: u32_ty.clone(),
+                surface_type_name: None,
+                origin: None,
+                initializer: None,
+            },
+            NirBinding {
+                name: "z".to_string(),
+                ty: u32_ty.clone(),
+                surface_type_name: None,
+                origin: Some(NirBindingOrigin::Temp),
+                initializer: None,
+            },
+            NirBinding {
+                name: "res1".to_string(),
+                ty: u8_ty.clone(),
+                surface_type_name: None,
+                origin: None,
+                initializer: None,
+            },
+            NirBinding {
+                name: "res2".to_string(),
+                ty: u8_ty.clone(),
+                surface_type_name: None,
+                origin: None,
+                initializer: None,
+            },
+        ],
+        body: vec![
+            // x = (u32)b
+            HirStmt::Assign {
+                lhs: HirLValue::Var("x".to_string()),
+                rhs: HirExpr::Cast {
+                    ty: u32_ty.clone(),
+                    expr: Box::new(HirExpr::Var("b".to_string())),
+                },
+            },
+            // res1 = (u8)x
+            HirStmt::Assign {
+                lhs: HirLValue::Var("res1".to_string()),
+                rhs: HirExpr::Cast {
+                    ty: u8_ty.clone(),
+                    expr: Box::new(HirExpr::Var("x".to_string())),
+                },
+            },
+            // z = y & 0xff
+            HirStmt::Assign {
+                lhs: HirLValue::Var("z".to_string()),
+                rhs: HirExpr::Binary {
+                    op: HirBinaryOp::And,
+                    lhs: Box::new(HirExpr::Var("y".to_string())),
+                    rhs: Box::new(HirExpr::Const(0xff, u32_ty.clone())),
+                    ty: u32_ty.clone(),
+                },
+            },
+            // res2 = (u8)z
+            HirStmt::Assign {
+                lhs: HirLValue::Var("res2".to_string()),
+                rhs: HirExpr::Cast {
+                    ty: u8_ty.clone(),
+                    expr: Box::new(HirExpr::Var("z".to_string())),
+                },
+            },
+        ],
+        ..Default::default()
+    };
+
+    assert!(apply_subvar_trim_pass(&mut func));
+
+    // Expected:
+    // res1 = b (cast elided and replaced with original byte variable b)
+    // res2 = (u8)y (bitwise AND elided, cast moved directly to y)
+    let HirStmt::Assign { rhs: rhs1, .. } = &func.body[1] else { panic!(); };
+    assert_eq!(rhs1, &HirExpr::Var("b".to_string()));
+
+    let HirStmt::Assign { rhs: rhs2, .. } = &func.body[3] else { panic!(); };
+    if let HirExpr::Cast { ty, expr } = rhs2 {
+        assert_eq!(ty, &u8_ty);
+        assert_eq!(expr.as_ref(), &HirExpr::Var("y".to_string()));
+    } else {
+        panic!("expected cast of y, got {:?}", rhs2);
+    }
+}
+
+
