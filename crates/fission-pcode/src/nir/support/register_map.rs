@@ -461,6 +461,50 @@ pub(crate) fn register_hardware_name_for_abi(
     }
 }
 
+/// Ghidra-style SLA-first hardware name lookup.
+///
+/// Prefers the dynamically built `(offset, size) → name` map from `ELEM_VARNODE_SYM`
+/// over the hardcoded `register_hardware_name_for_abi` table.  Falls back to the
+/// static table if `sla_map` is `None` or the pair is not found.
+///
+/// This covers all architectures in `utils/sleigh-specs/languages/` uniformly.
+pub(crate) fn register_hw_name_with_sla<'a>(
+    offset: u64,
+    size: u32,
+    abi: CallingConvention,
+    sla_map: Option<&'a std::collections::HashMap<(u64, u32), String>>,
+) -> Option<&'a str>
+where
+{
+    if let Some(map) = sla_map {
+        if let Some(name) = map.get(&(offset, size)) {
+            return Some(name.as_str());
+        }
+        // For wider varnodes check sub-register coverage (e.g. EAX at (0,4) from RAX at (0,8)).
+        if let Some(name) = map.get(&(offset, size.max(size))) {
+            return Some(name.as_str());
+        }
+    }
+    // Leak the `&'static str` so lifetime aligns.
+    register_hardware_name_for_abi(offset, size, abi).map(|s| s as &'a str)
+}
+
+/// Ghidra-style SLA-first ABI-independent name lookup.
+pub(crate) fn register_name_with_sla<'a>(
+    offset: u64,
+    size: u32,
+    sla_map: Option<&'a std::collections::HashMap<(u64, u32), String>>,
+) -> &'a str {
+    if let Some(map) = sla_map {
+        if let Some(name) = map.get(&(offset, size)) {
+            return name.as_str();
+        }
+    }
+    register_name(offset, size)
+}
+
+
+
 pub(crate) fn unique_register_name(offset: u64, size: u32) -> Option<&'static str> {
     crate::arch::x86::unique_x86_register_name(offset, size)
 }

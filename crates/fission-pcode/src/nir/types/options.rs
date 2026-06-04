@@ -45,7 +45,16 @@ pub struct NirRenderOptions {
     /// When set, used instead of the ABI-specific hardcoded base.
     #[serde(default)]
     pub cspec_stack_arg_base: Option<i64>,
+    /// Ghidra-style SLA register map: REGISTER-space `(offset, size)` → hardware register name.
+    ///
+    /// Inverted from the `ELEM_VARNODE_SYM` table in the compiled `.sla` file.
+    /// When populated, used by `register_hardware_name_for_abi` and `register_name` as the
+    /// primary offset→name lookup — replacing hardcoded architecture-specific offset tables.
+    /// Covers all architectures uniformly (x86, AARCH64, ARM, MIPS, PowerPC, RISC-V, etc.).
+    #[serde(default, skip)]
+    pub sla_register_map: Option<HashMap<(u64, u32), String>>,
 }
+
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum FormatFamily {
@@ -318,7 +327,9 @@ impl NirRenderOptions {
             userops: HashMap::new(),
             cspec_param_offsets: None,
             cspec_stack_arg_base: None,
+            sla_register_map: None,
         }
+
     }
 
     pub fn target_profile(&self) -> TargetProfile {

@@ -1,19 +1,28 @@
-//! Lazy, cached `.cspec` document loader.
+//! Lazy, cached `.cspec` document loader — Ghidra-style resolution.
 //!
-//! Ghidra resolves a compiler spec via `(language_id, compiler_spec_id)` — e.g.,
-//! `("x86:LE:64:default", "gcc")`. This module maps that pair to a `.cspec` file path
-//! in the Fission `utils/sleigh-specs/languages/` tree and caches the result.
+//! ## Resolution pipeline
+//!
+//! 1. **Exact** — query the global `.ldefs` index for `(language_id, compiler_spec_id)`
+//!    to get the precise `.cspec` filename.  This covers every architecture and compiler
+//!    variant that Ghidra ships, including AARCH64, ARM, MIPS, PowerPC, RISC-V, Sparc, …
+//!
+//! 2. **Fallback** — if the `.ldefs` index is unavailable (e.g., `utils/sleigh-specs`
+//!    tree not populated), fall back to the legacy stem-heuristic so that the caller
+//!    never hard-crashes.
+//!
+//! Both paths feed into the same `CspecDocument` cache, so a given `.cspec` file is
+//! parsed and cached at most once per process lifetime.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
-use super::{CspecDocument, SlaRegisterMap};
+use super::{ldefs::global_ldefs_index, CspecDocument, ResolvedCspec, SlaRegisterMap};
 
-/// Cache key: `(processor_dir, cspec_filename_stem)`.
-/// E.g. `("x86", "x86-64-gcc")`.
-type CacheKey = (String, String);
-type CspecCache = HashMap<CacheKey, Option<CspecDocument>>;
+// ── Per-file document cache ───────────────────────────────────────────────────
+
+/// Cache key: absolute path of the `.cspec` file.
+type CspecCache = HashMap<PathBuf, Option<CspecDocument>>;
 
 static CSPEC_CACHE: OnceLock<std::sync::Mutex<CspecCache>> = OnceLock::new();
 
@@ -21,13 +30,9 @@ fn global_cache() -> &'static std::sync::Mutex<CspecCache> {
     CSPEC_CACHE.get_or_init(|| std::sync::Mutex::new(HashMap::new()))
 }
 
-/// Load and cache a `.cspec` document.
-///
-/// - `language_dir`: absolute path to the language directory (e.g. `.../languages/x86/`).
-/// - `cspec_stem`: the stem of the `.cspec` filename (e.g. `"x86-64-gcc"`).
-pub fn load_cspec(language_dir: &Path, cspec_stem: &str) -> Option<CspecDocument> {
-    let dir_key = language_dir.to_string_lossy().to_string();
-    let key = (dir_key, cspec_stem.to_string());
+/// Load and cache a `.cspec` document by absolute path.
+pub fn load_cspec_path(path: &Path) -> Option<CspecDocument> {
+    let key = path.to_path_buf();
 
     {
         let guard = global_cache().lock().ok()?;
@@ -36,28 +41,75 @@ pub fn load_cspec(language_dir: &Path, cspec_stem: &str) -> Option<CspecDocument
         }
     }
 
-    let mut path = language_dir.to_path_buf();
-    path.push(format!("{cspec_stem}.cspec"));
-    let doc = CspecDocument::parse_file(&path);
+    let doc = CspecDocument::parse_file(path);
 
-    {
-        if let Ok(mut guard) = global_cache().lock() {
-            guard.entry(key).or_insert_with(|| doc.clone());
-        }
+    if let Ok(mut guard) = global_cache().lock() {
+        guard.entry(key).or_insert_with(|| doc.clone());
     }
 
     doc
 }
 
-/// Convenience: load the default `.cspec` for a processor directory and resolve
-/// register names using the provided SLA register map.
+// ── Ghidra-style .ldefs-based exact resolution ────────────────────────────────
+
+/// Resolve the `.cspec` path for a `(language_id, compiler_spec_id)` pair using
+/// the Ghidra-style `.ldefs` index.
 ///
-/// `preferred_stems` is checked in order; the first one that exists on disk wins.
+/// Returns `None` if the pair is not found in any `.ldefs` file under `languages_root`.
+///
+/// # Example
+/// ```text
+/// language_id      = "x86:LE:64:default"
+/// compiler_spec_id = "gcc"
+/// → <languages_root>/x86/x86-64-gcc.cspec
+/// ```
+pub fn cspec_path_for_pair(
+    languages_root: &Path,
+    language_id: &str,
+    compiler_spec_id: &str,
+) -> Option<PathBuf> {
+    let index = global_ldefs_index(languages_root);
+    let key = (language_id.to_string(), compiler_spec_id.to_string());
+    index.get(&key).map(|entry| entry.cspec_path())
+}
+
+/// Resolve and load a `.cspec` document for the given `(language_id, compiler_spec_id)`
+/// pair, returning the fully resolved prototype.
+///
+/// This is the **primary** entry point for all cspec loading.  It uses the `.ldefs`
+/// index for exact file-name resolution, then passes the result through the SLA
+/// register map to produce `(offset, size)` tuples.
+pub fn load_cspec_for_pair(
+    languages_root: &Path,
+    language_id: &str,
+    compiler_spec_id: &str,
+    reg_map: &SlaRegisterMap,
+) -> Option<ResolvedCspec> {
+    let path = cspec_path_for_pair(languages_root, language_id, compiler_spec_id)?;
+    let doc = load_cspec_path(&path)?;
+    Some(doc.resolve(reg_map))
+}
+
+// ── Legacy stem-based helpers (kept for backwards-compat / unit tests) ────────
+
+/// Load and cache a `.cspec` document by directory + stem.
+///
+/// Kept for test helpers and the legacy fallback path.  New callers should prefer
+/// `load_cspec_for_pair`.
+pub fn load_cspec(language_dir: &Path, cspec_stem: &str) -> Option<CspecDocument> {
+    let mut path = language_dir.to_path_buf();
+    path.push(format!("{cspec_stem}.cspec"));
+    load_cspec_path(&path)
+}
+
+/// Load and resolve a `.cspec` using a preferred-stem list.
+///
+/// Kept for unit tests.  New callers should prefer `load_cspec_for_pair`.
 pub fn load_default_cspec_resolved(
     language_dir: &Path,
     preferred_stems: &[&str],
     reg_map: &SlaRegisterMap,
-) -> Option<super::ResolvedCspec> {
+) -> Option<ResolvedCspec> {
     for &stem in preferred_stems {
         if let Some(doc) = load_cspec(language_dir, stem) {
             return Some(doc.resolve(reg_map));
@@ -68,9 +120,26 @@ pub fn load_default_cspec_resolved(
 
 /// Attempt to find the processor language directory from the sleigh-specs tree.
 ///
-/// `sleigh_specs_root`: root of the `utils/sleigh-specs/languages/` tree.
-/// `processor_subdir`: e.g. `"x86"`, `"ARM"`, `"MIPS"`.
+/// Kept for tests and legacy callers.  New code resolves via `.ldefs`.
 pub fn find_language_dir(sleigh_specs_root: &Path, processor_subdir: &str) -> Option<PathBuf> {
+    // Case-sensitive first
     let dir = sleigh_specs_root.join(processor_subdir);
-    dir.is_dir().then_some(dir)
+    if dir.is_dir() {
+        return Some(dir);
+    }
+    // Case-insensitive fallback (e.g. "aarch64" vs "AARCH64")
+    if let Ok(entries) = std::fs::read_dir(sleigh_specs_root) {
+        for entry in entries.flatten() {
+            let p = entry.path();
+            if p.is_dir() {
+                if p.file_name()
+                    .and_then(|n| n.to_str())
+                    .is_some_and(|n| n.eq_ignore_ascii_case(processor_subdir))
+                {
+                    return Some(p);
+                }
+            }
+        }
+    }
+    None
 }

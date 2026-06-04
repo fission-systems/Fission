@@ -19,13 +19,19 @@ pub(crate) fn should_retry_with_strict_indirect_stop(error: &str) -> bool {
 /// Attempt to resolve the `.cspec` prototype for `binary` and inject
 /// register-based ABI overrides into `options`.
 ///
-/// Reads the SLA register map (Ghidra `ELEM_VARNODE_SYM`) and the `.cspec` XML
-/// for the binary's `(language_id, compiler_spec_id)` pair. On success, populates
-/// `cspec_param_offsets` and `cspec_stack_arg_base` so that `AbiState` uses
-/// dynamic cspec-based resolution instead of hardcoded ABI tables.
+/// Uses the Ghidra-style `.ldefs` index to resolve the exact `.cspec` filename for
+/// the binary's `(language_id, compiler_spec_id)` pair — covering all architectures
+/// in `utils/sleigh-specs/languages/` (AARCH64, ARM, MIPS, PowerPC, RISC-V, Sparc,
+/// LoongArch, x86/x64 with all compiler variants, etc.).
 ///
-/// This is a best-effort, zero-regression helper: if the SLA or cspec is not
-/// available (e.g., no Ghidra install), the options are returned unchanged.
+/// Populates:
+/// - `cspec_param_offsets` — integer parameter register REGISTER-space offsets
+/// - `cspec_stack_arg_base` — stack argument base offset
+/// - `sla_register_map` — inverted SLA `(offset, size)` → name for all registers
+///
+/// Best-effort, zero-regression: if the SLA register map or `.cspec` is unavailable
+/// (e.g., no Ghidra install or no `.ldefs` match), options are returned unchanged and
+/// the pipeline falls back to the hardcoded `CallingConvention` tables.
 fn apply_cspec_overrides(binary: &LoadedBinary, options: &mut NirRenderOptions) {
     let Some(load_spec) = binary.load_spec() else {
         return;
@@ -36,49 +42,41 @@ fn apply_cspec_overrides(binary: &LoadedBinary, options: &mut NirRenderOptions) 
         return;
     };
 
-    // Step 2: Find the .cspec file in the utils/sleigh-specs/languages tree.
-    let compiler_spec_id = load_spec.pair.compiler_spec_id.as_str();
+    // Step 2: Build the inverted (offset, size) → name map for the renderer.
+    //
+    // The SLA `reg_map` is name → (offset, size).  We invert it so the NIR renderer
+    // can look up names dynamically for any architecture, replacing the hardcoded
+    // `x64_ghidra_reg_name` / `aarch64_ghidra_reg_name` / … tables.
+    //
+    // When multiple names map to the same (offset, size) (e.g. "RAX" and "rax"),
+    // prefer lowercase names as Ghidra uses lowercase for display.
+    let mut inverted: std::collections::HashMap<(u64, u32), String> =
+        std::collections::HashMap::new();
+    for (name, (offset, size)) in &reg_map {
+        let key = (*offset, *size);
+        inverted
+            .entry(key)
+            .and_modify(|existing| {
+                // Prefer shorter names (e.g. "rax" over "RAX"), then lowercase.
+                if name.len() < existing.len()
+                    || (name.len() == existing.len() && name.as_str() < existing.as_str())
+                {
+                    *existing = name.clone();
+                }
+            })
+            .or_insert_with(|| name.clone());
+    }
+    options.sla_register_map = Some(inverted);
+
+    // Step 3: Ghidra-style exact .cspec lookup via .ldefs index.
     let language_id = load_spec.pair.language_id.as_str();
-
-    // Derive the processor subdir from the language_id, e.g. "x86:LE:64:default" → "x86"
-    let processor = language_id.split(':').next().unwrap_or("");
-    if processor.is_empty() {
-        return;
-    }
-
+    let compiler_spec_id = load_spec.pair.compiler_spec_id.as_str();
     let languages_root = fission_sleigh::compiler::sleigh_languages_root();
-    let language_dir = fission_pcode::nir::cspec::loader::find_language_dir(
+
+    let Some(resolved) = fission_pcode::nir::cspec::loader::load_cspec_for_pair(
         &languages_root,
-        processor,
-    );
-    let Some(language_dir) = language_dir else {
-        return;
-    };
-
-    // Build candidate cspec stems in preference order:
-    //   1. "<proc>-<bits>-<compiler_spec_id>"  e.g. "x86-64-gcc", "x86-64-windows"
-    //   2. "<proc>-<bits>-<alias>"             e.g. "x86-64-win" (alias for "windows")
-    //   3. "<compiler_spec_id>"                 e.g. "gcc"
-    //   4. "default"
-    let bits = if binary.is_64bit { "64" } else { "32" };
-    let proc_lower = processor.to_ascii_lowercase();
-    let specific_stem = format!("{proc_lower}-{bits}-{compiler_spec_id}");
-    // Build short alias: "windows" → "win", "gcc" stays "gcc", etc.
-    let alias = match compiler_spec_id {
-        "windows" => Some("win"),
-        "macosx" => Some("osx"),
-        _ => None,
-    };
-    let alias_stem = alias.map(|a| format!("{proc_lower}-{bits}-{a}"));
-    let mut preferred_stems: Vec<&str> = vec![specific_stem.as_str(), compiler_spec_id];
-    if let Some(ref a) = alias_stem {
-        preferred_stems.push(a.as_str());
-    }
-    preferred_stems.push("default");
-
-    let Some(resolved) = fission_pcode::nir::cspec::loader::load_default_cspec_resolved(
-        &language_dir,
-        &preferred_stems,
+        language_id,
+        compiler_spec_id,
         &reg_map,
     ) else {
         return;
@@ -93,6 +91,7 @@ fn apply_cspec_overrides(binary: &LoadedBinary, options: &mut NirRenderOptions) 
         }
     }
 }
+
 
 pub(crate) fn finish_rust_sleigh_render(
     binary: &LoadedBinary,
