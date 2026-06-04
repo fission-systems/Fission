@@ -29,7 +29,7 @@ use super::super::cleanup::{
     simplify_fallthrough_edges, strip_redundant_assign_casts, apply_switch_norm_pass,
     rescue_undeclared_bindings,
 };
-use super::super::cleanup::{collapse_loop_exit_alias_returns, prune_unreachable_after_terminal, apply_condexe_folding_pass, apply_expand_load_pass, apply_deindirect_pass};
+use super::super::cleanup::{collapse_loop_exit_alias_returns, prune_unreachable_after_terminal, apply_condexe_folding_pass, apply_iblock_phi_elimination, apply_expand_load_pass, apply_deindirect_pass};
 use super::super::global_opt::{
     apply_bit_consume_dead_code_pass, apply_cse_pass, apply_dead_store_elimination,
     apply_gvn_join_hoist_pass, apply_licm_pass, apply_nz_mask_simplification_pass,
@@ -2433,6 +2433,10 @@ fn cleanup_stmt_list_with_options_and_preserved(
         if apply_condexe_folding_pass(stmts) {
             changed = true;
             last_changed_pass = Some("apply_condexe_folding_pass");
+        }
+        if apply_iblock_phi_elimination(stmts) {
+            changed = true;
+            last_changed_pass = Some("apply_iblock_phi_elimination");
         }
         if collapse_redundant_conditional_returns(stmts) {
             changed = true;

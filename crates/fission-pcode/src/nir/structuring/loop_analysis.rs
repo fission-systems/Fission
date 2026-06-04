@@ -1,6 +1,7 @@
 use super::cfg_analysis::{CfgAnalysis, EdgeClass};
 use std::collections::{HashMap, HashSet};
 
+
 #[derive(Debug, Clone)]
 pub(crate) struct LoopBody {
     pub head: usize,
@@ -48,6 +49,9 @@ impl LoopBody {
             loop_body.extend(predecessors, successors, irreducible_edges);
             // Phase C: re-scan the full body (after extend) to collect all exits.
             loop_body.find_all_exits(successors, irreducible_edges);
+            // Phase D (Ghidra LoopBody::orderTails): move preferred tail (direct exit edge)
+            // to tails[0] so multi-tail do-while structuring can reliably use the first tail.
+            loop_body.order_tails_by_exit(successors);
             bodies.push(loop_body);
         }
         bodies
@@ -159,6 +163,47 @@ impl LoopBody {
     /// Returns true if `block_idx` is a recognized exit destination (break target) for this loop.
     pub(crate) fn is_exit(&self, block_idx: usize) -> bool {
         self.all_exits.binary_search(&block_idx).is_ok()
+    }
+
+    /// Returns the index of the "preferred" tail — the tail that has a direct edge to
+    /// `exit_idx`. This mirrors Ghidra's `LoopBody::orderTails()` logic. If no tail has
+    /// a direct exit edge, returns `None`.
+    ///
+    /// When called, the caller should use the preferred tail as the latch for do-while
+    /// condition extraction, giving priority to the natural loop-closing exit.
+    pub(crate) fn preferred_tail_index(
+        &self,
+        successors: &[Vec<usize>],
+    ) -> Option<usize> {
+        let Some(exit_idx) = self.exit_idx else {
+            return None;
+        };
+        if self.tails.len() <= 1 {
+            return self.tails.first().map(|_| 0);
+        }
+        for (i, &tail) in self.tails.iter().enumerate() {
+            if tail < successors.len() && successors[tail].contains(&exit_idx) {
+                return Some(i);
+            }
+        }
+        // No tail has a direct exit edge; prefer the first tail as fallback.
+        Some(0)
+    }
+
+    /// Re-orders `tails` in place so that the preferred tail (one with a direct edge to
+    /// `exit_idx`) is at index 0. Equivalent to Ghidra's `LoopBody::orderTails()`.
+    /// This must be called after `find_all_exits` so that `exit_idx` is populated.
+    pub(crate) fn order_tails_by_exit(&mut self, successors: &[Vec<usize>]) {
+        if self.tails.len() <= 1 {
+            return;
+        }
+        let Some(pref_idx) = self.preferred_tail_index(successors) else {
+            return;
+        };
+        if pref_idx == 0 {
+            return;
+        }
+        self.tails.swap(0, pref_idx);
     }
 
     /// Returns all CFG edges `(src, exit_block)` where `src` is inside the loop body

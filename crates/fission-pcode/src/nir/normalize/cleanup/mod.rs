@@ -37,7 +37,7 @@ pub(crate) use control_flow::{
 // Re-export utility functions used by other modules outside cleanup.
 pub(crate) use utils::expr_has_side_effects;
 pub(crate) use switch_norm::apply_switch_norm_pass;
-pub(crate) use condexe::apply_condexe_folding_pass;
+pub(crate) use condexe::{apply_condexe_folding_pass, apply_iblock_phi_elimination};
 pub(crate) use expand_load::apply_expand_load_pass;
 pub(crate) use deindirect::apply_deindirect_pass;
 

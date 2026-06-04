@@ -175,6 +175,10 @@ pub struct NirBuildStats {
     /// How many while loops used the subgraph body lowering path (complex body with branches).
     #[serde(default)]
     pub loop_while_subgraph_lowered_count: usize,
+    /// How many multi-tail do-while loops were successfully lowered after Ghidra-style
+    /// tail ordering placed the preferred (exit-adjacent) latch at index 0.
+    #[serde(default)]
+    pub loop_multi_tail_dowhile_lowered_count: usize,
     /// How many Break statements were emitted via multi-exit CFG path (mid-body break).
     #[serde(default)]
     pub loop_multi_exit_break_count: usize,

@@ -180,6 +180,7 @@ fn merge_structuring_stats(target: &mut NirBuildStats, other: &NirBuildStats) {
             loop_control_rewrite_continue_count,
             loop_control_rewrite_skipped_nested_scope_count,
             loop_while_subgraph_lowered_count,
+            loop_multi_tail_dowhile_lowered_count,
             loop_multi_exit_break_count,
             loop_for_lowered_count,
             region_proof_candidate_count,

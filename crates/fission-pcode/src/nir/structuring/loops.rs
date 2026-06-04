@@ -653,19 +653,25 @@ impl<'a> PreviewBuilder<'a> {
     ) -> Result<Option<(HirStmt, usize)>, MlilPreviewError> {
         let diag = structuring_diag_enabled();
 
-        let (exit_idx, latch_idx, body_set) = {
+        // After `order_tails_by_exit()` (Ghidra LoopBody::orderTails equivalent),
+        // tails[0] is the preferred latch — the tail with a direct edge to the exit
+        // block.  We accept multi-tail loops here: additional tails are handled as
+        // mid-body break/continue edges by the subgraph lowerer.
+        let (exit_idx, latch_idx, body_set, multi_tail) = {
             let Some(loop_body) = self.get_loop_body(idx) else {
                 return Ok(None);
             };
             let Some(exit_idx) = loop_body.exit_idx else {
                 return Ok(None);
             };
-            if loop_body.tails.len() != 1 {
+            if loop_body.tails.is_empty() {
                 return Ok(None);
             }
+            let multi_tail = loop_body.tails.len() > 1;
+            // tails[0] is always the preferred latch after order_tails_by_exit().
             let latch_idx = loop_body.tails[0];
             let body_set: HashSet<usize> = loop_body.body.iter().copied().collect();
-            (exit_idx, latch_idx, body_set)
+            (exit_idx, latch_idx, body_set, multi_tail)
         };
 
         let start_addr = self.block_target_key(idx);
@@ -690,8 +696,8 @@ impl<'a> PreviewBuilder<'a> {
 
         if diag {
             eprintln!(
-                "[DIAG] try_lower_multiblock_dowhile: attempting subgraph for idx={}",
-                idx
+                "[DIAG] try_lower_multiblock_dowhile: attempting subgraph for idx={} multi_tail={}",
+                idx, multi_tail
             );
         }
 
@@ -701,6 +707,9 @@ impl<'a> PreviewBuilder<'a> {
         };
 
         self.telemetry.structuring.loop_while_subgraph_lowered_count += 1;
+        if multi_tail {
+            self.telemetry.structuring.loop_multi_tail_dowhile_lowered_count += 1;
+        }
 
         Ok(Some((
             HirStmt::While {

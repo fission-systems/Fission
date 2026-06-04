@@ -281,6 +281,9 @@ pub(crate) struct StructuringTelemetry {
     pub(crate) loop_control_rewrite_continue_count: usize,
     pub(crate) loop_control_rewrite_skipped_nested_scope_count: usize,
     pub(crate) loop_while_subgraph_lowered_count: usize,
+    /// How many multi-tail do-while loops were successfully lowered after Ghidra-style
+    /// tail ordering placed the preferred (exit-adjacent) latch at index 0.
+    pub(crate) loop_multi_tail_dowhile_lowered_count: usize,
     pub(crate) loop_multi_exit_break_count: usize,
     pub(crate) loop_for_lowered_count: usize,
     pub(crate) region_proof_candidate_count: usize,
@@ -420,6 +423,7 @@ impl StructuringTelemetry {
         stats.loop_control_rewrite_skipped_nested_scope_count =
             self.loop_control_rewrite_skipped_nested_scope_count;
         stats.loop_while_subgraph_lowered_count = self.loop_while_subgraph_lowered_count;
+        stats.loop_multi_tail_dowhile_lowered_count = self.loop_multi_tail_dowhile_lowered_count;
         stats.loop_multi_exit_break_count = self.loop_multi_exit_break_count;
         stats.loop_for_lowered_count = self.loop_for_lowered_count;
         stats.region_proof_candidate_count = self.region_proof_candidate_count;
