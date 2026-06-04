@@ -557,13 +557,11 @@ impl<'a> PreviewBuilder<'a> {
                     .or_else(|| crate::nir::support::unique_register_name(output.offset, output.size))
                     .map(|s| s.to_string())
                     .unwrap_or_else(|| {
-                        crate::nir::support::register_hardware_name_for_abi(
-                            output.offset,
-                            output.size,
-                            self.options.calling_convention,
-                        )
-                        .unwrap_or_else(|| crate::nir::support::register_name(output.offset, output.size))
-                        .to_string()
+                        self.sla_hw_name(output.offset, output.size)
+                            .unwrap_or_else(|| {
+                                crate::nir::support::register_name(output.offset, output.size)
+                                    .to_string()
+                            })
                     });
                 if !self.params.values().any(|b| b.name == candidate) && !self.locals.values().any(|s| s.name == candidate) {
                     name = Some(candidate);
@@ -690,7 +688,37 @@ impl<'a> PreviewBuilder<'a> {
             });
         name.to_string()
     }
+
+    /// Ghidra-style hardware register name lookup with SLA-first resolution.
+    ///
+    /// Queries `self.options.sla_register_map` (populated from `ELEM_VARNODE_SYM`) first,
+    /// then falls back to the hardcoded `register_hardware_name_for_abi` table.
+    ///
+    /// Use this instead of `register_hardware_name_for_abi(...)` anywhere `self.options`
+    /// is available — it covers all architectures uniformly via the `.ldefs`/SLA map.
+    #[inline]
+    pub(crate) fn sla_hw_name(&self, offset: u64, size: u32) -> Option<String> {
+        if let Some(map) = &self.options.sla_register_map {
+            if let Some(name) = map.get(&(offset, size)) {
+                return Some(name.clone());
+            }
+        }
+        register_hardware_name_for_abi(offset, size, self.options.calling_convention)
+            .map(|s| s.to_string())
+    }
+
+    /// ABI-independent hardware register name with SLA-first resolution.
+    #[inline]
+    pub(crate) fn sla_reg_name(&self, offset: u64, size: u32) -> String {
+        if let Some(map) = &self.options.sla_register_map {
+            if let Some(name) = map.get(&(offset, size)) {
+                return name.clone();
+            }
+        }
+        register_name(offset, size).to_string()
+    }
 }
+
 
 fn is_compiler_runtime_param_suppressed_name(name: &str) -> bool {
     let lower = name.to_ascii_lowercase();

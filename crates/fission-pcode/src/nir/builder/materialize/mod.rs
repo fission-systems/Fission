@@ -762,12 +762,8 @@ impl<'a> PreviewBuilder<'a> {
             return aarch64_ghidra_reg_name(output.offset, 4).map(|name| (name.to_string(), 4));
         }
         if live_register_loop_carried {
-            let name = register_hardware_name_for_abi(
-                output.offset,
-                output.size,
-                self.options.calling_convention,
-            )?;
-            if crate::arch::x86::x86_gpr_family_index(name).is_none()
+            let name = self.sla_hw_name(output.offset, output.size)?;
+            if crate::arch::x86::x86_gpr_family_index(name.as_str()).is_none()
                 && self.gpr_family_index_for_key(&output_key).is_none()
             {
                 return None;
@@ -778,9 +774,9 @@ impl<'a> PreviewBuilder<'a> {
                 output,
                 proof.relation,
                 proof.consumer_kind,
-                name,
+                name.as_str(),
             );
-            return Some((name.to_string(), output.size));
+            return Some((name, output.size));
         }
         None
     }

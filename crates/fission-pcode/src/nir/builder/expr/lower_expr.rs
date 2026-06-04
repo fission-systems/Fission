@@ -52,6 +52,7 @@ impl<'a> PreviewBuilder<'a> {
         }
     }
 
+
     pub(in crate::nir::builder) fn live_call_result_binding_for_return_register(
         &self,
         vn: &Varnode,
