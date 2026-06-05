@@ -110,12 +110,22 @@ pub(crate) fn child_body_has_entry_label(child_body: &[HirStmt], label: &str) ->
 /// a structuring failure where a back-edge or cross-edge target was referenced
 /// but the emitter never placed the matching label statement.
 pub(crate) fn has_orphan_goto_labels(body: &[HirStmt]) -> bool {
+    !orphan_goto_labels(body).is_empty()
+}
+
+/// Label names referenced by `Goto` but absent from any `Label` declaration in `body`.
+pub(crate) fn orphan_goto_labels(body: &[HirStmt]) -> Vec<String> {
     let goto_targets = collect_referenced_labels(body);
     if goto_targets.is_empty() {
-        return false;
+        return Vec::new();
     }
     let declared = collect_declared_labels(body);
-    goto_targets.iter().any(|label| !declared.contains(label))
+    let mut orphans: Vec<String> = goto_targets
+        .into_iter()
+        .filter(|label| !declared.contains(label))
+        .collect();
+    orphans.sort();
+    orphans
 }
 
 /// Collects the set of label names that are *declared* (i.e. `Label(name)`)
@@ -683,6 +693,29 @@ mod tests {
         let (normalized, rewritten) = canonicalize_top_level_forward_label_aliases(body.clone());
         assert_eq!(rewritten, 0);
         assert_eq!(normalized, body);
+    }
+
+    #[test]
+    fn orphan_goto_labels_detects_missing_declarations() {
+        let body = vec![HirStmt::While {
+            cond: HirExpr::Const(1, NirType::Bool),
+            body: vec![HirStmt::Goto("block_140001890".to_string())],
+        }];
+        assert_eq!(
+            orphan_goto_labels(&body),
+            vec!["block_140001890".to_string()]
+        );
+        assert!(has_orphan_goto_labels(&body));
+    }
+
+    #[test]
+    fn orphan_goto_labels_empty_when_all_targets_declared() {
+        let body = vec![
+            HirStmt::Label("block_140001890".to_string()),
+            HirStmt::Return(None),
+        ];
+        assert!(orphan_goto_labels(&body).is_empty());
+        assert!(!has_orphan_goto_labels(&body));
     }
 
     #[test]

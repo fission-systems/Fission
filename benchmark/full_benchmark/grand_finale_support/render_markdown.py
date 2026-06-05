@@ -39,7 +39,7 @@ def render_single_benchmark_markdown(benchmark: dict[str, Any]) -> str:
         owner_metrics=(summary.owner_metrics or {}).get("fission", {}),
         shape_drift_metrics=(summary.shape_drift_metrics or {}).get("fission", {}),
         ghidra_action_metrics=(summary.ghidra_action_metrics or {}).get("fission", {}),
-        mir_metrics=(summary.mir_metrics or {}).get("fission", {}),
+        blockgraph_collapse_metrics=(summary.blockgraph_collapse_metrics or {}).get("fission", {}),
         blockgraph_region_metrics=(summary.blockgraph_region_metrics or {}).get("fission", {}),
         watchlist=watchlist,
         baseline_gate=benchmark.get("baseline_regression_gate") or {},

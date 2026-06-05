@@ -82,7 +82,6 @@ fn required_const_tpl_u32(value: Option<u64>, role: &str) -> Result<u32> {
 
 pub(super) fn emit_pcode_for_state(
     compiled: &CompiledFrontend,
-    native: Option<&Arc<NativeBackend>>,
     address: u64,
     memory_window: &[u8],
     memory_base: u64,
@@ -91,7 +90,6 @@ pub(super) fn emit_pcode_for_state(
 ) -> Result<(Vec<PcodeOp>, RuntimeExecutionDetails)> {
     emit_pcode_for_state_with_bytes(
         compiled,
-        native,
         address,
         memory_window,
         memory_base,
@@ -130,7 +128,6 @@ pub enum RuntimeFlowOverride {
 
 pub(super) fn emit_pcode_for_state_with_bytes(
     compiled: &CompiledFrontend,
-    native: Option<&Arc<NativeBackend>>,
     address: u64,
     memory_window: &[u8],
     memory_base: u64,
@@ -138,7 +135,7 @@ pub(super) fn emit_pcode_for_state_with_bytes(
     flow: FlowEmitOptions,
 ) -> Result<(Vec<PcodeOp>, RuntimeExecutionDetails)> {
     let mut emitter =
-        CompiledTableEmitter::new(compiled, native, address, memory_window, memory_base, flow);
+        CompiledTableEmitter::new(compiled, address, memory_window, memory_base, flow);
     // If the template uses InstNext2 (delay-slot architectures), pre-decode the
     // delay-slot instruction to get its actual length.
     if (uses_inst_next2(&decoded.constructor_template.ops)
@@ -257,7 +254,6 @@ fn nonnegative_i64_to_u64(value: i64) -> Option<u64> {
 #[derive(Debug, Clone)]
 pub(super) struct CompiledTableEmitter<'c> {
     compiled: &'c CompiledFrontend,
-    native: Option<&'c Arc<NativeBackend>>,
     /// Byte window for the current decode; `memory_window[0]` is at `memory_base`.
     memory_window: &'c [u8],
     memory_base: u64,
@@ -296,7 +292,6 @@ pub(super) struct DynamicMemoryTarget {
 impl<'c> CompiledTableEmitter<'c> {
     fn new(
         compiled: &'c CompiledFrontend,
-        native: Option<&'c Arc<NativeBackend>>,
         address: u64,
         memory_window: &'c [u8],
         memory_base: u64,
@@ -305,7 +300,6 @@ impl<'c> CompiledTableEmitter<'c> {
         let uniqbase = compiled.sla_uniqbase;
         Self {
             compiled,
-            native,
             memory_window,
             memory_base,
             address,
@@ -348,7 +342,6 @@ impl<'c> CompiledTableEmitter<'c> {
             .map_err(|_| anyhow!("delay-slot memory offset exceeds usize"))?;
         let len = decode_instruction_length(
             self.compiled,
-            self.native,
             self.memory_window,
             inst_next_address,
             inst_next_offset,
@@ -821,7 +814,6 @@ impl<'c> CompiledTableEmitter<'c> {
                 let ctx_mask = self.flow.instruction_context_known_mask;
                 let cross_state = try_bind_runtime_state_at(
                     self.compiled,
-                    self.native,
                     self.memory_window,
                     self.memory_base,
                     target_pc,
@@ -874,7 +866,6 @@ impl<'c> CompiledTableEmitter<'c> {
                             .ok_or_else(|| anyhow!("delay slot address overflow"))?;
                         let slot_state = try_bind_runtime_state_at(
                             self.compiled,
-                            self.native,
                             self.memory_window,
                             self.memory_base,
                             slot_pc,
@@ -1816,7 +1807,6 @@ mod tests {
         let compiled = minimal_frontend_with_spaces(std::collections::BTreeMap::new());
         let mut emitter = CompiledTableEmitter::new(
             &compiled,
-            None,
             0x1000,
             &[],
             0x1000,

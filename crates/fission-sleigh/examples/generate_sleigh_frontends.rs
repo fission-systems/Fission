@@ -2,15 +2,13 @@ use std::env;
 
 use anyhow::{anyhow, Result};
 use fission_sleigh::compiler::{
-    compile_generated_native_backend_for_entry_spec, discover_all_entry_specs, generated_root,
-    write_all_generated_artifacts, write_generated_artifacts_for_entry_spec,
-    write_ghidra_language_manifest,
+    discover_all_entry_specs, generated_root, write_all_generated_artifacts,
+    write_generated_artifacts_for_entry_spec, write_ghidra_language_manifest,
 };
 
 fn main() -> Result<()> {
     let output_root = generated_root();
     let mut entry_filter = None;
-    let mut compile_native = false;
     let mut args = env::args().skip(1);
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -20,10 +18,9 @@ fn main() -> Result<()> {
                         .ok_or_else(|| anyhow!("--entry requires an entry id"))?,
                 );
             }
-            "--native" => compile_native = true,
             "--help" | "-h" => {
                 println!(
-                    "usage: generate_sleigh_frontends [--entry <entry-id>] [--native]\n\n\
+                    "usage: generate_sleigh_frontends [--entry <entry-id>]\n\n\
                      Without --entry, regenerate all frontends. With --entry, only write that \
                      entry under the normal target/fission-sleigh/generated cache."
                 );
@@ -46,11 +43,6 @@ fn main() -> Result<()> {
             entry.entry_id,
             output_root.display()
         );
-        if compile_native {
-            let native_backend =
-                compile_generated_native_backend_for_entry_spec(&entry.path, &output_root)?;
-            println!("{}", native_backend.display());
-        }
         return Ok(());
     }
 

@@ -19,7 +19,7 @@ Authoritative schema documentation lives beside the harness (`benchmark/full_ben
 
 - Gate posture: `weighted_avg_normalized_similarity`, `release_promotion_allowed`, `promotion_blockers`
 - Architecture buckets: `x86_summary`, `x64_summary` (`binary_count`, `weighted_avg_normalized_similarity`, `failed_binary_ids`, …)
-- Rolled metrics: `owner_metric_totals`, `shape_drift_totals`, `normalize_pass_metric_totals`, `ghidra_action_metric_totals`, `mir_metric_totals`, `blockgraph_region_metric_totals`, `alias_interleave_metric_totals`, `cpu_metric_totals`
+- Rolled metrics: `owner_metric_totals`, `shape_drift_totals`, `normalize_pass_metric_totals`, `ghidra_action_metric_totals`, `blockgraph_collapse_metric_totals`, `blockgraph_region_metric_totals`, `alias_interleave_metric_totals`, `cpu_metric_totals`
 - Row sampling: `top_degraded_rows`, `per_binary_rows[]` (`direct_success`, `avg_normalized_similarity`, nested metric maps matching single-binary compact rows)
 
 Subset constants enumerating promoted keys appear in [`benchmark/full_benchmark/grand_finale_support/compact_summary.py`](../benchmark/full_benchmark/grand_finale_support/compact_summary.py) (`SELECTED_*` tuples).
@@ -54,7 +54,7 @@ Each `BinarySnapshot` / `AggregateSnapshot` embeds `nir_build_stats_totals`, whi
 
 ### Embedded `NirBuildStats`
 
-Counters cover timing (`build_duration_ms`, `normalize_duration_ms`, …), pcode validation (`invalid_pcode_shape_count`, …), Ghidra-parity stage mirrors (`ghidra_action_*`), MIR projection counts (`mir_*`), structuring outcomes (`structuring_*`, `region_linearize_*`, …). **Extend counters only in `types.rs`**, then thread through automation aggregates—never fork a parallel telemetry struct.
+Counters cover timing (`build_duration_ms`, `normalize_duration_ms`, …), pcode validation (`invalid_pcode_shape_count`, …), Ghidra-parity stage mirrors (`ghidra_action_*`), BlockGraph collapse admission (`blockgraph_collapse_*`), structuring outcomes (`structuring_*`, `region_linearize_*`, …). **Extend counters only in `types.rs`**, then thread through automation aggregates—never fork a parallel telemetry struct.
 
 ## Loader identity (`BinaryIdentityReport`)
 

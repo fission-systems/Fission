@@ -2,55 +2,15 @@ use super::*;
 
 pub(super) fn candidate_selections<'a>(
     compiled: &'a CompiledFrontend,
-    strategy: &RuntimeDecodeStrategy<'a>,
     ctx: &CompiledInstructionContext<'_>,
     address: u64,
 ) -> Result<Vec<RuntimeSelection<'a>>> {
-    let instruction_table = compiled.subtables.get("instruction").ok_or_else(|| {
-        RuntimeSleighError::UnsupportedPcodeTemplate {
+    let primary = select_constructor(compiled, "instruction", ctx)?.ok_or_else(|| {
+        RuntimeSleighError::DecodeNoMatch {
             language: compiled.entry_id.clone(),
-            reason: "selection_no_instruction_root".to_string(),
+            address,
         }
     })?;
-    let primary = if let Some(native) = strategy.native_for_table(compiled, "instruction", ctx) {
-        let constructor_index = native
-            .decode_match("instruction", ctx.bytes, ctx.context_register)?
-            .ok_or_else(|| RuntimeSleighError::DecodeNoMatch {
-                language: compiled.entry_id.clone(),
-                address,
-            })?;
-        let constructor = instruction_table
-            .constructors
-            .get(constructor_index)
-            .ok_or_else(|| anyhow!("invalid constructor index returned by backend"))?;
-        let (subtable_id, constructor_slot) = constructor_sla_selection_identity(
-            instruction_table,
-            constructor,
-            constructor_index,
-            "instruction",
-        )?;
-        RuntimeSelection {
-            constructor,
-            constructor_index,
-            subtable_id,
-            constructor_id: constructor.constructor_id,
-            constructor_slot,
-            trace: spine::RuntimeMatchTrace {
-                root_bucket: "native".to_string(),
-                probes: Vec::new(),
-                leaf_constructor_indexes: vec![constructor_index],
-                matched_leaf_pattern: None,
-            },
-        }
-    } else {
-        select_constructor(compiled, "instruction", ctx)?.ok_or_else(|| {
-            RuntimeSleighError::DecodeNoMatch {
-                language: compiled.entry_id.clone(),
-                address,
-            }
-        })?
-    };
-
     Ok(vec![primary])
 }
 

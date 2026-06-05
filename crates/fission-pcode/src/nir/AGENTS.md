@@ -24,6 +24,10 @@ nir/
 
 | Task | Location | Notes |
 |---|---|---|
+| Action pipeline framework | `action_pipeline/` | Pass/ActionGroup/Pipeline; see [`docs/architecture/DECOMPILER_ACTIONS.md`](../../../docs/architecture/DECOMPILER_ACTIONS.md) |
+| Normalize group registry | `normalize/pipeline/groups.rs` | Ghidra-ordered ActionGroups; production driver via `run_normalize_pipeline` |
+| Canonical stage functions | `normalize/pipeline/stages.rs` | Shared pass sequence for each ActionGroup (1:1 parity) |
+| Pipeline helpers | `normalize/pipeline/run.rs` | `run_pass_logged`, cleanup families, admission summaries |
 | Telemetry fields | `types.rs` | `NirBuildStats` is canonical |
 | PreviewBuilder state | `mod.rs`, `builder/mod.rs` | Keep builder state/projection aligned |
 | Structuring rules | `structuring/` | Read child AGENT there first |
@@ -43,6 +47,8 @@ nir/
 - Do not fix structuring bugs only in `printer.rs`.
 - Do not skip large-sample validation when changing rejection/acceptance logic.
 - Do not prevent regressions with downstream workarounds or sample-specific heuristics (address guards, hard-coded function names, etc.). Fix the root cause at the canonical owner (builder, normalize, or structuring) using invariant-based algorithms (CFG, dominance, def-use chains, type-system rules). A builder-level fix that stops the wrong binding from being created is better than a normalize pass that tries to clean it up later.
+- Do not reintroduce deleted narrow idiom passes (`security_cookie`, `xor_swap`, `string_copy`, `recurrence`, `call_artifact`, `bitstream`, `likely_trash`) without a Ghidra Rule/Action reference.
+- Do not add parallel dead-code or bitmask transform layers; use the consolidated owners documented in [`docs/architecture/DECOMPILER_ACTIONS.md`](../../../docs/architecture/DECOMPILER_ACTIONS.md).
 
 ## Regression Prevention
 

@@ -6,8 +6,9 @@ mod admission;
 pub use admission::*;
 
 pub(crate) mod collapse;
+mod orphan_repair;
 
-fn apply_mir_blockgraph_admission_gate(
+fn apply_blockgraph_collapse_admission_gate(
     admission: StructuringAdmissionReason,
     enabled: bool,
 ) -> StructuringAdmissionReason {
@@ -201,39 +202,43 @@ impl<'a> PreviewBuilder<'a> {
             .structuring_irreducible_header_count += scc_irreducible_header_count;
         let original_admission =
             self.structuring_admission_reason(scc_irreducible_count, max_scc_component_size);
-        let mir_blockgraph_enabled = mir_blockgraph_admission_enabled();
-        if mir_blockgraph_enabled {
-            self.telemetry.mir.mir_blockgraph_admission_enabled_count += 1;
+        let blockgraph_collapse_enabled = blockgraph_collapse_admission_enabled();
+        if blockgraph_collapse_enabled {
+            self.telemetry
+                .structuring
+                .blockgraph_collapse_admission_enabled_count += 1;
             match original_admission {
                 StructuringAdmissionReason::IrreducibleBudget => {
                     self.telemetry
-                        .mir
-                        .mir_blockgraph_irreducible_budget_bypass_count += 1;
+                        .structuring
+                        .blockgraph_collapse_irreducible_budget_bypass_count += 1;
                 }
                 StructuringAdmissionReason::ExtremeBudget => {
                     self.telemetry
-                        .mir
-                        .mir_blockgraph_extreme_budget_blocked_count += 1;
+                        .structuring
+                        .blockgraph_collapse_extreme_budget_blocked_count += 1;
                 }
                 StructuringAdmissionReason::GraphCollapse
                 | StructuringAdmissionReason::ExplicitForceLinear => {}
             }
         }
-        let admission =
-            apply_mir_blockgraph_admission_gate(original_admission, mir_blockgraph_enabled);
+        let admission = apply_blockgraph_collapse_admission_gate(
+            original_admission,
+            blockgraph_collapse_enabled,
+        );
         let force_linear = !matches!(admission, StructuringAdmissionReason::GraphCollapse);
-        let mir_blockgraph_irreducible_trial = mir_blockgraph_enabled
+        let blockgraph_irreducible_trial = blockgraph_collapse_enabled
             && matches!(
                 original_admission,
                 StructuringAdmissionReason::IrreducibleBudget
             )
             && matches!(admission, StructuringAdmissionReason::GraphCollapse);
         let pre_trial_successors =
-            mir_blockgraph_irreducible_trial.then(|| self.successors.clone());
+            blockgraph_irreducible_trial.then(|| self.successors.clone());
         let pre_trial_predecessors =
-            mir_blockgraph_irreducible_trial.then(|| self.predecessors.clone());
+            blockgraph_irreducible_trial.then(|| self.predecessors.clone());
         let pre_trial_virtual_block_map =
-            mir_blockgraph_irreducible_trial.then(|| self.virtual_block_map.clone());
+            blockgraph_irreducible_trial.then(|| self.virtual_block_map.clone());
         let pre_trial_blockgraph_complete_count =
             self.telemetry.structuring.blockgraph_region_complete_count;
 
@@ -274,9 +279,9 @@ impl<'a> PreviewBuilder<'a> {
                             fas_edges
                         );
                     }
-                    self.fas_virtual_edges = fas_edges;
-                    self.telemetry.structuring.fas_virtual_goto_count +=
-                        self.fas_virtual_edges.len();
+                    for (from, to) in fas_edges {
+                        self.apply_virtual_goto_edge(from, to);
+                    }
                 }
             }
         }
@@ -325,7 +330,21 @@ impl<'a> PreviewBuilder<'a> {
         // determine follow blocks.  The diag path additionally logs edge-class statistics.
         // NOTE: These are computed AFTER node-splitting so they reflect the augmented CFG.
         let total_blocks = self.pcode.blocks.len() + self.virtual_block_map.len();
-        let sese_result = super::sese::structure_cfg_via_sese(self, total_blocks);
+        let sese_result = if super::collapse_loop::collapse_loop_admission_enabled() {
+            match super::collapse_loop::structure_cfg_via_collapse_loop(self, total_blocks) {
+                Ok(body) => Ok(body),
+                Err(err) => {
+                    if diag {
+                        eprintln!(
+                            "[DIAG] collapse loop failed ({err:?}), falling back to SESE tree"
+                        );
+                    }
+                    super::sese::structure_cfg_via_sese(self, total_blocks)
+                }
+            }
+        } else {
+            super::sese::structure_cfg_via_sese(self, total_blocks)
+        };
 
         match sese_result {
         Ok(body) => {
@@ -343,6 +362,20 @@ impl<'a> PreviewBuilder<'a> {
                 // structured).  Fall back to linear rather than emitting broken
                 // pseudocode that will fail to compile.
                 if has_orphan_goto_labels(&finalized) {
+                    if let Some(repaired) = self.try_repair_orphan_gotos(finalized) {
+                        if diag {
+                            eprintln!(
+                                "[DIAG] SESE orphan goto labels localized without full linear fallback"
+                            );
+                        }
+                        self.telemetry
+                            .structuring
+                            .structuring_orphan_goto_localized_count += 1;
+                        metrics::histogram!("fission.structuring.total_ms")
+                            .record(total_start.elapsed().as_secs_f64() * 1000.0);
+                        metrics::counter!("fission.structuring.invocations_total").increment(1);
+                        return Ok(repaired);
+                    }
                     if diag {
                         eprintln!(
                             "[DIAG] SESE result has orphan goto labels, falling back to linear"
@@ -352,6 +385,9 @@ impl<'a> PreviewBuilder<'a> {
                     self.telemetry
                         .structuring
                         .structuring_sese_orphan_goto_fallback_count += 1;
+                    self.telemetry
+                        .structuring
+                        .structuring_orphan_goto_unrepairable_count += 1;
                     return self.build_proof_first_linear_multiblock_body();
                 }
                 metrics::histogram!("fission.structuring.total_ms")
@@ -649,6 +685,17 @@ impl<'a> PreviewBuilder<'a> {
 
                 idx += 1;
             }
+
+            if !progress && super::collapse_loop::collapse_loop_admission_enabled() {
+                if self.try_virtualize_one_bad_edge(entry, exit)? {
+                    if diag {
+                        eprintln!(
+                            "[DIAG] build_sese_region_body: virtualized bad edge, continuing collapse loop"
+                        );
+                    }
+                    progress = true;
+                }
+            }
         }
 
         // Final reconstruction scan: reconstruct graph step-by-step
@@ -750,12 +797,18 @@ impl<'a> PreviewBuilder<'a> {
                     false_target,
                 } => {
                     let next_addr = self.next_block_address(idx);
-                    let mut then_body = if next_addr == Some(true_target) {
-                        Vec::new()
-                    } else {
+                    let true_idx = self.find_block_index_by_address(true_target);
+                    let false_idx = false_target
+                        .and_then(|target| self.find_block_index_by_address(target));
+                    let true_virtual = true_idx.is_some_and(|ti| self.is_virtual_goto_edge(idx, ti));
+                    let false_virtual =
+                        false_idx.is_some_and(|fi| self.is_virtual_goto_edge(idx, fi));
+                    let mut then_body = if true_virtual || next_addr != Some(true_target) {
                         vec![HirStmt::Goto(block_label(true_target))]
+                    } else {
+                        Vec::new()
                     };
-                    if let Some(true_idx) = self.find_block_index_by_address(true_target) {
+                    if let Some(true_idx) = true_idx {
                         if let Some(expr) =
                             self.lower_return_join_expr_for_predecessor(idx, true_idx)?
                         {
@@ -764,13 +817,13 @@ impl<'a> PreviewBuilder<'a> {
                     }
                     let else_body = match false_target {
                         Some(false_target) => {
-                            let mut else_body = if Some(false_target) != next_addr {
+                            let mut else_body = if false_virtual || Some(false_target) != next_addr
+                            {
                                 vec![HirStmt::Goto(block_label(false_target))]
                             } else {
                                 Vec::new()
                             };
-                            if let Some(false_idx) = self.find_block_index_by_address(false_target)
-                            {
+                            if let Some(false_idx) = false_idx {
                                 if let Some(expr) =
                                     self.lower_return_join_expr_for_predecessor(idx, false_idx)?
                                 {
@@ -1014,7 +1067,7 @@ pub(crate) fn discover_guarded_tail_candidates_for_stats(body: &[HirStmt]) -> Pr
 mod tests {
     use super::{
         PreviewBuilder, StructuringAdmissionInput, StructuringAdmissionReason,
-        apply_mir_blockgraph_admission_gate, decide_structuring_admission,
+        apply_blockgraph_collapse_admission_gate, decide_structuring_admission,
     };
     use crate::PcodeFunction;
     use crate::nir::types::{
@@ -1197,8 +1250,8 @@ mod tests {
     }
 
     #[test]
-    fn mir_blockgraph_gate_allows_irreducible_budget_graph_collapse() {
-        let decision = apply_mir_blockgraph_admission_gate(
+    fn blockgraph_collapse_gate_allows_irreducible_budget_graph_collapse() {
+        let decision = apply_blockgraph_collapse_admission_gate(
             StructuringAdmissionReason::IrreducibleBudget,
             true,
         );
@@ -1206,15 +1259,15 @@ mod tests {
     }
 
     #[test]
-    fn mir_blockgraph_gate_stays_fail_closed_for_extreme_budget() {
+    fn blockgraph_collapse_gate_stays_fail_closed_for_extreme_budget() {
         let decision =
-            apply_mir_blockgraph_admission_gate(StructuringAdmissionReason::ExtremeBudget, true);
+            apply_blockgraph_collapse_admission_gate(StructuringAdmissionReason::ExtremeBudget, true);
         assert_eq!(decision, StructuringAdmissionReason::ExtremeBudget);
     }
 
     #[test]
-    fn mir_blockgraph_gate_stays_fail_closed_for_explicit_override() {
-        let decision = apply_mir_blockgraph_admission_gate(
+    fn blockgraph_collapse_gate_stays_fail_closed_for_explicit_override() {
+        let decision = apply_blockgraph_collapse_admission_gate(
             StructuringAdmissionReason::ExplicitForceLinear,
             true,
         );
@@ -1222,8 +1275,8 @@ mod tests {
     }
 
     #[test]
-    fn mir_blockgraph_gate_is_noop_when_disabled() {
-        let decision = apply_mir_blockgraph_admission_gate(
+    fn blockgraph_collapse_gate_is_noop_when_disabled() {
+        let decision = apply_blockgraph_collapse_admission_gate(
             StructuringAdmissionReason::IrreducibleBudget,
             false,
         );

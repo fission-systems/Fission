@@ -377,3 +377,28 @@ pub(super) fn simplify_logical_expr(expr: HirExpr) -> HirExpr {
         other => other,
     }
 }
+
+/// Address-keyed CFG edges using the same successor map as NIR structuring.
+pub fn structuring_cfg_edges(pcode: &PcodeFunction) -> Vec<crate::cfg::AddressEdge> {
+    let address_to_index = build_address_to_index_map(pcode);
+    let layout_fallthrough = build_layout_fallthrough_map(pcode);
+    let successors = build_successor_index_map(pcode, &address_to_index, &layout_fallthrough);
+    let mut edges = Vec::new();
+    for (idx, succs) in successors.iter().enumerate() {
+        let Some(from) = pcode.blocks.get(idx) else {
+            continue;
+        };
+        for succ in succs {
+            let Some(to) = pcode.blocks.get(*succ) else {
+                continue;
+            };
+            edges.push(crate::cfg::AddressEdge {
+                from: from.start_address,
+                to: to.start_address,
+            });
+        }
+    }
+    edges.sort_unstable();
+    edges.dedup();
+    edges
+}

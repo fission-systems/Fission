@@ -3,13 +3,11 @@ use super::*;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use crate::runtime::native::NativeBackend;
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Mutex, OnceLock};
 
 #[derive(Clone)]
 struct RuntimeFrontendArtifacts {
     compiled: Option<CompiledFrontend>,
-    native_backend: Option<Arc<NativeBackend>>,
 }
 
 static RUNTIME_FRONTEND_ARTIFACT_CACHE: OnceLock<Mutex<HashMap<String, RuntimeFrontendArtifacts>>> =
@@ -40,7 +38,6 @@ impl RuntimeSleighFrontend {
             entry,
             status,
             compiled: artifacts.compiled,
-            native_backend: artifacts.native_backend,
         })
     }
 
@@ -76,35 +73,8 @@ impl RuntimeSleighFrontend {
             None
         };
 
-        let native_backend = if compiled.is_some() {
-            let spec_root = crate::compiler::generated_root_for_entry_spec(&entry.path).ok();
-            let dylib_name = crate::compiler::native_backend_library_name();
-
-            spec_root.and_then(|root| {
-                let path = root.join(dylib_name);
-                if path.exists() {
-                    match NativeBackend::load(&path) {
-                        Ok(backend) => Some(Arc::new(backend)),
-                        Err(e) => {
-                            tracing::error!(
-                                "Failed to load native backend at {}: {}",
-                                path.display(),
-                                e
-                            );
-                            None
-                        }
-                    }
-                } else {
-                    None
-                }
-            })
-        } else {
-            None
-        };
-
         Ok(RuntimeFrontendArtifacts {
             compiled,
-            native_backend,
         })
     }
 

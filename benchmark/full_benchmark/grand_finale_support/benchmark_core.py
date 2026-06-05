@@ -365,23 +365,15 @@ GHIDRA_ACTION_METRIC_SPECS: tuple[tuple[str, str], ...] = (
     ("ghidra_clean_room_pipeline_complete_count", "pipeline_complete"),
 )
 
-MIR_METRIC_SPECS: tuple[tuple[str, str], ...] = (
-    ("mir_enabled_count", "enabled"),
-    ("mir_function_count", "function"),
-    ("mir_block_count", "block"),
-    ("mir_value_count", "value"),
-    ("mir_memory_region_count", "memory_region"),
-    ("mir_join_proof_count", "join_proof"),
-    ("mir_region_proof_count", "region_proof"),
-    ("mir_projection_duration_ms", "projection_duration_ms"),
-    ("mir_blockgraph_admission_enabled_count", "blockgraph_admission_enabled"),
+BLOCKGRAPH_COLLAPSE_METRIC_SPECS: tuple[tuple[str, str], ...] = (
+    ("blockgraph_collapse_admission_enabled_count", "admission_enabled"),
     (
-        "mir_blockgraph_irreducible_budget_bypass_count",
-        "blockgraph_irreducible_budget_bypass",
+        "blockgraph_collapse_irreducible_budget_bypass_count",
+        "irreducible_budget_bypass",
     ),
     (
-        "mir_blockgraph_extreme_budget_blocked_count",
-        "blockgraph_extreme_budget_blocked",
+        "blockgraph_collapse_extreme_budget_blocked_count",
+        "extreme_budget_blocked",
     ),
 )
 
@@ -403,6 +395,18 @@ BLOCKGRAPH_REGION_METRIC_SPECS: tuple[tuple[str, str], ...] = (
     ),
     ("blockgraph_region_rejected_emit_ready_count", "rejected_emit_ready"),
     ("blockgraph_region_rejected_irreducible_count", "rejected_irreducible"),
+)
+
+STRUCTURING_LOCALIZATION_METRIC_SPECS: tuple[tuple[str, str], ...] = (
+    ("forced_linear_structuring_count", "forced_linear"),
+    ("structuring_orphan_goto_localized_count", "orphan_goto_localized"),
+    ("structuring_orphan_goto_unrepairable_count", "orphan_goto_unrepairable"),
+    ("sese_child_localized_linear_count", "sese_child_localized"),
+    ("structuring_sese_orphan_goto_fallback_count", "sese_orphan_fallback"),
+    ("fas_virtual_goto_count", "fas_virtual_goto"),
+    ("structuring_select_bad_edge_count", "select_bad_edge"),
+    ("region_emit_ready_failed_count", "region_emit_ready_failed"),
+    ("switch_emit_ready_failed_count", "switch_emit_ready_failed"),
 )
 
 ALIAS_INTERLEAVE_METRIC_SPECS: tuple[tuple[str, str], ...] = (
@@ -494,9 +498,9 @@ def _extract_ghidra_action_metrics(preview_build_stats: dict[str, Any]) -> dict[
     return _extract_named_metrics(source, GHIDRA_ACTION_METRIC_SPECS)
 
 
-def _extract_mir_metrics(preview_build_stats: dict[str, Any]) -> dict[str, float]:
+def _extract_blockgraph_collapse_metrics(preview_build_stats: dict[str, Any]) -> dict[str, float]:
     source = preview_build_stats if isinstance(preview_build_stats, dict) else {}
-    return _extract_named_metrics(source, MIR_METRIC_SPECS)
+    return _extract_named_metrics(source, BLOCKGRAPH_COLLAPSE_METRIC_SPECS)
 
 
 def _extract_blockgraph_region_metrics(preview_build_stats: dict[str, Any]) -> dict[str, float]:
@@ -507,6 +511,13 @@ def _extract_blockgraph_region_metrics(preview_build_stats: dict[str, Any]) -> d
 def _extract_alias_interleave_metrics(preview_build_stats: dict[str, Any]) -> dict[str, float]:
     source = preview_build_stats if isinstance(preview_build_stats, dict) else {}
     return _extract_named_metrics(source, ALIAS_INTERLEAVE_METRIC_SPECS)
+
+
+def _extract_structuring_localization_metrics(
+    preview_build_stats: dict[str, Any],
+) -> dict[str, float]:
+    source = preview_build_stats if isinstance(preview_build_stats, dict) else {}
+    return _extract_named_metrics(source, STRUCTURING_LOCALIZATION_METRIC_SPECS)
 
 
 def _aggregate_ghidra_action_metrics_from_entries(
@@ -524,17 +535,17 @@ def _aggregate_ghidra_action_metrics_from_entries(
     return dict(sorted(totals.items()))
 
 
-def _aggregate_mir_metrics_from_entries(
+def _aggregate_blockgraph_collapse_metrics_from_entries(
     entries: dict[str, dict[str, Any]] | None,
 ) -> dict[str, float]:
-    totals = {alias: 0.0 for _key, alias in MIR_METRIC_SPECS}
+    totals = {alias: 0.0 for _key, alias in BLOCKGRAPH_COLLAPSE_METRIC_SPECS}
     for entry in (entries or {}).values():
         if not isinstance(entry, dict):
             continue
         preview_build_stats = entry.get("preview_build_stats", {})
         if not isinstance(preview_build_stats, dict):
             continue
-        for key, alias in MIR_METRIC_SPECS:
+        for key, alias in BLOCKGRAPH_COLLAPSE_METRIC_SPECS:
             totals[alias] += _safe_float(preview_build_stats.get(key), 0.0)
     return dict(sorted(totals.items()))
 
@@ -565,6 +576,21 @@ def _aggregate_alias_interleave_metrics_from_entries(
         if not isinstance(preview_build_stats, dict):
             continue
         for key, alias in ALIAS_INTERLEAVE_METRIC_SPECS:
+            totals[alias] += _safe_float(preview_build_stats.get(key), 0.0)
+    return dict(sorted(totals.items()))
+
+
+def _aggregate_structuring_localization_metrics_from_entries(
+    entries: dict[str, dict[str, Any]] | None,
+) -> dict[str, float]:
+    totals = {alias: 0.0 for _key, alias in STRUCTURING_LOCALIZATION_METRIC_SPECS}
+    for entry in (entries or {}).values():
+        if not isinstance(entry, dict):
+            continue
+        preview_build_stats = entry.get("preview_build_stats", {})
+        if not isinstance(preview_build_stats, dict):
+            continue
+        for key, alias in STRUCTURING_LOCALIZATION_METRIC_SPECS:
             totals[alias] += _safe_float(preview_build_stats.get(key), 0.0)
     return dict(sorted(totals.items()))
 
@@ -4637,12 +4663,12 @@ def build_comparison(
         ghidra_action_metrics = _normalize_metric_map_for_json(
             _aggregate_ghidra_action_metrics_from_entries(fission["entries"])
         )
-    mir_metrics = _normalize_metric_map_for_json(
-        _extract_mir_metrics(fission["meta"].get("preview_build_stats", {}))
+    blockgraph_collapse_metrics = _normalize_metric_map_for_json(
+        _extract_blockgraph_collapse_metrics(fission["meta"].get("preview_build_stats", {}))
     )
-    if not any(mir_metrics.values()):
-        mir_metrics = _normalize_metric_map_for_json(
-            _aggregate_mir_metrics_from_entries(fission["entries"])
+    if not any(blockgraph_collapse_metrics.values()):
+        blockgraph_collapse_metrics = _normalize_metric_map_for_json(
+            _aggregate_blockgraph_collapse_metrics_from_entries(fission["entries"])
         )
     blockgraph_region_metrics = _normalize_metric_map_for_json(
         _extract_blockgraph_region_metrics(fission["meta"].get("preview_build_stats", {}))
@@ -4657,6 +4683,15 @@ def build_comparison(
     if not any(alias_interleave_metrics.values()):
         alias_interleave_metrics = _normalize_metric_map_for_json(
             _aggregate_alias_interleave_metrics_from_entries(fission["entries"])
+        )
+    structuring_localization_metrics = _normalize_metric_map_for_json(
+        _extract_structuring_localization_metrics(
+            fission["meta"].get("preview_build_stats", {})
+        )
+    )
+    if not any(structuring_localization_metrics.values()):
+        structuring_localization_metrics = _normalize_metric_map_for_json(
+            _aggregate_structuring_localization_metrics_from_entries(fission["entries"])
         )
     giant_function_diagnostics = _build_giant_function_diagnostics(fission["entries"])
     target_structuring_rows = _annotate_target_structuring_rows(
@@ -4753,14 +4788,17 @@ def build_comparison(
         "ghidra_action_metrics": {
             "fission": ghidra_action_metrics,
         },
-        "mir_metrics": {
-            "fission": mir_metrics,
+        "blockgraph_collapse_metrics": {
+            "fission": blockgraph_collapse_metrics,
         },
         "blockgraph_region_metrics": {
             "fission": blockgraph_region_metrics,
         },
         "alias_interleave_metrics": {
             "fission": alias_interleave_metrics,
+        },
+        "structuring_localization_metrics": {
+            "fission": structuring_localization_metrics,
         },
         "cpu_metrics": {
             "fission": fission_cpu_kpi,
@@ -5283,9 +5321,10 @@ def build_corpus_assessment(
     shape_drift_totals_per_binary: dict[str, dict[str, float]] = {}
     normalize_pass_metrics_per_binary: dict[str, dict[str, float]] = {}
     ghidra_action_metrics_per_binary: dict[str, dict[str, float]] = {}
-    mir_metrics_per_binary: dict[str, dict[str, float]] = {}
+    blockgraph_collapse_metrics_per_binary: dict[str, dict[str, float]] = {}
     blockgraph_region_metrics_per_binary: dict[str, dict[str, float]] = {}
     alias_interleave_metrics_per_binary: dict[str, dict[str, float]] = {}
+    structuring_localization_metrics_per_binary: dict[str, dict[str, float]] = {}
     cpu_metrics_per_binary: dict[str, dict[str, float]] = {}
     similarity_attribution_per_binary: dict[str, dict[str, Any]] = {}
     giant_function_speed_family_counts_per_binary: dict[str, dict[str, int]] = {}
@@ -5381,17 +5420,17 @@ def build_corpus_assessment(
                     _lookup_path(benchmark, ("engines", "fission", "entries"), {})
                 )
             )
-        mir_metrics = _normalize_metric_map_for_json(
-            _lookup_path(benchmark, ("summary", "mir_metrics", "fission"), {})
+        blockgraph_collapse_metrics = _normalize_metric_map_for_json(
+            _lookup_path(benchmark, ("summary", "blockgraph_collapse_metrics", "fission"), {})
             if isinstance(
-                _lookup_path(benchmark, ("summary", "mir_metrics", "fission"), {}),
+                _lookup_path(benchmark, ("summary", "blockgraph_collapse_metrics", "fission"), {}),
                 dict,
             )
             else {}
         )
-        if not any(mir_metrics.values()):
-            mir_metrics = _normalize_metric_map_for_json(
-                _extract_mir_metrics(
+        if not any(blockgraph_collapse_metrics.values()):
+            blockgraph_collapse_metrics = _normalize_metric_map_for_json(
+                _extract_blockgraph_collapse_metrics(
                     _lookup_path(
                         benchmark,
                         ("summary", "engines", "fission", "preview_build_stats"),
@@ -5399,9 +5438,9 @@ def build_corpus_assessment(
                     )
                 )
             )
-        if not any(mir_metrics.values()):
-            mir_metrics = _normalize_metric_map_for_json(
-                _aggregate_mir_metrics_from_entries(
+        if not any(blockgraph_collapse_metrics.values()):
+            blockgraph_collapse_metrics = _normalize_metric_map_for_json(
+                _aggregate_blockgraph_collapse_metrics_from_entries(
                     _lookup_path(benchmark, ("engines", "fission", "entries"), {})
                 )
             )
@@ -5450,6 +5489,38 @@ def build_corpus_assessment(
         if not any(alias_interleave_metrics.values()):
             alias_interleave_metrics = _normalize_metric_map_for_json(
                 _aggregate_alias_interleave_metrics_from_entries(
+                    _lookup_path(benchmark, ("engines", "fission", "entries"), {})
+                )
+            )
+        structuring_localization_metrics = _normalize_metric_map_for_json(
+            _lookup_path(
+                benchmark,
+                ("summary", "structuring_localization_metrics", "fission"),
+                {},
+            )
+            if isinstance(
+                _lookup_path(
+                    benchmark,
+                    ("summary", "structuring_localization_metrics", "fission"),
+                    {},
+                ),
+                dict,
+            )
+            else {}
+        )
+        if not any(structuring_localization_metrics.values()):
+            structuring_localization_metrics = _normalize_metric_map_for_json(
+                _extract_structuring_localization_metrics(
+                    _lookup_path(
+                        benchmark,
+                        ("summary", "engines", "fission", "preview_build_stats"),
+                        {},
+                    )
+                )
+            )
+        if not any(structuring_localization_metrics.values()):
+            structuring_localization_metrics = _normalize_metric_map_for_json(
+                _aggregate_structuring_localization_metrics_from_entries(
                     _lookup_path(benchmark, ("engines", "fission", "entries"), {})
                 )
             )
@@ -5536,9 +5607,10 @@ def build_corpus_assessment(
         shape_drift_totals_per_binary[binary_id] = shape_drift_metrics
         normalize_pass_metrics_per_binary[binary_id] = normalize_pass_metrics
         ghidra_action_metrics_per_binary[binary_id] = ghidra_action_metrics
-        mir_metrics_per_binary[binary_id] = mir_metrics
+        blockgraph_collapse_metrics_per_binary[binary_id] = blockgraph_collapse_metrics
         blockgraph_region_metrics_per_binary[binary_id] = blockgraph_region_metrics
         alias_interleave_metrics_per_binary[binary_id] = alias_interleave_metrics
+        structuring_localization_metrics_per_binary[binary_id] = structuring_localization_metrics
         cpu_metrics_per_binary[binary_id] = cpu_metrics
         similarity_attribution_per_binary[binary_id] = similarity_attribution
         giant_function_speed_family_counts_per_binary[binary_id] = dict(
@@ -5755,9 +5827,10 @@ def build_corpus_assessment(
                 "shape_drift_metrics": shape_drift_metrics,
                 "normalize_pass_metrics": normalize_pass_metrics,
                 "ghidra_action_metrics": ghidra_action_metrics,
-                "mir_metrics": mir_metrics,
+                "blockgraph_collapse_metrics": blockgraph_collapse_metrics,
                 "blockgraph_region_metrics": blockgraph_region_metrics,
                 "alias_interleave_metrics": alias_interleave_metrics,
+                "structuring_localization_metrics": structuring_localization_metrics,
                 "cpu_metrics": cpu_metrics,
                 "similarity_attribution": similarity_attribution,
                 "target_structuring_rows": target_structuring_rows,
@@ -5797,12 +5870,15 @@ def build_corpus_assessment(
         normalize_pass_metrics_per_binary
     )
     ghidra_action_metric_totals = _merge_named_metric_totals(ghidra_action_metrics_per_binary)
-    mir_metric_totals = _merge_named_metric_totals(mir_metrics_per_binary)
+    blockgraph_collapse_metric_totals = _merge_named_metric_totals(blockgraph_collapse_metrics_per_binary)
     blockgraph_region_metric_totals = _merge_named_metric_totals(
         blockgraph_region_metrics_per_binary
     )
     alias_interleave_metric_totals = _merge_named_metric_totals(
         alias_interleave_metrics_per_binary
+    )
+    structuring_localization_metric_totals = _merge_named_metric_totals(
+        structuring_localization_metrics_per_binary
     )
     cpu_metric_totals = _merge_cpu_metric_totals(cpu_metrics_per_binary)
     similarity_attribution_totals = _merge_similarity_attribution_totals(
@@ -6091,9 +6167,10 @@ def build_corpus_assessment(
             "shape_drift_totals": shape_drift_totals,
             "normalize_pass_metric_totals": normalize_pass_metric_totals,
             "ghidra_action_metric_totals": ghidra_action_metric_totals,
-            "mir_metric_totals": mir_metric_totals,
+            "blockgraph_collapse_metric_totals": blockgraph_collapse_metric_totals,
             "blockgraph_region_metric_totals": blockgraph_region_metric_totals,
             "alias_interleave_metric_totals": alias_interleave_metric_totals,
+            "structuring_localization_metric_totals": structuring_localization_metric_totals,
             "cpu_metric_totals": cpu_metric_totals,
             "similarity_attribution_totals": similarity_attribution_totals,
             "giant_function_speed_family_totals": giant_function_speed_family_totals,
@@ -6122,12 +6199,14 @@ def build_corpus_assessment(
         "normalize_pass_metrics_per_binary": normalize_pass_metrics_per_binary,
         "ghidra_action_metric_totals": ghidra_action_metric_totals,
         "ghidra_action_metrics_per_binary": ghidra_action_metrics_per_binary,
-        "mir_metric_totals": mir_metric_totals,
-        "mir_metrics_per_binary": mir_metrics_per_binary,
+        "blockgraph_collapse_metric_totals": blockgraph_collapse_metric_totals,
+        "blockgraph_collapse_metrics_per_binary": blockgraph_collapse_metrics_per_binary,
         "blockgraph_region_metric_totals": blockgraph_region_metric_totals,
         "blockgraph_region_metrics_per_binary": blockgraph_region_metrics_per_binary,
         "alias_interleave_metric_totals": alias_interleave_metric_totals,
         "alias_interleave_metrics_per_binary": alias_interleave_metrics_per_binary,
+        "structuring_localization_metric_totals": structuring_localization_metric_totals,
+        "structuring_localization_metrics_per_binary": structuring_localization_metrics_per_binary,
         "cpu_metric_totals": cpu_metric_totals,
         "cpu_metrics_per_binary": cpu_metrics_per_binary,
         "similarity_attribution_totals": similarity_attribution_totals,

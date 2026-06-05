@@ -9,10 +9,6 @@ use crate::packed_context::packed_context_word;
 
 #[test]
 fn compile_frontend_collects_pcode_ops_and_patterns() {
-    if !discovery::ghidra_packaged_sla_available() {
-        eprintln!("skip: packaged Ghidra .sla not available for ConstructTpl decode check");
-        return;
-    }
     let entry_spec = x86_64_entry_spec_path();
     let compiled = compile_frontend_for_entry_spec(&entry_spec).expect("compile frontend");
     assert!(
@@ -66,10 +62,6 @@ fn compile_frontend_collects_pcode_ops_and_patterns() {
 
 #[test]
 fn arm_frontends_preserve_thumb_context_layout_and_pspec_defaults() {
-    if !discovery::ghidra_packaged_sla_available() {
-        eprintln!("skip: packaged Ghidra .sla not available for ARM context layout check");
-        return;
-    }
 
     for entry_id in ["ARM8_le", "ARM8m_le", "ARM8m_be"] {
         let entry_spec = spec_root_for_arch("ARM").join(format!("{entry_id}.slaspec"));
@@ -162,10 +154,6 @@ fn compiler_lowering_diagnostics_are_trace_gated() {
 
 #[test]
 fn sla_native_runtime_ready_constructors_are_canonical() {
-    if !discovery::ghidra_packaged_sla_available() {
-        eprintln!("skip: packaged Ghidra .sla not available for runtime-ready constructor check");
-        return;
-    }
     let entry_spec = x86_64_entry_spec_path();
     let compiled = crate::compiler::compile_frontend_for_entry_spec(&entry_spec)
         .expect("compile x86-64 frontend with packaged .sla");
@@ -221,10 +209,6 @@ fn sla_native_runtime_ready_constructors_are_canonical() {
 
 #[test]
 fn promoted_non_x86_frontends_have_no_unsupported_sla_templates() {
-    if !discovery::ghidra_packaged_sla_available() {
-        eprintln!("skip: packaged Ghidra .sla not available for non-x86 runtime-ready check");
-        return;
-    }
 
     let entry_specs = [
         (
@@ -267,10 +251,6 @@ fn promoted_non_x86_frontends_have_no_unsupported_sla_templates() {
 
 #[test]
 fn runtime_ready_constructors_do_not_depend_on_compat_token_selectors() {
-    if !discovery::ghidra_packaged_sla_available() {
-        eprintln!("skip: packaged Ghidra .sla not available for token parser dependency check");
-        return;
-    }
 
     let legacy_decode_step = ["Consume", "TokenFields"].concat();
     assert!(
@@ -310,10 +290,6 @@ fn runtime_ready_constructors_do_not_depend_on_compat_token_selectors() {
 
 #[test]
 fn legacy_source_context_changes_preserve_high_context_words() {
-    if !discovery::ghidra_packaged_sla_available() {
-        eprintln!("skip: packaged Ghidra .sla not available for JVM context-word check");
-        return;
-    }
 
     let entry_spec = spec_root_for_arch("JVM").join("JVM.slaspec");
     let compiled = compile_frontend_for_entry_spec(&entry_spec).expect("compile JVM frontend");
@@ -424,24 +400,6 @@ fn compiled_operand_specs_have_no_compat_token_extraction_variant() {
 }
 
 #[test]
-fn generated_native_backend_does_not_zero_pad_short_instruction_bytes() {
-    let codegen = include_str!("../codegen.rs");
-    for forbidden in [
-        "bytes.get({offset}).copied().unwrap_or(0)",
-        "bytes.get(i as usize).unwrap_or(&0)",
-    ] {
-        assert!(
-            !codegen.contains(forbidden),
-            "generated native backend must fail closed on short instruction bytes: {forbidden}"
-        );
-    }
-    assert!(
-        codegen.contains("if bytes.len() < byte_cnt as usize { return -1; }"),
-        "generated native backend should reject short decision probes instead of padding"
-    );
-}
-
-#[test]
 fn generated_metadata_does_not_synthesize_missing_sla_identity_zeroes() {
     let codegen = include_str!("../codegen.rs");
     for forbidden in [
@@ -475,10 +433,6 @@ fn sla_template_parser_does_not_promote_named_sections_to_main() {
 
 #[test]
 fn sla_operand_minimum_lengths_are_preserved_on_handle_templates() {
-    if !discovery::ghidra_packaged_sla_available() {
-        eprintln!("skip: packaged Ghidra .sla not available for operand minlen check");
-        return;
-    }
     let compiled = compile_frontend_for_entry_spec(&x86_64_entry_spec_path())
         .expect("compile x86-64 frontend");
     let mut handles = 0usize;

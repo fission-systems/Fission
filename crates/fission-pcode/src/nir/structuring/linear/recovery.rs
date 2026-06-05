@@ -202,4 +202,31 @@ impl<'a> PreviewBuilder<'a> {
             .region_linearize_structuring_count += 1;
         Ok(Some((cleanup_redundant_labels(body, None), skip_to)))
     }
+
+    /// Linear fallback for a single SESE child region without discarding parent structure.
+    pub(crate) fn build_linear_sese_child_fallback(
+        &mut self,
+        entry: usize,
+        exit: usize,
+    ) -> Result<Vec<HirStmt>, MlilPreviewError> {
+        let exit_spec = if exit >= self.block_count() {
+            LinearExit::Return
+        } else {
+            LinearExit::Join(exit)
+        };
+        let Some((mut body, _skip)) = self.lower_linear_body(entry, exit_spec)? else {
+            return Err(MlilPreviewError::UnsupportedCfgRegionShape);
+        };
+        let targeted = self.collect_jump_targets()?;
+        let block_key = self.block_target_key(entry);
+        let entry_label = block_label(block_key);
+        if (entry == 0 || targeted.contains(&block_key))
+            && !body
+                .iter()
+                .any(|stmt| matches!(stmt, HirStmt::Label(label) if label == &entry_label))
+        {
+            body.insert(0, HirStmt::Label(entry_label));
+        }
+        Ok(cleanup_redundant_labels(body, None))
+    }
 }

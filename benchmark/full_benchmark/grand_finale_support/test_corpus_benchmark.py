@@ -22,7 +22,9 @@ from grand_finale_support.benchmark_core import (
     _extract_alias_interleave_metrics,
     _extract_blockgraph_region_metrics,
     _extract_ghidra_action_metrics,
-    _extract_mir_metrics,
+    _extract_blockgraph_collapse_metrics,
+    _extract_structuring_localization_metrics,
+    _aggregate_structuring_localization_metrics_from_entries,
     _extract_owner_metrics_from_engine_summary,
     _extract_selected_normalize_pass_metrics,
     _extract_shape_drift_metrics_from_engine_summary,
@@ -116,17 +118,9 @@ def _minimal_single_binary_summary(
                         "ghidra_action_blockgraph_structuring_count": 1,
                         "ghidra_action_printc_count": 1,
                         "ghidra_clean_room_pipeline_complete_count": 1,
-                        "mir_enabled_count": 1,
-                        "mir_function_count": 1,
-                        "mir_block_count": 1,
-                        "mir_value_count": 9,
-                        "mir_memory_region_count": 2,
-                        "mir_join_proof_count": 1,
-                        "mir_region_proof_count": 1,
-                        "mir_projection_duration_ms": 3,
-                        "mir_blockgraph_admission_enabled_count": 1,
-                        "mir_blockgraph_irreducible_budget_bypass_count": 1,
-                        "mir_blockgraph_extreme_budget_blocked_count": 0,
+                        "blockgraph_collapse_admission_enabled_count": 1,
+                        "blockgraph_collapse_irreducible_budget_bypass_count": 1,
+                        "blockgraph_collapse_extreme_budget_blocked_count": 0,
                         "blockgraph_region_candidate_count": 5,
                         "blockgraph_region_complete_count": 2,
                         "blockgraph_region_rejected_missing_follow_count": 1,
@@ -188,19 +182,11 @@ def _minimal_single_binary_summary(
                     "pipeline_complete": 1.0,
                 }
             },
-            "mir_metrics": {
+            "blockgraph_collapse_metrics": {
                 "fission": {
-                    "enabled": 1.0,
-                    "function": 1.0,
-                    "block": 1.0,
-                    "value": 9.0,
-                    "memory_region": 2.0,
-                    "join_proof": 1.0,
-                    "region_proof": 1.0,
-                    "projection_duration_ms": 3.0,
-                    "blockgraph_admission_enabled": 1.0,
-                    "blockgraph_irreducible_budget_bypass": 1.0,
-                    "blockgraph_extreme_budget_blocked": 0.0,
+                    "admission_enabled": 1.0,
+                    "irreducible_budget_bypass": 1.0,
+                    "extreme_budget_blocked": 0.0,
                 }
             },
             "blockgraph_region_metrics": {
@@ -903,33 +889,58 @@ class CorpusBenchmarkTests(unittest.TestCase):
         self.assertEqual(metrics["pipeline_complete"], 1.0)
         self.assertEqual(metrics["printc"], 0.0)
 
-    def test_extract_mir_metrics(self) -> None:
-        metrics = _extract_mir_metrics(
+    def test_extract_blockgraph_collapse_metrics(self) -> None:
+        metrics = _extract_blockgraph_collapse_metrics(
             {
-                "mir_enabled_count": 1,
-                "mir_function_count": 1,
-                "mir_block_count": 3,
-                "mir_value_count": 21,
-                "mir_memory_region_count": 4,
-                "mir_join_proof_count": 2,
-                "mir_region_proof_count": 5,
-                "mir_projection_duration_ms": 7,
-                "mir_blockgraph_admission_enabled_count": 1,
-                "mir_blockgraph_irreducible_budget_bypass_count": 1,
-                "mir_blockgraph_extreme_budget_blocked_count": 0,
+                "blockgraph_collapse_admission_enabled_count": 1,
+                "blockgraph_collapse_irreducible_budget_bypass_count": 1,
+                "blockgraph_collapse_extreme_budget_blocked_count": 0,
             }
         )
-        self.assertEqual(metrics["enabled"], 1.0)
-        self.assertEqual(metrics["function"], 1.0)
-        self.assertEqual(metrics["block"], 3.0)
-        self.assertEqual(metrics["value"], 21.0)
-        self.assertEqual(metrics["memory_region"], 4.0)
-        self.assertEqual(metrics["join_proof"], 2.0)
-        self.assertEqual(metrics["region_proof"], 5.0)
-        self.assertEqual(metrics["projection_duration_ms"], 7.0)
-        self.assertEqual(metrics["blockgraph_admission_enabled"], 1.0)
-        self.assertEqual(metrics["blockgraph_irreducible_budget_bypass"], 1.0)
-        self.assertEqual(metrics["blockgraph_extreme_budget_blocked"], 0.0)
+        self.assertEqual(metrics["admission_enabled"], 1.0)
+        self.assertEqual(metrics["irreducible_budget_bypass"], 1.0)
+        self.assertEqual(metrics["extreme_budget_blocked"], 0.0)
+
+    def test_extract_structuring_localization_metrics(self) -> None:
+        metrics = _extract_structuring_localization_metrics(
+            {
+                "forced_linear_structuring_count": 2,
+                "structuring_orphan_goto_localized_count": 1,
+                "structuring_orphan_goto_unrepairable_count": 0,
+                "sese_child_localized_linear_count": 3,
+                "structuring_sese_orphan_goto_fallback_count": 0,
+                "fas_virtual_goto_count": 4,
+                "structuring_select_bad_edge_count": 1,
+                "region_emit_ready_failed_count": 5,
+                "switch_emit_ready_failed_count": 5,
+            }
+        )
+        self.assertEqual(metrics["forced_linear"], 2.0)
+        self.assertEqual(metrics["orphan_goto_localized"], 1.0)
+        self.assertEqual(metrics["sese_child_localized"], 3.0)
+        self.assertEqual(metrics["fas_virtual_goto"], 4.0)
+        self.assertEqual(metrics["select_bad_edge"], 1.0)
+        self.assertEqual(metrics["switch_emit_ready_failed"], 5.0)
+
+    def test_aggregate_structuring_localization_metrics_from_entries(self) -> None:
+        totals = _aggregate_structuring_localization_metrics_from_entries(
+            {
+                "0x1": {
+                    "preview_build_stats": {
+                        "forced_linear_structuring_count": 1,
+                        "switch_emit_ready_failed_count": 2,
+                    }
+                },
+                "0x2": {
+                    "preview_build_stats": {
+                        "forced_linear_structuring_count": 3,
+                        "switch_emit_ready_failed_count": 1,
+                    }
+                },
+            }
+        )
+        self.assertEqual(totals["forced_linear"], 4.0)
+        self.assertEqual(totals["switch_emit_ready_failed"], 3.0)
 
     def test_extract_blockgraph_region_metrics(self) -> None:
         metrics = _extract_blockgraph_region_metrics(
@@ -1216,10 +1227,9 @@ class CorpusBenchmarkTests(unittest.TestCase):
         )
         self.assertEqual(corpus["blockgraph_region_metric_totals"]["candidate"], 5)
         self.assertEqual(corpus["alias_interleave_metric_totals"]["alias_has_nonlocal_ref"], 4)
-        self.assertEqual(corpus["mir_metric_totals"]["value"], 9)
-        self.assertEqual(corpus["mir_metric_totals"]["blockgraph_admission_enabled"], 1)
-        self.assertEqual(corpus["mir_metric_totals"]["blockgraph_irreducible_budget_bypass"], 1)
-        self.assertEqual(corpus["binaries"][0]["mir_metrics"]["memory_region"], 2)
+        self.assertEqual(corpus["blockgraph_collapse_metric_totals"]["admission_enabled"], 1)
+        self.assertEqual(corpus["blockgraph_collapse_metric_totals"]["irreducible_budget_bypass"], 1)
+        self.assertEqual(corpus["binaries"][0]["blockgraph_collapse_metrics"]["admission_enabled"], 1)
         self.assertEqual(
             corpus["binaries"][0]["blockgraph_region_metrics"]["complete"],
             2,
@@ -1383,10 +1393,9 @@ class CorpusBenchmarkTests(unittest.TestCase):
             12.0,
         )
         self.assertEqual(payload["ghidra_action_metric_totals"]["stage_count"], 6.0)
-        self.assertEqual(payload["mir_metric_totals"]["value"], 9.0)
-        self.assertEqual(payload["mir_metric_totals"]["blockgraph_admission_enabled"], 1.0)
+        self.assertEqual(payload["blockgraph_collapse_metric_totals"]["admission_enabled"], 1.0)
         self.assertEqual(
-            payload["mir_metric_totals"]["blockgraph_irreducible_budget_bypass"],
+            payload["blockgraph_collapse_metric_totals"]["irreducible_budget_bypass"],
             1.0,
         )
         self.assertEqual(payload["blockgraph_region_metric_totals"]["candidate"], 5.0)
@@ -1396,7 +1405,7 @@ class CorpusBenchmarkTests(unittest.TestCase):
             payload["per_binary_rows"][0]["ghidra_action_metrics"]["blockgraph_structuring"],
             1.0,
         )
-        self.assertEqual(payload["per_binary_rows"][0]["mir_metrics"]["block"], 1.0)
+        self.assertEqual(payload["per_binary_rows"][0]["blockgraph_collapse_metrics"]["admission_enabled"], 1.0)
         self.assertEqual(
             payload["per_binary_rows"][0]["blockgraph_region_metrics"]["complete"],
             2.0,

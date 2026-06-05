@@ -34,7 +34,7 @@ impl Drop for WalkStackGuard {
 
 pub(super) fn bind_instruction<'a>(
     compiled: &'a CompiledFrontend,
-    strategy: RuntimeDecodeStrategy<'a>,
+    strategy: RuntimeDecodeStrategy,
     ctx: &CompiledInstructionContext<'_>,
     selection: RuntimeSelection<'a>,
 ) -> Result<RuntimeConstructState> {
@@ -88,7 +88,7 @@ impl Drop for PoolGuard {
 
 pub(super) struct CompiledParserWalker<'a, 'b> {
     compiled: &'a CompiledFrontend,
-    strategy: RuntimeDecodeStrategy<'a>,
+    strategy: RuntimeDecodeStrategy,
     ctx: &'a CompiledInstructionContext<'b>,
     selection: RuntimeSelection<'a>,
     minimum_length: usize,
@@ -232,15 +232,10 @@ mod construct_state_offset_tests {
 
     #[test]
     fn opcode_register_subtable_reads_from_sla_operand_offset() {
-        if !discovery::ghidra_packaged_sla_available() {
-            eprintln!("skip: packaged Ghidra .sla not available for x86-64 push decode");
-            return;
-        }
 
         let compiled = compile_x86_64_frontend().expect("compile x86-64 frontend");
         let decoded = crate::runtime::spine::compiled_table::decode_instruction(
             &compiled,
-            None,
             &[0x57],
             0x1000,
         )
@@ -253,16 +248,12 @@ mod construct_state_offset_tests {
 
     #[test]
     fn shared_token_operands_do_not_require_legacy_cursor_policy() {
-        if !discovery::ghidra_packaged_sla_available() {
-            eprintln!("skip: packaged Ghidra .sla not available for x86-64 shared token decode");
-            return;
-        }
 
         let compiled = compile_x86_64_frontend().expect("compile x86-64 frontend");
         for bytes in [&[0x57][..], &[0x48, 0x89, 0x5c, 0x24, 0x08][..]] {
             let (_ops, length, details) =
                 crate::runtime::spine::compiled_table::decode_and_lift_with_details(
-                    &compiled, None, bytes, 0x1000,
+                    &compiled, bytes, 0x1000,
                 )
                 .expect("decode/lift shared-token sample");
 
@@ -371,7 +362,7 @@ mod construct_state_offset_tests {
 impl<'a, 'b> CompiledParserWalker<'a, 'b> {
     fn new(
         compiled: &'a CompiledFrontend,
-        strategy: RuntimeDecodeStrategy<'a>,
+        strategy: RuntimeDecodeStrategy,
         ctx: &'a CompiledInstructionContext<'b>,
         selection: RuntimeSelection<'a>,
     ) -> Result<Self> {
@@ -1646,56 +1637,10 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
             );
         }
 
-        let selection = if let Some(native) =
-            self.strategy
-                .native_for_table(self.compiled, table_name, &sub_ctx)
-        {
-            let decode_no_match_address = subtable_decode_address(&sub_ctx)?;
-            let constructor_index = native
-                .decode_match(table_name, self.ctx.bytes, sub_ctx.context_register)?
-                .ok_or_else(|| {
-                    anyhow!(
-                        "DecodeNoMatch in subtable {table_name} at 0x{decode_no_match_address:x}"
-                    )
-                })?;
-            let subtable = self
-                .compiled
-                .subtables
-                .get(table_name)
-                .ok_or_else(|| anyhow!("missing subtable {table_name}"))?;
-            let constructor = subtable
-                .constructors
-                .get(constructor_index)
-                .ok_or_else(|| {
-                    anyhow!(
-                        "invalid constructor index {constructor_index} in subtable {table_name}"
-                    )
-                })?;
-            let (subtable_id, constructor_slot) = constructor_sla_selection_identity(
-                subtable,
-                constructor,
-                constructor_index,
-                table_name,
-            )?;
-            RuntimeSelection {
-                constructor,
-                constructor_index,
-                subtable_id,
-                constructor_id: constructor.constructor_id,
-                constructor_slot,
-                trace: spine::RuntimeMatchTrace {
-                    root_bucket: format!("native:{}", table_name),
-                    probes: Vec::new(),
-                    leaf_constructor_indexes: vec![constructor_index],
-                    matched_leaf_pattern: None,
-                },
-            }
-        } else {
-            let decode_no_match_address = subtable_decode_address(&sub_ctx)?;
-            select_constructor(self.compiled, table_name, &sub_ctx)?.ok_or_else(|| {
-                anyhow!("DecodeNoMatch in subtable {table_name} at 0x{decode_no_match_address:x}")
-            })?
-        };
+        let decode_no_match_address = subtable_decode_address(&sub_ctx)?;
+        let selection = select_constructor(self.compiled, table_name, &sub_ctx)?.ok_or_else(|| {
+            anyhow!("DecodeNoMatch in subtable {table_name} at 0x{decode_no_match_address:x}")
+        })?;
         if crate::runtime::diagnostics::terminal_reselect_trace_enabled() {
             eprintln!(
                 "[decode-subtable selection] table={} ctor={} mnemonic={} source={}",
@@ -1866,16 +1811,12 @@ mod sleigh_parity_gaps_tests {
 
     #[test]
     fn test_decode_pool_reuses_allocations() {
-        if !discovery::ghidra_packaged_sla_available() {
-            return;
-        }
         let compiled = compile_x86_64_frontend().expect("compile x86-64 frontend");
         
         let initial_pool_len = DECODE_POOL.with(|p| p.borrow().len());
 
         let _decoded = crate::runtime::spine::compiled_table::decode_instruction(
             &compiled,
-            None,
             &[0x57],
             0x1000,
         )
@@ -1890,14 +1831,10 @@ mod sleigh_parity_gaps_tests {
 
     #[test]
     fn test_walk_stack_backtrace_on_failure() {
-        if !discovery::ghidra_packaged_sla_available() {
-            return;
-        }
         let compiled = compile_x86_64_frontend().expect("compile x86-64 frontend");
 
         let result = crate::runtime::spine::compiled_table::decode_instruction(
             &compiled,
-            None,
             &[0x48, 0x89],
             0x1000,
         );

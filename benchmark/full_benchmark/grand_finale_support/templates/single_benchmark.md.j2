@@ -80,13 +80,13 @@ Clean-room owner mapping only; Fission remains Rust-native and does not depend o
 | `{{ key }}` | {{ "%.3f"|format(value|float) }} |
 {% endfor %}
 
-## MIR Shadow Metrics
+## BlockGraph Collapse Metrics
 
-Behavior-preserving projection from current HIR into the internal MIR contract. These counters are diagnostic-only in this wave.
+NIR/HIR structuring admission counters for irreducible BlockGraph collapse trials. Diagnostic-only.
 
 | Metric | Fission |
 | --- | ---: |
-{% for key, value in mir_metrics|dictsort %}
+{% for key, value in blockgraph_collapse_metrics|dictsort %}
 | `{{ key }}` | {{ "%.3f"|format(value|float) }} |
 {% endfor %}
 
@@ -108,6 +108,17 @@ Guarded-tail canonicalization blocker breakdown. These counters narrow `alias_in
 | Metric | Fission |
 | --- | ---: |
 {% for key, value in alias_interleave_metrics|dictsort %}
+| `{{ key }}` | {{ "%.3f"|format(value|float) }} |
+{% endfor %}
+
+{% set structuring_localization_metrics = (summary.structuring_localization_metrics or {}).get("fission", {}) or {} %}
+## Structuring Localization Metrics
+
+CFG structuring fallback and switch emit-readiness counters from `NirBuildStats`.
+
+| Metric | Fission |
+| --- | ---: |
+{% for key, value in structuring_localization_metrics|dictsort %}
 | `{{ key }}` | {{ "%.3f"|format(value|float) }} |
 {% endfor %}
 

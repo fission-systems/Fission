@@ -51,18 +51,10 @@ SELECTED_GHIDRA_ACTION_KEYS = (
     "printc",
     "pipeline_complete",
 )
-SELECTED_MIR_KEYS = (
-    "enabled",
-    "function",
-    "block",
-    "value",
-    "memory_region",
-    "join_proof",
-    "region_proof",
-    "projection_duration_ms",
-    "blockgraph_admission_enabled",
-    "blockgraph_irreducible_budget_bypass",
-    "blockgraph_extreme_budget_blocked",
+SELECTED_BLOCKGRAPH_COLLAPSE_KEYS = (
+    "admission_enabled",
+    "irreducible_budget_bypass",
+    "extreme_budget_blocked",
 )
 SELECTED_BLOCKGRAPH_REGION_KEYS = (
     "candidate",
@@ -88,6 +80,17 @@ SELECTED_ALIAS_INTERLEAVE_KEYS = (
     "alias_not_fallthrough_nested_after_label",
     "alias_has_multiple_internal_predecessors",
     "payload_crosses_join",
+)
+SELECTED_STRUCTURING_LOCALIZATION_KEYS = (
+    "forced_linear",
+    "orphan_goto_localized",
+    "orphan_goto_unrepairable",
+    "sese_child_localized",
+    "sese_orphan_fallback",
+    "fas_virtual_goto",
+    "select_bad_edge",
+    "region_emit_ready_failed",
+    "switch_emit_ready_failed",
 )
 SELECTED_CPU_KEYS = (
     "process_cpu_seconds",
@@ -245,9 +248,9 @@ def build_single_compact_summary(
         (summary.ghidra_action_metrics or {}).get("fission", {}),
         allowed_keys=SELECTED_GHIDRA_ACTION_KEYS,
     )
-    mir_metrics = _normalize_metric_map(
-        (summary.mir_metrics or {}).get("fission", {}),
-        allowed_keys=SELECTED_MIR_KEYS,
+    blockgraph_collapse_metrics = _normalize_metric_map(
+        (summary.blockgraph_collapse_metrics or {}).get("fission", {}),
+        allowed_keys=SELECTED_BLOCKGRAPH_COLLAPSE_KEYS,
     )
     blockgraph_region_metrics = _normalize_metric_map(
         (summary.blockgraph_region_metrics or {}).get("fission", {}),
@@ -256,6 +259,10 @@ def build_single_compact_summary(
     alias_interleave_metrics = _normalize_metric_map(
         (summary.alias_interleave_metrics or {}).get("fission", {}),
         allowed_keys=SELECTED_ALIAS_INTERLEAVE_KEYS,
+    )
+    structuring_localization_metrics = _normalize_metric_map(
+        (summary.structuring_localization_metrics or {}).get("fission", {}),
+        allowed_keys=SELECTED_STRUCTURING_LOCALIZATION_KEYS,
     )
     kpi_engines = (((summary_payload.get("summary") or {}).get("kpi") or {}).get("engines") or {})
     fission_kpi = kpi_engines.get("fission", {}) if isinstance(kpi_engines, dict) else {}
@@ -321,9 +328,10 @@ def build_single_compact_summary(
         shape_drift_metrics=shape_drift,
         normalize_pass_metrics=normalize_pass_metrics,
         ghidra_action_metrics=ghidra_action_metrics,
-        mir_metrics=mir_metrics,
+        blockgraph_collapse_metrics=blockgraph_collapse_metrics,
         blockgraph_region_metrics=blockgraph_region_metrics,
         alias_interleave_metrics=alias_interleave_metrics,
+        structuring_localization_metrics=structuring_localization_metrics,
         cpu_metrics=cpu_metrics,
         giant_function_speed_family_counts=giant_function_speed_family_counts,
         watchlist_diagnostics=dict((watchlist.get("watchlist_diagnostics") or {})),
@@ -413,9 +421,9 @@ def build_corpus_compact_summary(
                     row.ghidra_action_metrics,
                     allowed_keys=SELECTED_GHIDRA_ACTION_KEYS,
                 ),
-                "mir_metrics": _normalize_metric_map(
-                    row.mir_metrics,
-                    allowed_keys=SELECTED_MIR_KEYS,
+                "blockgraph_collapse_metrics": _normalize_metric_map(
+                    row.blockgraph_collapse_metrics,
+                    allowed_keys=SELECTED_BLOCKGRAPH_COLLAPSE_KEYS,
                 ),
                 "blockgraph_region_metrics": _normalize_metric_map(
                     row.blockgraph_region_metrics,
@@ -424,6 +432,10 @@ def build_corpus_compact_summary(
                 "alias_interleave_metrics": _normalize_metric_map(
                     row.alias_interleave_metrics,
                     allowed_keys=SELECTED_ALIAS_INTERLEAVE_KEYS,
+                ),
+                "structuring_localization_metrics": _normalize_metric_map(
+                    row.structuring_localization_metrics,
+                    allowed_keys=SELECTED_STRUCTURING_LOCALIZATION_KEYS,
                 ),
                 "cpu_metrics": _normalize_metric_map(
                     row.cpu_metrics,
@@ -467,9 +479,9 @@ def build_corpus_compact_summary(
                         record["ghidra_action_metrics"],
                         allowed_keys=SELECTED_GHIDRA_ACTION_KEYS,
                     ),
-                    mir_metrics=_normalize_metric_map(
-                        record["mir_metrics"],
-                        allowed_keys=SELECTED_MIR_KEYS,
+                    blockgraph_collapse_metrics=_normalize_metric_map(
+                        record["blockgraph_collapse_metrics"],
+                        allowed_keys=SELECTED_BLOCKGRAPH_COLLAPSE_KEYS,
                     ),
                     blockgraph_region_metrics=_normalize_metric_map(
                         record["blockgraph_region_metrics"],
@@ -478,6 +490,10 @@ def build_corpus_compact_summary(
                     alias_interleave_metrics=_normalize_metric_map(
                         record["alias_interleave_metrics"],
                         allowed_keys=SELECTED_ALIAS_INTERLEAVE_KEYS,
+                    ),
+                    structuring_localization_metrics=_normalize_metric_map(
+                        record["structuring_localization_metrics"],
+                        allowed_keys=SELECTED_STRUCTURING_LOCALIZATION_KEYS,
                     ),
                     cpu_metrics=_normalize_metric_map(
                         record["cpu_metrics"],
@@ -526,9 +542,9 @@ def build_corpus_compact_summary(
         artifact.ghidra_action_metric_totals,
         allowed_keys=SELECTED_GHIDRA_ACTION_KEYS,
     )
-    mir_totals = _normalize_metric_map(
-        artifact.mir_metric_totals,
-        allowed_keys=SELECTED_MIR_KEYS,
+    blockgraph_collapse_totals = _normalize_metric_map(
+        artifact.blockgraph_collapse_metric_totals,
+        allowed_keys=SELECTED_BLOCKGRAPH_COLLAPSE_KEYS,
     )
     blockgraph_region_totals = _normalize_metric_map(
         artifact.blockgraph_region_metric_totals,
@@ -537,6 +553,10 @@ def build_corpus_compact_summary(
     alias_interleave_totals = _normalize_metric_map(
         artifact.alias_interleave_metric_totals,
         allowed_keys=SELECTED_ALIAS_INTERLEAVE_KEYS,
+    )
+    structuring_localization_totals = _normalize_metric_map(
+        artifact.structuring_localization_metric_totals,
+        allowed_keys=SELECTED_STRUCTURING_LOCALIZATION_KEYS,
     )
     cpu_metric_totals = _normalize_metric_map(
         artifact.cpu_metric_totals,
@@ -585,9 +605,10 @@ def build_corpus_compact_summary(
         shape_drift_totals=shape_totals,
         normalize_pass_metric_totals=normalize_pass_totals,
         ghidra_action_metric_totals=ghidra_action_totals,
-        mir_metric_totals=mir_totals,
+        blockgraph_collapse_metric_totals=blockgraph_collapse_totals,
         blockgraph_region_metric_totals=blockgraph_region_totals,
         alias_interleave_metric_totals=alias_interleave_totals,
+        structuring_localization_metric_totals=structuring_localization_totals,
         cpu_metric_totals=cpu_metric_totals,
         similarity_attribution_totals=dict(artifact.similarity_attribution_totals or {}),
         giant_function_speed_family_totals=giant_function_speed_family_totals,

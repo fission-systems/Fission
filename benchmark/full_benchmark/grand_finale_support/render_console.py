@@ -26,9 +26,12 @@ def print_single_benchmark_console(
     shape_metrics = ((summary.get("shape_drift_metrics") or {}).get("fission")) or {}
     normalize_pass_metrics = ((summary.get("normalize_pass_metrics") or {}).get("fission")) or {}
     ghidra_action_metrics = ((summary.get("ghidra_action_metrics") or {}).get("fission")) or {}
-    mir_metrics = ((summary.get("mir_metrics") or {}).get("fission")) or {}
+    blockgraph_collapse_metrics = ((summary.get("blockgraph_collapse_metrics") or {}).get("fission")) or {}
     blockgraph_region_metrics = ((summary.get("blockgraph_region_metrics") or {}).get("fission")) or {}
     alias_interleave_metrics = ((summary.get("alias_interleave_metrics") or {}).get("fission")) or {}
+    structuring_localization_metrics = (
+        (summary.get("structuring_localization_metrics") or {}).get("fission")
+    ) or {}
     giant_family_counts = summary.get("giant_function_speed_family_counts", {}) or {}
 
     console.print(
@@ -77,13 +80,13 @@ def print_single_benchmark_console(
     if ghidra_action_metrics:
         console.print(action_table)
 
-    mir_table = Table(title="MIR Shadow Metrics", show_header=True)
-    mir_table.add_column("Metric")
-    mir_table.add_column("Value", justify="right")
-    for key, value in sorted(mir_metrics.items()):
-        mir_table.add_row(key, f"{float(value):.3f}")
-    if mir_metrics:
-        console.print(mir_table)
+    collapse_table = Table(title="BlockGraph Collapse Metrics", show_header=True)
+    collapse_table.add_column("Metric")
+    collapse_table.add_column("Value", justify="right")
+    for key, value in sorted(blockgraph_collapse_metrics.items()):
+        collapse_table.add_row(key, f"{float(value):.3f}")
+    if blockgraph_collapse_metrics:
+        console.print(collapse_table)
 
     blockgraph_table = Table(title="BlockGraph Region Proof Metrics", show_header=True)
     blockgraph_table.add_column("Metric")
@@ -100,6 +103,14 @@ def print_single_benchmark_console(
         alias_table.add_row(key, f"{float(value):.3f}")
     if alias_interleave_metrics:
         console.print(alias_table)
+
+    localization_table = Table(title="Structuring Localization Metrics", show_header=True)
+    localization_table.add_column("Metric")
+    localization_table.add_column("Value", justify="right")
+    for key, value in sorted(structuring_localization_metrics.items()):
+        localization_table.add_row(key, f"{float(value):.3f}")
+    if structuring_localization_metrics:
+        console.print(localization_table)
 
     if giant_family_counts:
         giant_table = Table(title="Giant Function Families", show_header=True)
@@ -182,14 +193,14 @@ def print_corpus_benchmark_console(
             action_table.add_row(str(key), f"{float(value):.3f}")
         console.print(action_table)
 
-    mir_totals = corpus_summary.get("mir_metric_totals", {}) or {}
-    if mir_totals:
-        mir_table = Table(title="MIR Shadow Totals", show_header=True)
-        mir_table.add_column("Metric")
-        mir_table.add_column("Value", justify="right")
-        for key, value in sorted(mir_totals.items()):
-            mir_table.add_row(str(key), f"{float(value):.3f}")
-        console.print(mir_table)
+    collapse_totals = corpus_summary.get("blockgraph_collapse_metric_totals", {}) or {}
+    if collapse_totals:
+        collapse_table = Table(title="BlockGraph Collapse Totals", show_header=True)
+        collapse_table.add_column("Metric")
+        collapse_table.add_column("Value", justify="right")
+        for key, value in sorted(collapse_totals.items()):
+            collapse_table.add_row(str(key), f"{float(value):.3f}")
+        console.print(collapse_table)
 
     blockgraph_totals = corpus_summary.get("blockgraph_region_metric_totals", {}) or {}
     if blockgraph_totals:

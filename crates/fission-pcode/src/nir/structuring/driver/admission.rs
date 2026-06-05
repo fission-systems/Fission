@@ -50,6 +50,7 @@ pub(crate) fn decide_structuring_admission(input: StructuringAdmissionInput) -> 
     StructuringAdmissionReason::GraphCollapse
 }
 
-pub(crate) fn mir_blockgraph_admission_enabled() -> bool {
-    std::env::var_os("FISSION_ENABLE_MIR_BLOCKGRAPH").is_some()
+pub(crate) fn blockgraph_collapse_admission_enabled() -> bool {
+    std::env::var_os("FISSION_ENABLE_BLOCKGRAPH_COLLAPSE").is_some()
+        || std::env::var_os("FISSION_ENABLE_MIR_BLOCKGRAPH").is_some()
 }

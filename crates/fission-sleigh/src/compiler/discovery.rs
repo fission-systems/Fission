@@ -36,6 +36,11 @@ pub fn sleigh_languages_root() -> PathBuf {
     sleigh_specs_root().join("languages")
 }
 
+/// Root of checked-in Ghidra compiled `.sla` artifacts (`utils/sleigh-specs/compiled/`).
+pub fn sleigh_compiled_root() -> PathBuf {
+    sleigh_specs_root().join("compiled")
+}
+
 fn normalize_sleigh_specs_root(path: PathBuf) -> PathBuf {
     if path
         .file_name()
@@ -72,61 +77,43 @@ pub fn generated_root_for_arch(arch: &str) -> PathBuf {
     generated_root().join(canonical_processor_name(arch).unwrap_or_else(|| arch.to_string()))
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct GhidraInstallPaths {
-    pub install_root: PathBuf,
-    pub processors_root: PathBuf,
-}
-
-/// Returns true when a Ghidra install layout is present so packaged `.sla` ConstructTpl overlays can load.
+/// Returns true when checked-in compiled `.sla` artifacts exist under
+/// `utils/sleigh-specs/compiled/`.
 #[must_use]
-pub fn ghidra_packaged_sla_available() -> bool {
-    resolve_ghidra_install_paths().is_some()
+pub fn checked_in_compiled_sla_available() -> bool {
+    let root = sleigh_compiled_root();
+    root.is_dir()
+        && root
+            .read_dir()
+            .ok()
+            .is_some_and(|mut entries| entries.flatten().next().is_some())
 }
 
-pub fn resolve_ghidra_install_paths() -> Option<GhidraInstallPaths> {
-    let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .ancestors()
-        .nth(2)?
-        .to_path_buf();
-    let mut candidates = Vec::new();
-    if let Some(path) = env::var_os("FISSION_GHIDRA_DIR") {
-        candidates.push(PathBuf::from(path));
-    }
-    if let Some(path) = env::var_os("GHIDRA_INSTALL_DIR") {
-        candidates.push(PathBuf::from(path));
-    }
-    candidates.extend([
-        repo_root.join("vendor/ghidra/ghidra_12.0.4_PUBLIC"),
-        repo_root.join("vendor/ghidra/ghidra-Ghidra_12.0.4_build"),
-        repo_root.join("ghidra_12.0.4_PUBLIC"),
-        repo_root.join("ghidra-Ghidra_12.0.4_build"),
-    ]);
-
-    candidates.into_iter().find_map(|candidate| {
-        let install_root = normalize_ghidra_install_root(candidate);
-        let processors_root = install_root.join("Ghidra").join("Processors");
-        if processors_root.exists() {
-            Some(GhidraInstallPaths {
-                install_root,
-                processors_root,
-            })
-        } else {
-            None
-        }
-    })
+/// Resolve the checked-in packaged `.sla` for an entry spec stem under `compiled/<arch>/`.
+pub fn packaged_sla_for_entry_spec(entry_spec: &Path) -> Result<Option<PathBuf>> {
+    let stem = entry_id_from_path(entry_spec)?;
+    let arch = infer_arch_from_entry_spec(entry_spec)?;
+    let path = sleigh_compiled_root()
+        .join(&arch)
+        .join(format!("{stem}.sla"));
+    Ok(path.is_file().then_some(path))
 }
 
-fn normalize_ghidra_install_root(path: PathBuf) -> PathBuf {
-    if path
-        .file_name()
-        .and_then(|name| name.to_str())
-        .is_some_and(|name| name == "Ghidra")
-        && path.join("Processors").exists()
-    {
-        path.parent().unwrap_or(&path).to_path_buf()
+/// Same as [`packaged_sla_for_entry_spec`], but required for production lift frontends.
+pub fn require_packaged_sla_for_entry_spec(entry_spec: &Path) -> Result<PathBuf> {
+    let stem = entry_id_from_path(entry_spec)?;
+    let arch = infer_arch_from_entry_spec(entry_spec)?;
+    let path = sleigh_compiled_root()
+        .join(&arch)
+        .join(format!("{stem}.sla"));
+    if path.is_file() {
+        Ok(path)
     } else {
-        path
+        Err(anyhow!(
+            "missing checked-in compiled .sla for {} (expected {})",
+            entry_spec.display(),
+            path.display()
+        ))
     }
 }
 

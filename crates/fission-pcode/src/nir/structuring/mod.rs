@@ -18,6 +18,7 @@ mod loops;
 mod regions;
 mod sese;
 mod switch;
+mod collapse_loop;
 
 // --- re-exports consumed by nir::builder and other nir subsystems ---
 pub(crate) use cfg_analysis::{

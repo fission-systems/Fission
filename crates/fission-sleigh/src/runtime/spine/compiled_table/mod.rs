@@ -50,8 +50,6 @@ use walker::*;
 #[cfg(test)]
 mod tests;
 
-use crate::runtime::native::NativeBackend;
-use std::sync::Arc;
 use std::cell::RefCell;
 use std::collections::HashMap;
 
@@ -65,16 +63,14 @@ pub(crate) fn clear_bind_cache() {
 
 pub(crate) fn decode_and_lift_with_details(
     compiled: &CompiledFrontend,
-    native: Option<&Arc<NativeBackend>>,
     bytes: &[u8],
     address: u64,
 ) -> Result<(Vec<PcodeOp>, u64, RuntimeExecutionDetails)> {
-    decode_and_lift_with_context_override(compiled, native, bytes, address, None)
+    decode_and_lift_with_context_override(compiled, bytes, address, None)
 }
 
 pub(crate) fn decode_and_lift_with_context_override(
     compiled: &CompiledFrontend,
-    native: Option<&Arc<NativeBackend>>,
     bytes: &[u8],
     address: u64,
     context_override: Option<PackedContextOverride>,
@@ -87,8 +83,8 @@ pub(crate) fn decode_and_lift_with_context_override(
         context_override.apply_to(&mut ctx.context_register, &mut ctx.context_known_mask);
     }
 
-    let strategy = RuntimeDecodeStrategy::for_table(compiled, native, "instruction", &ctx);
-    let candidates = candidate_selections(compiled, &strategy, &ctx, address)?;
+    let strategy = RuntimeDecodeStrategy::for_table();
+    let candidates = candidate_selections(compiled, &ctx, address)?;
     let mut first_error: Option<anyhow::Error> = None;
 
     for selection in candidates {
@@ -100,7 +96,7 @@ pub(crate) fn decode_and_lift_with_context_override(
             continue;
         }
 
-        let strategy = RuntimeDecodeStrategy::for_table(compiled, native, "instruction", &ctx);
+        let strategy = RuntimeDecodeStrategy::for_table();
         let decoded = match bind_instruction(compiled, strategy, &ctx, selection) {
             Ok(decoded) => decoded,
             Err(err) => {
@@ -118,7 +114,6 @@ pub(crate) fn decode_and_lift_with_context_override(
 
         match emit_pcode_for_state_with_bytes(
             compiled,
-            native,
             address,
             bytes,
             address,
@@ -158,7 +153,6 @@ pub(crate) fn decode_and_lift_with_context_override(
 /// instruction boundaries.
 pub(crate) fn decode_instruction_with_context(
     compiled: &CompiledFrontend,
-    native: Option<&Arc<NativeBackend>>,
     bytes: &[u8],
     address: u64,
     context_override: Option<PackedContextOverride>,
@@ -169,31 +163,29 @@ pub(crate) fn decode_instruction_with_context(
     if let Some(context_override) = context_override {
         context_override.apply_to(&mut ctx.context_register, &mut ctx.context_known_mask);
     }
-    decode_instruction_inner(compiled, native, bytes, address, ctx)
+    decode_instruction_inner(compiled, bytes, address, ctx)
 }
 
 pub(crate) fn decode_instruction(
     compiled: &CompiledFrontend,
-    native: Option<&Arc<NativeBackend>>,
     bytes: &[u8],
     address: u64,
 ) -> Result<DecodedInstruction> {
     let mut ctx = CompiledInstructionContext::parse(bytes, address)?;
     ctx.context_register = compiled.default_context;
     ctx.context_known_mask = compiled.default_context_known_mask;
-    decode_instruction_inner(compiled, native, bytes, address, ctx)
+    decode_instruction_inner(compiled, bytes, address, ctx)
 }
 
 fn decode_instruction_inner(
     compiled: &CompiledFrontend,
-    native: Option<&Arc<NativeBackend>>,
     bytes: &[u8],
     address: u64,
     ctx: CompiledInstructionContext<'_>,
 ) -> Result<DecodedInstruction> {
     clear_bind_cache();
-    let strategy = RuntimeDecodeStrategy::for_table(compiled, native, "instruction", &ctx);
-    let candidates = candidate_selections(compiled, &strategy, &ctx, address)?;
+    let strategy = RuntimeDecodeStrategy::for_table();
+    let candidates = candidate_selections(compiled, &ctx, address)?;
     let mut first_error: Option<anyhow::Error> = None;
 
     for selection in candidates {
@@ -215,7 +207,7 @@ fn decode_instruction_inner(
             continue;
         }
 
-        let strategy = RuntimeDecodeStrategy::for_table(compiled, native, "instruction", &ctx);
+        let strategy = RuntimeDecodeStrategy::for_table();
         let decoded = match bind_instruction(compiled, strategy, &ctx, selection.clone()) {
             Ok(decoded) => decoded,
             Err(err) => {
@@ -228,7 +220,6 @@ fn decode_instruction_inner(
 
         match emit_pcode_for_state(
             compiled,
-            native,
             address,
             bytes,
             address,
@@ -289,7 +280,6 @@ fn typed_template_resolution_error(
 /// of the delay-slot instruction by actually decoding it at `inst_next`.
 pub(super) fn decode_instruction_length(
     compiled: &CompiledFrontend,
-    native: Option<&Arc<NativeBackend>>,
     bytes: &[u8],
     inst_next_address: u64,
     inst_next_byte_offset: usize,
@@ -304,14 +294,14 @@ pub(super) fn decode_instruction_length(
     let mut ctx = ctx;
     ctx.context_register = compiled.default_context;
     ctx.context_known_mask = compiled.default_context_known_mask;
-    let strategy = RuntimeDecodeStrategy::for_table(compiled, native, "instruction", &ctx);
-    let candidates = candidate_selections(compiled, &strategy, &ctx, inst_next_address)?;
+    let strategy = RuntimeDecodeStrategy::for_table();
+    let candidates = candidate_selections(compiled, &ctx, inst_next_address)?;
     let mut first_err: Option<anyhow::Error> = None;
     for selection in candidates {
         if !selection.constructor.runtime_ready {
             continue;
         }
-        let strategy = RuntimeDecodeStrategy::for_table(compiled, native, "instruction", &ctx);
+        let strategy = RuntimeDecodeStrategy::for_table();
         match bind_instruction(compiled, strategy, &ctx, selection) {
             Ok(decoded) => return checked_runtime_length_u32(decoded.length, "delay-slot decode"),
             Err(err) => {
@@ -332,7 +322,6 @@ pub(super) fn decode_instruction_length(
 /// Used by Ghidra `PcodeEmit.appendCrossBuild` and delay-slot emission.
 pub(super) fn try_bind_runtime_state_at(
     compiled: &CompiledFrontend,
-    native: Option<&Arc<NativeBackend>>,
     memory_window: &[u8],
     memory_base: u64,
     target_address: u64,
@@ -355,14 +344,14 @@ pub(super) fn try_bind_runtime_state_at(
         let mut ctx = CompiledInstructionContext::parse(slice, target_address)?;
         ctx.context_register = context_register;
         ctx.context_known_mask = context_known_mask;
-        let strategy = RuntimeDecodeStrategy::for_table(compiled, native, "instruction", &ctx);
-        let candidates = candidate_selections(compiled, &strategy, &ctx, target_address)?;
+        let strategy = RuntimeDecodeStrategy::for_table();
+        let candidates = candidate_selections(compiled, &ctx, target_address)?;
         let mut first_err: Option<anyhow::Error> = None;
         for selection in candidates {
             if !selection.constructor.runtime_ready {
                 continue;
             }
-            let strategy = RuntimeDecodeStrategy::for_table(compiled, native, "instruction", &ctx);
+            let strategy = RuntimeDecodeStrategy::for_table();
             match bind_instruction(compiled, strategy, &ctx, selection) {
                 Ok(state) => return Ok(state),
                 Err(err) => {
@@ -508,9 +497,18 @@ fn decoded_instruction_from_state(
 ) -> Result<DecodedInstruction> {
     let length = decoded.length;
     let (mnemonic, operands_text) = render_instruction_display(&decoded)?;
-    let direct_target = first_relative_target(&decoded);
     let flow_kind = flow_kind_for_state(&decoded);
     let references = decoded_references(address, length, flow_kind, &decoded.handles);
+    let direct_target = first_flow_target(&decoded, address, length).or_else(|| {
+        references.iter().find_map(|reference| {
+            match reference.kind {
+                DecodedReferenceKind::BranchTarget | DecodedReferenceKind::CallTarget => {
+                    Some(reference.target)
+                }
+                _ => None,
+            }
+        })
+    });
     let pending_context_commits =
         apply_context_commits(compiled, &decoded, address, decoded.context_register)?;
     let instruction_bytes = bytes.get(..length).ok_or_else(|| {

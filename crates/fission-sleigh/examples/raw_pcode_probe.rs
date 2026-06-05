@@ -7,7 +7,7 @@ use anyhow::{anyhow, bail, Context, Result};
 use fission_loader::loader::LoadedBinary;
 use fission_pcode::{PcodeOp, PcodeOpcode, Varnode};
 use fission_sleigh::compiler::{
-    load_construct_templates_from_sla, resolve_ghidra_install_paths, CompiledSpaceRef,
+    load_construct_templates_from_sla, packaged_sla_for_entry_spec, CompiledSpaceRef,
 };
 use fission_sleigh::runtime::{DecodedInstruction, PackedContextOverride, RuntimeSleighFrontend};
 use serde::Serialize;
@@ -222,46 +222,9 @@ fn load_space_map(frontend: &RuntimeSleighFrontend) -> SpaceMap {
     }
 }
 
-fn find_packaged_sla(entry_id: &str, entry_spec_path: Option<&std::path::Path>) -> Option<PathBuf> {
-    let paths = resolve_ghidra_install_paths()?;
-    let wanted_name = format!("{entry_id}.sla");
-    let mut matches = Vec::new();
-    
-    // Try to guess arch folder to avoid scanning everything recursively
-    if let Some(spec_path) = entry_spec_path {
-        if let Ok(arch) = fission_sleigh::compiler::infer_arch_from_entry_spec(spec_path) {
-            let arch_dir = paths.processors_root.join(&arch);
-            if arch_dir.exists() {
-                let _ = find_named_file(&arch_dir, &wanted_name, &mut matches);
-            }
-        }
-    }
-
-    // Fallback to full search
-    if matches.is_empty() {
-        let _ = find_named_file(&paths.processors_root, &wanted_name, &mut matches);
-    }
-
-    matches.sort();
-    matches.into_iter().next()
-}
-
-fn find_named_file(root: &std::path::Path, name: &str, out: &mut Vec<PathBuf>) -> Result<()> {
-    for entry in
-        std::fs::read_dir(root).with_context(|| format!("read directory {}", root.display()))?
-    {
-        let entry = entry.with_context(|| format!("read entry under {}", root.display()))?;
-        let path = entry.path();
-        let file_type = entry
-            .file_type()
-            .with_context(|| format!("read file type for {}", path.display()))?;
-        if file_type.is_dir() {
-            find_named_file(&path, name, out)?;
-        } else if path.file_name().and_then(|value| value.to_str()) == Some(name) {
-            out.push(path);
-        }
-    }
-    Ok(())
+fn find_packaged_sla(_entry_id: &str, entry_spec_path: Option<&std::path::Path>) -> Option<PathBuf> {
+    let spec_path = entry_spec_path?;
+    packaged_sla_for_entry_spec(spec_path).ok().flatten()
 }
 
 fn main() -> Result<()> {

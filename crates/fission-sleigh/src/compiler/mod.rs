@@ -23,9 +23,10 @@ pub use codegen::{GeneratedArtifact, GeneratedArtifactSet};
 use discovery::generated_output_root_for_entry_spec;
 pub use discovery::{
     entry_id_from_path, entry_spec_from_path, generated_root, generated_root_for_arch,
-    generated_root_for_entry_spec, ghidra_language_manifest_path, ghidra_packaged_sla_available,
-    infer_arch_from_entry_spec, resolve_ghidra_install_paths, sleigh_build_cache_root,
-    sleigh_languages_root, sleigh_specs_root, spec_root_for_arch, GhidraInstallPaths,
+    generated_root_for_entry_spec, ghidra_language_manifest_path, checked_in_compiled_sla_available,
+    infer_arch_from_entry_spec, packaged_sla_for_entry_spec, require_packaged_sla_for_entry_spec,
+    sleigh_build_cache_root, sleigh_compiled_root, sleigh_languages_root, sleigh_specs_root,
+    spec_root_for_arch,
 };
 pub use equivalence::{
     build_runtime_fixture_report, EquivalenceMismatchKind, RuntimeParityFixture,
@@ -497,66 +498,7 @@ pub fn compile_frontend_for_entry_spec(entry_spec: &Path) -> Result<CompiledFron
         if let Some(cache_time) = cache_mtime {
             let reader = std::io::BufReader::new(cache_file);
             if let Ok(compiled) = bincode::deserialize_from::<_, CompiledFrontend>(reader) {
-                // Verify if cache is up-to-date
-                let mut cache_valid = true;
-
-                // Check mtime of the entry_spec itself
-                if let Ok(spec_metadata) = fs::metadata(entry_spec) {
-                    if let Ok(spec_mtime) = spec_metadata.modified() {
-                        if spec_mtime > cache_time {
-                            tracing::debug!("Cache invalid for {}: spec file modified since cache creation", entry_id);
-                            cache_valid = false;
-                        }
-                    }
-                } else {
-                    cache_valid = false;
-                }
-
-                // Check mtime of all included files in include_manifest
-                if cache_valid {
-                    if let Some(spec_dir) = entry_spec.parent() {
-                        for include_file in &compiled.include_manifest {
-                            // Extract actual path before the '@depth' suffix
-                            let path_part = match include_file.rsplit_once('@') {
-                                Some((path, _depth)) => path,
-                                None => include_file.as_str(),
-                            };
-                            let include_path = spec_dir.join(path_part);
-                            if let Ok(inc_metadata) = fs::metadata(&include_path) {
-                                if let Ok(inc_mtime) = inc_metadata.modified() {
-                                    if inc_mtime > cache_time {
-                                        tracing::debug!("Cache invalid for {}: include file {} modified since cache creation", entry_id, include_file);
-                                        cache_valid = false;
-                                        break;
-                                    }
-                                }
-                            } else {
-                                cache_valid = false;
-                                break;
-                            }
-                        }
-                    } else {
-                        cache_valid = false;
-                    }
-                }
-
-                // Check mtime of the SLA file if applicable
-                if cache_valid {
-                    if let Ok(Some(sla_path)) = packaged_sla_for_entry_spec(entry_spec) {
-                        if let Ok(sla_metadata) = fs::metadata(&sla_path) {
-                            if let Ok(sla_mtime) = sla_metadata.modified() {
-                                if sla_mtime > cache_time {
-                                    tracing::debug!("Cache invalid for {}: SLA file modified since cache creation", entry_id);
-                                    cache_valid = false;
-                                }
-                            }
-                        } else {
-                            cache_valid = false;
-                        }
-                    }
-                }
-
-                if cache_valid {
+                if !frontend_cache_is_stale(entry_spec, &compiled, cache_time) {
                     tracing::info!("Loaded compiled Sleigh frontend for {} from cache", entry_id);
                     return Ok(compiled);
                 }
@@ -579,12 +521,7 @@ pub fn compile_frontend_for_entry_spec(entry_spec: &Path) -> Result<CompiledFron
         processor_spec.as_deref(),
     )
     .with_context(|| format!("compile frontend {}", entry_spec.display()))?;
-    if let Some(sla_path) = packaged_sla_for_entry_spec(entry_spec)? {
-        let library = sla::load_construct_templates_from_sla(&sla_path)
-            .with_context(|| format!("decode compiled SLEIGH artifact {}", sla_path.display()))?;
-        ir::build_frontend_from_sla_native_model(&mut compiled, &library)
-            .with_context(|| format!("lower compiled SLEIGH artifact {}", sla_path.display()))?;
-    }
+    apply_required_sla_overlay(&mut compiled, entry_spec)?;
 
     // Save to cache
     if let Err(e) = fs::create_dir_all(&cache_dir) {
@@ -629,99 +566,85 @@ fn processor_spec_for_entry_spec(entry_spec: &Path) -> Result<Option<PathBuf>> {
     }))
 }
 
-fn packaged_sla_for_entry_spec(entry_spec: &Path) -> Result<Option<PathBuf>> {
-    let stem = entry_spec
-        .file_stem()
-        .and_then(|stem| stem.to_str())
-        .ok_or_else(|| anyhow!("entry spec {} has no UTF-8 stem", entry_spec.display()))?;
-    let Some(paths) = resolve_ghidra_install_paths() else {
-        return Ok(None);
-    };
-    let wanted_name = format!("{stem}.sla");
-    let mut matches = Vec::new();
-
-    // Optimize search by looking in the specific architecture's subfolder first
-    if let Ok(arch) = infer_arch_from_entry_spec(entry_spec) {
-        let arch_dir = paths.processors_root.join(&arch);
-        if arch_dir.exists() {
-            find_named_file(&arch_dir, &wanted_name, &mut matches)?;
-        }
-    }
-
-    // Fallback to full search only if not found in the specific arch dir
-    if matches.is_empty() {
-        find_named_file(&paths.processors_root, &wanted_name, &mut matches)?;
-    }
-
-    matches.sort();
-    match matches.len() {
-        0 => Ok(None),
-        1 => Ok(matches.pop()),
-        _ => Err(anyhow!(
-            "multiple packaged SLEIGH artifacts named {wanted_name}: {:?}",
-            matches
-        )),
-    }
+fn path_modified_after(path: &Path, since: std::time::SystemTime) -> bool {
+    fs::metadata(path)
+        .ok()
+        .and_then(|metadata| metadata.modified().ok())
+        .is_some_and(|mtime| mtime > since)
 }
 
-fn find_named_file(root: &Path, name: &str, out: &mut Vec<PathBuf>) -> Result<()> {
-    for entry in fs::read_dir(root).with_context(|| format!("read directory {}", root.display()))? {
-        let entry = entry.with_context(|| format!("read entry under {}", root.display()))?;
-        let path = entry.path();
-        let file_type = entry
-            .file_type()
-            .with_context(|| format!("read file type for {}", path.display()))?;
-        if file_type.is_dir() {
-            find_named_file(&path, name, out)?;
-        } else if path.file_name().and_then(|value| value.to_str()) == Some(name) {
-            out.push(path);
-        }
-    }
-    Ok(())
-}
-
-use std::process::Command;
-
-pub fn native_backend_library_name() -> &'static str {
-    if cfg!(target_os = "windows") {
-        "native_backend.dll"
-    } else if cfg!(target_os = "macos") {
-        "native_backend.dylib"
-    } else {
-        "native_backend.so"
-    }
-}
-
-pub fn compile_native_backend(source_path: &Path, output_path: &Path) -> Result<()> {
-    if let Some(parent) = output_path.parent() {
-        fs::create_dir_all(parent)
-            .with_context(|| format!("create native backend output root {}", parent.display()))?;
-    }
-
-    let status = Command::new("rustc")
-        .arg("--crate-type=cdylib")
-        .arg("-O")
-        .arg("-o")
-        .arg(output_path)
-        .arg(source_path)
-        .status()
-        .with_context(|| "failed to execute rustc")?;
-
-    if !status.success() {
-        bail!("rustc failed to compile native backend: {}", status);
-    }
-    Ok(())
-}
-
-pub fn compile_generated_native_backend_for_entry_spec(
+fn frontend_cache_is_stale(
     entry_spec: &Path,
-    output_root: &Path,
-) -> Result<PathBuf> {
-    let entry_output_root = generated_output_root_for_entry_spec(entry_spec, output_root)?;
-    let source_path = entry_output_root.join("native_backend.rs");
-    let output_path = entry_output_root.join(native_backend_library_name());
-    compile_native_backend(&source_path, &output_path)?;
-    Ok(output_path)
+    compiled: &CompiledFrontend,
+    cache_time: std::time::SystemTime,
+) -> bool {
+    let sla_path = match discovery::packaged_sla_for_entry_spec(entry_spec) {
+        Ok(Some(path)) => path,
+        _ => {
+            tracing::debug!(
+                "Cache invalid for {}: checked-in .sla overlay is required",
+                entry_spec.display()
+            );
+            return true;
+        }
+    };
+    if path_modified_after(&sla_path, cache_time) {
+        tracing::debug!(
+            "Cache invalid for {}: .sla modified since cache creation ({})",
+            entry_spec.display(),
+            sla_path.display()
+        );
+        return true;
+    }
+
+    if path_modified_after(entry_spec, cache_time) {
+        tracing::debug!(
+            "Cache invalid for {}: entry spec modified since cache creation",
+            entry_spec.display()
+        );
+        return true;
+    }
+
+    let Some(spec_dir) = entry_spec.parent() else {
+        return true;
+    };
+    for include_file in &compiled.include_manifest {
+        let path_part = match include_file.rsplit_once('@') {
+            Some((path, _depth)) => path,
+            None => include_file.as_str(),
+        };
+        let include_path = spec_dir.join(path_part);
+        if !include_path.is_file() {
+            tracing::debug!(
+                "Cache invalid for {}: include file {} missing",
+                entry_spec.display(),
+                include_file
+            );
+            return true;
+        }
+        if path_modified_after(&include_path, cache_time) {
+            tracing::debug!(
+                "Cache invalid for {}: include file {} modified since cache creation",
+                entry_spec.display(),
+                include_file
+            );
+            return true;
+        }
+    }
+
+    false
+}
+
+fn apply_required_sla_overlay(
+    compiled: &mut CompiledFrontend,
+    entry_spec: &Path,
+) -> Result<()> {
+    let sla_path = discovery::require_packaged_sla_for_entry_spec(entry_spec)?;
+    let library = sla::load_construct_templates_from_sla(&sla_path)
+        .with_context(|| format!("decode compiled SLEIGH artifact {}", sla_path.display()))?;
+    ir::build_frontend_from_sla_native_model(compiled, &library)
+        .with_context(|| format!("lower compiled SLEIGH artifact {}", sla_path.display()))?;
+    Ok(())
 }
 
 pub fn compile_frontends_for_arch(arch: &str) -> Result<Vec<CompiledFrontend>> {
@@ -926,12 +849,6 @@ mod tests {
 
     #[test]
     fn compile_frontend_for_entry_spec_collects_inventory() {
-        if !crate::compiler::discovery::ghidra_packaged_sla_available() {
-            eprintln!(
-                "skip: packaged Ghidra .sla not available for x86-64 ConstructTpl inventory check"
-            );
-            return;
-        }
         let compiled =
             compile_frontend_for_entry_spec(&x86_64_entry_spec_path()).expect("compile frontend");
         assert_eq!(compiled.arch, "x86");
@@ -1042,23 +959,40 @@ mod tests {
     }
 
     #[test]
-    fn packaged_ghidra_path_discovery_uses_resolver() {
-        let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-        let source = fs::read_to_string(manifest_dir.join("src/compiler/mod.rs"))
-            .expect("read compiler module");
-        let processor_specific_path = ["Ghidra", "/", "Processors", "/", "x86"].concat();
+    fn compile_frontend_requires_checked_in_sla_overlay() {
+        let entry_spec = spec_root_for_arch("Toy").join("toy_le.slaspec");
+        let err = compile_frontend_for_entry_spec(&entry_spec)
+            .expect_err("Toy slaspecs have no checked-in .sla overlay");
         assert!(
-            !source.contains(&processor_specific_path),
-            "compiler module must not construct processor-specific Ghidra paths"
-        );
-        assert!(
-            source.contains("resolve_ghidra_install_paths"),
-            "compiler module should route packaged SLA lookup through the resolver"
+            err.to_string().contains("missing checked-in compiled .sla"),
+            "unexpected error: {err:#}"
         );
     }
 
     #[test]
-    #[ignore = "manual developer smoke: regenerates aarch64 native_backend via rustc"]
+    fn packaged_sla_discovery_uses_utils_compiled_root() {
+        let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let source = fs::read_to_string(manifest_dir.join("src/compiler/discovery.rs"))
+            .expect("read discovery module");
+        let processor_specific_path = ["Ghidra", "/", "Processors", "/", "x86"].concat();
+        assert!(
+            !source.contains(&processor_specific_path),
+            "discovery module must not construct processor-specific Ghidra install paths"
+        );
+        assert!(
+            source.contains("sleigh_compiled_root"),
+            "discovery module should route packaged SLA lookup through utils/sleigh-specs/compiled"
+        );
+        let x86_64_sla = sleigh_compiled_root().join("x86").join("x86-64.sla");
+        assert!(
+            x86_64_sla.is_file(),
+            "expected checked-in x86-64.sla at {}",
+            x86_64_sla.display()
+        );
+    }
+
+    #[test]
+    #[ignore = "manual developer smoke: regenerates aarch64 generated artifacts"]
     fn force_regenerate_aarch64() {
         let aarch64_spec = spec_root_for_arch("AARCH64").join("AARCH64.slaspec");
         println!("Compiling spec: {}", aarch64_spec.display());
@@ -1070,22 +1004,17 @@ mod tests {
         println!("Writing artifacts to: {}", entry_output_root.display());
         codegen::write_generated_artifacts(&entry_output_root, &artifacts)
             .expect("write artifacts");
-
-        let source_path = entry_output_root.join("native_backend.rs");
-        let output_path = entry_output_root.join("native_backend.dylib");
-        println!("Compiling native backend...");
-        compile_native_backend(&source_path, &output_path).expect("compile native backend");
     }
 
     #[test]
     fn compiles_all_checked_in_entry_specs() {
-        if !crate::compiler::discovery::ghidra_packaged_sla_available() {
-            eprintln!(
-                "skip: packaged Ghidra .sla not available (many slaspecs need overlay for constructors)"
-            );
-            return;
-        }
         for entry in discover_all_entry_specs().expect("discover entry specs") {
+            if discovery::packaged_sla_for_entry_spec(&entry.path)
+                .expect("resolve packaged sla")
+                .is_none()
+            {
+                continue;
+            }
             let compiled = compile_frontend_for_entry_spec(&entry.path).unwrap_or_else(|error| {
                 panic!("compile {} failed: {error:#}", entry.path.display())
             });

@@ -532,10 +532,8 @@ pub(crate) fn defuse_dead_assignment_pass(func: &mut HirFunction) -> bool {
     changed
 }
 
-/// Fixed-point dead temp removal: run [`defuse_dead_assignment_pass`] until it
-/// quiesces or the iteration budget is hit.  Intended after SCCP exposes temps
-/// whose only uses were folded away across the function.
-pub(crate) fn apply_wide_dead_assignment_pass(func: &mut HirFunction) -> bool {
+/// Fixed-point dead temp removal after SCCP/constant folding exposes cross-block dead temps.
+pub(crate) fn defuse_dead_assignment_fixpoint_pass(func: &mut HirFunction) -> bool {
     let first_changed = defuse_dead_assignment_pass(func);
     if !first_changed {
         return false;
@@ -555,6 +553,11 @@ pub(crate) fn apply_wide_dead_assignment_pass(func: &mut HirFunction) -> bool {
         }
     }
     true
+}
+
+/// Deprecated alias for [`defuse_dead_assignment_fixpoint_pass`].
+pub(crate) fn apply_wide_dead_assignment_pass(func: &mut HirFunction) -> bool {
+    defuse_dead_assignment_fixpoint_pass(func)
 }
 
 fn wide_dead_assignment_rerun_admission_enabled() -> bool {

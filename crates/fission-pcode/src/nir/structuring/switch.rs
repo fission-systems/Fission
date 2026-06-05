@@ -13,6 +13,9 @@ impl<'a> PreviewBuilder<'a> {
         let Some(parsed) = self.parse_switch_chain(idx)? else {
             return Ok(None);
         };
+        if !compare_chain_switch_candidate(&parsed) {
+            return Ok(None);
+        }
         let emit_ready = EmitReadyDecision::from_dispatcher_proof(Some(&parsed.proof));
         if !emit_ready.emit_ready {
             if structuring_diag_enabled() {
@@ -25,9 +28,6 @@ impl<'a> PreviewBuilder<'a> {
             self.telemetry.dispatcher.switch_emit_ready_failed_count += 1;
             self.telemetry.structuring.region_proof_candidate_count += 1;
             self.telemetry.structuring.region_emit_ready_failed_count += 1;
-            return Ok(None);
-        }
-        if parsed.cases.len() < 2 {
             return Ok(None);
         }
         let mut seen_case_values = HashSet::new();
@@ -389,6 +389,9 @@ impl<'a> PreviewBuilder<'a> {
                         return Ok(None);
                     }
                     let default_idx = guarded_default_idx.unwrap_or(default_idx);
+                    if !compare_chain_switch_candidate_values(&cases, default_idx) {
+                        return Ok(None);
+                    }
                     let proof =
                         self.build_compare_chain_proof(start_idx, &selector, &cases, default_idx);
                     return Ok(Some(ParsedSwitch {
@@ -423,6 +426,19 @@ impl<'a> PreviewBuilder<'a> {
         }
         current
     }
+}
+
+fn compare_chain_switch_candidate_values(cases: &[(i64, usize)], default_idx: usize) -> bool {
+    if cases.len() < 2 {
+        return false;
+    }
+    let mut targets: HashSet<usize> = cases.iter().map(|(_, block_idx)| *block_idx).collect();
+    targets.insert(default_idx);
+    targets.len() >= 2
+}
+
+fn compare_chain_switch_candidate(parsed: &ParsedSwitch) -> bool {
+    compare_chain_switch_candidate_values(&parsed.cases, parsed.default_idx)
 }
 
 #[derive(Debug, Clone)]
@@ -839,5 +855,12 @@ mod tests {
         ];
         let patched = detect_and_patch_case_fallthrough(&mut cases);
         assert_eq!(patched, 0, "Expected 0 fallthroughs for non-adjacent goto");
+    }
+
+    #[test]
+    fn compare_chain_switch_candidate_requires_two_cases_and_distinct_targets() {
+        assert!(!compare_chain_switch_candidate_values(&[(1, 3)], 4));
+        assert!(!compare_chain_switch_candidate_values(&[(1, 3), (2, 3)], 3));
+        assert!(compare_chain_switch_candidate_values(&[(1, 3), (2, 4)], 5));
     }
 }

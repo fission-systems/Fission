@@ -189,10 +189,21 @@ pub(crate) fn sese_structure_region(
     builder: &mut PreviewBuilder,
     region: &SeseRegion,
     results: &mut HashMap<(usize, usize), Vec<HirStmt>>,
+    total_nodes: usize,
 ) -> Result<(), MlilPreviewError> {
+    let is_root = region.entry == 0 && region.exit == total_nodes;
+
     // Bottom-up recursion: structure children first.
     for child in &region.children {
-        sese_structure_region(builder, child, results)?;
+        if let Err(err) = sese_structure_region(builder, child, results, total_nodes) {
+            match builder.build_linear_sese_child_fallback(child.entry, child.exit) {
+                Ok(body) => {
+                    builder.telemetry.structuring.sese_child_localized_linear_count += 1;
+                    results.insert((child.entry, child.exit), body);
+                }
+                Err(_) => return Err(err),
+            }
+        }
     }
 
     // Collect child results to map their entries to their corresponding structured body, exit, and proof.
@@ -211,10 +222,21 @@ pub(crate) fn sese_structure_region(
     }
 
     // Structure the current region using the builder.
-    let body = builder.build_sese_region_body(region.entry, region.exit, child_map)?;
-    results.insert((region.entry, region.exit), body);
-
-    Ok(())
+    match builder.build_sese_region_body(region.entry, region.exit, child_map) {
+        Ok(body) => {
+            results.insert((region.entry, region.exit), body);
+            Ok(())
+        }
+        Err(err) if is_root => Err(err),
+        Err(err) => match builder.build_linear_sese_child_fallback(region.entry, region.exit) {
+            Ok(body) => {
+                builder.telemetry.structuring.sese_child_localized_linear_count += 1;
+                results.insert((region.entry, region.exit), body);
+                Ok(())
+            }
+            Err(_) => Err(err),
+        },
+    }
 }
 
 /// Main entrypoint for SESE region-based structuring.
@@ -230,7 +252,7 @@ pub(crate) fn structure_cfg_via_sese(
     let tree = build_sese_tree(regions, total_nodes);
 
     let mut results = HashMap::default();
-    sese_structure_region(builder, &tree.root, &mut results)?;
+    sese_structure_region(builder, &tree.root, &mut results, total_nodes)?;
 
     let final_body = results
         .remove(&(0, total_nodes))

@@ -15,7 +15,6 @@ mod action_pipeline;
 mod builder;
 mod cfg;
 pub mod cspec;
-mod mir;
 mod normalize;
 mod piece;
 mod render;
@@ -39,10 +38,11 @@ pub use self::telemetry::{
 };
 pub use self::types::*;
 use self::{
-    action_pipeline::*, builder::*, cfg::*, mir::*, normalize::*, render::*, structuring::*,
+    action_pipeline::*, builder::*, cfg::*, normalize::*, render::*, structuring::*,
 };
 
 pub use self::abi::infer_entry_register_param_arity;
+pub use self::cfg::structuring_cfg_edges;
 pub use self::cspec::RegisterNamer;
 pub use self::normalize::{
     summarize_direct_tail_wrapper_from_ops, summarize_direct_tail_wrapper_from_pcode,
@@ -220,16 +220,6 @@ pub fn render_mlil_preview_with_binary_and_context(
         debug_log("type_hints_done");
     }
     recover_global_symbol_accesses(&mut hir, options);
-    if debug.mir_shadow_projection {
-        debug_log("mir_shadow_projection_start");
-        let mir_projection_start = Instant::now();
-        let (_shadow_mir, mir_lowering_stats) = project_hir_to_mir(&hir);
-        mir_lowering_stats.apply_to_build_stats(
-            &mut build_stats,
-            mir_projection_start.elapsed().as_millis() as usize,
-        );
-        debug_log("mir_shadow_projection_done");
-    }
     if debug.preview_debug {
         eprintln!("[mlil-preview] stage=print start fn=0x{address:x}");
     }
@@ -258,17 +248,13 @@ pub fn render_mlil_preview_with_binary_and_context(
 struct RenderDebugFlags {
     diag: bool,
     preview_debug: bool,
-    mir_shadow_projection: bool,
 }
 
 impl RenderDebugFlags {
     fn from_env() -> Self {
-        let preview_debug = std::env::var_os("FISSION_PREVIEW_DEBUG").is_some();
         Self {
             diag: std::env::var_os("FISSION_PREVIEW_DIAG").is_some(),
-            preview_debug,
-            mir_shadow_projection: preview_debug
-                || std::env::var_os("FISSION_NIR_MIR_SHADOW").is_some(),
+            preview_debug: std::env::var_os("FISSION_PREVIEW_DEBUG").is_some(),
         }
     }
 }

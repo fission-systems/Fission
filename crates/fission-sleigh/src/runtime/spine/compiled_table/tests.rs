@@ -7,12 +7,6 @@ use std::path::PathBuf;
 
 macro_rules! require_packaged_ghidra_sla {
     () => {
-        if !discovery::ghidra_packaged_sla_available() {
-            eprintln!(
-                "skip: packaged Ghidra .sla not found (vendor/ghidra layout or FISSION_GHIDRA_DIR)"
-            );
-            return;
-        }
     };
 }
 
@@ -21,7 +15,7 @@ fn assert_spec_derived_lift(
     bytes: &[u8],
     address: u64,
 ) -> Vec<PcodeOp> {
-    let (ops, length, details) = decode_and_lift_with_details(compiled, None, bytes, address)
+    let (ops, length, details) = decode_and_lift_with_details(compiled, bytes, address)
         .expect("expected SpecDerived .sla template lift");
     assert_eq!(length as usize, bytes.len());
     assert_eq!(
@@ -103,7 +97,7 @@ fn sla_template_feature_audit_smoke() {
 fn generated_runtime_decodes_ret_with_spec_derived_lift() {
     require_packaged_ghidra_sla!();
     let compiled = compile_x86_64_frontend().expect("compile frontend");
-    let decoded = decode_instruction(&compiled, None, &[0xC3], 0x1000).expect("generated ret");
+    let decoded = decode_instruction(&compiled, &[0xC3], 0x1000).expect("generated ret");
     assert_eq!(decoded.length, 1);
     assert!(matches!(decoded.flow_kind, DecodedFlowKind::Return));
     let ops = assert_spec_derived_lift(&compiled, &[0xC3], 0x1000);
@@ -115,7 +109,7 @@ fn generated_runtime_decodes_mov_imm64_without_compatibility_lift() {
     require_packaged_ghidra_sla!();
     let compiled = compile_x86_64_frontend().expect("compile frontend");
     let bytes = [0x48, 0xB8, 0x34, 0x12, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00];
-    let decoded = decode_instruction(&compiled, None, &bytes, 0x1000).expect("generated mov");
+    let decoded = decode_instruction(&compiled, &bytes, 0x1000).expect("generated mov");
     assert_eq!(decoded.length, bytes.len());
     assert_eq!(decoded.mnemonic, "mov");
     let ops = assert_spec_derived_lift(&compiled, &bytes, 0x1000);
@@ -127,13 +121,22 @@ fn generated_runtime_decodes_jcc_rel8_without_compatibility_lift() {
     require_packaged_ghidra_sla!();
     let compiled = compile_x86_64_frontend().expect("compile frontend");
     let decoded =
-        decode_instruction(&compiled, None, &[0x75, 0x05], 0x1000).expect("generated jne");
+        decode_instruction(&compiled, &[0x75, 0x05], 0x1000).expect("generated jne");
     assert_eq!(decoded.length, 2);
     assert_eq!(decoded.mnemonic, "jnz");
     assert!(matches!(
         decoded.flow_kind,
         DecodedFlowKind::ConditionalJump
     ));
+    assert_eq!(decoded.direct_target, Some(0x1007));
+    assert_eq!(
+        decoded.references.first().map(|reference| reference.kind),
+        Some(DecodedReferenceKind::BranchTarget)
+    );
+    assert_eq!(
+        decoded.references.first().map(|reference| reference.target),
+        Some(0x1007)
+    );
     let ops = assert_spec_derived_lift(&compiled, &[0x75, 0x05], 0x1000);
     assert!(ops.iter().any(|op| op.opcode == PcodeOpcode::CBranch));
 }
@@ -143,7 +146,7 @@ fn generated_runtime_renders_jle_condition_mnemonic_display_only() {
     require_packaged_ghidra_sla!();
     let compiled = compile_x86_64_frontend().expect("compile frontend");
     let decoded =
-        decode_instruction(&compiled, None, &[0x7e, 0x05], 0x1000).expect("generated jle");
+        decode_instruction(&compiled, &[0x7e, 0x05], 0x1000).expect("generated jle");
     assert_eq!(decoded.length, 2);
     assert_eq!(decoded.mnemonic, "jle");
     assert!(matches!(
@@ -160,10 +163,10 @@ fn generated_runtime_decodes_startup_store_mov_mem32_imm32_without_compatibility
     let compiled = compile_x86_64_frontend().expect("compile frontend");
     let bytes = [0xC7, 0x00, 0x01, 0x00, 0x00, 0x00];
     let decoded =
-        decode_instruction(&compiled, None, &bytes, 0x1000).expect("generated mov [rax], imm32");
+        decode_instruction(&compiled, &bytes, 0x1000).expect("generated mov [rax], imm32");
     assert_eq!(decoded.length, bytes.len());
     assert_eq!(decoded.mnemonic, "mov");
-    let (ops, length, details) = decode_and_lift_with_details(&compiled, None, &bytes, 0x1000)
+    let (ops, length, details) = decode_and_lift_with_details(&compiled, &bytes, 0x1000)
         .expect("lift mov [rax], imm32");
     assert_eq!(length as usize, bytes.len());
     assert_eq!(
@@ -184,7 +187,7 @@ fn generated_runtime_decodes_startup_sub_rsp_imm8_without_compatibility_lift() {
     let compiled = compile_x86_64_frontend().expect("compile frontend");
     let bytes = [0x48, 0x83, 0xEC, 0x28];
     let decoded =
-        decode_instruction(&compiled, None, &bytes, 0x1000).expect("generated sub rsp, imm8");
+        decode_instruction(&compiled, &bytes, 0x1000).expect("generated sub rsp, imm8");
     assert_eq!(decoded.length, bytes.len());
     assert_eq!(decoded.mnemonic, "sub");
     let ops = assert_spec_derived_lift(&compiled, &bytes, 0x1000);
@@ -198,10 +201,10 @@ fn generated_runtime_decodes_startup_rip_relative_load_without_compatibility_lif
     let bytes = [0x48, 0x8B, 0x05, 0x15, 0x30, 0x00, 0x00];
     let address = 0x1400_013e4;
     let decoded =
-        decode_instruction(&compiled, None, &bytes, address).expect("generated rip-relative mov");
+        decode_instruction(&compiled, &bytes, address).expect("generated rip-relative mov");
     assert_eq!(decoded.length, bytes.len());
     assert_eq!(decoded.mnemonic, "mov");
-    let (ops, length, details) = decode_and_lift_with_details(&compiled, None, &bytes, address)
+    let (ops, length, details) = decode_and_lift_with_details(&compiled, &bytes, address)
         .expect("lift rip-relative mov");
     assert_eq!(length as usize, bytes.len());
     assert_eq!(
@@ -224,7 +227,7 @@ fn generated_runtime_decodes_startup_call_rel32_without_compatibility_lift() {
     let compiled = compile_x86_64_frontend().expect("compile frontend");
     let bytes = [0xE8, 0x1A, 0xFC, 0xFF, 0xFF];
     let decoded =
-        decode_instruction(&compiled, None, &bytes, 0x1400_013ef).expect("generated call rel32");
+        decode_instruction(&compiled, &bytes, 0x1400_013ef).expect("generated call rel32");
     assert_eq!(decoded.length, bytes.len());
     assert!(matches!(decoded.flow_kind, DecodedFlowKind::Call));
     let ops = assert_spec_derived_lift(&compiled, &bytes, 0x1400_013ef);
@@ -239,11 +242,11 @@ fn vendor_x86_pe_c7_moffs_imm32_uses_sla_extents() {
     let bytes = [0xc7, 0x05, 0x34, 0x50, 0x40, 0x00, 0x00, 0x00, 0x00, 0x00];
 
     let decoded =
-        decode_instruction(&compiled, None, &bytes, 0x4014e3).expect("decode mov moffs32, imm32");
+        decode_instruction(&compiled, &bytes, 0x4014e3).expect("decode mov moffs32, imm32");
     assert_eq!(decoded.length, bytes.len());
     assert_eq!(decoded.mnemonic, "mov");
 
-    let (ops, length, details) = decode_and_lift_with_details(&compiled, None, &bytes, 0x4014e3)
+    let (ops, length, details) = decode_and_lift_with_details(&compiled, &bytes, 0x4014e3)
         .expect("lift mov moffs32, imm32");
     assert_eq!(length as usize, bytes.len());
     assert_eq!(
@@ -267,12 +270,12 @@ fn vendor_x86_pe_call_rel32_uses_construct_inst_next_extent() {
     let compiled = compile_frontend_for_entry_spec(&x86_spec).expect("compile x86 frontend");
     let bytes = [0xe8, 0x0e, 0x0d, 0x00, 0x00];
 
-    let decoded = decode_instruction(&compiled, None, &bytes, 0x4014ed).expect("decode call rel32");
+    let decoded = decode_instruction(&compiled, &bytes, 0x4014ed).expect("decode call rel32");
     assert_eq!(decoded.length, bytes.len());
     assert_eq!(decoded.mnemonic, "call");
 
     let (ops, length, details) =
-        decode_and_lift_with_details(&compiled, None, &bytes, 0x4014ed).expect("lift call rel32");
+        decode_and_lift_with_details(&compiled, &bytes, 0x4014ed).expect("lift call rel32");
     assert_eq!(length as usize, bytes.len());
     assert_eq!(
         details.template_source,
@@ -295,7 +298,7 @@ fn generated_runtime_records_decision_trace_for_startup_store() {
     let selection = select_constructor(&compiled, "instruction", &ctx)
         .expect("constructor selection")
         .expect("constructor match");
-    let strategy = RuntimeDecodeStrategy::for_table(&compiled, None, "instruction", &ctx);
+    let strategy = RuntimeDecodeStrategy::for_table();
     let state = bind_instruction(&compiled, strategy, &ctx, selection).expect("bind instruction");
     assert_eq!(state.match_trace.root_bucket, "instruction");
     assert!(!state.match_trace.probes.is_empty());
@@ -311,11 +314,11 @@ fn generated_runtime_decodes_reg32_lea_without_decode_no_match_or_compatibility_
     require_packaged_ghidra_sla!();
     let compiled = compile_x86_64_frontend().expect("compile frontend");
     let bytes = [0x8d, 0x04, 0x11];
-    let decoded = decode_instruction(&compiled, None, &bytes, 0x1400_1450).expect("generated lea");
+    let decoded = decode_instruction(&compiled, &bytes, 0x1400_1450).expect("generated lea");
     assert_eq!(decoded.length, bytes.len());
     assert_eq!(decoded.mnemonic, "lea");
     let (ops, length, details) =
-        decode_and_lift_with_details(&compiled, None, &bytes, 0x1400_1450).expect("lift lea");
+        decode_and_lift_with_details(&compiled, &bytes, 0x1400_1450).expect("lift lea");
     assert_eq!(length as usize, bytes.len());
     assert_eq!(
         details.template_source,
@@ -348,7 +351,7 @@ fn generated_runtime_decodes_lea_negative_displacement_const_without_decode_erro
     require_packaged_ghidra_sla!();
     let compiled = compile_x86_64_frontend().expect("compile frontend");
     let bytes = [0x8d, 0x41, 0xff];
-    let (ops, length, details) = decode_and_lift_with_details(&compiled, None, &bytes, 0x1400_148e)
+    let (ops, length, details) = decode_and_lift_with_details(&compiled, &bytes, 0x1400_148e)
         .expect("lift lea negative displacement");
     assert_eq!(length as usize, bytes.len());
     assert_eq!(
@@ -372,7 +375,7 @@ fn generated_runtime_decodes_sib_stack_disp8_from_sla_terminal_extent() {
     require_packaged_ghidra_sla!();
     let compiled = compile_x86_64_frontend().expect("compile frontend");
     let bytes = [0x48, 0x89, 0x5c, 0x24, 0x08];
-    let (ops, length, details) = decode_and_lift_with_details(&compiled, None, &bytes, 0x1800_85d0)
+    let (ops, length, details) = decode_and_lift_with_details(&compiled, &bytes, 0x1800_85d0)
         .expect("lift mov [rsp + disp8], rbx");
     assert_eq!(length as usize, bytes.len());
     assert_eq!(
@@ -400,7 +403,7 @@ fn generated_runtime_decodes_rip_relative_mov32_without_decode_no_match() {
     require_packaged_ghidra_sla!();
     let compiled = compile_x86_64_frontend().expect("compile frontend");
     let bytes = [0x8b, 0x05, 0x6a, 0x56, 0x00, 0x00];
-    let decoded = decode_instruction(&compiled, None, &bytes, 0x1400_19c0)
+    let decoded = decode_instruction(&compiled, &bytes, 0x1400_19c0)
         .expect("generated mov rip-relative");
     assert_eq!(decoded.length, bytes.len());
     assert_eq!(decoded.mnemonic, "mov");
@@ -416,7 +419,7 @@ fn generated_runtime_decodes_movsxd_without_decode_no_match_or_compatibility_lif
     let compiled = compile_x86_64_frontend().expect("compile frontend");
     let bytes = [0x48, 0x63, 0x41, 0x3c];
     let decoded =
-        decode_instruction(&compiled, None, &bytes, 0x1400_2600).expect("generated movsxd");
+        decode_instruction(&compiled, &bytes, 0x1400_2600).expect("generated movsxd");
     assert_eq!(decoded.length, bytes.len());
     assert_eq!(decoded.mnemonic, "movsxd");
     let ops = assert_spec_derived_lift(&compiled, &bytes, 0x1400_2600);
@@ -429,7 +432,7 @@ fn generated_runtime_zero_extends_reg32_decode_without_compatibility_lift() {
     let compiled = compile_x86_64_frontend().expect("compile frontend");
     let bytes = [0x31, 0xc0];
     let decoded =
-        decode_instruction(&compiled, None, &bytes, 0x1400_19e0).expect("generated xor eax, eax");
+        decode_instruction(&compiled, &bytes, 0x1400_19e0).expect("generated xor eax, eax");
     assert_eq!(decoded.length, bytes.len());
     assert_eq!(decoded.mnemonic, "xor");
     let ops = assert_spec_derived_lift(&compiled, &bytes, 0x1400_19e0);
@@ -442,7 +445,7 @@ fn generated_runtime_decodes_fninit_without_decode_no_match() {
     let compiled = compile_x86_64_frontend().expect("compile frontend");
     let bytes = [0xdb, 0xe3];
     let decoded =
-        decode_instruction(&compiled, None, &bytes, 0x1400_25c0).expect("generated fninit decode");
+        decode_instruction(&compiled, &bytes, 0x1400_25c0).expect("generated fninit decode");
     assert_eq!(decoded.length, bytes.len());
     assert_eq!(decoded.mnemonic, "fninit");
     assert!(matches!(decoded.flow_kind, DecodedFlowKind::None));
@@ -525,7 +528,7 @@ fn generated_runtime_decodes_aarch64_smoke_without_constructor_loop() {
     let aarch64_spec = spec_root_for_arch("AARCH64").join("AARCH64.slaspec");
     let compiled = compile_frontend_for_entry_spec(&aarch64_spec).expect("compile aarch64");
     let bytes = [0x0c, 0x10, 0x8e, 0xd2];
-    let decoded = decode_instruction(&compiled, None, &bytes, 0x100000).expect("decode aarch64");
+    let decoded = decode_instruction(&compiled, &bytes, 0x100000).expect("decode aarch64");
     assert_eq!(decoded.length, bytes.len());
     assert!(
         !decoded.mnemonic.is_empty(),
@@ -544,11 +547,11 @@ fn generated_runtime_decodes_aarch64_movk_shifted_immediate_from_exported_handle
     let compiled = compile_frontend_for_entry_spec(&aarch64_spec).expect("compile aarch64");
     let bytes = [0x0c, 0x0c, 0xaa, 0xf2];
 
-    let decoded = decode_instruction(&compiled, None, &bytes, 0x10000c).expect("decode movk");
+    let decoded = decode_instruction(&compiled, &bytes, 0x10000c).expect("decode movk");
     assert_eq!(decoded.length, bytes.len());
     assert_eq!(decoded.mnemonic, "movk");
 
-    let (ops, length, details) = decode_and_lift_with_details(&compiled, None, &bytes, 0x10000c)
+    let (ops, length, details) = decode_and_lift_with_details(&compiled, &bytes, 0x10000c)
         .expect("lift movk shifted immediate");
     assert_eq!(length as usize, bytes.len());
     assert_eq!(
@@ -572,12 +575,12 @@ fn generated_runtime_lifts_aarch64_cneg_from_sla_int_2comp_template() {
     let compiled = compile_frontend_for_entry_spec(&aarch64_spec).expect("compile aarch64");
     let bytes = [0x00, 0x85, 0x88, 0x5a]; // cneg w0, w8, ls
 
-    let decoded = decode_instruction(&compiled, None, &bytes, 0x100058).expect("decode cneg");
+    let decoded = decode_instruction(&compiled, &bytes, 0x100058).expect("decode cneg");
     assert_eq!(decoded.length, bytes.len());
     assert_eq!(decoded.mnemonic, "cneg");
 
     let (ops, length, details) =
-        decode_and_lift_with_details(&compiled, None, &bytes, 0x100058).expect("lift cneg");
+        decode_and_lift_with_details(&compiled, &bytes, 0x100058).expect("lift cneg");
     assert_eq!(length as usize, bytes.len());
     assert_eq!(
         details.template_source,
@@ -596,12 +599,12 @@ fn generated_runtime_lifts_aarch64_subs_shifted_from_sla_compare_template() {
     let compiled = compile_frontend_for_entry_spec(&aarch64_spec).expect("compile aarch64");
     let bytes = [0x08, 0x00, 0x01, 0x6b]; // subs w8, w0, w1
 
-    let decoded = decode_instruction(&compiled, None, &bytes, 0x100054).expect("decode subs");
+    let decoded = decode_instruction(&compiled, &bytes, 0x100054).expect("decode subs");
     assert_eq!(decoded.length, bytes.len());
     assert_eq!(decoded.mnemonic, "subs");
 
     let (ops, length, details) =
-        decode_and_lift_with_details(&compiled, None, &bytes, 0x100054).expect("lift subs");
+        decode_and_lift_with_details(&compiled, &bytes, 0x100054).expect("lift subs");
     assert_eq!(length as usize, bytes.len());
     assert_eq!(
         details.template_source,
@@ -624,12 +627,12 @@ fn generated_runtime_lifts_aarch64_udiv_from_sla_int_div_template() {
     let compiled = compile_frontend_for_entry_spec(&aarch64_spec).expect("compile aarch64");
     let bytes = [0x28, 0x09, 0xc8, 0x1a]; // udiv w8, w9, w8
 
-    let decoded = decode_instruction(&compiled, None, &bytes, 0x10002c).expect("decode udiv");
+    let decoded = decode_instruction(&compiled, &bytes, 0x10002c).expect("decode udiv");
     assert_eq!(decoded.length, bytes.len());
     assert_eq!(decoded.mnemonic, "udiv");
 
     let (ops, length, details) =
-        decode_and_lift_with_details(&compiled, None, &bytes, 0x10002c).expect("lift udiv");
+        decode_and_lift_with_details(&compiled, &bytes, 0x10002c).expect("lift udiv");
     assert_eq!(length as usize, bytes.len());
     assert_eq!(
         details.template_source,
@@ -648,12 +651,12 @@ fn generated_runtime_lifts_aarch64_vector_lane_mov_from_operand_value_expression
     let compiled = compile_frontend_for_entry_spec(&aarch64_spec).expect("compile aarch64");
     let bytes = [0x22, 0x64, 0x1c, 0x6e]; // mov v2.s[3], v1.s[3]
 
-    let decoded = decode_instruction(&compiled, None, &bytes, 0x1000b8).expect("decode mov");
+    let decoded = decode_instruction(&compiled, &bytes, 0x1000b8).expect("decode mov");
     assert_eq!(decoded.length, bytes.len());
     assert_eq!(decoded.mnemonic, "mov");
 
     let (ops, length, details) =
-        decode_and_lift_with_details(&compiled, None, &bytes, 0x1000b8).expect("lift mov");
+        decode_and_lift_with_details(&compiled, &bytes, 0x1000b8).expect("lift mov");
     assert_eq!(length as usize, bytes.len());
     assert_eq!(
         details.template_source,
@@ -669,7 +672,7 @@ fn generated_runtime_lifts_riscv_lui_shift_count_at_sla_const_width() {
     let compiled = compile_frontend_for_entry_spec(&riscv_spec).expect("compile riscv");
     let bytes = [0xb7, 0x87, 0x35, 0x01]; // lui a5,0x1358
 
-    let decoded = decode_instruction(&compiled, None, &bytes, 0x100590).expect("decode lui");
+    let decoded = decode_instruction(&compiled, &bytes, 0x100590).expect("decode lui");
     assert_eq!(decoded.length, bytes.len());
     assert_eq!(decoded.mnemonic, "lui");
 
@@ -693,11 +696,11 @@ fn generated_runtime_decodes_arm7_le_arm_mode_stmdb_from_sla_template() {
     let compiled = compile_frontend_for_entry_spec(&arm_spec).expect("compile ARM7_le");
     let bytes = [0x08, 0x40, 0x2d, 0xe9];
 
-    let decoded = decode_instruction(&compiled, None, &bytes, 0x102e8).expect("decode stmdb");
+    let decoded = decode_instruction(&compiled, &bytes, 0x102e8).expect("decode stmdb");
     assert_eq!(decoded.length, bytes.len());
     assert_eq!(decoded.mnemonic, "stmdb");
 
-    let (ops, length, details) = decode_and_lift_with_details(&compiled, None, &bytes, 0x102e8)
+    let (ops, length, details) = decode_and_lift_with_details(&compiled, &bytes, 0x102e8)
         .expect("lift ARM mode stmdb");
     assert_eq!(length as usize, bytes.len());
     assert_eq!(
@@ -714,11 +717,11 @@ fn generated_runtime_preserves_arm_conditional_execution_wrapper_pcode() {
     let compiled = compile_frontend_for_entry_spec(&arm_spec).expect("compile ARM4t_be");
     let bytes = [0x30, 0x40, 0x20, 0x01]; // subcc r2,r0,r1
 
-    let decoded = decode_instruction(&compiled, None, &bytes, 0x100044).expect("decode subcc");
+    let decoded = decode_instruction(&compiled, &bytes, 0x100044).expect("decode subcc");
     assert_eq!(decoded.length, bytes.len());
     assert_eq!(decoded.mnemonic, "subcc");
 
-    let (ops, length, details) = decode_and_lift_with_details(&compiled, None, &bytes, 0x100044)
+    let (ops, length, details) = decode_and_lift_with_details(&compiled, &bytes, 0x100044)
         .expect("lift ARM conditional sub");
     assert_eq!(length as usize, bytes.len());
     assert_eq!(
@@ -750,7 +753,7 @@ fn generated_runtime_reports_thumb_it_context_commits_in_lift_details() {
             .unwrap_or_else(|err| panic!("compile {entry_id}: {err:#}"));
 
         let (_ops, length, details) =
-            decode_and_lift_with_details(&compiled, None, &bytes, 0x100016)
+            decode_and_lift_with_details(&compiled, &bytes, 0x100016)
                 .unwrap_or_else(|err| panic!("lift {entry_id} Thumb IT: {err:#}"));
 
         assert_eq!(length as usize, bytes.len(), "{entry_id} IT length");
@@ -773,11 +776,11 @@ fn generated_runtime_executes_arm_bool_xor_template_opcode() {
     let compiled = compile_frontend_for_entry_spec(&arm_spec).expect("compile ARM4_le");
     let bytes = [0x00, 0x30, 0xcc, 0xe2]; // sbc r3,r12,#0
 
-    let decoded = decode_instruction(&compiled, None, &bytes, 0x100048).expect("decode sbc");
+    let decoded = decode_instruction(&compiled, &bytes, 0x100048).expect("decode sbc");
     assert_eq!(decoded.length, bytes.len());
     assert_eq!(decoded.mnemonic, "sbc");
 
-    let (ops, length, details) = decode_and_lift_with_details(&compiled, None, &bytes, 0x100048)
+    let (ops, length, details) = decode_and_lift_with_details(&compiled, &bytes, 0x100048)
         .expect("lift ARM sbc with BOOL_XOR template opcode");
     assert_eq!(length as usize, bytes.len());
     assert_eq!(

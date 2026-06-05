@@ -10,8 +10,20 @@ use crate::nir::{CallingConvention, NirRenderOptions};
 use std::collections::HashMap;
 
 /// Root of the checked-in Ghidra language tree (`utils/sleigh-specs/languages`).
+///
+/// Honors the `FISSION_SLEIGH_SPEC_DIR` override so this crate resolves to the same tree as
+/// `fission-sleigh` / `fission-core`. The override may point at either the specs root (which
+/// contains `languages/`) or the `languages/` directory itself.
 pub fn sleigh_languages_root() -> std::path::PathBuf {
-    std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+    use std::path::PathBuf;
+    if let Some(path) = std::env::var_os("FISSION_SLEIGH_SPEC_DIR") {
+        let path = PathBuf::from(path);
+        if path.file_name().and_then(|name| name.to_str()) == Some("languages") {
+            return path;
+        }
+        return path.join("languages");
+    }
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .ancestors()
         .nth(2)
         .expect("workspace root")

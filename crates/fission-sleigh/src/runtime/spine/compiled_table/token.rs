@@ -1,3 +1,5 @@
+//! SLA token field reads for compiled-table decode (canonical operand bit extraction).
+
 use super::handles::u64_to_i64_bits;
 use super::*;
 

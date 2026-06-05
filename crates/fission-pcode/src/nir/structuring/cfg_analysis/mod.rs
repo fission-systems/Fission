@@ -4,13 +4,17 @@ use super::*;
 
 mod dom;
 mod edge;
+mod follow;
 mod postdom;
 mod scc;
 pub(crate) mod util;
 mod trace_dag;
+mod goto_selector;
 
 pub(crate) use dom::{DomTree, DominanceFrontier, ImmDomTree};
 pub(crate) use edge::{CfgAnalysis, EdgeClass};
+pub(crate) use follow::dom_based_fallthrough_successor;
+pub(crate) use goto_selector::select_bad_edge;
 pub(crate) use postdom::{ImmPostDomTree, PostDomTree};
 pub(crate) use scc::SccAnalysis;
 pub(crate) use trace_dag::{TraceDag, TraceDagError};

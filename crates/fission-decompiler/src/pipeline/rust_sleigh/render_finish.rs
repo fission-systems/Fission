@@ -39,39 +39,24 @@ pub(crate) fn apply_spec_overrides(binary: &LoadedBinary, options: &mut NirRende
         return;
     };
 
-    // Step 1: Get register name → (offset, size) from SLA ELEM_VARNODE_SYM.
-    let Some(reg_map) = fission_sleigh::runtime::register_map_for_load_spec(load_spec) else {
-        return;
-    };
-
-    // Step 2: Build the inverted (offset, size) → name map for the renderer.
-    //
-    // The SLA `reg_map` is name → (offset, size).  We invert it so the NIR renderer
-    // can look up names dynamically for any architecture, replacing the hardcoded
-    // `x64_ghidra_reg_name` / `aarch64_ghidra_reg_name` / … tables.
-    //
-    // When multiple names map to the same (offset, size) (e.g. "RAX" and "rax"),
-    // prefer shorter/lowercase names as Ghidra uses lowercase for display.
-    let mut inverted: std::collections::HashMap<(u64, u32), String> =
-        std::collections::HashMap::new();
-    for (name, (offset, size)) in &reg_map {
-        let key = (*offset, *size);
-        inverted
-            .entry(key)
-            .and_modify(|existing| {
-                // Prefer shorter names (e.g. "rax" over "RAX"), then lowercase.
-                if name.len() < existing.len()
-                    || (name.len() == existing.len() && name.as_str() < existing.as_str())
-                {
-                    *existing = name.clone();
-                }
-            })
-            .or_insert_with(|| name.clone());
-    }
-    options.sla_register_map = Some(inverted);
-
     let language_id = load_spec.pair.language_id.as_str();
     let compiler_spec_id = load_spec.pair.compiler_spec_id.as_str();
+
+    // Step 1: register name → (offset, size) table used for cspec name resolution.
+    //
+    // Sourced from the checked-in `.slaspec` register model under
+    // `utils/sleigh-specs/languages`. We deliberately do NOT read Ghidra's packaged `.sla`
+    // (`vendor/`): `vendor/` is a reference-only corpus and must not be a production
+    // dependency. `NirRenderOptions::from_loaded_binary` already seeds `sla_register_map`
+    // from the same model via `ensure_sla_register_map()`; we keep that map when present.
+    let Some(model) = fission_pcode::nir::cspec::register_model_for_language(language_id) else {
+        return;
+    };
+    let reg_map = model.to_sla_register_map();
+    if options.sla_register_map.is_none() {
+        options.sla_register_map = Some(model.to_offset_map());
+    }
+
     let languages_root = fission_sleigh::compiler::sleigh_languages_root();
 
     // Step 3: Ghidra-style exact .cspec lookup via .ldefs index.

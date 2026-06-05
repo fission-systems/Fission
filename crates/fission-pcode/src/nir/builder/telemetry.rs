@@ -8,7 +8,6 @@ use crate::nir::types::PreviewBuildStats;
 #[derive(Debug, Default)]
 pub(crate) struct BuilderTelemetry {
     pub(crate) core: CoreTelemetry,
-    pub(crate) mir: MirTelemetry,
     pub(crate) procedure: ProcedureTelemetry,
     pub(crate) structuring: StructuringTelemetry,
     pub(crate) call_targets: CallTargetTelemetry,
@@ -20,7 +19,6 @@ pub(crate) struct BuilderTelemetry {
 impl BuilderTelemetry {
     pub(crate) fn apply_to_public_stats(&self, stats: &mut PreviewBuildStats) {
         self.core.apply_to_public_stats(stats);
-        self.mir.apply_to_public_stats(stats);
         self.procedure.apply_to_public_stats(stats);
         self.structuring.apply_to_public_stats(stats);
         self.call_targets.apply_to_public_stats(stats);
@@ -48,23 +46,6 @@ impl CoreTelemetry {
         stats.render_duration_ms = self.render_duration_ms;
         stats.rendered_code_len = self.rendered_code_len;
         stats.max_structuring_scc_component_size = self.max_structuring_scc_component_size;
-    }
-}
-
-#[derive(Debug, Default)]
-pub(crate) struct MirTelemetry {
-    pub(crate) mir_blockgraph_admission_enabled_count: usize,
-    pub(crate) mir_blockgraph_irreducible_budget_bypass_count: usize,
-    pub(crate) mir_blockgraph_extreme_budget_blocked_count: usize,
-}
-
-impl MirTelemetry {
-    fn apply_to_public_stats(&self, stats: &mut PreviewBuildStats) {
-        stats.mir_blockgraph_admission_enabled_count = self.mir_blockgraph_admission_enabled_count;
-        stats.mir_blockgraph_irreducible_budget_bypass_count =
-            self.mir_blockgraph_irreducible_budget_bypass_count;
-        stats.mir_blockgraph_extreme_budget_blocked_count =
-            self.mir_blockgraph_extreme_budget_blocked_count;
     }
 }
 
@@ -233,6 +214,9 @@ impl DispatcherTelemetry {
 #[derive(Debug, Default)]
 pub(crate) struct StructuringTelemetry {
     pub(crate) forced_linear_structuring_count: usize,
+    pub(crate) blockgraph_collapse_admission_enabled_count: usize,
+    pub(crate) blockgraph_collapse_irreducible_budget_bypass_count: usize,
+    pub(crate) blockgraph_collapse_extreme_budget_blocked_count: usize,
     /// Back-edges virtualized as explicit gotos by the FAS fallback when node-splitting
     /// exceeds budget (irreducible SCCs too large to split).
     pub(crate) fas_virtual_goto_count: usize,
@@ -360,11 +344,25 @@ pub(crate) struct StructuringTelemetry {
     /// SESE structuring succeeded but produced orphan goto labels (Goto without matching Label),
     /// indicating a back-edge label was omitted. Fell back to linear structuring.
     pub(crate) structuring_sese_orphan_goto_fallback_count: usize,
+    /// Orphan goto labels were localized by appending missing block labels/bodies.
+    pub(crate) structuring_orphan_goto_localized_count: usize,
+    /// Orphan goto labels could not be localized; full linear fallback was used.
+    pub(crate) structuring_orphan_goto_unrepairable_count: usize,
+    /// A child SESE region failed and was isolated as linear without discarding parent structure.
+    pub(crate) sese_child_localized_linear_count: usize,
+    /// Edges virtualized via iterative select-bad-edge during collapse loop.
+    pub(crate) structuring_select_bad_edge_count: usize,
 }
 
 impl StructuringTelemetry {
     fn apply_to_public_stats(&self, stats: &mut PreviewBuildStats) {
         stats.forced_linear_structuring_count = self.forced_linear_structuring_count;
+        stats.blockgraph_collapse_admission_enabled_count =
+            self.blockgraph_collapse_admission_enabled_count;
+        stats.blockgraph_collapse_irreducible_budget_bypass_count =
+            self.blockgraph_collapse_irreducible_budget_bypass_count;
+        stats.blockgraph_collapse_extreme_budget_blocked_count =
+            self.blockgraph_collapse_extreme_budget_blocked_count;
         stats.fas_virtual_goto_count = self.fas_virtual_goto_count;
         stats.switch_fallthrough_detected_count = self.switch_fallthrough_detected_count;
         stats.structuring_force_linear_explicit_count =
@@ -547,5 +545,11 @@ impl StructuringTelemetry {
         stats.condition_fold_rejected_side_effect = self.condition_fold_rejected_side_effect;
         stats.structuring_sese_orphan_goto_fallback_count =
             self.structuring_sese_orphan_goto_fallback_count;
+        stats.structuring_orphan_goto_localized_count =
+            self.structuring_orphan_goto_localized_count;
+        stats.structuring_orphan_goto_unrepairable_count =
+            self.structuring_orphan_goto_unrepairable_count;
+        stats.sese_child_localized_linear_count = self.sese_child_localized_linear_count;
+        stats.structuring_select_bad_edge_count = self.structuring_select_bad_edge_count;
     }
 }

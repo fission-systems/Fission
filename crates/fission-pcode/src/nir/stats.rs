@@ -18,7 +18,6 @@ impl NirBuildStats {
     pub fn merge_assign(&mut self, other: &Self) {
         merge_core_stats(self, other);
         merge_action_pipeline_stats(self, other);
-        merge_mir_stats(self, other);
         merge_procedure_stats(self, other);
         merge_structuring_stats(self, other);
         merge_type_and_normalize_stats(self, other);
@@ -109,26 +108,6 @@ fn merge_action_pipeline_stats(target: &mut NirBuildStats, other: &NirBuildStats
     );
 }
 
-fn merge_mir_stats(target: &mut NirBuildStats, other: &NirBuildStats) {
-    merge_additive_fields!(
-        target,
-        other,
-        [
-            mir_enabled_count,
-            mir_function_count,
-            mir_block_count,
-            mir_value_count,
-            mir_memory_region_count,
-            mir_join_proof_count,
-            mir_region_proof_count,
-            mir_projection_duration_ms,
-            mir_blockgraph_admission_enabled_count,
-            mir_blockgraph_irreducible_budget_bypass_count,
-            mir_blockgraph_extreme_budget_blocked_count,
-        ]
-    );
-}
-
 fn merge_procedure_stats(target: &mut NirBuildStats, other: &NirBuildStats) {
     merge_additive_fields!(
         target,
@@ -147,6 +126,9 @@ fn merge_structuring_stats(target: &mut NirBuildStats, other: &NirBuildStats) {
         other,
         [
             forced_linear_structuring_count,
+            blockgraph_collapse_admission_enabled_count,
+            blockgraph_collapse_irreducible_budget_bypass_count,
+            blockgraph_collapse_extreme_budget_blocked_count,
             structuring_force_linear_explicit_count,
             structuring_force_linear_irreducible_budget_count,
             structuring_force_linear_extreme_budget_count,
@@ -257,6 +239,10 @@ fn merge_structuring_stats(target: &mut NirBuildStats, other: &NirBuildStats) {
             fas_virtual_goto_count,
             switch_fallthrough_detected_count,
             structuring_sese_orphan_goto_fallback_count,
+            structuring_orphan_goto_localized_count,
+            structuring_orphan_goto_unrepairable_count,
+            sese_child_localized_linear_count,
+            structuring_select_bad_edge_count,
         ]
     );
 }

@@ -921,10 +921,16 @@ impl RuntimeSleighFrontend {
         decoded.retain(|addr, _| reachable.contains(addr));
         inferred_indirect_edges.retain(|addr, _| reachable.contains(addr));
         template_sources.retain(|addr, _| reachable.contains(addr));
+        instruction_lengths.retain(|addr, _| reachable.contains(addr));
         template_source_counts.clear();
         for src in template_sources.values() {
             *template_source_counts.entry(src.clone()).or_insert(0) += 1;
         }
+
+        let mut reachable_instruction_addresses: Vec<u64> = reachable.iter().copied().collect();
+        reachable_instruction_addresses.sort_unstable();
+        let reachable_instruction_lengths = instruction_lengths.clone();
+        let retained_inferred_indirect_edges = inferred_indirect_edges.clone();
 
         let instruction_count = decoded.len();
         let mut ops = Vec::new();
@@ -949,9 +955,20 @@ impl RuntimeSleighFrontend {
             .copied()
             .collect();
         indirect_targets.extend(memory_context.jump_table_targets.iter().copied());
+        let indirect_targets_for_snapshot = indirect_targets.clone();
+
+        let cfg_hints = InstructionCfgHints::from_memory_context(memory_context);
 
         let mut function = PcodeFunction {
-            blocks: build_cfg_blocks(entry_address, ops, &indirect_targets),
+            blocks: build_cfg_blocks_with_hints(
+                entry_address,
+                &reachable_instruction_addresses,
+                &reachable_instruction_lengths,
+                ops,
+                &indirect_targets,
+                &retained_inferred_indirect_edges,
+                &cfg_hints,
+            ),
         };
         attach_inferred_indirect_edges(&mut function, &inferred_indirect_edges);
         function
@@ -966,6 +983,10 @@ impl RuntimeSleighFrontend {
             decoded_instructions: instruction_count,
             stop_reason,
             template_source_counts,
+            reachable_instruction_addresses,
+            instruction_lengths: reachable_instruction_lengths,
+            inferred_indirect_edges: retained_inferred_indirect_edges,
+            indirect_targets: indirect_targets_for_snapshot,
         })
     }
 }

@@ -7,14 +7,8 @@ use flate2::Compression;
 use std::io::Write;
 
 fn packaged_sla_path(processor: &str, name: &str) -> Option<PathBuf> {
-    crate::compiler::resolve_ghidra_install_paths().map(|paths| {
-        paths
-            .processors_root
-            .join(processor)
-            .join("data")
-            .join("languages")
-            .join(name)
-    })
+    let path = crate::compiler::sleigh_compiled_root().join(processor).join(name);
+    path.is_file().then_some(path)
 }
 
 #[test]

@@ -40,7 +40,6 @@ impl RuntimeSleighFrontend {
                 self.compiled.as_ref().ok_or_else(|| {
                     anyhow!("missing compiled frontend for {}", self.entry.entry_id)
                 })?,
-                self.native_backend.as_ref(),
                 bytes,
                 address,
                 context_override,
@@ -191,7 +190,6 @@ impl RuntimeSleighFrontend {
                 self.compiled.as_ref().ok_or_else(|| {
                     anyhow!("missing compiled frontend for {}", self.entry.entry_id)
                 })?,
-                self.native_backend.as_ref(),
                 bytes,
                 address,
                 context_override,
@@ -224,7 +222,6 @@ impl RuntimeSleighFrontend {
                 self.compiled.as_ref().ok_or_else(|| {
                     anyhow!("missing compiled frontend for {}", self.entry.entry_id)
                 })?,
-                self.native_backend.as_ref(),
                 bytes,
                 address,
             ),

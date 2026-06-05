@@ -53,39 +53,15 @@ pub struct NirBuildStats {
     /// Completed Rust-native pipeline count after all clean-room stage records.
     #[serde(default)]
     pub ghidra_clean_room_pipeline_complete_count: usize,
-    /// Shadow MIR projection count for the Ghidra-style semantic working state.
+    /// Env-gated blockgraph collapse admission policy was evaluated for this function.
     #[serde(default)]
-    pub mir_enabled_count: usize,
-    /// Functions observed by the shadow MIR projection.
+    pub blockgraph_collapse_admission_enabled_count: usize,
+    /// Blockgraph collapse admitted an irreducible-budget function into graph collapse.
     #[serde(default)]
-    pub mir_function_count: usize,
-    /// Basic block-shaped units observed by the shadow MIR projection.
+    pub blockgraph_collapse_irreducible_budget_bypass_count: usize,
+    /// Blockgraph collapse intentionally left an extreme-budget function fail-closed.
     #[serde(default)]
-    pub mir_block_count: usize,
-    /// Value nodes observed by the shadow MIR projection.
-    #[serde(default)]
-    pub mir_value_count: usize,
-    /// Memory regions observed by the shadow MIR projection.
-    #[serde(default)]
-    pub mir_memory_region_count: usize,
-    /// Join proof records emitted by the shadow MIR projection.
-    #[serde(default)]
-    pub mir_join_proof_count: usize,
-    /// Region proof records emitted by the shadow MIR projection.
-    #[serde(default)]
-    pub mir_region_proof_count: usize,
-    /// Time spent projecting current HIR into shadow MIR.
-    #[serde(default)]
-    pub mir_projection_duration_ms: usize,
-    /// Env-gated MIR BlockGraph admission policy was evaluated for this function.
-    #[serde(default)]
-    pub mir_blockgraph_admission_enabled_count: usize,
-    /// MIR BlockGraph admitted an irreducible-budget function into graph collapse.
-    #[serde(default)]
-    pub mir_blockgraph_irreducible_budget_bypass_count: usize,
-    /// MIR BlockGraph intentionally left an extreme-budget function fail-closed.
-    #[serde(default)]
-    pub mir_blockgraph_extreme_budget_blocked_count: usize,
+    pub blockgraph_collapse_extreme_budget_blocked_count: usize,
     #[serde(default)]
     pub procedure_summary_contracted_count: usize,
     #[serde(default)]
@@ -624,6 +600,18 @@ pub struct NirBuildStats {
     /// indicating a back-edge label was omitted by the emitter. Fell back to linear structuring.
     #[serde(default)]
     pub structuring_sese_orphan_goto_fallback_count: usize,
+    /// Orphan goto labels were localized by appending missing block labels/bodies.
+    #[serde(default)]
+    pub structuring_orphan_goto_localized_count: usize,
+    /// Orphan goto labels could not be localized; full linear fallback was used.
+    #[serde(default)]
+    pub structuring_orphan_goto_unrepairable_count: usize,
+    /// A child SESE region failed and was isolated as linear without discarding parent structure.
+    #[serde(default)]
+    pub sese_child_localized_linear_count: usize,
+    /// Edges virtualized via iterative select-bad-edge during collapse loop.
+    #[serde(default)]
+    pub structuring_select_bad_edge_count: usize,
     #[serde(default)]
     pub pass_metrics: std::collections::BTreeMap<String, PassAggregate>,
 }

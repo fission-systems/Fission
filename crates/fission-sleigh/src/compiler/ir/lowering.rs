@@ -46,7 +46,6 @@ pub fn compile_frontend(
     }
 
     let language_layout = collector.language_layout();
-    let construct_templates = collector.construct_templates();
     let mut pcode_ops = collector
         .pcode_ops
         .into_iter()
@@ -61,41 +60,10 @@ pub fn compile_frontend(
         .collect::<Vec<_>>();
     pcode_ops.sort_by(|lhs, rhs| lhs.name.cmp(&rhs.name));
 
-    let mut subtables = BTreeMap::new();
-    for (name, constructors) in &collector.subtable_executables {
-        let mut sorted_constructors = constructors.clone();
-        sorted_constructors.sort_by_key(|ctor| std::cmp::Reverse(decision_specificity(ctor)));
-        let decision_tree = build_decision_tree(&sorted_constructors);
-        subtables.insert(
-            name.clone(),
-            CompiledSubtableDefinition {
-                name: name.clone(),
-                sla_subtable_id: 0,
-                constructors_by_sla_id: constructors_by_sla_id(&sorted_constructors),
-                constructors: sorted_constructors,
-                decision_tree,
-            },
-        );
-    }
-
-    // Ensure "instruction" subtable exists as it's the primary entry point
-    if !subtables.contains_key("instruction") {
-        subtables.insert(
-            "instruction".to_string(),
-            CompiledSubtableDefinition {
-                name: "instruction".to_string(),
-                sla_subtable_id: 0,
-                constructors_by_sla_id: BTreeMap::new(),
-                constructors: Vec::new(),
-                decision_tree: CompiledDecisionTree {
-                    root_node_index: 0,
-                    nodes: Vec::new(),
-                    decision_node_count: 0,
-                    root_buckets: Vec::new(),
-                },
-            },
-        );
-    }
+    // Executable subtables and ConstructTpl templates come exclusively from the
+    // required checked-in `.sla` overlay applied after slaspec metadata collection.
+    let subtables = BTreeMap::new();
+    let construct_templates = Vec::new();
 
     Ok(CompiledFrontend {
         arch: arch.to_string(),
@@ -755,21 +723,6 @@ impl Collector {
             signature_hash,
             context_changes: context_changes.clone(),
         });
-
-        if let Some(executable) = self.compile_executable_constructor(
-            &full_signature,
-            &mnemonic,
-            &source,
-            signature_hash,
-            context_changes,
-        ) {
-            let mut executable = executable;
-            executable.constructor_id = u32::MAX; // To be set by apply_sla
-            self.subtable_executables
-                .entry(table_name)
-                .or_default()
-                .push(executable);
-        }
         Ok(())
     }
 

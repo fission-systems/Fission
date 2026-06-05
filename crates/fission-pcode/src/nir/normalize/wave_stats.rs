@@ -86,20 +86,6 @@ pub(super) fn add_call_prototype_signature_missing(n: usize) {
     WAVE.with(|w| w.borrow_mut().call_prototype_signature_missing_count += n);
 }
 
-pub(super) fn add_security_cookie_folds(n: usize) {
-    if n == 0 {
-        return;
-    }
-    WAVE.with(|w| w.borrow_mut().security_cookie_fold_count += n);
-}
-
-pub(super) fn add_call_artifact_removals(n: usize) {
-    if n == 0 {
-        return;
-    }
-    WAVE.with(|w| w.borrow_mut().call_artifact_removed_count += n);
-}
-
 pub(super) fn add_object_shape_recoveries(n: usize) {
     if n == 0 {
         return;
@@ -398,7 +384,7 @@ pub(crate) fn add_dispatcher_shape_recoveries(n: usize) {
     WAVE.with(|w| w.borrow_mut().dispatcher_shape_recovered_count += n);
 }
 
-pub(super) fn add_pass_metric(
+pub(crate) fn add_pass_metric(
     name: &str,
     elapsed_ms: f64,
     changed: bool,
