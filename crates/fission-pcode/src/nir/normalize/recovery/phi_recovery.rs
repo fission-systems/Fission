@@ -135,6 +135,7 @@ mod tests {
     fn copy_propagation_skips_preserved_temp_alias() {
         let mut func = HirFunction {
             name: "test_copy_prop_preserved".to_string(),
+            int_param_offsets: Vec::new(),
             params: vec![],
             locals: vec![NirBinding {
                 name: "uVar0".to_string(),
@@ -175,6 +176,7 @@ mod tests {
     fn copy_propagation_skips_single_use_alias_of_preserved_source() {
         let mut func = HirFunction {
             name: "test_copy_prop_preserved_source".to_string(),
+            int_param_offsets: Vec::new(),
             params: vec![],
             locals: vec![
                 NirBinding {
@@ -216,6 +218,7 @@ mod tests {
     fn constant_propagation_eliminates_unused_local_constant() {
         let mut func = HirFunction {
             name: "test_const_prop".to_string(),
+            int_param_offsets: Vec::new(),
             params: vec![],
             locals: vec![NirBinding {
                 name: "local_c".to_string(),

@@ -411,12 +411,7 @@ fn preview_store_resolves_split_constant_global_address() {
         }],
     };
 
-    let mut options = preview_options();
-    options.pe_x64_only = false;
-    options.is_64bit = false;
-    options.pointer_size = 4;
-    options.format = "ELF32".to_string();
-    options.calling_convention = CallingConvention::Arm32;
+    let mut options = preview_options_for(CallingConvention::Arm32);
     options
         .global_names
         .insert(0x100058, "math_sink".to_string());

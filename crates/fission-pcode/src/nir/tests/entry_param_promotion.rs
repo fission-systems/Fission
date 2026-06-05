@@ -25,6 +25,7 @@ fn entry_spill_sysv_rsi_becomes_param_2() {
     // System V AMD64: rsi is the second integer parameter register.
     let mut func = HirFunction {
         name: "spill".into(),
+        int_param_offsets: int_params_for(CallingConvention::SystemVAmd64),
         params: vec![],
         locals: vec![binding_temp("tmp_x")],
         return_type: NirType::Unknown,
@@ -52,6 +53,7 @@ fn entry_spill_sysv_rsi_becomes_param_2() {
 fn entry_spill_win64_ecx_alias_becomes_param_1() {
     let mut func = HirFunction {
         name: "spill".into(),
+        int_param_offsets: int_params_for(CallingConvention::WindowsX64),
         params: vec![],
         locals: vec![binding_temp("saved_n")],
         return_type: NirType::Unknown,
@@ -88,6 +90,7 @@ fn win64_variadic_shape_trims_unused_tail_params() {
     };
     let mut func = HirFunction {
         name: "variadic".into(),
+        int_param_offsets: int_params_for(CallingConvention::WindowsX64),
         params: (0..4)
             .map(|slot| NirBinding {
                 name: format!("param_{}", slot + 1),
@@ -134,6 +137,7 @@ fn loongarch32_existing_param_local_becomes_function_param_before_self_call_prun
     };
     let mut func = HirFunction {
         name: "recursive_fib".into(),
+        int_param_offsets: int_params_for(CallingConvention::LoongArch32),
         params: vec![],
         locals: vec![NirBinding {
             name: "param_1".into(),

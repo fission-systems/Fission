@@ -92,6 +92,7 @@ mod tests {
     fn gvn_join_hoist_marks_temp_preserved() {
         let mut func = HirFunction {
             name: "test_gvn_join_preserved".to_string(),
+            int_param_offsets: Vec::new(),
             params: vec![],
             locals: vec![],
             return_type: int(32),

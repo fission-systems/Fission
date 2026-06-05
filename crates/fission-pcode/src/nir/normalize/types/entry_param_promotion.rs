@@ -9,7 +9,7 @@ use crate::nir::types::{
 };
 use crate::nir::var_rename::rename_vars_in_stmts;
 use crate::nir::{AbiState, CallingConvention};
-use std::collections::HashSet;
+use std::collections::{BTreeSet, HashSet};
 
 use super::super::wave_stats::add_entry_param_promotions;
 
@@ -215,7 +215,7 @@ fn param_ty_for_abi(func: &HirFunction) -> NirType {
 
 fn promote_existing_param_name_reads(func: &mut HirFunction) -> usize {
     let mut promotions = 0usize;
-    for slot in 0..func.calling_convention.param_offsets().len() {
+    for slot in 0..func.int_param_offsets.len() {
         let param_name = format!("param_{}", slot + 1);
         if !func
             .body
@@ -242,24 +242,31 @@ fn promote_direct_param_register_reads(func: &mut HirFunction) -> usize {
     let max_fixed_slot = if variadic_evidence {
         2
     } else {
-        abi.param_offsets().len()
+        func.int_param_offsets.len()
     };
     let mut renames = Vec::new();
     let mut promotions = 0usize;
     for slot in 0..max_fixed_slot {
-        let Some(hw) = hw_name_for_slot(abi, slot) else {
-            continue;
-        };
-        if stmt_assigns_var(&HirStmt::Block(func.body.clone()), hw) {
-            continue;
-        }
-        if !func.body.iter().any(|stmt| stmt_contains_rhs_var(stmt, hw)) {
+        let hw_names = hardware_names_for_slot(func, slot);
+        if hw_names.is_empty() {
             continue;
         }
         let param_name = format!("param_{}", slot + 1);
-        ensure_param_binding(func, slot, param_ty_for_abi(func));
-        renames.push((hw.to_string(), param_name));
-        promotions += 1;
+        let mut promoted = false;
+        for hw in hw_names {
+            if stmt_assigns_var(&HirStmt::Block(func.body.clone()), &hw) {
+                continue;
+            }
+            if !func.body.iter().any(|stmt| stmt_contains_rhs_var(stmt, &hw)) {
+                continue;
+            }
+            ensure_param_binding(func, slot, param_ty_for_abi(func));
+            renames.push((hw, param_name.clone()));
+            promoted = true;
+        }
+        if promoted {
+            promotions += 1;
+        }
     }
     if !renames.is_empty() {
         rename_vars_in_stmts(&mut func.body, &renames);
@@ -321,9 +328,98 @@ fn trim_unused_variadic_tail_params(func: &mut HirFunction) -> bool {
     true
 }
 
-fn hw_name_for_slot(abi: CallingConvention, slot: usize) -> Option<&'static str> {
-    let is_64bit = !abi_is_32bit_register_set(abi);
-    AbiState::new(abi, is_64bit, abi_pointer_size(is_64bit, abi), 0).param_hw_name(slot)
+fn abi_state_for_func(func: &HirFunction) -> AbiState {
+    AbiState::new_with_cspec(
+        func.calling_convention,
+        func.is_64bit,
+        abi_pointer_size(func.is_64bit, func.calling_convention),
+        0,
+        Some(func.int_param_offsets.clone()),
+        None,
+        None,
+    )
+}
+
+fn hw_name_for_slot(func: &HirFunction, slot: usize) -> Option<String> {
+    abi_state_for_func(func).param_hw_name(slot)
+}
+
+fn hardware_names_for_slot(func: &HirFunction, slot: usize) -> Vec<String> {
+    let abi = abi_state_for_func(func);
+    let mut names = BTreeSet::new();
+    if let Some(hw) = abi.param_hw_name(slot) {
+        names.insert(hw);
+    }
+    let mut body_vars = HashSet::new();
+    for stmt in &func.body {
+        collect_var_names_in_stmt(stmt, &mut body_vars);
+    }
+    for name in body_vars {
+        if abi.param_slot_for_name(&name) == Some(slot) {
+            names.insert(name);
+        }
+    }
+    names.into_iter().collect()
+}
+
+fn collect_var_names_in_stmt(stmt: &HirStmt, vars: &mut HashSet<String>) {
+    match stmt {
+        HirStmt::Assign { rhs, .. } => collect_var_names_in_expr(rhs, vars),
+        HirStmt::Return(Some(expr)) => collect_var_names_in_expr(expr, vars),
+        HirStmt::Expr(expr) => collect_var_names_in_expr(expr, vars),
+        HirStmt::If {
+            cond,
+            then_body,
+            else_body,
+        } => {
+            collect_var_names_in_expr(cond, vars);
+            for s in then_body {
+                collect_var_names_in_stmt(s, vars);
+            }
+            for s in else_body {
+                collect_var_names_in_stmt(s, vars);
+            }
+        }
+        HirStmt::Block(stmts) => {
+            for s in stmts {
+                collect_var_names_in_stmt(s, vars);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn collect_var_names_in_expr(expr: &HirExpr, vars: &mut HashSet<String>) {
+    match expr {
+        HirExpr::Var(name) => {
+            vars.insert(name.clone());
+        }
+        HirExpr::Cast { expr: inner, .. }
+        | HirExpr::Unary { expr: inner, .. }
+        | HirExpr::Load { ptr: inner, .. }
+        | HirExpr::PtrOffset { base: inner, .. }
+        | HirExpr::AggregateCopy { src: inner, .. }
+        | HirExpr::FieldAccess { base: inner, .. } => collect_var_names_in_expr(inner, vars),
+        HirExpr::Binary { lhs, rhs, .. } => {
+            collect_var_names_in_expr(lhs, vars);
+            collect_var_names_in_expr(rhs, vars);
+        }
+        HirExpr::Select { cond, then_expr, else_expr, .. } => {
+            collect_var_names_in_expr(cond, vars);
+            collect_var_names_in_expr(then_expr, vars);
+            collect_var_names_in_expr(else_expr, vars);
+        }
+        HirExpr::Call { args, .. } => {
+            for arg in args {
+                collect_var_names_in_expr(arg, vars);
+            }
+        }
+        HirExpr::Index { base, index, .. } => {
+            collect_var_names_in_expr(base, vars);
+            collect_var_names_in_expr(index, vars);
+        }
+        HirExpr::Const(_, _) | HirExpr::AddressOfGlobal(_) => {}
+    }
 }
 
 /// Remove `param_k = <hw>` copies where `<hw>` is the incoming register for slot `k`.

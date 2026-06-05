@@ -5,6 +5,7 @@ use std::collections::HashMap;
 fn preview_type_hints_rename_params_from_function_hints() {
     let mut func = HirFunction {
         name: "FUN_0x140001000".to_string(),
+            int_param_offsets: Vec::new(),
         params: vec![
             NirBinding {
                 name: "param_1".to_string(),
@@ -65,6 +66,7 @@ fn preview_type_hints_rename_params_from_function_hints() {
 fn preview_type_hints_rename_stack_locals_from_function_hints() {
     let mut func = HirFunction {
         name: "FUN_0x140001000".to_string(),
+            int_param_offsets: Vec::new(),
         params: vec![],
         locals: vec![NirBinding {
             name: "local_20".to_string(),
@@ -123,6 +125,7 @@ fn preview_type_hints_rename_stack_locals_from_function_hints() {
 fn preview_type_hints_surface_param_types_from_function_hints() {
     let mut func = HirFunction {
         name: "FUN_0x140001000".to_string(),
+            int_param_offsets: Vec::new(),
         params: vec![
             NirBinding {
                 name: "param_1".to_string(),
@@ -185,6 +188,7 @@ fn preview_type_hints_surface_param_types_from_function_hints() {
 fn preview_type_hints_surface_stack_local_types_from_function_hints() {
     let mut func = HirFunction {
         name: "FUN_0x140001000".to_string(),
+            int_param_offsets: Vec::new(),
         params: vec![],
         locals: vec![NirBinding {
             name: "local_20".to_string(),
@@ -231,6 +235,7 @@ fn preview_type_hints_surface_stack_local_types_from_function_hints() {
 fn preview_type_hints_surface_return_type_from_function_hints() {
     let mut func = HirFunction {
         name: "FUN_0x140001000".to_string(),
+            int_param_offsets: Vec::new(),
         params: vec![],
         locals: vec![],
         return_type: NirType::Unknown,
@@ -279,6 +284,7 @@ fn preview_type_hints_elide_surface_implied_return_cast() {
     };
     let mut func = HirFunction {
         name: "add".to_string(),
+            int_param_offsets: Vec::new(),
         params: vec![
             NirBinding {
                 name: "param_1".to_string(),
@@ -338,6 +344,7 @@ fn preview_type_hints_elide_surface_implied_return_cast() {
 fn preview_type_hints_create_missing_surface_params_from_function_hints() {
     let mut func = HirFunction {
         name: "FUN_0x140001420".to_string(),
+            int_param_offsets: Vec::new(),
         params: vec![],
         locals: vec![],
         return_type: NirType::Unknown,
@@ -377,6 +384,7 @@ fn preview_type_hints_create_missing_surface_params_from_function_hints() {
 fn preview_type_hints_explicit_function_types_override_derived_aliases() {
     let mut func = HirFunction {
         name: "FUN_0x140001000".to_string(),
+            int_param_offsets: Vec::new(),
         params: vec![
             NirBinding {
                 name: "param_1".to_string(),
@@ -446,6 +454,7 @@ fn preview_type_hints_explicit_function_types_override_derived_aliases() {
 fn preview_type_hints_collect_hint_stats() {
     let mut func = HirFunction {
         name: "FUN_0x140001000".to_string(),
+            int_param_offsets: Vec::new(),
         params: vec![
             NirBinding {
                 name: "param_1".to_string(),

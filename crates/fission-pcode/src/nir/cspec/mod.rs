@@ -16,17 +16,24 @@
 //! Callers who already have the `CompiledSlaTemplateLibrary` can call
 //! [`CspecDocument::load_and_resolve`] to get a fully resolved [`ResolvedCspec`].
 //!
-//! # Fallback
-//!
-//! If cspec loading or register resolution fails, callers fall back to the existing
-//! hardcoded [`CallingConvention::param_offsets()`] — ensuring zero regression.
+//! Callers must populate cspec fields from `utils/sleigh-specs/languages` before ABI-sensitive
+//! lowering (see [`apply::apply_cspec_for_options`]).
 
 use std::collections::HashMap;
 use std::path::Path;
 
+pub mod apply;
 pub mod ldefs;
 pub mod loader;
 pub mod pspec;
+pub mod register_model;
+pub use register_model::{
+    register_model_for_abi, register_model_for_language, register_namer_for_abi,
+    register_namer_from_options, RegisterModel, RegisterNamer,
+};
+mod slaspec_parse;
+#[cfg(test)]
+pub(crate) mod test_maps;
 
 
 /// A name → (offset_in_register_space, size_in_bytes) lookup table.
@@ -43,6 +50,8 @@ pub enum CspecPentry {
         name: String,
         /// Optional `metatype` from parent `<pentry>` (e.g. `"float"`). None means any.
         metatype: Option<String>,
+        /// Optional `storage` from parent `<pentry>` (e.g. `"hiddenret"`).
+        storage: Option<String>,
     },
     /// `<pentry><addr space="stack" offset="8"/></pentry>` — a stack slot.
     Stack { offset: i64 },
@@ -90,6 +99,8 @@ pub struct ResolvedPrototype {
     pub stack_pointer_offset: Option<u64>,
     /// Byte offset where stack parameters begin (from stack `<pentry>`).
     pub stack_arg_base: Option<i64>,
+    /// Return-address size on stack (`extrapop` / `stackshift` from the prototype).
+    pub extrapop: i64,
     /// Callee-saved register offsets.
     pub unaffected_offsets: Vec<u64>,
     /// Caller-saved register offsets.
@@ -162,8 +173,16 @@ fn resolve_prototype(
         .input
         .iter()
         .filter_map(|pentry| {
-            if let CspecPentry::Register { name, metatype } = pentry {
-                if metatype.as_deref() == Some("float") {
+            if let CspecPentry::Register {
+                name,
+                metatype,
+                storage,
+            } = pentry
+            {
+                if metatype.as_deref() == Some("float") || storage.as_deref() == Some("float") {
+                    return None;
+                }
+                if storage.as_deref() == Some("hiddenret") {
                     return None;
                 }
                 resolve_reg_offset(name, reg_map)
@@ -182,8 +201,14 @@ fn resolve_prototype(
     });
 
     let return_offset = proto.output.iter().find_map(|pentry| {
-        if let CspecPentry::Register { name, metatype } = pentry {
-            if metatype.as_deref() == Some("float") {
+        if let CspecPentry::Register {
+            name,
+            metatype,
+            storage,
+            ..
+        } = pentry
+        {
+            if metatype.as_deref() == Some("float") || storage.as_deref() == Some("float") {
                 return None;
             }
             resolve_reg_offset(name, reg_map)
@@ -210,6 +235,7 @@ fn resolve_prototype(
         return_offset,
         stack_pointer_offset: sp_offset,
         stack_arg_base,
+        extrapop: proto.extrapop,
         unaffected_offsets,
         killedbycall_offsets,
     }
@@ -245,6 +271,7 @@ struct CspecParser<'a> {
     prototypes: Vec<CspecPrototype>,
     cur_proto: Option<CspecPrototype>,
     cur_pentry_metatype: Option<String>,
+    cur_pentry_storage: Option<String>,
     cur_io: Option<IoKind>,
 }
 
@@ -265,6 +292,7 @@ impl<'a> CspecParser<'a> {
             prototypes: Vec::new(),
             cur_proto: None,
             cur_pentry_metatype: None,
+            cur_pentry_storage: None,
             cur_io: None,
         }
     }
@@ -330,6 +358,7 @@ impl<'a> CspecParser<'a> {
             }
             "pentry" if matches!(self.state, ParseState::Input | ParseState::Output) => {
                 self.cur_pentry_metatype = attrs.get("metatype").cloned();
+                self.cur_pentry_storage = attrs.get("storage").cloned();
                 self.push(ParseState::Pentry);
             }
             "register" if self.state == ParseState::Pentry => {
@@ -337,6 +366,7 @@ impl<'a> CspecParser<'a> {
                     let pentry = CspecPentry::Register {
                         name: reg_name.clone(),
                         metatype: self.cur_pentry_metatype.clone(),
+                        storage: self.cur_pentry_storage.clone(),
                     };
                     if let Some(proto) = self.cur_proto.as_mut() {
                         match self.cur_io {
@@ -413,6 +443,7 @@ impl<'a> CspecParser<'a> {
             }
             "pentry" if self.state == ParseState::Pentry => {
                 self.cur_pentry_metatype = None;
+                self.cur_pentry_storage = None;
                 self.pop();
             }
             _ => {}
@@ -657,6 +688,7 @@ mod tests {
         );
         assert_eq!(rp.return_offset, Some(0x00), "RAX return");
         assert_eq!(rp.stack_arg_base, Some(8), "stack arg base");
+        assert_eq!(rp.extrapop, 8, "return-address stack size");
         assert!(
             rp.unaffected_offsets.contains(&0x20),
             "RSP is callee-saved"

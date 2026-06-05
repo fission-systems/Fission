@@ -1118,6 +1118,7 @@ mod global_decl_tests {
     fn render_hir_declares_referenced_loader_global() {
         let hir = HirFunction {
             name: "store_global".to_string(),
+            int_param_offsets: Vec::new(),
             params: vec![NirBinding {
                 name: "param_1".to_string(),
                 ty: NirType::Int {
@@ -1146,6 +1147,7 @@ mod global_decl_tests {
     fn recover_global_symbol_accesses_follows_constant_pointer_alias() {
         let mut hir = HirFunction {
             name: "store_global_alias".to_string(),
+            int_param_offsets: Vec::new(),
             params: vec![NirBinding {
                 name: "param_1".to_string(),
                 ty: NirType::Int {
@@ -1205,6 +1207,7 @@ mod global_decl_tests {
     fn render_hir_skips_non_identifier_global_names() {
         let hir = HirFunction {
             name: "string_user".to_string(),
+            int_param_offsets: Vec::new(),
             return_type: NirType::Unknown,
             body: vec![HirStmt::Expr(HirExpr::Var("\"hello\"".to_string()))],
             ..HirFunction::default()
@@ -1219,6 +1222,7 @@ mod global_decl_tests {
     fn render_hir_declares_referenced_aggregate_placeholder_types() {
         let hir = HirFunction {
             name: "aggregate_user".to_string(),
+            int_param_offsets: Vec::new(),
             params: vec![NirBinding {
                 name: "param_1".to_string(),
                 ty: NirType::Ptr(Box::new(NirType::Aggregate {
@@ -1249,6 +1253,7 @@ mod global_decl_tests {
     fn render_hir_declares_opaque_pcodeop_stub_for_aggregate_return() {
         let hir = HirFunction {
             name: "userop_aggregate".to_string(),
+            int_param_offsets: Vec::new(),
             locals: vec![NirBinding {
                 name: "xVar30".to_string(),
                 ty: NirType::Aggregate {

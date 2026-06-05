@@ -35,24 +35,36 @@ pub struct NirRenderOptions {
     pub userops: HashMap<u32, String>,
     /// Ghidra-style .cspec-resolved integer parameter register offsets (REGISTER-space).
     ///
-    /// When populated, overrides `calling_convention.param_offsets()` for parameter
-    /// identification. Set by `fission-decompiler` after resolving `.cspec` prototype
-    /// register names against the SLA `ELEM_VARNODE_SYM` register map.
+    /// Set by `fission-decompiler` (or tests via `cspec::apply`) after resolving `.cspec`
+    /// prototype register names against the SLA `ELEM_VARNODE_SYM` register map.
     /// Order matches the prototype `<input>` pentry order (float slots excluded).
     #[serde(default)]
     pub cspec_param_offsets: Option<Vec<u64>>,
     /// Stack base offset where stack arguments begin (from .cspec `<addr space="stack" offset=...>`).
-    /// When set, used instead of the ABI-specific hardcoded base.
     #[serde(default)]
     pub cspec_stack_arg_base: Option<i64>,
+    /// Return-address stack size from .cspec prototype (`extrapop` / `stackshift`).
+    ///
+    /// Converts pre-call RSP-relative displacements into Ghidra stack-space offsets:
+    /// `ghidra_offset = rsp_displacement + cspec_extrapop`.
+    #[serde(default)]
+    pub cspec_extrapop: Option<i64>,
     /// Ghidra-style SLA register map: REGISTER-space `(offset, size)` → hardware register name.
     ///
     /// Inverted from the `ELEM_VARNODE_SYM` table in the compiled `.sla` file.
-    /// When populated, used by `register_hardware_name_for_abi` and `register_name` as the
+    /// When populated, used by [`RegisterNamer`] as the primary offset→name table.
     /// primary offset→name lookup — replacing hardcoded architecture-specific offset tables.
     /// Covers all architectures uniformly (x86, AARCH64, ARM, MIPS, PowerPC, RISC-V, etc.).
     #[serde(default, skip)]
     pub sla_register_map: Option<HashMap<(u64, u32), String>>,
+
+    /// Ghidra `.cspec` primary return register offset (REGISTER-space).
+    #[serde(default, skip)]
+    pub cspec_return_offset: Option<u64>,
+
+    /// Ghidra `.cspec`/`.pspec` return-target (link register) offset when resolved.
+    #[serde(default, skip)]
+    pub cspec_return_target: Option<(u64, u32)>,
 
     // ── .pspec-derived fields ─────────────────────────────────────────────────
 
@@ -334,7 +346,7 @@ impl NirRenderOptions {
             CallingConvention::WindowsX64
         };
 
-        Self {
+        let mut options = Self {
             pe_x64_only: true,
             is_64bit: binary.is_64bit,
             is_big_endian: binary
@@ -356,12 +368,16 @@ impl NirRenderOptions {
             userops: HashMap::new(),
             cspec_param_offsets: None,
             cspec_stack_arg_base: None,
+            cspec_extrapop: None,
             sla_register_map: None,
+            cspec_return_offset: None,
+            cspec_return_target: None,
             pspec_programcounter: None,
             pspec_tracked_context: Vec::new(),
             pspec_hidden_registers: std::collections::HashSet::new(),
-        }
-
+        };
+        options.ensure_sla_register_map();
+        options
     }
 
     pub fn target_profile(&self) -> TargetProfile {

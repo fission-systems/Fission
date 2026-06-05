@@ -56,6 +56,15 @@ impl LdefsEntry {
 // ── Global cache ─────────────────────────────────────────────────────────────
 
 static LDEFS_INDEX: OnceLock<LdefsIndex> = OnceLock::new();
+static LANGUAGE_SLASPEC_INDEX: OnceLock<HashMap<String, PathBuf>> = OnceLock::new();
+
+/// `language_id` → absolute path to the checked-in `.slaspec` entry file.
+pub type LanguageSlaspecIndex = HashMap<String, PathBuf>;
+
+/// Return (or build and cache) the global `language_id` → `.slaspec` index.
+pub fn global_language_slaspec_index(languages_root: &Path) -> &'static LanguageSlaspecIndex {
+    LANGUAGE_SLASPEC_INDEX.get_or_init(|| build_language_slaspec_index(languages_root))
+}
 
 /// Return (or build and cache) the global `.ldefs` index for `languages_root`.
 ///
@@ -80,6 +89,73 @@ pub fn build_ldefs_index(languages_root: &Path) -> LdefsIndex {
         }
     }
     index
+}
+
+pub fn build_language_slaspec_index(languages_root: &Path) -> LanguageSlaspecIndex {
+    let mut index = HashMap::new();
+    if let Ok(entries) = std::fs::read_dir(languages_root) {
+        for entry in entries.flatten() {
+            let dir = entry.path();
+            if dir.is_dir() {
+                scan_processor_dir_for_slaspec(&dir, &mut index);
+            }
+        }
+    }
+    index
+}
+
+fn scan_processor_dir_for_slaspec(dir: &Path, index: &mut LanguageSlaspecIndex) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            scan_processor_dir_for_slaspec(&path, index);
+        } else if path.extension().and_then(|e| e.to_str()) == Some("ldefs") {
+            if let Ok(contents) = std::fs::read_to_string(&path) {
+                parse_ldefs_slaspec_into_index(&contents, dir, index);
+            }
+        }
+    }
+}
+
+fn parse_ldefs_slaspec_into_index(contents: &str, dir: &Path, index: &mut LanguageSlaspecIndex) {
+    let mut rest = contents;
+    loop {
+        let Some(lt) = rest.find('<') else { break };
+        rest = &rest[lt + 1..];
+        if rest.starts_with("!--") {
+            if let Some(end) = rest.find("-->") {
+                rest = &rest[end + 3..];
+            }
+            continue;
+        }
+        let tag_end = rest
+            .find(|c: char| c.is_ascii_whitespace() || c == '>' || c == '/')
+            .unwrap_or(rest.len());
+        let tag = &rest[..tag_end];
+        if tag == "language" {
+            let close = rest.find('>').unwrap_or(rest.len());
+            let segment = &rest[..close];
+            if let (Some(language_id), Some(slafile)) =
+                (extract_attr(segment, "id"), extract_attr(segment, "slafile"))
+            {
+                let slaspec = slafile_to_slaspec_path(dir, slafile);
+                index.insert(language_id.to_string(), slaspec);
+            }
+            rest = &rest[close.min(rest.len())..];
+        } else if let Some(close) = rest.find('>') {
+            rest = &rest[close + 1..];
+        } else {
+            break;
+        }
+    }
+}
+
+fn slafile_to_slaspec_path(dir: &Path, slafile: &str) -> PathBuf {
+    let stem = slafile.strip_suffix(".sla").unwrap_or(slafile);
+    dir.join(format!("{stem}.slaspec"))
 }
 
 fn scan_processor_dir(dir: &Path, index: &mut LdefsIndex) {

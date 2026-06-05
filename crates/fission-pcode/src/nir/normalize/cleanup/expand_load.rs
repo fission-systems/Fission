@@ -299,6 +299,7 @@ mod tests {
     fn empty_func_with_body(body: Vec<HirStmt>) -> HirFunction {
         HirFunction {
             name: "test".to_string(),
+            int_param_offsets: Vec::new(),
             body,
             ..HirFunction::default()
         }

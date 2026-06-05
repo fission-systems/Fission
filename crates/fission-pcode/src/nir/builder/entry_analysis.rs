@@ -1,8 +1,9 @@
 use super::*;
+use crate::nir::cspec::RegisterNamer;
 
 pub(super) fn collect_entry_register_param_aliases(
     pcode: &PcodeFunction,
-    abi: CallingConvention,
+    namer: &RegisterNamer,
 ) -> HashMap<u64, usize> {
     let mut aliases = HashMap::new();
     let Some(entry) = pcode.blocks.first() else {
@@ -26,7 +27,7 @@ pub(super) fn collect_entry_register_param_aliases(
                     continue;
                 }
                 let Some((_, output_param_index)) =
-                    register_name_with_param(output.offset, output.size, abi)
+                    namer.register_name_with_param_owned(output.offset, output.size)
                 else {
                     continue;
                 };
@@ -39,7 +40,8 @@ pub(super) fn collect_entry_register_param_aliases(
                 if !is_register_varnode(input) {
                     continue;
                 }
-                let alias_param_index = register_name_with_param(input.offset, input.size, abi)
+                let alias_param_index = namer
+                    .register_name_with_param_owned(input.offset, input.size)
                     .and_then(|(_, input_param_index)| input_param_index)
                     .or_else(|| aliases.get(&input.offset).copied());
                 if let Some(param_index) = alias_param_index {

@@ -1212,6 +1212,7 @@ pub fn render_contracted_wrapper_summary(
         .unwrap_or_else(|| "unknown_target".to_string());
     let mut hir = HirFunction {
         name: name.to_string(),
+            int_param_offsets: Vec::new(),
         return_type: NirType::Unknown,
         ..HirFunction::default()
     };

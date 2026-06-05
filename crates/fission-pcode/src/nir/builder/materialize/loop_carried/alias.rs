@@ -1,7 +1,11 @@
 use super::*;
 
 impl<'a> PreviewBuilder<'a> {
-    pub(in crate::nir::builder) fn prior_output_aliases_loop_carried_update(prior: &Varnode, current: &Varnode) -> bool {
+    pub(in crate::nir::builder) fn prior_output_aliases_loop_carried_update(
+        &self,
+        prior: &Varnode,
+        current: &Varnode,
+    ) -> bool {
         !prior.is_constant
             && !current.is_constant
             && prior.space_id == current.space_id
@@ -9,8 +13,10 @@ impl<'a> PreviewBuilder<'a> {
             && prior.offset == current.offset
             && prior.size == 8
             && current.size == 4
-            && (x64_ghidra_reg_name(prior.offset).is_some()
-                || aarch64_ghidra_reg_name(prior.offset, prior.size).is_some())
+            && self
+                .register_namer()
+                .hw_name_at(prior.offset, prior.size)
+                .is_some()
     }
 
     pub(in crate::nir::builder) fn varnode_key_may_alias_output(

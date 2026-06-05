@@ -1613,8 +1613,8 @@ fn loop_header_missing_merge_uses_x64_live_register_binding() {
         DisallowedSingleConsumerConsumerKind::StoreValue
     );
     assert_eq!(
-        register_hardware_name_for_abi(r15d.offset, r15d.size, options.calling_convention),
-        Some("r15")
+        crate::nir::cspec::RegisterNamer::from_options(&options).hw_name_at(r15d.offset, r15d.size),
+        Some("r15".to_string())
     );
 
     assert_eq!(
@@ -1966,6 +1966,7 @@ fn same_instruction_callother_does_not_steal_arm_call_args_or_result() {
     options.is_64bit = false;
     options.pointer_size = 4;
     options.calling_convention = CallingConvention::Arm32;
+    crate::nir::cspec::test_maps::apply_preview_cspec(&mut options);
     let mut builder = PreviewBuilder::new(&pcode, &options, None);
 
     let stmts = builder
@@ -2159,6 +2160,7 @@ fn duplicate_start_join_uses_shared_merge_binding_for_conflicting_defs() {
     options.calling_convention = CallingConvention::AArch64;
     options.format = "ELF64".to_string();
     options.pe_x64_only = false;
+    crate::nir::cspec::test_maps::sync_preview_cspec(&mut options);
 
     let code =
         render_mlil_preview(&pcode, "duplicate_merge", 0x1000, &options).expect("render");

@@ -3,14 +3,7 @@
 //! ## Resolution pipeline
 //!
 //! 1. **Exact** — query the global `.ldefs` index for `(language_id, compiler_spec_id)`
-//!    to get the precise `.cspec` filename.  This covers every architecture and compiler
-//!    variant that Ghidra ships, including AARCH64, ARM, MIPS, PowerPC, RISC-V, Sparc, …
-//!
-//! 2. **Fallback** — if the `.ldefs` index is unavailable (e.g., `utils/sleigh-specs`
-//!    tree not populated), fall back to the legacy stem-heuristic so that the caller
-//!    never hard-crashes.
-//!
-//! Both paths feed into the same `CspecDocument` cache, so a given `.cspec` file is
+//!    to get the precise `.cspec` filename.
 //! parsed and cached at most once per process lifetime.
 
 use std::collections::HashMap;
@@ -88,58 +81,4 @@ pub fn load_cspec_for_pair(
     let path = cspec_path_for_pair(languages_root, language_id, compiler_spec_id)?;
     let doc = load_cspec_path(&path)?;
     Some(doc.resolve(reg_map))
-}
-
-// ── Legacy stem-based helpers (kept for backwards-compat / unit tests) ────────
-
-/// Load and cache a `.cspec` document by directory + stem.
-///
-/// Kept for test helpers and the legacy fallback path.  New callers should prefer
-/// `load_cspec_for_pair`.
-pub fn load_cspec(language_dir: &Path, cspec_stem: &str) -> Option<CspecDocument> {
-    let mut path = language_dir.to_path_buf();
-    path.push(format!("{cspec_stem}.cspec"));
-    load_cspec_path(&path)
-}
-
-/// Load and resolve a `.cspec` using a preferred-stem list.
-///
-/// Kept for unit tests.  New callers should prefer `load_cspec_for_pair`.
-pub fn load_default_cspec_resolved(
-    language_dir: &Path,
-    preferred_stems: &[&str],
-    reg_map: &SlaRegisterMap,
-) -> Option<ResolvedCspec> {
-    for &stem in preferred_stems {
-        if let Some(doc) = load_cspec(language_dir, stem) {
-            return Some(doc.resolve(reg_map));
-        }
-    }
-    None
-}
-
-/// Attempt to find the processor language directory from the sleigh-specs tree.
-///
-/// Kept for tests and legacy callers.  New code resolves via `.ldefs`.
-pub fn find_language_dir(sleigh_specs_root: &Path, processor_subdir: &str) -> Option<PathBuf> {
-    // Case-sensitive first
-    let dir = sleigh_specs_root.join(processor_subdir);
-    if dir.is_dir() {
-        return Some(dir);
-    }
-    // Case-insensitive fallback (e.g. "aarch64" vs "AARCH64")
-    if let Ok(entries) = std::fs::read_dir(sleigh_specs_root) {
-        for entry in entries.flatten() {
-            let p = entry.path();
-            if p.is_dir() {
-                if p.file_name()
-                    .and_then(|n| n.to_str())
-                    .is_some_and(|n| n.eq_ignore_ascii_case(processor_subdir))
-                {
-                    return Some(p);
-                }
-            }
-        }
-    }
-    None
 }

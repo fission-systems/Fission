@@ -877,6 +877,7 @@ mod tests {
     fn removes_contiguous_entry_stack_scaffold_stores() {
         let mut func = HirFunction {
             name: "test".to_owned(),
+            int_param_offsets: Vec::new(),
             body: vec![
                 scaffold_store("var_20", "var_38"),
                 scaffold_store("xVar0", "param_2"),
@@ -893,6 +894,7 @@ mod tests {
     fn removes_aarch64_sp_based_entry_callee_saved_scaffold() {
         let mut func = HirFunction {
             name: "test".to_owned(),
+            int_param_offsets: Vec::new(),
             body: vec![
                 scaffold_store("sp", "x29"),
                 HirStmt::Assign {
@@ -931,6 +933,7 @@ mod tests {
     fn removes_aarch64_entry_stack_alias_callee_saved_scaffold() {
         let mut func = HirFunction {
             name: "test".to_owned(),
+            int_param_offsets: Vec::new(),
             body: vec![
                 HirStmt::Assign {
                     lhs: HirLValue::Var("xVar2".to_owned()),
@@ -962,6 +965,7 @@ mod tests {
     fn removes_arm32_uvar_stack_alias_callee_saved_scaffold() {
         let mut func = HirFunction {
             name: "test".to_owned(),
+            int_param_offsets: Vec::new(),
             body: vec![
                 HirStmt::Assign {
                     lhs: HirLValue::Var("uVar0".to_owned()),
@@ -1011,6 +1015,7 @@ mod tests {
     fn keeps_entry_stack_alias_when_used_after_prefix() {
         let mut func = HirFunction {
             name: "test".to_owned(),
+            int_param_offsets: Vec::new(),
             body: vec![
                 HirStmt::Assign {
                     lhs: HirLValue::Var("xVar2".to_owned()),
@@ -1039,6 +1044,7 @@ mod tests {
     fn removes_contiguous_entry_stack_slot_callee_saved_saves() {
         let mut func = HirFunction {
             name: "test".to_owned(),
+            int_param_offsets: Vec::new(),
             body: vec![
                 HirStmt::Assign {
                     lhs: HirLValue::Var("home_0".to_owned()),
@@ -1061,6 +1067,7 @@ mod tests {
     fn removes_entry_stack_slot_callee_saved_saves_inside_entry_block() {
         let mut func = HirFunction {
             name: "test".to_owned(),
+            int_param_offsets: Vec::new(),
             body: vec![HirStmt::Block(vec![
                 HirStmt::Assign {
                     lhs: HirLValue::Var("home_0".to_owned()),
@@ -1083,6 +1090,7 @@ mod tests {
     fn keeps_entry_stack_slot_initializers_without_callee_saved_evidence() {
         let mut func = HirFunction {
             name: "test".to_owned(),
+            int_param_offsets: Vec::new(),
             body: vec![
                 HirStmt::Assign {
                     lhs: HirLValue::Var("local_8".to_owned()),
@@ -1101,6 +1109,7 @@ mod tests {
     fn keeps_non_entry_and_non_scaffold_stores() {
         let mut func = HirFunction {
             name: "test".to_owned(),
+            int_param_offsets: Vec::new(),
             body: vec![
                 HirStmt::Expr(HirExpr::Const(1, u64_ty())),
                 scaffold_store("var_20", "var_38"),
@@ -1132,6 +1141,7 @@ mod tests {
     fn removes_orphaned_slot_epilogue_restore_with_uppercase_register() {
         let mut func = HirFunction {
             name: "fill_matrix".to_owned(),
+            int_param_offsets: Vec::new(),
             body: vec![
                 HirStmt::Expr(HirExpr::Const(42, u64_ty())),
                 slot_restore("RDI", "home_0"),
@@ -1158,6 +1168,7 @@ mod tests {
         // `rbx = home_0` is an orphaned epilogue restore and should be removed.
         let mut func = HirFunction {
             name: "test".to_owned(),
+            int_param_offsets: Vec::new(),
             body: vec![
                 HirStmt::Expr(HirExpr::Const(42, u64_ty())),
                 slot_restore("rbx", "home_0"),
@@ -1183,6 +1194,7 @@ mod tests {
         // Both home_0 and home_8 have no definitions (prologue saves stripped).
         let mut func = HirFunction {
             name: "test".to_owned(),
+            int_param_offsets: Vec::new(),
             body: vec![
                 HirStmt::Expr(HirExpr::Const(1, u64_ty())),
                 slot_restore("rbx", "home_0"),
@@ -1206,6 +1218,7 @@ mod tests {
         // home_0 IS defined in the body — not orphaned, must NOT be removed.
         let mut func = HirFunction {
             name: "test".to_owned(),
+            int_param_offsets: Vec::new(),
             body: vec![
                 HirStmt::Assign {
                     lhs: HirLValue::Var("home_0".to_owned()),
@@ -1233,6 +1246,7 @@ mod tests {
         // Orphaned restores inside nested blocks are also removed.
         let mut func = HirFunction {
             name: "test".to_owned(),
+            int_param_offsets: Vec::new(),
             body: vec![
                 HirStmt::If {
                     cond: HirExpr::Const(1, u64_ty()),
@@ -1275,6 +1289,7 @@ mod tests {
         // rbx = param_3  but rbx has no binding and is never read → remove.
         let mut func = HirFunction {
             name: "test".to_owned(),
+            int_param_offsets: Vec::new(),
             body: vec![
                 assign_var("rbx", var("param_3")),
                 HirStmt::Return(None),
@@ -1292,6 +1307,7 @@ mod tests {
         // rsi = param_2, but rsi IS read in the condition → keep.
         let mut func = HirFunction {
             name: "test".to_owned(),
+            int_param_offsets: Vec::new(),
             body: vec![
                 assign_var("rsi", var("param_2")),
                 HirStmt::If {
@@ -1314,6 +1330,7 @@ mod tests {
         // The new strategy: 0 rvalue uses → remove assignment AND binding.
         let mut func = HirFunction {
             name: "test".to_owned(),
+            int_param_offsets: Vec::new(),
             body: vec![
                 assign_var("rbx", var("param_3")),
                 HirStmt::Return(None),
@@ -1339,6 +1356,7 @@ mod tests {
         // It has 0 rvalue uses and should be pruned.
         let mut func = HirFunction {
             name: "fill_matrix".to_owned(),
+            int_param_offsets: Vec::new(),
             body: vec![
                 HirStmt::Return(None),
             ],

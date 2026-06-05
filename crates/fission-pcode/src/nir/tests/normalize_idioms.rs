@@ -6,6 +6,7 @@ fn test_string_copy_collapses_contiguous_index_stores() {
     let char_ty = NirType::Int { bits: 8, signed: true };
     let mut func = HirFunction {
         name: "test_string_copy".to_string(),
+            int_param_offsets: Vec::new(),
         params: vec![],
         locals: vec![
             NirBinding {
@@ -95,6 +96,7 @@ fn test_string_copy_collapses_contiguous_deref_offset_stores() {
     let char_ty = NirType::Int { bits: 8, signed: true };
     let mut func = HirFunction {
         name: "test_string_copy".to_string(),
+            int_param_offsets: Vec::new(),
         params: vec![],
         locals: vec![
             NirBinding {
@@ -185,6 +187,7 @@ fn test_string_copy_rejects_interfering_write_to_base() {
     let char_ty = NirType::Int { bits: 8, signed: true };
     let mut func = HirFunction {
         name: "test_string_copy".to_string(),
+            int_param_offsets: Vec::new(),
         params: vec![],
         locals: vec![
             NirBinding {
@@ -252,6 +255,7 @@ fn test_string_copy_collapses_wide_character_stores() {
     let wchar_ty = NirType::Int { bits: 16, signed: false };
     let mut func = HirFunction {
         name: "test_string_copy".to_string(),
+            int_param_offsets: Vec::new(),
         params: vec![],
         locals: vec![
             NirBinding {

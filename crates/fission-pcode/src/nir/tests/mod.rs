@@ -50,7 +50,7 @@ fn cst(value: i64, size: u32) -> Varnode {
 }
 
 fn preview_options() -> MlilPreviewOptions {
-    MlilPreviewOptions {
+    let mut options = MlilPreviewOptions {
         pe_x64_only: true,
         is_64bit: true,
         is_big_endian: false,
@@ -65,13 +65,125 @@ fn preview_options() -> MlilPreviewOptions {
         global_names: Default::default(),
         global_sizes: Default::default(),
         relocation_names: Default::default(),
-        calling_convention: Default::default(),
+        calling_convention: CallingConvention::WindowsX64,
         ..Default::default()
+    };
+    apply_win64_cspec(&mut options);
+    options
+}
+
+fn configure_options_for_abi(options: &mut MlilPreviewOptions, abi: CallingConvention) {
+    options.calling_convention = abi;
+    match abi {
+        CallingConvention::SystemVAmd64 => {
+            options.format = "ELF64".to_string();
+            options.pe_x64_only = false;
+            options.is_64bit = true;
+            options.pointer_size = 8;
+        }
+        CallingConvention::AArch64 => {
+            options.format = "ELF64".to_string();
+            options.pe_x64_only = false;
+            options.is_64bit = true;
+            options.pointer_size = 8;
+        }
+        CallingConvention::Arm32 => {
+            options.is_64bit = false;
+            options.pointer_size = 4;
+            options.format = "ELF".to_string();
+            options.pe_x64_only = false;
+        }
+        CallingConvention::PowerPc32 => {
+            options.is_64bit = false;
+            options.pointer_size = 4;
+            options.is_big_endian = true;
+            options.format = "ELF".to_string();
+            options.pe_x64_only = false;
+        }
+        CallingConvention::PowerPc64 => {
+            options.is_64bit = true;
+            options.pointer_size = 8;
+            options.is_big_endian = true;
+            options.format = "ELF64".to_string();
+            options.pe_x64_only = false;
+        }
+        CallingConvention::LoongArch32 => {
+            options.is_64bit = false;
+            options.pointer_size = 4;
+            options.format = "ELF".to_string();
+            options.pe_x64_only = false;
+        }
+        CallingConvention::LoongArch64 => {
+            options.is_64bit = true;
+            options.pointer_size = 8;
+            options.format = "ELF64".to_string();
+            options.pe_x64_only = false;
+        }
+        CallingConvention::Mips32 => {
+            options.is_64bit = false;
+            options.pointer_size = 4;
+            options.format = "ELF".to_string();
+            options.pe_x64_only = false;
+        }
+        CallingConvention::Mips64 => {
+            options.is_64bit = true;
+            options.pointer_size = 8;
+            options.format = "ELF64".to_string();
+            options.pe_x64_only = false;
+        }
+        CallingConvention::X86_32 => {
+            options.is_64bit = false;
+            options.pointer_size = 4;
+        }
+        CallingConvention::WindowsX64 => {
+            options.pe_x64_only = true;
+            options.is_64bit = true;
+            options.pointer_size = 8;
+            options.format = "PE".to_string();
+        }
     }
+    apply_cspec_for_convention(options);
+}
+
+fn preview_options_for(abi: CallingConvention) -> MlilPreviewOptions {
+    let mut options = preview_options();
+    configure_options_for_abi(&mut options, abi);
+    options
+}
+
+fn preview_options_win64() -> MlilPreviewOptions {
+    let mut options = preview_options();
+    apply_win64_cspec(&mut options);
+    options
+}
+
+fn apply_win64_cspec(options: &mut MlilPreviewOptions) {
+    crate::nir::cspec::test_maps::apply_preview_cspec(options);
+}
+
+fn apply_cspec_for_convention(options: &mut MlilPreviewOptions) {
+    crate::nir::cspec::test_maps::apply_preview_cspec(options);
+}
+
+pub(super) fn int_params_for(abi: CallingConvention) -> Vec<u64> {
+    preview_options_for(abi).cspec_param_offsets.unwrap_or_default()
+}
+
+pub(super) fn abi_state_for(abi: CallingConvention, stack_frame_size: i64) -> AbiState {
+    let options = preview_options_for(abi);
+    AbiState::new_with_cspec(
+        abi,
+        options.is_64bit,
+        options.pointer_size,
+        stack_frame_size,
+        options.cspec_param_offsets.clone(),
+        options.cspec_stack_arg_base,
+        options.cspec_extrapop,
+    )
 }
 
 fn preview_options_x86() -> MlilPreviewOptions {
-    MlilPreviewOptions {
+    let mut options = MlilPreviewOptions {
         pe_x64_only: true,
         is_64bit: false,
         is_big_endian: false,
@@ -86,9 +198,11 @@ fn preview_options_x86() -> MlilPreviewOptions {
         global_names: Default::default(),
         global_sizes: Default::default(),
         relocation_names: Default::default(),
-        calling_convention: Default::default(),
+        calling_convention: CallingConvention::WindowsX64,
         ..Default::default()
-    }
+    };
+    apply_cspec_for_convention(&mut options);
+    options
 }
 
 /// Shared preview context for tests that lower `CALL`/import sites at `0x14012c378` as `GetClientRect`

@@ -225,6 +225,7 @@ fn eliminate_redundant_var_assigns_removes_exact_self_assign() {
 fn cast_elision_rewrites_self_widening_assignment_to_self_assign() {
     let mut func = HirFunction {
         name: "test_self_widening_cast".to_string(),
+            int_param_offsets: Vec::new(),
         locals: vec![NirBinding {
             name: "uVar84".to_string(),
             ty: int(32),
@@ -259,6 +260,7 @@ fn cast_elision_rewrites_self_widening_assignment_to_self_assign() {
 fn cast_elision_keeps_self_narrowing_assignment_to_wide_binding() {
     let mut func = HirFunction {
         name: "test_self_narrowing_cast".to_string(),
+            int_param_offsets: Vec::new(),
         locals: vec![NirBinding {
             name: "xVar29".to_string(),
             ty: int(64),
@@ -513,6 +515,7 @@ fn prune_unreachable_after_return_stops_at_label_boundary() {
 fn prune_unused_temp_bindings_removes_dead_preserved_temp() {
     let mut func = HirFunction {
         name: "test_preserved_prune".to_string(),
+            int_param_offsets: Vec::new(),
         params: vec![],
         locals: vec![preserved_temp_binding("uVar0", 32)],
         return_type: int(32),
@@ -529,6 +532,7 @@ fn prune_unused_temp_bindings_removes_dead_preserved_temp() {
 fn prune_unused_temp_bindings_removes_dead_plain_temp_with_nontrivial_name() {
     let mut func = HirFunction {
         name: "test_plain_temp_prune".to_string(),
+            int_param_offsets: Vec::new(),
         params: vec![],
         locals: vec![temp_binding("rcx", 64)],
         return_type: int(32),
@@ -545,6 +549,7 @@ fn prune_unused_temp_bindings_removes_dead_plain_temp_with_nontrivial_name() {
 fn prune_unused_temp_bindings_removes_dead_preserved_temp_with_nontrivial_name() {
     let mut func = HirFunction {
         name: "test_preserved_named_register_prune".to_string(),
+            int_param_offsets: Vec::new(),
         params: vec![],
         locals: vec![preserved_temp_binding("rcx", 64)],
         return_type: int(32),
@@ -561,6 +566,7 @@ fn prune_unused_temp_bindings_removes_dead_preserved_temp_with_nontrivial_name()
 fn prune_unused_temp_bindings_keeps_used_plain_temp_with_nontrivial_name() {
     let mut func = HirFunction {
         name: "test_plain_temp_used".to_string(),
+            int_param_offsets: Vec::new(),
         params: vec![],
         locals: vec![temp_binding("rcx", 64)],
         return_type: int(64),
@@ -578,6 +584,7 @@ fn prune_unused_temp_bindings_keeps_used_plain_temp_with_nontrivial_name() {
 fn prune_unused_temp_bindings_keeps_side_effect_assignment_target() {
     let mut func = HirFunction {
         name: "test_side_effect_lhs_preserved".to_string(),
+            int_param_offsets: Vec::new(),
         params: vec![],
         locals: vec![preserved_temp_binding("xVar30", 64)],
         return_type: int(32),
@@ -682,6 +689,7 @@ fn inline_single_use_temps_inlines_flag_intrinsic_into_predicate() {
 fn inline_loop_condition_trailing_temps_substitutes_condition_chain() {
     let mut func = HirFunction {
         name: "test_loop_cond_inline".to_string(),
+            int_param_offsets: Vec::new(),
         params: vec![],
         locals: vec![],
         return_type: NirType::Unknown,
@@ -781,6 +789,7 @@ fn inline_single_use_temps_keeps_unknown_call_out_of_predicate() {
 fn xor_swap_recovers_three_xor_statements() {
     let mut func = HirFunction {
         name: "test_xor_swap".to_string(),
+            int_param_offsets: Vec::new(),
         locals: vec![
             NirBinding {
                 name: "a".to_string(),
@@ -848,6 +857,7 @@ fn xor_swap_recovers_three_xor_statements() {
 fn switch_norm_folds_range_check_guard() {
     let mut func = HirFunction {
         name: "test_switch_norm".to_string(),
+            int_param_offsets: Vec::new(),
         body: vec![
             HirStmt::If {
                 cond: HirExpr::Binary {
@@ -913,6 +923,7 @@ fn constant_ptr_recovery_recovers_symbolic_addresses() {
 
     let mut func = HirFunction {
         name: "test_constant_ptr".to_string(),
+            int_param_offsets: Vec::new(),
         body: vec![
             // Exact match
             HirStmt::Assign {
@@ -968,6 +979,7 @@ fn condexe_folding_merges_sequential_siblings() {
 
     let mut func = HirFunction {
         name: "test_condexe_siblings".to_string(),
+            int_param_offsets: Vec::new(),
         body: vec![
             HirStmt::If {
                 cond: HirExpr::Var("a".to_string()),
@@ -1011,6 +1023,7 @@ fn condexe_folding_merges_nested_ifs() {
 
     let mut func = HirFunction {
         name: "test_condexe_nested".to_string(),
+            int_param_offsets: Vec::new(),
         body: vec![
             HirStmt::If {
                 cond: HirExpr::Var("a".to_string()),
@@ -1055,6 +1068,7 @@ fn condexe_folding_preserves_safety_on_assignment() {
 
     let mut func = HirFunction {
         name: "test_condexe_safety".to_string(),
+            int_param_offsets: Vec::new(),
         body: vec![
             HirStmt::If {
                 cond: HirExpr::Var("a".to_string()),
@@ -1127,6 +1141,7 @@ fn deindirect_resolves_const_address_to_symbol() {
 
     let mut func = HirFunction {
         name: "test_deindirect_const".to_string(),
+            int_param_offsets: Vec::new(),
         body: vec![HirStmt::Expr(HirExpr::Call {
             target: "__fission_callind_opaque".to_string(),
             args: vec![
@@ -1189,6 +1204,7 @@ fn deindirect_resolves_var_initializer_to_symbol() {
 
     let mut func = HirFunction {
         name: "test_deindirect_var".to_string(),
+            int_param_offsets: Vec::new(),
         locals: vec![NirBinding {
             name: "fn_ptr".to_string(),
             ty: int(64),
@@ -1269,6 +1285,7 @@ fn deindirect_resolves_iat_load_to_symbol() {
 
     let mut func = HirFunction {
         name: "test_deindirect_iat_load".to_string(),
+            int_param_offsets: Vec::new(),
         body: vec![HirStmt::Expr(HirExpr::Call {
             target: "__fission_callind_opaque".to_string(),
             args: vec![iat_load, HirExpr::Var("param_1".to_string())],
@@ -1326,6 +1343,7 @@ fn subvar_trim_eliminates_redundant_casts() {
 
     let mut func = HirFunction {
         name: "test_subvar_trim".to_string(),
+            int_param_offsets: Vec::new(),
         locals: vec![
             NirBinding {
                 name: "b".to_string(),

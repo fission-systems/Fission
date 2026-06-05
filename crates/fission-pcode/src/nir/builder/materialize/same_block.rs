@@ -522,16 +522,13 @@ impl<'a> PreviewBuilder<'a> {
     ) -> bool {
         fn output_base_reg(builder: &PreviewBuilder<'_>, output: &Varnode) -> StackAddressBaseReg {
             let name = match output.space_id {
-                UNIQUE_SPACE_ID => unique_register_name(output.offset, output.size),
-                space_id if is_register_space_id(space_id) && !builder.options.is_64bit => {
-                    crate::nir::support::register_name_32(output.offset, output.size)
-                }
-                space_id if is_register_space_id(space_id) => Some(
-                    crate::nir::support::register_name(output.offset, output.size),
-                ),
+                UNIQUE_SPACE_ID => crate::arch::x86::unique_x86_register_name(output.offset, output.size)
+                    .map(str::to_string),
+                space_id if is_register_space_id(space_id) => builder.sla_hw_name(output.offset, output.size)
+                    .or_else(|| Some("reg".to_string())),
                 _ => None,
             };
-            match name {
+            match name.as_deref() {
                 Some("rsp") => StackAddressBaseReg::Rsp,
                 Some("rbp") => StackAddressBaseReg::Rbp,
                 Some("esp") => StackAddressBaseReg::Esp,

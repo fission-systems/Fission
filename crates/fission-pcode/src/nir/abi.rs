@@ -1,75 +1,26 @@
-use super::support::{
-    StackBase, aarch64_ghidra_reg_name, aarch64_gpr_family_index, arm32_ghidra_reg_name,
-    arm32_gpr_family_index, is_register_varnode, loongarch_ghidra_reg_name_for_abi,
-    loongarch_gpr_family_index, mips_ghidra_reg_name_for_abi, mips_gpr_family_index,
-    powerpc_ghidra_reg_name, powerpc_gpr_family_index, register_name_with_param,
-    unique_register_name, x64_ghidra_reg_name,
-};
+use crate::arch::x86::unique_x86_register_name;
+use crate::nir::cspec::{register_namer_for_abi, RegisterNamer};
+
+use super::support::{is_register_varnode, StackBase};
 use super::{CallingConvention, NirBindingOrigin, UNIQUE_SPACE_ID, Varnode};
 
-fn x64_param_slot_for_name_family(name: &str, abi: CallingConvention) -> Option<usize> {
-    let name_family = crate::arch::x86::x86_gpr_family_index(name)?;
-    abi.param_offsets().iter().position(|&off| {
-        x64_ghidra_reg_name(off)
-            .and_then(crate::arch::x86::x86_gpr_family_index)
-            .is_some_and(|family| family == name_family)
-    })
+fn param_namer(abi: CallingConvention, int_param_offsets: &[u64]) -> RegisterNamer {
+    let mut namer = register_namer_for_abi(abi);
+    namer.int_param_offsets = int_param_offsets.to_vec();
+    namer
 }
 
-fn aarch64_param_slot_for_name_family(name: &str, abi: CallingConvention) -> Option<usize> {
-    let name_family = aarch64_gpr_family_index(name)?;
-    abi.param_offsets().iter().position(|&off| {
-        aarch64_ghidra_reg_name(off, 8)
-            .and_then(aarch64_gpr_family_index)
-            .is_some_and(|family| family == name_family)
-    })
-}
-
-fn arm32_param_slot_for_name_family(name: &str, abi: CallingConvention) -> Option<usize> {
-    let name_family = arm32_gpr_family_index(name)?;
-    abi.param_offsets().iter().position(|&off| {
-        arm32_ghidra_reg_name(off, 4)
-            .and_then(arm32_gpr_family_index)
-            .is_some_and(|family| family == name_family)
-    })
-}
-
-fn powerpc_param_slot_for_name_family(name: &str, abi: CallingConvention) -> Option<usize> {
-    let name_family = powerpc_gpr_family_index(name)?;
-    let slot_size = match abi {
-        CallingConvention::PowerPc64 => 8,
-        _ => 4,
-    };
-    abi.param_offsets().iter().position(|&off| {
-        powerpc_ghidra_reg_name(off, slot_size)
-            .and_then(powerpc_gpr_family_index)
-            .is_some_and(|family| family == name_family)
-    })
-}
-
-fn loongarch_param_slot_for_name_family(name: &str, abi: CallingConvention) -> Option<usize> {
-    let name_family = loongarch_gpr_family_index(name)?;
-    let slot_size = match abi {
-        CallingConvention::LoongArch64 => 8,
-        _ => 4,
-    };
-    abi.param_offsets().iter().position(|&off| {
-        loongarch_ghidra_reg_name_for_abi(off, slot_size, abi)
-            .and_then(loongarch_gpr_family_index)
-            .is_some_and(|family| family == name_family)
-    })
-}
-
-fn mips_param_slot_for_name_family(name: &str, abi: CallingConvention) -> Option<usize> {
-    let name_family = mips_gpr_family_index(name)?;
-    let slot_size = match abi {
-        CallingConvention::Mips64 => 8,
-        _ => 4,
-    };
-    abi.param_offsets().iter().position(|&off| {
-        mips_ghidra_reg_name_for_abi(off, slot_size, abi)
-            .and_then(mips_gpr_family_index)
-            .is_some_and(|family| family == name_family)
+fn param_slot_for_name_family(
+    namer: &RegisterNamer,
+    name: &str,
+    param_offsets: &[u64],
+) -> Option<usize> {
+    let name_family = namer.gpr_family_index_for_name(name)?;
+    param_offsets.iter().position(|&off| {
+        namer
+            .hw_name_at(off, namer.param_slot_size())
+            .and_then(|hw| namer.gpr_family_index_for_name(&hw))
+            == Some(name_family)
     })
 }
 
@@ -103,13 +54,6 @@ impl CarrierAssignment {
 
 pub(crate) trait AbiProvider {
     fn abi(&self) -> CallingConvention;
-    fn param_slot_for_varnode(&self, vn: &Varnode) -> Option<usize>;
-    fn param_slot_for_name(&self, name: &str) -> Option<usize>;
-    fn param_name(&self, slot: usize) -> String {
-        format!("param_{}", slot + 1)
-    }
-    fn param_hw_name(&self, slot: usize) -> Option<&'static str>;
-    fn stack_argument_index(&self, pointer_size: u32, offset: i64) -> Option<usize>;
     fn classify_stack_slot_origin(
         &self,
         is_64bit: bool,
@@ -125,11 +69,12 @@ pub(crate) struct AbiState {
     pub(crate) is_64bit: bool,
     pub(crate) pointer_size: u32,
     pub(crate) stack_frame_size: i64,
-    /// Ghidra-style .cspec-resolved integer param register offsets.
-    /// When `Some`, overrides `abi.param_offsets()` for parameter slot lookup.
+    /// Ghidra-style .cspec-resolved integer param register offsets (REGISTER-space).
     pub(crate) cspec_param_offsets: Option<Vec<u64>>,
     /// Stack argument base offset from .cspec (overrides ABI-specific default).
     pub(crate) cspec_stack_arg_base: Option<i64>,
+    /// Return-address stack size from .cspec prototype (`extrapop`).
+    pub(crate) cspec_extrapop: Option<i64>,
 }
 
 impl AbiState {
@@ -146,6 +91,7 @@ impl AbiState {
             stack_frame_size,
             cspec_param_offsets: None,
             cspec_stack_arg_base: None,
+            cspec_extrapop: None,
         }
     }
 
@@ -157,6 +103,7 @@ impl AbiState {
         stack_frame_size: i64,
         cspec_param_offsets: Option<Vec<u64>>,
         cspec_stack_arg_base: Option<i64>,
+        cspec_extrapop: Option<i64>,
     ) -> Self {
         Self {
             abi,
@@ -165,32 +112,28 @@ impl AbiState {
             stack_frame_size,
             cspec_param_offsets,
             cspec_stack_arg_base,
+            cspec_extrapop,
         }
     }
 
-    /// Returns effective parameter offsets: cspec override if present, else ABI table.
+    fn register_namer(&self) -> RegisterNamer {
+        let mut namer = register_namer_for_abi(self.abi);
+        namer.int_param_offsets = self.effective_param_offsets().to_vec();
+        namer.pointer_size = self.pointer_size;
+        namer
+    }
+
+    /// Integer parameter register offsets from `.cspec` (empty when not loaded).
     pub(crate) fn effective_param_offsets(&self) -> &[u64] {
-        if let Some(offsets) = &self.cspec_param_offsets {
-            offsets.as_slice()
-        } else {
-            self.abi.param_offsets()
-        }
+        self.cspec_param_offsets.as_deref().unwrap_or(&[])
     }
 
-    /// Returns effective `(offset, size)` parameter slots.
-    ///
-    /// When cspec offsets are available, size defaults to `pointer_size` (the natural
-    /// integer argument width for this ABI). Falls back to the hardcoded
-    /// `CallingConvention::param_reg_slots()` table otherwise.
+    /// `(offset, size)` slots derived from `.cspec` integer params.
     pub(crate) fn effective_param_reg_slots(&self) -> Vec<(u64, u32)> {
-        if let Some(offsets) = &self.cspec_param_offsets {
-            offsets
-                .iter()
-                .map(|&off| (off, self.pointer_size))
-                .collect()
-        } else {
-            self.abi.param_reg_slots().to_vec()
-        }
+        self.effective_param_offsets()
+            .iter()
+            .map(|&off| (off, self.pointer_size))
+            .collect()
     }
 
     pub(crate) fn provider(&self) -> AbiKind {
@@ -209,14 +152,16 @@ impl AbiState {
         {
             return None;
         }
-        // Ghidra-style: if .cspec offsets are loaded, use direct offset comparison.
-        if self.cspec_param_offsets.is_some() && is_register_varnode(vn) {
-            return self
-                .effective_param_offsets()
-                .iter()
-                .position(|&off| off == vn.offset);
+        let offsets = self.effective_param_offsets();
+        if is_register_varnode(vn) {
+            return offsets.iter().position(|&off| off == vn.offset);
         }
-        self.provider().param_slot_for_varnode(vn)
+        if vn.space_id == UNIQUE_SPACE_ID
+            && let Some(name) = unique_x86_register_name(vn.offset, vn.size)
+        {
+            return self.param_slot_for_name(name);
+        }
+        None
     }
 
     pub(crate) fn param_slot_for_name(&self, name: &str) -> Option<usize> {
@@ -231,30 +176,30 @@ impl AbiState {
         {
             return None;
         }
-        self.provider().param_slot_for_name(name)
+        param_slot_for_name_family(&self.register_namer(), name, self.effective_param_offsets())
     }
 
     pub(crate) fn param_name(&self, slot: usize) -> String {
-        self.provider().param_name(slot)
+        format!("param_{}", slot + 1)
     }
 
-    pub(crate) fn param_hw_name(&self, slot: usize) -> Option<&'static str> {
-        self.provider().param_hw_name(slot)
+    pub(crate) fn param_hw_name(&self, slot: usize) -> Option<String> {
+        let offset = *self.effective_param_offsets().get(slot)?;
+        self.register_namer()
+            .hw_name_at(offset, self.register_namer().param_slot_size())
     }
 
     pub(crate) fn stack_argument_index(&self, offset: i64) -> Option<usize> {
         if !self.is_64bit {
             return None;
         }
-        // If .cspec resolved a stack arg base, use it.
-        if let Some(base) = self.cspec_stack_arg_base {
-            if offset < base || (offset - base) % i64::from(self.pointer_size) != 0 {
-                return None;
-            }
-            return Some(((offset - base) / i64::from(self.pointer_size)) as usize);
+        let base = self.cspec_stack_arg_base?;
+        let shift = self.cspec_extrapop.unwrap_or(0);
+        let ghidra_offset = offset + shift;
+        if ghidra_offset < base || (ghidra_offset - base) % i64::from(self.pointer_size) != 0 {
+            return None;
         }
-        self.provider()
-            .stack_argument_index(self.pointer_size, offset)
+        Some(((ghidra_offset - base) / i64::from(self.pointer_size)) as usize)
     }
 
     pub(crate) fn classify_stack_slot_origin(
@@ -331,34 +276,6 @@ impl AbiProvider for AbiKind {
         }
     }
 
-    fn param_slot_for_varnode(&self, vn: &Varnode) -> Option<usize> {
-        match self {
-            Self::WindowsX64(provider) => provider.param_slot_for_varnode(vn),
-            Self::Generic(provider) => provider.param_slot_for_varnode(vn),
-        }
-    }
-
-    fn param_slot_for_name(&self, name: &str) -> Option<usize> {
-        match self {
-            Self::WindowsX64(provider) => provider.param_slot_for_name(name),
-            Self::Generic(provider) => provider.param_slot_for_name(name),
-        }
-    }
-
-    fn param_hw_name(&self, slot: usize) -> Option<&'static str> {
-        match self {
-            Self::WindowsX64(provider) => provider.param_hw_name(slot),
-            Self::Generic(provider) => provider.param_hw_name(slot),
-        }
-    }
-
-    fn stack_argument_index(&self, pointer_size: u32, offset: i64) -> Option<usize> {
-        match self {
-            Self::WindowsX64(provider) => provider.stack_argument_index(pointer_size, offset),
-            Self::Generic(provider) => provider.stack_argument_index(pointer_size, offset),
-        }
-    }
-
     fn classify_stack_slot_origin(
         &self,
         is_64bit: bool,
@@ -383,38 +300,6 @@ pub(crate) struct WindowsX64AbiProvider;
 impl AbiProvider for WindowsX64AbiProvider {
     fn abi(&self) -> CallingConvention {
         CallingConvention::WindowsX64
-    }
-
-    fn param_slot_for_varnode(&self, vn: &Varnode) -> Option<usize> {
-        if is_register_varnode(vn) {
-            return register_name_with_param(vn.offset, vn.size, CallingConvention::WindowsX64)
-                .and_then(|(_, index)| index);
-        }
-        if vn.space_id == UNIQUE_SPACE_ID
-            && let Some(name) = unique_register_name(vn.offset, vn.size)
-        {
-            return self.param_slot_for_name(name);
-        }
-        None
-    }
-
-    fn param_slot_for_name(&self, name: &str) -> Option<usize> {
-        x64_param_slot_for_name_family(name, CallingConvention::WindowsX64)
-    }
-
-    fn param_hw_name(&self, slot: usize) -> Option<&'static str> {
-        CallingConvention::WindowsX64
-            .param_offsets()
-            .get(slot)
-            .copied()
-            .and_then(x64_ghidra_reg_name)
-    }
-
-    fn stack_argument_index(&self, pointer_size: u32, offset: i64) -> Option<usize> {
-        if offset < 0x20 || (offset - 0x20) % i64::from(pointer_size) != 0 {
-            return None;
-        }
-        Some(((offset - 0x20) / i64::from(pointer_size)) as usize)
     }
 
     fn classify_stack_slot_origin(
@@ -443,57 +328,6 @@ impl AbiProvider for GenericAbiProvider {
         self.abi
     }
 
-    fn param_slot_for_varnode(&self, vn: &Varnode) -> Option<usize> {
-        if !is_register_varnode(vn) {
-            return None;
-        }
-        register_name_with_param(vn.offset, vn.size, self.abi).and_then(|(_, index)| index)
-    }
-
-    fn param_slot_for_name(&self, name: &str) -> Option<usize> {
-        match self.abi {
-            CallingConvention::AArch64 => aarch64_param_slot_for_name_family(name, self.abi),
-            CallingConvention::Arm32 => arm32_param_slot_for_name_family(name, self.abi),
-            CallingConvention::PowerPc32 | CallingConvention::PowerPc64 => {
-                powerpc_param_slot_for_name_family(name, self.abi)
-            }
-            CallingConvention::LoongArch32 | CallingConvention::LoongArch64 => {
-                loongarch_param_slot_for_name_family(name, self.abi)
-            }
-            CallingConvention::Mips32 | CallingConvention::Mips64 => {
-                mips_param_slot_for_name_family(name, self.abi)
-            }
-            CallingConvention::WindowsX64 | CallingConvention::SystemVAmd64 | CallingConvention::X86_32 => {
-                x64_param_slot_for_name_family(name, self.abi)
-            }
-        }
-    }
-
-    fn param_hw_name(&self, slot: usize) -> Option<&'static str> {
-        let offset = self.abi.param_offsets().get(slot).copied()?;
-        match self.abi {
-            CallingConvention::AArch64 => aarch64_ghidra_reg_name(offset, 8),
-            CallingConvention::Arm32 => arm32_ghidra_reg_name(offset, 4),
-            CallingConvention::PowerPc32 => powerpc_ghidra_reg_name(offset, 4),
-            CallingConvention::PowerPc64 => powerpc_ghidra_reg_name(offset, 8),
-            CallingConvention::LoongArch32 => {
-                loongarch_ghidra_reg_name_for_abi(offset, 4, self.abi)
-            }
-            CallingConvention::LoongArch64 => {
-                loongarch_ghidra_reg_name_for_abi(offset, 8, self.abi)
-            }
-            CallingConvention::Mips32 => mips_ghidra_reg_name_for_abi(offset, 4, self.abi),
-            CallingConvention::Mips64 => mips_ghidra_reg_name_for_abi(offset, 8, self.abi),
-            CallingConvention::WindowsX64 | CallingConvention::SystemVAmd64 | CallingConvention::X86_32 => {
-                x64_ghidra_reg_name(offset)
-            }
-        }
-    }
-
-    fn stack_argument_index(&self, _pointer_size: u32, _offset: i64) -> Option<usize> {
-        None
-    }
-
     fn classify_stack_slot_origin(
         &self,
         _is_64bit: bool,
@@ -507,13 +341,13 @@ impl AbiProvider for GenericAbiProvider {
 
 pub fn infer_entry_register_param_arity(
     pcode: &crate::pcode::PcodeFunction,
-    abi: CallingConvention,
+    namer: &RegisterNamer,
 ) -> Option<usize> {
     use crate::pcode::PcodeOpcode;
     use std::collections::{HashMap, HashSet, VecDeque};
 
     let entry = pcode.blocks.first()?;
-    let num_params = abi.param_offsets().len();
+    let num_params = namer.int_param_offsets.len();
     if num_params == 0 {
         return None;
     }
@@ -561,7 +395,7 @@ pub fn infer_entry_register_param_arity(
                     continue;
                 }
                 if let Some((_, Some(param_index))) =
-                    register_name_with_param(input.offset, input.size, abi)
+                    namer.register_name_with_param_owned(input.offset, input.size)
                 {
                     if current_active.contains(&param_index) {
                         detected_params.insert(param_index);
@@ -578,7 +412,7 @@ pub fn infer_entry_register_param_arity(
             if let Some(output) = &op.output {
                 if !output.is_constant && is_register_varnode(output) {
                     if let Some((_, Some(param_index))) =
-                        register_name_with_param(output.offset, output.size, abi)
+                        namer.register_name_with_param_owned(output.offset, output.size)
                     {
                         current_active.remove(&param_index);
                     }

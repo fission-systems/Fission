@@ -1274,6 +1274,7 @@ mod tests {
     fn make_func(locals: Vec<NirBinding>, body: Vec<HirStmt>, return_type: NirType) -> HirFunction {
         HirFunction {
             name: "test".to_owned(),
+            int_param_offsets: Vec::new(),
             params: vec![],
             locals,
             return_type,
@@ -1477,6 +1478,7 @@ mod tests {
         }];
         let mut func = HirFunction {
             name: "signed_max".to_owned(),
+            int_param_offsets: Vec::new(),
             params: vec![
                 make_typed_binding("a", u32_ty.clone(), NirBindingOrigin::ParamIndex(0)),
                 make_typed_binding("b", u32_ty.clone(), NirBindingOrigin::ParamIndex(1)),
@@ -1516,6 +1518,7 @@ mod tests {
         }))];
         let mut func = HirFunction {
             name: "add".to_owned(),
+            int_param_offsets: Vec::new(),
             params: vec![
                 make_typed_binding("a", u32_ty.clone(), NirBindingOrigin::ParamIndex(0)),
                 make_typed_binding("b", u32_ty, NirBindingOrigin::ParamIndex(1)),
@@ -1553,6 +1556,7 @@ mod tests {
         }))];
         let mut func = HirFunction {
             name: "add".to_owned(),
+            int_param_offsets: Vec::new(),
             params: vec![
                 make_typed_binding("a", u32_ty.clone(), NirBindingOrigin::ParamIndex(0)),
                 make_typed_binding("b", u32_ty, NirBindingOrigin::ParamIndex(1)),
@@ -1581,6 +1585,7 @@ mod tests {
         };
         let mut func = HirFunction {
             name: "add32".to_owned(),
+            int_param_offsets: Vec::new(),
             params: vec![
                 make_typed_binding("param_1", u64_ty.clone(), NirBindingOrigin::ParamIndex(0)),
                 make_typed_binding("param_2", u64_ty.clone(), NirBindingOrigin::ParamIndex(1)),
@@ -1614,6 +1619,7 @@ mod tests {
         };
         let mut func = HirFunction {
             name: "add32_with_call".to_owned(),
+            int_param_offsets: Vec::new(),
             params: vec![make_typed_binding(
                 "param_1",
                 u64_ty.clone(),
@@ -1649,6 +1655,7 @@ mod tests {
         };
         let mut func = HirFunction {
             name: "fill".to_owned(),
+            int_param_offsets: Vec::new(),
             params: vec![
                 make_typed_binding(
                     "param_1",
@@ -1682,6 +1689,7 @@ mod tests {
         };
         let mut func = HirFunction {
             name: "fill_guarded".to_owned(),
+            int_param_offsets: Vec::new(),
             params: vec![
                 make_typed_binding(
                     "param_1",
@@ -1804,6 +1812,7 @@ mod tests {
         ];
         let mut func = HirFunction {
             name: "copy_ptr".to_owned(),
+            int_param_offsets: Vec::new(),
             params: vec![make_typed_binding(
                 "param_1",
                 NirType::Unknown,
@@ -1857,6 +1866,7 @@ mod tests {
         ];
         let mut func = HirFunction {
             name: "scaled_ptr".to_owned(),
+            int_param_offsets: Vec::new(),
             params: vec![make_typed_binding(
                 "param_1",
                 NirType::Unknown,

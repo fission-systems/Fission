@@ -468,6 +468,7 @@ mod tests {
     fn mir_shadow_projection_counts_simple_return() {
         let func = HirFunction {
             name: "mir_test".to_string(),
+            int_param_offsets: Vec::new(),
             body: vec![HirStmt::Return(Some(HirExpr::Const(
                 7,
                 NirType::Int {
@@ -491,6 +492,7 @@ mod tests {
     fn mir_shadow_projection_records_labels_as_incomplete_join_proofs() {
         let func = HirFunction {
             name: "mir_join".to_string(),
+            int_param_offsets: Vec::new(),
             body: vec![
                 HirStmt::Label("join_0".to_string()),
                 HirStmt::Goto("join_0".to_string()),
@@ -513,6 +515,7 @@ mod tests {
     fn mir_shadow_projection_does_not_mutate_hir() {
         let func = HirFunction {
             name: "mir_immutable".to_string(),
+            int_param_offsets: Vec::new(),
             body: vec![HirStmt::Expr(HirExpr::Unary {
                 op: HirUnaryOp::Not,
                 expr: Box::new(HirExpr::Var("flag".to_string())),

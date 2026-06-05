@@ -729,6 +729,7 @@ mod tests {
     fn make_func(locals: Vec<NirBinding>, body: Vec<HirStmt>, return_type: NirType) -> HirFunction {
         HirFunction {
             name: "test".to_owned(),
+            int_param_offsets: Vec::new(),
             params: vec![],
             locals,
             return_type,
@@ -917,6 +918,7 @@ mod tests {
         };
         let mut func = HirFunction {
             name: "test".to_owned(),
+            int_param_offsets: Vec::new(),
             params: vec![
                 make_param("param_1", u32_ty.clone()),
                 make_param("param_2", u32_ty.clone()),
@@ -962,6 +964,7 @@ mod tests {
         };
         let mut func = HirFunction {
             name: "test".to_owned(),
+            int_param_offsets: Vec::new(),
             params: vec![make_param("param_1", u32_ty.clone())],
             locals: vec![],
             return_type: u32_ty,
@@ -1011,6 +1014,7 @@ mod tests {
         };
         let mut func = HirFunction {
             name: "test".to_owned(),
+            int_param_offsets: Vec::new(),
             params: vec![make_param("param_1", u32_ty)],
             locals: vec![],
             return_type: u64_ty.clone(),
@@ -1046,6 +1050,7 @@ mod tests {
         };
         let mut func = HirFunction {
             name: "test".to_owned(),
+            int_param_offsets: Vec::new(),
             params: vec![make_param("param_1", i32_ty.clone())],
             locals: vec![NirBinding {
                 name: "tmp".to_owned(),
@@ -1102,6 +1107,7 @@ mod tests {
         };
         let mut func = HirFunction {
             name: "test".to_owned(),
+            int_param_offsets: Vec::new(),
             params: vec![make_param("param_1", i32_ty.clone())],
             locals: vec![
                 local("rdi", i64_ty.clone()),
@@ -1158,6 +1164,7 @@ mod tests {
         };
         let mut func = HirFunction {
             name: "test".to_owned(),
+            int_param_offsets: Vec::new(),
             params: vec![make_param("param_1", i32_ty.clone())],
             locals: vec![
                 local("rdi", i64_ty.clone()),
@@ -1205,6 +1212,7 @@ mod tests {
         // After narrowing, constants should become -1, -2 and return type int.
         let mut func = HirFunction {
             name: "validate_input".to_owned(),
+            int_param_offsets: Vec::new(),
             params: vec![
                 make_param("param_1", NirType::Int { bits: 32, signed: true }),
                 make_param("param_2", NirType::Int { bits: 32, signed: true }),

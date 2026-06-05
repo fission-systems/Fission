@@ -49,8 +49,8 @@ impl<'a> PreviewBuilder<'a> {
                 return None;
             }
             return Some(
-                register_hardware_name_for_abi(vn.offset, vn.size, self.options.calling_convention)
-                    .unwrap_or_else(|| register_name(vn.offset, vn.size))
+                self.sla_hw_name(vn.offset, vn.size)
+                    .unwrap_or_else(|| "reg".to_string())
                     .to_string(),
             );
         }
@@ -508,7 +508,7 @@ impl<'a> PreviewBuilder<'a> {
             };
         }
         if ptr.space_id == UNIQUE_SPACE_ID
-            && let Some(name) = unique_register_name(ptr.offset, ptr.size)
+            && let Some(name) = crate::arch::x86::unique_x86_register_name(ptr.offset, ptr.size)
         {
             return match name {
                 "rsp" | "esp" => Some((StackBase::Rsp, 0)),

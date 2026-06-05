@@ -293,7 +293,7 @@ impl<'a> PreviewBuilder<'a> {
                 op.output
                     .as_ref()
                     .filter(|output| {
-                        is_primary_return_register_for_abi(output, self.options.calling_convention)
+                        self.register_namer().is_primary_return_register(output)
                             && !self.is_return_target_copy(op, output)
                     })
                     .map(|output| (op_idx, output.clone()))
@@ -494,10 +494,10 @@ impl<'a> PreviewBuilder<'a> {
 
     fn is_return_target_copy(&self, op: &PcodeOp, output: &Varnode) -> bool {
         op.opcode == PcodeOpcode::Copy
-            && output.space_id == RUST_SLEIGH_REGISTER_SPACE_ID
+            && is_register_space_id(output.space_id)
             && output.offset == 0
             && op.inputs.first().is_some_and(|input| {
-                is_return_target_register_for_abi(input, self.options.calling_convention)
+                self.register_namer().is_return_target_register(input)
             })
     }
 
@@ -547,7 +547,7 @@ impl<'a> PreviewBuilder<'a> {
         if input.size >= ret_vn.size || !is_register_space_id(input.space_id) {
             return None;
         }
-        is_primary_return_register_for_abi(input, self.options.calling_convention)
+        self.register_namer().is_primary_return_register(input)
             .then_some(input.clone())
     }
 
@@ -609,7 +609,7 @@ impl<'a> PreviewBuilder<'a> {
             {
                 return None;
             }
-            if !is_primary_return_register_for_abi(input, self.options.calling_convention) {
+            if !self.register_namer().is_primary_return_register(input) {
                 return Some(input.clone());
             }
             cursor_idx = op_idx;
@@ -632,7 +632,7 @@ impl<'a> PreviewBuilder<'a> {
         term_idx: usize,
     ) -> bool {
         let ret_regs =
-            primary_return_registers(self.options.pointer_size, self.options.calling_convention);
+            self.register_namer().primary_return_registers();
         if ret_regs.is_empty() {
             return false;
         }
@@ -653,7 +653,7 @@ impl<'a> PreviewBuilder<'a> {
         term_idx: usize,
     ) -> bool {
         let ret_regs =
-            primary_return_registers(self.options.pointer_size, self.options.calling_convention);
+            self.register_namer().primary_return_registers();
         if ret_regs.is_empty() {
             return false;
         }
@@ -783,7 +783,7 @@ impl<'a> PreviewBuilder<'a> {
             return Ok(Some(expr));
         }
         let Some(ret_vn) =
-            primary_return_registers(self.options.pointer_size, self.options.calling_convention)
+            self.register_namer().primary_return_registers()
                 .into_iter()
                 .next()
         else {
@@ -825,7 +825,7 @@ impl<'a> PreviewBuilder<'a> {
         return_term_idx: usize,
         merge_vn: &Varnode,
     ) -> Option<(usize, Varnode)> {
-        if is_primary_return_register_for_abi(merge_vn, self.options.calling_convention) {
+        if self.register_namer().is_primary_return_register(merge_vn) {
             return Some((return_term_idx, merge_vn.clone()));
         }
 
@@ -853,7 +853,7 @@ impl<'a> PreviewBuilder<'a> {
             .rev()
             .find_map(|(op_idx, op)| {
                 let output = op.output.as_ref()?;
-                if !is_primary_return_register_for_abi(output, self.options.calling_convention) {
+                if !self.register_namer().is_primary_return_register(output) {
                     return None;
                 }
                 op.inputs
@@ -997,7 +997,7 @@ impl<'a> PreviewBuilder<'a> {
         term_idx: usize,
     ) -> Result<Option<HirExpr>, MlilPreviewError> {
         let Some(ret_vn) =
-            primary_return_registers(self.options.pointer_size, self.options.calling_convention)
+            self.register_namer().primary_return_registers()
                 .into_iter()
                 .next()
         else {
@@ -1027,7 +1027,7 @@ impl<'a> PreviewBuilder<'a> {
         if self.return_input_is_stack_target(input) {
             return true;
         }
-        if is_return_target_register_for_abi(input, self.options.calling_convention) {
+        if self.register_namer().is_return_target_register(input) {
             return true;
         }
         self.lookup_def_site(input).is_some_and(|(_, op)| {
@@ -1154,7 +1154,7 @@ impl<'a> PreviewBuilder<'a> {
             return false;
         }
         self.stack_pointer_register_name(&op.inputs[1])
-            .is_some_and(|name| matches!(name, "rsp" | "esp" | "sp"))
+            .is_some_and(|name| matches!(name.as_str(), "rsp" | "esp" | "sp"))
     }
 
     pub(in crate::nir) fn try_lower_intra_instruction_conditional_return(
@@ -2897,18 +2897,21 @@ impl<'a> PreviewBuilder<'a> {
         for leaf in &leaves {
             let is_reg = is_register_space_id(leaf.space_id);
             let name = if is_reg {
-                register_hardware_name_for_abi(leaf.offset, leaf.size, self.options.calling_convention)
+                self.sla_hw_name(leaf.offset, leaf.size)
             } else {
                 None
             };
 
-            let is_pc = name == Some("pc")
+            let is_pc = name.as_deref() == Some("pc")
                 || (self.options.calling_convention == CallingConvention::SystemVAmd64 && leaf.offset == 0x80)
                 || (self.options.calling_convention == CallingConvention::WindowsX64 && leaf.offset == 0x80);
 
             if is_pc {
                 other_leaf_values.insert(leaf.clone(), op.address);
-            } else if name == Some("sp") || name == Some("rsp") || name == Some("rbp") {
+            } else if name.as_deref() == Some("sp")
+                || name.as_deref() == Some("rsp")
+                || name.as_deref() == Some("rbp")
+            {
                 other_leaf_values.insert(leaf.clone(), 0);
             } else if selector_leaf.is_none() {
                 selector_leaf = Some(leaf.clone());
@@ -3162,8 +3165,8 @@ fn extract_modulo_bound(expr: &HirExpr) -> Option<u64> {
                     }
                 }
                 for size in [1, 2, 4, 8] {
-                    let name = register_hardware_name_for_abi(current_vn.offset, size, self.options.calling_convention)
-                        .unwrap_or_else(|| register_name(current_vn.offset, size));
+                    let name = self.sla_hw_name(current_vn.offset, size)
+                        .unwrap_or_else(|| "reg".to_string());
                     selector_names.insert(name.to_string());
                 }
             }

@@ -66,7 +66,7 @@ pub(super) fn pcode_function(
 }
 
 pub(super) fn test_options() -> MlilPreviewOptions {
-    MlilPreviewOptions {
+    let mut options = MlilPreviewOptions {
         pe_x64_only: true,
         is_64bit: true,
         is_big_endian: false,
@@ -83,5 +83,7 @@ pub(super) fn test_options() -> MlilPreviewOptions {
         relocation_names: Default::default(),
         calling_convention: Default::default(),
         ..Default::default()
-    }
+    };
+    crate::nir::cspec::test_maps::apply_preview_cspec(&mut options);
+    options
 }

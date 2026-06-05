@@ -330,7 +330,7 @@ fn preview_x64_ret_recovers_single_predecessor_return_register() {
         &func,
         "x64_predecessor_value_ret",
         0x140002200,
-        &preview_options(),
+        &preview_options_win64(),
     )
     .expect("preview render");
     assert!(code.contains("return 7;"), "{code}");
@@ -397,7 +397,7 @@ fn preview_x64_ret_recovers_predecessor_computed_return_register() {
         &func,
         "x64_predecessor_computed_value_ret",
         0x140002300,
-        &preview_options(),
+        &preview_options_win64(),
     )
     .expect("preview render");
     assert!(code.contains("return param_1 + 5;"), "{code}");
@@ -407,7 +407,7 @@ fn preview_x64_ret_recovers_predecessor_computed_return_register() {
 
 #[test]
 fn preview_uses_entry_register_alias_for_non_abi_register() {
-    let mut options = preview_options();
+    let mut options = preview_options_win64();
     options.calling_convention = CallingConvention::WindowsX64;
     let runtime_reg = |offset, size| Varnode {
         space_id: RUST_SLEIGH_REGISTER_SPACE_ID,
@@ -473,7 +473,7 @@ fn preview_uses_entry_register_alias_for_non_abi_register() {
 #[test]
 #[ignore = "pre-existing failure"]
 fn preview_inlines_lea_register_return() {
-    let mut options = preview_options();
+    let mut options = preview_options_win64();
     options.calling_convention = CallingConvention::WindowsX64;
     let runtime_reg = |offset, size| Varnode {
         space_id: RUST_SLEIGH_REGISTER_SPACE_ID,
@@ -564,7 +564,7 @@ fn preview_inlines_lea_register_return() {
 
 #[test]
 fn preview_inlines_read_modify_write_register_return() {
-    let mut options = preview_options();
+    let mut options = preview_options_win64();
     options.calling_convention = CallingConvention::WindowsX64;
     let runtime_reg = |offset, size| Varnode {
         space_id: RUST_SLEIGH_REGISTER_SPACE_ID,
@@ -663,7 +663,7 @@ fn preview_inlines_read_modify_write_register_return() {
 
 #[test]
 fn preview_refines_win64_param_width_from_later_subregister_use() {
-    let mut options = preview_options();
+    let mut options = preview_options_win64();
     options.calling_convention = CallingConvention::WindowsX64;
     let runtime_reg = |offset, size| Varnode {
         space_id: RUST_SLEIGH_REGISTER_SPACE_ID,
@@ -722,7 +722,7 @@ fn preview_refines_win64_param_width_from_later_subregister_use() {
 
 #[test]
 fn preview_projects_narrow_read_from_wide_register_write() {
-    let mut options = preview_options();
+    let mut options = preview_options_win64();
     options.calling_convention = CallingConvention::WindowsX64;
     let runtime_reg = |offset, size| Varnode {
         space_id: RUST_SLEIGH_REGISTER_SPACE_ID,
@@ -789,7 +789,7 @@ fn preview_projects_narrow_read_from_wide_register_write() {
 
 #[test]
 fn preview_projects_wide_read_from_zero_extending_narrow_register_write() {
-    let mut options = preview_options();
+    let mut options = preview_options_win64();
     options.calling_convention = CallingConvention::WindowsX64;
     let runtime_reg = |offset, size| Varnode {
         space_id: RUST_SLEIGH_REGISTER_SPACE_ID,
@@ -844,7 +844,7 @@ fn preview_projects_wide_read_from_zero_extending_narrow_register_write() {
 
 #[test]
 fn preview_recovers_stack_slot_from_rust_sleigh_rsp_space() {
-    let mut options = preview_options();
+    let mut options = preview_options_win64();
     options.calling_convention = CallingConvention::WindowsX64;
     let runtime_reg = |offset, size| Varnode {
         space_id: RUST_SLEIGH_REGISTER_SPACE_ID,
@@ -910,7 +910,7 @@ fn preview_recovers_stack_slot_from_rust_sleigh_rsp_space() {
 
 #[test]
 fn preview_lowers_register_xor_self_to_zero() {
-    let mut options = preview_options();
+    let mut options = preview_options_win64();
     options.calling_convention = CallingConvention::WindowsX64;
     let runtime_reg = |offset, size| Varnode {
         space_id: RUST_SLEIGH_REGISTER_SPACE_ID,
@@ -963,7 +963,7 @@ fn preview_lowers_register_xor_self_to_zero() {
 
 #[test]
 fn preview_projects_cross_space_gpr32_write_to_rust_sleigh_gpr64_read() {
-    let mut options = preview_options();
+    let mut options = preview_options_win64();
     options.calling_convention = CallingConvention::WindowsX64;
     let runtime_reg = |offset, size| Varnode {
         space_id: RUST_SLEIGH_REGISTER_SPACE_ID,
@@ -1026,7 +1026,7 @@ fn preview_projects_cross_space_gpr32_write_to_rust_sleigh_gpr64_read() {
 }
 
 fn preview_structures_intra_instruction_conditional_return_copy() {
-    let mut options = preview_options();
+    let mut options = preview_options_win64();
     options.calling_convention = CallingConvention::WindowsX64;
     let runtime_reg = |offset, size| Varnode {
         space_id: RUST_SLEIGH_REGISTER_SPACE_ID,
@@ -1125,7 +1125,7 @@ fn preview_structures_intra_instruction_conditional_return_copy() {
 
 #[test]
 fn preview_suppresses_entrypoint_register_alias_params() {
-    let mut options = preview_options();
+    let mut options = preview_options_win64();
     options.calling_convention = CallingConvention::WindowsX64;
     let runtime_reg = |offset, size| Varnode {
         space_id: RUST_SLEIGH_REGISTER_SPACE_ID,
@@ -1192,12 +1192,7 @@ fn preview_suppresses_entrypoint_register_alias_params() {
 
 #[test]
 fn preview_keeps_params_for_zero_entry_relocatable_function() {
-    let mut options = preview_options();
-    options.calling_convention = CallingConvention::AArch64;
-    options.format = "Mach-O 64".to_string();
-    options.pe_x64_only = false;
-    options.is_64bit = true;
-    options.pointer_size = 8;
+    let options = preview_options_for(CallingConvention::AArch64);
 
     let runtime_reg = |offset, size| Varnode {
         space_id: RUST_SLEIGH_REGISTER_SPACE_ID,
@@ -1261,7 +1256,7 @@ fn preview_keeps_params_for_zero_entry_relocatable_function() {
     )
     .expect("preview render");
 
-    assert!(code.contains("llvm_smoke(uint param_1)"), "{code}");
+    assert!(code.contains("llvm_smoke(longlong param_1)"), "{code}");
     assert!(code.contains("return param_1;"), "{code}");
     assert!(!code.contains("w0"), "{code}");
 }
@@ -1600,7 +1595,7 @@ fn preview_known_external_tail_call_recovers_same_block_register_arg() {
         &func,
         "x64_known_external_tail_arg",
         0x140006000,
-        &preview_options(),
+        &preview_options_win64(),
         Some(&context),
     )
     .expect("preview render");
@@ -1610,7 +1605,7 @@ fn preview_known_external_tail_call_recovers_same_block_register_arg() {
 
 #[test]
 fn preview_recovers_cross_block_rust_sleigh_register_call_arg() {
-    let mut options = preview_options();
+    let mut options = preview_options_win64();
     options.calling_convention = CallingConvention::WindowsX64;
     let runtime_reg = |offset, size| Varnode {
         space_id: RUST_SLEIGH_REGISTER_SPACE_ID,
@@ -1828,7 +1823,7 @@ fn preview_recovers_win64_stack_args_when_unique_address_scratch_is_reused() {
         &func,
         "x64_reused_unique_stack_args",
         0x140006200,
-        &preview_options(),
+        &preview_options_win64(),
         Some(&context),
     )
     .expect("preview render");
@@ -2008,7 +2003,7 @@ fn preview_recovers_win64_register_arg_from_live_call_result() {
         &func,
         "x64_live_call_result_arg",
         0x140006300,
-        &preview_options(),
+        &preview_options_win64(),
         Some(&context),
     )
     .expect("preview render");
@@ -2017,6 +2012,144 @@ fn preview_recovers_win64_register_arg_from_live_call_result() {
         "{code}"
     );
     assert!(!code.contains("(ulonglong)rax"), "{code}");
+}
+
+#[test]
+fn preview_recovers_win64_printf_stack_args_with_reused_addr_temp() {
+    let addr_tmp = uniq(0x9d00, 8);
+    let value_tmp = uniq(0xd400, 4);
+    let func = PcodeFunction {
+        blocks: vec![PcodeBasicBlock {
+            index: 0,
+            start_address: 0x140002d00,
+            successors: vec![],
+            ops: vec![
+                PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::IntAdd,
+                    address: 0x140002d0e,
+                    output: Some(addr_tmp.clone()),
+                    inputs: vec![cst(0x28, 8), reg(0x20, 8)],
+                    asm_mnemonic: Some("MOV dword ptr [RSP + 0X28],0X14".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 1,
+                    opcode: PcodeOpcode::Copy,
+                    address: 0x140002d0e,
+                    output: Some(value_tmp.clone()),
+                    inputs: vec![cst(20, 4)],
+                    asm_mnemonic: Some("MOV dword ptr [RSP + 0X28],0X14".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 2,
+                    opcode: PcodeOpcode::Store,
+                    address: 0x140002d0e,
+                    output: None,
+                    inputs: vec![cst(3, 4), addr_tmp.clone(), value_tmp.clone()],
+                    asm_mnemonic: None,
+                },
+                PcodeOp {
+                    seq_num: 3,
+                    opcode: PcodeOpcode::IntAdd,
+                    address: 0x140002d16,
+                    output: Some(addr_tmp.clone()),
+                    inputs: vec![cst(0x20, 8), reg(0x20, 8)],
+                    asm_mnemonic: Some("MOV dword ptr [RSP + 0X20],0XF".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 4,
+                    opcode: PcodeOpcode::Copy,
+                    address: 0x140002d16,
+                    output: Some(value_tmp.clone()),
+                    inputs: vec![cst(15, 4)],
+                    asm_mnemonic: Some("MOV dword ptr [RSP + 0X20],0XF".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 5,
+                    opcode: PcodeOpcode::Store,
+                    address: 0x140002d16,
+                    output: None,
+                    inputs: vec![cst(3, 4), addr_tmp, value_tmp],
+                    asm_mnemonic: None,
+                },
+                PcodeOp {
+                    seq_num: 6,
+                    opcode: PcodeOpcode::Copy,
+                    address: 0x140002d09,
+                    output: Some(reg(0x10, 8)),
+                    inputs: vec![cst(15, 8)],
+                    asm_mnemonic: Some("MOV RDX,0xf".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 7,
+                    opcode: PcodeOpcode::Copy,
+                    address: 0x140002d03,
+                    output: Some(reg(0x80, 8)),
+                    inputs: vec![cst(10, 8)],
+                    asm_mnemonic: Some("MOV R8,0xa".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 8,
+                    opcode: PcodeOpcode::Copy,
+                    address: 0x140002d21,
+                    output: Some(reg(0x8, 8)),
+                    inputs: vec![cst(0x140004000, 8)],
+                    asm_mnemonic: Some("LEA RCX,[fmt]".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 9,
+                    opcode: PcodeOpcode::Call,
+                    address: 0x140002d28,
+                    output: None,
+                    inputs: vec![cst(0x140002a40, 8)],
+                    asm_mnemonic: Some("CALL printf".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 10,
+                    opcode: PcodeOpcode::Return,
+                    address: 0x140002d33,
+                    output: None,
+                    inputs: vec![cst(0, 8)],
+                    asm_mnemonic: Some("RET".to_string()),
+                },
+            ],
+        }],
+    };
+    let mut context = PreviewTypeContext::default();
+    context.call_target_refs.insert(
+        0x140004000,
+        CallTargetRef {
+            address: Some(0x140004000),
+            symbol: "fmt".to_string(),
+            provenance: CallTargetProvenance::Direct,
+            edge_kind: CallEdgeKind::Reference,
+            confidence: 100,
+        },
+    );
+    context.call_target_refs.insert(
+        0x140002a40,
+        CallTargetRef {
+            address: Some(0x140002a40),
+            symbol: "printf".to_string(),
+            provenance: CallTargetProvenance::Direct,
+            edge_kind: CallEdgeKind::Direct,
+            confidence: 100,
+        },
+    );
+
+    let code = render_mlil_preview_with_context(
+        &func,
+        "x64_reused_addr_temp_printf_stack",
+        0x140002d00,
+        &preview_options_win64(),
+        Some(&context),
+    )
+    .expect("preview render");
+    assert!(
+        code.contains("printf(5368725504, 15, 10, 15, 20);")
+            || code.contains("printf(5368725504, 15, 10, 15, 20,"),
+        "{code}"
+    );
 }
 
 #[test]
@@ -2754,7 +2887,7 @@ fn preview_build_stats_records_max_structuring_scc_component_size() {
 }
 
 fn lower_x86_cond_expr(func: &PcodeFunction) -> HirExpr {
-    let options = preview_options_x86();
+    let options = preview_options_for(CallingConvention::X86_32);
     let mut builder = PreviewBuilder::new(func, &options, None);
     match builder
         .lower_block_terminator(0)

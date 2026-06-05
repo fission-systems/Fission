@@ -1,6 +1,22 @@
 use super::*;
 use std::collections::HashSet;
 
+fn resolve_add_op_stack_address(
+    builder: &PreviewBuilder<'_>,
+    add: &PcodeOp,
+) -> Option<(StackBase, i64)> {
+    if add.inputs.len() < 2 {
+        return None;
+    }
+    if let Some((base, offset)) = builder.resolve_stack_address(&add.inputs[0]) {
+        return crate::nir::cfg::const_offset(&add.inputs[1]).map(|delta| (base, offset + delta));
+    }
+    if let Some((base, offset)) = builder.resolve_stack_address(&add.inputs[1]) {
+        return crate::nir::cfg::const_offset(&add.inputs[0]).map(|delta| (base, offset + delta));
+    }
+    None
+}
+
 impl<'a> PreviewBuilder<'a> {
     pub(in crate::nir::builder) fn abi_state(&self) -> AbiState {
         AbiState::new_with_cspec(
@@ -10,6 +26,7 @@ impl<'a> PreviewBuilder<'a> {
             self.stack_frame_size,
             self.options.cspec_param_offsets.clone(),
             self.options.cspec_stack_arg_base,
+            self.options.cspec_extrapop,
         )
     }
 
@@ -18,12 +35,13 @@ impl<'a> PreviewBuilder<'a> {
             return Some(param);
         }
         if vn.space_id == UNIQUE_SPACE_ID {
-            return unique_register_name(vn.offset, vn.size).map(str::to_string);
+            return crate::arch::x86::unique_x86_register_name(vn.offset, vn.size)
+                .map(str::to_string);
         }
         if is_register_varnode(vn) {
             return Some(
-                register_hardware_name_for_abi(vn.offset, vn.size, self.options.calling_convention)
-                    .unwrap_or_else(|| register_name(vn.offset, vn.size))
+                self.sla_hw_name(vn.offset, vn.size)
+                    .unwrap_or_else(|| "reg".to_string())
                     .to_string(),
             );
         }
@@ -76,15 +94,17 @@ impl<'a> PreviewBuilder<'a> {
 
     fn is_callee_saved_register_varnode(&self, vn: &Varnode) -> bool {
         let reg_name = if is_register_varnode(vn) {
-            register_hardware_name_for_abi(vn.offset, vn.size, self.options.calling_convention)
-                .unwrap_or_else(|| register_name(vn.offset, vn.size))
+            self.sla_hw_name(vn.offset, vn.size)
+                .unwrap_or_else(|| "reg".to_string())
         } else if vn.space_id == UNIQUE_SPACE_ID {
-            unique_register_name(vn.offset, vn.size).unwrap_or("")
+            crate::arch::x86::unique_x86_register_name(vn.offset, vn.size)
+                .map(str::to_string)
+                .unwrap_or_default()
         } else {
-            ""
+            String::new()
         };
         matches!(
-            reg_name,
+            reg_name.as_str(),
             "rbx" | "rbp" | "rsi" | "rdi" | "r12" | "r13" | "r14" | "r15"
         )
     }
@@ -126,6 +146,38 @@ impl<'a> PreviewBuilder<'a> {
         true
     }
 
+    fn resolve_call_store_stack_address(
+        &mut self,
+        block: &crate::pcode::PcodeBasicBlock,
+        store_idx: usize,
+    ) -> Option<(StackBase, i64)> {
+        let store = &block.ops[store_idx];
+        let site = LoweringSite {
+            block_idx: block.index as usize,
+            op_idx: store_idx,
+        };
+        self.with_lowering_site(site, |this| {
+            if let Some(addr) = this.resolve_stack_address_from_memory_op(store) {
+                return Some(addr);
+            }
+            let ptr = store.inputs.get(1)?;
+            let store_addr = store.address;
+            for prev_idx in (0..store_idx).rev() {
+                let prev = &block.ops[prev_idx];
+                if prev.address != store_addr {
+                    break;
+                }
+                if prev.output.as_ref() != Some(ptr) {
+                    continue;
+                }
+                if matches!(prev.opcode, PcodeOpcode::IntAdd | PcodeOpcode::PtrAdd) {
+                    return resolve_add_op_stack_address(this, prev);
+                }
+            }
+            this.resolve_stack_address(ptr)
+        })
+    }
+
     fn recover_call_stack_args_from_block(
         &mut self,
         block: &crate::pcode::PcodeBasicBlock,
@@ -164,8 +216,7 @@ impl<'a> PreviewBuilder<'a> {
                 op_idx: prev_idx,
             };
             let stack_address = self.with_lowering_site(site, |this| {
-                this.resolve_stack_address_from_memory_op(prev)
-                    .or_else(|| this.resolve_stack_address(&prev.inputs[1]))
+                this.resolve_call_store_stack_address(block, prev_idx)
             });
             let Some((StackBase::Rsp, offset)) = stack_address else {
                 continue;

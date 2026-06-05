@@ -790,6 +790,7 @@ mod tests {
 
         let mut func = HirFunction {
             name: "test_fn".to_string(),
+            int_param_offsets: Vec::new(),
             params: vec![],
             locals: vec![b1, b2, b3],
             return_type: NirType::Unknown,
@@ -842,6 +843,7 @@ mod tests {
 
         let mut func = HirFunction {
             name: "test_fn2".to_string(),
+            int_param_offsets: Vec::new(),
             params: vec![],
             locals: vec![b1, b2],
             return_type: NirType::Unknown,
@@ -889,6 +891,7 @@ mod tests {
 
         let mut func = HirFunction {
             name: "test_loop_fn".to_string(),
+            int_param_offsets: Vec::new(),
             params: vec![],
             locals: vec![b1, b2],
             return_type: NirType::Unknown,
@@ -950,6 +953,7 @@ mod tests {
 
         let mut func = HirFunction {
             name: "test_loop_fn".to_string(),
+            int_param_offsets: Vec::new(),
             params: vec![],
             locals: vec![b1, b2],
             return_type: NirType::Unknown,
@@ -1009,6 +1013,7 @@ mod tests {
 
         let mut func = HirFunction {
             name: "test_pri_fn".to_string(),
+            int_param_offsets: Vec::new(),
             params: vec![],
             locals: vec![b1, b2],
             body: vec![
@@ -1050,6 +1055,7 @@ mod tests {
 
         let mut func = HirFunction {
             name: "test_domain_fn".to_string(),
+            int_param_offsets: Vec::new(),
             params: vec![],
             locals: vec![b1, b2],
             body: vec![
@@ -1091,6 +1097,7 @@ mod tests {
 
         let mut func = HirFunction {
             name: "test_ctrl_fn".to_string(),
+            int_param_offsets: Vec::new(),
             params: vec![],
             locals: vec![b1, b2],
             body: vec![

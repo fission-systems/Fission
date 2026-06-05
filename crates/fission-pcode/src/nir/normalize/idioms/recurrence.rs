@@ -343,6 +343,7 @@ mod tests {
         body.extend(body_tail);
         HirFunction {
             name: "fib_like".to_string(),
+            int_param_offsets: Vec::new(),
             params: vec![param()],
             locals: vec![NirBinding {
                 name: "n_alias".to_string(),

@@ -261,6 +261,7 @@ mod tests {
     fn sccp_keeps_backedge_label_values_nonconstant() {
         let mut func = HirFunction {
             name: "test_sccp_unstructured_backedge".to_string(),
+            int_param_offsets: Vec::new(),
             return_type: int(32),
             body: vec![
                 HirStmt::Assign {
@@ -306,6 +307,7 @@ mod tests {
     fn sccp_does_not_prune_if_when_discarded_branch_has_side_effects() {
         let mut func = HirFunction {
             name: "test".to_string(),
+            int_param_offsets: Vec::new(),
             return_type: int(32),
             body: vec![HirStmt::If {
                 cond: HirExpr::Const(1, int(32)),

@@ -3,6 +3,7 @@ use super::*;
 fn preview_type_hints_surface_known_local_aggregate_alias() {
     let mut func = HirFunction {
         name: "FUN_0x140006260".to_string(),
+            int_param_offsets: Vec::new(),
         params: vec![
             NirBinding {
                 name: "param_1".to_string(),
@@ -103,6 +104,7 @@ fn preview_type_hints_surface_known_local_aggregate_alias() {
 fn preview_type_hints_surface_local_alias_through_aggregate_copy_wrapper() {
     let func = HirFunction {
         name: "FUN_0x140006260".to_string(),
+            int_param_offsets: Vec::new(),
         params: vec![
             NirBinding {
                 name: "param_1".to_string(),
@@ -187,6 +189,7 @@ fn preview_type_hints_surface_local_alias_through_aggregate_copy_wrapper() {
 fn normalize_removes_dead_aggregate_temp_after_direct_store_recovery() {
     let mut func = HirFunction {
         name: "FUN_0x140006260".to_string(),
+            int_param_offsets: Vec::new(),
         params: vec![NirBinding {
             name: "param_2".to_string(),
             ty: NirType::Ptr(Box::new(NirType::Aggregate {
@@ -251,6 +254,7 @@ fn normalize_removes_dead_aggregate_temp_after_direct_store_recovery() {
 fn normalize_recovers_field_access_after_aggregate_pointer_inference() {
     let mut func = HirFunction {
         name: "process_config_like".to_string(),
+            int_param_offsets: Vec::new(),
         params: vec![NirBinding {
             name: "param_1".to_string(),
             ty: NirType::Ptr(Box::new(NirType::Unknown)),
@@ -306,6 +310,7 @@ fn normalize_recovers_field_access_after_aggregate_pointer_inference() {
 fn normalize_rewrites_constant_index_alias_back_to_aggregate_field() {
     let mut func = HirFunction {
         name: "process_config_alias".to_string(),
+            int_param_offsets: Vec::new(),
         params: vec![NirBinding {
             name: "param_1".to_string(),
             ty: NirType::Ptr(Box::new(NirType::Unknown)),
@@ -783,6 +788,7 @@ fn union_resolve_scores_and_selects_dominant_float_access_type() {
 
     let mut func = HirFunction {
         name: "test_union_resolve".to_string(),
+            int_param_offsets: Vec::new(),
         params: vec![NirBinding {
             name: "param_1".to_string(),
             ty: NirType::Ptr(Box::new(NirType::Aggregate {

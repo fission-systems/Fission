@@ -34,6 +34,7 @@ pub use nir::{
     StackSlotId, StructuringBudgetClass, StructuringEngineKind, StructuringFailureKind,
     StructuringOutcome, StructuringReasonFamily, TargetProfile, WrapperClass,
     infer_entry_register_param_arity, parse_call_target_address, render_contracted_wrapper_summary,
+    RegisterNamer,
     render_mlil_preview, render_mlil_preview_with_binary_and_context,
     render_mlil_preview_with_context, render_nir, render_nir_with_binary_and_context,
     render_nir_with_context, structuring_outcome_for_signature,

@@ -1,8 +1,10 @@
 use crate::decode_rust_sleigh_pcode;
+use crate::pipeline::rust_sleigh::apply_spec_overrides;
 use crate::{
     CallEdgeKind, CallEffectSummarySource, CallTargetProvenance, CallTargetRef,
     NirCallEffectSummary, NirCallParamRule, NirCallPrototypeSummary, NirFunctionHints,
     NirRenderOptions, NirTypeContext, PcodeFunction, PcodeOpcode, infer_entry_register_param_arity,
+    RegisterNamer,
 };
 use fission_core::core::ghidra_no_return::{binary_format_to_ghidra_format, ghidra_no_return_index};
 use fission_core::{normalize_named_type_identity, sanitize_symbol_name};
@@ -452,8 +454,11 @@ fn build_preview_callee_summaries(
         &pcode,
         &detail,
     );
-    let calling_convention = NirRenderOptions::from_loaded_binary(binary).calling_convention;
-    let prototype = infer_entry_register_param_arity(&pcode, calling_convention).map(|arity| {
+    let mut options = NirRenderOptions::from_loaded_binary(binary);
+    apply_spec_overrides(binary, &mut options);
+    let register_namer = RegisterNamer::from_options(&options);
+    let prototype = infer_entry_register_param_arity(&pcode, &register_namer)
+    .map(|arity| {
         NirCallPrototypeSummary {
             min_arity: arity,
             max_arity: arity,

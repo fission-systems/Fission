@@ -1,44 +1,71 @@
 /// Tests for ABI-aware register parameter naming.
 ///
-/// `register_name_with_param` maps Ghidra REGISTER-space offsets to either
+/// `RegisterNamer::register_name_with_param_owned` maps Ghidra REGISTER-space offsets to either
 /// `("param_N", Some(N-1))` for parameter registers or `(hw_name, None)` for others.
 /// The distinction depends on the active `CallingConvention`.
 use super::*;
+use crate::nir::cspec::register_namer_for_abi;
 use crate::nir::AbiState;
+
+fn reg_param_be(offset: u64, size: u32) -> Option<(String, Option<usize>)> {
+    let mut options = preview_options_for(CallingConvention::AArch64);
+    options.is_big_endian = true;
+    crate::nir::cspec::test_maps::sync_preview_cspec(&mut options);
+    crate::nir::cspec::RegisterNamer::from_options(&options)
+        .register_name_with_param_owned(offset, size)
+}
+
+fn reg_param(
+    offset: u64,
+    size: u32,
+    abi: CallingConvention,
+) -> Option<(String, Option<usize>)> {
+    let mut namer = register_namer_for_abi(abi);
+    namer.int_param_offsets = int_params_for(abi);
+    namer.register_name_with_param_owned(offset, size)
+}
+
+fn is_primary_return_for_abi(vn: &Varnode, abi: CallingConvention) -> bool {
+    register_namer_for_abi(abi).is_primary_return_register(vn)
+}
+
+fn is_primary_return_x64(vn: &Varnode) -> bool {
+    register_namer_for_abi(CallingConvention::WindowsX64).is_primary_return_register(vn)
+}
 
 // ── Windows x64 ────────────────────────────────────────────────────────────────
 
 #[test]
 fn win64_rcx_is_param_1() {
-    let (name, idx) = register_name_with_param(0x08, 8, CallingConvention::WindowsX64).unwrap();
+    let (name, idx) = reg_param(0x08, 8, CallingConvention::WindowsX64).unwrap();
     assert_eq!(name, "param_1");
     assert_eq!(idx, Some(0));
 }
 
 #[test]
 fn win64_rdx_is_param_2() {
-    let (name, idx) = register_name_with_param(0x10, 8, CallingConvention::WindowsX64).unwrap();
+    let (name, idx) = reg_param(0x10, 8, CallingConvention::WindowsX64).unwrap();
     assert_eq!(name, "param_2");
     assert_eq!(idx, Some(1));
 }
 
 #[test]
 fn win64_r8_is_param_3() {
-    let (name, idx) = register_name_with_param(0x80, 8, CallingConvention::WindowsX64).unwrap();
+    let (name, idx) = reg_param(0x80, 8, CallingConvention::WindowsX64).unwrap();
     assert_eq!(name, "param_3");
     assert_eq!(idx, Some(2));
 }
 
 #[test]
 fn win64_r9_is_param_4() {
-    let (name, idx) = register_name_with_param(0x88, 8, CallingConvention::WindowsX64).unwrap();
+    let (name, idx) = reg_param(0x88, 8, CallingConvention::WindowsX64).unwrap();
     assert_eq!(name, "param_4");
     assert_eq!(idx, Some(3));
 }
 
 #[test]
 fn win64_subregister_aliases_map_to_param_slots() {
-    let abi = AbiState::new(CallingConvention::WindowsX64, true, 8, 0);
+    let abi = abi_state_for(CallingConvention::WindowsX64, 0);
     assert_eq!(abi.param_slot_for_name("ecx"), Some(0));
     assert_eq!(abi.param_slot_for_name("cx"), Some(0));
     assert_eq!(abi.param_slot_for_name("cl"), Some(0));
@@ -48,22 +75,21 @@ fn win64_subregister_aliases_map_to_param_slots() {
 
 #[test]
 fn win64_rdi_is_not_a_param() {
-    let (name, idx) = register_name_with_param(0x38, 8, CallingConvention::WindowsX64).unwrap();
+    let (name, idx) = reg_param(0x38, 8, CallingConvention::WindowsX64).unwrap();
     assert_eq!(name, "rdi");
     assert_eq!(idx, None);
 }
 
 #[test]
 fn win64_rsi_is_not_a_param() {
-    let (name, idx) = register_name_with_param(0x30, 8, CallingConvention::WindowsX64).unwrap();
+    let (name, idx) = reg_param(0x30, 8, CallingConvention::WindowsX64).unwrap();
     assert_eq!(name, "rsi");
     assert_eq!(idx, None);
 }
 
 #[test]
 fn win64_pointer_swap_does_not_synthesize_stale_eax_return() {
-    let mut options = preview_options();
-    options.calling_convention = CallingConvention::WindowsX64;
+    let mut options = preview_options_for(CallingConvention::WindowsX64);
 
     let rcx = reg(0x08, 8);
     let rdx = reg(0x10, 8);
@@ -244,49 +270,49 @@ fn x86_32_stack_pushes_become_call_arguments() {
 
 #[test]
 fn sysv_rdi_is_param_1() {
-    let (name, idx) = register_name_with_param(0x38, 8, CallingConvention::SystemVAmd64).unwrap();
+    let (name, idx) = reg_param(0x38, 8, CallingConvention::SystemVAmd64).unwrap();
     assert_eq!(name, "param_1");
     assert_eq!(idx, Some(0));
 }
 
 #[test]
 fn sysv_rsi_is_param_2() {
-    let (name, idx) = register_name_with_param(0x30, 8, CallingConvention::SystemVAmd64).unwrap();
+    let (name, idx) = reg_param(0x30, 8, CallingConvention::SystemVAmd64).unwrap();
     assert_eq!(name, "param_2");
     assert_eq!(idx, Some(1));
 }
 
 #[test]
 fn sysv_rdx_is_param_3() {
-    let (name, idx) = register_name_with_param(0x10, 8, CallingConvention::SystemVAmd64).unwrap();
+    let (name, idx) = reg_param(0x10, 8, CallingConvention::SystemVAmd64).unwrap();
     assert_eq!(name, "param_3");
     assert_eq!(idx, Some(2));
 }
 
 #[test]
 fn sysv_rcx_is_param_4() {
-    let (name, idx) = register_name_with_param(0x08, 8, CallingConvention::SystemVAmd64).unwrap();
+    let (name, idx) = reg_param(0x08, 8, CallingConvention::SystemVAmd64).unwrap();
     assert_eq!(name, "param_4");
     assert_eq!(idx, Some(3));
 }
 
 #[test]
 fn sysv_r8_is_param_5() {
-    let (name, idx) = register_name_with_param(0x80, 8, CallingConvention::SystemVAmd64).unwrap();
+    let (name, idx) = reg_param(0x80, 8, CallingConvention::SystemVAmd64).unwrap();
     assert_eq!(name, "param_5");
     assert_eq!(idx, Some(4));
 }
 
 #[test]
 fn sysv_r9_is_param_6() {
-    let (name, idx) = register_name_with_param(0x88, 8, CallingConvention::SystemVAmd64).unwrap();
+    let (name, idx) = reg_param(0x88, 8, CallingConvention::SystemVAmd64).unwrap();
     assert_eq!(name, "param_6");
     assert_eq!(idx, Some(5));
 }
 
 #[test]
 fn sysv_subregister_aliases_map_to_param_slots() {
-    let abi = AbiState::new(CallingConvention::SystemVAmd64, true, 8, 0);
+    let abi = abi_state_for(CallingConvention::SystemVAmd64, 0);
     assert_eq!(abi.param_slot_for_name("edi"), Some(0));
     assert_eq!(abi.param_slot_for_name("si"), Some(1));
     assert_eq!(abi.param_slot_for_name("edx"), Some(2));
@@ -301,7 +327,7 @@ fn sysv_subregister_aliases_map_to_param_slots() {
 fn aarch64_x0_to_x7_are_params() {
     for slot in 0..8usize {
         let offset = 0x4000 + (slot as u64 * 8);
-        let (name, idx) = register_name_with_param(offset, 8, CallingConvention::AArch64).unwrap();
+        let (name, idx) = reg_param(offset, 8, CallingConvention::AArch64).unwrap();
         assert_eq!(name, format!("param_{}", slot + 1));
         assert_eq!(idx, Some(slot));
     }
@@ -309,25 +335,28 @@ fn aarch64_x0_to_x7_are_params() {
 
 #[test]
 fn aarch64_compact_x0_offset_is_param() {
-    let (name, idx) = register_name_with_param(0x00, 8, CallingConvention::AArch64).unwrap();
+    let (name, idx) = reg_param(0x4000, 8, CallingConvention::AArch64).unwrap();
     assert_eq!(name, "param_1");
     assert_eq!(idx, Some(0));
 
-    let (name, idx) = register_name_with_param(0x00, 4, CallingConvention::AArch64).unwrap();
+    let (name, idx) = reg_param(0x4000, 4, CallingConvention::AArch64).unwrap();
     assert_eq!(name, "param_1");
     assert_eq!(idx, Some(0));
 }
 
 #[test]
 fn aarch64_big_endian_w_register_halves_are_params() {
-    let (name, idx) = register_name_with_param(0x4004, 4, CallingConvention::AArch64).unwrap();
+    let (name, idx) = reg_param_be(0x4004, 4).unwrap();
     assert_eq!(name, "param_1");
     assert_eq!(idx, Some(0));
 
-    let (name, idx) = register_name_with_param(0x400c, 4, CallingConvention::AArch64).unwrap();
+    let (name, idx) = reg_param_be(0x400c, 4).unwrap();
     assert_eq!(name, "param_2");
     assert_eq!(idx, Some(1));
 
+    let mut options = preview_options_for(CallingConvention::AArch64);
+    options.is_big_endian = true;
+    crate::nir::cspec::test_maps::sync_preview_cspec(&mut options);
     let ret = Varnode {
         space_id: REGISTER_SPACE_ID,
         offset: 0x4004,
@@ -335,15 +364,12 @@ fn aarch64_big_endian_w_register_halves_are_params() {
         is_constant: false,
         constant_val: 0,
     };
-    assert!(is_primary_return_register_for_abi(
-        &ret,
-        CallingConvention::AArch64
-    ));
+    assert!(crate::nir::cspec::RegisterNamer::from_options(&options).is_primary_return_register(&ret));
 }
 
 #[test]
 fn aarch64_subregister_aliases_map_to_param_slots() {
-    let abi = AbiState::new(CallingConvention::AArch64, true, 8, 0);
+    let abi = abi_state_for(CallingConvention::AArch64, 0);
     assert_eq!(abi.param_slot_for_name("x0"), Some(0));
     assert_eq!(abi.param_slot_for_name("w0"), Some(0));
     assert_eq!(abi.param_slot_for_name("x7"), Some(7));
@@ -353,8 +379,9 @@ fn aarch64_subregister_aliases_map_to_param_slots() {
 
 #[test]
 fn aarch64_return_register_is_named_and_recognized() {
-    assert_eq!(register_name(0x4000, 8), "x0");
-    assert_eq!(register_name(0x4000, 4), "w0");
+    let namer = register_namer_for_abi(CallingConvention::AArch64);
+    assert_eq!(namer.hw_name_at(0x4000, 8).as_deref(), Some("x0"));
+    assert_eq!(namer.hw_name_at(0x4000, 4).as_deref(), Some("w0"));
     let x0 = Varnode {
         space_id: REGISTER_SPACE_ID,
         offset: 0x4000,
@@ -362,20 +389,20 @@ fn aarch64_return_register_is_named_and_recognized() {
         is_constant: false,
         constant_val: 0,
     };
-    assert!(is_primary_return_register_for_abi(
+    assert!(is_primary_return_for_abi(
         &x0,
         CallingConvention::AArch64
     ));
-    assert!(!is_primary_return_register(&x0));
+    assert!(!is_primary_return_x64(&x0));
 }
 
 #[test]
 fn aarch64_be_unique_subrange_projection_uses_low_value_view() {
-    let mut options = preview_options();
-    options.calling_convention = CallingConvention::AArch64;
+    let mut options = preview_options_for(CallingConvention::AArch64);
     options.format = "ELF64".to_string();
     options.pe_x64_only = false;
     options.is_big_endian = true;
+    crate::nir::cspec::test_maps::sync_preview_cspec(&mut options);
 
     let param = reg(0x4004, 4);
     let mixed = uniq(0x100, 8);
@@ -459,7 +486,7 @@ fn aarch64_be_unique_subrange_projection_uses_low_value_view() {
 fn arm32_r0_to_r3_are_params() {
     for slot in 0..4usize {
         let offset = 0x20 + (slot as u64 * 4);
-        let (name, idx) = register_name_with_param(offset, 4, CallingConvention::Arm32).unwrap();
+        let (name, idx) = reg_param(offset, 4, CallingConvention::Arm32).unwrap();
         assert_eq!(name, format!("param_{}", slot + 1));
         assert_eq!(idx, Some(slot));
     }
@@ -467,17 +494,18 @@ fn arm32_r0_to_r3_are_params() {
 
 #[test]
 fn arm32_non_param_registers_are_named() {
-    let (name, idx) = register_name_with_param(0x30, 4, CallingConvention::Arm32).unwrap();
+    let namer = register_namer_for_abi(CallingConvention::Arm32);
+    let (name, idx) = reg_param(0x30, 4, CallingConvention::Arm32).unwrap();
     assert_eq!(name, "r4");
     assert_eq!(idx, None);
-    assert_eq!(register_name(0x54, 4), "sp");
-    assert_eq!(register_name(0x58, 4), "lr");
-    assert_eq!(register_name(0x5c, 4), "pc");
+    assert_eq!(namer.hw_name_at(0x54, 4).as_deref(), Some("sp"));
+    assert_eq!(namer.hw_name_at(0x58, 4).as_deref(), Some("lr"));
+    assert_eq!(namer.hw_name_at(0x5c, 4).as_deref(), Some("pc"));
 }
 
 #[test]
 fn arm32_param_slots_work_for_32bit_abi_state() {
-    let abi = AbiState::new(CallingConvention::Arm32, false, 4, 0);
+    let abi = abi_state_for(CallingConvention::Arm32, 0);
     assert_eq!(abi.param_slot_for_name("r0"), Some(0));
     assert_eq!(abi.param_slot_for_name("r3"), Some(3));
     assert_eq!(abi.param_slot_for_name("r4"), None);
@@ -485,7 +513,7 @@ fn arm32_param_slots_work_for_32bit_abi_state() {
 
 #[test]
 fn arm32_return_register_is_named_and_recognized() {
-    let (name, idx) = register_name_with_param(0x20, 4, CallingConvention::Arm32).unwrap();
+    let (name, idx) = reg_param(0x20, 4, CallingConvention::Arm32).unwrap();
     assert_eq!(name, "param_1");
     assert_eq!(idx, Some(0));
     let r0 = Varnode {
@@ -495,17 +523,16 @@ fn arm32_return_register_is_named_and_recognized() {
         is_constant: false,
         constant_val: 0,
     };
-    assert!(is_primary_return_register_for_abi(
+    assert!(is_primary_return_for_abi(
         &r0,
         CallingConvention::Arm32
     ));
-    assert!(!is_primary_return_register(&r0));
+    assert!(!is_primary_return_x64(&r0));
 }
 
 #[test]
 fn arm32_bx_lr_returns_primary_r0_not_link_target() {
-    let mut options = preview_options();
-    options.calling_convention = CallingConvention::Arm32;
+    let mut options = preview_options_for(CallingConvention::Arm32);
     options.format = "ELF32".to_string();
     options.pe_x64_only = false;
     options.pointer_size = 4;
@@ -592,7 +619,7 @@ fn powerpc32_r3_to_r10_are_params() {
     for slot in 0..8usize {
         let offset = 0x0c + (slot as u64 * 4);
         let (name, idx) =
-            register_name_with_param(offset, 4, CallingConvention::PowerPc32).unwrap();
+            reg_param(offset, 4, CallingConvention::PowerPc32).unwrap();
         assert_eq!(name, format!("param_{}", slot + 1));
         assert_eq!(idx, Some(slot));
     }
@@ -603,7 +630,7 @@ fn powerpc64_r3_to_r10_are_params() {
     for slot in 0..8usize {
         let offset = 0x18 + (slot as u64 * 8);
         let (name, idx) =
-            register_name_with_param(offset, 8, CallingConvention::PowerPc64).unwrap();
+            reg_param(offset, 8, CallingConvention::PowerPc64).unwrap();
         assert_eq!(name, format!("param_{}", slot + 1));
         assert_eq!(idx, Some(slot));
     }
@@ -618,7 +645,7 @@ fn powerpc64_32bit_gpr_views_map_to_containing_param_register() {
         (0x24, "param_2", 1usize),
     ] {
         let (name, idx) =
-            register_name_with_param(offset, 4, CallingConvention::PowerPc64).unwrap();
+            reg_param(offset, 4, CallingConvention::PowerPc64).unwrap();
         assert_eq!(name, expected_name, "offset=0x{offset:x}");
         assert_eq!(idx, Some(expected_slot), "offset=0x{offset:x}");
     }
@@ -626,23 +653,26 @@ fn powerpc64_32bit_gpr_views_map_to_containing_param_register() {
 
 #[test]
 fn powerpc_non_param_registers_are_named() {
-    let (name, idx) = register_name_with_param(0x04, 4, CallingConvention::PowerPc32).unwrap();
+    let (name, idx) = reg_param(0x04, 4, CallingConvention::PowerPc32).unwrap();
     assert_eq!(name, "r1");
     assert_eq!(idx, None);
-    let (name, idx) = register_name_with_param(0x1020, 4, CallingConvention::PowerPc32).unwrap();
-    assert_eq!(name, "LR");
+    let (name, idx) = reg_param(0x1020, 4, CallingConvention::PowerPc32).unwrap();
+    assert_eq!(name, "lr");
     assert_eq!(idx, None);
-    assert_eq!(powerpc_ghidra_reg_name(0x400, 1), Some("xer_so"));
+    assert_eq!(
+        register_namer_for_abi(CallingConvention::PowerPc32).hw_name_at(0x400, 1),
+        Some("xer_so".to_string())
+    );
 }
 
 #[test]
 fn powerpc_param_slots_work_for_abi_state() {
-    let ppc32 = AbiState::new(CallingConvention::PowerPc32, false, 4, 0);
+    let ppc32 = abi_state_for(CallingConvention::PowerPc32, 0);
     assert_eq!(ppc32.param_slot_for_name("r3"), Some(0));
     assert_eq!(ppc32.param_slot_for_name("r10"), Some(7));
     assert_eq!(ppc32.param_slot_for_name("r11"), None);
 
-    let ppc64 = AbiState::new(CallingConvention::PowerPc64, true, 8, 0);
+    let ppc64 = abi_state_for(CallingConvention::PowerPc64, 0);
     assert_eq!(ppc64.param_slot_for_name("r3"), Some(0));
     assert_eq!(ppc64.param_slot_for_name("r10"), Some(7));
     assert_eq!(ppc64.param_slot_for_name("r11"), None);
@@ -650,8 +680,7 @@ fn powerpc_param_slots_work_for_abi_state() {
 
 #[test]
 fn powerpc64_descriptor_callind_recovers_logical_function_pointer_param() {
-    let mut options = preview_options();
-    options.calling_convention = CallingConvention::PowerPc64;
+    let mut options = preview_options_for(CallingConvention::PowerPc64);
     options.format = "ELF64".to_string();
     options.pe_x64_only = false;
     options.pointer_size = 8;
@@ -720,8 +749,7 @@ fn powerpc64_descriptor_callind_recovers_logical_function_pointer_param() {
 
 #[test]
 fn powerpc64_direct_callind_recovers_function_pointer_param() {
-    let mut options = preview_options();
-    options.calling_convention = CallingConvention::PowerPc64;
+    let mut options = preview_options_for(CallingConvention::PowerPc64);
     options.format = "ELF64".to_string();
     options.pe_x64_only = false;
     options.pointer_size = 8;
@@ -773,8 +801,7 @@ fn powerpc64_direct_callind_recovers_function_pointer_param() {
 
 #[test]
 fn powerpc32_blr_returns_primary_r3_not_link_target() {
-    let mut options = preview_options();
-    options.calling_convention = CallingConvention::PowerPc32;
+    let mut options = preview_options_for(CallingConvention::PowerPc32);
     options.format = "ELF32".to_string();
     options.pe_x64_only = false;
     options.pointer_size = 4;
@@ -838,8 +865,7 @@ fn powerpc32_blr_returns_primary_r3_not_link_target() {
 
 #[test]
 fn arm32_direct_call_recovers_r0_argument() {
-    let mut options = preview_options();
-    options.calling_convention = CallingConvention::Arm32;
+    let mut options = preview_options_for(CallingConvention::Arm32);
     options.format = "ELF32".to_string();
     options.pe_x64_only = false;
     options.pointer_size = 4;
@@ -893,8 +919,7 @@ fn arm32_direct_call_recovers_r0_argument() {
 
 #[test]
 fn arm32_direct_call_materializes_r0_result() {
-    let mut options = preview_options();
-    options.calling_convention = CallingConvention::Arm32;
+    let mut options = preview_options_for(CallingConvention::Arm32);
     options.format = "ELF32".to_string();
     options.pe_x64_only = false;
     options.pointer_size = 4;
@@ -954,8 +979,7 @@ fn arm32_direct_call_materializes_r0_result() {
 
 #[test]
 fn arm32_r1_r0_pair_materializes_u64_return() {
-    let mut options = preview_options();
-    options.calling_convention = CallingConvention::Arm32;
+    let mut options = preview_options_for(CallingConvention::Arm32);
     options.format = "ELF32".to_string();
     options.pe_x64_only = false;
     options.pointer_size = 4;
@@ -1046,8 +1070,7 @@ fn arm32_r1_r0_pair_materializes_u64_return() {
 
 #[test]
 fn arm32_address_in_r1_does_not_force_u64_return() {
-    let mut options = preview_options();
-    options.calling_convention = CallingConvention::Arm32;
+    let mut options = preview_options_for(CallingConvention::Arm32);
     options.format = "ELF32".to_string();
     options.pe_x64_only = false;
     options.pointer_size = 4;
@@ -1140,8 +1163,7 @@ fn arm32_address_in_r1_does_not_force_u64_return() {
 
 #[test]
 fn arm32_branchind_tail_call_recovers_function_pointer_call() {
-    let mut options = preview_options();
-    options.calling_convention = CallingConvention::Arm32;
+    let mut options = preview_options_for(CallingConvention::Arm32);
     options.format = "ELF32".to_string();
     options.pe_x64_only = false;
     options.pointer_size = 4;
@@ -1245,8 +1267,7 @@ fn arm32_branchind_tail_call_recovers_function_pointer_call() {
 
 #[test]
 fn arm32_link_register_target_without_r0_def_is_void_return() {
-    let mut options = preview_options();
-    options.calling_convention = CallingConvention::Arm32;
+    let mut options = preview_options_for(CallingConvention::Arm32);
     options.format = "ELF32".to_string();
     options.pe_x64_only = false;
     options.pointer_size = 4;
@@ -1303,8 +1324,7 @@ fn arm32_link_register_target_without_r0_def_is_void_return() {
 
 #[test]
 fn aarch64_return_link_register_input_is_control_target_not_value() {
-    let mut options = preview_options();
-    options.calling_convention = CallingConvention::AArch64;
+    let mut options = preview_options_for(CallingConvention::AArch64);
     options.format = "ELF64".to_string();
     options.pe_x64_only = false;
 
@@ -1339,8 +1359,7 @@ fn aarch64_return_link_register_input_is_control_target_not_value() {
 
 #[test]
 fn aarch64_return_target_copy_input_is_control_target_not_value() {
-    let mut options = preview_options();
-    options.calling_convention = CallingConvention::AArch64;
+    let mut options = preview_options_for(CallingConvention::AArch64);
     options.format = "ELF64".to_string();
     options.pe_x64_only = false;
 
@@ -1393,8 +1412,7 @@ fn aarch64_return_target_copy_input_is_control_target_not_value() {
 #[test]
 #[ignore = "pre-existing failure"]
 fn aarch64_ret_link_register_copy_is_not_return_value() {
-    let mut options = preview_options();
-    options.calling_convention = CallingConvention::AArch64;
+    let mut options = preview_options_for(CallingConvention::AArch64);
     options.format = "ELF64".to_string();
     options.pe_x64_only = false;
 
@@ -1481,8 +1499,7 @@ fn aarch64_ret_link_register_copy_is_not_return_value() {
 #[test]
 #[ignore = "pre-existing failure"]
 fn aarch64_return_only_join_inlines_predecessor_return_values() {
-    let mut options = preview_options();
-    options.calling_convention = CallingConvention::AArch64;
+    let mut options = preview_options_for(CallingConvention::AArch64);
     options.format = "ELF64".to_string();
     options.pe_x64_only = false;
 
@@ -1905,10 +1922,10 @@ fn win64_return_target_load_without_return_register_def_is_void() {
 }
 
 fn aarch64_preview_options() -> MlilPreviewOptions {
-    let mut options = preview_options();
-    options.calling_convention = CallingConvention::AArch64;
+    let mut options = preview_options_for(CallingConvention::AArch64);
     options.format = "ELF64".to_string();
     options.pe_x64_only = false;
+    apply_cspec_for_convention(&mut options);
     options
 }
 
@@ -2286,8 +2303,7 @@ fn aarch64_join_return_preserves_predecessor_local_const_alias() {
 
 #[test]
 fn aarch64_instruction_local_conditional_merge_returns_both_values() {
-    let mut options = preview_options();
-    options.calling_convention = CallingConvention::AArch64;
+    let mut options = preview_options_for(CallingConvention::AArch64);
     options.format = "ELF64".to_string();
     options.pe_x64_only = false;
 
@@ -2446,11 +2462,11 @@ fn rax_is_never_a_param() {
         CallingConvention::AArch64,
     ] {
         if abi == CallingConvention::AArch64 {
-            let (name, idx) = register_name_with_param(0x00, 8, abi).unwrap();
+            let (name, idx) = reg_param(0x00, 8, abi).unwrap();
             assert_eq!(name, "param_1");
             assert_eq!(idx, Some(0));
         } else {
-            let (name, idx) = register_name_with_param(0x00, 8, abi).unwrap();
+            let (name, idx) = reg_param(0x00, 8, abi).unwrap();
             assert_eq!(name, "rax", "rax should stay 'rax' in {abi:?}");
             assert_eq!(idx, None, "rax must not be a param in {abi:?}");
         }
@@ -2465,9 +2481,9 @@ fn rsp_is_never_a_param() {
         CallingConvention::AArch64,
     ] {
         if abi == CallingConvention::AArch64 {
-            assert!(register_name_with_param(0x20, 8, abi).is_none());
+            assert!(reg_param(0x20, 8, abi).is_none());
         } else {
-            let (name, idx) = register_name_with_param(0x20, 8, abi).unwrap();
+            let (name, idx) = reg_param(0x20, 8, abi).unwrap();
             assert_eq!(name, "rsp");
             assert_eq!(idx, None);
         }
@@ -2481,27 +2497,28 @@ fn unknown_offset_returns_none() {
         CallingConvention::SystemVAmd64,
         CallingConvention::AArch64,
     ] {
-        assert!(register_name_with_param(0xDEAD, 8, abi).is_none());
+        assert!(reg_param(0xDEAD, 8, abi).is_none());
     }
 }
 
-// ── x64_ghidra_reg_name is always ABI-independent ─────────────────────────────
+// ── x86-64 SLA register names are ABI-independent ─────────────────────────────
 
 #[test]
 fn ghidra_reg_name_is_hardware_canonical() {
-    assert_eq!(x64_ghidra_reg_name(0x00), Some("rax"));
-    assert_eq!(x64_ghidra_reg_name(0x08), Some("rcx"));
-    assert_eq!(x64_ghidra_reg_name(0x10), Some("rdx"));
-    assert_eq!(x64_ghidra_reg_name(0x30), Some("rsi"));
-    assert_eq!(x64_ghidra_reg_name(0x38), Some("rdi"));
-    assert_eq!(x64_ghidra_reg_name(0x80), Some("r8"));
-    assert_eq!(x64_ghidra_reg_name(0x88), Some("r9"));
-    assert_eq!(x64_ghidra_reg_name(0xDEAD), None);
+    let namer = register_namer_for_abi(CallingConvention::WindowsX64);
+    assert_eq!(namer.hw_name_at(0x00, 8), Some("rax".to_string()));
+    assert_eq!(namer.hw_name_at(0x08, 8), Some("rcx".to_string()));
+    assert_eq!(namer.hw_name_at(0x10, 8), Some("rdx".to_string()));
+    assert_eq!(namer.hw_name_at(0x30, 8), Some("rsi".to_string()));
+    assert_eq!(namer.hw_name_at(0x38, 8), Some("rdi".to_string()));
+    assert_eq!(namer.hw_name_at(0x80, 8), Some("r8".to_string()));
+    assert_eq!(namer.hw_name_at(0x88, 8), Some("r9".to_string()));
+    assert_eq!(namer.hw_name_at(0xDEAD, 8), None);
 }
 
 #[test]
 fn abi_state_classifies_win64_home_slot() {
-    let abi = AbiState::new(CallingConvention::WindowsX64, true, 8, 0x40);
+    let abi = abi_state_for(CallingConvention::WindowsX64, 0x40);
     assert_eq!(
         abi.classify_stack_slot_origin(StackBase::Rsp, 0x40),
         NirBindingOrigin::HomeSlot(0x40)
@@ -2513,8 +2530,16 @@ fn abi_state_classifies_win64_home_slot() {
 }
 
 #[test]
-fn abi_state_recovers_win64_stack_arg_index() {
-    let abi = AbiState::new(CallingConvention::WindowsX64, true, 8, 0x40);
+fn abi_state_recovers_win64_stack_arg_index_from_cspec() {
+    let abi = AbiState::new_with_cspec(
+        CallingConvention::WindowsX64,
+        true,
+        8,
+        0x40,
+        Some(vec![0x08, 0x10, 0x80, 0x88]),
+        Some(40),
+        Some(8),
+    );
     assert_eq!(abi.stack_argument_index(0x20), Some(0));
     assert_eq!(abi.stack_argument_index(0x28), Some(1));
     assert_eq!(abi.stack_argument_index(0x18), None);
@@ -2522,15 +2547,15 @@ fn abi_state_recovers_win64_stack_arg_index() {
 
 #[test]
 fn loongarch32_a_registers_are_param_slots() {
-    let (name, idx) = register_name_with_param(0x110, 4, CallingConvention::LoongArch32).unwrap();
+    let (name, idx) = reg_param(0x110, 4, CallingConvention::LoongArch32).unwrap();
     assert_eq!(name, "param_1");
     assert_eq!(idx, Some(0));
 
-    let (name, idx) = register_name_with_param(0x12c, 4, CallingConvention::LoongArch32).unwrap();
+    let (name, idx) = reg_param(0x12c, 4, CallingConvention::LoongArch32).unwrap();
     assert_eq!(name, "param_8");
     assert_eq!(idx, Some(7));
 
-    let abi = AbiState::new(CallingConvention::LoongArch32, false, 4, 0);
+    let abi = abi_state_for(CallingConvention::LoongArch32, 0);
     assert_eq!(abi.param_slot_for_name("a0"), Some(0));
     assert_eq!(abi.param_slot_for_name("a7"), Some(7));
     assert_eq!(abi.param_slot_for_name("sp"), None);
@@ -2546,7 +2571,7 @@ fn loongarch32_alt_register_space_primary_return_is_a0() {
         is_constant: false,
         constant_val: 0,
     };
-    assert!(is_primary_return_register_for_abi(
+    assert!(is_primary_return_for_abi(
         &ret,
         CallingConvention::LoongArch32
     ));
@@ -2556,7 +2581,7 @@ fn loongarch32_alt_register_space_primary_return_is_a0() {
 fn mips32_a0_to_a3_are_params() {
     for slot in 0..4usize {
         let offset = 0x10 + (slot as u64 * 4);
-        let (name, idx) = register_name_with_param(offset, 4, CallingConvention::Mips32).unwrap();
+        let (name, idx) = reg_param(offset, 4, CallingConvention::Mips32).unwrap();
         assert_eq!(name, format!("param_{}", slot + 1));
         assert_eq!(idx, Some(slot));
     }
@@ -2564,22 +2589,22 @@ fn mips32_a0_to_a3_are_params() {
 
 #[test]
 fn mips32_non_param_registers_are_named() {
-    let (name, idx) = register_name_with_param(0x74, 4, CallingConvention::Mips32).unwrap();
+    let (name, idx) = reg_param(0x74, 4, CallingConvention::Mips32).unwrap();
     assert_eq!(name, "sp");
     assert_eq!(idx, None);
 
-    let (name, idx) = register_name_with_param(0x78, 4, CallingConvention::Mips32).unwrap();
-    assert_eq!(name, "fp");
+    let (name, idx) = reg_param(0x78, 4, CallingConvention::Mips32).unwrap();
+    assert_eq!(name, "s8");
     assert_eq!(idx, None);
 
-    let (name, idx) = register_name_with_param(0x7c, 4, CallingConvention::Mips32).unwrap();
+    let (name, idx) = reg_param(0x7c, 4, CallingConvention::Mips32).unwrap();
     assert_eq!(name, "ra");
     assert_eq!(idx, None);
 }
 
 #[test]
 fn mips32_param_slots_work_for_abi_state() {
-    let abi = AbiState::new(CallingConvention::Mips32, false, 4, 0);
+    let abi = abi_state_for(CallingConvention::Mips32, 0);
     assert_eq!(abi.param_slot_for_name("a0"), Some(0));
     assert_eq!(abi.param_slot_for_name("a3"), Some(3));
     assert_eq!(abi.param_slot_for_name("sp"), None);
@@ -2596,7 +2621,7 @@ fn mips32_primary_return_is_v0() {
         is_constant: false,
         constant_val: 0,
     };
-    assert!(is_primary_return_register_for_abi(
+    assert!(is_primary_return_for_abi(
         &ret,
         CallingConvention::Mips32
     ));
@@ -2604,8 +2629,7 @@ fn mips32_primary_return_is_v0() {
 
 #[test]
 fn mips32_guarded_trap_callother_does_not_surface_as_pcodeop() {
-    let mut options = preview_options();
-    options.calling_convention = CallingConvention::Mips32;
+    let mut options = preview_options_for(CallingConvention::Mips32);
     options.format = "ELF32".to_string();
     options.pe_x64_only = false;
     options.pointer_size = 4;

@@ -75,9 +75,10 @@ impl<'a> PreviewBuilder<'a> {
         let cfg_facts = crate::nir::structuring::CfgFactCache::analyze(&successors, &predecessors);
         dom_tree = cfg_facts.dominators().clone();
 
-        let entry_arity = infer_entry_register_param_arity(pcode, options.calling_convention).unwrap_or(0);
+        let register_namer = RegisterNamer::from_options(options);
+        let entry_arity = infer_entry_register_param_arity(pcode, &register_namer).unwrap_or(0);
         let mut register_param_aliases =
-            entry_analysis::collect_entry_register_param_aliases(pcode, options.calling_convention);
+            entry_analysis::collect_entry_register_param_aliases(pcode, &register_namer);
         register_param_aliases.retain(|_, idx| *idx < entry_arity);
         let stack_frame_size = entry_analysis::infer_entry_stack_frame_size(pcode, options);
         if preview_builder_diag_enabled() {

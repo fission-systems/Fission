@@ -453,6 +453,7 @@ mod tests {
     fn typed_fact_inventory_keeps_escaped_root_coarse() {
         let func = HirFunction {
             name: "escaped".to_string(),
+            int_param_offsets: Vec::new(),
             params: vec![NirBinding {
                 name: "param_1".to_string(),
                 ty: NirType::Ptr(Box::new(NirType::Unknown)),
@@ -484,6 +485,7 @@ mod tests {
     fn typed_fact_inventory_prefers_explicit_surface_type() {
         let func = HirFunction {
             name: "rect".to_string(),
+            int_param_offsets: Vec::new(),
             params: vec![NirBinding {
                 name: "param_1".to_string(),
                 ty: NirType::Ptr(Box::new(NirType::Unknown)),
@@ -528,6 +530,7 @@ mod tests {
     fn typed_fact_inventory_does_not_apply_ambient_windows_shapes_to_aarch64() {
         let func = HirFunction {
             name: "anonymous_aarch64_shape".to_string(),
+            int_param_offsets: Vec::new(),
             params: vec![NirBinding {
                 name: "param_1".to_string(),
                 ty: NirType::Ptr(Box::new(NirType::Unknown)),

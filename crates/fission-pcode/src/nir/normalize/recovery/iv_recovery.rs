@@ -2629,6 +2629,7 @@ mod tests {
     fn guarded_pointer_dowhile_upgrades_to_for() {
         let mut func = HirFunction {
             name: "guarded_pointer_loop".to_string(),
+            int_param_offsets: Vec::new(),
             params: Vec::new(),
             locals: Vec::new(),
             return_type: NirType::Unknown,
@@ -2720,6 +2721,7 @@ mod tests {
     fn unguarded_pointer_dowhile_stays_dowhile() {
         let mut func = HirFunction {
             name: "unguarded_pointer_loop".to_string(),
+            int_param_offsets: Vec::new(),
             params: Vec::new(),
             locals: Vec::new(),
             return_type: NirType::Unknown,
@@ -2748,6 +2750,7 @@ mod tests {
     fn early_return_guarded_pointer_dowhile_upgrades_to_indexed_for() {
         let mut func = HirFunction {
             name: "early_return_guarded_pointer_loop".to_string(),
+            int_param_offsets: Vec::new(),
             params: Vec::new(),
             locals: Vec::new(),
             return_type: int(32, false),
@@ -2829,6 +2832,7 @@ mod tests {
     fn tail_label_counted_loop_becomes_break_guarded_for() {
         let mut func = HirFunction {
             name: "tail_label_loop".to_string(),
+            int_param_offsets: Vec::new(),
             params: Vec::new(),
             locals: Vec::new(),
             return_type: NirType::Unknown,
@@ -2902,6 +2906,7 @@ mod tests {
     fn tail_label_loop_allows_body_local_goto() {
         let mut func = HirFunction {
             name: "tail_label_loop_with_local_goto".to_string(),
+            int_param_offsets: Vec::new(),
             params: Vec::new(),
             locals: Vec::new(),
             return_type: NirType::Unknown,
@@ -2944,6 +2949,7 @@ mod tests {
     fn tail_label_loop_rejects_nonlocal_body_goto() {
         let mut func = HirFunction {
             name: "tail_label_loop_with_external_goto".to_string(),
+            int_param_offsets: Vec::new(),
             params: Vec::new(),
             locals: Vec::new(),
             return_type: NirType::Unknown,
@@ -2977,6 +2983,7 @@ mod tests {
     fn tail_label_loop_rejects_multiple_backedges_to_head() {
         let mut func = HirFunction {
             name: "tail_label_loop_with_multiple_backedges".to_string(),
+            int_param_offsets: Vec::new(),
             params: Vec::new(),
             locals: Vec::new(),
             return_type: NirType::Unknown,
@@ -3016,6 +3023,7 @@ mod tests {
         // and has a valid linear iteration update!
         let mut func = HirFunction {
             name: "dataflow_loop".to_string(),
+            int_param_offsets: Vec::new(),
             params: Vec::new(),
             locals: Vec::new(),
             return_type: NirType::Unknown,
@@ -3075,6 +3083,7 @@ mod tests {
         // This is not a linear/affine recurrence of i, so it should fail to upgrade!
         let mut func = HirFunction {
             name: "invalid_dataflow_loop".to_string(),
+            int_param_offsets: Vec::new(),
             params: Vec::new(),
             locals: Vec::new(),
             return_type: NirType::Unknown,
@@ -3393,6 +3402,7 @@ mod tests {
         ];
         let mut func = HirFunction {
             name: "row_stride_fill".to_string(),
+            int_param_offsets: Vec::new(),
             params: Vec::new(),
             locals: Vec::new(),
             return_type: NirType::Unknown,

@@ -637,8 +637,10 @@ pub struct HirFunction {
     pub return_type: NirType,
     pub surface_return_type_name: Option<String>,
     pub body: Vec<HirStmt>,
-    /// ABI used for `param_k` register ordering and entry promotion (mirrors preview options).
+    /// ABI used for entry promotion and variadic heuristics (mirrors preview options).
     pub calling_convention: CallingConvention,
+    /// Integer param register offsets from `.cspec` (mirrors preview options at HIR build).
+    pub int_param_offsets: Vec<u64>,
     /// When false, x64-only normalize passes (entry param promotion, etc.) are skipped.
     pub is_64bit: bool,
     /// When true, entry-register reads should stay as hardware registers rather than ABI params.
@@ -661,6 +663,7 @@ impl Default for HirFunction {
             surface_return_type_name: None,
             body: Vec::new(),
             calling_convention: CallingConvention::default(),
+            int_param_offsets: Vec::new(),
             is_64bit: true,
             suppress_entry_register_params: false,
             callee_observed_max_arity: IndexMap::new(),

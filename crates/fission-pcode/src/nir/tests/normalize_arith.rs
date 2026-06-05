@@ -866,6 +866,7 @@ fn sborrow_compare_non_matching_shape_is_preserved() {
 fn normalize_hir_function_removes_dead_flag_intrinsic_temp() {
     let mut func = HirFunction {
         name: "flag_temp_cleanup".to_string(),
+            int_param_offsets: Vec::new(),
         params: vec![],
         locals: vec![NirBinding {
             name: "xVar1".to_string(),
@@ -1017,6 +1018,7 @@ fn repeated_integer_bitwise_identity_simplifies() {
 fn normalize_hir_function_inlines_multi_use_temp_within_single_if_condition() {
     let mut func = HirFunction {
         name: "inline_condition_temp".to_string(),
+            int_param_offsets: Vec::new(),
         params: vec![NirBinding {
             name: "eax".to_string(),
             ty: NirType::Int { bits: 32, signed: false },
@@ -1138,6 +1140,7 @@ fn compound_arm_flag_canonicalizes_to_signed_greater_than() {
 fn normalize_double_precision_reconstructs_32bit_arith_to_64bit() {
     let mut func = HirFunction {
         name: "test_dp".to_string(),
+            int_param_offsets: Vec::new(),
         params: Vec::new(),
         locals: vec![
             NirBinding {
@@ -1304,6 +1307,7 @@ fn normalize_variable_merge_coalesces_disjoint_variables() {
 
     let mut func = HirFunction {
         name: "test_merge".to_string(),
+            int_param_offsets: Vec::new(),
         params: vec![],
         locals: vec![
             make_binding("temp1"),
@@ -1367,6 +1371,7 @@ fn normalize_conditional_const_propagates_equality_branches() {
     let u32_ty = NirType::Int { bits: 32, signed: false };
     let mut func = HirFunction {
         name: "test_cond_const".to_string(),
+            int_param_offsets: Vec::new(),
         params: vec![],
         locals: vec![
             NirBinding {
@@ -1438,6 +1443,7 @@ fn normalize_three_way_compare_simplifies_to_relational() {
     // Pattern: (zext(a < b) + zext(a <= b) - 1) == 0  =>  a == b
     let mut func = HirFunction {
         name: "test_three_way".to_string(),
+            int_param_offsets: Vec::new(),
         params: vec![],
         locals: vec![
             NirBinding {
@@ -1524,6 +1530,7 @@ fn normalize_conditional_move() {
 
     let mut func = HirFunction {
         name: "test_cmov".to_string(),
+            int_param_offsets: Vec::new(),
         params: vec![],
         locals: vec![
             NirBinding {
@@ -1607,6 +1614,7 @@ fn subfloat_flow_narrowing_elides_redundant_casts() {
 
     let mut func = HirFunction {
         name: "test_subfloat".to_string(),
+            int_param_offsets: Vec::new(),
         params: vec![
             NirBinding {
                 name: "x".to_string(),
@@ -1686,6 +1694,7 @@ fn normalize_or_compare_simplifies_zero_comparisons() {
 
     let mut func = HirFunction {
         name: "test_or_compare".to_string(),
+            int_param_offsets: Vec::new(),
         params: vec![],
         locals: vec![
             NirBinding {
@@ -1880,6 +1889,7 @@ fn normalize_or_compare_simplifies_or_of_zero() {
 
     let mut func = HirFunction {
         name: "test_or_of_zero".to_string(),
+            int_param_offsets: Vec::new(),
         params: vec![],
         locals: vec![
             NirBinding {
@@ -2068,6 +2078,7 @@ fn normalize_float_sign_simplifies_manipulations() {
 
     let mut func = HirFunction {
         name: "test_float_sign".to_string(),
+            int_param_offsets: Vec::new(),
         params: vec![],
         locals: vec![
             NirBinding {
@@ -2213,6 +2224,7 @@ fn normalize_ignore_nan_simplifies_comparisons() {
 
     let mut func = HirFunction {
         name: "test_ignore_nan".to_string(),
+            int_param_offsets: Vec::new(),
         params: vec![],
         locals: vec![
             NirBinding {

@@ -592,6 +592,7 @@ mod tests {
     fn aggregate_fields_upgrades_unknown_pointer_to_aggregate() {
         let mut func = HirFunction {
             name: "test".to_string(),
+            int_param_offsets: Vec::new(),
             params: vec![NirBinding {
                 name: "param_1".to_string(),
                 ty: ptr_unknown(),
@@ -635,6 +636,7 @@ mod tests {
     fn aggregate_fields_upgrades_byte_pointer_when_shape_is_structured() {
         let mut func = HirFunction {
             name: "shape".to_string(),
+            int_param_offsets: Vec::new(),
             params: vec![NirBinding {
                 name: "param_1".to_string(),
                 ty: ptr_u8(),
@@ -699,6 +701,7 @@ mod tests {
     fn aggregate_fields_uses_windows_struct_field_names_when_surface_type_known() {
         let mut func = HirFunction {
             name: "rect_shape".to_string(),
+            int_param_offsets: Vec::new(),
             params: vec![NirBinding {
                 name: "param_1".to_string(),
                 ty: ptr_unknown(),
@@ -778,6 +781,7 @@ mod tests {
         // from multiple memory accesses on a pointer parameter.
         let mut func = HirFunction {
             name: "process_info_infer".to_string(),
+            int_param_offsets: Vec::new(),
             params: vec![NirBinding {
                 name: "param_1".to_string(),
                 ty: ptr_unknown(),
@@ -862,6 +866,7 @@ mod tests {
         // that name and propagate the surface type correctly.
         let mut func = HirFunction {
             name: "process_info_hint".to_string(),
+            int_param_offsets: Vec::new(),
             params: vec![NirBinding {
                 name: "param_1".to_string(),
                 ty: ptr_unknown(),

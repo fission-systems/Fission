@@ -43,6 +43,7 @@ use self::{
 };
 
 pub use self::abi::infer_entry_register_param_arity;
+pub use self::cspec::RegisterNamer;
 pub use self::normalize::{
     summarize_direct_tail_wrapper_from_ops, summarize_direct_tail_wrapper_from_pcode,
 };

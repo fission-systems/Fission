@@ -373,6 +373,7 @@ mod tests {
     fn interproc_summary_marks_zero_arity_as_non_escaping() {
         let mut func = HirFunction {
             name: "caller".to_string(),
+            int_param_offsets: Vec::new(),
             params: vec![],
             locals: vec![],
             return_type: NirType::Unknown,
@@ -397,6 +398,7 @@ mod tests {
     fn interproc_summary_detects_simple_wrapper_shape() {
         let mut func = HirFunction {
             name: "wrapper".to_string(),
+            int_param_offsets: Vec::new(),
             params: vec![empty_binding("param_1")],
             locals: vec![],
             return_type: NirType::Unknown,

@@ -8,6 +8,7 @@ use insta::assert_snapshot;
 fn snapshot_print_hir_function_minimal() {
     let func = HirFunction {
         name: "f_snapshot".to_string(),
+            int_param_offsets: Vec::new(),
         params: vec![],
         locals: vec![],
         return_type: NirType::Int {
@@ -72,6 +73,7 @@ fn printer_casts_pointer_subtraction_to_byte_difference() {
     let ptr_ty = NirType::Ptr(Box::new(uint_ty.clone()));
     let func = HirFunction {
         name: "ptr_diff".to_string(),
+            int_param_offsets: Vec::new(),
         params: vec![],
         locals: vec![
             NirBinding {

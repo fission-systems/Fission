@@ -207,6 +207,7 @@ mod tests {
     fn stabilizes_self_referential_assignment_before_do_while_condition() {
         let mut func = HirFunction {
             name: "test_post_assign_do_while".to_string(),
+            int_param_offsets: Vec::new(),
             return_type: NirType::Unknown,
             body: vec![HirStmt::DoWhile {
                 body: vec![HirStmt::Assign {
@@ -247,6 +248,7 @@ mod tests {
     fn stabilizes_self_referential_assignment_before_if_condition() {
         let mut func = HirFunction {
             name: "test_post_assign_if".to_string(),
+            int_param_offsets: Vec::new(),
             return_type: NirType::Unknown,
             body: vec![
                 HirStmt::Assign {

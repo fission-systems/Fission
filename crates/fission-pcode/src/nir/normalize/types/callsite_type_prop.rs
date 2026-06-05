@@ -1042,6 +1042,7 @@ mod tests {
     fn callsite_type_prop_promotes_import_param_name_and_surface_type() {
         let mut func = HirFunction {
             name: "caller".to_string(),
+            int_param_offsets: Vec::new(),
             params: vec![unknown_binding(
                 "param_1",
                 Some(NirBindingOrigin::ParamIndex(0)),
@@ -1076,6 +1077,7 @@ mod tests {
     fn callsite_type_prop_rewrites_target_through_wrapper_summary() {
         let mut func = HirFunction {
             name: "caller".to_string(),
+            int_param_offsets: Vec::new(),
             params: vec![],
             locals: vec![],
             return_type: NirType::Unknown,
@@ -1140,6 +1142,7 @@ mod tests {
         reset_normalize_wave_stats();
         let mut func = HirFunction {
             name: "caller".to_string(),
+            int_param_offsets: Vec::new(),
             params: vec![],
             locals: vec![],
             return_type: NirType::Unknown,
@@ -1195,6 +1198,7 @@ mod tests {
         reset_normalize_wave_stats();
         let mut func = HirFunction {
             name: "caller".to_string(),
+            int_param_offsets: Vec::new(),
             params: vec![],
             locals: vec![],
             return_type: NirType::Unknown,
@@ -1260,6 +1264,7 @@ mod tests {
         reset_normalize_wave_stats();
         let mut func = HirFunction {
             name: "fib".to_string(),
+            int_param_offsets: Vec::new(),
             params: vec![NirBinding {
                 name: "param_1".to_string(),
                 ty: NirType::Int {
@@ -1305,6 +1310,7 @@ mod tests {
         reset_normalize_wave_stats();
         let mut func = HirFunction {
             name: "caller".to_string(),
+            int_param_offsets: Vec::new(),
             params: vec![],
             locals: vec![],
             return_type: NirType::Unknown,
@@ -1381,6 +1387,7 @@ mod tests {
         reset_normalize_wave_stats();
         let mut func = HirFunction {
             name: "caller".to_string(),
+            int_param_offsets: Vec::new(),
             params: vec![],
             locals: vec![],
             return_type: NirType::Unknown,
@@ -1443,6 +1450,7 @@ mod tests {
         reset_normalize_wave_stats();
         let mut func = HirFunction {
             name: "caller".to_string(),
+            int_param_offsets: Vec::new(),
             params: vec![],
             locals: vec![],
             return_type: NirType::Unknown,

@@ -26,27 +26,30 @@ impl<'a> PreviewBuilder<'a> {
     pub(in crate::nir::builder) fn stack_pointer_register_name(
         &self,
         vn: &Varnode,
-    ) -> Option<&'static str> {
+    ) -> Option<String> {
         match vn.space_id {
-            UNIQUE_SPACE_ID => unique_register_name(vn.offset, vn.size),
+            UNIQUE_SPACE_ID => crate::arch::x86::unique_x86_register_name(vn.offset, vn.size)
+                .map(str::to_string),
             space_id if is_register_space_id(space_id) => {
                 if self.options.calling_convention == CallingConvention::X86_32 && vn.size == 4 {
                     match vn.offset {
-                        0x10 => return Some("esp"),
-                        0x14 => return Some("ebp"),
+                        0x10 => return Some("esp".to_string()),
+                        0x14 => return Some("ebp".to_string()),
                         _ => {}
                     }
                 }
-                register_name_with_param(vn.offset, vn.size, self.options.calling_convention)
-                    .and_then(|(name, idx)| {
-                        if let Some(idx) = idx {
-                            (idx < self.entry_arity).then_some(name)
-                        } else {
-                            Some(name)
-                        }
-                    })
-                    .or_else(|| register_hardware_name_for_abi(vn.offset, vn.size, self.options.calling_convention))
-                    .or_else(|| Some(register_name(vn.offset, vn.size)))
+                let namer = self.register_namer();
+                namer
+                    .register_name_with_param_owned(vn.offset, vn.size)
+                .and_then(|(name, idx)| {
+                    if let Some(idx) = idx {
+                        (idx < self.entry_arity).then_some(name)
+                    } else {
+                        Some(name)
+                    }
+                })
+                .or_else(|| self.sla_hw_name(vn.offset, vn.size))
+                .or_else(|| Some("reg".to_string()))
             }
             _ => None,
         }
@@ -57,7 +60,7 @@ impl<'a> PreviewBuilder<'a> {
         &self,
         vn: &Varnode,
     ) -> Option<String> {
-        if !is_primary_return_register_for_abi(vn, self.options.calling_convention) {
+        if !self.register_namer().is_primary_return_register(vn) {
             return None;
         }
         let site = self.current_lowering_site?;
@@ -500,8 +503,7 @@ impl<'a> PreviewBuilder<'a> {
             && candidate.offset == requested.offset
             && candidate.size == 4
             && requested.size == 8
-            && (x64_ghidra_reg_name(candidate.offset).is_some()
-                || aarch64_ghidra_reg_name(candidate.offset, candidate.size).is_some())
+            && self.register_namer().hw_name_at(candidate.offset, candidate.size).is_some()
     }
 
     pub(in crate::nir::builder) fn register_key_cross_space_covers(
@@ -541,47 +543,10 @@ impl<'a> PreviewBuilder<'a> {
             return None;
         }
         if is_register_space_id(key.space_id) {
-            return match self.options.calling_convention {
-                CallingConvention::AArch64 => {
-                    aarch64_ghidra_reg_name(key.offset, key.size).and_then(aarch64_gpr_family_index)
-                }
-                CallingConvention::Arm32 => {
-                    arm32_ghidra_reg_name(key.offset, key.size).and_then(arm32_gpr_family_index)
-                }
-                CallingConvention::PowerPc32 | CallingConvention::PowerPc64 => {
-                    powerpc_ghidra_reg_name_for_abi(
-                        key.offset,
-                        key.size,
-                        self.options.calling_convention,
-                    )
-                    .and_then(powerpc_gpr_family_index)
-                }
-                CallingConvention::LoongArch32 | CallingConvention::LoongArch64 => {
-                    loongarch_ghidra_reg_name_for_abi(
-                        key.offset,
-                        key.size,
-                        self.options.calling_convention,
-                    )
-                    .and_then(loongarch_gpr_family_index)
-                }
-                CallingConvention::Mips32 | CallingConvention::Mips64 => {
-                    mips_ghidra_reg_name_for_abi(
-                        key.offset,
-                        key.size,
-                        self.options.calling_convention,
-                    )
-                    .and_then(mips_gpr_family_index)
-                }
-                CallingConvention::WindowsX64 | CallingConvention::SystemVAmd64 => {
-                    x64_ghidra_reg_name(key.offset).and_then(crate::arch::x86::x86_gpr_family_index)
-                }
-                CallingConvention::X86_32 => {
-                    register_name_32(key.offset, 4).and_then(crate::arch::x86::x86_gpr_family_index)
-                }
-            };
+            return self.register_namer().gpr_family_index_at(key.offset, key.size);
         }
         if is_unique_space_id(key.space_id) {
-            let name = unique_register_name(key.offset, key.size)?;
+            let name = crate::arch::x86::unique_x86_register_name(key.offset, key.size)?;
             return crate::arch::x86::x86_gpr_family_index(name);
         }
         None
@@ -702,11 +667,12 @@ impl<'a> PreviewBuilder<'a> {
             && is_register_space_id(output.space_id)
             && output.size == 8
             && requested.size == 4
-            && aarch64_ghidra_reg_name(output.offset, output.size)
-                .and_then(aarch64_gpr_family_index)
+            && self
+                .register_namer()
+                .gpr_family_index_at(output.offset, output.size)
                 .is_some_and(|output_family| {
-                    aarch64_ghidra_reg_name(requested.offset, requested.size)
-                        .and_then(aarch64_gpr_family_index)
+                    self.register_namer()
+                        .gpr_family_index_at(requested.offset, requested.size)
                         == Some(output_family)
                 })
     }
@@ -1573,11 +1539,9 @@ impl<'a> PreviewBuilder<'a> {
         let site = match self.exact_def_site_for_call_target(target, scope) {
             Ok(site) => site,
             Err(_) if is_register_space_id(target.space_id) => {
-                return register_name_with_param(
-                    target.offset,
-                    target.size,
-                    self.options.calling_convention,
-                )
+                return self
+                    .register_namer()
+                    .register_name_with_param_owned(target.offset, target.size)
                 .and_then(|(name, param_index)| {
                     param_index.filter(|&idx| idx < self.entry_arity).map(|_| name.to_string())
                 });
@@ -1611,7 +1575,9 @@ impl<'a> PreviewBuilder<'a> {
             return None;
         }
         if is_register_space_id(ptr.space_id) {
-            return register_name_with_param(ptr.offset, ptr.size, self.options.calling_convention)
+            return self
+                .register_namer()
+                .register_name_with_param_owned(ptr.offset, ptr.size)
                 .and_then(|(name, param_index)| {
                     param_index.filter(|&idx| idx < self.entry_arity).map(|_| name.to_string())
                 });
@@ -1918,7 +1884,7 @@ impl<'a> PreviewBuilder<'a> {
                 return Ok(HirExpr::Var(param));
             }
             if is_unique_space_id(vn.space_id)
-                && let Some(name) = unique_register_name(vn.offset, vn.size)
+                && let Some(name) = crate::arch::x86::unique_x86_register_name(vn.offset, vn.size)
             {
                 return Ok(HirExpr::Var(name.to_string()));
             }
@@ -1928,12 +1894,13 @@ impl<'a> PreviewBuilder<'a> {
                     self.options.calling_convention,
                     CallingConvention::WindowsX64 | CallingConvention::SystemVAmd64
                 )
-                && let Some(name) = register_name_32(vn.offset, vn.size)
+                && let Some(name) = self.sla_hw_name(vn.offset, vn.size)
             {
-                let name = self.ensure_live_register_binding(name, vn.size);
+                let name = self.ensure_live_register_binding(&name, vn.size);
                 return Ok(HirExpr::Var(name));
             }
             if is_register_space_id(vn.space_id) {
+                let namer = self.register_namer();
                 let name = if (!self.options.is_64bit
                     && matches!(
                         self.options.calling_convention,
@@ -1941,10 +1908,11 @@ impl<'a> PreviewBuilder<'a> {
                     ))
                     || self.suppress_entry_register_params
                 {
-                    register_hardware_name_for_abi(vn.offset, vn.size, self.options.calling_convention)
-                        .unwrap_or_else(|| register_name(vn.offset, vn.size))
+                    self.sla_hw_name(vn.offset, vn.size)
+                        .unwrap_or_else(|| "reg".to_string())
                 } else {
-                    register_name_with_param(vn.offset, vn.size, self.options.calling_convention)
+                    namer
+                        .register_name_with_param_owned(vn.offset, vn.size)
                         .and_then(|(name, idx)| {
                             if let Some(idx) = idx {
                                 (idx < self.entry_arity).then_some(name)
@@ -1953,19 +1921,19 @@ impl<'a> PreviewBuilder<'a> {
                             }
                         })
                         .unwrap_or_else(|| {
-                            register_hardware_name_for_abi(vn.offset, vn.size, self.options.calling_convention)
-                                .unwrap_or_else(|| register_name(vn.offset, vn.size))
+                            self.sla_hw_name(vn.offset, vn.size)
+                                .unwrap_or_else(|| "reg".to_string())
                         })
                 };
-                let name = self.ensure_live_register_binding(name, vn.size);
+                let name = self.ensure_live_register_binding(&name, vn.size);
                 return Ok(HirExpr::Var(name));
             }
         }
         let stack_reg_name = self.stack_pointer_register_name(vn);
         if let Some(name) = stack_reg_name
-            && matches!(name, "rsp" | "esp" | "sp")
+            && matches!(name.as_str(), "rsp" | "esp" | "sp")
         {
-            return Ok(HirExpr::Var(name.to_string()));
+            return Ok(HirExpr::Var(name));
         }
         if let Some((_, op)) = def_site {
             if op.output.is_none()
@@ -1973,7 +1941,7 @@ impl<'a> PreviewBuilder<'a> {
                     op.opcode,
                     PcodeOpcode::Call | PcodeOpcode::CallInd | PcodeOpcode::CallOther
                 )
-                && is_primary_return_register_for_abi(vn, self.options.calling_convention)
+                && self.register_namer().is_primary_return_register(vn)
                 && let Some((site, _)) = def_site
                 && let Some(name) = self.call_result_bindings.get(&site)
             {
@@ -2058,7 +2026,7 @@ impl<'a> PreviewBuilder<'a> {
                     });
             }
             let cycle_name = if is_unique_space_id(vn.space_id) {
-                unique_register_name(vn.offset, vn.size)
+                crate::arch::x86::unique_x86_register_name(vn.offset, vn.size)
                     .map_or_else(|| {
                         let name = format!("tmp_{:x}", vn.offset);
                         self.ensure_live_register_binding(&name, vn.size)
@@ -2177,19 +2145,10 @@ impl<'a> PreviewBuilder<'a> {
         if !is_register_space_id(vn.space_id) {
             return None;
         }
-        match self.options.calling_convention {
-            CallingConvention::AArch64 => {
-                if vn.size == 8 {
-                    aarch64_ghidra_reg_name(vn.offset, 4).map(str::to_string)
-                } else {
-                    aarch64_ghidra_reg_name(vn.offset, vn.size).map(str::to_string)
-                }
-            }
-            _ => {
-                register_hardware_name_for_abi(vn.offset, vn.size, self.options.calling_convention)
-                    .map(str::to_string)
-            }
+        if self.options.calling_convention == CallingConvention::AArch64 && vn.size == 8 {
+            return self.sla_hw_name(vn.offset, 4);
         }
+        self.sla_hw_name(vn.offset, vn.size)
     }
 
     fn try_lower_diamond_select_for_varnode(

@@ -33,9 +33,8 @@ pub(crate) fn should_retry_with_strict_indirect_stop(error: &str) -> bool {
 /// - `pspec_tracked_context` — register constants (e.g. `DF=0` on x86-64)
 /// - `pspec_hidden_registers` — internal SLEIGH context variables to suppress
 ///
-/// Best-effort, zero-regression: if any spec is unavailable, options are returned
-/// unchanged and the pipeline falls back to hardcoded `CallingConvention` tables.
-fn apply_spec_overrides(binary: &LoadedBinary, options: &mut NirRenderOptions) {
+/// Best-effort: if any spec is unavailable, options are returned unchanged.
+pub(crate) fn apply_spec_overrides(binary: &LoadedBinary, options: &mut NirRenderOptions) {
     let Some(load_spec) = binary.load_spec() else {
         return;
     };
@@ -81,15 +80,9 @@ fn apply_spec_overrides(binary: &LoadedBinary, options: &mut NirRenderOptions) {
         language_id,
         compiler_spec_id,
         &reg_map,
-    ) {
-        if let Some(proto) = &resolved.default_proto {
-            if !proto.int_param_offsets.is_empty() {
-                options.cspec_param_offsets = Some(proto.int_param_offsets.clone());
-            }
-            if let Some(base) = proto.stack_arg_base {
-                options.cspec_stack_arg_base = Some(base);
-            }
-        }
+    ) && let Some(proto) = resolved.default_proto.as_ref()
+    {
+        fission_pcode::nir::cspec::apply::apply_resolved_proto_to_options(options, proto);
     }
 
     // Step 4: Ghidra-style .pspec lookup via the same .ldefs index.

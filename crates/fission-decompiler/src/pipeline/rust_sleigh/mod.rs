@@ -26,6 +26,7 @@ mod render_finish;
 
 pub use pipeline::decompile_with_rust_sleigh;
 pub use render_finish::select_nir_output_from_prebuilt_pcode;
+pub(crate) use render_finish::apply_spec_overrides;
 
 use fission_loader::loader::LoadedBinary;
 

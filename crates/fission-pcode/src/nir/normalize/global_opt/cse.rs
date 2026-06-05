@@ -233,6 +233,7 @@ mod tests {
     fn stack_slots_do_not_become_cse_value_representatives() {
         let mut func = HirFunction {
             name: "cse_stack_slot_rep".to_owned(),
+            int_param_offsets: Vec::new(),
             locals: vec![local("saved_param", NirBindingOrigin::HomeSlot(0))],
             body: vec![
                 assign("saved_param", HirExpr::Var("param_1".to_owned())),
@@ -252,6 +253,7 @@ mod tests {
     fn temp_representatives_still_drive_local_cse() {
         let mut func = HirFunction {
             name: "cse_temp_rep".to_owned(),
+            int_param_offsets: Vec::new(),
             body: vec![
                 assign(
                     "uVar1",
@@ -286,6 +288,7 @@ mod tests {
     fn loop_body_clobber_clears_outer_cse_representatives() {
         let mut func = HirFunction {
             name: "cse_loop_clobber".to_owned(),
+            int_param_offsets: Vec::new(),
             body: vec![
                 assign("uVar1", HirExpr::Var("param_1".to_owned())),
                 HirStmt::DoWhile {
@@ -316,6 +319,7 @@ mod tests {
     fn redefining_representative_invalidates_cse_map_entry() {
         let mut func = HirFunction {
             name: "cse_representative_redef".to_owned(),
+            int_param_offsets: Vec::new(),
             body: vec![
                 assign("uVar1", HirExpr::Var("param_1".to_owned())),
                 assign(

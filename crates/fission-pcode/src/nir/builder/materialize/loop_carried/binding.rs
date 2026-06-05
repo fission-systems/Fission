@@ -15,7 +15,7 @@ impl<'a> PreviewBuilder<'a> {
                 return Some(name);
             }
         }
-        if !Self::prior_output_aliases_loop_carried_update(prior_output, output) {
+        if !self.prior_output_aliases_loop_carried_update(prior_output, output) {
             return None;
         }
         // When the prior op is a passthrough (ZExt/SExt/Copy/Cast) whose input is
@@ -113,7 +113,7 @@ impl<'a> PreviewBuilder<'a> {
         }
         let prior_output = op.output.as_ref()?;
         if prior_output.size <= output.size
-            || !Self::prior_output_aliases_loop_carried_update(prior_output, output)
+            || !self.prior_output_aliases_loop_carried_update(prior_output, output)
         {
             return None;
         }
@@ -231,7 +231,7 @@ impl<'a> PreviewBuilder<'a> {
                 
                 let pred_key = VarnodeKey::from(pred_output);
                 if !Self::varnode_key_may_alias_output(&pred_key, output_key)
-                    && !Self::prior_output_aliases_loop_carried_update(pred_output, output)
+                    && !self.prior_output_aliases_loop_carried_update(pred_output, output)
                 {
                     visiting.remove(&pred_idx);
                     return false;

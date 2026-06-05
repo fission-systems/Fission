@@ -3,6 +3,7 @@ use super::*;
 fn preview_type_hints_surface_known_pointer_alias_on_param() {
     let mut func = HirFunction {
         name: "FUN_0x140006260".to_string(),
+            int_param_offsets: Vec::new(),
         params: vec![
             NirBinding {
                 name: "param_1".to_string(),
@@ -63,6 +64,7 @@ fn preview_type_hints_surface_known_pointer_alias_on_param() {
 fn preview_type_hints_surface_known_pointer_alias_through_wrapper_cast() {
     let mut func = HirFunction {
         name: "FUN_0x140006260".to_string(),
+            int_param_offsets: Vec::new(),
         params: vec![
             NirBinding {
                 name: "param_1".to_string(),

@@ -332,6 +332,11 @@ impl<'a> PreviewBuilder<'a> {
                 .then(|| "void".to_string()),
             body,
             calling_convention: self.options.calling_convention,
+            int_param_offsets: self
+                .options
+                .cspec_param_offsets
+                .clone()
+                .unwrap_or_default(),
             is_64bit: self.options.is_64bit,
             suppress_entry_register_params: self.suppress_entry_register_params,
             callee_observed_max_arity: IndexMap::new(),
@@ -540,29 +545,17 @@ impl<'a> PreviewBuilder<'a> {
         
         let mut name = None;
         if is_register_space_id(output.space_id) {
-            let is_param_reg = crate::nir::support::register_name_with_param(
-                output.offset,
-                output.size,
-                self.options.calling_convention,
-            )
-            .is_some_and(|(_, idx)| idx.is_some());
+            let namer = self.register_namer();
+            let is_param_reg = namer
+                .register_name_with_param_owned(output.offset, output.size)
+                .is_some_and(|(_, idx)| idx.is_some());
 
-            let is_ret_reg = crate::nir::support::is_primary_return_register_for_abi(
-                output,
-                self.options.calling_convention,
-            );
+            let is_ret_reg = namer.is_primary_return_register(output);
 
             if !is_param_reg && !is_ret_reg {
-                let candidate = crate::nir::support::register_name_32(output.offset, output.size)
-                    .or_else(|| crate::nir::support::unique_register_name(output.offset, output.size))
-                    .map(|s| s.to_string())
-                    .unwrap_or_else(|| {
-                        self.sla_hw_name(output.offset, output.size)
-                            .unwrap_or_else(|| {
-                                crate::nir::support::register_name(output.offset, output.size)
-                                    .to_string()
-                            })
-                    });
+                let candidate = self
+                    .sla_hw_name(output.offset, output.size)
+                    .unwrap_or_else(|| "reg".to_string());
                 if !self.params.values().any(|b| b.name == candidate) && !self.locals.values().any(|s| s.name == candidate) {
                     name = Some(candidate);
                 }
@@ -620,7 +613,7 @@ impl<'a> PreviewBuilder<'a> {
         // temp for GPR-family varnodes. This prevents a RAX=ZExt(EAX) passthrough
         // in the loop body from being given an opaque temp name (e.g. xVar1) that
         // then propagates back into EAX bindings via loop_header_explicit_merge_binding_name.
-        // We use `register_hardware_name_for_abi` for the narrow canonical name (EAX→"rax").
+        // We use SLA-first hardware naming for the narrow canonical name (EAX→"rax").
         let hw_name: Option<String> = if !output.is_constant
             && is_register_space_id(output.space_id)
             && matches!(
@@ -633,12 +626,7 @@ impl<'a> PreviewBuilder<'a> {
             let is_gpr = self.gpr_family_index_for_key(&output_key).is_some();
             let is_loop_head = self.loop_bodies.iter().any(|lb| lb.head == block_idx);
             if is_gpr && is_loop_head {
-                register_hardware_name_for_abi(
-                    output.offset,
-                    output.size,
-                    self.options.calling_convention,
-                )
-                .map(|s| s.to_string())
+                self.sla_hw_name(output.offset, output.size)
             } else {
                 None
             }
@@ -691,31 +679,25 @@ impl<'a> PreviewBuilder<'a> {
 
     /// Ghidra-style hardware register name lookup with SLA-first resolution.
     ///
-    /// Queries `self.options.sla_register_map` (populated from `ELEM_VARNODE_SYM`) first,
-    /// then falls back to the hardcoded `register_hardware_name_for_abi` table.
+    /// Queries `self.options.sla_register_map` (populated from SLA register model) first,
+    /// then falls back to the checked-in `.slaspec` register model.
     ///
-    /// Use this instead of `register_hardware_name_for_abi(...)` anywhere `self.options`
+    /// Use this instead of ad-hoc ABI tables anywhere `self.options` is available.
     /// is available — it covers all architectures uniformly via the `.ldefs`/SLA map.
     #[inline]
     pub(crate) fn sla_hw_name(&self, offset: u64, size: u32) -> Option<String> {
-        if let Some(map) = &self.options.sla_register_map {
-            if let Some(name) = map.get(&(offset, size)) {
-                return Some(name.clone());
-            }
-        }
-        register_hardware_name_for_abi(offset, size, self.options.calling_convention)
-            .map(|s| s.to_string())
+        crate::nir::cspec::RegisterNamer::from_options(&self.options).hw_name_at(offset, size)
     }
 
     /// ABI-independent hardware register name with SLA-first resolution.
     #[inline]
     pub(crate) fn sla_reg_name(&self, offset: u64, size: u32) -> String {
-        if let Some(map) = &self.options.sla_register_map {
-            if let Some(name) = map.get(&(offset, size)) {
-                return name.clone();
-            }
-        }
-        register_name(offset, size).to_string()
+        self.sla_hw_name(offset, size).unwrap_or_else(|| "reg".to_string())
+    }
+
+    #[inline]
+    pub(crate) fn register_namer(&self) -> crate::nir::cspec::RegisterNamer {
+        crate::nir::cspec::RegisterNamer::from_options(&self.options)
     }
 }
 

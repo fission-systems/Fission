@@ -907,6 +907,7 @@ mod tests {
             surface_return_type_name: None,
             body,
             calling_convention: Default::default(),
+            int_param_offsets: Vec::new(),
             is_64bit: true,
             suppress_entry_register_params: false,
             callee_observed_max_arity: Default::default(),

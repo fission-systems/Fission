@@ -1603,6 +1603,7 @@ mod tests {
     fn make_func(locals: Vec<NirBinding>, body: Vec<HirStmt>) -> HirFunction {
         HirFunction {
             name: "test".to_owned(),
+            int_param_offsets: Vec::new(),
             params: vec![],
             locals,
             return_type: NirType::Unknown,

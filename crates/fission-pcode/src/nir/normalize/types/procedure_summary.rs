@@ -246,6 +246,7 @@ mod tests {
     fn summarize_wrapper_hir_function_detects_tail_forwarder() {
         let func = HirFunction {
             name: "wrapper".to_string(),
+            int_param_offsets: Vec::new(),
             params: vec![empty_binding("param_1")],
             locals: vec![],
             return_type: NirType::Unknown,

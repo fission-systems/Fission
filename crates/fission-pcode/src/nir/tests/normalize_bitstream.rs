@@ -4,6 +4,7 @@ use super::*;
 fn normalize_hir_function_rewrites_flush_bits_to_pseudo_intrinsic() {
     let mut func = HirFunction {
         name: "flush_fn".to_string(),
+            int_param_offsets: Vec::new(),
         params: vec![NirBinding {
             name: "param_1".to_string(),
             ty: NirType::Ptr(Box::new(NirType::Unknown)),
@@ -130,6 +131,7 @@ fn normalize_hir_function_rewrites_table_driven_emit_to_intrinsic() {
     let idx = HirExpr::Var("idx".to_string());
     let mut func = HirFunction {
         name: "emit_fn".to_string(),
+            int_param_offsets: Vec::new(),
         params: vec![NirBinding {
             name: "param_1".to_string(),
             ty: NirType::Ptr(Box::new(NirType::Unknown)),
@@ -238,6 +240,7 @@ fn normalize_hir_function_rewrites_slot_based_write_bits_to_intrinsic() {
     };
     let mut func = HirFunction {
         name: "slot_write_bits_fn".to_string(),
+            int_param_offsets: Vec::new(),
         params: vec![NirBinding {
             name: "param_1".to_string(),
             ty: NirType::Ptr(Box::new(NirType::Unknown)),

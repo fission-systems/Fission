@@ -10,6 +10,11 @@ use super::{
     merge_inferred_branchind_targets,
 };
 
+fn preview_options_with_cspec(mut options: MlilPreviewOptions) -> MlilPreviewOptions {
+    crate::nir::cspec::test_maps::apply_preview_cspec(&mut options);
+    options
+}
+
 fn test_binary(op: HirBinaryOp, lhs: HirExpr, rhs: HirExpr, ty: NirType) -> HirExpr {
     HirExpr::Binary {
         op,
@@ -209,7 +214,7 @@ fn x64_cbranch_condition_recovers_cmp_jnz_from_fresh_zero_flag() {
             },
         ],
     };
-    let options = MlilPreviewOptions {
+    let options = preview_options_with_cspec(MlilPreviewOptions {
         pe_x64_only: false,
         is_64bit: true,
         is_big_endian: false,
@@ -226,7 +231,7 @@ fn x64_cbranch_condition_recovers_cmp_jnz_from_fresh_zero_flag() {
         relocation_names: Default::default(),
         calling_convention: CallingConvention::WindowsX64,
         ..Default::default()
-    };
+    });
     let mut builder = PreviewBuilder::new(&pcode, &options, None);
     let (_, cond) = builder
         .lower_cbranch_condition_for_block(0)
@@ -300,7 +305,7 @@ fn return_recovery_keeps_return_register_before_side_effect_store() {
             ],
         }],
     };
-    let options = MlilPreviewOptions {
+    let options = preview_options_with_cspec(MlilPreviewOptions {
         pe_x64_only: false,
         is_64bit: true,
         is_big_endian: false,
@@ -317,7 +322,7 @@ fn return_recovery_keeps_return_register_before_side_effect_store() {
         relocation_names: Default::default(),
         calling_convention: CallingConvention::AArch64,
         ..Default::default()
-    };
+    });
     let code = render_mlil_preview(&pcode, "store_then_return", 0x1000, &options)
         .expect("preview render");
 
@@ -378,7 +383,7 @@ fn x64_return_recovery_uses_eax_source_for_zero_extended_rax() {
             ],
         }],
     };
-    let options = MlilPreviewOptions {
+    let options = preview_options_with_cspec(MlilPreviewOptions {
         pe_x64_only: false,
         is_64bit: true,
         is_big_endian: false,
@@ -395,7 +400,7 @@ fn x64_return_recovery_uses_eax_source_for_zero_extended_rax() {
         relocation_names: Default::default(),
         calling_convention: CallingConvention::WindowsX64,
         ..Default::default()
-    };
+    });
     let code = render_mlil_preview(&pcode, "narrow_return", 0x1400_1000, &options)
         .expect("preview render");
 
@@ -459,7 +464,7 @@ fn arm32_return_target_register_uses_r0_value_not_lr_target() {
             },
         ],
     };
-    let options = MlilPreviewOptions {
+    let options = preview_options_with_cspec(MlilPreviewOptions {
         pe_x64_only: false,
         is_64bit: false,
         is_big_endian: false,
@@ -476,7 +481,7 @@ fn arm32_return_target_register_uses_r0_value_not_lr_target() {
         relocation_names: Default::default(),
         calling_convention: CallingConvention::Arm32,
         ..Default::default()
-    };
+    });
     let code =
         render_mlil_preview(&pcode, "return_r0", 0x1000, &options).expect("preview render");
 
@@ -542,7 +547,7 @@ fn arm32_pair_return_fixture(r0_value: i64, r1_value: i64) -> PcodeFunction {
 }
 
 fn arm32_pair_return_options(is_big_endian: bool) -> MlilPreviewOptions {
-    MlilPreviewOptions {
+    preview_options_with_cspec(MlilPreviewOptions {
         pe_x64_only: false,
         is_64bit: false,
         is_big_endian,
@@ -559,7 +564,7 @@ fn arm32_pair_return_options(is_big_endian: bool) -> MlilPreviewOptions {
         relocation_names: Default::default(),
         calling_convention: CallingConvention::Arm32,
         ..Default::default()
-    }
+    })
 }
 
 #[test]

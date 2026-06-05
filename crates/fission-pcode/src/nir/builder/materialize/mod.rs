@@ -73,7 +73,7 @@ impl<'a> PreviewBuilder<'a> {
         {
             return Vec::new();
         }
-        primary_return_registers(self.options.pointer_size, self.options.calling_convention)
+        self.register_namer().primary_return_registers()
     }
 
     fn callother_is_same_instruction_call_marker(
@@ -759,7 +759,7 @@ impl<'a> PreviewBuilder<'a> {
             && matches!(op.opcode, PcodeOpcode::IntZExt | PcodeOpcode::Cast)
             && op.inputs.first().is_some_and(|input| input.size <= 4)
         {
-            return aarch64_ghidra_reg_name(output.offset, 4).map(|name| (name.to_string(), 4));
+            return self.sla_hw_name(output.offset, 4).map(|name| (name, 4));
         }
         if live_register_loop_carried {
             let name = self.sla_hw_name(output.offset, output.size)?;
@@ -874,7 +874,7 @@ impl<'a> PreviewBuilder<'a> {
         // equivalent for accumulation. Other partial registers (r12d, etc.) remain rejected.
         let is_32bit_return_reg = self.options.is_64bit
             && output.size == 4
-            && is_primary_return_register_for_abi(output, self.options.calling_convention);
+            && self.register_namer().is_primary_return_register(output);
         if output.is_constant
             || !is_register_space_id(output.space_id)
             || (output.size != self.options.pointer_size && !is_32bit_return_reg)
@@ -893,7 +893,7 @@ impl<'a> PreviewBuilder<'a> {
         }
         let output_key = VarnodeKey::from(output);
         if self.gpr_family_index_for_key(&output_key).is_none()
-            && !is_primary_return_register_for_abi(output, self.options.calling_convention)
+            && !self.register_namer().is_primary_return_register(output)
         {
             self.trace_direct_successor_accumulator_merge_rejected(
                 block.start_address,
@@ -1007,7 +1007,7 @@ impl<'a> PreviewBuilder<'a> {
         // registers. See the corresponding guard in merge_binding_name_for_direct_successor_accumulator.
         let is_32bit_return_reg = self.options.is_64bit
             && output.size == 4
-            && is_primary_return_register_for_abi(output, self.options.calling_convention);
+            && self.register_namer().is_primary_return_register(output);
         if output.is_constant
             || !is_register_space_id(output.space_id)
             || (output.size != self.options.pointer_size && !is_32bit_return_reg)
@@ -2442,14 +2442,13 @@ impl<'a> PreviewBuilder<'a> {
     }
 
     pub(super) fn canonical_x86_gpr64_name_for_value(&self, value: &Varnode) -> Option<(&'static str, usize)> {
-        let raw_name = register_hardware_name_for_abi(
-            value.offset,
-            value.size,
-            self.options.calling_convention,
-        )
-        .or_else(|| register_name_32(value.offset, value.size))
-        .or_else(|| unique_register_name(value.offset, value.size))?;
-        Self::canonical_x86_gpr64_name_for_raw_name(raw_name)
+        let raw_name = self
+            .sla_hw_name(value.offset, value.size)
+            .or_else(|| {
+                crate::arch::x86::unique_x86_register_name(value.offset, value.size)
+                    .map(str::to_string)
+            })?;
+        Self::canonical_x86_gpr64_name_for_raw_name(raw_name.as_str())
     }
 
     fn canonical_x86_gpr64_name_for_value_source(
@@ -2837,7 +2836,7 @@ impl<'a> PreviewBuilder<'a> {
         }
         if !self
             .stack_pointer_register_name(&op.inputs[1])
-            .is_some_and(|name| matches!(name, "rsp" | "esp" | "sp"))
+            .is_some_and(|name| matches!(name.as_str(), "rsp" | "esp" | "sp"))
         {
             return false;
         }
@@ -2857,7 +2856,7 @@ impl<'a> PreviewBuilder<'a> {
 
     fn output_is_stack_pointer_register(&self, output: &Varnode) -> bool {
         self.stack_pointer_register_name(output)
-            .is_some_and(|name| matches!(name, "rsp" | "esp" | "sp"))
+            .is_some_and(|name| matches!(name.as_str(), "rsp" | "esp" | "sp"))
     }
 
     fn is_predicate_passthrough_to_terminator(op: &PcodeOp) -> bool {
