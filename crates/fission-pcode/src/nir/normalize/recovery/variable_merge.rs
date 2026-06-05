@@ -1,6 +1,6 @@
 use super::super::*;// For accessing normalizer structures
 use crate::nir::var_rename::rename_vars_in_stmts;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 fn collect_direct_copies(stmts: &[HirStmt]) -> std::collections::HashSet<(String, String)> {
     let mut copies = std::collections::HashSet::new();
@@ -44,6 +44,148 @@ fn collect_direct_copies(stmts: &[HirStmt]) -> std::collections::HashSet<(String
     }
     visit(stmts, &mut copies);
     copies
+}
+
+fn transitive_copy_aliases(
+    direct_copies: &std::collections::HashSet<(String, String)>,
+    local_names: &HashSet<String>,
+) -> HashMap<String, String> {
+    fn root(parent: &HashMap<String, String>, node: &str) -> String {
+        let mut cur = node.to_string();
+        loop {
+            match parent.get(&cur) {
+                Some(p) if p != &cur => cur = p.clone(),
+                _ => break,
+            }
+        }
+        cur
+    }
+
+    let eligible_copies = direct_copies.iter().filter(|(a, b)| {
+        local_names.contains(a)
+            && local_names.contains(b)
+            && (is_eligible_for_speculative_merge_by_name(a)
+                || is_eligible_for_speculative_merge_by_name(b))
+    });
+
+    let mut parent: HashMap<String, String> = HashMap::new();
+    for (a, b) in eligible_copies {
+        let ra = root(&parent, a);
+        let rb = root(&parent, b);
+        if ra == rb {
+            continue;
+        }
+        let (keep, drop) = if name_priority(&ra) >= name_priority(&rb) {
+            (ra, rb)
+        } else {
+            (rb, ra)
+        };
+        parent.insert(drop, keep);
+    }
+
+    let mut nodes = HashSet::<String>::new();
+    for (a, b) in direct_copies {
+        if local_names.contains(a) {
+            nodes.insert(a.clone());
+        }
+        if local_names.contains(b) {
+            nodes.insert(b.clone());
+        }
+    }
+    let mut aliases = HashMap::<String, String>::new();
+    for node in nodes {
+        let canonical = root(&parent, &node);
+        if canonical != node {
+            aliases.insert(node, canonical);
+        }
+    }
+    aliases
+}
+
+fn collect_dominant_copy_join_merges(stmts: &[HirStmt]) -> Vec<(String, String)> {
+    let mut renames = Vec::new();
+    collect_dominant_copy_join_merges_in_stmts(stmts, &mut renames);
+    renames
+}
+
+fn collect_dominant_copy_join_merges_in_stmts(stmts: &[HirStmt], renames: &mut Vec<(String, String)>) {
+    for stmt in stmts {
+        match stmt {
+            HirStmt::If { then_body, else_body, .. } => {
+                if let (Some((dest1, src1)), Some((dest2, src2))) = (
+                    last_direct_var_copy(then_body),
+                    last_direct_var_copy(else_body),
+                ) {
+                    if src1 == src2
+                        && dest1 != dest2
+                        && is_eligible_for_speculative_merge_by_name(&dest1)
+                        && is_eligible_for_speculative_merge_by_name(&dest2)
+                    {
+                        let (keep, drop) = if name_priority(&dest1) >= name_priority(&dest2) {
+                            (dest1, dest2)
+                        } else {
+                            (dest2, dest1)
+                        };
+                        renames.push((drop, keep));
+                    }
+                }
+                collect_dominant_copy_join_merges_in_stmts(then_body, renames);
+                collect_dominant_copy_join_merges_in_stmts(else_body, renames);
+            }
+            HirStmt::Block(body)
+            | HirStmt::While { body, .. }
+            | HirStmt::DoWhile { body, .. } => {
+                collect_dominant_copy_join_merges_in_stmts(body, renames);
+            }
+            HirStmt::For { init, update, body, .. } => {
+                if let Some(init) = init {
+                    collect_dominant_copy_join_merges_in_stmts(std::slice::from_ref(init), renames);
+                }
+                if let Some(update) = update {
+                    collect_dominant_copy_join_merges_in_stmts(std::slice::from_ref(update), renames);
+                }
+                collect_dominant_copy_join_merges_in_stmts(body, renames);
+            }
+            HirStmt::Switch { cases, default, .. } => {
+                for case in cases {
+                    collect_dominant_copy_join_merges_in_stmts(&case.body, renames);
+                }
+                collect_dominant_copy_join_merges_in_stmts(default, renames);
+            }
+            _ => {}
+        }
+    }
+}
+
+fn last_direct_var_copy(body: &[HirStmt]) -> Option<(String, String)> {
+    body.iter().rev().find_map(|stmt| {
+        if let HirStmt::Assign {
+            lhs: HirLValue::Var(dest),
+            rhs: HirExpr::Var(src),
+        } = stmt
+        {
+            Some((dest.clone(), src.clone()))
+        } else {
+            None
+        }
+    })
+}
+
+fn is_eligible_for_speculative_merge_by_name(name: &str) -> bool {
+    if is_hardware_register_variable(name) {
+        let name_lower = name.to_lowercase();
+        let is_sp_or_bp = matches!(
+            name_lower.as_str(),
+            "rsp" | "rbp" | "esp" | "ebp" | "sp" | "bp"
+        );
+        return !is_sp_or_bp
+            && (name.starts_with("xVar")
+                || name.starts_with("uVar")
+                || name.starts_with("iVar")
+                || name.starts_with("bVar")
+                || name.starts_with("tmp_"));
+    }
+    name_priority(name) < 2
 }
 
 pub(crate) fn apply_variable_merge_pass(func: &mut HirFunction) -> bool {
@@ -106,7 +248,6 @@ pub(crate) fn apply_variable_merge_pass(func: &mut HirFunction) -> bool {
                     (j, i, b2_name.clone(), b1_name.clone(), b2_ty.clone(), b1_ty.clone())
                 };
 
-                eprintln!("DEBUG STACK MERGE: merging {} into {}", merge_name, keep_name);
                 stack_renames.push((merge_name, keep_name));
 
                 let unified_ty = force_unify_types_for_merge(&keep_ty, &merge_ty);
@@ -130,9 +271,27 @@ pub(crate) fn apply_variable_merge_pass(func: &mut HirFunction) -> bool {
                 local.ty = updated.ty.clone();
             }
         }
+        changed = true;
     }
 
     let direct_copies = collect_direct_copies(&func.body);
+    let join_copy_merges = collect_dominant_copy_join_merges(&func.body);
+    let mut direct_copies = direct_copies;
+    for (a, b) in join_copy_merges {
+        direct_copies.insert((a.clone(), b.clone()));
+        direct_copies.insert((b, a));
+    }
+    let local_names: HashSet<String> = func.locals.iter().map(|b| b.name.clone()).collect();
+    let copy_aliases = transitive_copy_aliases(&direct_copies, &local_names);
+
+    if !copy_aliases.is_empty() {
+        let copy_renames: Vec<(String, String)> = copy_aliases.into_iter().collect();
+        rename_vars_in_stmts(&mut func.body, &copy_renames);
+        let renamed_from: std::collections::HashSet<String> =
+            copy_renames.iter().map(|(from, _)| from.clone()).collect();
+        func.locals.retain(|local| !renamed_from.contains(&local.name));
+        changed = true;
+    }
 
     // Step 2: Speculatively merge variables with disjoint live ranges and compatible types
     let mut live_ranges = LiveRangeCollector {

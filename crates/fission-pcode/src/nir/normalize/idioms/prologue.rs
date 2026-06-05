@@ -47,7 +47,8 @@ const CALLEE_SAVED_REGS: &[&str] = &[
 ];
 
 fn is_callee_saved(name: &str) -> bool {
-    CALLEE_SAVED_REGS.contains(&name)
+    let lower = name.to_ascii_lowercase();
+    CALLEE_SAVED_REGS.contains(&lower.as_str())
 }
 
 fn looks_like_stack_scaffold_name(name: &str) -> bool {
@@ -1125,6 +1126,30 @@ mod tests {
             lhs: HirLValue::Var(reg.to_owned()),
             rhs: HirExpr::Var(slot.to_owned()),
         }
+    }
+
+    #[test]
+    fn removes_orphaned_slot_epilogue_restore_with_uppercase_register() {
+        let mut func = HirFunction {
+            name: "fill_matrix".to_owned(),
+            body: vec![
+                HirStmt::Expr(HirExpr::Const(42, u64_ty())),
+                slot_restore("RDI", "home_0"),
+                HirStmt::Return(None),
+            ],
+            locals: vec![NirBinding {
+                name: "home_0".to_owned(),
+                ty: u64_ty(),
+                surface_type_name: None,
+                origin: None,
+                initializer: None,
+            }],
+            ..Default::default()
+        };
+
+        assert!(remove_callee_save_prologue_epilogue(&mut func));
+        assert_eq!(func.body.len(), 2, "uppercase register restore should be removed");
+        assert!(!func.locals.iter().any(|b| b.name == "home_0"));
     }
 
     #[test]

@@ -383,7 +383,7 @@ fn collect_constraints_expr(
                             .push(UseConstraint::Signed { bits });
                     }
                 }
-                HirBinaryOp::Add | HirBinaryOp::Sub | HirBinaryOp::Mul | HirBinaryOp::And | HirBinaryOp::Or | HirBinaryOp::Xor | HirBinaryOp::Shl | HirBinaryOp::Shr => {
+                HirBinaryOp::Add | HirBinaryOp::Sub | HirBinaryOp::Mul | HirBinaryOp::Div | HirBinaryOp::Mod | HirBinaryOp::And | HirBinaryOp::Or | HirBinaryOp::Xor | HirBinaryOp::Shl | HirBinaryOp::Shr => {
                     collect_arithmetic_result_constraints(lhs, rhs, ty, known_binding_types, out);
                 }
                 _ => {}

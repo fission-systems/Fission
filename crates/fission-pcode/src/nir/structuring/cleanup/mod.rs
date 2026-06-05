@@ -5,12 +5,104 @@ pub(crate) use goto::eliminate_redundant_gotos;
 
 pub(crate) fn finalize_structured_body(mut body: Vec<HirStmt>) -> Vec<HirStmt> {
     body = eliminate_redundant_gotos(body);
+    body = dedupe_structured_region_entry_labels(body);
     body = cleanup_redundant_labels(body, None);
     let referenced = collect_referenced_labels(&body);
     while matches!(body.first(), Some(HirStmt::Label(label)) if !referenced.contains(label)) {
         body.remove(0);
     }
     body
+}
+
+/// Remove duplicate block labels emitted both outside and inside a structured region
+/// (e.g. `Label(L); while (1) { Label(L); ... }`). Keeps the inner declaration so
+/// loop back-edges and continue lowering remain anchored on the region body.
+pub(crate) fn dedupe_structured_region_entry_labels(mut body: Vec<HirStmt>) -> Vec<HirStmt> {
+    dedupe_structured_region_entry_labels_in_place(&mut body);
+    body
+}
+
+fn first_meaningful_label(stmts: &[HirStmt]) -> Option<&str> {
+    stmts.iter().find_map(|stmt| {
+        if let HirStmt::Label(label) = stmt {
+            Some(label.as_str())
+        } else {
+            None
+        }
+    })
+}
+
+fn dedupe_structured_region_entry_labels_in_place(stmts: &mut Vec<HirStmt>) {
+    let mut i = 0;
+    while i < stmts.len() {
+        if let HirStmt::Label(outer) = stmts[i].clone() {
+            if i + 1 < stmts.len() {
+                let inner_matches = match &mut stmts[i + 1] {
+                    HirStmt::While { body, .. }
+                    | HirStmt::DoWhile { body, .. }
+                    | HirStmt::For { body, .. } => {
+                        dedupe_structured_region_entry_labels_in_place(body);
+                        first_meaningful_label(body) == Some(outer.as_str())
+                    }
+                    _ => false,
+                };
+                if inner_matches {
+                    stmts.remove(i);
+                    continue;
+                }
+            }
+        }
+        dedupe_structured_region_entry_labels_stmt(&mut stmts[i]);
+        i += 1;
+    }
+}
+
+fn dedupe_structured_region_entry_labels_stmt(stmt: &mut HirStmt) {
+    match stmt {
+        HirStmt::Block(body) => dedupe_structured_region_entry_labels_in_place(body),
+        HirStmt::If { then_body, else_body, .. } => {
+            dedupe_structured_region_entry_labels_in_place(then_body);
+            dedupe_structured_region_entry_labels_in_place(else_body);
+        }
+        HirStmt::While { body, .. }
+        | HirStmt::DoWhile { body, .. }
+        | HirStmt::For { body, .. } => {
+            dedupe_structured_region_entry_labels_in_place(body);
+        }
+        HirStmt::Switch { cases, default, .. } => {
+            for case in cases.iter_mut() {
+                if case.body.len() >= 2 {
+                    if let HirStmt::Label(outer) = case.body[0].clone() {
+                        let inner_matches = match &mut case.body[1] {
+                            HirStmt::While { body, .. }
+                            | HirStmt::DoWhile { body, .. }
+                            | HirStmt::For { body, .. } => {
+                                dedupe_structured_region_entry_labels_in_place(body);
+                                first_meaningful_label(body) == Some(outer.as_str())
+                            }
+                            _ => false,
+                        };
+                        if inner_matches {
+                            case.body.remove(0);
+                        }
+                    }
+                }
+                dedupe_structured_region_entry_labels_in_place(&mut case.body);
+            }
+            dedupe_structured_region_entry_labels_in_place(default);
+        }
+        _ => {}
+    }
+}
+
+/// True when `child_body` is a single loop whose body already begins with `label`.
+pub(crate) fn child_body_has_entry_label(child_body: &[HirStmt], label: &str) -> bool {
+    child_body.iter().any(|stmt| match stmt {
+        HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } | HirStmt::For { body, .. } => {
+            first_meaningful_label(body) == Some(label)
+        }
+        _ => false,
+    })
 }
 
 /// Returns true if the body contains any `Goto(label)` whose corresponding
@@ -608,6 +700,34 @@ mod tests {
             finalized,
             vec![HirStmt::Return(Some(HirExpr::Var("ret".to_string())))]
         );
+    }
+
+    #[test]
+    fn dedupe_structured_region_entry_labels_removes_outer_loop_header_duplicate() {
+        let body = vec![
+            HirStmt::Label("block_140001890".to_string()),
+            HirStmt::While {
+                cond: HirExpr::Const(1, NirType::Bool),
+                body: vec![
+                    HirStmt::Label("block_140001890".to_string()),
+                    HirStmt::Assign {
+                        lhs: HirLValue::Var("x".to_string()),
+                        rhs: HirExpr::Const(0, NirType::Int {
+                            bits: 32,
+                            signed: false,
+                        }),
+                    },
+                ],
+            },
+        ];
+
+        let deduped = dedupe_structured_region_entry_labels(body);
+        assert_eq!(deduped.len(), 1);
+        let HirStmt::While { body, .. } = &deduped[0] else {
+            panic!("expected while");
+        };
+        assert_eq!(body.len(), 2);
+        assert!(matches!(body[0], HirStmt::Label(ref l) if l == "block_140001890"));
     }
 
     #[test]

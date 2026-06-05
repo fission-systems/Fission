@@ -7,6 +7,7 @@
 //! [`crate::nir::vsa::jump_resolver`] (intervals, not a constant lattice).
 
 use super::super::analysis::defuse::{eval_hir_expr_with_const_env, fold_expr_hir};
+use super::super::cleanup::expr_has_side_effects;
 use super::super::pipeline::is_large_hir_function;
 use super::super::*;
 use std::collections::{HashMap, HashSet};
@@ -106,6 +107,45 @@ fn env_without_vars(env: &ConstEnv, vars: &HashSet<String>) -> ConstEnv {
         out.remove(var);
     }
     out
+}
+
+fn stmt_list_has_side_effects(stmts: &[HirStmt]) -> bool {
+    stmts.iter().any(stmt_has_side_effects)
+}
+
+fn stmt_has_side_effects(stmt: &HirStmt) -> bool {
+    match stmt {
+        HirStmt::Assign { lhs, rhs } => {
+            lvalue_has_side_effects(lhs) || expr_has_side_effects(rhs)
+        }
+        HirStmt::Expr(expr) | HirStmt::Return(Some(expr)) => expr_has_side_effects(expr),
+        HirStmt::Block(body) => stmt_list_has_side_effects(body),
+        HirStmt::If {
+            then_body,
+            else_body,
+            ..
+        } => stmt_list_has_side_effects(then_body) || stmt_list_has_side_effects(else_body),
+        HirStmt::While { body, .. }
+        | HirStmt::DoWhile { body, .. }
+        | HirStmt::For { body, .. } => stmt_list_has_side_effects(body),
+        HirStmt::Switch { cases, default, .. } => {
+            cases.iter().any(|c| stmt_list_has_side_effects(&c.body))
+                || stmt_list_has_side_effects(default)
+        }
+        HirStmt::VaStart { .. } => true,
+        _ => false,
+    }
+}
+
+fn lvalue_has_side_effects(lhs: &HirLValue) -> bool {
+    match lhs {
+        HirLValue::Var(_) => false,
+        HirLValue::Deref { ptr, .. } => expr_has_side_effects(ptr),
+        HirLValue::Index { base, index, .. } => {
+            expr_has_side_effects(base) || expr_has_side_effects(index)
+        }
+        HirLValue::FieldAccess { base, .. } => expr_has_side_effects(base),
+    }
 }
 
 fn loop_variant_vars(body: &[HirStmt], all_xvars: &HashSet<String>) -> HashSet<String> {
@@ -261,6 +301,36 @@ mod tests {
         };
         assert_eq!(rhs.as_ref(), &var("x"));
     }
+
+    #[test]
+    fn sccp_does_not_prune_if_when_discarded_branch_has_side_effects() {
+        let mut func = HirFunction {
+            name: "test".to_string(),
+            return_type: int(32),
+            body: vec![HirStmt::If {
+                cond: HirExpr::Const(1, int(32)),
+                then_body: vec![HirStmt::Expr(HirExpr::Call {
+                    target: "add".to_string(),
+                    args: vec![HirExpr::Const(1, int(32)), HirExpr::Const(2, int(32))],
+                    ty: int(32),
+                })],
+                else_body: vec![HirStmt::Expr(HirExpr::Call {
+                    target: "max".to_string(),
+                    args: vec![HirExpr::Const(3, int(32)), HirExpr::Const(4, int(32))],
+                    ty: int(32),
+                })],
+            }],
+            ..Default::default()
+        };
+
+        apply_sccp_pass(&mut func);
+
+        let HirStmt::If { then_body, else_body, .. } = &func.body[0] else {
+            panic!("side-effectful branch should not be pruned");
+        };
+        assert_eq!(then_body.len(), 1);
+        assert_eq!(else_body.len(), 1);
+    }
 }
 
 fn eval_truth(expr: &HirExpr, env: &ConstEnv) -> Option<bool> {
@@ -407,17 +477,17 @@ fn sccp_stmt(
                 changed |= sccp_subst_expr(cond, &pre);
                 changed |= fold_expr_hir(cond);
                 match eval_truth(cond, &pre) {
-                    Some(true) => {
+                    Some(true) if !stmt_list_has_side_effects(else_body) => {
                         *stmt = HirStmt::Block(std::mem::take(then_body));
                         changed = true;
                         continue;
                     }
-                    Some(false) => {
+                    Some(false) if !stmt_list_has_side_effects(then_body) => {
                         *stmt = HirStmt::Block(std::mem::take(else_body));
                         changed = true;
                         continue;
                     }
-                    None => {
+                    Some(_) | None => {
                         // Ghidra ActionConditionalConst: derive constants from the branch condition.
                         // Pattern: `if (x == K)` → inside then-branch, x=K
                         // Pattern: `if (x != K)` → inside else-branch, x=K
@@ -509,10 +579,17 @@ fn sccp_stmt(
                             break;
                         }
                     }
-                    let blk = taken.unwrap_or_else(|| std::mem::take(default));
-                    *stmt = HirStmt::Block(blk);
-                    changed = true;
-                    continue;
+                    let discarded_have_side_effects = cases
+                        .iter()
+                        .filter(|case| !case.values.iter().any(|x| *x == v))
+                        .any(|case| stmt_list_has_side_effects(&case.body))
+                        || stmt_list_has_side_effects(default);
+                    if !discarded_have_side_effects {
+                        let blk = taken.unwrap_or_else(|| std::mem::take(default));
+                        *stmt = HirStmt::Block(blk);
+                        changed = true;
+                        continue;
+                    }
                 }
                 let mut acc: Option<ConstEnv> = None;
                 for case in cases.iter_mut() {

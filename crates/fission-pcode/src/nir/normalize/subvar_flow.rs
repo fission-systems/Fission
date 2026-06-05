@@ -361,6 +361,69 @@ fn analyze_expr_use(expr: &HirExpr, var_name: &str, dest: Option<&str>, uses: &m
     }
 }
 
+/// RuleSubvarShift: trace SUBPIECE/CONCAT-style `Or` reassembly back to the source varnode.
+fn trace_or_subvar_piece(lhs: &HirExpr, rhs: &HirExpr, mask: u64) -> Option<(String, u64)> {
+    let (low_part, high_part) = match (lhs, rhs) {
+        (low, HirExpr::Binary { op: HirBinaryOp::Shl, .. }) => (low, rhs),
+        (HirExpr::Binary { op: HirBinaryOp::Shl, .. }, low) => (low, lhs),
+        _ => return None,
+    };
+    let HirExpr::Binary {
+        op: HirBinaryOp::Shl,
+        lhs: shifted,
+        rhs: shift_amt,
+        ..
+    } = high_part
+    else {
+        return None;
+    };
+    let HirExpr::Const(n, _) = shift_amt.as_ref() else {
+        return None;
+    };
+    if *n <= 0 || *n >= 64 {
+        return None;
+    }
+    let expected_low_mask = (1u64 << *n).saturating_sub(1);
+    if mask != expected_low_mask {
+        return None;
+    }
+    let (src, and_mask) = match low_part {
+        HirExpr::Binary {
+            op: HirBinaryOp::And,
+            lhs: and_lhs,
+            rhs: and_rhs,
+            ..
+        } => match (and_lhs.as_ref(), and_rhs.as_ref()) {
+            (HirExpr::Var(name), HirExpr::Const(m, _)) => (name.clone(), *m as u64),
+            (HirExpr::Const(m, _), HirExpr::Var(name)) => (name.clone(), *m as u64),
+            _ => return None,
+        },
+        _ => return None,
+    };
+    if and_mask != expected_low_mask {
+        return None;
+    }
+    let HirExpr::Binary {
+        op: HirBinaryOp::Shr | HirBinaryOp::Sar,
+        lhs: shr_lhs,
+        rhs: shr_amt,
+        ..
+    } = shifted.as_ref()
+    else {
+        return None;
+    };
+    let HirExpr::Const(shr_n, _) = shr_amt.as_ref() else {
+        return None;
+    };
+    if shr_n != n {
+        return None;
+    }
+    match shr_lhs.as_ref() {
+        HirExpr::Var(name) if name == &src => Some((src, mask)),
+        _ => None,
+    }
+}
+
 fn analyze_lvalue_use(lhs: &HirLValue, var_name: &str, uses: &mut Vec<UseInfo>) {
     match lhs {
         HirLValue::Var(_) => {}
@@ -453,7 +516,20 @@ impl SubvarFlowSolver {
         match def_expr {
             HirExpr::Binary { op, lhs, rhs, .. } => {
                 match op {
-                    HirBinaryOp::Add | HirBinaryOp::Sub | HirBinaryOp::And | HirBinaryOp::Or | HirBinaryOp::Xor => {
+                    HirBinaryOp::Or => {
+                        if let Some((src, piece_mask)) = trace_or_subvar_piece(lhs, rhs, mask) {
+                            self.worklist.push((src, piece_mask));
+                            return true;
+                        }
+                        if let HirExpr::Var(l) = &**lhs {
+                            self.worklist.push((l.clone(), mask));
+                        }
+                        if let HirExpr::Var(r) = &**rhs {
+                            self.worklist.push((r.clone(), mask));
+                        }
+                        true
+                    }
+                    HirBinaryOp::Add | HirBinaryOp::Sub | HirBinaryOp::And | HirBinaryOp::Xor => {
                         if let HirExpr::Var(l) = &**lhs {
                             self.worklist.push((l.clone(), mask));
                         }

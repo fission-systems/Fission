@@ -473,8 +473,6 @@ fn try_tail_label_loop_to_for(
         }
 
         let mut body = body_slice.to_vec();
-        eprintln!("[DEBUG-FIB-IV] matched try_tail_label_loop_to_for: label={}, label_idx={}, tail_idx={}, body_len={}",
-                 label, label_idx, tail_idx, body.len());
         body.push(HirStmt::If {
             cond: invert_condition(continue_cond),
             then_body: vec![HirStmt::Break],
@@ -491,6 +489,559 @@ fn try_tail_label_loop_to_for(
     }
 
     false
+}
+
+/// MSVC `/O` row-fill inner loops sometimes peel vectorized prolog/epilog into
+/// label/goto pointer walks with `(end - start) & align` guards.  When the outer
+/// latch is already an infinite `for` with a break tail, recover:
+///   `for (j = 0; j < cols; j++) base[row_offset + j] = value`.
+fn try_recover_row_stride_fill_inner_loop(
+    stmts: &mut Vec<HirStmt>,
+    loop_idx: usize,
+    locals: &mut Vec<NirBinding>,
+) -> bool {
+    let body = match &stmts[loop_idx] {
+        HirStmt::For {
+            init: None,
+            cond: None,
+            update: None,
+            body,
+        } => body.clone(),
+        _ => return false,
+    };
+    if super::for_loops::stmt_list_contains_continue_pub(&body) {
+        return false;
+    }
+    let tail_start = match find_outer_infinite_for_tail_start(&body) {
+        Some(i) => i,
+        None => return false,
+    };
+    let loop_variant = loop_variant_vars(&body);
+    let matched = match try_parse_row_stride_fill(&body, tail_start, &loop_variant) {
+        Some(m) => m,
+        None => return false,
+    };
+
+    let j_name = fresh_index_name(locals, stmts);
+    let j_ty = index_type_for_count(&matched.stride);
+    locals.push(NirBinding {
+        name: j_name.clone(),
+        ty: j_ty.clone(),
+        surface_type_name: None,
+        origin: Some(NirBindingOrigin::Temp),
+        initializer: None,
+    });
+
+    let index_expr = HirExpr::Binary {
+        op: HirBinaryOp::Add,
+        lhs: Box::new(matched.row_offset),
+        rhs: Box::new(HirExpr::Var(j_name.clone())),
+        ty: j_ty.clone(),
+    };
+    let store_stmt = HirStmt::Assign {
+        lhs: HirLValue::Index {
+            base: Box::new(matched.base),
+            index: Box::new(index_expr),
+            elem_ty: matched.elem_ty.clone(),
+        },
+        rhs: matched.fill_value,
+    };
+    let inner_for = HirStmt::For {
+        init: Some(Box::new(HirStmt::Assign {
+            lhs: HirLValue::Var(j_name.clone()),
+            rhs: HirExpr::Const(0, j_ty.clone()),
+        })),
+        cond: Some(HirExpr::Binary {
+            op: HirBinaryOp::SLt,
+            lhs: Box::new(HirExpr::Var(j_name.clone())),
+            rhs: Box::new(matched.stride),
+            ty: NirType::Bool,
+        }),
+        update: Some(Box::new(HirStmt::Assign {
+            lhs: HirLValue::Var(j_name.clone()),
+            rhs: HirExpr::Binary {
+                op: HirBinaryOp::Add,
+                lhs: Box::new(HirExpr::Var(j_name.clone())),
+                rhs: Box::new(HirExpr::Const(1, j_ty.clone())),
+                ty: j_ty,
+            },
+        })),
+        body: vec![store_stmt],
+    };
+
+    let mut new_body = vec![inner_for];
+    new_body.extend_from_slice(&body[matched.tail_start..]);
+    stmts[loop_idx] = HirStmt::For {
+        init: None,
+        cond: None,
+        update: None,
+        body: new_body,
+    };
+    true
+}
+
+struct RowStrideFillMatch {
+    base: HirExpr,
+    row_offset: HirExpr,
+    stride: HirExpr,
+    fill_value: HirExpr,
+    elem_ty: NirType,
+    tail_start: usize,
+}
+
+fn find_outer_infinite_for_tail_start(body: &[HirStmt]) -> Option<usize> {
+    let tail = tail_meaningful_stmts(body, 3)?;
+    parse_break_eq_var(&tail[2].1)?;
+    Some(tail[0].0)
+}
+
+fn parse_ptr_base_offset(expr: &HirExpr) -> Option<(HirExpr, HirExpr)> {
+    match strip_casts(expr) {
+        HirExpr::PtrOffset { base, offset } => Some((
+            (*base).as_ref().clone(),
+            HirExpr::Const(*offset, NirType::Int {
+                bits: 64,
+                signed: false,
+            }),
+        )),
+        HirExpr::Index { base, index, .. } => {
+            Some(((*base).as_ref().clone(), (*index).as_ref().clone()))
+        }
+        HirExpr::Binary {
+            op: HirBinaryOp::Add,
+            lhs,
+            rhs,
+            ..
+        } => Some(((*lhs).as_ref().clone(), (*rhs).as_ref().clone())),
+        _ => None,
+    }
+}
+
+fn assign_rhs_ptr_base_offset(stmt: &HirStmt) -> Option<(String, HirExpr, HirExpr)> {
+    let HirStmt::Assign {
+        lhs: HirLValue::Var(name),
+        rhs,
+    } = stmt
+    else {
+        return None;
+    };
+    let (base, offset) = parse_ptr_base_offset(rhs)?;
+    Some((name.clone(), base, offset))
+}
+
+fn is_peel_corruption_pair(sub_stmt: &HirStmt, mask_stmt: &HirStmt) -> bool {
+    let Some((_, _sub_rhs)) = parse_self_sub_assign(sub_stmt) else {
+        return false;
+    };
+    let HirStmt::Assign {
+        lhs: HirLValue::Var(_),
+        rhs,
+    } = mask_stmt
+    else {
+        return false;
+    };
+    matches!(
+        strip_casts(rhs),
+        HirExpr::Binary {
+            op: HirBinaryOp::And,
+            rhs: mask,
+            ..
+        } if matches!(strip_casts(mask.as_ref()), HirExpr::Const(v, _) if (1..=16).contains(v))
+    )
+}
+
+fn parse_self_sub_assign(stmt: &HirStmt) -> Option<(String, HirExpr)> {
+    let HirStmt::Assign {
+        lhs: HirLValue::Var(name),
+        rhs,
+    } = stmt
+    else {
+        return None;
+    };
+    let HirExpr::Binary {
+        op: HirBinaryOp::Sub,
+        lhs,
+        rhs: subtrahend,
+        ..
+    } = strip_casts(rhs)
+    else {
+        return None;
+    };
+    if matches!(strip_casts(lhs.as_ref()), HirExpr::Var(var) if var == name) {
+        Some((name.clone(), (*subtrahend).as_ref().clone()))
+    } else {
+        None
+    }
+}
+
+fn deref_targets_var(ptr: &HirExpr, cursor: &str) -> bool {
+    matches!(strip_casts(ptr), HirExpr::Var(name) if name == cursor)
+}
+
+fn find_fill_value_in_region(stmts: &[HirStmt], cursor: &str) -> Option<HirExpr> {
+    for stmt in stmts {
+        match stmt {
+            HirStmt::Assign {
+                lhs: HirLValue::Deref { ptr, .. },
+                rhs,
+            } if deref_targets_var(ptr, cursor) => return Some(rhs.clone()),
+            HirStmt::If {
+                then_body,
+                else_body,
+                ..
+            } => {
+                if let Some(v) = find_fill_value_in_region(then_body, cursor) {
+                    return Some(v);
+                }
+                if let Some(v) = find_fill_value_in_region(else_body, cursor) {
+                    return Some(v);
+                }
+            }
+            HirStmt::Block(body) => {
+                if let Some(v) = find_fill_value_in_region(body, cursor) {
+                    return Some(v);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+fn inner_region_has_cursor_stores(stmts: &[HirStmt], cursor: &str) -> bool {
+    for stmt in stmts {
+        match stmt {
+            HirStmt::Assign {
+                lhs: HirLValue::Deref { ptr, .. },
+                ..
+            } if deref_targets_var(ptr, cursor) => return true,
+            HirStmt::If {
+                then_body,
+                else_body,
+                ..
+            } => {
+                if inner_region_has_cursor_stores(then_body, cursor)
+                    || inner_region_has_cursor_stores(else_body, cursor)
+                {
+                    return true;
+                }
+            }
+            HirStmt::Block(body) => {
+                if inner_region_has_cursor_stores(body, cursor) {
+                    return true;
+                }
+            }
+            _ => {}
+        }
+    }
+    false
+}
+
+fn try_parse_row_stride_fill(
+    body: &[HirStmt],
+    tail_start: usize,
+    loop_variant: &HashSet<String>,
+) -> Option<RowStrideFillMatch> {
+    let mut meaningful = Vec::new();
+    for (idx, stmt) in body.iter().enumerate().take(tail_start) {
+        if !matches!(stmt, HirStmt::Label(_)) {
+            meaningful.push((idx, stmt));
+        }
+    }
+    if meaningful.len() < 4 {
+        return None;
+    }
+
+    let mut idx = 0;
+    let mut row_offset: Option<HirExpr> = None;
+    let mut base: Option<HirExpr> = None;
+    let mut cursor: Option<String> = None;
+    let mut stride: Option<HirExpr> = None;
+    let mut prefix_end = 0;
+
+    if let HirStmt::Assign {
+        lhs: HirLValue::Var(_),
+        rhs,
+    } = meaningful[idx].1
+    {
+        if let Some(var) = stripped_var_name(strip_casts(rhs)) {
+            row_offset = Some(HirExpr::Var(var.to_string()));
+            prefix_end = meaningful[idx].0 + 1;
+            idx += 1;
+        } else if let HirExpr::Cast { expr, .. } = strip_casts(rhs) {
+            if let Some(var) = stripped_var_name(expr) {
+                row_offset = Some(HirExpr::Var(var.to_string()));
+                prefix_end = meaningful[idx].0 + 1;
+                idx += 1;
+            }
+        }
+    }
+
+    if idx >= meaningful.len() {
+        return None;
+    }
+    let (cursor_name, base_expr, off_expr) = assign_rhs_ptr_base_offset(meaningful[idx].1)?;
+    base = Some(base_expr);
+    cursor = Some(cursor_name);
+    if row_offset.is_none() {
+        row_offset = Some(off_expr);
+    }
+    prefix_end = meaningful[idx].0 + 1;
+    idx += 1;
+
+    if idx >= meaningful.len() {
+        return None;
+    }
+    let (_, addend) = parse_self_add_assign(meaningful[idx].1)?;
+    if !is_loop_invariant(&addend, loop_variant) {
+        return None;
+    }
+    stride = Some(addend);
+    prefix_end = meaningful[idx].0 + 1;
+    idx += 1;
+
+    if idx >= meaningful.len() {
+        return None;
+    }
+    let (_, base2, _) = assign_rhs_ptr_base_offset(meaningful[idx].1)?;
+    if !vars_equivalent_after_casts(base.as_ref()?, &base2) {
+        return None;
+    }
+    prefix_end = meaningful[idx].0 + 1;
+    idx += 1;
+
+    if idx + 1 < meaningful.len()
+        && is_peel_corruption_pair(meaningful[idx].1, meaningful[idx + 1].1)
+    {
+        prefix_end = meaningful[idx + 1].0 + 1;
+    }
+
+    let inner_region = &body[prefix_end..tail_start];
+    let fill_value = find_fill_value_in_region(inner_region, cursor.as_ref()?)?;
+    if !inner_region_has_cursor_stores(inner_region, cursor.as_ref()?) {
+        return None;
+    }
+
+    Some(RowStrideFillMatch {
+        base: base?,
+        row_offset: row_offset?,
+        stride: stride?,
+        fill_value,
+        elem_ty: NirType::Int {
+            bits: 32,
+            signed: false,
+        },
+        tail_start,
+    })
+}
+
+/// MSVC-style nested-loop outer latch sometimes merges two induction variables
+/// (row counter `+= 1` and row offset `+= cols`) onto one temp after copy chains.
+/// Pattern at infinite-`for` tail:
+///   `v = v + 1; v = v + K; if (limit == v) break;`
+/// Recover by splitting the `+1` update and exit compare onto a fresh row counter.
+fn try_split_merged_dual_iv_tail(
+    stmts: &mut Vec<HirStmt>,
+    loop_idx: usize,
+    locals: &mut Vec<NirBinding>,
+) -> bool {
+    let body = match &stmts[loop_idx] {
+        HirStmt::For {
+            init: None,
+            cond: None,
+            update: None,
+            body,
+        } => body.clone(),
+        _ => return false,
+    };
+
+    let Some(tail) = tail_meaningful_stmts(&body, 3) else {
+        return false;
+    };
+    let (_, break_stmt) = &tail[2];
+    let (_, step_k_stmt) = &tail[1];
+    let (_, step_one_stmt) = &tail[0];
+
+    let (limit_expr, compare_var) = match parse_break_eq_var(break_stmt) {
+        Some(v) => v,
+        None => return false,
+    };
+    let (var_one, add_one) = match parse_self_add_assign(step_one_stmt) {
+        Some(v) => v,
+        None => return false,
+    };
+    let (var_k, add_k) = match parse_self_add_assign(step_k_stmt) {
+        Some(v) => v,
+        None => return false,
+    };
+    if var_one != var_k || var_one != compare_var {
+        return false;
+    }
+    if !matches!(strip_casts(&add_one), HirExpr::Const(1, _)) {
+        return false;
+    }
+
+    let loop_variant = loop_variant_vars(&body);
+    if !is_loop_invariant(&add_k, &loop_variant) {
+        return false;
+    }
+    if super::for_loops::stmt_list_contains_continue_pub(&body) {
+        return false;
+    }
+
+    let row_name = fresh_index_name(locals, stmts);
+    let row_ty = index_type_for_count(&limit_expr);
+    locals.push(NirBinding {
+        name: row_name.clone(),
+        ty: row_ty.clone(),
+        surface_type_name: None,
+        origin: Some(NirBindingOrigin::Temp),
+        initializer: None,
+    });
+
+    let mut new_body = body;
+    substitute_var_in_stmt(
+        &mut new_body[tail[0].0],
+        &var_one,
+        &row_name,
+        false,
+    );
+    substitute_var_in_stmt(
+        &mut new_body[tail[2].0],
+        &var_one,
+        &row_name,
+        false,
+    );
+
+    stmts[loop_idx] = HirStmt::For {
+        init: None,
+        cond: None,
+        update: None,
+        body: new_body,
+    };
+
+    let init_stmt = HirStmt::Assign {
+        lhs: HirLValue::Var(row_name),
+        rhs: HirExpr::Const(0, row_ty),
+    };
+    stmts.insert(loop_idx, init_stmt);
+    true
+}
+
+fn tail_meaningful_stmts(body: &[HirStmt], count: usize) -> Option<Vec<(usize, HirStmt)>> {
+    let mut tail = Vec::new();
+    for (idx, stmt) in body.iter().enumerate().rev() {
+        if matches!(stmt, HirStmt::Label(_)) {
+            continue;
+        }
+        tail.push((idx, stmt.clone()));
+        if tail.len() == count {
+            tail.reverse();
+            return Some(tail);
+        }
+    }
+    None
+}
+
+fn parse_self_add_assign(stmt: &HirStmt) -> Option<(String, HirExpr)> {
+    let HirStmt::Assign {
+        lhs: HirLValue::Var(name),
+        rhs,
+    } = stmt
+    else {
+        return None;
+    };
+    let HirExpr::Binary {
+        op: HirBinaryOp::Add,
+        lhs,
+        rhs: addend,
+        ..
+    } = strip_casts(rhs)
+    else {
+        return None;
+    };
+    if matches!(strip_casts(lhs.as_ref()), HirExpr::Var(var) if var == name) {
+        Some((name.clone(), (*addend).as_ref().clone()))
+    } else if matches!(strip_casts(addend.as_ref()), HirExpr::Var(var) if var == name) {
+        Some((name.clone(), (*lhs).as_ref().clone()))
+    } else {
+        None
+    }
+}
+
+fn parse_break_eq_var(stmt: &HirStmt) -> Option<(HirExpr, String)> {
+    let HirStmt::If {
+        cond,
+        then_body,
+        else_body,
+    } = stmt
+    else {
+        return None;
+    };
+    if !else_body.is_empty() || !matches!(then_body.as_slice(), [HirStmt::Break]) {
+        return None;
+    }
+    let HirExpr::Binary {
+        op: HirBinaryOp::Eq,
+        lhs,
+        rhs,
+        ..
+    } = strip_casts(cond)
+    else {
+        return None;
+    };
+    if let HirExpr::Var(var) = strip_casts(rhs.as_ref()) {
+        Some(((*lhs).as_ref().clone(), var.clone()))
+    } else if let HirExpr::Var(var) = strip_casts(lhs.as_ref()) {
+        Some(((*rhs).as_ref().clone(), var.clone()))
+    } else {
+        None
+    }
+}
+
+/// Replace `var` with `replacement` in `stmt`. When `assign_lhs_only`, only rewrite
+/// the assignment target (for splitting a shared temp across dual IV updates).
+fn substitute_var_in_stmt(stmt: &mut HirStmt, var: &str, replacement: &str, assign_lhs_only: bool) {
+    match stmt {
+        HirStmt::Assign { lhs, rhs } => {
+            if let HirLValue::Var(name) = lhs {
+                if name == var {
+                    *name = replacement.to_string();
+                }
+            }
+            if !assign_lhs_only {
+                substitute_var_in_expr(rhs, var, &HirExpr::Var(replacement.to_string()));
+            }
+        }
+        HirStmt::If { cond, then_body, else_body, .. } => {
+            substitute_var_in_expr(cond, var, &HirExpr::Var(replacement.to_string()));
+            for s in then_body.iter_mut().chain(else_body.iter_mut()) {
+                substitute_var_in_stmt(s, var, replacement, false);
+            }
+        }
+        HirStmt::Block(body)
+        | HirStmt::While { body, .. }
+        | HirStmt::DoWhile { body, .. }
+        | HirStmt::For { body, .. } => {
+            for s in body.iter_mut() {
+                substitute_var_in_stmt(s, var, replacement, false);
+            }
+        }
+        HirStmt::Switch { cases, default, .. } => {
+            for case in cases.iter_mut() {
+                for s in case.body.iter_mut() {
+                    substitute_var_in_stmt(s, var, replacement, false);
+                }
+            }
+            for s in default.iter_mut() {
+                substitute_var_in_stmt(s, var, replacement, false);
+            }
+        }
+        HirStmt::Expr(expr) | HirStmt::Return(Some(expr)) => {
+            substitute_var_in_expr(expr, var, &HirExpr::Var(replacement.to_string()));
+        }
+        _ => {}
+    }
 }
 
 fn apply_tail_label_loop_recovery_in_stmts(
@@ -1728,28 +2279,23 @@ fn try_guarded_dowhile_pointer_iv_upgrade(
     loop_idx: usize,
     active_guards: &[HirExpr],
 ) -> bool {
-    eprintln!("[DEBUG-FIB-IV] Entered try_guarded_dowhile_pointer_iv_upgrade for loop_idx {}", loop_idx);
     let (cond, body) = {
         let HirStmt::DoWhile { cond, body } = &stmts[loop_idx] else {
-            eprintln!("[DEBUG-FIB-IV] Not a DoWhile");
             return false;
         };
         (cond.clone(), body.clone())
     };
 
     if super::for_loops::stmt_list_contains_continue_pub(&body) {
-        eprintln!("[DEBUG-FIB-IV] contains continue");
         return false;
     }
 
     let Some((cursor_str, count_expr, end_ptr_idx_opt)) = extract_pointer_cursor_and_count(&cond, stmts, loop_idx) else {
-        eprintln!("[DEBUG-FIB-IV] extract_pointer_cursor_and_count returned None");
         return false;
     };
     let cursor = &cursor_str;
     let loop_variant = loop_variant_vars(&body);
     let Some((update_idx, true)) = find_iv_update(&body, cursor, &loop_variant) else {
-        eprintln!("[DEBUG-FIB-IV] find_iv_update returned false");
         return false;
     };
     let after_labels = labels_after(stmts, loop_idx);
@@ -1762,11 +2308,9 @@ fn try_guarded_dowhile_pointer_iv_upgrade(
             }
         });
     let Some(count_cmp) = count_cmp else {
-        eprintln!("[DEBUG-FIB-IV] count_cmp is None");
         return false;
     };
     if cursor_used_after_loop(stmts, loop_idx, cursor) {
-        eprintln!("[DEBUG-FIB-IV] cursor_used_after_loop is true");
         return false;
     }
 
@@ -1827,13 +2371,8 @@ fn try_guarded_dowhile_pointer_iv_upgrade(
         update: Some(Box::new(update_stmt)),
         body: new_body,
     };
-    eprintln!("[DEBUG-FIB-IV] Replacing end_ptr_idx: {:?}", end_ptr_idx_opt);
     if let Some(end_ptr_idx) = end_ptr_idx_opt {
         stmts[end_ptr_idx] = HirStmt::Block(Vec::new());
-    }
-    eprintln!("[DEBUG-FIB-IV] End of try_guarded_dowhile_pointer_iv_upgrade. stmts[end_ptr_idx_opt]: {:?}", end_ptr_idx_opt);
-    for (idx, stmt) in stmts.iter().enumerate() {
-        eprintln!("[DEBUG-FIB-IV] stmts[{}] = {:?}", idx, stmt);
     }
     true
 }
@@ -1979,6 +2518,16 @@ fn apply_scev_upgrade_in_stmts(
             }
         } else if matches!(&stmts[i], HirStmt::DoWhile { .. })
             && try_guarded_dowhile_pointer_iv_upgrade(stmts, locals, i, active_guards)
+        {
+            changed = true;
+            continue;
+        } else if matches!(&stmts[i], HirStmt::For { cond: None, update: None, .. })
+            && try_recover_row_stride_fill_inner_loop(stmts, i, locals)
+        {
+            changed = true;
+            continue;
+        } else if matches!(&stmts[i], HirStmt::For { cond: None, update: None, .. })
+            && try_split_merged_dual_iv_tail(stmts, i, locals)
         {
             changed = true;
             continue;
@@ -2715,6 +3264,174 @@ mod tests {
             make_infinite_for_with_tail(work_stmts, "i", "limit", "update_lbl");
 
         assert!(!try_upgrade_infinite_for_with_tail_update(&mut stmts, 1));
+    }
+
+    #[test]
+    fn splits_merged_dual_iv_tail_on_infinite_for() {
+        let ty = int(64, false);
+        let body = vec![
+            HirStmt::Expr(HirExpr::Const(1, ty.clone())),
+            HirStmt::Assign {
+                lhs: HirLValue::Var("off".to_string()),
+                rhs: add(var("off"), const_i(1), ty.clone()),
+            },
+            HirStmt::Assign {
+                lhs: HirLValue::Var("off".to_string()),
+                rhs: add(var("off"), var("cols"), ty.clone()),
+            },
+            HirStmt::If {
+                cond: eq_expr(var("rows"), var("off")),
+                then_body: vec![HirStmt::Break],
+                else_body: vec![],
+            },
+        ];
+        let mut stmts = vec![
+            HirStmt::Assign {
+                lhs: HirLValue::Var("off".to_string()),
+                rhs: const_i(0),
+            },
+            HirStmt::For {
+                init: None,
+                cond: None,
+                update: None,
+                body,
+            },
+        ];
+        let mut locals = Vec::new();
+        assert!(try_split_merged_dual_iv_tail(&mut stmts, 1, &mut locals));
+        assert_eq!(stmts.len(), 3, "off init + row init + for");
+        assert_eq!(locals.len(), 1, "fresh row counter local");
+
+        let HirStmt::For { body, .. } = &stmts[2] else {
+            panic!("expected For");
+        };
+        let tail = tail_meaningful_stmts(body, 3).expect("tail triple");
+        let (_, step_one) = &tail[0];
+        let (_, step_k) = &tail[1];
+        let (_, break_if) = &tail[2];
+
+        let (row, _) = parse_self_add_assign(step_one).expect("row += 1");
+        assert_ne!(row, "off");
+        let (off, addend) = parse_self_add_assign(step_k).expect("off += cols");
+        assert_eq!(off, "off");
+        assert!(matches!(strip_casts(&addend), HirExpr::Var(v) if v == "cols"));
+        let (_, break_var) = parse_break_eq_var(break_if).expect("rows == row");
+        assert_eq!(break_var, row);
+    }
+
+    #[test]
+    fn recovers_row_stride_fill_inner_loop_in_infinite_for() {
+        let ty = int(64, false);
+        let u32_ty = int(32, false);
+        let body = vec![
+            HirStmt::Assign {
+                lhs: HirLValue::Var("tmp".to_string()),
+                rhs: HirExpr::Cast {
+                    ty: ty.clone(),
+                    expr: Box::new(var("row_off")),
+                },
+            },
+            HirStmt::Assign {
+                lhs: HirLValue::Var("cursor".to_string()),
+                rhs: add(var("matrix"), var("tmp"), ptr_u32()),
+            },
+            HirStmt::Assign {
+                lhs: HirLValue::Var("tmp".to_string()),
+                rhs: add(var("tmp"), var("cols"), ty.clone()),
+            },
+            HirStmt::Assign {
+                lhs: HirLValue::Var("end".to_string()),
+                rhs: add(var("matrix"), var("tmp"), ptr_u32()),
+            },
+            HirStmt::Assign {
+                lhs: HirLValue::Var("end".to_string()),
+                rhs: HirExpr::Binary {
+                    op: HirBinaryOp::Sub,
+                    lhs: Box::new(var("end")),
+                    rhs: Box::new(var("cursor")),
+                    ty: ty.clone(),
+                },
+            },
+            HirStmt::Assign {
+                lhs: HirLValue::Var("end".to_string()),
+                rhs: HirExpr::Binary {
+                    op: HirBinaryOp::And,
+                    lhs: Box::new(HirExpr::Cast {
+                        ty: ty.clone(),
+                        expr: Box::new(var("end")),
+                    }),
+                    rhs: Box::new(HirExpr::Const(4, ty.clone())),
+                    ty: ty.clone(),
+                },
+            },
+            HirStmt::Label("inner".to_string()),
+            HirStmt::Assign {
+                lhs: HirLValue::Deref {
+                    ptr: Box::new(var("cursor")),
+                    ty: u32_ty.clone(),
+                },
+                rhs: var("value"),
+            },
+            HirStmt::Assign {
+                lhs: HirLValue::Var("cursor".to_string()),
+                rhs: add(var("cursor"), const_i(1), ptr_u32()),
+            },
+            HirStmt::Goto("inner".to_string()),
+            HirStmt::Assign {
+                lhs: HirLValue::Var("row".to_string()),
+                rhs: add(var("row"), const_i(1), ty.clone()),
+            },
+            HirStmt::Assign {
+                lhs: HirLValue::Var("row_off".to_string()),
+                rhs: add(var("row_off"), var("cols"), ty.clone()),
+            },
+            HirStmt::If {
+                cond: eq_expr(var("rows"), var("row")),
+                then_body: vec![HirStmt::Break],
+                else_body: vec![],
+            },
+        ];
+        let mut func = HirFunction {
+            name: "row_stride_fill".to_string(),
+            params: Vec::new(),
+            locals: Vec::new(),
+            return_type: NirType::Unknown,
+            surface_return_type_name: None,
+            body: vec![HirStmt::For {
+                init: None,
+                cond: None,
+                update: None,
+                body,
+            }],
+            ..Default::default()
+        };
+
+        assert!(apply_iv_recovery_pass(&mut func));
+        let HirStmt::For { body, .. } = &func.body[0] else {
+            panic!("expected For");
+        };
+        assert!(
+            body.iter().any(|stmt| matches!(stmt, HirStmt::For { .. })),
+            "expected nested inner for, got {body:?}"
+        );
+        let inner = body
+            .iter()
+            .find_map(|stmt| {
+                if let HirStmt::For {
+                    init,
+                    cond,
+                    update,
+                    body: inner_body,
+                } = stmt
+                {
+                    Some((init.is_some(), cond.is_some(), update.is_some(), inner_body.len()))
+                } else {
+                    None
+                }
+            })
+            .expect("inner for");
+        assert!(inner.0 && inner.1 && inner.2);
+        assert_eq!(inner.3, 1);
     }
 }
 

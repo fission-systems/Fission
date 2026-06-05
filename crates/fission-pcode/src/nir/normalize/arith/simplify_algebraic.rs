@@ -310,3 +310,133 @@ pub(crate) fn simplify_collect_mul_terms(expr: &HirExpr) -> Option<HirExpr> {
     None
 }
 
+/// Distribute a shared multiplicand: `a*b + a*c` → `a*(b+c)`.
+pub(crate) fn simplify_distribute_common_factor(expr: &HirExpr) -> Option<HirExpr> {
+    let HirExpr::Binary {
+        op: HirBinaryOp::Add,
+        lhs,
+        rhs,
+        ty,
+    } = expr
+    else {
+        return None;
+    };
+
+    let (factor_lhs, c_lhs, cty) = extract_mul_factor(lhs)?;
+    let (factor_rhs, c_rhs, _) = extract_mul_factor(rhs)?;
+    if factor_lhs != factor_rhs {
+        return None;
+    }
+    let new_c = c_lhs.checked_add(c_rhs)?;
+    Some(HirExpr::Binary {
+        op: HirBinaryOp::Mul,
+        lhs: Box::new(factor_lhs),
+        rhs: Box::new(HirExpr::Const(new_c, cty)),
+        ty: ty.clone(),
+    })
+}
+
+fn extract_mul_factor(term: &HirExpr) -> Option<(HirExpr, i64, NirType)> {
+    match term {
+        HirExpr::Binary {
+            op: HirBinaryOp::Mul,
+            lhs,
+            rhs,
+            ..
+        } => {
+            if let HirExpr::Const(c, cty) = rhs.as_ref() {
+                Some((lhs.as_ref().clone(), *c, cty.clone()))
+            } else if let HirExpr::Const(c, cty) = lhs.as_ref() {
+                Some((rhs.as_ref().clone(), *c, cty.clone()))
+            } else {
+                None
+            }
+        }
+        _ => None,
+    }
+}
+
+/// Canonicalize commutative add operand order for stable output (RuleTermOrder).
+pub(crate) fn simplify_term_order_add(expr: &HirExpr) -> Option<HirExpr> {
+    let HirExpr::Binary {
+        op: HirBinaryOp::Add,
+        lhs,
+        rhs,
+        ty,
+    } = expr
+    else {
+        return None;
+    };
+    if term_order_key(lhs) <= term_order_key(rhs) {
+        return None;
+    }
+    Some(HirExpr::Binary {
+        op: HirBinaryOp::Add,
+        lhs: rhs.clone(),
+        rhs: lhs.clone(),
+        ty: ty.clone(),
+    })
+}
+
+fn term_order_key(expr: &HirExpr) -> (u8, String) {
+    match expr {
+        HirExpr::Const(c, _) => (0, format!("const:{c}")),
+        HirExpr::Var(name) => (1, format!("var:{name}")),
+        HirExpr::Binary {
+            op: HirBinaryOp::Mul,
+            lhs,
+            rhs,
+            ..
+        } => {
+            let lhs_key = term_order_key(lhs);
+            let rhs_key = term_order_key(rhs);
+            if lhs_key <= rhs_key {
+                (2, format!("mul:{lhs_key:?}"))
+            } else {
+                (2, format!("mul:{rhs_key:?}"))
+            }
+        }
+        other => (3, format!("{other:?}")),
+    }
+}
+
+#[cfg(test)]
+mod term_order_tests {
+    use super::*;
+
+    #[test]
+    fn distributes_shared_multiplicand() {
+        let a = HirExpr::Var("a".to_string());
+        let ty = NirType::Int {
+            bits: 32,
+            signed: false,
+        };
+        let expr = HirExpr::Binary {
+            op: HirBinaryOp::Add,
+            lhs: Box::new(HirExpr::Binary {
+                op: HirBinaryOp::Mul,
+                lhs: Box::new(a.clone()),
+                rhs: Box::new(HirExpr::Const(2, ty.clone())),
+                ty: ty.clone(),
+            }),
+            rhs: Box::new(HirExpr::Binary {
+                op: HirBinaryOp::Mul,
+                lhs: Box::new(a.clone()),
+                rhs: Box::new(HirExpr::Const(3, ty.clone())),
+                ty: ty.clone(),
+            }),
+            ty: ty.clone(),
+        };
+        let normalized = simplify_distribute_common_factor(&expr).expect("distribute");
+        assert_eq!(
+            normalized,
+            HirExpr::Binary {
+                op: HirBinaryOp::Mul,
+                lhs: Box::new(a),
+                rhs: Box::new(HirExpr::Const(5, ty.clone())),
+                ty,
+            }
+        );
+    }
+}
+

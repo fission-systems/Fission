@@ -124,6 +124,18 @@ fn strip_redundant_casts_in_expr(expr: &mut HirExpr, type_map: &HashMap<String, 
                     changed = true;
                 }
             }
+        } else if let HirExpr::Cast {
+            ty: inner_ty,
+            expr: innermost,
+        } = inner.as_ref()
+        {
+            if inner_ty == ty {
+                *expr = HirExpr::Cast {
+                    ty: ty.clone(),
+                    expr: innermost.clone(),
+                };
+                changed = true;
+            }
         }
     }
     changed
@@ -493,5 +505,18 @@ fn try_strip_return_outer_cast(expr: &HirExpr, return_type: &NirType) -> Option<
         None
     } else {
         None
+    }
+}
+
+/// ActionSetCasts / RulePushPtr / RuleStructOffset0-style cleanups at expression level.
+pub(crate) fn normalize_pointer_and_struct_casts(expr: &HirExpr) -> Option<HirExpr> {
+    match expr {
+        HirExpr::FieldAccess {
+            offset: 0,
+            base,
+            ..
+        } => Some((**base).clone()),
+        HirExpr::PtrOffset { base, offset: 0 } => Some((**base).clone()),
+        _ => None,
     }
 }

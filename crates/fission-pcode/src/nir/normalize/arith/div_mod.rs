@@ -402,9 +402,14 @@ fn normalize_signed_power_of_two_div(expr: &HirExpr) -> Option<HirExpr> {
         }
         _ => return None,
     };
-    if sign_source != add_lhs.as_ref() {
+    if sign_source != add_lhs.as_ref() && sign_source != add_rhs.as_ref() {
         return None;
     }
+    let div_lhs = if sign_source == add_lhs.as_ref() {
+        add_lhs.clone()
+    } else {
+        add_rhs.clone()
+    };
 
     let width = match ty {
         NirType::Int { bits, signed: true } => *bits,
@@ -420,7 +425,7 @@ fn normalize_signed_power_of_two_div(expr: &HirExpr) -> Option<HirExpr> {
 
     Some(HirExpr::Binary {
         op: HirBinaryOp::Div,
-        lhs: add_lhs.clone(),
+        lhs: div_lhs,
         rhs: Box::new(HirExpr::Const(
             divisor,
             NirType::Int {

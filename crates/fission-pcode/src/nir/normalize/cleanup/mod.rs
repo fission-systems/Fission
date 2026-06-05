@@ -20,7 +20,8 @@ pub(crate) use temp_var::{
     rescue_undeclared_bindings, coerce_ptr_typed_bitop_vars,
 };
 pub(crate) use casts::{
-    cast_elision_pass, collapse_trivial_pointer_alias_bindings, strip_redundant_assign_casts,
+    cast_elision_pass, collapse_trivial_pointer_alias_bindings, normalize_pointer_and_struct_casts,
+    strip_redundant_assign_casts,
 };
 pub(crate) use loops_conds::{
     canonicalize_minmax_conditional_returns, collapse_loop_exit_alias_returns,

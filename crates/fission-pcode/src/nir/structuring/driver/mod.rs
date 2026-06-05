@@ -1,3 +1,4 @@
+use super::cleanup::child_body_has_entry_label;
 use super::irreducible::{compute_fas_virtual_gotos, compute_node_splits};
 use super::*;
 
@@ -674,8 +675,12 @@ impl<'a> PreviewBuilder<'a> {
 
             if let Some((child_body, child_exit, child_proof)) = active_child_map.get(&idx) {
                 let mut node_statements = child_body.clone();
-                if (idx == 0 || targeted.contains(&block_key)) && emitted_labels.insert(block_key) {
-                    node_statements.insert(0, HirStmt::Label(block_label(block_key)));
+                let header_label = block_label(block_key);
+                if (idx == 0 || targeted.contains(&block_key))
+                    && emitted_labels.insert(block_key)
+                    && !child_body_has_entry_label(child_body, &header_label)
+                {
+                    node_statements.insert(0, HirStmt::Label(header_label));
                 }
 
                 let node = StructureNode {

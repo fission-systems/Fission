@@ -6,13 +6,15 @@ use super::super::analysis::preservation::preserved_materialization_names;
 use super::super::arith::{
     canonicalize_condition_expr, canonicalize_flag_intrinsics, canonicalize_integer_expr,
     cleanup_arithmetic_wrappers, collapse_zero_offset_cast, merge_consecutive_shifts,
-    normalize_boolean_logic, recognize_compiler_runtime_division, recognize_hi_lo_extract,
-    recognize_magic_number_division, recognize_mod_div_power_of_two,
+    normalize_boolean_logic, recognize_compiler_runtime_division, recognize_concat_zext_or,
+    recognize_dumpty_hump_cast, recognize_dumpty_hump_late, recognize_hi_lo_extract,
+    recognize_humpty_dumpty_or, recognize_magic_number_division, recognize_mod_div_power_of_two,
     recognize_wide_integer_recombine, simplify_double_add, simplify_factor_common_mul,
     simplify_negated_const, simplify_nested_adds_subs, simplify_collect_mul_terms,
-    simplify_subpiece_chain, apply_double_precision_reconstruction_pass,
-    apply_three_way_compare_pass, apply_conditional_move_pass, apply_subfloat_flow_pass,
-    apply_or_compare_pass, apply_float_sign_pass, apply_ignore_nan_pass,
+    simplify_distribute_common_factor, simplify_subpiece_chain,
+    apply_double_precision_reconstruction_pass, apply_three_way_compare_pass,
+    apply_conditional_move_pass, apply_subfloat_flow_pass, apply_or_compare_pass,
+    apply_float_sign_pass, apply_ignore_nan_pass,
 };
 use super::super::cleanup::single_pred_label_inline;
 use super::super::cleanup::{
@@ -2664,9 +2666,14 @@ pub(crate) fn normalize_expr(expr: &mut HirExpr) {
     let mut current = expr.clone();
     loop {
         let next = canonicalize_integer_expr(&current)
+            .or_else(|| recognize_dumpty_hump_cast(&current))
+            .or_else(|| recognize_humpty_dumpty_or(&current))
+            .or_else(|| recognize_concat_zext_or(&current))
+            .or_else(|| recognize_dumpty_hump_late(&current))
             .or_else(|| simplify_negated_const(&current))
             .or_else(|| simplify_double_add(&current))
             .or_else(|| simplify_factor_common_mul(&current))
+            .or_else(|| simplify_distribute_common_factor(&current))
             .or_else(|| simplify_nested_adds_subs(&current))
             .or_else(|| simplify_collect_mul_terms(&current))
             .or_else(|| recognize_compiler_runtime_division(&current))
