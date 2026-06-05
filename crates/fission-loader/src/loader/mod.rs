@@ -62,6 +62,7 @@ impl LoadedBinary {
                 tracing::debug!("[Loader] focused PDB function ingestion skipped: {err}");
             }
         }
+        merge_debug_function_sizes(&mut binary);
 
         // Go Language Analysis
         let detection = crate::detector::detect(&binary);
@@ -298,6 +299,27 @@ impl LoadedBinary {
         }
 
         Ok(binary)
+    }
+}
+
+fn merge_debug_function_sizes(binary: &mut LoadedBinary) {
+    let dwarf = binary.dwarf_functions.clone();
+    let pdb = binary.pdb_functions.clone();
+    for func in &mut binary.inner_mut().functions {
+        if func.is_import || func.size > 0 {
+            continue;
+        }
+        if let Some(debug) = dwarf.get(&func.address) {
+            if debug.size > 0 {
+                func.size = debug.size;
+                continue;
+            }
+        }
+        if let Some(debug) = pdb.get(&func.address) {
+            if debug.size > 0 {
+                func.size = debug.size;
+            }
+        }
     }
 }
 

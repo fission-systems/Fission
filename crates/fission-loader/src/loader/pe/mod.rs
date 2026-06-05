@@ -7,6 +7,7 @@ use fission_core::architecture::select_pe_load_spec;
 
 mod coff;
 mod imports;
+mod mingw_pseudo_reloc;
 mod pdata;
 
 pub struct PeLoader;
@@ -108,6 +109,7 @@ enum SymbolName {
 mod storage_class {
     pub const C_EXT: u8 = 2;
     pub const C_STAT: u8 = 3;
+    pub const C_LABEL: u8 = 6;
 }
 
 mod symbol_type {
@@ -233,6 +235,7 @@ impl PeLoader {
         // Parse COFF Symbol Table (if present)
         let coff_started = std::time::Instant::now();
         let file_header = &pe_file.file_header;
+        let mut cfg_label_leaders = Vec::new();
         if file_header.pointer_to_symbol_table != 0 && file_header.number_of_symbols > 0 {
             if let Ok(coff_functions) = loader.parse_coff_symbols(
                 file_header.pointer_to_symbol_table,
@@ -254,6 +257,9 @@ impl PeLoader {
                         {
                             existing.name = coff_func.name;
                         }
+                        if existing.size == 0 && coff_func.size > 0 {
+                            existing.size = coff_func.size;
+                        }
                     } else {
                         address_to_index.insert(coff_func.address, functions_info.len());
                         functions_info.push(coff_func);
@@ -267,6 +273,14 @@ impl PeLoader {
                 image_base,
             ) {
                 global_symbols = coff_data_symbols;
+            }
+
+            if let Ok(leaders) = loader.parse_coff_cfg_label_leaders(
+                file_header.pointer_to_symbol_table,
+                file_header.number_of_symbols,
+                image_base,
+            ) {
+                cfg_label_leaders = leaders;
             }
         }
         tracing::debug!("[PE Profiler] parse_coff_symbols took: {:?}", coff_started.elapsed());
@@ -364,8 +378,16 @@ impl PeLoader {
                 .unwrap_or((0, 0)),
         };
         let mut relocations = Vec::new();
+        let mut relocation_symbols = std::collections::HashMap::new();
         if reloc_dir_rva.0 != 0 && reloc_dir_rva.1 > 0 {
             if let Ok(entries) = loader.parse_relocations(reloc_dir_rva.0, reloc_dir_rva.1, image_base) {
+                for entry in &entries {
+                    if entry.r_type != 0 && entry.size > 0 {
+                        relocation_symbols
+                            .entry(entry.address)
+                            .or_insert_with(String::new);
+                    }
+                }
                 relocations = entries;
             }
         }
@@ -374,6 +396,38 @@ impl PeLoader {
         let rich_started = std::time::Instant::now();
         let rich_records = parse_rich_header(bytes, pe_file.e_lfanew);
         tracing::debug!("[PE Profiler] parse_rich_header took: {:?}", rich_started.elapsed());
+
+        let likely_mingw = mingw_pseudo_reloc::is_likely_mingw_pe(
+            rich_records.as_deref(),
+            &global_symbols,
+        );
+        let view_va = |va: u64, len: usize| -> Option<Vec<u8>> {
+            if va < image_base {
+                return None;
+            }
+            let rva = (va - image_base) as u32;
+            let file_off = loader.rva_to_file_offset(rva, image_base)? as usize;
+            loader
+                .data
+                .get(file_off..file_off.checked_add(len)?)
+                .map(|slice| slice.to_vec())
+        };
+        let mingw_facts = mingw_pseudo_reloc::scan_mingw_pseudo_relocs(
+            image_base,
+            is_64bit,
+            &global_symbols,
+            &view_va,
+            likely_mingw,
+        );
+        cfg_label_leaders.extend(mingw_facts.cfg_label_leaders);
+        for site in &mingw_facts.relocation_use_sites {
+            relocation_symbols
+                .entry(*site)
+                .or_insert_with(String::new);
+        }
+        relocations.extend(mingw_pseudo_reloc::mingw_pseudo_reloc_entries(
+            &mingw_facts.relocation_use_sites,
+        ));
 
         let build_started = std::time::Instant::now();
         let mut builder = LoadedBinaryBuilder::new(path, data)
@@ -389,7 +443,9 @@ impl PeLoader {
             .add_iat_symbols(iat_symbols)
             .add_global_symbols(global_symbols)
             .add_inferred_types(header_types)
-            .add_relocations(relocations);
+            .add_relocations(relocations)
+            .add_relocation_symbols(relocation_symbols)
+            .cfg_label_leaders(cfg_label_leaders);
 
         if let Some(records) = rich_records {
             builder = builder.rich_header_records(records);
@@ -882,6 +938,15 @@ impl<'a> PeLoaderImpl<'a> {
         _image_base: u64,
     ) -> Result<std::collections::HashMap<u64, String>> {
         coff::parse_coff_data_symbols(self, symbol_table_offset, symbol_count, _image_base)
+    }
+
+    fn parse_coff_cfg_label_leaders(
+        &self,
+        symbol_table_offset: u32,
+        symbol_count: u32,
+        _image_base: u64,
+    ) -> Result<Vec<u64>> {
+        coff::parse_coff_cfg_label_leaders(self, symbol_table_offset, symbol_count, _image_base)
     }
 
     fn parse_pdb_debug_info(

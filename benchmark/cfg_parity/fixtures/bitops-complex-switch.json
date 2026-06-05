@@ -1,0 +1,64 @@
+{
+  "binary": "benchmark/binary/x86-64/window/small/binary/c/bitops_and_control_flow.exe",
+  "expect_full_match": true,
+  "fission_model": "pcode_instruction_cfg",
+  "function_address": 5368714624,
+  "function_name": "complex_switch",
+  "ghidra_model": "ghidra_basic_block_model",
+  "name": "bitops-complex-switch",
+  "snapshot": {
+    "block_starts": [
+      5368714624,
+      5368714629,
+      5368714639,
+      5368714649,
+      5368714662,
+      5368714672,
+      5368714682
+    ],
+    "edges": [
+      {
+        "from": 5368714624,
+        "to": 5368714629
+      },
+      {
+        "from": 5368714624,
+        "to": 5368714672
+      },
+      {
+        "from": 5368714629,
+        "to": 5368714639
+      },
+      {
+        "from": 5368714629,
+        "to": 5368714662
+      },
+      {
+        "from": 5368714639,
+        "to": 5368714649
+      },
+      {
+        "from": 5368714639,
+        "to": 5368714662
+      },
+      {
+        "from": 5368714649,
+        "to": 5368714662
+      },
+      {
+        "from": 5368714672,
+        "to": 5368714662
+      },
+      {
+        "from": 5368714672,
+        "to": 5368714682
+      }
+    ],
+    "exit_blocks": [
+      5368714662,
+      5368714682
+    ],
+    "function_address": 5368714624,
+    "model": "ghidra_basic_block_model"
+  }
+}

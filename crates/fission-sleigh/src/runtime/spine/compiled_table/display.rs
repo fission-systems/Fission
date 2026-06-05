@@ -129,6 +129,69 @@ pub(super) fn flow_kind_for_state(state: &RuntimeConstructState) -> DecodedFlowK
     DecodedFlowKind::None
 }
 
+fn flow_reference_kind(flow_kind: DecodedFlowKind) -> Option<DecodedReferenceKind> {
+    match flow_kind {
+        DecodedFlowKind::Call => Some(DecodedReferenceKind::CallTarget),
+        DecodedFlowKind::Jump | DecodedFlowKind::ConditionalJump => {
+            Some(DecodedReferenceKind::BranchTarget)
+        }
+        _ => None,
+    }
+}
+
+fn rip_relative_target_from_memory(
+    address: u64,
+    length: usize,
+    operand: &BoundOperand,
+) -> Option<u64> {
+    let BoundOperand::Memory {
+        displacement,
+        absolute,
+        rip_relative: true,
+        ..
+    } = operand
+    else {
+        return None;
+    };
+    absolute.or_else(|| {
+        instruction_end_address(address, length).and_then(|base| add_signed(base, *displacement))
+    })
+}
+
+pub(super) fn first_flow_target(
+    state: &RuntimeConstructState,
+    address: u64,
+    length: usize,
+) -> Option<u64> {
+    if flow_reference_kind(flow_kind_for_state(state)).is_none() {
+        return None;
+    }
+    first_relative_target(state).or_else(|| first_rip_relative_flow_target(state, address, length))
+}
+
+fn first_rip_relative_flow_target(
+    state: &RuntimeConstructState,
+    address: u64,
+    length: usize,
+) -> Option<u64> {
+    first_rip_relative_memory(state)
+        .and_then(|operand| rip_relative_target_from_memory(address, length, operand))
+        .or_else(|| {
+            state.handles.iter().find_map(|handle| {
+                handle
+                    .debug_value
+                    .as_ref()
+                    .and_then(|operand| rip_relative_target_from_memory(address, length, operand))
+                    .or_else(|| {
+                        handle
+                            .subtable_state
+                            .as_deref()
+                            .and_then(|child| first_rip_relative_flow_target(child, address, length))
+                    })
+            })
+        })
+}
+
 pub(super) fn disasm_mnemonic(state: &RuntimeConstructState) -> String {
     state.mnemonic.replace('^', "").to_ascii_lowercase()
 }
@@ -384,7 +447,14 @@ pub(super) fn decoded_references(
     for (operand_index, handle) in handles.iter().enumerate() {
         if let Some(reference) = handle.subtable_state.as_deref().and_then(|state| {
             reference_from_subtable_state(address, length, flow_kind, operand_index, state)
-                .or_else(|| inst_next_relative_reference_from_handle(operand_index, handle, state))
+                .or_else(|| {
+                    inst_next_relative_reference_from_handle(
+                        operand_index,
+                        handle,
+                        state,
+                        flow_kind,
+                    )
+                })
         }) {
             refs.push(reference);
             continue;
@@ -458,13 +528,15 @@ pub(super) fn decoded_references(
                     None
                 };
                 if let Some(target) = target {
-                    let kind = if is_rip_relative {
-                        DecodedReferenceKind::RipRelativeAddress
-                    } else if base.is_none() && index.is_none() {
-                        DecodedReferenceKind::MemoryAddress
-                    } else {
-                        DecodedReferenceKind::MemoryAddress
-                    };
+                    let kind = flow_reference_kind(flow_kind).unwrap_or_else(|| {
+                        if is_rip_relative {
+                            DecodedReferenceKind::RipRelativeAddress
+                        } else if base.is_none() && index.is_none() {
+                            DecodedReferenceKind::MemoryAddress
+                        } else {
+                            DecodedReferenceKind::MemoryAddress
+                        }
+                    });
                     refs.push(DecodedReference {
                         target,
                         kind,
@@ -489,6 +561,7 @@ fn inst_next_relative_reference_from_handle(
     operand_index: usize,
     handle: &RuntimeHandle,
     state: &RuntimeConstructState,
+    flow_kind: DecodedFlowKind,
 ) -> Option<DecodedReference> {
     if !state_uses_inst_next_pattern_expression(state) {
         return None;
@@ -502,9 +575,11 @@ fn inst_next_relative_reference_from_handle(
             .is_none()
             .then_some(handle.fixed.offset_offset),
     }?;
+    let kind = flow_reference_kind(flow_kind)
+        .unwrap_or(DecodedReferenceKind::RipRelativeAddress);
     Some(DecodedReference {
         target,
-        kind: DecodedReferenceKind::RipRelativeAddress,
+        kind,
         operand_index,
     })
 }
@@ -526,9 +601,11 @@ fn reference_from_subtable_state(
             instruction_end_address(address, length)
                 .and_then(|base| add_signed(base, *displacement))
         })?;
+        let kind = flow_reference_kind(flow_kind)
+            .unwrap_or(DecodedReferenceKind::RipRelativeAddress);
         return Some(DecodedReference {
             target,
-            kind: DecodedReferenceKind::RipRelativeAddress,
+            kind,
             operand_index,
         });
     }
@@ -623,6 +700,9 @@ pub(super) fn first_relative_target(state: &RuntimeConstructState) -> Option<u64
         })
         .or_else(|| {
             state.handles.iter().find_map(|handle| {
+                if let Some(BoundOperand::Relative { target }) = handle.debug_value.as_ref() {
+                    return Some(*target);
+                }
                 handle
                     .subtable_state
                     .as_deref()

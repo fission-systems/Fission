@@ -1,0 +1,12 @@
+{
+  "name": "crt-winmain-startup",
+  "binary": "benchmark/binary/x86-64/window/small/binary/c/test_functions.exe",
+  "addr": "0x1400013e0",
+  "facts": {
+    "function_address": 5368714208,
+    "labels": [5368714208, 5368714212, 5368714231],
+    "flow_edges": [],
+    "indirect_targets": [],
+    "noreturn_callsites": []
+  }
+}

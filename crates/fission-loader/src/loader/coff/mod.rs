@@ -24,6 +24,7 @@ const IMAGE_SCN_MEM_WRITE: u32 = 0x8000_0000;
 
 const C_EXT: u8 = 2;
 const C_STAT: u8 = 3;
+const C_LABEL: u8 = 6;
 const DT_FCN: u16 = 2;
 
 #[derive(Clone, Copy, Debug)]
@@ -52,6 +53,7 @@ struct CoffSymbol {
     symbol_type: u16,
     storage_class: u8,
     number_of_aux_symbols: u8,
+    total_size: u32,
 }
 
 impl CoffLoader {
@@ -118,6 +120,7 @@ impl CoffLoader {
 
         let symbols = parse_symbols(bytes, &header, &string_table);
         let functions = classify_symbols(&symbols, &sections);
+        let cfg_label_leaders = parse_cfg_label_leaders(&symbols, &sections);
         let entry_point = functions
             .iter()
             .find(|function| !function.is_import)
@@ -136,6 +139,7 @@ impl CoffLoader {
             .is_64bit(is_64bit)
             .add_sections(section_infos)
             .add_functions(functions)
+            .cfg_label_leaders(cfg_label_leaders)
             .build()
     }
 }
@@ -225,6 +229,10 @@ fn parse_symbols(bytes: &[u8], header: &CoffHeader, string_table: &[u8]) -> Vec<
         let symbol_type = read_u16(bytes, offset + 14).unwrap_or(0);
         let storage_class = bytes[offset + 16];
         let number_of_aux_symbols = bytes[offset + 17];
+        let mut total_size = 0u32;
+        if number_of_aux_symbols > 0 && offset + COFF_SYMBOL_SIZE + 8 <= bytes.len() {
+            total_size = read_u32(bytes, offset + COFF_SYMBOL_SIZE + 4).unwrap_or(0);
+        }
         symbols.push(CoffSymbol {
             name,
             value,
@@ -232,6 +240,7 @@ fn parse_symbols(bytes: &[u8], header: &CoffHeader, string_table: &[u8]) -> Vec<
             symbol_type,
             storage_class,
             number_of_aux_symbols,
+            total_size,
         });
         let advance = 1 + number_of_aux_symbols as u32;
         index = index.saturating_add(advance);
@@ -286,7 +295,7 @@ fn classify_symbols(symbols: &[CoffSymbol], sections: &[CoffSection]) -> Vec<Fun
         functions.push(FunctionInfo {
             name: symbol.name.clone(),
             address: section.assigned_address + symbol.value as u64,
-            size: 0,
+            size: symbol.total_size as u64,
             is_export: symbol.storage_class == C_EXT,
             is_import: false,
             origin: Some("coff-symbol-table".to_string()),
@@ -301,6 +310,26 @@ fn classify_symbols(symbols: &[CoffSymbol], sections: &[CoffSection]) -> Vec<Fun
     functions
         .dedup_by(|a, b| a.address == b.address && a.name == b.name && a.is_import == b.is_import);
     functions
+}
+
+fn parse_cfg_label_leaders(symbols: &[CoffSymbol], sections: &[CoffSection]) -> Vec<u64> {
+    let mut leaders = Vec::new();
+    for symbol in symbols {
+        if symbol.storage_class != C_LABEL || symbol.section_number <= 0 {
+            continue;
+        }
+        let section_index = (symbol.section_number - 1) as usize;
+        let Some(section) = sections.get(section_index) else {
+            continue;
+        };
+        if !section.is_executable() {
+            continue;
+        }
+        leaders.push(section.assigned_address + symbol.value as u64);
+    }
+    leaders.sort_unstable();
+    leaders.dedup();
+    leaders
 }
 
 fn parse_string_table<'a>(bytes: &'a [u8], header: &CoffHeader) -> &'a [u8] {

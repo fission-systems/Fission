@@ -540,6 +540,7 @@ mod tests {
                 return_type: Some("int".into()),
                 params: Vec::new(),
                 local_vars: Vec::new(),
+                size: 0,
             },
         );
 
@@ -586,6 +587,7 @@ mod tests {
                     type_name: "int".into(),
                     location: DwarfLocation::Unknown,
                 }],
+                size: 0,
             },
         );
 
@@ -640,6 +642,7 @@ mod tests {
             relocations: Vec::new(),
             rich_header_records: None,
             symbol_versions: HashMap::new(),
+            cfg_label_leaders: Vec::new(),
         };
         let binary = LoadedBinary::from_inner(inner);
         let store = FactStore::from_binary(&binary);

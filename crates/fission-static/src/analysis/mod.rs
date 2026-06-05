@@ -4,6 +4,7 @@
 //! crate supplies facts under `decomp` and analyzer utilities loaded binaries can use without owning IR policy.
 
 pub mod callgraph;
+pub mod control_flow_facts;
 pub mod decomp;
 pub mod external_symbol;
 pub mod function_discovery;
@@ -23,6 +24,10 @@ pub use fission_loader::{
 };
 
 pub use callgraph::{CallEdge, CallGraph};
+pub use control_flow_facts::{
+    control_flow_facts_for, decode_memory_context_for, function_max_bytes, ControlFlowFacts,
+    FunctionControlFlowFacts,
+};
 pub use external_symbol::{
     ExternalSymbolIdentity, ExternalSymbolIndex, build_external_symbol_index,
     normalize_library_key, parse_external_identity_from_loader_string,

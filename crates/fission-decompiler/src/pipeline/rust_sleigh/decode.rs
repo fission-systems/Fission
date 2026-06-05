@@ -1,5 +1,6 @@
 use crate::{PcodeFunction, Varnode};
 use fission_loader::loader::LoadedBinary;
+use fission_static::analysis::control_flow_facts::decode_memory_context_for;
 use fission_sleigh::runtime::{DecodeContract, DecodeMemoryContext, RuntimeSleighFrontend};
 
 #[derive(Debug, Clone)]
@@ -33,77 +34,7 @@ pub(crate) fn pcode_op_count(pcode: &PcodeFunction) -> usize {
 }
 
 fn decode_memory_context(binary: &LoadedBinary, entry_address: u64, max_bytes: usize) -> DecodeMemoryContext {
-    let inner = binary.inner();
-    let mut relative_address_bases = Vec::new();
-    for section in &inner.sections {
-        let start = section.virtual_address;
-        let end = start.saturating_add(section.virtual_size);
-        if entry_address >= start && entry_address < end && !relative_address_bases.contains(&start)
-        {
-            relative_address_bases.push(start);
-        }
-    }
-    if inner.image_base != 0 && !relative_address_bases.contains(&inner.image_base) {
-        relative_address_bases.push(inner.image_base);
-    }
-
-    let mut jump_table_targets = Vec::new();
-    let little_endian = !inner.arch_spec.contains("BE");
-
-    // Bound the function end address
-    let mut func_size = None;
-    if let Some(&idx) = inner.function_addr_index.get(&entry_address) {
-        if let Some(info) = inner.functions.get(idx) {
-            if info.size > 0 {
-                func_size = Some(info.size as u64);
-            }
-        }
-    }
-
-    let limit_addr = if let Some(size) = func_size {
-        entry_address.saturating_add(size)
-    } else {
-        let mut next_addr = entry_address.saturating_add(max_bytes as u64);
-        for info in &inner.functions {
-            if info.address > entry_address && info.address < next_addr {
-                next_addr = info.address;
-            }
-        }
-        next_addr
-    };
-
-    for &use_site in inner.relocation_symbols.keys() {
-        if let Some(raw_8) = binary.view_bytes(use_site, 8) {
-            let val = if little_endian {
-                u64::from_le_bytes(raw_8.try_into().unwrap())
-            } else {
-                u64::from_be_bytes(raw_8.try_into().unwrap())
-            };
-            if val >= entry_address && val < limit_addr {
-                if !jump_table_targets.contains(&val) {
-                    jump_table_targets.push(val);
-                }
-            }
-        }
-        if let Some(raw_4) = binary.view_bytes(use_site, 4) {
-            let val_32 = if little_endian {
-                u32::from_le_bytes(raw_4.try_into().unwrap())
-            } else {
-                u32::from_be_bytes(raw_4.try_into().unwrap())
-            };
-            let val = val_32 as u64;
-            if val >= entry_address && val < limit_addr {
-                if !jump_table_targets.contains(&val) {
-                    jump_table_targets.push(val);
-                }
-            }
-        }
-    }
-
-    DecodeMemoryContext {
-        relative_address_bases,
-        jump_table_targets,
-    }
+    decode_memory_context_for(binary, entry_address, max_bytes)
 }
 
 pub(crate) fn decode_rust_sleigh_pcode(
@@ -318,16 +249,10 @@ mod tests {
     use super::*;
     use fission_loader::loader::LoadedBinary;
     use fission_pcode::PcodeOpcode;
-    use fission_sleigh::compiler::discovery;
     use std::path::Path;
 
     #[test]
     fn decomp_lift_does_not_fallthrough_into_jump_table_data() {
-        if !discovery::ghidra_packaged_sla_available() {
-            eprintln!("skip: packaged Ghidra .sla not available for ARM strict retry check");
-            return;
-        }
-
         let fixture =
             Path::new("../../benchmark/binary/ARM4_be/baremetal/small/binary/c/control_flow.o");
         if !fixture.exists() {
@@ -359,11 +284,6 @@ mod tests {
 
     #[test]
     fn conditional_return_keeps_fallthrough_without_decoding_jump_table_data() {
-        if !discovery::ghidra_packaged_sla_available() {
-            eprintln!("skip: packaged Ghidra .sla not available for ARM conditional return check");
-            return;
-        }
-
         let fixture =
             Path::new("../../benchmark/binary/ARM5_be/baremetal/small/binary/c/control_flow.o");
         if !fixture.exists() {

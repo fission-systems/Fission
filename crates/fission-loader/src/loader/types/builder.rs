@@ -31,6 +31,7 @@ impl LoadedBinaryBuilder {
             rich_header_records: None,
             symbol_versions: std::collections::HashMap::new(),
             inferred_types: Vec::new(),
+            cfg_label_leaders: Vec::new(),
         }
     }
 
@@ -161,6 +162,11 @@ impl LoadedBinaryBuilder {
         self
     }
 
+    pub fn cfg_label_leaders(mut self, leaders: impl IntoIterator<Item = u64>) -> Self {
+        self.cfg_label_leaders.extend(leaders);
+        self
+    }
+
     pub fn build(self) -> Result<LoadedBinary> {
         let mut functions = self.functions;
         functions.sort_by_key(|f| f.address);
@@ -208,6 +214,10 @@ impl LoadedBinaryBuilder {
 
         let string_map = scan_ascii_strings_from_sections(self.data.as_slice(), &sections);
 
+        let mut cfg_label_leaders = self.cfg_label_leaders;
+        cfg_label_leaders.sort_unstable();
+        cfg_label_leaders.dedup();
+
         let inner = LoadedBinaryInner {
             path: self.path,
             hash: self.hash,
@@ -234,6 +244,7 @@ impl LoadedBinaryBuilder {
             relocations: self.relocations,
             rich_header_records: self.rich_header_records,
             symbol_versions: self.symbol_versions,
+            cfg_label_leaders,
         };
 
         Ok(LoadedBinary::from_inner(inner))

@@ -1,0 +1,85 @@
+{
+  "binary": "benchmark/binary/x86-64/window/small/binary/c/test_functions.exe",
+  "expect_full_match": true,
+  "fission_model": "pcode_instruction_cfg",
+  "function_address": 5368715376,
+  "function_name": "fill_matrix",
+  "ghidra_model": "ghidra_basic_block_model",
+  "name": "test-functions-fill-matrix",
+  "snapshot": {
+    "block_starts": [
+      5368715376,
+      5368715391,
+      5368715396,
+      5368715408,
+      5368715434,
+      5368715446,
+      5368715456,
+      5368715472,
+      5368715482
+    ],
+    "edges": [
+      {
+        "from": 5368715376,
+        "to": 5368715391
+      },
+      {
+        "from": 5368715376,
+        "to": 5368715482
+      },
+      {
+        "from": 5368715391,
+        "to": 5368715396
+      },
+      {
+        "from": 5368715391,
+        "to": 5368715482
+      },
+      {
+        "from": 5368715396,
+        "to": 5368715408
+      },
+      {
+        "from": 5368715408,
+        "to": 5368715434
+      },
+      {
+        "from": 5368715408,
+        "to": 5368715456
+      },
+      {
+        "from": 5368715434,
+        "to": 5368715446
+      },
+      {
+        "from": 5368715434,
+        "to": 5368715472
+      },
+      {
+        "from": 5368715446,
+        "to": 5368715456
+      },
+      {
+        "from": 5368715456,
+        "to": 5368715456
+      },
+      {
+        "from": 5368715456,
+        "to": 5368715472
+      },
+      {
+        "from": 5368715472,
+        "to": 5368715408
+      },
+      {
+        "from": 5368715472,
+        "to": 5368715482
+      }
+    ],
+    "exit_blocks": [
+      5368715482
+    ],
+    "function_address": 5368715376,
+    "model": "ghidra_basic_block_model"
+  }
+}

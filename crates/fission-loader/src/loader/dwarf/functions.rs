@@ -14,6 +14,7 @@ struct FuncBuilder {
     return_type: Option<String>,
     params: Vec<DwarfParamInfo>,
     local_vars: Vec<DwarfLocalVar>,
+    size: u64,
 }
 
 impl FuncBuilder {
@@ -24,6 +25,7 @@ impl FuncBuilder {
             return_type: self.return_type,
             params: self.params,
             local_vars: self.local_vars,
+            size: self.size,
         })
     }
 }
@@ -111,6 +113,11 @@ impl<'a> super::analyzer::DwarfAnalyzer<'a> {
 
                     let name = crate::loader::demangle::demangle(&raw_name);
                     let return_type = self.resolve_type_ref(entry, &unit, &type_cache)?;
+                    let high_pc = self.get_attr_u64(entry, DwAt(0x12))?;
+                    let size = high_pc
+                        .filter(|high| *high > address)
+                        .map(|high| high - address)
+                        .unwrap_or(0);
 
                     current_func = Some(FuncBuilder {
                         address,
@@ -118,6 +125,7 @@ impl<'a> super::analyzer::DwarfAnalyzer<'a> {
                         return_type,
                         params: Vec::new(),
                         local_vars: Vec::new(),
+                        size,
                     });
                     func_depth = 1; // We're at depth 1 relative to this subprogram
                 }

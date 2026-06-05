@@ -1,0 +1,46 @@
+{
+  "binary": "benchmark/binary/x86-64/window/small/binary/c/test_functions.exe",
+  "expect_full_match": true,
+  "fission_model": "pcode_instruction_cfg",
+  "function_address": 5368715296,
+  "function_name": "sum_array",
+  "ghidra_model": "ghidra_basic_block_model",
+  "name": "test-functions-sum-array",
+  "snapshot": {
+    "block_starts": [
+      5368715296,
+      5368715300,
+      5368715312,
+      5368715323,
+      5368715328
+    ],
+    "edges": [
+      {
+        "from": 5368715296,
+        "to": 5368715300
+      },
+      {
+        "from": 5368715296,
+        "to": 5368715328
+      },
+      {
+        "from": 5368715300,
+        "to": 5368715312
+      },
+      {
+        "from": 5368715312,
+        "to": 5368715312
+      },
+      {
+        "from": 5368715312,
+        "to": 5368715323
+      }
+    ],
+    "exit_blocks": [
+      5368715323,
+      5368715328
+    ],
+    "function_address": 5368715296,
+    "model": "ghidra_basic_block_model"
+  }
+}

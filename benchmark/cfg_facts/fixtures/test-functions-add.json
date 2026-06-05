@@ -1,0 +1,12 @@
+{
+  "name": "test-functions-add",
+  "binary": "benchmark/binary/x86-64/window/small/binary/c/test_functions.exe",
+  "addr": "0x140001450",
+  "facts": {
+    "function_address": 5368714320,
+    "labels": [5368714320],
+    "flow_edges": [],
+    "indirect_targets": [],
+    "noreturn_callsites": []
+  }
+}

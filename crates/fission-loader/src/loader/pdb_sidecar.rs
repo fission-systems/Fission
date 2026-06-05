@@ -165,6 +165,7 @@ impl PendingFunction {
                 return_type,
                 params,
                 local_vars: Vec::new(),
+                size: u64::from(proc.len),
             },
             pending_param_names: Vec::new(),
         })

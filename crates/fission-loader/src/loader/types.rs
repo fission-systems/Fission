@@ -224,6 +224,8 @@ pub struct DwarfFunctionInfo {
     pub params: Vec<DwarfParamInfo>,
     /// Local variables
     pub local_vars: Vec<DwarfLocalVar>,
+    /// Function body size when known from debug info (high_pc - low_pc).
+    pub size: u64,
 }
 
 pub type PdbParamInfo = DwarfParamInfo;
@@ -316,6 +318,8 @@ pub struct LoadedBinaryInner {
     pub rich_header_records: Option<Vec<RichHeaderRecord>>,
     /// ELF symbol versioning (address -> version name).
     pub symbol_versions: std::collections::HashMap<u64, String>,
+    /// COFF/PE label addresses (for example MingW `.l_startw`) used as CFG block leaders.
+    pub cfg_label_leaders: Vec<u64>,
 }
 
 /// Parsed binary information with O(1) clone via Arc.
@@ -412,6 +416,15 @@ impl LoadedBinary {
     pub fn is_unique(&self) -> bool {
         Arc::strong_count(&self.inner) == 1
     }
+
+    /// COFF/PE label addresses within `[start, end)` suitable as CFG block leaders.
+    pub fn cfg_block_entry_hints_in_range(&self, start: u64, end: u64) -> Vec<u64> {
+        self.cfg_label_leaders
+            .iter()
+            .copied()
+            .filter(|addr| *addr >= start && *addr < end)
+            .collect()
+    }
 }
 
 // Deref allows direct field access: binary.path instead of binary.inner().path
@@ -455,4 +468,5 @@ pub struct LoadedBinaryBuilder {
     rich_header_records: Option<Vec<RichHeaderRecord>>,
     symbol_versions: std::collections::HashMap<u64, String>,
     inferred_types: Vec<InferredTypeInfo>,
+    cfg_label_leaders: Vec<u64>,
 }

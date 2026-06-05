@@ -10,6 +10,7 @@
 
 mod analysis;
 mod basic_block;
+mod export;
 mod graph;
 mod render;
 mod summary;
@@ -17,6 +18,7 @@ mod summary;
 use crate::PcodeFunction;
 pub use analysis::{CfgMetrics, ComplexityAnalyzer, DominatorTree, Loop, LoopAnalyzer, LoopKind};
 pub use basic_block::{BasicBlock, BlockEdge, EdgeKind};
+pub use export::{AddressCfgSnapshot, AddressEdge};
 pub use graph::{CfgBuilder, ControlFlowGraph};
 pub use render::{CfgVisualizer, DotOptions};
 pub use summary::*;

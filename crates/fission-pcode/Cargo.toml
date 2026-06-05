@@ -32,3 +32,5 @@ indexmap = "2"
 criterion = "0.5"
 insta = { version = "1.47", features = ["yaml"] }
 petgraph = "0.8"
+fission-sleigh = { path = "../fission-sleigh" }
+fission-static = { path = "../fission-static" }

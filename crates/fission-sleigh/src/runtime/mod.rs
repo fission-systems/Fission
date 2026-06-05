@@ -5,7 +5,6 @@ mod engine;
 mod frontend;
 mod function;
 mod lift;
-pub mod native;
 mod registry;
 mod spine;
 
@@ -22,7 +21,10 @@ use crate::compiler::{
 };
 pub use crate::packed_context::PackedContextOverride;
 pub use address_state::RuntimeAddressState;
-pub use function::build_cfg_blocks;
+pub use function::{
+    build_cfg_blocks, build_cfg_blocks_from_ops, build_cfg_blocks_with_hints,
+    build_instruction_cfg_snapshot,
+};
 pub use registry::{
     CompiledRuntimeRegistry, ExecutionEngineKey, ProcessorDescriptor, RuntimeEntrySelection,
     RuntimeEntrySelectionError, RuntimeEntrySelectionSource, RuntimeFrontendDescriptor,
@@ -32,34 +34,23 @@ pub use spine::{LanguageRuntime, ProcessorRuntimeProfile, RuntimeAttemptReport, 
 
 /// Extract the register name → (offset, size) map for the given `BinaryLoadSpec`.
 ///
-/// Reads the packaged `.sla` file (Ghidra's canonical `ELEM_VARNODE_SYM` table) and converts
-/// it into the flat `HashMap<String, (u64, u32)>` expected by `fission-pcode`'s `SlaRegisterMap`.
+/// Reads the checked-in packaged `.sla` file (Ghidra's canonical `ELEM_VARNODE_SYM` table)
+/// from `utils/sleigh-specs/compiled/` and converts it into the flat register map.
 ///
 /// Returns `None` if the SLA file is unavailable or the library cannot be decoded.
-/// Callers should fall back to hardcoded ABI tables when `None` is returned.
 pub fn register_map_for_load_spec(
     load_spec: &BinaryLoadSpec,
 ) -> Option<std::collections::HashMap<String, (u64, u32)>> {
-    use crate::compiler::{resolve_ghidra_install_paths, sla::load_construct_templates_from_sla};
+    use crate::compiler::{packaged_sla_for_entry_spec, sla::load_construct_templates_from_sla};
 
     let language_id = load_spec.pair.language_id.as_str();
 
-    // Try to find the entry spec for this language.
     let entries = discover_all_entry_specs().ok()?;
     let entry = entries
         .into_iter()
         .find(|e| frontend::entry_matches_language_name(e, language_id))?;
 
-    // Find the packaged SLA file in the Ghidra installation.
-    let paths = resolve_ghidra_install_paths()?;
-    let stem = entry.path.file_stem()?.to_str()?.to_string();
-    let wanted = format!("{}.sla", stem);
-
-    let arch = entry.arch.clone();
-    let arch_dir = paths.processors_root.join(&arch);
-    let sla_path = find_sla_in_dir(&arch_dir, &wanted)
-        .or_else(|| find_sla_in_dir(&paths.processors_root, &wanted))?;
-
+    let sla_path = packaged_sla_for_entry_spec(&entry.path).ok()??;
     let library = load_construct_templates_from_sla(&sla_path).ok()?;
 
     let map = library
@@ -69,24 +60,6 @@ pub fn register_map_for_load_spec(
         .collect();
 
     Some(map)
-}
-
-fn find_sla_in_dir(root: &std::path::Path, name: &str) -> Option<std::path::PathBuf> {
-    fn walk(dir: &std::path::Path, name: &str) -> Option<std::path::PathBuf> {
-        let rd = std::fs::read_dir(dir).ok()?;
-        for entry in rd.flatten() {
-            let path = entry.path();
-            if path.is_dir() {
-                if let Some(found) = walk(&path, name) {
-                    return Some(found);
-                }
-            } else if path.file_name().and_then(|n| n.to_str()) == Some(name) {
-                return Some(path);
-            }
-        }
-        None
-    }
-    walk(root, name)
 }
 
 const DEFAULT_FUNCTION_INSTRUCTION_LIMIT: usize = 512;
@@ -166,8 +139,6 @@ pub struct RuntimeExecutionDetails {
     pub pending_context_commits: Vec<(u64, u32, u32, u32)>,
 }
 
-use crate::runtime::native::NativeBackend;
-use std::sync::Arc;
 
 #[derive(Debug, Clone)]
 pub struct RuntimeSleighFrontend {
@@ -175,7 +146,6 @@ pub struct RuntimeSleighFrontend {
     entry: EntrySpec,
     status: RuntimeFrontendStatus,
     compiled: Option<CompiledFrontend>,
-    native_backend: Option<Arc<NativeBackend>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -191,12 +161,49 @@ pub struct DecodedPcodeFunction {
     pub decoded_instructions: usize,
     pub stop_reason: DecodeStopReason,
     pub template_source_counts: BTreeMap<String, usize>,
+    /// Reachable instruction start addresses in ascending order (includes zero-pcode nops).
+    pub reachable_instruction_addresses: Vec<u64>,
+    /// Decoded byte length per reachable instruction address.
+    pub instruction_lengths: BTreeMap<u64, u64>,
+    /// Indirect branch targets inferred during lift, keyed by branch site address.
+    pub inferred_indirect_edges: BTreeMap<u64, Vec<u64>>,
+    /// Union of inferred and jump-table indirect branch targets.
+    pub indirect_targets: BTreeSet<u64>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct DecodeMemoryContext {
     pub relative_address_bases: Vec<u64>,
     pub jump_table_targets: Vec<u64>,
+    /// Loader-provided label addresses (for example COFF `.l_startw`) within the lifted function.
+    pub block_entry_hints: Vec<u64>,
+    /// Flow-reference targets (jump/jcc destinations) promoted to block leaders.
+    pub flow_leaders: Vec<u64>,
+    /// Explicit non-call flow edges `(from_instruction, to)` within the lifted function.
+    pub flow_edges: Vec<(u64, u64)>,
+    /// Call instruction addresses whose callee is known to never return.
+    pub noreturn_callsites: Vec<u64>,
+}
+
+/// Merged instruction-level CFG hints consumed by `build_instruction_cfg_snapshot`.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct InstructionCfgHints {
+    pub block_leaders: BTreeSet<u64>,
+    pub flow_edges: Vec<(u64, u64)>,
+    pub noreturn_callsites: BTreeSet<u64>,
+}
+
+impl InstructionCfgHints {
+    pub fn from_memory_context(ctx: &DecodeMemoryContext) -> Self {
+        let mut block_leaders = BTreeSet::new();
+        block_leaders.extend(ctx.block_entry_hints.iter().copied());
+        block_leaders.extend(ctx.flow_leaders.iter().copied());
+        Self {
+            block_leaders,
+            flow_edges: ctx.flow_edges.clone(),
+            noreturn_callsites: ctx.noreturn_callsites.iter().copied().collect(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -368,7 +375,7 @@ mod tests {
             ops.push(op);
         }
 
-        let blocks = build_cfg_blocks(0x1000, ops, &BTreeSet::new());
+        let blocks = build_cfg_blocks_from_ops(0x1000, ops, &BTreeSet::new());
         assert!(
             blocks.iter().any(|block| block.start_address == 0x1020),
             "{blocks:?}"
@@ -424,10 +431,6 @@ mod tests {
 
     #[test]
     fn loongarch_variants_lift_add_w_from_spec_template() {
-        if !discovery::ghidra_packaged_sla_available() {
-            eprintln!("skip: packaged Ghidra .sla not available for LoongArch ConstructTpl lift");
-            return;
-        }
 
         for language in [
             "Loongarch:LE:32:ilp32f",
@@ -463,10 +466,6 @@ mod tests {
 
     #[test]
     fn sparc_v9_64_lifts_add_from_spec_template() {
-        if !discovery::ghidra_packaged_sla_available() {
-            eprintln!("skip: packaged Ghidra .sla not available for SPARC ConstructTpl lift");
-            return;
-        }
 
         let frontend = RuntimeSleighFrontend::new_for_language("sparc:BE:64:default")
             .expect("SPARC V9 64 runtime");
@@ -493,10 +492,6 @@ mod tests {
 
     #[test]
     fn powerpc_32_defaults_lift_add_from_spec_template() {
-        if !discovery::ghidra_packaged_sla_available() {
-            eprintln!("skip: packaged Ghidra .sla not available for PowerPC ConstructTpl lift");
-            return;
-        }
 
         for (language, bytes) in [
             ("PowerPC:BE:32:default", [0x7c, 0x64, 0x1a, 0x14]),
@@ -529,10 +524,6 @@ mod tests {
 
     #[test]
     fn powerpc_64_defaults_lift_add_from_spec_template() {
-        if !discovery::ghidra_packaged_sla_available() {
-            eprintln!("skip: packaged Ghidra .sla not available for PowerPC ConstructTpl lift");
-            return;
-        }
 
         for (language, bytes) in [
             (
@@ -571,10 +562,6 @@ mod tests {
 
     #[test]
     fn powerpc_64_powerisa_lifts_iselgt_from_spec_template() {
-        if !discovery::ghidra_packaged_sla_available() {
-            eprintln!("skip: packaged Ghidra .sla not available for PowerPC ConstructTpl lift");
-            return;
-        }
 
         for (language, bytes) in [
             ("PowerPC:BE:64:A2ALT", [0x7c, 0x66, 0x28, 0x5e]),
@@ -624,10 +611,6 @@ mod tests {
 
     #[test]
     fn runtime_frontend_lifts_x86_64_ret_from_spec_template() {
-        if !discovery::ghidra_packaged_sla_available() {
-            eprintln!("skip: packaged Ghidra .sla not available for ret ConstructTpl lift");
-            return;
-        }
         let frontend =
             RuntimeSleighFrontend::new_for_language("x86-64").expect("x86-64 runtime frontend");
         let decoded = frontend
@@ -650,10 +633,6 @@ mod tests {
 
     #[test]
     fn runtime_function_lift_follows_conditional_target_after_fallthrough_ret() {
-        if !discovery::ghidra_packaged_sla_available() {
-            eprintln!("skip: packaged Ghidra .sla not available for x86-64 branch lift");
-            return;
-        }
         let frontend =
             RuntimeSleighFrontend::new_for_language("x86-64").expect("x86-64 runtime frontend");
         let bytes = [
@@ -718,10 +697,6 @@ mod tests {
 
     #[test]
     fn arm_low_bit_code_address_seeds_thumb_context_without_address_byte_skew() {
-        if !discovery::ghidra_packaged_sla_available() {
-            eprintln!("skip: packaged Ghidra .sla not available for ARM low-bit context test");
-            return;
-        }
         let frontend = RuntimeSleighFrontend::new_for_language("ARM8_le").expect("ARM8 runtime");
         let address_state = frontend.normalize_low_bit_code_address(0x100001);
         let decode_address = address_state.address;
@@ -749,12 +724,6 @@ mod tests {
 
     #[test]
     fn arm_low_bit_decode_window_keeps_thumb_context_after_first_instruction() {
-        if !discovery::ghidra_packaged_sla_available() {
-            eprintln!(
-                "skip: packaged Ghidra .sla not available for ARM low-bit decode-window test"
-            );
-            return;
-        }
         let frontend = RuntimeSleighFrontend::new_for_language("ARM8_le").expect("ARM8 runtime");
         let address_state = frontend.normalize_low_bit_code_address(0x100001);
         assert_eq!(address_state.address, 0x100000);
@@ -780,10 +749,6 @@ mod tests {
 
     #[test]
     fn arm8m_recursive_thumb_subtables_decode_without_sequential_recursion_failure() {
-        if !discovery::ghidra_packaged_sla_available() {
-            eprintln!("skip: packaged Ghidra .sla not available for ARM8m recursion test");
-            return;
-        }
         for (entry_id, bytes) in [("ARM8m_le", [0xb0, 0xb5]), ("ARM8m_be", [0xb5, 0xb0])] {
             let frontend =
                 RuntimeSleighFrontend::new_for_language(entry_id).expect("ARM8m runtime");
@@ -818,10 +783,6 @@ mod tests {
 
     #[test]
     fn arm8m_be_low_bit_code_address_decodes_thumb_instruction_without_byte_skew() {
-        if !discovery::ghidra_packaged_sla_available() {
-            eprintln!("skip: packaged Ghidra .sla not available for ARM8m_be low-bit test");
-            return;
-        }
         let frontend =
             RuntimeSleighFrontend::new_for_language("ARM8m_be").expect("ARM8m_be runtime");
         let address_state = frontend.normalize_low_bit_code_address(0x100019);
@@ -857,10 +818,6 @@ mod tests {
 
     #[test]
     fn arm_thumb_it_context_commit_keeps_conditional_bx_fallthrough_reachable() {
-        if !discovery::ghidra_packaged_sla_available() {
-            eprintln!("skip: packaged Ghidra .sla not available for ARM Thumb IT lift test");
-            return;
-        }
         for (language, bytes) in [
             (
                 "ARM8_le",
@@ -919,10 +876,6 @@ mod tests {
 
     #[test]
     fn runtime_frontend_load_spec_matches_entry_id_frontend_for_ret() {
-        if !discovery::ghidra_packaged_sla_available() {
-            eprintln!("skip: packaged Ghidra .sla not available for ret lift parity check");
-            return;
-        }
         let load_spec = BinaryLoadSpec::new(
             "PE",
             0x140000000,
@@ -981,16 +934,16 @@ mod tests {
             ),
         ];
 
-        let blocks = build_cfg_blocks(0x100, ops, &BTreeSet::new());
+        let blocks = build_cfg_blocks_from_ops(0x100, ops, &BTreeSet::new());
         assert_eq!(blocks.len(), 3);
         assert_eq!(blocks[0].start_address, 0x100);
         assert_eq!(blocks[1].start_address, 0x108);
         assert_eq!(blocks[2].start_address, 0x110);
-        assert_eq!(blocks[0].successors, vec![2, 1]);
+        assert_eq!(blocks[0].successors, vec![1, 2]);
     }
 
     #[test]
-    fn cfg_blocks_split_instruction_local_relative_conditional_target() {
+    fn cfg_blocks_keeps_instruction_local_relative_conditional_in_one_block() {
         let ops = vec![
             op(
                 0,
@@ -1023,11 +976,12 @@ mod tests {
             op(4, 0x104, PcodeOpcode::Return, None, vec![]),
         ];
 
-        let blocks = build_cfg_blocks(0x100, ops, &BTreeSet::new());
-        assert_eq!(blocks.len(), 3, "{blocks:?}");
-        assert_eq!(blocks[0].ops.last().unwrap().opcode, PcodeOpcode::CBranch);
-        assert_eq!(blocks[0].successors, vec![2, 1]);
-        assert_eq!(blocks[2].ops[0].seq_num, 3);
+        let blocks = build_cfg_blocks_from_ops(0x100, ops, &BTreeSet::new());
+        assert_eq!(blocks.len(), 1, "{blocks:?}");
+        assert_eq!(blocks[0].start_address, 0x100);
+        assert_eq!(blocks[0].ops.len(), 5);
+        assert_eq!(blocks[0].ops.last().unwrap().opcode, PcodeOpcode::Return);
+        assert!(blocks[0].successors.is_empty());
     }
 
     #[test]
@@ -1063,18 +1017,15 @@ mod tests {
             ),
         ];
 
-        let blocks = build_cfg_blocks(0x200, ops, &BTreeSet::new());
-        assert_eq!(blocks.len(), 3, "{blocks:?}");
-        assert_eq!(blocks[0].successors, vec![2]);
-        assert_eq!(blocks[2].ops[0].seq_num, 3);
+        let blocks = build_cfg_blocks_from_ops(0x200, ops, &BTreeSet::new());
+        assert_eq!(blocks.len(), 1, "{blocks:?}");
+        assert_eq!(blocks[0].start_address, 0x200);
+        assert_eq!(blocks[0].ops.len(), 4);
+        assert!(blocks[0].successors.is_empty());
     }
 
     #[test]
     fn mips32_le_lifts_addu_from_spec_template() {
-        if !discovery::ghidra_packaged_sla_available() {
-            eprintln!("skip: packaged Ghidra .sla not available for MIPS32 LE ConstructTpl lift");
-            return;
-        }
         let frontend = RuntimeSleighFrontend::new_for_language("MIPS:LE:32:default")
             .expect("MIPS32 LE runtime");
         assert_eq!(frontend.status(), RuntimeFrontendStatus::ExecutableCandidate);
@@ -1102,10 +1053,6 @@ mod tests {
 
     #[test]
     fn mips32_be_lifts_addu_from_spec_template() {
-        if !discovery::ghidra_packaged_sla_available() {
-            eprintln!("skip: packaged Ghidra .sla not available for MIPS32 BE ConstructTpl lift");
-            return;
-        }
         let frontend = RuntimeSleighFrontend::new_for_language("MIPS:BE:32:default")
             .expect("MIPS32 BE runtime");
         assert_eq!(frontend.status(), RuntimeFrontendStatus::ExecutableCandidate);
@@ -1133,10 +1080,6 @@ mod tests {
 
     #[test]
     fn mips64_be_lifts_addiu_from_spec_template() {
-        if !discovery::ghidra_packaged_sla_available() {
-            eprintln!("skip: packaged Ghidra .sla not available for MIPS64 BE ConstructTpl lift");
-            return;
-        }
         let frontend = RuntimeSleighFrontend::new_for_language("MIPS:BE:64:default")
             .expect("MIPS64 BE runtime");
         assert_eq!(frontend.status(), RuntimeFrontendStatus::ExecutableCandidate);
@@ -1160,10 +1103,6 @@ mod tests {
 
     #[test]
     fn p6502_lifts_lda_immediate_from_spec_template() {
-        if !discovery::ghidra_packaged_sla_available() {
-            eprintln!("skip: packaged Ghidra .sla not available for 6502 ConstructTpl lift");
-            return;
-        }
         let frontend = RuntimeSleighFrontend::new_for_language("6502:LE:16:default")
             .expect("6502 runtime");
         assert_eq!(frontend.status(), RuntimeFrontendStatus::ExecutableCandidate);
@@ -1191,10 +1130,6 @@ mod tests {
 
     #[test]
     fn avr8_lifts_add_from_spec_template() {
-        if !discovery::ghidra_packaged_sla_available() {
-            eprintln!("skip: packaged Ghidra .sla not available for AVR8 ConstructTpl lift");
-            return;
-        }
         let frontend = RuntimeSleighFrontend::new_for_language("avr8:LE:16:default")
             .expect("AVR8 runtime");
         assert_eq!(frontend.status(), RuntimeFrontendStatus::ExecutableCandidate);
@@ -1219,10 +1154,6 @@ mod tests {
 
     #[test]
     fn m68000_lifts_nop_from_spec_template() {
-        if !discovery::ghidra_packaged_sla_available() {
-            eprintln!("skip: packaged Ghidra .sla not available for 68000 ConstructTpl lift");
-            return;
-        }
         let frontend = RuntimeSleighFrontend::new_for_language("68000:BE:32:default")
             .expect("68000 runtime");
         assert_eq!(frontend.status(), RuntimeFrontendStatus::ExecutableCandidate);
@@ -1245,10 +1176,6 @@ mod tests {
 
     #[test]
     fn riscv_32_le_lifts_addi_from_spec_template() {
-        if !discovery::ghidra_packaged_sla_available() {
-            eprintln!("skip: packaged Ghidra .sla not available for RISC-V 32 ConstructTpl lift");
-            return;
-        }
         // Note: RISCV:LE:32 uses riscv.ilp32d.slaspec entry
         let frontend = RuntimeSleighFrontend::new_for_language("RISCV:LE:32:default")
             .expect("RISC-V 32 runtime");
@@ -1278,10 +1205,6 @@ mod tests {
 
     #[test]
     fn riscv_64_le_lifts_addi_from_spec_template() {
-        if !discovery::ghidra_packaged_sla_available() {
-            eprintln!("skip: packaged Ghidra .sla not available for RISC-V 64 ConstructTpl lift");
-            return;
-        }
         let frontend = RuntimeSleighFrontend::new_for_language("RISCV:LE:64:default")
             .expect("RISC-V 64 runtime");
         assert_eq!(frontend.status(), RuntimeFrontendStatus::ExecutableCandidate);
@@ -1310,10 +1233,6 @@ mod tests {
     // ── MIPS R6 / MIPS64 LE ──────────────────────────────────────────────
     #[test]
     fn mips32_r6_be_lifts_addiu_from_spec_template() {
-        if !discovery::ghidra_packaged_sla_available() {
-            eprintln!("skip: packaged Ghidra .sla not available for MIPS32 R6 BE lift");
-            return;
-        }
         let frontend = RuntimeSleighFrontend::new_for_language("MIPS:BE:32:R6")
             .expect("MIPS32 R6 BE runtime");
         assert_eq!(frontend.status(), RuntimeFrontendStatus::ExecutableCandidate);
@@ -1328,10 +1247,6 @@ mod tests {
 
     #[test]
     fn mips32_r6_le_lifts_addiu_from_spec_template() {
-        if !discovery::ghidra_packaged_sla_available() {
-            eprintln!("skip: packaged Ghidra .sla not available for MIPS32 R6 LE lift");
-            return;
-        }
         let frontend = RuntimeSleighFrontend::new_for_language("MIPS:LE:32:R6")
             .expect("MIPS32 R6 LE runtime");
         assert_eq!(frontend.status(), RuntimeFrontendStatus::ExecutableCandidate);
@@ -1346,10 +1261,6 @@ mod tests {
 
     #[test]
     fn mips64_le_lifts_addu_from_spec_template() {
-        if !discovery::ghidra_packaged_sla_available() {
-            eprintln!("skip: packaged Ghidra .sla not available for MIPS64 LE lift");
-            return;
-        }
         let frontend = RuntimeSleighFrontend::new_for_language("MIPS:LE:64:default")
             .expect("MIPS64 LE runtime");
         assert_eq!(frontend.status(), RuntimeFrontendStatus::ExecutableCandidate);
@@ -1367,10 +1278,6 @@ mod tests {
     // ── Z80 / Z180 ───────────────────────────────────────────────────────
     #[test]
     fn z80_lifts_nop_from_spec_template() {
-        if !discovery::ghidra_packaged_sla_available() {
-            eprintln!("skip: packaged Ghidra .sla not available for Z80 lift");
-            return;
-        }
         for language in ["z80:LE:16:default", "z180:LE:16:default"] {
             let frontend = RuntimeSleighFrontend::new_for_language(language)
                 .unwrap_or_else(|e| panic!("{language} runtime: {e}"));
@@ -1388,10 +1295,6 @@ mod tests {
     // ── 8-bit MCU family: 8048 / 8051 / 8085 ────────────────────────────
     #[test]
     fn mcu_8bit_family_lifts_nop_from_spec_template() {
-        if !discovery::ghidra_packaged_sla_available() {
-            eprintln!("skip: packaged Ghidra .sla not available for 8-bit MCU lift");
-            return;
-        }
         for (language, nop_bytes, nop_len) in [
             ("8085:LE:16:default",    &[0x00u8][..], 1u64),
             ("8051:BE:16:default",    &[0x00u8][..], 1),
@@ -1415,10 +1318,6 @@ mod tests {
     // ── 65C02 ─────────────────────────────────────────────────────────────
     #[test]
     fn p65c02_lifts_nop_from_spec_template() {
-        if !discovery::ghidra_packaged_sla_available() {
-            eprintln!("skip: packaged Ghidra .sla not available for 65C02 lift");
-            return;
-        }
         let frontend = RuntimeSleighFrontend::new_for_language("65C02:LE:16:default")
             .expect("65C02 runtime");
         assert_eq!(frontend.status(), RuntimeFrontendStatus::ExecutableCandidate);
@@ -1433,10 +1332,6 @@ mod tests {
     // ── 68000 family (68020 / 68030 / ColdFire) ──────────────────────────
     #[test]
     fn m68000_family_lifts_nop_from_spec_template() {
-        if !discovery::ghidra_packaged_sla_available() {
-            eprintln!("skip: packaged Ghidra .sla not available for 68000 family lift");
-            return;
-        }
         for language in [
             "68000:BE:32:MC68020",
             "68000:BE:32:MC68030",
@@ -1458,10 +1353,6 @@ mod tests {
     // ── AVR extended / xmega ─────────────────────────────────────────────
     #[test]
     fn avr_extended_variants_lift_nop_from_spec_template() {
-        if !discovery::ghidra_packaged_sla_available() {
-            eprintln!("skip: packaged Ghidra .sla not available for AVR extended lift");
-            return;
-        }
         for language in [
             "avr8:LE:16:extended",
             "avr8:LE:24:xmega",
@@ -1482,10 +1373,6 @@ mod tests {
     // ── SuperH (SH-1 / SH-2 / SH-2A) and SuperH4 ────────────────────────
     #[test]
     fn superh_family_lifts_nop_from_spec_template() {
-        if !discovery::ghidra_packaged_sla_available() {
-            eprintln!("skip: packaged Ghidra .sla not available for SuperH lift");
-            return;
-        }
         for (language, nop_bytes) in [
             ("SuperH:BE:32:SH-1",   [0x00u8, 0x09]),
             ("SuperH:BE:32:SH-2",   [0x00, 0x09]),
@@ -1508,10 +1395,6 @@ mod tests {
     // ── TI MSP430 / MSP430X ───────────────────────────────────────────────
     #[test]
     fn ti_msp430_lifts_nop_from_spec_template() {
-        if !discovery::ghidra_packaged_sla_available() {
-            eprintln!("skip: packaged Ghidra .sla not available for TI MSP430 lift");
-            return;
-        }
         for language in ["TI_MSP430:LE:16:default", "TI_MSP430X:LE:32:default"] {
             let frontend = RuntimeSleighFrontend::new_for_language(language)
                 .unwrap_or_else(|e| panic!("{language} runtime: {e}"));
@@ -1530,10 +1413,6 @@ mod tests {
     // ── Dalvik (representative variants) ─────────────────────────────────
     #[test]
     fn dalvik_base_lifts_nop_from_spec_template() {
-        if !discovery::ghidra_packaged_sla_available() {
-            eprintln!("skip: packaged Ghidra .sla not available for Dalvik lift");
-            return;
-        }
         for language in [
             "Dalvik:LE:32:default",
             "Dalvik:LE:32:DEX_Android10",
@@ -1557,10 +1436,6 @@ mod tests {
     // ── eBPF (LE/BE) ─────────────────────────────────────────────────────
     #[test]
     fn ebpf_lifts_mov_from_spec_template() {
-        if !discovery::ghidra_packaged_sla_available() {
-            eprintln!("skip: packaged Ghidra .sla not available for eBPF lift");
-            return;
-        }
         for language in ["eBPF:LE:64:default", "eBPF:BE:64:default"] {
             let frontend = RuntimeSleighFrontend::new_for_language(language)
                 .unwrap_or_else(|e| panic!("{language} runtime: {e}"));
@@ -1579,10 +1454,6 @@ mod tests {
     // ── Classic BPF (32-bit) ──────────────────────────────────────────────
     #[test]
     fn bpf_le_lifts_ld_from_spec_template() {
-        if !discovery::ghidra_packaged_sla_available() {
-            eprintln!("skip: packaged Ghidra .sla not available for BPF lift");
-            return;
-        }
         let frontend = RuntimeSleighFrontend::new_for_language("BPF:LE:32:default")
             .expect("BPF LE runtime");
         assert_eq!(frontend.status(), RuntimeFrontendStatus::ExecutableCandidate);
@@ -1598,10 +1469,6 @@ mod tests {
     // ── V850 ─────────────────────────────────────────────────────────────
     #[test]
     fn v850_lifts_nop_from_spec_template() {
-        if !discovery::ghidra_packaged_sla_available() {
-            eprintln!("skip: packaged Ghidra .sla not available for V850 lift");
-            return;
-        }
         let frontend = RuntimeSleighFrontend::new_for_language("V850:LE:32:default")
             .expect("V850 runtime");
         assert_eq!(frontend.status(), RuntimeFrontendStatus::ExecutableCandidate);
@@ -1616,10 +1483,6 @@ mod tests {
     // ── MC6800 family: 6809 / H6309 / 6805 ─────────────────────────────
     #[test]
     fn mc6800_family_lifts_nop_from_spec_template() {
-        if !discovery::ghidra_packaged_sla_available() {
-            eprintln!("skip: packaged Ghidra .sla not available for MC6800 family lift");
-            return;
-        }
         for (language, nop_byte, nop_len) in [
             ("6809:BE:16:default", 0x12u8, 1u64), // NOP = 0x12
             ("H6309:BE:16:default", 0x12, 1),      // compatible
@@ -1641,10 +1504,6 @@ mod tests {
     // ── HCS08 family: HC05 / HC08 / HCS08 ────────────────────────────────
     #[test]
     fn hcs08_family_lifts_nop_from_spec_template() {
-        if !discovery::ghidra_packaged_sla_available() {
-            eprintln!("skip: packaged Ghidra .sla not available for HCS08 family lift");
-            return;
-        }
         for language in [
             "HC05:BE:16:default",
             "HC08:BE:16:default",
@@ -1666,10 +1525,6 @@ mod tests {
     // ── HCS12 family: HC12 / HCS12 / HCS12X ──────────────────────────────
     #[test]
     fn hcs12_family_lifts_nop_from_spec_template() {
-        if !discovery::ghidra_packaged_sla_available() {
-            eprintln!("skip: packaged Ghidra .sla not available for HCS12 family lift");
-            return;
-        }
         for language in [
             "HC-12:BE:16:default",
             "HCS-12:BE:24:default",
@@ -1703,10 +1558,6 @@ mod tests {
     // ── MCS96 ────────────────────────────────────────────────────────────
     #[test]
     fn mcs96_lifts_nop_from_spec_template() {
-        if !discovery::ghidra_packaged_sla_available() {
-            eprintln!("skip: packaged Ghidra .sla not available for MCS96 lift");
-            return;
-        }
         let frontend = RuntimeSleighFrontend::new_for_language("MCS96:LE:16:default")
             .expect("MCS96 runtime");
         assert_eq!(frontend.status(), RuntimeFrontendStatus::ExecutableCandidate);
@@ -1722,10 +1573,6 @@ mod tests {
     // ── M16C ─────────────────────────────────────────────────────────────
     #[test]
     fn m16c_lifts_nop_from_spec_template() {
-        if !discovery::ghidra_packaged_sla_available() {
-            eprintln!("skip: packaged Ghidra .sla not available for M16C lift");
-            return;
-        }
         // M16C NOP = 0x04 (1 byte for M16C/60; M16C/80 extended mode reports 2 bytes)
         for (language, nop_bytes, expected_len) in [
             ("M16C/60:LE:16:default", &[0x04u8, 0x00][..], 1u64),
@@ -1746,10 +1593,6 @@ mod tests {
     // ── M8C ──────────────────────────────────────────────────────────────
     #[test]
     fn m8c_lifts_nop_from_spec_template() {
-        if !discovery::ghidra_packaged_sla_available() {
-            eprintln!("skip: packaged Ghidra .sla not available for M8C lift");
-            return;
-        }
         let frontend = RuntimeSleighFrontend::new_for_language("M8C:BE:16:default")
             .expect("M8C runtime");
         assert_eq!(frontend.status(), RuntimeFrontendStatus::ExecutableCandidate);
@@ -1776,10 +1619,6 @@ mod tests {
     // ── NDS32 (BE/LE) ────────────────────────────────────────────────────
     #[test]
     fn nds32_lifts_nop_from_spec_template() {
-        if !discovery::ghidra_packaged_sla_available() {
-            eprintln!("skip: packaged Ghidra .sla not available for NDS32 lift");
-            return;
-        }
         // NDS32 NOP16 (16-bit compact): I16=0, opc6=0b001001, rt4=0, imm5u=0
         // bits[15:0]: [15]=0, [14:9]=001001, [8:5]=0, [4:0]=0 = 0x1200
         // BE: 0x12 0x00; LE: 0x00 0x12
@@ -1804,10 +1643,6 @@ mod tests {
     // ── Xtensa (LE only; BE SLA has different decode constraints) ────────
     #[test]
     fn xtensa_le_lifts_nop_from_spec_template() {
-        if !discovery::ghidra_packaged_sla_available() {
-            eprintln!("skip: packaged Ghidra .sla not available for Xtensa lift");
-            return;
-        }
         // Xtensa NOP (RRR format, 24-bit instruction):
         // op2=0, r=2(ar), s=0(as), t=0xF(at=15), op1=0, op0=0
         // RRR layout: bits[23:20]=op2, [19:16]=r, [15:12]=s, [11:8]=t, [7:4]=op1, [3:0]=op0
@@ -1839,10 +1674,6 @@ mod tests {
     // ── TriCore ───────────────────────────────────────────────────────────
     #[test]
     fn tricore_lifts_nop_from_spec_template() {
-        if !discovery::ghidra_packaged_sla_available() {
-            eprintln!("skip: packaged Ghidra .sla not available for TriCore lift");
-            return;
-        }
         let frontend = RuntimeSleighFrontend::new_for_language("tricore:LE:32:default")
             .expect("TriCore runtime");
         assert_eq!(frontend.status(), RuntimeFrontendStatus::ExecutableCandidate);
@@ -1859,10 +1690,6 @@ mod tests {
     // ── PIC family (representative: PIC-16, PIC-18, PIC-24E, dsPIC33E) ───
     #[test]
     fn pic_family_lifts_nop_from_spec_template() {
-        if !discovery::ghidra_packaged_sla_available() {
-            eprintln!("skip: packaged Ghidra .sla not available for PIC lift");
-            return;
-        }
         // PIC-12/16: 14-bit word, stored as 2 bytes; NOP = 0x0000
         // PIC-18: 16-bit word (2 bytes); NOP = 0x0000
         // PIC-24/dsPIC: 24-bit instruction words, but address space is word-addressed
@@ -1893,10 +1720,6 @@ mod tests {
     // ── PowerPC 4xx / e500 / e500mc / QUICC / VLE ────────────────────────
     #[test]
     fn powerpc_extended_variants_lift_nop_from_spec_template() {
-        if !discovery::ghidra_packaged_sla_available() {
-            eprintln!("skip: packaged Ghidra .sla not available for PowerPC extended variants lift");
-            return;
-        }
         for (language, nop_bytes) in [
             ("PowerPC:BE:32:4xx",    [0x60u8, 0x00, 0x00, 0x00]),
             ("PowerPC:LE:32:4xx",    [0x00u8, 0x00, 0x00, 0x60]),
@@ -1922,10 +1745,6 @@ mod tests {
     // ── SPARC V9 32-bit ──────────────────────────────────────────────────
     #[test]
     fn sparc_v9_32_lifts_sethi_from_spec_template() {
-        if !discovery::ghidra_packaged_sla_available() {
-            eprintln!("skip: packaged Ghidra .sla not available for SPARC V9 32-bit lift");
-            return;
-        }
         let frontend = RuntimeSleighFrontend::new_for_language("sparc:BE:32:default")
             .expect("SPARC V9 32 runtime");
         assert_eq!(frontend.status(), RuntimeFrontendStatus::ExecutableCandidate);
@@ -1941,10 +1760,6 @@ mod tests {
     // ── RISC-V AndesStar ─────────────────────────────────────────────────
     #[test]
     fn riscv_andestar_lifts_addi_from_spec_template() {
-        if !discovery::ghidra_packaged_sla_available() {
-            eprintln!("skip: packaged Ghidra .sla not available for RISC-V AndesStar lift");
-            return;
-        }
         let frontend = RuntimeSleighFrontend::new_for_language("RISCV:LE:32:AndeStar_v5")
             .expect("RISC-V AndesStar runtime");
         assert_eq!(frontend.status(), RuntimeFrontendStatus::ExecutableCandidate);
@@ -2058,11 +1873,121 @@ mod tests {
             op(3, 0x110, PcodeOpcode::Return, None, vec![]),
         ];
 
-        let blocks = build_cfg_blocks(0x100, ops, &BTreeSet::new());
+        let blocks = build_cfg_blocks_from_ops(0x100, ops, &BTreeSet::new());
         assert_eq!(blocks.len(), 3);
         assert_eq!(blocks[0].start_address, 0x100);
         assert_eq!(blocks[1].start_address, 0x108);
         assert_eq!(blocks[2].start_address, 0x110);
-        assert_eq!(blocks[0].successors, vec![2, 1]);
+        assert_eq!(blocks[0].successors, vec![1, 2]);
+    }
+
+    #[test]
+    fn winmain_crt_startup_lift_includes_call_fallthrough() {
+        use fission_loader::loader::LoadedBinary;
+        use std::path::Path;
+
+        let binary_path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../benchmark/binary/x86-64/window/small/binary/c/test_functions.exe");
+        let binary = LoadedBinary::from_file(&binary_path).expect("load binary");
+        let load_spec = binary.load_spec().expect("load spec");
+        let frontends =
+            RuntimeSleighFrontend::new_candidate_frontends_for_load_spec(load_spec).expect("frontends");
+        let frontend = frontends.first().expect("frontend");
+        let entry = 0x1400013e0u64;
+        let max_bytes = {
+            let inner = binary.inner();
+            let mut next = entry.saturating_add(256 * 1024);
+            for info in &inner.functions {
+                if info.address > entry && info.address < next {
+                    next = info.address;
+                }
+            }
+            next.saturating_sub(entry) as usize
+        };
+        let bytes = binary.view_bytes(entry, max_bytes).expect("bytes");
+        let memory_context = DecodeMemoryContext {
+            block_entry_hints: binary.cfg_block_entry_hints_in_range(
+                entry,
+                entry.saturating_add(max_bytes as u64),
+            ),
+            ..DecodeMemoryContext::default()
+        };
+        let lifted = frontend
+            .lift_raw_pcode_function_with_context_and_memory_context(
+                bytes,
+                entry,
+                DecodeContract::decomp_function(512),
+                &memory_context,
+                None,
+            )
+            .expect("lift WinMainCRTStartup");
+
+        assert!(
+            lifted
+                .reachable_instruction_addresses
+                .contains(&0x1400013f7),
+            "expected fallthrough after call; reachable={:?}",
+            lifted
+                .reachable_instruction_addresses
+                .iter()
+                .map(|addr| format!("0x{addr:x}"))
+                .collect::<Vec<_>>()
+        );
+        assert!(
+            lifted
+                .function
+                .blocks
+                .iter()
+                .any(|block| block.start_address == 0x1400013f7),
+            "expected block leader at post-call nop; blocks={:?}",
+            lifted
+                .function
+                .blocks
+                .iter()
+                .map(|block| format!("0x{:x}", block.start_address))
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn test_atomic_instruction_cfg_matches_single_block() {
+        use fission_loader::loader::LoadedBinary;
+        use std::path::Path;
+
+        let binary_path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../benchmark/binary/x86-64/window/small/binary/c/instruction_matrix.exe");
+        let binary = LoadedBinary::from_file(&binary_path).expect("load binary");
+        let load_spec = binary.load_spec().expect("load spec");
+        let frontends =
+            RuntimeSleighFrontend::new_candidate_frontends_for_load_spec(load_spec).expect("frontends");
+        let frontend = frontends.first().expect("frontend");
+        let entry = 0x1400014d0u64;
+        let max_bytes = 32usize;
+        let bytes = binary.view_bytes(entry, max_bytes).expect("bytes");
+        let lifted = frontend
+            .lift_raw_pcode_function_with_context_and_memory_context(
+                bytes,
+                entry,
+                DecodeContract::decomp_function(32),
+                &DecodeMemoryContext::default(),
+                None,
+            )
+            .expect("lift test_atomic");
+
+        assert_eq!(
+            lifted.function.blocks.len(),
+            1,
+            "cmpxchg internal CBranch must not split BBM blocks; blocks={:?}",
+            lifted
+                .function
+                .blocks
+                .iter()
+                .map(|block| format!("0x{:x}", block.start_address))
+                .collect::<Vec<_>>()
+        );
+        assert!(
+            lifted.function.blocks[0].successors.is_empty(),
+            "expected exit block without successors"
+        );
     }
 }

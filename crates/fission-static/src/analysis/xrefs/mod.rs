@@ -78,14 +78,23 @@ impl XrefDatabase {
 
     /// Build xref database from disassembled executable sections (same criterion as loader).
     pub fn build_from_binary(binary: &fission_loader::loader::LoadedBinary) -> Self {
-        let mut db = Self::new();
         let frontend = binary
             .load_spec()
             .and_then(|load_spec| RuntimeSleighFrontend::new_for_load_spec(load_spec).ok());
 
         let Some(frontend) = frontend.as_ref() else {
-            return db;
+            return Self::new();
         };
+
+        Self::build_with_frontend(binary, frontend)
+    }
+
+    /// Build xref database using a caller-provided Sleigh frontend.
+    pub fn build_with_frontend(
+        binary: &fission_loader::loader::LoadedBinary,
+        frontend: &RuntimeSleighFrontend,
+    ) -> Self {
+        let mut db = Self::new();
 
         for section in binary.executable_sections() {
             let start = section.file_offset as usize;

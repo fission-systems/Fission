@@ -1,0 +1,14 @@
+{
+  "name": "crt-common-main",
+  "binary": "benchmark/binary/x86-64/window/small/binary/c/test_functions.exe",
+  "addr": "0x140001420",
+  "facts": {
+    "function_address": 5368714272,
+    "labels": [
+      5368714272
+    ],
+    "flow_edges": [],
+    "indirect_targets": [],
+    "noreturn_callsites": []
+  }
+}

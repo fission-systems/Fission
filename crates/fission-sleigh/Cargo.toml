@@ -25,4 +25,5 @@ memmap2 = "0.9"
 
 [dev-dependencies]
 fission-loader = { path = "../fission-loader" }
+fission-static = { path = "../fission-static" }
 tempfile = "3.23.0"

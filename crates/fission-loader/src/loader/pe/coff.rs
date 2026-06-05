@@ -85,10 +85,23 @@ pub(super) fn parse_coff_symbols(
         let section = &loader.sections[section_idx];
         let func_addr = section.virtual_address + symbol.value as u64;
 
+        let mut func_size = 0u64;
+        if aux_count > 0 {
+            let aux_pos = symbol_pos + 18;
+            if aux_pos + 8 <= loader.data.len() as u64 {
+                func_size = u32::from_le_bytes([
+                    loader.data[(aux_pos + 4) as usize],
+                    loader.data[(aux_pos + 5) as usize],
+                    loader.data[(aux_pos + 6) as usize],
+                    loader.data[(aux_pos + 7) as usize],
+                ]) as u64;
+            }
+        }
+
         functions.push(crate::loader::types::FunctionInfo {
             name,
             address: func_addr,
-            size: 0,
+            size: func_size,
             is_export: false,
             is_import: false,
             origin: Some("pe-coff-symbol-table".to_string()),
@@ -103,6 +116,59 @@ pub(super) fn parse_coff_symbols(
     }
 
     Ok(functions)
+}
+
+pub(super) fn parse_coff_cfg_label_leaders(
+    loader: &PeLoaderImpl<'_>,
+    symbol_table_offset: u32,
+    symbol_count: u32,
+    _image_base: u64,
+) -> Result<Vec<u64>> {
+    let mut leaders = Vec::new();
+
+    let symbols_offset = symbol_table_offset as u64;
+    let symbols_end = symbols_offset + (symbol_count as u64 * 18);
+
+    if symbols_end > loader.data.len() as u64 {
+        return Ok(leaders);
+    }
+
+    let mut i = 0;
+    while i < symbol_count {
+        let symbol_pos = symbols_offset + (i as u64 * 18);
+
+        let symbol = match loader.read_coff_symbol(symbol_pos) {
+            Ok(s) => s,
+            Err(_) => break,
+        };
+
+        let aux_count = symbol.number_of_aux_symbols;
+        i += 1;
+
+        if symbol.storage_class != storage_class::C_LABEL || symbol.section_number <= 0 {
+            i += aux_count as u32;
+            continue;
+        }
+
+        let section_idx = (symbol.section_number - 1) as usize;
+        if section_idx >= loader.sections.len() {
+            i += aux_count as u32;
+            continue;
+        }
+
+        let section = &loader.sections[section_idx];
+        if !section.is_executable {
+            i += aux_count as u32;
+            continue;
+        }
+
+        leaders.push(section.virtual_address + symbol.value as u64);
+        i += aux_count as u32;
+    }
+
+    leaders.sort_unstable();
+    leaders.dedup();
+    Ok(leaders)
 }
 
 pub(super) fn parse_coff_data_symbols(
