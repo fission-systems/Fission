@@ -1,0 +1,77 @@
+{
+  "name": "multi-commercial-binaries-asm-parity-test",
+  "entries": [
+    {
+      "id": "windivert-kernel-driver",
+      "binary_path": "/Users/sjkim1127/Fission/benchmark/binary/x86-64/vendor_binaries/x86_64/windows/WinDivert.sys",
+      "rows": [
+        {
+          "id": "windivert_func_1",
+          "address": "0x11008",
+          "count": 5,
+          "role": "driver_function"
+        },
+        {
+          "id": "windivert_func_2",
+          "address": "0x112e0",
+          "count": 5,
+          "role": "driver_function"
+        },
+        {
+          "id": "windivert_func_3",
+          "address": "0x1139c",
+          "count": 5,
+          "role": "driver_function"
+        }
+      ]
+    },
+    {
+      "id": "mimidrv-kernel-driver",
+      "binary_path": "/Users/sjkim1127/Fission/benchmark/binary/x86-64/vendor_binaries/x86_64/windows/mimidrv.sys",
+      "rows": [
+        {
+          "id": "mimidrv_func_1",
+          "address": "0x11008",
+          "count": 5,
+          "role": "driver_function"
+        },
+        {
+          "id": "mimidrv_func_2",
+          "address": "0x1122c",
+          "count": 5,
+          "role": "driver_function"
+        },
+        {
+          "id": "mimidrv_func_3",
+          "address": "0x11258",
+          "count": 5,
+          "role": "driver_function"
+        }
+      ]
+    },
+    {
+      "id": "simple-crackme-x64",
+      "binary_path": "/Users/sjkim1127/Fission/benchmark/binary/x86-64/vendor_binaries/x86_64/windows/simple_crackme_x64.exe",
+      "rows": [
+        {
+          "id": "crackme_init",
+          "address": "0x401000",
+          "count": 5,
+          "role": "main_function"
+        },
+        {
+          "id": "crackme_pre_c_init",
+          "address": "0x401010",
+          "count": 5,
+          "role": "main_function"
+        },
+        {
+          "id": "crackme_main_start",
+          "address": "0x401500",
+          "count": 5,
+          "role": "main_function"
+        }
+      ]
+    }
+  ]
+}

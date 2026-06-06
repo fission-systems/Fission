@@ -1,0 +1,53 @@
+{
+  "name": "multi-binary-asm-parity-test",
+  "entries": [
+    {
+      "id": "sqlite3-export-thunks",
+      "binary_path": "/Users/sjkim1127/Fission/benchmark/binary/x86-64/window/commercial_binary/binary/sqlite3.dll",
+      "rows": [
+        {
+          "id": "sqlite3_backup_init_export",
+          "address": "0x18000104b",
+          "count": 1,
+          "role": "export_thunk"
+        },
+        {
+          "id": "sqlite3_keyword_count_export",
+          "address": "0x1800013fc",
+          "count": 1,
+          "role": "export_thunk"
+        },
+        {
+          "id": "sqlite3_busy_handler_export",
+          "address": "0x18000140b",
+          "count": 1,
+          "role": "export_thunk"
+        }
+      ]
+    },
+    {
+      "id": "test-functions",
+      "binary_path": "/Users/sjkim1127/Fission/benchmark/binary/x86-64/window/small/binary/c/test_functions.exe",
+      "rows": [
+        {
+          "id": "fibonacci",
+          "address": "0x140001470",
+          "count": 5,
+          "role": "function"
+        }
+      ]
+    },
+    {
+      "id": "math-operations",
+      "binary_path": "/Users/sjkim1127/Fission/benchmark/binary/x86-64/window/small/binary/c/math_operations.exe",
+      "rows": [
+        {
+          "id": "fibonacci_memo",
+          "address": "0x140001a90",
+          "count": 5,
+          "role": "function"
+        }
+      ]
+    }
+  ]
+}

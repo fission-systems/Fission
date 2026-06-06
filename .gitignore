@@ -23,6 +23,31 @@ memory_loadimage.hh
 memory_loadimage.cc
 /putty_single.c
 
+# Root-level scratch / one-off experiment files
+# (keep proper source organized in crates/ or scripts/)
+/scratch/
+/scratch_*/
+/scratch.rs
+/patch.rs
+/patch2.rs
+/patch_*.py
+/patch_*.rs
+/test_*.rs
+/test_*.json
+/tmp.json
+/sum_array_debug.json
+/fill_matrix*.c
+/fill_matrix*.o
+
+# Rust compiler intermediate artifacts (*.rcgu.o) that can appear at root
+/*.rcgu.o
+
+# Patch files inside crates (use git diff instead)
+crates/**/*.patch
+
+# Backup files
+*.bak
+
 # Python and environment
 .venv/
 .opencode/
@@ -127,3 +152,8 @@ benchmark_results/
 # Cursor / local IDE prompts (not part of canonical repo surface)
 .github/prompts/
 /SKILL.md
+
+# External repos cloned locally inside scripts/ (not registered as submodules)
+# Use: git submodule add https://github.com/threatrack/ghidra-fid-generator.git scripts/ghidra-fid-generator
+# if you want it tracked.
+/scripts/ghidra-fid-generator/
