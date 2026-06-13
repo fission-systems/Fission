@@ -465,9 +465,20 @@ mod tests {
 
     #[test]
     fn label_leaders_include_function_entries_and_loader_labels() {
-        let binary = LoadedBinaryBuilder::new("sample.exe".to_string(), DataBuffer::Heap(vec![]))
+        let binary = LoadedBinaryBuilder::new("sample.exe".to_string(), DataBuffer::Heap(vec![0; 0x1000]))
             .format("PE")
             .is_64bit(true)
+            .image_base(0x1000)
+            .add_section(fission_loader::loader::SectionInfo {
+                name: ".text".to_string(),
+                virtual_address: 0x1000,
+                virtual_size: 0x1000,
+                file_offset: 0,
+                file_size: 0x1000,
+                is_executable: true,
+                is_readable: true,
+                is_writable: false,
+            })
             .cfg_label_leaders([0x1005])
             .add_function(FunctionInfo {
                 name: "main".to_string(),

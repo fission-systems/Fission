@@ -1462,6 +1462,9 @@ impl<'a> PreviewBuilder<'a> {
                                     });
                                 }
                             }
+                            if this.options.is_data_ref_origin {
+                                return Err(MlilPreviewError::NotAFunctionOrphanBlock);
+                            }
                             Err(MlilPreviewError::UnsupportedCfgBranchTarget)
                         }
                         PcodeOpcode::CBranch | PcodeOpcode::Branch if op.inputs.len() >= 2 => {
@@ -1516,9 +1519,15 @@ impl<'a> PreviewBuilder<'a> {
                                             target_expr,
                                         });
                                     } else {
+                                        if this.options.is_data_ref_origin {
+                                            return Err(MlilPreviewError::NotAFunctionOrphanBlock);
+                                        }
                                         return Err(MlilPreviewError::UnsupportedCfgBranchTarget);
                                     }
                                 } else {
+                                    if this.options.is_data_ref_origin {
+                                        return Err(MlilPreviewError::NotAFunctionOrphanBlock);
+                                    }
                                     return Err(MlilPreviewError::UnsupportedCfgBranchTarget);
                                 }
                             };

@@ -71,6 +71,9 @@ pub fn classify_nir_failure_refined(reason: &str) -> &'static str {
     if structuring_failure_signature(reason).is_some() {
         return "nir_structuring_failure";
     }
+    if lower.contains("not a function (orphan block detected)") {
+        return "nir_orphan_block";
+    }
     if lower.contains("unsupported control flow") || lower.contains("unsupported branch target") {
         return "nir_unsupported_cfg";
     }

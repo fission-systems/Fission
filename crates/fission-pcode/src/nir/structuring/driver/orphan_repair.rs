@@ -159,6 +159,7 @@ mod tests {
             pspec_programcounter: None,
             pspec_tracked_context: Vec::new(),
             pspec_hidden_registers: Default::default(),
+            is_data_ref_origin: false,
         };
         let mut builder = PreviewBuilder::new(&dummy, &options, None);
         let body = vec![HirStmt::Goto("block_deadbeef".to_string())];
@@ -195,6 +196,7 @@ mod tests {
             pspec_programcounter: None,
             pspec_tracked_context: Vec::new(),
             pspec_hidden_registers: Default::default(),
+            is_data_ref_origin: false,
         };
         let mut builder = PreviewBuilder::new(&dummy, &options, None);
         let body = vec![

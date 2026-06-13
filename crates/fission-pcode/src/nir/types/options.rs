@@ -16,6 +16,8 @@ pub struct NirRenderOptions {
     pub structuring_engine: StructuringEngineKind,
     #[serde(default)]
     pub conservative_irreducible_fallback: bool,
+    #[serde(default)]
+    pub is_data_ref_origin: bool,
     /// Address → symbol name for IAT slots and global data symbols.
     /// Used to replace `DAT_<addr>` with the actual symbol name in decompiled output.
     #[serde(default)]
@@ -349,6 +351,7 @@ impl NirRenderOptions {
         let mut options = Self {
             pe_x64_only: true,
             is_64bit: binary.is_64bit,
+            is_data_ref_origin: false,
             is_big_endian: binary
                 .sleigh_language_id()
                 .unwrap_or(&binary.arch_spec)
@@ -536,6 +539,8 @@ pub enum MlilPreviewError {
     UnsupportedPattern(&'static str),
     #[error("value lowering failed")]
     LoweringFailed,
+    #[error("not a function (orphan block detected)")]
+    NotAFunctionOrphanBlock,
     #[error("value lowering failed on multiequal")]
     UnsupportedExprMultiequal,
     #[error("value lowering failed on varnode")]

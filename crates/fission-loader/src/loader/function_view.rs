@@ -59,7 +59,7 @@ fn dedupe_exact_functions<'a>(functions: Vec<&'a FunctionInfo>) -> Vec<&'a Funct
 
 fn should_filter_internal_candidate(func: &FunctionInfo, covering_end: u64) -> bool {
     if func.is_import
-        || func.is_thunk_like
+        || (func.is_thunk_like && !func.is_export)
         || matches!(
             func.kind.as_deref(),
             Some("undefined_external" | "import" | "import_thunk" | "debug_symbol")

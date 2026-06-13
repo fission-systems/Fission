@@ -1732,6 +1732,7 @@ dependencies = [
  "flate2",
  "log",
  "once_cell",
+ "quick-xml",
  "regex",
  "serde",
  "serde_json",

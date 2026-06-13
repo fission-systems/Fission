@@ -105,6 +105,7 @@ mod tests {
             pspec_programcounter: None,
             pspec_tracked_context: Vec::new(),
             pspec_hidden_registers: Default::default(),
+            is_data_ref_origin: false,
         };
         let mut builder = PreviewBuilder::new(&dummy, &options, None);
         builder.successors = vec![vec![1], vec![0], vec![]];

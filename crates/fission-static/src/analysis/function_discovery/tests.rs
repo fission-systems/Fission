@@ -83,7 +83,7 @@ fn collect_instruction_targets_treats_rip_relative_as_call_on_call_flow() {
     let binary = pe64_executable_shell();
     let mut calls = Vec::new();
     let mut jumps = Vec::new();
-    collect_instruction_targets(&binary, &call_with_rip_reference(), &mut calls, &mut jumps);
+    collect_instruction_targets(&binary, &call_with_rip_reference(), &mut calls, &mut jumps, &mut Vec::new());
     assert!(calls.contains(&SAMPLE_RIP_TARGET));
     assert!(jumps.is_empty());
 }
@@ -98,6 +98,7 @@ fn collect_instruction_targets_treats_rip_relative_as_jump_for_jmp_mnemonic() {
         &jmp_with_rip_reference_flow_none(),
         &mut calls,
         &mut jumps,
+        &mut Vec::new(),
     );
     assert!(calls.is_empty());
     assert!(jumps.contains(&SAMPLE_RIP_TARGET));
@@ -122,7 +123,7 @@ fn discover_accepts_call_target_inside_executable_when_not_known() {
 
     let mut calls = Vec::new();
     let mut jumps = Vec::new();
-    collect_instruction_targets(&binary, &call_with_rip_reference(), &mut calls, &mut jumps);
+    collect_instruction_targets(&binary, &call_with_rip_reference(), &mut calls, &mut jumps, &mut Vec::new());
 
     let candidates = discovery_candidate_targets(FunctionDiscoveryProfile::Balanced, calls, &jumps);
     let executable_ranges = executable_ranges(&binary);
@@ -147,6 +148,7 @@ fn discover_balanced_skips_jump_only_even_when_executable() {
         &jmp_with_rip_reference_flow_none(),
         &mut calls,
         &mut jumps,
+        &mut Vec::new(),
     );
     let candidates = discovery_candidate_targets(FunctionDiscoveryProfile::Balanced, calls, &jumps);
     assert!(candidates.is_empty());
@@ -163,6 +165,7 @@ fn discover_aggressive_accepts_jump_target_inside_executable() {
         &jmp_with_rip_reference_flow_none(),
         &mut calls,
         &mut jumps,
+        &mut Vec::new(),
     );
     let candidates =
         discovery_candidate_targets(FunctionDiscoveryProfile::Aggressive, calls, &jumps);

@@ -21,6 +21,7 @@
 #![allow(clippy::missing_panics_doc)]
 
 pub mod api_types;
+pub mod ghidra_patterns;
 pub mod fid;
 pub mod fidbf;
 pub mod golang_typeinfo;
@@ -55,5 +56,6 @@ pub use fidbf::{
     parse_all_fidbf_for_arch, parse_fidbf,
 };
 pub use import_flat::symbol_for_win_api_database_lookup;
+pub use ghidra_patterns::{GhidraFuncPattern, load_ghidra_patterns, parse_ghidra_pattern_xml};
 pub use provider::{SIGNATURE_RESOURCES, SignatureResourceProvider};
 pub use win_constants::WIN_CONSTANTS_DB;

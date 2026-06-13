@@ -65,6 +65,9 @@ fn render_selection_from_json(
             "nir skipped: function not supported by Fission NIR builder",
         )),
         Err(err) => {
+            if err.contains("not a function (orphan block detected)") {
+                return Ok(NirRoutingResolver::nir_skipped(&err));
+            }
             if let Some(selection) = try_structuring_recovery(
                 pcode_json,
                 binary,
@@ -116,6 +119,9 @@ fn render_selection_from_pcode(
             "nir skipped: function not supported by Fission NIR builder",
         )),
         Err(err) => {
+            if err.contains("not a function (orphan block detected)") {
+                return Ok(NirRoutingResolver::nir_skipped(&err));
+            }
             if let Some(selection) = try_structuring_recovery_from_pcode(
                 pcode,
                 binary,

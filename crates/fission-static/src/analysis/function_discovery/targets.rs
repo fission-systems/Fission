@@ -61,32 +61,43 @@ fn same_section(binary: &LoadedBinary, addr1: u64, addr2: u64) -> bool {
 }
 
 /// Accumulate direct CFG targets from one decoded instruction (including PC-relative operands).
+///
+/// `jump_edges` receives (src_addr, dst_addr) pairs for unconditional far JMPs.
+/// This enables G2 (SharedReturnAnalysis) which requires both src and dst to
+/// determine whether a jump crosses a function boundary.
 pub(crate) fn collect_instruction_targets(
     binary: &LoadedBinary,
     instruction: &DecodedInstruction,
     call_targets: &mut Vec<u64>,
     jump_targets: &mut Vec<u64>,
+    jump_edges: &mut Vec<(u64, u64)>, // (src, dst) pairs for unconditional JMPs
 ) {
+    let inst_addr = instruction.address;
+
     match instruction.flow_kind {
         DecodedFlowKind::Call => {
             if let Some(target) = instruction.direct_target {
                 call_targets.push(normalize_target(binary, target));
             }
         }
-        DecodedFlowKind::Jump | DecodedFlowKind::ConditionalJump => {
+        DecodedFlowKind::Jump => {
             if let Some(target) = instruction.direct_target {
                 let norm_target = normalize_target(binary, target);
-                let inst_addr = instruction.address;
                 let distance = if inst_addr > norm_target {
                     inst_addr - norm_target
                 } else {
                     norm_target - inst_addr
                 };
-                if distance > 512 || !same_section(binary, inst_addr, norm_target) {
+                let is_long_or_cross = distance > 512 || !same_section(binary, inst_addr, norm_target);
+                if inst_addr != norm_target {
+                    jump_edges.push((inst_addr, norm_target));
+                }
+                if is_long_or_cross {
                     jump_targets.push(norm_target);
                 }
             }
         }
+        DecodedFlowKind::ConditionalJump => {}
         DecodedFlowKind::None
         | DecodedFlowKind::Return
         | DecodedFlowKind::Interrupt
@@ -100,41 +111,45 @@ pub(crate) fn collect_instruction_targets(
             }
             DecodedReferenceKind::BranchTarget => {
                 let norm_target = normalize_target(binary, reference.target);
-                let inst_addr = instruction.address;
-                let distance = if inst_addr > norm_target {
-                    inst_addr - norm_target
-                } else {
-                    norm_target - inst_addr
-                };
-                if distance > 512 || !same_section(binary, inst_addr, norm_target) {
-                    jump_targets.push(norm_target);
+                if instruction.flow_kind == DecodedFlowKind::Jump {
+                    let distance = if inst_addr > norm_target {
+                        inst_addr - norm_target
+                    } else {
+                        norm_target - inst_addr
+                    };
+                    let is_long_or_cross = distance > 512 || !same_section(binary, inst_addr, norm_target);
+                    if inst_addr != norm_target {
+                        jump_edges.push((inst_addr, norm_target));
+                    }
+                    if is_long_or_cross {
+                        jump_targets.push(norm_target);
+                    }
                 }
             }
             DecodedReferenceKind::RipRelativeAddress => match instruction.flow_kind {
                 DecodedFlowKind::Call => {
                     call_targets.push(normalize_target(binary, reference.target));
                 }
-                DecodedFlowKind::Jump | DecodedFlowKind::ConditionalJump => {
+                DecodedFlowKind::Jump => {
                     let norm_target = normalize_target(binary, reference.target);
-                    let inst_addr = instruction.address;
-                    let distance = if inst_addr > norm_target {
-                        inst_addr - norm_target
-                    } else {
-                        norm_target - inst_addr
-                    };
-                    if distance > 512 || !same_section(binary, inst_addr, norm_target) {
+                    let distance = if inst_addr > norm_target { inst_addr - norm_target } else { norm_target - inst_addr };
+                    let is_long_or_cross = distance > 512 || !same_section(binary, inst_addr, norm_target);
+                    if inst_addr != norm_target {
+                        jump_edges.push((inst_addr, norm_target));
+                    }
+                    if is_long_or_cross {
                         jump_targets.push(norm_target);
                     }
                 }
+                DecodedFlowKind::ConditionalJump => {}
                 DecodedFlowKind::None if instruction.mnemonic.eq_ignore_ascii_case("jmp") => {
                     let norm_target = normalize_target(binary, reference.target);
-                    let inst_addr = instruction.address;
-                    let distance = if inst_addr > norm_target {
-                        inst_addr - norm_target
-                    } else {
-                        norm_target - inst_addr
-                    };
-                    if distance > 512 || !same_section(binary, inst_addr, norm_target) {
+                    let distance = if inst_addr > norm_target { inst_addr - norm_target } else { norm_target - inst_addr };
+                    let is_long_or_cross = distance > 512 || !same_section(binary, inst_addr, norm_target);
+                    if inst_addr != norm_target {
+                        jump_edges.push((inst_addr, norm_target));
+                    }
+                    if is_long_or_cross {
                         jump_targets.push(norm_target);
                     }
                 }
@@ -146,14 +161,13 @@ pub(crate) fn collect_instruction_targets(
 }
 
 pub(crate) fn discovery_candidate_targets(
-    profile: FunctionDiscoveryProfile,
+    _profile: FunctionDiscoveryProfile,
     mut call_targets: Vec<u64>,
-    jump_targets: &[u64],
+    _jump_targets: &[u64],
 ) -> Vec<u64> {
-    if profile == FunctionDiscoveryProfile::Aggressive {
-        call_targets.extend_from_slice(jump_targets);
-        call_targets.sort_unstable();
-        call_targets.dedup();
-    }
+    // Jump targets are no longer blindly merged into call targets.
+    // They will be validated dynamically in discover.rs under the Aggressive profile.
+    call_targets.sort_unstable();
+    call_targets.dedup();
     call_targets
 }

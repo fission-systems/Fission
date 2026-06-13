@@ -187,6 +187,28 @@ impl NirRoutingResolver {
         }
     }
 
+    pub fn nir_skipped(reason: impl AsRef<str>) -> NirSelection {
+        let fallback_reason = classified_nir_error(reason.as_ref());
+        NirSelection {
+            nir_code: None,
+            build_stats: None,
+            hint_stats: None,
+            engine_used: NirEngineMode::Nir,
+            fell_back: false,
+            fallback_kind: extract_fallback_kind(Some(fallback_reason.as_str())),
+            fallback_kind_refined: extract_refined_fallback_kind(Some(fallback_reason.as_str())),
+            fallback_reason: Some(fallback_reason),
+            nir_surface: None,
+            recovery_strategy_attempted: None,
+            recovery_strategy_applied: None,
+            recovery_outcome: None,
+            recovery_source_signature: None,
+            recovery_structuring_mode: None,
+            recovery_reason_family: None,
+            recovery_retryable: None,
+        }
+    }
+
     pub fn nir_fallback_with_recovery(
         reason: impl AsRef<str>,
         attempted: &'static str,
