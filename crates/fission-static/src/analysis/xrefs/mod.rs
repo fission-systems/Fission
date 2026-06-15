@@ -22,6 +22,10 @@ pub enum XrefType {
     Jump,
     /// Data reference (MOV, LEA with address)
     Data,
+    /// Data read reference (memory load)
+    DataRead,
+    /// Data write reference (memory store)
+    DataWrite,
 }
 
 /// A single cross-reference from decoded instructions.
@@ -107,6 +111,30 @@ impl XrefDatabase {
         }
 
         db
+    }
+
+    /// Refines the xref database using Value Set Analysis (VSA) over known functions.
+    pub fn refine_with_vsa(
+        &mut self,
+        binary: &fission_loader::loader::LoadedBinary,
+        frontend: &RuntimeSleighFrontend,
+        function_addrs: &[u64],
+    ) {
+        let mut analyzer = crate::analysis::value_set::ValueSetAnalyzer::new();
+        let code = binary.data.as_slice();
+        for &addr in function_addrs {
+            let start = addr as usize;
+            if start >= code.len() {
+                continue;
+            }
+            if let Ok(pcode_fn) = frontend.lift_raw_pcode_function(&code[start..], addr) {
+                analyzer.analyze(&pcode_fn);
+            }
+        }
+        let vsa_xrefs = analyzer.into_xrefs();
+        for xref in vsa_xrefs {
+            self.add_xref(xref);
+        }
     }
 
     fn analyze_code(&mut self, frontend: &RuntimeSleighFrontend, code: &[u8], base_addr: u64) {
@@ -196,6 +224,8 @@ impl Xref {
         match self.xref_type {
             XrefType::Call => "call",
             XrefType::Data => "data",
+            XrefType::DataRead => "read",
+            XrefType::DataWrite => "write",
             XrefType::Jump => match self.flow_kind {
                 Some(DecodedFlowKind::ConditionalJump) => "jcc",
                 _ => "jmp",

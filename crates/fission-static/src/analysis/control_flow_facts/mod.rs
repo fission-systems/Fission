@@ -102,7 +102,7 @@ impl ControlFlowFacts {
                             noreturn_callsites.insert(xref.from_addr);
                         }
                     }
-                    XrefType::Data => {}
+                    XrefType::Data | XrefType::DataRead | XrefType::DataWrite => {}
                 }
             }
         }

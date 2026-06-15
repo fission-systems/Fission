@@ -14,6 +14,7 @@ pub mod patch;
 pub mod prototype_hint;
 pub mod string_xrefs;
 pub mod strings;
+pub mod value_set;
 pub mod xref_index;
 pub mod xrefs;
 
@@ -51,4 +52,5 @@ pub use string_xrefs::{
     StringWithXrefs, StringXrefAnalysis, StringXrefStats, analyze_string_xrefs,
 };
 pub use strings::{ExtractedString, StringType, extract_strings, build_string_lookup};
+pub use value_set::{AbstractValue, ValueSetAnalyzer, ValueState};
 pub use xrefs::{OPERAND_INDEX_MNEMONIC, Xref, XrefDatabase, XrefType};

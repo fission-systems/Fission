@@ -463,7 +463,9 @@ pub fn push_disassembly_layer(
                     (XrefKind::Jump, "jump")
                 }
             }
-            XrefType::Data => (XrefKind::DataRead, "data"),
+            XrefType::Data => (XrefKind::DataRead, "data"), // fallback
+            XrefType::DataRead => (XrefKind::DataRead, "read"),
+            XrefType::DataWrite => (XrefKind::DataWrite, "write"),
         };
 
         let mut note = format!("operand_index={}; {note_suffix}", x.operand_index);

@@ -113,7 +113,7 @@ fn discovery_candidate_targets_balanced_excludes_jump_only() {
     let aggressive =
         discovery_candidate_targets(FunctionDiscoveryProfile::Aggressive, balanced, &jumps);
     assert!(aggressive.contains(&0x401000));
-    assert!(aggressive.contains(&0x402200));
+    assert!(!aggressive.contains(&0x402200), "Jump targets are no longer blindly accepted");
 }
 
 #[test]
@@ -156,7 +156,7 @@ fn discover_balanced_skips_jump_only_even_when_executable() {
 }
 
 #[test]
-fn discover_aggressive_accepts_jump_target_inside_executable() {
+fn discover_aggressive_excludes_jump_target_inside_executable() {
     let binary = pe64_executable_shell();
     let mut calls = Vec::new();
     let mut jumps = Vec::new();
@@ -177,8 +177,7 @@ fn discover_aggressive_accepts_jump_target_inside_executable() {
                 && is_in_executable_ranges(t, &executable_ranges)
         })
         .collect();
-    assert_eq!(accepted.len(), 1);
-    assert_eq!(accepted[0], SAMPLE_RIP_TARGET);
+    assert_eq!(accepted.len(), 0, "Jump targets are no longer blindly accepted");
 }
 
 /// Unknown `language_id` must resolve as unsupported **before** mutating discovered functions.
