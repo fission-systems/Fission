@@ -435,6 +435,112 @@ impl<'a> CppAnalyzer<'a> {
             })
             .collect()
     }
+
+    /// Discovers functions by sweeping VTable payloads.
+    pub fn discover_vtable_functions(&self) -> Vec<crate::loader::types::FunctionInfo> {
+        let mut functions = Vec::new();
+        let ptr_size = if self.binary.is_64bit { 8 } else { 4 };
+
+        // Helper closure to sweep a VTable
+        let mut sweep_vtable = |start_addr: u64| {
+            let mut current_addr = start_addr;
+            loop {
+                let Ok(ptr) = self.binary.read_ptr(current_addr) else { break; };
+                if ptr == 0 { break; }
+
+                // Check if the pointer falls within an executable section
+                let mut is_executable = false;
+                for sec in &self.binary.sections {
+                    if ptr >= sec.virtual_address && ptr < sec.virtual_address + sec.virtual_size {
+                        if sec.is_executable {
+                            is_executable = true;
+                        }
+                        break;
+                    }
+                }
+
+                if !is_executable {
+                    break;
+                }
+
+                functions.push(crate::loader::types::FunctionInfo {
+                    address: ptr,
+                    name: format!("vfunc_{:x}", ptr),
+                    size: 0,
+                    is_export: false,
+                    is_import: false,
+                    origin: Some("cpp_rtti".to_string()),
+                    kind: Some("vtable".to_string()),
+                    ..Default::default()
+                });
+
+                current_addr += ptr_size;
+            }
+        };
+
+        // 1. Sweep Itanium VTables
+        // In Itanium, __ZTV points to the start of the vtable array.
+        // Index 0: offset_to_top, Index 1: typeinfo ptr, Index 2: first vfunc.
+        let mut itanium_vtables = Vec::new();
+        for (addr, name) in &self.binary.iat_symbols {
+            if name.starts_with("__ZTV") {
+                itanium_vtables.push(*addr);
+            }
+        }
+        for func in &self.binary.functions {
+            if func.name.starts_with("__ZTV") {
+                itanium_vtables.push(func.address);
+            }
+        }
+        for (addr, name) in &self.binary.global_symbols {
+            if name.starts_with("__ZTV") {
+                itanium_vtables.push(*addr);
+            }
+        }
+
+        for vt_addr in itanium_vtables {
+            let func_array_start = vt_addr + 2 * ptr_size;
+            sweep_vtable(func_array_start);
+        }
+
+        // 2. Sweep MSVC VTables
+        // In MSVC, the COL (??_R4) is pointed to by the entry immediately preceding the VTable.
+        if self.binary.format.starts_with("PE") {
+            let msvc_classes = self.analyze_msvc_classes();
+            for class in msvc_classes {
+                let col_addr = class.type_info_address;
+                
+                // Scan .rdata for pointers to this COL
+                for section in &self.binary.sections {
+                    if section.name == ".rdata" || section.name == ".data" {
+                        let Some(data) = self.binary.view_bytes(section.virtual_address, section.virtual_size as usize) else {
+                            continue;
+                        };
+                        
+                        let step = ptr_size as usize;
+                        if data.len() < step { continue; }
+                        for i in (0..=data.len() - step).step_by(step) {
+                            let val = if ptr_size == 8 {
+                                u64::from_le_bytes(data[i..i+8].try_into().unwrap())
+                            } else {
+                                u32::from_le_bytes(data[i..i+4].try_into().unwrap()) as u64
+                            };
+
+                            if val == col_addr {
+                                // Found a pointer to COL. The VTable starts immediately after this pointer.
+                                let vtable_start = section.virtual_address + (i as u64) + ptr_size;
+                                sweep_vtable(vtable_start);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        functions.sort_by_key(|f| f.address);
+        functions.dedup_by_key(|f| f.address);
+        functions
+    }
 }
 
 struct ItaniumTypeInfo {

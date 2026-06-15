@@ -85,7 +85,7 @@ impl LoadedBinary {
                 (apple_funcs_res, swift_types_res, objc_classes_res, objc_selectors_res),
                 (
                     (dwarf_types_res, dwarf_funcs_res),
-                    (rust_vtables_res, cpp_types_res)
+                    (rust_vtables_res, (cpp_types_res, cpp_vtable_funcs_res))
                 )
             )
         ) = rayon::join(
@@ -136,7 +136,7 @@ impl LoadedBinary {
                         },
                         || {
                             let analyzer = cpp::CppAnalyzer::new(binary_ref);
-                            analyzer.to_inferred_types()
+                            (analyzer.to_inferred_types(), analyzer.discover_vtable_functions())
                         }
                     )
                 )
@@ -296,6 +296,31 @@ impl LoadedBinary {
         // 5. Merge C++ Results
         for ty in cpp_types_res {
             binary.inner_mut().inferred_types.push(ty);
+        }
+
+        // Merge C++ VTable Functions
+        if !cpp_vtable_funcs_res.is_empty() {
+            let mut addr_to_existing = std::collections::HashMap::new();
+            for (idx, func) in binary.inner().functions.iter().enumerate() {
+                addr_to_existing.insert(func.address, idx);
+            }
+
+            for vfunc in cpp_vtable_funcs_res {
+                if let Some(&idx) = addr_to_existing.get(&vfunc.address) {
+                    let existing = &mut binary.inner_mut().functions[idx];
+                    if existing.name.starts_with("FUN_") || existing.name.starts_with("sub_") || existing.name.is_empty() {
+                        existing.name = vfunc.name;
+                        existing.origin = vfunc.origin;
+                        existing.kind = vfunc.kind;
+                    }
+                } else {
+                    addr_to_existing.insert(vfunc.address, binary.inner().functions.len());
+                    binary.inner_mut().functions.push(vfunc);
+                }
+            }
+            binary.inner_mut().functions.sort_unstable_by_key(|f| f.address);
+            binary.inner_mut().functions_sorted = true;
+            binary.rebuild_function_indices();
         }
 
         Ok(binary)
