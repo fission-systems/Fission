@@ -38,9 +38,11 @@ pub struct Xref {
     pub operand_index: i32,
     /// Present when this xref came from [`DecodedInstruction::references`].
     pub sleigh_kind: Option<DecodedReferenceKind>,
-    /// Flow refinement for CALL/JMP rows (conditional vs unconditional).
+/// Flow refinement for CALL/JMP rows (conditional vs unconditional).
     pub flow_kind: Option<DecodedFlowKind>,
 }
+
+pub mod pointer_sweep;
 
 /// Database of all cross-references in a binary.
 #[derive(Debug, Clone, Default)]
@@ -108,6 +110,13 @@ impl XrefDatabase {
             };
             let base_addr = section.virtual_address;
             db.analyze_code(frontend, code, base_addr);
+        }
+
+        // Sweep data sections for hardcoded pointers to enrich xref coverage
+        let sweeper = pointer_sweep::PointerSweeper::new(binary);
+        let data_xrefs = sweeper.sweep(binary);
+        for xref in data_xrefs {
+            db.add_xref(xref);
         }
 
         db
