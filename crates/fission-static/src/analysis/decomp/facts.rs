@@ -42,6 +42,7 @@ pub struct FunctionFacts {
     pub type_facts: Vec<TypeFact>,
     pub dwarf_info: Option<DwarfFunctionInfo>,
     pub pdb_info: Option<PdbFunctionInfo>,
+    pub calling_convention: Option<fission_pcode::nir::CallingConvention>,
 }
 
 impl FunctionFacts {
@@ -81,6 +82,7 @@ pub struct FactStore {
     loader_type_facts: Vec<InferredTypeInfo>,
     dwarf_functions: HashMap<u64, DwarfFunctionInfo>,
     pdb_functions: HashMap<u64, PdbFunctionInfo>,
+    pub calling_conventions: HashMap<u64, fission_pcode::nir::CallingConvention>,
 }
 
 impl FactStore {
@@ -91,6 +93,7 @@ impl FactStore {
             loader_type_facts: binary.inferred_types.clone(),
             dwarf_functions: binary.dwarf_functions.clone(),
             pdb_functions: binary.pdb_functions.clone(),
+            calling_conventions: HashMap::new(),
         };
 
         for func in &binary.functions {
@@ -253,6 +256,10 @@ impl FactStore {
         }
     }
 
+    pub fn ingest_calling_convention(&mut self, address: u64, cc: fission_pcode::nir::CallingConvention) {
+        self.calling_conventions.insert(address, cc);
+    }
+
     pub fn ingest_name_fact(&mut self, address: u64, name: String, provenance: FactProvenance) {
         let trimmed = name.trim();
         if trimmed.is_empty() {
@@ -356,6 +363,7 @@ impl FactStore {
             type_facts,
             dwarf_info: self.dwarf_functions.get(&address).cloned(),
             pdb_info: self.pdb_functions.get(&address).cloned(),
+            calling_convention: self.calling_conventions.get(&address).cloned(),
         }
     }
 }

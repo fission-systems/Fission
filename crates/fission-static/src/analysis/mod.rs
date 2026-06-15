@@ -4,6 +4,7 @@
 //! crate supplies facts under `decomp` and analyzer utilities loaded binaries can use without owning IR policy.
 
 pub mod callgraph;
+pub mod calling_convention;
 pub mod control_flow_facts;
 pub mod decomp;
 pub mod external_symbol;
