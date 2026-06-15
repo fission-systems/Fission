@@ -7,6 +7,7 @@ use fission_core::architecture::select_elf_load_spec;
 use std::collections::{HashMap, HashSet};
 
 pub mod schema;
+pub mod eh_frame;
 use schema::*;
 
 pub struct ElfLoader;
@@ -212,6 +213,25 @@ impl ElfLoader {
                         &ppc64_function_descriptors,
                         endian,
                     );
+                }
+            }
+
+            // eh_frame parsing for 64-bit
+            if let Some(eh_frame_sec) = sections_info.iter().find(|s| s.name == ".eh_frame") {
+                let text_addr = sections_info.iter().find(|s| s.name == ".text").map(|s| s.virtual_address).unwrap_or(0);
+                let data_addr = sections_info.iter().find(|s| s.name == ".data").map(|s| s.virtual_address).unwrap_or(0);
+                let start = eh_frame_sec.file_offset as usize;
+                let end = start.saturating_add(eh_frame_sec.file_size as usize);
+                if let Some(eh_frame_data) = bytes.get(start..end) {
+                    let eh_funcs = eh_frame::parse_eh_frame(
+                        eh_frame_data,
+                        eh_frame_sec.virtual_address,
+                        text_addr,
+                        data_addr,
+                        endian == Endian::Little,
+                        true,
+                    );
+                    functions_info.extend(eh_funcs);
                 }
             }
 
@@ -440,6 +460,25 @@ impl ElfLoader {
                         &mut global_symbol_sizes,
                         endian,
                     );
+                }
+            }
+
+            // eh_frame parsing for 32-bit
+            if let Some(eh_frame_sec) = sections_info.iter().find(|s| s.name == ".eh_frame") {
+                let text_addr = sections_info.iter().find(|s| s.name == ".text").map(|s| s.virtual_address).unwrap_or(0);
+                let data_addr = sections_info.iter().find(|s| s.name == ".data").map(|s| s.virtual_address).unwrap_or(0);
+                let start = eh_frame_sec.file_offset as usize;
+                let end = start.saturating_add(eh_frame_sec.file_size as usize);
+                if let Some(eh_frame_data) = bytes.get(start..end) {
+                    let eh_funcs = eh_frame::parse_eh_frame(
+                        eh_frame_data,
+                        eh_frame_sec.virtual_address,
+                        text_addr,
+                        data_addr,
+                        endian == Endian::Little,
+                        false,
+                    );
+                    functions_info.extend(eh_funcs);
                 }
             }
 
