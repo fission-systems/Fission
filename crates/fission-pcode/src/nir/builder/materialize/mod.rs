@@ -205,14 +205,66 @@ impl<'a> PreviewBuilder<'a> {
         &mut self,
         block: &crate::pcode::PcodeBasicBlock,
     ) -> Result<Vec<HirStmt>, MlilPreviewError> {
-        let mut body = Vec::new();
         let terminator_index = self.block_terminator_index(block);
+        let mut body = self.synthesize_explicit_merge_bindings_for_block(block)?;
+        body.extend(self.lower_block_ops_range(block, 0, block.ops.len(), terminator_index)?);
+        Ok(body)
+    }
+
+    fn lower_block_ops_range(
+        &mut self,
+        block: &crate::pcode::PcodeBasicBlock,
+        start_idx: usize,
+        end_idx: usize,
+        terminator_index: Option<usize>,
+    ) -> Result<Vec<HirStmt>, MlilPreviewError> {
+        let mut body = Vec::new();
         let block_idx = self.lowering_block_index(block);
-        body.extend(self.synthesize_explicit_merge_bindings_for_block(block)?);
-        for (op_idx, op) in block.ops.iter().enumerate() {
+        let mut op_idx = start_idx;
+        while op_idx < end_idx {
+            let op = &block.ops[op_idx];
             if Some(op_idx) == terminator_index {
+                op_idx += 1;
                 continue;
             }
+            
+            // Handle intra-block control flow (e.g. from cmov)
+            if op.opcode == PcodeOpcode::CBranch && op.inputs.len() >= 2 && op.inputs[0].is_constant {
+                if let Some(target_seq) = crate::nir::cfg::instruction_local_branch_target_seq(op, &op.inputs[0]) {
+                    let target_op_idx_opt = block.ops[op_idx + 1..end_idx]
+                        .iter()
+                        .position(|candidate| candidate.seq_num == target_seq)
+                        .map(|pos| op_idx + 1 + pos);
+                    if let Some(target_op_idx) = target_op_idx_opt {
+                        let cond = self.lower_varnode(&op.inputs[1], &mut HashSet::new())?;
+                        let inverted_cond = HirExpr::Unary {
+                            op: HirUnaryOp::Not,
+                            expr: Box::new(cond),
+                            ty: NirType::Bool,
+                        };
+                        let nested_body = self.lower_block_ops_range(block, op_idx + 1, target_op_idx, terminator_index)?;
+                        body.push(HirStmt::If {
+                            cond: inverted_cond,
+                            then_body: nested_body,
+                            else_body: Vec::new(),
+                        });
+                        op_idx = target_op_idx;
+                        continue;
+                    }
+                }
+            } else if op.opcode == PcodeOpcode::Branch && !op.inputs.is_empty() && op.inputs[0].is_constant {
+                if let Some(target_seq) = crate::nir::cfg::instruction_local_branch_target_seq(op, &op.inputs[0]) {
+                    let target_op_idx_opt = block.ops[op_idx + 1..end_idx]
+                        .iter()
+                        .position(|candidate| candidate.seq_num == target_seq)
+                        .map(|pos| op_idx + 1 + pos);
+                    if let Some(target_op_idx) = target_op_idx_opt {
+                        op_idx = target_op_idx;
+                        continue;
+                    }
+                }
+            }
+
             let site = LoweringSite { block_idx, op_idx };
             let maybe_stmt = self.with_lowering_site(
                 site,
@@ -357,6 +409,7 @@ impl<'a> PreviewBuilder<'a> {
             if let Some(stmt) = maybe_stmt {
                 body.push(stmt);
             }
+            op_idx += 1;
         }
         Ok(body)
     }

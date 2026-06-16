@@ -362,20 +362,6 @@ impl<'a> PreviewBuilder<'a> {
         exit: LinearExit,
         mut budget: Option<&mut IfLoweringBudget>,
     ) -> Result<Option<(Vec<HirStmt>, usize)>, MlilPreviewError> {
-        let key = LinearBodyCacheKey {
-            start_idx,
-            exit,
-            region_recovery: false,
-        };
-        if let Some(cached) = self.linear_body_cache.get(&key) {
-            return Ok(match cached {
-                LinearBodyCachedOutcome::Lowered(lowered) => Some(lowered.clone()),
-                LinearBodyCachedOutcome::Rejected(_) => None,
-            });
-        }
-        if !self.active_linear_body_keys.insert(key) {
-            return Ok(None);
-        }
         let mut auto_budget = None;
         let budget_ref = if let Some(b) = budget {
             b
@@ -390,35 +376,12 @@ impl<'a> PreviewBuilder<'a> {
             ));
             auto_budget.as_mut().unwrap()
         };
-        if budget_ref.checkpoint("lower_linear_body_start") {
-            self.active_linear_body_keys.remove(&key);
-            return Ok(None);
-        }
-        let detailed = self.lower_linear_body_with_depth_detailed(
-            start_idx,
-            exit,
-            0,
-            Some(budget_ref),
-            false,
-        )?;
-        let result = match &detailed {
+        let detailed =
+            self.lower_linear_body_cached(start_idx, exit, 0, Some(budget_ref), false)?;
+        Ok(match &detailed {
             LinearBodyLoweringOutcome::Lowered(lowered) => Some(lowered.clone()),
             LinearBodyLoweringOutcome::Rejected(_) => None,
-        };
-        self.active_linear_body_keys.remove(&key);
-        let should_cache = !budget_ref.tripped;
-        if should_cache {
-            let cached = match &detailed {
-                LinearBodyLoweringOutcome::Lowered(lowered) => {
-                    LinearBodyCachedOutcome::Lowered(lowered.clone())
-                }
-                LinearBodyLoweringOutcome::Rejected(reason) => {
-                    LinearBodyCachedOutcome::Rejected(*reason)
-                }
-            };
-            self.linear_body_cache.insert(key, cached);
-        }
-        Ok(result)
+        })
     }
 
     pub(crate) fn lower_linear_body_for_region_recovery_detailed(
@@ -427,42 +390,6 @@ impl<'a> PreviewBuilder<'a> {
         exit: LinearExit,
         mut budget: Option<&mut IfLoweringBudget>,
     ) -> Result<LinearBodyLoweringOutcome, MlilPreviewError> {
-        self.lower_linear_body_detailed_with_mode(start_idx, exit, budget.as_deref_mut(), true)
-    }
-
-    fn lower_linear_body_detailed_with_mode(
-        &mut self,
-        start_idx: usize,
-        exit: LinearExit,
-        mut budget: Option<&mut IfLoweringBudget>,
-        region_recovery: bool,
-    ) -> Result<LinearBodyLoweringOutcome, MlilPreviewError> {
-        let key = LinearBodyCacheKey {
-            start_idx,
-            exit,
-            region_recovery,
-        };
-        if let Some(cached) = self.linear_body_cache.get(&key) {
-            return Ok(match cached {
-                LinearBodyCachedOutcome::Lowered(lowered) => {
-                    LinearBodyLoweringOutcome::Lowered(lowered.clone())
-                }
-                LinearBodyCachedOutcome::Rejected(reason) => {
-                    if region_recovery {
-                        LinearBodyLoweringOutcome::Rejected(*reason)
-                    } else {
-                        LinearBodyLoweringOutcome::Rejected(
-                            LinearBodyRejectReason::UnsupportedTerminator,
-                        )
-                    }
-                }
-            });
-        }
-        if !self.active_linear_body_keys.insert(key) {
-            return Ok(LinearBodyLoweringOutcome::Rejected(
-                LinearBodyRejectReason::RevisitCycle,
-            ));
-        }
         let mut auto_budget = None;
         let budget_ref = if let Some(b) = budget {
             b
@@ -477,34 +404,56 @@ impl<'a> PreviewBuilder<'a> {
             ));
             auto_budget.as_mut().unwrap()
         };
-        if budget_ref.checkpoint("lower_linear_body_start") {
-            self.active_linear_body_keys.remove(&key);
+        self.lower_linear_body_cached(start_idx, exit, 0, Some(budget_ref), true)
+    }
+
+    fn lower_linear_body_cached(
+        &mut self,
+        start_idx: usize,
+        exit: LinearExit,
+        depth: usize,
+        mut budget: Option<&mut IfLoweringBudget>,
+        region_recovery: bool,
+    ) -> Result<LinearBodyLoweringOutcome, MlilPreviewError> {
+        let key = LinearBodyCacheKey {
+            start_idx,
+            exit,
+            region_recovery,
+        };
+        if let Some(cached) = self.linear_body_cache.get(&key) {
+            match cached {
+                LinearBodyCachedOutcome::Lowered(lowered) => {
+                    return Ok(LinearBodyLoweringOutcome::Lowered(lowered.clone()));
+                }
+                LinearBodyCachedOutcome::Rejected(reason) => {
+                    return Ok(LinearBodyLoweringOutcome::Rejected(*reason));
+                }
+            }
+        }
+        if !self.active_linear_body_keys.insert(key) {
             return Ok(LinearBodyLoweringOutcome::Rejected(
-                LinearBodyRejectReason::BudgetTripped,
+                LinearBodyRejectReason::RevisitCycle,
             ));
         }
+
         let result = self.lower_linear_body_with_depth_detailed(
             start_idx,
             exit,
-            0,
-            Some(budget_ref),
+            depth,
+            budget.as_deref_mut(),
             region_recovery,
         )?;
+
         self.active_linear_body_keys.remove(&key);
-        let should_cache = !budget_ref.tripped;
+        let should_cache = budget.map_or(true, |b| !b.tripped)
+            || matches!(result, LinearBodyLoweringOutcome::Rejected(LinearBodyRejectReason::BudgetTripped));
         if should_cache {
             let cached = match &result {
                 LinearBodyLoweringOutcome::Lowered(lowered) => {
                     LinearBodyCachedOutcome::Lowered(lowered.clone())
                 }
                 LinearBodyLoweringOutcome::Rejected(reason) => {
-                    if region_recovery {
-                        LinearBodyCachedOutcome::Rejected(*reason)
-                    } else {
-                        LinearBodyCachedOutcome::Rejected(
-                            LinearBodyRejectReason::UnsupportedTerminator,
-                        )
-                    }
+                    LinearBodyCachedOutcome::Rejected(*reason)
                 }
             };
             self.linear_body_cache.insert(key, cached);
@@ -1153,7 +1102,7 @@ impl<'a> PreviewBuilder<'a> {
         let result = (|| {
             if true_arm.reaches_join_trivially
                 && let LinearBodyLoweringOutcome::Lowered((false_body, skip_to)) = self
-                    .lower_linear_body_with_depth_detailed(
+                    .lower_linear_body_cached(
                         false_arm.effective_start_idx,
                         exit,
                         depth + 1,
@@ -1173,7 +1122,7 @@ impl<'a> PreviewBuilder<'a> {
 
             if false_arm.reaches_join_trivially
                 && let LinearBodyLoweringOutcome::Lowered((true_body, skip_to)) = self
-                    .lower_linear_body_with_depth_detailed(
+                    .lower_linear_body_cached(
                         true_arm.effective_start_idx,
                         exit,
                         depth + 1,
@@ -1211,14 +1160,14 @@ impl<'a> PreviewBuilder<'a> {
                         continue;
                     }
                     let shared_exit = LinearExit::Join(shared_tail_entry_idx);
-                    let true_branch = self.lower_linear_body_with_depth_detailed(
+                    let true_branch = self.lower_linear_body_cached(
                         true_arm.canonical_idx,
                         shared_exit,
                         depth + 1,
                         budget.as_deref_mut(),
                         region_recovery,
                     )?;
-                    let false_branch = self.lower_linear_body_with_depth_detailed(
+                    let false_branch = self.lower_linear_body_cached(
                         false_arm.canonical_idx,
                         shared_exit,
                         depth + 1,
@@ -1227,10 +1176,10 @@ impl<'a> PreviewBuilder<'a> {
                     )?;
                     match (true_branch, false_branch) {
                         (
-                            LinearBodyLoweringOutcome::Lowered((then_body, then_skip)),
-                            LinearBodyLoweringOutcome::Lowered((else_body, else_skip)),
+                             LinearBodyLoweringOutcome::Lowered((then_body, then_skip)),
+                             LinearBodyLoweringOutcome::Lowered((else_body, else_skip)),
                         ) => {
-                            match self.lower_linear_body_with_depth_detailed(
+                            match self.lower_linear_body_cached(
                                 shared_tail_entry_idx,
                                 exit,
                                 depth + 1,
@@ -1256,7 +1205,7 @@ impl<'a> PreviewBuilder<'a> {
                                     fallback_mismatch_subtype =
                                         ConditionalTailMismatchSubtype::FollowTailLoweringFailed;
                                 }
-                            }
+                             }
                         }
                         (
                             LinearBodyLoweringOutcome::Rejected(_),
@@ -1273,14 +1222,14 @@ impl<'a> PreviewBuilder<'a> {
                 }
             }
 
-            let true_branch = self.lower_linear_body_with_depth_detailed(
+            let true_branch = self.lower_linear_body_cached(
                 true_arm.effective_start_idx,
                 exit,
                 depth + 1,
                 budget.as_deref_mut(),
                 region_recovery,
             )?;
-            let false_branch = self.lower_linear_body_with_depth_detailed(
+            let false_branch = self.lower_linear_body_cached(
                 false_arm.effective_start_idx,
                 exit,
                 depth + 1,
