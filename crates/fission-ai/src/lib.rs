@@ -31,25 +31,37 @@ pub use pipeline::AiPipeline;
 #[cfg(test)]
 mod tests {
     use crate::auth::ResolvedAuth;
-    use crate::provider::{ProviderKind, ProviderConfig, build_provider};
+    use crate::provider::{ProviderConfig, ProviderKind, build_provider};
     use crate::session::SessionContext;
 
     // ── ProviderKind parsing ──────────────────────────────────────────────────
 
     #[test]
     fn provider_kind_from_str_codex() {
-        assert_eq!("codex".parse::<ProviderKind>().unwrap(), ProviderKind::Codex);
-        assert_eq!("chatgpt".parse::<ProviderKind>().unwrap(), ProviderKind::Codex);
+        assert_eq!(
+            "codex".parse::<ProviderKind>().unwrap(),
+            ProviderKind::Codex
+        );
+        assert_eq!(
+            "chatgpt".parse::<ProviderKind>().unwrap(),
+            ProviderKind::Codex
+        );
     }
 
     #[test]
     fn provider_kind_from_str_openai() {
-        assert_eq!("openai".parse::<ProviderKind>().unwrap(), ProviderKind::OpenAi);
+        assert_eq!(
+            "openai".parse::<ProviderKind>().unwrap(),
+            ProviderKind::OpenAi
+        );
     }
 
     #[test]
     fn provider_kind_from_str_ollama() {
-        assert_eq!("ollama".parse::<ProviderKind>().unwrap(), ProviderKind::Ollama);
+        assert_eq!(
+            "ollama".parse::<ProviderKind>().unwrap(),
+            ProviderKind::Ollama
+        );
     }
 
     #[test]
@@ -126,7 +138,7 @@ mod tests {
     fn test_context_compaction() {
         use crate::session::{ContextManager, Message};
         let cm = ContextManager::new(50, 50);
-        
+
         let mut messages = vec![
             Message::system("System prompt"),
             Message::user("Hello 1"),
@@ -138,7 +150,7 @@ mod tests {
             Message::user("Hello 4"),
             Message::assistant("Hi 4"),
         ];
-        
+
         let compacted = cm.compact_history(&mut messages);
         assert!(compacted);
         // Should keep system prompt (index 0) + compaction sentinel (index 1) + last 4 messages = 6
@@ -154,7 +166,7 @@ mod tests {
         let mut cm = ContextManager::new(1000, 50);
         cm.focus.active_function_addr = Some("0x140001000".to_string());
         cm.focus.active_function_name = Some("main".to_string());
-        
+
         let prompt = cm.format_focus_prompt();
         assert!(prompt.contains("0x140001000"));
         assert!(prompt.contains("main"));
@@ -164,20 +176,20 @@ mod tests {
     async fn test_apply_patch_tool_executes() {
         use crate::tools::execution::{AiTool, ApplyPatchTool};
         use std::fs;
-        
+
         let path = std::env::temp_dir().join("fission_mock_binary_patch.exe");
         fs::write(&path, b"mock exe contents").unwrap();
-        
+
         let tool = ApplyPatchTool;
         let args = serde_json::json!({
             "addr": "0x401000",
             "action": "rename_function",
             "value": "target_func"
         });
-        
+
         let result = tool.execute(&args, Some(&path)).await.unwrap();
         assert!(result.contains("Successfully applied patch"));
-        
+
         // Verify sidecar was created and has correct contents
         let sidecar_path = path.with_extension("fission.json");
         assert!(sidecar_path.exists());
@@ -187,7 +199,7 @@ mod tests {
             project["user_function_names"]["4198400"],
             serde_json::json!("target_func")
         );
-        
+
         // Clean up
         let _ = fs::remove_file(path);
         let _ = fs::remove_file(sidecar_path);
@@ -271,7 +283,9 @@ mod tests {
         let project: serde_json::Value = serde_json::from_str(&sidecar_content).unwrap();
         assert_eq!(
             project["annotations"]["4198400"],
-            serde_json::json!("This function handles user authentication and decrypts the main key.")
+            serde_json::json!(
+                "This function handles user authentication and decrypts the main key."
+            )
         );
 
         // 2. Perform a search
@@ -279,7 +293,10 @@ mod tests {
         let search_args = serde_json::json!({
             "query": "authentication"
         });
-        let search_result = search_tool.execute(&search_args, Some(&path)).await.unwrap();
+        let search_result = search_tool
+            .execute(&search_args, Some(&path))
+            .await
+            .unwrap();
         assert!(search_result.contains("Found 1 matches"));
         assert!(search_result.contains("0x401000"));
         assert!(search_result.contains("user authentication"));
@@ -288,7 +305,10 @@ mod tests {
         let search_args_fail = serde_json::json!({
             "query": "non_existent_pattern"
         });
-        let search_result_fail = search_tool.execute(&search_args_fail, Some(&path)).await.unwrap();
+        let search_result_fail = search_tool
+            .execute(&search_args_fail, Some(&path))
+            .await
+            .unwrap();
         assert!(search_result_fail.contains("No matches found"));
 
         // Clean up
@@ -316,13 +336,20 @@ mod tests {
                 }
             }
         });
-        fs::write(&sidecar_path, serde_json::to_string_pretty(&project).unwrap()).unwrap();
+        fs::write(
+            &sidecar_path,
+            serde_json::to_string_pretty(&project).unwrap(),
+        )
+        .unwrap();
 
         let search_tool = SearchMemoryTool;
         let search_args = serde_json::json!({
             "query": "0xbeef"
         });
-        let result = search_tool.execute(&search_args, Some(&path)).await.unwrap();
+        let result = search_tool
+            .execute(&search_args, Some(&path))
+            .await
+            .unwrap();
         assert!(result.contains("Found 1 matches"));
         assert!(result.contains("target_func"));
         assert!(result.contains("0x401000"));
@@ -338,12 +365,26 @@ mod tests {
 
     #[async_trait::async_trait]
     impl crate::provider::AiProvider for MockProvider {
-        fn name(&self) -> &str { "mock" }
-        fn model(&self) -> &str { "mock-model" }
-        async fn chat_stream(&self, _messages: &[crate::session::Message], _tools: Option<&[crate::tools::ToolDefinition]>) -> crate::provider::ProviderResult<crate::provider::ChunkStream> {
-            Err(crate::provider::ProviderError::Other("Not implemented".to_string()))
+        fn name(&self) -> &str {
+            "mock"
         }
-        async fn chat(&self, _messages: &[crate::session::Message], _tools: Option<&[crate::tools::ToolDefinition]>) -> crate::provider::ProviderResult<String> {
+        fn model(&self) -> &str {
+            "mock-model"
+        }
+        async fn chat_stream(
+            &self,
+            _messages: &[crate::session::Message],
+            _tools: Option<&[crate::tools::ToolDefinition]>,
+        ) -> crate::provider::ProviderResult<crate::provider::ChunkStream> {
+            Err(crate::provider::ProviderError::Other(
+                "Not implemented".to_string(),
+            ))
+        }
+        async fn chat(
+            &self,
+            _messages: &[crate::session::Message],
+            _tools: Option<&[crate::tools::ToolDefinition]>,
+        ) -> crate::provider::ProviderResult<String> {
             Ok("# Consolidated Mock Report\n\n- Match found.\n- Code is consolidated.".to_string())
         }
     }
@@ -351,9 +392,9 @@ mod tests {
     #[tokio::test]
     async fn test_consolidate_analysis_report() {
         use crate::pipeline::AiPipeline;
+        use crate::session::ContextManager;
         use crate::session::SessionContext;
         use crate::tools::registry::ToolRegistry;
-        use crate::session::ContextManager;
         use std::fs;
 
         let path = std::env::temp_dir().join("fission_mock_binary_consolidate.exe");
@@ -374,15 +415,24 @@ mod tests {
                 "4198400": "This is an important function."
             }
         });
-        fs::write(&sidecar_path, serde_json::to_string_pretty(&project).unwrap()).unwrap();
+        fs::write(
+            &sidecar_path,
+            serde_json::to_string_pretty(&project).unwrap(),
+        )
+        .unwrap();
 
         // Reconstruct pipeline with MockProvider
         let provider = std::sync::Arc::new(MockProvider);
         let pipeline = AiPipeline {
             provider,
-            session: std::sync::Arc::new(std::sync::Mutex::new(SessionContext::new(None, Some(path.clone())))),
+            session: std::sync::Arc::new(std::sync::Mutex::new(SessionContext::new(
+                None,
+                Some(path.clone()),
+            ))),
             tool_registry: std::sync::Arc::new(ToolRegistry::new()),
-            context_manager: std::sync::Arc::new(std::sync::Mutex::new(ContextManager::new(1000, 50))),
+            context_manager: std::sync::Arc::new(std::sync::Mutex::new(ContextManager::new(
+                1000, 50,
+            ))),
         };
 
         let result = pipeline.consolidate_analysis_report().await.unwrap();
@@ -398,5 +448,52 @@ mod tests {
         let _ = fs::remove_file(path);
         let _ = fs::remove_file(sidecar_path);
         let _ = fs::remove_file(report_path);
+    }
+
+    #[tokio::test]
+    async fn test_pseudocode_analyzer_with_mock_provider() {
+        use crate::provider::PseudocodeAnalyzer;
+        use crate::provider::mock::MockProvider;
+
+        let provider = MockProvider::new("mock-model".to_string());
+
+        let pseudocode = r#"
+        undefined8 FUN_001011a0(undefined8 param_1) {
+            long local_1;
+            local_1 = param_1 * 2;
+            return local_1;
+        }
+        "#;
+
+        let report = provider.analyze_pseudocode(pseudocode).await.unwrap();
+
+        assert!(report.contains("FUN_001011a0"));
+        assert!(report.contains("param_1"));
+        assert!(report.contains("local_1"));
+        assert!(report.contains("# Decompiled Function Analysis"));
+    }
+
+    #[tokio::test]
+    async fn test_mock_provider_chat_stream() {
+        use crate::provider::AiProvider;
+        use crate::provider::mock::MockProvider;
+        use crate::session::Message;
+        use futures::StreamExt;
+
+        let provider = MockProvider::new("mock-model".to_string());
+        let messages = vec![Message::user(
+            "undefined8 FUN_001011a0(undefined8 param_1) { return param_1; }",
+        )];
+
+        let mut stream = provider.chat_stream(&messages, None).await.unwrap();
+        let mut full_response = String::new();
+        while let Some(chunk) = stream.next().await {
+            let chunk = chunk.unwrap();
+            full_response.push_str(&chunk.delta);
+        }
+
+        assert!(full_response.contains("FUN_001011a0"));
+        assert!(full_response.contains("param_1"));
+        assert!(full_response.contains("# Decompiled Function Analysis"));
     }
 }

@@ -5,14 +5,15 @@
 
 pub mod codex;
 pub mod copilot;
+pub mod mock;
 pub mod ollama;
 pub mod openai;
 
+use async_trait::async_trait;
+use futures::Stream;
 use std::fmt;
 use std::pin::Pin;
 use std::sync::Arc;
-use async_trait::async_trait;
-use futures::Stream;
 use thiserror::Error;
 
 use crate::session::Message;
@@ -89,11 +90,19 @@ pub trait AiProvider: fmt::Debug + Send + Sync {
     }
 
     /// Send a chat completion request and return a streaming response.
-    async fn chat_stream(&self, messages: &[Message], tools: Option<&[ToolDefinition]>) -> ProviderResult<ChunkStream>;
+    async fn chat_stream(
+        &self,
+        messages: &[Message],
+        tools: Option<&[ToolDefinition]>,
+    ) -> ProviderResult<ChunkStream>;
 
     /// Return a one-shot (non-streaming) response.  Default implementation
     /// collects the stream into a single string.
-    async fn chat(&self, messages: &[Message], tools: Option<&[ToolDefinition]>) -> ProviderResult<String> {
+    async fn chat(
+        &self,
+        messages: &[Message],
+        tools: Option<&[ToolDefinition]>,
+    ) -> ProviderResult<String> {
         use futures::StreamExt;
         let mut stream = self.chat_stream(messages, tools).await?;
         let mut out = String::new();
@@ -101,6 +110,28 @@ pub trait AiProvider: fmt::Debug + Send + Sync {
             out.push_str(&chunk?.delta);
         }
         Ok(out)
+    }
+}
+
+/// Trait to analyze decompiled pseudocode using an AI provider.
+#[async_trait]
+pub trait PseudocodeAnalyzer: Send + Sync {
+    async fn analyze_pseudocode(&self, code: &str) -> Result<String, ProviderError>;
+}
+
+#[async_trait]
+impl<T> PseudocodeAnalyzer for T
+where
+    T: AiProvider + ?Sized,
+{
+    async fn analyze_pseudocode(&self, code: &str) -> Result<String, ProviderError> {
+        let messages = vec![
+            Message::system(
+                "You are a senior reverse engineer. Analyze the following decompiled pseudocode, identify its purpose, list key variables/operations, and recommend descriptive variable or function names.",
+            ),
+            Message::user(code),
+        ];
+        self.chat(&messages, None).await
     }
 }
 
@@ -117,6 +148,8 @@ pub enum ProviderKind {
     OpenAi,
     /// Local Ollama server.
     Ollama,
+    /// Mock provider for testing and offline development.
+    Mock,
 }
 
 impl fmt::Display for ProviderKind {
@@ -126,6 +159,7 @@ impl fmt::Display for ProviderKind {
             Self::Copilot => write!(f, "copilot"),
             Self::OpenAi => write!(f, "openai"),
             Self::Ollama => write!(f, "ollama"),
+            Self::Mock => write!(f, "mock"),
         }
     }
 }
@@ -138,7 +172,10 @@ impl std::str::FromStr for ProviderKind {
             "copilot" | "github-copilot" | "github_copilot" => Ok(Self::Copilot),
             "openai" => Ok(Self::OpenAi),
             "ollama" => Ok(Self::Ollama),
-            other => Err(format!("unknown provider: {other}. Use codex|copilot|openai|ollama")),
+            "mock" => Ok(Self::Mock),
+            other => Err(format!(
+                "unknown provider: {other}. Use codex|copilot|openai|ollama|mock"
+            )),
         }
     }
 }
@@ -186,6 +223,9 @@ pub fn build_provider(cfg: ProviderConfig) -> SharedAiProvider {
         ProviderKind::Ollama => Arc::new(ollama::OllamaProvider::new(
             cfg.base_url,
             cfg.model.unwrap_or_else(|| "llama3".into()),
+        )),
+        ProviderKind::Mock => Arc::new(mock::MockProvider::new(
+            cfg.model.unwrap_or_else(|| "mock-model".into()),
         )),
     }
 }
