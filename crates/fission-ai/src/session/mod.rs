@@ -36,11 +36,11 @@ pub struct Message {
     pub role: Role,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub content: Option<String>,
-    
+
     // For assistant messages calling tools
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tool_calls: Option<Vec<ToolCall>>,
-    
+
     // For tool response messages
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tool_call_id: Option<String>,
@@ -50,19 +50,49 @@ pub struct Message {
 
 impl Message {
     pub fn system(content: impl Into<String>) -> Self {
-        Self { role: Role::System, content: Some(content.into()), tool_calls: None, tool_call_id: None, name: None }
+        Self {
+            role: Role::System,
+            content: Some(content.into()),
+            tool_calls: None,
+            tool_call_id: None,
+            name: None,
+        }
     }
     pub fn user(content: impl Into<String>) -> Self {
-        Self { role: Role::User, content: Some(content.into()), tool_calls: None, tool_call_id: None, name: None }
+        Self {
+            role: Role::User,
+            content: Some(content.into()),
+            tool_calls: None,
+            tool_call_id: None,
+            name: None,
+        }
     }
     pub fn assistant(content: impl Into<String>) -> Self {
-        Self { role: Role::Assistant, content: Some(content.into()), tool_calls: None, tool_call_id: None, name: None }
+        Self {
+            role: Role::Assistant,
+            content: Some(content.into()),
+            tool_calls: None,
+            tool_call_id: None,
+            name: None,
+        }
     }
     pub fn assistant_tool_calls(tool_calls: Vec<ToolCall>) -> Self {
-        Self { role: Role::Assistant, content: None, tool_calls: Some(tool_calls), tool_call_id: None, name: None }
+        Self {
+            role: Role::Assistant,
+            content: None,
+            tool_calls: Some(tool_calls),
+            tool_call_id: None,
+            name: None,
+        }
     }
     pub fn tool_response(tool_call_id: String, name: String, content: String) -> Self {
-        Self { role: Role::Tool, content: Some(content), tool_calls: None, tool_call_id: Some(tool_call_id), name: Some(name) }
+        Self {
+            role: Role::Tool,
+            content: Some(content),
+            tool_calls: None,
+            tool_call_id: Some(tool_call_id),
+            name: Some(name),
+        }
     }
 }
 
@@ -77,8 +107,12 @@ pub enum AgentMode {
 impl AgentMode {
     pub fn system_prompt_prefix(&self) -> &'static str {
         match self {
-            AgentMode::Analyst => "You are Fission AI, a professional reverse engineering Analyst. Your goal is to explore, analyze, and explain code/binaries. You are read-only. You must not attempt to modify files. Provide deep insights.",
-            AgentMode::Editor => "You are Fission AI, a professional reverse engineering Editor. Your goal is to modify binaries, write patches, or generate scripts. You have full write access. Focus on correct modifications.",
+            AgentMode::Analyst => {
+                "You are Fission AI, a professional reverse engineering Analyst. Your goal is to explore, analyze, and explain code/binaries. You are read-only. You must not attempt to modify files. Provide deep insights."
+            }
+            AgentMode::Editor => {
+                "You are Fission AI, a professional reverse engineering Editor. Your goal is to modify binaries, write patches, or generate scripts. You have full write access. Focus on correct modifications."
+            }
         }
     }
 }
@@ -95,7 +129,12 @@ pub struct SessionContext {
 impl SessionContext {
     /// Create a new session with an optional system prompt and binary.
     pub fn new(system_prompt: Option<String>, binary_path: Option<PathBuf>) -> Self {
-        Self { messages: Vec::new(), system_prompt, binary_path, mode: AgentMode::default() }
+        Self {
+            messages: Vec::new(),
+            system_prompt,
+            binary_path,
+            mode: AgentMode::default(),
+        }
     }
 
     /// Returns the full message list including the system prompt prepended.
@@ -115,7 +154,7 @@ impl SessionContext {
     pub fn push_assistant(&mut self, content: impl Into<String>) {
         self.messages.push(Message::assistant(content));
     }
-    
+
     pub fn push_message(&mut self, message: Message) {
         self.messages.push(message);
     }

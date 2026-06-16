@@ -11,10 +11,10 @@
 
 use async_trait::async_trait;
 
+use super::openai::OpenAiProvider;
+use super::{AiProvider, ChunkStream, ProviderResult};
 use crate::auth::copilot_oauth::COPILOT_API_BASE;
 use crate::session::Message;
-use super::{AiProvider, ChunkStream, ProviderResult};
-use super::openai::OpenAiProvider;
 
 /// GitHub Copilot provider — uses a GitHub OAuth token.
 ///
@@ -48,7 +48,10 @@ impl CopilotProvider {
                 model,
                 vec![
                     // Required by the Copilot API
-                    ("Openai-Intent".to_string(), "conversation-edits".to_string()),
+                    (
+                        "Openai-Intent".to_string(),
+                        "conversation-edits".to_string(),
+                    ),
                     ("x-initiator".to_string(), "user".to_string()),
                 ],
             ),
@@ -74,7 +77,11 @@ impl AiProvider for CopilotProvider {
         self.inner.fetch_models().await
     }
 
-    async fn chat_stream(&self, messages: &[Message], tools: Option<&[crate::tools::ToolDefinition]>) -> ProviderResult<ChunkStream> {
+    async fn chat_stream(
+        &self,
+        messages: &[Message],
+        tools: Option<&[crate::tools::ToolDefinition]>,
+    ) -> ProviderResult<ChunkStream> {
         self.inner.chat_stream(messages, tools).await
     }
 }

@@ -12,11 +12,11 @@
 //!
 //! Fallback (headless): `run_device_code_login` is kept for CI/SSH contexts.
 
-use std::time::Duration;
 use base64::Engine as _;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
-use sha2::{Digest, Sha256};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
+use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 
@@ -80,7 +80,10 @@ fn generate_pkce() -> AuthResult<PkceCodes> {
     let hash = hasher.finalize();
     let challenge = URL_SAFE_NO_PAD.encode(hash.as_slice());
 
-    Ok(PkceCodes { verifier, challenge })
+    Ok(PkceCodes {
+        verifier,
+        challenge,
+    })
 }
 
 fn generate_state() -> AuthResult<String> {
@@ -106,26 +109,32 @@ struct TokenResponse {
     expires_in: Option<u64>,
 }
 
-#[derive(Serialize)]
-struct TokenExchangeForm<'a> {
-    grant_type: &'a str,
-    code: &'a str,
-    redirect_uri: &'a str,
-    client_id: &'a str,
-    code_verifier: &'a str,
-}
+
 
 // ── Browser helper ────────────────────────────────────────────────────────────
 fn open_browser(url: &str) {
     let result = {
         #[cfg(target_os = "macos")]
-        { std::process::Command::new("open").arg(url).spawn() }
+        {
+            std::process::Command::new("open").arg(url).spawn()
+        }
         #[cfg(target_os = "linux")]
-        { std::process::Command::new("xdg-open").arg(url).spawn() }
+        {
+            std::process::Command::new("xdg-open").arg(url).spawn()
+        }
         #[cfg(target_os = "windows")]
-        { std::process::Command::new("cmd").args(["/c", "start", url]).spawn() }
+        {
+            std::process::Command::new("cmd")
+                .args(["/c", "start", url])
+                .spawn()
+        }
         #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
-        { Err(std::io::Error::new(std::io::ErrorKind::Unsupported, "unsupported platform")) }
+        {
+            Err(std::io::Error::new(
+                std::io::ErrorKind::Unsupported,
+                "unsupported platform",
+            ))
+        }
     };
     if let Err(e) = result {
         eprintln!("{GRAY}(could not open browser automatically: {e}){RESET}");
@@ -205,16 +214,10 @@ async fn accept_one_request(listener: &TcpListener) -> AuthResult<CallbackResult
 
     // Extract the request line: "GET /auth/callback?code=...&state=... HTTP/1.1"
     let request_line = request.lines().next().unwrap_or("");
-    let path_part = request_line
-        .split_whitespace()
-        .nth(1)
-        .unwrap_or("");
+    let path_part = request_line.split_whitespace().nth(1).unwrap_or("");
 
     // Parse query params
-    let query = path_part
-        .splitn(2, '?')
-        .nth(1)
-        .unwrap_or("");
+    let query = path_part.splitn(2, '?').nth(1).unwrap_or("");
 
     let mut code = None;
     let mut state = None;
@@ -266,7 +269,7 @@ fn percent_decode(s: &str) -> String {
     let mut i = 0;
     while i < bytes.len() {
         if bytes[i] == b'%' && i + 2 < bytes.len() {
-            if let Ok(hex) = std::str::from_utf8(&bytes[i+1..i+3]) {
+            if let Ok(hex) = std::str::from_utf8(&bytes[i + 1..i + 3]) {
                 if let Ok(byte) = u8::from_str_radix(hex, 16) {
                     out.push(byte as char);
                     i += 3;
@@ -403,16 +406,20 @@ struct UserCodeResp {
     interval: u64,
 }
 
-fn default_interval() -> u64 { 5 }
+fn default_interval() -> u64 {
+    5
+}
 
 fn de_interval<'de, D: serde::Deserializer<'de>>(d: D) -> Result<u64, D::Error> {
     let v = serde_json::Value::deserialize(d)?;
     match v {
-        serde_json::Value::Number(n) =>
-            n.as_u64().ok_or_else(|| serde::de::Error::custom("invalid interval")),
-        serde_json::Value::String(s) =>
-            s.trim().parse::<u64>().map_err(serde::de::Error::custom),
-        _ => Err(serde::de::Error::custom("expected string or number for interval")),
+        serde_json::Value::Number(n) => n
+            .as_u64()
+            .ok_or_else(|| serde::de::Error::custom("invalid interval")),
+        serde_json::Value::String(s) => s.trim().parse::<u64>().map_err(serde::de::Error::custom),
+        _ => Err(serde::de::Error::custom(
+            "expected string or number for interval",
+        )),
     }
 }
 
@@ -436,14 +443,18 @@ pub async fn request_device_code(opts: &OAuthOptions) -> AuthResult<DeviceCode> 
 
     let resp = client
         .post(&url)
-        .json(&UserCodeReq { client_id: &opts.client_id })
+        .json(&UserCodeReq {
+            client_id: &opts.client_id,
+        })
         .send()
         .await
         .map_err(|e| AuthError::DeviceCodeRequest(e.to_string()))?;
 
     if !resp.status().is_success() {
         let status = resp.status();
-        return Err(AuthError::DeviceCodeRequest(format!("server returned {status}")));
+        return Err(AuthError::DeviceCodeRequest(format!(
+            "server returned {status}"
+        )));
     }
 
     let body: UserCodeResp = resp
@@ -499,7 +510,10 @@ pub async fn complete_device_code_login(opts: &OAuthOptions, code: &DeviceCode) 
 
         let status = resp.status();
         if status.is_success() {
-            break resp.json().await.map_err(|e| AuthError::TokenPoll(e.to_string()))?;
+            break resp
+                .json()
+                .await
+                .map_err(|e| AuthError::TokenPoll(e.to_string()))?;
         }
         if !matches!(status.as_u16(), 403 | 404) {
             return Err(AuthError::TokenPoll(format!("unexpected status {status}")));

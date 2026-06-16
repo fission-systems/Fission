@@ -1,12 +1,12 @@
 //! Ollama local provider — calls the Ollama `/api/chat` streaming endpoint.
 
 use async_trait::async_trait;
-use futures::{StreamExt, stream};
+use futures::StreamExt;
 use serde::{Deserialize, Serialize};
 
-use crate::session::Message;
 use super::{AiProvider, ChunkStream, ProviderError, ProviderResult, ResponseChunk};
 use crate::auth::ENV_FISSION_AI_OLLAMA_URL;
+use crate::session::Message;
 
 const DEFAULT_OLLAMA_URL: &str = "http://localhost:11434";
 
@@ -67,7 +67,11 @@ impl OllamaProvider {
             .user_agent(concat!("fission-ai/", env!("CARGO_PKG_VERSION")))
             .build()
             .expect("failed to build HTTP client");
-        Self { client, base_url, model }
+        Self {
+            client,
+            base_url,
+            model,
+        }
     }
 }
 
@@ -92,7 +96,9 @@ impl AiProvider for OllamaProvider {
         if !resp.status().is_success() {
             let status = resp.status();
             let body = resp.text().await.unwrap_or_default();
-            return Err(ProviderError::Other(format!("Ollama HTTP {status}: {body}")));
+            return Err(ProviderError::Other(format!(
+                "Ollama HTTP {status}: {body}"
+            )));
         }
 
         let tags_resp: OllamaTagsResponse = resp.json().await?;
@@ -101,7 +107,11 @@ impl AiProvider for OllamaProvider {
         Ok(names)
     }
 
-    async fn chat_stream(&self, messages: &[Message], _tools: Option<&[crate::tools::ToolDefinition]>) -> ProviderResult<ChunkStream> {
+    async fn chat_stream(
+        &self,
+        messages: &[Message],
+        _tools: Option<&[crate::tools::ToolDefinition]>,
+    ) -> ProviderResult<ChunkStream> {
         use crate::session::Role;
 
         let url = format!("{}/api/chat", self.base_url.trim_end_matches('/'));
@@ -121,34 +131,62 @@ impl AiProvider for OllamaProvider {
         let resp = self
             .client
             .post(&url)
-            .json(&OllamaChatReq { model: &self.model, messages: ollama_msgs, stream: true })
+            .json(&OllamaChatReq {
+                model: &self.model,
+                messages: ollama_msgs,
+                stream: true,
+            })
             .send()
             .await?;
 
         if !resp.status().is_success() {
             let status = resp.status();
             let body = resp.text().await.unwrap_or_default();
-            return Err(ProviderError::Other(format!("Ollama HTTP {status}: {body}")));
+            return Err(ProviderError::Other(format!(
+                "Ollama HTTP {status}: {body}"
+            )));
         }
 
-        let byte_stream = resp.bytes_stream();
-        let chunk_stream = byte_stream.flat_map(|item| {
-            let results: Vec<ProviderResult<ResponseChunk>> = match item {
-                Err(e) => vec![Err(ProviderError::Http(e))],
-                Ok(bytes) => {
-                    let text = String::from_utf8_lossy(&bytes);
-                    text.lines()
-                        .filter(|l| !l.trim().is_empty())
-                        .filter_map(|line| {
-                            serde_json::from_str::<OllamaChunk>(line)
-                                .ok()
-                                .map(|c| Ok(ResponseChunk { delta: c.message.content, tool_calls: None, done: c.done }))
-                        })
-                        .collect()
+        let mut byte_stream = resp.bytes_stream();
+        let chunk_stream = async_stream::stream! {
+            let mut buffer = Vec::new();
+
+            while let Some(item) = byte_stream.next().await {
+                match item {
+                    Err(e) => {
+                        yield Err(ProviderError::Http(e));
+                        return;
+                    }
+                    Ok(bytes) => {
+                        buffer.extend_from_slice(&bytes);
+
+                        while let Some(pos) = buffer.iter().position(|&b| b == b'\n') {
+                            let line_bytes = &buffer[..pos];
+                            let line = String::from_utf8_lossy(line_bytes).trim().to_string();
+                            buffer = buffer[pos + 1..].to_vec();
+
+                            if line.is_empty() {
+                                continue;
+                            }
+
+                            match serde_json::from_str::<OllamaChunk>(&line) {
+                                Ok(c) => {
+                                    yield Ok(ResponseChunk {
+                                        delta: c.message.content,
+                                        tool_calls: None,
+                                        done: c.done,
+                                    });
+                                }
+                                Err(e) => {
+                                    yield Err(ProviderError::Json(e));
+                                    return;
+                                }
+                            }
+                        }
+                    }
                 }
-            };
-            stream::iter(results)
-        });
+            }
+        };
 
         Ok(Box::pin(chunk_stream))
     }

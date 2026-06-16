@@ -3,9 +3,9 @@
 
 use async_trait::async_trait;
 
-use crate::session::Message;
-use super::{AiProvider, ChunkStream, ProviderResult};
 use super::openai::OpenAiProvider;
+use super::{AiProvider, ChunkStream, ProviderResult};
+use crate::session::Message;
 
 const CODEX_BASE_URL: &str = "https://api.openai.com/v1";
 
@@ -41,7 +41,11 @@ impl AiProvider for CodexProvider {
         self.inner.fetch_models().await
     }
 
-    async fn chat_stream(&self, messages: &[Message], tools: Option<&[crate::tools::ToolDefinition]>) -> ProviderResult<ChunkStream> {
+    async fn chat_stream(
+        &self,
+        messages: &[Message],
+        tools: Option<&[crate::tools::ToolDefinition]>,
+    ) -> ProviderResult<ChunkStream> {
         self.inner.chat_stream(messages, tools).await
     }
 }

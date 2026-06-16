@@ -52,7 +52,7 @@ pub fn normalize_tool_name(raw_name: &str) -> String {
 
     let prefix_len = MAX_TOOL_NAME_LENGTH.saturating_sub(suffix.len());
     let truncated: String = prefixed.chars().take(prefix_len).collect();
-    
+
     format!("{}{}", truncated, suffix)
 }
 
@@ -83,7 +83,7 @@ fn mask_address_property_schema(schema: &mut JsonValue) {
         .and_then(JsonValue::as_str)
         .map(str::to_string)
         .unwrap_or_default();
-    
+
     let guidance = "This parameter expects a 64-bit hex address string prefixed with '0x' (e.g., '0x14000000'). Do NOT use decimal.";
     if description.is_empty() {
         description = guidance.to_string();
@@ -131,9 +131,14 @@ mod tests {
         });
 
         inject_schema_guidance(&mut schema);
-        
+
         let addr_prop = &schema["properties"]["addr"];
         assert_eq!(addr_prop["type"], "string");
-        assert!(addr_prop["description"].as_str().unwrap().contains("Do NOT use decimal"));
+        assert!(
+            addr_prop["description"]
+                .as_str()
+                .unwrap()
+                .contains("Do NOT use decimal")
+        );
     }
 }

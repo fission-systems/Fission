@@ -1,15 +1,15 @@
+use super::ToolDefinition;
 use anyhow::{Context, Result};
 use serde_json::Value as JsonValue;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use super::ToolDefinition;
 
 /// Trait defining a tool that can be executed by the AI.
 #[async_trait::async_trait]
 pub trait AiTool: Send + Sync {
     /// Returns the schema definition of the tool.
     fn definition(&self) -> ToolDefinition;
-    
+
     /// Executes the tool with the given JSON arguments and binary context.
     async fn execute(&self, args: &JsonValue, context_binary: Option<&Path>) -> Result<String>;
 }
@@ -37,7 +37,9 @@ pub(crate) fn extract_function_name(code: &str, addr: u64) -> String {
             let before_paren = &trimmed[..pos];
             if let Some(name) = before_paren.split_whitespace().last() {
                 let clean_name = name.trim_start_matches('*').to_string();
-                if !clean_name.is_empty() && clean_name.chars().all(|c| c.is_alphanumeric() || c == '_') {
+                if !clean_name.is_empty()
+                    && clean_name.chars().all(|c| c.is_alphanumeric() || c == '_')
+                {
                     return clean_name;
                 }
             }
@@ -68,13 +70,16 @@ impl AiTool for DisasmTool {
                     }
                 },
                 "required": ["addr"]
-            })
+            }),
         )
     }
 
     async fn execute(&self, args: &JsonValue, context_binary: Option<&Path>) -> Result<String> {
         let binary = context_binary.context("No binary context available. Cannot run disasm.")?;
-        let addr = args.get("addr").and_then(|v| v.as_str()).context("Missing or invalid 'addr'")?;
+        let addr = args
+            .get("addr")
+            .and_then(|v| v.as_str())
+            .context("Missing or invalid 'addr'")?;
         let count = args.get("count").and_then(|v| v.as_u64()).unwrap_or(20);
 
         let output = tokio::task::spawn_blocking({
@@ -90,12 +95,16 @@ impl AiTool for DisasmTool {
                     .arg(count.to_string())
                     .output()
             }
-        }).await??;
+        })
+        .await??;
 
         if output.status.success() {
             Ok(String::from_utf8_lossy(&output.stdout).into_owned())
         } else {
-            Ok(format!("Error: {}", String::from_utf8_lossy(&output.stderr)))
+            Ok(format!(
+                "Error: {}",
+                String::from_utf8_lossy(&output.stderr)
+            ))
         }
     }
 }
@@ -118,13 +127,16 @@ impl AiTool for XrefsTool {
                     }
                 },
                 "required": ["addr"]
-            })
+            }),
         )
     }
 
     async fn execute(&self, args: &JsonValue, context_binary: Option<&Path>) -> Result<String> {
         let binary = context_binary.context("No binary context available. Cannot run xrefs.")?;
-        let addr = args.get("addr").and_then(|v| v.as_str()).context("Missing or invalid 'addr'")?;
+        let addr = args
+            .get("addr")
+            .and_then(|v| v.as_str())
+            .context("Missing or invalid 'addr'")?;
 
         let output = tokio::task::spawn_blocking({
             let binary = binary.to_path_buf();
@@ -137,12 +149,16 @@ impl AiTool for XrefsTool {
                     .arg(addr)
                     .output()
             }
-        }).await??;
+        })
+        .await??;
 
         if output.status.success() {
             Ok(String::from_utf8_lossy(&output.stdout).into_owned())
         } else {
-            Ok(format!("Error: {}", String::from_utf8_lossy(&output.stderr)))
+            Ok(format!(
+                "Error: {}",
+                String::from_utf8_lossy(&output.stderr)
+            ))
         }
     }
 }
@@ -174,15 +190,24 @@ impl AiTool for ApplyPatchTool {
                     }
                 },
                 "required": ["addr", "action", "value"]
-            })
+            }),
         )
     }
 
     async fn execute(&self, args: &JsonValue, context_binary: Option<&Path>) -> Result<String> {
         let binary = context_binary.context("No binary context available. Cannot apply patch.")?;
-        let addr = args.get("addr").and_then(|v| v.as_str()).context("Missing or invalid 'addr'")?;
-        let action = args.get("action").and_then(|v| v.as_str()).context("Missing or invalid 'action'")?;
-        let value = args.get("value").and_then(|v| v.as_str()).context("Missing or invalid 'value'")?;
+        let addr = args
+            .get("addr")
+            .and_then(|v| v.as_str())
+            .context("Missing or invalid 'addr'")?;
+        let action = args
+            .get("action")
+            .and_then(|v| v.as_str())
+            .context("Missing or invalid 'action'")?;
+        let value = args
+            .get("value")
+            .and_then(|v| v.as_str())
+            .context("Missing or invalid 'value'")?;
 
         let parsed_addr = parse_addr(addr)?;
 
@@ -191,7 +216,8 @@ impl AiTool for ApplyPatchTool {
         // Load existing or initialize new sidecar project
         let mut project = if sidecar_path.exists() {
             let content = std::fs::read_to_string(&sidecar_path)?;
-            serde_json::from_str::<serde_json::Value>(&content).unwrap_or_else(|_| serde_json::json!({}))
+            serde_json::from_str::<serde_json::Value>(&content)
+                .unwrap_or_else(|_| serde_json::json!({}))
         } else {
             serde_json::json!({})
         };
@@ -205,7 +231,10 @@ impl AiTool for ApplyPatchTool {
 
         // Apply action
         if action == "rename_function" {
-            if let Some(names) = project.get_mut("user_function_names").and_then(|n| n.as_object_mut()) {
+            if let Some(names) = project
+                .get_mut("user_function_names")
+                .and_then(|n| n.as_object_mut())
+            {
                 names.insert(parsed_addr.to_string(), serde_json::json!(value));
             }
         } else {
@@ -215,7 +244,10 @@ impl AiTool for ApplyPatchTool {
         // Fill basic metadata
         if let Some(obj) = project.as_object_mut() {
             if obj.get("binary_path").is_none() {
-                obj.insert("binary_path".to_string(), serde_json::json!(binary.display().to_string()));
+                obj.insert(
+                    "binary_path".to_string(),
+                    serde_json::json!(binary.display().to_string()),
+                );
             }
         }
 
@@ -248,14 +280,17 @@ impl AiTool for LoadBinaryTool {
                     }
                 },
                 "required": ["path"]
-            })
+            }),
         )
     }
 
     async fn execute(&self, args: &JsonValue, _context_binary: Option<&Path>) -> Result<String> {
-        let path_str = args.get("path").and_then(|v| v.as_str()).context("Missing or invalid 'path'")?;
+        let path_str = args
+            .get("path")
+            .and_then(|v| v.as_str())
+            .context("Missing or invalid 'path'")?;
         let path = PathBuf::from(path_str);
-        
+
         if !path.exists() {
             return Ok(format!("Error: File '{}' does not exist.", path_str));
         }
@@ -264,7 +299,10 @@ impl AiTool for LoadBinaryTool {
         }
 
         // We just return success here. The actual state modification happens in AiPipeline::send_internal
-        Ok(format!("[✓] Successfully loaded binary from '{}'. You can now use disasm, xrefs, and other tools on it.", path_str))
+        Ok(format!(
+            "[✓] Successfully loaded binary from '{}'. You can now use disasm, xrefs, and other tools on it.",
+            path_str
+        ))
     }
 }
 
@@ -286,13 +324,17 @@ impl AiTool for DecompileTool {
                     }
                 },
                 "required": ["addr"]
-            })
+            }),
         )
     }
 
     async fn execute(&self, args: &JsonValue, context_binary: Option<&Path>) -> Result<String> {
-        let binary = context_binary.context("No binary context available. Cannot run decompile.")?;
-        let addr = args.get("addr").and_then(|v| v.as_str()).context("Missing or invalid 'addr'")?;
+        let binary =
+            context_binary.context("No binary context available. Cannot run decompile.")?;
+        let addr = args
+            .get("addr")
+            .and_then(|v| v.as_str())
+            .context("Missing or invalid 'addr'")?;
 
         let output = tokio::task::spawn_blocking({
             let binary = binary.to_path_buf();
@@ -305,7 +347,8 @@ impl AiTool for DecompileTool {
                     .arg(addr)
                     .output()
             }
-        }).await??;
+        })
+        .await??;
 
         if output.status.success() {
             let decomp_code = String::from_utf8_lossy(&output.stdout).into_owned();
@@ -314,7 +357,8 @@ impl AiTool for DecompileTool {
                     let sidecar_path = binary.with_extension("fission.json");
                     let mut project = if sidecar_path.exists() {
                         if let Ok(content) = std::fs::read_to_string(&sidecar_path) {
-                            serde_json::from_str::<serde_json::Value>(&content).unwrap_or_else(|_| serde_json::json!({}))
+                            serde_json::from_str::<serde_json::Value>(&content)
+                                .unwrap_or_else(|_| serde_json::json!({}))
                         } else {
                             serde_json::json!({})
                         }
@@ -323,8 +367,14 @@ impl AiTool for DecompileTool {
                     };
 
                     let mut name = extract_function_name(&decomp_code, parsed_addr);
-                    if let Some(user_names) = project.get("user_function_names").and_then(|n| n.as_object()) {
-                        if let Some(n) = user_names.get(&parsed_addr.to_string()).and_then(|v| v.as_str()) {
+                    if let Some(user_names) = project
+                        .get("user_function_names")
+                        .and_then(|n| n.as_object())
+                    {
+                        if let Some(n) = user_names
+                            .get(&parsed_addr.to_string())
+                            .and_then(|v| v.as_str())
+                        {
                             name = n.to_string();
                         }
                     }
@@ -335,7 +385,10 @@ impl AiTool for DecompileTool {
                         }
                     }
 
-                    if let Some(cache) = project.get_mut("decompilation_cache").and_then(|c| c.as_object_mut()) {
+                    if let Some(cache) = project
+                        .get_mut("decompilation_cache")
+                        .and_then(|c| c.as_object_mut())
+                    {
                         let timestamp = std::time::SystemTime::now()
                             .duration_since(std::time::UNIX_EPOCH)
                             .map(|d| d.as_secs())
@@ -346,13 +399,16 @@ impl AiTool for DecompileTool {
                                 "name": name,
                                 "code": decomp_code,
                                 "timestamp": timestamp
-                            })
+                            }),
                         );
                     }
 
                     if let Some(obj) = project.as_object_mut() {
                         if obj.get("binary_path").is_none() {
-                            obj.insert("binary_path".to_string(), serde_json::json!(binary.display().to_string()));
+                            obj.insert(
+                                "binary_path".to_string(),
+                                serde_json::json!(binary.display().to_string()),
+                            );
                         }
                     }
 
@@ -363,7 +419,10 @@ impl AiTool for DecompileTool {
             }
             Ok(decomp_code)
         } else {
-            Ok(format!("Error: {}", String::from_utf8_lossy(&output.stderr)))
+            Ok(format!(
+                "Error: {}",
+                String::from_utf8_lossy(&output.stderr)
+            ))
         }
     }
 }
@@ -380,12 +439,13 @@ impl AiTool for ListFunctionsTool {
             serde_json::json!({
                 "type": "object",
                 "properties": {}
-            })
+            }),
         )
     }
 
     async fn execute(&self, _args: &JsonValue, context_binary: Option<&Path>) -> Result<String> {
-        let binary = context_binary.context("No binary context available. Cannot run list_functions.")?;
+        let binary =
+            context_binary.context("No binary context available. Cannot run list_functions.")?;
 
         let output = tokio::task::spawn_blocking({
             let binary = binary.to_path_buf();
@@ -395,12 +455,16 @@ impl AiTool for ListFunctionsTool {
                     .arg(binary)
                     .output()
             }
-        }).await??;
+        })
+        .await??;
 
         if output.status.success() {
             Ok(String::from_utf8_lossy(&output.stdout).into_owned())
         } else {
-            Ok(format!("Error: {}", String::from_utf8_lossy(&output.stderr)))
+            Ok(format!(
+                "Error: {}",
+                String::from_utf8_lossy(&output.stderr)
+            ))
         }
     }
 }
@@ -422,7 +486,7 @@ impl AiTool for StringsTool {
                         "description": "Minimum string length (default 6)."
                     }
                 }
-            })
+            }),
         )
     }
 
@@ -440,12 +504,16 @@ impl AiTool for StringsTool {
                     .arg(min_len.to_string())
                     .output()
             }
-        }).await??;
+        })
+        .await??;
 
         if output.status.success() {
             Ok(String::from_utf8_lossy(&output.stdout).into_owned())
         } else {
-            Ok(format!("Error: {}", String::from_utf8_lossy(&output.stderr)))
+            Ok(format!(
+                "Error: {}",
+                String::from_utf8_lossy(&output.stderr)
+            ))
         }
     }
 }
@@ -462,12 +530,13 @@ impl AiTool for BinaryInfoTool {
             serde_json::json!({
                 "type": "object",
                 "properties": {}
-            })
+            }),
         )
     }
 
     async fn execute(&self, _args: &JsonValue, context_binary: Option<&Path>) -> Result<String> {
-        let binary = context_binary.context("No binary context available. Cannot run binary_info.")?;
+        let binary =
+            context_binary.context("No binary context available. Cannot run binary_info.")?;
 
         let output = tokio::task::spawn_blocking({
             let binary = binary.to_path_buf();
@@ -477,12 +546,16 @@ impl AiTool for BinaryInfoTool {
                     .arg(binary)
                     .output()
             }
-        }).await??;
+        })
+        .await??;
 
         if output.status.success() {
             Ok(String::from_utf8_lossy(&output.stdout).into_owned())
         } else {
-            Ok(format!("Error: {}", String::from_utf8_lossy(&output.stderr)))
+            Ok(format!(
+                "Error: {}",
+                String::from_utf8_lossy(&output.stderr)
+            ))
         }
     }
 }
@@ -499,12 +572,13 @@ impl AiTool for CallgraphTool {
             serde_json::json!({
                 "type": "object",
                 "properties": {}
-            })
+            }),
         )
     }
 
     async fn execute(&self, _args: &JsonValue, context_binary: Option<&Path>) -> Result<String> {
-        let binary = context_binary.context("No binary context available. Cannot run callgraph.")?;
+        let binary =
+            context_binary.context("No binary context available. Cannot run callgraph.")?;
 
         let output = tokio::task::spawn_blocking({
             let binary = binary.to_path_buf();
@@ -514,12 +588,16 @@ impl AiTool for CallgraphTool {
                     .arg(binary)
                     .output()
             }
-        }).await??;
+        })
+        .await??;
 
         if output.status.success() {
             Ok(String::from_utf8_lossy(&output.stdout).into_owned())
         } else {
-            Ok(format!("Error: {}", String::from_utf8_lossy(&output.stderr)))
+            Ok(format!(
+                "Error: {}",
+                String::from_utf8_lossy(&output.stderr)
+            ))
         }
     }
 }
@@ -542,13 +620,16 @@ impl AiTool for ScriptTool {
                     }
                 },
                 "required": ["script_content"]
-            })
+            }),
         )
     }
 
     async fn execute(&self, args: &JsonValue, context_binary: Option<&Path>) -> Result<String> {
         let binary = context_binary.context("No binary context available. Cannot run script.")?;
-        let script_content = args.get("script_content").and_then(|v| v.as_str()).context("Missing or invalid 'script_content'")?;
+        let script_content = args
+            .get("script_content")
+            .and_then(|v| v.as_str())
+            .context("Missing or invalid 'script_content'")?;
 
         let temp_dir = std::env::temp_dir();
         let script_path = temp_dir.join(format!("fission_ai_script_{}.rhai", std::process::id()));
@@ -566,14 +647,18 @@ impl AiTool for ScriptTool {
                     .arg(script_path_clone)
                     .output()
             }
-        }).await??;
+        })
+        .await??;
 
         let _ = tokio::fs::remove_file(&script_path).await; // Clean up temp file
 
         if output.status.success() {
             Ok(String::from_utf8_lossy(&output.stdout).into_owned())
         } else {
-            Ok(format!("Error: {}", String::from_utf8_lossy(&output.stderr)))
+            Ok(format!(
+                "Error: {}",
+                String::from_utf8_lossy(&output.stderr)
+            ))
         }
     }
 }
@@ -596,13 +681,17 @@ impl AiTool for RawPcodeTool {
                     }
                 },
                 "required": ["addr"]
-            })
+            }),
         )
     }
 
     async fn execute(&self, args: &JsonValue, context_binary: Option<&Path>) -> Result<String> {
-        let binary = context_binary.context("No binary context available. Cannot run raw_pcode.")?;
-        let addr = args.get("addr").and_then(|v| v.as_str()).context("Missing or invalid 'addr'")?;
+        let binary =
+            context_binary.context("No binary context available. Cannot run raw_pcode.")?;
+        let addr = args
+            .get("addr")
+            .and_then(|v| v.as_str())
+            .context("Missing or invalid 'addr'")?;
 
         let output = tokio::task::spawn_blocking({
             let binary = binary.to_path_buf();
@@ -615,12 +704,16 @@ impl AiTool for RawPcodeTool {
                     .arg(addr)
                     .output()
             }
-        }).await??;
+        })
+        .await??;
 
         if output.status.success() {
             Ok(String::from_utf8_lossy(&output.stdout).into_owned())
         } else {
-            Ok(format!("Error: {}", String::from_utf8_lossy(&output.stderr)))
+            Ok(format!(
+                "Error: {}",
+                String::from_utf8_lossy(&output.stderr)
+            ))
         }
     }
 }
@@ -643,13 +736,17 @@ impl AiTool for PcodeTopologyTool {
                     }
                 },
                 "required": ["addr"]
-            })
+            }),
         )
     }
 
     async fn execute(&self, args: &JsonValue, context_binary: Option<&Path>) -> Result<String> {
-        let binary = context_binary.context("No binary context available. Cannot run pcode_topology.")?;
-        let addr = args.get("addr").and_then(|v| v.as_str()).context("Missing or invalid 'addr'")?;
+        let binary =
+            context_binary.context("No binary context available. Cannot run pcode_topology.")?;
+        let addr = args
+            .get("addr")
+            .and_then(|v| v.as_str())
+            .context("Missing or invalid 'addr'")?;
 
         let output = tokio::task::spawn_blocking({
             let binary = binary.to_path_buf();
@@ -662,12 +759,16 @@ impl AiTool for PcodeTopologyTool {
                     .arg(addr)
                     .output()
             }
-        }).await??;
+        })
+        .await??;
 
         if output.status.success() {
             Ok(String::from_utf8_lossy(&output.stdout).into_owned())
         } else {
-            Ok(format!("Error: {}", String::from_utf8_lossy(&output.stderr)))
+            Ok(format!(
+                "Error: {}",
+                String::from_utf8_lossy(&output.stderr)
+            ))
         }
     }
 }
@@ -694,20 +795,28 @@ impl AiTool for AnnotateFunctionTool {
                     }
                 },
                 "required": ["addr", "notes"]
-            })
+            }),
         )
     }
 
     async fn execute(&self, args: &JsonValue, context_binary: Option<&Path>) -> Result<String> {
-        let binary = context_binary.context("No binary context available. Cannot run annotate_function.")?;
-        let addr = args.get("addr").and_then(|v| v.as_str()).context("Missing or invalid 'addr'")?;
-        let notes = args.get("notes").and_then(|v| v.as_str()).context("Missing or invalid 'notes'")?;
+        let binary =
+            context_binary.context("No binary context available. Cannot run annotate_function.")?;
+        let addr = args
+            .get("addr")
+            .and_then(|v| v.as_str())
+            .context("Missing or invalid 'addr'")?;
+        let notes = args
+            .get("notes")
+            .and_then(|v| v.as_str())
+            .context("Missing or invalid 'notes'")?;
 
         let parsed_addr = parse_addr(addr)?;
         let sidecar_path = binary.with_extension("fission.json");
         let mut project = if sidecar_path.exists() {
             let content = std::fs::read_to_string(&sidecar_path)?;
-            serde_json::from_str::<serde_json::Value>(&content).unwrap_or_else(|_| serde_json::json!({}))
+            serde_json::from_str::<serde_json::Value>(&content)
+                .unwrap_or_else(|_| serde_json::json!({}))
         } else {
             serde_json::json!({})
         };
@@ -718,13 +827,19 @@ impl AiTool for AnnotateFunctionTool {
             }
         }
 
-        if let Some(annotations) = project.get_mut("annotations").and_then(|a| a.as_object_mut()) {
+        if let Some(annotations) = project
+            .get_mut("annotations")
+            .and_then(|a| a.as_object_mut())
+        {
             annotations.insert(parsed_addr.to_string(), serde_json::json!(notes));
         }
 
         if let Some(obj) = project.as_object_mut() {
             if obj.get("binary_path").is_none() {
-                obj.insert("binary_path".to_string(), serde_json::json!(binary.display().to_string()));
+                obj.insert(
+                    "binary_path".to_string(),
+                    serde_json::json!(binary.display().to_string()),
+                );
             }
         }
 
@@ -756,13 +871,17 @@ impl AiTool for SearchMemoryTool {
                     }
                 },
                 "required": ["query"]
-            })
+            }),
         )
     }
 
     async fn execute(&self, args: &JsonValue, context_binary: Option<&Path>) -> Result<String> {
-        let binary = context_binary.context("No binary context available. Cannot run search_memory.")?;
-        let query = args.get("query").and_then(|v| v.as_str()).context("Missing or invalid 'query'")?;
+        let binary =
+            context_binary.context("No binary context available. Cannot run search_memory.")?;
+        let query = args
+            .get("query")
+            .and_then(|v| v.as_str())
+            .context("Missing or invalid 'query'")?;
         let query_lower = query.to_lowercase();
 
         let sidecar_path = binary.with_extension("fission.json");
@@ -771,9 +890,12 @@ impl AiTool for SearchMemoryTool {
         }
 
         let content = std::fs::read_to_string(&sidecar_path)?;
-        let project: serde_json::Value = serde_json::from_str(&content).unwrap_or_else(|_| serde_json::json!({}));
+        let project: serde_json::Value =
+            serde_json::from_str(&content).unwrap_or_else(|_| serde_json::json!({}));
 
-        let decomp_cache = project.get("decompilation_cache").and_then(|c| c.as_object());
+        let decomp_cache = project
+            .get("decompilation_cache")
+            .and_then(|c| c.as_object());
         let annotations = project.get("annotations").and_then(|a| a.as_object());
 
         let mut matches = std::collections::HashSet::new();
@@ -782,7 +904,7 @@ impl AiTool for SearchMemoryTool {
             for (addr_str, val) in cache {
                 let name = val.get("name").and_then(|n| n.as_str()).unwrap_or("");
                 let code = val.get("code").and_then(|c| c.as_str()).unwrap_or("");
-                
+
                 let parsed_addr = addr_str.parse::<u64>().unwrap_or(0);
                 let hex_addr = format!("{:#x}", parsed_addr);
 
@@ -812,15 +934,22 @@ impl AiTool for SearchMemoryTool {
         }
 
         if matches.is_empty() {
-            return Ok(format!("No matches found in the memory index for query '{}'.", query));
+            return Ok(format!(
+                "No matches found in the memory index for query '{}'.",
+                query
+            ));
         }
 
-        let mut output = format!("### Search Results for '{}' (Found {} matches)\n\n", query, matches.len());
-        
+        let mut output = format!(
+            "### Search Results for '{}' (Found {} matches)\n\n",
+            query,
+            matches.len()
+        );
+
         for addr_str in matches {
             let parsed_addr = addr_str.parse::<u64>().unwrap_or(0);
             let hex_addr = format!("{:#x}", parsed_addr);
-            
+
             let name = decomp_cache
                 .and_then(|c| c.get(&addr_str))
                 .and_then(|v| v.get("name"))
@@ -844,7 +973,7 @@ impl AiTool for SearchMemoryTool {
                 let mut snippet = String::new();
                 let lines: Vec<&str> = code_text.lines().collect();
                 let mut found_line = None;
-                
+
                 for (i, line) in lines.iter().enumerate() {
                     if line.to_lowercase().contains(&query_lower) {
                         found_line = Some(i);

@@ -160,7 +160,10 @@ impl ContextManager {
 
     /// Return the snapshot system-prompt prefix (empty string if no snapshot yet).
     pub fn format_binary_snapshot(&self) -> String {
-        self.snapshot.as_ref().map(|s| s.format_prompt()).unwrap_or_default()
+        self.snapshot
+            .as_ref()
+            .map(|s| s.format_prompt())
+            .unwrap_or_default()
     }
 
     /// Formats the active focus state into a structured Markdown prompt to keep the LLM grounded.
@@ -177,7 +180,10 @@ impl ContextManager {
             has_focus = true;
         }
         if let Some((start, end)) = self.focus.last_disasm_range {
-            prompt.push_str(&format!("- **Last Disassembled Address Range**: {:#x} - {:#x}\n", start, end));
+            prompt.push_str(&format!(
+                "- **Last Disassembled Address Range**: {:#x} - {:#x}\n",
+                start, end
+            ));
             has_focus = true;
         }
         if !self.focus.verified_types.is_empty() {
@@ -217,7 +223,8 @@ impl ContextManager {
     /// Checks the total character length of the message list, squashing older messages
     /// into a single high-level summary if they exceed the maximum character budget.
     pub fn compact_history(&self, messages: &mut Vec<crate::session::Message>) -> bool {
-        let total_len: usize = messages.iter()
+        let total_len: usize = messages
+            .iter()
             .map(|m| m.content.as_ref().map(|c| c.len()).unwrap_or(0))
             .sum();
 

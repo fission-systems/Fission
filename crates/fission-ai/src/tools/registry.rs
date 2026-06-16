@@ -1,6 +1,6 @@
-use std::collections::HashMap;
 use super::ToolDefinition;
 use super::execution::AiTool;
+use std::collections::HashMap;
 use std::sync::Arc;
 
 #[derive(Default)]
@@ -23,19 +23,19 @@ impl ToolRegistry {
     pub fn get_model_visible_tools(&self) -> Vec<ToolDefinition> {
         self.tools.values().map(|t| t.definition()).collect()
     }
-    
+
     pub fn get_tool(&self, name: &str) -> Option<Arc<dyn AiTool>> {
         if let Some(tool) = self.tools.get(name) {
             return Some(tool.clone());
         }
-        
+
         // Handle namespaced tool names (e.g. from GitHub Copilot like `fission__disasm`)
         if let Some((_, suffix)) = name.split_once("__") {
             if let Some(tool) = self.tools.get(suffix) {
                 return Some(tool.clone());
             }
         }
-        
+
         None
     }
 }

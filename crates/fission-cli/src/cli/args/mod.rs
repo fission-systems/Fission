@@ -7,7 +7,7 @@ mod oneshot;
 
 pub use decomp::DecompArgs;
 pub use inventory::{
-    InventoryArgs, InventoryCommand, InventoryFunctionFactsArgs, InventoryPreviewCandidatesArgs,
+    InventoryArgs, InventoryCommand,
 };
 pub use legacy::{LegacyCliArgs, LegacyInvocationKind, ParsedOneShotArgs, normalize_legacy};
 pub use oneshot::OneShotArgs;
@@ -38,15 +38,15 @@ pub fn parse_bool_str(s: &str) -> Result<bool, String> {
     }
 }
 
-
-
-
 /// Parsed top-level CLI invocation (legacy one-shot pipeline vs Rhai script runner).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ParsedInvocation {
     OneShot(ParsedOneShotArgs),
     Script(ScriptInvocation),
-    ResourcesStatus { json: bool, verbose: bool },
+    ResourcesStatus {
+        json: bool,
+        verbose: bool,
+    },
     Debug(DebugCommand),
     /// AI chat / authentication subcommand.
     Ai(AiInvocation),
@@ -57,6 +57,8 @@ pub enum ParsedInvocation {
 pub enum AiInvocation {
     /// Launch interactive TUI chat session.
     Chat(crate::cli::args::AiChatArgs),
+    /// Analyze decompiled pseudocode using an AI provider.
+    Analyze(AiAnalyzeArgs),
     /// Run Codex Browser OAuth login.
     Login,
     /// Run GitHub Copilot Device Code OAuth login.
@@ -167,6 +169,8 @@ pub struct AiArgs {
 enum AiCommand {
     /// Launch interactive TUI chat session
     Chat(AiChatArgs),
+    /// Analyze decompiled pseudocode using an AI provider
+    Analyze(AiAnalyzeArgs),
     /// Login with Codex/ChatGPT Browser OAuth (ChatGPT Plus required)
     Login,
     /// Login with GitHub Copilot Device Code OAuth (Copilot Individual $10/mo)
@@ -188,6 +192,12 @@ pub struct AiChatArgs {
     /// Model name override (e.g. gpt-4o, llama3)
     #[arg(long)]
     pub model: Option<String>,
+}
+
+#[derive(Args, Clone, Debug, PartialEq, Eq)]
+pub struct AiAnalyzeArgs {
+    /// Custom code string to analyze (optional, positional)
+    pub code: Option<String>,
 }
 
 #[derive(Args, Debug)]
@@ -384,7 +394,6 @@ struct PcodeTopologyArgs {
     #[command(flatten)]
     common: CommonBinaryOutputArgs,
 }
-
 
 #[derive(Args, Debug)]
 #[command(
@@ -758,13 +767,12 @@ fn normalize_canonical(cli: CliArgs) -> ParsedInvocation {
                             provider: None,
                             model: None,
                         }),
-                        Some(AiCommand::Chat(args)) => {
-                            AiInvocation::Chat(args)
-                        }
-                        Some(AiCommand::Login)        => AiInvocation::Login,
+                        Some(AiCommand::Chat(args)) => AiInvocation::Chat(args),
+                        Some(AiCommand::Analyze(args)) => AiInvocation::Analyze(args),
+                        Some(AiCommand::Login) => AiInvocation::Login,
                         Some(AiCommand::CopilotLogin) => AiInvocation::CopilotLogin,
-                        Some(AiCommand::Status)       => AiInvocation::Status,
-                        Some(AiCommand::Logout)       => AiInvocation::Logout,
+                        Some(AiCommand::Status) => AiInvocation::Status,
+                        Some(AiCommand::Logout) => AiInvocation::Logout,
                     };
                     return ParsedInvocation::Ai(inv);
                 }
@@ -779,20 +787,15 @@ fn normalize_canonical(cli: CliArgs) -> ParsedInvocation {
     }
 }
 
-
-
 // Re-export debug CLI types so existing consumers don't change paths
 mod debug;
+#[allow(unused_imports)]
 pub use debug::{
-    DebugArgs, DebugCommand,
-    DebugInitArgs, DebugAttachArgs, DebugSwitchThreadArgs,
-    DebugBpArgs, DebugHwBpArgs, DebugBpListArgs, DebugMemBpArgs,
-    DebugDllBpArgs, DebugExBpArgs, DebugSetRegArgs, DebugFlagArgs,
-    DebugAllocArgs, DebugFreeArgs, DebugProtectArgs,
-    DebugStackPeekArgs, DebugStackPopArgs, DebugStackPushArgs,
-    DebugFindArgs, DebugModuleArgs,
-    DebugReadArgs, DebugWriteArgs,
-    HwBpKindArg, MemoryBpKindArg,
+    DebugAllocArgs, DebugArgs, DebugAttachArgs, DebugBpArgs, DebugBpListArgs, DebugCommand,
+    DebugDllBpArgs, DebugExBpArgs, DebugFindArgs, DebugFlagArgs, DebugFreeArgs, DebugHwBpArgs,
+    DebugInitArgs, DebugMemBpArgs, DebugModuleArgs, DebugProtectArgs, DebugReadArgs,
+    DebugSetRegArgs, DebugStackPeekArgs, DebugStackPopArgs, DebugStackPushArgs,
+    DebugSwitchThreadArgs, DebugWriteArgs, HwBpKindArg, MemoryBpKindArg,
 };
 
 #[cfg(test)]
@@ -1130,7 +1133,10 @@ mod tests {
             "--json",
         ]);
         assert!(parsed.args.decomp_all);
-        assert_eq!(parsed.args.addresses_file, Some(PathBuf::from("/tmp/addrs.txt")));
+        assert_eq!(
+            parsed.args.addresses_file,
+            Some(PathBuf::from("/tmp/addrs.txt"))
+        );
         assert!(parsed.args.json);
     }
 
@@ -1261,9 +1267,9 @@ mod tests {
         assert_eq!(err.kind(), ErrorKind::UnknownArgument);
     }
 
-// ============================================================================
-// Tests
-// ============================================================================
+    // ============================================================================
+    // Tests
+    // ============================================================================
 
     #[test]
     fn canonical_non_inventory_subcommands_reject_inventory_only_options() {

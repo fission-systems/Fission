@@ -1,11 +1,11 @@
 //! AI pipeline: ties together auth resolution, provider selection, and session management.
 
 use crate::auth::{OAuthOptions, ResolvedAuth, resolve_auth};
+use crate::provider::{ChunkStream, ProviderResult};
 use crate::provider::{
     ProviderConfig, ProviderKind, SharedAiProvider, build_provider, provider_kind_from_env,
 };
 use crate::session::SessionContext;
-use crate::provider::{ChunkStream, ProviderResult};
 use crate::tools::registry::ToolRegistry;
 
 use std::sync::Arc;
@@ -34,16 +34,15 @@ impl AiPipeline {
     /// Runs blocking CLI calls inside `spawn_blocking` with a 3-second timeout.
     /// Never panics: on failure the snapshot stays `None` and the session starts normally.
     pub async fn init_binary_context(&self, binary_path: std::path::PathBuf) {
-        let exe = std::env::current_exe().unwrap_or_else(|_| std::path::PathBuf::from("fission_cli"));
+        let exe =
+            std::env::current_exe().unwrap_or_else(|_| std::path::PathBuf::from("fission_cli"));
         let path_str = binary_path.display().to_string();
 
         let exe_clone = exe.clone();
         let path_clone = path_str.clone();
         let snapshot = tokio::time::timeout(
             std::time::Duration::from_secs(3),
-            tokio::task::spawn_blocking(move || {
-                collect_binary_snapshot(&exe_clone, &path_clone)
-            }),
+            tokio::task::spawn_blocking(move || collect_binary_snapshot(&exe_clone, &path_clone)),
         )
         .await
         .ok()
@@ -93,9 +92,9 @@ impl AiPipeline {
         tool_registry.register(crate::tools::execution::PcodeTopologyTool);
         tool_registry.register(crate::tools::execution::AnnotateFunctionTool);
         tool_registry.register(crate::tools::execution::SearchMemoryTool);
-        
+
         let context_manager = crate::session::ContextManager::new(32000, 6000);
-        
+
         Ok(Self {
             provider,
             session: Arc::new(Mutex::new(SessionContext::new(system_prompt, binary_path))),
@@ -112,46 +111,47 @@ impl AiPipeline {
         }
         self.send_internal().await
     }
-    
+
     pub async fn send_internal(&self) -> ProviderResult<ChunkStream> {
         let msgs = {
             let mut session = self.session.lock().unwrap();
             let cm = self.context_manager.lock().unwrap();
-            
+
             // 1. Apply history compaction if message budget exceeded
             cm.compact_history(&mut session.messages);
-            
+
             // 2. Build system prompt: AgentMode prefix + binary snapshot + focus state
             let mode = session.mode;
-            let mut base_prompt = session.system_prompt.clone().unwrap_or_else(|| {
-                mode.system_prompt_prefix().to_string()
-            });
+            let mut base_prompt = session
+                .system_prompt
+                .clone()
+                .unwrap_or_else(|| mode.system_prompt_prefix().to_string());
             base_prompt.push_str(&cm.format_binary_snapshot());
             base_prompt.push_str(&cm.format_focus_prompt());
-            
+
             let mut msgs = Vec::new();
             msgs.push(crate::session::Message::system(base_prompt));
             msgs.extend(session.messages.iter().cloned());
             msgs
         };
-        
+
         let session_clone = self.session.clone();
         let tool_registry_clone = self.tool_registry.clone();
         let context_manager_clone = self.context_manager.clone();
         let provider = self.provider.clone();
-        
+
         // We will maintain local `current_msgs` for recursive tool calling loop
         let current_msgs = msgs;
-        
+
         // Return a wrapped stream that intercepts tool calls.
         let stream = async_stream::stream! {
             use futures::StreamExt;
             let mut current_msgs = current_msgs;
-            
+
             loop {
                 let tools = tool_registry_clone.get_model_visible_tools();
                 let tools_ref = if tools.is_empty() { None } else { Some(tools.as_slice()) };
-                
+
                 let mut inner_stream = match provider.chat_stream(&current_msgs, tools_ref).await {
                     Ok(s) => s,
                     Err(e) => { yield Err(e); return; }
@@ -221,12 +221,12 @@ impl AiPipeline {
 
                 // Execute tools
                 let mut session_tool_calls = Vec::new();
-                
+
                 for tc in &pending_tool_calls {
                     let id = tc.id.clone().unwrap_or_default();
                     let func_name = tc.function.as_ref().and_then(|f| f.name.clone()).unwrap_or_default();
                     let func_args = tc.function.as_ref().and_then(|f| f.arguments.clone()).unwrap_or_default();
-                    
+
                     session_tool_calls.push(crate::session::ToolCall {
                         id: id.clone(),
                         kind: tc.kind.clone().unwrap_or_else(|| "function".to_string()),
@@ -236,7 +236,7 @@ impl AiPipeline {
                         },
                     });
                 }
-                
+
                 {
                     let mut session = session_clone.lock().unwrap();
                     session.push_message(crate::session::Message::assistant_tool_calls(session_tool_calls));
@@ -246,13 +246,13 @@ impl AiPipeline {
                     let id = tc.id.unwrap_or_default();
                     let func_name = tc.function.as_ref().and_then(|f| f.name.clone()).unwrap_or_default();
                     let func_args = tc.function.as_ref().and_then(|f| f.arguments.clone()).unwrap_or_default();
-                    
+
                     yield Ok(crate::provider::ResponseChunk {
                         delta: format!("\n\n> [Tool] Calling `{}`(args: {})\n", func_name, func_args),
                         tool_calls: None,
                         done: false,
                     });
-                    
+
                     let tool_result = if let Some(tool) = tool_registry_clone.get_tool(&func_name) {
                         if let Ok(args_json) = serde_json::from_str(&func_args) {
                             let binary_path = {
@@ -269,12 +269,12 @@ impl AiPipeline {
                     } else {
                         format!("Error: Tool {} not found", func_name)
                     };
-                    
+
                     let processed_result = {
                         let cm = context_manager_clone.lock().unwrap();
                         cm.process_tool_output(&func_name, tool_result)
                     };
-                    
+
                     {
                         let mut cm = context_manager_clone.lock().unwrap();
                         if func_name == "load_binary" || func_name == "fission__load_binary" {
@@ -303,7 +303,7 @@ impl AiPipeline {
                                                 .ok()
                                                 .and_then(|r| r.ok())
                                                 .flatten();
-                                                
+
                                                 let mut cm = cm_bg.lock().unwrap();
                                                 cm.snapshot = snapshot;
                                             });
@@ -340,32 +340,32 @@ impl AiPipeline {
                             cm.focus.set_disasm_snippet(processed_result.clone());
                         }
                     }
-                    
+
                     yield Ok(crate::provider::ResponseChunk {
                         delta: format!("> [Tool] Result: {} bytes\n\n", processed_result.len()),
                         tool_calls: None,
                         done: false,
                     });
-                    
+
                     {
                         let mut session = session_clone.lock().unwrap();
                         session.push_message(crate::session::Message::tool_response(id, func_name, processed_result));
                     }
                 }
-                
+
                 // Now restart the stream by updating `current_msgs`
                 current_msgs = {
                     let mut session = session_clone.lock().unwrap();
                     let cm = context_manager_clone.lock().unwrap();
-                    
+
                     cm.compact_history(&mut session.messages);
-                    
+
                     let mut base_prompt = session.system_prompt.clone().unwrap_or_else(|| {
                         "You are Fission AI, a professional reverse engineering assistant.".to_string()
                     });
                     base_prompt.push_str(&cm.format_binary_snapshot());
                     base_prompt.push_str(&cm.format_focus_prompt());
-                    
+
                     let mut msgs = Vec::new();
                     msgs.push(crate::session::Message::system(base_prompt));
                     msgs.extend(session.messages.iter().cloned());
@@ -373,7 +373,7 @@ impl AiPipeline {
                 };
             }
         };
-        
+
         Ok(Box::pin(stream))
     }
 
@@ -392,7 +392,10 @@ impl AiPipeline {
     }
 
     /// Dynamically swap the active provider.
-    pub async fn switch_provider(&mut self, kind: ProviderKind) -> Result<(), crate::auth::AuthError> {
+    pub async fn switch_provider(
+        &mut self,
+        kind: ProviderKind,
+    ) -> Result<(), crate::auth::AuthError> {
         let opts = crate::auth::OAuthOptions::default();
         let auth = crate::auth::resolve_auth(&opts).await?;
         let cfg = ProviderConfig {
@@ -470,14 +473,21 @@ impl AiPipeline {
         }
 
         let sidecar_content = std::fs::read_to_string(&sidecar_path)?;
-        let project: serde_json::Value = serde_json::from_str(&sidecar_content).unwrap_or_else(|_| serde_json::json!({}));
+        let project: serde_json::Value =
+            serde_json::from_str(&sidecar_content).unwrap_or_else(|_| serde_json::json!({}));
 
         let decomp_cache = project.get("decompilation_cache");
         let annotations = project.get("annotations");
         let user_names = project.get("user_function_names");
 
-        let has_decomp = decomp_cache.and_then(|c| c.as_object()).map(|o| !o.is_empty()).unwrap_or(false);
-        let has_ann = annotations.and_then(|a| a.as_object()).map(|o| !o.is_empty()).unwrap_or(false);
+        let has_decomp = decomp_cache
+            .and_then(|c| c.as_object())
+            .map(|o| !o.is_empty())
+            .unwrap_or(false);
+        let has_ann = annotations
+            .and_then(|a| a.as_object())
+            .map(|o| !o.is_empty())
+            .unwrap_or(false);
 
         if !has_decomp && !has_ann {
             return Ok(None); // Nothing to consolidate
@@ -495,9 +505,12 @@ impl AiPipeline {
             cache_prompt.push_str("### Cached Decompiled Functions\n\n");
             for (addr_str, val) in cache_obj {
                 let parsed_addr = addr_str.parse::<u64>().unwrap_or(0);
-                let name = val.get("name").and_then(|n| n.as_str()).unwrap_or("unknown");
+                let name = val
+                    .get("name")
+                    .and_then(|n| n.as_str())
+                    .unwrap_or("unknown");
                 let code = val.get("code").and_then(|c| c.as_str()).unwrap_or("");
-                
+
                 cache_prompt.push_str(&format!("#### Function: {} ({:#x})\n", name, parsed_addr));
                 cache_prompt.push_str("```c\n");
                 cache_prompt.push_str(code);
@@ -511,7 +524,10 @@ impl AiPipeline {
             for (addr_str, val) in ann_obj {
                 let parsed_addr = addr_str.parse::<u64>().unwrap_or(0);
                 let notes = val.as_str().unwrap_or("");
-                ann_prompt.push_str(&format!("#### Address: {:#x}\n**Notes:**\n{}\n\n", parsed_addr, notes));
+                ann_prompt.push_str(&format!(
+                    "#### Address: {:#x}\n**Notes:**\n{}\n\n",
+                    parsed_addr, notes
+                ));
             }
         }
 
@@ -536,7 +552,7 @@ impl AiPipeline {
                              You MUST preserve previous user modifications, manual analysis notes, and structural updates in the existing report, \
                              while incrementally integrating the newly decompiled functions, renames, and annotations. \
                              Output ONLY the updated, valid markdown document without enclosing it in extra conversational text or markdown code block quotes (like ```markdown). Start directly with the title.";
-        
+
         let mut user_content = String::new();
         if let Some(report) = &existing_report {
             user_content.push_str("## Existing Analysis Report\n\n");
@@ -545,7 +561,7 @@ impl AiPipeline {
         } else {
             user_content.push_str("## Existing Analysis Report\n*(No existing report found. Create a new one.)*\n\n---\n\n");
         }
-        
+
         user_content.push_str("## Session Cache Data to Integrate\n\n");
         user_content.push_str(&names_prompt);
         user_content.push_str(&ann_prompt);
@@ -553,7 +569,7 @@ impl AiPipeline {
 
         let messages = vec![
             crate::session::Message::system(system_prompt),
-            crate::session::Message::user(user_content)
+            crate::session::Message::user(user_content),
         ];
 
         let response = self.provider.chat(&messages, None).await;
@@ -576,17 +592,17 @@ impl AiPipeline {
                 std::fs::write(&report_path, final_text)?;
                 Ok(Some(report_path))
             }
-            Err(e) => Err(anyhow::anyhow!("AI provider error during consolidation: {:?}", e)),
+            Err(e) => Err(anyhow::anyhow!(
+                "AI provider error during consolidation: {:?}",
+                e
+            )),
         }
     }
 }
 
 /// Convenience: collect a full streaming response into a String, calling
 /// `on_chunk` for each delta (e.g. to print incrementally).
-pub async fn collect_stream<F>(
-    stream: ChunkStream,
-    mut on_chunk: F,
-) -> ProviderResult<String>
+pub async fn collect_stream<F>(stream: ChunkStream, mut on_chunk: F) -> ProviderResult<String>
 where
     F: FnMut(&str),
 {
@@ -614,8 +630,8 @@ fn collect_binary_snapshot(
     exe: &std::path::Path,
     binary_path: &str,
 ) -> Option<crate::session::context_manager::BinarySnapshot> {
-    use std::process::Command;
     use crate::session::context_manager::BinarySnapshot;
+    use std::process::Command;
 
     // 1. Binary metadata via `fission_cli info <binary>`
     let meta = Command::new(exe)
@@ -670,15 +686,16 @@ fn collect_binary_snapshot(
         })
         .unwrap_or_default();
 
-    Some(BinarySnapshot { meta, functions, strings })
+    Some(BinarySnapshot {
+        meta,
+        functions,
+        strings,
+    })
 }
 
 /// Parse an xrefs tool output and update the focus with callers/callees.
 /// This is best-effort: if the output can't be parsed we leave xrefs unchanged.
-fn update_xrefs_from_output(
-    focus: &mut crate::session::ReversingFocus,
-    output: &str,
-) {
+fn update_xrefs_from_output(focus: &mut crate::session::ReversingFocus, output: &str) {
     // The xrefs output is plain text with lines like:
     //   callers: <addr> <name>, <addr> <name>, ...
     //   callees: <addr> <name>, ...
@@ -693,17 +710,27 @@ fn update_xrefs_from_output(
             let rest = trimmed.splitn(2, ':').nth(1).unwrap_or("").trim();
             for entry in rest.split(',') {
                 let s = entry.trim().to_string();
-                if !s.is_empty() { callers.push(s); }
+                if !s.is_empty() {
+                    callers.push(s);
+                }
             }
-        } else if trimmed.to_lowercase().starts_with("callee") || trimmed.to_lowercase().starts_with("call ") {
+        } else if trimmed.to_lowercase().starts_with("callee")
+            || trimmed.to_lowercase().starts_with("call ")
+        {
             let rest = trimmed.splitn(2, ':').nth(1).unwrap_or("").trim();
             for entry in rest.split(',') {
                 let s = entry.trim().to_string();
-                if !s.is_empty() { callees.push(s); }
+                if !s.is_empty() {
+                    callees.push(s);
+                }
             }
         }
     }
 
-    if !callers.is_empty() { focus.xrefs_callers = callers; }
-    if !callees.is_empty() { focus.xrefs_callees = callees; }
+    if !callers.is_empty() {
+        focus.xrefs_callers = callers;
+    }
+    if !callees.is_empty() {
+        focus.xrefs_callees = callees;
+    }
 }

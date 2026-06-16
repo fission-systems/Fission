@@ -3,12 +3,15 @@
 //! Handles Server-Sent Events (SSE) streaming via `reqwest` byte stream.
 
 use async_trait::async_trait;
-use futures::{StreamExt, stream};
+use futures::StreamExt;
 use serde::{Deserialize, Serialize};
 
+use super::{
+    AiProvider, ChunkStream, ProviderError, ProviderResult, ProviderToolCallDelta,
+    ProviderToolCallFunctionDelta, ResponseChunk,
+};
 use crate::session::Message;
 use crate::tools::ToolDefinition;
-use super::{AiProvider, ChunkStream, ProviderError, ProviderResult, ResponseChunk, ProviderToolCallDelta, ProviderToolCallFunctionDelta};
 
 const DEFAULT_BASE_URL: &str = "https://api.openai.com/v1";
 
@@ -23,7 +26,6 @@ struct OpenAiModelsResponse {
 struct OpenAiModelObj {
     id: String,
 }
-
 
 // ── Request / response types ──────────────────────────────────────────────────
 
@@ -135,7 +137,10 @@ impl AiProvider for OpenAiProvider {
     }
 
     async fn fetch_models(&self) -> ProviderResult<Vec<String>> {
-        let token = self.bearer_token.as_deref().ok_or(ProviderError::NotAuthenticated)?;
+        let token = self
+            .bearer_token
+            .as_deref()
+            .ok_or(ProviderError::NotAuthenticated)?;
         let url = format!("{}/models", self.base_url.trim_end_matches('/'));
 
         let mut req = self.client.get(&url).bearer_auth(token);
@@ -156,27 +161,41 @@ impl AiProvider for OpenAiProvider {
         Ok(ids)
     }
 
-    async fn chat_stream(&self, messages: &[Message], tools: Option<&[ToolDefinition]>) -> ProviderResult<ChunkStream> {
-        let token = self.bearer_token.as_deref().ok_or(ProviderError::NotAuthenticated)?;
+    async fn chat_stream(
+        &self,
+        messages: &[Message],
+        tools: Option<&[ToolDefinition]>,
+    ) -> ProviderResult<ChunkStream> {
+        let token = self
+            .bearer_token
+            .as_deref()
+            .ok_or(ProviderError::NotAuthenticated)?;
 
         let url = format!("{}/chat/completions", self.base_url.trim_end_matches('/'));
-        
+
         let chat_tools = tools.map(|ts| {
-            ts.iter().map(|t| ChatTool {
-                kind: "function",
-                function: ChatToolFunction {
-                    name: &t.callable_name,
-                    description: &t.description,
-                    parameters: &t.parameters,
-                }
-            }).collect::<Vec<_>>()
+            ts.iter()
+                .map(|t| ChatTool {
+                    kind: "function",
+                    function: ChatToolFunction {
+                        name: &t.callable_name,
+                        description: &t.description,
+                        parameters: &t.parameters,
+                    },
+                })
+                .collect::<Vec<_>>()
         });
 
         let mut req = self
             .client
             .post(&url)
             .bearer_auth(token)
-            .json(&ChatRequest { model: &self.model, messages, stream: true, tools: chat_tools });
+            .json(&ChatRequest {
+                model: &self.model,
+                messages,
+                stream: true,
+                tools: chat_tools,
+            });
 
         for (k, v) in &self.extra_headers {
             req = req.header(k.as_str(), v.as_str());
@@ -191,10 +210,10 @@ impl AiProvider for OpenAiProvider {
         }
 
         let mut byte_stream = resp.bytes_stream();
-        
+
         let chunk_stream = async_stream::stream! {
-            let mut buffer = String::new();
-            
+            let mut buffer = Vec::new();
+
             while let Some(item) = byte_stream.next().await {
                 match item {
                     Err(e) => {
@@ -202,20 +221,21 @@ impl AiProvider for OpenAiProvider {
                         return;
                     }
                     Ok(bytes) => {
-                        buffer.push_str(&String::from_utf8_lossy(&bytes));
-                        
-                        while let Some(pos) = buffer.find('\n') {
-                            let line = buffer[..pos].trim().to_string();
-                            buffer = buffer[pos + 1..].to_string();
-                            
+                        buffer.extend_from_slice(&bytes);
+
+                        while let Some(pos) = buffer.iter().position(|&b| b == b'\n') {
+                            let line_bytes = &buffer[..pos];
+                            let line = String::from_utf8_lossy(line_bytes).trim().to_string();
+                            buffer.drain(..pos + 1);
+
                             if line.is_empty() { continue; }
-                            
+
                             if let Some(data) = line.strip_prefix("data: ") {
                                 if data == "[DONE]" {
                                     yield Ok(ResponseChunk { delta: String::new(), tool_calls: None, done: true });
                                     continue;
                                 }
-                                
+
                                 match serde_json::from_str::<SseChunk>(data) {
                                     Ok(sse) => {
                                         for choice in sse.choices {
@@ -232,7 +252,7 @@ impl AiProvider for OpenAiProvider {
                                                     }),
                                                 }).collect()
                                             });
-                                            
+
                                             if !delta.is_empty() || tool_calls.is_some() || done {
                                                 yield Ok(ResponseChunk { delta, tool_calls, done });
                                             }
@@ -252,4 +272,3 @@ impl AiProvider for OpenAiProvider {
         Ok(Box::pin(chunk_stream))
     }
 }
-

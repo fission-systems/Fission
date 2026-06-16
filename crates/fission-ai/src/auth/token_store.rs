@@ -1,7 +1,7 @@
 //! Token persistence: reads and writes `~/.fission/auth.json`.
 
-use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
+use std::path::{Path, PathBuf};
 use tokio::fs;
 
 use super::AuthError;
@@ -62,7 +62,10 @@ impl TokenStore {
             .map_err(|e| AuthError::TokenStore(format!("read {}: {e}", path.display())))?;
         let token: StoredToken = serde_json::from_slice(&bytes)
             .map_err(|e| AuthError::TokenStore(format!("parse {}: {e}", path.display())))?;
-        Ok(Self { path, token: Some(token) })
+        Ok(Self {
+            path,
+            token: Some(token),
+        })
     }
 
     /// Save a token to `<fission_home>/auth.json`, creating the directory if needed.
@@ -93,7 +96,10 @@ impl TokenStore {
 
     /// Returns the access token string if stored and still valid.
     pub fn valid_access_token(&self) -> Option<&str> {
-        self.token.as_ref().filter(|t| t.is_valid()).map(|t| t.access_token.as_str())
+        self.token
+            .as_ref()
+            .filter(|t| t.is_valid())
+            .map(|t| t.access_token.as_str())
     }
 
     pub fn stored_token(&self) -> Option<&StoredToken> {

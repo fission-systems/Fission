@@ -73,13 +73,26 @@ struct TokenPollResp {
 fn open_browser(url: &str) {
     let result = {
         #[cfg(target_os = "macos")]
-        { std::process::Command::new("open").arg(url).spawn() }
+        {
+            std::process::Command::new("open").arg(url).spawn()
+        }
         #[cfg(target_os = "linux")]
-        { std::process::Command::new("xdg-open").arg(url).spawn() }
+        {
+            std::process::Command::new("xdg-open").arg(url).spawn()
+        }
         #[cfg(target_os = "windows")]
-        { std::process::Command::new("cmd").args(["/c", "start", url]).spawn() }
+        {
+            std::process::Command::new("cmd")
+                .args(["/c", "start", url])
+                .spawn()
+        }
         #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
-        { Err(std::io::Error::new(std::io::ErrorKind::Unsupported, "unsupported platform")) }
+        {
+            Err(std::io::Error::new(
+                std::io::ErrorKind::Unsupported,
+                "unsupported platform",
+            ))
+        }
     };
     if let Err(e) = result {
         eprintln!("{GRAY}(could not open browser automatically: {e}){RESET}");
@@ -127,13 +140,18 @@ pub async fn run_copilot_login(fission_home: &std::path::Path) -> AuthResult<()>
         .await
         .map_err(|e| AuthError::DeviceCodeRequest(e.to_string()))?;
 
-    let poll_interval_ms =
-        device.interval.unwrap_or(5) * 1_000 + POLLING_SAFETY_MS;
+    let poll_interval_ms = device.interval.unwrap_or(5) * 1_000 + POLLING_SAFETY_MS;
 
     // ── Step 2: Show prompt + open browser ───────────────────────────────────
     println!("\n{GRAY}Fission AI — GitHub Copilot login{RESET}");
-    println!("\n1. Opening browser: {BLUE}{url}{RESET}", url = device.verification_uri);
-    println!("2. Enter this one-time code:\n\n   {BLUE}{code}{RESET}\n", code = device.user_code);
+    println!(
+        "\n1. Opening browser: {BLUE}{url}{RESET}",
+        url = device.verification_uri
+    );
+    println!(
+        "2. Enter this one-time code:\n\n   {BLUE}{code}{RESET}\n",
+        code = device.user_code
+    );
 
     open_browser(&device.verification_uri);
 
@@ -199,7 +217,7 @@ pub async fn run_copilot_login(fission_home: &std::path::Path) -> AuthResult<()>
         StoredToken {
             access_token: access_token.clone(),
             refresh_token: Some(access_token), // GitHub uses the same token for refresh
-            expires_at: None,                   // Copilot tokens are long-lived
+            expires_at: None,                  // Copilot tokens are long-lived
             provider: "copilot".to_string(),
         },
     )
