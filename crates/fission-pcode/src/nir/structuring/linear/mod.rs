@@ -250,7 +250,7 @@ impl<'a> PreviewBuilder<'a> {
         self.build_linear_multiblock_body_inner(false)
     }
 
-    pub(super) fn build_proof_first_linear_multiblock_body(
+    pub(crate) fn build_proof_first_linear_multiblock_body(
         &mut self,
     ) -> Result<Vec<HirStmt>, MlilPreviewError> {
         self.build_linear_multiblock_body_inner(true)

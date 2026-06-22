@@ -166,248 +166,7 @@ impl<'a> PreviewBuilder<'a> {
     }
 
     pub(crate) fn build_multiblock_body(&mut self) -> Result<Vec<HirStmt>, MlilPreviewError> {
-        if let Some(body) = self.try_lower_intra_instruction_conditional_return()? {
-            return Ok(body);
-        }
-        if let Some(body) = self.try_lower_conditional_tailcall_after_return()? {
-            return Ok(body);
-        }
-
-        let diag = structuring_diag_enabled();
-        let total_start = Instant::now();
-        self.structuring_start = Some(total_start);
-        let (
-            scc_component_count,
-            scc_irreducible_count,
-            scc_irreducible_header_count,
-            max_scc_component_size,
-        ) = {
-            let scc = self.cfg_fact_cache().scc();
-            (
-                scc.component_count(),
-                scc.irreducible_count(),
-                scc.irreducible_header_total_count(),
-                scc.max_component_size(),
-            )
-        };
-        self.telemetry.structuring.structuring_scc_component_count += scc_component_count;
-        self.telemetry.core.max_structuring_scc_component_size = self
-            .telemetry
-            .core
-            .max_structuring_scc_component_size
-            .max(max_scc_component_size);
-        self.telemetry.structuring.structuring_irreducible_scc_count += scc_irreducible_count;
-        self.telemetry
-            .structuring
-            .structuring_irreducible_header_count += scc_irreducible_header_count;
-        let original_admission =
-            self.structuring_admission_reason(scc_irreducible_count, max_scc_component_size);
-        let blockgraph_collapse_enabled = blockgraph_collapse_admission_enabled();
-        if blockgraph_collapse_enabled {
-            self.telemetry
-                .structuring
-                .blockgraph_collapse_admission_enabled_count += 1;
-            match original_admission {
-                StructuringAdmissionReason::IrreducibleBudget => {
-                    self.telemetry
-                        .structuring
-                        .blockgraph_collapse_irreducible_budget_bypass_count += 1;
-                }
-                StructuringAdmissionReason::ExtremeBudget => {
-                    self.telemetry
-                        .structuring
-                        .blockgraph_collapse_extreme_budget_blocked_count += 1;
-                }
-                StructuringAdmissionReason::GraphCollapse
-                | StructuringAdmissionReason::ExplicitForceLinear => {}
-            }
-        }
-        let admission = apply_blockgraph_collapse_admission_gate(
-            original_admission,
-            blockgraph_collapse_enabled,
-        );
-        let force_linear = !matches!(admission, StructuringAdmissionReason::GraphCollapse);
-        let blockgraph_irreducible_trial = blockgraph_collapse_enabled
-            && matches!(
-                original_admission,
-                StructuringAdmissionReason::IrreducibleBudget
-            )
-            && matches!(admission, StructuringAdmissionReason::GraphCollapse);
-        let pre_trial_successors =
-            blockgraph_irreducible_trial.then(|| self.successors.clone());
-        let pre_trial_predecessors =
-            blockgraph_irreducible_trial.then(|| self.predecessors.clone());
-        let pre_trial_virtual_block_map =
-            blockgraph_irreducible_trial.then(|| self.virtual_block_map.clone());
-        let pre_trial_blockgraph_complete_count =
-            self.telemetry.structuring.blockgraph_region_complete_count;
-
-        // Node-splitting for irreducible CFGs: when the SCC analysis shows
-        // irreducible SCCs, attempt to make the CFG reducible by splitting
-        // the extra header nodes into virtual clones.  This allows the
-        // structured-code reducer to succeed where it would otherwise fall
-        // back to goto-based linearisation.
-        if scc_irreducible_count > 0 && !force_linear {
-            let block_stmt_counts: Vec<usize> =
-                self.pcode.blocks.iter().map(|b| b.ops.len()).collect();
-            if let Some(split) =
-                compute_node_splits(&self.successors, &self.predecessors, &block_stmt_counts)
-            {
-                if diag {
-                    eprintln!(
-                        "[DIAG] node-splitting: applied {} splits, virtual_blocks={}",
-                        split.splits_applied,
-                        split.virtual_to_original.len()
-                    );
-                }
-                self.successors = split.new_successors;
-                self.predecessors = split.new_predecessors;
-                self.virtual_block_map = split.virtual_to_original;
-                self.refresh_cfg_fact_cache();
-            } else {
-                // Node-splitting budget exceeded (blocks too large or too many splits).
-                // Attempt FAS-based edge virtualization: compute the Minimum Feedback
-                // Arc Set and mark only those edges as forced gotos, leaving the rest
-                // of the CFG structurable via the normal graph-collapse pass.
-                let fas_edges =
-                    compute_fas_virtual_gotos(&self.successors, &self.predecessors);
-                if !fas_edges.is_empty() {
-                    if diag {
-                        eprintln!(
-                            "[DIAG] FAS edge virtualization: {} edges virtualized as gotos: {:?}",
-                            fas_edges.len(),
-                            fas_edges
-                        );
-                    }
-                    for (from, to) in fas_edges {
-                        self.apply_virtual_goto_edge(from, to);
-                    }
-                }
-            }
-        }
-        if diag {
-            eprintln!(
-                "[DIAG] structuring start: blocks={} edges={} force_linear={}",
-                self.pcode.blocks.len(),
-                self.successors.iter().map(Vec::len).sum::<usize>(),
-                force_linear
-            );
-        }
-        if force_linear {
-            self.telemetry.structuring.forced_linear_structuring_count += 1;
-            match admission {
-                StructuringAdmissionReason::ExplicitForceLinear => {
-                    self.telemetry
-                        .structuring
-                        .structuring_force_linear_explicit_count += 1;
-                }
-                StructuringAdmissionReason::IrreducibleBudget => {
-                    self.telemetry
-                        .structuring
-                        .structuring_force_linear_irreducible_budget_count += 1;
-                }
-                StructuringAdmissionReason::ExtremeBudget => {
-                    self.telemetry
-                        .structuring
-                        .structuring_force_linear_extreme_budget_count += 1;
-                }
-                StructuringAdmissionReason::GraphCollapse => {}
-            }
-            let result = self.build_proof_first_linear_multiblock_body();
-            if diag {
-                eprintln!(
-                    "[DIAG] structuring linear done: elapsed={:.3}s success={} proof_first={} admission={:?}",
-                    total_start.elapsed().as_secs_f64(),
-                    result.is_ok(),
-                    true,
-                    admission,
-                );
-            }
-            return result;
-        }
-
-        // Dom and postdom are computed unconditionally and used by the primary reducer to
-        // determine follow blocks.  The diag path additionally logs edge-class statistics.
-        // NOTE: These are computed AFTER node-splitting so they reflect the augmented CFG.
-        let total_blocks = self.pcode.blocks.len() + self.virtual_block_map.len();
-        let sese_result = if super::collapse_loop::collapse_loop_admission_enabled() {
-            match super::collapse_loop::structure_cfg_via_collapse_loop(self, total_blocks) {
-                Ok(body) => Ok(body),
-                Err(err) => {
-                    if diag {
-                        eprintln!(
-                            "[DIAG] collapse loop failed ({err:?}), falling back to SESE tree"
-                        );
-                    }
-                    super::sese::structure_cfg_via_sese(self, total_blocks)
-                }
-            }
-        } else {
-            super::sese::structure_cfg_via_sese(self, total_blocks)
-        };
-
-        match sese_result {
-        Ok(body) => {
-                if diag {
-                    eprintln!(
-                        "[DIAG] structuring done (SESE): elapsed={:.3}s stmts={}",
-                        total_start.elapsed().as_secs_f64(),
-                        body.len()
-                    );
-                }
-                let finalized = finalize_structured_body(body);
-                // Validate that every Goto target has a matching Label in the
-                // output.  If not, the SESE/GuardedTail emitter omitted a
-                // back-edge label (common when an inner loop can't be
-                // structured).  Fall back to linear rather than emitting broken
-                // pseudocode that will fail to compile.
-                if has_orphan_goto_labels(&finalized) {
-                    if let Some(repaired) = self.try_repair_orphan_gotos(finalized) {
-                        if diag {
-                            eprintln!(
-                                "[DIAG] SESE orphan goto labels localized without full linear fallback"
-                            );
-                        }
-                        self.telemetry
-                            .structuring
-                            .structuring_orphan_goto_localized_count += 1;
-                        metrics::histogram!("fission.structuring.total_ms")
-                            .record(total_start.elapsed().as_secs_f64() * 1000.0);
-                        metrics::counter!("fission.structuring.invocations_total").increment(1);
-                        return Ok(repaired);
-                    }
-                    if diag {
-                        eprintln!(
-                            "[DIAG] SESE result has orphan goto labels, falling back to linear"
-                        );
-                    }
-                    self.telemetry.structuring.forced_linear_structuring_count += 1;
-                    self.telemetry
-                        .structuring
-                        .structuring_sese_orphan_goto_fallback_count += 1;
-                    self.telemetry
-                        .structuring
-                        .structuring_orphan_goto_unrepairable_count += 1;
-                    return self.build_proof_first_linear_multiblock_body();
-                }
-                metrics::histogram!("fission.structuring.total_ms")
-                    .record(total_start.elapsed().as_secs_f64() * 1000.0);
-                metrics::counter!("fission.structuring.invocations_total").increment(1);
-                Ok(finalized)
-            }
-
-            Err(err) => {
-                if diag {
-                    eprintln!(
-                        "[DIAG] SESE structuring failed, falling back to linear: {:?}",
-                        err
-                    );
-                }
-                self.telemetry.structuring.forced_linear_structuring_count += 1;
-                let fallback_result = self.build_proof_first_linear_multiblock_body();
-                fallback_result
-            }
-        }
+        CollapseDriver::run(self)
     }
 
     pub(crate) fn build_sese_region_body(
@@ -433,44 +192,12 @@ impl<'a> PreviewBuilder<'a> {
         let dom_frontier = self.cfg_fact_cache().dominance_frontier();
         let imm_postdom = self.cfg_fact_cache().immediate_postdominators();
 
-        let total_blocks_for_follow = self.pcode.blocks.len() + self.virtual_block_map.len();
-        let dom_tree = self.cfg_facts.dominators();
-        let follow_blocks: Vec<Option<usize>> = (0..total_blocks_for_follow)
-            .map(|i| {
-                let succs = self.successors.get(i)?;
-                if succs.len() < 2 {
-                    return None;
-                }
-                
-                if total_blocks_for_follow <= 500 {
-                    let mut trace_dag = crate::nir::structuring::cfg_analysis::TraceDag::new(
-                        &self.successors,
-                        &self.predecessors,
-                        dom_tree,
-                    );
-                    
-                    if let Ok(Some(exitblock)) = trace_dag.find_follow_block(i) {
-                        if exitblock > i {
-                            return Some(exitblock);
-                        }
-                    }
-                }
-
-                let follow = imm_postdom.nearest_common_postdominator(succs)?;
-                if follow <= i {
-                    return None;
-                }
-                let has_frontier_witness = succs
-                    .iter()
-                    .copied()
-                    .any(|succ| succ == follow || dom_frontier.contains(succ, follow));
-                has_frontier_witness.then_some(follow)
-            })
-            .collect();
+        let follow_blocks = self.compute_follow_blocks();
 
         let mut active_child_map = child_map;
         active_child_map.retain(|&k, &mut (_, exit, _)| exit > k);
         let mut progress = true;
+        let mut tier1_failures = std::collections::HashMap::new();
         let mut collapse_iterations = 0;
 
         // Tier 1 & Tier 2 Collapsing Loop
@@ -574,6 +301,9 @@ impl<'a> PreviewBuilder<'a> {
                         res,
                     )?;
                 }
+                if let Some(ref err) = last_structuring_failure {
+                    tier1_failures.insert(idx, err.clone());
+                }
 
                 if let Some(best) = self.select_structured_candidate(ideal_candidates) {
                     let skip_to = best.node.skip_to;
@@ -624,48 +354,7 @@ impl<'a> PreviewBuilder<'a> {
                     continue;
                 }
 
-                let mut last_structuring_failure = None;
-                let follow = follow_blocks.get(idx).copied().flatten();
-                for rule in ACTIVE_COLLAPSE_RULES {
-                    if matches!(rule, CollapseRule::Sequence | CollapseRule::Unstructured) {
-                        continue;
-                    }
-                    let res = match rule {
-                        CollapseRule::Switch => self.try_lower_switch(idx),
-                        CollapseRule::ForLoop => self.try_lower_for(idx),
-                        CollapseRule::DoWhile => {
-                            let mut dw = self.try_lower_dowhile(idx)?;
-                            if dw.is_none() {
-                                dw = self.try_lower_multiblock_dowhile(idx)?;
-                            }
-                            Ok(dw)
-                        }
-                        CollapseRule::WhileDo => self.try_lower_while(idx),
-                        CollapseRule::InfLoopBreak => self.try_lower_infloop_with_break(idx),
-                        CollapseRule::InfLoop => {
-                            let mut inf = self.try_lower_infloop(idx);
-                            if inf.is_err() || matches!(inf, Ok(None)) {
-                                inf = self.try_lower_multiblock_infloop(idx);
-                            }
-                            inf
-                        }
-                        CollapseRule::Conditional => {
-                            let mut cond = self.try_lower_short_circuit_if(idx);
-                            if cond.is_err() || matches!(cond, Ok(None)) {
-                                cond = self.try_reduce_if_else_with_follow(idx, follow);
-                            }
-                            if cond.is_err() || matches!(cond, Ok(None)) {
-                                cond = self.try_lower_if_else(idx);
-                            }
-                            if cond.is_err() || matches!(cond, Ok(None)) {
-                                cond = self.try_lower_if(idx);
-                            }
-                            cond
-                        }
-                        _ => Ok(None),
-                    };
-                    let _ = Self::capture_structuring_failure(res, &mut last_structuring_failure)?;
-                }
+                let last_structuring_failure = tier1_failures.remove(&idx);
 
                 if let Some(err) = last_structuring_failure {
                     let mut temp_emitted_labels = emitted_labels.clone();
@@ -956,7 +645,7 @@ impl<'a> PreviewBuilder<'a> {
         Ok(body)
     }
 
-    fn structuring_admission_reason(
+    pub(crate) fn structuring_admission_reason(
         &self,
         scc_irreducible_count: usize,
         max_scc_component_size: usize,

@@ -67,4 +67,11 @@ pub(crate) struct PreviewBuilder<'a> {
     /// over budget. These edges are skipped during normal block terminator
     /// lowering and emitted as explicit `HirStmt::Goto` stmts instead.
     pub(crate) fas_virtual_edges: Vec<(usize, usize)>,
+    pub(crate) lowered_block_stmts_cache: BuilderCacheMap<usize, Vec<HirStmt>>,
+    pub(crate) partial_gpr_live_binding_cache: BuilderCacheMap<usize, bool>,
+    pub(crate) follow_blocks: Vec<Option<usize>>,
+    pub(crate) failed_loop_subgraphs: HashSet<(usize, usize)>,
+    pub(crate) lower_varnode_cache: BuilderCacheMap<(Option<LoweringSite>, VarnodeKey), HirExpr>,
+    pub(crate) structured_body: Option<Vec<HirStmt>>,
 }
+

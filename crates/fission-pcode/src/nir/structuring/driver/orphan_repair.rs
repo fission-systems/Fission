@@ -81,7 +81,7 @@ impl<'a> PreviewBuilder<'a> {
     /// Ghidra `ruleBlockGoto` analog: keep structured SESE output and localize orphan goto
     /// targets by appending missing block labels/bodies instead of rebuilding the whole
     /// function as flat goto-linear.
-    pub(super) fn try_repair_orphan_gotos(&mut self, body: Vec<HirStmt>) -> Option<Vec<HirStmt>> {
+    pub(crate) fn try_repair_orphan_gotos(&mut self, body: Vec<HirStmt>) -> Option<Vec<HirStmt>> {
         if !has_orphan_goto_labels(&body) {
             return Some(body);
         }

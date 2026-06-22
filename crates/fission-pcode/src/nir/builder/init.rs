@@ -91,7 +91,7 @@ impl<'a> PreviewBuilder<'a> {
                 );
             }
         }
-        Self {
+        let mut b = Self {
             pcode,
             options,
             binary,
@@ -147,6 +147,13 @@ impl<'a> PreviewBuilder<'a> {
             telemetry: super::telemetry::BuilderTelemetry::default(),
             structuring_start: None,
             fas_virtual_edges: Vec::new(),
-        }
+            lowered_block_stmts_cache: Default::default(),
+            partial_gpr_live_binding_cache: Default::default(),
+            follow_blocks: Vec::new(),
+            failed_loop_subgraphs: HashSet::new(),
+            lower_varnode_cache: Default::default(),
+            structured_body: None,
+        };
+        b
     }
 }

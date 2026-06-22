@@ -6,21 +6,24 @@
 pub(super) use super::support::*;
 use super::*;
 
-mod cfg_analysis;
+pub(crate) mod cfg_analysis;
 mod cleanup;
 mod conditionals;
-mod driver;
+pub(crate) mod driver;
 mod graph;
 mod guarded_tail;
 pub(super) mod irreducible;
 mod linear;
 mod loops;
+pub(crate) mod passes;
 mod regions;
-mod sese;
+pub(crate) mod sese;
 mod switch;
-mod collapse_loop;
+pub(crate) mod collapse_loop;
+pub(crate) mod collapse_driver;
 
 // --- re-exports consumed by nir::builder and other nir subsystems ---
+pub(crate) use collapse_driver::CollapseDriver;
 pub(crate) use cfg_analysis::{
     CfgAnalysis, CfgFactCache, DomTree, EdgeClass, PostDomTree, SccAnalysis,
 };
