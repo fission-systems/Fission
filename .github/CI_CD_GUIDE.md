@@ -23,7 +23,6 @@ Fission's CI/CD pipeline is designed with **standardization**, **reusability**, 
 │  - reusable-run-tests.yml             │
 │  - reusable-cli-smoke.yml              │
 │  - reusable-build-cli.yml             │
-│  - reusable-build-tauri.yml           │
 │  - reusable-nir-check.yml             │
 │  - reusable-corpus-validation.yml     │
 │  - reusable-benchmark.yml             │
@@ -59,8 +58,7 @@ Fission's CI/CD pipeline is designed with **standardization**, **reusability**, 
 ```
 ✓ Security Check
   ├─ cargo deny (CVE, licenses, sources)
-  ├─ cargo audit (known vulnerabilities)
-  └─ npm audit (Tauri dependencies)
+  └─ cargo audit (known vulnerabilities)
 
 ✓ Lint & Format
   ├─ rustfmt check
@@ -126,8 +124,6 @@ git push
   ├─ Windows release build
   └─ macOS release build
 
-✓ Tauri Build (~15 min)
-  └─ Desktop UI build
 
 ✓ Automation NIR-Check (~45 min)
   ├─ Quality lane validation
@@ -139,7 +135,7 @@ git push
 - [ ] All Fast Gate criteria included
 - [ ] Corpus manifest validation passed
 - [ ] Full test suite passed
-- [ ] Tauri build successful
+
 - [ ] NIR-Check regression < 5%
 
 **If it fails:**
@@ -151,10 +147,7 @@ python3 -c "import json; json.load(open('smoke_corpus.json'))"
 # 2. Test failure
 cargo test --all
 
-# 3. Tauri build failure
-cd crates/fission-tauri
-npm ci && npm run build
-```
+
 
 ---
 
@@ -220,7 +213,7 @@ test-new-module:
 | `reusable-lint-format.yml` | os, exclude_crates | Code style checks |
 | `reusable-run-tests.yml` | os, crates, profile, coverage | Run tests |
 | `reusable-build-cli.yml` | os, target, profile | Build CLI |
-| `reusable-build-tauri.yml` | os | Build Tauri |
+
 | `reusable-nir-check.yml` | run_profile, functions_limit | NIR validation |
 | `reusable-corpus-validation.yml` | - | Corpus validation |
 | `reusable-benchmark.yml` | (see workflow) | Full benchmark lane |
@@ -251,7 +244,7 @@ gh run download RUN_ID
 | `clippy` warning | Code style issue | Run `cargo clippy --fix` |
 | Test failure | Logic error | Run `cargo test --all -- --nocapture` locally |
 | Build timeout | Build time exceeded | Split jobs or increase timeout |
-| Tauri build failure | npm dependency issue | Run `npm ci --prefer-offline` |
+
 | Network error | Temporary GitHub API issue | Manual retry |
 
 ---
@@ -301,7 +294,7 @@ For big refactors:
 ```bash
 # Simulate Fast Gate
 cargo fmt --all -- --check
-cargo clippy --workspace --exclude fission-tauri -- -D warnings
+cargo clippy --workspace -- -D warnings
 cargo test -p fission-pcode -p fission-automation
 ```
 

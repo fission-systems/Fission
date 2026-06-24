@@ -21,10 +21,9 @@ Declared in root [`Cargo.toml`](../Cargo.toml) `workspace.members`:
 | [`crates/fission-plugin`](../crates/fission-plugin) | Plugin contracts (`contracts`), manager/loader/hooks (`interactive_runtime`) |
 | [`crates/fission-cli`](../crates/fission-cli) | CLI product (`fission_cli`) |
 | [`crates/fission-decompiler`](../crates/fission-decompiler) | Decompilation orchestration, Rust-Sleigh bridge, routing/workers |
-| [`crates/fission-tauri/src-tauri`](../crates/fission-tauri/src-tauri) | Tauri backend crate (workspace member) |
 | [`crates/fission-sleigh`](../crates/fission-sleigh) | Sleigh decode/lift; CFG skeleton |
-
-Frontend assets for the desktop app live under [`crates/fission-tauri/`](../crates/fission-tauri/) (npm/Tauri).
+| [`crates/fission-tui`](../crates/fission-tui) | Terminal UI (ratatui-based AI chat interface) |
+| `crates/fission-dioxus` | Pure Rust desktop GUI (Dioxus Desktop) — planned |
 
 ## Top-level directories
 

@@ -28,7 +28,8 @@ Fission/
 │   ├── fission-loader/       # Binary parsing, symbols, sections, strings
 │   ├── fission-signatures/   # FID/signature data and lookup
 │   ├── fission-cli/          # CLI surface
-│   └── fission-tauri/        # Desktop surface
+│   ├── fission-tui/          # Terminal UI (ratatui-based AI chat)
+│   └── fission-dioxus/       # Pure Rust desktop GUI (Dioxus)
 ├── utils/                    # Checked-in signatures, type info, benchmark support data
 ├── vendor/                   # Ghidra, RetDec, other reference code
 ├── scripts/benchmark/        # Benchmark setup / history helpers
@@ -82,7 +83,7 @@ Read the nearest child file before editing those areas.
 - Do not patch semantic gaps only in printer/UI output.
 - Do not add one-off binary-specific shortcuts without invariant-based guards.
 - Do not duplicate the same metric definition across pcode and automation.
-- Do not treat `fission-cli` or `fission-tauri` as semantic repair layers.
+- Do not treat `fission-cli` or `fission-dioxus` as semantic repair layers.
 - Do not treat benchmark/reporting scripts as semantic repair layers.
 - Do not bypass `PathConfig`, `PATHS`, `resource_roots`, or related helpers by embedding `/Users/sjkim1127/Fission/utils` directly in implementation logic.
 - Do not link against, shell out to, bind to, or otherwise depend on `/Users/sjkim1127/Fission/vendor` code in production paths.
@@ -111,7 +112,7 @@ python3 benchmark/source_semantic_benchmark/run_source_semantic_benchmark.py --h
 
 - Use `cargo nextest run` as the default local Rust test runner. Use `cargo test` only when checking doctests, harness-specific behavior, or when nextest is unavailable.
 - For NIR/structuring changes: targeted nextest filter → `cargo nextest run -p fission-pcode` → `cargo check -p fission-pcode`.
-- For orchestration / Rust-Sleigh glue: also `cargo check -p fission-decompiler` (and CLI/Tauri surfaces as needed).
+- For orchestration / Rust-Sleigh glue: also `cargo check -p fission-decompiler` (and CLI/TUI surfaces as needed).
 - For resource path / bundle resolution changes: `cargo nextest run -p fission-core` and smoke `fission_cli resources status`.
 - If telemetry/reporting changes: also run `cargo check -p fission-automation`.
 - If benchmark/reporting changes: validate under `benchmark/source_semantic_benchmark/` and keep artifacts under `benchmark/artifacts/`.
@@ -213,3 +214,7 @@ Regression-prevention workflow:
 - `.github/workflows/ci.yml`
 - `.github/workflows/ci-heavy.yml`
 - `.github/workflows/release-tag.yml`
+
+## NIR vs HIR Policy
+1. **NIR (Normalized Intermediate Representation)**: Must be 100% semantically identical to the source. Correctness and semantic parity are the absolute highest priorities.
+2. **HIR (High-level Intermediate Representation)**: Acts as human-readable pseudocode. It does NOT need to be 100% semantically identical, and can prioritize readability and C-friendly structures over strict, mechanical semantic equivalence.

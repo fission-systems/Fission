@@ -30,9 +30,8 @@ Pull Request/Feature Branch
    │  ├─ Corpus Validation (15 min)       │
    │  ├─ Full Test Suite (20 min)         │
    │  ├─ Build All Products (15 min)      │
-   │  ├─ Tauri Frontend (10 min)          │
    │  └─ Automation NIR-Check (45 min)    │
-   │  Total: ~90 minutes                  │
+   │  Total: ~80 minutes                  │
    └─────────────────────────────────────┘
          ↓ (Manual)
    Tag Creation (v*.*.*)
@@ -80,9 +79,9 @@ env:
 | Tests (core modules) | Fast | 10 min | fission-pcode, automation, loader |
 | **Fast Gate (total)** | Fast | **40 min** | Total timeout |
 | Full Test Suite | Heavy | 20 min | Full workspace tests |
-| Build All | Heavy | 15 min | CLI + Tauri build |
+| Build All | Heavy | 15 min | CLI build |
 | NIR-Check | Heavy | 45 min | Automation benchmark |
-| **Heavy Validation (total)** | Heavy | **90 min** | Total timeout |
+| **Heavy Validation (total)** | Heavy | **80 min** | Total timeout |
 | Release Build (3 platforms) | Release | 45 min | Linux + macOS + Windows |
 
 ---
@@ -93,14 +92,12 @@ env:
 - ✅ `cargo fmt --all -- --check` 100% pass
 - ✅ `cargo clippy` 0 warnings (`-D warnings`)
 - ✅ `cargo deny check all` security pass
-- ✅ `npm audit --audit-level=high` pass (Tauri)
 - ✅ All platforms build successfully
 - ✅ Core module tests pass (fission-pcode, automation, loader)
 
 ### Heavy Validation (auto-runs after merge to main)
 - ✅ All Fast Gate criteria included
 - ✅ Full workspace tests pass (`cargo test --workspace`)
-- ✅ Tauri frontend build successful
 - ✅ Corpus manifest validation pass
 - ✅ NIR-Check complete (Regression < 5%)
 
@@ -150,8 +147,7 @@ artifacts/
 │   ├── nir-check/
 │   │   ├── per_binary/
 │   │   ├── summary.json
-│   │   └── regression-report.md
-│   └── tauri-build.log
+│   └── regression-report.md
 │
 └── releases/
     └── v{version}/
@@ -176,16 +172,13 @@ artifacts/
 - Key: `rust-${{ matrix.os }}-${{ matrix.target }}`
 - Retention: 14 days
 
-### npm Cache
-- Based on `crates/fission-tauri/package-lock.json`
-- Auto-cache enabled
-- Retention: 14 days
+
 
 ---
 
 ## Retry Policy
 
-- Network errors (cargo/npm): 3 retries
+- Network errors (cargo): 3 retries
 - System errors (GitHub Actions): no auto-retry, manual trigger required
 - Timeouts: no retry (job splitting recommended)
 
@@ -198,7 +191,6 @@ artifacts/
   - Known CVE validation
   - License verification (AGPL-3.0-or-later)
   - Source verification
-- `npm audit`: Tauri dependency check
 
 ### Permission Policy
 ```yaml
@@ -225,7 +217,7 @@ permissions:
 | `clippy` warning | Code style | Run `cargo clippy --fix` |
 | Test failure | Logic error | Run `cargo test --all` locally |
 | Build failure | Compile error | Run `cargo build --all` locally |
-| Tauri failure | npm dependency | Run `cd crates/fission-tauri && npm ci` |
+
 
 ---
 

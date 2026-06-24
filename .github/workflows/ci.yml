@@ -36,8 +36,6 @@ jobs:
   security-check:
     name: 🔒 Security Check
     uses: ./.github/workflows/reusable-security-check.yml
-    with:
-      check_npm: true
 
   lint-format:
     name: 📋 Lint & Format
@@ -45,7 +43,7 @@ jobs:
     with:
       os: ubuntu-latest
       # `fission-signatures` enables `clippy::pedantic`; `-D warnings` makes pedantic findings release-blocking until we baseline cleanup (FIDBF casts, Win constants).
-      exclude_crates: "fission-tauri,fission-signatures"
+      exclude_crates: "fission-signatures"
 
   # Step 2: Core Tests (Linux, ~15 min)
   test-linux:

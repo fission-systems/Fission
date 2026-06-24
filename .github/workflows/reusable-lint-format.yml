@@ -10,7 +10,7 @@ on:
       exclude_crates:
         type: string
         required: false
-        default: "fission-tauri"
+        default: ""
         description: "Crates to exclude from clippy (comma-separated)"
 
 env:

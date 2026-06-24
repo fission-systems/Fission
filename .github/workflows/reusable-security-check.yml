@@ -2,12 +2,6 @@ name: Reusable Security Check
 
 on:
   workflow_call:
-    inputs:
-      check_npm:
-        type: boolean
-        required: false
-        default: true
-        description: "Also run npm audit for Tauri dependencies"
 
 env:
   CARGO_TERM_COLOR: always
@@ -34,10 +28,3 @@ jobs:
         run: |
           cargo install cargo-audit
           cargo audit --deny warnings
-
-      - name: NPM Security Audit (Tauri)
-        if: ${{ inputs.check_npm }}
-        run: |
-          cd crates/fission-tauri
-          npm ci --ignore-scripts
-          npm audit --audit-level=high

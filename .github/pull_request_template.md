@@ -9,7 +9,7 @@
 - [ ] Static facts / native preparation
 - [ ] Decompilation orchestration / Rust-Sleigh
 - [ ] CLI / product surface
-- [ ] Desktop UI / Tauri
+- [ ] Desktop UI / Dioxus
 - [ ] Benchmark / automation
 - [ ] Documentation only
 - [ ] Build / CI / release infrastructure
@@ -23,7 +23,7 @@
 - [ ] **Decompilation orchestration / Rust-Sleigh** (`crates/fission-decompiler/`)
 - [ ] **Loader / binary parsing** (`crates/fission-loader/`)
 - [ ] **CLI / UX** (`crates/fission-cli/`)
-- [ ] **Desktop (Tauri)** (`crates/fission-tauri/`)
+- [ ] **Desktop (Dioxus)** (`crates/fission-dioxus/`)
 - [ ] **Automation / quality lanes** (`crates/fission-automation/`, including `crates/fission-automation/config/`)
 - [ ] **Benchmark harness / corpus** (`benchmark/source_semantic_benchmark/`, `benchmark/full_benchmark/`, `benchmark/config/`)
 - [ ] **Docs / process only** (no semantic code paths)

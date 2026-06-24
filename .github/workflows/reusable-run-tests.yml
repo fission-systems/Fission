@@ -24,7 +24,7 @@ on:
       exclude_crates:
         type: string
         required: false
-        default: "fission-tauri,fission-static"
+        default: "fission-static"
         description: "Crates to exclude from full suite"
       timeout_minutes:
         type: number
@@ -49,18 +49,6 @@ jobs:
 
       - name: Cache Rust Build
         uses: Swatinem/rust-cache@v2
-
-      - name: Install system dependencies (Linux/Tauri)
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libwebkit2gtk-4.1-dev \
-            libssl-dev \
-            librsvg2-dev \
-            libayatana-appindicator3-dev \
-            build-essential \
-            file
 
       - name: Run Tests (Specific Crates)
         if: ${{ inputs.crates != '' }}

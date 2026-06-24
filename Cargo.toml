@@ -1,8 +1,5 @@
 [workspace]
 resolver = "2"
-# Tauri GUI crate: if this path is unavailable, comment out the member below
-# so Cargo and rust-analyzer can still load the rest of the workspace.
-# See docs/build/BUILD.md, "Rust workspace / rust-analyzer".
 members = [
     "crates/fission-script",
     "crates/fission-automation",
@@ -16,10 +13,10 @@ members = [
     "crates/fission-ttd",
     "crates/fission-plugin",
     "crates/fission-cli",
-    "crates/fission-tauri/src-tauri",
     "crates/fission-sleigh",
     "crates/fission-ai",
     "crates/fission-tui",
+    # fission-dioxus — Pure Rust desktop GUI (Dioxus); to be added when ready
 ]
 
 [profile.release]

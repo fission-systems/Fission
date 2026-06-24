@@ -31,7 +31,7 @@ jobs:
       os: ubuntu-latest
       crates: ""
       profile: debug
-      exclude_crates: "fission-tauri,fission-static"
+      exclude_crates: "fission-static"
 
   test-linux-static:
     name: 🧪 Tests (fission-static)
@@ -72,15 +72,7 @@ jobs:
       profile: release
       upload_artifact: true
 
-  # Step 5: Build Tauri (~15 min parallel)
-  build-tauri-linux:
-    name: 🖥️ Build Tauri (Linux)
-    needs: corpus-validation
-    uses: ./.github/workflows/reusable-build-tauri.yml
-    with:
-      os: ubuntu-latest
-
-  # Step 6: Automation NIR-Check (~45 min)
+  # Step 5: Automation NIR-Check (~45 min)
   nir-check:
     name: 🔬 Automation NIR-Check
     needs: corpus-validation
@@ -108,7 +100,6 @@ jobs:
       - test-linux-static
       - build-macos-heavy
       - test-windows-heavy
-      - build-tauri-linux
       - nir-check
       - benchmark
     runs-on: ubuntu-latest
@@ -138,10 +129,7 @@ jobs:
             echo "❌ Windows heavy tests failed"
             FAILED=1
           fi
-          if [ "${{ needs.build-tauri-linux.result }}" != "success" ]; then
-            echo "❌ Tauri build failed"
-            FAILED=1
-          fi
+
           if [ "${{ needs.nir-check.result }}" != "success" ]; then
             echo "❌ NIR-Check failed"
             FAILED=1
