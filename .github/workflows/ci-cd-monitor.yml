@@ -1,122 +1,73 @@
 name: CI/CD Status Monitor
 
 on:
+  # Weekly on Monday at 09:00 UTC (reduced from daily)
   schedule:
-    - cron: "0 12 * * *"  # Daily at noon UTC
+    - cron: "0 9 * * 1"
   workflow_dispatch:
 
 permissions:
   contents: read
 
-env:
-  CARGO_TERM_COLOR: always
-
 jobs:
   monitor:
-    name: 📊 Monitor Status
+    name: 📊 CI/CD Health Monitor
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Fetch Last 10 Workflow Runs (Fast Gate)
-        id: fast-gate
+      - name: Fetch Workflow Run Stats
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           python3 << 'PYTHON'
           import json
           import subprocess
-          from datetime import datetime, timedelta
-          
-          # Get last 10 CI runs
-          result = subprocess.run(
-              ["gh", "run", "list", "--workflow", "ci.yml", "-L", "10", "--json", "status,conclusion,durationMinutes,createdAt"],
-              capture_output=True,
-              text=True
+          import os
+
+          def fetch_runs(workflow, limit=10):
+              result = subprocess.run(
+                  ["gh", "run", "list", "--workflow", workflow, "-L", str(limit),
+                   "--json", "status,conclusion,durationMinutes,createdAt,displayTitle"],
+                  capture_output=True, text=True, env={**os.environ}
+              )
+              if result.returncode != 0:
+                  return []
+              return json.loads(result.stdout)
+
+          def summarize(label, runs):
+              if not runs:
+                  return f"### {label}\n- ⚠️ No runs found\n"
+              total = len(runs)
+              passed = sum(1 for r in runs if r.get("conclusion") == "success")
+              failed = sum(1 for r in runs if r.get("conclusion") == "failure")
+              rate = passed / total * 100 if total > 0 else 0
+              avg_dur = sum(r.get("durationMinutes", 0) for r in runs) / total
+              badges = "".join("🟢" if r.get("conclusion")=="success" else "🔴" if r.get("conclusion")=="failure" else "⚪" for r in runs)
+              return (
+                  f"### {label}\n"
+                  f"- Success rate: **{rate:.0f}%** ({passed}/{total}), Failures: {failed}\n"
+                  f"- Avg duration: **{avg_dur:.1f} min**\n"
+                  f"- Last {total} runs: {badges}\n"
+              )
+
+          fast = fetch_runs("ci.yml")
+          heavy = fetch_runs("ci-heavy.yml")
+          cd = fetch_runs("cd.yml", limit=5)
+
+          report = (
+              "# 📊 CI/CD Weekly Health Report\n\n"
+              f"Generated: $(date -u +'%Y-%m-%d %H:%M UTC')\n\n"
+              + summarize("🟢 Fast Gate (ci.yml) — PR/push", fast)
+              + "\n"
+              + summarize("🔵 Heavy Validation (ci-heavy.yml) — nightly", heavy)
+              + "\n"
+              + summarize("🚀 CD Release (cd.yml) — tag-triggered", cd)
+              + f"\n---\n[View all workflow runs](https://github.com/${{{{ github.repository }}}}/actions)\n"
           )
-          
-          if result.returncode != 0:
-              print("❌ Failed to fetch CI runs")
-              exit(1)
-          
-          runs = json.loads(result.stdout)
-          
-          success_count = sum(1 for r in runs if r["conclusion"] == "success")
-          total_count = len(runs)
-          success_rate = (success_count / total_count * 100) if total_count > 0 else 0
-          avg_duration = sum(r.get("durationMinutes", 0) for r in runs) / total_count if total_count > 0 else 0
-          
-          print(f"### 🟢 Fast Gate (ci.yml)")
-          print(f"- **Success Rate**: {success_rate:.1f}% ({success_count}/{total_count})")
-          print(f"- **Avg Duration**: {avg_duration:.1f} min")
-          print(f"- **Last 10 Runs**: {json.dumps([r['conclusion'] for r in runs], indent=2)}")
-          print()
-          
+
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as f:
+              f.write(report)
+
+          print(report)
           PYTHON
-
-      - name: Fetch Last 10 Workflow Runs (Heavy)
-        id: heavy
-        run: |
-          python3 << 'PYTHON'
-          import json
-          import subprocess
-          from datetime import datetime, timedelta
-          
-          # Get last 10 CI Heavy runs
-          result = subprocess.run(
-              ["gh", "run", "list", "--workflow", "ci-heavy.yml", "-L", "10", "--json", "status,conclusion,durationMinutes,createdAt"],
-              capture_output=True,
-              text=True
-          )
-          
-          if result.returncode != 0:
-              print("❌ Failed to fetch CI Heavy runs")
-              exit(1)
-          
-          runs = json.loads(result.stdout)
-          
-          success_count = sum(1 for r in runs if r["conclusion"] == "success")
-          total_count = len(runs)
-          success_rate = (success_count / total_count * 100) if total_count > 0 else 0
-          avg_duration = sum(r.get("durationMinutes", 0) for r in runs) / total_count if total_count > 0 else 0
-          
-          print(f"### 🔵 Heavy Validation (ci-heavy.yml)")
-          print(f"- **Success Rate**: {success_rate:.1f}% ({success_count}/{total_count})")
-          print(f"- **Avg Duration**: {avg_duration:.1f} min")
-          print(f"- **Last 10 Runs**: {json.dumps([r['conclusion'] for r in runs], indent=2)}")
-          print()
-          
-          PYTHON
-
-      - name: Generate Status Report
-        id: report
-        run: |
-          cat > ci_cd_status_report.md << 'EOF'
-          # CI/CD Status Report
-          
-          Generated: $(date -u +'%Y-%m-%d %H:%M:%S UTC')
-          
-          ## Pipeline Health
-          
-          - **Fast Gate**: ✅ Active (PR/Push)
-          - **Heavy Validation**: ✅ Active (Main + Nightly)
-          - **Release**: ✅ Active (Tag-based)
-          
-          ## Status Summary
-          
-          ### Configuration
-          - Rust Version: 1.85 (stable)
-          - Platforms: Linux, macOS, Windows
-          - Timeout Policy: 40 min (Fast), 90 min (Heavy)
-          
-          ### Recent Runs
-          - See workflow runs: https://github.com/${{ github.repository }}/actions
-          
-          EOF
-          cat ci_cd_status_report.md
-
-      - name: Upload Status Report
-        uses: actions/upload-artifact@v4
-        with:
-          name: ci-cd-status-report-${{ github.run_id }}
-          path: ci_cd_status_report.md
-          retention-days: 30
-          if-no-files-found: warn

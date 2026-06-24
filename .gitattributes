@@ -1,0 +1,43 @@
+# ─── Git LFS ──────────────────────────────────────────────────────────────────
+# (LFS not currently configured; add patterns here when adopting LFS)
+
+# ─── GitHub Linguist overrides ────────────────────────────────────────────────
+# Prevent generated/data files from inflating language stats
+
+# Ghidra symbol export data (auto-generated from PE DLLs — not source code)
+utils/ghidra-data/**/*.exports   linguist-generated=true
+
+# Ghidra type info data files
+utils/ghidra-data/**/*.gdt       linguist-generated=true
+
+# Sleigh specification files are DSL data, not general-purpose language code
+utils/sleigh-specs/**            linguist-language=Sleigh
+
+# DIE signature database scripts (vendor JS patterns, not project source)
+utils/signatures/die/**/*.js     linguist-vendored=true
+utils/signatures/die/**/*.lua    linguist-vendored=true
+
+# Benchmark source files under binary/ are test fixtures, not project source
+benchmark/binary/**/source/**    linguist-generated=true
+
+# ─── Line-ending normalization ────────────────────────────────────────────────
+# Ensure consistent line endings across platforms
+*.rs    text eol=lf
+*.toml  text eol=lf
+*.yml   text eol=lf
+*.yaml  text eol=lf
+*.md    text eol=lf
+*.py    text eol=lf
+*.sh    text eol=lf
+*.c     text eol=lf
+*.cpp   text eol=lf
+*.h     text eol=lf
+
+# Windows-specific binary files
+*.exe   binary
+*.dll   binary
+*.ico   binary
+*.icns  binary
+*.png   binary
+*.jpg   binary
+*.jpeg  binary

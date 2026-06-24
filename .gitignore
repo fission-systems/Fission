@@ -157,3 +157,41 @@ benchmark_results/
 # Use: git submodule add https://github.com/threatrack/ghidra-fid-generator.git scripts/ghidra-fid-generator
 # if you want it tracked.
 /scripts/ghidra-fid-generator/
+
+# ─── Local scratch / diagnostic files ────────────────────────────────────────
+# Root-level diagnostic output files produced during development sessions
+/diag_*.txt
+/run_out.txt
+/decomp_out.txt
+/lldb_out.txt
+/check_out.txt
+/diff_mod.txt
+/bt.txt
+
+# Root-level benchmark/analysis scratch JSON files
+/sq.json
+/sq.jsonl
+/debug.json
+/debug_*.json
+/pcode.json
+/inventory_temp.jsonl
+/summary_temp.json
+
+# Flamegraph / profiling traces
+*.trace
+cargo-flamegraph.trace/
+
+# Root-level patch files from development sessions
+/scratch*.patch
+/scratch.patch
+
+# Root-level development helper scripts (non-canonical; use scripts/ instead)
+/fix*.py
+/patch*.py
+/auto_refactor.py
+/fix_*.py
+/patch_*.py
+
+# Fission local debug / run output files
+/fission.toml.local
+/run_lldb.sh

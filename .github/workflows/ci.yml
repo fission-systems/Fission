@@ -65,28 +65,7 @@ jobs:
     with:
       profile: debug
 
-  # Step 3: Build & Test (Windows, ~20 min parallel)
-  build-windows:
-    name: 🪟 Build & Test (Windows)
-    needs: [security-check, lint-format]
-    uses: ./.github/workflows/reusable-build-cli.yml
-    with:
-      os: windows-latest
-      profile: release
-      upload_artifact: false
-
-  test-windows:
-    name: 🧪 Tests (Windows)
-    needs: build-windows
-    uses: ./.github/workflows/reusable-run-tests.yml
-    with:
-      os: windows-latest
-      crates: "fission-pcode,fission-decompiler,fission-automation"
-      # Match macOS fast gate: debug tests avoid duplicate release rebuild + timeout/cancel churn.
-      profile: debug
-      timeout_minutes: 90
-
-  # Step 4: Build & Test (macOS, ~20 min parallel)
+  # Step 3: Build & Test (macOS, ~20 min parallel with linux)
   build-macos:
     name: 🍎 Build & Test (macOS)
     needs: [security-check, lint-format]
@@ -105,6 +84,29 @@ jobs:
       crates: "fission-pcode,fission-automation,fission-loader"
       profile: debug
 
+  # Step 4: Windows tests — PR only (expensive; heavy CI covers main branch)
+  build-windows:
+    name: 🪟 Build & Test (Windows) [PR only]
+    if: github.event_name == 'pull_request'
+    needs: [security-check, lint-format]
+    uses: ./.github/workflows/reusable-build-cli.yml
+    with:
+      os: windows-latest
+      profile: release
+      upload_artifact: false
+
+  test-windows:
+    name: 🧪 Tests (Windows) [PR only]
+    if: github.event_name == 'pull_request'
+    needs: build-windows
+    uses: ./.github/workflows/reusable-run-tests.yml
+    with:
+      os: windows-latest
+      crates: "fission-pcode,fission-decompiler,fission-automation"
+      # Match macOS fast gate: debug tests avoid duplicate release rebuild + timeout/cancel churn.
+      profile: debug
+      timeout_minutes: 90
+
   # Final summary
   ci-summary:
     name: ✅ CI Summary
@@ -115,7 +117,6 @@ jobs:
         lint-format,
         test-linux,
         cli-smoke-linux,
-        test-windows,
         test-macos,
       ]
     runs-on: ubuntu-latest
@@ -143,12 +144,10 @@ jobs:
             echo "❌ CLI smoke failed"
             exit 1
           fi
-          if [ "${{ needs.test-windows.result }}" != "success" ]; then
-            echo "❌ Windows tests failed"
-            exit 1
-          fi
           if [ "${{ needs.test-macos.result }}" != "success" ]; then
             echo "❌ macOS tests failed"
             exit 1
           fi
           echo "✅ All CI checks passed!"
+          echo ""
+          echo "ℹ️  Windows tests run on PR only. Heavy CI (nightly) covers full platform validation."

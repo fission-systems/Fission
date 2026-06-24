@@ -1,8 +1,7 @@
 name: CI Heavy Validation
 
 on:
-  push:
-    branches: ["main"]
+  # Nightly at 02:30 UTC — does not run on every push; Fast Gate (ci.yml) covers that.
   schedule:
     - cron: "30 2 * * *"
   workflow_dispatch:
