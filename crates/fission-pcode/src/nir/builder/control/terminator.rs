@@ -496,9 +496,10 @@ impl<'a> PreviewBuilder<'a> {
         op.opcode == PcodeOpcode::Copy
             && is_register_space_id(output.space_id)
             && output.offset == 0
-            && op.inputs.first().is_some_and(|input| {
-                self.register_namer().is_return_target_register(input)
-            })
+            && op
+                .inputs
+                .first()
+                .is_some_and(|input| self.register_namer().is_return_target_register(input))
     }
 
     fn lower_primary_return_expr_from_block(
@@ -547,7 +548,8 @@ impl<'a> PreviewBuilder<'a> {
         if input.size >= ret_vn.size || !is_register_space_id(input.space_id) {
             return None;
         }
-        self.register_namer().is_primary_return_register(input)
+        self.register_namer()
+            .is_primary_return_register(input)
             .then_some(input.clone())
     }
 
@@ -631,8 +633,7 @@ impl<'a> PreviewBuilder<'a> {
         block: &crate::pcode::PcodeBasicBlock,
         term_idx: usize,
     ) -> bool {
-        let ret_regs =
-            self.register_namer().primary_return_registers();
+        let ret_regs = self.register_namer().primary_return_registers();
         if ret_regs.is_empty() {
             return false;
         }
@@ -652,8 +653,7 @@ impl<'a> PreviewBuilder<'a> {
         block: &crate::pcode::PcodeBasicBlock,
         term_idx: usize,
     ) -> bool {
-        let ret_regs =
-            self.register_namer().primary_return_registers();
+        let ret_regs = self.register_namer().primary_return_registers();
         if ret_regs.is_empty() {
             return false;
         }
@@ -782,10 +782,11 @@ impl<'a> PreviewBuilder<'a> {
         {
             return Ok(Some(expr));
         }
-        let Some(ret_vn) =
-            self.register_namer().primary_return_registers()
-                .into_iter()
-                .next()
+        let Some(ret_vn) = self
+            .register_namer()
+            .primary_return_registers()
+            .into_iter()
+            .next()
         else {
             return Ok(None);
         };
@@ -996,10 +997,11 @@ impl<'a> PreviewBuilder<'a> {
         block: &crate::pcode::PcodeBasicBlock,
         term_idx: usize,
     ) -> Result<Option<HirExpr>, MlilPreviewError> {
-        let Some(ret_vn) =
-            self.register_namer().primary_return_registers()
-                .into_iter()
-                .next()
+        let Some(ret_vn) = self
+            .register_namer()
+            .primary_return_registers()
+            .into_iter()
+            .next()
         else {
             return Ok(None);
         };
@@ -1999,7 +2001,10 @@ impl<'a> PreviewBuilder<'a> {
         idx: usize,
     ) -> Option<(u64, HirExpr)> {
         if let Some(cached) = self.terminator_cache.get(&idx) {
-            if let LoweredTerminator::Cond { cond, true_target, .. } = cached {
+            if let LoweredTerminator::Cond {
+                cond, true_target, ..
+            } = cached
+            {
                 return Some((*true_target, cond.clone()));
             }
         }
@@ -2073,9 +2078,7 @@ impl<'a> PreviewBuilder<'a> {
 
         let predicate = self
             .match_test_branch_predicate(&peeled)
-            .or_else(|| {
-                self.match_cmp_branch_predicate(&peeled)
-            });
+            .or_else(|| self.match_cmp_branch_predicate(&peeled));
         predicate
             .map(|predicate| self.lower_x86_branch_predicate(predicate))
             .transpose()
@@ -2766,8 +2769,12 @@ impl<'a> PreviewBuilder<'a> {
                 self.recover_selector_expr_from_predecessors(idx, alias, &mut selector_visiting)
             })
             .unwrap_or_else(|| selector.discriminant.clone());
-        let direct_bound =
-            self.infer_branchind_selector_upper_bound(idx, &normalized_selector, selector_alias, selector.min_val);
+        let direct_bound = self.infer_branchind_selector_upper_bound(
+            idx,
+            &normalized_selector,
+            selector_alias,
+            selector.min_val,
+        );
         let alias_family_bound = selector_alias.and_then(|alias| {
             self.infer_branchind_selector_upper_bound_from_alias_family(
                 idx,
@@ -2892,8 +2899,9 @@ impl<'a> PreviewBuilder<'a> {
         op: &PcodeOp,
         switch_var: &Varnode,
     ) -> Option<InferredJumpTableTargets> {
-        let (ordered_ops, leaves) = collect_switch_dependencies(switch_var, &self.defs, self.pcode)?;
-        
+        let (ordered_ops, leaves) =
+            collect_switch_dependencies(switch_var, &self.defs, self.pcode)?;
+
         let little_endian = if let Some(bin) = self.binary {
             !bin.arch_spec.contains(":BE:")
         } else {
@@ -2912,8 +2920,10 @@ impl<'a> PreviewBuilder<'a> {
             };
 
             let is_pc = name.as_deref() == Some("pc")
-                || (self.options.calling_convention == CallingConvention::SystemVAmd64 && leaf.offset == 0x80)
-                || (self.options.calling_convention == CallingConvention::WindowsX64 && leaf.offset == 0x80);
+                || (self.options.calling_convention == CallingConvention::SystemVAmd64
+                    && leaf.offset == 0x80)
+                || (self.options.calling_convention == CallingConvention::WindowsX64
+                    && leaf.offset == 0x80);
 
             if is_pc {
                 other_leaf_values.insert(leaf.clone(), op.address);
@@ -2938,7 +2948,9 @@ impl<'a> PreviewBuilder<'a> {
             if let Some(ref sel) = selector_leaf {
                 leaf_values.insert(sel.clone(), s);
             }
-            if let Some(target_addr) = emulate_path(&ordered_ops, &leaf_values, self.binary, !little_endian) {
+            if let Some(target_addr) =
+                emulate_path(&ordered_ops, &leaf_values, self.binary, !little_endian)
+            {
                 if let Some(&target_idx) = self.address_to_index.get(&target_addr) {
                     let target = self.block_target_key(target_idx);
                     recovered_cases.push((s as i64, target));
@@ -2994,7 +3006,8 @@ impl<'a> PreviewBuilder<'a> {
     fn extract_jump_table_selector_varnode(&self, ptr: &Varnode) -> Option<Varnode> {
         let (_, op) = self.lookup_def_site(ptr)?;
         if op.opcode == PcodeOpcode::IntAdd && op.inputs.len() == 2 {
-            return self.extract_scaled_selector_varnode(&op.inputs[0])
+            return self
+                .extract_scaled_selector_varnode(&op.inputs[0])
                 .or_else(|| self.extract_scaled_selector_varnode(&op.inputs[1]));
         }
         self.extract_scaled_selector_varnode(ptr)
@@ -3104,30 +3117,30 @@ impl<'a> PreviewBuilder<'a> {
         self.lower_wrapped_varnode(&peeled, visiting)
     }
 
-fn extract_modulo_bound(expr: &HirExpr) -> Option<u64> {
-    let mut current = expr;
-    loop {
-        match current {
-            HirExpr::Cast { expr, .. } => {
-                current = expr;
-            }
-            HirExpr::Binary {
-                op: HirBinaryOp::Mod,
-                rhs,
-                ..
-            } => {
-                let stripped_rhs = strip_casts(rhs);
-                if let HirExpr::Const(divisor, _) = stripped_rhs {
-                    if divisor > 0 {
-                        return Some((divisor - 1) as u64);
-                    }
+    fn extract_modulo_bound(expr: &HirExpr) -> Option<u64> {
+        let mut current = expr;
+        loop {
+            match current {
+                HirExpr::Cast { expr, .. } => {
+                    current = expr;
                 }
-                return None;
+                HirExpr::Binary {
+                    op: HirBinaryOp::Mod,
+                    rhs,
+                    ..
+                } => {
+                    let stripped_rhs = strip_casts(rhs);
+                    if let HirExpr::Const(divisor, _) = stripped_rhs {
+                        if divisor > 0 {
+                            return Some((divisor - 1) as u64);
+                        }
+                    }
+                    return None;
+                }
+                _ => return None,
             }
-            _ => return None,
         }
     }
-}
 
     fn infer_branchind_selector_upper_bound(
         &mut self,
@@ -3161,7 +3174,9 @@ fn extract_modulo_bound(expr: &HirExpr) -> Option<u64> {
             }
 
             for (key, name) in &self.materialized_vns {
-                if key.varnode.space_id == current_vn.space_id && key.varnode.offset == current_vn.offset {
+                if key.varnode.space_id == current_vn.space_id
+                    && key.varnode.offset == current_vn.offset
+                {
                     selector_names.insert(name.clone());
                 }
             }
@@ -3174,7 +3189,8 @@ fn extract_modulo_bound(expr: &HirExpr) -> Option<u64> {
                     }
                 }
                 for size in [1, 2, 4, 8] {
-                    let name = self.sla_hw_name(current_vn.offset, size)
+                    let name = self
+                        .sla_hw_name(current_vn.offset, size)
                         .unwrap_or_else(|| "reg".to_string());
                     selector_names.insert(name.to_string());
                 }
@@ -3188,7 +3204,8 @@ fn extract_modulo_bound(expr: &HirExpr) -> Option<u64> {
                         | PcodeOpcode::IntZExt
                         | PcodeOpcode::IntSExt
                         | PcodeOpcode::SubPiece
-                ) && !op.inputs.is_empty() {
+                ) && !op.inputs.is_empty()
+                {
                     queue.push(op.inputs[0].clone());
                 }
             }
@@ -3308,28 +3325,20 @@ fn extract_modulo_bound(expr: &HirExpr) -> Option<u64> {
                 PcodeOpcode::IntLess | PcodeOpcode::IntSLess if op.inputs.len() == 2 => {
                     let in0 = self.peel_passthrough_varnode(&op.inputs[0]);
                     let in1 = self.peel_passthrough_varnode(&op.inputs[1]);
-                    if same_family_varnode(&in0, selector_family)
-                        && in1.is_constant
-                    {
+                    if same_family_varnode(&in0, selector_family) && in1.is_constant {
                         less_than_bound = u64::try_from(in1.constant_val).ok();
-                    } else if in0.is_constant
-                        && same_family_varnode(&in1, selector_family)
-                    {
+                    } else if in0.is_constant && same_family_varnode(&in1, selector_family) {
                         less_than_bound = u64::try_from(in0.constant_val).ok();
                     }
                 }
                 PcodeOpcode::IntLessEqual | PcodeOpcode::IntSLessEqual if op.inputs.len() == 2 => {
                     let in0 = self.peel_passthrough_varnode(&op.inputs[0]);
                     let in1 = self.peel_passthrough_varnode(&op.inputs[1]);
-                    if same_family_varnode(&in0, selector_family)
-                        && in1.is_constant
-                    {
+                    if same_family_varnode(&in0, selector_family) && in1.is_constant {
                         less_than_bound = u64::try_from(in1.constant_val)
                             .ok()
                             .and_then(|value| value.checked_add(1));
-                    } else if in0.is_constant
-                        && same_family_varnode(&in1, selector_family)
-                    {
+                    } else if in0.is_constant && same_family_varnode(&in1, selector_family) {
                         less_than_bound = u64::try_from(in0.constant_val).ok();
                     }
                 }
@@ -3712,7 +3721,8 @@ fn extract_modulo_bound(expr: &HirExpr) -> Option<u64> {
 
     fn match_unsigned_gt(&self, vn: &Varnode) -> Option<(Varnode, Varnode)> {
         if let Some((lhs, rhs)) = self.match_bool_binary(vn, PcodeOpcode::BoolAnd) {
-            if let Some(res) = self.match_unsigned_gt_pair(&lhs, &rhs)
+            if let Some(res) = self
+                .match_unsigned_gt_pair(&lhs, &rhs)
                 .or_else(|| self.match_unsigned_gt_pair(&rhs, &lhs))
             {
                 return Some(res);
@@ -3720,7 +3730,8 @@ fn extract_modulo_bound(expr: &HirExpr) -> Option<u64> {
         }
         if let Some(inner) = self.match_bool_negate(vn) {
             if let Some((lhs, rhs)) = self.match_bool_binary(&inner, PcodeOpcode::BoolOr) {
-                if let Some(res) = self.match_unsigned_le_pair(&lhs, &rhs)
+                if let Some(res) = self
+                    .match_unsigned_le_pair(&lhs, &rhs)
                     .or_else(|| self.match_unsigned_le_pair(&rhs, &lhs))
                 {
                     return Some(res);
@@ -3950,8 +3961,10 @@ fn extract_selector_upper_bound_from_cond(
 
     match op {
         HirBinaryOp::LogicalAnd | HirBinaryOp::And => {
-            let lhs_bound = extract_selector_upper_bound_from_cond(&lhs, selector_match, current_on_true);
-            let rhs_bound = extract_selector_upper_bound_from_cond(&rhs, selector_match, current_on_true);
+            let lhs_bound =
+                extract_selector_upper_bound_from_cond(&lhs, selector_match, current_on_true);
+            let rhs_bound =
+                extract_selector_upper_bound_from_cond(&rhs, selector_match, current_on_true);
             return if current_on_true {
                 match (lhs_bound, rhs_bound) {
                     (Some(lhs), Some(rhs)) => Some(lhs.min(rhs)),
@@ -3967,8 +3980,10 @@ fn extract_selector_upper_bound_from_cond(
             };
         }
         HirBinaryOp::LogicalOr | HirBinaryOp::Or => {
-            let lhs_bound = extract_selector_upper_bound_from_cond(&lhs, selector_match, current_on_true);
-            let rhs_bound = extract_selector_upper_bound_from_cond(&rhs, selector_match, current_on_true);
+            let lhs_bound =
+                extract_selector_upper_bound_from_cond(&lhs, selector_match, current_on_true);
+            let rhs_bound =
+                extract_selector_upper_bound_from_cond(&rhs, selector_match, current_on_true);
             return if current_on_true {
                 match (lhs_bound, rhs_bound) {
                     (Some(lhs), Some(rhs)) => Some(lhs.max(rhs)),
@@ -4019,11 +4034,9 @@ fn extract_selector_upper_bound_from_cond(
     }
 }
 
-
 #[cfg(test)]
 #[path = "terminator_tests.rs"]
 mod tests;
-
 
 fn is_safe_selector_provenance_opcode(opcode: PcodeOpcode) -> bool {
     matches!(

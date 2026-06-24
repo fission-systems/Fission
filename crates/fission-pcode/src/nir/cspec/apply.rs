@@ -36,7 +36,10 @@ pub fn default_cspec_pair(options: &NirRenderOptions) -> Option<(String, String)
     let pair = match options.calling_convention {
         CallingConvention::WindowsX64 => ("x86:LE:64:default", "windows"),
         CallingConvention::SystemVAmd64 => ("x86:LE:64:default", "gcc"),
-        CallingConvention::X86_32 => ("x86:LE:32:default", if fmt.contains("PE") { "windows" } else { "gcc" }),
+        CallingConvention::X86_32 => (
+            "x86:LE:32:default",
+            if fmt.contains("PE") { "windows" } else { "gcc" },
+        ),
         CallingConvention::AArch64 => {
             if options.is_big_endian {
                 ("AARCH64:BE:64:v8A", "default")
@@ -99,7 +102,8 @@ pub fn apply_cspec_for_pair(
     if !languages_root.is_dir() {
         return false;
     }
-    let Some(resolved) = load_cspec_for_pair(&languages_root, language_id, compiler_spec_id, reg_map)
+    let Some(resolved) =
+        load_cspec_for_pair(&languages_root, language_id, compiler_spec_id, reg_map)
     else {
         return false;
     };
@@ -152,7 +156,9 @@ impl NirRenderOptions {
     }
 }
 
-pub(in crate::nir) fn sla_register_map_from_offset_map(map: &HashMap<(u64, u32), String>) -> SlaRegisterMap {
+pub(in crate::nir) fn sla_register_map_from_offset_map(
+    map: &HashMap<(u64, u32), String>,
+) -> SlaRegisterMap {
     map.iter()
         .map(|((off, sz), name)| (name.to_ascii_uppercase(), (*off, *sz)))
         .collect()

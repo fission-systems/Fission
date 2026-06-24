@@ -1,4 +1,4 @@
-use super::super::global_opt::{AliasKey, build_mem_ssa, nir_byte_size, MemDef, MemUse, MemPhi};
+use super::super::global_opt::{AliasKey, MemDef, MemPhi, MemUse, build_mem_ssa, nir_byte_size};
 use super::super::*;
 use super::partition_key_for_pointer_expr;
 use std::collections::{HashMap, HashSet};
@@ -34,9 +34,14 @@ pub(crate) fn apply_memory_heritage(func: &mut HirFunction) -> bool {
 
     for def in &mem_ssa.defs {
         if promotable_keys.contains(&def.key) {
-            let AliasKey::Partition(partition) = &def.key else { continue; };
+            let AliasKey::Partition(partition) = &def.key else {
+                continue;
+            };
             let size = (partition.offset_interval.1 - partition.offset_interval.0).max(1) as u32;
-            let ty = NirType::Int { bits: size * 8, signed: false };
+            let ty = NirType::Int {
+                bits: size * 8,
+                signed: false,
+            };
             let base_name = format!("{}_{}", partition.base_object, partition.offset_interval.0);
             // Replace invalid characters for C identifiers
             let base_name = base_name.replace(['.', ' ', '[', ']', '-', '+', '*', '/'], "_");
@@ -49,9 +54,14 @@ pub(crate) fn apply_memory_heritage(func: &mut HirFunction) -> bool {
 
     for phi in &mem_ssa.phis {
         if promotable_keys.contains(&phi.key) {
-            let AliasKey::Partition(partition) = &phi.key else { continue; };
+            let AliasKey::Partition(partition) = &phi.key else {
+                continue;
+            };
             let size = (partition.offset_interval.1 - partition.offset_interval.0).max(1) as u32;
-            let ty = NirType::Int { bits: size * 8, signed: false };
+            let ty = NirType::Int {
+                bits: size * 8,
+                signed: false,
+            };
             let base_name = format!("{}_{}", partition.base_object, partition.offset_interval.0);
             let base_name = base_name.replace(['.', ' ', '[', ']', '-', '+', '*', '/'], "_");
             let var_name = format!("vVar_{}_phi{}", base_name, phi.id);
@@ -154,7 +164,11 @@ impl<'a> Rewriter<'a> {
                             }
                         }
                     }
-                    HirLValue::Index { base, index: _, elem_ty } => {
+                    HirLValue::Index {
+                        base,
+                        index: _,
+                        elem_ty,
+                    } => {
                         let size = nir_byte_size(elem_ty);
                         let key = alias_key_for_ptr(base, size);
                         if self.promotable_keys.contains(&key) {
@@ -188,7 +202,11 @@ impl<'a> Rewriter<'a> {
             HirStmt::Block(body) => {
                 self.rewrite_stmts(body);
             }
-            HirStmt::If { cond, then_body, else_body } => {
+            HirStmt::If {
+                cond,
+                then_body,
+                else_body,
+            } => {
                 self.rewrite_expr(cond);
 
                 // Rewrite then/else branches
@@ -213,18 +231,28 @@ impl<'a> Rewriter<'a> {
 
                         if let Some(phi_var) = self.var_names.get(&(phi.key.clone(), phi.id)) {
                             // then branch assignment: phi_var = then_input_var
-                            if let Some(then_var) = self.var_names.get(&(phi.key.clone(), then_input)) {
-                                append_to_body_before_cf(then_body, HirStmt::Assign {
-                                    lhs: HirLValue::Var(phi_var.clone()),
-                                    rhs: HirExpr::Var(then_var.clone()),
-                                });
+                            if let Some(then_var) =
+                                self.var_names.get(&(phi.key.clone(), then_input))
+                            {
+                                append_to_body_before_cf(
+                                    then_body,
+                                    HirStmt::Assign {
+                                        lhs: HirLValue::Var(phi_var.clone()),
+                                        rhs: HirExpr::Var(then_var.clone()),
+                                    },
+                                );
                             }
                             // else branch assignment: phi_var = else_input_var
-                            if let Some(else_var) = self.var_names.get(&(phi.key.clone(), else_input)) {
-                                append_to_body_before_cf(else_body, HirStmt::Assign {
-                                    lhs: HirLValue::Var(phi_var.clone()),
-                                    rhs: HirExpr::Var(else_var.clone()),
-                                });
+                            if let Some(else_var) =
+                                self.var_names.get(&(phi.key.clone(), else_input))
+                            {
+                                append_to_body_before_cf(
+                                    else_body,
+                                    HirStmt::Assign {
+                                        lhs: HirLValue::Var(phi_var.clone()),
+                                        rhs: HirExpr::Var(else_var.clone()),
+                                    },
+                                );
                             }
                         }
                     }
@@ -248,22 +276,28 @@ impl<'a> Rewriter<'a> {
                 for phi in merge_phis {
                     if phi.inputs.len() >= 2 {
                         let body_input = phi.inputs[0]; // loop body end
-                        let pre_input = phi.inputs[1];  // before loop
+                        let pre_input = phi.inputs[1]; // before loop
 
                         if let Some(phi_var) = self.var_names.get(&(phi.key.clone(), phi.id)) {
                             // Pre-loop: phi_var = pre_input_var
-                            if let Some(pre_var) = self.var_names.get(&(phi.key.clone(), pre_input)) {
+                            if let Some(pre_var) = self.var_names.get(&(phi.key.clone(), pre_input))
+                            {
                                 pre_insert.push(HirStmt::Assign {
                                     lhs: HirLValue::Var(phi_var.clone()),
                                     rhs: HirExpr::Var(pre_var.clone()),
                                 });
                             }
                             // Loop end: phi_var = body_input_var
-                            if let Some(body_var) = self.var_names.get(&(phi.key.clone(), body_input)) {
-                                append_to_body_before_cf(body, HirStmt::Assign {
-                                    lhs: HirLValue::Var(phi_var.clone()),
-                                    rhs: HirExpr::Var(body_var.clone()),
-                                });
+                            if let Some(body_var) =
+                                self.var_names.get(&(phi.key.clone(), body_input))
+                            {
+                                append_to_body_before_cf(
+                                    body,
+                                    HirStmt::Assign {
+                                        lhs: HirLValue::Var(phi_var.clone()),
+                                        rhs: HirExpr::Var(body_var.clone()),
+                                    },
+                                );
                             }
                         }
                     }
@@ -288,23 +322,34 @@ impl<'a> Rewriter<'a> {
                         let pre_input = phi.inputs[1];
 
                         if let Some(phi_var) = self.var_names.get(&(phi.key.clone(), phi.id)) {
-                            if let Some(pre_var) = self.var_names.get(&(phi.key.clone(), pre_input)) {
+                            if let Some(pre_var) = self.var_names.get(&(phi.key.clone(), pre_input))
+                            {
                                 pre_insert.push(HirStmt::Assign {
                                     lhs: HirLValue::Var(phi_var.clone()),
                                     rhs: HirExpr::Var(pre_var.clone()),
                                 });
                             }
-                            if let Some(body_var) = self.var_names.get(&(phi.key.clone(), body_input)) {
-                                append_to_body_before_cf(body, HirStmt::Assign {
-                                    lhs: HirLValue::Var(phi_var.clone()),
-                                    rhs: HirExpr::Var(body_var.clone()),
-                                });
+                            if let Some(body_var) =
+                                self.var_names.get(&(phi.key.clone(), body_input))
+                            {
+                                append_to_body_before_cf(
+                                    body,
+                                    HirStmt::Assign {
+                                        lhs: HirLValue::Var(phi_var.clone()),
+                                        rhs: HirExpr::Var(body_var.clone()),
+                                    },
+                                );
                             }
                         }
                     }
                 }
             }
-            HirStmt::For { init, cond, update, body } => {
+            HirStmt::For {
+                init,
+                cond,
+                update,
+                body,
+            } => {
                 if let Some(s) = init {
                     let mut dummy = vec![(**s).clone()];
                     self.rewrite_stmts(&mut dummy);
@@ -345,23 +390,33 @@ impl<'a> Rewriter<'a> {
                         let pre_input = phi.inputs[1];
 
                         if let Some(phi_var) = self.var_names.get(&(phi.key.clone(), phi.id)) {
-                            if let Some(pre_var) = self.var_names.get(&(phi.key.clone(), pre_input)) {
+                            if let Some(pre_var) = self.var_names.get(&(phi.key.clone(), pre_input))
+                            {
                                 pre_insert.push(HirStmt::Assign {
                                     lhs: HirLValue::Var(phi_var.clone()),
                                     rhs: HirExpr::Var(pre_var.clone()),
                                 });
                             }
-                            if let Some(body_var) = self.var_names.get(&(phi.key.clone(), body_input)) {
-                                append_to_body_before_cf(body, HirStmt::Assign {
-                                    lhs: HirLValue::Var(phi_var.clone()),
-                                    rhs: HirExpr::Var(body_var.clone()),
-                                });
+                            if let Some(body_var) =
+                                self.var_names.get(&(phi.key.clone(), body_input))
+                            {
+                                append_to_body_before_cf(
+                                    body,
+                                    HirStmt::Assign {
+                                        lhs: HirLValue::Var(phi_var.clone()),
+                                        rhs: HirExpr::Var(body_var.clone()),
+                                    },
+                                );
                             }
                         }
                     }
                 }
             }
-            HirStmt::Switch { expr, cases, default } => {
+            HirStmt::Switch {
+                expr,
+                cases,
+                default,
+            } => {
                 self.rewrite_expr(expr);
 
                 for case in cases.iter_mut() {
@@ -386,9 +441,13 @@ impl<'a> Rewriter<'a> {
                 }
 
                 for (key, phis) in phis_by_key {
-                    let AliasKey::Partition(ref partition) = key else { continue; };
-                    let base_name = format!("{}_{}", partition.base_object, partition.offset_interval.0);
-                    let base_name = base_name.replace(['.', ' ', '[', ']', '-', '+', '*', '/'], "_");
+                    let AliasKey::Partition(ref partition) = key else {
+                        continue;
+                    };
+                    let base_name =
+                        format!("{}_{}", partition.base_object, partition.offset_interval.0);
+                    let base_name =
+                        base_name.replace(['.', ' ', '[', ']', '-', '+', '*', '/'], "_");
 
                     if let Some(first_phi) = phis.first() {
                         let d_saved = first_phi.inputs[0];
@@ -402,20 +461,26 @@ impl<'a> Rewriter<'a> {
                                     let arm_var = find_last_def_in_stmts(&case.body, &base_name)
                                         .or_else(|| pre_var.cloned());
                                     if let Some(v) = arm_var {
-                                        append_to_body_before_cf(&mut case.body, HirStmt::Assign {
-                                            lhs: HirLValue::Var(phi_var.clone()),
-                                            rhs: HirExpr::Var(v),
-                                        });
+                                        append_to_body_before_cf(
+                                            &mut case.body,
+                                            HirStmt::Assign {
+                                                lhs: HirLValue::Var(phi_var.clone()),
+                                                rhs: HirExpr::Var(v),
+                                            },
+                                        );
                                     }
                                 }
                                 // Assign for default arm
                                 let default_var = find_last_def_in_stmts(default, &base_name)
                                     .or_else(|| pre_var.cloned());
                                 if let Some(v) = default_var {
-                                    append_to_body_before_cf(default, HirStmt::Assign {
-                                        lhs: HirLValue::Var(phi_var.clone()),
-                                        rhs: HirExpr::Var(v),
-                                    });
+                                    append_to_body_before_cf(
+                                        default,
+                                        HirStmt::Assign {
+                                            lhs: HirLValue::Var(phi_var.clone()),
+                                            rhs: HirExpr::Var(v),
+                                        },
+                                    );
                                 }
                             }
                         }
@@ -446,7 +511,8 @@ impl<'a> Rewriter<'a> {
                     if self.current_use_idx < self.uses.len() {
                         let use_node = &self.uses[self.current_use_idx];
                         if let Some(reaching_id) = use_node.reaching_def {
-                            if let Some(var_name) = self.var_names.get(&(key.clone(), reaching_id)) {
+                            if let Some(var_name) = self.var_names.get(&(key.clone(), reaching_id))
+                            {
                                 promoted_var = Some(var_name.clone());
                                 is_promoted = true;
                             }
@@ -473,7 +539,12 @@ impl<'a> Rewriter<'a> {
                 self.rewrite_expr(lhs);
                 self.rewrite_expr(rhs);
             }
-            HirExpr::Select { cond, then_expr, else_expr, .. } => {
+            HirExpr::Select {
+                cond,
+                then_expr,
+                else_expr,
+                ..
+            } => {
                 self.rewrite_expr(cond);
                 self.rewrite_expr(then_expr);
                 self.rewrite_expr(else_expr);
@@ -517,7 +588,11 @@ fn find_last_def_in_stmts(stmts: &[HirStmt], base_name: &str) -> Option<String> 
                     return Some(name);
                 }
             }
-            HirStmt::If { then_body, else_body, .. } => {
+            HirStmt::If {
+                then_body,
+                else_body,
+                ..
+            } => {
                 if let Some(name) = find_last_def_in_stmts(then_body, base_name) {
                     return Some(name);
                 }
@@ -525,7 +600,9 @@ fn find_last_def_in_stmts(stmts: &[HirStmt], base_name: &str) -> Option<String> 
                     return Some(name);
                 }
             }
-            HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } | HirStmt::For { body, .. } => {
+            HirStmt::While { body, .. }
+            | HirStmt::DoWhile { body, .. }
+            | HirStmt::For { body, .. } => {
                 if let Some(name) = find_last_def_in_stmts(body, base_name) {
                     return Some(name);
                 }
@@ -548,7 +625,10 @@ fn find_last_def_in_stmts(stmts: &[HirStmt], base_name: &str) -> Option<String> 
 
 fn append_to_body_before_cf(body: &mut Vec<HirStmt>, stmt: HirStmt) {
     if let Some(last) = body.last() {
-        if matches!(last, HirStmt::Break | HirStmt::Continue | HirStmt::Goto(_) | HirStmt::Return(_)) {
+        if matches!(
+            last,
+            HirStmt::Break | HirStmt::Continue | HirStmt::Goto(_) | HirStmt::Return(_)
+        ) {
             let idx = body.len() - 1;
             body.insert(idx, stmt);
             return;

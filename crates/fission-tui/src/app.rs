@@ -74,7 +74,7 @@ pub struct App {
     pub offset_from_bottom: u16,
     /// Whether to show the help overlay.
     pub show_help: bool,
-    
+
     // ── Provider Menu ────────────────────────────────────────────────────────
     pub show_provider_menu: bool,
     pub provider_options: Vec<ProviderOption>,
@@ -97,7 +97,7 @@ pub struct App {
 
     // ── Mentions ─────────────────────────────────────────────────────────────
     pub mention_state: Option<MentionState>,
-    
+
     // ── Slash Commands ───────────────────────────────────────────────────────
     pub slash_state: Option<SlashCommandState>,
 
@@ -214,9 +214,17 @@ impl App {
     pub fn handle_explorer_scroll_up(&mut self, x: u16, y: u16, n: u16) {
         let disasm = self.disasm_area.get();
         let decomp = self.decomp_area.get();
-        if x >= disasm.x && x < disasm.x + disasm.width && y >= disasm.y && y < disasm.y + disasm.height {
+        if x >= disasm.x
+            && x < disasm.x + disasm.width
+            && y >= disasm.y
+            && y < disasm.y + disasm.height
+        {
             self.disasm_scroll = self.disasm_scroll.saturating_sub(n);
-        } else if x >= decomp.x && x < decomp.x + decomp.width && y >= decomp.y && y < decomp.y + decomp.height {
+        } else if x >= decomp.x
+            && x < decomp.x + decomp.width
+            && y >= decomp.y
+            && y < decomp.y + decomp.height
+        {
             self.decomp_scroll = self.decomp_scroll.saturating_sub(n);
         } else {
             self.explorer_scroll_up(n);
@@ -226,9 +234,17 @@ impl App {
     pub fn handle_explorer_scroll_down(&mut self, x: u16, y: u16, n: u16) {
         let disasm = self.disasm_area.get();
         let decomp = self.decomp_area.get();
-        if x >= disasm.x && x < disasm.x + disasm.width && y >= disasm.y && y < disasm.y + disasm.height {
+        if x >= disasm.x
+            && x < disasm.x + disasm.width
+            && y >= disasm.y
+            && y < disasm.y + disasm.height
+        {
             self.disasm_scroll = self.disasm_scroll.saturating_add(n);
-        } else if x >= decomp.x && x < decomp.x + decomp.width && y >= decomp.y && y < decomp.y + decomp.height {
+        } else if x >= decomp.x
+            && x < decomp.x + decomp.width
+            && y >= decomp.y
+            && y < decomp.y + decomp.height
+        {
             self.decomp_scroll = self.decomp_scroll.saturating_add(n);
         } else {
             self.explorer_scroll_down(n);
@@ -272,7 +288,8 @@ impl App {
     }
 
     pub fn explorer_search_insert_char(&mut self, ch: char) {
-        self.explorer_search_input.insert(self.explorer_search_cursor, ch);
+        self.explorer_search_input
+            .insert(self.explorer_search_cursor, ch);
         self.explorer_search_cursor += ch.len_utf8();
     }
 
@@ -301,7 +318,10 @@ impl App {
 
     pub fn explorer_search_cursor_right(&mut self) {
         if self.explorer_search_cursor < self.explorer_search_input.len() {
-            if let Some(ch) = self.explorer_search_input[self.explorer_search_cursor..].chars().next() {
+            if let Some(ch) = self.explorer_search_input[self.explorer_search_cursor..]
+                .chars()
+                .next()
+            {
                 self.explorer_search_cursor += ch.len_utf8();
             }
         }
@@ -314,7 +334,9 @@ impl App {
         disasm: Option<String>,
         decomp: Option<String>,
     ) {
-        if let Some(l) = label { self.explorer_label = Some(l); }
+        if let Some(l) = label {
+            self.explorer_label = Some(l);
+        }
         if let Some(d) = disasm {
             self.disasm_content = d;
             self.disasm_scroll = 0;
@@ -423,7 +445,9 @@ impl App {
         // Byte position of the '\n' that ends the previous line.
         let prev_nl_pos = text_before.rfind('\n').unwrap(); // safe: count > 0
         let line_start_byte = prev_nl_pos + 1;
-        let current_col = self.input[line_start_byte..self.input_cursor].chars().count();
+        let current_col = self.input[line_start_byte..self.input_cursor]
+            .chars()
+            .count();
 
         // Find start of the line *before* prev_nl_pos.
         let before_prev = &self.input[..prev_nl_pos];
@@ -441,27 +465,29 @@ impl App {
         let text_before = &self.input[..self.input_cursor];
         let current_line_idx = text_before.matches('\n').count();
         let total_lines = self.input.matches('\n').count();
-        
+
         if current_line_idx == total_lines {
             self.scroll_down();
             return;
         }
-        
+
         let line_start_byte = text_before.rfind('\n').map(|i| i + 1).unwrap_or(0);
-        let current_col = self.input[line_start_byte..self.input_cursor].chars().count();
-        
+        let current_col = self.input[line_start_byte..self.input_cursor]
+            .chars()
+            .count();
+
         let next_line_start = self.input[self.input_cursor..]
             .find('\n')
             .map(|i| self.input_cursor + i + 1)
             .unwrap_or(self.input.len());
-            
+
         let next_line_end = self.input[next_line_start..]
             .find('\n')
             .map(|i| next_line_start + i)
             .unwrap_or(self.input.len());
-            
+
         let next_line_text = &self.input[next_line_start..next_line_end];
-        
+
         let mut target_byte = next_line_start;
         for (i, c) in next_line_text.char_indices().take(current_col) {
             target_byte = next_line_start + i + c.len_utf8();
@@ -517,7 +543,8 @@ impl App {
                 }
 
                 let all = get_workspace_files();
-                state.options = all.into_iter()
+                state.options = all
+                    .into_iter()
                     .filter(|f| f.to_lowercase().contains(&state.query.to_lowercase()))
                     .take(20)
                     .collect();
@@ -531,7 +558,9 @@ impl App {
 
     pub fn mention_up(&mut self) {
         if let Some(ref mut state) = self.mention_state {
-            if state.options.is_empty() { return; }
+            if state.options.is_empty() {
+                return;
+            }
             if state.selected_idx > 0 {
                 state.selected_idx -= 1;
             } else {
@@ -542,7 +571,9 @@ impl App {
 
     pub fn mention_down(&mut self) {
         if let Some(ref mut state) = self.mention_state {
-            if state.options.is_empty() { return; }
+            if state.options.is_empty() {
+                return;
+            }
             if state.selected_idx + 1 < state.options.len() {
                 state.selected_idx += 1;
             } else {
@@ -612,7 +643,9 @@ impl App {
                     return;
                 }
 
-                let all_commands = vec!["clear", "quit", "help", "provider", "model", "history", "export"];
+                let all_commands = vec![
+                    "clear", "quit", "help", "provider", "model", "history", "export",
+                ];
                 state.options = all_commands
                     .into_iter()
                     .filter(|cmd| cmd.to_lowercase().contains(&state.query.to_lowercase()))
@@ -703,7 +736,9 @@ impl App {
     }
 
     pub fn provider_menu_up(&mut self) {
-        if self.provider_options.is_empty() { return; }
+        if self.provider_options.is_empty() {
+            return;
+        }
         if self.selected_provider_idx > 0 {
             self.selected_provider_idx -= 1;
         } else {
@@ -712,7 +747,9 @@ impl App {
     }
 
     pub fn provider_menu_down(&mut self) {
-        if self.provider_options.is_empty() { return; }
+        if self.provider_options.is_empty() {
+            return;
+        }
         if self.selected_provider_idx + 1 < self.provider_options.len() {
             self.selected_provider_idx += 1;
         } else {
@@ -721,7 +758,9 @@ impl App {
     }
 
     pub fn get_selected_provider(&self) -> Option<fission_ai::provider::ProviderKind> {
-        self.provider_options.get(self.selected_provider_idx).map(|p| p.kind.clone())
+        self.provider_options
+            .get(self.selected_provider_idx)
+            .map(|p| p.kind.clone())
     }
 
     // ── Model Menu ────────────────────────────────────────────────────────────
@@ -736,7 +775,9 @@ impl App {
     }
 
     pub fn model_menu_up(&mut self) {
-        if self.model_options.is_empty() { return; }
+        if self.model_options.is_empty() {
+            return;
+        }
         if self.selected_model_idx > 0 {
             self.selected_model_idx -= 1;
         } else {
@@ -745,7 +786,9 @@ impl App {
     }
 
     pub fn model_menu_down(&mut self) {
-        if self.model_options.is_empty() { return; }
+        if self.model_options.is_empty() {
+            return;
+        }
         if self.selected_model_idx + 1 < self.model_options.len() {
             self.selected_model_idx += 1;
         } else {
@@ -767,7 +810,13 @@ impl App {
                 if let Ok(entries) = std::fs::read_dir(&session_dir) {
                     for entry in entries.flatten() {
                         if let Ok(meta) = entry.metadata() {
-                            if meta.is_file() && entry.path().extension().map(|s| s == "json").unwrap_or(false) {
+                            if meta.is_file()
+                                && entry
+                                    .path()
+                                    .extension()
+                                    .map(|s| s == "json")
+                                    .unwrap_or(false)
+                            {
                                 let filename = entry.file_name().to_string_lossy().to_string();
                                 let mut name = filename.replace(".json", "");
                                 // Extract first few words if we saved them
@@ -781,7 +830,7 @@ impl App {
                 }
             }
         }
-        
+
         // Sort descending by name (which starts with timestamp if we use UNIX time)
         options.sort_by(|a, b| b.1.cmp(&a.1));
 
@@ -817,7 +866,10 @@ impl App {
 
     pub fn get_selected_session(&self) -> Option<std::path::PathBuf> {
         self.session_history.as_ref().and_then(|state| {
-            state.options.get(state.selected_idx).map(|(p, _)| p.clone())
+            state
+                .options
+                .get(state.selected_idx)
+                .map(|(p, _)| p.clone())
         })
     }
 
@@ -831,7 +883,9 @@ impl App {
 
             let (messages, binary_path) = {
                 let session = pipeline.session.lock().unwrap();
-                if session.messages.is_empty() { return; }
+                if session.messages.is_empty() {
+                    return;
+                }
                 (session.messages.clone(), session.binary_path.clone())
             };
 
@@ -844,7 +898,13 @@ impl App {
             // Sanitise: keep only alphanumeric, dash, underscore, dot.
             let safe_stem: String = stem
                 .chars()
-                .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' || c == '.' { c } else { '_' })
+                .map(|c| {
+                    if c.is_alphanumeric() || c == '-' || c == '_' || c == '.' {
+                        c
+                    } else {
+                        '_'
+                    }
+                })
                 .collect();
             let path = session_dir.join(format!("{}.json", safe_stem));
 
@@ -855,24 +915,26 @@ impl App {
     }
 
     pub fn export_to_markdown(&mut self) {
-        if self.entries.is_empty() { return; }
-        
+        if self.entries.is_empty() {
+            return;
+        }
+
         let timestamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_secs();
-        
+
         let filename = format!("fission_export_{}.md", timestamp);
-        
+
         let mut md = String::new();
         md.push_str(&format!("# Fission AI Export - {}\n\n", timestamp));
-        
+
         for entry in &self.entries {
             md.push_str(&format!("### {}\n\n", entry.role_label));
             md.push_str(&entry.content);
             md.push_str("\n\n---\n\n");
         }
-        
+
         if std::fs::write(&filename, md).is_ok() {
             self.entries.push(ChatEntry {
                 role_label: "System".to_string(),
@@ -899,19 +961,20 @@ fn get_workspace_files() -> Vec<String> {
                         continue;
                     }
                 }
-                
+
                 if path.is_dir() {
                     dirs_to_visit.push(path);
                 } else if path.is_file() {
                     if let Some(path_str) = path.to_str() {
-                        let clean_path = path_str.strip_prefix("./").unwrap_or(path_str).to_string();
+                        let clean_path =
+                            path_str.strip_prefix("./").unwrap_or(path_str).to_string();
                         results.push(clean_path);
                     }
                 }
             }
         }
     }
-    
+
     // Sort for stable display
     results.sort();
     results

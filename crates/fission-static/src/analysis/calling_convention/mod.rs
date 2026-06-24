@@ -1,10 +1,10 @@
 pub mod infer;
 
-use std::collections::BTreeSet;
-use fission_loader::loader::LoadedBinary;
-use fission_sleigh::runtime::RuntimeSleighFrontend;
-use fission_pcode::nir::CallingConvention;
 use super::control_flow_facts::FunctionControlFlowFacts;
+use fission_loader::loader::LoadedBinary;
+use fission_pcode::nir::CallingConvention;
+use fission_sleigh::runtime::RuntimeSleighFrontend;
+use std::collections::BTreeSet;
 
 /// calling convention analyzer that tracks register use-def
 /// to infer parameters and return registers.
@@ -19,7 +19,11 @@ impl<'a> CallingConventionAnalyzer<'a> {
     }
 
     /// Analyzes the calling convention of a single function.
-    pub fn analyze_function(&self, entry_address: u64, facts: &FunctionControlFlowFacts) -> Option<CallingConvention> {
+    pub fn analyze_function(
+        &self,
+        entry_address: u64,
+        facts: &FunctionControlFlowFacts,
+    ) -> Option<CallingConvention> {
         let mut read_before_write_registers = BTreeSet::new();
         let mut written_registers = BTreeSet::new();
 
@@ -46,12 +50,21 @@ impl<'a> CallingConventionAnalyzer<'a> {
             return None;
         };
 
-        let file_offset = (entry_address - section.virtual_address) as usize + section.file_offset as usize;
-        let bytes_avail = self.binary.data.as_slice().len().saturating_sub(file_offset).min(max_bytes);
-        if bytes_avail == 0 { return None; }
-        
+        let file_offset =
+            (entry_address - section.virtual_address) as usize + section.file_offset as usize;
+        let bytes_avail = self
+            .binary
+            .data
+            .as_slice()
+            .len()
+            .saturating_sub(file_offset)
+            .min(max_bytes);
+        if bytes_avail == 0 {
+            return None;
+        }
+
         let bytes = &self.binary.data.as_slice()[file_offset..file_offset + bytes_avail];
-        
+
         if let Ok(ops) = self.frontend.decode_and_lift(bytes, entry_address) {
             for op in ops {
                 // Check inputs (Reads)

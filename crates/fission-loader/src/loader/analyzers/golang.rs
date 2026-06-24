@@ -457,8 +457,13 @@ impl<'a> GoAnalyzer<'a> {
             if !section_names.contains(&section.name.as_str()) {
                 continue;
             }
-            if let Some(data) = self.binary.view_bytes(section.virtual_address, section.virtual_size as usize) {
-                if let Some(ver) = Self::parse_buildinfo_version(data, section.virtual_address, self.binary) {
+            if let Some(data) = self
+                .binary
+                .view_bytes(section.virtual_address, section.virtual_size as usize)
+            {
+                if let Some(ver) =
+                    Self::parse_buildinfo_version(data, section.virtual_address, self.binary)
+                {
                     return Some(ver);
                 }
             }
@@ -471,7 +476,11 @@ impl<'a> GoAnalyzer<'a> {
             let vsize = (section.virtual_size as usize).min(65536);
             if let Some(data) = self.binary.view_bytes(section.virtual_address, vsize) {
                 if let Some(offset) = Self::find_buildinfo_magic(data) {
-                    if let Some(ver) = Self::parse_buildinfo_version(&data[offset..], section.virtual_address + offset as u64, self.binary) {
+                    if let Some(ver) = Self::parse_buildinfo_version(
+                        &data[offset..],
+                        section.virtual_address + offset as u64,
+                        self.binary,
+                    ) {
                         return Some(ver);
                     }
                 }
@@ -511,7 +520,11 @@ impl<'a> GoAnalyzer<'a> {
             // Pointer-based: scan forward for "go1." in a 256-byte window
             let window = &data[content_start..content_start.saturating_add(256).min(data.len())];
             if let Some(pos) = window.windows(4).position(|w| w == b"go1.") {
-                let end = window[pos..].iter().position(|&b| b == 0 || b == b'\n').unwrap_or(32).min(32);
+                let end = window[pos..]
+                    .iter()
+                    .position(|&b| b == 0 || b == b'\n')
+                    .unwrap_or(32)
+                    .min(32);
                 if let Ok(s) = std::str::from_utf8(&window[pos..pos + end]) {
                     return Some(s.to_string());
                 }
@@ -565,9 +578,14 @@ impl<'a> GoAnalyzer<'a> {
         let ptr_size = if is_64bit { 8usize } else { 4usize };
         let struct_size = ptr_size * 2; // {ptr, len}
 
-        let section_views: Vec<(u64, u64, &[u8])> = self.binary.sections.iter()
+        let section_views: Vec<(u64, u64, &[u8])> = self
+            .binary
+            .sections
+            .iter()
             .filter_map(|s| {
-                let data = self.binary.view_bytes(s.virtual_address, s.virtual_size as usize)?;
+                let data = self
+                    .binary
+                    .view_bytes(s.virtual_address, s.virtual_size as usize)?;
                 Some((s.virtual_address, s.virtual_address + s.virtual_size, data))
             })
             .collect();
@@ -636,7 +654,8 @@ impl<'a> GoAnalyzer<'a> {
                         let (start, _, sec_data) = &section_views[i];
                         let offset_in_sec = (ptr_val - start) as usize;
                         if offset_in_sec + len_val as usize <= sec_data.len() {
-                            let str_bytes = &sec_data[offset_in_sec..offset_in_sec + len_val as usize];
+                            let str_bytes =
+                                &sec_data[offset_in_sec..offset_in_sec + len_val as usize];
                             if let Ok(s) = std::str::from_utf8(str_bytes) {
                                 // Valid UTF-8 GoString found
                                 let struct_addr = va + offset as u64;
@@ -707,11 +726,12 @@ mod tests {
     fn test_detect_go_version_real_binary() {
         let path = std::path::Path::new("/tmp/go_test_bin/go_test_binary");
         if !path.exists() {
-            eprintln!("skipped: /tmp/go_test_bin/go_test_binary not found (run: cd /tmp/go_test_bin && go build -o go_test_binary .)");
+            eprintln!(
+                "skipped: /tmp/go_test_bin/go_test_binary not found (run: cd /tmp/go_test_bin && go build -o go_test_binary .)"
+            );
             return;
         }
-        let binary = LoadedBinary::from_file(path)
-            .expect("should load Go binary");
+        let binary = LoadedBinary::from_file(path).expect("should load Go binary");
 
         eprintln!("format: {}", binary.format);
         eprintln!("go_version: {:?}", binary.go_version);

@@ -531,9 +531,7 @@ fn rewrite_memory_slot_lvalue(
             changed |= rewrite_memory_slot_expr(index, aliases);
             changed
         }
-        HirLValue::FieldAccess { base, .. } => {
-            rewrite_memory_slot_expr(base, aliases)
-        }
+        HirLValue::FieldAccess { base, .. } => rewrite_memory_slot_expr(base, aliases),
     }
 }
 

@@ -10,7 +10,9 @@ use std::collections::{BTreeSet, HashMap};
 use std::num::NonZeroUsize;
 use std::sync::{Mutex, OnceLock};
 
-use fission_core::core::ghidra_no_return::{binary_format_to_ghidra_format, ghidra_no_return_index};
+use fission_core::core::ghidra_no_return::{
+    binary_format_to_ghidra_format, ghidra_no_return_index,
+};
 use fission_loader::loader::{LoadedBinary, RelocationEntry};
 use fission_sleigh::runtime::{DecodeMemoryContext, RuntimeSleighFrontend};
 use lru::LruCache;
@@ -71,10 +73,7 @@ pub fn control_flow_facts_for(binary: &LoadedBinary) -> ControlFlowFacts {
 }
 
 impl ControlFlowFacts {
-    pub fn assemble(
-        binary: &LoadedBinary,
-        frontend: Option<&RuntimeSleighFrontend>,
-    ) -> Self {
+    pub fn assemble(binary: &LoadedBinary, frontend: Option<&RuntimeSleighFrontend>) -> Self {
         let label_leaders = collect_label_leaders(binary);
         let function_extents = collect_function_extents(binary);
         let indirect_targets = collect_indirect_targets(binary);
@@ -95,9 +94,11 @@ impl ControlFlowFacts {
                     }
                     XrefType::Call => {
                         if ghidra_format.is_some_and(|fmt| {
-                            resolve_call_target_name(binary, xref.to_addr).is_some_and(|(symbol, library)| {
-                                no_return_idx.is_no_return(fmt, compiler_key, library, &symbol)
-                            })
+                            resolve_call_target_name(binary, xref.to_addr).is_some_and(
+                                |(symbol, library)| {
+                                    no_return_idx.is_no_return(fmt, compiler_key, library, &symbol)
+                                },
+                            )
                         }) {
                             noreturn_callsites.insert(xref.from_addr);
                         }
@@ -134,8 +135,7 @@ impl ControlFlowFacts {
             .filter(|addr| (entry_address..limit_addr).contains(addr))
             .collect();
         if block_entry_hints.is_empty() {
-            block_entry_hints =
-                binary.cfg_block_entry_hints_in_range(entry_address, limit_addr);
+            block_entry_hints = binary.cfg_block_entry_hints_in_range(entry_address, limit_addr);
         }
 
         let mut flow_leaders: BTreeSet<u64> = self
@@ -339,11 +339,7 @@ fn collect_indirect_targets(binary: &LoadedBinary) -> BTreeSet<u64> {
     targets
 }
 
-fn collect_relocation_targets_in_range(
-    binary: &LoadedBinary,
-    start: u64,
-    end: u64,
-) -> Vec<u64> {
+fn collect_relocation_targets_in_range(binary: &LoadedBinary, start: u64, end: u64) -> Vec<u64> {
     let little_endian = !binary.inner().arch_spec.contains("BE");
     let mut targets = Vec::new();
 
@@ -367,7 +363,8 @@ fn relative_address_bases(binary: &LoadedBinary, entry_address: u64) -> Vec<u64>
     for section in &inner.sections {
         let start = section.virtual_address;
         let end = start.saturating_add(section.virtual_size);
-        if entry_address >= start && entry_address < end && !relative_address_bases.contains(&start) {
+        if entry_address >= start && entry_address < end && !relative_address_bases.contains(&start)
+        {
             relative_address_bases.push(start);
         }
     }
@@ -410,7 +407,10 @@ fn ghidra_no_return_compiler_key(binary: &LoadedBinary) -> Option<&'static str> 
     }
 }
 
-fn resolve_call_target_name(binary: &LoadedBinary, target_addr: u64) -> Option<(String, Option<&str>)> {
+fn resolve_call_target_name(
+    binary: &LoadedBinary,
+    target_addr: u64,
+) -> Option<(String, Option<&str>)> {
     resolve_call_target_name_direct(binary, target_addr).or_else(|| {
         let ptr_size = if binary.is_64bit { 8 } else { 4 };
         let raw = binary.view_bytes(target_addr, ptr_size)?;
@@ -438,7 +438,11 @@ fn resolve_call_target_name_direct(
         let library = iat_name
             .rsplit_once('!')
             .map(|(lib, _)| lib.strip_suffix(".dll").unwrap_or(lib))
-            .or_else(|| binary.function_at_exact(target_addr).and_then(|f| f.external_library.as_deref()));
+            .or_else(|| {
+                binary
+                    .function_at_exact(target_addr)
+                    .and_then(|f| f.external_library.as_deref())
+            });
         return Some((symbol, library));
     }
 
@@ -465,29 +469,30 @@ mod tests {
 
     #[test]
     fn label_leaders_include_function_entries_and_loader_labels() {
-        let binary = LoadedBinaryBuilder::new("sample.exe".to_string(), DataBuffer::Heap(vec![0; 0x1000]))
-            .format("PE")
-            .is_64bit(true)
-            .image_base(0x1000)
-            .add_section(fission_loader::loader::SectionInfo {
-                name: ".text".to_string(),
-                virtual_address: 0x1000,
-                virtual_size: 0x1000,
-                file_offset: 0,
-                file_size: 0x1000,
-                is_executable: true,
-                is_readable: true,
-                is_writable: false,
-            })
-            .cfg_label_leaders([0x1005])
-            .add_function(FunctionInfo {
-                name: "main".to_string(),
-                address: 0x1000,
-                size: 32,
-                ..Default::default()
-            })
-            .build()
-            .expect("build");
+        let binary =
+            LoadedBinaryBuilder::new("sample.exe".to_string(), DataBuffer::Heap(vec![0; 0x1000]))
+                .format("PE")
+                .is_64bit(true)
+                .image_base(0x1000)
+                .add_section(fission_loader::loader::SectionInfo {
+                    name: ".text".to_string(),
+                    virtual_address: 0x1000,
+                    virtual_size: 0x1000,
+                    file_offset: 0,
+                    file_size: 0x1000,
+                    is_executable: true,
+                    is_readable: true,
+                    is_writable: false,
+                })
+                .cfg_label_leaders([0x1005])
+                .add_function(FunctionInfo {
+                    name: "main".to_string(),
+                    address: 0x1000,
+                    size: 32,
+                    ..Default::default()
+                })
+                .build()
+                .expect("build");
 
         let facts = ControlFlowFacts::assemble(&binary, None);
         assert!(facts.label_leaders.contains(&0x1000));

@@ -7,7 +7,7 @@ use super::stages::{
     run_stage_proto_recovery, run_stage_stackstall, run_stage_type_early,
 };
 use crate::nir::action_pipeline::{
-    group, GhidraActionConcept, Pass, PassCtx, PassOutcome, Pipeline,
+    GhidraActionConcept, Pass, PassCtx, PassOutcome, Pipeline, group,
 };
 use crate::nir::types::HirFunction;
 use std::time::Instant;
@@ -52,41 +52,43 @@ pub(crate) fn build_normalize_pipeline() -> Pipeline {
     let block = GhidraActionConcept::BlockGraphStructuring;
 
     Pipeline::new("normalize")
-        .group(
-            group("proto_recovery", concept)
-                .pass(stage_pass("proto_recovery", concept, run_stage_proto_recovery)),
-        )
-        .group(
-            group("deadcode_dynamic", concept)
-                .pass(stage_pass("deadcode_dynamic", concept, run_stage_deadcode_dynamic)),
-        )
-        .group(
-            group("type_early", proto)
-                .pass(stage_pass("type_early", proto, run_stage_type_early)),
-        )
-        .group(
-            group("stackstall", concept)
-                .pass(stage_pass("stackstall", concept, run_stage_stackstall)),
-        )
+        .group(group("proto_recovery", concept).pass(stage_pass(
+            "proto_recovery",
+            concept,
+            run_stage_proto_recovery,
+        )))
+        .group(group("deadcode_dynamic", concept).pass(stage_pass(
+            "deadcode_dynamic",
+            concept,
+            run_stage_deadcode_dynamic,
+        )))
+        .group(group("type_early", proto).pass(stage_pass(
+            "type_early",
+            proto,
+            run_stage_type_early,
+        )))
+        .group(group("stackstall", concept).pass(stage_pass(
+            "stackstall",
+            concept,
+            run_stage_stackstall,
+        )))
         .group(group("heritage_value_recovery", heritage).pass(stage_pass(
             "heritage_value_recovery",
             heritage,
             run_stage_heritage_value_recovery,
         )))
-        .group(
-            group("memory_recovery", concept)
-                .pass(stage_pass("memory_recovery", concept, run_stage_memory_recovery)),
-        )
+        .group(group("memory_recovery", concept).pass(stage_pass(
+            "memory_recovery",
+            concept,
+            run_stage_memory_recovery,
+        )))
         .group(group("merge", proto).pass(stage_pass("merge", proto, run_stage_merge)))
         .group(group("block_structure_1", block).pass(stage_pass(
             "block_structure_1",
             block,
             run_stage_block_structure_1,
         )))
-        .group(
-            group("cleanup", concept)
-                .pass(stage_pass("cleanup", concept, run_stage_cleanup)),
-        )
+        .group(group("cleanup", concept).pass(stage_pass("cleanup", concept, run_stage_cleanup)))
 }
 
 pub(crate) fn run_normalize_pipeline(func: &mut HirFunction, diag: bool, perf: bool) {

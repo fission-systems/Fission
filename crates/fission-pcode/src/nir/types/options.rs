@@ -69,7 +69,6 @@ pub struct NirRenderOptions {
     pub cspec_return_target: Option<(u64, u32)>,
 
     // ── .pspec-derived fields ─────────────────────────────────────────────────
-
     /// Authoritative program counter register name from `.pspec` `<programcounter register="..."/>`.
     ///
     /// Examples: `"RIP"` (x86-64), `"pc"` (ARM/MIPS/AArch64), `"PC"` (PowerPC).
@@ -97,7 +96,6 @@ pub struct NirRenderOptions {
     #[serde(default, skip)]
     pub pspec_hidden_registers: std::collections::HashSet<String>,
 }
-
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum FormatFamily {
@@ -424,8 +422,7 @@ impl NirRenderOptions {
             .filter(|(start, end)| {
                 // Exclude the section that contains image_base (likely .text)
                 // and skip zero-sized sections.
-                *end > *start
-                    && !(self.image_base >= *start && self.image_base < *end)
+                *end > *start && !(self.image_base >= *start && self.image_base < *end)
             })
             .map(|(start, _)| *start)
             .next()

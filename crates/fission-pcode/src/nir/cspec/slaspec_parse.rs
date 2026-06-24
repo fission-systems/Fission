@@ -7,7 +7,7 @@ use std::collections::{BTreeMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{Context, Result, anyhow, bail};
 
 /// One hardware register entry extracted from a `define register` statement.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -136,7 +136,9 @@ impl PreprocessorState {
                     .to_string();
                 let resolved = current_file
                     .parent()
-                    .ok_or_else(|| anyhow!("include parent missing for {}", current_file.display()))?
+                    .ok_or_else(|| {
+                        anyhow!("include parent missing for {}", current_file.display())
+                    })?
                     .join(include_path);
                 self.expand_file(&resolved)?;
             }
@@ -175,8 +177,7 @@ impl PreprocessorState {
             return Ok(());
         }
         if trimmed.starts_with("@elif ") {
-            let predicate =
-                evaluate_if_expression(trimmed["@elif ".len()..].trim(), &self.defines);
+            let predicate = evaluate_if_expression(trimmed["@elif ".len()..].trim(), &self.defines);
             let Some(last) = conditionals.last_mut() else {
                 bail!("@elif without @if in {}", current_file.display());
             };
@@ -198,9 +199,9 @@ impl PreprocessorState {
             return Ok(());
         }
         if trimmed == "@endif" {
-            conditionals.pop().ok_or_else(|| {
-                anyhow!("@endif without @if in {}", current_file.display())
-            })?;
+            conditionals
+                .pop()
+                .ok_or_else(|| anyhow!("@endif without @if in {}", current_file.display()))?;
             return Ok(());
         }
 
@@ -287,8 +288,10 @@ fn extract_define_registers(expanded: &ExpandedSpec) -> Result<Vec<ParsedRegiste
                 if idx >= expanded.lines.len() {
                     break;
                 }
-                let next =
-                    normalize_define_line_with_macros(expanded.lines[idx].trim(), &expanded.defines);
+                let next = normalize_define_line_with_macros(
+                    expanded.lines[idx].trim(),
+                    &expanded.defines,
+                );
                 block.push(' ');
                 block.push_str(&next);
                 if next.contains(']') {
@@ -303,7 +306,9 @@ fn extract_define_registers(expanded: &ExpandedSpec) -> Result<Vec<ParsedRegiste
 }
 
 fn normalize_define_line_with_macros(line: &str, defines: &BTreeMap<String, String>) -> String {
-    let mut normalized = line.replace("offset =", "offset=").replace("size =", "size=");
+    let mut normalized = line
+        .replace("offset =", "offset=")
+        .replace("size =", "size=");
     while normalized.contains("offset= ") {
         normalized = normalized.replace("offset= ", "offset=");
     }
@@ -420,7 +425,10 @@ fn parse_define_register_block(
 
 fn parse_u64_token(token: &str, defines: &BTreeMap<String, String>) -> Result<u64> {
     let token = substitute_macros(token.trim(), defines);
-    if let Some(hex) = token.strip_prefix("0x").or_else(|| token.strip_prefix("0X")) {
+    if let Some(hex) = token
+        .strip_prefix("0x")
+        .or_else(|| token.strip_prefix("0X"))
+    {
         u64::from_str_radix(hex, 16).with_context(|| format!("bad hex offset {token}"))
     } else {
         token
@@ -472,21 +480,22 @@ mod tests {
     #[test]
     fn powerpc32_slaspec_parses() {
         let root = super::super::apply::sleigh_languages_root();
-        let path = super::super::ldefs::global_language_slaspec_index(&root)
-            ["PowerPC:BE:32:default"]
-            .clone();
+        let path =
+            super::super::ldefs::global_language_slaspec_index(&root)["PowerPC:BE:32:default"]
+                .clone();
         let parsed = parse_registers_from_slaspec(&path).expect("parse powerpc");
         assert!(parsed.iter().any(|r| r.name == "r0" && r.offset == 0));
     }
     #[test]
     fn aarch64_slaspec_contains_x0() {
         let root = super::super::apply::sleigh_languages_root();
-        let path = super::super::ldefs::global_language_slaspec_index(&root)
-            ["AARCH64:LE:64:v8A"]
-            .clone();
+        let path =
+            super::super::ldefs::global_language_slaspec_index(&root)["AARCH64:LE:64:v8A"].clone();
         let parsed = parse_registers_from_slaspec(&path).expect("parse AARCH64");
         assert!(
-            parsed.iter().any(|r| r.name == "x0" && r.offset == 0x4000 && r.size == 8),
+            parsed
+                .iter()
+                .any(|r| r.name == "x0" && r.offset == 0x4000 && r.size == 8),
             "parsed {} registers, sample: {:?}",
             parsed.len(),
             parsed.iter().take(5).collect::<Vec<_>>()

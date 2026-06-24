@@ -185,7 +185,9 @@ fn scan_expr(
             scan_expr(lhs, arity_map, summary_map);
             scan_expr(rhs, arity_map, summary_map);
         }
-        HirExpr::PtrOffset { base, .. } | HirExpr::FieldAccess { base, .. } => scan_expr(base, arity_map, summary_map),
+        HirExpr::PtrOffset { base, .. } | HirExpr::FieldAccess { base, .. } => {
+            scan_expr(base, arity_map, summary_map)
+        }
         HirExpr::Index { base, index, .. } => {
             scan_expr(base, arity_map, summary_map);
             scan_expr(index, arity_map, summary_map);

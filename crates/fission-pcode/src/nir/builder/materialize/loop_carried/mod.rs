@@ -20,7 +20,9 @@ impl<'a> PreviewBuilder<'a> {
     ) -> Option<String> {
         let is_candidate = Self::is_loop_carried_register_update_candidate(output);
         let block_idx = self.address_to_index.get(&block.start_address).copied();
-        let is_update = block_idx.is_some_and(|b_idx| self.output_is_loop_carried_register_update(b_idx, op_idx, op, output));
+        let is_update = block_idx.is_some_and(|b_idx| {
+            self.output_is_loop_carried_register_update(b_idx, op_idx, op, output)
+        });
 
         if !is_candidate {
             return None;
@@ -29,8 +31,13 @@ impl<'a> PreviewBuilder<'a> {
         if !is_update {
             return None;
         }
-        let loop_head = self.loop_bodies.iter().filter(|body| body.body.contains(&block_idx)).min_by_key(|body| body.body.len()).map(|body| body.head)?;
-        
+        let loop_head = self
+            .loop_bodies
+            .iter()
+            .filter(|body| body.body.contains(&block_idx))
+            .min_by_key(|body| body.body.len())
+            .map(|body| body.head)?;
+
         if let Some(name) = self.loop_header_explicit_merge_binding_name(loop_head, output) {
             return Some(name);
         }
@@ -48,8 +55,7 @@ impl<'a> PreviewBuilder<'a> {
         if let Some(name) = self.prior_materialized_same_register_output_name(output) {
             return Some(name);
         }
-        if let Some(name) =
-            self.prior_materialized_local_wide_alias_name(block_idx, op_idx, output)
+        if let Some(name) = self.prior_materialized_local_wide_alias_name(block_idx, op_idx, output)
         {
             return Some(name);
         }
@@ -117,8 +123,7 @@ impl<'a> PreviewBuilder<'a> {
         if let Some(name) = self.prior_materialized_same_register_output_name(output) {
             return Some(name);
         }
-        if let Some(name) =
-            self.prior_materialized_local_wide_alias_name(block_idx, op_idx, output)
+        if let Some(name) = self.prior_materialized_local_wide_alias_name(block_idx, op_idx, output)
         {
             return Some(name);
         }

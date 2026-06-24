@@ -182,9 +182,7 @@ mod tests {
             .get("PsLookupProcessByProcessId")
             .expect("PsLookupProcessByProcessId");
         assert_eq!(ps_lookup.params.len(), 2);
-        let zw_term = db
-            .get("ZwTerminateProcess")
-            .expect("ZwTerminateProcess");
+        let zw_term = db.get("ZwTerminateProcess").expect("ZwTerminateProcess");
         assert_eq!(zw_term.params.len(), 2);
         let ke_attach = db
             .get("KeStackAttachProcess")
@@ -198,13 +196,9 @@ mod tests {
             .get("ObfDereferenceObject")
             .expect("ObfDereferenceObject");
         assert_eq!(obf_deref.params.len(), 1);
-        let mm_copy = db
-            .get("MmCopyVirtualMemory")
-            .expect("MmCopyVirtualMemory");
+        let mm_copy = db.get("MmCopyVirtualMemory").expect("MmCopyVirtualMemory");
         assert_eq!(mm_copy.params.len(), 7);
-        let ob_reg = db
-            .get("ObRegisterCallbacks")
-            .expect("ObRegisterCallbacks");
+        let ob_reg = db.get("ObRegisterCallbacks").expect("ObRegisterCallbacks");
         assert_eq!(ob_reg.params.len(), 2);
     }
 }

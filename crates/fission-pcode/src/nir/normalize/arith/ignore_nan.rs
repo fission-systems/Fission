@@ -35,9 +35,11 @@ fn get_isnan_var(expr: &HirExpr) -> Option<&str> {
 
 fn get_negated_isnan_var(expr: &HirExpr) -> Option<&str> {
     match expr {
-        HirExpr::Unary { op: HirUnaryOp::Not, expr: inner, .. } => {
-            get_isnan_var(inner)
-        }
+        HirExpr::Unary {
+            op: HirUnaryOp::Not,
+            expr: inner,
+            ..
+        } => get_isnan_var(inner),
         _ => None,
     }
 }
@@ -73,7 +75,13 @@ fn contains_comparison_involving(expr: &HirExpr, var_name: &str) -> bool {
 }
 
 fn collect_and_operands(expr: &HirExpr, operands: &mut Vec<HirExpr>) {
-    if let HirExpr::Binary { op: HirBinaryOp::LogicalAnd, lhs, rhs, .. } = expr {
+    if let HirExpr::Binary {
+        op: HirBinaryOp::LogicalAnd,
+        lhs,
+        rhs,
+        ..
+    } = expr
+    {
         collect_and_operands(lhs, operands);
         collect_and_operands(rhs, operands);
     } else {
@@ -82,7 +90,13 @@ fn collect_and_operands(expr: &HirExpr, operands: &mut Vec<HirExpr>) {
 }
 
 fn collect_or_operands(expr: &HirExpr, operands: &mut Vec<HirExpr>) {
-    if let HirExpr::Binary { op: HirBinaryOp::LogicalOr, lhs, rhs, .. } = expr {
+    if let HirExpr::Binary {
+        op: HirBinaryOp::LogicalOr,
+        lhs,
+        rhs,
+        ..
+    } = expr
+    {
         collect_or_operands(lhs, operands);
         collect_or_operands(rhs, operands);
     } else {
@@ -143,7 +157,12 @@ fn visit_expr(expr: &mut HirExpr) -> bool {
                 changed |= visit_expr(arg);
             }
         }
-        HirExpr::Select { cond, then_expr, else_expr, .. } => {
+        HirExpr::Select {
+            cond,
+            then_expr,
+            else_expr,
+            ..
+        } => {
             changed |= visit_expr(cond);
             changed |= visit_expr(then_expr);
             changed |= visit_expr(else_expr);
@@ -160,7 +179,7 @@ fn visit_expr(expr: &mut HirExpr) -> bool {
         if *op == HirBinaryOp::LogicalAnd {
             let mut operands = Vec::new();
             collect_and_operands(expr, &mut operands);
-            
+
             let mut to_remove = HashSet::new();
             for (idx, operand) in operands.iter().enumerate() {
                 if let Some(var_name) = get_negated_isnan_var(operand) {
@@ -247,7 +266,11 @@ fn visit_stmt(stmt: &mut HirStmt) -> bool {
                 changed |= visit_stmt(s);
             }
         }
-        HirStmt::If { cond, then_body, else_body } => {
+        HirStmt::If {
+            cond,
+            then_body,
+            else_body,
+        } => {
             changed |= visit_expr(cond);
             for s in then_body {
                 changed |= visit_stmt(s);
@@ -256,7 +279,11 @@ fn visit_stmt(stmt: &mut HirStmt) -> bool {
                 changed |= visit_stmt(s);
             }
         }
-        HirStmt::Switch { expr, cases, default } => {
+        HirStmt::Switch {
+            expr,
+            cases,
+            default,
+        } => {
             changed |= visit_expr(expr);
             for case in cases {
                 for s in &mut case.body {

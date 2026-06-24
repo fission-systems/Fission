@@ -24,12 +24,12 @@ fn rewrite_stmts(stmts: &mut Vec<HirStmt>, type_map: &HashMap<String, NirType>) 
     // Step 1: Recursively simplify nested blocks first
     for stmt in stmts.iter_mut() {
         match stmt {
-            HirStmt::Block(body)
-            | HirStmt::While { body, .. }
-            | HirStmt::DoWhile { body, .. } => {
+            HirStmt::Block(body) | HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
                 changed |= rewrite_stmts(body, type_map);
             }
-            HirStmt::For { init, update, body, .. } => {
+            HirStmt::For {
+                init, update, body, ..
+            } => {
                 if let Some(init_stmt) = init {
                     changed |= rewrite_stmt_nested(init_stmt.as_mut(), type_map);
                 }
@@ -38,7 +38,11 @@ fn rewrite_stmts(stmts: &mut Vec<HirStmt>, type_map: &HashMap<String, NirType>) 
                 }
                 changed |= rewrite_stmts(body, type_map);
             }
-            HirStmt::If { then_body, else_body, .. } => {
+            HirStmt::If {
+                then_body,
+                else_body,
+                ..
+            } => {
                 changed |= rewrite_stmts(then_body, type_map);
                 changed |= rewrite_stmts(else_body, type_map);
             }
@@ -54,8 +58,14 @@ fn rewrite_stmts(stmts: &mut Vec<HirStmt>, type_map: &HashMap<String, NirType>) 
 
     // Step 2: Handle If-Then-Else pattern (in-place replacement of If statement)
     for stmt in stmts.iter_mut() {
-        if let HirStmt::If { cond, then_body, else_body } = stmt {
-            if let Some((lhs_name, then_expr, else_expr)) = match_if_then_else(then_body, else_body) {
+        if let HirStmt::If {
+            cond,
+            then_body,
+            else_body,
+        } = stmt
+        {
+            if let Some((lhs_name, then_expr, else_expr)) = match_if_then_else(then_body, else_body)
+            {
                 let ty = type_map.get(&lhs_name).cloned().unwrap_or_else(|| {
                     let et = expr_type(&then_expr);
                     if et != NirType::Unknown {
@@ -86,12 +96,24 @@ fn rewrite_stmts(stmts: &mut Vec<HirStmt>, type_map: &HashMap<String, NirType>) 
             let right = &stmts[i + 1];
             match (left, right) {
                 (
-                    HirStmt::Assign { lhs: HirLValue::Var(var_l), rhs: default_val },
-                    HirStmt::If { cond, then_body, else_body },
+                    HirStmt::Assign {
+                        lhs: HirLValue::Var(var_l),
+                        rhs: default_val,
+                    },
+                    HirStmt::If {
+                        cond,
+                        then_body,
+                        else_body,
+                    },
                 ) if else_body.is_empty() => {
                     if let Some((var_r, override_val)) = match_single_assign(then_body) {
                         if var_l == &var_r {
-                            Some((var_l.clone(), cond.clone(), override_val, default_val.clone()))
+                            Some((
+                                var_l.clone(),
+                                cond.clone(),
+                                override_val,
+                                default_val.clone(),
+                            ))
                         } else {
                             None
                         }
@@ -135,12 +157,12 @@ fn rewrite_stmts(stmts: &mut Vec<HirStmt>, type_map: &HashMap<String, NirType>) 
 fn rewrite_stmt_nested(stmt: &mut HirStmt, type_map: &HashMap<String, NirType>) -> bool {
     let mut changed = false;
     match stmt {
-        HirStmt::Block(body)
-        | HirStmt::While { body, .. }
-        | HirStmt::DoWhile { body, .. } => {
+        HirStmt::Block(body) | HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
             changed |= rewrite_stmts(body, type_map);
         }
-        HirStmt::For { init, update, body, .. } => {
+        HirStmt::For {
+            init, update, body, ..
+        } => {
             if let Some(init_stmt) = init {
                 changed |= rewrite_stmt_nested(init_stmt.as_mut(), type_map);
             }
@@ -149,9 +171,14 @@ fn rewrite_stmt_nested(stmt: &mut HirStmt, type_map: &HashMap<String, NirType>) 
             }
             changed |= rewrite_stmts(body, type_map);
         }
-        HirStmt::If { cond, then_body, else_body } => {
+        HirStmt::If {
+            cond,
+            then_body,
+            else_body,
+        } => {
             // Check if this If itself is matchable
-            if let Some((lhs_name, then_expr, else_expr)) = match_if_then_else(then_body, else_body) {
+            if let Some((lhs_name, then_expr, else_expr)) = match_if_then_else(then_body, else_body)
+            {
                 let ty = type_map.get(&lhs_name).cloned().unwrap_or_else(|| {
                     let et = expr_type(&then_expr);
                     if et != NirType::Unknown {
@@ -192,13 +219,19 @@ fn match_single_assign(body: &[HirStmt]) -> Option<(String, HirExpr)> {
         return None;
     }
     match &body[0] {
-        HirStmt::Assign { lhs: HirLValue::Var(name), rhs } => Some((name.clone(), rhs.clone())),
+        HirStmt::Assign {
+            lhs: HirLValue::Var(name),
+            rhs,
+        } => Some((name.clone(), rhs.clone())),
         _ => None,
     }
 }
 
 /// Matches `then_body = [x = a;]` and `else_body = [x = b;]`, returning `Some((x, a, b))`
-fn match_if_then_else(then_body: &[HirStmt], else_body: &[HirStmt]) -> Option<(String, HirExpr, HirExpr)> {
+fn match_if_then_else(
+    then_body: &[HirStmt],
+    else_body: &[HirStmt],
+) -> Option<(String, HirExpr, HirExpr)> {
     let (var_then, expr_then) = match_single_assign(then_body)?;
     let (var_else, expr_else) = match_single_assign(else_body)?;
     if var_then == var_else {

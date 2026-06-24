@@ -377,9 +377,7 @@ fn lvalue_uses_var(lhs: &HirLValue, name: &str) -> bool {
         HirLValue::Index { base, index, .. } => {
             expr_uses_var(base, name) || expr_uses_var(index, name)
         }
-        HirLValue::FieldAccess { base, .. } => {
-            expr_uses_var(base, name)
-        }
+        HirLValue::FieldAccess { base, .. } => expr_uses_var(base, name),
     }
 }
 
@@ -519,9 +517,7 @@ fn rewrite_alias_lvalue(lhs: &mut HirLValue, aliases: &HashMap<String, Aggregate
             changed
         }
         HirLValue::Var(_) => false,
-        HirLValue::FieldAccess { base, .. } => {
-            rewrite_alias_expr(base, aliases)
-        }
+        HirLValue::FieldAccess { base, .. } => rewrite_alias_expr(base, aliases),
     }
 }
 
@@ -854,9 +850,13 @@ mod tests {
         assert_eq!(*size, 24);
         // All four accessed offsets must appear as fields.
         assert_eq!(fields.len(), 4);
-        let offsets: std::collections::BTreeSet<u32> =
-            fields.iter().map(|f| f.offset).collect();
-        assert_eq!(offsets, [0u32, 8, 16, 20].into_iter().collect::<std::collections::BTreeSet<u32>>());
+        let offsets: std::collections::BTreeSet<u32> = fields.iter().map(|f| f.offset).collect();
+        assert_eq!(
+            offsets,
+            [0u32, 8, 16, 20]
+                .into_iter()
+                .collect::<std::collections::BTreeSet<u32>>()
+        );
     }
 
     #[test]

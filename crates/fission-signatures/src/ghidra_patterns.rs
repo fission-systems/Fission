@@ -31,22 +31,30 @@ impl GhidraFuncPattern {
 
         let pre_len = self.pre_bytes.len();
         if pre_len > 0 {
-            if offset < pre_len { return false; }
+            if offset < pre_len {
+                return false;
+            }
             let pre_slice = &data[offset - pre_len..offset];
             for (i, pat) in self.pre_bytes.iter().enumerate() {
                 if let Some(expected) = pat {
-                    if pre_slice[i] != *expected { return false; }
+                    if pre_slice[i] != *expected {
+                        return false;
+                    }
                 }
             }
         }
 
         let post_len = self.post_bytes.len();
         if post_len > 0 {
-            if offset + post_len > data.len() { return false; }
+            if offset + post_len > data.len() {
+                return false;
+            }
             let post_slice = &data[offset..offset + post_len];
             for (i, pat) in self.post_bytes.iter().enumerate() {
                 if let Some(expected) = pat {
-                    if post_slice[i] != *expected { return false; }
+                    if post_slice[i] != *expected {
+                        return false;
+                    }
                 }
             }
         }
@@ -67,12 +75,10 @@ pub fn load_ghidra_patterns(arch_tag: &str, compiler_id: Option<&str>) -> Vec<Gh
     // Map arch_tag + compiler_id → specific pattern files for that architecture and compiler
     // Derived from patternconstraints.xml + prepatternconstraints.xml
     let files: &[&str] = match (arch_tag, compiler_id) {
-        ("x86-64win" | "x86-64", Some("gcc")) => &[
-            "ghidra/x86-64gcc_patterns.xml",
-        ],
-        ("x86-64win" | "x86-64", Some("windows") | Some("borlandcpp")) => &[
-            "ghidra/x86-64win_patterns.xml",
-        ],
+        ("x86-64win" | "x86-64", Some("gcc")) => &["ghidra/x86-64gcc_patterns.xml"],
+        ("x86-64win" | "x86-64", Some("windows") | Some("borlandcpp")) => {
+            &["ghidra/x86-64win_patterns.xml"]
+        }
         ("x86-64win" | "x86-64", _) => &[
             "ghidra/x86-64win_patterns.xml",
             "ghidra/x86-64gcc_patterns.xml",
@@ -85,9 +91,7 @@ pub fn load_ghidra_patterns(arch_tag: &str, compiler_id: Option<&str>) -> Vec<Gh
             "ghidra/x86win_patterns.xml",
             "ghidra/x86win_prepatterns.xml",
         ],
-        ("x86win" | "x86", Some("borlanddelphi")) => &[
-            "ghidra/x86delphi_patterns.xml",
-        ],
+        ("x86win" | "x86", Some("borlanddelphi")) => &["ghidra/x86delphi_patterns.xml"],
         ("x86win" | "x86", _) => &[
             "ghidra/x86win_patterns.xml",
             "ghidra/x86gcc_patterns.xml",
@@ -102,11 +106,16 @@ pub fn load_ghidra_patterns(arch_tag: &str, compiler_id: Option<&str>) -> Vec<Gh
     let mut all: Vec<GhidraFuncPattern> = Vec::new();
 
     for &file in files {
-        let Some(path) = paths.get_pattern_file(file) else { continue; };
+        let Some(path) = paths.get_pattern_file(file) else {
+            continue;
+        };
         let xml = match std::fs::read_to_string(&path) {
             Ok(s) => s,
             Err(e) => {
-                eprintln!("[fission-signatures] Failed to read {}: {e}", path.display());
+                eprintln!(
+                    "[fission-signatures] Failed to read {}: {e}",
+                    path.display()
+                );
                 continue;
             }
         };
@@ -130,7 +139,13 @@ pub fn parse_ghidra_pattern_xml(xml: &str) -> Result<Vec<GhidraFuncPattern>, Str
 
     // --- state machine ---
     #[derive(Debug, PartialEq, Clone, Copy)]
-    enum Ctx { Root, PatternPairs, PrePatterns, PostPatterns, StandalonePattern }
+    enum Ctx {
+        Root,
+        PatternPairs,
+        PrePatterns,
+        PostPatterns,
+        StandalonePattern,
+    }
 
     let mut ctx = Ctx::Root;
 
@@ -152,7 +167,12 @@ pub fn parse_ghidra_pattern_xml(xml: &str) -> Result<Vec<GhidraFuncPattern>, Str
 
     // which part of <data> content we're collecting
     #[derive(Debug, Clone, Copy, PartialEq)]
-    enum DataSlot { None, PpPre, PpPost, SpInline }
+    enum DataSlot {
+        None,
+        PpPre,
+        PpPost,
+        SpInline,
+    }
     let mut data_slot = DataSlot::None;
 
     loop {
@@ -163,54 +183,84 @@ pub fn parse_ghidra_pattern_xml(xml: &str) -> Result<Vec<GhidraFuncPattern>, Str
 
             // ── opening tags ──────────────────────────────────────────────
             Ok(Event::Start(ref e)) => {
-                let tag = std::str::from_utf8(e.name().as_ref()).unwrap_or("").to_ascii_lowercase();
+                let tag = std::str::from_utf8(e.name().as_ref())
+                    .unwrap_or("")
+                    .to_ascii_lowercase();
                 match tag.as_str() {
                     "patternpairs" => {
                         ctx = Ctx::PatternPairs;
-                        pp_pre.clear(); pp_post.clear(); pp_has_funcstart = false;
-                        pp_after_cond = None; pp_valid_code_min = None;
+                        pp_pre.clear();
+                        pp_post.clear();
+                        pp_has_funcstart = false;
+                        pp_after_cond = None;
+                        pp_valid_code_min = None;
                     }
-                    "prepatterns"  if ctx == Ctx::PatternPairs => { ctx = Ctx::PrePatterns; }
-                    "postpatterns" if ctx == Ctx::PatternPairs => { ctx = Ctx::PostPatterns; }
+                    "prepatterns" if ctx == Ctx::PatternPairs => {
+                        ctx = Ctx::PrePatterns;
+                    }
+                    "postpatterns" if ctx == Ctx::PatternPairs => {
+                        ctx = Ctx::PostPatterns;
+                    }
                     "pattern" => {
                         ctx = Ctx::StandalonePattern;
-                        sp_pre.clear(); sp_post.clear();
-                        sp_label = None; sp_after_cond = None; sp_valid_code_min = None;
-                        sp_has_funcstart = false; sp_star_found = false;
+                        sp_pre.clear();
+                        sp_post.clear();
+                        sp_label = None;
+                        sp_after_cond = None;
+                        sp_valid_code_min = None;
+                        sp_has_funcstart = false;
+                        sp_star_found = false;
                     }
                     "data" => {
                         data_slot = match ctx {
-                            Ctx::PrePatterns       => DataSlot::PpPre,
-                            Ctx::PostPatterns      => DataSlot::PpPost,
+                            Ctx::PrePatterns => DataSlot::PpPre,
+                            Ctx::PostPatterns => DataSlot::PpPost,
                             Ctx::StandalonePattern => DataSlot::SpInline,
-                            _                      => DataSlot::None,
+                            _ => DataSlot::None,
                         };
                     }
                     "funcstart" | "possiblefuncstart" => {
-                        let label = e.attributes()
+                        let label = e
+                            .attributes()
                             .filter_map(|a| a.ok())
                             .find(|a| a.key.as_ref() == b"label")
                             .and_then(|a| String::from_utf8(a.value.to_vec()).ok());
-                        let after = e.attributes()
+                        let after = e
+                            .attributes()
                             .filter_map(|a| a.ok())
                             .find(|a| a.key.as_ref() == b"after")
                             .and_then(|a| String::from_utf8(a.value.to_vec()).ok());
-                        let validcode = e.attributes()
+                        let validcode = e
+                            .attributes()
                             .filter_map(|a| a.ok())
                             .find(|a| a.key.as_ref() == b"validcode")
-                            .and_then(|a| std::str::from_utf8(a.value.as_ref()).ok().and_then(|s| s.parse::<usize>().ok()));
+                            .and_then(|a| {
+                                std::str::from_utf8(a.value.as_ref())
+                                    .ok()
+                                    .and_then(|s| s.parse::<usize>().ok())
+                            });
 
                         match ctx {
-                            Ctx::PostPatterns      => {
+                            Ctx::PostPatterns => {
                                 pp_has_funcstart = true;
-                                if after.is_some() { pp_after_cond = after; }
-                                if validcode.is_some() { pp_valid_code_min = validcode; }
+                                if after.is_some() {
+                                    pp_after_cond = after;
+                                }
+                                if validcode.is_some() {
+                                    pp_valid_code_min = validcode;
+                                }
                             }
                             Ctx::StandalonePattern => {
                                 sp_has_funcstart = true;
-                                if label.is_some() { sp_label = label; }
-                                if after.is_some() { sp_after_cond = after; }
-                                if validcode.is_some() { sp_valid_code_min = validcode; }
+                                if label.is_some() {
+                                    sp_label = label;
+                                }
+                                if after.is_some() {
+                                    sp_after_cond = after;
+                                }
+                                if validcode.is_some() {
+                                    sp_valid_code_min = validcode;
+                                }
                             }
                             _ => {}
                         }
@@ -221,33 +271,52 @@ pub fn parse_ghidra_pattern_xml(xml: &str) -> Result<Vec<GhidraFuncPattern>, Str
 
             // ── self-closing tags ─────────────────────────────────────────
             Ok(Event::Empty(ref e)) => {
-                let tag = std::str::from_utf8(e.name().as_ref()).unwrap_or("").to_ascii_lowercase();
+                let tag = std::str::from_utf8(e.name().as_ref())
+                    .unwrap_or("")
+                    .to_ascii_lowercase();
                 match tag.as_str() {
                     "funcstart" | "possiblefuncstart" => {
-                        let label = e.attributes()
+                        let label = e
+                            .attributes()
                             .filter_map(|a| a.ok())
                             .find(|a| a.key.as_ref() == b"label")
                             .and_then(|a| String::from_utf8(a.value.to_vec()).ok());
-                        let after = e.attributes()
+                        let after = e
+                            .attributes()
                             .filter_map(|a| a.ok())
                             .find(|a| a.key.as_ref() == b"after")
                             .and_then(|a| String::from_utf8(a.value.to_vec()).ok());
-                        let validcode = e.attributes()
+                        let validcode = e
+                            .attributes()
                             .filter_map(|a| a.ok())
                             .find(|a| a.key.as_ref() == b"validcode")
-                            .and_then(|a| std::str::from_utf8(a.value.as_ref()).ok().and_then(|s| s.parse::<usize>().ok()));
+                            .and_then(|a| {
+                                std::str::from_utf8(a.value.as_ref())
+                                    .ok()
+                                    .and_then(|s| s.parse::<usize>().ok())
+                            });
 
                         match ctx {
-                            Ctx::PostPatterns      => {
+                            Ctx::PostPatterns => {
                                 pp_has_funcstart = true;
-                                if after.is_some() { pp_after_cond = after; }
-                                if validcode.is_some() { pp_valid_code_min = validcode; }
+                                if after.is_some() {
+                                    pp_after_cond = after;
+                                }
+                                if validcode.is_some() {
+                                    pp_valid_code_min = validcode;
+                                }
                             }
                             Ctx::StandalonePattern => {
                                 sp_has_funcstart = true;
-                                if label.is_some() { sp_label = label; }
-                                if after.is_some() { sp_after_cond = after; }
-                                if validcode.is_some() { sp_valid_code_min = validcode; }
+                                if label.is_some() {
+                                    sp_label = label;
+                                }
+                                if after.is_some() {
+                                    sp_after_cond = after;
+                                }
+                                if validcode.is_some() {
+                                    sp_valid_code_min = validcode;
+                                }
                             }
                             _ => {}
                         }
@@ -260,21 +329,27 @@ pub fn parse_ghidra_pattern_xml(xml: &str) -> Result<Vec<GhidraFuncPattern>, Str
             Ok(Event::Text(ref e)) => {
                 let decoded = e.decode().unwrap_or_default();
                 let text = decoded.trim();
-                if text.is_empty() || data_slot == DataSlot::None { continue; }
+                if text.is_empty() || data_slot == DataSlot::None {
+                    continue;
+                }
 
                 match data_slot {
                     DataSlot::PpPre => {
                         let p = parse_data_string(text);
-                        if !p.is_empty() { pp_pre.push(p); }
+                        if !p.is_empty() {
+                            pp_pre.push(p);
+                        }
                     }
                     DataSlot::PpPost => {
                         let p = parse_data_string(text);
-                        if !p.is_empty() { pp_post.push(p); }
+                        if !p.is_empty() {
+                            pp_post.push(p);
+                        }
                     }
                     DataSlot::SpInline => {
                         // Inline `*` syntax: pre_bytes * post_bytes
                         if let Some(star_pos) = text.find('*') {
-                            sp_pre  = parse_data_string(text[..star_pos].trim());
+                            sp_pre = parse_data_string(text[..star_pos].trim());
                             sp_post = parse_data_string(text[star_pos + 1..].trim());
                             sp_star_found = true;
                         } else {
@@ -288,7 +363,9 @@ pub fn parse_ghidra_pattern_xml(xml: &str) -> Result<Vec<GhidraFuncPattern>, Str
 
             // ── closing tags ──────────────────────────────────────────────
             Ok(Event::End(ref e)) => {
-                let tag = std::str::from_utf8(e.name().as_ref()).unwrap_or("").to_ascii_lowercase();
+                let tag = std::str::from_utf8(e.name().as_ref())
+                    .unwrap_or("")
+                    .to_ascii_lowercase();
                 match tag.as_str() {
                     "patternpairs" => {
                         if pp_has_funcstart {
@@ -317,26 +394,47 @@ pub fn parse_ghidra_pattern_xml(xml: &str) -> Result<Vec<GhidraFuncPattern>, Str
                             }
                         }
                         ctx = Ctx::Root;
-                        pp_pre.clear(); pp_post.clear(); pp_has_funcstart = false;
-                        pp_after_cond = None; pp_valid_code_min = None;
+                        pp_pre.clear();
+                        pp_post.clear();
+                        pp_has_funcstart = false;
+                        pp_after_cond = None;
+                        pp_valid_code_min = None;
                     }
-                    "prepatterns"  => { if ctx == Ctx::PrePatterns  { ctx = Ctx::PatternPairs; } }
-                    "postpatterns" => { if ctx == Ctx::PostPatterns  { ctx = Ctx::PatternPairs; } }
-                    "data"         => { data_slot = DataSlot::None; }
+                    "prepatterns" => {
+                        if ctx == Ctx::PrePatterns {
+                            ctx = Ctx::PatternPairs;
+                        }
+                    }
+                    "postpatterns" => {
+                        if ctx == Ctx::PostPatterns {
+                            ctx = Ctx::PatternPairs;
+                        }
+                    }
+                    "data" => {
+                        data_slot = DataSlot::None;
+                    }
                     "pattern" => {
                         if sp_has_funcstart && !sp_post.is_empty() {
                             out.push(GhidraFuncPattern {
-                                pre_bytes:  if sp_star_found { sp_pre.clone() } else { vec![] },
+                                pre_bytes: if sp_star_found {
+                                    sp_pre.clone()
+                                } else {
+                                    vec![]
+                                },
                                 post_bytes: sp_post.clone(),
-                                label:      sp_label.take(),
+                                label: sp_label.take(),
                                 after_cond: sp_after_cond.take(),
                                 valid_code_min: sp_valid_code_min.take(),
                             });
                         }
                         ctx = Ctx::Root;
-                        sp_pre.clear(); sp_post.clear(); sp_label = None;
-                        sp_after_cond = None; sp_valid_code_min = None;
-                        sp_has_funcstart = false; sp_star_found = false;
+                        sp_pre.clear();
+                        sp_post.clear();
+                        sp_label = None;
+                        sp_after_cond = None;
+                        sp_valid_code_min = None;
+                        sp_has_funcstart = false;
+                        sp_star_found = false;
                     }
                     _ => {}
                 }
@@ -357,7 +455,9 @@ pub fn parse_data_string(s: &str) -> Vec<Option<u8>> {
 
     while !rest.is_empty() {
         rest = rest.trim_start();
-        if rest.is_empty() { break; }
+        if rest.is_empty() {
+            break;
+        }
 
         if rest.starts_with("0x") || rest.starts_with("0X") {
             let hex_start = 2;
@@ -398,7 +498,10 @@ mod tests {
 
     #[test]
     fn test_parse_data_fixed_bytes() {
-        assert_eq!(parse_data_string("0x4883ec"), vec![Some(0x48), Some(0x83), Some(0xec)]);
+        assert_eq!(
+            parse_data_string("0x4883ec"),
+            vec![Some(0x48), Some(0x83), Some(0xec)]
+        );
     }
 
     #[test]
@@ -435,7 +538,12 @@ mod tests {
           </pattern>
         </patternlist>"#;
         let pats = parse_ghidra_pattern_xml(xml).unwrap();
-        assert_eq!(pats.len(), 1, "expected 1 pattern, got {}: {pats:?}", pats.len());
+        assert_eq!(
+            pats.len(),
+            1,
+            "expected 1 pattern, got {}: {pats:?}",
+            pats.len()
+        );
         assert_eq!(pats[0].pre_bytes, vec![Some(0xcc)]);
         assert_eq!(pats[0].post_bytes, vec![Some(0x48), Some(0x83), Some(0xec)]);
     }

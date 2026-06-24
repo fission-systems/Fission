@@ -26,7 +26,8 @@ pub fn dissect_x86_function_to_fid_units(
         }
 
         // Decode instruction details
-        let (inst_len, mask, operands, is_call) = decode_x86_instruction_details(remaining, pc, relocations);
+        let (inst_len, mask, operands, is_call) =
+            decode_x86_instruction_details(remaining, pc, relocations);
         if inst_len == 0 {
             break; // Stop decoding on invalid/malformed bytes
         }
@@ -252,7 +253,9 @@ fn decode_x86_instruction_details(
     }
     if let Some(val) = imm_val {
         // If it's a direct branch or memory offset, mark it as address reference
-        let is_branch_target = op_byte1 == 0xE8 || op_byte1 == 0xE9 || (op_byte1 == 0x0F && op_byte2.is_some_and(|o| o >= 0x80 && o <= 0x8F));
+        let is_branch_target = op_byte1 == 0xE8
+            || op_byte1 == 0xE9
+            || (op_byte1 == 0x0F && op_byte2.is_some_and(|o| o >= 0x80 && o <= 0x8F));
         let is_moffset = op_byte1 >= 0xA0 && op_byte1 <= 0xA3;
         operands.push(FidInstructionOperand {
             values: vec![FidOperandValue::Scalar {
@@ -333,14 +336,30 @@ fn get_immediate_size(
         // 1-byte opcode
         let default_word = if has_operand_size_prefix { 2 } else { 4 };
         match b1 {
-            0x04 | 0x0C | 0x14 | 0x1C | 0x24 | 0x2C | 0x34 | 0x3C |
-            0x6A | 0x70..=0x7F | 0x80 | 0x82 | 0x83 | 0xA8 |
-            0xB0..=0xB7 | 0xC0 | 0xC1 | 0xEB => 1,
+            0x04
+            | 0x0C
+            | 0x14
+            | 0x1C
+            | 0x24
+            | 0x2C
+            | 0x34
+            | 0x3C
+            | 0x6A
+            | 0x70..=0x7F
+            | 0x80
+            | 0x82
+            | 0x83
+            | 0xA8
+            | 0xB0..=0xB7
+            | 0xC0
+            | 0xC1
+            | 0xEB => 1,
 
             0xC2 | 0xCA => 2,
 
-            0x05 | 0x0D | 0x15 | 0x1D | 0x25 | 0x2D | 0x35 | 0x3D |
-            0x68 | 0x81 | 0xA9 | 0xC7 => default_word,
+            0x05 | 0x0D | 0x15 | 0x1D | 0x25 | 0x2D | 0x35 | 0x3D | 0x68 | 0x81 | 0xA9 | 0xC7 => {
+                default_word
+            }
 
             0xA0..=0xA3 => {
                 if is_64bit {
@@ -372,7 +391,11 @@ fn get_immediate_size(
 
             0xF7 => {
                 if let Some(reg) = modrm_reg {
-                    if reg == 0 || reg == 1 { default_word } else { 0 }
+                    if reg == 0 || reg == 1 {
+                        default_word
+                    } else {
+                        0
+                    }
                 } else {
                     0
                 }
@@ -431,7 +454,10 @@ mod tests {
         let units = dissect_x86_function_to_fid_units(&bytes, 0x1000, &relocs);
         assert_eq!(units.len(), 1);
         assert_eq!(units[0].bytes, bytes.to_vec());
-        assert_eq!(units[0].instruction_mask, Some(vec![0xFF, 0x00, 0x00, 0x00, 0x00]));
+        assert_eq!(
+            units[0].instruction_mask,
+            Some(vec![0xFF, 0x00, 0x00, 0x00, 0x00])
+        );
         assert_eq!(units[0].operands.len(), 1);
         assert_eq!(
             units[0].operands[0].values[0],
@@ -450,7 +476,10 @@ mod tests {
         let units = dissect_x86_function_to_fid_units(&bytes, 0x1000, &relocs);
         assert_eq!(units.len(), 1);
         assert_eq!(units[0].bytes, bytes.to_vec());
-        assert_eq!(units[0].instruction_mask, Some(vec![0xFF, 0x00, 0x00, 0x00, 0x00]));
+        assert_eq!(
+            units[0].instruction_mask,
+            Some(vec![0xFF, 0x00, 0x00, 0x00, 0x00])
+        );
         assert!(units[0].is_call);
     }
 

@@ -135,6 +135,26 @@ The active rule flow is:
 
 Printer and postprocess must not reconstruct structure after this point.
 
+## Pass Pipeline Architecture
+
+Fission uses an explicit `Pass` pipeline framework (`nir::action_pipeline`) for all HIR transformation stages. Each stage is registered as a named `Pass` with a declared `GhidraActionConcept`, and is executed by a `PassManager` (`Pipeline` + `ActionGroup`) that owns fixed-point iteration and budget.
+
+**Structuring stage** (`nir::structuring::passes`) is wired into this framework via `run_structuring_pipeline`, called from `render_mlil_preview_with_binary_and_context` after `normalize_hir_function`.
+
+**Enforcement rules (architectural)**:
+
+1. Every new transformation must be expressed as a `NirPass` implementation — not as an inline patch inside `build_sese_region_body`, `CollapseDriver`, or any other internal loop.
+2. A `Pass` may only read/write through `PassCtx { func: &mut HirFunction, ... }`. It must not capture `PreviewBuilder` internal state or address-specific constants.
+3. `AnalysisKey` dependencies (Dominance, PostDom, LoopBody, ...) must be declared via `fn requires() -> &[AnalysisKey]` so `PassManager` can enforce sane ordering.
+4. `PassOutcome::changed: bool` must be accurate — returning `Changed` when nothing changed causes unnecessary fixed-point rounds; returning `Unchanged` when something changed silently breaks convergence.
+5. Binary-specific or address-specific guard conditions inside a `Pass` body are **forbidden**. All admission conditions must derive from CFG properties (block count, SCC shape, dominance, etc.).
+
+**Anti-patterns (will fail code review)**:
+- `if func.name == "fibonacci" { ... }` inside a Pass body
+- `if address == 0x140001470 { skip_rule() }` timer skips in Pass
+- Adding a new `CollapseRule` variant without registering a corresponding `Pass`
+- Round-about patches that bypass `PassCtx` by reaching into `builder::state`
+
 ## Benchmark / Telemetry Contract
 
 - Canonical telemetry owner: `NirBuildStats`

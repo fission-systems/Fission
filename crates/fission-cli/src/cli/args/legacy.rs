@@ -1,6 +1,6 @@
+use super::{FunctionDiscoveryProfileArg, OneShotArgs, parse_hex_address};
 use clap::Parser;
 use std::path::PathBuf;
-use super::{FunctionDiscoveryProfileArg, OneShotArgs, parse_hex_address};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum LegacyInvocationKind {

@@ -1,9 +1,7 @@
 use fission_decompiler::{PcodeFunction, PcodeOp, Varnode};
 use fission_loader::loader::LoadedBinary;
+use fission_sleigh::runtime::{DecodeContract, DecodeStopReason, RuntimeSleighFrontend};
 use fission_static::analysis::control_flow_facts::decode_memory_context_for;
-use fission_sleigh::runtime::{
-    DecodeContract, DecodeStopReason, RuntimeSleighFrontend,
-};
 use std::collections::BTreeMap;
 use std::io::{self, Write};
 

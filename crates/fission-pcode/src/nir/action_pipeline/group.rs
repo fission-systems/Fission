@@ -1,9 +1,9 @@
 //! Action groups and fixpoint repeat semantics.
 
+use super::super::types::HirFunction;
 use super::budget::hir_shape;
 use super::concept::GhidraActionConcept;
 use super::pass::{Pass, PassCtx, PassOutcome, run_pass_logged};
-use super::super::types::HirFunction;
 use std::time::Instant;
 
 #[derive(Debug, Clone, Copy)]
@@ -80,11 +80,7 @@ impl ActionGroup {
             }
             Repeat::UntilStable { max_rounds } => {
                 for round in 0..max_rounds {
-                    let round_start = if ctx.perf {
-                        Some(Instant::now())
-                    } else {
-                        None
-                    };
+                    let round_start = if ctx.perf { Some(Instant::now()) } else { None };
                     let (before_stmts, before_locals) = if ctx.perf {
                         hir_shape(ctx.func)
                     } else {

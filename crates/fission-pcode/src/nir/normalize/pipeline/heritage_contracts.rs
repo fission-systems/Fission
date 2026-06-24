@@ -1,7 +1,7 @@
 //! Heritage stage boundary contract tests.
 
 use crate::nir::action_pipeline::{
-    stage_boundary_violation, GhidraActionConcept, GHIDRA_CLEAN_ROOM_ACTION_SEQUENCE,
+    GHIDRA_CLEAN_ROOM_ACTION_SEQUENCE, GhidraActionConcept, stage_boundary_violation,
 };
 use crate::nir::normalize::pipeline::build_normalize_pipeline;
 

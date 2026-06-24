@@ -393,11 +393,14 @@ fn prefer_narrow_return_candidate(current: Option<NirType>, candidate: NirType) 
             signed: current_signed || candidate_signed,
         },
         (
-            Some(current @ NirType::Int {
-                bits: current_bits, ..
-            }),
+            Some(
+                current @ NirType::Int {
+                    bits: current_bits, ..
+                },
+            ),
             candidate @ NirType::Int {
-                bits: candidate_bits, ..
+                bits: candidate_bits,
+                ..
             },
         ) => {
             if candidate_bits < current_bits {
@@ -586,15 +589,9 @@ fn narrow_zero_extended_return_width(
     else {
         return false;
     };
-    let candidate_signed = candidates.iter().any(|ty| {
-        matches!(
-            ty,
-            NirType::Int {
-                signed: true,
-                ..
-            }
-        )
-    });
+    let candidate_signed = candidates
+        .iter()
+        .any(|ty| matches!(ty, NirType::Int { signed: true, .. }));
     if candidate_bits > *return_bits
         || candidates.iter().any(|ty| {
             !matches!(
@@ -1064,9 +1061,7 @@ mod tests {
             body: vec![
                 HirStmt::If {
                     cond: HirExpr::Var("cond".to_owned()),
-                    then_body: vec![HirStmt::Return(Some(HirExpr::Var(
-                        "param_1".to_owned(),
-                    )))],
+                    then_body: vec![HirStmt::Return(Some(HirExpr::Var("param_1".to_owned())))],
                     else_body: vec![],
                 },
                 HirStmt::Return(Some(HirExpr::Var("tmp".to_owned()))),
@@ -1214,8 +1209,20 @@ mod tests {
             name: "validate_input".to_owned(),
             int_param_offsets: Vec::new(),
             params: vec![
-                make_param("param_1", NirType::Int { bits: 32, signed: true }),
-                make_param("param_2", NirType::Int { bits: 32, signed: true }),
+                make_param(
+                    "param_1",
+                    NirType::Int {
+                        bits: 32,
+                        signed: true,
+                    },
+                ),
+                make_param(
+                    "param_2",
+                    NirType::Int {
+                        bits: 32,
+                        signed: true,
+                    },
+                ),
             ],
             locals: vec![],
             return_type: u64_ty.clone(),
@@ -1242,12 +1249,18 @@ mod tests {
                 HirStmt::Return(Some(HirExpr::Cast {
                     ty: u64_ty.clone(),
                     expr: Box::new(HirExpr::Cast {
-                        ty: NirType::Int { bits: 32, signed: false },
+                        ty: NirType::Int {
+                            bits: 32,
+                            signed: false,
+                        },
                         expr: Box::new(HirExpr::Binary {
                             op: HirBinaryOp::Add,
                             lhs: Box::new(HirExpr::Var("param_1".to_owned())),
                             rhs: Box::new(HirExpr::Var("param_2".to_owned())),
-                            ty: NirType::Int { bits: 32, signed: true },
+                            ty: NirType::Int {
+                                bits: 32,
+                                signed: true,
+                            },
                         }),
                     }),
                 })),

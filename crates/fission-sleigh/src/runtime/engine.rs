@@ -8,7 +8,6 @@ use crate::runtime::{
     RuntimeExecutionDetails, RuntimeSleighError,
 };
 
-
 pub(crate) fn decode_and_lift_with_details(
     entry: &EntrySpec,
     compiled: &CompiledFrontend,

@@ -23,11 +23,12 @@ pub(crate) fn apply_float_sign_pass(func: &mut HirFunction) -> bool {
     changed
 }
 
-fn resolve_float_expr(expr: &HirExpr, var_types: &HashMap<String, NirType>) -> Option<(HirExpr, u32)> {
+fn resolve_float_expr(
+    expr: &HirExpr,
+    var_types: &HashMap<String, NirType>,
+) -> Option<(HirExpr, u32)> {
     match expr {
-        HirExpr::Cast { expr: inner, .. } => {
-            resolve_float_expr(inner, var_types)
-        }
+        HirExpr::Cast { expr: inner, .. } => resolve_float_expr(inner, var_types),
         HirExpr::Var(name) => {
             if let Some(NirType::Float { bits }) = var_types.get(name) {
                 Some((expr.clone(), *bits))
@@ -82,7 +83,12 @@ fn visit_expr(expr: &mut HirExpr, var_types: &HashMap<String, NirType>) -> bool 
                 changed |= visit_expr(arg, var_types);
             }
         }
-        HirExpr::Select { cond, then_expr, else_expr, .. } => {
+        HirExpr::Select {
+            cond,
+            then_expr,
+            else_expr,
+            ..
+        } => {
             changed |= visit_expr(cond, var_types);
             changed |= visit_expr(then_expr, var_types);
             changed |= visit_expr(else_expr, var_types);
@@ -184,7 +190,11 @@ fn visit_stmt(stmt: &mut HirStmt, var_types: &HashMap<String, NirType>) -> bool 
                 changed |= visit_stmt(s, var_types);
             }
         }
-        HirStmt::If { cond, then_body, else_body } => {
+        HirStmt::If {
+            cond,
+            then_body,
+            else_body,
+        } => {
             changed |= visit_expr(cond, var_types);
             for s in then_body {
                 changed |= visit_stmt(s, var_types);
@@ -193,7 +203,11 @@ fn visit_stmt(stmt: &mut HirStmt, var_types: &HashMap<String, NirType>) -> bool 
                 changed |= visit_stmt(s, var_types);
             }
         }
-        HirStmt::Switch { expr, cases, default } => {
+        HirStmt::Switch {
+            expr,
+            cases,
+            default,
+        } => {
             changed |= visit_expr(expr, var_types);
             for case in cases {
                 for s in &mut case.body {

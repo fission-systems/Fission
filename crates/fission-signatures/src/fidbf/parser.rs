@@ -60,14 +60,10 @@ pub fn parse_fidbf(path: &Path) -> Result<FidbfDatabase, FidbfParseError> {
 /// Compression method is always DEFLATE (8). The data descriptor at the end of
 /// the file holds the actual compressed size because the local header uses
 /// streaming mode (flag bit 3 set) with sizes zeroed in the header.
-fn unpack_java_fid_database(
-    path: &Path,
-    data: &[u8],
-) -> Result<Vec<u8>, FidbfParseError> {
-    let err = |msg: String| FidbfParseError::PackedFidDatabaseUnpackError(
-        path.display().to_string(),
-        msg,
-    );
+fn unpack_java_fid_database(path: &Path, data: &[u8]) -> Result<Vec<u8>, FidbfParseError> {
+    let err = |msg: String| {
+        FidbfParseError::PackedFidDatabaseUnpackError(path.display().to_string(), msg)
+    };
 
     // Locate the ZIP local file header (`PK\x03\x04`) embedded in the stream.
     let zip_off = data
@@ -84,7 +80,9 @@ fn unpack_java_fid_database(
     }
     let comp = u16::from_le_bytes([data[lh_off + 4], data[lh_off + 5]]);
     if comp != 8 {
-        return Err(err(format!("unsupported ZIP compression method {comp} (expected DEFLATE=8)")));
+        return Err(err(format!(
+            "unsupported ZIP compression method {comp} (expected DEFLATE=8)"
+        )));
     }
     let namelen = u16::from_le_bytes([data[lh_off + 22], data[lh_off + 23]]) as usize;
     let extralen = u16::from_le_bytes([data[lh_off + 24], data[lh_off + 25]]) as usize;
@@ -102,9 +100,7 @@ fn unpack_java_fid_database(
     if data.len() < dd_off + 16 {
         return Err(err("truncated ZIP data descriptor".into()));
     }
-    let csz = u32::from_le_bytes(
-        data[dd_off + 8..dd_off + 12].try_into().expect("slice"),
-    ) as usize;
+    let csz = u32::from_le_bytes(data[dd_off + 8..dd_off + 12].try_into().expect("slice")) as usize;
 
     if data_start + csz > dd_off {
         return Err(err(format!(
@@ -116,9 +112,9 @@ fn unpack_java_fid_database(
     let compressed = &data[data_start..data_start + csz];
     let mut decoder = DeflateDecoder::new(compressed);
     let mut unpacked = Vec::new();
-    decoder.read_to_end(&mut unpacked).map_err(|e| {
-        err(format!("DEFLATE decompression failed: {e}"))
-    })?;
+    decoder
+        .read_to_end(&mut unpacked)
+        .map_err(|e| err(format!("DEFLATE decompression failed: {e}")))?;
 
     Ok(unpacked)
 }
@@ -213,7 +209,10 @@ mod tests {
         stub.extend_from_slice(b"not a real packed database");
         std::fs::write(&path, &stub).expect("write stub fidb");
         let err = parse_fidbf(&path).expect_err("invalid packed fidb must return error");
-        assert!(matches!(err, FidbfParseError::PackedFidDatabaseUnpackError(..)));
+        assert!(matches!(
+            err,
+            FidbfParseError::PackedFidDatabaseUnpackError(..)
+        ));
         let _ = std::fs::remove_file(path);
     }
 
@@ -230,7 +229,10 @@ mod tests {
         assert!(!parsed.libraries.is_empty(), "no libraries parsed");
         assert!(!parsed.functions.is_empty(), "no functions parsed");
         assert!(
-            parsed.libraries.iter().any(|l| l.language_id.contains("x86")),
+            parsed
+                .libraries
+                .iter()
+                .any(|l| l.language_id.contains("x86")),
             "expected x86 library entry"
         );
     }

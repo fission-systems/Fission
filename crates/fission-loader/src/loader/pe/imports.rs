@@ -179,11 +179,7 @@ pub(super) fn parse_delay_imports(
         let int_rva = get_rva(rva_int);
         let iat_rva = get_rva(rva_iat);
 
-        let thunk_rva = if int_rva != 0 {
-            int_rva
-        } else {
-            iat_rva
-        };
+        let thunk_rva = if int_rva != 0 { int_rva } else { iat_rva };
         let thunk_offset = loader
             .rva_to_file_offset(thunk_rva, image_base)
             .unwrap_or(0);
@@ -248,8 +244,11 @@ pub(super) fn parse_delay_imports(
                 symbol_map.insert(iat_addr, full_name);
 
                 // Try to resolve the initial value in the IAT to create the delay load helper/proxy function
-                let iat_entry_rva = iat_base_rva + (idx * if loader.is_64bit { 8 } else { 4 }) as u32;
-                let iat_entry_offset = loader.rva_to_file_offset(iat_entry_rva, image_base).unwrap_or(0);
+                let iat_entry_rva =
+                    iat_base_rva + (idx * if loader.is_64bit { 8 } else { 4 }) as u32;
+                let iat_entry_offset = loader
+                    .rva_to_file_offset(iat_entry_rva, image_base)
+                    .unwrap_or(0);
                 let proxy_val = if iat_entry_offset != 0 {
                     if loader.is_64bit {
                         loader.read_u64(iat_entry_offset).unwrap_or(0)
@@ -291,4 +290,3 @@ pub(super) fn parse_delay_imports(
 
     Ok((functions, symbol_map, delay_proxies))
 }
-

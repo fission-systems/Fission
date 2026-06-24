@@ -123,7 +123,10 @@ impl PeLoader {
 
         let pe_started = std::time::Instant::now();
         let pe_file = parse_pe_file(bytes)?;
-        tracing::debug!("[PE Profiler] parse_pe_file took: {:?}", pe_started.elapsed());
+        tracing::debug!(
+            "[PE Profiler] parse_pe_file took: {:?}",
+            pe_started.elapsed()
+        );
 
         // Extract basic info
         let is_64bit = match pe_file.optional_header {
@@ -143,7 +146,10 @@ impl PeLoader {
         let (architecture, load_spec) =
             select_pe_load_spec(pe_file.file_header.machine, is_64bit, image_base)
                 .map_err(|e| err!(loader, "{}", e))?;
-        tracing::debug!("[PE Profiler] select_pe_load_spec took: {:?}", spec_started.elapsed());
+        tracing::debug!(
+            "[PE Profiler] select_pe_load_spec took: {:?}",
+            spec_started.elapsed()
+        );
 
         // Sections
         let mut sections_info = Vec::new();
@@ -189,7 +195,10 @@ impl PeLoader {
                 functions_info.append(&mut exports);
             }
         }
-        tracing::debug!("[PE Profiler] parse_exports took: {:?}", export_started.elapsed());
+        tracing::debug!(
+            "[PE Profiler] parse_exports took: {:?}",
+            export_started.elapsed()
+        );
 
         // Parse Imports
         // DataDirectory[1] is Import Table
@@ -208,7 +217,10 @@ impl PeLoader {
                 iat_symbols = symbols;
             }
         }
-        tracing::debug!("[PE Profiler] parse_imports took: {:?}", import_started.elapsed());
+        tracing::debug!(
+            "[PE Profiler] parse_imports took: {:?}",
+            import_started.elapsed()
+        );
 
         // Parse Delay Imports
         // DataDirectory[13] is Delay Import Table
@@ -230,7 +242,10 @@ impl PeLoader {
                 iat_symbols.extend(delay_symbols);
             }
         }
-        tracing::debug!("[PE Profiler] parse_delay_imports took: {:?}", delay_started.elapsed());
+        tracing::debug!(
+            "[PE Profiler] parse_delay_imports took: {:?}",
+            delay_started.elapsed()
+        );
 
         // Parse COFF Symbol Table (if present)
         let coff_started = std::time::Instant::now();
@@ -283,7 +298,10 @@ impl PeLoader {
                 cfg_label_leaders = leaders;
             }
         }
-        tracing::debug!("[PE Profiler] parse_coff_symbols took: {:?}", coff_started.elapsed());
+        tracing::debug!(
+            "[PE Profiler] parse_coff_symbols took: {:?}",
+            coff_started.elapsed()
+        );
 
         // Add entry point if not exists
         if entry_point != 0 && !functions_info.iter().any(|f| f.address == entry_point) {
@@ -345,7 +363,10 @@ impl PeLoader {
                 }
             }
         }
-        tracing::debug!("[PE Profiler] parse_pdata took: {:?}", pdata_started.elapsed());
+        tracing::debug!(
+            "[PE Profiler] parse_pdata took: {:?}",
+            pdata_started.elapsed()
+        );
 
         let pdb_started = std::time::Instant::now();
         let pdb_debug_info = match &pe_file.optional_header {
@@ -355,7 +376,10 @@ impl PeLoader {
                 })
             }
         };
-        tracing::debug!("[PE Profiler] parse_pdb_debug_info took: {:?}", pdb_started.elapsed());
+        tracing::debug!(
+            "[PE Profiler] parse_pdb_debug_info took: {:?}",
+            pdb_started.elapsed()
+        );
 
         let header_started = std::time::Instant::now();
         let (header_types, header_symbols) = generate_pe_header_types(
@@ -366,7 +390,10 @@ impl PeLoader {
             pe_file.section_headers.len() as u16,
         );
         global_symbols.extend(header_symbols);
-        tracing::debug!("[PE Profiler] generate_pe_header_types took: {:?}", header_started.elapsed());
+        tracing::debug!(
+            "[PE Profiler] generate_pe_header_types took: {:?}",
+            header_started.elapsed()
+        );
 
         // Parse Base Relocations (Gap 3)
         let reloc_started = std::time::Instant::now();
@@ -380,7 +407,9 @@ impl PeLoader {
         let mut relocations = Vec::new();
         let mut relocation_symbols = std::collections::HashMap::new();
         if reloc_dir_rva.0 != 0 && reloc_dir_rva.1 > 0 {
-            if let Ok(entries) = loader.parse_relocations(reloc_dir_rva.0, reloc_dir_rva.1, image_base) {
+            if let Ok(entries) =
+                loader.parse_relocations(reloc_dir_rva.0, reloc_dir_rva.1, image_base)
+            {
                 for entry in &entries {
                     if entry.r_type != 0 && entry.size > 0 {
                         relocation_symbols
@@ -391,16 +420,20 @@ impl PeLoader {
                 relocations = entries;
             }
         }
-        tracing::debug!("[PE Profiler] parse_relocations took: {:?}", reloc_started.elapsed());
+        tracing::debug!(
+            "[PE Profiler] parse_relocations took: {:?}",
+            reloc_started.elapsed()
+        );
 
         let rich_started = std::time::Instant::now();
         let rich_records = parse_rich_header(bytes, pe_file.e_lfanew);
-        tracing::debug!("[PE Profiler] parse_rich_header took: {:?}", rich_started.elapsed());
-
-        let likely_mingw = mingw_pseudo_reloc::is_likely_mingw_pe(
-            rich_records.as_deref(),
-            &global_symbols,
+        tracing::debug!(
+            "[PE Profiler] parse_rich_header took: {:?}",
+            rich_started.elapsed()
         );
+
+        let likely_mingw =
+            mingw_pseudo_reloc::is_likely_mingw_pe(rich_records.as_deref(), &global_symbols);
         let view_va = |va: u64, len: usize| -> Option<Vec<u8>> {
             if va < image_base {
                 return None;
@@ -421,9 +454,7 @@ impl PeLoader {
         );
         cfg_label_leaders.extend(mingw_facts.cfg_label_leaders);
         for site in &mingw_facts.relocation_use_sites {
-            relocation_symbols
-                .entry(*site)
-                .or_insert_with(String::new);
+            relocation_symbols.entry(*site).or_insert_with(String::new);
         }
         relocations.extend(mingw_pseudo_reloc::mingw_pseudo_reloc_entries(
             &mingw_facts.relocation_use_sites,
@@ -452,8 +483,14 @@ impl PeLoader {
         }
 
         let res = builder.build();
-        tracing::debug!("[PE Profiler] LoadedBinaryBuilder::build took: {:?}", build_started.elapsed());
-        tracing::debug!("[PE Profiler] TOTAL PeLoader::parse took: {:?}", main_started.elapsed());
+        tracing::debug!(
+            "[PE Profiler] LoadedBinaryBuilder::build took: {:?}",
+            build_started.elapsed()
+        );
+        tracing::debug!(
+            "[PE Profiler] TOTAL PeLoader::parse took: {:?}",
+            main_started.elapsed()
+        );
         res
     }
 }
@@ -872,7 +909,12 @@ impl<'a> PeLoaderImpl<'a> {
         pdata::parse_pdata(self, pdata_rva, pdata_size, image_base)
     }
 
-    fn parse_relocations(&self, dir_rva: u32, dir_size: u32, image_base: u64) -> Result<Vec<crate::loader::types::RelocationEntry>> {
+    fn parse_relocations(
+        &self,
+        dir_rva: u32,
+        dir_size: u32,
+        image_base: u64,
+    ) -> Result<Vec<crate::loader::types::RelocationEntry>> {
         let mut offset = self
             .rva_to_file_offset(dir_rva, image_base)
             .ok_or(err!(loader, "Invalid Reloc Dir RVA"))?;
@@ -901,8 +943,8 @@ impl<'a> PeLoaderImpl<'a> {
 
                 let address = image_base + page_rva as u64 + r_offset as u64;
                 let size = match r_type {
-                    10 => 8, // DIR64
-                    3 => 4,  // HIGHLOW
+                    10 => 8,    // DIR64
+                    3 => 4,     // HIGHLOW
                     1 | 2 => 2, // HIGH / LOW
                     _ => 0,
                 };
@@ -1122,7 +1164,10 @@ fn identity_va_to_file_offset(binary: &LoadedBinary, va: u64) -> Option<usize> {
     None
 }
 
-fn parse_rich_header(bytes: &[u8], e_lfanew: u32) -> Option<Vec<crate::loader::types::RichHeaderRecord>> {
+fn parse_rich_header(
+    bytes: &[u8],
+    e_lfanew: u32,
+) -> Option<Vec<crate::loader::types::RichHeaderRecord>> {
     use crate::loader::types::RichHeaderRecord;
 
     if e_lfanew < 0x80 || e_lfanew as usize > bytes.len() {
@@ -1181,32 +1226,130 @@ fn generate_pe_header_types(
     e_lfanew: u32,
     section_table_offset: u32,
     section_count: u16,
-) -> (Vec<crate::loader::types::InferredTypeInfo>, std::collections::HashMap<u64, String>) {
-    use crate::loader::types::{InferredTypeInfo, InferredFieldInfo};
+) -> (
+    Vec<crate::loader::types::InferredTypeInfo>,
+    std::collections::HashMap<u64, String>,
+) {
+    use crate::loader::types::{InferredFieldInfo, InferredTypeInfo};
     let mut types = Vec::new();
     let mut symbols = std::collections::HashMap::new();
 
     // 1. IMAGE_DOS_HEADER
     let dos_fields = vec![
-        InferredFieldInfo { name: "e_magic".to_string(), type_name: "WORD".to_string(), offset: 0, size: 2 },
-        InferredFieldInfo { name: "e_cblp".to_string(), type_name: "WORD".to_string(), offset: 2, size: 2 },
-        InferredFieldInfo { name: "e_cp".to_string(), type_name: "WORD".to_string(), offset: 4, size: 2 },
-        InferredFieldInfo { name: "e_crlc".to_string(), type_name: "WORD".to_string(), offset: 6, size: 2 },
-        InferredFieldInfo { name: "e_cparhdr".to_string(), type_name: "WORD".to_string(), offset: 8, size: 2 },
-        InferredFieldInfo { name: "e_minalloc".to_string(), type_name: "WORD".to_string(), offset: 10, size: 2 },
-        InferredFieldInfo { name: "e_maxalloc".to_string(), type_name: "WORD".to_string(), offset: 12, size: 2 },
-        InferredFieldInfo { name: "e_ss".to_string(), type_name: "WORD".to_string(), offset: 14, size: 2 },
-        InferredFieldInfo { name: "e_sp".to_string(), type_name: "WORD".to_string(), offset: 16, size: 2 },
-        InferredFieldInfo { name: "e_csum".to_string(), type_name: "WORD".to_string(), offset: 18, size: 2 },
-        InferredFieldInfo { name: "e_ip".to_string(), type_name: "WORD".to_string(), offset: 20, size: 2 },
-        InferredFieldInfo { name: "e_cs".to_string(), type_name: "WORD".to_string(), offset: 22, size: 2 },
-        InferredFieldInfo { name: "e_lfarlc".to_string(), type_name: "WORD".to_string(), offset: 24, size: 2 },
-        InferredFieldInfo { name: "e_ovno".to_string(), type_name: "WORD".to_string(), offset: 26, size: 2 },
-        InferredFieldInfo { name: "e_res".to_string(), type_name: "WORD[4]".to_string(), offset: 28, size: 8 },
-        InferredFieldInfo { name: "e_oemid".to_string(), type_name: "WORD".to_string(), offset: 36, size: 2 },
-        InferredFieldInfo { name: "e_oeminfo".to_string(), type_name: "WORD".to_string(), offset: 38, size: 2 },
-        InferredFieldInfo { name: "e_res2".to_string(), type_name: "WORD[10]".to_string(), offset: 40, size: 20 },
-        InferredFieldInfo { name: "e_lfanew".to_string(), type_name: "LONG".to_string(), offset: 60, size: 4 },
+        InferredFieldInfo {
+            name: "e_magic".to_string(),
+            type_name: "WORD".to_string(),
+            offset: 0,
+            size: 2,
+        },
+        InferredFieldInfo {
+            name: "e_cblp".to_string(),
+            type_name: "WORD".to_string(),
+            offset: 2,
+            size: 2,
+        },
+        InferredFieldInfo {
+            name: "e_cp".to_string(),
+            type_name: "WORD".to_string(),
+            offset: 4,
+            size: 2,
+        },
+        InferredFieldInfo {
+            name: "e_crlc".to_string(),
+            type_name: "WORD".to_string(),
+            offset: 6,
+            size: 2,
+        },
+        InferredFieldInfo {
+            name: "e_cparhdr".to_string(),
+            type_name: "WORD".to_string(),
+            offset: 8,
+            size: 2,
+        },
+        InferredFieldInfo {
+            name: "e_minalloc".to_string(),
+            type_name: "WORD".to_string(),
+            offset: 10,
+            size: 2,
+        },
+        InferredFieldInfo {
+            name: "e_maxalloc".to_string(),
+            type_name: "WORD".to_string(),
+            offset: 12,
+            size: 2,
+        },
+        InferredFieldInfo {
+            name: "e_ss".to_string(),
+            type_name: "WORD".to_string(),
+            offset: 14,
+            size: 2,
+        },
+        InferredFieldInfo {
+            name: "e_sp".to_string(),
+            type_name: "WORD".to_string(),
+            offset: 16,
+            size: 2,
+        },
+        InferredFieldInfo {
+            name: "e_csum".to_string(),
+            type_name: "WORD".to_string(),
+            offset: 18,
+            size: 2,
+        },
+        InferredFieldInfo {
+            name: "e_ip".to_string(),
+            type_name: "WORD".to_string(),
+            offset: 20,
+            size: 2,
+        },
+        InferredFieldInfo {
+            name: "e_cs".to_string(),
+            type_name: "WORD".to_string(),
+            offset: 22,
+            size: 2,
+        },
+        InferredFieldInfo {
+            name: "e_lfarlc".to_string(),
+            type_name: "WORD".to_string(),
+            offset: 24,
+            size: 2,
+        },
+        InferredFieldInfo {
+            name: "e_ovno".to_string(),
+            type_name: "WORD".to_string(),
+            offset: 26,
+            size: 2,
+        },
+        InferredFieldInfo {
+            name: "e_res".to_string(),
+            type_name: "WORD[4]".to_string(),
+            offset: 28,
+            size: 8,
+        },
+        InferredFieldInfo {
+            name: "e_oemid".to_string(),
+            type_name: "WORD".to_string(),
+            offset: 36,
+            size: 2,
+        },
+        InferredFieldInfo {
+            name: "e_oeminfo".to_string(),
+            type_name: "WORD".to_string(),
+            offset: 38,
+            size: 2,
+        },
+        InferredFieldInfo {
+            name: "e_res2".to_string(),
+            type_name: "WORD[10]".to_string(),
+            offset: 40,
+            size: 20,
+        },
+        InferredFieldInfo {
+            name: "e_lfanew".to_string(),
+            type_name: "LONG".to_string(),
+            offset: 60,
+            size: 4,
+        },
     ];
     types.push(InferredTypeInfo {
         name: "IMAGE_DOS_HEADER".to_string(),
@@ -1219,15 +1362,38 @@ fn generate_pe_header_types(
     symbols.insert(image_base, "DOS_HEADER".to_string());
 
     // 2. IMAGE_NT_HEADERS
-    let nt_name = if is_64bit { "IMAGE_NT_HEADERS64" } else { "IMAGE_NT_HEADERS32" };
-    let opt_name = if is_64bit { "IMAGE_OPTIONAL_HEADER64" } else { "IMAGE_OPTIONAL_HEADER32" };
+    let nt_name = if is_64bit {
+        "IMAGE_NT_HEADERS64"
+    } else {
+        "IMAGE_NT_HEADERS32"
+    };
+    let opt_name = if is_64bit {
+        "IMAGE_OPTIONAL_HEADER64"
+    } else {
+        "IMAGE_OPTIONAL_HEADER32"
+    };
     let opt_size = if is_64bit { 240 } else { 224 };
     let nt_size = 24 + opt_size;
 
     let nt_fields = vec![
-        InferredFieldInfo { name: "Signature".to_string(), type_name: "DWORD".to_string(), offset: 0, size: 4 },
-        InferredFieldInfo { name: "FileHeader".to_string(), type_name: "IMAGE_FILE_HEADER".to_string(), offset: 4, size: 20 },
-        InferredFieldInfo { name: "OptionalHeader".to_string(), type_name: opt_name.to_string(), offset: 24, size: opt_size },
+        InferredFieldInfo {
+            name: "Signature".to_string(),
+            type_name: "DWORD".to_string(),
+            offset: 0,
+            size: 4,
+        },
+        InferredFieldInfo {
+            name: "FileHeader".to_string(),
+            type_name: "IMAGE_FILE_HEADER".to_string(),
+            offset: 4,
+            size: 20,
+        },
+        InferredFieldInfo {
+            name: "OptionalHeader".to_string(),
+            type_name: opt_name.to_string(),
+            offset: 24,
+            size: opt_size,
+        },
     ];
     let nt_va = image_base + e_lfanew as u64;
     types.push(InferredTypeInfo {
@@ -1242,16 +1408,66 @@ fn generate_pe_header_types(
 
     // 3. IMAGE_SECTION_HEADER
     let sect_fields = vec![
-        InferredFieldInfo { name: "Name".to_string(), type_name: "BYTE[8]".to_string(), offset: 0, size: 8 },
-        InferredFieldInfo { name: "VirtualSize".to_string(), type_name: "DWORD".to_string(), offset: 8, size: 4 },
-        InferredFieldInfo { name: "VirtualAddress".to_string(), type_name: "DWORD".to_string(), offset: 12, size: 4 },
-        InferredFieldInfo { name: "SizeOfRawData".to_string(), type_name: "DWORD".to_string(), offset: 16, size: 4 },
-        InferredFieldInfo { name: "PointerToRawData".to_string(), type_name: "DWORD".to_string(), offset: 20, size: 4 },
-        InferredFieldInfo { name: "PointerToRelocations".to_string(), type_name: "DWORD".to_string(), offset: 24, size: 4 },
-        InferredFieldInfo { name: "PointerToLinenumbers".to_string(), type_name: "DWORD".to_string(), offset: 28, size: 4 },
-        InferredFieldInfo { name: "NumberOfRelocations".to_string(), type_name: "WORD".to_string(), offset: 32, size: 2 },
-        InferredFieldInfo { name: "NumberOfLinenumbers".to_string(), type_name: "WORD".to_string(), offset: 34, size: 2 },
-        InferredFieldInfo { name: "Characteristics".to_string(), type_name: "DWORD".to_string(), offset: 36, size: 4 },
+        InferredFieldInfo {
+            name: "Name".to_string(),
+            type_name: "BYTE[8]".to_string(),
+            offset: 0,
+            size: 8,
+        },
+        InferredFieldInfo {
+            name: "VirtualSize".to_string(),
+            type_name: "DWORD".to_string(),
+            offset: 8,
+            size: 4,
+        },
+        InferredFieldInfo {
+            name: "VirtualAddress".to_string(),
+            type_name: "DWORD".to_string(),
+            offset: 12,
+            size: 4,
+        },
+        InferredFieldInfo {
+            name: "SizeOfRawData".to_string(),
+            type_name: "DWORD".to_string(),
+            offset: 16,
+            size: 4,
+        },
+        InferredFieldInfo {
+            name: "PointerToRawData".to_string(),
+            type_name: "DWORD".to_string(),
+            offset: 20,
+            size: 4,
+        },
+        InferredFieldInfo {
+            name: "PointerToRelocations".to_string(),
+            type_name: "DWORD".to_string(),
+            offset: 24,
+            size: 4,
+        },
+        InferredFieldInfo {
+            name: "PointerToLinenumbers".to_string(),
+            type_name: "DWORD".to_string(),
+            offset: 28,
+            size: 4,
+        },
+        InferredFieldInfo {
+            name: "NumberOfRelocations".to_string(),
+            type_name: "WORD".to_string(),
+            offset: 32,
+            size: 2,
+        },
+        InferredFieldInfo {
+            name: "NumberOfLinenumbers".to_string(),
+            type_name: "WORD".to_string(),
+            offset: 34,
+            size: 2,
+        },
+        InferredFieldInfo {
+            name: "Characteristics".to_string(),
+            type_name: "DWORD".to_string(),
+            offset: 36,
+            size: 4,
+        },
     ];
 
     let section_table_va = image_base + section_table_offset as u64;
@@ -1648,7 +1864,8 @@ mod tests {
         // pointer_to_raw_data = 0x200
         data[section_offset + 20..section_offset + 24].copy_from_slice(&0x200u32.to_le_bytes());
         // characteristics = Executable | Readable (0x60000020)
-        data[section_offset + 36..section_offset + 40].copy_from_slice(&0x60000020u32.to_le_bytes());
+        data[section_offset + 36..section_offset + 40]
+            .copy_from_slice(&0x60000020u32.to_le_bytes());
 
         // Rich Header (at 0x60..0x78)
         // xor_key = 0x11223344
@@ -1705,7 +1922,10 @@ mod tests {
         println!("Parsed rich header: {:?}", bin.rich_header_records);
 
         // Verify Rich Header
-        let rich = bin.rich_header_records.as_ref().expect("Rich Header records should be parsed");
+        let rich = bin
+            .rich_header_records
+            .as_ref()
+            .expect("Rich Header records should be parsed");
         assert_eq!(rich.len(), 1);
         assert_eq!(rich[0].build_number, 0x0020);
         assert_eq!(rich[0].product_id, 0x0010);
@@ -1713,7 +1933,10 @@ mod tests {
         assert_eq!(bin.get_ghidra_compiler_id(), Some("windows".to_string()));
 
         // Verify Delay-Load Import Function
-        let delay_func = bin.functions.iter().find(|f| f.name == "my_delay.dll!DelayFunc");
+        let delay_func = bin
+            .functions
+            .iter()
+            .find(|f| f.name == "my_delay.dll!DelayFunc");
         assert!(delay_func.is_some(), "DelayFunc import should be recovered");
         let df = delay_func.unwrap();
         assert_eq!(df.address, 0x401060);
@@ -1721,8 +1944,14 @@ mod tests {
         assert_eq!(df.external_library, Some("my_delay.dll".to_string()));
 
         // Verify Delay-Load Proxy Function
-        let delay_proxy = bin.functions.iter().find(|f| f.name == "DelayLoad_DelayFunc");
-        assert!(delay_proxy.is_some(), "DelayLoad_DelayFunc proxy should be recovered");
+        let delay_proxy = bin
+            .functions
+            .iter()
+            .find(|f| f.name == "DelayLoad_DelayFunc");
+        assert!(
+            delay_proxy.is_some(),
+            "DelayLoad_DelayFunc proxy should be recovered"
+        );
         let dp = delay_proxy.unwrap();
         assert_eq!(dp.address, 0x4010C0);
         assert_eq!(dp.is_import, false);

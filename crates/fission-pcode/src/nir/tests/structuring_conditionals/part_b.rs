@@ -1197,69 +1197,70 @@ fn test_return_duplication_removes_gotos_on_shared_returns() {
                 index: 0,
                 start_address: 0x6500,
                 successors: vec![3, 1],
-                ops: vec![
-                    PcodeOp {
-                        seq_num: 0,
-                        opcode: PcodeOpcode::CBranch,
-                        address: 0x6500,
-                        output: None,
-                        inputs: vec![cst(0x6530, 8), cond1],
-                        asm_mnemonic: None,
-                    },
-                ],
+                ops: vec![PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::CBranch,
+                    address: 0x6500,
+                    output: None,
+                    inputs: vec![cst(0x6530, 8), cond1],
+                    asm_mnemonic: None,
+                }],
             },
             PcodeBasicBlock {
                 index: 1,
                 start_address: 0x6510,
                 successors: vec![3, 2],
-                ops: vec![
-                    PcodeOp {
-                        seq_num: 0,
-                        opcode: PcodeOpcode::CBranch,
-                        address: 0x6510,
-                        output: None,
-                        inputs: vec![cst(0x6530, 8), cond2],
-                        asm_mnemonic: None,
-                    },
-                ],
+                ops: vec![PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::CBranch,
+                    address: 0x6510,
+                    output: None,
+                    inputs: vec![cst(0x6530, 8), cond2],
+                    asm_mnemonic: None,
+                }],
             },
             PcodeBasicBlock {
                 index: 2,
                 start_address: 0x6520,
                 successors: vec![0],
-                ops: vec![
-                    PcodeOp {
-                        seq_num: 0,
-                        opcode: PcodeOpcode::Branch,
-                        address: 0x6520,
-                        output: None,
-                        inputs: vec![cst(0x6500, 8)],
-                        asm_mnemonic: None,
-                    },
-                ],
+                ops: vec![PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::Branch,
+                    address: 0x6520,
+                    output: None,
+                    inputs: vec![cst(0x6500, 8)],
+                    asm_mnemonic: None,
+                }],
             },
             PcodeBasicBlock {
                 index: 3,
                 start_address: 0x6530,
                 successors: vec![],
-                ops: vec![
-                    PcodeOp {
-                        seq_num: 0,
-                        opcode: PcodeOpcode::Return,
-                        address: 0x6530,
-                        output: None,
-                        inputs: vec![cst(0, 8), cst(0, 4)],
-                        asm_mnemonic: None,
-                    },
-                ],
+                ops: vec![PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::Return,
+                    address: 0x6530,
+                    output: None,
+                    inputs: vec![cst(0, 8), cst(0, 4)],
+                    asm_mnemonic: None,
+                }],
             },
         ],
     };
 
     let options = preview_options_x86();
-    let code = render_mlil_preview(&func, "shared_return_loop", 0x6500, &options).expect("preview render");
-    
+    let code =
+        render_mlil_preview(&func, "shared_return_loop", 0x6500, &options).expect("preview render");
+
     // With Return Duplication, the return block is cloned, allowing early returns to be structured without gotos
-    assert!(!code.contains("goto"), "expected no gotos in structured loop output:\n{}", code);
-    assert!(code.contains("return 0;"), "expected return statement in output:\n{}", code);
+    assert!(
+        !code.contains("goto"),
+        "expected no gotos in structured loop output:\n{}",
+        code
+    );
+    assert!(
+        code.contains("return 0;"),
+        "expected return statement in output:\n{}",
+        code
+    );
 }

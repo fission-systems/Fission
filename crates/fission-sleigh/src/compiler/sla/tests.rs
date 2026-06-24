@@ -7,7 +7,9 @@ use flate2::Compression;
 use std::io::Write;
 
 fn packaged_sla_path(processor: &str, name: &str) -> Option<PathBuf> {
-    let path = crate::compiler::sleigh_compiled_root().join(processor).join(name);
+    let path = crate::compiler::sleigh_compiled_root()
+        .join(processor)
+        .join(name);
     path.is_file().then_some(path)
 }
 

@@ -62,19 +62,24 @@ pub fn poll_event() -> std::io::Result<Option<AppAction>> {
     }
 
     match event::read()? {
-        Event::Key(key_event) if key_event.kind == crossterm::event::KeyEventKind::Press
-            || key_event.kind == crossterm::event::KeyEventKind::Repeat =>
+        Event::Key(key_event)
+            if key_event.kind == crossterm::event::KeyEventKind::Press
+                || key_event.kind == crossterm::event::KeyEventKind::Repeat =>
         {
             Ok(Some(map_key(key_event.code, key_event.modifiers)))
         }
         Event::Key(_) => Ok(Some(AppAction::Tick)), // ignore Release events
         Event::Resize(w, h) => Ok(Some(AppAction::Resize(w, h))),
-        Event::Mouse(mouse_event) => {
-            match mouse_event.kind {
-                crossterm::event::MouseEventKind::ScrollUp => Ok(Some(AppAction::ScrollUp(mouse_event.column, mouse_event.row))),
-                crossterm::event::MouseEventKind::ScrollDown => Ok(Some(AppAction::ScrollDown(mouse_event.column, mouse_event.row))),
-                _ => Ok(Some(AppAction::Tick)),
-            }
+        Event::Mouse(mouse_event) => match mouse_event.kind {
+            crossterm::event::MouseEventKind::ScrollUp => Ok(Some(AppAction::ScrollUp(
+                mouse_event.column,
+                mouse_event.row,
+            ))),
+            crossterm::event::MouseEventKind::ScrollDown => Ok(Some(AppAction::ScrollDown(
+                mouse_event.column,
+                mouse_event.row,
+            ))),
+            _ => Ok(Some(AppAction::Tick)),
         },
         _ => Ok(Some(AppAction::Tick)),
     }
@@ -85,11 +90,17 @@ fn map_key(code: KeyCode, modifiers: KeyModifiers) -> AppAction {
         // Quit
         KeyCode::Char('c') if modifiers.contains(KeyModifiers::CONTROL) => AppAction::Quit,
         // Toggle Provider Menu
-        KeyCode::Char('p') if modifiers.contains(KeyModifiers::CONTROL) => AppAction::ToggleProviderMenu,
+        KeyCode::Char('p') if modifiers.contains(KeyModifiers::CONTROL) => {
+            AppAction::ToggleProviderMenu
+        }
         // Toggle Model Menu
-        KeyCode::Char('o') if modifiers.contains(KeyModifiers::CONTROL) => AppAction::ToggleModelMenu,
+        KeyCode::Char('o') if modifiers.contains(KeyModifiers::CONTROL) => {
+            AppAction::ToggleModelMenu
+        }
         // Toggle History Menu
-        KeyCode::Char('h') if modifiers.contains(KeyModifiers::CONTROL) => AppAction::ToggleHistoryMenu,
+        KeyCode::Char('h') if modifiers.contains(KeyModifiers::CONTROL) => {
+            AppAction::ToggleHistoryMenu
+        }
         // Close menus
         KeyCode::Esc => AppAction::Escape,
         // Toggle View Mode (Ctrl+Tab sends BackTab on some terminals; F2 is the explicit binding)

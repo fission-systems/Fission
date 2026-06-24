@@ -244,8 +244,7 @@ fn count_ptr_var_rvalue_uses(stmts: &[HirStmt], ptr_var: &str) -> usize {
 
 fn count_ptr_in_stmt(stmt: &HirStmt, name: &str) -> usize {
     let count = count_ptr_in_stmt_inner(stmt, name);
-    if count > 0 && name == "rbx" {
-    }
+    if count > 0 && name == "rbx" {}
     count
 }
 
@@ -600,7 +599,11 @@ fn collect_slot_restores(stmts: &[HirStmt], out: &mut Vec<(String, String)>) {
         }
         match stmt {
             HirStmt::Block(body) => collect_slot_restores(body, out),
-            HirStmt::If { then_body, else_body, .. } => {
+            HirStmt::If {
+                then_body,
+                else_body,
+                ..
+            } => {
                 collect_slot_restores(then_body, out);
                 collect_slot_restores(else_body, out);
             }
@@ -626,21 +629,37 @@ fn count_var_definitions(stmts: &[HirStmt], var: &str) -> usize {
 
 fn count_var_defs_in_stmt(stmt: &HirStmt, var: &str) -> usize {
     match stmt {
-        HirStmt::Assign { lhs: HirLValue::Var(lhs), .. } if lhs == var => 1,
+        HirStmt::Assign {
+            lhs: HirLValue::Var(lhs),
+            ..
+        } if lhs == var => 1,
         HirStmt::Block(body) => count_var_definitions(body, var),
-        HirStmt::If { then_body, else_body, .. } => {
-            count_var_definitions(then_body, var) + count_var_definitions(else_body, var)
-        }
+        HirStmt::If {
+            then_body,
+            else_body,
+            ..
+        } => count_var_definitions(then_body, var) + count_var_definitions(else_body, var),
         HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
             count_var_definitions(body, var)
         }
-        HirStmt::For { init, body, update, .. } => {
-            let i = init.as_ref().map(|s| count_var_defs_in_stmt(s, var)).unwrap_or(0);
-            let u = update.as_ref().map(|s| count_var_defs_in_stmt(s, var)).unwrap_or(0);
+        HirStmt::For {
+            init, body, update, ..
+        } => {
+            let i = init
+                .as_ref()
+                .map(|s| count_var_defs_in_stmt(s, var))
+                .unwrap_or(0);
+            let u = update
+                .as_ref()
+                .map(|s| count_var_defs_in_stmt(s, var))
+                .unwrap_or(0);
             i + u + count_var_definitions(body, var)
         }
         HirStmt::Switch { cases, default, .. } => {
-            let c: usize = cases.iter().map(|c| count_var_definitions(&c.body, var)).sum();
+            let c: usize = cases
+                .iter()
+                .map(|c| count_var_definitions(&c.body, var))
+                .sum();
             c + count_var_definitions(default, var)
         }
         _ => 0,
@@ -673,16 +692,18 @@ fn remove_orphaned_slot_restore_nested(
 ) {
     match stmt {
         HirStmt::Block(body) => remove_orphaned_slot_restores_from_stmts(body, slots, changed),
-        HirStmt::If { then_body, else_body, .. } => {
+        HirStmt::If {
+            then_body,
+            else_body,
+            ..
+        } => {
             remove_orphaned_slot_restores_from_stmts(then_body, slots, changed);
             remove_orphaned_slot_restores_from_stmts(else_body, slots, changed);
         }
         HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
             remove_orphaned_slot_restores_from_stmts(body, slots, changed)
         }
-        HirStmt::For { body, .. } => {
-            remove_orphaned_slot_restores_from_stmts(body, slots, changed)
-        }
+        HirStmt::For { body, .. } => remove_orphaned_slot_restores_from_stmts(body, slots, changed),
         HirStmt::Switch { cases, default, .. } => {
             for case in cases.iter_mut() {
                 remove_orphaned_slot_restores_from_stmts(&mut case.body, slots, changed);
@@ -770,22 +791,24 @@ pub(crate) fn remove_dead_callee_saved_param_loads(func: &mut HirFunction) -> bo
 
 /// Collect all top-level `callee_reg = expr` assignments where the RHS is
 /// NOT a stack-slot variable (to avoid touching epilogue-restore patterns).
-fn collect_callee_assign_targets_no_slot_rhs(
-    stmts: &[HirStmt],
-    out: &mut HashSet<String>,
-) {
+fn collect_callee_assign_targets_no_slot_rhs(stmts: &[HirStmt], out: &mut HashSet<String>) {
     for stmt in stmts {
         match stmt {
-            HirStmt::Assign { lhs: HirLValue::Var(name), rhs }
-                if is_callee_saved(name) =>
-            {
-                let rhs_is_slot = var_name_through_cast(rhs)
-                    .is_some_and(looks_like_stack_slot_name);
+            HirStmt::Assign {
+                lhs: HirLValue::Var(name),
+                rhs,
+            } if is_callee_saved(name) => {
+                let rhs_is_slot =
+                    var_name_through_cast(rhs).is_some_and(looks_like_stack_slot_name);
                 if !rhs_is_slot {
                     out.insert(name.clone());
                 }
             }
-            HirStmt::If { then_body, else_body, .. } => {
+            HirStmt::If {
+                then_body,
+                else_body,
+                ..
+            } => {
                 collect_callee_assign_targets_no_slot_rhs(then_body, out);
                 collect_callee_assign_targets_no_slot_rhs(else_body, out);
             }
@@ -813,7 +836,11 @@ fn remove_dead_callee_assigns_from_stmts(
 ) {
     for stmt in stmts.iter_mut() {
         match stmt {
-            HirStmt::If { then_body, else_body, .. } => {
+            HirStmt::If {
+                then_body,
+                else_body,
+                ..
+            } => {
                 remove_dead_callee_assigns_from_stmts(then_body, dead, changed);
                 remove_dead_callee_assigns_from_stmts(else_body, dead, changed);
             }
@@ -1158,7 +1185,11 @@ mod tests {
         };
 
         assert!(remove_callee_save_prologue_epilogue(&mut func));
-        assert_eq!(func.body.len(), 2, "uppercase register restore should be removed");
+        assert_eq!(
+            func.body.len(),
+            2,
+            "uppercase register restore should be removed"
+        );
         assert!(!func.locals.iter().any(|b| b.name == "home_0"));
     }
 
@@ -1186,7 +1217,10 @@ mod tests {
 
         assert!(remove_callee_save_prologue_epilogue(&mut func));
         assert_eq!(func.body.len(), 2, "orphaned restore should be removed");
-        assert!(!func.locals.iter().any(|b| b.name == "home_0"), "home_0 local should be removed");
+        assert!(
+            !func.locals.iter().any(|b| b.name == "home_0"),
+            "home_0 local should be removed"
+        );
     }
 
     #[test]
@@ -1202,14 +1236,30 @@ mod tests {
                 HirStmt::Return(None),
             ],
             locals: vec![
-                NirBinding { name: "home_0".to_owned(), ty: u64_ty(), surface_type_name: None, origin: None, initializer: None },
-                NirBinding { name: "home_8".to_owned(), ty: u64_ty(), surface_type_name: None, origin: None, initializer: None },
+                NirBinding {
+                    name: "home_0".to_owned(),
+                    ty: u64_ty(),
+                    surface_type_name: None,
+                    origin: None,
+                    initializer: None,
+                },
+                NirBinding {
+                    name: "home_8".to_owned(),
+                    ty: u64_ty(),
+                    surface_type_name: None,
+                    origin: None,
+                    initializer: None,
+                },
             ],
             ..Default::default()
         };
 
         assert!(remove_callee_save_prologue_epilogue(&mut func));
-        assert_eq!(func.body.len(), 2, "both orphaned restores should be removed");
+        assert_eq!(
+            func.body.len(),
+            2,
+            "both orphaned restores should be removed"
+        );
         assert!(func.locals.is_empty(), "home locals should be removed");
     }
 
@@ -1238,7 +1288,11 @@ mod tests {
         };
 
         assert!(!remove_callee_save_prologue_epilogue(&mut func));
-        assert_eq!(func.body.len(), 3, "slot restore with live definition must be kept");
+        assert_eq!(
+            func.body.len(),
+            3,
+            "slot restore with live definition must be kept"
+        );
     }
 
     #[test]
@@ -1267,7 +1321,10 @@ mod tests {
 
         assert!(remove_callee_save_prologue_epilogue(&mut func));
         if let HirStmt::If { then_body, .. } = &func.body[0] {
-            assert!(then_body.is_empty(), "orphaned restore inside if-branch should be removed");
+            assert!(
+                then_body.is_empty(),
+                "orphaned restore inside if-branch should be removed"
+            );
         }
     }
 
@@ -1290,11 +1347,8 @@ mod tests {
         let mut func = HirFunction {
             name: "test".to_owned(),
             int_param_offsets: Vec::new(),
-            body: vec![
-                assign_var("rbx", var("param_3")),
-                HirStmt::Return(None),
-            ],
-            locals: vec![],  // rbx has no NirBinding
+            body: vec![assign_var("rbx", var("param_3")), HirStmt::Return(None)],
+            locals: vec![], // rbx has no NirBinding
             ..Default::default()
         };
 
@@ -1316,7 +1370,7 @@ mod tests {
                     else_body: vec![],
                 },
             ],
-            locals: vec![],  // undeclared but has reads
+            locals: vec![], // undeclared but has reads
             ..Default::default()
         };
 
@@ -1331,10 +1385,7 @@ mod tests {
         let mut func = HirFunction {
             name: "test".to_owned(),
             int_param_offsets: Vec::new(),
-            body: vec![
-                assign_var("rbx", var("param_3")),
-                HirStmt::Return(None),
-            ],
+            body: vec![assign_var("rbx", var("param_3")), HirStmt::Return(None)],
             locals: vec![NirBinding {
                 name: "rbx".to_owned(),
                 ty: u64_ty(),
@@ -1346,8 +1397,15 @@ mod tests {
         };
 
         assert!(remove_callee_save_prologue_epilogue(&mut func));
-        assert_eq!(func.body, vec![HirStmt::Return(None)], "dead assignment removed");
-        assert!(func.locals.is_empty(), "dead binding also removed from locals");
+        assert_eq!(
+            func.body,
+            vec![HirStmt::Return(None)],
+            "dead assignment removed"
+        );
+        assert!(
+            func.locals.is_empty(),
+            "dead binding also removed from locals"
+        );
     }
 
     #[test]
@@ -1357,9 +1415,7 @@ mod tests {
         let mut func = HirFunction {
             name: "fill_matrix".to_owned(),
             int_param_offsets: Vec::new(),
-            body: vec![
-                HirStmt::Return(None),
-            ],
+            body: vec![HirStmt::Return(None)],
             locals: vec![NirBinding {
                 name: "rbx".to_owned(),
                 ty: u64_ty(),
@@ -1371,6 +1427,9 @@ mod tests {
         };
 
         assert!(remove_dead_callee_saved_param_loads(&mut func));
-        assert!(func.locals.is_empty(), "rbx local should be removed even if assignment was already deleted");
+        assert!(
+            func.locals.is_empty(),
+            "rbx local should be removed even if assignment was already deleted"
+        );
     }
 }

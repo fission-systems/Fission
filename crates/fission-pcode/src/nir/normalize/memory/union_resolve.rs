@@ -182,7 +182,11 @@ fn collect_accesses_in_stmt(
         HirStmt::Expr(expr) | HirStmt::Return(Some(expr)) => {
             collect_accesses_in_expr(expr, binding_name, target_offset, out, &[]);
         }
-        HirStmt::If { cond, then_body, else_body } => {
+        HirStmt::If {
+            cond,
+            then_body,
+            else_body,
+        } => {
             collect_accesses_in_expr(cond, binding_name, target_offset, out, &[]);
             collect_accesses_in_stmts(then_body, binding_name, target_offset, out);
             collect_accesses_in_stmts(else_body, binding_name, target_offset, out);
@@ -191,7 +195,12 @@ fn collect_accesses_in_stmt(
             collect_accesses_in_expr(cond, binding_name, target_offset, out, &[]);
             collect_accesses_in_stmts(body, binding_name, target_offset, out);
         }
-        HirStmt::For { init, cond, update, body } => {
+        HirStmt::For {
+            init,
+            cond,
+            update,
+            body,
+        } => {
             if let Some(init) = init {
                 collect_accesses_in_stmt(init, binding_name, target_offset, out);
             }
@@ -203,7 +212,11 @@ fn collect_accesses_in_stmt(
             }
             collect_accesses_in_stmts(body, binding_name, target_offset, out);
         }
-        HirStmt::Switch { expr, cases, default } => {
+        HirStmt::Switch {
+            expr,
+            cases,
+            default,
+        } => {
             collect_accesses_in_expr(expr, binding_name, target_offset, out, &[]);
             for case in cases {
                 collect_accesses_in_stmts(&case.body, binding_name, target_offset, out);
@@ -238,7 +251,9 @@ fn collect_accesses_in_expr(
         }
         HirExpr::Cast { ty, expr: inner } => {
             let mut next_contexts = parent_contexts.to_vec();
-            next_contexts.push(AccessContext::Cast { target_ty: ty.clone() });
+            next_contexts.push(AccessContext::Cast {
+                target_ty: ty.clone(),
+            });
             collect_accesses_in_expr(inner, binding_name, target_offset, out, &next_contexts);
         }
         HirExpr::Unary { expr: inner, .. } => {
@@ -255,7 +270,12 @@ fn collect_accesses_in_expr(
             collect_accesses_in_expr(lhs, binding_name, target_offset, out, &next_contexts);
             collect_accesses_in_expr(rhs, binding_name, target_offset, out, &next_contexts);
         }
-        HirExpr::Select { cond, then_expr, else_expr, .. } => {
+        HirExpr::Select {
+            cond,
+            then_expr,
+            else_expr,
+            ..
+        } => {
             collect_accesses_in_expr(cond, binding_name, target_offset, out, &[]);
             collect_accesses_in_expr(then_expr, binding_name, target_offset, out, parent_contexts);
             collect_accesses_in_expr(else_expr, binding_name, target_offset, out, parent_contexts);
@@ -294,49 +314,69 @@ fn score_candidate_type(candidate: &NirType, accesses: &[AccessInfo]) -> i32 {
 
         for ctx in &access.contexts {
             match ctx {
-                AccessContext::Binary { op, is_float_op, .. } => {
-                    match candidate {
-                        NirType::Float { .. } => {
-                            if *is_float_op {
-                                score += 10;
-                            } else {
-                                score -= 10;
-                            }
+                AccessContext::Binary {
+                    op, is_float_op, ..
+                } => match candidate {
+                    NirType::Float { .. } => {
+                        if *is_float_op {
+                            score += 10;
+                        } else {
+                            score -= 10;
                         }
-                        NirType::Int { signed, .. } => {
-                            if *is_float_op {
-                                score -= 10;
-                            } else {
-                                score += 3;
-                                if matches!(op, HirBinaryOp::SLt | HirBinaryOp::SLe | HirBinaryOp::SGt | HirBinaryOp::SGe) {
-                                    if *signed {
-                                        score += 5;
-                                    } else {
-                                        score -= 2;
-                                    }
-                                }
-                                if matches!(op, HirBinaryOp::Lt | HirBinaryOp::Le | HirBinaryOp::Gt | HirBinaryOp::Ge) {
-                                    if !*signed {
-                                        score += 5;
-                                    } else {
-                                        score -= 2;
-                                    }
-                                }
-                                if matches!(op, HirBinaryOp::And | HirBinaryOp::Or | HirBinaryOp::Xor | HirBinaryOp::Shl | HirBinaryOp::Shr | HirBinaryOp::Sar) {
-                                    score += 5;
-                                }
-                            }
-                        }
-                        NirType::Ptr(_) => {
-                            if matches!(op, HirBinaryOp::Add | HirBinaryOp::Sub) {
-                                score += 5;
-                            } else {
-                                score -= 8;
-                            }
-                        }
-                        _ => {}
                     }
-                }
+                    NirType::Int { signed, .. } => {
+                        if *is_float_op {
+                            score -= 10;
+                        } else {
+                            score += 3;
+                            if matches!(
+                                op,
+                                HirBinaryOp::SLt
+                                    | HirBinaryOp::SLe
+                                    | HirBinaryOp::SGt
+                                    | HirBinaryOp::SGe
+                            ) {
+                                if *signed {
+                                    score += 5;
+                                } else {
+                                    score -= 2;
+                                }
+                            }
+                            if matches!(
+                                op,
+                                HirBinaryOp::Lt
+                                    | HirBinaryOp::Le
+                                    | HirBinaryOp::Gt
+                                    | HirBinaryOp::Ge
+                            ) {
+                                if !*signed {
+                                    score += 5;
+                                } else {
+                                    score -= 2;
+                                }
+                            }
+                            if matches!(
+                                op,
+                                HirBinaryOp::And
+                                    | HirBinaryOp::Or
+                                    | HirBinaryOp::Xor
+                                    | HirBinaryOp::Shl
+                                    | HirBinaryOp::Shr
+                                    | HirBinaryOp::Sar
+                            ) {
+                                score += 5;
+                            }
+                        }
+                    }
+                    NirType::Ptr(_) => {
+                        if matches!(op, HirBinaryOp::Add | HirBinaryOp::Sub) {
+                            score += 5;
+                        } else {
+                            score -= 8;
+                        }
+                    }
+                    _ => {}
+                },
                 AccessContext::Call { target, .. } => {
                     let target_lower = target.to_lowercase();
                     let is_float_fn = target_lower.contains("sqrt")
@@ -362,16 +402,14 @@ fn score_candidate_type(candidate: &NirType, accesses: &[AccessInfo]) -> i32 {
                         _ => {}
                     }
                 }
-                AccessContext::Cast { target_ty } => {
-                    match (candidate, target_ty) {
-                        (NirType::Float { .. }, NirType::Float { .. }) => score += 8,
-                        (NirType::Int { .. }, NirType::Int { .. }) => score += 8,
-                        (NirType::Ptr(_), NirType::Ptr(_)) => score += 8,
-                        _ => {
-                            score -= 3;
-                        }
+                AccessContext::Cast { target_ty } => match (candidate, target_ty) {
+                    (NirType::Float { .. }, NirType::Float { .. }) => score += 8,
+                    (NirType::Int { .. }, NirType::Int { .. }) => score += 8,
+                    (NirType::Ptr(_), NirType::Ptr(_)) => score += 8,
+                    _ => {
+                        score -= 3;
                     }
-                }
+                },
                 AccessContext::StoreRhs { rhs_ty } => {
                     if rhs_ty == candidate {
                         score += 8;

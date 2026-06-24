@@ -1,11 +1,11 @@
 //! Centralized admission gates for normalize action groups.
 
 use super::super::types::HirFunction;
-use super::group::Gate;
 use super::budget::{
     EARLY_CLEANUP_BLOCK_BLOCK_LIMIT, EARLY_CLEANUP_BLOCK_STMT_LIMIT,
     LARGE_FUNCTION_LOCAL_THRESHOLD, LARGE_FUNCTION_STMT_THRESHOLD, count_hir_stmts,
 };
+use super::group::Gate;
 
 pub(crate) const INIT_CLEANUP_STMT_LIMIT: usize = 600;
 pub(crate) const INIT_CLEANUP_BLOCK_LIMIT: usize = 120;
@@ -16,7 +16,7 @@ pub(crate) const CLEANUP_LARGE_BODY_ROUND_LIMIT: usize = 6;
 pub(crate) const CLEANUP_DEFAULT_ROUND_LIMIT: usize = 16;
 pub(crate) const MERGE_TYPE_MAX_ROUNDS: usize = 4;
 pub(crate) const RULE_POOL_MAX_ROUNDS: usize = 15;
-pub(crate) const STRUCTURING_TIME_CEILING_SECS: f64 = 0.5;
+pub(crate) const STRUCTURING_TIME_CEILING_SECS: f64 = 4.5;
 pub(crate) const TRACE_DAG_FOLLOW_BLOCK_LIMIT: usize = 500;
 
 pub(crate) fn gate_not_large_function() -> Gate {

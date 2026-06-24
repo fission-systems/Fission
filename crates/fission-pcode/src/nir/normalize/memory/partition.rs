@@ -246,9 +246,7 @@ fn classify_base_object(base: &HirExpr) -> MemoryAccessClass {
         }
         HirExpr::PtrOffset { base, .. }
         | HirExpr::Cast { expr: base, .. }
-        | HirExpr::FieldAccess { base, .. } => {
-            classify_base_object(base)
-        }
+        | HirExpr::FieldAccess { base, .. } => classify_base_object(base),
         _ => MemoryAccessClass::HeapLike,
     }
 }

@@ -257,7 +257,11 @@ fn promote_direct_param_register_reads(func: &mut HirFunction) -> usize {
             if stmt_assigns_var(&HirStmt::Block(func.body.clone()), &hw) {
                 continue;
             }
-            if !func.body.iter().any(|stmt| stmt_contains_rhs_var(stmt, &hw)) {
+            if !func
+                .body
+                .iter()
+                .any(|stmt| stmt_contains_rhs_var(stmt, &hw))
+            {
                 continue;
             }
             ensure_param_binding(func, slot, param_ty_for_abi(func));
@@ -404,7 +408,12 @@ fn collect_var_names_in_expr(expr: &HirExpr, vars: &mut HashSet<String>) {
             collect_var_names_in_expr(lhs, vars);
             collect_var_names_in_expr(rhs, vars);
         }
-        HirExpr::Select { cond, then_expr, else_expr, .. } => {
+        HirExpr::Select {
+            cond,
+            then_expr,
+            else_expr,
+            ..
+        } => {
             collect_var_names_in_expr(cond, vars);
             collect_var_names_in_expr(then_expr, vars);
             collect_var_names_in_expr(else_expr, vars);

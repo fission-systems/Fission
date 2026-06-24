@@ -8,4 +8,3 @@ pub use hash::{
 };
 pub use matcher::{FidDatabaseSet, FidFunctionView, FidMatchError, FidMatcher, FidRelocationView};
 pub use x86_decoder::dissect_x86_function_to_fid_units;
-

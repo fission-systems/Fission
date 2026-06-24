@@ -94,8 +94,10 @@ pub(crate) fn copy_propagation_pass(func: &mut HirFunction) -> bool {
         .locals
         .iter()
         .filter(|b| {
-            matches!(b.ty, NirType::Int { .. } | NirType::Float { .. } | NirType::Bool)
-                && !should_skip_copyprop_for_preserved_name(&b.name, &preserved_temps)
+            matches!(
+                b.ty,
+                NirType::Int { .. } | NirType::Float { .. } | NirType::Bool
+            ) && !should_skip_copyprop_for_preserved_name(&b.name, &preserved_temps)
                 && !loop_preservation_vars.contains(b.name.as_str())
         })
         .map(|b| b.name.as_str())
@@ -1393,7 +1395,10 @@ fn collect_loop_preservation_vars(stmts: &[HirStmt]) -> HashSet<String> {
     let mut used_inside: HashSet<String> = HashSet::new();
     collect_defs_outside_loops(stmts, &mut defined_outside);
     collect_uses_inside_loops(stmts, &mut used_inside);
-    defined_outside.intersection(&used_inside).cloned().collect()
+    defined_outside
+        .intersection(&used_inside)
+        .cloned()
+        .collect()
 }
 
 fn collect_defs_outside_loops(stmts: &[HirStmt], out: &mut HashSet<String>) {
@@ -1405,7 +1410,11 @@ fn collect_defs_outside_loops(stmts: &[HirStmt], out: &mut HashSet<String>) {
                 }
             }
             HirStmt::Block(body) => collect_defs_outside_loops(body, out),
-            HirStmt::If { then_body, else_body, .. } => {
+            HirStmt::If {
+                then_body,
+                else_body,
+                ..
+            } => {
                 collect_defs_outside_loops(then_body, out);
                 collect_defs_outside_loops(else_body, out);
             }
@@ -1435,7 +1444,12 @@ fn collect_uses_inside_loops(stmts: &[HirStmt], out: &mut HashSet<String>) {
                     collect_all_vars_in_stmts(body, inner_out);
                     collect_vars_in_expr(cond, inner_out);
                 }
-                HirStmt::For { init, cond, update, body } => {
+                HirStmt::For {
+                    init,
+                    cond,
+                    update,
+                    body,
+                } => {
                     if let Some(i) = init {
                         collect_all_vars_in_stmt(i, inner_out);
                     }
@@ -1448,7 +1462,11 @@ fn collect_uses_inside_loops(stmts: &[HirStmt], out: &mut HashSet<String>) {
                     collect_all_vars_in_stmts(body, inner_out);
                 }
                 HirStmt::Block(body) => inner(body, inner_out),
-                HirStmt::If { then_body, else_body, .. } => {
+                HirStmt::If {
+                    then_body,
+                    else_body,
+                    ..
+                } => {
                     inner(then_body, inner_out);
                     inner(else_body, inner_out);
                 }
@@ -1479,18 +1497,29 @@ fn collect_all_vars_in_stmt<'a>(stmt: &'a HirStmt, out: &mut HashSet<&'a str>) {
             collect_vars_in_lvalue(lhs, out);
             collect_vars_in_expr(rhs, out);
         }
-        HirStmt::Expr(expr) | HirStmt::Return(Some(expr)) | HirStmt::VaStart { va_list: expr, .. } => {
+        HirStmt::Expr(expr)
+        | HirStmt::Return(Some(expr))
+        | HirStmt::VaStart { va_list: expr, .. } => {
             collect_vars_in_expr(expr, out);
         }
-        HirStmt::Block(body)
-        | HirStmt::While { body, .. }
-        | HirStmt::DoWhile { body, .. } => collect_all_vars_in_stmts(body, out),
-        HirStmt::If { then_body, else_body, cond } => {
+        HirStmt::Block(body) | HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
+            collect_all_vars_in_stmts(body, out)
+        }
+        HirStmt::If {
+            then_body,
+            else_body,
+            cond,
+        } => {
             collect_vars_in_expr(cond, out);
             collect_all_vars_in_stmts(then_body, out);
             collect_all_vars_in_stmts(else_body, out);
         }
-        HirStmt::For { init, cond, update, body } => {
+        HirStmt::For {
+            init,
+            cond,
+            update,
+            body,
+        } => {
             if let Some(i) = init {
                 collect_all_vars_in_stmt(i, out);
             }
@@ -1502,7 +1531,11 @@ fn collect_all_vars_in_stmt<'a>(stmt: &'a HirStmt, out: &mut HashSet<&'a str>) {
             }
             collect_all_vars_in_stmts(body, out);
         }
-        HirStmt::Switch { cases, default, expr } => {
+        HirStmt::Switch {
+            cases,
+            default,
+            expr,
+        } => {
             collect_vars_in_expr(expr, out);
             for case in cases {
                 collect_all_vars_in_stmts(&case.body, out);

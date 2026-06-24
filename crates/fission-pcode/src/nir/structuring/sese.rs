@@ -47,19 +47,15 @@ pub(crate) fn find_sese_regions(
     let mut regions = Vec::new();
 
     for u in 0..n {
-        for v in 0..n {
+        let Some(pdom_set) = postdom.postdominators().get(&u) else {
+            continue;
+        };
+        for &v in pdom_set.iter() {
             if u == v {
                 continue;
             }
             // Check basic dominance and post-dominance requirements.
             if !dom.dominates(u, v) {
-                continue;
-            }
-            if !postdom
-                .postdominators()
-                .get(&u)
-                .is_some_and(|set| set.contains(&v))
-            {
                 continue;
             }
             // Ensure u precedes v in RPO.

@@ -273,7 +273,10 @@ impl<'a> PreviewBuilder<'a> {
         })
     }
 
-    pub(in crate::nir::builder) fn format_redefinition_rhs(&self, redef: &CrossBlockRedefinitionDetail) -> String {
+    pub(in crate::nir::builder) fn format_redefinition_rhs(
+        &self,
+        redef: &CrossBlockRedefinitionDetail,
+    ) -> String {
         let Some(redef_block_idx) = self.address_to_index.get(&redef.redef_block_addr).copied()
         else {
             return "<unknown>".to_string();

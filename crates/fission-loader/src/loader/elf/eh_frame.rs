@@ -23,7 +23,7 @@ pub(crate) fn parse_eh_frame(
     if text_addr != 0 {
         bases = bases.set_text(text_addr);
     }
-    
+
     // We assume the native pointer size for FDE decoding based on is_64bit.
     // Gimli handles parsing CIE/FDE automatically, but we need to provide bases.
 
@@ -33,7 +33,9 @@ pub(crate) fn parse_eh_frame(
             Ok(Some(entry)) => {
                 match entry {
                     gimli::CieOrFde::Fde(partial_fde) => {
-                        match partial_fde.parse(|_, bases, offset| eh_frame.cie_from_offset(bases, offset)) {
+                        match partial_fde
+                            .parse(|_, bases, offset| eh_frame.cie_from_offset(bases, offset))
+                        {
                             Ok(fde) => {
                                 let start = fde.initial_address();
                                 let size = fde.len() as u64;
@@ -80,25 +82,26 @@ mod tests {
             // CIE (24 bytes total: 4 length + 20 payload)
             0x14, 0x00, 0x00, 0x00, // Length (20)
             0x00, 0x00, 0x00, 0x00, // CIE ID
-            0x01,                   // Version
-            0x7a, 0x52, 0x00,       // Augmentation String "zR"
-            0x01,                   // Code alignment factor
-            0x78,                   // Data alignment factor
-            0x10,                   // Return address register
-            0x01,                   // Augmentation data length
-            0x1b,                   // pcrel | sdata4
+            0x01, // Version
+            0x7a, 0x52, 0x00, // Augmentation String "zR"
+            0x01, // Code alignment factor
+            0x78, // Data alignment factor
+            0x10, // Return address register
+            0x01, // Augmentation data length
+            0x1b, // pcrel | sdata4
             0x0c, 0x07, 0x08, 0x90, 0x01, 0x00, 0x00, // Instructions
             // FDE (24 bytes total: 4 length + 20 payload)
             0x14, 0x00, 0x00, 0x00, // Length (20)
             0x1c, 0x00, 0x00, 0x00, // CIE pointer (relative, 28)
             0x10, 0x10, 0x00, 0x00, // Initial location (PC relative offset)
             0x50, 0x00, 0x00, 0x00, // Address range (0x50 bytes)
-            0x00,                   // Augmentation length
-            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // Padding (7 bytes to reach 20 bytes payload)
+            0x00, // Augmentation length
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, // Padding (7 bytes to reach 20 bytes payload)
         ];
 
         let funcs = parse_eh_frame(&eh_frame_data, 0x2000, 0x1000, 0x3000, true, true);
-        
+
         // Given initial location is relative, we should just verify gimli parses it successfully.
         // It should extract at least 1 function.
         assert_eq!(funcs.len(), 1);

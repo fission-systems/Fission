@@ -3,19 +3,35 @@ use super::super::*;
 /// The trait representing an AST simplification rule.
 pub(crate) trait Rule {
     fn name(&self) -> &'static str;
-    fn apply_stmt(&self, _stmt: &mut HirStmt) -> bool { false }
-    fn apply_expr(&self, _expr: &mut HirExpr) -> bool { false }
+    fn apply_stmt(&self, _stmt: &mut HirStmt) -> bool {
+        false
+    }
+    fn apply_expr(&self, _expr: &mut HirExpr) -> bool {
+        false
+    }
 }
 
 /// Simplifies double negations: `!(!x)` -> `x` and `~(~x)` -> `x`.
 struct RuleSimplifyDoubleNegation;
 
 impl Rule for RuleSimplifyDoubleNegation {
-    fn name(&self) -> &'static str { "simplify_double_negation" }
+    fn name(&self) -> &'static str {
+        "simplify_double_negation"
+    }
 
     fn apply_expr(&self, expr: &mut HirExpr) -> bool {
-        if let HirExpr::Unary { op: op1, expr: inner1, ty: _ } = expr {
-            if let HirExpr::Unary { op: op2, expr: inner2, ty: _ } = inner1.as_mut() {
+        if let HirExpr::Unary {
+            op: op1,
+            expr: inner1,
+            ty: _,
+        } = expr
+        {
+            if let HirExpr::Unary {
+                op: op2,
+                expr: inner2,
+                ty: _,
+            } = inner1.as_mut()
+            {
                 if (*op1 == HirUnaryOp::Not && *op2 == HirUnaryOp::Not)
                     || (*op1 == HirUnaryOp::BitNot && *op2 == HirUnaryOp::BitNot)
                 {
@@ -37,7 +53,9 @@ impl Rule for RuleSimplifyDoubleNegation {
 struct RuleFoldConstants;
 
 impl Rule for RuleFoldConstants {
-    fn name(&self) -> &'static str { "fold_constants" }
+    fn name(&self) -> &'static str {
+        "fold_constants"
+    }
 
     fn apply_expr(&self, expr: &mut HirExpr) -> bool {
         match expr {
@@ -100,7 +118,11 @@ impl Rule for RuleFoldConstants {
                     _ => {}
                 }
             }
-            HirExpr::Unary { op: HirUnaryOp::Neg, expr: inner, ty } => {
+            HirExpr::Unary {
+                op: HirUnaryOp::Neg,
+                expr: inner,
+                ty,
+            } => {
                 if let HirExpr::Const(c, _) = inner.as_ref() {
                     *expr = HirExpr::Const(c.wrapping_neg(), ty.clone());
                     return true;
@@ -120,58 +142,54 @@ impl Rule for RuleFoldConstants {
 struct RuleBitwiseIdentities;
 
 impl Rule for RuleBitwiseIdentities {
-    fn name(&self) -> &'static str { "bitwise_identities" }
+    fn name(&self) -> &'static str {
+        "bitwise_identities"
+    }
 
     fn apply_expr(&self, expr: &mut HirExpr) -> bool {
         if let HirExpr::Binary { op, lhs, rhs, ty } = expr {
             match op {
-                HirBinaryOp::And => {
-                    match (lhs.as_ref(), rhs.as_ref()) {
-                        (_, HirExpr::Const(0, _)) => {
-                            *expr = HirExpr::Const(0, ty.clone());
-                            return true;
-                        }
-                        (HirExpr::Const(0, _), _) => {
-                            *expr = HirExpr::Const(0, ty.clone());
-                            return true;
-                        }
-                        (other, HirExpr::Const(-1, _)) => {
-                            *expr = other.clone();
-                            return true;
-                        }
-                        (HirExpr::Const(-1, _), other) => {
-                            *expr = other.clone();
-                            return true;
-                        }
-                        _ => {}
+                HirBinaryOp::And => match (lhs.as_ref(), rhs.as_ref()) {
+                    (_, HirExpr::Const(0, _)) => {
+                        *expr = HirExpr::Const(0, ty.clone());
+                        return true;
                     }
-                }
-                HirBinaryOp::Or => {
-                    match (lhs.as_ref(), rhs.as_ref()) {
-                        (other, HirExpr::Const(0, _)) => {
-                            *expr = other.clone();
-                            return true;
-                        }
-                        (HirExpr::Const(0, _), other) => {
-                            *expr = other.clone();
-                            return true;
-                        }
-                        _ => {}
+                    (HirExpr::Const(0, _), _) => {
+                        *expr = HirExpr::Const(0, ty.clone());
+                        return true;
                     }
-                }
-                HirBinaryOp::Xor => {
-                    match (lhs.as_ref(), rhs.as_ref()) {
-                        (other, HirExpr::Const(0, _)) => {
-                            *expr = other.clone();
-                            return true;
-                        }
-                        (HirExpr::Const(0, _), other) => {
-                            *expr = other.clone();
-                            return true;
-                        }
-                        _ => {}
+                    (other, HirExpr::Const(-1, _)) => {
+                        *expr = other.clone();
+                        return true;
                     }
-                }
+                    (HirExpr::Const(-1, _), other) => {
+                        *expr = other.clone();
+                        return true;
+                    }
+                    _ => {}
+                },
+                HirBinaryOp::Or => match (lhs.as_ref(), rhs.as_ref()) {
+                    (other, HirExpr::Const(0, _)) => {
+                        *expr = other.clone();
+                        return true;
+                    }
+                    (HirExpr::Const(0, _), other) => {
+                        *expr = other.clone();
+                        return true;
+                    }
+                    _ => {}
+                },
+                HirBinaryOp::Xor => match (lhs.as_ref(), rhs.as_ref()) {
+                    (other, HirExpr::Const(0, _)) => {
+                        *expr = other.clone();
+                        return true;
+                    }
+                    (HirExpr::Const(0, _), other) => {
+                        *expr = other.clone();
+                        return true;
+                    }
+                    _ => {}
+                },
                 _ => {}
             }
         }
@@ -185,53 +203,57 @@ impl Rule for RuleBitwiseIdentities {
 struct RuleLogicalIdentities;
 
 impl Rule for RuleLogicalIdentities {
-    fn name(&self) -> &'static str { "logical_identities" }
+    fn name(&self) -> &'static str {
+        "logical_identities"
+    }
 
     fn apply_expr(&self, expr: &mut HirExpr) -> bool {
-        if let HirExpr::Binary { op, lhs, rhs, ty: _ } = expr {
+        if let HirExpr::Binary {
+            op,
+            lhs,
+            rhs,
+            ty: _,
+        } = expr
+        {
             match op {
-                HirBinaryOp::LogicalAnd => {
-                    match (lhs.as_ref(), rhs.as_ref()) {
-                        (other, HirExpr::Const(1, _)) => {
-                            *expr = other.clone();
-                            return true;
-                        }
-                        (HirExpr::Const(1, _), other) => {
-                            *expr = other.clone();
-                            return true;
-                        }
-                        (_, HirExpr::Const(0, _)) => {
-                            *expr = HirExpr::Const(0, NirType::Bool);
-                            return true;
-                        }
-                        (HirExpr::Const(0, _), _) => {
-                            *expr = HirExpr::Const(0, NirType::Bool);
-                            return true;
-                        }
-                        _ => {}
+                HirBinaryOp::LogicalAnd => match (lhs.as_ref(), rhs.as_ref()) {
+                    (other, HirExpr::Const(1, _)) => {
+                        *expr = other.clone();
+                        return true;
                     }
-                }
-                HirBinaryOp::LogicalOr => {
-                    match (lhs.as_ref(), rhs.as_ref()) {
-                        (other, HirExpr::Const(0, _)) => {
-                            *expr = other.clone();
-                            return true;
-                        }
-                        (HirExpr::Const(0, _), other) => {
-                            *expr = other.clone();
-                            return true;
-                        }
-                        (_, HirExpr::Const(1, _)) => {
-                            *expr = HirExpr::Const(1, NirType::Bool);
-                            return true;
-                        }
-                        (HirExpr::Const(1, _), _) => {
-                            *expr = HirExpr::Const(1, NirType::Bool);
-                            return true;
-                        }
-                        _ => {}
+                    (HirExpr::Const(1, _), other) => {
+                        *expr = other.clone();
+                        return true;
                     }
-                }
+                    (_, HirExpr::Const(0, _)) => {
+                        *expr = HirExpr::Const(0, NirType::Bool);
+                        return true;
+                    }
+                    (HirExpr::Const(0, _), _) => {
+                        *expr = HirExpr::Const(0, NirType::Bool);
+                        return true;
+                    }
+                    _ => {}
+                },
+                HirBinaryOp::LogicalOr => match (lhs.as_ref(), rhs.as_ref()) {
+                    (other, HirExpr::Const(0, _)) => {
+                        *expr = other.clone();
+                        return true;
+                    }
+                    (HirExpr::Const(0, _), other) => {
+                        *expr = other.clone();
+                        return true;
+                    }
+                    (_, HirExpr::Const(1, _)) => {
+                        *expr = HirExpr::Const(1, NirType::Bool);
+                        return true;
+                    }
+                    (HirExpr::Const(1, _), _) => {
+                        *expr = HirExpr::Const(1, NirType::Bool);
+                        return true;
+                    }
+                    _ => {}
+                },
                 _ => {}
             }
         }
@@ -244,7 +266,9 @@ impl Rule for RuleLogicalIdentities {
 struct RuleCollapseZeroOffset;
 
 impl Rule for RuleCollapseZeroOffset {
-    fn name(&self) -> &'static str { "collapse_zero_offset" }
+    fn name(&self) -> &'static str {
+        "collapse_zero_offset"
+    }
 
     fn apply_expr(&self, expr: &mut HirExpr) -> bool {
         if let HirExpr::PtrOffset { base, offset: 0 } = expr {
@@ -258,10 +282,18 @@ impl Rule for RuleCollapseZeroOffset {
 struct RuleSimplifyMulToShl;
 
 impl Rule for RuleSimplifyMulToShl {
-    fn name(&self) -> &'static str { "simplify_mul_to_shl" }
+    fn name(&self) -> &'static str {
+        "simplify_mul_to_shl"
+    }
 
     fn apply_expr(&self, expr: &mut HirExpr) -> bool {
-        if let HirExpr::Binary { op: HirBinaryOp::Mul, lhs, rhs, ty } = expr {
+        if let HirExpr::Binary {
+            op: HirBinaryOp::Mul,
+            lhs,
+            rhs,
+            ty,
+        } = expr
+        {
             match (lhs.as_ref(), rhs.as_ref()) {
                 (other, HirExpr::Const(2, _)) => {
                     *expr = HirExpr::Binary {
@@ -291,10 +323,18 @@ impl Rule for RuleSimplifyMulToShl {
 struct RuleSimplifySelect;
 
 impl Rule for RuleSimplifySelect {
-    fn name(&self) -> &'static str { "simplify_select" }
+    fn name(&self) -> &'static str {
+        "simplify_select"
+    }
 
     fn apply_expr(&self, expr: &mut HirExpr) -> bool {
-        if let HirExpr::Select { cond, then_expr, else_expr, .. } = expr {
+        if let HirExpr::Select {
+            cond,
+            then_expr,
+            else_expr,
+            ..
+        } = expr
+        {
             // Rule 1: cond ? A : A -> A
             if then_expr == else_expr {
                 *expr = (**then_expr).clone();
@@ -372,12 +412,20 @@ fn apply_rules_to_stmt(stmt: &mut HirStmt, rules: &[Box<dyn Rule>]) -> bool {
         | HirStmt::For { body, .. } => {
             changed |= apply_rules_to_stmts(body, rules);
         }
-        HirStmt::If { cond, then_body, else_body } => {
+        HirStmt::If {
+            cond,
+            then_body,
+            else_body,
+        } => {
             changed |= apply_rules_to_expr(cond, rules);
             changed |= apply_rules_to_stmts(then_body, rules);
             changed |= apply_rules_to_stmts(else_body, rules);
         }
-        HirStmt::Switch { expr, cases, default } => {
+        HirStmt::Switch {
+            expr,
+            cases,
+            default,
+        } => {
             changed |= apply_rules_to_expr(expr, rules);
             for case in cases {
                 changed |= apply_rules_to_stmts(&mut case.body, rules);
@@ -421,7 +469,12 @@ fn apply_rules_to_expr(expr: &mut HirExpr, rules: &[Box<dyn Rule>]) -> bool {
             changed |= apply_rules_to_expr(lhs, rules);
             changed |= apply_rules_to_expr(rhs, rules);
         }
-        HirExpr::Select { cond, then_expr, else_expr, .. } => {
+        HirExpr::Select {
+            cond,
+            then_expr,
+            else_expr,
+            ..
+        } => {
             changed |= apply_rules_to_expr(cond, rules);
             changed |= apply_rules_to_expr(then_expr, rules);
             changed |= apply_rules_to_expr(else_expr, rules);
@@ -458,7 +511,10 @@ mod tests {
             cond: Box::new(cond.clone()),
             then_expr: Box::new(val.clone()),
             else_expr: Box::new(val.clone()),
-            ty: NirType::Int { bits: 32, signed: false },
+            ty: NirType::Int {
+                bits: 32,
+                signed: false,
+            },
         };
         let rule = RuleSimplifySelect;
         let changed = rule.apply_expr(&mut select_expr);

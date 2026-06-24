@@ -1,27 +1,22 @@
 //! Canonical normalize stage functions — shared by ActionGroup passes and the pipeline driver.
 
-use super::run::{
-    apply_type_signature_fixed_point, body_contains_popcount_call, body_has_loopish_shapes,
-    cleanup_func_stmt_list, contains_call_stmts, hir_shape, is_large_hir_function,
-    jump_resolver_admission, memory_fact_prefilter_allows_full, run_cleanup_block,
-    run_cleanup_family_passes, run_pass_logged, sccp_admission_summary,
-};
 use super::super::analysis::defuse::{
     apply_wide_dead_assignment_pass, constant_folding_pass, defuse_dead_assignment_pass,
     stabilize_repeated_pure_exprs,
 };
+use super::super::apply_rule_normalization;
 use super::super::arith::{
-    apply_conditional_move_pass, apply_double_precision_reconstruction_pass,
-    apply_float_sign_pass, apply_ignore_nan_pass, apply_or_compare_pass,
-    apply_subfloat_flow_pass, apply_three_way_compare_pass,
+    apply_conditional_move_pass, apply_double_precision_reconstruction_pass, apply_float_sign_pass,
+    apply_ignore_nan_pass, apply_or_compare_pass, apply_subfloat_flow_pass,
+    apply_three_way_compare_pass,
 };
 use super::super::cleanup::{
     apply_deindirect_pass, apply_expand_load_pass, apply_subvar_trim_pass, apply_switch_norm_pass,
     canonicalize_minmax_conditional_returns, cast_elision_pass, elide_unused_popcount_assigns,
     eliminate_dead_local_clobber_assigns, inline_loop_condition_trailing_temps,
     normalize_dowhile_decrement_condition, prune_unused_dead_local_bindings,
-    prune_unused_temp_bindings, rescue_undeclared_bindings, single_pred_label_inline,
-    simplify_empty_and_constant_ifs_recursive,
+    prune_unused_temp_bindings, rescue_undeclared_bindings,
+    simplify_empty_and_constant_ifs_recursive, single_pred_label_inline,
 };
 use super::super::global_opt::{
     apply_bit_consume_dead_code_pass, apply_conditional_const_pass, apply_cse_pass,
@@ -42,21 +37,25 @@ use super::super::memory::{
 };
 use super::super::recovery::{
     apply_break_continue_pass, apply_flag_recovery_pass, apply_for_loop_folding,
-    apply_iv_recovery_pass, copy_propagation_pass, join_coalescing_pass, apply_variable_merge_pass,
+    apply_iv_recovery_pass, apply_variable_merge_pass, copy_propagation_pass, join_coalescing_pass,
 };
 use super::super::subvar_flow::apply_subvar_flow_pass;
 use super::super::types::{
     apply_entry_param_promotion_pass, apply_interproc_callsite_arity_pass,
     apply_type_inference_pass, apply_variadic_stack_region_pass,
 };
-use super::super::apply_rule_normalization;
 use super::super::wave_stats;
+use super::run::{
+    apply_type_signature_fixed_point, body_contains_popcount_call, body_has_loopish_shapes,
+    cleanup_func_stmt_list, contains_call_stmts, hir_shape, is_large_hir_function,
+    jump_resolver_admission, memory_fact_prefilter_allows_full, run_cleanup_block,
+    run_cleanup_family_passes, run_pass_logged, sccp_admission_summary,
+};
 use crate::nir::action_pipeline::PassBudget;
 use crate::nir::types::HirFunction;
 use crate::nir::vsa::apply_jump_resolver_pass;
 use std::time::Instant;
 use tracing::debug_span;
-
 
 pub(crate) fn run_stage_proto_recovery(func: &mut HirFunction, diag: bool, perf: bool) {
     let _hir_normalize = debug_span!("hir_normalize", fn_name = %func.name).entered();
@@ -145,7 +144,6 @@ pub(crate) fn run_stage_proto_recovery(func: &mut HirFunction, diag: bool, perf:
             eliminate_dead_local_clobber_assigns(f);
 
             prune_unused_temp_bindings(f);
-
         });
     }
 }
@@ -163,7 +161,12 @@ pub(crate) fn run_stage_deadcode_dynamic(func: &mut HirFunction, diag: bool, per
             prune_unused_dead_local_bindings(f);
         });
     }
-    if run_pass_logged(func, "conditional_const", perf, apply_conditional_const_pass) {
+    if run_pass_logged(
+        func,
+        "conditional_const",
+        perf,
+        apply_conditional_const_pass,
+    ) {
         run_cleanup_block(func, "cleanup_conditional_const", perf, |f| {
             cleanup_func_stmt_list(f);
             constant_folding_pass(&mut f.body);
@@ -351,7 +354,12 @@ pub(crate) fn run_stage_type_early(func: &mut HirFunction, diag: bool, perf: boo
 }
 
 pub(crate) fn run_stage_stackstall(func: &mut HirFunction, diag: bool, perf: bool) {
-    run_pass_logged(func, "nz_mask_simplification", perf, apply_nz_mask_simplification_pass);
+    run_pass_logged(
+        func,
+        "nz_mask_simplification",
+        perf,
+        apply_nz_mask_simplification_pass,
+    );
     // Subflow / bitmask pruning: optimize redundant bit-widths and bitmasks (subflow.cc).
     run_pass_logged(func, "subflow_pruning_early", perf, apply_subflow_pruning);
     // Global subvariable flow analyzer: propagate active bitmasks globally to declare narrow subvariables.
@@ -437,36 +445,21 @@ pub(crate) fn run_stage_stackstall(func: &mut HirFunction, diag: bool, perf: boo
             prune_unused_dead_local_bindings(f);
         });
     }
-    if run_pass_logged(
-        func,
-        "conditional_move",
-        perf,
-        apply_conditional_move_pass,
-    ) {
+    if run_pass_logged(func, "conditional_move", perf, apply_conditional_move_pass) {
         run_cleanup_block(func, "cleanup_conditional_move", perf, |f| {
             cleanup_func_stmt_list(f);
             prune_unused_temp_bindings(f);
             prune_unused_dead_local_bindings(f);
         });
     }
-    if run_pass_logged(
-        func,
-        "switch_norm",
-        perf,
-        apply_switch_norm_pass,
-    ) {
+    if run_pass_logged(func, "switch_norm", perf, apply_switch_norm_pass) {
         run_cleanup_block(func, "cleanup_switch_norm", perf, |f| {
             cleanup_func_stmt_list(f);
             prune_unused_temp_bindings(f);
             prune_unused_dead_local_bindings(f);
         });
     }
-    if run_pass_logged(
-        func,
-        "deindirect",
-        perf,
-        apply_deindirect_pass,
-    ) {
+    if run_pass_logged(func, "deindirect", perf, apply_deindirect_pass) {
         run_cleanup_block(func, "cleanup_deindirect", perf, |f| {
             cleanup_func_stmt_list(f);
             prune_unused_temp_bindings(f);
@@ -544,12 +537,7 @@ pub(crate) fn run_stage_heritage_value_recovery(func: &mut HirFunction, diag: bo
             },
         );
     }
-    let heritage_changed = run_pass_logged(
-        func,
-        "memory_heritage",
-        perf,
-        apply_memory_heritage,
-    );
+    let heritage_changed = run_pass_logged(func, "memory_heritage", perf, apply_memory_heritage);
     if heritage_changed {
         run_cleanup_family_passes(
             func,
@@ -566,8 +554,7 @@ pub(crate) fn run_stage_heritage_value_recovery(func: &mut HirFunction, diag: bo
 
 pub(crate) fn run_stage_memory_recovery(func: &mut HirFunction, diag: bool, perf: bool) {
     let has_loopish_control = body_has_loopish_shapes(&func.body);
-    let memory_fact_prefilter =
-        memory_fact_prefilter_allows_full(func) && !has_loopish_control;
+    let memory_fact_prefilter = memory_fact_prefilter_allows_full(func) && !has_loopish_control;
     if run_pass_logged(
         func,
         "ptr_arith_recovery",
@@ -667,12 +654,7 @@ pub(crate) fn run_stage_memory_recovery(func: &mut HirFunction, diag: bool, perf
             prune_unused_dead_local_bindings(f);
         });
     }
-    if run_pass_logged(
-        func,
-        "or_compare",
-        perf,
-        apply_or_compare_pass,
-    ) {
+    if run_pass_logged(func, "or_compare", perf, apply_or_compare_pass) {
         run_cleanup_block(func, "cleanup_or_compare", perf, |f| {
             cleanup_func_stmt_list(f);
             constant_folding_pass(&mut f.body);
@@ -680,12 +662,7 @@ pub(crate) fn run_stage_memory_recovery(func: &mut HirFunction, diag: bool, perf
             prune_unused_dead_local_bindings(f);
         });
     }
-    if run_pass_logged(
-        func,
-        "float_sign",
-        perf,
-        apply_float_sign_pass,
-    ) {
+    if run_pass_logged(func, "float_sign", perf, apply_float_sign_pass) {
         run_cleanup_block(func, "cleanup_float_sign", perf, |f| {
             cleanup_func_stmt_list(f);
             constant_folding_pass(&mut f.body);
@@ -693,12 +670,7 @@ pub(crate) fn run_stage_memory_recovery(func: &mut HirFunction, diag: bool, perf
             prune_unused_dead_local_bindings(f);
         });
     }
-    if run_pass_logged(
-        func,
-        "ignore_nan",
-        perf,
-        apply_ignore_nan_pass,
-    ) {
+    if run_pass_logged(func, "ignore_nan", perf, apply_ignore_nan_pass) {
         run_cleanup_block(func, "cleanup_ignore_nan", perf, |f| {
             cleanup_func_stmt_list(f);
             constant_folding_pass(&mut f.body);
@@ -706,12 +678,7 @@ pub(crate) fn run_stage_memory_recovery(func: &mut HirFunction, diag: bool, perf
             prune_unused_dead_local_bindings(f);
         });
     }
-    if run_pass_logged(
-        func,
-        "subfloat_flow",
-        perf,
-        apply_subfloat_flow_pass,
-    ) {
+    if run_pass_logged(func, "subfloat_flow", perf, apply_subfloat_flow_pass) {
         run_cleanup_block(func, "cleanup_subfloat_flow", perf, |f| {
             cleanup_func_stmt_list(f);
             constant_folding_pass(&mut f.body);
@@ -787,7 +754,8 @@ pub(crate) fn run_stage_merge(func: &mut HirFunction, diag: bool, perf: bool) {
         apply_type_signature_fixed_point(func, diag, perf);
 
         // Pass 2: Run variable merge pass
-        let merge_changed = run_pass_logged(func, "variable_merge", perf, apply_variable_merge_pass);
+        let merge_changed =
+            run_pass_logged(func, "variable_merge", perf, apply_variable_merge_pass);
 
         if diag {
             eprintln!(
@@ -949,6 +917,16 @@ pub(crate) fn run_stage_cleanup(func: &mut HirFunction, diag: bool, perf: bool) 
     });
     // Subflow / bitmask pruning: optimize redundant bit-widths and bitmasks (subflow.cc).
     run_pass_logged(func, "subflow_pruning_final", perf, apply_subflow_pruning);
-    run_pass_logged(func, "type_inference_final", perf, apply_type_inference_pass);
-    run_pass_logged(func, "rescue_undeclared_bindings", perf, rescue_undeclared_bindings);
+    run_pass_logged(
+        func,
+        "type_inference_final",
+        perf,
+        apply_type_inference_pass,
+    );
+    run_pass_logged(
+        func,
+        "rescue_undeclared_bindings",
+        perf,
+        rescue_undeclared_bindings,
+    );
 }

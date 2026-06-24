@@ -248,7 +248,9 @@ fn is_pure_and_invariant(expr: &HirExpr, loop_defs: &HashSet<String>) -> bool {
         HirExpr::Binary { lhs, rhs, .. } => {
             is_pure_and_invariant(lhs, loop_defs) && is_pure_and_invariant(rhs, loop_defs)
         }
-        HirExpr::PtrOffset { base, .. } | HirExpr::FieldAccess { base, .. } => is_pure_and_invariant(base, loop_defs),
+        HirExpr::PtrOffset { base, .. } | HirExpr::FieldAccess { base, .. } => {
+            is_pure_and_invariant(base, loop_defs)
+        }
         // Loads, calls, aggregate copies are never considered pure/invariant.
         HirExpr::Load { .. }
         | HirExpr::Call { .. }

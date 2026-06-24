@@ -703,7 +703,9 @@ impl RuntimeSleighFrontend {
 
             let current_override_val = context_override.unwrap_or_default();
             if decoded.contains_key(&current) {
-                if decoded_contexts.get(&current).copied().unwrap_or_default() == current_override_val {
+                if decoded_contexts.get(&current).copied().unwrap_or_default()
+                    == current_override_val
+                {
                     continue;
                 }
             }
@@ -861,9 +863,9 @@ impl RuntimeSleighFrontend {
                     .is_some_and(|op| contract.is_terminal_control_flow(op.opcode));
                 let last_opcode = ins_ops.last().map(|op| op.opcode);
                 let direct_target = ins_ops.last().and_then(direct_pcode_branch_target);
-                let decoded_len = *instruction_lengths.get(&addr).ok_or_else(|| {
-                    anyhow!("missing instruction length for 0x{:x}", addr)
-                })?;
+                let decoded_len = *instruction_lengths
+                    .get(&addr)
+                    .ok_or_else(|| anyhow!("missing instruction length for 0x{:x}", addr))?;
                 let fallthrough = checked_instruction_fallthrough(addr, decoded_len)?;
                 let cbranch_exits_to_fallthrough =
                     instruction_cbranch_exits_to_fallthrough(ins_ops, fallthrough);
@@ -888,7 +890,9 @@ impl RuntimeSleighFrontend {
                     }
                     Some(PcodeOpcode::Return) => {
                         if cbranch_exits_to_fallthrough {
-                            if internal_byte_offset(entry_address, bytes.len(), fallthrough).is_some() {
+                            if internal_byte_offset(entry_address, bytes.len(), fallthrough)
+                                .is_some()
+                            {
                                 reach_queue.push_back(fallthrough);
                             }
                         }
@@ -896,13 +900,17 @@ impl RuntimeSleighFrontend {
                     Some(PcodeOpcode::BranchInd) => {
                         if contract.stop_at_indirect_branch {
                             if cbranch_exits_to_fallthrough {
-                                if internal_byte_offset(entry_address, bytes.len(), fallthrough).is_some() {
+                                if internal_byte_offset(entry_address, bytes.len(), fallthrough)
+                                    .is_some()
+                                {
                                     reach_queue.push_back(fallthrough);
                                 }
                             }
                         } else if let Some(targets) = inferred_indirect_edges.get(&addr) {
                             for &target in targets {
-                                if internal_byte_offset(entry_address, bytes.len(), target).is_some() {
+                                if internal_byte_offset(entry_address, bytes.len(), target)
+                                    .is_some()
+                                {
                                     reach_queue.push_back(target);
                                 }
                             }

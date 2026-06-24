@@ -77,7 +77,8 @@ pub(crate) fn apply_type_constraint_propagation(func: &mut HirFunction) -> bool 
                 // Back-propagation to Deref pointer variable if RHS is a Load
                 if let HirExpr::Load { ptr, .. } = rhs {
                     if let HirExpr::Var(ptr_var) = ptr.as_ref() {
-                        let prev_ptr_ty = var_types.get(ptr_var).cloned().unwrap_or(NirType::Unknown);
+                        let prev_ptr_ty =
+                            var_types.get(ptr_var).cloned().unwrap_or(NirType::Unknown);
                         let ptr_constraint = NirType::Ptr(Box::new(unified.clone()));
                         if let Some(unified_ptr) = unify_types(&prev_ptr_ty, &ptr_constraint) {
                             if unified_ptr != prev_ptr_ty {
@@ -158,24 +159,45 @@ fn collect_constraints(
                 collect_constraints(body, field_accesses, assignments);
                 collect_constraints_expr(cond, field_accesses);
             }
-            HirStmt::For { init, cond, update, body } => {
+            HirStmt::For {
+                init,
+                cond,
+                update,
+                body,
+            } => {
                 if let Some(init_stmt) = init {
-                    collect_constraints(std::slice::from_ref(init_stmt.as_ref()), field_accesses, assignments);
+                    collect_constraints(
+                        std::slice::from_ref(init_stmt.as_ref()),
+                        field_accesses,
+                        assignments,
+                    );
                 }
                 if let Some(cond_expr) = cond {
                     collect_constraints_expr(cond_expr, field_accesses);
                 }
                 if let Some(update_stmt) = update {
-                    collect_constraints(std::slice::from_ref(update_stmt.as_ref()), field_accesses, assignments);
+                    collect_constraints(
+                        std::slice::from_ref(update_stmt.as_ref()),
+                        field_accesses,
+                        assignments,
+                    );
                 }
                 collect_constraints(body, field_accesses, assignments);
             }
-            HirStmt::If { cond, then_body, else_body } => {
+            HirStmt::If {
+                cond,
+                then_body,
+                else_body,
+            } => {
                 collect_constraints_expr(cond, field_accesses);
                 collect_constraints(then_body, field_accesses, assignments);
                 collect_constraints(else_body, field_accesses, assignments);
             }
-            HirStmt::Switch { expr, cases, default } => {
+            HirStmt::Switch {
+                expr,
+                cases,
+                default,
+            } => {
                 collect_constraints_expr(expr, field_accesses);
                 for case in cases {
                     collect_constraints(&case.body, field_accesses, assignments);
@@ -203,7 +225,11 @@ fn collect_constraints_lvalue(
             }
             collect_constraints_expr(ptr, field_accesses);
         }
-        HirLValue::Index { base, index, elem_ty: _ } => {
+        HirLValue::Index {
+            base,
+            index,
+            elem_ty: _,
+        } => {
             collect_constraints_expr(base, field_accesses);
             collect_constraints_expr(index, field_accesses);
         }
@@ -237,7 +263,12 @@ fn collect_constraints_expr(
             collect_constraints_expr(lhs, field_accesses);
             collect_constraints_expr(rhs, field_accesses);
         }
-        HirExpr::Select { cond, then_expr, else_expr, .. } => {
+        HirExpr::Select {
+            cond,
+            then_expr,
+            else_expr,
+            ..
+        } => {
             collect_constraints_expr(cond, field_accesses);
             collect_constraints_expr(then_expr, field_accesses);
             collect_constraints_expr(else_expr, field_accesses);
@@ -291,7 +322,16 @@ fn unify_types(t1: &NirType, t2: &NirType) -> Option<NirType> {
             let unified_inner = unify_types(i1, i2)?;
             Some(NirType::Ptr(Box::new(unified_inner)))
         }
-        (NirType::Aggregate { size: s1, fields: f1 }, NirType::Aggregate { size: s2, fields: f2 }) => {
+        (
+            NirType::Aggregate {
+                size: s1,
+                fields: f1,
+            },
+            NirType::Aggregate {
+                size: s2,
+                fields: f2,
+            },
+        ) => {
             let mut merged_fields = HashMap::new();
             for field in f1 {
                 merged_fields.insert(field.offset, field.clone());
@@ -345,7 +385,12 @@ fn update_ast_types(stmts: &mut [HirStmt], var_types: &HashMap<String, NirType>)
                 update_ast_types(body, var_types);
                 update_ast_expr(cond, var_types);
             }
-            HirStmt::For { init, cond, update, body } => {
+            HirStmt::For {
+                init,
+                cond,
+                update,
+                body,
+            } => {
                 if let Some(init_stmt) = init {
                     update_ast_types(std::slice::from_mut(init_stmt.as_mut()), var_types);
                 }
@@ -357,12 +402,20 @@ fn update_ast_types(stmts: &mut [HirStmt], var_types: &HashMap<String, NirType>)
                 }
                 update_ast_types(body, var_types);
             }
-            HirStmt::If { cond, then_body, else_body } => {
+            HirStmt::If {
+                cond,
+                then_body,
+                else_body,
+            } => {
                 update_ast_expr(cond, var_types);
                 update_ast_types(then_body, var_types);
                 update_ast_types(else_body, var_types);
             }
-            HirStmt::Switch { expr, cases, default } => {
+            HirStmt::Switch {
+                expr,
+                cases,
+                default,
+            } => {
                 update_ast_expr(expr, var_types);
                 for case in cases {
                     update_ast_types(&mut case.body, var_types);
@@ -383,7 +436,11 @@ fn update_ast_lvalue(lhs: &mut HirLValue, var_types: &HashMap<String, NirType>) 
                 *ty = *inner;
             }
         }
-        HirLValue::Index { base, index, elem_ty } => {
+        HirLValue::Index {
+            base,
+            index,
+            elem_ty,
+        } => {
             update_ast_expr(base, var_types);
             update_ast_expr(index, var_types);
             let base_ty = get_expr_type(base, var_types);
@@ -414,7 +471,12 @@ fn update_ast_expr(expr: &mut HirExpr, var_types: &HashMap<String, NirType>) {
             update_ast_expr(lhs, var_types);
             update_ast_expr(rhs, var_types);
         }
-        HirExpr::Select { cond, then_expr, else_expr, .. } => {
+        HirExpr::Select {
+            cond,
+            then_expr,
+            else_expr,
+            ..
+        } => {
             update_ast_expr(cond, var_types);
             update_ast_expr(then_expr, var_types);
             update_ast_expr(else_expr, var_types);
@@ -424,7 +486,11 @@ fn update_ast_expr(expr: &mut HirExpr, var_types: &HashMap<String, NirType>) {
                 update_ast_expr(arg, var_types);
             }
         }
-        HirExpr::Index { base, index, elem_ty } => {
+        HirExpr::Index {
+            base,
+            index,
+            elem_ty,
+        } => {
             update_ast_expr(base, var_types);
             update_ast_expr(index, var_types);
             let base_ty = get_expr_type(base, var_types);

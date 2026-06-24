@@ -92,7 +92,11 @@ impl GhidraNoReturnIndex {
     /// affected list is silently skipped so that a missing file never prevents
     /// decompilation.
     pub fn load(ghidra_data_root: &Path) -> Self {
-        let base = ghidra_data_root.join("Ghidra").join("Features").join("Base").join("data");
+        let base = ghidra_data_root
+            .join("Ghidra")
+            .join("Features")
+            .join("Base")
+            .join("data");
 
         // ── 1. Parse constraint manifest ────────────────────────────────────
         let constraints_path = base.join("noReturnFunctionConstraints.xml");
@@ -140,7 +144,10 @@ impl GhidraNoReturnIndex {
             }
         }
 
-        Self { format_lists, hint_lists }
+        Self {
+            format_lists,
+            hint_lists,
+        }
     }
 
     /// Return `true` if the symbol is known to never return according to the
@@ -171,8 +178,9 @@ impl GhidraNoReturnIndex {
 
         // 2. Compiler-specific list (golang / rustc).
         if let Some(ck) = compiler_key {
-            if let Some(names) =
-                self.format_lists.get(&(ghidra_format.to_string(), Some(ck.to_string())))
+            if let Some(names) = self
+                .format_lists
+                .get(&(ghidra_format.to_string(), Some(ck.to_string())))
             {
                 if names.contains(canonical.as_str()) || names.contains(symbol_name) {
                     return true;
@@ -252,7 +260,11 @@ fn parse_constraints_xml(text: &str) -> Vec<(String, Option<String>, String)> {
             if file_name.is_empty() {
                 continue;
             }
-            let compiler_key = if in_compiler { current_compiler.clone() } else { None };
+            let compiler_key = if in_compiler {
+                current_compiler.clone()
+            } else {
+                None
+            };
             if let Some(fmt) = &current_format {
                 results.push((fmt.clone(), compiler_key, file_name));
             }
@@ -408,7 +420,10 @@ mod tests {
         assert_eq!(file2, "RustFunctionsThatDoNotReturn");
 
         let (_, key3, file3) = &entries[2];
-        assert!(key3.is_none(), "format-level entry must have no compiler key");
+        assert!(
+            key3.is_none(),
+            "format-level entry must have no compiler key"
+        );
         assert_eq!(file3, "PEFunctionsThatDoNotReturn");
     }
 
@@ -443,7 +458,10 @@ mod tests {
     #[test]
     fn test_normalize_dll_name() {
         assert_eq!(normalize_dll_name("KERNEL32.DLL"), "kernel32.dll");
-        assert_eq!(normalize_dll_name("C:\\Windows\\System32\\KERNEL32.DLL"), "kernel32.dll");
+        assert_eq!(
+            normalize_dll_name("C:\\Windows\\System32\\KERNEL32.DLL"),
+            "kernel32.dll"
+        );
         assert_eq!(normalize_dll_name("kernel32.dll"), "kernel32.dll");
     }
 
@@ -456,10 +474,19 @@ mod tests {
 
     #[test]
     fn test_binary_format_to_ghidra_format() {
-        assert_eq!(binary_format_to_ghidra_format("PE64"), Some(GHIDRA_FORMAT_PE));
+        assert_eq!(
+            binary_format_to_ghidra_format("PE64"),
+            Some(GHIDRA_FORMAT_PE)
+        );
         assert_eq!(binary_format_to_ghidra_format("pe"), Some(GHIDRA_FORMAT_PE));
-        assert_eq!(binary_format_to_ghidra_format("ELF"), Some(GHIDRA_FORMAT_ELF));
-        assert_eq!(binary_format_to_ghidra_format("Mach-O"), Some(GHIDRA_FORMAT_MACHO));
+        assert_eq!(
+            binary_format_to_ghidra_format("ELF"),
+            Some(GHIDRA_FORMAT_ELF)
+        );
+        assert_eq!(
+            binary_format_to_ghidra_format("Mach-O"),
+            Some(GHIDRA_FORMAT_MACHO)
+        );
         assert_eq!(binary_format_to_ghidra_format("RAW"), None);
     }
 

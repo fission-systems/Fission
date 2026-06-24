@@ -4,7 +4,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use fission_loader::loader::LoadedBinary;
-use fission_static::analysis::control_flow_facts::{control_flow_facts_for, FunctionControlFlowFacts};
+use fission_static::analysis::control_flow_facts::{
+    FunctionControlFlowFacts, control_flow_facts_for,
+};
 use serde::Deserialize;
 
 #[derive(Debug, Deserialize)]

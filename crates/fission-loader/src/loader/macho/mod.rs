@@ -214,10 +214,8 @@ impl MachoLoader {
                 let mut current_addr = image_base; // first entry is absolute VA
                 let mut i = 0usize;
                 let mut new_count = 0usize;
-                let mut known_addresses: HashSet<u64> = functions_info
-                    .iter()
-                    .map(|f| f.address)
-                    .collect();
+                let mut known_addresses: HashSet<u64> =
+                    functions_info.iter().map(|f| f.address).collect();
                 while i < fs_data.len() {
                     // Decode one ULEB128 value
                     let mut delta: u64 = 0;
@@ -528,7 +526,13 @@ impl MachoLoader {
                         if !name.is_empty() {
                             iat_symbols.insert(stub_addr, name);
                             if let Some(name) = iat_symbols.get(&stub_addr) {
-                                push_macho_import(functions, &mut import_addresses, stub_addr, name.clone(), "__stubs");
+                                push_macho_import(
+                                    functions,
+                                    &mut import_addresses,
+                                    stub_addr,
+                                    name.clone(),
+                                    "__stubs",
+                                );
                             }
                         }
                     }
@@ -560,7 +564,13 @@ impl MachoLoader {
                         if !name.is_empty() {
                             iat_symbols.insert(got_addr, name);
                             if let Some(name) = iat_symbols.get(&got_addr) {
-                                push_macho_import(functions, &mut import_addresses, got_addr, name.clone(), "__got");
+                                push_macho_import(
+                                    functions,
+                                    &mut import_addresses,
+                                    got_addr,
+                                    name.clone(),
+                                    "__got",
+                                );
                             }
                         }
                     }
@@ -667,7 +677,13 @@ impl MachoLoader {
                         let name = Self::get_symbol_name_32(data, symtab, sym_idx, endian);
                         if !name.is_empty() {
                             iat_symbols.insert(stub_addr, name.clone());
-                            push_macho_import(functions, &mut import_addresses, stub_addr, name, "__stubs");
+                            push_macho_import(
+                                functions,
+                                &mut import_addresses,
+                                stub_addr,
+                                name,
+                                "__stubs",
+                            );
                         }
                     }
                 }
@@ -688,7 +704,13 @@ impl MachoLoader {
                         let name = Self::get_symbol_name_32(data, symtab, sym_idx, endian);
                         if !name.is_empty() {
                             iat_symbols.insert(got_addr, name.clone());
-                            push_macho_import(functions, &mut import_addresses, got_addr, name, &got.name);
+                            push_macho_import(
+                                functions,
+                                &mut import_addresses,
+                                got_addr,
+                                name,
+                                &got.name,
+                            );
                         }
                     }
                 }

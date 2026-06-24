@@ -102,12 +102,12 @@ pub(super) fn flow_kind_for_state(state: &RuntimeConstructState) -> DecodedFlowK
     {
         return DecodedFlowKind::Return;
     }
-    if state
-        .constructor_template
-        .ops
-        .iter()
-        .any(|op| matches!(op.opcode, CompiledOpTplOpcode::Call | CompiledOpTplOpcode::CallInd))
-    {
+    if state.constructor_template.ops.iter().any(|op| {
+        matches!(
+            op.opcode,
+            CompiledOpTplOpcode::Call | CompiledOpTplOpcode::CallInd
+        )
+    }) {
         return DecodedFlowKind::Call;
     }
     if state
@@ -118,12 +118,12 @@ pub(super) fn flow_kind_for_state(state: &RuntimeConstructState) -> DecodedFlowK
     {
         return DecodedFlowKind::ConditionalJump;
     }
-    if state
-        .constructor_template
-        .ops
-        .iter()
-        .any(|op| matches!(op.opcode, CompiledOpTplOpcode::Branch | CompiledOpTplOpcode::BranchInd))
-    {
+    if state.constructor_template.ops.iter().any(|op| {
+        matches!(
+            op.opcode,
+            CompiledOpTplOpcode::Branch | CompiledOpTplOpcode::BranchInd
+        )
+    }) {
         return DecodedFlowKind::Jump;
     }
     DecodedFlowKind::None
@@ -183,10 +183,9 @@ fn first_rip_relative_flow_target(
                     .as_ref()
                     .and_then(|operand| rip_relative_target_from_memory(address, length, operand))
                     .or_else(|| {
-                        handle
-                            .subtable_state
-                            .as_deref()
-                            .and_then(|child| first_rip_relative_flow_target(child, address, length))
+                        handle.subtable_state.as_deref().and_then(|child| {
+                            first_rip_relative_flow_target(child, address, length)
+                        })
                     })
             })
         })
@@ -446,15 +445,16 @@ pub(super) fn decoded_references(
     let mut refs = Vec::new();
     for (operand_index, handle) in handles.iter().enumerate() {
         if let Some(reference) = handle.subtable_state.as_deref().and_then(|state| {
-            reference_from_subtable_state(address, length, flow_kind, operand_index, state)
-                .or_else(|| {
+            reference_from_subtable_state(address, length, flow_kind, operand_index, state).or_else(
+                || {
                     inst_next_relative_reference_from_handle(
                         operand_index,
                         handle,
                         state,
                         flow_kind,
                     )
-                })
+                },
+            )
         }) {
             refs.push(reference);
             continue;
@@ -575,8 +575,7 @@ fn inst_next_relative_reference_from_handle(
             .is_none()
             .then_some(handle.fixed.offset_offset),
     }?;
-    let kind = flow_reference_kind(flow_kind)
-        .unwrap_or(DecodedReferenceKind::RipRelativeAddress);
+    let kind = flow_reference_kind(flow_kind).unwrap_or(DecodedReferenceKind::RipRelativeAddress);
     Some(DecodedReference {
         target,
         kind,
@@ -601,8 +600,8 @@ fn reference_from_subtable_state(
             instruction_end_address(address, length)
                 .and_then(|base| add_signed(base, *displacement))
         })?;
-        let kind = flow_reference_kind(flow_kind)
-            .unwrap_or(DecodedReferenceKind::RipRelativeAddress);
+        let kind =
+            flow_reference_kind(flow_kind).unwrap_or(DecodedReferenceKind::RipRelativeAddress);
         return Some(DecodedReference {
             target,
             kind,

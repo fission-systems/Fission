@@ -466,7 +466,10 @@ fn try_tail_label_loop_to_for(
         count_goto_targets(body_slice, &mut internal_goto_counts);
         for label_in_body in &body_labels {
             let global_gotos = goto_counts.get(label_in_body).copied().unwrap_or(0);
-            let internal_gotos = internal_goto_counts.get(label_in_body).copied().unwrap_or(0);
+            let internal_gotos = internal_goto_counts
+                .get(label_in_body)
+                .copied()
+                .unwrap_or(0);
             if global_gotos > internal_gotos {
                 return false;
             }
@@ -599,10 +602,13 @@ fn parse_ptr_base_offset(expr: &HirExpr) -> Option<(HirExpr, HirExpr)> {
     match strip_casts(expr) {
         HirExpr::PtrOffset { base, offset } => Some((
             (*base).as_ref().clone(),
-            HirExpr::Const(*offset, NirType::Int {
-                bits: 64,
-                signed: false,
-            }),
+            HirExpr::Const(
+                *offset,
+                NirType::Int {
+                    bits: 64,
+                    signed: false,
+                },
+            ),
         )),
         HirExpr::Index { base, index, .. } => {
             Some(((*base).as_ref().clone(), (*index).as_ref().clone()))
@@ -900,18 +906,8 @@ fn try_split_merged_dual_iv_tail(
     });
 
     let mut new_body = body;
-    substitute_var_in_stmt(
-        &mut new_body[tail[0].0],
-        &var_one,
-        &row_name,
-        false,
-    );
-    substitute_var_in_stmt(
-        &mut new_body[tail[2].0],
-        &var_one,
-        &row_name,
-        false,
-    );
+    substitute_var_in_stmt(&mut new_body[tail[0].0], &var_one, &row_name, false);
+    substitute_var_in_stmt(&mut new_body[tail[2].0], &var_one, &row_name, false);
 
     stmts[loop_idx] = HirStmt::For {
         init: None,
@@ -1013,7 +1009,12 @@ fn substitute_var_in_stmt(stmt: &mut HirStmt, var: &str, replacement: &str, assi
                 substitute_var_in_expr(rhs, var, &HirExpr::Var(replacement.to_string()));
             }
         }
-        HirStmt::If { cond, then_body, else_body, .. } => {
+        HirStmt::If {
+            cond,
+            then_body,
+            else_body,
+            ..
+        } => {
             substitute_var_in_expr(cond, var, &HirExpr::Var(replacement.to_string()));
             for s in then_body.iter_mut().chain(else_body.iter_mut()) {
                 substitute_var_in_stmt(s, var, replacement, false);
@@ -1075,8 +1076,7 @@ fn apply_tail_label_loop_recovery_in_stmts(
             }
             HirStmt::Switch { cases, default, .. } => {
                 for case in cases.iter_mut() {
-                    changed |=
-                        apply_tail_label_loop_recovery_in_stmts(&mut case.body, goto_counts);
+                    changed |= apply_tail_label_loop_recovery_in_stmts(&mut case.body, goto_counts);
                 }
                 changed |= apply_tail_label_loop_recovery_in_stmts(default, goto_counts);
             }
@@ -1405,16 +1405,32 @@ fn find_pointer_end_assignment_before(
                         found_count_expr = Some(lhs.as_ref().clone());
                     }
                 }
-                
+
                 if let Some(mut expr) = found_count_expr {
                     let mut backtrack = scan;
                     while backtrack > 0 {
                         backtrack -= 1;
-                        if let HirStmt::Assign { lhs: HirLValue::Var(v), rhs: val } = &stmts[backtrack] {
+                        if let HirStmt::Assign {
+                            lhs: HirLValue::Var(v),
+                            rhs: val,
+                        } = &stmts[backtrack]
+                        {
                             if count_var_uses(&expr, v) > 0 {
                                 substitute_var_in_expr(&mut expr, v, val);
                             }
-                        } else if matches!(&stmts[backtrack], HirStmt::Label(_) | HirStmt::Goto(_) | HirStmt::While {..} | HirStmt::DoWhile {..} | HirStmt::For {..} | HirStmt::Switch {..} | HirStmt::Block(_) | HirStmt::Return(_) | HirStmt::Break | HirStmt::Continue) {
+                        } else if matches!(
+                            &stmts[backtrack],
+                            HirStmt::Label(_)
+                                | HirStmt::Goto(_)
+                                | HirStmt::While { .. }
+                                | HirStmt::DoWhile { .. }
+                                | HirStmt::For { .. }
+                                | HirStmt::Switch { .. }
+                                | HirStmt::Block(_)
+                                | HirStmt::Return(_)
+                                | HirStmt::Break
+                                | HirStmt::Continue
+                        ) {
                             break;
                         }
                     }
@@ -1613,9 +1629,7 @@ fn count_var_uses_in_lvalue(lhs: &HirLValue, name: &str) -> usize {
         HirLValue::Index { base, index, .. } => {
             count_var_uses(base, name) + count_var_uses(index, name)
         }
-        HirLValue::FieldAccess { base, .. } => {
-            count_var_uses(base, name)
-        }
+        HirLValue::FieldAccess { base, .. } => count_var_uses(base, name),
     }
 }
 
@@ -1813,7 +1827,8 @@ fn is_cursor_increment_by_one(stmt: &HirStmt, cursor: &str) -> bool {
         _ => 1,
     };
     (direct_cursor_var(lhs, cursor) && (is_const_val(rhs, element_size) || is_const_val(rhs, 1)))
-        || (direct_cursor_var(rhs, cursor) && (is_const_val(lhs, element_size) || is_const_val(lhs, 1)))
+        || (direct_cursor_var(rhs, cursor)
+            && (is_const_val(lhs, element_size) || is_const_val(lhs, 1)))
 }
 
 fn rewrite_cursor_expr_to_index(expr: &mut HirExpr, cursor: &str, index_name: &str) -> bool {
@@ -1968,10 +1983,7 @@ fn find_iv_update_simple(body: &[HirStmt], var: &str) -> Option<usize> {
 
 /// Find a unique definition of a variable inside the loop body,
 /// recursively checking top-level statements, nested blocks, and If statement branches.
-fn find_unique_definition_in_body<'a>(
-    body: &'a [HirStmt],
-    var: &str,
-) -> Option<&'a HirExpr> {
+fn find_unique_definition_in_body<'a>(body: &'a [HirStmt], var: &str) -> Option<&'a HirExpr> {
     let mut found: Option<&'a HirExpr> = None;
     for stmt in body {
         if let Some(rhs) = find_assignment_in_stmt(stmt, var) {
@@ -1986,7 +1998,10 @@ fn find_unique_definition_in_body<'a>(
 
 fn find_assignment_in_stmt<'a>(stmt: &'a HirStmt, var: &str) -> Option<&'a HirExpr> {
     match stmt {
-        HirStmt::Assign { lhs: HirLValue::Var(lhs_name), rhs } if lhs_name == var => Some(rhs),
+        HirStmt::Assign {
+            lhs: HirLValue::Var(lhs_name),
+            rhs,
+        } if lhs_name == var => Some(rhs),
         HirStmt::Block(body) => {
             let mut found: Option<&'a HirExpr> = None;
             for s in body {
@@ -1999,7 +2014,11 @@ fn find_assignment_in_stmt<'a>(stmt: &'a HirStmt, var: &str) -> Option<&'a HirEx
             }
             found
         }
-        HirStmt::If { then_body, else_body, .. } => {
+        HirStmt::If {
+            then_body,
+            else_body,
+            ..
+        } => {
             let mut found: Option<&'a HirExpr> = None;
             for s in then_body.iter().chain(else_body.iter()) {
                 if let Some(rhs) = find_assignment_in_stmt(s, var) {
@@ -2016,13 +2035,13 @@ fn find_assignment_in_stmt<'a>(stmt: &'a HirStmt, var: &str) -> Option<&'a HirEx
 }
 
 /// Recursively checks if `loop_var` feeds the `expr` (iterator statement RHS) using dataflow path-walking.
-fn test_iterate_form(
-    body: &[HirStmt],
-    update_idx: usize,
-    loop_var: &str,
-) -> bool {
+fn test_iterate_form(body: &[HirStmt], update_idx: usize, loop_var: &str) -> bool {
     let update_stmt = &body[update_idx];
-    let HirStmt::Assign { lhs: HirLValue::Var(lhs_name), rhs } = update_stmt else {
+    let HirStmt::Assign {
+        lhs: HirLValue::Var(lhs_name),
+        rhs,
+    } = update_stmt
+    else {
         return false;
     };
     if lhs_name != loop_var {
@@ -2117,7 +2136,9 @@ fn path_walk_var(
         let update_idx = find_iv_update_simple(body, curr_var).unwrap();
         let update_stmt = &body[update_idx];
         if let HirStmt::Assign { rhs, .. } = update_stmt {
-            if is_iv_update_dataflow(rhs, curr_var, loop_variant, body, 0) && test_iterate_form(body, update_idx, curr_var) {
+            if is_iv_update_dataflow(rhs, curr_var, loop_variant, body, 0)
+                && test_iterate_form(body, update_idx, curr_var)
+            {
                 return Some((curr_var.to_string(), update_idx));
             }
         }
@@ -2151,9 +2172,17 @@ fn path_walk_var(
 fn try_scev_upgrade(stmts: &mut Vec<HirStmt>, loop_idx: usize) -> bool {
     let (is_for, init, cond, body) = match &stmts[loop_idx] {
         HirStmt::While { cond, body } => (false, None, cond.clone(), body.clone()),
-        HirStmt::For { init, cond, update, body } if update.is_none() => {
-            (true, init.clone(), cond.as_ref().cloned().unwrap(), body.clone())
-        }
+        HirStmt::For {
+            init,
+            cond,
+            update,
+            body,
+        } if update.is_none() => (
+            true,
+            init.clone(),
+            cond.as_ref().cloned().unwrap(),
+            body.clone(),
+        ),
         _ => return false,
     };
 
@@ -2164,10 +2193,11 @@ fn try_scev_upgrade(stmts: &mut Vec<HirStmt>, loop_idx: usize) -> bool {
 
     let loop_variant = loop_variant_vars(&body);
 
-    let (var, update_idx) = match find_loop_variable_dataflow(stmts, loop_idx, &body, &cond, &loop_variant) {
-        Some(res) => res,
-        None => return false,
-    };
+    let (var, update_idx) =
+        match find_loop_variable_dataflow(stmts, loop_idx, &body, &cond, &loop_variant) {
+            Some(res) => res,
+            None => return false,
+        };
 
     // Update must be the last statement in body (or we'd change semantics).
     let is_last = update_idx == body.len() - 1;
@@ -2266,7 +2296,8 @@ fn extract_pointer_cursor_and_count(
 
     match (strip_casts(lhs.as_ref()), strip_casts(rhs.as_ref())) {
         (HirExpr::Var(cursor), HirExpr::Var(end)) => {
-            let (scan_idx, count_expr) = find_pointer_end_assignment_before(stmts, loop_idx, cursor, end)?;
+            let (scan_idx, count_expr) =
+                find_pointer_end_assignment_before(stmts, loop_idx, cursor, end)?;
             Some((cursor.clone(), count_expr, Some(scan_idx)))
         }
         _ => None,
@@ -2290,7 +2321,9 @@ fn try_guarded_dowhile_pointer_iv_upgrade(
         return false;
     }
 
-    let Some((cursor_str, count_expr, end_ptr_idx_opt)) = extract_pointer_cursor_and_count(&cond, stmts, loop_idx) else {
+    let Some((cursor_str, count_expr, end_ptr_idx_opt)) =
+        extract_pointer_cursor_and_count(&cond, stmts, loop_idx)
+    else {
         return false;
     };
     let cursor = &cursor_str;
@@ -2385,7 +2418,11 @@ fn replace_gotos_with_continue_shallow(stmts: &mut Vec<HirStmt>, label: &str) {
             HirStmt::Goto(target) if target == label => {
                 *stmt = HirStmt::Continue;
             }
-            HirStmt::If { then_body, else_body, .. } => {
+            HirStmt::If {
+                then_body,
+                else_body,
+                ..
+            } => {
                 replace_gotos_with_continue_shallow(then_body, label);
                 replace_gotos_with_continue_shallow(else_body, label);
             }
@@ -2414,10 +2451,7 @@ fn replace_gotos_with_continue_shallow(stmts: &mut Vec<HirStmt>, label: &str) {
 /// The body may also contain `goto L` (acting as `continue`), which are
 /// replaced with `continue` statements after the transformation.
 /// An init assignment `iv_var = <val>` must immediately precede the loop.
-fn try_upgrade_infinite_for_with_tail_update(
-    stmts: &mut Vec<HirStmt>,
-    loop_idx: usize,
-) -> bool {
+fn try_upgrade_infinite_for_with_tail_update(stmts: &mut Vec<HirStmt>, loop_idx: usize) -> bool {
     let body = match &stmts[loop_idx] {
         HirStmt::For {
             init: None,
@@ -2521,18 +2555,36 @@ fn apply_scev_upgrade_in_stmts(
         {
             changed = true;
             continue;
-        } else if matches!(&stmts[i], HirStmt::For { cond: None, update: None, .. })
-            && try_recover_row_stride_fill_inner_loop(stmts, i, locals)
+        } else if matches!(
+            &stmts[i],
+            HirStmt::For {
+                cond: None,
+                update: None,
+                ..
+            }
+        ) && try_recover_row_stride_fill_inner_loop(stmts, i, locals)
         {
             changed = true;
             continue;
-        } else if matches!(&stmts[i], HirStmt::For { cond: None, update: None, .. })
-            && try_split_merged_dual_iv_tail(stmts, i, locals)
+        } else if matches!(
+            &stmts[i],
+            HirStmt::For {
+                cond: None,
+                update: None,
+                ..
+            }
+        ) && try_split_merged_dual_iv_tail(stmts, i, locals)
         {
             changed = true;
             continue;
-        } else if matches!(&stmts[i], HirStmt::For { cond: None, update: None, .. })
-            && try_upgrade_infinite_for_with_tail_update(stmts, i)
+        } else if matches!(
+            &stmts[i],
+            HirStmt::For {
+                cond: None,
+                update: None,
+                ..
+            }
+        ) && try_upgrade_infinite_for_with_tail_update(stmts, i)
         {
             changed = true;
             continue;
@@ -2940,9 +2992,10 @@ mod tests {
         let HirStmt::For { body, .. } = &func.body[0] else {
             panic!("expected local-goto tail loop to become for");
         };
-        assert!(body
-            .iter()
-            .any(|stmt| matches!(stmt, HirStmt::Label(label) if label == "inside")));
+        assert!(
+            body.iter()
+                .any(|stmt| matches!(stmt, HirStmt::Label(label) if label == "inside"))
+        );
     }
 
     #[test]
@@ -3056,7 +3109,13 @@ mod tests {
         };
 
         assert!(apply_iv_recovery_pass(&mut func));
-        let HirStmt::For { init, cond, update, body } = &func.body[0] else {
+        let HirStmt::For {
+            init,
+            cond,
+            update,
+            body,
+        } = &func.body[0]
+        else {
             panic!("Expected loop to become a For loop!");
         };
         assert!(init.is_some());
@@ -3187,7 +3246,13 @@ mod tests {
         assert!(try_upgrade_infinite_for_with_tail_update(&mut stmts, 1));
         assert_eq!(stmts.len(), 1, "init should be absorbed into for-init");
 
-        let HirStmt::For { init, cond, update, body } = &stmts[0] else {
+        let HirStmt::For {
+            init,
+            cond,
+            update,
+            body,
+        } = &stmts[0]
+        else {
             panic!("expected For");
         };
         assert!(init.is_some(), "init should be set");
@@ -3198,7 +3263,13 @@ mod tests {
         // Condition should be the negation: i != limit
         let cond = cond.as_ref().unwrap();
         assert!(
-            matches!(cond, HirExpr::Binary { op: HirBinaryOp::Ne, .. }),
+            matches!(
+                cond,
+                HirExpr::Binary {
+                    op: HirBinaryOp::Ne,
+                    ..
+                }
+            ),
             "cond should be Ne (inverted from Eq), got: {cond:?}"
         );
     }
@@ -3214,8 +3285,7 @@ mod tests {
             },
             HirStmt::Expr(HirExpr::Const(99, int(64, false))),
         ];
-        let (mut stmts, _ty) =
-            make_infinite_for_with_tail(work_stmts, "i", "limit", "update_lbl");
+        let (mut stmts, _ty) = make_infinite_for_with_tail(work_stmts, "i", "limit", "update_lbl");
 
         assert!(try_upgrade_infinite_for_with_tail_update(&mut stmts, 1));
 
@@ -3269,8 +3339,7 @@ mod tests {
             HirStmt::Continue, // existing continue — safety check must reject
             HirStmt::Expr(HirExpr::Const(1, int(64, false))),
         ];
-        let (mut stmts, _) =
-            make_infinite_for_with_tail(work_stmts, "i", "limit", "update_lbl");
+        let (mut stmts, _) = make_infinite_for_with_tail(work_stmts, "i", "limit", "update_lbl");
 
         assert!(!try_upgrade_infinite_for_with_tail_update(&mut stmts, 1));
     }
@@ -3434,7 +3503,12 @@ mod tests {
                     body: inner_body,
                 } = stmt
                 {
-                    Some((init.is_some(), cond.is_some(), update.is_some(), inner_body.len()))
+                    Some((
+                        init.is_some(),
+                        cond.is_some(),
+                        update.is_some(),
+                        inner_body.len(),
+                    ))
                 } else {
                     None
                 }

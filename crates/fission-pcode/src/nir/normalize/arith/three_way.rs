@@ -30,7 +30,12 @@ fn simplify_stmt(stmt: &mut HirStmt) -> bool {
         HirStmt::Block(body) | HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
             changed |= simplify_stmts(body);
         }
-        HirStmt::For { init, cond, update, body } => {
+        HirStmt::For {
+            init,
+            cond,
+            update,
+            body,
+        } => {
             if let Some(i) = init {
                 changed |= simplify_stmt(i.as_mut());
             }
@@ -42,12 +47,20 @@ fn simplify_stmt(stmt: &mut HirStmt) -> bool {
             }
             changed |= simplify_stmts(body);
         }
-        HirStmt::If { cond, then_body, else_body } => {
+        HirStmt::If {
+            cond,
+            then_body,
+            else_body,
+        } => {
             changed |= simplify_expr(cond);
             changed |= simplify_stmts(then_body);
             changed |= simplify_stmts(else_body);
         }
-        HirStmt::Switch { expr, cases, default } => {
+        HirStmt::Switch {
+            expr,
+            cases,
+            default,
+        } => {
             changed |= simplify_expr(expr);
             for case in cases {
                 changed |= simplify_stmts(&mut case.body);
@@ -101,7 +114,12 @@ fn simplify_expr(expr: &mut HirExpr) -> bool {
                 changed |= simplify_expr(arg);
             }
         }
-        HirExpr::Select { cond, then_expr, else_expr, .. } => {
+        HirExpr::Select {
+            cond,
+            then_expr,
+            else_expr,
+            ..
+        } => {
             changed |= simplify_expr(cond);
             changed |= simplify_expr(then_expr);
             changed |= simplify_expr(else_expr);
@@ -130,7 +148,13 @@ fn simplify_expr(expr: &mut HirExpr) -> bool {
 }
 
 fn collect_add_terms(expr: &HirExpr, terms: &mut Vec<HirExpr>) {
-    if let HirExpr::Binary { op: HirBinaryOp::Add, lhs, rhs, .. } = expr {
+    if let HirExpr::Binary {
+        op: HirBinaryOp::Add,
+        lhs,
+        rhs,
+        ..
+    } = expr
+    {
         collect_add_terms(lhs, terms);
         collect_add_terms(rhs, terms);
     } else {
@@ -148,7 +172,9 @@ fn detect_three_way(expr: &HirExpr) -> Option<(HirExpr, HirExpr, HirBinaryOp)> {
     let const_idx = terms.iter().position(|t| {
         if let HirExpr::Const(val, ty) = t {
             let mask = match ty {
-                NirType::Int { bits, .. } => (1u64.checked_shl(*bits).unwrap_or(0).wrapping_sub(1)) as i64,
+                NirType::Int { bits, .. } => {
+                    (1u64.checked_shl(*bits).unwrap_or(0).wrapping_sub(1)) as i64
+                }
                 _ => -1,
             };
             *val == -1 || *val == mask
@@ -265,12 +291,36 @@ fn try_simplify_three_way_cmp(
     // Helper to return comparison inputs in order (v, w) or (w, v)
     let make_ret = |rel: TargetRelation| -> Option<(HirBinaryOp, HirExpr, HirExpr)> {
         match rel {
-            TargetRelation::Lt => Some((get_compare_op(less_op, TargetRelation::Lt), v.clone(), w.clone())),
-            TargetRelation::Le => Some((get_compare_op(less_op, TargetRelation::Le), v.clone(), w.clone())),
-            TargetRelation::Gt => Some((get_compare_op(less_op, TargetRelation::Lt), w.clone(), v.clone())),
-            TargetRelation::Ge => Some((get_compare_op(less_op, TargetRelation::Le), w.clone(), v.clone())),
-            TargetRelation::Eq => Some((get_compare_op(less_op, TargetRelation::Eq), v.clone(), w.clone())),
-            TargetRelation::Ne => Some((get_compare_op(less_op, TargetRelation::Ne), v.clone(), w.clone())),
+            TargetRelation::Lt => Some((
+                get_compare_op(less_op, TargetRelation::Lt),
+                v.clone(),
+                w.clone(),
+            )),
+            TargetRelation::Le => Some((
+                get_compare_op(less_op, TargetRelation::Le),
+                v.clone(),
+                w.clone(),
+            )),
+            TargetRelation::Gt => Some((
+                get_compare_op(less_op, TargetRelation::Lt),
+                w.clone(),
+                v.clone(),
+            )),
+            TargetRelation::Ge => Some((
+                get_compare_op(less_op, TargetRelation::Le),
+                w.clone(),
+                v.clone(),
+            )),
+            TargetRelation::Eq => Some((
+                get_compare_op(less_op, TargetRelation::Eq),
+                v.clone(),
+                w.clone(),
+            )),
+            TargetRelation::Ne => Some((
+                get_compare_op(less_op, TargetRelation::Ne),
+                v.clone(),
+                w.clone(),
+            )),
         }
     };
 
@@ -296,8 +346,8 @@ fn try_simplify_three_way_cmp(
         // LESS THAN (signed and unsigned)
         HirBinaryOp::Lt | HirBinaryOp::SLt => {
             match const_val {
-                0 => make_ret(TargetRelation::Lt),  // X < 0  => v < w
-                1 => make_ret(TargetRelation::Le),  // X < 1  => v <= w
+                0 => make_ret(TargetRelation::Lt), // X < 0  => v < w
+                1 => make_ret(TargetRelation::Le), // X < 1  => v <= w
                 -1 => None, // X < -1 => always false (not simplified here, handled by constant folding)
                 _ => None,
             }
@@ -307,7 +357,7 @@ fn try_simplify_three_way_cmp(
             match const_val {
                 -1 => make_ret(TargetRelation::Lt), // X <= -1 => v < w
                 0 => make_ret(TargetRelation::Le),  // X <= 0  => v <= w
-                1 => None, // X <= 1 => always true (not simplified here)
+                1 => None,                          // X <= 1 => always true (not simplified here)
                 _ => None,
             }
         }
@@ -316,16 +366,16 @@ fn try_simplify_three_way_cmp(
             match const_val {
                 0 => make_ret(TargetRelation::Gt),  // X > 0  => w < v (v > w)
                 -1 => make_ret(TargetRelation::Ge), // X > -1 => w <= v (v >= w)
-                1 => None, // X > 1 => always false
+                1 => None,                          // X > 1 => always false
                 _ => None,
             }
         }
         // GREATER OR EQUAL
         HirBinaryOp::Ge | HirBinaryOp::SGe => {
             match const_val {
-                1 => make_ret(TargetRelation::Gt),  // X >= 1  => w < v (v > w)
-                0 => make_ret(TargetRelation::Ge),  // X >= 0  => w <= v (v >= w)
-                -1 => None, // X >= -1 => always true
+                1 => make_ret(TargetRelation::Gt), // X >= 1  => w < v (v > w)
+                0 => make_ret(TargetRelation::Ge), // X >= 0  => w <= v (v >= w)
+                -1 => None,                        // X >= -1 => always true
                 _ => None,
             }
         }

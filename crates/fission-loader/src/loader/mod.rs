@@ -85,9 +85,9 @@ impl LoadedBinary {
                 (apple_funcs_res, swift_types_res, objc_classes_res, objc_selectors_res),
                 (
                     (dwarf_types_res, dwarf_funcs_res),
-                    (rust_vtables_res, (cpp_types_res, cpp_vtable_funcs_res))
-                )
-            )
+                    (rust_vtables_res, (cpp_types_res, cpp_vtable_funcs_res)),
+                ),
+            ),
         ) = rayon::join(
             || {
                 if detection_ref.language().map_or(false, |d| d.name == "Go") {
@@ -101,46 +101,63 @@ impl LoadedBinary {
                     (None, None, std::collections::HashMap::new(), Vec::new())
                 }
             },
-            || rayon::join(
-                || {
-                    if format_ref.starts_with("Mach-O") {
-                        let analyzer = macho::apple::AppleAnalyzer::new(binary_ref);
-                        let apple_funcs = analyzer.analyze();
-                        let swift_types = analyzer.analyze_swift_types();
-                        let objc_classes = analyzer.analyze_objc_ivars();
-                        let objc_selectors = analyzer.resolve_msg_send_selectors();
-                        (Some(apple_funcs), Some(swift_types), objc_classes, objc_selectors)
-                    } else {
-                        (None, None, Vec::new(), std::collections::HashMap::new())
-                    }
-                },
-                || rayon::join(
+            || {
+                rayon::join(
                     || {
-                        let dwarf_analyzer = dwarf::DwarfAnalyzer::new(binary_ref);
-                        if dwarf_analyzer.has_debug_info() {
-                            let types = dwarf_analyzer.analyze_types();
-                            let funcs = dwarf_analyzer.analyze_functions();
-                            (types, funcs)
+                        if format_ref.starts_with("Mach-O") {
+                            let analyzer = macho::apple::AppleAnalyzer::new(binary_ref);
+                            let apple_funcs = analyzer.analyze();
+                            let swift_types = analyzer.analyze_swift_types();
+                            let objc_classes = analyzer.analyze_objc_ivars();
+                            let objc_selectors = analyzer.resolve_msg_send_selectors();
+                            (
+                                Some(apple_funcs),
+                                Some(swift_types),
+                                objc_classes,
+                                objc_selectors,
+                            )
                         } else {
-                            (Vec::new(), Vec::new())
+                            (None, None, Vec::new(), std::collections::HashMap::new())
                         }
                     },
-                    || rayon::join(
-                        || {
-                            if detection_ref.language().map_or(false, |d| d.name == "Rust") {
-                                let analyzer = rust::RustAnalyzer::new(binary_ref);
-                                analyzer.analyze_vtables()
-                            } else {
-                                Vec::new()
-                            }
-                        },
-                        || {
-                            let analyzer = cpp::CppAnalyzer::new(binary_ref);
-                            (analyzer.to_inferred_types(), analyzer.discover_vtable_functions())
-                        }
-                    )
+                    || {
+                        rayon::join(
+                            || {
+                                let dwarf_analyzer = dwarf::DwarfAnalyzer::new(binary_ref);
+                                if dwarf_analyzer.has_debug_info() {
+                                    let types = dwarf_analyzer.analyze_types();
+                                    let funcs = dwarf_analyzer.analyze_functions();
+                                    (types, funcs)
+                                } else {
+                                    (Vec::new(), Vec::new())
+                                }
+                            },
+                            || {
+                                rayon::join(
+                                    || {
+                                        if detection_ref
+                                            .language()
+                                            .map_or(false, |d| d.name == "Rust")
+                                        {
+                                            let analyzer = rust::RustAnalyzer::new(binary_ref);
+                                            analyzer.analyze_vtables()
+                                        } else {
+                                            Vec::new()
+                                        }
+                                    },
+                                    || {
+                                        let analyzer = cpp::CppAnalyzer::new(binary_ref);
+                                        (
+                                            analyzer.to_inferred_types(),
+                                            analyzer.discover_vtable_functions(),
+                                        )
+                                    },
+                                )
+                            },
+                        )
+                    },
                 )
-            )
+            },
         );
 
         // ====================================================================
@@ -186,7 +203,10 @@ impl LoadedBinary {
         }
 
         for ty in go_types {
-            binary.inner_mut().inferred_types.push(ty.to_inferred_type());
+            binary
+                .inner_mut()
+                .inferred_types
+                .push(ty.to_inferred_type());
         }
 
         // 2. Merge Apple/ObjC/Swift Results
@@ -308,7 +328,10 @@ impl LoadedBinary {
             for vfunc in cpp_vtable_funcs_res {
                 if let Some(&idx) = addr_to_existing.get(&vfunc.address) {
                     let existing = &mut binary.inner_mut().functions[idx];
-                    if existing.name.starts_with("FUN_") || existing.name.starts_with("sub_") || existing.name.is_empty() {
+                    if existing.name.starts_with("FUN_")
+                        || existing.name.starts_with("sub_")
+                        || existing.name.is_empty()
+                    {
                         existing.name = vfunc.name;
                         existing.origin = vfunc.origin;
                         existing.kind = vfunc.kind;
@@ -318,7 +341,10 @@ impl LoadedBinary {
                     binary.inner_mut().functions.push(vfunc);
                 }
             }
-            binary.inner_mut().functions.sort_unstable_by_key(|f| f.address);
+            binary
+                .inner_mut()
+                .functions
+                .sort_unstable_by_key(|f| f.address);
             binary.inner_mut().functions_sorted = true;
             binary.rebuild_function_indices();
         }
@@ -376,7 +402,9 @@ mod tests {
     #[test]
     fn test_profile_loader_on_fixture() {
         use std::time::Instant;
-        let fixture_path = std::path::Path::new("/Users/sjkim1127/Fission/benchmark/binary/x86-64/window/small/binary/c/test_functions.exe");
+        let fixture_path = std::path::Path::new(
+            "/Users/sjkim1127/Fission/benchmark/binary/x86-64/window/small/binary/c/test_functions.exe",
+        );
         if !fixture_path.exists() {
             println!("Fixture not found at {}", fixture_path.display());
             return;

@@ -1,7 +1,7 @@
 use super::super::*;
-use std::collections::HashMap;
-use crate::nir::support::expr_type;
 use crate::nir::normalize::analysis::defuse::DefUseMap;
+use crate::nir::support::expr_type;
+use std::collections::HashMap;
 
 pub(crate) fn apply_subvar_trim_pass(func: &mut HirFunction) -> bool {
     let mut assignments = HashMap::new();
@@ -47,13 +47,21 @@ fn get_expr_type(expr: &HirExpr, local_types: &HashMap<String, NirType>) -> NirT
 fn find_all_assignments(stmts: &[HirStmt], assignments: &mut HashMap<String, Vec<HirExpr>>) {
     for stmt in stmts {
         match stmt {
-            HirStmt::Assign { lhs: HirLValue::Var(name), rhs } => {
-                assignments.entry(name.clone()).or_default().push(rhs.clone());
+            HirStmt::Assign {
+                lhs: HirLValue::Var(name),
+                rhs,
+            } => {
+                assignments
+                    .entry(name.clone())
+                    .or_default()
+                    .push(rhs.clone());
             }
             HirStmt::Block(body) | HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
                 find_all_assignments(body, assignments);
             }
-            HirStmt::For { init, update, body, .. } => {
+            HirStmt::For {
+                init, update, body, ..
+            } => {
                 if let Some(init) = init {
                     find_all_assignments(std::slice::from_ref(init.as_ref()), assignments);
                 }
@@ -62,7 +70,11 @@ fn find_all_assignments(stmts: &[HirStmt], assignments: &mut HashMap<String, Vec
                 }
                 find_all_assignments(body, assignments);
             }
-            HirStmt::If { then_body, else_body, .. } => {
+            HirStmt::If {
+                then_body,
+                else_body,
+                ..
+            } => {
                 find_all_assignments(then_body, assignments);
                 find_all_assignments(else_body, assignments);
             }
@@ -108,7 +120,12 @@ fn simplify_stmt(
         HirStmt::Block(body) | HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
             changed |= simplify_stmts(body, assignments, defuse, local_types);
         }
-        HirStmt::For { init, cond, update, body } => {
+        HirStmt::For {
+            init,
+            cond,
+            update,
+            body,
+        } => {
             if let Some(i) = init {
                 changed |= simplify_stmt(i.as_mut(), assignments, defuse, local_types);
             }
@@ -120,12 +137,20 @@ fn simplify_stmt(
             }
             changed |= simplify_stmts(body, assignments, defuse, local_types);
         }
-        HirStmt::If { cond, then_body, else_body } => {
+        HirStmt::If {
+            cond,
+            then_body,
+            else_body,
+        } => {
             changed |= simplify_expr(cond, assignments, defuse, local_types);
             changed |= simplify_stmts(then_body, assignments, defuse, local_types);
             changed |= simplify_stmts(else_body, assignments, defuse, local_types);
         }
-        HirStmt::Switch { expr, cases, default } => {
+        HirStmt::Switch {
+            expr,
+            cases,
+            default,
+        } => {
             changed |= simplify_expr(expr, assignments, defuse, local_types);
             for case in cases {
                 changed |= simplify_stmts(&mut case.body, assignments, defuse, local_types);
@@ -190,7 +215,12 @@ fn simplify_expr(
                 changed |= simplify_expr(arg, assignments, defuse, local_types);
             }
         }
-        HirExpr::Select { cond, then_expr, else_expr, .. } => {
+        HirExpr::Select {
+            cond,
+            then_expr,
+            else_expr,
+            ..
+        } => {
             changed |= simplify_expr(cond, assignments, defuse, local_types);
             changed |= simplify_expr(then_expr, assignments, defuse, local_types);
             changed |= simplify_expr(else_expr, assignments, defuse, local_types);
@@ -202,17 +232,25 @@ fn simplify_expr(
         _ => {}
     }
 
-    if let HirExpr::Cast { ty: target_ty, expr: inner_cast_expr } = expr {
+    if let HirExpr::Cast {
+        ty: target_ty,
+        expr: inner_cast_expr,
+    } = expr
+    {
         if let HirExpr::Var(name) = inner_cast_expr.as_ref() {
             if let Some(exprs) = assignments.get(name) {
                 if exprs.len() == 1 {
                     let def_expr = &exprs[0];
                     let use_count = defuse.use_count.get(name).copied().unwrap_or(0);
-                    let is_safe_to_dup = matches!(def_expr, HirExpr::Var(_) | HirExpr::Const(_, _)) || use_count <= 1;
+                    let is_safe_to_dup = matches!(def_expr, HirExpr::Var(_) | HirExpr::Const(_, _))
+                        || use_count <= 1;
 
                     if is_safe_to_dup {
                         // Pattern 1: (target_ty)(intermediate_ty)inner_expr  where inner_expr: target_ty
-                        if let HirExpr::Cast { expr: inner_val, .. } = def_expr {
+                        if let HirExpr::Cast {
+                            expr: inner_val, ..
+                        } = def_expr
+                        {
                             let inner_val_ty = get_expr_type(inner_val, local_types);
                             if &inner_val_ty == target_ty {
                                 *expr = inner_val.as_ref().clone();

@@ -335,11 +335,8 @@ pub fn prepare_native_decompiler_for_binary<'a>(
     // GDT (type info): primary + supplementary platform GDTs
     let t0 = Instant::now();
     preview_diag_prepare(binary, "gdt_start", total_start);
-    let gdt_paths = PATHS.get_all_gdt_paths(
-        binary.is_64bit,
-        Some(&binary.format),
-        options.compiler_id,
-    );
+    let gdt_paths =
+        PATHS.get_all_gdt_paths(binary.is_64bit, Some(&binary.format), options.compiler_id);
     for path in &gdt_paths {
         if options.verbose {
             eprintln!("[*] Loading GDT: {}", path.display());

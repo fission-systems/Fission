@@ -332,7 +332,6 @@ fn ensure_missing_hinted_params(
     }
 }
 
-
 fn stack_origin_offset(origin: Option<NirBindingOrigin>) -> Option<(i64, bool)> {
     match origin {
         Some(NirBindingOrigin::StackOffset(offset)) => Some((offset, false)),

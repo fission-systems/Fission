@@ -1,6 +1,6 @@
+use super::{FunctionDiscoveryProfileArg, parse_hex_address};
 use clap::Args;
 use std::path::PathBuf;
-use super::{FunctionDiscoveryProfileArg, parse_hex_address};
 
 #[derive(Args, Debug)]
 #[command(group(

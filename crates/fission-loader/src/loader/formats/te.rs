@@ -1,7 +1,7 @@
 use crate::loader::reader::ByteReader;
 use crate::loader::types::{
-    DataBuffer, FunctionInfo, LoadedBinary, LoadedBinaryBuilder, SectionInfo,
-    extract_cstring, PdbDebugInfo, InferredTypeInfo, InferredFieldInfo,
+    DataBuffer, FunctionInfo, InferredFieldInfo, InferredTypeInfo, LoadedBinary,
+    LoadedBinaryBuilder, PdbDebugInfo, SectionInfo, extract_cstring,
 };
 use crate::prelude::*;
 use fission_core::architecture::select_pe_load_spec;
@@ -40,18 +40,27 @@ impl<'a> TeLoaderImpl<'a> {
     }
 
     fn read_u16(&self, offset: u64) -> Result<u16> {
-        let bytes = self.data.get(offset as usize..offset as usize + 2)
+        let bytes = self
+            .data
+            .get(offset as usize..offset as usize + 2)
             .ok_or_else(|| err!(loader, "out of bounds u16"))?;
         Ok(u16::from_le_bytes(bytes.try_into().unwrap()))
     }
 
     fn read_u32(&self, offset: u64) -> Result<u32> {
-        let bytes = self.data.get(offset as usize..offset as usize + 4)
+        let bytes = self
+            .data
+            .get(offset as usize..offset as usize + 4)
             .ok_or_else(|| err!(loader, "out of bounds u32"))?;
         Ok(u32::from_le_bytes(bytes.try_into().unwrap()))
     }
 
-    fn parse_relocations(&self, dir_rva: u32, dir_size: u32, image_base: u64) -> Result<Vec<crate::loader::types::RelocationEntry>> {
+    fn parse_relocations(
+        &self,
+        dir_rva: u32,
+        dir_size: u32,
+        image_base: u64,
+    ) -> Result<Vec<crate::loader::types::RelocationEntry>> {
         let mut offset = self
             .rva_to_file_offset(dir_rva, image_base)
             .ok_or(err!(loader, "Invalid Reloc Dir RVA"))?;
@@ -80,8 +89,8 @@ impl<'a> TeLoaderImpl<'a> {
 
                 let address = image_base + page_rva as u64 + r_offset as u64;
                 let size = match r_type {
-                    10 => 8, // DIR64
-                    3 => 4,  // HIGHLOW
+                    10 => 8,    // DIR64
+                    3 => 4,     // HIGHLOW
                     1 | 2 => 2, // HIGH / LOW
                     _ => 0,
                 };
@@ -188,18 +197,78 @@ fn generate_te_header_types(
 
     // 1. EFI_TE_IMAGE_HEADER
     let te_fields = vec![
-        InferredFieldInfo { name: "Signature".to_string(), type_name: "WORD".to_string(), offset: 0, size: 2 },
-        InferredFieldInfo { name: "Machine".to_string(), type_name: "WORD".to_string(), offset: 2, size: 2 },
-        InferredFieldInfo { name: "NumberOfSections".to_string(), type_name: "BYTE".to_string(), offset: 4, size: 1 },
-        InferredFieldInfo { name: "Subsystem".to_string(), type_name: "BYTE".to_string(), offset: 5, size: 1 },
-        InferredFieldInfo { name: "StrippedSize".to_string(), type_name: "WORD".to_string(), offset: 6, size: 2 },
-        InferredFieldInfo { name: "AddressOfEntryPoint".to_string(), type_name: "DWORD".to_string(), offset: 8, size: 4 },
-        InferredFieldInfo { name: "BaseOfCode".to_string(), type_name: "DWORD".to_string(), offset: 12, size: 4 },
-        InferredFieldInfo { name: "ImageBase".to_string(), type_name: "QWORD".to_string(), offset: 16, size: 8 },
-        InferredFieldInfo { name: "DataDirectory_BaseReloc_RVA".to_string(), type_name: "DWORD".to_string(), offset: 24, size: 4 },
-        InferredFieldInfo { name: "DataDirectory_BaseReloc_Size".to_string(), type_name: "DWORD".to_string(), offset: 28, size: 4 },
-        InferredFieldInfo { name: "DataDirectory_Debug_RVA".to_string(), type_name: "DWORD".to_string(), offset: 32, size: 4 },
-        InferredFieldInfo { name: "DataDirectory_Debug_Size".to_string(), type_name: "DWORD".to_string(), offset: 36, size: 4 },
+        InferredFieldInfo {
+            name: "Signature".to_string(),
+            type_name: "WORD".to_string(),
+            offset: 0,
+            size: 2,
+        },
+        InferredFieldInfo {
+            name: "Machine".to_string(),
+            type_name: "WORD".to_string(),
+            offset: 2,
+            size: 2,
+        },
+        InferredFieldInfo {
+            name: "NumberOfSections".to_string(),
+            type_name: "BYTE".to_string(),
+            offset: 4,
+            size: 1,
+        },
+        InferredFieldInfo {
+            name: "Subsystem".to_string(),
+            type_name: "BYTE".to_string(),
+            offset: 5,
+            size: 1,
+        },
+        InferredFieldInfo {
+            name: "StrippedSize".to_string(),
+            type_name: "WORD".to_string(),
+            offset: 6,
+            size: 2,
+        },
+        InferredFieldInfo {
+            name: "AddressOfEntryPoint".to_string(),
+            type_name: "DWORD".to_string(),
+            offset: 8,
+            size: 4,
+        },
+        InferredFieldInfo {
+            name: "BaseOfCode".to_string(),
+            type_name: "DWORD".to_string(),
+            offset: 12,
+            size: 4,
+        },
+        InferredFieldInfo {
+            name: "ImageBase".to_string(),
+            type_name: "QWORD".to_string(),
+            offset: 16,
+            size: 8,
+        },
+        InferredFieldInfo {
+            name: "DataDirectory_BaseReloc_RVA".to_string(),
+            type_name: "DWORD".to_string(),
+            offset: 24,
+            size: 4,
+        },
+        InferredFieldInfo {
+            name: "DataDirectory_BaseReloc_Size".to_string(),
+            type_name: "DWORD".to_string(),
+            offset: 28,
+            size: 4,
+        },
+        InferredFieldInfo {
+            name: "DataDirectory_Debug_RVA".to_string(),
+            type_name: "DWORD".to_string(),
+            offset: 32,
+            size: 4,
+        },
+        InferredFieldInfo {
+            name: "DataDirectory_Debug_Size".to_string(),
+            type_name: "DWORD".to_string(),
+            offset: 36,
+            size: 4,
+        },
     ];
     types.push(InferredTypeInfo {
         name: "EFI_TE_IMAGE_HEADER".to_string(),
@@ -216,16 +285,66 @@ fn generate_te_header_types(
     for idx in 0..section_count {
         let sec_va = section_headers_va + (idx as u64 * 40);
         let sec_fields = vec![
-            InferredFieldInfo { name: "Name".to_string(), type_name: "char[8]".to_string(), offset: 0, size: 8 },
-            InferredFieldInfo { name: "VirtualSize".to_string(), type_name: "DWORD".to_string(), offset: 8, size: 4 },
-            InferredFieldInfo { name: "VirtualAddress".to_string(), type_name: "DWORD".to_string(), offset: 12, size: 4 },
-            InferredFieldInfo { name: "SizeOfRawData".to_string(), type_name: "DWORD".to_string(), offset: 16, size: 4 },
-            InferredFieldInfo { name: "PointerToRawData".to_string(), type_name: "DWORD".to_string(), offset: 20, size: 4 },
-            InferredFieldInfo { name: "PointerToRelocations".to_string(), type_name: "DWORD".to_string(), offset: 24, size: 4 },
-            InferredFieldInfo { name: "PointerToLinenumbers".to_string(), type_name: "DWORD".to_string(), offset: 28, size: 4 },
-            InferredFieldInfo { name: "NumberOfRelocations".to_string(), type_name: "WORD".to_string(), offset: 32, size: 2 },
-            InferredFieldInfo { name: "NumberOfLinenumbers".to_string(), type_name: "WORD".to_string(), offset: 34, size: 2 },
-            InferredFieldInfo { name: "Characteristics".to_string(), type_name: "DWORD".to_string(), offset: 36, size: 4 },
+            InferredFieldInfo {
+                name: "Name".to_string(),
+                type_name: "char[8]".to_string(),
+                offset: 0,
+                size: 8,
+            },
+            InferredFieldInfo {
+                name: "VirtualSize".to_string(),
+                type_name: "DWORD".to_string(),
+                offset: 8,
+                size: 4,
+            },
+            InferredFieldInfo {
+                name: "VirtualAddress".to_string(),
+                type_name: "DWORD".to_string(),
+                offset: 12,
+                size: 4,
+            },
+            InferredFieldInfo {
+                name: "SizeOfRawData".to_string(),
+                type_name: "DWORD".to_string(),
+                offset: 16,
+                size: 4,
+            },
+            InferredFieldInfo {
+                name: "PointerToRawData".to_string(),
+                type_name: "DWORD".to_string(),
+                offset: 20,
+                size: 4,
+            },
+            InferredFieldInfo {
+                name: "PointerToRelocations".to_string(),
+                type_name: "DWORD".to_string(),
+                offset: 24,
+                size: 4,
+            },
+            InferredFieldInfo {
+                name: "PointerToLinenumbers".to_string(),
+                type_name: "DWORD".to_string(),
+                offset: 28,
+                size: 4,
+            },
+            InferredFieldInfo {
+                name: "NumberOfRelocations".to_string(),
+                type_name: "WORD".to_string(),
+                offset: 32,
+                size: 2,
+            },
+            InferredFieldInfo {
+                name: "NumberOfLinenumbers".to_string(),
+                type_name: "WORD".to_string(),
+                offset: 34,
+                size: 2,
+            },
+            InferredFieldInfo {
+                name: "Characteristics".to_string(),
+                type_name: "DWORD".to_string(),
+                offset: 36,
+                size: 4,
+            },
         ];
         types.push(InferredTypeInfo {
             name: format!("EFI_IMAGE_SECTION_HEADER_{idx}"),
@@ -245,11 +364,15 @@ impl TeLoader {
     pub fn parse(data: DataBuffer, path: String) -> Result<LoadedBinary> {
         let bytes = data.as_slice();
         if bytes.len() < 40 {
-            return Err(err!(loader, "MalformedHeader: Terse Executable header too small"));
+            return Err(err!(
+                loader,
+                "MalformedHeader: Terse Executable header too small"
+            ));
         }
         let reader = ByteReader::little(bytes);
         let signature = reader.u16(0)?;
-        if signature != 0x5a56 { // "VZ"
+        if signature != 0x5a56 {
+            // "VZ"
             return Err(err!(loader, "MalformedHeader: invalid TE signature"));
         }
 
@@ -269,7 +392,10 @@ impl TeLoader {
         let mut sections_info = Vec::new();
         let section_table_offset = 40;
         if bytes.len() < section_table_offset + (num_sections as usize * 40) {
-            return Err(err!(loader, "MalformedHeader: Terse Executable section table truncated"));
+            return Err(err!(
+                loader,
+                "MalformedHeader: Terse Executable section table truncated"
+            ));
         }
 
         for idx in 0..num_sections as usize {
@@ -337,7 +463,8 @@ impl TeLoader {
         // Parse base relocations
         let mut relocations = Vec::new();
         if reloc_dir_rva != 0 && reloc_dir_size > 0 {
-            if let Ok(entries) = loader.parse_relocations(reloc_dir_rva, reloc_dir_size, image_base) {
+            if let Ok(entries) = loader.parse_relocations(reloc_dir_rva, reloc_dir_size, image_base)
+            {
                 relocations = entries;
             }
         }
@@ -479,20 +606,41 @@ mod tests {
         assert_eq!(bin.relocations[0].size, 4);
 
         // Verify PDB info
-        let pdb = bin.inner().pdb_debug_info.as_ref().expect("should parse PdbDebugInfo");
+        let pdb = bin
+            .inner()
+            .pdb_debug_info
+            .as_ref()
+            .expect("should parse PdbDebugInfo");
         assert_eq!(pdb.path_hint, Some("test.pdb".to_string()));
         assert_eq!(pdb.age, Some(1));
-        assert_eq!(pdb.guid_hex, Some("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_string()));
+        assert_eq!(
+            pdb.guid_hex,
+            Some("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_string())
+        );
 
         // Verify Inferred Header Types and Symbols
-        let te_header_sym = bin.global_symbols.get(&0x400000).expect("should find TE_HEADER symbol");
+        let te_header_sym = bin
+            .global_symbols
+            .get(&0x400000)
+            .expect("should find TE_HEADER symbol");
         assert_eq!(te_header_sym, "TE_HEADER");
-        let sec_headers_sym = bin.global_symbols.get(&0x400028).expect("should find SECTION_HEADERS symbol");
+        let sec_headers_sym = bin
+            .global_symbols
+            .get(&0x400028)
+            .expect("should find SECTION_HEADERS symbol");
         assert_eq!(sec_headers_sym, "SECTION_HEADERS");
 
-        let te_type = bin.inner().inferred_types.iter().find(|t| t.name == "EFI_TE_IMAGE_HEADER");
+        let te_type = bin
+            .inner()
+            .inferred_types
+            .iter()
+            .find(|t| t.name == "EFI_TE_IMAGE_HEADER");
         assert!(te_type.is_some());
-        let sec_type = bin.inner().inferred_types.iter().find(|t| t.name == "EFI_IMAGE_SECTION_HEADER_0");
+        let sec_type = bin
+            .inner()
+            .inferred_types
+            .iter()
+            .find(|t| t.name == "EFI_IMAGE_SECTION_HEADER_0");
         assert!(sec_type.is_some());
     }
 }

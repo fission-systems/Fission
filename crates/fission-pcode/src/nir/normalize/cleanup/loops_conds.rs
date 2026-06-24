@@ -222,9 +222,7 @@ fn matches_single_goto(body: &[HirStmt], label: &str) -> bool {
     matches!(body, [HirStmt::Goto(target)] if target == label)
 }
 
-pub(crate) fn inline_loop_condition_trailing_temps(
-    func: &mut HirFunction,
-) -> bool {
+pub(crate) fn inline_loop_condition_trailing_temps(func: &mut HirFunction) -> bool {
     let mut changed = false;
     for _ in 0..8 {
         let use_count = DefUseMap::build(&func.body).use_count;
@@ -254,9 +252,7 @@ pub(crate) fn normalize_dowhile_decrement_condition(stmts: &mut Vec<HirStmt>) ->
                 // Recurse into nested statements.
                 changed |= normalize_dowhile_decrement_condition(body);
             }
-            HirStmt::While { body, .. }
-            | HirStmt::For { body, .. }
-            | HirStmt::Block(body) => {
+            HirStmt::While { body, .. } | HirStmt::For { body, .. } | HirStmt::Block(body) => {
                 changed |= normalize_dowhile_decrement_condition(body);
             }
             HirStmt::If {
@@ -435,9 +431,7 @@ fn expr_is_low_cost_inline_candidate(expr: &HirExpr) -> bool {
         }
         HirExpr::Cast { expr, .. }
         | HirExpr::Unary { expr, .. }
-        | HirExpr::FieldAccess { base: expr, .. } => {
-            expr_is_low_cost_inline_candidate(expr)
-        }
+        | HirExpr::FieldAccess { base: expr, .. } => expr_is_low_cost_inline_candidate(expr),
         HirExpr::Binary { op, lhs, rhs, .. } => {
             matches!(
                 op,
@@ -664,14 +658,24 @@ pub(crate) fn conditional_select_pass(stmts: &mut Vec<HirStmt>) -> bool {
         if is_convertible {
             // Temporarily take ownership to avoid borrow conflicts.
             let stmt = std::mem::replace(&mut stmts[idx], HirStmt::Break);
-            if let HirStmt::If { cond, then_body, else_body } = &stmt {
+            if let HirStmt::If {
+                cond,
+                then_body,
+                else_body,
+            } = &stmt
+            {
                 if let Some(replacement) = try_cmov_to_select(cond, then_body, else_body) {
                     stmts[idx] = replacement;
                     changed = true;
                 } else {
                     // Restore and recurse.
                     stmts[idx] = stmt;
-                    if let HirStmt::If { then_body, else_body, .. } = &mut stmts[idx] {
+                    if let HirStmt::If {
+                        then_body,
+                        else_body,
+                        ..
+                    } = &mut stmts[idx]
+                    {
                         changed |= conditional_select_pass(then_body);
                         changed |= conditional_select_pass(else_body);
                     }
@@ -686,7 +690,9 @@ pub(crate) fn conditional_select_pass(stmts: &mut Vec<HirStmt>) -> bool {
                 | HirStmt::Block(body) => {
                     changed |= conditional_select_pass(body);
                 }
-                HirStmt::For { init, update, body, .. } => {
+                HirStmt::For {
+                    init, update, body, ..
+                } => {
                     if let Some(init) = init {
                         if let HirStmt::Block(b) = init.as_mut() {
                             changed |= conditional_select_pass(b);
@@ -746,8 +752,7 @@ fn try_cmov_to_select(
     }
 
     // Cheap inline candidates only (avoid large expressions in ternaries).
-    if !expr_is_low_cost_inline_candidate(then_rhs)
-        || !expr_is_low_cost_inline_candidate(else_rhs)
+    if !expr_is_low_cost_inline_candidate(then_rhs) || !expr_is_low_cost_inline_candidate(else_rhs)
     {
         return None;
     }
@@ -767,10 +772,12 @@ fn try_cmov_to_select(
 
 fn single_assign(body: &[HirStmt]) -> Option<(&str, &HirExpr)> {
     match body {
-        [HirStmt::Assign {
-            lhs: HirLValue::Var(name),
-            rhs,
-        }] => Some((name.as_str(), rhs)),
+        [
+            HirStmt::Assign {
+                lhs: HirLValue::Var(name),
+                rhs,
+            },
+        ] => Some((name.as_str(), rhs)),
         _ => None,
     }
 }

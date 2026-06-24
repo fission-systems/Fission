@@ -1,6 +1,6 @@
 use super::*;
-use std::collections::{HashMap, HashSet};
 use fission_loader::loader::LoadedBinary;
+use std::collections::{HashMap, HashSet};
 
 /// Traces the operations required to compute a target varnode.
 /// Returns a topologically sorted vector of PcodeOps and a set of leaf varnode keys (un-defined variables).
@@ -33,7 +33,7 @@ pub(crate) fn collect_switch_dependencies(
         if visited.contains(&key) {
             return true;
         }
-        
+
         visited.insert(key.clone());
 
         if let Some(def_site) = defs.get(&key) {
@@ -45,7 +45,7 @@ pub(crate) fn collect_switch_dependencies(
                 return false;
             }
             let op = &block.ops[def_site.op_idx];
-            
+
             // Recursively visit inputs first to establish topological order
             for input in &op.inputs {
                 if !visit(input, defs, pcode, visited, ordered_ops, leaves) {
@@ -59,7 +59,14 @@ pub(crate) fn collect_switch_dependencies(
         true
     }
 
-    if visit(target, defs, pcode, &mut visited, &mut ordered_ops, &mut leaves) {
+    if visit(
+        target,
+        defs,
+        pcode,
+        &mut visited,
+        &mut ordered_ops,
+        &mut leaves,
+    ) {
         Some((ordered_ops, leaves))
     } else {
         None

@@ -157,9 +157,7 @@ pub fn render_markdown(input: &str, _width: usize) -> Vec<Line<'static>> {
                     in_code_block = true;
                     code_buf.clear();
                     code_lang = match kind {
-                        CodeBlockKind::Fenced(lang) if !lang.is_empty() => {
-                            Some(lang.into_string())
-                        }
+                        CodeBlockKind::Fenced(lang) if !lang.is_empty() => Some(lang.into_string()),
                         _ => None,
                     };
                 }
@@ -180,10 +178,7 @@ pub fn render_markdown(input: &str, _width: usize) -> Vec<Line<'static>> {
                     } else {
                         format!("{}• ", indent)
                     };
-                    current_spans.push(Span::styled(
-                        marker,
-                        Style::default().fg(Color::Yellow),
-                    ));
+                    current_spans.push(Span::styled(marker, Style::default().fg(Color::Yellow)));
                 }
 
                 Tag::BlockQuote(_) => {
@@ -236,10 +231,7 @@ pub fn render_markdown(input: &str, _width: usize) -> Vec<Line<'static>> {
                     for code_line in code_buf.lines() {
                         lines.push(Line::from(vec![
                             Span::styled("  ", Style::default()),
-                            Span::styled(
-                                code_line.to_string(),
-                                Style::default().fg(Color::Green),
-                            ),
+                            Span::styled(code_line.to_string(), Style::default().fg(Color::Green)),
                         ]));
                     }
                     code_buf.clear();

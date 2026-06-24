@@ -1,7 +1,7 @@
 //! Debugger CLI argument definitions
 
-use clap::{Args, Subcommand, ValueEnum};
-use super::{parse_hex_address, parse_bool_str};
+use super::{parse_bool_str, parse_hex_address};
+use clap::{Args, Subcommand};
 
 // ============================================================================
 // Debugger CLI surface
@@ -351,4 +351,3 @@ pub struct DebugWriteArgs {
     #[arg(short, long)]
     pub json: bool,
 }
-

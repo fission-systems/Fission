@@ -8,7 +8,6 @@ pub(crate) fn recognize_mod_div_power_of_two(expr: &HirExpr) -> Option<HirExpr> 
         .or_else(|| normalize_unsigned_power_of_two_div(expr))
 }
 
-
 pub(crate) fn recognize_compiler_runtime_division(expr: &HirExpr) -> Option<HirExpr> {
     let HirExpr::Call {
         target, args, ty, ..

@@ -3,10 +3,10 @@ use std::path::{Path, PathBuf};
 
 use fission_loader::loader::LoadedBinary;
 use fission_pcode::cfg::AddressCfgSnapshot;
-use fission_static::analysis::control_flow_facts::{decode_memory_context_for, function_max_bytes};
 use fission_sleigh::runtime::{
-    build_instruction_cfg_snapshot, DecodeContract, InstructionCfgHints, RuntimeSleighFrontend,
+    DecodeContract, InstructionCfgHints, RuntimeSleighFrontend, build_instruction_cfg_snapshot,
 };
+use fission_static::analysis::control_flow_facts::{decode_memory_context_for, function_max_bytes};
 use serde::Deserialize;
 
 #[derive(Debug, Deserialize)]
@@ -78,9 +78,8 @@ fn lift_function_snapshot(
             )
         }
         "pcode_structuring" => AddressCfgSnapshot::from_pcode_structuring(&lifted.function),
-        "pcode_cfg_builder" => {
-            AddressCfgSnapshot::from_pcode_cfg_builder(&lifted.function).expect("cfg builder export")
-        }
+        "pcode_cfg_builder" => AddressCfgSnapshot::from_pcode_cfg_builder(&lifted.function)
+            .expect("cfg builder export"),
         other => panic!("unsupported fixture model {other}"),
     }
 }
@@ -123,7 +122,11 @@ fn cfg_parity_matches_ghidra_fixtures() {
             "{} block_starts",
             fixture.name
         );
-        assert_eq!(actual.edges, fixture.snapshot.edges, "{} edges", fixture.name);
+        assert_eq!(
+            actual.edges, fixture.snapshot.edges,
+            "{} edges",
+            fixture.name
+        );
         assert_eq!(
             actual.exit_blocks, fixture.snapshot.exit_blocks,
             "{} exit_blocks",

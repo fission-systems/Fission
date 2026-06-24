@@ -18,9 +18,9 @@ pub use fission_pcode::*;
 
 // ─── Submodule hierarchy ────────────────────────────────────────────────────
 
+pub mod facts;
 pub mod orchestration;
 pub mod pipeline;
-pub mod facts;
 pub mod rendering;
 
 // ─── Internal backward-compat module aliases ────────────────────────────────
@@ -45,8 +45,8 @@ pub use rendering::render;
 
 // ─── Public API re-exports (backward compatibility for downstream crates) ───
 
-pub use pipeline::adapters::{NativeDecompilerBackend, NativeDecompilerSource};
 pub use fission_static::utils;
+pub use pipeline::adapters::{NativeDecompilerBackend, NativeDecompilerSource};
 
 pub use orchestration::engine::{
     NirEngineMode, NirRoutingDecision, NirRoutingResolver, NirSelection, NirSource, NirSurfaceKind,

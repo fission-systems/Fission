@@ -367,7 +367,9 @@ impl LoadedBinary {
     /// Get Ghidra-compatible compiler ID based on detections
     pub fn get_ghidra_compiler_id(&self) -> Option<String> {
         if let Some(load_spec) = &self.load_spec {
-            if load_spec.pair.compiler_spec_id.as_str() == "default" && self.rich_header_records.is_some() {
+            if load_spec.pair.compiler_spec_id.as_str() == "default"
+                && self.rich_header_records.is_some()
+            {
                 return Some("windows".to_string());
             }
             return Some(load_spec.pair.compiler_spec_id.as_str().to_string());

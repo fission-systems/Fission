@@ -164,7 +164,9 @@ fn apply_cspec_for_convention(options: &mut MlilPreviewOptions) {
 }
 
 pub(super) fn int_params_for(abi: CallingConvention) -> Vec<u64> {
-    preview_options_for(abi).cspec_param_offsets.unwrap_or_default()
+    preview_options_for(abi)
+        .cspec_param_offsets
+        .unwrap_or_default()
 }
 
 pub(super) fn abi_state_for(abi: CallingConvention, stack_frame_size: i64) -> AbiState {

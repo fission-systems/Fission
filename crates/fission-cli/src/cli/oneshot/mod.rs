@@ -4,6 +4,7 @@
 
 mod assessment;
 mod binary_info;
+mod callgraph;
 #[cfg(feature = "native_decomp")]
 mod common;
 #[cfg(feature = "debugger")]
@@ -23,12 +24,12 @@ mod pcode_topology;
 mod raw_pcode;
 #[cfg(not(feature = "native_decomp"))]
 mod rust_decomp;
-mod callgraph;
 mod script;
 mod strings;
 mod xrefs;
 
 use binary_info::{print_binary_info, print_exports, print_imports, print_sections};
+use callgraph::run_callgraph;
 #[cfg(feature = "native_decomp")]
 use decompile::{
     emit_preview_candidate_inventory, emit_preview_candidate_scan_batch, run_decompilation,
@@ -42,7 +43,6 @@ use pcode_topology::emit_pcode_topology;
 use raw_pcode::emit_raw_pcode;
 #[cfg(not(feature = "native_decomp"))]
 use rust_decomp::run_decompilation_rust_sleigh;
-use callgraph::run_callgraph;
 use strings::print_strings;
 use xrefs::run_xrefs;
 
@@ -432,7 +432,9 @@ fn print_help() {
     println!("  fission_cli debug rmbp <addr> [--json]");
     println!("  fission_cli debug bpenable <addr> | bpdisable <addr> | bplist [--json]");
     println!("  fission_cli debug hwbp <addr> [--kind execute|write|read-write] [--json]");
-    println!("  fission_cli debug membp <addr> --size <N> [--kind read|write|execute|access] [--json]");
+    println!(
+        "  fission_cli debug membp <addr> --size <N> [--kind read|write|execute|access] [--json]"
+    );
     println!("  fission_cli debug rmmembp <addr> [--json]");
     println!("  fission_cli debug dllbp <name> | rmdllbp <name>");
     println!("  fission_cli debug exbp <code> | rmexbp <code>");
@@ -444,7 +446,9 @@ fn print_help() {
     println!("  fission_cli debug free <addr> [--json]");
     println!("  fission_cli debug getprotect <addr> [--json]");
     println!("  fission_cli debug setprotect <addr> <size> <protect-u32> [--json]");
-    println!("  fission_cli debug stack-peek [--offset <N>] | stack-pop | stack-push <value> [--json]");
+    println!(
+        "  fission_cli debug stack-peek [--offset <N>] | stack-pop | stack-push <value> [--json]"
+    );
     println!("  fission_cli debug find <start> <size> <hex-pattern> [--json]");
     println!("  fission_cli debug exports <base-addr> | imports <base-addr> [--json]");
     println!("  fission_cli debug modules | threads | switch-thread <tid>");

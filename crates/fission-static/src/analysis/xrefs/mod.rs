@@ -38,7 +38,7 @@ pub struct Xref {
     pub operand_index: i32,
     /// Present when this xref came from [`DecodedInstruction::references`].
     pub sleigh_kind: Option<DecodedReferenceKind>,
-/// Flow refinement for CALL/JMP rows (conditional vs unconditional).
+    /// Flow refinement for CALL/JMP rows (conditional vs unconditional).
     pub flow_kind: Option<DecodedFlowKind>,
 }
 

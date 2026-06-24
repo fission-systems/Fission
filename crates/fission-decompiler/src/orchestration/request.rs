@@ -27,14 +27,18 @@ impl<'a> DecompileRequest<'a> {
     }
 
     pub fn resolved_render_options(&self) -> NirRenderOptions {
-        let mut options = self.render_options
+        let mut options = self
+            .render_options
             .clone()
             .unwrap_or_else(|| NirRenderOptions::from_loaded_binary(self.binary));
-        
+
         if let Some(func) = self.binary.function_at(self.function_address) {
-            options.is_data_ref_origin = func.origin.iter().any(|origin| origin.to_string() == "data_refs");
+            options.is_data_ref_origin = func
+                .origin
+                .iter()
+                .any(|origin| origin.to_string() == "data_refs");
         }
-        
+
         options
     }
 }

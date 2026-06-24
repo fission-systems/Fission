@@ -459,7 +459,12 @@ impl<'a> PreviewBuilder<'a> {
                 for (idx, candidate) in block.ops.iter().enumerate() {
                     if block_idx == current_block_idx {
                         if idx >= def_op_idx {
-                            if idx > def_op_idx && candidate.output.as_ref().is_some_and(|out| Self::varnode_matches_key(out, &key)) {
+                            if idx > def_op_idx
+                                && candidate
+                                    .output
+                                    .as_ref()
+                                    .is_some_and(|out| Self::varnode_matches_key(out, &key))
+                            {
                                 return None;
                             }
                             continue;
@@ -557,9 +562,9 @@ impl<'a> PreviewBuilder<'a> {
         rhs: &HirExpr,
     ) -> Option<MissingMergeBindingProof> {
         let def_block_idx = self.lowering_block_index(block);
-        let first_use = self.first_output_use_site_outside_block_by_index(def_block_idx, op_idx, output);
-        if first_use.is_none() && is_register_space_id(output.space_id) {
-        }
+        let first_use =
+            self.first_output_use_site_outside_block_by_index(def_block_idx, op_idx, output);
+        if first_use.is_none() && is_register_space_id(output.space_id) {}
         let (merge_block_idx, merge_block_addr, consumer_op_idx, _) = first_use?;
         let merge_block = self.pcode.blocks.get(merge_block_idx)?;
         let consumer_op = merge_block.ops.get(consumer_op_idx)?;
@@ -1352,7 +1357,9 @@ impl<'a> PreviewBuilder<'a> {
         if let Some((branch_idx, _)) =
             self.find_diamond_branch_for_predecessors(pred_idx_a, pred_idx_b)
         {
-            if let Some((true_target_key, cond)) = self.lower_cbranch_condition_for_block(branch_idx) {
+            if let Some((true_target_key, cond)) =
+                self.lower_cbranch_condition_for_block(branch_idx)
+            {
                 let target_key_a = self.block_target_key(pred_idx_a);
                 let target_key_b = self.block_target_key(pred_idx_b);
                 let (true_addr, false_addr) = if true_target_key == target_key_a {

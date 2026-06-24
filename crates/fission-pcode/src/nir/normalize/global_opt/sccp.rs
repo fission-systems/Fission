@@ -115,9 +115,7 @@ fn stmt_list_has_side_effects(stmts: &[HirStmt]) -> bool {
 
 fn stmt_has_side_effects(stmt: &HirStmt) -> bool {
     match stmt {
-        HirStmt::Assign { lhs, rhs } => {
-            lvalue_has_side_effects(lhs) || expr_has_side_effects(rhs)
-        }
+        HirStmt::Assign { lhs, rhs } => lvalue_has_side_effects(lhs) || expr_has_side_effects(rhs),
         HirStmt::Expr(expr) | HirStmt::Return(Some(expr)) => expr_has_side_effects(expr),
         HirStmt::Block(body) => stmt_list_has_side_effects(body),
         HirStmt::If {
@@ -125,9 +123,9 @@ fn stmt_has_side_effects(stmt: &HirStmt) -> bool {
             else_body,
             ..
         } => stmt_list_has_side_effects(then_body) || stmt_list_has_side_effects(else_body),
-        HirStmt::While { body, .. }
-        | HirStmt::DoWhile { body, .. }
-        | HirStmt::For { body, .. } => stmt_list_has_side_effects(body),
+        HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } | HirStmt::For { body, .. } => {
+            stmt_list_has_side_effects(body)
+        }
         HirStmt::Switch { cases, default, .. } => {
             cases.iter().any(|c| stmt_list_has_side_effects(&c.body))
                 || stmt_list_has_side_effects(default)
@@ -327,7 +325,12 @@ mod tests {
 
         apply_sccp_pass(&mut func);
 
-        let HirStmt::If { then_body, else_body, .. } = &func.body[0] else {
+        let HirStmt::If {
+            then_body,
+            else_body,
+            ..
+        } = &func.body[0]
+        else {
             panic!("side-effectful branch should not be pruned");
         };
         assert_eq!(then_body.len(), 1);
@@ -382,12 +385,8 @@ fn extract_branch_constants(
             ..
         } => {
             let (var_name, const_val, ty) = match (lhs.as_ref(), rhs.as_ref()) {
-                (HirExpr::Var(name), HirExpr::Const(k, ty)) => {
-                    (name.clone(), *k, ty.clone())
-                }
-                (HirExpr::Const(k, ty), HirExpr::Var(name)) => {
-                    (name.clone(), *k, ty.clone())
-                }
+                (HirExpr::Var(name), HirExpr::Const(k, ty)) => (name.clone(), *k, ty.clone()),
+                (HirExpr::Const(k, ty), HirExpr::Var(name)) => (name.clone(), *k, ty.clone()),
                 _ => return,
             };
             // For `==`: const holds in then-branch (unless negated → else-branch).
@@ -502,8 +501,10 @@ fn sccp_stmt(
                         for (name, val, ty) in else_extra {
                             e2.insert(name, (val, ty));
                         }
-                        changed |= sccp_transform_stmts(then_body, &mut e1, goto_targets, all_xvars);
-                        changed |= sccp_transform_stmts(else_body, &mut e2, goto_targets, all_xvars);
+                        changed |=
+                            sccp_transform_stmts(then_body, &mut e1, goto_targets, all_xvars);
+                        changed |=
+                            sccp_transform_stmts(else_body, &mut e2, goto_targets, all_xvars);
                         *env = merge_env(&e1, &e2);
                     }
                 }
@@ -596,7 +597,8 @@ fn sccp_stmt(
                 let mut acc: Option<ConstEnv> = None;
                 for case in cases.iter_mut() {
                     let mut e = pre.clone();
-                    changed |= sccp_transform_stmts(&mut case.body, &mut e, goto_targets, all_xvars);
+                    changed |=
+                        sccp_transform_stmts(&mut case.body, &mut e, goto_targets, all_xvars);
                     acc = Some(match acc {
                         None => e,
                         Some(a) => merge_env(&a, &e),
@@ -643,7 +645,12 @@ fn collect_xvars_in_stmt(stmt: &HirStmt, out: &mut HashSet<String>) {
         HirStmt::Block(body) | HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
             collect_xvars_in_stmts(body, out);
         }
-        HirStmt::For { init, cond, update, body } => {
+        HirStmt::For {
+            init,
+            cond,
+            update,
+            body,
+        } => {
             if let Some(s) = init {
                 collect_xvars_in_stmt(s, out);
             }
@@ -655,12 +662,20 @@ fn collect_xvars_in_stmt(stmt: &HirStmt, out: &mut HashSet<String>) {
             }
             collect_xvars_in_stmts(body, out);
         }
-        HirStmt::If { cond, then_body, else_body } => {
+        HirStmt::If {
+            cond,
+            then_body,
+            else_body,
+        } => {
             collect_xvars_in_expr(cond, out);
             collect_xvars_in_stmts(then_body, out);
             collect_xvars_in_stmts(else_body, out);
         }
-        HirStmt::Switch { expr, cases, default } => {
+        HirStmt::Switch {
+            expr,
+            cases,
+            default,
+        } => {
             collect_xvars_in_expr(expr, out);
             for case in cases {
                 collect_xvars_in_stmts(&case.body, out);
@@ -723,7 +738,12 @@ fn collect_xvars_in_expr(expr: &HirExpr, out: &mut HashSet<String>) {
                 collect_xvars_in_expr(arg, out);
             }
         }
-        HirExpr::Select { cond, then_expr, else_expr, .. } => {
+        HirExpr::Select {
+            cond,
+            then_expr,
+            else_expr,
+            ..
+        } => {
             collect_xvars_in_expr(cond, out);
             collect_xvars_in_expr(then_expr, out);
             collect_xvars_in_expr(else_expr, out);

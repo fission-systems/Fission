@@ -1,4 +1,3 @@
-
 use fission_loader::LoadedBinary;
 use fission_sleigh::runtime::{DecodedFlowKind, DecodedInstruction, DecodedReferenceKind};
 
@@ -25,7 +24,10 @@ fn same_section(binary: &LoadedBinary, addr1: u64, addr2: u64) -> bool {
 
     // Fast path: check if binary sections are sorted by virtual_address.
     // PE/ELF/Mach-O sections are sorted by default.
-    let is_sorted = binary.sections.windows(2).all(|w| w[0].virtual_address <= w[1].virtual_address);
+    let is_sorted = binary
+        .sections
+        .windows(2)
+        .all(|w| w[0].virtual_address <= w[1].virtual_address);
     if is_sorted {
         let idx1 = binary.sections.binary_search_by(|section| {
             let start = section.virtual_address;
@@ -88,7 +90,8 @@ pub(crate) fn collect_instruction_targets(
                 } else {
                     norm_target - inst_addr
                 };
-                let is_long_or_cross = distance > 512 || !same_section(binary, inst_addr, norm_target);
+                let is_long_or_cross =
+                    distance > 512 || !same_section(binary, inst_addr, norm_target);
                 if inst_addr != norm_target {
                     jump_edges.push((inst_addr, norm_target));
                 }
@@ -117,7 +120,8 @@ pub(crate) fn collect_instruction_targets(
                     } else {
                         norm_target - inst_addr
                     };
-                    let is_long_or_cross = distance > 512 || !same_section(binary, inst_addr, norm_target);
+                    let is_long_or_cross =
+                        distance > 512 || !same_section(binary, inst_addr, norm_target);
                     if inst_addr != norm_target {
                         jump_edges.push((inst_addr, norm_target));
                     }
@@ -132,8 +136,13 @@ pub(crate) fn collect_instruction_targets(
                 }
                 DecodedFlowKind::Jump => {
                     let norm_target = normalize_target(binary, reference.target);
-                    let distance = if inst_addr > norm_target { inst_addr - norm_target } else { norm_target - inst_addr };
-                    let is_long_or_cross = distance > 512 || !same_section(binary, inst_addr, norm_target);
+                    let distance = if inst_addr > norm_target {
+                        inst_addr - norm_target
+                    } else {
+                        norm_target - inst_addr
+                    };
+                    let is_long_or_cross =
+                        distance > 512 || !same_section(binary, inst_addr, norm_target);
                     if inst_addr != norm_target {
                         jump_edges.push((inst_addr, norm_target));
                     }
@@ -144,8 +153,13 @@ pub(crate) fn collect_instruction_targets(
                 DecodedFlowKind::ConditionalJump => {}
                 DecodedFlowKind::None if instruction.mnemonic.eq_ignore_ascii_case("jmp") => {
                     let norm_target = normalize_target(binary, reference.target);
-                    let distance = if inst_addr > norm_target { inst_addr - norm_target } else { norm_target - inst_addr };
-                    let is_long_or_cross = distance > 512 || !same_section(binary, inst_addr, norm_target);
+                    let distance = if inst_addr > norm_target {
+                        inst_addr - norm_target
+                    } else {
+                        norm_target - inst_addr
+                    };
+                    let is_long_or_cross =
+                        distance > 512 || !same_section(binary, inst_addr, norm_target);
                     if inst_addr != norm_target {
                         jump_edges.push((inst_addr, norm_target));
                     }

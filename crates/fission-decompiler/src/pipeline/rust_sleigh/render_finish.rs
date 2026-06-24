@@ -92,7 +92,6 @@ pub(crate) fn apply_spec_overrides(binary: &LoadedBinary, options: &mut NirRende
     }
 }
 
-
 pub(crate) fn finish_rust_sleigh_render(
     binary: &LoadedBinary,
     entry_address: u64,

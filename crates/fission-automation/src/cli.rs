@@ -210,8 +210,7 @@ mod tests {
 
     #[test]
     fn check_alias_parses_as_source_semantic() {
-        let cli = Cli::try_parse_from(["fission-automation", "check"])
-            .expect("check alias parses");
+        let cli = Cli::try_parse_from(["fission-automation", "check"]).expect("check alias parses");
         assert!(
             matches!(cli.command, Commands::Check(_)),
             "expected Check variant"

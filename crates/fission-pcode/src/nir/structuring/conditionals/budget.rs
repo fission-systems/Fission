@@ -30,7 +30,7 @@ impl IfLoweringBudget {
 
         if let Some(total_start) = self.structuring_start {
             let total_elapsed_ms = total_start.elapsed().as_secs_f64() * 1000.0;
-            if total_elapsed_ms > 500.0 {
+            if total_elapsed_ms > 5000.0 {
                 self.tripped = true;
                 if structuring_diag_enabled() {
                     eprintln!(

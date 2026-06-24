@@ -4,9 +4,11 @@ use std::env;
 use std::path::PathBuf;
 use std::time::Instant;
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use fission_loader::loader::LoadedBinary;
-use fission_static::analysis::control_flow_facts::{control_flow_facts_for, FunctionControlFlowFacts};
+use fission_static::analysis::control_flow_facts::{
+    FunctionControlFlowFacts, control_flow_facts_for,
+};
 use serde::Serialize;
 
 #[derive(Debug, Serialize)]

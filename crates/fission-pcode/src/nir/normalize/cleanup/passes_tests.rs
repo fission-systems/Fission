@@ -1,5 +1,5 @@
-use super::*;
 use super::utils::*;
+use super::*;
 use crate::nir::*;
 use std::collections::HashSet;
 
@@ -225,7 +225,7 @@ fn eliminate_redundant_var_assigns_removes_exact_self_assign() {
 fn cast_elision_rewrites_self_widening_assignment_to_self_assign() {
     let mut func = HirFunction {
         name: "test_self_widening_cast".to_string(),
-            int_param_offsets: Vec::new(),
+        int_param_offsets: Vec::new(),
         locals: vec![NirBinding {
             name: "uVar84".to_string(),
             ty: int(32),
@@ -260,7 +260,7 @@ fn cast_elision_rewrites_self_widening_assignment_to_self_assign() {
 fn cast_elision_keeps_self_narrowing_assignment_to_wide_binding() {
     let mut func = HirFunction {
         name: "test_self_narrowing_cast".to_string(),
-            int_param_offsets: Vec::new(),
+        int_param_offsets: Vec::new(),
         locals: vec![NirBinding {
             name: "xVar29".to_string(),
             ty: int(64),
@@ -515,7 +515,7 @@ fn prune_unreachable_after_return_stops_at_label_boundary() {
 fn prune_unused_temp_bindings_removes_dead_preserved_temp() {
     let mut func = HirFunction {
         name: "test_preserved_prune".to_string(),
-            int_param_offsets: Vec::new(),
+        int_param_offsets: Vec::new(),
         params: vec![],
         locals: vec![preserved_temp_binding("uVar0", 32)],
         return_type: int(32),
@@ -532,7 +532,7 @@ fn prune_unused_temp_bindings_removes_dead_preserved_temp() {
 fn prune_unused_temp_bindings_removes_dead_plain_temp_with_nontrivial_name() {
     let mut func = HirFunction {
         name: "test_plain_temp_prune".to_string(),
-            int_param_offsets: Vec::new(),
+        int_param_offsets: Vec::new(),
         params: vec![],
         locals: vec![temp_binding("rcx", 64)],
         return_type: int(32),
@@ -549,7 +549,7 @@ fn prune_unused_temp_bindings_removes_dead_plain_temp_with_nontrivial_name() {
 fn prune_unused_temp_bindings_removes_dead_preserved_temp_with_nontrivial_name() {
     let mut func = HirFunction {
         name: "test_preserved_named_register_prune".to_string(),
-            int_param_offsets: Vec::new(),
+        int_param_offsets: Vec::new(),
         params: vec![],
         locals: vec![preserved_temp_binding("rcx", 64)],
         return_type: int(32),
@@ -566,7 +566,7 @@ fn prune_unused_temp_bindings_removes_dead_preserved_temp_with_nontrivial_name()
 fn prune_unused_temp_bindings_keeps_used_plain_temp_with_nontrivial_name() {
     let mut func = HirFunction {
         name: "test_plain_temp_used".to_string(),
-            int_param_offsets: Vec::new(),
+        int_param_offsets: Vec::new(),
         params: vec![],
         locals: vec![temp_binding("rcx", 64)],
         return_type: int(64),
@@ -584,7 +584,7 @@ fn prune_unused_temp_bindings_keeps_used_plain_temp_with_nontrivial_name() {
 fn prune_unused_temp_bindings_keeps_side_effect_assignment_target() {
     let mut func = HirFunction {
         name: "test_side_effect_lhs_preserved".to_string(),
-            int_param_offsets: Vec::new(),
+        int_param_offsets: Vec::new(),
         params: vec![],
         locals: vec![preserved_temp_binding("xVar30", 64)],
         return_type: int(32),
@@ -689,7 +689,7 @@ fn inline_single_use_temps_inlines_flag_intrinsic_into_predicate() {
 fn inline_loop_condition_trailing_temps_substitutes_condition_chain() {
     let mut func = HirFunction {
         name: "test_loop_cond_inline".to_string(),
-            int_param_offsets: Vec::new(),
+        int_param_offsets: Vec::new(),
         params: vec![],
         locals: vec![],
         return_type: NirType::Unknown,
@@ -733,9 +733,7 @@ fn inline_loop_condition_trailing_temps_substitutes_condition_chain() {
         ..Default::default()
     };
 
-    assert!(inline_loop_condition_trailing_temps(
-        &mut func,
-    ));
+    assert!(inline_loop_condition_trailing_temps(&mut func,));
     let HirStmt::DoWhile { body, cond } = &func.body[0] else {
         panic!("expected do-while");
     };
@@ -789,29 +787,24 @@ fn inline_single_use_temps_keeps_unknown_call_out_of_predicate() {
 fn switch_norm_folds_range_check_guard() {
     let mut func = HirFunction {
         name: "test_switch_norm".to_string(),
-            int_param_offsets: Vec::new(),
-        body: vec![
-            HirStmt::If {
-                cond: HirExpr::Binary {
-                    op: HirBinaryOp::Lt,
-                    lhs: Box::new(HirExpr::Var("x".to_string())),
-                    rhs: Box::new(HirExpr::Const(5, int(32))),
-                    ty: NirType::Bool,
-                },
-                then_body: vec![
-                    HirStmt::Switch {
-                        expr: HirExpr::Var("x".to_string()),
-                        cases: vec![
-                            HirSwitchCase { values: vec![1], body: vec![HirStmt::Return(Some(HirExpr::Const(10, int(32))))] }
-                        ],
-                        default: Vec::new(),
-                    }
-                ],
-                else_body: vec![
-                    HirStmt::Return(Some(HirExpr::Const(20, int(32))))
-                ],
-            }
-        ],
+        int_param_offsets: Vec::new(),
+        body: vec![HirStmt::If {
+            cond: HirExpr::Binary {
+                op: HirBinaryOp::Lt,
+                lhs: Box::new(HirExpr::Var("x".to_string())),
+                rhs: Box::new(HirExpr::Const(5, int(32))),
+                ty: NirType::Bool,
+            },
+            then_body: vec![HirStmt::Switch {
+                expr: HirExpr::Var("x".to_string()),
+                cases: vec![HirSwitchCase {
+                    values: vec![1],
+                    body: vec![HirStmt::Return(Some(HirExpr::Const(10, int(32))))],
+                }],
+                default: Vec::new(),
+            }],
+            else_body: vec![HirStmt::Return(Some(HirExpr::Const(20, int(32))))],
+        }],
         params: Vec::new(),
         locals: Vec::new(),
         return_type: NirType::Unknown,
@@ -825,19 +818,27 @@ fn switch_norm_folds_range_check_guard() {
 
     assert!(apply_switch_norm_pass(&mut func));
     assert_eq!(func.body.len(), 1);
-    let HirStmt::Switch { expr, cases, default } = &func.body[0] else {
+    let HirStmt::Switch {
+        expr,
+        cases,
+        default,
+    } = &func.body[0]
+    else {
         panic!("expected switch statement");
     };
     assert_eq!(expr, &HirExpr::Var("x".to_string()));
     assert_eq!(cases.len(), 1);
     assert_eq!(default.len(), 1);
-    assert!(matches!(&default[0], HirStmt::Return(Some(HirExpr::Const(20, _)))));
+    assert!(matches!(
+        &default[0],
+        HirStmt::Return(Some(HirExpr::Const(20, _)))
+    ));
 }
 
 #[test]
 fn constant_ptr_recovery_recovers_symbolic_addresses() {
-    use crate::nir::normalize::pipeline::{GLOBAL_SYMBOL_CONTEXT, GlobalSymbolContext};
     use crate::nir::normalize::memory::apply_constant_ptr_recovery_pass;
+    use crate::nir::normalize::pipeline::{GLOBAL_SYMBOL_CONTEXT, GlobalSymbolContext};
     use std::collections::HashMap;
 
     let mut names = HashMap::new();
@@ -855,7 +856,7 @@ fn constant_ptr_recovery_recovers_symbolic_addresses() {
 
     let mut func = HirFunction {
         name: "test_constant_ptr".to_string(),
-            int_param_offsets: Vec::new(),
+        int_param_offsets: Vec::new(),
         body: vec![
             // Exact match
             HirStmt::Assign {
@@ -893,15 +894,23 @@ fn constant_ptr_recovery_recovers_symbolic_addresses() {
     assert_eq!(func.body.len(), 3);
 
     // Assert exact match: AddressOfGlobal("g_exact")
-    let HirStmt::Assign { rhs: rhs1, .. } = &func.body[0] else { panic!(); };
+    let HirStmt::Assign { rhs: rhs1, .. } = &func.body[0] else {
+        panic!();
+    };
     assert_eq!(rhs1, &HirExpr::AddressOfGlobal("g_exact".to_string()));
 
     // Assert offset match: PtrOffset { base: AddressOfGlobal("g_data"), offset: 8 }
-    let HirStmt::Assign { rhs: rhs2, .. } = &func.body[1] else { panic!(); };
-    assert!(matches!(rhs2, HirExpr::PtrOffset { base, offset: 8 } if matches!(base.as_ref(), HirExpr::AddressOfGlobal(name) if name == "g_data")));
+    let HirStmt::Assign { rhs: rhs2, .. } = &func.body[1] else {
+        panic!();
+    };
+    assert!(
+        matches!(rhs2, HirExpr::PtrOffset { base, offset: 8 } if matches!(base.as_ref(), HirExpr::AddressOfGlobal(name) if name == "g_data"))
+    );
 
     // Assert no match: stays Const(0x140005000)
-    let HirStmt::Assign { rhs: rhs3, .. } = &func.body[2] else { panic!(); };
+    let HirStmt::Assign { rhs: rhs3, .. } = &func.body[2] else {
+        panic!();
+    };
     assert_eq!(rhs3, &HirExpr::Const(0x140005000, int(64)));
 }
 
@@ -911,7 +920,7 @@ fn condexe_folding_merges_sequential_siblings() {
 
     let mut func = HirFunction {
         name: "test_condexe_siblings".to_string(),
-            int_param_offsets: Vec::new(),
+        int_param_offsets: Vec::new(),
         body: vec![
             HirStmt::If {
                 cond: HirExpr::Var("a".to_string()),
@@ -943,7 +952,14 @@ fn condexe_folding_merges_sequential_siblings() {
 
     assert!(apply_condexe_folding_pass(&mut func.body));
     assert_eq!(func.body.len(), 1);
-    let HirStmt::If { cond, then_body, else_body } = &func.body[0] else { panic!(); };
+    let HirStmt::If {
+        cond,
+        then_body,
+        else_body,
+    } = &func.body[0]
+    else {
+        panic!();
+    };
     assert_eq!(cond, &HirExpr::Var("a".to_string()));
     assert_eq!(then_body.len(), 2);
     assert!(else_body.is_empty());
@@ -955,23 +971,19 @@ fn condexe_folding_merges_nested_ifs() {
 
     let mut func = HirFunction {
         name: "test_condexe_nested".to_string(),
-            int_param_offsets: Vec::new(),
-        body: vec![
-            HirStmt::If {
+        int_param_offsets: Vec::new(),
+        body: vec![HirStmt::If {
+            cond: HirExpr::Var("a".to_string()),
+            then_body: vec![HirStmt::If {
                 cond: HirExpr::Var("a".to_string()),
-                then_body: vec![
-                    HirStmt::If {
-                        cond: HirExpr::Var("a".to_string()),
-                        then_body: vec![HirStmt::Assign {
-                            lhs: HirLValue::Var("x".to_string()),
-                            rhs: HirExpr::Const(1, int(32)),
-                        }],
-                        else_body: Vec::new(),
-                    }
-                ],
+                then_body: vec![HirStmt::Assign {
+                    lhs: HirLValue::Var("x".to_string()),
+                    rhs: HirExpr::Const(1, int(32)),
+                }],
                 else_body: Vec::new(),
-            },
-        ],
+            }],
+            else_body: Vec::new(),
+        }],
         params: Vec::new(),
         locals: Vec::new(),
         return_type: NirType::Unknown,
@@ -985,12 +997,21 @@ fn condexe_folding_merges_nested_ifs() {
 
     assert!(apply_condexe_folding_pass(&mut func.body));
     assert_eq!(func.body.len(), 1);
-    let HirStmt::If { cond, then_body, else_body } = &func.body[0] else { panic!(); };
+    let HirStmt::If {
+        cond,
+        then_body,
+        else_body,
+    } = &func.body[0]
+    else {
+        panic!();
+    };
     assert_eq!(cond, &HirExpr::Var("a".to_string()));
     assert_eq!(then_body.len(), 1);
     assert!(else_body.is_empty());
-    
-    let HirStmt::Assign { lhs, .. } = &then_body[0] else { panic!(); };
+
+    let HirStmt::Assign { lhs, .. } = &then_body[0] else {
+        panic!();
+    };
     assert_eq!(lhs, &HirLValue::Var("x".to_string()));
 }
 
@@ -1000,7 +1021,7 @@ fn condexe_folding_preserves_safety_on_assignment() {
 
     let mut func = HirFunction {
         name: "test_condexe_safety".to_string(),
-            int_param_offsets: Vec::new(),
+        int_param_offsets: Vec::new(),
         body: vec![
             HirStmt::If {
                 cond: HirExpr::Var("a".to_string()),
@@ -1073,7 +1094,7 @@ fn deindirect_resolves_const_address_to_symbol() {
 
     let mut func = HirFunction {
         name: "test_deindirect_const".to_string(),
-            int_param_offsets: Vec::new(),
+        int_param_offsets: Vec::new(),
         body: vec![HirStmt::Expr(HirExpr::Call {
             target: "__fission_callind_opaque".to_string(),
             args: vec![
@@ -1136,7 +1157,7 @@ fn deindirect_resolves_var_initializer_to_symbol() {
 
     let mut func = HirFunction {
         name: "test_deindirect_var".to_string(),
-            int_param_offsets: Vec::new(),
+        int_param_offsets: Vec::new(),
         locals: vec![NirBinding {
             name: "fn_ptr".to_string(),
             ty: int(64),
@@ -1146,9 +1167,7 @@ fn deindirect_resolves_var_initializer_to_symbol() {
         }],
         body: vec![HirStmt::Expr(HirExpr::Call {
             target: "__fission_callind_opaque".to_string(),
-            args: vec![
-                HirExpr::Var("fn_ptr".to_string()),
-            ],
+            args: vec![HirExpr::Var("fn_ptr".to_string())],
             ty: NirType::Unknown,
         })],
         callee_summaries,
@@ -1217,7 +1236,7 @@ fn deindirect_resolves_iat_load_to_symbol() {
 
     let mut func = HirFunction {
         name: "test_deindirect_iat_load".to_string(),
-            int_param_offsets: Vec::new(),
+        int_param_offsets: Vec::new(),
         body: vec![HirStmt::Expr(HirExpr::Call {
             target: "__fission_callind_opaque".to_string(),
             args: vec![iat_load, HirExpr::Var("param_1".to_string())],
@@ -1275,7 +1294,7 @@ fn subvar_trim_eliminates_redundant_casts() {
 
     let mut func = HirFunction {
         name: "test_subvar_trim".to_string(),
-            int_param_offsets: Vec::new(),
+        int_param_offsets: Vec::new(),
         locals: vec![
             NirBinding {
                 name: "b".to_string(),
@@ -1364,10 +1383,14 @@ fn subvar_trim_eliminates_redundant_casts() {
     // Expected:
     // res1 = b (cast elided and replaced with original byte variable b)
     // res2 = (u8)y (bitwise AND elided, cast moved directly to y)
-    let HirStmt::Assign { rhs: rhs1, .. } = &func.body[1] else { panic!(); };
+    let HirStmt::Assign { rhs: rhs1, .. } = &func.body[1] else {
+        panic!();
+    };
     assert_eq!(rhs1, &HirExpr::Var("b".to_string()));
 
-    let HirStmt::Assign { rhs: rhs2, .. } = &func.body[3] else { panic!(); };
+    let HirStmt::Assign { rhs: rhs2, .. } = &func.body[3] else {
+        panic!();
+    };
     if let HirExpr::Cast { ty, expr } = rhs2 {
         assert_eq!(ty, &u8_ty);
         assert_eq!(expr.as_ref(), &HirExpr::Var("y".to_string()));
@@ -1375,5 +1398,3 @@ fn subvar_trim_eliminates_redundant_casts() {
         panic!("expected cast of y, got {:?}", rhs2);
     }
 }
-
-

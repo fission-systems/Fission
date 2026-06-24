@@ -14,12 +14,12 @@ fn process_statement_list(stmts: &mut Vec<HirStmt>) -> bool {
     // 1. Recurse into nested blocks first (bottom-up)
     for stmt in stmts.iter_mut() {
         match stmt {
-            HirStmt::Block(body)
-            | HirStmt::While { body, .. }
-            | HirStmt::DoWhile { body, .. } => {
+            HirStmt::Block(body) | HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
                 changed |= process_statement_list(body);
             }
-            HirStmt::For { init, update, body, .. } => {
+            HirStmt::For {
+                init, update, body, ..
+            } => {
                 if let Some(init_stmt) = init {
                     if let HirStmt::Block(init_body) = init_stmt.as_mut() {
                         changed |= process_statement_list(init_body);
@@ -32,7 +32,11 @@ fn process_statement_list(stmts: &mut Vec<HirStmt>) -> bool {
                 }
                 changed |= process_statement_list(body);
             }
-            HirStmt::If { then_body, else_body, .. } => {
+            HirStmt::If {
+                then_body,
+                else_body,
+                ..
+            } => {
                 changed |= process_statement_list(then_body);
                 changed |= process_statement_list(else_body);
             }
@@ -49,7 +53,12 @@ fn process_statement_list(stmts: &mut Vec<HirStmt>) -> bool {
     // 2. Process switch guard folding at the current level
     let mut i = 0;
     while i < stmts.len() {
-        if let HirStmt::If { cond, then_body, else_body } = &stmts[i] {
+        if let HirStmt::If {
+            cond,
+            then_body,
+            else_body,
+        } = &stmts[i]
+        {
             if let Some((var_name, _op, _limit)) = match_var_const_comparison(cond) {
                 // Check if one side is a single Switch on `var_name`
                 let then_switch = get_single_switch(then_body);
@@ -58,7 +67,10 @@ fn process_statement_list(stmts: &mut Vec<HirStmt>) -> bool {
                 match (then_switch, else_switch) {
                     (Some((sw_expr, sw_cases, sw_default)), None) => {
                         if get_var_name(sw_expr) == Some(var_name.clone()) {
-                            if sw_default.is_empty() || else_body.is_empty() || sw_default == else_body {
+                            if sw_default.is_empty()
+                                || else_body.is_empty()
+                                || sw_default == else_body
+                            {
                                 let new_default = if sw_default.is_empty() {
                                     else_body.clone()
                                 } else {
@@ -75,7 +87,10 @@ fn process_statement_list(stmts: &mut Vec<HirStmt>) -> bool {
                     }
                     (None, Some((sw_expr, sw_cases, sw_default))) => {
                         if get_var_name(sw_expr) == Some(var_name.clone()) {
-                            if sw_default.is_empty() || then_body.is_empty() || sw_default == then_body {
+                            if sw_default.is_empty()
+                                || then_body.is_empty()
+                                || sw_default == then_body
+                            {
                                 let new_default = if sw_default.is_empty() {
                                     then_body.clone()
                                 } else {
@@ -124,7 +139,12 @@ fn get_single_switch(stmts: &[HirStmt]) -> Option<(&HirExpr, &[HirSwitchCase], &
         stmts
     };
     if block.len() == 1 {
-        if let HirStmt::Switch { expr, cases, default } = &block[0] {
+        if let HirStmt::Switch {
+            expr,
+            cases,
+            default,
+        } = &block[0]
+        {
             return Some((expr, cases, default));
         }
     }
@@ -182,26 +202,28 @@ fn negate_cmp_op(op: HirBinaryOp) -> Option<HirBinaryOp> {
 fn match_var_const_comparison(expr: &HirExpr) -> Option<(String, HirBinaryOp, i64)> {
     let expr = strip_casts(expr);
     match expr {
-        HirExpr::Binary { op, lhs, rhs, .. } => {
-            match (strip_casts(lhs), strip_casts(rhs)) {
-                (HirExpr::Var(name), HirExpr::Const(val, _)) => {
-                    if is_cmp_op(*op) {
-                        Some((name.clone(), *op, *val))
-                    } else {
-                        None
-                    }
+        HirExpr::Binary { op, lhs, rhs, .. } => match (strip_casts(lhs), strip_casts(rhs)) {
+            (HirExpr::Var(name), HirExpr::Const(val, _)) => {
+                if is_cmp_op(*op) {
+                    Some((name.clone(), *op, *val))
+                } else {
+                    None
                 }
-                (HirExpr::Const(val, _), HirExpr::Var(name)) => {
-                    if let Some(swapped_op) = swap_cmp_op(*op) {
-                        Some((name.clone(), swapped_op, *val))
-                    } else {
-                        None
-                    }
-                }
-                _ => None,
             }
-        }
-        HirExpr::Unary { op: HirUnaryOp::Not, expr: inner, .. } => {
+            (HirExpr::Const(val, _), HirExpr::Var(name)) => {
+                if let Some(swapped_op) = swap_cmp_op(*op) {
+                    Some((name.clone(), swapped_op, *val))
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        },
+        HirExpr::Unary {
+            op: HirUnaryOp::Not,
+            expr: inner,
+            ..
+        } => {
             let (name, inner_op, val) = match_var_const_comparison(inner)?;
             let negated_op = negate_cmp_op(inner_op)?;
             Some((name, negated_op, val))

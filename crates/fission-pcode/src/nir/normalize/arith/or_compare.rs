@@ -34,7 +34,12 @@ fn simplify_stmt(stmt: &mut HirStmt) -> bool {
         HirStmt::Block(body) | HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
             changed |= simplify_stmts(body);
         }
-        HirStmt::For { init, cond, update, body } => {
+        HirStmt::For {
+            init,
+            cond,
+            update,
+            body,
+        } => {
             if let Some(i) = init {
                 changed |= simplify_stmt(i.as_mut());
             }
@@ -46,12 +51,20 @@ fn simplify_stmt(stmt: &mut HirStmt) -> bool {
             }
             changed |= simplify_stmts(body);
         }
-        HirStmt::If { cond, then_body, else_body } => {
+        HirStmt::If {
+            cond,
+            then_body,
+            else_body,
+        } => {
             changed |= simplify_expr(cond);
             changed |= simplify_stmts(then_body);
             changed |= simplify_stmts(else_body);
         }
-        HirStmt::Switch { expr, cases, default } => {
+        HirStmt::Switch {
+            expr,
+            cases,
+            default,
+        } => {
             changed |= simplify_expr(expr);
             for case in cases {
                 changed |= simplify_stmts(&mut case.body);
@@ -106,7 +119,12 @@ fn simplify_expr(expr: &mut HirExpr) -> bool {
                 changed |= simplify_expr(arg);
             }
         }
-        HirExpr::Select { cond, then_expr, else_expr, .. } => {
+        HirExpr::Select {
+            cond,
+            then_expr,
+            else_expr,
+            ..
+        } => {
             changed |= simplify_expr(cond);
             changed |= simplify_expr(then_expr);
             changed |= simplify_expr(else_expr);
@@ -121,21 +139,63 @@ fn simplify_expr(expr: &mut HirExpr) -> bool {
     // Match OR-of-zero (RuleOrPredicate):
     // (cond ? val : 0) | other  =>  cond ? (val | other) : other
     // (cond ? 0 : val) | other  =>  cond ? other : (val | other)
-    if let HirExpr::Binary { op: HirBinaryOp::Or, lhs, rhs, ty } = expr {
+    if let HirExpr::Binary {
+        op: HirBinaryOp::Or,
+        lhs,
+        rhs,
+        ty,
+    } = expr
+    {
         let mut target = None;
-        if let HirExpr::Select { cond, then_expr, else_expr, .. } = lhs.as_ref() {
+        if let HirExpr::Select {
+            cond,
+            then_expr,
+            else_expr,
+            ..
+        } = lhs.as_ref()
+        {
             if is_zero_const(then_expr) {
-                target = Some((true, cond.clone(), then_expr.clone(), else_expr.clone(), rhs.clone()));
+                target = Some((
+                    true,
+                    cond.clone(),
+                    then_expr.clone(),
+                    else_expr.clone(),
+                    rhs.clone(),
+                ));
             } else if is_zero_const(else_expr) {
-                target = Some((false, cond.clone(), then_expr.clone(), else_expr.clone(), rhs.clone()));
+                target = Some((
+                    false,
+                    cond.clone(),
+                    then_expr.clone(),
+                    else_expr.clone(),
+                    rhs.clone(),
+                ));
             }
         }
         if target.is_none() {
-            if let HirExpr::Select { cond, then_expr, else_expr, .. } = rhs.as_ref() {
+            if let HirExpr::Select {
+                cond,
+                then_expr,
+                else_expr,
+                ..
+            } = rhs.as_ref()
+            {
                 if is_zero_const(then_expr) {
-                    target = Some((true, cond.clone(), then_expr.clone(), else_expr.clone(), lhs.clone()));
+                    target = Some((
+                        true,
+                        cond.clone(),
+                        then_expr.clone(),
+                        else_expr.clone(),
+                        lhs.clone(),
+                    ));
                 } else if is_zero_const(else_expr) {
-                    target = Some((false, cond.clone(), then_expr.clone(), else_expr.clone(), lhs.clone()));
+                    target = Some((
+                        false,
+                        cond.clone(),
+                        then_expr.clone(),
+                        else_expr.clone(),
+                        lhs.clone(),
+                    ));
                 }
             }
         }
@@ -172,15 +232,29 @@ fn simplify_expr(expr: &mut HirExpr) -> bool {
     }
 
     // Match comparison with zero
-    if let HirExpr::Binary { op: cmp_op @ (HirBinaryOp::Eq | HirBinaryOp::Ne), lhs, rhs, .. } = expr {
+    if let HirExpr::Binary {
+        op: cmp_op @ (HirBinaryOp::Eq | HirBinaryOp::Ne),
+        lhs,
+        rhs,
+        ..
+    } = expr
+    {
         let (or_expr, is_lhs) = if is_zero_const(rhs) {
-            if let HirExpr::Binary { op: HirBinaryOp::Or, .. } = lhs.as_ref() {
+            if let HirExpr::Binary {
+                op: HirBinaryOp::Or,
+                ..
+            } = lhs.as_ref()
+            {
                 (lhs.as_ref(), true)
             } else {
                 return changed;
             }
         } else if is_zero_const(lhs) {
-            if let HirExpr::Binary { op: HirBinaryOp::Or, .. } = rhs.as_ref() {
+            if let HirExpr::Binary {
+                op: HirBinaryOp::Or,
+                ..
+            } = rhs.as_ref()
+            {
                 (rhs.as_ref(), false)
             } else {
                 return changed;
@@ -189,7 +263,13 @@ fn simplify_expr(expr: &mut HirExpr) -> bool {
             return changed;
         };
 
-        if let HirExpr::Binary { lhs: or_lhs, rhs: or_rhs, ty: or_ty, .. } = or_expr {
+        if let HirExpr::Binary {
+            lhs: or_lhs,
+            rhs: or_rhs,
+            ty: or_ty,
+            ..
+        } = or_expr
+        {
             let mut left_cmp = HirExpr::Binary {
                 op: *cmp_op,
                 lhs: or_lhs.clone(),
@@ -202,7 +282,7 @@ fn simplify_expr(expr: &mut HirExpr) -> bool {
                 rhs: Box::new(HirExpr::Const(0, or_ty.clone())),
                 ty: NirType::Bool,
             };
-            
+
             // Recursively simplify the newly created comparisons to handle nested ORs
             simplify_expr(&mut left_cmp);
             simplify_expr(&mut right_cmp);

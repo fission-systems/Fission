@@ -180,7 +180,10 @@ fn seed_stmt(
             collect_consumed_seeds(body, consumed, def_map, multi_def);
         }
         HirStmt::For {
-            init, cond, update, body,
+            init,
+            cond,
+            update,
+            body,
         } => {
             if let Some(i) = init {
                 seed_stmt(i, consumed, def_map, multi_def);
@@ -202,7 +205,11 @@ fn seed_stmt(
             collect_consumed_seeds(then_body, consumed, def_map, multi_def);
             collect_consumed_seeds(else_body, consumed, def_map, multi_def);
         }
-        HirStmt::Switch { expr, cases, default } => {
+        HirStmt::Switch {
+            expr,
+            cases,
+            default,
+        } => {
             seed_expr_fully(expr, consumed);
             for case in cases {
                 collect_consumed_seeds(&case.body, consumed, def_map, multi_def);
@@ -214,11 +221,7 @@ fn seed_stmt(
 
 /// Seed variables in `expr` as their bits in context determine.
 /// `can_narrow = true` means we track the operator-level narrowing (AND/cast).
-fn seed_expr_uses(
-    expr: &HirExpr,
-    consumed: &mut HashMap<String, u64>,
-    can_narrow: bool,
-) {
+fn seed_expr_uses(expr: &HirExpr, consumed: &mut HashMap<String, u64>, can_narrow: bool) {
     match expr {
         HirExpr::Binary {
             op: HirBinaryOp::And,
@@ -439,7 +442,12 @@ fn backward_propagate_inner(expr: &HirExpr, out_consume: u64, result: &mut Vec<(
             if let HirExpr::Const(n, _) = shift.as_ref() {
                 let n = (*n).clamp(0, 63) as u32;
                 // Arithmetic shift: sign-bit may replicate; treat upper bits as consumed too
-                let src_mask = (out_consume << n) | (if out_consume >> 63 != 0 { u64::MAX << (64 - n.min(63)) } else { 0 });
+                let src_mask = (out_consume << n)
+                    | (if out_consume >> 63 != 0 {
+                        u64::MAX << (64 - n.min(63))
+                    } else {
+                        0
+                    });
                 backward_propagate_inner(lhs, src_mask, result);
             } else {
                 let full = if out_consume == 0 { 0 } else { u64::MAX };
@@ -537,7 +545,10 @@ fn simplify_stmt(
             simplify_stmts(body, consumed, multi_def, any_changed);
         }
         HirStmt::For {
-            init, cond, update, body,
+            init,
+            cond,
+            update,
+            body,
         } => {
             if let Some(i) = init {
                 simplify_stmt(i, consumed, multi_def, any_changed);
@@ -559,7 +570,11 @@ fn simplify_stmt(
             simplify_stmts(then_body, consumed, multi_def, any_changed);
             simplify_stmts(else_body, consumed, multi_def, any_changed);
         }
-        HirStmt::Switch { expr, cases, default } => {
+        HirStmt::Switch {
+            expr,
+            cases,
+            default,
+        } => {
             simplify_expr(expr, consumed, any_changed);
             for case in cases.iter_mut() {
                 simplify_stmts(&mut case.body, consumed, multi_def, any_changed);
@@ -631,11 +646,7 @@ fn simplify_assign_rhs(
     simplify_expr(rhs, consumed, any_changed);
 }
 
-fn simplify_expr(
-    expr: &mut HirExpr,
-    consumed: &HashMap<String, u64>,
-    any_changed: &mut bool,
-) {
+fn simplify_expr(expr: &mut HirExpr, consumed: &HashMap<String, u64>, any_changed: &mut bool) {
     match expr {
         HirExpr::Binary { lhs, rhs, .. } => {
             simplify_expr(lhs, consumed, any_changed);
@@ -673,11 +684,7 @@ fn simplify_expr(
     }
 }
 
-fn simplify_lvalue(
-    lhs: &mut HirLValue,
-    consumed: &HashMap<String, u64>,
-    any_changed: &mut bool,
-) {
+fn simplify_lvalue(lhs: &mut HirLValue, consumed: &HashMap<String, u64>, any_changed: &mut bool) {
     match lhs {
         HirLValue::Var(_) => {}
         HirLValue::Deref { ptr, .. } => simplify_expr(ptr, consumed, any_changed),

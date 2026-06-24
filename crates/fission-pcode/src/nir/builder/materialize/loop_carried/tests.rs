@@ -39,10 +39,10 @@ fn expr_contains_shr(expr: &HirExpr) -> bool {
         HirExpr::Unary { expr, .. } | HirExpr::Cast { expr, .. } => expr_contains_shr(expr),
         HirExpr::Call { args, .. } => args.iter().any(expr_contains_shr),
         HirExpr::Load { ptr, .. } => expr_contains_shr(ptr),
-        HirExpr::PtrOffset { base, .. } | HirExpr::FieldAccess { base, .. } => expr_contains_shr(base),
-        HirExpr::Index { base, index, .. } => {
-            expr_contains_shr(base) || expr_contains_shr(index)
+        HirExpr::PtrOffset { base, .. } | HirExpr::FieldAccess { base, .. } => {
+            expr_contains_shr(base)
         }
+        HirExpr::Index { base, index, .. } => expr_contains_shr(base) || expr_contains_shr(index),
         HirExpr::AggregateCopy { src, .. } => expr_contains_shr(src),
         HirExpr::Select {
             cond,
@@ -50,9 +50,7 @@ fn expr_contains_shr(expr: &HirExpr) -> bool {
             else_expr,
             ..
         } => {
-            expr_contains_shr(cond)
-                || expr_contains_shr(then_expr)
-                || expr_contains_shr(else_expr)
+            expr_contains_shr(cond) || expr_contains_shr(then_expr) || expr_contains_shr(else_expr)
         }
         HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) | HirExpr::Const(_, _) => false,
     }
@@ -69,7 +67,12 @@ fn loop_carried_register_update_reuses_prior_binding_and_param() {
             vec![
                 op(0, PcodeOpcode::Copy, Some(rax.clone()), vec![constant(0)]),
                 // Dummy read of param_1 register rcx to establish param arity at entry
-                op(99, PcodeOpcode::Copy, Some(varnode(0x99)), vec![rcx.clone()]),
+                op(
+                    99,
+                    PcodeOpcode::Copy,
+                    Some(varnode(0x99)),
+                    vec![rcx.clone()],
+                ),
                 op(1, PcodeOpcode::Branch, None, vec![constant(0x1010)]),
             ],
         ),
@@ -159,7 +162,9 @@ fn win64_ecx_self_loop_without_preheader_uses_param_1() {
         .expect("loop lowering");
 
     assert!(
-        loop_body.iter().any(|stmt| lhs_var(stmt) == Some("param_1")),
+        loop_body
+            .iter()
+            .any(|stmt| lhs_var(stmt) == Some("param_1")),
         "ECX self-loop without preheader should bind to param_1: {loop_body:?}"
     );
 }
@@ -181,7 +186,12 @@ fn win64_ecx_self_loop_with_external_pred_uses_param_1() {
             0,
             vec![
                 // reads ECX (param_1) but does not write ECX
-                op(0, PcodeOpcode::IntAnd, Some(unique_out), vec![ecx.clone(), ecx.clone()]),
+                op(
+                    0,
+                    PcodeOpcode::IntAnd,
+                    Some(unique_out),
+                    vec![ecx.clone(), ecx.clone()],
+                ),
                 op(1, PcodeOpcode::Branch, None, vec![constant(0x1010)]),
             ],
         ),
@@ -215,7 +225,9 @@ fn win64_ecx_self_loop_with_external_pred_uses_param_1() {
         .expect("loop lowering");
 
     assert!(
-        loop_body.iter().any(|stmt| lhs_var(stmt) == Some("param_1")),
+        loop_body
+            .iter()
+            .any(|stmt| lhs_var(stmt) == Some("param_1")),
         "ECX loop-carried with external predecessor should use param_1: {loop_body:?}"
     );
 }
@@ -237,7 +249,12 @@ fn win64_ecx_zext_then_shr_self_loop_uses_param_1() {
             0,
             vec![
                 // Dummy read of param_1 register ecx to establish param arity at entry
-                op(99, PcodeOpcode::Copy, Some(varnode(0x99)), vec![ecx.clone()]),
+                op(
+                    99,
+                    PcodeOpcode::Copy,
+                    Some(varnode(0x99)),
+                    vec![ecx.clone()],
+                ),
                 op(0, PcodeOpcode::Branch, None, vec![constant(0x1010)]),
             ],
         ),
@@ -246,7 +263,12 @@ fn win64_ecx_zext_then_shr_self_loop_uses_param_1() {
             1,
             vec![
                 // IntZExt ECX → RCX (size=8 binding — must NOT hijack the following ECX update)
-                op(1, PcodeOpcode::IntZExt, Some(rcx.clone()), vec![ecx.clone()]),
+                op(
+                    1,
+                    PcodeOpcode::IntZExt,
+                    Some(rcx.clone()),
+                    vec![ecx.clone()],
+                ),
                 // IntRight ECX, 1 → ECX (size=4 — the real loop-carried update)
                 op(
                     2,
@@ -274,7 +296,9 @@ fn win64_ecx_zext_then_shr_self_loop_uses_param_1() {
         .expect("loop lowering");
 
     assert!(
-        loop_body.iter().any(|stmt| lhs_var(stmt) == Some("param_1")),
+        loop_body
+            .iter()
+            .any(|stmt| lhs_var(stmt) == Some("param_1")),
         "ECX IntRight after IntZExt RCX in same block should still bind to param_1, not hijacked xVar: {loop_body:?}"
     );
 }
@@ -295,7 +319,12 @@ fn win64_ecx_intzext_and_shr_in_loop_body_uses_param_1() {
             0,
             vec![
                 // Dummy read of param_1 register ecx to establish param arity at entry
-                op(99, PcodeOpcode::Copy, Some(varnode(0x99)), vec![ecx.clone()]),
+                op(
+                    99,
+                    PcodeOpcode::Copy,
+                    Some(varnode(0x99)),
+                    vec![ecx.clone()],
+                ),
                 op(0, PcodeOpcode::Branch, None, vec![constant(0x1010)]),
             ],
         ),
@@ -311,7 +340,12 @@ fn win64_ecx_intzext_and_shr_in_loop_body_uses_param_1() {
                     vec![ecx.clone(), constant(1)],
                 ),
                 // IntZExt ECX → RCX (temporary cast inside loop)
-                op(2, PcodeOpcode::IntZExt, Some(rcx.clone()), vec![ecx.clone()]),
+                op(
+                    2,
+                    PcodeOpcode::IntZExt,
+                    Some(rcx.clone()),
+                    vec![ecx.clone()],
+                ),
                 op(3, PcodeOpcode::CBranch, None, vec![constant(0x1010), cond]),
             ],
         ),
@@ -332,7 +366,9 @@ fn win64_ecx_intzext_and_shr_in_loop_body_uses_param_1() {
         .expect("loop lowering");
 
     assert!(
-        loop_body.iter().any(|stmt| lhs_var(stmt) == Some("param_1")),
+        loop_body
+            .iter()
+            .any(|stmt| lhs_var(stmt) == Some("param_1")),
         "ECX IntRight with IntZExt RCX inside same loop body should bind to param_1: {loop_body:?}"
     );
 }
@@ -415,7 +451,9 @@ fn loop_carried_gpr32_update_with_prior_wide_def_does_not_rebind_param() {
         .expect("loop body lowering");
 
     assert!(
-        !loop_body.iter().any(|stmt| lhs_var(stmt) == Some("param_3")),
+        !loop_body
+            .iter()
+            .any(|stmt| lhs_var(stmt) == Some("param_3")),
         "R8D mask derived from a prior R8 temp must not mutate param_3: {loop_body:?}"
     );
     let mask_stmt = loop_body

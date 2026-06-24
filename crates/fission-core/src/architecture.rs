@@ -223,14 +223,15 @@ impl OpinionDatabase {
     fn load() -> Result<Self, String> {
         let cache_path = opinion_cache_path();
         let opinion_paths = collect_files_with_extension(&ghidra_data_root(), "opinion");
-        let ldefs_paths = collect_files_with_extension(&sleigh_specs_root().join("languages"), "ldefs");
+        let ldefs_paths =
+            collect_files_with_extension(&sleigh_specs_root().join("languages"), "ldefs");
 
         if let Some(ref cache_p) = cache_path {
             if cache_p.exists() {
                 if let Ok(cache_metadata) = fs::metadata(cache_p) {
                     if let Ok(cache_time) = cache_metadata.modified() {
                         let mut cache_valid = true;
-                        
+
                         // Check if any opinion file is newer than cache
                         for p in &opinion_paths {
                             if let Ok(m) = fs::metadata(p) {
@@ -242,7 +243,7 @@ impl OpinionDatabase {
                                 }
                             }
                         }
-                        
+
                         // Check if any ldefs file is newer than cache
                         if cache_valid {
                             for p in &ldefs_paths {
@@ -256,7 +257,7 @@ impl OpinionDatabase {
                                 }
                             }
                         }
-                        
+
                         if cache_valid {
                             if let Ok(content) = fs::read_to_string(cache_p) {
                                 if let Ok(db) = serde_json::from_str::<Self>(&content) {

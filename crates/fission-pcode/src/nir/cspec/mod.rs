@@ -28,13 +28,12 @@ pub mod loader;
 pub mod pspec;
 pub mod register_model;
 pub use register_model::{
-    register_model_for_abi, register_model_for_language, register_namer_for_abi,
-    register_namer_from_options, RegisterModel, RegisterNamer,
+    RegisterModel, RegisterNamer, register_model_for_abi, register_model_for_language,
+    register_namer_for_abi, register_namer_from_options,
 };
 mod slaspec_parse;
 #[cfg(test)]
 pub(crate) mod test_maps;
-
 
 /// A name → (offset_in_register_space, size_in_bytes) lookup table.
 /// Populated from `ELEM_VARNODE_SYM` in the compiled `.sla` artifact.
@@ -391,7 +390,10 @@ impl<'a> CspecParser<'a> {
                 }
             }
             "register"
-                if matches!(self.state, ParseState::Unaffected | ParseState::KilledByCall) =>
+                if matches!(
+                    self.state,
+                    ParseState::Unaffected | ParseState::KilledByCall
+                ) =>
             {
                 if let Some(reg_name) = attrs.get("name") {
                     if let Some(proto) = self.cur_proto.as_mut() {
@@ -553,7 +555,9 @@ fn parse_tag_body(body: &str) -> (String, HashMap<String, String>) {
             break;
         }
         let after_quote = &after_eq[1..];
-        let Some(val_end) = after_quote.find('"') else { break };
+        let Some(val_end) = after_quote.find('"') else {
+            break;
+        };
         let value = after_quote[..val_end].to_string();
         if !key.is_empty() {
             attrs.insert(key, value);
@@ -689,10 +693,7 @@ mod tests {
         assert_eq!(rp.return_offset, Some(0x00), "RAX return");
         assert_eq!(rp.stack_arg_base, Some(8), "stack arg base");
         assert_eq!(rp.extrapop, 8, "return-address stack size");
-        assert!(
-            rp.unaffected_offsets.contains(&0x20),
-            "RSP is callee-saved"
-        );
+        assert!(rp.unaffected_offsets.contains(&0x20), "RSP is callee-saved");
         assert!(
             rp.killedbycall_offsets.contains(&0x00),
             "RAX is caller-saved"

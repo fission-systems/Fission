@@ -173,11 +173,27 @@ impl<'a> AppleAnalyzer<'a> {
         let mut offset = 0usize;
         while offset + 16 <= data.len() {
             let desc_offset = offset;
-            let mangled_type_offset = i32::from_le_bytes([data[offset], data[offset + 1], data[offset + 2], data[offset + 3]]);
-            let _superclass_offset = i32::from_le_bytes([data[offset + 4], data[offset + 5], data[offset + 6], data[offset + 7]]);
+            let mangled_type_offset = i32::from_le_bytes([
+                data[offset],
+                data[offset + 1],
+                data[offset + 2],
+                data[offset + 3],
+            ]);
+            let _superclass_offset = i32::from_le_bytes([
+                data[offset + 4],
+                data[offset + 5],
+                data[offset + 6],
+                data[offset + 7],
+            ]);
             let kind_raw = u16::from_le_bytes([data[offset + 8], data[offset + 9]]);
-            let field_record_size = u16::from_le_bytes([data[offset + 10], data[offset + 11]]) as usize;
-            let num_fields = u32::from_le_bytes([data[offset + 12], data[offset + 13], data[offset + 14], data[offset + 15]]) as usize;
+            let field_record_size =
+                u16::from_le_bytes([data[offset + 10], data[offset + 11]]) as usize;
+            let num_fields = u32::from_le_bytes([
+                data[offset + 12],
+                data[offset + 13],
+                data[offset + 14],
+                data[offset + 15],
+            ]) as usize;
 
             let kind = match kind_raw & 0x1F {
                 0 => SwiftTypeKind::Struct,
@@ -226,13 +242,15 @@ impl<'a> AppleAnalyzer<'a> {
                 ]);
 
                 // Resolve field name (relative offset from current position)
-                let name_va = ((va as i64) + (rec_offset as i64) + 8 + (name_ref_offset as i64)) as u64;
+                let name_va =
+                    ((va as i64) + (rec_offset as i64) + 8 + (name_ref_offset as i64)) as u64;
                 let field_name = self
                     .read_string_at(name_va)
                     .unwrap_or_else(|| format!("field_{}", i));
 
                 // Resolve type name
-                let type_va = ((va as i64) + (rec_offset as i64) + 4 + (type_ref_offset as i64)) as u64;
+                let type_va =
+                    ((va as i64) + (rec_offset as i64) + 4 + (type_ref_offset as i64)) as u64;
                 let type_name = self
                     .read_string_at(type_va)
                     .unwrap_or_else(|| "Unknown".to_string());
@@ -247,7 +265,8 @@ impl<'a> AppleAnalyzer<'a> {
             // Resolve nominal type name from mangled_type_offset
             let mut type_name = String::new();
             if mangled_type_offset != 0 {
-                let mangled_type_va = ((va as i64) + (desc_offset as i64) + 0 + (mangled_type_offset as i64)) as u64;
+                let mangled_type_va =
+                    ((va as i64) + (desc_offset as i64) + 0 + (mangled_type_offset as i64)) as u64;
                 if let Some(mangled) = self.read_string_at(mangled_type_va) {
                     type_name = crate::loader::demangle::demangle(&mangled);
                 }
@@ -356,7 +375,9 @@ impl<'a> AppleAnalyzer<'a> {
         // Parse instance methods
         let base_methods_ptr = self.read_ptr(&ro_data, 32, ptr_size);
         if base_methods_ptr != 0 {
-            if let Ok(method_funcs) = self.parse_objc_method_list(base_methods_ptr, &class_name, false) {
+            if let Ok(method_funcs) =
+                self.parse_objc_method_list(base_methods_ptr, &class_name, false)
+            {
                 functions.extend(method_funcs);
             }
         }
@@ -369,7 +390,9 @@ impl<'a> AppleAnalyzer<'a> {
                     if let Some(meta_ro_data) = self.binary.get_bytes(meta_ro_data_ptr, 64) {
                         let meta_methods_ptr = self.read_ptr(&meta_ro_data, 32, ptr_size);
                         if meta_methods_ptr != 0 {
-                            if let Ok(method_funcs) = self.parse_objc_method_list(meta_methods_ptr, &class_name, true) {
+                            if let Ok(method_funcs) =
+                                self.parse_objc_method_list(meta_methods_ptr, &class_name, true)
+                            {
                                 functions.extend(method_funcs);
                             }
                         }
@@ -412,17 +435,23 @@ impl<'a> AppleAnalyzer<'a> {
         }
 
         // Get category name
-        let cat_name = self.read_string(cat_name_ptr).unwrap_or_else(|| "Category".to_string());
+        let cat_name = self
+            .read_string(cat_name_ptr)
+            .unwrap_or_else(|| "Category".to_string());
         let class_and_cat = format!("{}({})", class_name, cat_name);
 
         if instance_methods_ptr != 0 {
-            if let Ok(method_funcs) = self.parse_objc_method_list(instance_methods_ptr, &class_and_cat, false) {
+            if let Ok(method_funcs) =
+                self.parse_objc_method_list(instance_methods_ptr, &class_and_cat, false)
+            {
                 functions.extend(method_funcs);
             }
         }
 
         if class_methods_ptr != 0 {
-            if let Ok(method_funcs) = self.parse_objc_method_list(class_methods_ptr, &class_and_cat, true) {
+            if let Ok(method_funcs) =
+                self.parse_objc_method_list(class_methods_ptr, &class_and_cat, true)
+            {
                 functions.extend(method_funcs);
             }
         }
@@ -601,7 +630,12 @@ impl<'a> AppleAnalyzer<'a> {
         ivars
     }
 
-    fn parse_objc_method_list(&self, addr: u64, class_name: &str, is_class_method: bool) -> Result<Vec<FunctionInfo>> {
+    fn parse_objc_method_list(
+        &self,
+        addr: u64,
+        class_name: &str,
+        is_class_method: bool,
+    ) -> Result<Vec<FunctionInfo>> {
         let mut functions = Vec::new();
         let ptr_size = if self.binary.is_64bit { 8 } else { 4 };
         let prefix = if is_class_method { "+" } else { "-" };
@@ -721,7 +755,8 @@ impl<'a> AppleAnalyzer<'a> {
             return result;
         };
 
-        let mut name_map: std::collections::BTreeMap<u64, String> = std::collections::BTreeMap::new();
+        let mut name_map: std::collections::BTreeMap<u64, String> =
+            std::collections::BTreeMap::new();
         let mut offset = 0usize;
         while offset < methnames_data.len() {
             // Find the end of this null-terminated string

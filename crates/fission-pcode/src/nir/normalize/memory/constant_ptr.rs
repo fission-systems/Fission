@@ -48,19 +48,32 @@ fn process_stmt(stmt: &mut HirStmt, context: &GlobalSymbolContext, changed: &mut
         HirStmt::Block(body) | HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
             process_statement_list(body, context, changed);
         }
-        HirStmt::If { cond, then_body, else_body } => {
+        HirStmt::If {
+            cond,
+            then_body,
+            else_body,
+        } => {
             process_expr(cond, context, changed);
             process_statement_list(then_body, context, changed);
             process_statement_list(else_body, context, changed);
         }
-        HirStmt::Switch { expr, cases, default } => {
+        HirStmt::Switch {
+            expr,
+            cases,
+            default,
+        } => {
             process_expr(expr, context, changed);
             for case in cases {
                 process_statement_list(&mut case.body, context, changed);
             }
             process_statement_list(default, context, changed);
         }
-        HirStmt::For { init, cond, update, body } => {
+        HirStmt::For {
+            init,
+            cond,
+            update,
+            body,
+        } => {
             if let Some(init) = init {
                 process_stmt(init, context, changed);
             }
@@ -108,7 +121,11 @@ fn process_expr(expr: &mut HirExpr, context: &GlobalSymbolContext, changed: &mut
             process_expr(inner, context, changed);
         }
         HirExpr::Binary { lhs, rhs, .. }
-        | HirExpr::Index { base: lhs, index: rhs, .. } => {
+        | HirExpr::Index {
+            base: lhs,
+            index: rhs,
+            ..
+        } => {
             process_expr(lhs, context, changed);
             process_expr(rhs, context, changed);
         }
@@ -117,7 +134,12 @@ fn process_expr(expr: &mut HirExpr, context: &GlobalSymbolContext, changed: &mut
                 process_expr(arg, context, changed);
             }
         }
-        HirExpr::Select { cond, then_expr, else_expr, .. } => {
+        HirExpr::Select {
+            cond,
+            then_expr,
+            else_expr,
+            ..
+        } => {
             process_expr(cond, context, changed);
             process_expr(then_expr, context, changed);
             process_expr(else_expr, context, changed);

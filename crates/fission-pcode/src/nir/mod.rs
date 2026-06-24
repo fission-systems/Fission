@@ -17,6 +17,7 @@ mod cfg;
 pub mod cspec;
 mod normalize;
 mod piece;
+pub(crate) mod pass;
 mod render;
 mod stats;
 mod structuring;
@@ -36,10 +37,9 @@ pub use self::telemetry::{
     take_last_nir_build_stats, take_last_nir_hint_stats, take_last_preview_build_stats,
     take_last_preview_hint_stats,
 };
+pub(crate) use self::action_pipeline::STRUCTURING_TIME_CEILING_SECS;
 pub use self::types::*;
-use self::{
-    action_pipeline::*, builder::*, cfg::*, normalize::*, render::*, structuring::*,
-};
+use self::{action_pipeline::*, builder::*, cfg::*, normalize::*, render::*, structuring::*};
 
 pub use self::abi::infer_entry_register_param_arity;
 pub use self::cfg::structuring_cfg_edges;
@@ -183,6 +183,14 @@ pub fn render_mlil_preview_with_binary_and_context(
         *ctx.borrow_mut() = Some(context);
     });
     normalize_hir_function(&mut hir);
+    // Run the explicit structuring Pass pipeline.  Today this is a thin shim
+    // (PostStructuringCleanupPass) that records the stage in PassTrace and
+    // provides the extension point for future per-CollapseRule Pass migration.
+    structuring::passes::pipeline::run_structuring_pipeline(
+        &mut hir,
+        debug.diag,
+        std::env::var_os("FISSION_PREVIEW_PERF").is_some(),
+    );
     normalize::pipeline::GLOBAL_SYMBOL_CONTEXT.with(|ctx| {
         *ctx.borrow_mut() = None;
     });

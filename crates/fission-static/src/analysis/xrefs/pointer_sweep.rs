@@ -1,6 +1,6 @@
-use std::collections::BTreeMap;
+use crate::analysis::xrefs::{OPERAND_INDEX_MNEMONIC, Xref, XrefType};
 use fission_loader::loader::LoadedBinary;
-use crate::analysis::xrefs::{Xref, XrefType, OPERAND_INDEX_MNEMONIC};
+use std::collections::BTreeMap;
 
 /// Sweeps non-executable data sections to find hardcoded pointers (e.g. vtables, callback arrays).
 pub struct PointerSweeper {
@@ -26,10 +26,10 @@ impl PointerSweeper {
         let pointer_size = if binary.is_64bit { 8 } else { 4 };
 
         // We assume little endian by default. If we need big endian support, we can check the format/arch.
-        // Fission load_spec usually handles it, but for raw pointer sweeping we'll assume little-endian 
-        // unless it's explicitly a big-endian architecture. Fission doesn't explicitly expose endianness 
+        // Fission load_spec usually handles it, but for raw pointer sweeping we'll assume little-endian
+        // unless it's explicitly a big-endian architecture. Fission doesn't explicitly expose endianness
         // cleanly on LoadedBinary yet, so we assume LE which covers x86/x64 and most ARM.
-        let is_little_endian = true; 
+        let is_little_endian = true;
 
         Self {
             valid_regions,
@@ -71,7 +71,7 @@ impl PointerSweeper {
 
             let base_addr = section.virtual_address;
 
-            // We iterate with stride = pointer_size for aligned pointers, 
+            // We iterate with stride = pointer_size for aligned pointers,
             // but to be safe against unaligned packed structs we could stride by 4.
             // Ghidra usually aligns. Let's do stride = pointer_size to reduce false positives.
             // If we want to be exhaustive, stride = 1 or 4. Let's use pointer_size alignment.
@@ -105,7 +105,7 @@ impl PointerSweeper {
                         flow_kind: None,
                     });
                 }
-                
+
                 i += alignment;
             }
         }
@@ -117,9 +117,9 @@ impl PointerSweeper {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use fission_loader::loader::{LoadedBinaryInner, SectionInfo, DataBuffer};
-    use std::sync::Arc;
+    use fission_loader::loader::{DataBuffer, LoadedBinaryInner, SectionInfo};
     use std::collections::HashMap;
+    use std::sync::Arc;
 
     #[test]
     fn test_pointer_sweeper() {

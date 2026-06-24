@@ -30,7 +30,10 @@ impl<'a> PreviewBuilder<'a> {
                 && Self::register_key_ranges_overlap(candidate, output_key))
     }
 
-    pub(in crate::nir::builder) fn register_key_ranges_overlap(lhs: &VarnodeKey, rhs: &VarnodeKey) -> bool {
+    pub(in crate::nir::builder) fn register_key_ranges_overlap(
+        lhs: &VarnodeKey,
+        rhs: &VarnodeKey,
+    ) -> bool {
         let Some(lhs_end) = lhs.offset.checked_add(u64::from(lhs.size)) else {
             return false;
         };

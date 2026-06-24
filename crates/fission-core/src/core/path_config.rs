@@ -586,7 +586,9 @@ impl PathConfig {
     ) -> Vec<PathBuf> {
         let mut paths = Vec::new();
 
-        let is_pe = format.map(|f| f.to_ascii_uppercase().starts_with("PE")).unwrap_or(false);
+        let is_pe = format
+            .map(|f| f.to_ascii_uppercase().starts_with("PE"))
+            .unwrap_or(false);
         let is_macho = format
             .map(|f| {
                 f.to_ascii_uppercase().starts_with("MACH")

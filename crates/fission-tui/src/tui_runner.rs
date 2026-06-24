@@ -1,17 +1,14 @@
 //! This module provides `run_tui`, the public entry point.
 
 use anyhow::Result;
+use crossterm::event::{DisableMouseCapture, EnableMouseCapture};
+use crossterm::execute;
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
 use fission_ai::pipeline::AiPipeline;
 use futures::StreamExt;
-use ratatui::{
-    backend::CrosstermBackend,
-    Terminal, TerminalOptions, Viewport,
-};
-use crossterm::event::{EnableMouseCapture, DisableMouseCapture};
-use crossterm::execute;
-use tokio::sync::mpsc;
+use ratatui::{Terminal, TerminalOptions, Viewport, backend::CrosstermBackend};
 use std::io;
+use tokio::sync::mpsc;
 
 use crate::app::App;
 use crate::events::{AppAction, poll_event};
@@ -41,11 +38,15 @@ pub fn run_tui(mut pipeline: AiPipeline) -> Result<()> {
     // buffers on tab-reparenting; inline mode is immune to that.
     let mut terminal = Terminal::with_options(
         backend,
-        TerminalOptions { viewport: Viewport::Inline(term_height) },
+        TerminalOptions {
+            viewport: Viewport::Inline(term_height),
+        },
     )
     .map_err(|e| anyhow::anyhow!("create terminal: {e}"))?;
 
-    terminal.clear().map_err(|e| anyhow::anyhow!("clear terminal: {e}"))?;
+    terminal
+        .clear()
+        .map_err(|e| anyhow::anyhow!("clear terminal: {e}"))?;
 
     let result = run_event_loop(&mut terminal, &mut pipeline);
 
@@ -84,7 +85,7 @@ pub fn run_tui(mut pipeline: AiPipeline) -> Result<()> {
 
 enum TuiMsg {
     Delta(String),
-    Done(String),    // full response text for history
+    Done(String), // full response text for history
     Error(String),
     /// Fired when background context collection finishes.
     ContextReady,
@@ -170,12 +171,17 @@ fn run_event_loop(
                         app.model_options = models;
                     } else {
                         // Fallback hardcoded if empty
-                        app.model_options = vec!["gpt-4o".into(), "claude-3.5-sonnet".into(), "llama3".into()];
+                        app.model_options =
+                            vec!["gpt-4o".into(), "claude-3.5-sonnet".into(), "llama3".into()];
                     }
-                    app.selected_model_idx =0;
+                    app.selected_model_idx = 0;
                 }
                 // ExplorerContent is kept as an extension point but never auto-switches view.
-                TuiMsg::ExplorerContent { label, disasm, decomp } => {
+                TuiMsg::ExplorerContent {
+                    label,
+                    disasm,
+                    decomp,
+                } => {
                     app.update_explorer_content(label, disasm, decomp);
                     // NOTE: do NOT auto-switch view_mode here — let the user press F2.
                 }
@@ -211,7 +217,7 @@ fn run_event_loop(
             AppAction::ToggleProviderMenu => {
                 app.show_model_menu = false;
                 app.toggle_provider_menu();
-            },
+            }
             AppAction::ToggleModelMenu => {
                 app.show_provider_menu = false;
                 app.toggle_model_menu();
@@ -219,11 +225,14 @@ fn run_event_loop(
                     let tx2 = tx.clone();
                     let pipeline_clone = pipeline.clone();
                     rt.spawn(async move {
-                        let models = pipeline_clone.fetch_models().await.unwrap_or_else(|_| vec![]);
+                        let models = pipeline_clone
+                            .fetch_models()
+                            .await
+                            .unwrap_or_else(|_| vec![]);
                         let _ = tx2.send(TuiMsg::ModelsFetched(models));
                     });
                 }
-            },
+            }
             AppAction::ToggleHistoryMenu => {
                 app.show_provider_menu = false;
                 app.show_model_menu = false;
@@ -232,7 +241,7 @@ fn run_event_loop(
                 } else {
                     app.close_session_history();
                 }
-            },
+            }
             AppAction::Escape => {
                 app.show_help = false;
                 app.show_provider_menu = false;
@@ -244,7 +253,12 @@ fn run_event_loop(
                     app.cancel_explorer_search();
                 }
             }
-            AppAction::InsertChar(c) if !app.streaming && !app.show_provider_menu && !app.show_model_menu && app.session_history.is_none() => {
+            AppAction::InsertChar(c)
+                if !app.streaming
+                    && !app.show_provider_menu
+                    && !app.show_model_menu
+                    && app.session_history.is_none() =>
+            {
                 if app.view_mode == crate::app::ViewMode::CodeExplorer {
                     if app.explorer_search_mode {
                         app.explorer_search_insert_char(c);
@@ -272,7 +286,12 @@ fn run_event_loop(
                     }
                 }
             }
-            AppAction::DeleteBack if !app.streaming && !app.show_provider_menu && !app.show_model_menu && app.session_history.is_none() => {
+            AppAction::DeleteBack
+                if !app.streaming
+                    && !app.show_provider_menu
+                    && !app.show_model_menu
+                    && app.session_history.is_none() =>
+            {
                 if app.view_mode == crate::app::ViewMode::CodeExplorer {
                     if app.explorer_search_mode {
                         app.explorer_search_delete_char_before_cursor();
@@ -343,7 +362,9 @@ fn run_event_loop(
                 app.provider_menu_down();
                 if let Some(kind) = app.get_selected_provider() {
                     match rt.block_on(pipeline.switch_provider(kind)) {
-                        Ok(_) => { app.status_label = pipeline.status_label(); }
+                        Ok(_) => {
+                            app.status_label = pipeline.status_label();
+                        }
                         Err(_) => {} // Ignore silently on quick cycle
                     }
                 }
@@ -352,12 +373,19 @@ fn run_event_loop(
                 app.provider_menu_up();
                 if let Some(kind) = app.get_selected_provider() {
                     match rt.block_on(pipeline.switch_provider(kind)) {
-                        Ok(_) => { app.status_label = pipeline.status_label(); }
+                        Ok(_) => {
+                            app.status_label = pipeline.status_label();
+                        }
                         Err(_) => {} // Ignore silently on quick cycle
                     }
                 }
             }
-            AppAction::CursorLeft if !app.streaming && !app.show_provider_menu && !app.show_model_menu && app.session_history.is_none() => {
+            AppAction::CursorLeft
+                if !app.streaming
+                    && !app.show_provider_menu
+                    && !app.show_model_menu
+                    && app.session_history.is_none() =>
+            {
                 if app.view_mode == crate::app::ViewMode::CodeExplorer {
                     if app.explorer_search_mode {
                         app.explorer_search_cursor_left();
@@ -366,7 +394,12 @@ fn run_event_loop(
                     app.cursor_left();
                 }
             }
-            AppAction::CursorRight if !app.streaming && !app.show_provider_menu && !app.show_model_menu && app.session_history.is_none() => {
+            AppAction::CursorRight
+                if !app.streaming
+                    && !app.show_provider_menu
+                    && !app.show_model_menu
+                    && app.session_history.is_none() =>
+            {
                 if app.view_mode == crate::app::ViewMode::CodeExplorer {
                     if app.explorer_search_mode {
                         app.explorer_search_cursor_right();
@@ -375,7 +408,10 @@ fn run_event_loop(
                     app.cursor_right();
                 }
             }
-            AppAction::Submit if app.view_mode == crate::app::ViewMode::CodeExplorer && app.explorer_search_mode => {
+            AppAction::Submit
+                if app.view_mode == crate::app::ViewMode::CodeExplorer
+                    && app.explorer_search_mode =>
+            {
                 app.commit_explorer_search();
             }
             AppAction::Submit if app.slash_state.is_some() => {
@@ -424,7 +460,9 @@ fn run_event_loop(
                 if let Some(path) = app.get_selected_session() {
                     // Load the JSON file into the pipeline
                     if let Ok(json) = std::fs::read_to_string(&path) {
-                        if let Ok(messages) = serde_json::from_str::<Vec<fission_ai::session::Message>>(&json) {
+                        if let Ok(messages) =
+                            serde_json::from_str::<Vec<fission_ai::session::Message>>(&json)
+                        {
                             // Update pipeline
                             {
                                 let mut session = pipeline.session.lock().unwrap();
@@ -450,7 +488,10 @@ fn run_event_loop(
                                             for call in tc {
                                                 app.entries.push(crate::app::ChatEntry {
                                                     role_label: "Fission AI (Tool)".to_string(),
-                                                    content: format!("Called tool: {} with {}", call.function.name, call.function.arguments),
+                                                    content: format!(
+                                                        "Called tool: {} with {}",
+                                                        call.function.name, call.function.arguments
+                                                    ),
                                                     is_streaming: false,
                                                 });
                                             }
@@ -474,9 +515,15 @@ fn run_event_loop(
                     app.close_session_history();
                 }
             }
-            AppAction::Submit if !app.streaming && !app.input.trim().is_empty() && !app.show_provider_menu && !app.show_model_menu && app.session_history.is_none() => {
+            AppAction::Submit
+                if !app.streaming
+                    && !app.input.trim().is_empty()
+                    && !app.show_provider_menu
+                    && !app.show_model_menu
+                    && app.session_history.is_none() =>
+            {
                 let user_text = app.take_input();
-                
+
                 let trim_cmd = user_text.trim();
                 if trim_cmd == "/quit" {
                     break;
@@ -502,13 +549,16 @@ fn run_event_loop(
                         let tx2 = tx.clone();
                         let pipeline_clone = pipeline.clone();
                         rt.spawn(async move {
-                            let models = pipeline_clone.fetch_models().await.unwrap_or_else(|_| vec![]);
+                            let models = pipeline_clone
+                                .fetch_models()
+                                .await
+                                .unwrap_or_else(|_| vec![]);
                             let _ = tx2.send(TuiMsg::ModelsFetched(models));
                         });
                     }
                     continue;
                 }
-                
+
                 app.push_user(user_text.clone());
                 app.begin_assistant_stream();
                 app.scroll_to_bottom();
@@ -530,7 +580,9 @@ fn run_event_loop(
                                             let _ = tx2.send(TuiMsg::Delta(c.delta.clone()));
                                             full.push_str(&c.delta);
                                         }
-                                        if c.done { break; }
+                                        if c.done {
+                                            break;
+                                        }
                                     }
                                     Err(e) => {
                                         let _ = tx2.send(TuiMsg::Error(e.to_string()));
@@ -553,7 +605,8 @@ fn run_event_loop(
                 // new height and force a full repaint.
                 let new_height = h.saturating_sub(1).max(8);
                 let _ = terminal.resize(ratatui::layout::Rect {
-                    x: 0, y: 0,
+                    x: 0,
+                    y: 0,
                     width: _w,
                     height: new_height,
                 });

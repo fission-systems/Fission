@@ -103,7 +103,15 @@ pub fn decompile_with_rust_sleigh(
         .pipeline_stage_status
         .insert("decode".into(), "ok".into());
 
-    match finish_rust_sleigh_render(binary, entry_address, name, config, &pcode, userops.clone(), &mut evidence) {
+    match finish_rust_sleigh_render(
+        binary,
+        entry_address,
+        name,
+        config,
+        &pcode,
+        userops.clone(),
+        &mut evidence,
+    ) {
         Ok(result) => Ok(result),
         Err(err)
             if config.continue_past_indirect_branch

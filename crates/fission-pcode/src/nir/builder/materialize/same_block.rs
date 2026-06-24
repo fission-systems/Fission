@@ -439,7 +439,9 @@ impl<'a> PreviewBuilder<'a> {
                 Self::classify_stack_address_base_reg(lhs),
                 Self::classify_stack_address_base_reg(rhs),
             ),
-            HirExpr::PtrOffset { base, .. } | HirExpr::FieldAccess { base, .. } => Self::classify_stack_address_base_reg(base),
+            HirExpr::PtrOffset { base, .. } | HirExpr::FieldAccess { base, .. } => {
+                Self::classify_stack_address_base_reg(base)
+            }
             HirExpr::Index { base, index, .. } => merge_base_regs(
                 Self::classify_stack_address_base_reg(base),
                 Self::classify_stack_address_base_reg(index),
@@ -475,7 +477,9 @@ impl<'a> PreviewBuilder<'a> {
             | HirExpr::AggregateCopy { .. } => None,
             HirExpr::Cast { expr, .. } => Self::extract_stack_address_offset(expr),
             HirExpr::PtrOffset { base, offset } => is_stack_base(base).then_some(*offset),
-            HirExpr::FieldAccess { base, offset, .. } => is_stack_base(base).then_some(*offset as i64),
+            HirExpr::FieldAccess { base, offset, .. } => {
+                is_stack_base(base).then_some(*offset as i64)
+            }
             HirExpr::Binary { op, lhs, rhs, .. } => match (op, lhs.as_ref(), rhs.as_ref()) {
                 (HirBinaryOp::Add, base, HirExpr::Const(offset, _)) if is_stack_base(base) => {
                     Some(*offset)
@@ -496,7 +500,9 @@ impl<'a> PreviewBuilder<'a> {
             match expr {
                 HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) => true,
                 HirExpr::Cast { expr, .. } => is_simple_frame_relative_expr(expr),
-                HirExpr::PtrOffset { base, .. } | HirExpr::FieldAccess { base, .. } => is_simple_frame_relative_expr(base),
+                HirExpr::PtrOffset { base, .. } | HirExpr::FieldAccess { base, .. } => {
+                    is_simple_frame_relative_expr(base)
+                }
                 HirExpr::Binary { op, lhs, rhs, .. } => {
                     matches!(op, HirBinaryOp::Add | HirBinaryOp::Sub)
                         && matches!(rhs.as_ref(), HirExpr::Const(..))
@@ -522,9 +528,12 @@ impl<'a> PreviewBuilder<'a> {
     ) -> bool {
         fn output_base_reg(builder: &PreviewBuilder<'_>, output: &Varnode) -> StackAddressBaseReg {
             let name = match output.space_id {
-                UNIQUE_SPACE_ID => crate::arch::x86::unique_x86_register_name(output.offset, output.size)
-                    .map(str::to_string),
-                space_id if is_register_space_id(space_id) => builder.sla_hw_name(output.offset, output.size)
+                UNIQUE_SPACE_ID => {
+                    crate::arch::x86::unique_x86_register_name(output.offset, output.size)
+                        .map(str::to_string)
+                }
+                space_id if is_register_space_id(space_id) => builder
+                    .sla_hw_name(output.offset, output.size)
                     .or_else(|| Some("reg".to_string())),
                 _ => None,
             };
@@ -1019,7 +1028,9 @@ impl<'a> PreviewBuilder<'a> {
                 Self::materialize_expr_contains_load(lhs)
                     || Self::materialize_expr_contains_load(rhs)
             }
-            HirExpr::PtrOffset { base, .. } | HirExpr::FieldAccess { base, .. } => Self::materialize_expr_contains_load(base),
+            HirExpr::PtrOffset { base, .. } | HirExpr::FieldAccess { base, .. } => {
+                Self::materialize_expr_contains_load(base)
+            }
             HirExpr::Index { base, index, .. } => {
                 Self::materialize_expr_contains_load(base)
                     || Self::materialize_expr_contains_load(index)
@@ -1053,7 +1064,9 @@ impl<'a> PreviewBuilder<'a> {
                     || Self::materialize_expr_contains_call(rhs)
             }
             HirExpr::Load { ptr, .. } => Self::materialize_expr_contains_call(ptr),
-            HirExpr::PtrOffset { base, .. } | HirExpr::FieldAccess { base, .. } => Self::materialize_expr_contains_call(base),
+            HirExpr::PtrOffset { base, .. } | HirExpr::FieldAccess { base, .. } => {
+                Self::materialize_expr_contains_call(base)
+            }
             HirExpr::Index { base, index, .. } => {
                 Self::materialize_expr_contains_call(base)
                     || Self::materialize_expr_contains_call(index)
@@ -1084,7 +1097,9 @@ impl<'a> PreviewBuilder<'a> {
             HirExpr::Binary { lhs, rhs, .. } => Self::first_call_expr_in_materialize_expr(lhs)
                 .or_else(|| Self::first_call_expr_in_materialize_expr(rhs)),
             HirExpr::Load { ptr, .. } => Self::first_call_expr_in_materialize_expr(ptr),
-            HirExpr::PtrOffset { base, .. } | HirExpr::FieldAccess { base, .. } => Self::first_call_expr_in_materialize_expr(base),
+            HirExpr::PtrOffset { base, .. } | HirExpr::FieldAccess { base, .. } => {
+                Self::first_call_expr_in_materialize_expr(base)
+            }
             HirExpr::Index { base, index, .. } => Self::first_call_expr_in_materialize_expr(base)
                 .or_else(|| Self::first_call_expr_in_materialize_expr(index)),
             HirExpr::AggregateCopy { src, .. } => Self::first_call_expr_in_materialize_expr(src),
@@ -1108,7 +1123,9 @@ impl<'a> PreviewBuilder<'a> {
             }
             HirExpr::Binary { lhs, rhs, .. } => Self::first_load_expr_in_materialize_expr(lhs)
                 .or_else(|| Self::first_load_expr_in_materialize_expr(rhs)),
-            HirExpr::PtrOffset { base, .. } | HirExpr::FieldAccess { base, .. } => Self::first_load_expr_in_materialize_expr(base),
+            HirExpr::PtrOffset { base, .. } | HirExpr::FieldAccess { base, .. } => {
+                Self::first_load_expr_in_materialize_expr(base)
+            }
             HirExpr::Index { base, index, .. } => Self::first_load_expr_in_materialize_expr(base)
                 .or_else(|| Self::first_load_expr_in_materialize_expr(index)),
             HirExpr::AggregateCopy { src, .. } => Self::first_load_expr_in_materialize_expr(src),
@@ -1759,9 +1776,7 @@ impl<'a> PreviewBuilder<'a> {
             HirExpr::Load { .. }
             | HirExpr::PtrOffset { .. }
             | HirExpr::FieldAccess { .. }
-            | HirExpr::Index { .. } => {
-                LowBitMaskInputOriginKind::Load
-            }
+            | HirExpr::Index { .. } => LowBitMaskInputOriginKind::Load,
             HirExpr::Call { .. } => LowBitMaskInputOriginKind::Call,
             HirExpr::AggregateCopy { .. }
             | HirExpr::Select { .. }
@@ -2225,20 +2240,22 @@ impl<'a> PreviewBuilder<'a> {
             {
                 SingleConsumerLoadAliasClass::ReadOnlyLocalLoad
             }
-            HirExpr::PtrOffset { base, .. } | HirExpr::FieldAccess { base, .. } => match base.as_ref() {
-                HirExpr::Var(name)
-                    if name == "rsp" || name == "rbp" || name == "sp" || name == "bp" =>
-                {
-                    SingleConsumerLoadAliasClass::ReadOnlyLocalLoad
+            HirExpr::PtrOffset { base, .. } | HirExpr::FieldAccess { base, .. } => {
+                match base.as_ref() {
+                    HirExpr::Var(name)
+                        if name == "rsp" || name == "rbp" || name == "sp" || name == "bp" =>
+                    {
+                        SingleConsumerLoadAliasClass::ReadOnlyLocalLoad
+                    }
+                    HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) => {
+                        SingleConsumerLoadAliasClass::GlobalOrExternalLoad
+                    }
+                    HirExpr::Call { .. } | HirExpr::Load { .. } => {
+                        SingleConsumerLoadAliasClass::VolatileOrUnknownLoad
+                    }
+                    _ => SingleConsumerLoadAliasClass::UnknownLoad,
                 }
-                HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) => {
-                    SingleConsumerLoadAliasClass::GlobalOrExternalLoad
-                }
-                HirExpr::Call { .. } | HirExpr::Load { .. } => {
-                    SingleConsumerLoadAliasClass::VolatileOrUnknownLoad
-                }
-                _ => SingleConsumerLoadAliasClass::UnknownLoad,
-            },
+            }
             HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) => {
                 SingleConsumerLoadAliasClass::GlobalOrExternalLoad
             }
@@ -3234,8 +3251,6 @@ impl<'a> PreviewBuilder<'a> {
     }
 }
 
-
 #[cfg(test)]
 #[path = "same_block_tests.rs"]
 mod tests;
-

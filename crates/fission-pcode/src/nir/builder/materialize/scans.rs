@@ -35,8 +35,14 @@ impl<'a> PreviewBuilder<'a> {
             {
                 let is_false_redef = matches!(
                     candidate.opcode,
-                    PcodeOpcode::IntZExt | PcodeOpcode::IntSExt | PcodeOpcode::Cast | PcodeOpcode::Copy
-                ) && candidate.inputs.first().is_some_and(|first_input| Self::varnode_matches_key(first_input, &key));
+                    PcodeOpcode::IntZExt
+                        | PcodeOpcode::IntSExt
+                        | PcodeOpcode::Cast
+                        | PcodeOpcode::Copy
+                ) && candidate
+                    .inputs
+                    .first()
+                    .is_some_and(|first_input| Self::varnode_matches_key(first_input, &key));
 
                 if !is_false_redef {
                     break;
@@ -81,7 +87,10 @@ impl<'a> PreviewBuilder<'a> {
                 }
                 if matches!(
                     candidate.opcode,
-                    PcodeOpcode::IntZExt | PcodeOpcode::IntSExt | PcodeOpcode::Cast | PcodeOpcode::Copy
+                    PcodeOpcode::IntZExt
+                        | PcodeOpcode::IntSExt
+                        | PcodeOpcode::Cast
+                        | PcodeOpcode::Copy
                 ) {
                     if let Some(first_input) = candidate.inputs.first() {
                         if Self::varnode_matches_key(first_input, &key) {
@@ -175,11 +184,24 @@ mod tests {
         let x20 = reg(0x40a0, 8);
         let w20 = reg(0x40a0, 4);
         let block = block(vec![
-            op(0, PcodeOpcode::IntAdd, Some(w20.clone()), vec![w20.clone(), constant(1)]),
-            op(1, PcodeOpcode::IntZExt, Some(x20.clone()), vec![w20.clone()]),
+            op(
+                0,
+                PcodeOpcode::IntAdd,
+                Some(w20.clone()),
+                vec![w20.clone(), constant(1)],
+            ),
+            op(
+                1,
+                PcodeOpcode::IntZExt,
+                Some(x20.clone()),
+                vec![w20.clone()],
+            ),
         ]);
 
         let redef = PreviewBuilder::first_output_redefinition_in_block_from(&block, 1, &w20);
-        assert!(redef.is_none(), "ZExt of the same register should be recognized as a false redefinition hazard and ignored");
+        assert!(
+            redef.is_none(),
+            "ZExt of the same register should be recognized as a false redefinition hazard and ignored"
+        );
     }
 }

@@ -70,10 +70,22 @@ fn print_regs(regs: &fission_dynamic::debug::types::RegisterState, json: bool) {
         });
         println!("{}", serde_json::to_string_pretty(&obj).unwrap());
     } else {
-        println!("RAX={:016x} RBX={:016x} RCX={:016x} RDX={:016x}", regs.rax, regs.rbx, regs.rcx, regs.rdx);
-        println!("RSI={:016x} RDI={:016x} RBP={:016x} RSP={:016x}", regs.rsi, regs.rdi, regs.rbp, regs.rsp);
-        println!("R8 ={:016x} R9 ={:016x} R10={:016x} R11={:016x}", regs.r8, regs.r9, regs.r10, regs.r11);
-        println!("R12={:016x} R13={:016x} R14={:016x} R15={:016x}", regs.r12, regs.r13, regs.r14, regs.r15);
+        println!(
+            "RAX={:016x} RBX={:016x} RCX={:016x} RDX={:016x}",
+            regs.rax, regs.rbx, regs.rcx, regs.rdx
+        );
+        println!(
+            "RSI={:016x} RDI={:016x} RBP={:016x} RSP={:016x}",
+            regs.rsi, regs.rdi, regs.rbp, regs.rsp
+        );
+        println!(
+            "R8 ={:016x} R9 ={:016x} R10={:016x} R11={:016x}",
+            regs.r8, regs.r9, regs.r10, regs.r11
+        );
+        println!(
+            "R12={:016x} R13={:016x} R14={:016x} R15={:016x}",
+            regs.r12, regs.r13, regs.r14, regs.r15
+        );
         println!("RIP={:016x} RFLAGS={:016x}", regs.rip, regs.rflags);
     }
 }
@@ -96,9 +108,20 @@ fn print_hex_dump(addr: u64, data: &[u8], json: bool) {
             let hex_part: Vec<String> = chunk.iter().map(|b| format!("{:02x}", b)).collect();
             let ascii_part: String = chunk
                 .iter()
-                .map(|&b| if b.is_ascii_graphic() || b == b' ' { b as char } else { '.' })
+                .map(|&b| {
+                    if b.is_ascii_graphic() || b == b' ' {
+                        b as char
+                    } else {
+                        '.'
+                    }
+                })
                 .collect();
-            println!("{:016x}  {:47}  {}", line_addr, hex_part.join(" "), ascii_part);
+            println!(
+                "{:016x}  {:47}  {}",
+                line_addr,
+                hex_part.join(" "),
+                ascii_part
+            );
         }
     }
 }
@@ -109,7 +132,10 @@ pub fn run_debug_command(cmd: DebugCommand) -> Result<()> {
         DebugCommand::Attach(args) => {
             let mut session = fission_dynamic::debug::DebugSession::new().build();
             session.attach(args.pid).with_context(|| {
-                format!("Failed to attach to PID {}. Is the process running?", args.pid)
+                format!(
+                    "Failed to attach to PID {}. Is the process running?",
+                    args.pid
+                )
             })?;
 
             let state = DebugStateFile {
@@ -153,7 +179,10 @@ pub fn run_debug_command(cmd: DebugCommand) -> Result<()> {
             for entry in entries {
                 let name = entry.file_name();
                 let fname = name.to_string_lossy();
-                if let Some(pid_str) = fname.strip_prefix("fission-debug-").and_then(|s| s.strip_suffix(".json")) {
+                if let Some(pid_str) = fname
+                    .strip_prefix("fission-debug-")
+                    .and_then(|s| s.strip_suffix(".json"))
+                {
                     if let Ok(pid) = pid_str.parse::<u32>() {
                         let mut session = fission_dynamic::debug::DebugSession::new().build();
                         let _ = session.attach(pid);
@@ -199,7 +228,10 @@ pub fn run_debug_command(cmd: DebugCommand) -> Result<()> {
             }
             save_state(&state)?;
             if args.json {
-                println!("{{\"status\":\"ok\",\"action\":\"set_sw_breakpoint\",\"address\":\"0x{:x}\"}}", args.addr);
+                println!(
+                    "{{\"status\":\"ok\",\"action\":\"set_sw_breakpoint\",\"address\":\"0x{:x}\"}}",
+                    args.addr
+                );
             } else {
                 println!("Breakpoint set at 0x{:016x}", args.addr);
             }
@@ -214,7 +246,10 @@ pub fn run_debug_command(cmd: DebugCommand) -> Result<()> {
             state.breakpoints.retain(|&a| a != args.addr);
             save_state(&state)?;
             if args.json {
-                println!("{{\"status\":\"ok\",\"action\":\"remove_sw_breakpoint\",\"address\":\"0x{:x}\"}}", args.addr);
+                println!(
+                    "{{\"status\":\"ok\",\"action\":\"remove_sw_breakpoint\",\"address\":\"0x{:x}\"}}",
+                    args.addr
+                );
             } else {
                 println!("Breakpoint removed at 0x{:016x}", args.addr);
             }
@@ -229,13 +264,20 @@ pub fn run_debug_command(cmd: DebugCommand) -> Result<()> {
                 session.attach(state.pid)?;
 
                 let kind = match args.kind {
-                    HwBpKindArg::Execute => fission_dynamic::debug::types::HwBreakpointKind::Execute,
+                    HwBpKindArg::Execute => {
+                        fission_dynamic::debug::types::HwBreakpointKind::Execute
+                    }
                     HwBpKindArg::Write => fission_dynamic::debug::types::HwBreakpointKind::Write,
-                    HwBpKindArg::ReadWrite => fission_dynamic::debug::types::HwBreakpointKind::ReadWrite,
+                    HwBpKindArg::ReadWrite => {
+                        fission_dynamic::debug::types::HwBreakpointKind::ReadWrite
+                    }
                 };
                 session.debugger.set_hw_breakpoint(args.addr, kind)?;
                 if args.json {
-                    println!("{{\"status\":\"ok\",\"action\":\"set_hw_breakpoint\",\"address\":\"0x{:x}\"}}", args.addr);
+                    println!(
+                        "{{\"status\":\"ok\",\"action\":\"set_hw_breakpoint\",\"address\":\"0x{:x}\"}}",
+                        args.addr
+                    );
                 } else {
                     println!("Hardware breakpoint set at 0x{:016x}", args.addr);
                 }
@@ -276,7 +318,11 @@ pub fn run_debug_command(cmd: DebugCommand) -> Result<()> {
             let bytes = hex_bytes_from_str(&args.data)?;
             session.debugger.write_memory(args.addr, &bytes)?;
             if args.json {
-                println!("{{\"status\":\"ok\",\"action\":\"write_memory\",\"address\":\"0x{:x}\",\"bytes_written\":{}}}", args.addr, bytes.len());
+                println!(
+                    "{{\"status\":\"ok\",\"action\":\"write_memory\",\"address\":\"0x{:x}\",\"bytes_written\":{}}}",
+                    args.addr,
+                    bytes.len()
+                );
             } else {
                 println!("Wrote {} bytes to 0x{:016x}", bytes.len(), args.addr);
             }
@@ -300,7 +346,10 @@ pub fn run_debug_command(cmd: DebugCommand) -> Result<()> {
             let threads = session.debugger.state().threads.clone();
             println!("Active threads ({}):", threads.len());
             for (tid, info) in threads {
-                println!("  {}  start_address={:x}  suspended={}  main={}", tid, info.start_address, info.suspended, info.is_main);
+                println!(
+                    "  {}  start_address={:x}  suspended={}  main={}",
+                    tid, info.start_address, info.suspended, info.is_main
+                );
             }
             Ok(())
         }
@@ -463,15 +512,18 @@ pub fn run_debug_command(cmd: DebugCommand) -> Result<()> {
             let session = fission_dynamic::debug::DebugSession::new().build();
             let bps = session.debugger.list_breakpoints();
             if args.json {
-                let arr: Vec<_> = bps.iter().map(|bp| {
-                    serde_json::json!({
-                        "address": bp.address,
-                        "enabled": bp.enabled,
-                        "temporary": bp.temporary,
-                        "kind": format!("{:?}", bp.kind),
-                        "hits": bp.hits,
+                let arr: Vec<_> = bps
+                    .iter()
+                    .map(|bp| {
+                        serde_json::json!({
+                            "address": bp.address,
+                            "enabled": bp.enabled,
+                            "temporary": bp.temporary,
+                            "kind": format!("{:?}", bp.kind),
+                            "hits": bp.hits,
+                        })
                     })
-                }).collect();
+                    .collect();
                 println!("{}", serde_json::to_string_pretty(&arr)?);
             } else {
                 println!("Breakpoints ({}):", bps.len());
@@ -495,19 +547,32 @@ pub fn run_debug_command(cmd: DebugCommand) -> Result<()> {
             let mut session = fission_dynamic::debug::DebugSession::new().build();
             session.attach(state.pid)?;
             let kind = match args.kind {
-                crate::cli::args::MemoryBpKindArg::Read => fission_dynamic::debug::types::MemoryBpKind::Read,
-                crate::cli::args::MemoryBpKindArg::Write => fission_dynamic::debug::types::MemoryBpKind::Write,
-                crate::cli::args::MemoryBpKindArg::Execute => fission_dynamic::debug::types::MemoryBpKind::Execute,
-                crate::cli::args::MemoryBpKindArg::Access => fission_dynamic::debug::types::MemoryBpKind::Access,
+                crate::cli::args::MemoryBpKindArg::Read => {
+                    fission_dynamic::debug::types::MemoryBpKind::Read
+                }
+                crate::cli::args::MemoryBpKindArg::Write => {
+                    fission_dynamic::debug::types::MemoryBpKind::Write
+                }
+                crate::cli::args::MemoryBpKindArg::Execute => {
+                    fission_dynamic::debug::types::MemoryBpKind::Execute
+                }
+                crate::cli::args::MemoryBpKindArg::Access => {
+                    fission_dynamic::debug::types::MemoryBpKind::Access
+                }
             };
-            session.debugger.set_memory_breakpoint(args.addr, args.size, kind)?;
+            session
+                .debugger
+                .set_memory_breakpoint(args.addr, args.size, kind)?;
             if args.json {
                 println!(
                     "{{\"status\":\"ok\",\"action\":\"set_memory_breakpoint\",\"address\":\"0x{:x}\",\"size\":{}}}",
                     args.addr, args.size
                 );
             } else {
-                println!("Memory breakpoint set at 0x{:016x} (size {})", args.addr, args.size);
+                println!(
+                    "Memory breakpoint set at 0x{:016x} (size {})",
+                    args.addr, args.size
+                );
             }
             Ok(())
         }
@@ -564,7 +629,9 @@ pub fn run_debug_command(cmd: DebugCommand) -> Result<()> {
             let state = find_active_state()?;
             let mut session = fission_dynamic::debug::DebugSession::new().build();
             session.attach(state.pid)?;
-            session.debugger.set_exception_breakpoint(args.code as u32)?;
+            session
+                .debugger
+                .set_exception_breakpoint(args.code as u32)?;
             if args.json {
                 println!(
                     "{{\"status\":\"ok\",\"action\":\"set_exception_breakpoint\",\"code\":\"0x{:x}\"}}",
@@ -580,7 +647,9 @@ pub fn run_debug_command(cmd: DebugCommand) -> Result<()> {
             let state = find_active_state()?;
             let mut session = fission_dynamic::debug::DebugSession::new().build();
             session.attach(state.pid)?;
-            session.debugger.remove_exception_breakpoint(args.code as u32)?;
+            session
+                .debugger
+                .remove_exception_breakpoint(args.code as u32)?;
             if args.json {
                 println!(
                     "{{\"status\":\"ok\",\"action\":\"remove_exception_breakpoint\",\"code\":\"0x{:x}\"}}",
@@ -631,7 +700,9 @@ pub fn run_debug_command(cmd: DebugCommand) -> Result<()> {
             let state = find_active_state()?;
             let mut session = fission_dynamic::debug::DebugSession::new().build();
             session.attach(state.pid)?;
-            let value = args.value.ok_or_else(|| anyhow::anyhow!("Flag value required for set-flag"))?;
+            let value = args
+                .value
+                .ok_or_else(|| anyhow::anyhow!("Flag value required for set-flag"))?;
             session.debugger.set_flag(&args.name, value)?;
             if args.json {
                 println!(
@@ -696,15 +767,22 @@ pub fn run_debug_command(cmd: DebugCommand) -> Result<()> {
             let state = find_active_state()?;
             let mut session = fission_dynamic::debug::DebugSession::new().build();
             session.attach(state.pid)?;
-            let protect = args.protect.ok_or_else(|| anyhow::anyhow!("Protection flags required for set-protect"))?;
-            session.debugger.set_page_rights(args.addr, args.size, protect)?;
+            let protect = args
+                .protect
+                .ok_or_else(|| anyhow::anyhow!("Protection flags required for set-protect"))?;
+            session
+                .debugger
+                .set_page_rights(args.addr, args.size, protect)?;
             if args.json {
                 println!(
                     "{{\"status\":\"ok\",\"action\":\"set_protect\",\"address\":\"0x{:x}\",\"size\":{},\"protect\":{}}}",
                     args.addr, args.size, protect
                 );
             } else {
-                println!("Set page rights at 0x{:016x} (size {}, protect 0x{:08x})", args.addr, args.size, protect);
+                println!(
+                    "Set page rights at 0x{:016x} (size {}, protect 0x{:08x})",
+                    args.addr, args.size, protect
+                );
             }
             Ok(())
         }
@@ -759,9 +837,14 @@ pub fn run_debug_command(cmd: DebugCommand) -> Result<()> {
             let mut session = fission_dynamic::debug::DebugSession::new().build();
             session.attach(state.pid)?;
             let pattern = hex_bytes_from_str(&args.pattern)?;
-            let results = session.debugger.find_pattern(args.start, args.size, &pattern)?;
+            let results = session
+                .debugger
+                .find_pattern(args.start, args.size, &pattern)?;
             if args.json {
-                let arr: Vec<_> = results.iter().map(|&addr| serde_json::json!(format!("0x{:x}", addr))).collect();
+                let arr: Vec<_> = results
+                    .iter()
+                    .map(|&addr| serde_json::json!(format!("0x{:x}", addr)))
+                    .collect();
                 println!("{}", serde_json::to_string_pretty(&arr)?);
             } else {
                 println!("Found {} match(es):", results.len());
@@ -778,13 +861,16 @@ pub fn run_debug_command(cmd: DebugCommand) -> Result<()> {
             session.attach(state.pid)?;
             let exports = session.debugger.get_module_exports(args.base)?;
             if args.json {
-                let arr: Vec<_> = exports.iter().map(|e| {
-                    serde_json::json!({
-                        "name": e.name,
-                        "address": format!("0x{:x}", e.address),
-                        "ordinal": e.ordinal,
+                let arr: Vec<_> = exports
+                    .iter()
+                    .map(|e| {
+                        serde_json::json!({
+                            "name": e.name,
+                            "address": format!("0x{:x}", e.address),
+                            "ordinal": e.ordinal,
+                        })
                     })
-                }).collect();
+                    .collect();
                 println!("{}", serde_json::to_string_pretty(&arr)?);
             } else {
                 println!("Exports ({}):", exports.len());
@@ -801,21 +887,27 @@ pub fn run_debug_command(cmd: DebugCommand) -> Result<()> {
             session.attach(state.pid)?;
             let imports = session.debugger.get_module_imports(args.base)?;
             if args.json {
-                let arr: Vec<_> = imports.iter().map(|i| {
-                    serde_json::json!({
-                        "module": i.module,
-                        "name": i.name,
-                        "ordinal": i.ordinal,
-                        "address": format!("0x{:x}", i.address),
+                let arr: Vec<_> = imports
+                    .iter()
+                    .map(|i| {
+                        serde_json::json!({
+                            "module": i.module,
+                            "name": i.name,
+                            "ordinal": i.ordinal,
+                            "address": format!("0x{:x}", i.address),
+                        })
                     })
-                }).collect();
+                    .collect();
                 println!("{}", serde_json::to_string_pretty(&arr)?);
             } else {
                 println!("Imports ({}):", imports.len());
                 for i in imports {
                     println!(
                         "  0x{:016x}  {}!{}  ord={:?}",
-                        i.address, i.module, i.name.as_deref().unwrap_or(""), i.ordinal
+                        i.address,
+                        i.module,
+                        i.name.as_deref().unwrap_or(""),
+                        i.ordinal
                     );
                 }
             }

@@ -467,7 +467,8 @@ fn match_ne_comparison<'a>(expr: &'a HirExpr) -> Option<(&'a HirExpr, &'a HirExp
                     lhs: inner_lhs,
                     rhs: inner_rhs,
                     ..
-                } = lhs.as_ref() {
+                } = lhs.as_ref()
+                {
                     return Some((inner_lhs.as_ref(), inner_rhs.as_ref()));
                 }
             }

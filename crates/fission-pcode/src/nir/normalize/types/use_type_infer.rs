@@ -184,7 +184,11 @@ fn collect_assignment_copy_constraints(
                     .push(UseConstraint::Exact(ty.clone()));
             }
 
-            if let HirExpr::Cast { ty: NirType::Ptr(pointee), .. } = rhs {
+            if let HirExpr::Cast {
+                ty: NirType::Ptr(pointee),
+                ..
+            } = rhs
+            {
                 out.entry(lhs_name.clone())
                     .or_default()
                     .push(UseConstraint::Ptr(pointee.as_ref().clone()));
@@ -383,7 +387,16 @@ fn collect_constraints_expr(
                             .push(UseConstraint::Signed { bits });
                     }
                 }
-                HirBinaryOp::Add | HirBinaryOp::Sub | HirBinaryOp::Mul | HirBinaryOp::Div | HirBinaryOp::Mod | HirBinaryOp::And | HirBinaryOp::Or | HirBinaryOp::Xor | HirBinaryOp::Shl | HirBinaryOp::Shr => {
+                HirBinaryOp::Add
+                | HirBinaryOp::Sub
+                | HirBinaryOp::Mul
+                | HirBinaryOp::Div
+                | HirBinaryOp::Mod
+                | HirBinaryOp::And
+                | HirBinaryOp::Or
+                | HirBinaryOp::Xor
+                | HirBinaryOp::Shl
+                | HirBinaryOp::Shr => {
                     collect_arithmetic_result_constraints(lhs, rhs, ty, known_binding_types, out);
                 }
                 _ => {}
@@ -433,7 +446,10 @@ fn collect_constraints_expr(
             if let HirExpr::Var(name) = index.as_ref() {
                 out.entry(name.clone())
                     .or_default()
-                    .push(UseConstraint::Exact(NirType::Int { bits: 32, signed: false }));
+                    .push(UseConstraint::Exact(NirType::Int {
+                        bits: 32,
+                        signed: false,
+                    }));
             }
             collect_constraints_expr(base, return_type, known_binding_types, out);
             collect_constraints_expr(index, return_type, known_binding_types, out);

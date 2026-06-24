@@ -533,7 +533,7 @@ pub(super) fn decode_construct_templates(
             },
         );
     }
-    
+
     let mut userops = BTreeMap::new();
     for head in root.descendants_with_id(sla_format::ELEM_USEROP_HEAD) {
         if let Some(index_val) = head.attr_unsigned(sla_format::ATTR_INDEX) {

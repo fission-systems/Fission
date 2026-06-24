@@ -866,7 +866,7 @@ fn sborrow_compare_non_matching_shape_is_preserved() {
 fn normalize_hir_function_removes_dead_flag_intrinsic_temp() {
     let mut func = HirFunction {
         name: "flag_temp_cleanup".to_string(),
-            int_param_offsets: Vec::new(),
+        int_param_offsets: Vec::new(),
         params: vec![],
         locals: vec![NirBinding {
             name: "xVar1".to_string(),
@@ -1018,10 +1018,13 @@ fn repeated_integer_bitwise_identity_simplifies() {
 fn normalize_hir_function_inlines_multi_use_temp_within_single_if_condition() {
     let mut func = HirFunction {
         name: "inline_condition_temp".to_string(),
-            int_param_offsets: Vec::new(),
+        int_param_offsets: Vec::new(),
         params: vec![NirBinding {
             name: "eax".to_string(),
-            ty: NirType::Int { bits: 32, signed: false },
+            ty: NirType::Int {
+                bits: 32,
+                signed: false,
+            },
             surface_type_name: None,
             origin: None,
             initializer: None,
@@ -1140,47 +1143,65 @@ fn compound_arm_flag_canonicalizes_to_signed_greater_than() {
 fn normalize_double_precision_reconstructs_32bit_arith_to_64bit() {
     let mut func = HirFunction {
         name: "test_dp".to_string(),
-            int_param_offsets: Vec::new(),
+        int_param_offsets: Vec::new(),
         params: Vec::new(),
         locals: vec![
             NirBinding {
                 name: "lo".to_string(),
-                ty: NirType::Int { bits: 32, signed: false },
+                ty: NirType::Int {
+                    bits: 32,
+                    signed: false,
+                },
                 surface_type_name: None,
                 origin: None,
                 initializer: None,
             },
             NirBinding {
                 name: "hi".to_string(),
-                ty: NirType::Int { bits: 32, signed: false },
+                ty: NirType::Int {
+                    bits: 32,
+                    signed: false,
+                },
                 surface_type_name: None,
                 origin: None,
                 initializer: None,
             },
             NirBinding {
                 name: "lo1".to_string(),
-                ty: NirType::Int { bits: 32, signed: false },
+                ty: NirType::Int {
+                    bits: 32,
+                    signed: false,
+                },
                 surface_type_name: None,
                 origin: None,
                 initializer: None,
             },
             NirBinding {
                 name: "lo2".to_string(),
-                ty: NirType::Int { bits: 32, signed: false },
+                ty: NirType::Int {
+                    bits: 32,
+                    signed: false,
+                },
                 surface_type_name: None,
                 origin: None,
                 initializer: None,
             },
             NirBinding {
                 name: "hi1".to_string(),
-                ty: NirType::Int { bits: 32, signed: false },
+                ty: NirType::Int {
+                    bits: 32,
+                    signed: false,
+                },
                 surface_type_name: None,
                 origin: None,
                 initializer: None,
             },
             NirBinding {
                 name: "hi2".to_string(),
-                ty: NirType::Int { bits: 32, signed: false },
+                ty: NirType::Int {
+                    bits: 32,
+                    signed: false,
+                },
                 surface_type_name: None,
                 origin: None,
                 initializer: None,
@@ -1194,7 +1215,10 @@ fn normalize_double_precision_reconstructs_32bit_arith_to_64bit() {
             },
             NirBinding {
                 name: "val_64".to_string(),
-                ty: NirType::Int { bits: 64, signed: false },
+                ty: NirType::Int {
+                    bits: 64,
+                    signed: false,
+                },
                 surface_type_name: None,
                 origin: None,
                 initializer: None,
@@ -1207,7 +1231,10 @@ fn normalize_double_precision_reconstructs_32bit_arith_to_64bit() {
                     op: HirBinaryOp::Add,
                     lhs: Box::new(HirExpr::Var("lo1".to_string())),
                     rhs: Box::new(HirExpr::Var("lo2".to_string())),
-                    ty: NirType::Int { bits: 32, signed: false },
+                    ty: NirType::Int {
+                        bits: 32,
+                        signed: false,
+                    },
                 },
             },
             HirStmt::Assign {
@@ -1227,13 +1254,22 @@ fn normalize_double_precision_reconstructs_32bit_arith_to_64bit() {
                         op: HirBinaryOp::Add,
                         lhs: Box::new(HirExpr::Var("hi1".to_string())),
                         rhs: Box::new(HirExpr::Var("hi2".to_string())),
-                        ty: NirType::Int { bits: 32, signed: false },
+                        ty: NirType::Int {
+                            bits: 32,
+                            signed: false,
+                        },
                     }),
                     rhs: Box::new(HirExpr::Cast {
-                        ty: NirType::Int { bits: 32, signed: false },
+                        ty: NirType::Int {
+                            bits: 32,
+                            signed: false,
+                        },
                         expr: Box::new(HirExpr::Var("carry".to_string())),
                     }),
-                    ty: NirType::Int { bits: 32, signed: false },
+                    ty: NirType::Int {
+                        bits: 32,
+                        signed: false,
+                    },
                 },
             },
             HirStmt::Assign {
@@ -1243,17 +1279,35 @@ fn normalize_double_precision_reconstructs_32bit_arith_to_64bit() {
                     lhs: Box::new(HirExpr::Binary {
                         op: HirBinaryOp::Shl,
                         lhs: Box::new(HirExpr::Cast {
-                            ty: NirType::Int { bits: 64, signed: false },
+                            ty: NirType::Int {
+                                bits: 64,
+                                signed: false,
+                            },
                             expr: Box::new(HirExpr::Var("hi".to_string())),
                         }),
-                        rhs: Box::new(HirExpr::Const(32, NirType::Int { bits: 32, signed: false })),
-                        ty: NirType::Int { bits: 64, signed: false },
+                        rhs: Box::new(HirExpr::Const(
+                            32,
+                            NirType::Int {
+                                bits: 32,
+                                signed: false,
+                            },
+                        )),
+                        ty: NirType::Int {
+                            bits: 64,
+                            signed: false,
+                        },
                     }),
                     rhs: Box::new(HirExpr::Cast {
-                        ty: NirType::Int { bits: 64, signed: false },
+                        ty: NirType::Int {
+                            bits: 64,
+                            signed: false,
+                        },
                         expr: Box::new(HirExpr::Var("lo".to_string())),
                     }),
-                    ty: NirType::Int { bits: 64, signed: false },
+                    ty: NirType::Int {
+                        bits: 64,
+                        signed: false,
+                    },
                 },
             },
             HirStmt::Return(Some(HirExpr::Var("val_64".to_string()))),
@@ -1284,7 +1338,10 @@ fn normalize_double_precision_reconstructs_32bit_arith_to_64bit() {
 fn normalize_variable_merge_coalesces_disjoint_variables() {
     use crate::nir::normalize::recovery::apply_variable_merge_pass;
 
-    let u32_ty = NirType::Int { bits: 32, signed: false };
+    let u32_ty = NirType::Int {
+        bits: 32,
+        signed: false,
+    };
     let make_binding = |name: &str| NirBinding {
         name: name.to_string(),
         ty: u32_ty.clone(),
@@ -1307,7 +1364,7 @@ fn normalize_variable_merge_coalesces_disjoint_variables() {
 
     let mut func = HirFunction {
         name: "test_merge".to_string(),
-            int_param_offsets: Vec::new(),
+        int_param_offsets: Vec::new(),
         params: vec![],
         locals: vec![
             make_binding("temp1"),
@@ -1356,11 +1413,16 @@ fn normalize_variable_merge_coalesces_disjoint_variables() {
     // The pass must report that it did something.
     assert!(changed, "apply_variable_merge_pass should return true");
     // result must survive: it's returned and has highest name priority.
-    assert!(names.contains(&"result"), "result should survive: {:?}", names);
+    assert!(
+        names.contains(&"result"),
+        "result should survive: {:?}",
+        names
+    );
     // temp1 and temp2 are disjoint u32s — exactly one should remain.
     assert!(
         func.locals.len() < 3,
-        "expected temp1/temp2 to be merged (one dropped), got: {:?}", names
+        "expected temp1/temp2 to be merged (one dropped), got: {:?}",
+        names
     );
 }
 
@@ -1368,10 +1430,13 @@ fn normalize_variable_merge_coalesces_disjoint_variables() {
 fn normalize_conditional_const_propagates_equality_branches() {
     use crate::nir::normalize::global_opt::apply_conditional_const_pass;
 
-    let u32_ty = NirType::Int { bits: 32, signed: false };
+    let u32_ty = NirType::Int {
+        bits: 32,
+        signed: false,
+    };
     let mut func = HirFunction {
         name: "test_cond_const".to_string(),
-            int_param_offsets: Vec::new(),
+        int_param_offsets: Vec::new(),
         params: vec![],
         locals: vec![
             NirBinding {
@@ -1389,28 +1454,22 @@ fn normalize_conditional_const_propagates_equality_branches() {
                 initializer: None,
             },
         ],
-        body: vec![
-            HirStmt::If {
-                cond: HirExpr::Binary {
-                    op: HirBinaryOp::Eq,
-                    lhs: Box::new(HirExpr::Var("x".to_string())),
-                    rhs: Box::new(HirExpr::Const(5, u32_ty.clone())),
-                    ty: NirType::Bool,
-                },
-                then_body: vec![
-                    HirStmt::Assign {
-                        lhs: HirLValue::Var("y".to_string()),
-                        rhs: HirExpr::Var("x".to_string()),
-                    },
-                ],
-                else_body: vec![
-                    HirStmt::Assign {
-                        lhs: HirLValue::Var("y".to_string()),
-                        rhs: HirExpr::Var("x".to_string()),
-                    },
-                ],
+        body: vec![HirStmt::If {
+            cond: HirExpr::Binary {
+                op: HirBinaryOp::Eq,
+                lhs: Box::new(HirExpr::Var("x".to_string())),
+                rhs: Box::new(HirExpr::Const(5, u32_ty.clone())),
+                ty: NirType::Bool,
             },
-        ],
+            then_body: vec![HirStmt::Assign {
+                lhs: HirLValue::Var("y".to_string()),
+                rhs: HirExpr::Var("x".to_string()),
+            }],
+            else_body: vec![HirStmt::Assign {
+                lhs: HirLValue::Var("y".to_string()),
+                rhs: HirExpr::Var("x".to_string()),
+            }],
+        }],
         is_64bit: false,
         ..Default::default()
     };
@@ -1419,7 +1478,12 @@ fn normalize_conditional_const_propagates_equality_branches() {
     assert!(changed);
 
     // In then_body, y = x should become y = 5
-    if let HirStmt::If { then_body, else_body, .. } = &func.body[0] {
+    if let HirStmt::If {
+        then_body,
+        else_body,
+        ..
+    } = &func.body[0]
+    {
         if let HirStmt::Assign { rhs, .. } = &then_body[0] {
             assert!(matches!(rhs, HirExpr::Const(5, _)));
         } else {
@@ -1439,11 +1503,14 @@ fn normalize_conditional_const_propagates_equality_branches() {
 fn normalize_three_way_compare_simplifies_to_relational() {
     use crate::nir::normalize::arith::apply_three_way_compare_pass;
 
-    let u32_ty = NirType::Int { bits: 32, signed: false };
+    let u32_ty = NirType::Int {
+        bits: 32,
+        signed: false,
+    };
     // Pattern: (zext(a < b) + zext(a <= b) - 1) == 0  =>  a == b
     let mut func = HirFunction {
         name: "test_three_way".to_string(),
-            int_param_offsets: Vec::new(),
+        int_param_offsets: Vec::new(),
         params: vec![],
         locals: vec![
             NirBinding {
@@ -1468,43 +1535,41 @@ fn normalize_three_way_compare_simplifies_to_relational() {
                 initializer: None,
             },
         ],
-        body: vec![
-            HirStmt::Assign {
-                lhs: HirLValue::Var("result".to_string()),
-                rhs: HirExpr::Binary {
-                    op: HirBinaryOp::Eq,
+        body: vec![HirStmt::Assign {
+            lhs: HirLValue::Var("result".to_string()),
+            rhs: HirExpr::Binary {
+                op: HirBinaryOp::Eq,
+                lhs: Box::new(HirExpr::Binary {
+                    op: HirBinaryOp::Add,
                     lhs: Box::new(HirExpr::Binary {
                         op: HirBinaryOp::Add,
-                        lhs: Box::new(HirExpr::Binary {
-                            op: HirBinaryOp::Add,
-                            lhs: Box::new(HirExpr::Cast {
-                                expr: Box::new(HirExpr::Binary {
-                                    op: HirBinaryOp::Lt,
-                                    lhs: Box::new(HirExpr::Var("a".to_string())),
-                                    rhs: Box::new(HirExpr::Var("b".to_string())),
-                                    ty: NirType::Bool,
-                                }),
-                                ty: u32_ty.clone(),
-                            }),
-                            rhs: Box::new(HirExpr::Cast {
-                                expr: Box::new(HirExpr::Binary {
-                                    op: HirBinaryOp::Le,
-                                    lhs: Box::new(HirExpr::Var("a".to_string())),
-                                    rhs: Box::new(HirExpr::Var("b".to_string())),
-                                    ty: NirType::Bool,
-                                }),
-                                ty: u32_ty.clone(),
+                        lhs: Box::new(HirExpr::Cast {
+                            expr: Box::new(HirExpr::Binary {
+                                op: HirBinaryOp::Lt,
+                                lhs: Box::new(HirExpr::Var("a".to_string())),
+                                rhs: Box::new(HirExpr::Var("b".to_string())),
+                                ty: NirType::Bool,
                             }),
                             ty: u32_ty.clone(),
                         }),
-                        rhs: Box::new(HirExpr::Const(-1, u32_ty.clone())),
+                        rhs: Box::new(HirExpr::Cast {
+                            expr: Box::new(HirExpr::Binary {
+                                op: HirBinaryOp::Le,
+                                lhs: Box::new(HirExpr::Var("a".to_string())),
+                                rhs: Box::new(HirExpr::Var("b".to_string())),
+                                ty: NirType::Bool,
+                            }),
+                            ty: u32_ty.clone(),
+                        }),
                         ty: u32_ty.clone(),
                     }),
-                    rhs: Box::new(HirExpr::Const(0, u32_ty.clone())),
-                    ty: NirType::Bool,
-                },
+                    rhs: Box::new(HirExpr::Const(-1, u32_ty.clone())),
+                    ty: u32_ty.clone(),
+                }),
+                rhs: Box::new(HirExpr::Const(0, u32_ty.clone())),
+                ty: NirType::Bool,
             },
-        ],
+        }],
         is_64bit: false,
         ..Default::default()
     };
@@ -1513,7 +1578,13 @@ fn normalize_three_way_compare_simplifies_to_relational() {
     assert!(changed);
 
     if let HirStmt::Assign { rhs, .. } = &func.body[0] {
-        if let HirExpr::Binary { op: HirBinaryOp::Eq, lhs, rhs, .. } = rhs {
+        if let HirExpr::Binary {
+            op: HirBinaryOp::Eq,
+            lhs,
+            rhs,
+            ..
+        } = rhs
+        {
             assert!(matches!(lhs.as_ref(), HirExpr::Var(name) if name == "a"));
             assert!(matches!(rhs.as_ref(), HirExpr::Var(name) if name == "b"));
         } else {
@@ -1530,40 +1601,65 @@ fn normalize_conditional_move() {
 
     let mut func = HirFunction {
         name: "test_cmov".to_string(),
-            int_param_offsets: Vec::new(),
+        int_param_offsets: Vec::new(),
         params: vec![],
-        locals: vec![
-            NirBinding {
-                name: "x".to_string(),
-                ty: NirType::Int { bits: 32, signed: true },
-                surface_type_name: None,
-                origin: None,
-                initializer: None,
+        locals: vec![NirBinding {
+            name: "x".to_string(),
+            ty: NirType::Int {
+                bits: 32,
+                signed: true,
             },
-        ],
+            surface_type_name: None,
+            origin: None,
+            initializer: None,
+        }],
         body: vec![
             // Scenario 1: If-Then-Else
             HirStmt::If {
                 cond: HirExpr::Var("cond".to_string()),
                 then_body: vec![HirStmt::Assign {
                     lhs: HirLValue::Var("x".to_string()),
-                    rhs: HirExpr::Const(10, NirType::Int { bits: 32, signed: true }),
+                    rhs: HirExpr::Const(
+                        10,
+                        NirType::Int {
+                            bits: 32,
+                            signed: true,
+                        },
+                    ),
                 }],
                 else_body: vec![HirStmt::Assign {
                     lhs: HirLValue::Var("x".to_string()),
-                    rhs: HirExpr::Const(20, NirType::Int { bits: 32, signed: true }),
+                    rhs: HirExpr::Const(
+                        20,
+                        NirType::Int {
+                            bits: 32,
+                            signed: true,
+                        },
+                    ),
                 }],
             },
             // Scenario 2: Default-Override
             HirStmt::Assign {
                 lhs: HirLValue::Var("x".to_string()),
-                rhs: HirExpr::Const(20, NirType::Int { bits: 32, signed: true }),
+                rhs: HirExpr::Const(
+                    20,
+                    NirType::Int {
+                        bits: 32,
+                        signed: true,
+                    },
+                ),
             },
             HirStmt::If {
                 cond: HirExpr::Var("cond".to_string()),
                 then_body: vec![HirStmt::Assign {
                     lhs: HirLValue::Var("x".to_string()),
-                    rhs: HirExpr::Const(10, NirType::Int { bits: 32, signed: true }),
+                    rhs: HirExpr::Const(
+                        10,
+                        NirType::Int {
+                            bits: 32,
+                            signed: true,
+                        },
+                    ),
                 }],
                 else_body: vec![],
             },
@@ -1579,7 +1675,13 @@ fn normalize_conditional_move() {
     // Verify Scenario 1 became Select
     if let HirStmt::Assign { lhs, rhs } = &func.body[0] {
         assert!(matches!(lhs, HirLValue::Var(name) if name == "x"));
-        if let HirExpr::Select { cond, then_expr, else_expr, .. } = rhs {
+        if let HirExpr::Select {
+            cond,
+            then_expr,
+            else_expr,
+            ..
+        } = rhs
+        {
             assert!(matches!(cond.as_ref(), HirExpr::Var(name) if name == "cond"));
             assert!(matches!(then_expr.as_ref(), HirExpr::Const(10, _)));
             assert!(matches!(else_expr.as_ref(), HirExpr::Const(20, _)));
@@ -1593,7 +1695,13 @@ fn normalize_conditional_move() {
     // Verify Scenario 2 became Select
     if let HirStmt::Assign { lhs, rhs } = &func.body[1] {
         assert!(matches!(lhs, HirLValue::Var(name) if name == "x"));
-        if let HirExpr::Select { cond, then_expr, else_expr, .. } = rhs {
+        if let HirExpr::Select {
+            cond,
+            then_expr,
+            else_expr,
+            ..
+        } = rhs
+        {
             assert!(matches!(cond.as_ref(), HirExpr::Var(name) if name == "cond"));
             assert!(matches!(then_expr.as_ref(), HirExpr::Const(10, _)));
             assert!(matches!(else_expr.as_ref(), HirExpr::Const(20, _)));
@@ -1614,7 +1722,7 @@ fn subfloat_flow_narrowing_elides_redundant_casts() {
 
     let mut func = HirFunction {
         name: "test_subfloat".to_string(),
-            int_param_offsets: Vec::new(),
+        int_param_offsets: Vec::new(),
         params: vec![
             NirBinding {
                 name: "x".to_string(),
@@ -1631,15 +1739,13 @@ fn subfloat_flow_narrowing_elides_redundant_casts() {
                 initializer: None,
             },
         ],
-        locals: vec![
-            NirBinding {
-                name: "res".to_string(),
-                ty: float32.clone(),
-                surface_type_name: None,
-                origin: None,
-                initializer: None,
-            },
-        ],
+        locals: vec![NirBinding {
+            name: "res".to_string(),
+            ty: float32.clone(),
+            surface_type_name: None,
+            origin: None,
+            initializer: None,
+        }],
         body: vec![
             // res = (float)((double)x + (double)y)
             HirStmt::Assign {
@@ -1674,14 +1780,19 @@ fn subfloat_flow_narrowing_elides_redundant_casts() {
     assert_eq!(func.body.len(), 1);
 
     // Expected: res = x + y (all casts elided, math is float32)
-    let HirStmt::Assign { rhs, .. } = &func.body[0] else { panic!(); };
+    let HirStmt::Assign { rhs, .. } = &func.body[0] else {
+        panic!();
+    };
     if let HirExpr::Binary { op, lhs, rhs, ty } = rhs {
         assert_eq!(*op, HirBinaryOp::Add);
         assert_eq!(ty, &float32);
         assert_eq!(lhs.as_ref(), &HirExpr::Var("x".to_string()));
         assert_eq!(rhs.as_ref(), &HirExpr::Var("y".to_string()));
     } else {
-        panic!("expected direct float addition without casts, got {:?}", rhs);
+        panic!(
+            "expected direct float addition without casts, got {:?}",
+            rhs
+        );
     }
 }
 
@@ -1689,12 +1800,15 @@ fn subfloat_flow_narrowing_elides_redundant_casts() {
 fn normalize_or_compare_simplifies_zero_comparisons() {
     use crate::nir::normalize::arith::apply_or_compare_pass;
 
-    let u32_ty = NirType::Int { bits: 32, signed: false };
+    let u32_ty = NirType::Int {
+        bits: 32,
+        signed: false,
+    };
     let bool_ty = NirType::Bool;
 
     let mut func = HirFunction {
         name: "test_or_compare".to_string(),
-            int_param_offsets: Vec::new(),
+        int_param_offsets: Vec::new(),
         params: vec![],
         locals: vec![
             NirBinding {
@@ -1805,18 +1919,36 @@ fn normalize_or_compare_simplifies_zero_comparisons() {
     assert_eq!(func.body.len(), 3);
 
     // Verify first simplification: res1 = ((a == 0) && (b == 0))
-    let HirStmt::Assign { rhs: rhs1, .. } = &func.body[0] else { panic!(); };
+    let HirStmt::Assign { rhs: rhs1, .. } = &func.body[0] else {
+        panic!();
+    };
     if let HirExpr::Binary { op, lhs, rhs, ty } = rhs1 {
         assert_eq!(*op, HirBinaryOp::LogicalAnd);
         assert_eq!(ty, &bool_ty);
-        
-        let HirExpr::Binary { op: op_l, lhs: lhs_l, rhs: rhs_l, ty: ty_l } = lhs.as_ref() else { panic!(); };
+
+        let HirExpr::Binary {
+            op: op_l,
+            lhs: lhs_l,
+            rhs: rhs_l,
+            ty: ty_l,
+        } = lhs.as_ref()
+        else {
+            panic!();
+        };
         assert_eq!(*op_l, HirBinaryOp::Eq);
         assert_eq!(lhs_l.as_ref(), &HirExpr::Var("a".to_string()));
         assert!(matches!(rhs_l.as_ref(), HirExpr::Const(0, _)));
         assert_eq!(ty_l, &bool_ty);
 
-        let HirExpr::Binary { op: op_r, lhs: lhs_r, rhs: rhs_r, ty: ty_r } = rhs.as_ref() else { panic!(); };
+        let HirExpr::Binary {
+            op: op_r,
+            lhs: lhs_r,
+            rhs: rhs_r,
+            ty: ty_r,
+        } = rhs.as_ref()
+        else {
+            panic!();
+        };
         assert_eq!(*op_r, HirBinaryOp::Eq);
         assert_eq!(lhs_r.as_ref(), &HirExpr::Var("b".to_string()));
         assert!(matches!(rhs_r.as_ref(), HirExpr::Const(0, _)));
@@ -1826,18 +1958,36 @@ fn normalize_or_compare_simplifies_zero_comparisons() {
     }
 
     // Verify second simplification: res2 = ((a != 0) || (b != 0))
-    let HirStmt::Assign { rhs: rhs2, .. } = &func.body[1] else { panic!(); };
+    let HirStmt::Assign { rhs: rhs2, .. } = &func.body[1] else {
+        panic!();
+    };
     if let HirExpr::Binary { op, lhs, rhs, ty } = rhs2 {
         assert_eq!(*op, HirBinaryOp::LogicalOr);
         assert_eq!(ty, &bool_ty);
-        
-        let HirExpr::Binary { op: op_l, lhs: lhs_l, rhs: rhs_l, ty: ty_l } = lhs.as_ref() else { panic!(); };
+
+        let HirExpr::Binary {
+            op: op_l,
+            lhs: lhs_l,
+            rhs: rhs_l,
+            ty: ty_l,
+        } = lhs.as_ref()
+        else {
+            panic!();
+        };
         assert_eq!(*op_l, HirBinaryOp::Ne);
         assert_eq!(lhs_l.as_ref(), &HirExpr::Var("a".to_string()));
         assert!(matches!(rhs_l.as_ref(), HirExpr::Const(0, _)));
         assert_eq!(ty_l, &bool_ty);
 
-        let HirExpr::Binary { op: op_r, lhs: lhs_r, rhs: rhs_r, ty: ty_r } = rhs.as_ref() else { panic!(); };
+        let HirExpr::Binary {
+            op: op_r,
+            lhs: lhs_r,
+            rhs: rhs_r,
+            ty: ty_r,
+        } = rhs.as_ref()
+        else {
+            panic!();
+        };
         assert_eq!(*op_r, HirBinaryOp::Ne);
         assert_eq!(lhs_r.as_ref(), &HirExpr::Var("b".to_string()));
         assert!(matches!(rhs_r.as_ref(), HirExpr::Const(0, _)));
@@ -1847,30 +1997,64 @@ fn normalize_or_compare_simplifies_zero_comparisons() {
     }
 
     // Verify third simplification (nested OR): res3 = (((a == 0) && (b == 0)) && (c == 0))
-    let HirStmt::Assign { rhs: rhs3, .. } = &func.body[2] else { panic!(); };
+    let HirStmt::Assign { rhs: rhs3, .. } = &func.body[2] else {
+        panic!();
+    };
     if let HirExpr::Binary { op, lhs, rhs, ty } = rhs3 {
         assert_eq!(*op, HirBinaryOp::LogicalAnd);
         assert_eq!(ty, &bool_ty);
 
         // Right side should be (c == 0)
-        let HirExpr::Binary { op: op_r, lhs: lhs_r, rhs: rhs_r, ty: ty_r } = rhs.as_ref() else { panic!(); };
+        let HirExpr::Binary {
+            op: op_r,
+            lhs: lhs_r,
+            rhs: rhs_r,
+            ty: ty_r,
+        } = rhs.as_ref()
+        else {
+            panic!();
+        };
         assert_eq!(*op_r, HirBinaryOp::Eq);
         assert_eq!(lhs_r.as_ref(), &HirExpr::Var("c".to_string()));
         assert!(matches!(rhs_r.as_ref(), HirExpr::Const(0, _)));
         assert_eq!(ty_r, &bool_ty);
 
         // Left side should be ((a == 0) && (b == 0))
-        let HirExpr::Binary { op: op_l, lhs: lhs_l, rhs: rhs_l, ty: ty_l } = lhs.as_ref() else { panic!(); };
+        let HirExpr::Binary {
+            op: op_l,
+            lhs: lhs_l,
+            rhs: rhs_l,
+            ty: ty_l,
+        } = lhs.as_ref()
+        else {
+            panic!();
+        };
         assert_eq!(*op_l, HirBinaryOp::LogicalAnd);
         assert_eq!(ty_l, &bool_ty);
 
-        let HirExpr::Binary { op: op_ll, lhs: lhs_ll, rhs: rhs_ll, ty: ty_ll } = lhs_l.as_ref() else { panic!(); };
+        let HirExpr::Binary {
+            op: op_ll,
+            lhs: lhs_ll,
+            rhs: rhs_ll,
+            ty: ty_ll,
+        } = lhs_l.as_ref()
+        else {
+            panic!();
+        };
         assert_eq!(*op_ll, HirBinaryOp::Eq);
         assert_eq!(lhs_ll.as_ref(), &HirExpr::Var("a".to_string()));
         assert!(matches!(rhs_ll.as_ref(), HirExpr::Const(0, _)));
         assert_eq!(ty_ll, &bool_ty);
 
-        let HirExpr::Binary { op: op_lr, lhs: lhs_lr, rhs: rhs_lr, ty: ty_lr } = rhs_l.as_ref() else { panic!(); };
+        let HirExpr::Binary {
+            op: op_lr,
+            lhs: lhs_lr,
+            rhs: rhs_lr,
+            ty: ty_lr,
+        } = rhs_l.as_ref()
+        else {
+            panic!();
+        };
         assert_eq!(*op_lr, HirBinaryOp::Eq);
         assert_eq!(lhs_lr.as_ref(), &HirExpr::Var("b".to_string()));
         assert!(matches!(rhs_lr.as_ref(), HirExpr::Const(0, _)));
@@ -1884,12 +2068,15 @@ fn normalize_or_compare_simplifies_zero_comparisons() {
 fn normalize_or_compare_simplifies_or_of_zero() {
     use crate::nir::normalize::arith::apply_or_compare_pass;
 
-    let u32_ty = NirType::Int { bits: 32, signed: false };
+    let u32_ty = NirType::Int {
+        bits: 32,
+        signed: false,
+    };
     let bool_ty = NirType::Bool;
 
     let mut func = HirFunction {
         name: "test_or_of_zero".to_string(),
-            int_param_offsets: Vec::new(),
+        int_param_offsets: Vec::new(),
         params: vec![],
         locals: vec![
             NirBinding {
@@ -1945,13 +2132,27 @@ fn normalize_or_compare_simplifies_or_of_zero() {
     assert_eq!(func.body.len(), 1);
 
     // Expected: res = cond ? (val | other) : other
-    let HirStmt::Assign { rhs, .. } = &func.body[0] else { panic!(); };
-    if let HirExpr::Select { cond, then_expr, else_expr, ty } = rhs {
+    let HirStmt::Assign { rhs, .. } = &func.body[0] else {
+        panic!();
+    };
+    if let HirExpr::Select {
+        cond,
+        then_expr,
+        else_expr,
+        ty,
+    } = rhs
+    {
         assert_eq!(ty, &u32_ty);
         assert_eq!(cond.as_ref(), &HirExpr::Var("cond".to_string()));
         assert_eq!(else_expr.as_ref(), &HirExpr::Var("other".to_string()));
 
-        if let HirExpr::Binary { op, lhs, rhs, ty: or_ty } = then_expr.as_ref() {
+        if let HirExpr::Binary {
+            op,
+            lhs,
+            rhs,
+            ty: or_ty,
+        } = then_expr.as_ref()
+        {
             assert_eq!(*op, HirBinaryOp::Or);
             assert_eq!(or_ty, &u32_ty);
             assert_eq!(lhs.as_ref(), &HirExpr::Var("val".to_string()));
@@ -1968,7 +2169,10 @@ fn normalize_or_compare_simplifies_or_of_zero() {
 fn normalize_nested_adds_subs_simplifies_constants() {
     use crate::nir::normalize::arith::simplify_nested_adds_subs;
 
-    let u32_ty = NirType::Int { bits: 32, signed: false };
+    let u32_ty = NirType::Int {
+        bits: 32,
+        signed: false,
+    };
 
     // Case 1: (a + 10) + 20 => a + 30
     let expr1 = HirExpr::Binary {
@@ -2017,7 +2221,10 @@ fn normalize_nested_adds_subs_simplifies_constants() {
 fn normalize_collect_mul_terms_simplifies_constants() {
     use crate::nir::normalize::arith::simplify_collect_mul_terms;
 
-    let u32_ty = NirType::Int { bits: 32, signed: false };
+    let u32_ty = NirType::Int {
+        bits: 32,
+        signed: false,
+    };
 
     // Case 1: (a * 5) + (a * 2) => a * 7
     let expr1 = HirExpr::Binary {
@@ -2073,12 +2280,18 @@ fn normalize_float_sign_simplifies_manipulations() {
 
     let f32_ty = NirType::Float { bits: 32 };
     let f64_ty = NirType::Float { bits: 64 };
-    let i32_ty = NirType::Int { bits: 32, signed: false };
-    let i64_ty = NirType::Int { bits: 64, signed: false };
+    let i32_ty = NirType::Int {
+        bits: 32,
+        signed: false,
+    };
+    let i64_ty = NirType::Int {
+        bits: 64,
+        signed: false,
+    };
 
     let mut func = HirFunction {
         name: "test_float_sign".to_string(),
-            int_param_offsets: Vec::new(),
+        int_param_offsets: Vec::new(),
         params: vec![],
         locals: vec![
             NirBinding {
@@ -2172,7 +2385,9 @@ fn normalize_float_sign_simplifies_manipulations() {
     assert!(apply_float_sign_pass(&mut func));
 
     // Verify first simplification: res1 = fabsf(f32_var)
-    let HirStmt::Assign { rhs: rhs1, .. } = &func.body[0] else { panic!(); };
+    let HirStmt::Assign { rhs: rhs1, .. } = &func.body[0] else {
+        panic!();
+    };
     if let HirExpr::Call { target, args, ty } = rhs1 {
         assert_eq!(target, "fabsf");
         assert_eq!(args.len(), 1);
@@ -2183,7 +2398,9 @@ fn normalize_float_sign_simplifies_manipulations() {
     }
 
     // Verify second simplification: res2 = -f32_var
-    let HirStmt::Assign { rhs: rhs2, .. } = &func.body[1] else { panic!(); };
+    let HirStmt::Assign { rhs: rhs2, .. } = &func.body[1] else {
+        panic!();
+    };
     if let HirExpr::Unary { op, expr, ty } = rhs2 {
         assert_eq!(*op, HirUnaryOp::Neg);
         assert_eq!(expr.as_ref(), &HirExpr::Var("f32_var".to_string()));
@@ -2193,7 +2410,9 @@ fn normalize_float_sign_simplifies_manipulations() {
     }
 
     // Verify third simplification: res3 = fabs(f64_var)
-    let HirStmt::Assign { rhs: rhs3, .. } = &func.body[2] else { panic!(); };
+    let HirStmt::Assign { rhs: rhs3, .. } = &func.body[2] else {
+        panic!();
+    };
     if let HirExpr::Call { target, args, ty } = rhs3 {
         assert_eq!(target, "fabs");
         assert_eq!(args.len(), 1);
@@ -2204,7 +2423,9 @@ fn normalize_float_sign_simplifies_manipulations() {
     }
 
     // Verify fourth simplification: res4 = -f64_var
-    let HirStmt::Assign { rhs: rhs4, .. } = &func.body[3] else { panic!(); };
+    let HirStmt::Assign { rhs: rhs4, .. } = &func.body[3] else {
+        panic!();
+    };
     if let HirExpr::Unary { op, expr, ty } = rhs4 {
         assert_eq!(*op, HirUnaryOp::Neg);
         assert_eq!(expr.as_ref(), &HirExpr::Var("f64_var".to_string()));
@@ -2224,7 +2445,7 @@ fn normalize_ignore_nan_simplifies_comparisons() {
 
     let mut func = HirFunction {
         name: "test_ignore_nan".to_string(),
-            int_param_offsets: Vec::new(),
+        int_param_offsets: Vec::new(),
         params: vec![],
         locals: vec![
             NirBinding {
@@ -2349,7 +2570,9 @@ fn normalize_ignore_nan_simplifies_comparisons() {
     assert!(apply_ignore_nan_pass(&mut func));
 
     // Verify first simplification: res1 = (f32_var < 5.0f)
-    let HirStmt::Assign { rhs: rhs1, .. } = &func.body[0] else { panic!(); };
+    let HirStmt::Assign { rhs: rhs1, .. } = &func.body[0] else {
+        panic!();
+    };
     if let HirExpr::Binary { op, lhs, rhs, ty } = rhs1 {
         assert_eq!(*op, HirBinaryOp::Lt);
         assert_eq!(lhs.as_ref(), &HirExpr::Var("f32_var".to_string()));
@@ -2360,7 +2583,9 @@ fn normalize_ignore_nan_simplifies_comparisons() {
     }
 
     // Verify second simplification: res2 = (f32_var != 5.0f)
-    let HirStmt::Assign { rhs: rhs2, .. } = &func.body[1] else { panic!(); };
+    let HirStmt::Assign { rhs: rhs2, .. } = &func.body[1] else {
+        panic!();
+    };
     if let HirExpr::Binary { op, lhs, rhs, ty } = rhs2 {
         assert_eq!(*op, HirBinaryOp::Ne);
         assert_eq!(lhs.as_ref(), &HirExpr::Var("f32_var".to_string()));
@@ -2371,7 +2596,9 @@ fn normalize_ignore_nan_simplifies_comparisons() {
     }
 
     // Verify third simplification: res3 = (f32_var < f64_var)
-    let HirStmt::Assign { rhs: rhs3, .. } = &func.body[2] else { panic!(); };
+    let HirStmt::Assign { rhs: rhs3, .. } = &func.body[2] else {
+        panic!();
+    };
     if let HirExpr::Binary { op, lhs, rhs, ty } = rhs3 {
         assert_eq!(*op, HirBinaryOp::Lt);
         assert_eq!(lhs.as_ref(), &HirExpr::Var("f32_var".to_string()));
@@ -2381,7 +2608,3 @@ fn normalize_ignore_nan_simplifies_comparisons() {
         panic!("expected binary op, got {:?}", rhs3);
     }
 }
-
-
-
-

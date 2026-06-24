@@ -233,7 +233,10 @@ fn while_preview_lowers_multi_block_body() {
     let code =
         render_mlil_preview(&func, "while_fn", 0x4100, &preview_options()).expect("preview render");
     assert!(code.contains("while (!param_1) {") || code.contains("while (param_1) {"));
-    assert!(code.contains("local_10 = 1;"), "expected first store: {code}");
+    assert!(
+        code.contains("local_10 = 1;"),
+        "expected first store: {code}"
+    );
     // NOTE: Due to a known stack-slot deduplication limitation, RBP-0x14 is
     // currently aliased to local_10 (same as RBP-0x10). The store value 2
     // should be present even if under the same slot name.
@@ -768,7 +771,9 @@ fn while_loop_with_early_continue() {
         "expected while: {code}"
     );
     assert!(
-        code.contains("continue;") || code.contains("if (!param_2)") || code.contains("if (!param_2_1)"),
+        code.contains("continue;")
+            || code.contains("if (!param_2)")
+            || code.contains("if (!param_2_1)"),
         "expected continue or structured if: {code}"
     );
     assert!(
@@ -1538,12 +1543,23 @@ fn for_loop_non_last_update_success() {
         ],
     };
 
-    let code = render_mlil_preview(&func, "non_last_update_success_fn", 0x8000, &preview_options())
-        .expect("preview render");
+    let code = render_mlil_preview(
+        &func,
+        "non_last_update_success_fn",
+        0x8000,
+        &preview_options(),
+    )
+    .expect("preview render");
     // Should be successfully folded into a C-style for loop!
     assert!(code.contains("for ("), "expected for loop: {code}");
-    assert!(code.contains("rbx = rbx + 1") || code.contains("rbx++") || code.contains("rbx += 1"), "expected update in header: {code}");
-    assert!(code.contains("local_10 = 42;"), "expected body store: {code}");
+    assert!(
+        code.contains("rbx = rbx + 1") || code.contains("rbx++") || code.contains("rbx += 1"),
+        "expected update in header: {code}"
+    );
+    assert!(
+        code.contains("local_10 = 42;"),
+        "expected body store: {code}"
+    );
 }
 
 #[test]
@@ -1659,14 +1675,29 @@ fn for_loop_non_last_update_failure() {
         ],
     };
 
-    let code = render_mlil_preview(&func, "non_last_update_failure_fn", 0x9000, &preview_options())
-        .expect("preview render");
+    let code = render_mlil_preview(
+        &func,
+        "non_last_update_failure_fn",
+        0x9000,
+        &preview_options(),
+    )
+    .expect("preview render");
     // Should NOT have the update statement in the third clause of the for loop!
     assert!(code.contains("for ("), "expected for loop: {code}");
-    assert!(code.contains("for (rbx = 0; rbx < param_1; )") || code.contains("for (rbx = 0; rbx < param_1;)"), "expected empty update in header: {code}");
+    assert!(
+        code.contains("for (rbx = 0; rbx < param_1; )")
+            || code.contains("for (rbx = 0; rbx < param_1;)"),
+        "expected empty update in header: {code}"
+    );
     // Verify that the update statement is still in the loop body!
-    assert!(code.contains("rbx += param_2") || code.contains("rbx = rbx + param_2"), "expected update statement in body: {code}");
-    assert!(code.contains("local_10 = rbx;"), "expected body store: {code}");
+    assert!(
+        code.contains("rbx += param_2") || code.contains("rbx = rbx + param_2"),
+        "expected update statement in body: {code}"
+    );
+    assert!(
+        code.contains("local_10 = rbx;"),
+        "expected body store: {code}"
+    );
 }
 
 /// Regression test: x86-64 loop accumulator ZExt passthrough look-through.

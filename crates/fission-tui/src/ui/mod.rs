@@ -13,19 +13,21 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span, Text},
-    widgets::{Block, Borders, Clear, Paragraph, Wrap, Scrollbar, ScrollbarOrientation, ScrollbarState},
+    widgets::{
+        Block, Borders, Clear, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, Wrap,
+    },
 };
 
-use crate::app::{App, ViewMode, ActivePanel};
+use crate::app::{ActivePanel, App, ViewMode};
 use crate::markdown::render_markdown;
 
 // ── Palette ───────────────────────────────────────────────────────────────────
 // ANSI 16-color named only (no Rgb) to avoid GPU font atlas exhaustion.
-const C_ACCENT:  Color = Color::Cyan;
-const C_USER:    Color = Color::Green;
-const C_AI:      Color = Color::Yellow;
-const C_DIM:     Color = Color::DarkGray;
-const C_WHITE:   Color = Color::White;
+const C_ACCENT: Color = Color::Cyan;
+const C_USER: Color = Color::Green;
+const C_AI: Color = Color::Yellow;
+const C_DIM: Color = Color::DarkGray;
+const C_WHITE: Color = Color::White;
 
 /// Spinner frames — rotates while streaming.
 const SPINNER_FRAMES: [&str; 8] = ["⣾", "⣽", "⣻", "⢿", "⡿", "⣟", "⣯", "⣷"];
@@ -50,8 +52,8 @@ fn render_chat_layout(frame: &mut Frame, app: &App, area: Rect) {
     let outer = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Min(3),      // Chat viewport (top, expands)
-            Constraint::Length(1),   // Status bar / separator
+            Constraint::Min(3),               // Chat viewport (top, expands)
+            Constraint::Length(1),            // Status bar / separator
             Constraint::Length(input_height), // Dynamic Input
         ])
         .split(area);
@@ -86,16 +88,16 @@ fn render_code_explorer(frame: &mut Frame, app: &App, area: Rect) {
     // ── Outer layout: header (1) | panes (fill) | status (1) ──────────────
     let constraints = if app.explorer_search_mode {
         vec![
-            Constraint::Length(1),   // View-mode header bar
-            Constraint::Min(4),      // Two stacked panels
-            Constraint::Length(3),   // Search input bar
-            Constraint::Length(1),   // Status / key-hint bar
+            Constraint::Length(1), // View-mode header bar
+            Constraint::Min(4),    // Two stacked panels
+            Constraint::Length(3), // Search input bar
+            Constraint::Length(1), // Status / key-hint bar
         ]
     } else {
         vec![
-            Constraint::Length(1),   // View-mode header bar
-            Constraint::Min(4),      // Two stacked panels
-            Constraint::Length(1),   // Status / key-hint bar
+            Constraint::Length(1), // View-mode header bar
+            Constraint::Min(4),    // Two stacked panels
+            Constraint::Length(1), // Status / key-hint bar
         ]
     };
     let outer = Layout::default()
@@ -104,9 +106,15 @@ fn render_code_explorer(frame: &mut Frame, app: &App, area: Rect) {
         .split(area);
 
     // ── Header bar ──────────────────────────────────────────────────────────
-    let label = app.explorer_label.as_deref().unwrap_or("No function selected");
+    let label = app
+        .explorer_label
+        .as_deref()
+        .unwrap_or("No function selected");
     let header = Line::from(vec![
-        Span::styled(" 🔬 Code Explorer ", Style::default().fg(C_ACCENT).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            " 🔬 Code Explorer ",
+            Style::default().fg(C_ACCENT).add_modifier(Modifier::BOLD),
+        ),
         Span::styled("│ ", Style::default().fg(C_DIM)),
         Span::styled(label, Style::default().fg(C_WHITE)),
         Span::styled("  F2 back to Chat", Style::default().fg(C_DIM)),
@@ -175,17 +183,28 @@ fn render_code_explorer(frame: &mut Frame, app: &App, area: Rect) {
     };
 
     let disasm_total = disasm_text.len();
-    let disasm_current = if disasm_total == 0 { 0 } else { (app.disasm_scroll as usize + 1).min(disasm_total) };
+    let disasm_current = if disasm_total == 0 {
+        0
+    } else {
+        (app.disasm_scroll as usize + 1).min(disasm_total)
+    };
 
     let disasm_title = if disasm_focused {
-        format!(" ▶ Disassembly [{}/{}] (Tab to switch) ", disasm_current, disasm_total)
+        format!(
+            " ▶ Disassembly [{}/{}] (Tab to switch) ",
+            disasm_current, disasm_total
+        )
     } else {
         format!("   Disassembly [{}/{}] ", disasm_current, disasm_total)
     };
 
     let disasm_block = Block::default()
         .title(disasm_title)
-        .title_style(Style::default().fg(disasm_border_color).add_modifier(disasm_title_mod))
+        .title_style(
+            Style::default()
+                .fg(disasm_border_color)
+                .add_modifier(disasm_title_mod),
+        )
         .borders(Borders::ALL)
         .border_style(Style::default().fg(disasm_border_color));
 
@@ -195,7 +214,8 @@ fn render_code_explorer(frame: &mut Frame, app: &App, area: Rect) {
         .scroll((app.disasm_scroll, 0));
     frame.render_widget(disasm_para, panes[0]);
 
-    let mut disasm_scrollbar_state = ScrollbarState::new(disasm_total).position(app.disasm_scroll as usize);
+    let mut disasm_scrollbar_state =
+        ScrollbarState::new(disasm_total).position(app.disasm_scroll as usize);
     frame.render_stateful_widget(
         Scrollbar::default()
             .orientation(ScrollbarOrientation::VerticalRight)
@@ -239,17 +259,28 @@ fn render_code_explorer(frame: &mut Frame, app: &App, area: Rect) {
     };
 
     let decomp_total = decomp_text.len();
-    let decomp_current = if decomp_total == 0 { 0 } else { (app.decomp_scroll as usize + 1).min(decomp_total) };
+    let decomp_current = if decomp_total == 0 {
+        0
+    } else {
+        (app.decomp_scroll as usize + 1).min(decomp_total)
+    };
 
     let decomp_title = if decomp_focused {
-        format!(" ▶ Decompiled C [{}/{}] (Tab to switch) ", decomp_current, decomp_total)
+        format!(
+            " ▶ Decompiled C [{}/{}] (Tab to switch) ",
+            decomp_current, decomp_total
+        )
     } else {
         format!("   Decompiled C [{}/{}] ", decomp_current, decomp_total)
     };
 
     let decomp_block = Block::default()
         .title(decomp_title)
-        .title_style(Style::default().fg(decomp_border_color).add_modifier(decomp_title_mod))
+        .title_style(
+            Style::default()
+                .fg(decomp_border_color)
+                .add_modifier(decomp_title_mod),
+        )
         .borders(Borders::ALL)
         .border_style(Style::default().fg(decomp_border_color));
 
@@ -259,7 +290,8 @@ fn render_code_explorer(frame: &mut Frame, app: &App, area: Rect) {
         .scroll((app.decomp_scroll, 0));
     frame.render_widget(decomp_para, panes[1]);
 
-    let mut decomp_scrollbar_state = ScrollbarState::new(decomp_total).position(app.decomp_scroll as usize);
+    let mut decomp_scrollbar_state =
+        ScrollbarState::new(decomp_total).position(app.decomp_scroll as usize);
     frame.render_stateful_widget(
         Scrollbar::default()
             .orientation(ScrollbarOrientation::VerticalRight)
@@ -292,15 +324,17 @@ fn render_code_explorer(frame: &mut Frame, app: &App, area: Rect) {
             .title_style(Style::default().fg(C_ACCENT))
             .borders(Borders::ALL)
             .border_style(Style::default().fg(C_ACCENT));
-        
+
         let search_para = Paragraph::new(app.explorer_search_input.as_str())
             .block(search_block)
             .style(Style::default().fg(C_WHITE));
-        
+
         frame.render_widget(search_para, outer[2]);
-        
+
         // Show blinking block cursor
-        let cursor_col = app.explorer_search_input[..app.explorer_search_cursor].chars().count() as u16;
+        let cursor_col = app.explorer_search_input[..app.explorer_search_cursor]
+            .chars()
+            .count() as u16;
         let inner_x = outer[2].x + 1 + cursor_col;
         let inner_y = outer[2].y + 1;
         if inner_x < outer[2].x + outer[2].width.saturating_sub(1) {
@@ -341,8 +375,17 @@ fn render_disasm_line(line: &str) -> Line<'static> {
     }
 
     // Address token (hex starting with 0x or pure hex followed by ':').
-    let rest = if trimmed.starts_with("0x") || (trimmed.len() > 8 && trimmed.chars().next().map(|c| c.is_ascii_hexdigit()).unwrap_or(false)) {
-        let addr_end = trimmed.find(|c: char| c.is_whitespace()).unwrap_or(trimmed.len());
+    let rest = if trimmed.starts_with("0x")
+        || (trimmed.len() > 8
+            && trimmed
+                .chars()
+                .next()
+                .map(|c| c.is_ascii_hexdigit())
+                .unwrap_or(false))
+    {
+        let addr_end = trimmed
+            .find(|c: char| c.is_whitespace())
+            .unwrap_or(trimmed.len());
         let addr = &trimmed[..addr_end];
         spans.push(Span::styled(addr.to_string(), Style::default().fg(C_DIM)));
         &trimmed[addr_end..]
@@ -358,28 +401,39 @@ fn render_disasm_line(line: &str) -> Line<'static> {
     }
 
     if !rest2.is_empty() {
-        let mnem_end = rest2.find(|c: char| c.is_whitespace()).unwrap_or(rest2.len());
+        let mnem_end = rest2
+            .find(|c: char| c.is_whitespace())
+            .unwrap_or(rest2.len());
         let mnem = &rest2[..mnem_end];
         // Keywords / interesting mnemonics highlighted brighter.
         let mnem_color = match mnem {
-            "call" | "ret" | "jmp" | "je" | "jne" | "jz" | "jnz" | "jl" | "jle"
-            | "jg" | "jge" | "ja" | "jae" | "jb" | "jbe" => Color::Magenta,
+            "call" | "ret" | "jmp" | "je" | "jne" | "jz" | "jnz" | "jl" | "jle" | "jg" | "jge"
+            | "ja" | "jae" | "jb" | "jbe" => Color::Magenta,
             "push" | "pop" => Color::Green,
             "mov" | "lea" | "movsx" | "movzx" | "movaps" | "movups" => Color::Yellow,
-            "add" | "sub" | "imul" | "idiv" | "xor" | "and" | "or" | "not"
-            | "shl" | "shr" | "sar" => Color::Cyan,
+            "add" | "sub" | "imul" | "idiv" | "xor" | "and" | "or" | "not" | "shl" | "shr"
+            | "sar" => Color::Cyan,
             _ => C_WHITE,
         };
-        spans.push(Span::styled(mnem.to_string(), Style::default().fg(mnem_color).add_modifier(Modifier::BOLD)));
+        spans.push(Span::styled(
+            mnem.to_string(),
+            Style::default().fg(mnem_color).add_modifier(Modifier::BOLD),
+        ));
         let operands = &rest2[mnem_end..];
         if !operands.is_empty() {
-            spans.push(Span::styled(operands.to_string(), Style::default().fg(C_WHITE)));
+            spans.push(Span::styled(
+                operands.to_string(),
+                Style::default().fg(C_WHITE),
+            ));
         }
     }
 
     // Comment part.
     if let Some(comment) = comment_part {
-        spans.push(Span::styled(comment.to_string(), Style::default().fg(C_DIM).add_modifier(Modifier::ITALIC)));
+        spans.push(Span::styled(
+            comment.to_string(),
+            Style::default().fg(C_DIM).add_modifier(Modifier::ITALIC),
+        ));
     }
 
     Line::from(spans)
@@ -395,13 +449,14 @@ fn render_chat(frame: &mut Frame, app: &App, area: Rect) {
 
     if app.entries.is_empty() {
         text_lines.push(Line::from(""));
-        text_lines.push(Line::from(vec![
-            Span::styled(
-                "  👋 Welcome to Fission AI",
-                Style::default().fg(C_ACCENT).add_modifier(Modifier::BOLD),
-            )
-        ]));
-        text_lines.push(Line::from(Span::styled("     Press ? for help or just start typing to chat.", Style::default().fg(C_DIM))));
+        text_lines.push(Line::from(vec![Span::styled(
+            "  👋 Welcome to Fission AI",
+            Style::default().fg(C_ACCENT).add_modifier(Modifier::BOLD),
+        )]));
+        text_lines.push(Line::from(Span::styled(
+            "     Press ? for help or just start typing to chat.",
+            Style::default().fg(C_DIM),
+        )));
         text_lines.push(Line::from(""));
     }
 
@@ -409,7 +464,11 @@ fn render_chat(frame: &mut Frame, app: &App, area: Rect) {
         .entries
         .iter()
         .flat_map(|entry| {
-            let role_color = if entry.role_label == "You" { C_USER } else { C_AI };
+            let role_color = if entry.role_label == "You" {
+                C_USER
+            } else {
+                C_AI
+            };
 
             // ── Role header ───────────────────────────────────────────────────
             let spinner_frame = {
@@ -426,10 +485,7 @@ fn render_chat(frame: &mut Frame, app: &App, area: Rect) {
                         format!("{} ", entry.role_label),
                         Style::default().fg(role_color).add_modifier(Modifier::BOLD),
                     ),
-                    Span::styled(
-                        SPINNER_FRAMES[spinner_frame],
-                        Style::default().fg(C_AI),
-                    ),
+                    Span::styled(SPINNER_FRAMES[spinner_frame], Style::default().fg(C_AI)),
                 ])
             } else {
                 Line::from(vec![Span::styled(
@@ -474,10 +530,17 @@ fn render_chat(frame: &mut Frame, app: &App, area: Rect) {
     let total_lines: u16 = if width == 0 {
         text_lines.len() as u16
     } else {
-        text_lines.iter().map(|l| {
-            let w = l.width() as u16;
-            if w == 0 { 1 } else { (w + width as u16 - 1) / (width as u16) }
-        }).sum()
+        text_lines
+            .iter()
+            .map(|l| {
+                let w = l.width() as u16;
+                if w == 0 {
+                    1
+                } else {
+                    (w + width as u16 - 1) / (width as u16)
+                }
+            })
+            .sum()
     };
 
     let max_scroll = total_lines.saturating_sub(area.height);
@@ -502,7 +565,10 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
         Span::styled("│ ", Style::default().fg(C_DIM)),
         Span::styled(&app.status_label, Style::default().fg(C_DIM)),
         if app.streaming {
-            Span::styled("  ⟳ generating…", Style::default().fg(C_AI).add_modifier(Modifier::ITALIC))
+            Span::styled(
+                "  ⟳ generating…",
+                Style::default().fg(C_AI).add_modifier(Modifier::ITALIC),
+            )
         } else {
             Span::raw("")
         },
@@ -519,8 +585,7 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
         .constraints([Constraint::Min(1), Constraint::Length(right_width)])
         .split(area);
 
-    let left_para = Paragraph::new(left)
-        .style(Style::default().bg(Color::Black));
+    let left_para = Paragraph::new(left).style(Style::default().bg(Color::Black));
     frame.render_widget(left_para, status_chunks[0]);
 
     // Only show right hints if the terminal is wide enough.
@@ -551,7 +616,7 @@ fn render_input(frame: &mut Frame, app: &App, area: Rect) {
 
     let text_area_height = area.height.saturating_sub(2);
     let cursor_line = app.input[..app.input_cursor].matches('\n').count() as u16;
-    
+
     // Scroll input box if cursor is below visible area
     let scroll_y = if cursor_line >= text_area_height {
         cursor_line - text_area_height + 1
@@ -571,11 +636,13 @@ fn render_input(frame: &mut Frame, app: &App, area: Rect) {
         let text_before = &app.input[..app.input_cursor];
         let last_nl = text_before.rfind('\n').map(|i| i + 1).unwrap_or(0);
         let cursor_col = app.input[last_nl..app.input_cursor].chars().count() as u16;
-        
+
         let inner_x = area.x + 1 + cursor_col;
         let inner_y = area.y + 1 + cursor_line.saturating_sub(scroll_y);
-        
-        if inner_x < area.x + area.width.saturating_sub(1) && inner_y < area.y + area.height.saturating_sub(1) {
+
+        if inner_x < area.x + area.width.saturating_sub(1)
+            && inner_y < area.y + area.height.saturating_sub(1)
+        {
             frame.set_cursor_position((inner_x, inner_y));
         }
     }
@@ -587,23 +654,25 @@ fn render_mention_popup(frame: &mut Frame, app: &App, input_area: Rect) {
     if let Some(ref state) = app.mention_state {
         let max_items = 8;
         let item_count = state.options.len().min(max_items) as u16;
-        
+
         let width = 40;
         let height = item_count + 2; // +2 for borders
-        
+
         // Position it right above the input cursor
         let cursor_line = app.input[..app.input_cursor].matches('\n').count() as u16;
         let text_before = &app.input[..app.input_cursor];
         let last_nl = text_before.rfind('\n').map(|i| i + 1).unwrap_or(0);
         let cursor_col = app.input[last_nl..app.input_cursor].chars().count() as u16;
-        
-        let x = (input_area.x + 1 + cursor_col).min(input_area.x + input_area.width.saturating_sub(width));
-        
+
+        let x = (input_area.x + 1 + cursor_col)
+            .min(input_area.x + input_area.width.saturating_sub(width));
+
         // Calculate Y so it sits just above the current cursor line
-        let y = input_area.y
+        let y = input_area
+            .y
             .saturating_add(cursor_line)
             .saturating_sub(height);
-            
+
         let area = Rect {
             x,
             y,
@@ -614,16 +683,25 @@ fn render_mention_popup(frame: &mut Frame, app: &App, input_area: Rect) {
         frame.render_widget(Clear, area);
 
         let items: Vec<Line> = if state.options.is_empty() {
-            vec![Line::from(Span::styled("  No results found", Style::default().fg(C_DIM)))]
+            vec![Line::from(Span::styled(
+                "  No results found",
+                Style::default().fg(C_DIM),
+            ))]
         } else {
-            state.options.iter().enumerate().take(max_items).map(|(i, opt)| {
-                let (prefix, style) = if i == state.selected_idx {
-                    ("> ", Style::default().fg(Color::Black).bg(C_ACCENT))
-                } else {
-                    ("  ", Style::default().fg(C_WHITE).bg(Color::Black))
-                };
-                Line::from(Span::styled(format!("{prefix}{opt}"), style))
-            }).collect()
+            state
+                .options
+                .iter()
+                .enumerate()
+                .take(max_items)
+                .map(|(i, opt)| {
+                    let (prefix, style) = if i == state.selected_idx {
+                        ("> ", Style::default().fg(Color::Black).bg(C_ACCENT))
+                    } else {
+                        ("  ", Style::default().fg(C_WHITE).bg(Color::Black))
+                    };
+                    Line::from(Span::styled(format!("{prefix}{opt}"), style))
+                })
+                .collect()
         };
 
         let block = Block::default()
@@ -631,7 +709,7 @@ fn render_mention_popup(frame: &mut Frame, app: &App, input_area: Rect) {
             .border_style(Style::default().fg(C_ACCENT))
             .title(format!(" Mentions (@{}) ", state.query))
             .style(Style::default().bg(Color::Black));
-            
+
         let paragraph = Paragraph::new(items).block(block);
         frame.render_widget(paragraph, area);
     }
@@ -643,36 +721,52 @@ fn render_slash_popup(frame: &mut Frame, app: &App, input_area: Rect) {
     if let Some(ref state) = app.slash_state {
         let max_items = 8;
         let item_count = state.options.len().min(max_items) as u16;
-        
+
         let width = 30;
         let height = item_count + 2; // +2 for borders
-        
+
         let cursor_line = app.input[..app.input_cursor].matches('\n').count() as u16;
         let text_before = &app.input[..app.input_cursor];
         let last_nl = text_before.rfind('\n').map(|i| i + 1).unwrap_or(0);
         let cursor_col = app.input[last_nl..app.input_cursor].chars().count() as u16;
-        
-        let x = (input_area.x + 1 + cursor_col).min(input_area.x + input_area.width.saturating_sub(width));
-        
-        let y = input_area.y
+
+        let x = (input_area.x + 1 + cursor_col)
+            .min(input_area.x + input_area.width.saturating_sub(width));
+
+        let y = input_area
+            .y
             .saturating_add(cursor_line)
             .saturating_sub(height);
-            
-        let area = Rect { x, y, width, height };
+
+        let area = Rect {
+            x,
+            y,
+            width,
+            height,
+        };
 
         frame.render_widget(Clear, area);
 
         let items: Vec<Line> = if state.options.is_empty() {
-            vec![Line::from(Span::styled("  No commands found", Style::default().fg(C_DIM)))]
+            vec![Line::from(Span::styled(
+                "  No commands found",
+                Style::default().fg(C_DIM),
+            ))]
         } else {
-            state.options.iter().enumerate().take(max_items).map(|(i, opt)| {
-                let (prefix, style) = if i == state.selected_idx {
-                    ("> ", Style::default().fg(Color::Black).bg(C_ACCENT))
-                } else {
-                    ("  ", Style::default().fg(C_WHITE).bg(Color::Black))
-                };
-                Line::from(Span::styled(format!("{prefix}/{opt}"), style))
-            }).collect()
+            state
+                .options
+                .iter()
+                .enumerate()
+                .take(max_items)
+                .map(|(i, opt)| {
+                    let (prefix, style) = if i == state.selected_idx {
+                        ("> ", Style::default().fg(Color::Black).bg(C_ACCENT))
+                    } else {
+                        ("  ", Style::default().fg(C_WHITE).bg(Color::Black))
+                    };
+                    Line::from(Span::styled(format!("{prefix}/{opt}"), style))
+                })
+                .collect()
         };
 
         let block = Block::default()
@@ -680,7 +774,7 @@ fn render_slash_popup(frame: &mut Frame, app: &App, input_area: Rect) {
             .border_style(Style::default().fg(C_ACCENT))
             .title(" Commands ")
             .style(Style::default().bg(Color::Black));
-            
+
         let paragraph = Paragraph::new(items).block(block);
         frame.render_widget(paragraph, area);
     }
@@ -695,21 +789,35 @@ fn render_session_history(frame: &mut Frame, app: &App, area: Rect) {
             .borders(Borders::ALL)
             .border_style(Style::default().fg(C_ACCENT))
             .style(Style::default().bg(Color::Black));
-            
+
         let popup_area = centered_rect(60, 50, area);
         frame.render_widget(Clear, popup_area);
 
         let items: Vec<Line> = if state.options.is_empty() {
-            vec![Line::from(Span::styled("  No saved sessions found", Style::default().fg(C_DIM)))]
+            vec![Line::from(Span::styled(
+                "  No saved sessions found",
+                Style::default().fg(C_DIM),
+            ))]
         } else {
-            state.options.iter().enumerate().map(|(i, (_path, name))| {
-                let (prefix, style) = if i == state.selected_idx {
-                    ("> ", Style::default().fg(Color::Black).bg(C_ACCENT).add_modifier(Modifier::BOLD))
-                } else {
-                    ("  ", Style::default().fg(C_WHITE).bg(Color::Black))
-                };
-                Line::from(Span::styled(format!("{prefix}{name}"), style))
-            }).collect()
+            state
+                .options
+                .iter()
+                .enumerate()
+                .map(|(i, (_path, name))| {
+                    let (prefix, style) = if i == state.selected_idx {
+                        (
+                            "> ",
+                            Style::default()
+                                .fg(Color::Black)
+                                .bg(C_ACCENT)
+                                .add_modifier(Modifier::BOLD),
+                        )
+                    } else {
+                        ("  ", Style::default().fg(C_WHITE).bg(Color::Black))
+                    };
+                    Line::from(Span::styled(format!("{prefix}{name}"), style))
+                })
+                .collect()
         };
 
         let list = Paragraph::new(items).block(block);
@@ -776,7 +884,10 @@ fn render_provider_menu(frame: &mut Frame, app: &App, area: Rect) {
     for (i, opt) in app.provider_options.iter().enumerate() {
         let selected = i == app.selected_provider_idx;
         let (prefix, style) = if selected {
-            (" ▶ ", Style::default().fg(C_ACCENT).add_modifier(Modifier::BOLD))
+            (
+                " ▶ ",
+                Style::default().fg(C_ACCENT).add_modifier(Modifier::BOLD),
+            )
         } else {
             ("   ", Style::default().fg(C_WHITE))
         };
@@ -823,7 +934,10 @@ fn render_model_menu(frame: &mut Frame, app: &App, area: Rect) {
         for (i, model) in app.model_options.iter().enumerate() {
             let selected = i == app.selected_model_idx;
             let (prefix, style) = if selected {
-                (" ▶ ", Style::default().fg(C_ACCENT).add_modifier(Modifier::BOLD))
+                (
+                    " ▶ ",
+                    Style::default().fg(C_ACCENT).add_modifier(Modifier::BOLD),
+                )
             } else {
                 ("   ", Style::default().fg(C_WHITE))
             };
@@ -858,10 +972,7 @@ fn centered_rect(width: u16, height: u16, area: Rect) -> Rect {
 /// Build a two-column key/description hint line.
 fn hint_line(key: &str, description: &str) -> Line<'static> {
     Line::from(vec![
-        Span::styled(
-            format!("  {:<22}", key),
-            Style::default().fg(C_ACCENT),
-        ),
+        Span::styled(format!("  {:<22}", key), Style::default().fg(C_ACCENT)),
         Span::styled(description.to_string(), Style::default().fg(C_WHITE)),
     ])
 }

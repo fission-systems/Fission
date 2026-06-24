@@ -513,22 +513,20 @@ pub(crate) fn eliminate_dead_local_clobber_assigns(func: &mut HirFunction) -> bo
         .iter()
         .map(|b| (b.name.as_str(), &b.ty))
         .collect();
-    let param_names: HashSet<&str> = func
-        .params
-        .iter()
-        .map(|b| b.name.as_str())
-        .collect();
+    let param_names: HashSet<&str> = func.params.iter().map(|b| b.name.as_str()).collect();
     // Stack-backed locals (StackOffset / DerivedFromStackOffset origin) must
     // NEVER be silently removed even when their name is never read, because the
     // write itself may be observable through aliased pointers.
     let stack_backed_names: HashSet<&str> = func
         .locals
         .iter()
-        .filter(|b| matches!(
-            b.origin,
-            Some(NirBindingOrigin::StackOffset(_))
-                | Some(NirBindingOrigin::DerivedFromStackOffset(_))
-        ))
+        .filter(|b| {
+            matches!(
+                b.origin,
+                Some(NirBindingOrigin::StackOffset(_))
+                    | Some(NirBindingOrigin::DerivedFromStackOffset(_))
+            )
+        })
         .map(|b| b.name.as_str())
         .collect();
     eliminate_dead_local_clobber_assigns_in_stmts(
@@ -554,21 +552,51 @@ fn eliminate_dead_local_clobber_assigns_in_stmts(
             | HirStmt::While { body, .. }
             | HirStmt::DoWhile { body, .. }
             | HirStmt::For { body, .. } => {
-                eliminate_dead_local_clobber_assigns_in_stmts(body, param_names, local_types, stack_backed_names, use_map);
+                eliminate_dead_local_clobber_assigns_in_stmts(
+                    body,
+                    param_names,
+                    local_types,
+                    stack_backed_names,
+                    use_map,
+                );
             }
             HirStmt::If {
                 then_body,
                 else_body,
                 ..
             } => {
-                eliminate_dead_local_clobber_assigns_in_stmts(then_body, param_names, local_types, stack_backed_names, use_map);
-                eliminate_dead_local_clobber_assigns_in_stmts(else_body, param_names, local_types, stack_backed_names, use_map);
+                eliminate_dead_local_clobber_assigns_in_stmts(
+                    then_body,
+                    param_names,
+                    local_types,
+                    stack_backed_names,
+                    use_map,
+                );
+                eliminate_dead_local_clobber_assigns_in_stmts(
+                    else_body,
+                    param_names,
+                    local_types,
+                    stack_backed_names,
+                    use_map,
+                );
             }
             HirStmt::Switch { cases, default, .. } => {
                 for case in cases {
-                    eliminate_dead_local_clobber_assigns_in_stmts(&mut case.body, param_names, local_types, stack_backed_names, use_map);
+                    eliminate_dead_local_clobber_assigns_in_stmts(
+                        &mut case.body,
+                        param_names,
+                        local_types,
+                        stack_backed_names,
+                        use_map,
+                    );
                 }
-                eliminate_dead_local_clobber_assigns_in_stmts(default, param_names, local_types, stack_backed_names, use_map);
+                eliminate_dead_local_clobber_assigns_in_stmts(
+                    default,
+                    param_names,
+                    local_types,
+                    stack_backed_names,
+                    use_map,
+                );
             }
             _ => {}
         }
@@ -617,7 +645,6 @@ fn eliminate_dead_local_clobber_assigns_in_stmts(
     }
     changed
 }
-
 
 pub(crate) fn prune_unused_temp_bindings(func: &mut HirFunction) -> bool {
     let mut changed = false;
@@ -718,9 +745,12 @@ pub(crate) fn prune_unused_dead_local_bindings(func: &mut HirFunction) -> bool {
     changed
 }
 
-
 fn is_rescue_candidate_name(name: &str) -> bool {
-    if name.starts_with("iVar") || name.starts_with("uVar") || name.starts_with("bVar") || name.starts_with("xVar") {
+    if name.starts_with("iVar")
+        || name.starts_with("uVar")
+        || name.starts_with("bVar")
+        || name.starts_with("xVar")
+    {
         let suffix = &name[4..];
         !suffix.is_empty() && suffix.chars().all(|c| c.is_ascii_digit())
     } else if name.starts_with("tmp_") {
@@ -773,7 +803,9 @@ pub(crate) fn rescue_undeclared_bindings(func: &mut HirFunction) -> bool {
 
 fn collect_all_body_names_expr(expr: &HirExpr, out: &mut HashSet<String>) {
     match expr {
-        HirExpr::Var(name) => { out.insert(name.clone()); }
+        HirExpr::Var(name) => {
+            out.insert(name.clone());
+        }
         HirExpr::Const(_, _) | HirExpr::AddressOfGlobal(_) => {}
         HirExpr::Unary { expr, .. } | HirExpr::Cast { expr, .. } => {
             collect_all_body_names_expr(expr, out);
@@ -788,7 +820,12 @@ fn collect_all_body_names_expr(expr: &HirExpr, out: &mut HashSet<String>) {
                 collect_all_body_names_expr(arg, out);
             }
         }
-        HirExpr::Select { cond, then_expr, else_expr, .. } => {
+        HirExpr::Select {
+            cond,
+            then_expr,
+            else_expr,
+            ..
+        } => {
             collect_all_body_names_expr(cond, out);
             collect_all_body_names_expr(then_expr, out);
             collect_all_body_names_expr(else_expr, out);
@@ -814,7 +851,9 @@ fn collect_all_body_names_expr(expr: &HirExpr, out: &mut HashSet<String>) {
 
 fn collect_all_body_names_lvalue(lhs: &HirLValue, out: &mut HashSet<String>) {
     match lhs {
-        HirLValue::Var(name) => { out.insert(name.clone()); }
+        HirLValue::Var(name) => {
+            out.insert(name.clone());
+        }
         HirLValue::Deref { ptr, .. } => collect_all_body_names_expr(ptr, out),
         HirLValue::Index { base, index, .. } => {
             collect_all_body_names_expr(base, out);
@@ -843,7 +882,12 @@ fn collect_all_body_names_stmt(stmt: &HirStmt, out: &mut HashSet<String>) {
             collect_all_body_names_stmts(body, out);
             collect_all_body_names_expr(cond, out);
         }
-        HirStmt::For { init, cond, update, body } => {
+        HirStmt::For {
+            init,
+            cond,
+            update,
+            body,
+        } => {
             if let Some(init) = init {
                 collect_all_body_names_stmt(init, out);
             }
@@ -855,12 +899,20 @@ fn collect_all_body_names_stmt(stmt: &HirStmt, out: &mut HashSet<String>) {
             }
             collect_all_body_names_stmts(body, out);
         }
-        HirStmt::If { cond, then_body, else_body } => {
+        HirStmt::If {
+            cond,
+            then_body,
+            else_body,
+        } => {
             collect_all_body_names_expr(cond, out);
             collect_all_body_names_stmts(then_body, out);
             collect_all_body_names_stmts(else_body, out);
         }
-        HirStmt::Switch { expr, cases, default } => {
+        HirStmt::Switch {
+            expr,
+            cases,
+            default,
+        } => {
             collect_all_body_names_expr(expr, out);
             for case in cases {
                 collect_all_body_names_stmts(&case.body, out);
@@ -901,7 +953,10 @@ fn infer_type_from_stmt(stmt: &HirStmt, name: &str) -> Option<NirType> {
         } if lhs_name == name => {
             let ty = expr_type(rhs);
             Some(if ty == NirType::Unknown {
-                NirType::Int { bits: 32, signed: true }
+                NirType::Int {
+                    bits: 32,
+                    signed: true,
+                }
             } else {
                 ty
             })
@@ -911,10 +966,12 @@ fn infer_type_from_stmt(stmt: &HirStmt, name: &str) -> Option<NirType> {
         }
         HirStmt::DoWhile { body, .. } => infer_type_from_first_assign_stmts(body, name),
         HirStmt::For { body, .. } => infer_type_from_first_assign_stmts(body, name),
-        HirStmt::If { then_body, else_body, .. } => {
-            infer_type_from_first_assign_stmts(then_body, name)
-                .or_else(|| infer_type_from_first_assign_stmts(else_body, name))
-        }
+        HirStmt::If {
+            then_body,
+            else_body,
+            ..
+        } => infer_type_from_first_assign_stmts(then_body, name)
+            .or_else(|| infer_type_from_first_assign_stmts(else_body, name)),
         HirStmt::Switch { cases, default, .. } => {
             for case in cases {
                 if let Some(ty) = infer_type_from_first_assign_stmts(&case.body, name) {
@@ -953,18 +1010,12 @@ pub(crate) fn elide_unused_popcount_assigns(func: &mut HirFunction) -> bool {
     changed
 }
 
-fn elide_popcount_round(
-    func: &mut HirFunction,
-    use_map: &DefUseMap,
-) -> bool {
+fn elide_popcount_round(func: &mut HirFunction, use_map: &DefUseMap) -> bool {
     let mut changed = false;
     elide_popcount_in_stmts(&mut func.body, use_map, &mut changed);
     if changed {
-        let remaining_names: HashSet<String> = func
-            .body
-            .iter()
-            .flat_map(collect_assigned_names)
-            .collect();
+        let remaining_names: HashSet<String> =
+            func.body.iter().flat_map(collect_assigned_names).collect();
         func.locals.retain(|b| {
             remaining_names.contains(&b.name)
                 || use_map.use_count.get(&b.name).copied().unwrap_or(0) > 0
@@ -1021,11 +1072,7 @@ fn collect_assigned_names(stmt: &HirStmt) -> Vec<String> {
     names
 }
 
-fn elide_popcount_in_stmts(
-    stmts: &mut Vec<HirStmt>,
-    use_map: &DefUseMap,
-    changed: &mut bool,
-) {
+fn elide_popcount_in_stmts(stmts: &mut Vec<HirStmt>, use_map: &DefUseMap, changed: &mut bool) {
     for stmt in stmts.iter_mut() {
         match stmt {
             HirStmt::Block(body) => elide_popcount_in_stmts(body, use_map, changed),
@@ -1087,7 +1134,11 @@ fn has_popcount(stmt: &HirStmt) -> bool {
         HirStmt::Assign { rhs, .. } => rhs_contains_popcount(rhs),
         HirStmt::Expr(expr) | HirStmt::Return(Some(expr)) => rhs_contains_popcount(expr),
         HirStmt::Block(body) => body.iter().any(has_popcount),
-        HirStmt::If { cond, then_body, else_body } => {
+        HirStmt::If {
+            cond,
+            then_body,
+            else_body,
+        } => {
             rhs_contains_popcount(cond)
                 || then_body.iter().any(has_popcount)
                 || else_body.iter().any(has_popcount)
@@ -1095,13 +1146,22 @@ fn has_popcount(stmt: &HirStmt) -> bool {
         HirStmt::While { cond, body } | HirStmt::DoWhile { cond, body } => {
             rhs_contains_popcount(cond) || body.iter().any(has_popcount)
         }
-        HirStmt::For { init, cond, update, body } => {
+        HirStmt::For {
+            init,
+            cond,
+            update,
+            body,
+        } => {
             init.as_deref().is_some_and(has_popcount)
                 || cond.as_ref().is_some_and(rhs_contains_popcount)
                 || update.as_deref().is_some_and(has_popcount)
                 || body.iter().any(has_popcount)
         }
-        HirStmt::Switch { expr, cases, default } => {
+        HirStmt::Switch {
+            expr,
+            cases,
+            default,
+        } => {
             rhs_contains_popcount(expr)
                 || cases.iter().any(|c| c.body.iter().any(has_popcount))
                 || default.iter().any(has_popcount)

@@ -80,7 +80,6 @@ pub(crate) fn simplify_double_add(expr: &HirExpr) -> Option<HirExpr> {
     }
 }
 
-
 /// Factor common multiplicand: `x + x*c` -> `x*(c+1)` and `x*c + x` -> `x*(c+1)`.
 pub(crate) fn simplify_factor_common_mul(expr: &HirExpr) -> Option<HirExpr> {
     let HirExpr::Binary {
@@ -88,32 +87,34 @@ pub(crate) fn simplify_factor_common_mul(expr: &HirExpr) -> Option<HirExpr> {
         lhs,
         rhs,
         ty,
-    } = expr else {
+    } = expr
+    else {
         return None;
     };
 
     // Helper: if `term` matches `common * const`, return (common, const)
-    let match_mul_const = |term: &HirExpr, common: &HirExpr| -> Option<(Box<HirExpr>, i64, NirType)> {
-        if let HirExpr::Binary {
-            op: HirBinaryOp::Mul,
-            lhs: mul_lhs,
-            rhs: mul_rhs,
-            ..
-        } = term
-        {
-            if mul_lhs.as_ref() == common {
-                if let HirExpr::Const(c, cty) = mul_rhs.as_ref() {
-                    return Some((mul_lhs.clone(), *c, cty.clone()));
+    let match_mul_const =
+        |term: &HirExpr, common: &HirExpr| -> Option<(Box<HirExpr>, i64, NirType)> {
+            if let HirExpr::Binary {
+                op: HirBinaryOp::Mul,
+                lhs: mul_lhs,
+                rhs: mul_rhs,
+                ..
+            } = term
+            {
+                if mul_lhs.as_ref() == common {
+                    if let HirExpr::Const(c, cty) = mul_rhs.as_ref() {
+                        return Some((mul_lhs.clone(), *c, cty.clone()));
+                    }
+                }
+                if mul_rhs.as_ref() == common {
+                    if let HirExpr::Const(c, cty) = mul_lhs.as_ref() {
+                        return Some((mul_rhs.clone(), *c, cty.clone()));
+                    }
                 }
             }
-            if mul_rhs.as_ref() == common {
-                if let HirExpr::Const(c, cty) = mul_lhs.as_ref() {
-                    return Some((mul_rhs.clone(), *c, cty.clone()));
-                }
-            }
-        }
-        None
-    };
+            None
+        };
 
     // rhs is lhs * c
     if let Some((common, c, cty)) = match_mul_const(rhs, lhs) {
@@ -285,8 +286,16 @@ pub(crate) fn simplify_collect_mul_terms(expr: &HirExpr) -> Option<HirExpr> {
             let (factor_rhs, c_rhs, _) = extract_factor(rhs)?;
 
             if factor_lhs == factor_rhs {
-                if let HirExpr::Binary { op: HirBinaryOp::Mul, .. } = lhs.as_ref() {
-                } else if let HirExpr::Binary { op: HirBinaryOp::Mul, .. } = rhs.as_ref() {
+                if let HirExpr::Binary {
+                    op: HirBinaryOp::Mul,
+                    ..
+                } = lhs.as_ref()
+                {
+                } else if let HirExpr::Binary {
+                    op: HirBinaryOp::Mul,
+                    ..
+                } = rhs.as_ref()
+                {
                 } else {
                     return None;
                 }
@@ -439,4 +448,3 @@ mod term_order_tests {
         );
     }
 }
-

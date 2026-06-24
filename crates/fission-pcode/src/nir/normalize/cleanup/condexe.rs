@@ -1,6 +1,6 @@
 use super::super::*;
-use super::utils::stmt_assigns_var;
 use super::utils::expr_has_side_effects;
+use super::utils::stmt_assigns_var;
 use std::collections::HashSet;
 
 /// Simplifies a series of conditionally executed statements (Ghidra's ActionConditionalExe equivalent).
@@ -8,45 +8,54 @@ use std::collections::HashSet;
 /// to fold nested redundant If statement hierarchies.
 pub(crate) fn apply_condexe_folding_pass(stmts: &mut Vec<HirStmt>) -> bool {
     let mut changed = false;
-    
+
     // Run fixed-point iteration of sequential and path-sensitive folding passes
     for _ in 0..10 {
         let mut pass_changed = false;
-        
+
         // 1. Sibling sequential If folding
         pass_changed |= fold_sequential_siblings(stmts);
-        
+
         // 2. Path-sensitive nested If folding
         let mut true_conds = Vec::new();
         let mut false_conds = Vec::new();
         pass_changed |= fold_conditions(stmts, &mut true_conds, &mut false_conds);
-        
+
         if !pass_changed {
             break;
         }
         changed = true;
     }
-    
+
     changed
 }
 
 fn fold_sequential_siblings(stmts: &mut Vec<HirStmt>) -> bool {
     let mut changed = false;
     let mut idx = 0;
-    
+
     while idx + 1 < stmts.len() {
         let is_foldable = {
-            if let (Some(HirStmt::If { cond: cond1, then_body: then1, else_body: else1 }),
-                    Some(HirStmt::If { cond: cond2, then_body: then2, else_body: else2 })) = 
-                (stmts.get(idx), stmts.get(idx + 1)) 
+            if let (
+                Some(HirStmt::If {
+                    cond: cond1,
+                    then_body: then1,
+                    else_body: else1,
+                }),
+                Some(HirStmt::If {
+                    cond: cond2,
+                    then_body: then2,
+                    else_body: else2,
+                }),
+            ) = (stmts.get(idx), stmts.get(idx + 1))
             {
                 if cond1 == cond2 && else1.is_empty() && else2.is_empty() {
                     // Check if any variable in cond1 is modified inside then1
                     let mut cond_vars = HashSet::new();
                     get_variables_in_expr(cond1, &mut cond_vars);
-                    let modifies_cond_var = cond_vars.iter().any(|var| {
-                        then1.iter().any(|stmt| stmt_assigns_var(stmt, var))
-                    });
+                    let modifies_cond_var = cond_vars
+                        .iter()
+                        .any(|var| then1.iter().any(|stmt| stmt_assigns_var(stmt, var)));
                     !modifies_cond_var
                 } else {
                     false
@@ -57,8 +66,16 @@ fn fold_sequential_siblings(stmts: &mut Vec<HirStmt>) -> bool {
         };
 
         if is_foldable {
-            if let HirStmt::If { then_body: mut then1, cond: cond1, .. } = stmts.remove(idx) {
-                if let HirStmt::If { then_body: then2, .. } = stmts.remove(idx) {
+            if let HirStmt::If {
+                then_body: mut then1,
+                cond: cond1,
+                ..
+            } = stmts.remove(idx)
+            {
+                if let HirStmt::If {
+                    then_body: then2, ..
+                } = stmts.remove(idx)
+                {
                     then1.extend(then2);
                     let merged_if = HirStmt::If {
                         cond: cond1,
@@ -74,7 +91,7 @@ fn fold_sequential_siblings(stmts: &mut Vec<HirStmt>) -> bool {
         }
         idx += 1;
     }
-    
+
     // Also recurse into all nested block/If structures
     for stmt in stmts.iter_mut() {
         match stmt {
@@ -84,7 +101,11 @@ fn fold_sequential_siblings(stmts: &mut Vec<HirStmt>) -> bool {
             | HirStmt::For { body, .. } => {
                 changed |= fold_sequential_siblings(body);
             }
-            HirStmt::If { then_body, else_body, .. } => {
+            HirStmt::If {
+                then_body,
+                else_body,
+                ..
+            } => {
                 changed |= fold_sequential_siblings(then_body);
                 changed |= fold_sequential_siblings(else_body);
             }
@@ -97,7 +118,7 @@ fn fold_sequential_siblings(stmts: &mut Vec<HirStmt>) -> bool {
             _ => {}
         }
     }
-    
+
     changed
 }
 
@@ -119,7 +140,7 @@ fn fold_conditions(
 
         if is_if {
             let cond = cond_opt.unwrap();
-            
+
             // Case 1: Redundant If statement where condition is proven True
             if true_conds.contains(&cond) {
                 if let HirStmt::If { then_body, .. } = stmts.remove(idx) {
@@ -142,7 +163,12 @@ fn fold_conditions(
             }
             // Case 3: Condition not proven, recurse with path context
             else {
-                if let HirStmt::If { cond, then_body, else_body } = &mut stmts[idx] {
+                if let HirStmt::If {
+                    cond,
+                    then_body,
+                    else_body,
+                } = &mut stmts[idx]
+                {
                     // Inside then_body: cond is True
                     let mut nested_true = true_conds.clone();
                     let mut nested_false = false_conds.clone();
@@ -174,7 +200,9 @@ fn fold_conditions(
                     }
                     changed |= fold_conditions(body, &mut nested_true, &mut nested_false);
                 }
-                HirStmt::For { init, update, body, .. } => {
+                HirStmt::For {
+                    init, update, body, ..
+                } => {
                     let mut assigned = HashSet::new();
                     if let Some(i) = init {
                         get_assigned_vars_in_stmt(i, &mut assigned);
@@ -196,7 +224,8 @@ fn fold_conditions(
                     for case in cases {
                         let mut nested_true = true_conds.clone();
                         let mut nested_false = false_conds.clone();
-                        changed |= fold_conditions(&mut case.body, &mut nested_true, &mut nested_false);
+                        changed |=
+                            fold_conditions(&mut case.body, &mut nested_true, &mut nested_false);
                     }
                     let mut nested_true = true_conds.clone();
                     let mut nested_false = false_conds.clone();
@@ -234,7 +263,12 @@ fn get_variables_in_expr(expr: &HirExpr, vars: &mut HashSet<String>) {
             get_variables_in_expr(lhs, vars);
             get_variables_in_expr(rhs, vars);
         }
-        HirExpr::Select { cond, then_expr, else_expr, .. } => {
+        HirExpr::Select {
+            cond,
+            then_expr,
+            else_expr,
+            ..
+        } => {
             get_variables_in_expr(cond, vars);
             get_variables_in_expr(then_expr, vars);
             get_variables_in_expr(else_expr, vars);
@@ -276,7 +310,11 @@ fn get_assigned_vars_in_stmt(stmt: &HirStmt, vars: &mut HashSet<String>) {
                 get_assigned_vars_in_stmt(s, vars);
             }
         }
-        HirStmt::If { then_body, else_body, .. } => {
+        HirStmt::If {
+            then_body,
+            else_body,
+            ..
+        } => {
             for s in then_body {
                 get_assigned_vars_in_stmt(s, vars);
             }
@@ -393,9 +431,7 @@ fn iblock_phi_pass(stmts: &mut Vec<HirStmt>) -> bool {
         let diamond = extract_diamond_phi(&stmts[idx]);
         if let Some((cond, lhs_var, val_true, val_false)) = diamond {
             // Check if lhs_var is used in any subsequent statement and can be replaced
-            let lhs_used_below = stmts[idx + 1..]
-                .iter()
-                .any(|s| stmt_uses_var(s, &lhs_var));
+            let lhs_used_below = stmts[idx + 1..].iter().any(|s| stmt_uses_var(s, &lhs_var));
 
             if lhs_used_below {
                 let select_expr = HirExpr::Select {
@@ -457,12 +493,7 @@ fn extract_diamond_phi(stmt: &HirStmt) -> Option<(HirExpr, String, HirExpr, HirE
         return None;
     }
 
-    Some((
-        cond.clone(),
-        then_lhs,
-        then_rhs.clone(),
-        else_rhs.clone(),
-    ))
+    Some((cond.clone(), then_lhs, then_rhs.clone(), else_rhs.clone()))
 }
 
 /// Extracts `(var_name, rhs_expr)` from a simple `var = expr` assignment.
@@ -483,7 +514,11 @@ fn stmt_uses_var(stmt: &HirStmt, var_name: &str) -> bool {
         HirStmt::Assign { rhs, .. } => expr_uses_var(rhs, var_name),
         HirStmt::Return(Some(expr)) => expr_uses_var(expr, var_name),
         HirStmt::Return(None) => false,
-        HirStmt::If { cond, then_body, else_body } => {
+        HirStmt::If {
+            cond,
+            then_body,
+            else_body,
+        } => {
             expr_uses_var(cond, var_name)
                 || then_body.iter().any(|s| stmt_uses_var(s, var_name))
                 || else_body.iter().any(|s| stmt_uses_var(s, var_name))
@@ -491,17 +526,30 @@ fn stmt_uses_var(stmt: &HirStmt, var_name: &str) -> bool {
         HirStmt::While { cond, body } | HirStmt::DoWhile { cond, body } => {
             expr_uses_var(cond, var_name) || body.iter().any(|s| stmt_uses_var(s, var_name))
         }
-        HirStmt::For { init, cond, update, body } => {
+        HirStmt::For {
+            init,
+            cond,
+            update,
+            body,
+        } => {
             init.as_ref().map_or(false, |s| stmt_uses_var(s, var_name))
                 || cond.as_ref().map_or(false, |e| expr_uses_var(e, var_name))
-                || update.as_ref().map_or(false, |s| stmt_uses_var(s, var_name))
+                || update
+                    .as_ref()
+                    .map_or(false, |s| stmt_uses_var(s, var_name))
                 || body.iter().any(|s| stmt_uses_var(s, var_name))
         }
         HirStmt::Block(body) => body.iter().any(|s| stmt_uses_var(s, var_name)),
         HirStmt::Expr(expr) => expr_uses_var(expr, var_name),
-        HirStmt::Switch { expr, cases, default } => {
+        HirStmt::Switch {
+            expr,
+            cases,
+            default,
+        } => {
             expr_uses_var(expr, var_name)
-                || cases.iter().any(|c| c.body.iter().any(|s| stmt_uses_var(s, var_name)))
+                || cases
+                    .iter()
+                    .any(|c| c.body.iter().any(|s| stmt_uses_var(s, var_name)))
                 || default.iter().any(|s| stmt_uses_var(s, var_name))
         }
         _ => false,
@@ -516,7 +564,12 @@ fn expr_uses_var(expr: &HirExpr, var_name: &str) -> bool {
         HirExpr::Binary { lhs, rhs, .. } => {
             expr_uses_var(lhs, var_name) || expr_uses_var(rhs, var_name)
         }
-        HirExpr::Select { cond, then_expr, else_expr, .. } => {
+        HirExpr::Select {
+            cond,
+            then_expr,
+            else_expr,
+            ..
+        } => {
             expr_uses_var(cond, var_name)
                 || expr_uses_var(then_expr, var_name)
                 || expr_uses_var(else_expr, var_name)
@@ -541,7 +594,11 @@ fn replace_var_in_stmt(stmt: &mut HirStmt, var_name: &str, replacement: &HirExpr
         HirStmt::Return(Some(expr)) => {
             replace_var_in_expr(expr, var_name, replacement);
         }
-        HirStmt::If { cond, then_body, else_body } => {
+        HirStmt::If {
+            cond,
+            then_body,
+            else_body,
+        } => {
             replace_var_in_expr(cond, var_name, replacement);
             for s in then_body.iter_mut() {
                 replace_var_in_stmt(s, var_name, replacement);
@@ -556,7 +613,12 @@ fn replace_var_in_stmt(stmt: &mut HirStmt, var_name: &str, replacement: &HirExpr
                 replace_var_in_stmt(s, var_name, replacement);
             }
         }
-        HirStmt::For { init, cond, update, body } => {
+        HirStmt::For {
+            init,
+            cond,
+            update,
+            body,
+        } => {
             if let Some(s) = init {
                 replace_var_in_stmt(s, var_name, replacement);
             }
@@ -578,7 +640,11 @@ fn replace_var_in_stmt(stmt: &mut HirStmt, var_name: &str, replacement: &HirExpr
         HirStmt::Expr(expr) => {
             replace_var_in_expr(expr, var_name, replacement);
         }
-        HirStmt::Switch { expr, cases, default } => {
+        HirStmt::Switch {
+            expr,
+            cases,
+            default,
+        } => {
             replace_var_in_expr(expr, var_name, replacement);
             for case in cases.iter_mut() {
                 for s in case.body.iter_mut() {
@@ -608,7 +674,12 @@ fn replace_var_in_expr(expr: &mut HirExpr, var_name: &str, replacement: &HirExpr
             replace_var_in_expr(lhs, var_name, replacement);
             replace_var_in_expr(rhs, var_name, replacement);
         }
-        HirExpr::Select { cond, then_expr, else_expr, .. } => {
+        HirExpr::Select {
+            cond,
+            then_expr,
+            else_expr,
+            ..
+        } => {
             replace_var_in_expr(cond, var_name, replacement);
             replace_var_in_expr(then_expr, var_name, replacement);
             replace_var_in_expr(else_expr, var_name, replacement);

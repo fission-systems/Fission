@@ -29,7 +29,10 @@ pub(crate) fn render_hir_function_with_global_decls(
         rendered.push_str(&format!("{} {};\n", print_type(&ty), name));
     }
     rendered.push('\n');
-    rendered.push_str(&print_hir_function_with_global_names(hir, &options.global_names));
+    rendered.push_str(&print_hir_function_with_global_names(
+        hir,
+        &options.global_names,
+    ));
     rendered
 }
 
@@ -914,16 +917,13 @@ fn collect_global_decls_from_expr(
 ) {
     match expr {
         HirExpr::Var(name) | HirExpr::AddressOfGlobal(name) if global_names.contains(name) => {
-            let ty = global_decl_types
-                .get(name)
-                .cloned()
-                .unwrap_or_else(|| {
-                    if matches!(expr, HirExpr::AddressOfGlobal(_)) {
-                        NirType::Unknown
-                    } else {
-                        infer_global_decl_expr_type(expr, binding_types)
-                    }
-                });
+            let ty = global_decl_types.get(name).cloned().unwrap_or_else(|| {
+                if matches!(expr, HirExpr::AddressOfGlobal(_)) {
+                    NirType::Unknown
+                } else {
+                    infer_global_decl_expr_type(expr, binding_types)
+                }
+            });
             merge_global_decl_type(decls, name, ty);
         }
         HirExpr::Cast { expr, .. }

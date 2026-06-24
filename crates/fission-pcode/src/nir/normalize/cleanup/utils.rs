@@ -249,7 +249,9 @@ pub(super) fn stmt_assigns_var(stmt: &HirStmt, name: &str) -> bool {
                 || else_body.iter().any(|s| stmt_assigns_var(s, name))
         }
         HirStmt::Switch { cases, default, .. } => {
-            cases.iter().any(|c| c.body.iter().any(|s| stmt_assigns_var(s, name)))
+            cases
+                .iter()
+                .any(|c| c.body.iter().any(|s| stmt_assigns_var(s, name)))
                 || default.iter().any(|s| stmt_assigns_var(s, name))
         }
         _ => false,
@@ -258,10 +260,7 @@ pub(super) fn stmt_assigns_var(stmt: &HirStmt, name: &str) -> bool {
 
 pub(super) fn stmt_may_bypass_following_stmts(stmt: &HirStmt) -> bool {
     match stmt {
-        HirStmt::Goto(_)
-        | HirStmt::Return(_)
-        | HirStmt::Break
-        | HirStmt::Continue => true,
+        HirStmt::Goto(_) | HirStmt::Return(_) | HirStmt::Break | HirStmt::Continue => true,
         HirStmt::Block(body)
         | HirStmt::While { body, .. }
         | HirStmt::DoWhile { body, .. }
@@ -275,7 +274,9 @@ pub(super) fn stmt_may_bypass_following_stmts(stmt: &HirStmt) -> bool {
                 || else_body.iter().any(stmt_may_bypass_following_stmts)
         }
         HirStmt::Switch { cases, default, .. } => {
-            cases.iter().any(|c| c.body.iter().any(stmt_may_bypass_following_stmts))
+            cases
+                .iter()
+                .any(|c| c.body.iter().any(stmt_may_bypass_following_stmts))
                 || default.iter().any(stmt_may_bypass_following_stmts)
         }
         _ => false,
@@ -298,7 +299,9 @@ pub(super) fn stmt_assigns_any_expr_var(stmt: &HirStmt, expr: &HirExpr) -> bool 
                 || else_body.iter().any(|s| stmt_assigns_any_expr_var(s, expr))
         }
         HirStmt::Switch { cases, default, .. } => {
-            cases.iter().any(|c| c.body.iter().any(|s| stmt_assigns_any_expr_var(s, expr)))
+            cases
+                .iter()
+                .any(|c| c.body.iter().any(|s| stmt_assigns_any_expr_var(s, expr)))
                 || default.iter().any(|s| stmt_assigns_any_expr_var(s, expr))
         }
         _ => false,
@@ -572,7 +575,10 @@ pub(super) fn collect_stmt_referenced_labels(stmt: &HirStmt, referenced: &mut Ha
     }
 }
 
-pub(super) fn collect_stmt_referenced_label_counts(stmt: &HirStmt, counts: &mut HashMap<String, usize>) {
+pub(super) fn collect_stmt_referenced_label_counts(
+    stmt: &HirStmt,
+    counts: &mut HashMap<String, usize>,
+) {
     match stmt {
         HirStmt::Block(body)
         | HirStmt::While { body, .. }

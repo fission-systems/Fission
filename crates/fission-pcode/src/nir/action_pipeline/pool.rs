@@ -1,8 +1,8 @@
 //! ActionPool: fixpoint rule sweep over HIR (Ghidra ActionPool analog).
 
+use super::super::types::{HirExpr, HirFunction, HirLValue, HirStmt};
 use super::concept::GhidraActionConcept;
 use super::pass::{Pass, PassCtx, PassOutcome};
-use super::super::types::{HirExpr, HirFunction, HirLValue, HirStmt};
 
 pub(crate) trait Rule {
     fn name(&self) -> &'static str;

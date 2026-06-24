@@ -361,12 +361,16 @@ pub(super) fn try_bind_runtime_state_at(
                 }
             }
         }
-        Err(first_err
-            .unwrap_or_else(|| anyhow!("decode bind failed at target_address=0x{target_address:x}")))
+        Err(first_err.unwrap_or_else(|| {
+            anyhow!("decode bind failed at target_address=0x{target_address:x}")
+        }))
     })();
 
     BIND_CACHE.with(|cache| {
-        cache.borrow_mut().insert(key, res.as_ref().map(|s| s.clone()).map_err(|e| e.to_string()));
+        cache.borrow_mut().insert(
+            key,
+            res.as_ref().map(|s| s.clone()).map_err(|e| e.to_string()),
+        );
     });
     res
 }
@@ -500,14 +504,14 @@ fn decoded_instruction_from_state(
     let flow_kind = flow_kind_for_state(&decoded);
     let references = decoded_references(address, length, flow_kind, &decoded.handles);
     let direct_target = first_flow_target(&decoded, address, length).or_else(|| {
-        references.iter().find_map(|reference| {
-            match reference.kind {
+        references
+            .iter()
+            .find_map(|reference| match reference.kind {
                 DecodedReferenceKind::BranchTarget | DecodedReferenceKind::CallTarget => {
                     Some(reference.target)
                 }
                 _ => None,
-            }
-        })
+            })
     });
     let pending_context_commits =
         apply_context_commits(compiled, &decoded, address, decoded.context_register)?;

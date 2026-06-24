@@ -45,25 +45,44 @@ fn compute_sizes(mask: u64) -> Option<(u32, u32)> {
 }
 
 /// Recursively scans statement trees to collect all local assignments and track multi-defined variables.
-fn collect_assignments(stmts: &[HirStmt], assigns: &mut Vec<AssignInfo>, multi_def: &mut HashSet<String>) {
+fn collect_assignments(
+    stmts: &[HirStmt],
+    assigns: &mut Vec<AssignInfo>,
+    multi_def: &mut HashSet<String>,
+) {
     for stmt in stmts {
         match stmt {
-            HirStmt::Assign { lhs: HirLValue::Var(name), rhs } => {
+            HirStmt::Assign {
+                lhs: HirLValue::Var(name),
+                rhs,
+            } => {
                 if assigns.iter().any(|a| &a.lhs == name) {
                     multi_def.insert(name.clone());
                 }
-                assigns.push(AssignInfo { lhs: name.clone(), rhs: rhs.clone() });
+                assigns.push(AssignInfo {
+                    lhs: name.clone(),
+                    rhs: rhs.clone(),
+                });
             }
-            HirStmt::Assign { lhs: HirLValue::Deref { ptr, .. }, rhs } => {
+            HirStmt::Assign {
+                lhs: HirLValue::Deref { ptr, .. },
+                rhs,
+            } => {
                 collect_expr_assigns(ptr, assigns, multi_def);
                 collect_expr_assigns(rhs, assigns, multi_def);
             }
-            HirStmt::Assign { lhs: HirLValue::Index { base, index, .. }, rhs } => {
+            HirStmt::Assign {
+                lhs: HirLValue::Index { base, index, .. },
+                rhs,
+            } => {
                 collect_expr_assigns(base, assigns, multi_def);
                 collect_expr_assigns(index, assigns, multi_def);
                 collect_expr_assigns(rhs, assigns, multi_def);
             }
-            HirStmt::Assign { lhs: HirLValue::FieldAccess { base, .. }, rhs } => {
+            HirStmt::Assign {
+                lhs: HirLValue::FieldAccess { base, .. },
+                rhs,
+            } => {
                 collect_expr_assigns(base, assigns, multi_def);
                 collect_expr_assigns(rhs, assigns, multi_def);
             }
@@ -76,7 +95,12 @@ fn collect_assignments(stmts: &[HirStmt], assigns: &mut Vec<AssignInfo>, multi_d
             HirStmt::Block(body) | HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
                 collect_assignments(body, assigns, multi_def);
             }
-            HirStmt::For { init, cond, update, body } => {
+            HirStmt::For {
+                init,
+                cond,
+                update,
+                body,
+            } => {
                 if let Some(i) = init {
                     collect_assignments(std::slice::from_ref(i.as_ref()), assigns, multi_def);
                 }
@@ -88,12 +112,20 @@ fn collect_assignments(stmts: &[HirStmt], assigns: &mut Vec<AssignInfo>, multi_d
                 }
                 collect_assignments(body, assigns, multi_def);
             }
-            HirStmt::If { cond, then_body, else_body } => {
+            HirStmt::If {
+                cond,
+                then_body,
+                else_body,
+            } => {
                 collect_expr_assigns(cond, assigns, multi_def);
                 collect_assignments(then_body, assigns, multi_def);
                 collect_assignments(else_body, assigns, multi_def);
             }
-            HirStmt::Switch { expr, cases, default } => {
+            HirStmt::Switch {
+                expr,
+                cases,
+                default,
+            } => {
                 collect_expr_assigns(expr, assigns, multi_def);
                 for case in cases {
                     collect_assignments(&case.body, assigns, multi_def);
@@ -105,10 +137,13 @@ fn collect_assignments(stmts: &[HirStmt], assigns: &mut Vec<AssignInfo>, multi_d
     }
 }
 
-fn collect_expr_assigns(_expr: &HirExpr, _assigns: &mut Vec<AssignInfo>, _multi_def: &mut HashSet<String>) {
+fn collect_expr_assigns(
+    _expr: &HirExpr,
+    _assigns: &mut Vec<AssignInfo>,
+    _multi_def: &mut HashSet<String>,
+) {
     // Inner expressions do not contain assignment statements in Fission's HIR.
 }
-
 
 #[derive(Debug, Clone)]
 struct UseInfo {
@@ -156,11 +191,22 @@ fn expr_contains_var(expr: &HirExpr, var_name: &str) -> bool {
         | HirExpr::PtrOffset { base: expr, .. }
         | HirExpr::AggregateCopy { src: expr, .. }
         | HirExpr::FieldAccess { base: expr, .. } => expr_contains_var(expr, var_name),
-        HirExpr::Binary { lhs, rhs, .. } => expr_contains_var(lhs, var_name) || expr_contains_var(rhs, var_name),
+        HirExpr::Binary { lhs, rhs, .. } => {
+            expr_contains_var(lhs, var_name) || expr_contains_var(rhs, var_name)
+        }
         HirExpr::Call { args, .. } => args.iter().any(|arg| expr_contains_var(arg, var_name)),
-        HirExpr::Index { base, index, .. } => expr_contains_var(base, var_name) || expr_contains_var(index, var_name),
-        HirExpr::Select { cond, then_expr, else_expr, .. } => {
-            expr_contains_var(cond, var_name) || expr_contains_var(then_expr, var_name) || expr_contains_var(else_expr, var_name)
+        HirExpr::Index { base, index, .. } => {
+            expr_contains_var(base, var_name) || expr_contains_var(index, var_name)
+        }
+        HirExpr::Select {
+            cond,
+            then_expr,
+            else_expr,
+            ..
+        } => {
+            expr_contains_var(cond, var_name)
+                || expr_contains_var(then_expr, var_name)
+                || expr_contains_var(else_expr, var_name)
         }
         _ => false,
     }
@@ -170,7 +216,10 @@ fn expr_contains_var(expr: &HirExpr, var_name: &str) -> bool {
 fn find_uses(stmts: &[HirStmt], var_name: &str, uses: &mut Vec<UseInfo>) {
     for stmt in stmts {
         match stmt {
-            HirStmt::Assign { lhs: HirLValue::Var(dest), rhs } => {
+            HirStmt::Assign {
+                lhs: HirLValue::Var(dest),
+                rhs,
+            } => {
                 analyze_expr_use(rhs, var_name, Some(dest), uses);
             }
             HirStmt::Assign { lhs, rhs } => {
@@ -184,11 +233,15 @@ fn find_uses(stmts: &[HirStmt], var_name: &str, uses: &mut Vec<UseInfo>) {
                 if expr_contains_var(expr, var_name) {
                     if let HirExpr::Var(name) = expr {
                         if name == var_name {
-                            uses.push(UseInfo { context: UseContext::Return });
+                            uses.push(UseInfo {
+                                context: UseContext::Return,
+                            });
                             continue;
                         }
                     }
-                    uses.push(UseInfo { context: UseContext::Incompatible });
+                    uses.push(UseInfo {
+                        context: UseContext::Incompatible,
+                    });
                 }
             }
             HirStmt::Return(None) => {}
@@ -203,7 +256,12 @@ fn find_uses(stmts: &[HirStmt], var_name: &str, uses: &mut Vec<UseInfo>) {
                 find_uses(body, var_name, uses);
                 analyze_expr_use(cond, var_name, None, uses);
             }
-            HirStmt::For { init, cond, update, body } => {
+            HirStmt::For {
+                init,
+                cond,
+                update,
+                body,
+            } => {
                 if let Some(i) = init {
                     find_uses(std::slice::from_ref(i.as_ref()), var_name, uses);
                 }
@@ -215,12 +273,20 @@ fn find_uses(stmts: &[HirStmt], var_name: &str, uses: &mut Vec<UseInfo>) {
                 }
                 find_uses(body, var_name, uses);
             }
-            HirStmt::If { cond, then_body, else_body } => {
+            HirStmt::If {
+                cond,
+                then_body,
+                else_body,
+            } => {
                 analyze_expr_use(cond, var_name, None, uses);
                 find_uses(then_body, var_name, uses);
                 find_uses(else_body, var_name, uses);
             }
-            HirStmt::Switch { expr, cases, default } => {
+            HirStmt::Switch {
+                expr,
+                cases,
+                default,
+            } => {
                 analyze_expr_use(expr, var_name, None, uses);
                 for case in cases {
                     find_uses(&case.body, var_name, uses);
@@ -245,27 +311,43 @@ fn analyze_expr_use(expr: &HirExpr, var_name: &str, dest: Option<&str>, uses: &m
                             op: HirBinaryOp::And,
                             other: HirExpr::Const(-1, NirType::Unknown),
                             dest: d.to_string(),
-                        }
+                        },
                     });
                 } else {
-                    uses.push(UseInfo { context: UseContext::Incompatible });
+                    uses.push(UseInfo {
+                        context: UseContext::Incompatible,
+                    });
                 }
             }
         }
         HirExpr::Binary { op, lhs, rhs, .. } => {
-            let left_var = match &**lhs { HirExpr::Var(name) => name == var_name, _ => false };
-            let right_var = match &**rhs { HirExpr::Var(name) => name == var_name, _ => false };
+            let left_var = match &**lhs {
+                HirExpr::Var(name) => name == var_name,
+                _ => false,
+            };
+            let right_var = match &**rhs {
+                HirExpr::Var(name) => name == var_name,
+                _ => false,
+            };
 
             if left_var || right_var {
                 let other = if left_var { &**rhs } else { &**lhs };
                 match op {
-                    HirBinaryOp::Eq | HirBinaryOp::Ne | HirBinaryOp::Lt | HirBinaryOp::Le | HirBinaryOp::Gt | HirBinaryOp::Ge |
-                    HirBinaryOp::SLt | HirBinaryOp::SLe | HirBinaryOp::SGt | HirBinaryOp::SGe => {
+                    HirBinaryOp::Eq
+                    | HirBinaryOp::Ne
+                    | HirBinaryOp::Lt
+                    | HirBinaryOp::Le
+                    | HirBinaryOp::Gt
+                    | HirBinaryOp::Ge
+                    | HirBinaryOp::SLt
+                    | HirBinaryOp::SLe
+                    | HirBinaryOp::SGt
+                    | HirBinaryOp::SGe => {
                         uses.push(UseInfo {
                             context: UseContext::Compare {
                                 op: *op,
                                 other: other.clone(),
-                            }
+                            },
                         });
                     }
                     HirBinaryOp::And => {
@@ -274,7 +356,7 @@ fn analyze_expr_use(expr: &HirExpr, var_name: &str, dest: Option<&str>, uses: &m
                                 context: UseContext::AndMask {
                                     mask: *mask as u64,
                                     dest: d.to_string(),
-                                }
+                                },
                             });
                         } else if let Some(d) = dest {
                             uses.push(UseInfo {
@@ -282,21 +364,32 @@ fn analyze_expr_use(expr: &HirExpr, var_name: &str, dest: Option<&str>, uses: &m
                                     op: *op,
                                     other: other.clone(),
                                     dest: d.to_string(),
-                                }
+                                },
                             });
                         } else {
-                            uses.push(UseInfo { context: UseContext::Incompatible });
+                            uses.push(UseInfo {
+                                context: UseContext::Incompatible,
+                            });
                         }
                     }
-                    HirBinaryOp::Add | HirBinaryOp::Sub | HirBinaryOp::Or | HirBinaryOp::Xor |
-                    HirBinaryOp::Shl | HirBinaryOp::Shr | HirBinaryOp::Sar => {
+                    HirBinaryOp::Add
+                    | HirBinaryOp::Sub
+                    | HirBinaryOp::Or
+                    | HirBinaryOp::Xor
+                    | HirBinaryOp::Shl
+                    | HirBinaryOp::Shr
+                    | HirBinaryOp::Sar => {
                         if let Some(d) = dest {
-                            if (*op == HirBinaryOp::Shl || *op == HirBinaryOp::Shr || *op == HirBinaryOp::Sar) && right_var {
+                            if (*op == HirBinaryOp::Shl
+                                || *op == HirBinaryOp::Shr
+                                || *op == HirBinaryOp::Sar)
+                                && right_var
+                            {
                                 uses.push(UseInfo {
                                     context: UseContext::ShiftAmount {
                                         op: *op,
                                         dest: d.to_string(),
-                                    }
+                                    },
                                 });
                             } else {
                                 uses.push(UseInfo {
@@ -304,19 +397,25 @@ fn analyze_expr_use(expr: &HirExpr, var_name: &str, dest: Option<&str>, uses: &m
                                         op: *op,
                                         other: other.clone(),
                                         dest: d.to_string(),
-                                    }
+                                    },
                                 });
                             }
                         } else {
-                            uses.push(UseInfo { context: UseContext::Incompatible });
+                            uses.push(UseInfo {
+                                context: UseContext::Incompatible,
+                            });
                         }
                     }
                     _ => {
-                        uses.push(UseInfo { context: UseContext::Incompatible });
+                        uses.push(UseInfo {
+                            context: UseContext::Incompatible,
+                        });
                     }
                 }
             } else {
-                uses.push(UseInfo { context: UseContext::Incompatible });
+                uses.push(UseInfo {
+                    context: UseContext::Incompatible,
+                });
             }
         }
         HirExpr::Cast { ty, expr } => {
@@ -327,15 +426,19 @@ fn analyze_expr_use(expr: &HirExpr, var_name: &str, dest: Option<&str>, uses: &m
                             context: UseContext::Cast {
                                 target_ty: ty.clone(),
                                 dest: d.to_string(),
-                            }
+                            },
                         });
                     } else {
-                        uses.push(UseInfo { context: UseContext::Incompatible });
+                        uses.push(UseInfo {
+                            context: UseContext::Incompatible,
+                        });
                     }
                     return;
                 }
             }
-            uses.push(UseInfo { context: UseContext::Incompatible });
+            uses.push(UseInfo {
+                context: UseContext::Incompatible,
+            });
         }
         HirExpr::Call { target, args, .. } => {
             for (idx, arg) in args.iter().enumerate() {
@@ -345,18 +448,22 @@ fn analyze_expr_use(expr: &HirExpr, var_name: &str, dest: Option<&str>, uses: &m
                             context: UseContext::Call {
                                 target: target.clone(),
                                 arg_idx: idx,
-                            }
+                            },
                         });
                         continue;
                     }
                 }
                 if expr_contains_var(arg, var_name) {
-                    uses.push(UseInfo { context: UseContext::Incompatible });
+                    uses.push(UseInfo {
+                        context: UseContext::Incompatible,
+                    });
                 }
             }
         }
         _ => {
-            uses.push(UseInfo { context: UseContext::Incompatible });
+            uses.push(UseInfo {
+                context: UseContext::Incompatible,
+            });
         }
     }
 }
@@ -364,8 +471,20 @@ fn analyze_expr_use(expr: &HirExpr, var_name: &str, dest: Option<&str>, uses: &m
 /// RuleSubvarShift: trace SUBPIECE/CONCAT-style `Or` reassembly back to the source varnode.
 fn trace_or_subvar_piece(lhs: &HirExpr, rhs: &HirExpr, mask: u64) -> Option<(String, u64)> {
     let (low_part, high_part) = match (lhs, rhs) {
-        (low, HirExpr::Binary { op: HirBinaryOp::Shl, .. }) => (low, rhs),
-        (HirExpr::Binary { op: HirBinaryOp::Shl, .. }, low) => (low, lhs),
+        (
+            low,
+            HirExpr::Binary {
+                op: HirBinaryOp::Shl,
+                ..
+            },
+        ) => (low, rhs),
+        (
+            HirExpr::Binary {
+                op: HirBinaryOp::Shl,
+                ..
+            },
+            low,
+        ) => (low, lhs),
         _ => return None,
     };
     let HirExpr::Binary {
@@ -429,17 +548,23 @@ fn analyze_lvalue_use(lhs: &HirLValue, var_name: &str, uses: &mut Vec<UseInfo>) 
         HirLValue::Var(_) => {}
         HirLValue::Deref { ptr, .. } => {
             if expr_contains_var(ptr, var_name) {
-                uses.push(UseInfo { context: UseContext::Incompatible });
+                uses.push(UseInfo {
+                    context: UseContext::Incompatible,
+                });
             }
         }
         HirLValue::Index { base, index, .. } => {
             if expr_contains_var(base, var_name) || expr_contains_var(index, var_name) {
-                uses.push(UseInfo { context: UseContext::Incompatible });
+                uses.push(UseInfo {
+                    context: UseContext::Incompatible,
+                });
             }
         }
         HirLValue::FieldAccess { base, .. } => {
             if expr_contains_var(base, var_name) {
-                uses.push(UseInfo { context: UseContext::Incompatible });
+                uses.push(UseInfo {
+                    context: UseContext::Incompatible,
+                });
             }
         }
     }
@@ -481,7 +606,10 @@ impl SubvarFlowSolver {
             };
 
             let new_name = format!("{}_sub{}", var_name, bitsize);
-            let new_type = NirType::Int { bits: bitsize, signed: is_signed };
+            let new_type = NirType::Int {
+                bits: bitsize,
+                signed: is_signed,
+            };
             self.varmap.insert(
                 var_name.clone(),
                 ReplaceVar {
@@ -514,75 +642,73 @@ impl SubvarFlowSolver {
         };
 
         match def_expr {
-            HirExpr::Binary { op, lhs, rhs, .. } => {
-                match op {
-                    HirBinaryOp::Or => {
-                        if let Some((src, piece_mask)) = trace_or_subvar_piece(lhs, rhs, mask) {
-                            self.worklist.push((src, piece_mask));
-                            return true;
-                        }
-                        if let HirExpr::Var(l) = &**lhs {
-                            self.worklist.push((l.clone(), mask));
-                        }
-                        if let HirExpr::Var(r) = &**rhs {
-                            self.worklist.push((r.clone(), mask));
-                        }
-                        true
+            HirExpr::Binary { op, lhs, rhs, .. } => match op {
+                HirBinaryOp::Or => {
+                    if let Some((src, piece_mask)) = trace_or_subvar_piece(lhs, rhs, mask) {
+                        self.worklist.push((src, piece_mask));
+                        return true;
                     }
-                    HirBinaryOp::Add | HirBinaryOp::Sub | HirBinaryOp::And | HirBinaryOp::Xor => {
-                        if let HirExpr::Var(l) = &**lhs {
-                            self.worklist.push((l.clone(), mask));
-                        }
-                        if let HirExpr::Var(r) = &**rhs {
-                            self.worklist.push((r.clone(), mask));
-                        }
-                        true
+                    if let HirExpr::Var(l) = &**lhs {
+                        self.worklist.push((l.clone(), mask));
                     }
-                    HirBinaryOp::Shl => {
-                        if let HirExpr::Const(sa, _) = &**rhs {
-                            let sa = *sa as u32;
-                            if sa < 64 {
-                                let new_mask = mask >> sa;
-                                if new_mask == 0 {
-                                    true
-                                } else if (new_mask << sa) == mask {
-                                    if let HirExpr::Var(l) = &**lhs {
-                                        self.worklist.push((l.clone(), new_mask));
-                                    }
-                                    true
-                                } else {
-                                    false
-                                }
-                            } else {
-                                false
-                            }
-                        } else {
-                            false
-                        }
+                    if let HirExpr::Var(r) = &**rhs {
+                        self.worklist.push((r.clone(), mask));
                     }
-                    HirBinaryOp::Shr | HirBinaryOp::Sar => {
-                        if let HirExpr::Const(sa, _) = &**rhs {
-                            let sa = *sa as u32;
-                            if sa < 64 {
-                                let new_mask = mask << sa;
-                                if (new_mask >> sa) == mask {
-                                    if let HirExpr::Var(l) = &**lhs {
-                                        self.worklist.push((l.clone(), new_mask));
-                                    }
-                                    true
-                                } else {
-                                    false
-                                }
-                            } else {
-                                false
-                            }
-                        } else {
-                            false
-                        }
-                    }
-                    _ => false,
+                    true
                 }
-            }
+                HirBinaryOp::Add | HirBinaryOp::Sub | HirBinaryOp::And | HirBinaryOp::Xor => {
+                    if let HirExpr::Var(l) = &**lhs {
+                        self.worklist.push((l.clone(), mask));
+                    }
+                    if let HirExpr::Var(r) = &**rhs {
+                        self.worklist.push((r.clone(), mask));
+                    }
+                    true
+                }
+                HirBinaryOp::Shl => {
+                    if let HirExpr::Const(sa, _) = &**rhs {
+                        let sa = *sa as u32;
+                        if sa < 64 {
+                            let new_mask = mask >> sa;
+                            if new_mask == 0 {
+                                true
+                            } else if (new_mask << sa) == mask {
+                                if let HirExpr::Var(l) = &**lhs {
+                                    self.worklist.push((l.clone(), new_mask));
+                                }
+                                true
+                            } else {
+                                false
+                            }
+                        } else {
+                            false
+                        }
+                    } else {
+                        false
+                    }
+                }
+                HirBinaryOp::Shr | HirBinaryOp::Sar => {
+                    if let HirExpr::Const(sa, _) = &**rhs {
+                        let sa = *sa as u32;
+                        if sa < 64 {
+                            let new_mask = mask << sa;
+                            if (new_mask >> sa) == mask {
+                                if let HirExpr::Var(l) = &**lhs {
+                                    self.worklist.push((l.clone(), new_mask));
+                                }
+                                true
+                            } else {
+                                false
+                            }
+                        } else {
+                            false
+                        }
+                    } else {
+                        false
+                    }
+                }
+                _ => false,
+            },
             HirExpr::Cast { expr, .. } => {
                 if let HirExpr::Var(inner) = &**expr {
                     self.worklist.push((inner.clone(), mask));
@@ -650,17 +776,19 @@ impl SubvarFlowSolver {
                         return false;
                     }
                 }
-                UseContext::Binary { op, other, dest } => {
-                    match op {
-                        HirBinaryOp::Add | HirBinaryOp::Sub | HirBinaryOp::And | HirBinaryOp::Or | HirBinaryOp::Xor => {
-                            self.worklist.push((dest.clone(), mask));
-                            if let HirExpr::Var(o) = other {
-                                self.worklist.push((o.clone(), mask));
-                            }
+                UseContext::Binary { op, other, dest } => match op {
+                    HirBinaryOp::Add
+                    | HirBinaryOp::Sub
+                    | HirBinaryOp::And
+                    | HirBinaryOp::Or
+                    | HirBinaryOp::Xor => {
+                        self.worklist.push((dest.clone(), mask));
+                        if let HirExpr::Var(o) = other {
+                            self.worklist.push((o.clone(), mask));
                         }
-                        _ => return false,
                     }
-                }
+                    _ => return false,
+                },
                 UseContext::Compare { op: _, other } => {
                     match other {
                         HirExpr::Const(val, _) => {
@@ -736,7 +864,9 @@ fn rewrite_expr(expr: &mut HirExpr, varmap: &HashMap<String, ReplaceVar>) {
                 *ty = nty;
             }
         }
-        HirExpr::Unary { expr: inner, ty, .. } => {
+        HirExpr::Unary {
+            expr: inner, ty, ..
+        } => {
             let narrow_ty = if let HirExpr::Var(name) = &**inner {
                 varmap.get(name).map(|rep| rep.new_type.clone())
             } else {
@@ -784,7 +914,12 @@ where
             f(base);
             f(index);
         }
-        HirExpr::Select { cond, then_expr, else_expr, .. } => {
+        HirExpr::Select {
+            cond,
+            then_expr,
+            else_expr,
+            ..
+        } => {
             f(cond);
             f(then_expr);
             f(else_expr);
@@ -836,7 +971,12 @@ fn rewrite_stmt(stmt: &mut HirStmt, varmap: &HashMap<String, ReplaceVar>) {
             rewrite_stmts(body, varmap);
             rewrite_expr(cond, varmap);
         }
-        HirStmt::For { init, cond, update, body } => {
+        HirStmt::For {
+            init,
+            cond,
+            update,
+            body,
+        } => {
             if let Some(i) = init {
                 rewrite_stmt(i.as_mut(), varmap);
             }
@@ -848,12 +988,20 @@ fn rewrite_stmt(stmt: &mut HirStmt, varmap: &HashMap<String, ReplaceVar>) {
             }
             rewrite_stmts(body, varmap);
         }
-        HirStmt::If { cond, then_body, else_body } => {
+        HirStmt::If {
+            cond,
+            then_body,
+            else_body,
+        } => {
             rewrite_expr(cond, varmap);
             rewrite_stmts(then_body, varmap);
             rewrite_stmts(else_body, varmap);
         }
-        HirStmt::Switch { expr, cases, default } => {
+        HirStmt::Switch {
+            expr,
+            cases,
+            default,
+        } => {
             rewrite_expr(expr, varmap);
             for case in cases {
                 rewrite_stmts(&mut case.body, varmap);
@@ -889,7 +1037,12 @@ pub(crate) fn apply_subvar_flow_pass(func: &mut HirFunction) -> bool {
             continue;
         }
         match &assign.rhs {
-            HirExpr::Binary { op: HirBinaryOp::And, lhs, rhs, .. } => {
+            HirExpr::Binary {
+                op: HirBinaryOp::And,
+                lhs,
+                rhs,
+                ..
+            } => {
                 if let (HirExpr::Var(name), HirExpr::Const(mask, _)) = (&**lhs, &**rhs) {
                     if is_valid_subvar_mask(*mask as u64) {
                         candidate_set.insert((name.clone(), *mask as u64));
@@ -980,15 +1133,24 @@ mod tests {
     use super::*;
 
     fn u8_ty() -> NirType {
-        NirType::Int { bits: 8, signed: false }
+        NirType::Int {
+            bits: 8,
+            signed: false,
+        }
     }
 
     fn u32_ty() -> NirType {
-        NirType::Int { bits: 32, signed: false }
+        NirType::Int {
+            bits: 32,
+            signed: false,
+        }
     }
 
     fn u64_ty() -> NirType {
-        NirType::Int { bits: 64, signed: false }
+        NirType::Int {
+            bits: 64,
+            signed: false,
+        }
     }
 
     #[test]

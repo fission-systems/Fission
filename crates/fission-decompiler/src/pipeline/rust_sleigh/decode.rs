@@ -1,7 +1,7 @@
 use crate::{PcodeFunction, Varnode};
 use fission_loader::loader::LoadedBinary;
-use fission_static::analysis::control_flow_facts::decode_memory_context_for;
 use fission_sleigh::runtime::{DecodeContract, DecodeMemoryContext, RuntimeSleighFrontend};
+use fission_static::analysis::control_flow_facts::decode_memory_context_for;
 
 #[derive(Debug, Clone)]
 pub(crate) struct DecodeDiag {
@@ -33,7 +33,11 @@ pub(crate) fn pcode_op_count(pcode: &PcodeFunction) -> usize {
     pcode.blocks.iter().map(|b| b.ops.len()).sum()
 }
 
-fn decode_memory_context(binary: &LoadedBinary, entry_address: u64, max_bytes: usize) -> DecodeMemoryContext {
+fn decode_memory_context(
+    binary: &LoadedBinary,
+    entry_address: u64,
+    max_bytes: usize,
+) -> DecodeMemoryContext {
     decode_memory_context_for(binary, entry_address, max_bytes)
 }
 
@@ -45,7 +49,14 @@ pub(crate) fn decode_rust_sleigh_pcode(
     instruction_limit: usize,
     continue_past_indirect_branch: bool,
     retry_on_decode_error: bool,
-) -> Result<(PcodeFunction, DecodeDiag, std::collections::HashMap<u32, String>), DecodeFailure> {
+) -> Result<
+    (
+        PcodeFunction,
+        DecodeDiag,
+        std::collections::HashMap<u32, String>,
+    ),
+    DecodeFailure,
+> {
     let load_spec = binary.load_spec().ok_or_else(|| DecodeFailure {
         message: format!(
             "rust_sleigh: missing Ghidra load spec for '{}'",

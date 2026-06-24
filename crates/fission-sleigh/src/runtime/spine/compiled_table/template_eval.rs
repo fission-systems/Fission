@@ -88,14 +88,7 @@ pub(super) fn emit_pcode_for_state(
     decoded: &RuntimeConstructState,
     flow: FlowEmitOptions,
 ) -> Result<(Vec<PcodeOp>, RuntimeExecutionDetails)> {
-    emit_pcode_for_state_with_bytes(
-        compiled,
-        address,
-        memory_window,
-        memory_base,
-        decoded,
-        flow,
-    )
+    emit_pcode_for_state_with_bytes(compiled, address, memory_window, memory_base, decoded, flow)
 }
 
 /// Options for pcode template emission (Ghidra `PcodeEmit` parity hooks).
@@ -1052,7 +1045,8 @@ impl<'c> CompiledTableEmitter<'c> {
         mnemonic: &str,
     ) -> Result<()> {
         if let Some(target) = self.dynamic_memory_target(template, state)? {
-            self.emitter.emit_store(target.space, target.ptr, value, mnemonic)
+            self.emitter
+                .emit_store(target.space, target.ptr, value, mnemonic)
         } else {
             let _ = (value, mnemonic);
             self.template_write_target(template, state).map(|_| ())
@@ -1805,13 +1799,8 @@ mod tests {
     #[test]
     fn const_space_tpl_requires_decoded_sla_space_metadata() {
         let compiled = minimal_frontend_with_spaces(std::collections::BTreeMap::new());
-        let mut emitter = CompiledTableEmitter::new(
-            &compiled,
-            0x1000,
-            &[],
-            0x1000,
-            FlowEmitOptions::default(),
-        );
+        let mut emitter =
+            CompiledTableEmitter::new(&compiled, 0x1000, &[], 0x1000, FlowEmitOptions::default());
         let state = minimal_construct_state();
         let err = emitter
             .resolve_space_tpl(

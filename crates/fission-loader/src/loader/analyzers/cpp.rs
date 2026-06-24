@@ -122,7 +122,10 @@ impl<'a> CppAnalyzer<'a> {
         // 2. If no symbols, scan .rdata/.data for potential COLs
         if cols.is_empty() {
             let image_base = self.binary.image_base;
-            let max_va = self.binary.sections.iter()
+            let max_va = self
+                .binary
+                .sections
+                .iter()
                 .map(|s| s.virtual_address + s.virtual_size)
                 .max()
                 .unwrap_or(0);
@@ -130,7 +133,10 @@ impl<'a> CppAnalyzer<'a> {
 
             for section in &self.binary.sections {
                 if section.name == ".rdata" || section.name == ".data" {
-                    let Some(data) = self.binary.view_bytes(section.virtual_address, section.virtual_size as usize) else {
+                    let Some(data) = self
+                        .binary
+                        .view_bytes(section.virtual_address, section.virtual_size as usize)
+                    else {
                         continue;
                     };
 
@@ -140,16 +146,37 @@ impl<'a> CppAnalyzer<'a> {
                         continue;
                     }
                     for i in (0..=len - 24).step_by(step) {
-                        let signature = u32::from_le_bytes([data[i], data[i + 1], data[i + 2], data[i + 3]]);
+                        let signature =
+                            u32::from_le_bytes([data[i], data[i + 1], data[i + 2], data[i + 3]]);
                         if signature != 0 && signature != 1 {
                             continue;
                         }
 
                         // Validate COL fields directly from section slice (zero-copy)
-                        let offset = u32::from_le_bytes([data[i + 4], data[i + 5], data[i + 6], data[i + 7]]);
-                        let cd_offset = u32::from_le_bytes([data[i + 8], data[i + 9], data[i + 10], data[i + 11]]);
-                        let td_val = u32::from_le_bytes([data[i + 12], data[i + 13], data[i + 14], data[i + 15]]);
-                        let chd_val = u32::from_le_bytes([data[i + 16], data[i + 17], data[i + 18], data[i + 19]]);
+                        let offset = u32::from_le_bytes([
+                            data[i + 4],
+                            data[i + 5],
+                            data[i + 6],
+                            data[i + 7],
+                        ]);
+                        let cd_offset = u32::from_le_bytes([
+                            data[i + 8],
+                            data[i + 9],
+                            data[i + 10],
+                            data[i + 11],
+                        ]);
+                        let td_val = u32::from_le_bytes([
+                            data[i + 12],
+                            data[i + 13],
+                            data[i + 14],
+                            data[i + 15],
+                        ]);
+                        let chd_val = u32::from_le_bytes([
+                            data[i + 16],
+                            data[i + 17],
+                            data[i + 18],
+                            data[i + 19],
+                        ]);
 
                         // Simple heuristics: offset and cd_offset are usually small
                         if offset > 0x100000 || cd_offset > 0x100000 {
@@ -163,7 +190,10 @@ impl<'a> CppAnalyzer<'a> {
                             // x86: td_val and chd_val are absolute VAs
                             let td_val64 = td_val as u64;
                             let chd_val64 = chd_val as u64;
-                            td_val64 > image_base && td_val64 < max_va && chd_val64 > image_base && chd_val64 < max_va
+                            td_val64 > image_base
+                                && td_val64 < max_va
+                                && chd_val64 > image_base
+                                && chd_val64 < max_va
                         };
 
                         if !valid {
@@ -407,7 +437,9 @@ impl<'a> CppAnalyzer<'a> {
                             }
                         }
                         if base_name.starts_with("base@") {
-                            if let Some(&idx) = self.binary.function_addr_index.get(&c.base_classes[0]) {
+                            if let Some(&idx) =
+                                self.binary.function_addr_index.get(&c.base_classes[0])
+                            {
                                 let sym = &self.binary.functions[idx];
                                 if sym.name.starts_with("__ZTI") {
                                     base_name = format!("{:?}", demangle(&sym.name));
@@ -445,8 +477,12 @@ impl<'a> CppAnalyzer<'a> {
         let mut sweep_vtable = |start_addr: u64| {
             let mut current_addr = start_addr;
             loop {
-                let Ok(ptr) = self.binary.read_ptr(current_addr) else { break; };
-                if ptr == 0 { break; }
+                let Ok(ptr) = self.binary.read_ptr(current_addr) else {
+                    break;
+                };
+                if ptr == 0 {
+                    break;
+                }
 
                 // Check if the pointer falls within an executable section
                 let mut is_executable = false;
@@ -509,21 +545,26 @@ impl<'a> CppAnalyzer<'a> {
             let msvc_classes = self.analyze_msvc_classes();
             for class in msvc_classes {
                 let col_addr = class.type_info_address;
-                
+
                 // Scan .rdata for pointers to this COL
                 for section in &self.binary.sections {
                     if section.name == ".rdata" || section.name == ".data" {
-                        let Some(data) = self.binary.view_bytes(section.virtual_address, section.virtual_size as usize) else {
+                        let Some(data) = self
+                            .binary
+                            .view_bytes(section.virtual_address, section.virtual_size as usize)
+                        else {
                             continue;
                         };
-                        
+
                         let step = ptr_size as usize;
-                        if data.len() < step { continue; }
+                        if data.len() < step {
+                            continue;
+                        }
                         for i in (0..=data.len() - step).step_by(step) {
                             let val = if ptr_size == 8 {
-                                u64::from_le_bytes(data[i..i+8].try_into().unwrap())
+                                u64::from_le_bytes(data[i..i + 8].try_into().unwrap())
                             } else {
-                                u32::from_le_bytes(data[i..i+4].try_into().unwrap()) as u64
+                                u32::from_le_bytes(data[i..i + 4].try_into().unwrap()) as u64
                             };
 
                             if val == col_addr {

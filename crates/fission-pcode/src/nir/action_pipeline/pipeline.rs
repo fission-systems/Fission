@@ -24,17 +24,10 @@ impl Pipeline {
     }
 
     pub(crate) fn run(&self, ctx: &mut PassCtx<'_>) {
-        let total_start = if ctx.perf {
-            Some(Instant::now())
-        } else {
-            None
-        };
+        let total_start = if ctx.perf { Some(Instant::now()) } else { None };
 
         if ctx.diag {
-            eprintln!(
-                "[DIAG] pipeline start: {} fn={}",
-                self.name, ctx.func.name
-            );
+            eprintln!("[DIAG] pipeline start: {} fn={}", self.name, ctx.func.name);
         }
 
         for group in &self.groups {
@@ -60,9 +53,6 @@ impl Pipeline {
     }
 }
 
-pub(crate) fn group(
-    name: &'static str,
-    concept: GhidraActionConcept,
-) -> ActionGroup {
+pub(crate) fn group(name: &'static str, concept: GhidraActionConcept) -> ActionGroup {
     ActionGroup::new(name, concept)
 }

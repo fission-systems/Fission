@@ -4,8 +4,8 @@
 /// `("param_N", Some(N-1))` for parameter registers or `(hw_name, None)` for others.
 /// The distinction depends on the active `CallingConvention`.
 use super::*;
-use crate::nir::cspec::register_namer_for_abi;
 use crate::nir::AbiState;
+use crate::nir::cspec::register_namer_for_abi;
 
 fn reg_param_be(offset: u64, size: u32) -> Option<(String, Option<usize>)> {
     let mut options = preview_options_for(CallingConvention::AArch64);
@@ -15,11 +15,7 @@ fn reg_param_be(offset: u64, size: u32) -> Option<(String, Option<usize>)> {
         .register_name_with_param_owned(offset, size)
 }
 
-fn reg_param(
-    offset: u64,
-    size: u32,
-    abi: CallingConvention,
-) -> Option<(String, Option<usize>)> {
+fn reg_param(offset: u64, size: u32, abi: CallingConvention) -> Option<(String, Option<usize>)> {
     let mut namer = register_namer_for_abi(abi);
     namer.int_param_offsets = int_params_for(abi);
     namer.register_name_with_param_owned(offset, size)
@@ -364,7 +360,9 @@ fn aarch64_big_endian_w_register_halves_are_params() {
         is_constant: false,
         constant_val: 0,
     };
-    assert!(crate::nir::cspec::RegisterNamer::from_options(&options).is_primary_return_register(&ret));
+    assert!(
+        crate::nir::cspec::RegisterNamer::from_options(&options).is_primary_return_register(&ret)
+    );
 }
 
 #[test]
@@ -389,10 +387,7 @@ fn aarch64_return_register_is_named_and_recognized() {
         is_constant: false,
         constant_val: 0,
     };
-    assert!(is_primary_return_for_abi(
-        &x0,
-        CallingConvention::AArch64
-    ));
+    assert!(is_primary_return_for_abi(&x0, CallingConvention::AArch64));
     assert!(!is_primary_return_x64(&x0));
 }
 
@@ -523,10 +518,7 @@ fn arm32_return_register_is_named_and_recognized() {
         is_constant: false,
         constant_val: 0,
     };
-    assert!(is_primary_return_for_abi(
-        &r0,
-        CallingConvention::Arm32
-    ));
+    assert!(is_primary_return_for_abi(&r0, CallingConvention::Arm32));
     assert!(!is_primary_return_x64(&r0));
 }
 
@@ -618,8 +610,7 @@ fn arm32_bx_lr_returns_primary_r0_not_link_target() {
 fn powerpc32_r3_to_r10_are_params() {
     for slot in 0..8usize {
         let offset = 0x0c + (slot as u64 * 4);
-        let (name, idx) =
-            reg_param(offset, 4, CallingConvention::PowerPc32).unwrap();
+        let (name, idx) = reg_param(offset, 4, CallingConvention::PowerPc32).unwrap();
         assert_eq!(name, format!("param_{}", slot + 1));
         assert_eq!(idx, Some(slot));
     }
@@ -629,8 +620,7 @@ fn powerpc32_r3_to_r10_are_params() {
 fn powerpc64_r3_to_r10_are_params() {
     for slot in 0..8usize {
         let offset = 0x18 + (slot as u64 * 8);
-        let (name, idx) =
-            reg_param(offset, 8, CallingConvention::PowerPc64).unwrap();
+        let (name, idx) = reg_param(offset, 8, CallingConvention::PowerPc64).unwrap();
         assert_eq!(name, format!("param_{}", slot + 1));
         assert_eq!(idx, Some(slot));
     }
@@ -644,8 +634,7 @@ fn powerpc64_32bit_gpr_views_map_to_containing_param_register() {
         (0x20, "param_2", 1usize),
         (0x24, "param_2", 1usize),
     ] {
-        let (name, idx) =
-            reg_param(offset, 4, CallingConvention::PowerPc64).unwrap();
+        let (name, idx) = reg_param(offset, 4, CallingConvention::PowerPc64).unwrap();
         assert_eq!(name, expected_name, "offset=0x{offset:x}");
         assert_eq!(idx, Some(expected_slot), "offset=0x{offset:x}");
     }
@@ -1629,7 +1618,12 @@ fn aarch64_return_only_join_inlines_predecessor_return_values() {
     let code = render_mlil_preview(&func, "return_join", 0x1000, &options).expect("preview render");
     assert!(code.contains("param_1 + 10"), "{code}");
     assert!(code.contains("param_1 ^ 43690"), "{code}");
-    assert!(code.contains("return tmp_2000 ?") || code.contains("return iVar0") || code.contains("return uVar2"), "{code}");
+    assert!(
+        code.contains("return tmp_2000 ?")
+            || code.contains("return iVar0")
+            || code.contains("return uVar2"),
+        "{code}"
+    );
     assert!(!code.contains("block_1030:"), "{code}");
     assert!(!code.contains("goto block_1030"), "{code}");
 }
@@ -2621,10 +2615,7 @@ fn mips32_primary_return_is_v0() {
         is_constant: false,
         constant_val: 0,
     };
-    assert!(is_primary_return_for_abi(
-        &ret,
-        CallingConvention::Mips32
-    ));
+    assert!(is_primary_return_for_abi(&ret, CallingConvention::Mips32));
 }
 
 #[test]

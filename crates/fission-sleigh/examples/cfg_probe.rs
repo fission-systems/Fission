@@ -7,10 +7,10 @@ use std::time::Instant;
 use anyhow::{anyhow, bail, Context, Result};
 use fission_loader::loader::LoadedBinary;
 use fission_pcode::cfg::AddressCfgSnapshot;
-use fission_static::analysis::control_flow_facts::{decode_memory_context_for, function_max_bytes};
 use fission_sleigh::runtime::{
     build_instruction_cfg_snapshot, DecodeContract, InstructionCfgHints, RuntimeSleighFrontend,
 };
+use fission_static::analysis::control_flow_facts::{decode_memory_context_for, function_max_bytes};
 use serde::Serialize;
 
 #[derive(Debug)]
@@ -144,20 +144,21 @@ fn main() -> Result<()> {
         "pcode_instruction_cfg" => {
             let cfg_hints = InstructionCfgHints::from_memory_context(&memory_context);
             build_instruction_cfg_snapshot(
-            decode_entry_address,
-            &lifted.reachable_instruction_addresses,
-            &lifted.instruction_lengths,
-            &lifted
-                .function
-                .blocks
-                .iter()
-                .flat_map(|block| block.ops.iter().cloned())
-                .collect::<Vec<_>>(),
-            &lifted.indirect_targets,
-            &lifted.inferred_indirect_edges,
-            &cfg_hints,
-            false,
-        )},
+                decode_entry_address,
+                &lifted.reachable_instruction_addresses,
+                &lifted.instruction_lengths,
+                &lifted
+                    .function
+                    .blocks
+                    .iter()
+                    .flat_map(|block| block.ops.iter().cloned())
+                    .collect::<Vec<_>>(),
+                &lifted.indirect_targets,
+                &lifted.inferred_indirect_edges,
+                &cfg_hints,
+                false,
+            )
+        }
         other => bail!("unsupported --model {other}"),
     };
 

@@ -267,10 +267,7 @@ pub fn build_cfg_blocks_from_ops(
     )
 }
 
-fn instruction_fallthrough(
-    address: u64,
-    instruction_lengths: &BTreeMap<u64, u64>,
-) -> Option<u64> {
+fn instruction_fallthrough(address: u64, instruction_lengths: &BTreeMap<u64, u64>) -> Option<u64> {
     let len = instruction_lengths.get(&address).copied()?;
     address.checked_add(len)
 }
@@ -343,7 +340,13 @@ fn instruction_cfg_control_terminator<'a>(
 ) -> Option<&'a PcodeOp> {
     ops_at.iter().copied().find(|op| {
         is_cfg_split_opcode(op.opcode)
-            && control_op_splits_instruction_cfg(op, ops, ops_at, op_seq_to_idx, instruction_lengths)
+            && control_op_splits_instruction_cfg(
+                op,
+                ops,
+                ops_at,
+                op_seq_to_idx,
+                instruction_lengths,
+            )
     })
 }
 
@@ -357,7 +360,10 @@ fn instruction_control_terminator<'a>(ops: &[&'a PcodeOp]) -> Option<&'a PcodeOp
 }
 
 fn cbranch_shares_instruction_with_return(ops_at: &[&PcodeOp]) -> bool {
-    let Some(cbranch_idx) = ops_at.iter().position(|op| op.opcode == PcodeOpcode::CBranch) else {
+    let Some(cbranch_idx) = ops_at
+        .iter()
+        .position(|op| op.opcode == PcodeOpcode::CBranch)
+    else {
         return false;
     };
     ops_at[cbranch_idx..]
@@ -365,11 +371,7 @@ fn cbranch_shares_instruction_with_return(ops_at: &[&PcodeOp]) -> bool {
         .any(|op| op.opcode == PcodeOpcode::Return)
 }
 
-fn cbranch_equal_target_is_cfg_split(
-    addr: u64,
-    fallthrough: u64,
-    ops_at: &[&PcodeOp],
-) -> bool {
+fn cbranch_equal_target_is_cfg_split(addr: u64, fallthrough: u64, ops_at: &[&PcodeOp]) -> bool {
     fallthrough != addr && cbranch_shares_instruction_with_return(ops_at)
 }
 
@@ -511,9 +513,7 @@ pub fn build_instruction_cfg_snapshot(
         let block_addrs: Vec<u64> = reachable_instruction_addresses
             .iter()
             .copied()
-            .filter(|addr| {
-                *addr >= leader && next_leader.is_none_or(|next| *addr < next)
-            })
+            .filter(|addr| *addr >= leader && next_leader.is_none_or(|next| *addr < next))
             .collect();
         let Some(&last_addr) = block_addrs.last() else {
             continue;
@@ -521,15 +521,13 @@ pub fn build_instruction_cfg_snapshot(
 
         let mut successors = Vec::new();
         if let Some(ops_at) = ops_by_addr.get(&last_addr) {
-            if let Some(term) = instruction_cfg_control_terminator(
-                ops_at,
-                ops,
-                &op_seq_to_idx,
-                instruction_lengths,
-            ) {
+            if let Some(term) =
+                instruction_cfg_control_terminator(ops_at, ops, &op_seq_to_idx, instruction_lengths)
+            {
                 match term.opcode {
-                PcodeOpcode::Branch => {
-                        if let Some(target) = direct_control_target_with_symbolic_internal_label(term)
+                    PcodeOpcode::Branch => {
+                        if let Some(target) =
+                            direct_control_target_with_symbolic_internal_label(term)
                         {
                             if let Some(dst) = leader_for_target(target, &block_starts, &reachable)
                             {
@@ -618,8 +616,7 @@ pub fn build_instruction_cfg_snapshot(
                     }
                 }
             } else if !noreturn.contains(&last_addr) {
-                if let Some(fallthrough) = instruction_fallthrough(last_addr, instruction_lengths)
-                {
+                if let Some(fallthrough) = instruction_fallthrough(last_addr, instruction_lengths) {
                     if let Some(dst) = leader_for_target(fallthrough, &block_starts, &reachable) {
                         successors.push(dst);
                     }

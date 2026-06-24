@@ -29,12 +29,7 @@ fn constant_sized(value: i64, size: u32) -> Varnode {
     Varnode::constant(value, size)
 }
 
-fn op(
-    seq_num: u32,
-    opcode: PcodeOpcode,
-    output: Option<Varnode>,
-    inputs: Vec<Varnode>,
-) -> PcodeOp {
+fn op(seq_num: u32, opcode: PcodeOpcode, output: Option<Varnode>, inputs: Vec<Varnode>) -> PcodeOp {
     PcodeOp {
         seq_num,
         opcode,
@@ -45,11 +40,7 @@ fn op(
     }
 }
 
-fn block_at(
-    start_address: u64,
-    index: u32,
-    ops: Vec<PcodeOp>,
-) -> crate::pcode::PcodeBasicBlock {
+fn block_at(start_address: u64, index: u32, ops: Vec<PcodeOp>) -> crate::pcode::PcodeBasicBlock {
     crate::pcode::PcodeBasicBlock {
         index,
         start_address,

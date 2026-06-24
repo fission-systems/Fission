@@ -50,12 +50,8 @@ fn expand_load_in_stmt(stmt: &mut HirStmt) -> bool {
     let mut changed = false;
     match stmt {
         HirStmt::Assign { rhs, .. } => changed |= expand_load_in_expr(rhs),
-        HirStmt::Expr(expr) | HirStmt::Return(Some(expr)) => {
-            changed |= expand_load_in_expr(expr)
-        }
-        HirStmt::Block(body)
-        | HirStmt::While { body, .. }
-        | HirStmt::DoWhile { body, .. } => {
+        HirStmt::Expr(expr) | HirStmt::Return(Some(expr)) => changed |= expand_load_in_expr(expr),
+        HirStmt::Block(body) | HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
             for s in body.iter_mut() {
                 changed |= expand_load_in_stmt(s);
             }
@@ -141,7 +137,6 @@ fn is_natural_narrowing(outer: &NirType, inner: &NirType) -> bool {
         _ => false,
     }
 }
-
 
 fn expand_load_in_expr(expr: &mut HirExpr) -> bool {
     // -----------------------------------------------------------------------
@@ -269,7 +264,6 @@ fn expand_load_in_expr(expr: &mut HirExpr) -> bool {
     changed
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -278,9 +272,15 @@ mod tests {
         NirType::Int { bits, signed }
     }
 
-    fn u8() -> NirType { make_int(8, false) }
-    fn u16() -> NirType { make_int(16, false) }
-    fn u32() -> NirType { make_int(32, false) }
+    fn u8() -> NirType {
+        make_int(8, false)
+    }
+    fn u16() -> NirType {
+        make_int(16, false)
+    }
+    fn u32() -> NirType {
+        make_int(32, false)
+    }
 
     fn load_expr(ty: NirType) -> HirExpr {
         HirExpr::Load {
@@ -317,7 +317,16 @@ mod tests {
         assert!(changed, "expected transformation");
         if let HirStmt::Assign { rhs, .. } = &func.body[0] {
             assert!(
-                matches!(rhs, HirExpr::Load { ty: NirType::Int { bits: 8, signed: false }, .. }),
+                matches!(
+                    rhs,
+                    HirExpr::Load {
+                        ty: NirType::Int {
+                            bits: 8,
+                            signed: false
+                        },
+                        ..
+                    }
+                ),
                 "expected Load<u8> after transformation, got: {rhs:?}"
             );
         } else {
@@ -372,7 +381,10 @@ mod tests {
         if let HirStmt::Expr(HirExpr::Binary { lhs, rhs, .. }) = &func.body[0] {
             // rhs (cmp const) should now have wider type
             assert!(
-                matches!(rhs.as_ref(), HirExpr::Const(5, NirType::Int { bits: 32, .. })),
+                matches!(
+                    rhs.as_ref(),
+                    HirExpr::Const(5, NirType::Int { bits: 32, .. })
+                ),
                 "expected cmp_rhs widened to u32, got: {rhs:?}"
             );
             // lhs should be And(Load<u32>, Const<u32>)
@@ -384,11 +396,20 @@ mod tests {
             } = lhs.as_ref()
             {
                 assert!(
-                    matches!(and_lhs.as_ref(), HirExpr::Load { ty: NirType::Int { bits: 32, .. }, .. }),
+                    matches!(
+                        and_lhs.as_ref(),
+                        HirExpr::Load {
+                            ty: NirType::Int { bits: 32, .. },
+                            ..
+                        }
+                    ),
                     "expected Load<u32> as and_lhs, got: {and_lhs:?}"
                 );
                 assert!(
-                    matches!(and_rhs.as_ref(), HirExpr::Const(0xFF, NirType::Int { bits: 32, .. })),
+                    matches!(
+                        and_rhs.as_ref(),
+                        HirExpr::Const(0xFF, NirType::Int { bits: 32, .. })
+                    ),
                     "expected and_rhs widened to u32, got: {and_rhs:?}"
                 );
             } else {
@@ -411,7 +432,16 @@ mod tests {
         assert!(changed, "expected transformation");
         if let HirStmt::Assign { rhs, .. } = &func.body[0] {
             assert!(
-                matches!(rhs, HirExpr::Load { ty: NirType::Int { bits: 16, signed: false }, .. }),
+                matches!(
+                    rhs,
+                    HirExpr::Load {
+                        ty: NirType::Int {
+                            bits: 16,
+                            signed: false
+                        },
+                        ..
+                    }
+                ),
                 "expected Load<u16>, got: {rhs:?}"
             );
         }

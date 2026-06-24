@@ -69,7 +69,7 @@ fn return_expr(expr: HirExpr) -> HirStmt {
 fn make_func(name: &str, locals: Vec<NirBinding>, body: Vec<HirStmt>) -> HirFunction {
     HirFunction {
         name: name.to_string(),
-            int_param_offsets: Vec::new(),
+        int_param_offsets: Vec::new(),
         params: vec![],
         locals,
         return_type: int(32),
@@ -116,7 +116,7 @@ fn constant_folding_binary_add_via_normalize() {
 fn normalize_hir_function_elides_return_cast_implied_by_return_type() {
     let mut func = HirFunction {
         name: "add".to_string(),
-            int_param_offsets: Vec::new(),
+        int_param_offsets: Vec::new(),
         params: vec![param_binding("param_1", 64), param_binding("param_2", 64)],
         locals: vec![],
         return_type: int(32),
@@ -241,7 +241,7 @@ fn normalize_canonicalizes_minmax_return_after_type_recovery() {
     let signed_i32 = sint(32);
     let mut func = HirFunction {
         name: "max".to_string(),
-            int_param_offsets: Vec::new(),
+        int_param_offsets: Vec::new(),
         params: vec![
             NirBinding {
                 name: "param_1".to_string(),
@@ -366,7 +366,7 @@ fn defuse_preserves_used_temp_assignment() {
 fn normalize_preserves_loop_assigned_temp_used_after_loop() {
     let mut func = HirFunction {
         name: "test_loop_carried_return_temp".to_string(),
-            int_param_offsets: Vec::new(),
+        int_param_offsets: Vec::new(),
         params: vec![param_binding("param_1", 32), param_binding("keep_going", 8)],
         locals: vec![temp_binding("xVar27", 32), temp_binding("bVar29", 1)],
         return_type: int(32),
@@ -416,7 +416,7 @@ fn normalize_preserves_loop_assigned_temp_used_after_loop() {
 fn normalize_preserves_preheader_temp_used_inside_loop() {
     let mut func = HirFunction {
         name: "test_preheader_loop_input_temp".to_string(),
-            int_param_offsets: Vec::new(),
+        int_param_offsets: Vec::new(),
         params: vec![param_binding("param_1", 32), param_binding("keep_going", 8)],
         locals: vec![
             temp_binding("xVar10", 32),
@@ -463,7 +463,7 @@ fn normalize_preserves_preheader_temp_used_inside_loop() {
 fn normalize_preserves_preheader_loop_carried_self_update() {
     let mut func = HirFunction {
         name: "test_preheader_loop_carried_self_update".to_string(),
-            int_param_offsets: Vec::new(),
+        int_param_offsets: Vec::new(),
         params: vec![param_binding("param_1", 32), param_binding("keep_going", 8)],
         locals: vec![
             temp_binding("xVar10", 64),
@@ -524,7 +524,7 @@ fn normalize_preserves_preheader_loop_carried_self_update() {
 fn normalize_preserves_preheader_copy_chain_with_loop_carried_self_update() {
     let mut func = HirFunction {
         name: "test_preheader_copy_chain_loop_carried_self_update".to_string(),
-            int_param_offsets: Vec::new(),
+        int_param_offsets: Vec::new(),
         params: vec![
             param_binding("var_0", 32),
             param_binding("param_1", 32),
@@ -601,7 +601,7 @@ fn normalize_preserves_preheader_copy_chain_with_loop_carried_self_update() {
 fn normalize_preserves_loop_carried_initializer_after_predicate_use() {
     let mut func = HirFunction {
         name: "test_loop_carried_initializer_after_predicate_use".to_string(),
-            int_param_offsets: Vec::new(),
+        int_param_offsets: Vec::new(),
         params: vec![
             param_binding("var_0", 32),
             param_binding("param_1", 32),
@@ -682,7 +682,7 @@ fn normalize_preserves_loop_carried_initializer_after_predicate_use() {
 fn normalize_sccp_does_not_fold_loop_carried_zero_into_loop_body() {
     let mut func = HirFunction {
         name: "test_sccp_loop_carried_zero".to_string(),
-            int_param_offsets: Vec::new(),
+        int_param_offsets: Vec::new(),
         params: vec![
             param_binding("param_1", 32),
             param_binding("param_2", 32),
@@ -749,7 +749,7 @@ fn normalize_sccp_does_not_fold_loop_carried_zero_into_loop_body() {
 fn normalize_preserves_preheader_copy_chain_used_inside_loop() {
     let mut func = HirFunction {
         name: "test_preheader_loop_input_copy_chain".to_string(),
-            int_param_offsets: Vec::new(),
+        int_param_offsets: Vec::new(),
         params: vec![
             param_binding("var_0", 32),
             param_binding("param_1", 32),
@@ -1029,12 +1029,12 @@ fn defuse_removes_dead_local_with_large_hex_offset_no_stack_origin() {
         name: name.to_string(),
         ty: int(64),
         surface_type_name: None,
-        origin: None,  // not a stack-backed slot
+        origin: None, // not a stack-backed slot
         initializer: None,
     };
     let mut func = HirFunction {
         name: "test_dead_local_large_offset".to_string(),
-            int_param_offsets: Vec::new(),
+        int_param_offsets: Vec::new(),
         params: vec![],
         locals: vec![
             make_non_stack("local_c"),
@@ -1073,7 +1073,7 @@ fn defuse_preserves_live_local_with_large_hex_offset() {
     // local_20 with no stack origin but actually used → must be kept.
     let mut func = HirFunction {
         name: "test_live_local_large_offset".to_string(),
-            int_param_offsets: Vec::new(),
+        int_param_offsets: Vec::new(),
         params: vec![],
         locals: vec![NirBinding {
             name: "local_20".to_string(),
@@ -1390,4 +1390,3 @@ fn multiequal_all_same_canonical_input_renders_cleanly() {
         "Should not produce raw offset names; got: {code}"
     );
 }
-

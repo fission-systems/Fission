@@ -31,7 +31,11 @@ impl<'a> PreviewBuilder<'a> {
         };
     }
 
-    pub(in crate::nir::builder) fn classify_stack_slot_origin(&self, base: StackBase, offset: i64) -> NirBindingOrigin {
+    pub(in crate::nir::builder) fn classify_stack_slot_origin(
+        &self,
+        base: StackBase,
+        offset: i64,
+    ) -> NirBindingOrigin {
         self.abi_state().classify_stack_slot_origin(base, offset)
     }
 
@@ -622,7 +626,11 @@ impl<'a> PreviewBuilder<'a> {
         Some((entry.name.clone(), entry.ty.clone()))
     }
 
-    pub(in crate::nir::builder) fn unique_stack_slot_binding_name(&self, base_name: &str, id: StackSlotId) -> String {
+    pub(in crate::nir::builder) fn unique_stack_slot_binding_name(
+        &self,
+        base_name: &str,
+        id: StackSlotId,
+    ) -> String {
         if !self.binding_name_in_use(base_name) {
             return base_name.to_string();
         }

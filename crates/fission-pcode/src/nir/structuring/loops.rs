@@ -358,6 +358,12 @@ impl<'a> PreviewBuilder<'a> {
         &mut self,
         idx: usize,
     ) -> Result<Option<(HirStmt, usize)>, MlilPreviewError> {
+        if let Some(start) = self.structuring_start {
+            if start.elapsed().as_secs_f64() * 1000.0 > 5000.0 {
+                return Ok(None);
+            }
+        }
+        
         let diag = structuring_diag_enabled();
         let block_addr = self.block_start_address(idx);
         let mut budget = IfLoweringBudget::new(
@@ -651,6 +657,11 @@ impl<'a> PreviewBuilder<'a> {
         &mut self,
         idx: usize,
     ) -> Result<Option<(HirStmt, usize)>, MlilPreviewError> {
+        if let Some(start) = self.structuring_start {
+            if start.elapsed().as_secs_f64() * 1000.0 > 5000.0 {
+                return Ok(None);
+            }
+        }
         let diag = structuring_diag_enabled();
 
         // After `order_tails_by_exit()` (Ghidra LoopBody::orderTails equivalent),
@@ -906,6 +917,12 @@ impl<'a> PreviewBuilder<'a> {
         break_idx: Option<usize>,
         head_idx: usize,
     ) -> Result<Option<Vec<HirStmt>>, MlilPreviewError> {
+        if let Some(start) = self.structuring_start {
+            if start.elapsed().as_secs_f64() * 1000.0 > 5000.0 {
+                return Ok(None);
+            }
+        }
+        
         if body_set.is_empty() {
             return Ok(Some(Vec::new()));
         }

@@ -2,16 +2,21 @@ use super::*;
 use std::collections::BTreeSet;
 
 impl<'a> PreviewBuilder<'a> {
-    pub(in crate::nir::builder) fn prior_materialized_loop_carried_output_name(&self, output: &Varnode) -> Option<String> {
+    pub(in crate::nir::builder) fn prior_materialized_loop_carried_output_name(
+        &self,
+        output: &Varnode,
+    ) -> Option<String> {
         let (site, op) = self.lookup_def_site(output)?;
         if Some(site) == self.current_lowering_site {
             return None;
         }
         let prior_output = op.output.as_ref()?;
         if VarnodeKey::from(prior_output) == VarnodeKey::from(output) {
-            if let Some(name) = self.materialized_vns
+            if let Some(name) = self
+                .materialized_vns
                 .get(&MaterializedVarnodeKey::new(prior_output, op))
-                .cloned() {
+                .cloned()
+            {
                 return Some(name);
             }
         }
@@ -208,7 +213,7 @@ impl<'a> PreviewBuilder<'a> {
         if depth > 8 || pred_idx == succ_idx || !visiting.insert(pred_idx) {
             return false;
         }
-        
+
         let Some(pred_block) = self.pcode.blocks.get(pred_idx) else {
             visiting.remove(&pred_idx);
             return false;
@@ -228,7 +233,7 @@ impl<'a> PreviewBuilder<'a> {
                     visiting.remove(&pred_idx);
                     return false;
                 }
-                
+
                 let pred_key = VarnodeKey::from(pred_output);
                 if !Self::varnode_key_may_alias_output(&pred_key, output_key)
                     && !self.prior_output_aliases_loop_carried_update(pred_output, output)
@@ -236,7 +241,7 @@ impl<'a> PreviewBuilder<'a> {
                     visiting.remove(&pred_idx);
                     return false;
                 }
-                
+
                 if let Some(name) = self
                     .materialized_vns
                     .get(&MaterializedVarnodeKey::new(pred_output, pred_op))
@@ -288,7 +293,7 @@ impl<'a> PreviewBuilder<'a> {
                 return false;
             }
         }
-        
+
         visiting.remove(&pred_idx);
         true
     }

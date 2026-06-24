@@ -22,8 +22,8 @@ pub use ast::{AstConstructor, AstItem, SpecAst, WithContextFrame};
 pub use codegen::{GeneratedArtifact, GeneratedArtifactSet};
 use discovery::generated_output_root_for_entry_spec;
 pub use discovery::{
-    entry_id_from_path, entry_spec_from_path, generated_root, generated_root_for_arch,
-    generated_root_for_entry_spec, ghidra_language_manifest_path, checked_in_compiled_sla_available,
+    checked_in_compiled_sla_available, entry_id_from_path, entry_spec_from_path, generated_root,
+    generated_root_for_arch, generated_root_for_entry_spec, ghidra_language_manifest_path,
     infer_arch_from_entry_spec, packaged_sla_for_entry_spec, require_packaged_sla_for_entry_spec,
     sleigh_build_cache_root, sleigh_compiled_root, sleigh_languages_root, sleigh_specs_root,
     spec_root_for_arch,
@@ -499,7 +499,10 @@ pub fn compile_frontend_for_entry_spec(entry_spec: &Path) -> Result<CompiledFron
             let reader = std::io::BufReader::new(cache_file);
             if let Ok(compiled) = bincode::deserialize_from::<_, CompiledFrontend>(reader) {
                 if !frontend_cache_is_stale(entry_spec, &compiled, cache_time) {
-                    tracing::info!("Loaded compiled Sleigh frontend for {} from cache", entry_id);
+                    tracing::info!(
+                        "Loaded compiled Sleigh frontend for {} from cache",
+                        entry_id
+                    );
                     return Ok(compiled);
                 }
             }
@@ -507,7 +510,10 @@ pub fn compile_frontend_for_entry_spec(entry_spec: &Path) -> Result<CompiledFron
     }
 
     // Cache miss: perform full compilation
-    tracing::info!("Cache miss/invalid for {}, performing full compilation", entry_id);
+    tracing::info!(
+        "Cache miss/invalid for {}, performing full compilation",
+        entry_id
+    );
     let arch = infer_arch_from_entry_spec(entry_spec)?;
     let expanded = preprocessor::expand_entry_spec(entry_spec)
         .with_context(|| format!("expand entry spec {}", entry_spec.display()))?;
@@ -635,10 +641,7 @@ fn frontend_cache_is_stale(
     false
 }
 
-fn apply_required_sla_overlay(
-    compiled: &mut CompiledFrontend,
-    entry_spec: &Path,
-) -> Result<()> {
+fn apply_required_sla_overlay(compiled: &mut CompiledFrontend, entry_spec: &Path) -> Result<()> {
     let sla_path = discovery::require_packaged_sla_for_entry_spec(entry_spec)?;
     let library = sla::load_construct_templates_from_sla(&sla_path)
         .with_context(|| format!("decode compiled SLEIGH artifact {}", sla_path.display()))?;

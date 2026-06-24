@@ -21,7 +21,8 @@ impl<'a> PreviewBuilder<'a> {
                             continue;
                         }
                         let ptr = &op.inputs[1];
-                        if let Some((base, offset)) = self.resolve_stack_address_from_memory_op(op)
+                        if let Some((base, offset)) = self
+                            .resolve_stack_address_from_memory_op(op)
                             .or_else(|| self.resolve_stack_address(ptr))
                         {
                             let size = op.output.as_ref().map(|out| out.size).unwrap_or(0);
@@ -44,7 +45,8 @@ impl<'a> PreviewBuilder<'a> {
                             continue;
                         }
                         let ptr = &op.inputs[1];
-                        if let Some((base, offset)) = self.resolve_stack_address_from_memory_op(op)
+                        if let Some((base, offset)) = self
+                            .resolve_stack_address_from_memory_op(op)
                             .or_else(|| self.resolve_stack_address(ptr))
                         {
                             if let Some(val) = op.inputs.get(2) {
@@ -98,12 +100,15 @@ impl<'a> PreviewBuilder<'a> {
         let id = self.locals_next_id;
         self.locals_next_id += 1;
         let name = self.unique_stack_slot_binding_name(&kind_name, id);
-        self.locals.insert(offset, StackSlot {
-            id,
-            name,
-            ty,
-            origin,
-        });
+        self.locals.insert(
+            offset,
+            StackSlot {
+                id,
+                name,
+                ty,
+                origin,
+            },
+        );
     }
 }
 

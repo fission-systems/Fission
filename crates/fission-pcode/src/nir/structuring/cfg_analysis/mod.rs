@@ -74,7 +74,7 @@ impl<'a> PreviewBuilder<'a> {
         &self.cfg_facts
     }
 
-    pub(super) fn refresh_cfg_fact_cache(&mut self) {
+    pub(crate) fn refresh_cfg_fact_cache(&mut self) {
         self.cfg_facts = CfgFactCache::analyze(&self.successors, &self.predecessors);
         self.dom_tree = self.cfg_facts.dominators().clone();
     }
@@ -90,3 +90,45 @@ impl<'a> PreviewBuilder<'a> {
 
 #[cfg(test)]
 mod tests;
+
+impl<'a> crate::nir::builder::PreviewBuilder<'a> {
+    pub(crate) fn compute_follow_blocks(&self) -> Vec<Option<usize>> {
+        let total_blocks_for_follow = self.pcode.blocks.len() + self.virtual_block_map.len();
+        let dom_tree = self.cfg_facts.dominators();
+        let dom_frontier = self.cfg_fact_cache().dominance_frontier();
+        let imm_postdom = self.cfg_fact_cache().immediate_postdominators();
+
+        (0..total_blocks_for_follow)
+            .map(|i| {
+                let succs = self.successors.get(i)?;
+                if succs.len() < 2 {
+                    return None;
+                }
+                
+                if total_blocks_for_follow <= 500 {
+                    let mut trace_dag = TraceDag::new(
+                        &self.successors,
+                        &self.predecessors,
+                        dom_tree,
+                    );
+                    
+                    if let Ok(Some(exitblock)) = trace_dag.find_follow_block(i) {
+                        if exitblock > i {
+                            return Some(exitblock);
+                        }
+                    }
+                }
+
+                let follow = imm_postdom.nearest_common_postdominator(succs)?;
+                if follow <= i {
+                    return None;
+                }
+                let has_frontier_witness = succs
+                    .iter()
+                    .copied()
+                    .any(|succ| succ == follow || dom_frontier.contains(succ, follow));
+                has_frontier_witness.then_some(follow)
+            })
+            .collect()
+    }
+}

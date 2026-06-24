@@ -1,12 +1,11 @@
-use fission_sleigh::runtime::DecodedFlowKind;
 use fission_loader::{FunctionInfo, LoadedBinary};
-use fission_sleigh::runtime::{RuntimeFrontendStatus, RuntimeSleighFrontend};
 use fission_signatures::load_ghidra_patterns;
+use fission_sleigh::runtime::DecodedFlowKind;
+use fission_sleigh::runtime::{RuntimeFrontendStatus, RuntimeSleighFrontend};
 
 use super::ranges::{executable_ranges, is_in_executable_ranges, runtime_load_spec_for};
 use super::targets::{collect_instruction_targets, discovery_candidate_targets};
 use super::types::{FunctionDiscoveryProfile, FunctionDiscoveryReport};
-
 
 pub fn discover_functions_with_runtime(
     binary: &mut LoadedBinary,
@@ -95,7 +94,8 @@ pub fn discover_functions_with_runtime(
         })
         .reduce(
             || (0usize, Vec::new(), Vec::new(), Vec::new()),
-            |(count_a, mut calls_a, mut jumps_a, mut edges_a), (count_b, mut calls_b, mut jumps_b, mut edges_b)| {
+            |(count_a, mut calls_a, mut jumps_a, mut edges_a),
+             (count_b, mut calls_b, mut jumps_b, mut edges_b)| {
                 calls_a.append(&mut calls_b);
                 calls_a.sort_unstable();
                 calls_a.dedup();
@@ -116,14 +116,12 @@ pub fn discover_functions_with_runtime(
     report.call_target_count = call_targets.len();
     report.jump_target_count = jump_targets.len();
 
-    let mut tracker_seeds: std::collections::HashSet<u64> = binary.functions.iter().map(|f| f.address).collect();
+    let mut tracker_seeds: std::collections::HashSet<u64> =
+        binary.functions.iter().map(|f| f.address).collect();
     tracker_seeds.extend(call_targets.iter().copied());
-    
+
     let pdb_keys: Vec<u64> = binary.pdb_functions.keys().copied().collect();
-    let _ = std::fs::write(
-        "/tmp/fission_pdb_truth.json",
-        format!("{:?}", pdb_keys)
-    );
+    let _ = std::fs::write("/tmp/fission_pdb_truth.json", format!("{:?}", pdb_keys));
 
     let mut all_references = std::collections::HashSet::new();
     all_references.extend(call_targets.iter().copied());
@@ -136,30 +134,52 @@ pub fn discover_functions_with_runtime(
         .copied()
         .filter_map(|addr| {
             let bytes = binary.view_bytes(addr, 1)?;
-            if bytes[0] == 0xcc || bytes[0] == 0x90 { return None; }
+            if bytes[0] == 0xcc || bytes[0] == 0x90 {
+                return None;
+            }
             let mut local_cache = std::collections::HashMap::new();
             let empty_known = std::collections::HashSet::new();
             let (valid, _) = validate_subroutine_candidate(
-                binary, &frontend, addr, 3, 4000, true, &empty_known, &mut local_cache, Some(&all_references)
+                binary,
+                &frontend,
+                addr,
+                3,
+                4000,
+                true,
+                &empty_known,
+                &mut local_cache,
+                Some(&all_references),
             );
             if valid { Some(addr) } else { None }
         })
         .collect();
-    eprintln!("SCANNER_STATS: call_targets validated = {} / {}", valid_call_targets.len(), candidates.len());
+    eprintln!(
+        "SCANNER_STATS: call_targets validated = {} / {}",
+        valid_call_targets.len(),
+        candidates.len()
+    );
     candidates = valid_call_targets.clone();
 
     if profile != FunctionDiscoveryProfile::Conservative {
         let mut tracker = InstructionBoundaryTracker::build(binary, &frontend, &tracker_seeds);
         let mut validation_cache = std::collections::HashMap::new();
 
-        let mut all_known: std::collections::HashSet<u64> = binary.functions.iter().map(|f| f.address).collect();
+        let mut all_known: std::collections::HashSet<u64> =
+            binary.functions.iter().map(|f| f.address).collect();
         all_known.extend(candidates.iter().copied());
 
         if profile == FunctionDiscoveryProfile::Aggressive {
             // Disabled valid_jumps: it causes 1700+ FPs by blindly accepting jump targets
         }
 
-        let mut data_refs = scan_data_references(binary, &frontend, &executable_ranges, &all_known, &mut validation_cache, Some(&all_references));
+        let mut data_refs = scan_data_references(
+            binary,
+            &frontend,
+            &executable_ranges,
+            &all_known,
+            &mut validation_cache,
+            Some(&all_references),
+        );
         data_refs.retain(|&addr| !tracker.is_overlap(addr));
         eprintln!("SCANNER_STATS: data_refs={}", data_refs.len());
         for &dr in &data_refs {
@@ -169,7 +189,15 @@ pub fn discover_functions_with_runtime(
         all_known.extend(data_refs.clone());
 
         // Ghidra XML static patterns (x86-64win / x86win)
-        let mut xml_hits = scan_ghidra_patterns(binary, &frontend, &executable_ranges, &all_known, &tracker, &mut validation_cache, Some(&all_references));
+        let mut xml_hits = scan_ghidra_patterns(
+            binary,
+            &frontend,
+            &executable_ranges,
+            &all_known,
+            &tracker,
+            &mut validation_cache,
+            Some(&all_references),
+        );
         xml_hits.retain(|&addr| !tracker.is_overlap(addr));
         eprintln!("SCANNER_STATS: xml_hits={}", xml_hits.len());
         for &xh in &xml_hits {
@@ -178,7 +206,14 @@ pub fn discover_functions_with_runtime(
         candidates.extend(xml_hits.clone());
         all_known.extend(xml_hits.clone());
 
-        let mut dynamic = scan_dynamic_prologues(binary, &frontend, &executable_ranges, &all_known, &tracker, &mut validation_cache);
+        let mut dynamic = scan_dynamic_prologues(
+            binary,
+            &frontend,
+            &executable_ranges,
+            &all_known,
+            &tracker,
+            &mut validation_cache,
+        );
         dynamic.retain(|&addr| !tracker.is_overlap(addr));
         eprintln!("SCANNER_STATS: dynamic_prologues={}", dynamic.len());
         for &dyn_addr in &dynamic {
@@ -187,14 +222,23 @@ pub fn discover_functions_with_runtime(
         candidates.extend(dynamic.clone());
         all_known.extend(dynamic.clone());
 
-        let _ = std::fs::write("/tmp/fission_fp_stats.json", format!(
-            "{{\"call_targets\": {:?}, \"data_refs\": {:?}, \"xml_hits\": {:?}, \"dynamic\": {:?}}}",
-            valid_call_targets, data_refs, xml_hits, dynamic
-        ));
+        let _ = std::fs::write(
+            "/tmp/fission_fp_stats.json",
+            format!(
+                "{{\"call_targets\": {:?}, \"data_refs\": {:?}, \"xml_hits\": {:?}, \"dynamic\": {:?}}}",
+                valid_call_targets, data_refs, xml_hits, dynamic
+            ),
+        );
 
-        if candidates.contains(&0x10001000) { eprintln!("FOUND 10001000 in scanners"); }
-        if jump_targets.contains(&0x10001000) { eprintln!("FOUND 10001000 in jump_targets"); }
-        if binary.function_addr_index.contains_key(&0x10001000) { eprintln!("FOUND 10001000 in binary functions"); }
+        if candidates.contains(&0x10001000) {
+            eprintln!("FOUND 10001000 in scanners");
+        }
+        if jump_targets.contains(&0x10001000) {
+            eprintln!("FOUND 10001000 in jump_targets");
+        }
+        if binary.function_addr_index.contains_key(&0x10001000) {
+            eprintln!("FOUND 10001000 in binary functions");
+        }
 
         // Disabled thunks: causes a massive amount of FPs
         // let mut thunks = scan_jmp_thunks(binary, &frontend, &executable_ranges, &all_known);
@@ -233,7 +277,7 @@ pub fn discover_functions_with_runtime(
                 if all_known.contains(&dest) {
                     continue;
                 }
-                
+
                 let mut function_before_src = None;
                 let mut function_after_src = None;
 
@@ -273,18 +317,31 @@ pub fn discover_functions_with_runtime(
 
             shared_returns.sort_unstable();
             shared_returns.dedup();
-            
+
             let mut validated_shared_returns = Vec::new();
             for sr in shared_returns {
                 if !tracker.is_overlap(sr) && is_strict_boundary(binary, sr) {
-                    let (valid, _) = validate_subroutine_candidate(binary, &frontend, sr, 1, 4000, true, &all_known, &mut validation_cache, Some(&all_references));
+                    let (valid, _) = validate_subroutine_candidate(
+                        binary,
+                        &frontend,
+                        sr,
+                        1,
+                        4000,
+                        true,
+                        &all_known,
+                        &mut validation_cache,
+                        Some(&all_references),
+                    );
                     if valid {
                         validated_shared_returns.push(sr);
                     }
                 }
             }
 
-            eprintln!("SCANNER_STATS: tail_calls={}", validated_shared_returns.len());
+            eprintln!(
+                "SCANNER_STATS: tail_calls={}",
+                validated_shared_returns.len()
+            );
             for &sr in &validated_shared_returns {
                 tracker.add_function(binary, &frontend, sr);
             }
@@ -298,8 +355,13 @@ pub fn discover_functions_with_runtime(
 
     let mut accepted = Vec::new();
     for target in candidates {
-        if binary.function_addr_index.contains_key(&target) { continue; }
-        if crate::analysis::function_discovery::ranges::is_in_executable_ranges(target, &executable_ranges) {
+        if binary.function_addr_index.contains_key(&target) {
+            continue;
+        }
+        if crate::analysis::function_discovery::ranges::is_in_executable_ranges(
+            target,
+            &executable_ranges,
+        ) {
             accepted.push(target);
         }
     }
@@ -340,7 +402,13 @@ fn collect_section_targets(
         };
         let decoded_count = decoded.len();
         for instruction in decoded {
-            collect_instruction_targets(binary, &instruction, call_targets, jump_targets, jump_edges);
+            collect_instruction_targets(
+                binary,
+                &instruction,
+                call_targets,
+                jump_targets,
+                jump_edges,
+            );
         }
         return decoded_count;
     }
@@ -371,12 +439,20 @@ fn collect_section_targets_resync(
 
     while offset < bytes.len() {
         let remaining = &bytes[offset..];
-        if let Ok(instructions) = frontend.decode_window(remaining, current, remaining.len().min(4096)) {
+        if let Ok(instructions) =
+            frontend.decode_window(remaining, current, remaining.len().min(4096))
+        {
             if !instructions.is_empty() {
                 let mut batch_bytes = 0;
                 for instruction in &instructions {
                     batch_bytes += instruction.length;
-                    collect_instruction_targets(binary, instruction, call_targets, jump_targets, jump_edges);
+                    collect_instruction_targets(
+                        binary,
+                        instruction,
+                        call_targets,
+                        jump_targets,
+                        jump_edges,
+                    );
                     decoded_count += 1;
                 }
                 offset = offset.saturating_add(batch_bytes);
@@ -388,7 +464,13 @@ fn collect_section_targets_resync(
         match frontend.decode_instruction_with_context_override(remaining, current, None) {
             Ok(instruction) if instruction.length > 0 && instruction.length <= remaining.len() => {
                 let step = instruction.length;
-                collect_instruction_targets(binary, &instruction, call_targets, jump_targets, jump_edges);
+                collect_instruction_targets(
+                    binary,
+                    &instruction,
+                    call_targets,
+                    jump_targets,
+                    jump_edges,
+                );
                 decoded_count += 1;
                 offset = offset.saturating_add(step);
                 current = current.saturating_add(step as u64);
@@ -402,7 +484,6 @@ fn collect_section_targets_resync(
 
     decoded_count
 }
-
 
 struct InstructionBoundaryTracker {
     boundaries: Vec<(u64, u64)>,
@@ -418,7 +499,9 @@ impl InstructionBoundaryTracker {
         let boundaries: Vec<(u64, u64)> = known_functions
             .par_iter()
             .flat_map(|&addr| {
-                let mut local_tracker = Self { boundaries: Vec::new() };
+                let mut local_tracker = Self {
+                    boundaries: Vec::new(),
+                };
                 local_tracker.add_function(binary, frontend, addr);
                 local_tracker.boundaries
             })
@@ -430,12 +513,7 @@ impl InstructionBoundaryTracker {
         tracker
     }
 
-    fn add_function(
-        &mut self,
-        binary: &LoadedBinary,
-        frontend: &RuntimeSleighFrontend,
-        addr: u64,
-    ) {
+    fn add_function(&mut self, binary: &LoadedBinary, frontend: &RuntimeSleighFrontend, addr: u64) {
         let exec_ranges = super::ranges::executable_ranges(binary);
         let mut visited = std::collections::HashSet::new();
         let mut worklist = vec![addr];
@@ -454,49 +532,52 @@ impl InstructionBoundaryTracker {
                 if !super::ranges::is_in_executable_ranges(ip, &exec_ranges) {
                     break;
                 }
-                    let Some(bytes) = binary.view_bytes(ip, 15) else {
-                        break;
-                    };
-                    let Ok(decoded) = frontend.decode_window(bytes, ip, 1) else {
-                        break;
-                    };
-                    if decoded.is_empty() {
+                let Some(bytes) = binary.view_bytes(ip, 15) else {
+                    break;
+                };
+                let Ok(decoded) = frontend.decode_window(bytes, ip, 1) else {
+                    break;
+                };
+                if decoded.is_empty() {
+                    break;
+                }
+                let inst = &decoded[0];
+                if inst.mnemonic.is_empty() || inst.mnemonic.to_lowercase() == "invalid" {
+                    break;
+                }
+
+                self.boundaries.push((ip, ip + inst.length as u64));
+                count += 1;
+
+                match inst.flow_kind {
+                    DecodedFlowKind::Return => {
                         break;
                     }
-                    let inst = &decoded[0];
-                    if inst.mnemonic.is_empty() || inst.mnemonic.to_lowercase() == "invalid" {
+                    DecodedFlowKind::Jump => {
+                        // Do not trace unconditional jumps to avoid enveloping tail call targets
                         break;
                     }
-
-                    self.boundaries.push((ip, ip + inst.length as u64));
-                    count += 1;
-
-                    match inst.flow_kind {
-                        DecodedFlowKind::Return => {
-                            break;
-                        }
-                        DecodedFlowKind::Jump => {
-                            // Do not trace unconditional jumps to avoid enveloping tail call targets
-                            break;
-                        }
-                        DecodedFlowKind::ConditionalJump => {
-                            if let Some(target) = inst.direct_target {
-                                let norm_target = crate::analysis::function_discovery::targets::normalize_target(binary, target);
-                                if super::ranges::is_in_executable_ranges(norm_target, &exec_ranges) {
-                                    worklist.push(norm_target);
-                                }
+                    DecodedFlowKind::ConditionalJump => {
+                        if let Some(target) = inst.direct_target {
+                            let norm_target =
+                                crate::analysis::function_discovery::targets::normalize_target(
+                                    binary, target,
+                                );
+                            if super::ranges::is_in_executable_ranges(norm_target, &exec_ranges) {
+                                worklist.push(norm_target);
                             }
-                            ip += inst.length as u64;
                         }
-                        DecodedFlowKind::Interrupt | DecodedFlowKind::Syscall => {
-                            break;
-                        }
-                        _ => {
-                            ip += inst.length as u64;
-                        }
+                        ip += inst.length as u64;
+                    }
+                    DecodedFlowKind::Interrupt | DecodedFlowKind::Syscall => {
+                        break;
+                    }
+                    _ => {
+                        ip += inst.length as u64;
                     }
                 }
             }
+        }
 
         // Merge into boundaries and deduplicate
         self.boundaries.sort_unstable_by_key(|&(start, _)| start);
@@ -508,7 +589,9 @@ impl InstructionBoundaryTracker {
     }
 
     fn is_in_body(&self, addr: u64) -> bool {
-        self.boundaries.binary_search_by_key(&addr, |&(start, _)| start).is_ok()
+        self.boundaries
+            .binary_search_by_key(&addr, |&(start, _)| start)
+            .is_ok()
     }
 
     fn is_offcut(&self, addr: u64) -> bool {
@@ -539,14 +622,14 @@ fn validate_after_condition(
     let prev_addr = addr - 1;
 
     match cond {
-        "defined" => {
-            super::ranges::is_in_executable_ranges(prev_addr, executable_ranges)
-        }
+        "defined" => super::ranges::is_in_executable_ranges(prev_addr, executable_ranges),
         "data" => {
             if !super::ranges::is_in_executable_ranges(prev_addr, executable_ranges) {
                 return true;
             }
-            if let Some(sec) = binary.sections.iter().find(|s| prev_addr >= s.virtual_address && prev_addr < s.virtual_address + s.virtual_size) {
+            if let Some(sec) = binary.sections.iter().find(|s| {
+                prev_addr >= s.virtual_address && prev_addr < s.virtual_address + s.virtual_size
+            }) {
                 if !sec.is_executable {
                     return true;
                 }
@@ -558,9 +641,7 @@ fn validate_after_condition(
             }
             false
         }
-        "function" => {
-            is_strict_boundary(binary, addr)
-        }
+        "function" => is_strict_boundary(binary, addr),
         _ => true,
     }
 }
@@ -579,7 +660,11 @@ fn scan_ghidra_patterns(
     cache: &mut std::collections::HashMap<u64, ValidationResult>,
     global_references: Option<&std::collections::HashSet<u64>>,
 ) -> Vec<u64> {
-    let arch_tag = if binary.is_64bit { "x86-64win" } else { "x86win" };
+    let arch_tag = if binary.is_64bit {
+        "x86-64win"
+    } else {
+        "x86win"
+    };
     let compiler_id = binary.get_ghidra_compiler_id();
     let patterns = load_ghidra_patterns(arch_tag, compiler_id.as_deref());
     if patterns.is_empty() {
@@ -592,10 +677,12 @@ fn scan_ghidra_patterns(
     let mut wildcard_start: Vec<usize> = Vec::new();
 
     for (i, pat) in patterns.iter().enumerate() {
-        if pat.post_bytes.is_empty() { continue; }
+        if pat.post_bytes.is_empty() {
+            continue;
+        }
         match pat.post_bytes[0] {
             Some(b) => by_first_byte.entry(b).or_default().push(i),
-            None    => wildcard_start.push(i),
+            None => wildcard_start.push(i),
         }
     }
 
@@ -605,7 +692,8 @@ fn scan_ghidra_patterns(
 
     // Build AhoCorasick automaton for the first contiguous block of fixed bytes
     let mut ac_patterns = Vec::new();
-    let mut pattern_map: std::collections::HashMap<usize, Vec<usize>> = std::collections::HashMap::new();
+    let mut pattern_map: std::collections::HashMap<usize, Vec<usize>> =
+        std::collections::HashMap::new();
     let mut current_ac_index = 0;
 
     for (i, pat) in patterns.iter().enumerate() {
@@ -617,7 +705,7 @@ fn scan_ghidra_patterns(
                 break;
             }
         }
-        
+
         if prefix.is_empty() {
             // Pattern starts with a wildcard (rare, but possible)
             wildcard_start.push(i);
@@ -641,12 +729,17 @@ fn scan_ghidra_patterns(
     use rayon::prelude::*;
 
     for section in &binary.sections {
-        if !section.is_executable { continue; }
+        if !section.is_executable {
+            continue;
+        }
         let Some(bytes) = binary.view_bytes(section.virtual_address, section.virtual_size as usize)
-        else { continue; };
+        else {
+            continue;
+        };
         let base = section.virtual_address;
 
-        let section_hits: Vec<(u64, Option<usize>)> = ac.find_overlapping_iter(bytes)
+        let section_hits: Vec<(u64, Option<usize>)> = ac
+            .find_overlapping_iter(bytes)
             .map(|mat| {
                 let offset = mat.start();
                 let ac_idx = mat.pattern().as_usize();
@@ -656,7 +749,9 @@ fn scan_ghidra_patterns(
             .collect::<Vec<_>>()
             .into_par_iter()
             .filter_map(|(offset, ac_idx, addr)| {
-                if !is_in_executable_ranges(addr, executable_ranges) { return None; }
+                if !is_in_executable_ranges(addr, executable_ranges) {
+                    return None;
+                }
 
                 if let Some(indices) = pattern_map.get(&ac_idx) {
                     for &i in indices.iter() {
@@ -686,9 +781,13 @@ fn scan_ghidra_patterns(
         let wildcard_hits: Vec<(u64, Option<usize>)> = (0..bytes.len())
             .into_par_iter()
             .filter_map(|offset| {
-                if wildcard_start.is_empty() { return None; }
+                if wildcard_start.is_empty() {
+                    return None;
+                }
                 let addr = base + offset as u64;
-                if !is_in_executable_ranges(addr, executable_ranges) { return None; }
+                if !is_in_executable_ranges(addr, executable_ranges) {
+                    return None;
+                }
 
                 for &i in &wildcard_start {
                     if patterns[i].matches(bytes, base, addr) {
@@ -736,8 +835,18 @@ fn scan_ghidra_patterns(
             let min_inst = valid_code_min.unwrap_or(3);
             let mut local_cache = std::collections::HashMap::new();
             if validate_subroutine_candidate(
-                binary, frontend, addr, min_inst, 4000, true, known_functions, &mut local_cache, global_references,
-            ).0 {
+                binary,
+                frontend,
+                addr,
+                min_inst,
+                4000,
+                true,
+                known_functions,
+                &mut local_cache,
+                global_references,
+            )
+            .0
+            {
                 Some(addr)
             } else {
                 None
@@ -769,7 +878,9 @@ fn is_strict_boundary(binary: &LoadedBinary, addr: u64) -> bool {
     let mut skipped = 0;
     while skipped < 16 && check_addr > 0 {
         check_addr -= 1;
-        let Some(byte_slice) = binary.view_bytes(check_addr, 1) else { break; };
+        let Some(byte_slice) = binary.view_bytes(check_addr, 1) else {
+            break;
+        };
         let b = byte_slice[0];
         if b == 0xcc || b == 0x90 {
             skipped += 1;
@@ -809,8 +920,12 @@ fn is_strict_boundary(binary: &LoadedBinary, addr: u64) -> bool {
                     let rel32 = i32::from_le_bytes([op[1], op[2], op[3], op[4]]);
                     let next_ip = check_addr + 1;
                     let target = (next_ip as i64 + rel32 as i64) as u64;
-                    let exec_ranges = crate::analysis::function_discovery::ranges::executable_ranges(binary);
-                    if crate::analysis::function_discovery::ranges::is_in_executable_ranges(target, &exec_ranges) {
+                    let exec_ranges =
+                        crate::analysis::function_discovery::ranges::executable_ranges(binary);
+                    if crate::analysis::function_discovery::ranges::is_in_executable_ranges(
+                        target,
+                        &exec_ranges,
+                    ) {
                         return true;
                     }
                 }
@@ -826,8 +941,12 @@ fn is_strict_boundary(binary: &LoadedBinary, addr: u64) -> bool {
                     let rel32 = i32::from_le_bytes([op[1], op[2], op[3], op[4]]);
                     let next_ip = check_addr + 1;
                     let target = (next_ip as i64 + rel32 as i64) as u64;
-                    let exec_ranges = crate::analysis::function_discovery::ranges::executable_ranges(binary);
-                    if crate::analysis::function_discovery::ranges::is_in_executable_ranges(target, &exec_ranges) {
+                    let exec_ranges =
+                        crate::analysis::function_discovery::ranges::executable_ranges(binary);
+                    if crate::analysis::function_discovery::ranges::is_in_executable_ranges(
+                        target,
+                        &exec_ranges,
+                    ) {
                         return true;
                     }
                 }
@@ -1031,7 +1150,15 @@ fn scan_cc_padding_regions(
                 continue;
             }
             let (valid, _) = validate_subroutine_candidate(
-                binary, frontend, candidate, MIN_INSNS, 4000, true, known_functions, cache, global_references,
+                binary,
+                frontend,
+                candidate,
+                MIN_INSNS,
+                4000,
+                true,
+                known_functions,
+                cache,
+                global_references,
             );
             if valid {
                 results.push(candidate);
@@ -1041,7 +1168,6 @@ fn scan_cc_padding_regions(
 
     results
 }
-
 
 fn scan_data_references(
     binary: &LoadedBinary,
@@ -1054,21 +1180,27 @@ fn scan_data_references(
     use rayon::prelude::*;
 
     let ptr_size = if binary.is_64bit { 8 } else { 4 };
-    
-    let mut candidates: Vec<u64> = binary.sections
+
+    let mut candidates: Vec<u64> = binary
+        .sections
         .par_iter()
         .filter(|sec| !sec.is_executable && sec.is_readable)
         .flat_map(|section| {
             let mut sec_candidates = Vec::new();
-            if let Some(bytes) = binary.view_bytes(section.virtual_address, section.virtual_size as usize) {
+            if let Some(bytes) =
+                binary.view_bytes(section.virtual_address, section.virtual_size as usize)
+            {
                 let mut offset = 0;
                 while offset + ptr_size <= bytes.len() {
                     let val = if ptr_size == 8 {
-                        u64::from_le_bytes(bytes[offset..offset+8].try_into().unwrap())
+                        u64::from_le_bytes(bytes[offset..offset + 8].try_into().unwrap())
                     } else {
-                        u32::from_le_bytes(bytes[offset..offset+4].try_into().unwrap()) as u64
+                        u32::from_le_bytes(bytes[offset..offset + 4].try_into().unwrap()) as u64
                     };
-                    if crate::analysis::function_discovery::ranges::is_in_executable_ranges(val, executable_ranges) {
+                    if crate::analysis::function_discovery::ranges::is_in_executable_ranges(
+                        val,
+                        executable_ranges,
+                    ) {
                         if is_strict_boundary(binary, val) {
                             sec_candidates.push(val);
                         }
@@ -1087,7 +1219,17 @@ fn scan_data_references(
         .into_par_iter()
         .filter_map(|val| {
             let mut local_cache = std::collections::HashMap::new();
-            let (is_valid, res) = validate_subroutine_candidate(binary, frontend, val, 1, 4000, true, known_functions, &mut local_cache, global_references);
+            let (is_valid, res) = validate_subroutine_candidate(
+                binary,
+                frontend,
+                val,
+                1,
+                4000,
+                true,
+                known_functions,
+                &mut local_cache,
+                global_references,
+            );
             if is_valid && res.has_call_to_valid {
                 Some(val)
             } else {
@@ -1110,7 +1252,6 @@ fn scan_dynamic_prologues(
     Vec::new()
 }
 
-
 fn scan_jmp_thunks(
     binary: &LoadedBinary,
     frontend: &RuntimeSleighFrontend,
@@ -1121,8 +1262,13 @@ fn scan_jmp_thunks(
     let exec_ranges = executable_ranges(binary);
 
     for section in &binary.sections {
-        if !section.is_executable { continue; }
-        let Some(bytes) = binary.view_bytes(section.virtual_address, section.virtual_size as usize) else { continue; };
+        if !section.is_executable {
+            continue;
+        }
+        let Some(bytes) = binary.view_bytes(section.virtual_address, section.virtual_size as usize)
+        else {
+            continue;
+        };
         let mut offset = 0;
         while offset + 5 <= bytes.len() {
             if bytes[offset] == 0xe9 {
@@ -1130,7 +1276,8 @@ fn scan_jmp_thunks(
                 if is_strict_boundary(binary, addr) {
                     if let Some(target_bytes) = binary.view_bytes(addr, 15) {
                         if let Ok(decoded) = frontend.decode_window(target_bytes, addr, 1) {
-                            if !decoded.is_empty() && decoded[0].flow_kind == DecodedFlowKind::Jump {
+                            if !decoded.is_empty() && decoded[0].flow_kind == DecodedFlowKind::Jump
+                            {
                                 if let Some(target) = decoded[0].direct_target {
                                     let norm_target = crate::analysis::function_discovery::targets::normalize_target(binary, target);
                                     if is_in_executable_ranges(norm_target, &exec_ranges) {
@@ -1147,7 +1294,6 @@ fn scan_jmp_thunks(
     }
     thunks
 }
-
 
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct ValidationResult {
@@ -1173,7 +1319,8 @@ pub(crate) fn validate_subroutine_candidate(
     } else {
         // Safety check: candidate must be in executable memory
         let exec_ranges = crate::analysis::function_discovery::ranges::executable_ranges(binary);
-        if !crate::analysis::function_discovery::ranges::is_in_executable_ranges(addr, &exec_ranges) {
+        if !crate::analysis::function_discovery::ranges::is_in_executable_ranges(addr, &exec_ranges)
+        {
             let val = ValidationResult {
                 count: 0,
                 did_terminate: false,
@@ -1207,7 +1354,10 @@ pub(crate) fn validate_subroutine_candidate(
                     break;
                 }
 
-                if !crate::analysis::function_discovery::ranges::is_in_executable_ranges(ip, &exec_ranges) {
+                if !crate::analysis::function_discovery::ranges::is_in_executable_ranges(
+                    ip,
+                    &exec_ranges,
+                ) {
                     invalid = true;
                     break;
                 }
@@ -1232,7 +1382,7 @@ pub(crate) fn validate_subroutine_candidate(
                     invalid = true;
                     break;
                 }
-                
+
                 // [G5] Offcut Reference Check
                 // Reject the candidate if any known global reference points to the *middle* of an instruction.
                 if let Some(refs) = global_references {
@@ -1251,12 +1401,15 @@ pub(crate) fn validate_subroutine_candidate(
 
                 // Check if it calls/jmps to a known function
                 if let Some(target) = inst.direct_target {
-                    let norm_target = crate::analysis::function_discovery::targets::normalize_target(binary, target);
+                    let norm_target =
+                        crate::analysis::function_discovery::targets::normalize_target(
+                            binary, target,
+                        );
                     if known_functions.contains(&norm_target) {
                         adds_info = true;
                         if inst.flow_kind == DecodedFlowKind::Call {
                             has_call_to_valid = true;
-                            
+
                             // [G7] noReturn CALL handling
                             let mut is_noreturn = false;
                             let mut name = None;
@@ -1277,7 +1430,8 @@ pub(crate) fn validate_subroutine_candidate(
                             if let Some(n) = name {
                                 let fmt = fission_core::core::ghidra_no_return::binary_format_to_ghidra_format(&binary.format).unwrap_or("");
                                 let comp = binary.get_ghidra_compiler_id();
-                                let idx = fission_core::core::ghidra_no_return::ghidra_no_return_index();
+                                let idx =
+                                    fission_core::core::ghidra_no_return::ghidra_no_return_index();
                                 is_noreturn = idx.is_no_return(fmt, comp.as_deref(), lib, n);
                             }
                             if is_noreturn {
@@ -1295,14 +1449,20 @@ pub(crate) fn validate_subroutine_candidate(
                     }
                     DecodedFlowKind::Jump => {
                         if let Some(target) = inst.direct_target {
-                            let norm_target = crate::analysis::function_discovery::targets::normalize_target(binary, target);
+                            let norm_target =
+                                crate::analysis::function_discovery::targets::normalize_target(
+                                    binary, target,
+                                );
                             // If it's a tail call to a known function, treat as termination
                             if known_functions.contains(&norm_target) {
                                 did_terminate = true;
                                 adds_info = true;
                                 break;
                             }
-                            if crate::analysis::function_discovery::ranges::is_in_executable_ranges(norm_target, &exec_ranges) {
+                            if crate::analysis::function_discovery::ranges::is_in_executable_ranges(
+                                norm_target,
+                                &exec_ranges,
+                            ) {
                                 worklist.push(norm_target);
                             } else {
                                 invalid = true;
@@ -1316,8 +1476,14 @@ pub(crate) fn validate_subroutine_candidate(
                     }
                     DecodedFlowKind::ConditionalJump => {
                         if let Some(target) = inst.direct_target {
-                            let norm_target = crate::analysis::function_discovery::targets::normalize_target(binary, target);
-                            if crate::analysis::function_discovery::ranges::is_in_executable_ranges(norm_target, &exec_ranges) {
+                            let norm_target =
+                                crate::analysis::function_discovery::targets::normalize_target(
+                                    binary, target,
+                                );
+                            if crate::analysis::function_discovery::ranges::is_in_executable_ranges(
+                                norm_target,
+                                &exec_ranges,
+                            ) {
                                 worklist.push(norm_target);
                             }
                         }
@@ -1356,6 +1522,7 @@ pub(crate) fn validate_subroutine_candidate(
         val
     };
 
-    let is_valid = (!must_terminate || res.did_terminate || res.has_call_to_valid) && res.count >= min_instructions;
+    let is_valid = (!must_terminate || res.did_terminate || res.has_call_to_valid)
+        && res.count >= min_instructions;
     (is_valid, res)
 }

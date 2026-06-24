@@ -1,7 +1,7 @@
 use crate::arch::x86::unique_x86_register_name;
-use crate::nir::cspec::{register_namer_for_abi, RegisterNamer};
+use crate::nir::cspec::{RegisterNamer, register_namer_for_abi};
 
-use super::support::{is_register_varnode, StackBase};
+use super::support::{StackBase, is_register_varnode};
 use super::{CallingConvention, NirBindingOrigin, UNIQUE_SPACE_ID, Varnode};
 
 fn param_namer(abi: CallingConvention, int_param_offsets: &[u64]) -> RegisterNamer {
@@ -352,20 +352,21 @@ pub fn infer_entry_register_param_arity(
         return None;
     }
 
-    let block_map: HashMap<u32, &crate::pcode::PcodeBasicBlock> = pcode
-        .blocks
-        .iter()
-        .map(|b| (b.index, b))
-        .collect();
+    let block_map: HashMap<u32, &crate::pcode::PcodeBasicBlock> =
+        pcode.blocks.iter().map(|b| (b.index, b)).collect();
 
     let has_no_succs = pcode.blocks.iter().all(|b| b.successors.is_empty());
     let mut block_successors = HashMap::new();
     if has_no_succs && pcode.blocks.len() > 1 {
         let address_to_index = super::cfg::build_address_to_index_map(pcode);
         let layout_fallthrough = super::cfg::build_layout_fallthrough_map(pcode);
-        let succ_indices = super::cfg::build_successor_index_map(pcode, &address_to_index, &layout_fallthrough);
+        let succ_indices =
+            super::cfg::build_successor_index_map(pcode, &address_to_index, &layout_fallthrough);
         for (idx, block) in pcode.blocks.iter().enumerate() {
-            let succs_for_block = succ_indices[idx].iter().map(|&s_idx| pcode.blocks[s_idx].index).collect::<Vec<u32>>();
+            let succs_for_block = succ_indices[idx]
+                .iter()
+                .map(|&s_idx| pcode.blocks[s_idx].index)
+                .collect::<Vec<u32>>();
             block_successors.insert(block.index, succs_for_block);
         }
     } else {

@@ -35,8 +35,6 @@ fn is_printable(b: u8) -> bool {
     matches!(b, 0x09 | 0x0a | 0x0d) || (b >= 0x20 && b <= 0x7e)
 }
 
-
-
 /// Scan a byte slice for null-terminated ASCII strings.
 ///
 /// # Arguments

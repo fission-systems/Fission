@@ -138,9 +138,10 @@ fn parse_ldefs_slaspec_into_index(contents: &str, dir: &Path, index: &mut Langua
         if tag == "language" {
             let close = rest.find('>').unwrap_or(rest.len());
             let segment = &rest[..close];
-            if let (Some(language_id), Some(slafile)) =
-                (extract_attr(segment, "id"), extract_attr(segment, "slafile"))
-            {
+            if let (Some(language_id), Some(slafile)) = (
+                extract_attr(segment, "id"),
+                extract_attr(segment, "slafile"),
+            ) {
                 let slaspec = slafile_to_slaspec_path(dir, slafile);
                 index.insert(language_id.to_string(), slaspec);
             }
@@ -219,8 +220,7 @@ fn parse_ldefs_into_index(contents: &str, dir: &Path, index: &mut LdefsIndex) {
                 let close = rest.find('>').unwrap_or(rest.len());
                 let segment = &rest[..close];
                 current_language_id = extract_attr(segment, "id").map(str::to_string);
-                current_pspec_filename =
-                    extract_attr(segment, "processorspec").map(str::to_string);
+                current_pspec_filename = extract_attr(segment, "processorspec").map(str::to_string);
                 rest = &rest[close.min(rest.len())..];
             }
             "/language" => {
@@ -432,4 +432,3 @@ mod tests {
         );
     }
 }
-

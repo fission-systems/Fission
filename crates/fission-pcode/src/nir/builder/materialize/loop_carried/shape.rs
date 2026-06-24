@@ -1,7 +1,9 @@
 use super::*;
 
 impl<'a> PreviewBuilder<'a> {
-    pub(in crate::nir::builder) fn is_loop_carried_register_update_candidate(output: &Varnode) -> bool {
+    pub(in crate::nir::builder) fn is_loop_carried_register_update_candidate(
+        output: &Varnode,
+    ) -> bool {
         !output.is_constant && is_register_space_id(output.space_id) && output.size >= 4
     }
 
@@ -76,7 +78,10 @@ impl<'a> PreviewBuilder<'a> {
         false
     }
 
-    pub(in crate::nir::builder) fn op_reads_varnode_key(op: &PcodeOp, output_key: &VarnodeKey) -> bool {
+    pub(in crate::nir::builder) fn op_reads_varnode_key(
+        op: &PcodeOp,
+        output_key: &VarnodeKey,
+    ) -> bool {
         op.inputs
             .iter()
             .any(|input| Self::varnode_key_may_alias_output(&VarnodeKey::from(input), output_key))

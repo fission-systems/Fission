@@ -205,9 +205,16 @@ impl<'a> PreviewBuilder<'a> {
         &mut self,
         block: &crate::pcode::PcodeBasicBlock,
     ) -> Result<Vec<HirStmt>, MlilPreviewError> {
+        let block_idx = self.pcode_block_idx(block.index as usize);
+        if let Some(cached) = self.lowered_block_stmts_cache.get(&block_idx) {
+            return Ok(cached.clone());
+        }
+
         let terminator_index = self.block_terminator_index(block);
         let mut body = self.synthesize_explicit_merge_bindings_for_block(block)?;
         body.extend(self.lower_block_ops_range(block, 0, block.ops.len(), terminator_index)?);
+        
+        self.lowered_block_stmts_cache.insert(block_idx, body.clone());
         Ok(body)
     }
 
@@ -1587,7 +1594,7 @@ impl<'a> PreviewBuilder<'a> {
     }
 
     fn live_register_lhs_name_for_partial_gpr_join_family(
-        &self,
+        &mut self,
         output: &Varnode,
     ) -> Option<(String, u32)> {
         if output.is_constant
@@ -1612,7 +1619,7 @@ impl<'a> PreviewBuilder<'a> {
             .then(|| (live_name.to_string(), self.options.pointer_size))
     }
 
-    fn partial_gpr_join_family_needs_live_binding(&self, family_idx: usize) -> bool {
+    fn partial_gpr_join_family_needs_live_binding(&mut self, family_idx: usize) -> bool {
         if !self.options.is_64bit
             || !matches!(
                 self.options.calling_convention,
@@ -1621,7 +1628,12 @@ impl<'a> PreviewBuilder<'a> {
         {
             return false;
         }
-        self.pcode
+
+        if let Some(&needs_binding) = self.partial_gpr_live_binding_cache.get(&family_idx) {
+            return needs_binding;
+        }
+
+        let needs_binding = self.pcode
             .blocks
             .iter()
             .enumerate()
@@ -1647,7 +1659,10 @@ impl<'a> PreviewBuilder<'a> {
                                         .is_some_and(|(_, input_family)| input_family == family_idx)
                             })
                     })
-            })
+            });
+        
+        self.partial_gpr_live_binding_cache.insert(family_idx, needs_binding);
+        needs_binding
     }
 
     fn block_entry_partial_gpr_loop_context_is_safe(

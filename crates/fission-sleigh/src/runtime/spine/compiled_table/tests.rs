@@ -6,8 +6,7 @@ use crate::compiler::{
 use std::path::PathBuf;
 
 macro_rules! require_packaged_ghidra_sla {
-    () => {
-    };
+    () => {};
 }
 
 fn assert_spec_derived_lift(
@@ -120,8 +119,7 @@ fn generated_runtime_decodes_mov_imm64_without_compatibility_lift() {
 fn generated_runtime_decodes_jcc_rel8_without_compatibility_lift() {
     require_packaged_ghidra_sla!();
     let compiled = compile_x86_64_frontend().expect("compile frontend");
-    let decoded =
-        decode_instruction(&compiled, &[0x75, 0x05], 0x1000).expect("generated jne");
+    let decoded = decode_instruction(&compiled, &[0x75, 0x05], 0x1000).expect("generated jne");
     assert_eq!(decoded.length, 2);
     assert_eq!(decoded.mnemonic, "jnz");
     assert!(matches!(
@@ -145,8 +143,7 @@ fn generated_runtime_decodes_jcc_rel8_without_compatibility_lift() {
 fn generated_runtime_renders_jle_condition_mnemonic_display_only() {
     require_packaged_ghidra_sla!();
     let compiled = compile_x86_64_frontend().expect("compile frontend");
-    let decoded =
-        decode_instruction(&compiled, &[0x7e, 0x05], 0x1000).expect("generated jle");
+    let decoded = decode_instruction(&compiled, &[0x7e, 0x05], 0x1000).expect("generated jle");
     assert_eq!(decoded.length, 2);
     assert_eq!(decoded.mnemonic, "jle");
     assert!(matches!(
@@ -166,8 +163,8 @@ fn generated_runtime_decodes_startup_store_mov_mem32_imm32_without_compatibility
         decode_instruction(&compiled, &bytes, 0x1000).expect("generated mov [rax], imm32");
     assert_eq!(decoded.length, bytes.len());
     assert_eq!(decoded.mnemonic, "mov");
-    let (ops, length, details) = decode_and_lift_with_details(&compiled, &bytes, 0x1000)
-        .expect("lift mov [rax], imm32");
+    let (ops, length, details) =
+        decode_and_lift_with_details(&compiled, &bytes, 0x1000).expect("lift mov [rax], imm32");
     assert_eq!(length as usize, bytes.len());
     assert_eq!(
         details.template_source,
@@ -186,8 +183,7 @@ fn generated_runtime_decodes_startup_sub_rsp_imm8_without_compatibility_lift() {
     require_packaged_ghidra_sla!();
     let compiled = compile_x86_64_frontend().expect("compile frontend");
     let bytes = [0x48, 0x83, 0xEC, 0x28];
-    let decoded =
-        decode_instruction(&compiled, &bytes, 0x1000).expect("generated sub rsp, imm8");
+    let decoded = decode_instruction(&compiled, &bytes, 0x1000).expect("generated sub rsp, imm8");
     assert_eq!(decoded.length, bytes.len());
     assert_eq!(decoded.mnemonic, "sub");
     let ops = assert_spec_derived_lift(&compiled, &bytes, 0x1000);
@@ -204,8 +200,8 @@ fn generated_runtime_decodes_startup_rip_relative_load_without_compatibility_lif
         decode_instruction(&compiled, &bytes, address).expect("generated rip-relative mov");
     assert_eq!(decoded.length, bytes.len());
     assert_eq!(decoded.mnemonic, "mov");
-    let (ops, length, details) = decode_and_lift_with_details(&compiled, &bytes, address)
-        .expect("lift rip-relative mov");
+    let (ops, length, details) =
+        decode_and_lift_with_details(&compiled, &bytes, address).expect("lift rip-relative mov");
     assert_eq!(length as usize, bytes.len());
     assert_eq!(
         details.template_source,
@@ -246,8 +242,8 @@ fn vendor_x86_pe_c7_moffs_imm32_uses_sla_extents() {
     assert_eq!(decoded.length, bytes.len());
     assert_eq!(decoded.mnemonic, "mov");
 
-    let (ops, length, details) = decode_and_lift_with_details(&compiled, &bytes, 0x4014e3)
-        .expect("lift mov moffs32, imm32");
+    let (ops, length, details) =
+        decode_and_lift_with_details(&compiled, &bytes, 0x4014e3).expect("lift mov moffs32, imm32");
     assert_eq!(length as usize, bytes.len());
     assert_eq!(
         details.template_source,
@@ -403,8 +399,8 @@ fn generated_runtime_decodes_rip_relative_mov32_without_decode_no_match() {
     require_packaged_ghidra_sla!();
     let compiled = compile_x86_64_frontend().expect("compile frontend");
     let bytes = [0x8b, 0x05, 0x6a, 0x56, 0x00, 0x00];
-    let decoded = decode_instruction(&compiled, &bytes, 0x1400_19c0)
-        .expect("generated mov rip-relative");
+    let decoded =
+        decode_instruction(&compiled, &bytes, 0x1400_19c0).expect("generated mov rip-relative");
     assert_eq!(decoded.length, bytes.len());
     assert_eq!(decoded.mnemonic, "mov");
     assert!(matches!(
@@ -418,8 +414,7 @@ fn generated_runtime_decodes_movsxd_without_decode_no_match_or_compatibility_lif
     require_packaged_ghidra_sla!();
     let compiled = compile_x86_64_frontend().expect("compile frontend");
     let bytes = [0x48, 0x63, 0x41, 0x3c];
-    let decoded =
-        decode_instruction(&compiled, &bytes, 0x1400_2600).expect("generated movsxd");
+    let decoded = decode_instruction(&compiled, &bytes, 0x1400_2600).expect("generated movsxd");
     assert_eq!(decoded.length, bytes.len());
     assert_eq!(decoded.mnemonic, "movsxd");
     let ops = assert_spec_derived_lift(&compiled, &bytes, 0x1400_2600);
@@ -700,8 +695,8 @@ fn generated_runtime_decodes_arm7_le_arm_mode_stmdb_from_sla_template() {
     assert_eq!(decoded.length, bytes.len());
     assert_eq!(decoded.mnemonic, "stmdb");
 
-    let (ops, length, details) = decode_and_lift_with_details(&compiled, &bytes, 0x102e8)
-        .expect("lift ARM mode stmdb");
+    let (ops, length, details) =
+        decode_and_lift_with_details(&compiled, &bytes, 0x102e8).expect("lift ARM mode stmdb");
     assert_eq!(length as usize, bytes.len());
     assert_eq!(
         details.template_source,
@@ -752,9 +747,8 @@ fn generated_runtime_reports_thumb_it_context_commits_in_lift_details() {
         let compiled = compile_frontend_for_entry_spec(&arm_spec)
             .unwrap_or_else(|err| panic!("compile {entry_id}: {err:#}"));
 
-        let (_ops, length, details) =
-            decode_and_lift_with_details(&compiled, &bytes, 0x100016)
-                .unwrap_or_else(|err| panic!("lift {entry_id} Thumb IT: {err:#}"));
+        let (_ops, length, details) = decode_and_lift_with_details(&compiled, &bytes, 0x100016)
+            .unwrap_or_else(|err| panic!("lift {entry_id} Thumb IT: {err:#}"));
 
         assert_eq!(length as usize, bytes.len(), "{entry_id} IT length");
         assert!(

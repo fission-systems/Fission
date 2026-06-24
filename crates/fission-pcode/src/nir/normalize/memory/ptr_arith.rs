@@ -649,7 +649,13 @@ fn try_recover_ptr_arith_tree(
     // We walk the left-most Add chain looking for a pointer.
     let mut ptr_side: Option<(HirExpr, NirType)> = None;
     let mut non_ptr_accum: Vec<HirExpr> = Vec::new();
-    collect_add_terms_with_ptr(expr, false, binding_types, &mut ptr_side, &mut non_ptr_accum);
+    collect_add_terms_with_ptr(
+        expr,
+        false,
+        binding_types,
+        &mut ptr_side,
+        &mut non_ptr_accum,
+    );
 
     let (ptr_expr, ptr_ty) = ptr_side?;
     if non_ptr_accum.is_empty() {
@@ -764,10 +770,22 @@ fn try_recover_ptr_arith(
         if let Some(stride) = stride_opt {
             if stride > 0 {
                 elem_ty = match stride {
-                    2 => NirType::Int { bits: 16, signed: false },
-                    4 => NirType::Int { bits: 32, signed: false },
-                    8 => NirType::Int { bits: 64, signed: false },
-                    _ => NirType::Int { bits: (stride * 8) as u32, signed: false },
+                    2 => NirType::Int {
+                        bits: 16,
+                        signed: false,
+                    },
+                    4 => NirType::Int {
+                        bits: 32,
+                        signed: false,
+                    },
+                    8 => NirType::Int {
+                        bits: 64,
+                        signed: false,
+                    },
+                    _ => NirType::Int {
+                        bits: (stride * 8) as u32,
+                        signed: false,
+                    },
                 };
             }
         }
@@ -890,10 +908,22 @@ fn try_recover_index_access(
     // On-the-fly refinement for stride/index matching
     if matches!(elem_ty, NirType::Unknown | NirType::Int { bits: 8, .. }) && stride > 0 {
         elem_ty = match stride {
-            2 => NirType::Int { bits: 16, signed: false },
-            4 => NirType::Int { bits: 32, signed: false },
-            8 => NirType::Int { bits: 64, signed: false },
-            _ => NirType::Int { bits: (stride * 8) as u32, signed: false },
+            2 => NirType::Int {
+                bits: 16,
+                signed: false,
+            },
+            4 => NirType::Int {
+                bits: 32,
+                signed: false,
+            },
+            8 => NirType::Int {
+                bits: 64,
+                signed: false,
+            },
+            _ => NirType::Int {
+                bits: (stride * 8) as u32,
+                signed: false,
+            },
         };
     }
 
@@ -1118,7 +1148,13 @@ fn recover_in_lvalue(lhs: &mut HirLValue, binding_types: &HashMap<String, NirTyp
     match lhs {
         HirLValue::Deref { ptr, ty } => {
             if let Some(field_expr) = try_recover_field_access(ptr, ty, binding_types) {
-                let HirExpr::FieldAccess { base, field_name, offset, ty: f_ty } = field_expr else {
+                let HirExpr::FieldAccess {
+                    base,
+                    field_name,
+                    offset,
+                    ty: f_ty,
+                } = field_expr
+                else {
                     unreachable!()
                 };
                 *lhs = HirLValue::FieldAccess {
@@ -1151,9 +1187,7 @@ fn recover_in_lvalue(lhs: &mut HirLValue, binding_types: &HashMap<String, NirTyp
             a || b
         }
         HirLValue::Var(_) => false,
-        HirLValue::FieldAccess { base, .. } => {
-            recover_in_expr(base, binding_types)
-        }
+        HirLValue::FieldAccess { base, .. } => recover_in_expr(base, binding_types),
     }
 }
 
@@ -1328,7 +1362,10 @@ fn infer_pointee_type_from_patterns(
     has_dynamic_stride: Option<i64>,
 ) -> NirType {
     if let NirType::Ptr(inner) = binding_ty {
-        if !matches!(inner.as_ref(), NirType::Unknown | NirType::Int { bits: 8, .. }) {
+        if !matches!(
+            inner.as_ref(),
+            NirType::Unknown | NirType::Int { bits: 8, .. }
+        ) {
             return inner.as_ref().clone();
         }
     }
@@ -1336,11 +1373,26 @@ fn infer_pointee_type_from_patterns(
     if let Some(stride) = has_dynamic_stride {
         if stride > 0 {
             return match stride {
-                1 => NirType::Int { bits: 8, signed: false },
-                2 => NirType::Int { bits: 16, signed: false },
-                4 => NirType::Int { bits: 32, signed: false },
-                8 => NirType::Int { bits: 64, signed: false },
-                _ => NirType::Int { bits: (stride * 8) as u32, signed: false },
+                1 => NirType::Int {
+                    bits: 8,
+                    signed: false,
+                },
+                2 => NirType::Int {
+                    bits: 16,
+                    signed: false,
+                },
+                4 => NirType::Int {
+                    bits: 32,
+                    signed: false,
+                },
+                8 => NirType::Int {
+                    bits: 64,
+                    signed: false,
+                },
+                _ => NirType::Int {
+                    bits: (stride * 8) as u32,
+                    signed: false,
+                },
             };
         }
     }
@@ -1359,9 +1411,18 @@ fn infer_pointee_type_from_patterns(
                 let is_continuous = indices.windows(2).all(|w| w[1] - w[0] <= 2);
                 if is_continuous {
                     return match stride {
-                        2 => NirType::Int { bits: 16, signed: false },
-                        4 => NirType::Int { bits: 32, signed: false },
-                        8 => NirType::Int { bits: 64, signed: false },
+                        2 => NirType::Int {
+                            bits: 16,
+                            signed: false,
+                        },
+                        4 => NirType::Int {
+                            bits: 32,
+                            signed: false,
+                        },
+                        8 => NirType::Int {
+                            bits: 64,
+                            signed: false,
+                        },
                         _ => NirType::Unknown,
                     };
                 }
@@ -1369,7 +1430,8 @@ fn infer_pointee_type_from_patterns(
         }
 
         if offsets.len() >= 2 {
-            let inferred_size = super::typed_facts::inferred_aggregate_size(&obj_facts.accesses).unwrap_or(0);
+            let inferred_size =
+                super::typed_facts::inferred_aggregate_size(&obj_facts.accesses).unwrap_or(0);
             if inferred_size > 0 {
                 return NirType::Aggregate {
                     size: inferred_size,
@@ -1392,7 +1454,8 @@ pub(crate) fn apply_ptr_arith_recovery_pass(func: &mut HirFunction) -> bool {
     let inventory = super::typed_facts::collect_typed_fact_inventory(func, false);
     for binding in func.locals.iter_mut().chain(func.params.iter_mut()) {
         if matches!(binding.ty, NirType::Ptr(_)) {
-            let refined = infer_pointee_type_from_patterns(&binding.name, &binding.ty, &inventory, None);
+            let refined =
+                infer_pointee_type_from_patterns(&binding.name, &binding.ty, &inventory, None);
             if refined != NirType::Unknown {
                 let new_ptr_ty = NirType::Ptr(Box::new(refined));
                 if binding.ty != new_ptr_ty {
@@ -1531,9 +1594,7 @@ fn normalize_zero_index_lvalue(lhs: &mut HirLValue) -> bool {
             changed
         }
         HirLValue::Var(_) => false,
-        HirLValue::FieldAccess { base, .. } => {
-            normalize_zero_index_expr(base)
-        }
+        HirLValue::FieldAccess { base, .. } => normalize_zero_index_expr(base),
     }
 }
 
@@ -2183,21 +2244,30 @@ mod tests {
                     base: Box::new(HirExpr::Var("p".to_owned())),
                     offset: 0,
                 }),
-                ty: NirType::Int { bits: 32, signed: false },
+                ty: NirType::Int {
+                    bits: 32,
+                    signed: false,
+                },
             }),
             HirStmt::Expr(HirExpr::Load {
                 ptr: Box::new(HirExpr::PtrOffset {
                     base: Box::new(HirExpr::Var("p".to_owned())),
                     offset: 4,
                 }),
-                ty: NirType::Int { bits: 32, signed: false },
+                ty: NirType::Int {
+                    bits: 32,
+                    signed: false,
+                },
             }),
             HirStmt::Expr(HirExpr::Load {
                 ptr: Box::new(HirExpr::PtrOffset {
                     base: Box::new(HirExpr::Var("p".to_owned())),
                     offset: 8,
                 }),
-                ty: NirType::Int { bits: 32, signed: false },
+                ty: NirType::Int {
+                    bits: 32,
+                    signed: false,
+                },
             }),
         ];
         let mut func = make_func(vec![make_binding_with_ty("p", p_ty)], body);
@@ -2221,18 +2291,39 @@ mod tests {
                     rhs: Box::new(HirExpr::Binary {
                         op: HirBinaryOp::Mul,
                         lhs: Box::new(HirExpr::Var("i".to_owned())),
-                        rhs: Box::new(HirExpr::Const(4, NirType::Int { bits: 64, signed: false })),
-                        ty: NirType::Int { bits: 64, signed: false },
+                        rhs: Box::new(HirExpr::Const(
+                            4,
+                            NirType::Int {
+                                bits: 64,
+                                signed: false,
+                            },
+                        )),
+                        ty: NirType::Int {
+                            bits: 64,
+                            signed: false,
+                        },
                     }),
-                    ty: NirType::Int { bits: 64, signed: false },
+                    ty: NirType::Int {
+                        bits: 64,
+                        signed: false,
+                    },
                 }),
-                ty: NirType::Int { bits: 32, signed: false },
+                ty: NirType::Int {
+                    bits: 32,
+                    signed: false,
+                },
             },
         }];
         let mut func = make_func(
             vec![
                 make_binding_with_ty("p", p_ty),
-                make_binding_with_ty("i", NirType::Int { bits: 64, signed: false }),
+                make_binding_with_ty(
+                    "i",
+                    NirType::Int {
+                        bits: 64,
+                        signed: false,
+                    },
+                ),
             ],
             body,
         );
@@ -2254,21 +2345,30 @@ mod tests {
                     base: Box::new(HirExpr::Var("p".to_owned())),
                     offset: 4,
                 }),
-                ty: NirType::Int { bits: 32, signed: false },
+                ty: NirType::Int {
+                    bits: 32,
+                    signed: false,
+                },
             }),
             HirStmt::Expr(HirExpr::Load {
                 ptr: Box::new(HirExpr::PtrOffset {
                     base: Box::new(HirExpr::Var("p".to_owned())),
                     offset: 11,
                 }),
-                ty: NirType::Int { bits: 8, signed: false },
+                ty: NirType::Int {
+                    bits: 8,
+                    signed: false,
+                },
             }),
             HirStmt::Expr(HirExpr::Load {
                 ptr: Box::new(HirExpr::PtrOffset {
                     base: Box::new(HirExpr::Var("p".to_owned())),
                     offset: 20,
                 }),
-                ty: NirType::Int { bits: 64, signed: false },
+                ty: NirType::Int {
+                    bits: 64,
+                    signed: false,
+                },
             }),
         ];
         let mut func = make_func(vec![make_binding_with_ty("p", p_ty)], body);
@@ -2284,7 +2384,10 @@ mod tests {
     fn recovers_aggregate_field_access() {
         let field_8 = crate::nir::StructField {
             offset: 8,
-            ty: NirType::Int { bits: 32, signed: true },
+            ty: NirType::Int {
+                bits: 32,
+                signed: true,
+            },
             name: "field_8".to_owned(),
         };
         let agg_ty = NirType::Aggregate {
@@ -2300,7 +2403,10 @@ mod tests {
                         base: Box::new(HirExpr::Var("p".to_owned())),
                         offset: 8,
                     }),
-                    ty: NirType::Int { bits: 32, signed: true },
+                    ty: NirType::Int {
+                        bits: 32,
+                        signed: true,
+                    },
                 },
             },
             HirStmt::Assign {
@@ -2309,15 +2415,30 @@ mod tests {
                         base: Box::new(HirExpr::Var("p".to_owned())),
                         offset: 16,
                     }),
-                    ty: NirType::Int { bits: 64, signed: false },
+                    ty: NirType::Int {
+                        bits: 64,
+                        signed: false,
+                    },
                 },
-                rhs: HirExpr::Const(0, NirType::Int { bits: 64, signed: false }),
+                rhs: HirExpr::Const(
+                    0,
+                    NirType::Int {
+                        bits: 64,
+                        signed: false,
+                    },
+                ),
             },
         ];
         let mut func = make_func(
             vec![
                 make_binding_with_ty("p", p_ty),
-                make_binding_with_ty("x", NirType::Int { bits: 32, signed: true }),
+                make_binding_with_ty(
+                    "x",
+                    NirType::Int {
+                        bits: 32,
+                        signed: true,
+                    },
+                ),
             ],
             body,
         );
@@ -2328,7 +2449,8 @@ mod tests {
         if let HirStmt::Assign { rhs, .. } = &func.body[0] {
             assert!(
                 matches!(rhs, HirExpr::FieldAccess { field_name, offset, .. } if field_name == "field_8" && *offset == 8),
-                "expected FieldAccess for field_8, got {:?}", rhs
+                "expected FieldAccess for field_8, got {:?}",
+                rhs
             );
         } else {
             panic!("expected assignment");
@@ -2338,11 +2460,11 @@ mod tests {
         if let HirStmt::Assign { lhs, .. } = &func.body[1] {
             assert!(
                 matches!(lhs, HirLValue::FieldAccess { field_name, offset, .. } if field_name == "field_16" && *offset == 16),
-                "expected FieldAccess for field_16, got {:?}", lhs
+                "expected FieldAccess for field_16, got {:?}",
+                lhs
             );
         } else {
             panic!("expected assignment");
         }
     }
 }
-

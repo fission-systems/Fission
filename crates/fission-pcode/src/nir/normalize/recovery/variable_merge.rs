@@ -1,4 +1,4 @@
-use super::super::*;// For accessing normalizer structures
+use super::super::*; // For accessing normalizer structures
 use crate::nir::var_rename::rename_vars_in_stmts;
 use std::collections::{HashMap, HashSet};
 
@@ -19,11 +19,17 @@ fn collect_direct_copies(stmts: &[HirStmt]) -> std::collections::HashSet<(String
                 | HirStmt::DoWhile { body, .. } => {
                     visit(body, copies);
                 }
-                HirStmt::If { then_body, else_body, .. } => {
+                HirStmt::If {
+                    then_body,
+                    else_body,
+                    ..
+                } => {
                     visit(then_body, copies);
                     visit(else_body, copies);
                 }
-                HirStmt::For { init, update, body, .. } => {
+                HirStmt::For {
+                    init, update, body, ..
+                } => {
                     if let Some(init_stmt) = init {
                         visit(std::slice::from_ref(init_stmt), copies);
                     }
@@ -108,10 +114,17 @@ fn collect_dominant_copy_join_merges(stmts: &[HirStmt]) -> Vec<(String, String)>
     renames
 }
 
-fn collect_dominant_copy_join_merges_in_stmts(stmts: &[HirStmt], renames: &mut Vec<(String, String)>) {
+fn collect_dominant_copy_join_merges_in_stmts(
+    stmts: &[HirStmt],
+    renames: &mut Vec<(String, String)>,
+) {
     for stmt in stmts {
         match stmt {
-            HirStmt::If { then_body, else_body, .. } => {
+            HirStmt::If {
+                then_body,
+                else_body,
+                ..
+            } => {
                 if let (Some((dest1, src1)), Some((dest2, src2))) = (
                     last_direct_var_copy(then_body),
                     last_direct_var_copy(else_body),
@@ -132,17 +145,20 @@ fn collect_dominant_copy_join_merges_in_stmts(stmts: &[HirStmt], renames: &mut V
                 collect_dominant_copy_join_merges_in_stmts(then_body, renames);
                 collect_dominant_copy_join_merges_in_stmts(else_body, renames);
             }
-            HirStmt::Block(body)
-            | HirStmt::While { body, .. }
-            | HirStmt::DoWhile { body, .. } => {
+            HirStmt::Block(body) | HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
                 collect_dominant_copy_join_merges_in_stmts(body, renames);
             }
-            HirStmt::For { init, update, body, .. } => {
+            HirStmt::For {
+                init, update, body, ..
+            } => {
                 if let Some(init) = init {
                     collect_dominant_copy_join_merges_in_stmts(std::slice::from_ref(init), renames);
                 }
                 if let Some(update) = update {
-                    collect_dominant_copy_join_merges_in_stmts(std::slice::from_ref(update), renames);
+                    collect_dominant_copy_join_merges_in_stmts(
+                        std::slice::from_ref(update),
+                        renames,
+                    );
                 }
                 collect_dominant_copy_join_merges_in_stmts(body, renames);
             }
@@ -192,11 +208,8 @@ pub(crate) fn apply_variable_merge_pass(func: &mut HirFunction) -> bool {
     let mut changed = false;
 
     // Keep track of parameters to avoid merging them
-    let param_names: std::collections::HashSet<String> = func
-        .params
-        .iter()
-        .map(|p| p.name.clone())
-        .collect();
+    let param_names: std::collections::HashSet<String> =
+        func.params.iter().map(|p| p.name.clone()).collect();
 
     // Step 1: Merge overlapping stack variables (coalescing multiple stack-slot views)
     let mut stack_renames = Vec::new();
@@ -213,7 +226,8 @@ pub(crate) fn apply_variable_merge_pass(func: &mut HirFunction) -> bool {
         if param_names.contains(&b1_name) {
             continue;
         }
-        let Some((offset1, size1, is_derived1)) = get_stack_span_from_parts(b1_origin, &b1_ty) else {
+        let Some((offset1, size1, is_derived1)) = get_stack_span_from_parts(b1_origin, &b1_ty)
+        else {
             continue;
         };
 
@@ -227,25 +241,40 @@ pub(crate) fn apply_variable_merge_pass(func: &mut HirFunction) -> bool {
             if param_names.contains(&b2_name) {
                 continue;
             }
-            let Some((offset2, size2, is_derived2)) = get_stack_span_from_parts(b2_origin, &b2_ty) else {
+            let Some((offset2, size2, is_derived2)) = get_stack_span_from_parts(b2_origin, &b2_ty)
+            else {
                 continue;
             };
 
             let is_slot1 = b1_name.starts_with("slot_");
             let is_slot2 = b2_name.starts_with("slot_");
-            let can_merge = (!is_slot1 && !is_slot2) && (
-                (is_derived1 == is_derived2 && spans_overlap((offset1, size1), (offset2, size2)))
-                || (offset1 == offset2)
-            );
+            let can_merge = (!is_slot1 && !is_slot2)
+                && ((is_derived1 == is_derived2
+                    && spans_overlap((offset1, size1), (offset2, size2)))
+                    || (offset1 == offset2));
 
             if can_merge {
                 let p1 = name_priority(&b1_name);
                 let p2 = name_priority(&b2_name);
 
                 let (keep_idx, merge_idx, keep_name, merge_name, keep_ty, merge_ty) = if p1 >= p2 {
-                    (i, j, b1_name.clone(), b2_name.clone(), b1_ty.clone(), b2_ty.clone())
+                    (
+                        i,
+                        j,
+                        b1_name.clone(),
+                        b2_name.clone(),
+                        b1_ty.clone(),
+                        b2_ty.clone(),
+                    )
                 } else {
-                    (j, i, b2_name.clone(), b1_name.clone(), b2_ty.clone(), b1_ty.clone())
+                    (
+                        j,
+                        i,
+                        b2_name.clone(),
+                        b1_name.clone(),
+                        b2_ty.clone(),
+                        b1_ty.clone(),
+                    )
                 };
 
                 stack_renames.push((merge_name, keep_name));
@@ -261,11 +290,10 @@ pub(crate) fn apply_variable_merge_pass(func: &mut HirFunction) -> bool {
 
     if !stack_renames.is_empty() {
         rename_vars_in_stmts(&mut func.body, &stack_renames);
-        let renamed_from: std::collections::HashSet<String> = stack_renames
-            .iter()
-            .map(|(from, _)| from.clone())
-            .collect();
-        func.locals.retain(|local| !renamed_from.contains(&local.name));
+        let renamed_from: std::collections::HashSet<String> =
+            stack_renames.iter().map(|(from, _)| from.clone()).collect();
+        func.locals
+            .retain(|local| !renamed_from.contains(&local.name));
         for local in &mut func.locals {
             if let Some(updated) = stack_locals.iter().find(|l| l.name == local.name) {
                 local.ty = updated.ty.clone();
@@ -289,7 +317,8 @@ pub(crate) fn apply_variable_merge_pass(func: &mut HirFunction) -> bool {
         rename_vars_in_stmts(&mut func.body, &copy_renames);
         let renamed_from: std::collections::HashSet<String> =
             copy_renames.iter().map(|(from, _)| from.clone()).collect();
-        func.locals.retain(|local| !renamed_from.contains(&local.name));
+        func.locals
+            .retain(|local| !renamed_from.contains(&local.name));
         changed = true;
     }
 
@@ -350,19 +379,24 @@ pub(crate) fn apply_variable_merge_pass(func: &mut HirFunction) -> bool {
             };
 
             // Disjoint Domain Restriction: At least one variable must be a hardware temporary
-            let is_temp1 = current_locals[i].is_temp_like() || name_priority(&current_locals[i].name) <= 1;
-            let is_temp2 = current_locals[j].is_temp_like() || name_priority(&current_locals[j].name) <= 1;
+            let is_temp1 =
+                current_locals[i].is_temp_like() || name_priority(&current_locals[i].name) <= 1;
+            let is_temp2 =
+                current_locals[j].is_temp_like() || name_priority(&current_locals[j].name) <= 1;
             if !is_temp1 && !is_temp2 {
                 continue;
             }
 
             // Control-Flow Boundaries: Reject merges across major loop scopes or switch boundaries.
             // If one variable is loop-local and the other is not (inside != inside), reject the merge.
-            let crosses_boundary = live_ranges.control_intervals.iter().any(|&(c_start, c_end)| {
-                let in1 = start1 >= c_start && end1 <= c_end;
-                let in2 = start2 >= c_start && end2 <= c_end;
-                in1 != in2
-            });
+            let crosses_boundary = live_ranges
+                .control_intervals
+                .iter()
+                .any(|&(c_start, c_end)| {
+                    let in1 = start1 >= c_start && end1 <= c_end;
+                    let in2 = start2 >= c_start && end2 <= c_end;
+                    in1 != in2
+                });
 
             if crosses_boundary {
                 continue;
@@ -384,12 +418,12 @@ pub(crate) fn apply_variable_merge_pass(func: &mut HirFunction) -> bool {
                 let p1 = name_priority(&b1_name);
                 let p2 = name_priority(&b2_name);
 
-                let is_stack1 = current_locals[i].origin.map_or(false, |o| {
-                    !matches!(o, NirBindingOrigin::Temp)
-                });
-                let is_stack2 = current_locals[j].origin.map_or(false, |o| {
-                    !matches!(o, NirBindingOrigin::Temp)
-                });
+                let is_stack1 = current_locals[i]
+                    .origin
+                    .map_or(false, |o| !matches!(o, NirBindingOrigin::Temp));
+                let is_stack2 = current_locals[j]
+                    .origin
+                    .map_or(false, |o| !matches!(o, NirBindingOrigin::Temp));
 
                 let (keep_idx, merge_idx, keep_name, merge_name) = if is_stack1 && !is_stack2 {
                     (i, j, b1_name.clone(), b2_name.clone())
@@ -420,12 +454,19 @@ pub(crate) fn apply_variable_merge_pass(func: &mut HirFunction) -> bool {
                     current_locals[keep_idx].origin = merge_origin;
                 }
 
-                let (k_start, k_end) = live_ranges.ranges.get(&keep_name).copied().unwrap_or((0, 0));
-                let (m_start, m_end) = live_ranges.ranges.get(&merge_name).copied().unwrap_or((0, 0));
-                live_ranges.ranges.insert(
-                    keep_name,
-                    (k_start.min(m_start), k_end.max(m_end)),
-                );
+                let (k_start, k_end) = live_ranges
+                    .ranges
+                    .get(&keep_name)
+                    .copied()
+                    .unwrap_or((0, 0));
+                let (m_start, m_end) = live_ranges
+                    .ranges
+                    .get(&merge_name)
+                    .copied()
+                    .unwrap_or((0, 0));
+                live_ranges
+                    .ranges
+                    .insert(keep_name, (k_start.min(m_start), k_end.max(m_end)));
 
                 disjoint_merged[merge_idx] = true;
                 changed = true;
@@ -439,7 +480,8 @@ pub(crate) fn apply_variable_merge_pass(func: &mut HirFunction) -> bool {
             .iter()
             .map(|(from, _)| from.clone())
             .collect();
-        func.locals.retain(|local| !renamed_from.contains(&local.name));
+        func.locals
+            .retain(|local| !renamed_from.contains(&local.name));
         for local in &mut func.locals {
             if let Some(updated) = current_locals.iter().find(|l| l.name == local.name) {
                 local.ty = updated.ty.clone();
@@ -501,7 +543,12 @@ impl LiveRangeCollector {
                 self.control_intervals.push((loop_start, loop_end));
                 self.extend_loop_ranges(loop_start, loop_end);
             }
-            HirStmt::For { init, cond, update, body } => {
+            HirStmt::For {
+                init,
+                cond,
+                update,
+                body,
+            } => {
                 let loop_start = self.stmt_counter;
                 if let Some(init_stmt) = init {
                     self.visit_stmt(init_stmt);
@@ -517,7 +564,11 @@ impl LiveRangeCollector {
                 self.control_intervals.push((loop_start, loop_end));
                 self.extend_loop_ranges(loop_start, loop_end);
             }
-            HirStmt::Switch { expr, cases, default } => {
+            HirStmt::Switch {
+                expr,
+                cases,
+                default,
+            } => {
                 let switch_start = self.stmt_counter;
                 self.visit_expr(expr);
                 for case in cases {
@@ -527,7 +578,11 @@ impl LiveRangeCollector {
                 let switch_end = self.stmt_counter;
                 self.control_intervals.push((switch_start, switch_end));
             }
-            HirStmt::If { cond, then_body, else_body } => {
+            HirStmt::If {
+                cond,
+                then_body,
+                else_body,
+            } => {
                 self.visit_expr(cond);
                 self.visit_stmts(then_body);
                 self.visit_stmts(else_body);
@@ -589,7 +644,12 @@ impl LiveRangeCollector {
                     self.visit_expr(arg);
                 }
             }
-            HirExpr::Select { cond, then_expr, else_expr, .. } => {
+            HirExpr::Select {
+                cond,
+                then_expr,
+                else_expr,
+                ..
+            } => {
                 self.visit_expr(cond);
                 self.visit_expr(then_expr);
                 self.visit_expr(else_expr);
@@ -621,7 +681,13 @@ fn name_priority(name: &str) -> usize {
     if name.starts_with("uVar_dp_") {
         return 0; // lowest priority (dp temp variables)
     }
-    if name.starts_with("uVar") || name.starts_with("iVar") || name.starts_with("xVar") || name.starts_with("bVar") || name.starts_with("temp_") || name.starts_with("temp") {
+    if name.starts_with("uVar")
+        || name.starts_with("iVar")
+        || name.starts_with("xVar")
+        || name.starts_with("bVar")
+        || name.starts_with("temp_")
+        || name.starts_with("temp")
+    {
         return 1;
     }
     if name.starts_with("slot_") {
@@ -636,14 +702,12 @@ fn name_priority(name: &str) -> usize {
 fn is_hardware_register_variable(name: &str) -> bool {
     let name_lower = name.to_lowercase();
     let gprs = [
-        "eax", "ebx", "ecx", "edx", "esi", "edi", "esp", "ebp",
-        "rax", "rbx", "rcx", "rdx", "rsi", "rdi", "rsp", "rbp",
-        "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15",
-        "ax", "bx", "cx", "dx", "sp", "bp", "si", "di",
-        "al", "bl", "cl", "dl", "ah", "bh", "ch", "dh",
-        "r8d", "r9d", "r10d", "r11d", "r12d", "r13d", "r14d", "r15d",
-        "r8w", "r9w", "r10w", "r11w", "r12w", "r13w", "r14w", "r15w",
-        "r8b", "r9b", "r10b", "r11b", "r12b", "r13b", "r14b", "r15b",
+        "eax", "ebx", "ecx", "edx", "esi", "edi", "esp", "ebp", "rax", "rbx", "rcx", "rdx", "rsi",
+        "rdi", "rsp", "rbp", "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15", "ax", "bx",
+        "cx", "dx", "sp", "bp", "si", "di", "al", "bl", "cl", "dl", "ah", "bh", "ch", "dh", "r8d",
+        "r9d", "r10d", "r11d", "r12d", "r13d", "r14d", "r15d", "r8w", "r9w", "r10w", "r11w",
+        "r12w", "r13w", "r14w", "r15w", "r8b", "r9b", "r10b", "r11b", "r12b", "r13b", "r14b",
+        "r15b",
     ];
     if gprs.contains(&name_lower.as_str()) {
         return true;
@@ -654,7 +718,11 @@ fn is_hardware_register_variable(name: &str) -> bool {
     if name_lower.starts_with("reg") && name_lower[3..].chars().all(|c| c.is_ascii_digit()) {
         return true;
     }
-    if name_lower.starts_with("xmm") || name_lower.starts_with("ymm") || name_lower.starts_with("zmm") || name_lower.starts_with("fvar") {
+    if name_lower.starts_with("xmm")
+        || name_lower.starts_with("ymm")
+        || name_lower.starts_with("zmm")
+        || name_lower.starts_with("fvar")
+    {
         return true;
     }
     false
@@ -682,7 +750,10 @@ fn is_eligible_for_speculative_merge(binding: &NirBinding) -> bool {
     true
 }
 
-fn get_stack_span_from_parts(origin: Option<NirBindingOrigin>, ty: &NirType) -> Option<(i64, u32, bool)> {
+fn get_stack_span_from_parts(
+    origin: Option<NirBindingOrigin>,
+    ty: &NirType,
+) -> Option<(i64, u32, bool)> {
     let (offset, is_derived) = match origin {
         Some(NirBindingOrigin::StackOffset(o))
         | Some(NirBindingOrigin::HomeSlot(o))
@@ -715,12 +786,19 @@ fn unify_types_for_merge(t1: &NirType, t2: &NirType) -> Option<NirType> {
         return Some(t1.clone());
     }
     match (t1, t2) {
-        (NirType::Int { bits: b1, signed: s1 }, NirType::Int { bits: b2, signed: s2 }) => {
-            Some(NirType::Int {
-                bits: (*b1).max(*b2),
-                signed: *s1 || *s2,
-            })
-        }
+        (
+            NirType::Int {
+                bits: b1,
+                signed: s1,
+            },
+            NirType::Int {
+                bits: b2,
+                signed: s2,
+            },
+        ) => Some(NirType::Int {
+            bits: (*b1).max(*b2),
+            signed: *s1 || *s2,
+        }),
         (NirType::Ptr(p1), NirType::Ptr(p2)) => {
             let inner = unify_types_for_merge(p1, p2)?;
             Some(NirType::Ptr(Box::new(inner)))
@@ -757,14 +835,19 @@ fn type_byte_size(ty: &NirType) -> Option<u32> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::nir::{NirBinding, NirBindingOrigin, NirType, HirFunction, HirStmt, HirLValue, HirExpr};
+    use crate::nir::{
+        HirExpr, HirFunction, HirLValue, HirStmt, NirBinding, NirBindingOrigin, NirType,
+    };
 
     #[test]
     fn test_stack_slot_coalescing_and_domain_separation() {
         // Direct stack offset 1: offset -16, size 4
         let b1 = NirBinding {
             name: "local_10".to_string(),
-            ty: NirType::Int { bits: 32, signed: false },
+            ty: NirType::Int {
+                bits: 32,
+                signed: false,
+            },
             surface_type_name: None,
             origin: Some(NirBindingOrigin::StackOffset(-16)),
             initializer: None,
@@ -773,7 +856,10 @@ mod tests {
         // Direct stack offset 2: offset -14, size 4 (overlaps with -16)
         let b2 = NirBinding {
             name: "local_0e".to_string(),
-            ty: NirType::Int { bits: 32, signed: false },
+            ty: NirType::Int {
+                bits: 32,
+                signed: false,
+            },
             surface_type_name: None,
             origin: Some(NirBindingOrigin::StackOffset(-14)),
             initializer: None,
@@ -782,7 +868,10 @@ mod tests {
         // Derived stack offset: offset -8, size 4 (different offset)
         let b3 = NirBinding {
             name: "derived_08".to_string(),
-            ty: NirType::Int { bits: 32, signed: false },
+            ty: NirType::Int {
+                bits: 32,
+                signed: false,
+            },
             surface_type_name: None,
             origin: Some(NirBindingOrigin::DerivedFromStackOffset(-8)),
             initializer: None,
@@ -798,15 +887,33 @@ mod tests {
             body: vec![
                 HirStmt::Assign {
                     lhs: HirLValue::Var("local_10".to_string()),
-                    rhs: HirExpr::Const(1, NirType::Int { bits: 32, signed: false }),
+                    rhs: HirExpr::Const(
+                        1,
+                        NirType::Int {
+                            bits: 32,
+                            signed: false,
+                        },
+                    ),
                 },
                 HirStmt::Assign {
                     lhs: HirLValue::Var("local_0e".to_string()),
-                    rhs: HirExpr::Const(2, NirType::Int { bits: 32, signed: false }),
+                    rhs: HirExpr::Const(
+                        2,
+                        NirType::Int {
+                            bits: 32,
+                            signed: false,
+                        },
+                    ),
                 },
                 HirStmt::Assign {
                     lhs: HirLValue::Var("derived_08".to_string()),
-                    rhs: HirExpr::Const(3, NirType::Int { bits: 32, signed: false }),
+                    rhs: HirExpr::Const(
+                        3,
+                        NirType::Int {
+                            bits: 32,
+                            signed: false,
+                        },
+                    ),
                 },
             ],
             ..Default::default()
@@ -835,7 +942,10 @@ mod tests {
 
         let b2 = NirBinding {
             name: "temp_2".to_string(),
-            ty: NirType::Int { bits: 32, signed: false },
+            ty: NirType::Int {
+                bits: 32,
+                signed: false,
+            },
             surface_type_name: None,
             origin: Some(NirBindingOrigin::Temp),
             initializer: None,
@@ -852,11 +962,23 @@ mod tests {
                 // Disjoint live ranges: temp_1 is used and then dead before temp_2 is used
                 HirStmt::Assign {
                     lhs: HirLValue::Var("temp_1".to_string()),
-                    rhs: HirExpr::Const(1, NirType::Int { bits: 32, signed: false }),
+                    rhs: HirExpr::Const(
+                        1,
+                        NirType::Int {
+                            bits: 32,
+                            signed: false,
+                        },
+                    ),
                 },
                 HirStmt::Assign {
                     lhs: HirLValue::Var("temp_2".to_string()),
-                    rhs: HirExpr::Const(2, NirType::Int { bits: 32, signed: false }),
+                    rhs: HirExpr::Const(
+                        2,
+                        NirType::Int {
+                            bits: 32,
+                            signed: false,
+                        },
+                    ),
                 },
             ],
             ..Default::default()
@@ -868,14 +990,23 @@ mod tests {
         // They should be merged into temp_1 or temp_2 (since they are disjoint and types are compatible)
         assert_eq!(func.locals.len(), 1);
         // The unified type should be Int
-        assert_eq!(func.locals[0].ty, NirType::Int { bits: 32, signed: false });
+        assert_eq!(
+            func.locals[0].ty,
+            NirType::Int {
+                bits: 32,
+                signed: false
+            }
+        );
     }
 
     #[test]
     fn test_loop_live_range_collector() {
         let b1 = NirBinding {
             name: "temp_1".to_string(),
-            ty: NirType::Int { bits: 32, signed: false },
+            ty: NirType::Int {
+                bits: 32,
+                signed: false,
+            },
             surface_type_name: None,
             origin: Some(NirBindingOrigin::Temp),
             initializer: None,
@@ -883,7 +1014,10 @@ mod tests {
 
         let b2 = NirBinding {
             name: "temp_2".to_string(),
-            ty: NirType::Int { bits: 32, signed: false },
+            ty: NirType::Int {
+                bits: 32,
+                signed: false,
+            },
             surface_type_name: None,
             origin: Some(NirBindingOrigin::Temp),
             initializer: None,
@@ -900,7 +1034,13 @@ mod tests {
                 // temp_1 is defined before the loop
                 HirStmt::Assign {
                     lhs: HirLValue::Var("temp_1".to_string()),
-                    rhs: HirExpr::Const(1, NirType::Int { bits: 32, signed: false }),
+                    rhs: HirExpr::Const(
+                        1,
+                        NirType::Int {
+                            bits: 32,
+                            signed: false,
+                        },
+                    ),
                 },
                 // Loop
                 HirStmt::While {
@@ -914,7 +1054,13 @@ mod tests {
                         // temp_2 is defined and read inside the loop, after temp_1's read
                         HirStmt::Assign {
                             lhs: HirLValue::Var("temp_2".to_string()),
-                            rhs: HirExpr::Const(2, NirType::Int { bits: 32, signed: false }),
+                            rhs: HirExpr::Const(
+                                2,
+                                NirType::Int {
+                                    bits: 32,
+                                    signed: false,
+                                },
+                            ),
                         },
                         HirStmt::Assign {
                             lhs: HirLValue::Var("dummy2".to_string()),
@@ -937,7 +1083,10 @@ mod tests {
     fn test_unstructured_loop_live_range_collector() {
         let b1 = NirBinding {
             name: "temp_1".to_string(),
-            ty: NirType::Int { bits: 32, signed: false },
+            ty: NirType::Int {
+                bits: 32,
+                signed: false,
+            },
             surface_type_name: None,
             origin: Some(NirBindingOrigin::Temp),
             initializer: None,
@@ -945,7 +1094,10 @@ mod tests {
 
         let b2 = NirBinding {
             name: "temp_2".to_string(),
-            ty: NirType::Int { bits: 32, signed: false },
+            ty: NirType::Int {
+                bits: 32,
+                signed: false,
+            },
             surface_type_name: None,
             origin: Some(NirBindingOrigin::Temp),
             initializer: None,
@@ -962,7 +1114,13 @@ mod tests {
                 // temp_1 is defined before the loop
                 HirStmt::Assign {
                     lhs: HirLValue::Var("temp_1".to_string()),
-                    rhs: HirExpr::Const(1, NirType::Int { bits: 32, signed: false }),
+                    rhs: HirExpr::Const(
+                        1,
+                        NirType::Int {
+                            bits: 32,
+                            signed: false,
+                        },
+                    ),
                 },
                 // Loop header label
                 HirStmt::Label("loop_start".to_string()),
@@ -974,7 +1132,13 @@ mod tests {
                 // temp_2 is defined and read inside the loop, after temp_1's read
                 HirStmt::Assign {
                     lhs: HirLValue::Var("temp_2".to_string()),
-                    rhs: HirExpr::Const(2, NirType::Int { bits: 32, signed: false }),
+                    rhs: HirExpr::Const(
+                        2,
+                        NirType::Int {
+                            bits: 32,
+                            signed: false,
+                        },
+                    ),
                 },
                 HirStmt::Assign {
                     lhs: HirLValue::Var("dummy2".to_string()),
@@ -997,7 +1161,10 @@ mod tests {
     fn test_speculative_merging_symbolic_priority_guard() {
         let b1 = NirBinding {
             name: "result".to_string(),
-            ty: NirType::Int { bits: 32, signed: false },
+            ty: NirType::Int {
+                bits: 32,
+                signed: false,
+            },
             surface_type_name: None,
             origin: Some(NirBindingOrigin::Temp),
             initializer: None,
@@ -1005,7 +1172,10 @@ mod tests {
 
         let b2 = NirBinding {
             name: "retval".to_string(),
-            ty: NirType::Int { bits: 32, signed: false },
+            ty: NirType::Int {
+                bits: 32,
+                signed: false,
+            },
             surface_type_name: None,
             origin: Some(NirBindingOrigin::Temp),
             initializer: None,
@@ -1019,11 +1189,23 @@ mod tests {
             body: vec![
                 HirStmt::Assign {
                     lhs: HirLValue::Var("result".to_string()),
-                    rhs: HirExpr::Const(1, NirType::Int { bits: 32, signed: false }),
+                    rhs: HirExpr::Const(
+                        1,
+                        NirType::Int {
+                            bits: 32,
+                            signed: false,
+                        },
+                    ),
                 },
                 HirStmt::Assign {
                     lhs: HirLValue::Var("retval".to_string()),
-                    rhs: HirExpr::Const(2, NirType::Int { bits: 32, signed: false }),
+                    rhs: HirExpr::Const(
+                        2,
+                        NirType::Int {
+                            bits: 32,
+                            signed: false,
+                        },
+                    ),
                 },
             ],
             ..Default::default()
@@ -1039,7 +1221,10 @@ mod tests {
     fn test_speculative_merging_disjoint_domain_guard() {
         let b1 = NirBinding {
             name: "local_10".to_string(),
-            ty: NirType::Int { bits: 32, signed: false },
+            ty: NirType::Int {
+                bits: 32,
+                signed: false,
+            },
             surface_type_name: None,
             origin: Some(NirBindingOrigin::StackOffset(-16)),
             initializer: None,
@@ -1047,7 +1232,10 @@ mod tests {
 
         let b2 = NirBinding {
             name: "local_20".to_string(),
-            ty: NirType::Int { bits: 32, signed: false },
+            ty: NirType::Int {
+                bits: 32,
+                signed: false,
+            },
             surface_type_name: None,
             origin: Some(NirBindingOrigin::StackOffset(-32)),
             initializer: None,
@@ -1061,11 +1249,23 @@ mod tests {
             body: vec![
                 HirStmt::Assign {
                     lhs: HirLValue::Var("local_10".to_string()),
-                    rhs: HirExpr::Const(1, NirType::Int { bits: 32, signed: false }),
+                    rhs: HirExpr::Const(
+                        1,
+                        NirType::Int {
+                            bits: 32,
+                            signed: false,
+                        },
+                    ),
                 },
                 HirStmt::Assign {
                     lhs: HirLValue::Var("local_20".to_string()),
-                    rhs: HirExpr::Const(2, NirType::Int { bits: 32, signed: false }),
+                    rhs: HirExpr::Const(
+                        2,
+                        NirType::Int {
+                            bits: 32,
+                            signed: false,
+                        },
+                    ),
                 },
             ],
             ..Default::default()
@@ -1081,7 +1281,10 @@ mod tests {
     fn test_speculative_merging_control_flow_boundary_guard() {
         let b1 = NirBinding {
             name: "temp_1".to_string(),
-            ty: NirType::Int { bits: 32, signed: false },
+            ty: NirType::Int {
+                bits: 32,
+                signed: false,
+            },
             surface_type_name: None,
             origin: Some(NirBindingOrigin::Temp),
             initializer: None,
@@ -1089,7 +1292,10 @@ mod tests {
 
         let b2 = NirBinding {
             name: "temp_2".to_string(),
-            ty: NirType::Int { bits: 32, signed: false },
+            ty: NirType::Int {
+                bits: 32,
+                signed: false,
+            },
             surface_type_name: None,
             origin: Some(NirBindingOrigin::Temp),
             initializer: None,
@@ -1104,7 +1310,13 @@ mod tests {
                 // temp_1 defined before the loop
                 HirStmt::Assign {
                     lhs: HirLValue::Var("temp_1".to_string()),
-                    rhs: HirExpr::Const(1, NirType::Int { bits: 32, signed: false }),
+                    rhs: HirExpr::Const(
+                        1,
+                        NirType::Int {
+                            bits: 32,
+                            signed: false,
+                        },
+                    ),
                 },
                 HirStmt::While {
                     cond: HirExpr::Const(1, NirType::Bool),
@@ -1112,7 +1324,13 @@ mod tests {
                         // temp_2 defined inside the loop
                         HirStmt::Assign {
                             lhs: HirLValue::Var("temp_2".to_string()),
-                            rhs: HirExpr::Const(2, NirType::Int { bits: 32, signed: false }),
+                            rhs: HirExpr::Const(
+                                2,
+                                NirType::Int {
+                                    bits: 32,
+                                    signed: false,
+                                },
+                            ),
                         },
                     ],
                 },

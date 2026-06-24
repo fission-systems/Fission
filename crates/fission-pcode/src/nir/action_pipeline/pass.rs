@@ -1,8 +1,8 @@
 //! Pass trait and execution context for the action pipeline.
 
+use super::super::types::{HirFunction, NirBuildStats};
 use super::budget::hir_shape;
 use super::concept::{GhidraActionConcept, record_ghidra_action_stage};
-use super::super::types::{HirFunction, NirBuildStats};
 use std::time::Instant;
 use tracing::{debug, debug_span};
 

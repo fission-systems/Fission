@@ -1257,7 +1257,12 @@ fn replace_matching_pure_expr(expr: &HirExpr, needle: &HirExpr, replacement: &Hi
             else_expr: Box::new(replace_matching_pure_expr(else_expr, needle, replacement)),
             ty: ty.clone(),
         },
-        HirExpr::FieldAccess { base, field_name, offset, ty } => HirExpr::FieldAccess {
+        HirExpr::FieldAccess {
+            base,
+            field_name,
+            offset,
+            ty,
+        } => HirExpr::FieldAccess {
             base: Box::new(replace_matching_pure_expr(base, needle, replacement)),
             field_name: field_name.clone(),
             offset: *offset,

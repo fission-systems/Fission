@@ -118,13 +118,9 @@ fn low_cost_builder_inline_accepts_pcodeop_intrinsics() {
 fn single_use_builder_inline_blocks_call_like_consumers() {
     assert!(!PreviewBuilder::use_opcode_allows_single_use_builder_inline(PcodeOpcode::Call));
     assert!(!PreviewBuilder::use_opcode_allows_single_use_builder_inline(PcodeOpcode::CallInd));
-    assert!(
-        !PreviewBuilder::use_opcode_allows_single_use_builder_inline(PcodeOpcode::CallOther)
-    );
+    assert!(!PreviewBuilder::use_opcode_allows_single_use_builder_inline(PcodeOpcode::CallOther));
     assert!(!PreviewBuilder::use_opcode_allows_single_use_builder_inline(PcodeOpcode::CBranch));
-    assert!(
-        !PreviewBuilder::use_opcode_allows_single_use_builder_inline(PcodeOpcode::BranchInd)
-    );
+    assert!(!PreviewBuilder::use_opcode_allows_single_use_builder_inline(PcodeOpcode::BranchInd));
 }
 
 #[test]
@@ -224,9 +220,7 @@ fn memory_backed_single_use_inline_requires_passthrough_consumer() {
         &expr
     ));
     assert!(
-        PreviewBuilder::use_opcode_allows_passthrough_single_use_builder_inline(
-            PcodeOpcode::Copy
-        )
+        PreviewBuilder::use_opcode_allows_passthrough_single_use_builder_inline(PcodeOpcode::Copy)
     );
     assert!(
         !PreviewBuilder::use_opcode_allows_passthrough_single_use_builder_inline(

@@ -277,7 +277,12 @@ fn conditional_loop_exit_accumulator_merge_accepts_32bit_return_register_eax() {
             successors: vec![1],
             ops: vec![
                 op(1, PcodeOpcode::Copy, Some(eax.clone()), vec![constant(0)]),
-                op(2, PcodeOpcode::IntZExt, Some(rax.clone()), vec![eax.clone()]),
+                op(
+                    2,
+                    PcodeOpcode::IntZExt,
+                    Some(rax.clone()),
+                    vec![eax.clone()],
+                ),
                 op(3, PcodeOpcode::Branch, None, vec![constant(0x1010)]),
             ],
         },
@@ -285,7 +290,12 @@ fn conditional_loop_exit_accumulator_merge_accepts_32bit_return_register_eax() {
             index: 1,
             start_address: 0x1010,
             successors: vec![2, 3],
-            ops: vec![op(4, PcodeOpcode::CBranch, None, vec![constant(0x1020), cond.clone()])],
+            ops: vec![op(
+                4,
+                PcodeOpcode::CBranch,
+                None,
+                vec![constant(0x1020), cond.clone()],
+            )],
         },
         PcodeBasicBlock {
             index: 2,
@@ -298,7 +308,12 @@ fn conditional_loop_exit_accumulator_merge_accepts_32bit_return_register_eax() {
             start_address: 0x1030,
             successors: vec![1, 2],
             ops: vec![
-                op(6, PcodeOpcode::IntAdd, Some(eax.clone()), vec![eax.clone(), constant(1)]),
+                op(
+                    6,
+                    PcodeOpcode::IntAdd,
+                    Some(eax.clone()),
+                    vec![eax.clone(), constant(1)],
+                ),
                 op(7, PcodeOpcode::CBranch, None, vec![constant(0x1010), cond]),
             ],
         },
@@ -322,18 +337,29 @@ fn conditional_loop_exit_accumulator_merge_accepts_32bit_return_register_eax() {
         ty: type_from_size(4, false),
     };
 
-    assert_eq!(builder.canonical_x86_gpr64_name_for_value(&eax), Some(("rax", 0)));
+    assert_eq!(
+        builder.canonical_x86_gpr64_name_for_value(&eax),
+        Some(("rax", 0))
+    );
     assert!(builder.loop_header_external_predecessors_seed_zero(
-        1, &builder.loop_bodies[0], 0, false
+        1,
+        &builder.loop_bodies[0],
+        0,
+        false
     ));
     assert!(builder.block_reads_merge_input_before_redefinition(&pcode.blocks[2], &eax));
     assert!(!builder.loop_body_has_side_entry_or_irreducible_edge(&builder.loop_bodies[0]));
-    assert!(builder
-        .last_redefinition_index_before_terminator(&pcode.blocks[3], &eax)
-        .is_some());
+    assert!(
+        builder
+            .last_redefinition_index_before_terminator(&pcode.blocks[3], &eax)
+            .is_some()
+    );
 
     let name = builder.with_lowering_site(
-        LoweringSite { block_idx: 3, op_idx: 0 },
+        LoweringSite {
+            block_idx: 3,
+            op_idx: 0,
+        },
         |builder| {
             builder
                 .merge_binding_name_for_direct_successor_accumulator(&pcode.blocks[3], &eax, &rhs)
@@ -342,19 +368,23 @@ fn conditional_loop_exit_accumulator_merge_accepts_32bit_return_register_eax() {
     );
 
     assert_eq!(
-        builder.explicit_merge_bindings.get(&(2, VarnodeKey::from(&eax))),
+        builder
+            .explicit_merge_bindings
+            .get(&(2, VarnodeKey::from(&eax))),
         Some(&name)
     );
     // Initializer must be 32-bit zero (output.size=4), not 64-bit (pointer_size=8)
     assert_eq!(
-        builder.temps.get(&name).and_then(|b| b.initializer.as_ref()),
+        builder
+            .temps
+            .get(&name)
+            .and_then(|b| b.initializer.as_ref()),
         Some(&HirExpr::Const(0, type_from_size(4, false)))
     );
 }
 
 #[test]
 fn conditional_loop_exit_accumulator_merge_uses_seeded_edge_binding() {
-
     let r10d = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0x90, 4);
     let r10 = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0x90, 8);
     let cond = register(UNIQUE_SPACE_ID, 0x300, 1);
@@ -2162,8 +2192,7 @@ fn duplicate_start_join_uses_shared_merge_binding_for_conflicting_defs() {
     options.pe_x64_only = false;
     crate::nir::cspec::test_maps::sync_preview_cspec(&mut options);
 
-    let code =
-        render_mlil_preview(&pcode, "duplicate_merge", 0x1000, &options).expect("render");
+    let code = render_mlil_preview(&pcode, "duplicate_merge", 0x1000, &options).expect("render");
     assert!(code.contains("if ("), "{code}");
     assert!(code.contains(" / "), "{code}");
     assert!(code.contains(" + 5"), "{code}");

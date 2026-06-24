@@ -1,7 +1,5 @@
 use crate::nir::support::{CallingConvention, RUST_SLEIGH_REGISTER_SPACE_ID};
-use crate::nir::types::{
-    HirBinaryOp, HirExpr, MlilPreviewOptions, NirType, StructuringEngineKind,
-};
+use crate::nir::types::{HirBinaryOp, HirExpr, MlilPreviewOptions, NirType, StructuringEngineKind};
 use crate::nir::{PreviewBuilder, render_mlil_preview};
 use crate::pcode::{PcodeBasicBlock, PcodeFunction, PcodeOp, PcodeOpcode, Varnode};
 
@@ -102,7 +100,11 @@ fn selector_upper_bound_keeps_false_arm_hi_equality_case() {
     );
 
     assert_eq!(
-        extract_selector_upper_bound_from_cond(&cond, &|expr| super::strip_casts(expr) == selector, false),
+        extract_selector_upper_bound_from_cond(
+            &cond,
+            &|expr| super::strip_casts(expr) == selector,
+            false
+        ),
         Some(3)
     );
 }
@@ -323,8 +325,8 @@ fn return_recovery_keeps_return_register_before_side_effect_store() {
         calling_convention: CallingConvention::AArch64,
         ..Default::default()
     });
-    let code = render_mlil_preview(&pcode, "store_then_return", 0x1000, &options)
-        .expect("preview render");
+    let code =
+        render_mlil_preview(&pcode, "store_then_return", 0x1000, &options).expect("preview render");
 
     assert!(
         code.lines()
@@ -482,8 +484,7 @@ fn arm32_return_target_register_uses_r0_value_not_lr_target() {
         calling_convention: CallingConvention::Arm32,
         ..Default::default()
     });
-    let code =
-        render_mlil_preview(&pcode, "return_r0", 0x1000, &options).expect("preview render");
+    let code = render_mlil_preview(&pcode, "return_r0", 0x1000, &options).expect("preview render");
 
     assert!(code.contains("return param_1;"), "{code}");
     assert!(!code.contains("return lr"), "{code}");

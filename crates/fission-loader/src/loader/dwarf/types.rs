@@ -187,7 +187,8 @@ fn resolve_type_name(
 
     let die_info = all_types.get(&offset)?;
     let result = match die_info.tag {
-        DwTag(0x0f) => { // DW_TAG_pointer_type
+        DwTag(0x0f) => {
+            // DW_TAG_pointer_type
             let base = if let Some(ref_offset) = die_info.type_ref {
                 resolve_type_name(ref_offset, all_types, resolved, visiting)
                     .unwrap_or_else(|| format!("ptr_0x{:x}", ref_offset.0))
@@ -196,7 +197,8 @@ fn resolve_type_name(
             };
             Some(format!("{}*", base))
         }
-        DwTag(0x26) => { // DW_TAG_const_type
+        DwTag(0x26) => {
+            // DW_TAG_const_type
             let base = if let Some(ref_offset) = die_info.type_ref {
                 resolve_type_name(ref_offset, all_types, resolved, visiting)
             } else {
@@ -204,7 +206,8 @@ fn resolve_type_name(
             };
             base.map(|b| format!("const {}", b))
         }
-        DwTag(0x35) => { // DW_TAG_volatile_type
+        DwTag(0x35) => {
+            // DW_TAG_volatile_type
             let base = if let Some(ref_offset) = die_info.type_ref {
                 resolve_type_name(ref_offset, all_types, resolved, visiting)
             } else {
@@ -242,11 +245,14 @@ impl<'a> super::analyzer::DwarfAnalyzer<'a> {
                         Some(AttributeValue::UnitRef(ref_offset)) => Some(ref_offset),
                         _ => None,
                     };
-                    all_types.insert(entry.offset(), TypeDieInfo {
-                        tag: entry.tag(),
-                        name,
-                        type_ref,
-                    });
+                    all_types.insert(
+                        entry.offset(),
+                        TypeDieInfo {
+                            tag: entry.tag(),
+                            name,
+                            type_ref,
+                        },
+                    );
                 }
                 _ => {}
             }
@@ -275,9 +281,7 @@ impl<'a> super::analyzer::DwarfAnalyzer<'a> {
         type_cache: &HashMap<UnitOffset<usize>, String>,
     ) -> Result<Option<String>, gimli::Error> {
         match entry.attr_value(DwAt(0x49))? {
-            Some(AttributeValue::UnitRef(ref_offset)) => {
-                Ok(type_cache.get(&ref_offset).cloned())
-            }
+            Some(AttributeValue::UnitRef(ref_offset)) => Ok(type_cache.get(&ref_offset).cloned()),
             _ => Ok(None),
         }
     }

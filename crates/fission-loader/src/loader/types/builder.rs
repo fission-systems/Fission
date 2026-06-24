@@ -142,7 +142,10 @@ impl LoadedBinaryBuilder {
         self
     }
 
-    pub fn add_relocations(mut self, relocations: impl IntoIterator<Item = super::RelocationEntry>) -> Self {
+    pub fn add_relocations(
+        mut self,
+        relocations: impl IntoIterator<Item = super::RelocationEntry>,
+    ) -> Self {
         self.relocations.extend(relocations);
         self
     }
@@ -157,7 +160,10 @@ impl LoadedBinaryBuilder {
         self
     }
 
-    pub fn add_inferred_types(mut self, types: impl IntoIterator<Item = super::InferredTypeInfo>) -> Self {
+    pub fn add_inferred_types(
+        mut self,
+        types: impl IntoIterator<Item = super::InferredTypeInfo>,
+    ) -> Self {
         self.inferred_types.extend(types);
         self
     }

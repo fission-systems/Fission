@@ -1,6 +1,6 @@
 use super::super::*;
-use std::collections::HashMap;
 use crate::nir::support::expr_type;
+use std::collections::HashMap;
 
 struct SimpleAssign {
     lhs: String,
@@ -10,13 +10,21 @@ struct SimpleAssign {
 fn collect_assignments(stmts: &[HirStmt], assigns: &mut Vec<SimpleAssign>) {
     for stmt in stmts {
         match stmt {
-            HirStmt::Assign { lhs: HirLValue::Var(name), rhs } => {
-                assigns.push(SimpleAssign { lhs: name.clone(), rhs: rhs.clone() });
+            HirStmt::Assign {
+                lhs: HirLValue::Var(name),
+                rhs,
+            } => {
+                assigns.push(SimpleAssign {
+                    lhs: name.clone(),
+                    rhs: rhs.clone(),
+                });
             }
             HirStmt::Block(body) | HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
                 collect_assignments(body, assigns);
             }
-            HirStmt::For { init, update, body, .. } => {
+            HirStmt::For {
+                init, update, body, ..
+            } => {
                 if let Some(i) = init {
                     collect_assignments(std::slice::from_ref(i.as_ref()), assigns);
                 }
@@ -25,7 +33,11 @@ fn collect_assignments(stmts: &[HirStmt], assigns: &mut Vec<SimpleAssign>) {
                 }
                 collect_assignments(body, assigns);
             }
-            HirStmt::If { then_body, else_body, .. } => {
+            HirStmt::If {
+                then_body,
+                else_body,
+                ..
+            } => {
                 collect_assignments(then_body, assigns);
                 collect_assignments(else_body, assigns);
             }
@@ -49,7 +61,13 @@ fn type_bits(ty: &NirType) -> u32 {
 }
 
 fn match_piece_concat(expr: &HirExpr) -> Option<(HirExpr, HirExpr, u32)> {
-    if let HirExpr::Binary { op: HirBinaryOp::Or, lhs, rhs, .. } = expr {
+    if let HirExpr::Binary {
+        op: HirBinaryOp::Or,
+        lhs,
+        rhs,
+        ..
+    } = expr
+    {
         if let Some((hi, shift_bits)) = match_shifted_high(lhs) {
             let lo = match_unshifted_low(rhs);
             return Some((hi, lo, shift_bits));
@@ -63,7 +81,13 @@ fn match_piece_concat(expr: &HirExpr) -> Option<(HirExpr, HirExpr, u32)> {
 }
 
 fn match_shifted_high(expr: &HirExpr) -> Option<(HirExpr, u32)> {
-    if let HirExpr::Binary { op: HirBinaryOp::Shl, lhs, rhs, .. } = expr {
+    if let HirExpr::Binary {
+        op: HirBinaryOp::Shl,
+        lhs,
+        rhs,
+        ..
+    } = expr
+    {
         if let HirExpr::Const(shift_bits, _) = &**rhs {
             let hi = if let HirExpr::Cast { expr: inner, .. } = &**lhs {
                 (**inner).clone()
@@ -88,7 +112,13 @@ fn match_zext_write(expr: &HirExpr, x_bits: u32) -> Option<(HirExpr, HirExpr, u3
     if let HirExpr::Cast { ty, expr: inner } = expr {
         let inner_bits = type_bits(&expr_type(inner));
         if x_bits > inner_bits {
-            let hi = HirExpr::Const(0, NirType::Int { bits: x_bits - inner_bits, signed: false });
+            let hi = HirExpr::Const(
+                0,
+                NirType::Int {
+                    bits: x_bits - inner_bits,
+                    signed: false,
+                },
+            );
             return Some((hi, (**inner).clone(), inner_bits));
         }
     }
@@ -113,7 +143,13 @@ fn is_valid_low_extract(expr: &HirExpr, x_name: &str, shift_bits: u32) -> bool {
 
 fn is_valid_high_extract(expr: &HirExpr, x_name: &str, shift_bits: u32) -> bool {
     if let HirExpr::Cast { expr: inner, .. } = expr {
-        if let HirExpr::Binary { op: HirBinaryOp::Shr | HirBinaryOp::Sar, lhs, rhs, .. } = &**inner {
+        if let HirExpr::Binary {
+            op: HirBinaryOp::Shr | HirBinaryOp::Sar,
+            lhs,
+            rhs,
+            ..
+        } = &**inner
+        {
             if let (HirExpr::Var(name), HirExpr::Const(sa, _)) = (&**lhs, &**rhs) {
                 if name == x_name && *sa as u32 == shift_bits {
                     return true;
@@ -121,7 +157,13 @@ fn is_valid_high_extract(expr: &HirExpr, x_name: &str, shift_bits: u32) -> bool 
             }
         }
     }
-    if let HirExpr::Binary { op: HirBinaryOp::Shr | HirBinaryOp::Sar, lhs, rhs, .. } = expr {
+    if let HirExpr::Binary {
+        op: HirBinaryOp::Shr | HirBinaryOp::Sar,
+        lhs,
+        rhs,
+        ..
+    } = expr
+    {
         if let (HirExpr::Var(name), HirExpr::Const(sa, _)) = (&**lhs, &**rhs) {
             if name == x_name && *sa as u32 == shift_bits {
                 return true;
@@ -156,7 +198,12 @@ where
             f(base);
             f(index);
         }
-        HirExpr::Select { cond, then_expr, else_expr, .. } => {
+        HirExpr::Select {
+            cond,
+            then_expr,
+            else_expr,
+            ..
+        } => {
             f(cond);
             f(then_expr);
             f(else_expr);
@@ -216,7 +263,12 @@ fn verify_reads_in_stmt(stmt: &HirStmt, x_name: &str, shift_bits: u32, valid: &m
                 verify_reads_in_stmt(s, x_name, shift_bits, valid);
             }
         }
-        HirStmt::For { init, cond, update, body } => {
+        HirStmt::For {
+            init,
+            cond,
+            update,
+            body,
+        } => {
             if let Some(i) = init {
                 verify_reads_in_stmt(i, x_name, shift_bits, valid);
             }
@@ -230,7 +282,11 @@ fn verify_reads_in_stmt(stmt: &HirStmt, x_name: &str, shift_bits: u32, valid: &m
                 verify_reads_in_stmt(s, x_name, shift_bits, valid);
             }
         }
-        HirStmt::If { cond, then_body, else_body } => {
+        HirStmt::If {
+            cond,
+            then_body,
+            else_body,
+        } => {
             verify_reads(cond, x_name, shift_bits, valid);
             for s in then_body {
                 verify_reads_in_stmt(s, x_name, shift_bits, valid);
@@ -239,7 +295,11 @@ fn verify_reads_in_stmt(stmt: &HirStmt, x_name: &str, shift_bits: u32, valid: &m
                 verify_reads_in_stmt(s, x_name, shift_bits, valid);
             }
         }
-        HirStmt::Switch { expr, cases, default } => {
+        HirStmt::Switch {
+            expr,
+            cases,
+            default,
+        } => {
             verify_reads(expr, x_name, shift_bits, valid);
             for case in cases {
                 for s in &case.body {
@@ -254,13 +314,7 @@ fn verify_reads_in_stmt(stmt: &HirStmt, x_name: &str, shift_bits: u32, valid: &m
     }
 }
 
-fn rewrite_expr(
-    expr: &mut HirExpr,
-    x_name: &str,
-    x_low: &str,
-    x_high: &str,
-    shift_bits: u32,
-) {
+fn rewrite_expr(expr: &mut HirExpr, x_name: &str, x_low: &str, x_high: &str, shift_bits: u32) {
     if is_valid_low_extract(expr, x_name, shift_bits) {
         if let HirExpr::Cast { ty, .. } = expr {
             *expr = HirExpr::Cast {
@@ -305,7 +359,12 @@ fn rewrite_expr(
             rewrite_expr(base, x_name, x_low, x_high, shift_bits);
             rewrite_expr(index, x_name, x_low, x_high, shift_bits);
         }
-        HirExpr::Select { cond, then_expr, else_expr, .. } => {
+        HirExpr::Select {
+            cond,
+            then_expr,
+            else_expr,
+            ..
+        } => {
             rewrite_expr(cond, x_name, x_low, x_high, shift_bits);
             rewrite_expr(then_expr, x_name, x_low, x_high, shift_bits);
             rewrite_expr(else_expr, x_name, x_low, x_high, shift_bits);
@@ -323,7 +382,10 @@ fn rewrite_stmt(
     x_bits: u32,
 ) {
     match stmt {
-        HirStmt::Assign { lhs: HirLValue::Var(name), rhs } if name == x_name => {
+        HirStmt::Assign {
+            lhs: HirLValue::Var(name),
+            rhs,
+        } if name == x_name => {
             if let Some((hi, lo, _)) = match_piece_concat(rhs) {
                 *stmt = HirStmt::Block(vec![
                     HirStmt::Assign {
@@ -373,7 +435,12 @@ fn rewrite_stmt(
         HirStmt::Block(body) | HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
             rewrite_stmts(body, x_name, x_low, x_high, shift_bits, x_bits);
         }
-        HirStmt::For { init, cond, update, body } => {
+        HirStmt::For {
+            init,
+            cond,
+            update,
+            body,
+        } => {
             if let Some(i) = init {
                 rewrite_stmt(i, x_name, x_low, x_high, shift_bits, x_bits);
             }
@@ -385,12 +452,20 @@ fn rewrite_stmt(
             }
             rewrite_stmts(body, x_name, x_low, x_high, shift_bits, x_bits);
         }
-        HirStmt::If { cond, then_body, else_body } => {
+        HirStmt::If {
+            cond,
+            then_body,
+            else_body,
+        } => {
             rewrite_expr(cond, x_name, x_low, x_high, shift_bits);
             rewrite_stmts(then_body, x_name, x_low, x_high, shift_bits, x_bits);
             rewrite_stmts(else_body, x_name, x_low, x_high, shift_bits, x_bits);
         }
-        HirStmt::Switch { expr, cases, default } => {
+        HirStmt::Switch {
+            expr,
+            cases,
+            default,
+        } => {
             rewrite_expr(expr, x_name, x_low, x_high, shift_bits);
             for case in cases {
                 rewrite_stmts(&mut case.body, x_name, x_low, x_high, shift_bits, x_bits);
@@ -432,10 +507,20 @@ pub(crate) fn apply_split_flow_pass(func: &mut HirFunction) -> bool {
 
     for local in func.locals.clone() {
         let name = &local.name;
-        let Some(rhs_exprs) = var_assigns.get(name) else { continue; };
-        if rhs_exprs.is_empty() { continue; }
+        let Some(rhs_exprs) = var_assigns.get(name) else {
+            continue;
+        };
+        if rhs_exprs.is_empty() {
+            continue;
+        }
 
-        let NirType::Int { bits: x_bits, signed } = local.ty else { continue; };
+        let NirType::Int {
+            bits: x_bits,
+            signed,
+        } = local.ty
+        else {
+            continue;
+        };
 
         let mut first_shift = None;
         let mut all_match = true;
@@ -465,9 +550,15 @@ pub(crate) fn apply_split_flow_pass(func: &mut HirFunction) -> bool {
             }
         }
 
-        if !all_match { continue; }
-        let Some(shift_bits) = first_shift else { continue; };
-        if shift_bits >= x_bits { continue; }
+        if !all_match {
+            continue;
+        }
+        let Some(shift_bits) = first_shift else {
+            continue;
+        };
+        if shift_bits >= x_bits {
+            continue;
+        }
 
         let mut is_valid = true;
         for stmt in &func.body {
@@ -480,14 +571,20 @@ pub(crate) fn apply_split_flow_pass(func: &mut HirFunction) -> bool {
 
             let low_binding = NirBinding {
                 name: x_low.clone(),
-                ty: NirType::Int { bits: shift_bits, signed: false },
+                ty: NirType::Int {
+                    bits: shift_bits,
+                    signed: false,
+                },
                 surface_type_name: None,
                 origin: Some(NirBindingOrigin::Temp),
                 initializer: None,
             };
             let high_binding = NirBinding {
                 name: x_high.clone(),
-                ty: NirType::Int { bits: x_bits - shift_bits, signed },
+                ty: NirType::Int {
+                    bits: x_bits - shift_bits,
+                    signed,
+                },
                 surface_type_name: None,
                 origin: Some(NirBindingOrigin::Temp),
                 initializer: None,

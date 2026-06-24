@@ -62,7 +62,12 @@ fn visit_stmt(
             }
             changed |= visit_stmts(body, &mut loop_env, binding_types);
         }
-        HirStmt::For { init, cond, update, body } => {
+        HirStmt::For {
+            init,
+            cond,
+            update,
+            body,
+        } => {
             let mut loop_env = env.clone();
             let mut written = HashSet::new();
             if let Some(i) = init {
@@ -87,7 +92,11 @@ fn visit_stmt(
             }
             changed |= visit_stmts(body, &mut loop_env, binding_types);
         }
-        HirStmt::If { cond, then_body, else_body } => {
+        HirStmt::If {
+            cond,
+            then_body,
+            else_body,
+        } => {
             changed |= substitute_expr(cond, env);
 
             let mut then_env = env.clone();
@@ -99,7 +108,11 @@ fn visit_stmt(
             changed |= visit_stmts(then_body, &mut then_env, binding_types);
             changed |= visit_stmts(else_body, &mut else_env, binding_types);
         }
-        HirStmt::Switch { expr, cases, default } => {
+        HirStmt::Switch {
+            expr,
+            cases,
+            default,
+        } => {
             changed |= substitute_expr(expr, env);
             for case in cases {
                 let mut case_env = env.clone();
@@ -149,7 +162,12 @@ fn substitute_expr(expr: &mut HirExpr, env: &HashMap<String, HirExpr>) -> bool {
                 changed |= substitute_expr(arg, env);
             }
         }
-        HirExpr::Select { cond, then_expr, else_expr, .. } => {
+        HirExpr::Select {
+            cond,
+            then_expr,
+            else_expr,
+            ..
+        } => {
             changed |= substitute_expr(cond, env);
             changed |= substitute_expr(then_expr, env);
             changed |= substitute_expr(else_expr, env);
@@ -181,11 +199,7 @@ fn substitute_lvalue(lval: &mut HirLValue, env: &HashMap<String, HirExpr>) -> bo
     changed
 }
 
-fn extract_constraints(
-    cond: &HirExpr,
-    is_then_branch: bool,
-    env: &mut HashMap<String, HirExpr>,
-) {
+fn extract_constraints(cond: &HirExpr, is_then_branch: bool, env: &mut HashMap<String, HirExpr>) {
     match cond {
         HirExpr::Binary {
             op: HirBinaryOp::Eq,
@@ -269,7 +283,12 @@ fn collect_written_vars(stmts: &[HirStmt], written: &mut HashSet<String>) {
             HirStmt::Block(body) | HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
                 collect_written_vars(body, written);
             }
-            HirStmt::For { init, cond, update, body } => {
+            HirStmt::For {
+                init,
+                cond,
+                update,
+                body,
+            } => {
                 if let Some(i) = init {
                     collect_written_vars(std::slice::from_ref(i.as_ref()), written);
                 }
@@ -281,12 +300,20 @@ fn collect_written_vars(stmts: &[HirStmt], written: &mut HashSet<String>) {
                 }
                 collect_written_vars(body, written);
             }
-            HirStmt::If { cond, then_body, else_body } => {
+            HirStmt::If {
+                cond,
+                then_body,
+                else_body,
+            } => {
                 collect_written_vars_expr(cond, written);
                 collect_written_vars(then_body, written);
                 collect_written_vars(else_body, written);
             }
-            HirStmt::Switch { expr, cases, default } => {
+            HirStmt::Switch {
+                expr,
+                cases,
+                default,
+            } => {
                 collect_written_vars_expr(expr, written);
                 for case in cases {
                     collect_written_vars(&case.body, written);
@@ -338,7 +365,12 @@ fn collect_written_vars_expr(expr: &HirExpr, written: &mut HashSet<String>) {
                 collect_written_vars_expr(arg, written);
             }
         }
-        HirExpr::Select { cond, then_expr, else_expr, .. } => {
+        HirExpr::Select {
+            cond,
+            then_expr,
+            else_expr,
+            ..
+        } => {
             collect_written_vars_expr(cond, written);
             collect_written_vars_expr(then_expr, written);
             collect_written_vars_expr(else_expr, written);

@@ -232,14 +232,10 @@ mod construct_state_offset_tests {
 
     #[test]
     fn opcode_register_subtable_reads_from_sla_operand_offset() {
-
         let compiled = compile_x86_64_frontend().expect("compile x86-64 frontend");
-        let decoded = crate::runtime::spine::compiled_table::decode_instruction(
-            &compiled,
-            &[0x57],
-            0x1000,
-        )
-        .expect("decode push rdi");
+        let decoded =
+            crate::runtime::spine::compiled_table::decode_instruction(&compiled, &[0x57], 0x1000)
+                .expect("decode push rdi");
 
         assert_eq!(decoded.length, 1);
         assert_eq!(decoded.mnemonic, "push");
@@ -248,7 +244,6 @@ mod construct_state_offset_tests {
 
     #[test]
     fn shared_token_operands_do_not_require_legacy_cursor_policy() {
-
         let compiled = compile_x86_64_frontend().expect("compile x86-64 frontend");
         for bytes in [&[0x57][..], &[0x48, 0x89, 0x5c, 0x24, 0x08][..]] {
             let (_ops, length, details) =
@@ -358,7 +353,6 @@ mod construct_state_offset_tests {
     }
 }
 
-
 impl<'a, 'b> CompiledParserWalker<'a, 'b> {
     fn new(
         compiled: &'a CompiledFrontend,
@@ -399,14 +393,14 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
             .checked_add(opcode_len)
             .ok_or_else(|| anyhow!("constructor cursor overflowed"))?;
 
-        let mut pool_item = DECODE_POOL.with(|pool| {
-            pool.borrow_mut().pop()
-        }).unwrap_or_else(|| DecodePool {
-            handles: Vec::new(),
-            operand_absolute_offsets: Vec::new(),
-            operand_relative_lengths: Vec::new(),
-            handle_reference_bitmap: Vec::new(),
-        });
+        let mut pool_item = DECODE_POOL
+            .with(|pool| pool.borrow_mut().pop())
+            .unwrap_or_else(|| DecodePool {
+                handles: Vec::new(),
+                operand_absolute_offsets: Vec::new(),
+                operand_relative_lengths: Vec::new(),
+                handle_reference_bitmap: Vec::new(),
+            });
 
         let target_len = selection.constructor.constructor_template.handles.len();
 
@@ -446,8 +440,7 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
     fn walk(mut self) -> Result<RuntimeConstructState> {
         let _guard = WalkStackGuard::new(format!(
             "constructor({}::{})",
-            self.selection.constructor.source,
-            self.selection.constructor.mnemonic
+            self.selection.constructor.source, self.selection.constructor.mnemonic
         ));
 
         for change in self.selection.constructor.context_changes.clone() {
@@ -506,7 +499,9 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
 
         let mut handles = Vec::with_capacity(self.handles.len());
         for opt in &mut self.handles {
-            let handle = opt.take().ok_or_else(|| anyhow!("incomplete handle decode"))?;
+            let handle = opt
+                .take()
+                .ok_or_else(|| anyhow!("incomplete handle decode"))?;
             handles.push(handle);
         }
         handles.sort_by_key(|handle| handle.operand_index);
@@ -1638,9 +1633,10 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
         }
 
         let decode_no_match_address = subtable_decode_address(&sub_ctx)?;
-        let selection = select_constructor(self.compiled, table_name, &sub_ctx)?.ok_or_else(|| {
-            anyhow!("DecodeNoMatch in subtable {table_name} at 0x{decode_no_match_address:x}")
-        })?;
+        let selection =
+            select_constructor(self.compiled, table_name, &sub_ctx)?.ok_or_else(|| {
+                anyhow!("DecodeNoMatch in subtable {table_name} at 0x{decode_no_match_address:x}")
+            })?;
         if crate::runtime::diagnostics::terminal_reselect_trace_enabled() {
             eprintln!(
                 "[decode-subtable selection] table={} ctor={} mnemonic={} source={}",
@@ -1812,21 +1808,24 @@ mod sleigh_parity_gaps_tests {
     #[test]
     fn test_decode_pool_reuses_allocations() {
         let compiled = compile_x86_64_frontend().expect("compile x86-64 frontend");
-        
+
         let initial_pool_len = DECODE_POOL.with(|p| p.borrow().len());
 
-        let _decoded = crate::runtime::spine::compiled_table::decode_instruction(
-            &compiled,
-            &[0x57],
-            0x1000,
-        )
-        .expect("decode push rdi");
+        let _decoded =
+            crate::runtime::spine::compiled_table::decode_instruction(&compiled, &[0x57], 0x1000)
+                .expect("decode push rdi");
 
         let post_pool_len = DECODE_POOL.with(|p| p.borrow().len());
-        assert!(post_pool_len > initial_pool_len, "Pool should have received the dropped walker vectors");
+        assert!(
+            post_pool_len > initial_pool_len,
+            "Pool should have received the dropped walker vectors"
+        );
 
         let mut pool_item = DECODE_POOL.with(|p| p.borrow_mut().pop()).unwrap();
-        assert!(pool_item.handles.capacity() > 0, "Capacity of handles vector should be preserved");
+        assert!(
+            pool_item.handles.capacity() > 0,
+            "Capacity of handles vector should be preserved"
+        );
     }
 
     #[test]
@@ -1838,7 +1837,7 @@ mod sleigh_parity_gaps_tests {
             &[0x48, 0x89],
             0x1000,
         );
-        
+
         if let Err(err) = result {
             let err_str = format!("{err:?}");
             assert!(

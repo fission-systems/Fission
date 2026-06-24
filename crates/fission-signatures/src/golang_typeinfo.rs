@@ -107,8 +107,18 @@ pub struct GoTypeinfoDatabase {
 // ---------------------------------------------------------------------------
 
 const UNIX_GOOS: &[&str] = &[
-    "aix", "android", "darwin", "dragonfly", "freebsd", "hurd",
-    "illumos", "ios", "linux", "netbsd", "openbsd", "solaris",
+    "aix",
+    "android",
+    "darwin",
+    "dragonfly",
+    "freebsd",
+    "hurd",
+    "illumos",
+    "ios",
+    "linux",
+    "netbsd",
+    "openbsd",
+    "solaris",
 ];
 
 // ---------------------------------------------------------------------------
@@ -140,21 +150,13 @@ impl GoTypeinfoDatabase {
         Some(Self::from_raw(raw, goos, goarch))
     }
 
-    fn from_raw(
-        raw: HashMap<String, JsonPlatformEntry>,
-        goos: &str,
-        goarch: &str,
-    ) -> Self {
+    fn from_raw(raw: HashMap<String, JsonPlatformEntry>, goos: &str, goarch: &str) -> Self {
         let is_unix = UNIX_GOOS.contains(&goos);
         let mut db = Self::default();
 
         // Merge order (lowest → highest priority): all, arch, os, unix, os-arch
         let merge_keys: Vec<String> = {
-            let mut v = vec![
-                "all".to_string(),
-                goarch.to_string(),
-                goos.to_string(),
-            ];
+            let mut v = vec!["all".to_string(), goarch.to_string(), goos.to_string()];
             if is_unix {
                 v.push("unix".to_string());
             }
@@ -166,10 +168,14 @@ impl GoTypeinfoDatabase {
             if let Some(entry) = raw.get(key.as_str()) {
                 for (name, sig) in &entry.funcs {
                     db.funcs.entry(name.clone()).or_insert_with(|| GoFuncSig {
-                        params: sig.params.iter()
+                        params: sig
+                            .params
+                            .iter()
                             .map(|p| (p.name.clone(), p.data_type.clone()))
                             .collect(),
-                        results: sig.results.iter()
+                        results: sig
+                            .results
+                            .iter()
                             .map(|r| (r.name.clone(), r.data_type.clone()))
                             .collect(),
                     });
@@ -177,7 +183,9 @@ impl GoTypeinfoDatabase {
                 for (name, ty) in &entry.types {
                     db.types.entry(name.clone()).or_insert_with(|| GoTypeEntry {
                         kind: ty.kind.clone(),
-                        fields: ty.fields.iter()
+                        fields: ty
+                            .fields
+                            .iter()
                             .map(|f| (f.name.clone(), f.data_type.clone()))
                             .collect(),
                         target: ty.target.clone(),
@@ -287,11 +295,12 @@ fn resolve_json_path(version: &str, typeinfo_dir: &Path) -> Option<std::path::Pa
 // Global per-version cache (avoids re-parsing 80 MB+ JSON per function call)
 // ---------------------------------------------------------------------------
 
-use std::sync::Mutex;
 use once_cell::sync::Lazy;
+use std::sync::Mutex;
 
-static DB_CACHE: Lazy<Mutex<HashMap<(String, String, String), Option<std::sync::Arc<GoTypeinfoDatabase>>>>> =
-    Lazy::new(|| Mutex::new(HashMap::new()));
+static DB_CACHE: Lazy<
+    Mutex<HashMap<(String, String, String), Option<std::sync::Arc<GoTypeinfoDatabase>>>>,
+> = Lazy::new(|| Mutex::new(HashMap::new()));
 
 impl GoTypeinfoDatabase {
     /// Cached variant of [`load_for_binary`]: the JSON is parsed at most once per
@@ -310,8 +319,8 @@ impl GoTypeinfoDatabase {
             }
         }
         // Load outside the lock to avoid blocking
-        let loaded = Self::load_for_binary(version, goos, goarch, typeinfo_dir)
-            .map(std::sync::Arc::new);
+        let loaded =
+            Self::load_for_binary(version, goos, goarch, typeinfo_dir).map(std::sync::Arc::new);
         let mut guard = DB_CACHE.lock().unwrap();
         // Another thread may have raced; prefer theirs
         guard.entry(key).or_insert(loaded).clone()
@@ -335,9 +344,18 @@ mod tests {
 
     #[test]
     fn test_goarch_from_spec() {
-        assert_eq!(GoTypeinfoDatabase::goarch_from_spec(true, "x86:LE:64:default"), "amd64");
-        assert_eq!(GoTypeinfoDatabase::goarch_from_spec(false, "x86:LE:32:default"), "386");
-        assert_eq!(GoTypeinfoDatabase::goarch_from_spec(true, "AARCH64:LE:64:v8A"), "arm64");
+        assert_eq!(
+            GoTypeinfoDatabase::goarch_from_spec(true, "x86:LE:64:default"),
+            "amd64"
+        );
+        assert_eq!(
+            GoTypeinfoDatabase::goarch_from_spec(false, "x86:LE:32:default"),
+            "386"
+        );
+        assert_eq!(
+            GoTypeinfoDatabase::goarch_from_spec(true, "AARCH64:LE:64:v8A"),
+            "arm64"
+        );
     }
 
     #[test]
@@ -386,7 +404,11 @@ mod tests {
         assert!(db.is_some(), "should load go1.22.0.json");
         let db = db.unwrap();
         eprintln!("funcs={} types={}", db.func_count(), db.type_count());
-        assert!(db.func_count() > 1000, "expected many functions, got {}", db.func_count());
+        assert!(
+            db.func_count() > 1000,
+            "expected many functions, got {}",
+            db.func_count()
+        );
 
         // fmt.Println must be present in 'all'
         let println = db.get_func("fmt.Println");
@@ -411,7 +433,11 @@ mod tests {
         let db = GoTypeinfoDatabase::load_for_binary("go1.22.3", "darwin", "arm64", &typeinfo_dir);
         assert!(db.is_some(), "should load go1.22.0.json for darwin/arm64");
         let db = db.unwrap();
-        eprintln!("darwin/arm64: funcs={} types={}", db.func_count(), db.type_count());
+        eprintln!(
+            "darwin/arm64: funcs={} types={}",
+            db.func_count(),
+            db.type_count()
+        );
         // darwin should have more funcs than linux due to extra darwin-arm64 key
         assert!(db.func_count() > 1000);
     }

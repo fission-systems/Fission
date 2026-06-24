@@ -14,36 +14,48 @@ pub(crate) fn apply_subfloat_flow_pass(func: &mut HirFunction) -> bool {
     for binding in &func.locals {
         var_types.insert(binding.name.clone(), binding.ty.clone());
     }
-    
+
     // 2. Walk statements recursively to narrow float expressions
     let mut changed = false;
     for stmt in &mut func.body {
         changed |= visit_stmt(stmt, &var_types);
     }
-    
+
     changed
 }
 
 fn resolve_expr_type(expr: &HirExpr, var_types: &HashMap<String, NirType>) -> NirType {
     match expr {
-        HirExpr::Var(name) => {
-            var_types.get(name).cloned().unwrap_or(NirType::Unknown)
-        }
+        HirExpr::Var(name) => var_types.get(name).cloned().unwrap_or(NirType::Unknown),
         _ => expr_type(expr),
     }
 }
 
-fn narrow_float_expression(expr: &HirExpr, var_types: &HashMap<String, NirType>) -> Option<HirExpr> {
+fn narrow_float_expression(
+    expr: &HirExpr,
+    var_types: &HashMap<String, NirType>,
+) -> Option<HirExpr> {
     match expr {
         // A widening cast from float(32) to float(64): if we are narrowing, we can elide the cast!
-        HirExpr::Cast { ty: NirType::Float { bits: 64 }, expr: inner } => {
+        HirExpr::Cast {
+            ty: NirType::Float { bits: 64 },
+            expr: inner,
+        } => {
             if let NirType::Float { bits: 32 } = resolve_expr_type(inner, var_types) {
                 return Some((**inner).clone());
             }
         }
         // Floating-point binary operations (+, -, *, /) on double-precision inputs
-        HirExpr::Binary { op, lhs, rhs, ty: NirType::Float { bits: 64 } } => {
-            if matches!(op, HirBinaryOp::Add | HirBinaryOp::Sub | HirBinaryOp::Mul | HirBinaryOp::Div) {
+        HirExpr::Binary {
+            op,
+            lhs,
+            rhs,
+            ty: NirType::Float { bits: 64 },
+        } => {
+            if matches!(
+                op,
+                HirBinaryOp::Add | HirBinaryOp::Sub | HirBinaryOp::Mul | HirBinaryOp::Div
+            ) {
                 if let (Some(narrowed_lhs), Some(narrowed_rhs)) = (
                     narrow_float_expression(lhs, var_types),
                     narrow_float_expression(rhs, var_types),
@@ -68,7 +80,7 @@ fn narrow_float_expression(expr: &HirExpr, var_types: &HashMap<String, NirType>)
 
 fn visit_expr(expr: &mut HirExpr, var_types: &HashMap<String, NirType>) -> bool {
     let mut changed = false;
-    
+
     // First recurse into subexpressions
     match expr {
         HirExpr::Cast { expr: inner, .. } => {
@@ -81,7 +93,12 @@ fn visit_expr(expr: &mut HirExpr, var_types: &HashMap<String, NirType>) -> bool 
             changed |= visit_expr(lhs, var_types);
             changed |= visit_expr(rhs, var_types);
         }
-        HirExpr::Select { cond, then_expr, else_expr, .. } => {
+        HirExpr::Select {
+            cond,
+            then_expr,
+            else_expr,
+            ..
+        } => {
             changed |= visit_expr(cond, var_types);
             changed |= visit_expr(then_expr, var_types);
             changed |= visit_expr(else_expr, var_types);
@@ -106,15 +123,19 @@ fn visit_expr(expr: &mut HirExpr, var_types: &HashMap<String, NirType>) -> bool 
         }
         _ => {}
     }
-    
+
     // Attempt narrowing on the current expression if it's a Cast to single-precision float(32)
-    if let HirExpr::Cast { ty: NirType::Float { bits: 32 }, expr: inner } = expr {
+    if let HirExpr::Cast {
+        ty: NirType::Float { bits: 32 },
+        expr: inner,
+    } = expr
+    {
         if let Some(narrowed) = narrow_float_expression(inner, var_types) {
             *expr = narrowed;
             changed = true;
         }
     }
-    
+
     changed
 }
 
@@ -148,7 +169,11 @@ fn visit_stmt(stmt: &mut HirStmt, var_types: &HashMap<String, NirType>) -> bool 
                 changed |= visit_stmt(s, var_types);
             }
         }
-        HirStmt::If { cond, then_body, else_body } => {
+        HirStmt::If {
+            cond,
+            then_body,
+            else_body,
+        } => {
             changed |= visit_expr(cond, var_types);
             for s in then_body {
                 changed |= visit_stmt(s, var_types);
@@ -157,7 +182,11 @@ fn visit_stmt(stmt: &mut HirStmt, var_types: &HashMap<String, NirType>) -> bool 
                 changed |= visit_stmt(s, var_types);
             }
         }
-        HirStmt::Switch { expr, cases, default } => {
+        HirStmt::Switch {
+            expr,
+            cases,
+            default,
+        } => {
             changed |= visit_expr(expr, var_types);
             for case in cases {
                 for s in &mut case.body {

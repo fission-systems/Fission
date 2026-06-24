@@ -48,7 +48,11 @@ impl AddressCfgSnapshot {
                 .first()
                 .map(|block| block.start_address)
                 .unwrap_or(cfg.function_address),
-            block_starts: func.blocks.iter().map(|block| block.start_address).collect(),
+            block_starts: func
+                .blocks
+                .iter()
+                .map(|block| block.start_address)
+                .collect(),
             edges: Vec::new(),
             exit_blocks: Vec::new(),
         };
@@ -81,7 +85,11 @@ impl AddressCfgSnapshot {
                 .first()
                 .map(|block| block.start_address)
                 .unwrap_or(0),
-            block_starts: func.blocks.iter().map(|block| block.start_address).collect(),
+            block_starts: func
+                .blocks
+                .iter()
+                .map(|block| block.start_address)
+                .collect(),
             edges,
             exit_blocks: func
                 .blocks

@@ -105,7 +105,7 @@ fn make_flag_func(
     });
     HirFunction {
         name: "test_flag_recovery".to_string(),
-            int_param_offsets: Vec::new(),
+        int_param_offsets: Vec::new(),
         params: vec![i32_binding("a"), i32_binding("b")],
         locals,
         return_type: NirType::Int {

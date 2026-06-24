@@ -139,7 +139,6 @@ pub struct RuntimeExecutionDetails {
     pub pending_context_commits: Vec<(u64, u32, u32, u32)>,
 }
 
-
 #[derive(Debug, Clone)]
 pub struct RuntimeSleighFrontend {
     language: String,
@@ -431,7 +430,6 @@ mod tests {
 
     #[test]
     fn loongarch_variants_lift_add_w_from_spec_template() {
-
         for language in [
             "Loongarch:LE:32:ilp32f",
             "Loongarch:LE:32:ilp32d",
@@ -466,7 +464,6 @@ mod tests {
 
     #[test]
     fn sparc_v9_64_lifts_add_from_spec_template() {
-
         let frontend = RuntimeSleighFrontend::new_for_language("sparc:BE:64:default")
             .expect("SPARC V9 64 runtime");
         assert_eq!(
@@ -492,7 +489,6 @@ mod tests {
 
     #[test]
     fn powerpc_32_defaults_lift_add_from_spec_template() {
-
         for (language, bytes) in [
             ("PowerPC:BE:32:default", [0x7c, 0x64, 0x1a, 0x14]),
             ("PowerPC:LE:32:default", [0x14, 0x1a, 0x64, 0x7c]),
@@ -524,7 +520,6 @@ mod tests {
 
     #[test]
     fn powerpc_64_defaults_lift_add_from_spec_template() {
-
         for (language, bytes) in [
             (
                 "PowerPC:BE:64:default",
@@ -562,7 +557,6 @@ mod tests {
 
     #[test]
     fn powerpc_64_powerisa_lifts_iselgt_from_spec_template() {
-
         for (language, bytes) in [
             ("PowerPC:BE:64:A2ALT", [0x7c, 0x66, 0x28, 0x5e]),
             ("PowerPC:LE:64:A2ALT", [0x5e, 0x28, 0x66, 0x7c]),
@@ -1028,7 +1022,10 @@ mod tests {
     fn mips32_le_lifts_addu_from_spec_template() {
         let frontend = RuntimeSleighFrontend::new_for_language("MIPS:LE:32:default")
             .expect("MIPS32 LE runtime");
-        assert_eq!(frontend.status(), RuntimeFrontendStatus::ExecutableCandidate);
+        assert_eq!(
+            frontend.status(),
+            RuntimeFrontendStatus::ExecutableCandidate
+        );
 
         // addu v0, a0, a1  (LE encoding: 21 10 85 00)
         let bytes = [0x21, 0x10, 0x85, 0x00];
@@ -1044,7 +1041,10 @@ mod tests {
             .decode_and_lift_with_len(&bytes, 0x400000)
             .expect("MIPS32 LE addu should lift from .sla ConstructTpl");
         assert_eq!(length, 4);
-        assert!(!ops.is_empty(), "MIPS32 LE addu emitted no p-code; ops={ops:?}");
+        assert!(
+            !ops.is_empty(),
+            "MIPS32 LE addu emitted no p-code; ops={ops:?}"
+        );
         assert!(
             ops.iter().any(|op| op.opcode == PcodeOpcode::IntAdd),
             "expected MIPS addu to emit INT_ADD; ops={ops:?}"
@@ -1055,7 +1055,10 @@ mod tests {
     fn mips32_be_lifts_addu_from_spec_template() {
         let frontend = RuntimeSleighFrontend::new_for_language("MIPS:BE:32:default")
             .expect("MIPS32 BE runtime");
-        assert_eq!(frontend.status(), RuntimeFrontendStatus::ExecutableCandidate);
+        assert_eq!(
+            frontend.status(),
+            RuntimeFrontendStatus::ExecutableCandidate
+        );
 
         // addu v0, a0, a1  (BE encoding: 00 85 10 21)
         let bytes = [0x00, 0x85, 0x10, 0x21];
@@ -1071,7 +1074,10 @@ mod tests {
             .decode_and_lift_with_len(&bytes, 0x400000)
             .expect("MIPS32 BE addu should lift from .sla ConstructTpl");
         assert_eq!(length, 4);
-        assert!(!ops.is_empty(), "MIPS32 BE addu emitted no p-code; ops={ops:?}");
+        assert!(
+            !ops.is_empty(),
+            "MIPS32 BE addu emitted no p-code; ops={ops:?}"
+        );
         assert!(
             ops.iter().any(|op| op.opcode == PcodeOpcode::IntAdd),
             "expected MIPS addu to emit INT_ADD; ops={ops:?}"
@@ -1082,7 +1088,10 @@ mod tests {
     fn mips64_be_lifts_addiu_from_spec_template() {
         let frontend = RuntimeSleighFrontend::new_for_language("MIPS:BE:64:default")
             .expect("MIPS64 BE runtime");
-        assert_eq!(frontend.status(), RuntimeFrontendStatus::ExecutableCandidate);
+        assert_eq!(
+            frontend.status(),
+            RuntimeFrontendStatus::ExecutableCandidate
+        );
 
         // addiu v0, zero, 42  (BE encoding: 24 02 00 2a)
         let bytes = [0x24, 0x02, 0x00, 0x2a];
@@ -1098,14 +1107,20 @@ mod tests {
             .decode_and_lift_with_len(&bytes, 0x400000)
             .expect("MIPS64 BE addiu should lift from .sla ConstructTpl");
         assert_eq!(length, 4);
-        assert!(!ops.is_empty(), "MIPS64 BE addiu emitted no p-code; ops={ops:?}");
+        assert!(
+            !ops.is_empty(),
+            "MIPS64 BE addiu emitted no p-code; ops={ops:?}"
+        );
     }
 
     #[test]
     fn p6502_lifts_lda_immediate_from_spec_template() {
-        let frontend = RuntimeSleighFrontend::new_for_language("6502:LE:16:default")
-            .expect("6502 runtime");
-        assert_eq!(frontend.status(), RuntimeFrontendStatus::ExecutableCandidate);
+        let frontend =
+            RuntimeSleighFrontend::new_for_language("6502:LE:16:default").expect("6502 runtime");
+        assert_eq!(
+            frontend.status(),
+            RuntimeFrontendStatus::ExecutableCandidate
+        );
 
         // LDA #42  (0xA9 0x2A)
         let bytes = [0xa9, 0x2a];
@@ -1130,9 +1145,12 @@ mod tests {
 
     #[test]
     fn avr8_lifts_add_from_spec_template() {
-        let frontend = RuntimeSleighFrontend::new_for_language("avr8:LE:16:default")
-            .expect("AVR8 runtime");
-        assert_eq!(frontend.status(), RuntimeFrontendStatus::ExecutableCandidate);
+        let frontend =
+            RuntimeSleighFrontend::new_for_language("avr8:LE:16:default").expect("AVR8 runtime");
+        assert_eq!(
+            frontend.status(),
+            RuntimeFrontendStatus::ExecutableCandidate
+        );
 
         // AVR8 NOP = 0x0000 (LE: 00 00)
         let bytes = [0x00, 0x00];
@@ -1154,9 +1172,12 @@ mod tests {
 
     #[test]
     fn m68000_lifts_nop_from_spec_template() {
-        let frontend = RuntimeSleighFrontend::new_for_language("68000:BE:32:default")
-            .expect("68000 runtime");
-        assert_eq!(frontend.status(), RuntimeFrontendStatus::ExecutableCandidate);
+        let frontend =
+            RuntimeSleighFrontend::new_for_language("68000:BE:32:default").expect("68000 runtime");
+        assert_eq!(
+            frontend.status(),
+            RuntimeFrontendStatus::ExecutableCandidate
+        );
 
         // 68040 NOP = 0x4E71 (BE: 4e 71)
         let bytes = [0x4e, 0x71];
@@ -1179,7 +1200,10 @@ mod tests {
         // Note: RISCV:LE:32 uses riscv.ilp32d.slaspec entry
         let frontend = RuntimeSleighFrontend::new_for_language("RISCV:LE:32:default")
             .expect("RISC-V 32 runtime");
-        assert_eq!(frontend.status(), RuntimeFrontendStatus::ExecutableCandidate);
+        assert_eq!(
+            frontend.status(),
+            RuntimeFrontendStatus::ExecutableCandidate
+        );
 
         // addi x10, x10, 1  => 0x00150513
         // LE bytes: 13 05 15 00
@@ -1196,7 +1220,10 @@ mod tests {
             .decode_and_lift_with_len(&bytes, 0x10000)
             .expect("RISC-V 32 addi should lift from .sla ConstructTpl");
         assert_eq!(length, 4);
-        assert!(!ops.is_empty(), "RISC-V 32 addi emitted no p-code; ops={ops:?}");
+        assert!(
+            !ops.is_empty(),
+            "RISC-V 32 addi emitted no p-code; ops={ops:?}"
+        );
         assert!(
             ops.iter().any(|op| op.opcode == PcodeOpcode::IntAdd),
             "expected RISC-V addi to emit INT_ADD; ops={ops:?}"
@@ -1207,7 +1234,10 @@ mod tests {
     fn riscv_64_le_lifts_addi_from_spec_template() {
         let frontend = RuntimeSleighFrontend::new_for_language("RISCV:LE:64:default")
             .expect("RISC-V 64 runtime");
-        assert_eq!(frontend.status(), RuntimeFrontendStatus::ExecutableCandidate);
+        assert_eq!(
+            frontend.status(),
+            RuntimeFrontendStatus::ExecutableCandidate
+        );
 
         // addi x10, x10, 1 => LE bytes: 13 05 15 00
         let bytes = [0x13, 0x05, 0x15, 0x00];
@@ -1223,7 +1253,10 @@ mod tests {
             .decode_and_lift_with_len(&bytes, 0x10000)
             .expect("RISC-V 64 addi should lift from .sla ConstructTpl");
         assert_eq!(length, 4);
-        assert!(!ops.is_empty(), "RISC-V 64 addi emitted no p-code; ops={ops:?}");
+        assert!(
+            !ops.is_empty(),
+            "RISC-V 64 addi emitted no p-code; ops={ops:?}"
+        );
         assert!(
             ops.iter().any(|op| op.opcode == PcodeOpcode::IntAdd),
             "expected RISC-V addi to emit INT_ADD; ops={ops:?}"
@@ -1233,46 +1266,72 @@ mod tests {
     // ── MIPS R6 / MIPS64 LE ──────────────────────────────────────────────
     #[test]
     fn mips32_r6_be_lifts_addiu_from_spec_template() {
-        let frontend = RuntimeSleighFrontend::new_for_language("MIPS:BE:32:R6")
-            .expect("MIPS32 R6 BE runtime");
-        assert_eq!(frontend.status(), RuntimeFrontendStatus::ExecutableCandidate);
+        let frontend =
+            RuntimeSleighFrontend::new_for_language("MIPS:BE:32:R6").expect("MIPS32 R6 BE runtime");
+        assert_eq!(
+            frontend.status(),
+            RuntimeFrontendStatus::ExecutableCandidate
+        );
         let bytes = [0x24, 0x02, 0x00, 0x2a]; // addiu v0, zero, 42
-        let decoded = frontend.decode_window(&bytes, 0x400000, 1).expect("MIPS32 R6 BE decode");
+        let decoded = frontend
+            .decode_window(&bytes, 0x400000, 1)
+            .expect("MIPS32 R6 BE decode");
         assert_eq!(decoded.first().map(|i| i.length), Some(4));
-        let (ops, len) = frontend.decode_and_lift_with_len(&bytes, 0x400000)
+        let (ops, len) = frontend
+            .decode_and_lift_with_len(&bytes, 0x400000)
             .expect("MIPS32 R6 BE lift");
         assert_eq!(len, 4);
-        assert!(!ops.is_empty(), "MIPS32 R6 BE emitted no p-code; ops={ops:?}");
+        assert!(
+            !ops.is_empty(),
+            "MIPS32 R6 BE emitted no p-code; ops={ops:?}"
+        );
     }
 
     #[test]
     fn mips32_r6_le_lifts_addiu_from_spec_template() {
-        let frontend = RuntimeSleighFrontend::new_for_language("MIPS:LE:32:R6")
-            .expect("MIPS32 R6 LE runtime");
-        assert_eq!(frontend.status(), RuntimeFrontendStatus::ExecutableCandidate);
+        let frontend =
+            RuntimeSleighFrontend::new_for_language("MIPS:LE:32:R6").expect("MIPS32 R6 LE runtime");
+        assert_eq!(
+            frontend.status(),
+            RuntimeFrontendStatus::ExecutableCandidate
+        );
         let bytes = [0x2a, 0x00, 0x02, 0x24]; // addiu v0, zero, 42 LE
-        let decoded = frontend.decode_window(&bytes, 0x400000, 1).expect("MIPS32 R6 LE decode");
+        let decoded = frontend
+            .decode_window(&bytes, 0x400000, 1)
+            .expect("MIPS32 R6 LE decode");
         assert_eq!(decoded.first().map(|i| i.length), Some(4));
-        let (ops, len) = frontend.decode_and_lift_with_len(&bytes, 0x400000)
+        let (ops, len) = frontend
+            .decode_and_lift_with_len(&bytes, 0x400000)
             .expect("MIPS32 R6 LE lift");
         assert_eq!(len, 4);
-        assert!(!ops.is_empty(), "MIPS32 R6 LE emitted no p-code; ops={ops:?}");
+        assert!(
+            !ops.is_empty(),
+            "MIPS32 R6 LE emitted no p-code; ops={ops:?}"
+        );
     }
 
     #[test]
     fn mips64_le_lifts_addu_from_spec_template() {
         let frontend = RuntimeSleighFrontend::new_for_language("MIPS:LE:64:default")
             .expect("MIPS64 LE runtime");
-        assert_eq!(frontend.status(), RuntimeFrontendStatus::ExecutableCandidate);
+        assert_eq!(
+            frontend.status(),
+            RuntimeFrontendStatus::ExecutableCandidate
+        );
         let bytes = [0x21, 0x10, 0x85, 0x00]; // addu v0, a0, a1 LE
-        let decoded = frontend.decode_window(&bytes, 0x400000, 1).expect("MIPS64 LE decode");
+        let decoded = frontend
+            .decode_window(&bytes, 0x400000, 1)
+            .expect("MIPS64 LE decode");
         assert_eq!(decoded.first().map(|i| i.length), Some(4));
-        let (ops, len) = frontend.decode_and_lift_with_len(&bytes, 0x400000)
+        let (ops, len) = frontend
+            .decode_and_lift_with_len(&bytes, 0x400000)
             .expect("MIPS64 LE lift");
         assert_eq!(len, 4);
         assert!(!ops.is_empty(), "MIPS64 LE emitted no p-code; ops={ops:?}");
-        assert!(ops.iter().any(|op| op.opcode == PcodeOpcode::IntAdd),
-            "expected MIPS64 LE addu to emit INT_ADD; ops={ops:?}");
+        assert!(
+            ops.iter().any(|op| op.opcode == PcodeOpcode::IntAdd),
+            "expected MIPS64 LE addu to emit INT_ADD; ops={ops:?}"
+        );
     }
 
     // ── Z80 / Z180 ───────────────────────────────────────────────────────
@@ -1281,12 +1340,18 @@ mod tests {
         for language in ["z80:LE:16:default", "z180:LE:16:default"] {
             let frontend = RuntimeSleighFrontend::new_for_language(language)
                 .unwrap_or_else(|e| panic!("{language} runtime: {e}"));
-            assert_eq!(frontend.status(), RuntimeFrontendStatus::ExecutableCandidate, "{language}");
+            assert_eq!(
+                frontend.status(),
+                RuntimeFrontendStatus::ExecutableCandidate,
+                "{language}"
+            );
             let bytes = [0x00u8]; // NOP
-            let decoded = frontend.decode_window(&bytes, 0x0000, 1)
+            let decoded = frontend
+                .decode_window(&bytes, 0x0000, 1)
                 .unwrap_or_else(|e| panic!("{language} NOP decode: {e}"));
             assert_eq!(decoded.first().map(|i| i.length), Some(1), "{language}");
-            let (_ops, len) = frontend.decode_and_lift_with_len(&bytes, 0x0000)
+            let (_ops, len) = frontend
+                .decode_and_lift_with_len(&bytes, 0x0000)
                 .unwrap_or_else(|e| panic!("{language} NOP lift: {e}"));
             assert_eq!(len, 1, "{language}");
         }
@@ -1296,20 +1361,30 @@ mod tests {
     #[test]
     fn mcu_8bit_family_lifts_nop_from_spec_template() {
         for (language, nop_bytes, nop_len) in [
-            ("8085:LE:16:default",    &[0x00u8][..], 1u64),
-            ("8051:BE:16:default",    &[0x00u8][..], 1),
-            ("80251:BE:24:default",   &[0x00u8][..], 1),
-            ("80390:BE:24:default",   &[0x00u8][..], 1),
-            ("8051:BE:24:mx51",       &[0x00u8][..], 1),
-            ("8048:LE:16:default",    &[0x00u8][..], 1),
+            ("8085:LE:16:default", &[0x00u8][..], 1u64),
+            ("8051:BE:16:default", &[0x00u8][..], 1),
+            ("80251:BE:24:default", &[0x00u8][..], 1),
+            ("80390:BE:24:default", &[0x00u8][..], 1),
+            ("8051:BE:24:mx51", &[0x00u8][..], 1),
+            ("8048:LE:16:default", &[0x00u8][..], 1),
         ] {
             let frontend = RuntimeSleighFrontend::new_for_language(language)
                 .unwrap_or_else(|e| panic!("{language} runtime: {e}"));
-            assert_eq!(frontend.status(), RuntimeFrontendStatus::ExecutableCandidate, "{language}");
-            let decoded = frontend.decode_window(nop_bytes, 0x0000, 1)
+            assert_eq!(
+                frontend.status(),
+                RuntimeFrontendStatus::ExecutableCandidate,
+                "{language}"
+            );
+            let decoded = frontend
+                .decode_window(nop_bytes, 0x0000, 1)
                 .unwrap_or_else(|e| panic!("{language} NOP decode: {e}"));
-            assert_eq!(decoded.first().map(|i| i.length as u64), Some(nop_len), "{language}");
-            let (_ops, len) = frontend.decode_and_lift_with_len(nop_bytes, 0x0000)
+            assert_eq!(
+                decoded.first().map(|i| i.length as u64),
+                Some(nop_len),
+                "{language}"
+            );
+            let (_ops, len) = frontend
+                .decode_and_lift_with_len(nop_bytes, 0x0000)
                 .unwrap_or_else(|e| panic!("{language} NOP lift: {e}"));
             assert_eq!(len, nop_len, "{language}");
         }
@@ -1318,13 +1393,19 @@ mod tests {
     // ── 65C02 ─────────────────────────────────────────────────────────────
     #[test]
     fn p65c02_lifts_nop_from_spec_template() {
-        let frontend = RuntimeSleighFrontend::new_for_language("65C02:LE:16:default")
-            .expect("65C02 runtime");
-        assert_eq!(frontend.status(), RuntimeFrontendStatus::ExecutableCandidate);
+        let frontend =
+            RuntimeSleighFrontend::new_for_language("65C02:LE:16:default").expect("65C02 runtime");
+        assert_eq!(
+            frontend.status(),
+            RuntimeFrontendStatus::ExecutableCandidate
+        );
         let bytes = [0xeau8]; // NOP
-        let decoded = frontend.decode_window(&bytes, 0x8000, 1).expect("65C02 NOP decode");
+        let decoded = frontend
+            .decode_window(&bytes, 0x8000, 1)
+            .expect("65C02 NOP decode");
         assert_eq!(decoded.first().map(|i| i.length), Some(1));
-        let (_ops, len) = frontend.decode_and_lift_with_len(&bytes, 0x8000)
+        let (_ops, len) = frontend
+            .decode_and_lift_with_len(&bytes, 0x8000)
             .expect("65C02 NOP lift");
         assert_eq!(len, 1);
     }
@@ -1339,12 +1420,18 @@ mod tests {
         ] {
             let frontend = RuntimeSleighFrontend::new_for_language(language)
                 .unwrap_or_else(|e| panic!("{language} runtime: {e}"));
-            assert_eq!(frontend.status(), RuntimeFrontendStatus::ExecutableCandidate, "{language}");
+            assert_eq!(
+                frontend.status(),
+                RuntimeFrontendStatus::ExecutableCandidate,
+                "{language}"
+            );
             let bytes = [0x4e, 0x71u8]; // NOP
-            let decoded = frontend.decode_window(&bytes, 0x1000, 1)
+            let decoded = frontend
+                .decode_window(&bytes, 0x1000, 1)
                 .unwrap_or_else(|e| panic!("{language} NOP decode: {e}"));
             assert_eq!(decoded.first().map(|i| i.length), Some(2), "{language}");
-            let (_ops, len) = frontend.decode_and_lift_with_len(&bytes, 0x1000)
+            let (_ops, len) = frontend
+                .decode_and_lift_with_len(&bytes, 0x1000)
                 .unwrap_or_else(|e| panic!("{language} NOP lift: {e}"));
             assert_eq!(len, 2, "{language}");
         }
@@ -1353,18 +1440,21 @@ mod tests {
     // ── AVR extended / xmega ─────────────────────────────────────────────
     #[test]
     fn avr_extended_variants_lift_nop_from_spec_template() {
-        for language in [
-            "avr8:LE:16:extended",
-            "avr8:LE:24:xmega",
-        ] {
+        for language in ["avr8:LE:16:extended", "avr8:LE:24:xmega"] {
             let frontend = RuntimeSleighFrontend::new_for_language(language)
                 .unwrap_or_else(|e| panic!("{language} runtime: {e}"));
-            assert_eq!(frontend.status(), RuntimeFrontendStatus::ExecutableCandidate, "{language}");
+            assert_eq!(
+                frontend.status(),
+                RuntimeFrontendStatus::ExecutableCandidate,
+                "{language}"
+            );
             let bytes = [0x00u8, 0x00]; // NOP = 0x0000
-            let decoded = frontend.decode_window(&bytes, 0x0000, 1)
+            let decoded = frontend
+                .decode_window(&bytes, 0x0000, 1)
                 .unwrap_or_else(|e| panic!("{language} NOP decode: {e}"));
             assert_eq!(decoded.first().map(|i| i.length), Some(2), "{language}");
-            let (_ops, len) = frontend.decode_and_lift_with_len(&bytes, 0x0000)
+            let (_ops, len) = frontend
+                .decode_and_lift_with_len(&bytes, 0x0000)
                 .unwrap_or_else(|e| panic!("{language} NOP lift: {e}"));
             assert_eq!(len, 2, "{language}");
         }
@@ -1374,19 +1464,25 @@ mod tests {
     #[test]
     fn superh_family_lifts_nop_from_spec_template() {
         for (language, nop_bytes) in [
-            ("SuperH:BE:32:SH-1",   [0x00u8, 0x09]),
-            ("SuperH:BE:32:SH-2",   [0x00, 0x09]),
-            ("SuperH:BE:32:SH-2A",  [0x00, 0x09]),
+            ("SuperH:BE:32:SH-1", [0x00u8, 0x09]),
+            ("SuperH:BE:32:SH-2", [0x00, 0x09]),
+            ("SuperH:BE:32:SH-2A", [0x00, 0x09]),
             ("SuperH4:BE:32:default", [0x00, 0x09]),
             ("SuperH4:LE:32:default", [0x09, 0x00]),
         ] {
             let frontend = RuntimeSleighFrontend::new_for_language(language)
                 .unwrap_or_else(|e| panic!("{language} runtime: {e}"));
-            assert_eq!(frontend.status(), RuntimeFrontendStatus::ExecutableCandidate, "{language}");
-            let decoded = frontend.decode_window(&nop_bytes, 0x1000, 1)
+            assert_eq!(
+                frontend.status(),
+                RuntimeFrontendStatus::ExecutableCandidate,
+                "{language}"
+            );
+            let decoded = frontend
+                .decode_window(&nop_bytes, 0x1000, 1)
                 .unwrap_or_else(|e| panic!("{language} NOP decode: {e}"));
             assert_eq!(decoded.first().map(|i| i.length), Some(2), "{language}");
-            let (_ops, len) = frontend.decode_and_lift_with_len(&nop_bytes, 0x1000)
+            let (_ops, len) = frontend
+                .decode_and_lift_with_len(&nop_bytes, 0x1000)
                 .unwrap_or_else(|e| panic!("{language} NOP lift: {e}"));
             assert_eq!(len, 2, "{language}");
         }
@@ -1398,13 +1494,19 @@ mod tests {
         for language in ["TI_MSP430:LE:16:default", "TI_MSP430X:LE:32:default"] {
             let frontend = RuntimeSleighFrontend::new_for_language(language)
                 .unwrap_or_else(|e| panic!("{language} runtime: {e}"));
-            assert_eq!(frontend.status(), RuntimeFrontendStatus::ExecutableCandidate, "{language}");
+            assert_eq!(
+                frontend.status(),
+                RuntimeFrontendStatus::ExecutableCandidate,
+                "{language}"
+            );
             // NOP = MOV R3,R3 = 0x4303 (LE bytes: 03 43)
             let bytes = [0x03u8, 0x43];
-            let decoded = frontend.decode_window(&bytes, 0x8000, 1)
+            let decoded = frontend
+                .decode_window(&bytes, 0x8000, 1)
                 .unwrap_or_else(|e| panic!("{language} NOP decode: {e}"));
             assert_eq!(decoded.first().map(|i| i.length), Some(2), "{language}");
-            let (_ops, len) = frontend.decode_and_lift_with_len(&bytes, 0x8000)
+            let (_ops, len) = frontend
+                .decode_and_lift_with_len(&bytes, 0x8000)
                 .unwrap_or_else(|e| panic!("{language} NOP lift: {e}"));
             assert_eq!(len, 2, "{language}");
         }
@@ -1420,14 +1522,23 @@ mod tests {
         ] {
             let frontend = RuntimeSleighFrontend::new_for_language(language)
                 .unwrap_or_else(|e| panic!("{language} runtime: {e}"));
-            assert_eq!(frontend.status(), RuntimeFrontendStatus::ExecutableCandidate, "{language}");
+            assert_eq!(
+                frontend.status(),
+                RuntimeFrontendStatus::ExecutableCandidate,
+                "{language}"
+            );
             // Dalvik NOP = 0x0000 (2 bytes), but Dalvik code-unit length = 1 (1 code unit = 2 bytes)
             let bytes = [0x00u8, 0x00, 0x00, 0x00]; // extra bytes for window
-            let decoded = frontend.decode_window(&bytes, 0x0000, 1)
+            let decoded = frontend
+                .decode_window(&bytes, 0x0000, 1)
                 .unwrap_or_else(|e| panic!("{language} NOP decode: {e}"));
             // length=1 means 1 Dalvik code unit (= 2 bytes); decode_and_lift returns byte count
-            assert!(decoded.first().is_some(), "{language} should decode something");
-            let (_ops, len) = frontend.decode_and_lift_with_len(&bytes, 0x0000)
+            assert!(
+                decoded.first().is_some(),
+                "{language} should decode something"
+            );
+            let (_ops, len) = frontend
+                .decode_and_lift_with_len(&bytes, 0x0000)
                 .unwrap_or_else(|e| panic!("{language} NOP lift: {e}"));
             assert!(len > 0, "{language} lift length must be positive");
         }
@@ -1439,13 +1550,19 @@ mod tests {
         for language in ["eBPF:LE:64:default", "eBPF:BE:64:default"] {
             let frontend = RuntimeSleighFrontend::new_for_language(language)
                 .unwrap_or_else(|e| panic!("{language} runtime: {e}"));
-            assert_eq!(frontend.status(), RuntimeFrontendStatus::ExecutableCandidate, "{language}");
+            assert_eq!(
+                frontend.status(),
+                RuntimeFrontendStatus::ExecutableCandidate,
+                "{language}"
+            );
             // MOV r0, r0 (eBPF ALU64 MOV BPF_X): opcode=0xBF, regs=0x00, off=0, imm=0
             let bytes = [0xbf, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00];
-            let decoded = frontend.decode_window(&bytes, 0x0000, 1)
+            let decoded = frontend
+                .decode_window(&bytes, 0x0000, 1)
                 .unwrap_or_else(|e| panic!("{language} MOV decode: {e}"));
             assert!(decoded.first().map(|i| i.length).is_some(), "{language}");
-            let (_ops, len) = frontend.decode_and_lift_with_len(&bytes, 0x0000)
+            let (_ops, len) = frontend
+                .decode_and_lift_with_len(&bytes, 0x0000)
                 .unwrap_or_else(|e| panic!("{language} MOV lift: {e}"));
             assert!(len > 0, "{language} lift length must be positive");
         }
@@ -1454,14 +1571,23 @@ mod tests {
     // ── Classic BPF (32-bit) ──────────────────────────────────────────────
     #[test]
     fn bpf_le_lifts_ld_from_spec_template() {
-        let frontend = RuntimeSleighFrontend::new_for_language("BPF:LE:32:default")
-            .expect("BPF LE runtime");
-        assert_eq!(frontend.status(), RuntimeFrontendStatus::ExecutableCandidate);
+        let frontend =
+            RuntimeSleighFrontend::new_for_language("BPF:LE:32:default").expect("BPF LE runtime");
+        assert_eq!(
+            frontend.status(),
+            RuntimeFrontendStatus::ExecutableCandidate
+        );
         // Classic BPF: LD A, #0 = {op=0x00, jt=0, jf=0, k=0} (8 bytes)
         let bytes = [0x00u8, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00];
-        let decoded = frontend.decode_window(&bytes, 0x0000, 1).expect("BPF LD decode");
-        assert!(decoded.first().map(|i| i.length).is_some(), "BPF should decode 8-byte instruction");
-        let (_ops, len) = frontend.decode_and_lift_with_len(&bytes, 0x0000)
+        let decoded = frontend
+            .decode_window(&bytes, 0x0000, 1)
+            .expect("BPF LD decode");
+        assert!(
+            decoded.first().map(|i| i.length).is_some(),
+            "BPF should decode 8-byte instruction"
+        );
+        let (_ops, len) = frontend
+            .decode_and_lift_with_len(&bytes, 0x0000)
             .expect("BPF LD lift");
         assert!(len > 0, "BPF LD lift length must be positive");
     }
@@ -1469,13 +1595,19 @@ mod tests {
     // ── V850 ─────────────────────────────────────────────────────────────
     #[test]
     fn v850_lifts_nop_from_spec_template() {
-        let frontend = RuntimeSleighFrontend::new_for_language("V850:LE:32:default")
-            .expect("V850 runtime");
-        assert_eq!(frontend.status(), RuntimeFrontendStatus::ExecutableCandidate);
+        let frontend =
+            RuntimeSleighFrontend::new_for_language("V850:LE:32:default").expect("V850 runtime");
+        assert_eq!(
+            frontend.status(),
+            RuntimeFrontendStatus::ExecutableCandidate
+        );
         let bytes = [0x00u8, 0x00]; // NOP (format I: opcode=0, r1=0, r2=0)
-        let decoded = frontend.decode_window(&bytes, 0x1000, 1).expect("V850 NOP decode");
+        let decoded = frontend
+            .decode_window(&bytes, 0x1000, 1)
+            .expect("V850 NOP decode");
         assert_eq!(decoded.first().map(|i| i.length), Some(2));
-        let (_ops, len) = frontend.decode_and_lift_with_len(&bytes, 0x1000)
+        let (_ops, len) = frontend
+            .decode_and_lift_with_len(&bytes, 0x1000)
             .expect("V850 NOP lift");
         assert_eq!(len, 2);
     }
@@ -1485,17 +1617,27 @@ mod tests {
     fn mc6800_family_lifts_nop_from_spec_template() {
         for (language, nop_byte, nop_len) in [
             ("6809:BE:16:default", 0x12u8, 1u64), // NOP = 0x12
-            ("H6309:BE:16:default", 0x12, 1),      // compatible
-            ("6805:BE:16:default", 0x9d, 1),       // NOP = 0x9D
+            ("H6309:BE:16:default", 0x12, 1),     // compatible
+            ("6805:BE:16:default", 0x9d, 1),      // NOP = 0x9D
         ] {
             let frontend = RuntimeSleighFrontend::new_for_language(language)
                 .unwrap_or_else(|e| panic!("{language} runtime: {e}"));
-            assert_eq!(frontend.status(), RuntimeFrontendStatus::ExecutableCandidate, "{language}");
+            assert_eq!(
+                frontend.status(),
+                RuntimeFrontendStatus::ExecutableCandidate,
+                "{language}"
+            );
             let bytes = [nop_byte];
-            let decoded = frontend.decode_window(&bytes, 0x1000, 1)
+            let decoded = frontend
+                .decode_window(&bytes, 0x1000, 1)
                 .unwrap_or_else(|e| panic!("{language} NOP decode: {e}"));
-            assert_eq!(decoded.first().map(|i| i.length as u64), Some(nop_len), "{language}");
-            let (_ops, len) = frontend.decode_and_lift_with_len(&bytes, 0x1000)
+            assert_eq!(
+                decoded.first().map(|i| i.length as u64),
+                Some(nop_len),
+                "{language}"
+            );
+            let (_ops, len) = frontend
+                .decode_and_lift_with_len(&bytes, 0x1000)
                 .unwrap_or_else(|e| panic!("{language} NOP lift: {e}"));
             assert_eq!(len, nop_len, "{language}");
         }
@@ -1511,12 +1653,18 @@ mod tests {
         ] {
             let frontend = RuntimeSleighFrontend::new_for_language(language)
                 .unwrap_or_else(|e| panic!("{language} runtime: {e}"));
-            assert_eq!(frontend.status(), RuntimeFrontendStatus::ExecutableCandidate, "{language}");
+            assert_eq!(
+                frontend.status(),
+                RuntimeFrontendStatus::ExecutableCandidate,
+                "{language}"
+            );
             let bytes = [0x9du8]; // NOP = 0x9D
-            let decoded = frontend.decode_window(&bytes, 0x1000, 1)
+            let decoded = frontend
+                .decode_window(&bytes, 0x1000, 1)
                 .unwrap_or_else(|e| panic!("{language} NOP decode: {e}"));
             assert_eq!(decoded.first().map(|i| i.length), Some(1), "{language}");
-            let (_ops, len) = frontend.decode_and_lift_with_len(&bytes, 0x1000)
+            let (_ops, len) = frontend
+                .decode_and_lift_with_len(&bytes, 0x1000)
                 .unwrap_or_else(|e| panic!("{language} NOP lift: {e}"));
             assert_eq!(len, 1, "{language}");
         }
@@ -1532,12 +1680,18 @@ mod tests {
         ] {
             let frontend = RuntimeSleighFrontend::new_for_language(language)
                 .unwrap_or_else(|e| panic!("{language} runtime: {e}"));
-            assert_eq!(frontend.status(), RuntimeFrontendStatus::ExecutableCandidate, "{language}");
+            assert_eq!(
+                frontend.status(),
+                RuntimeFrontendStatus::ExecutableCandidate,
+                "{language}"
+            );
             let bytes = [0xa7u8]; // NOP = 0xA7
-            let decoded = frontend.decode_window(&bytes, 0x1000, 1)
+            let decoded = frontend
+                .decode_window(&bytes, 0x1000, 1)
                 .unwrap_or_else(|e| panic!("{language} NOP decode: {e}"));
             assert_eq!(decoded.first().map(|i| i.length), Some(1), "{language}");
-            let (_ops, len) = frontend.decode_and_lift_with_len(&bytes, 0x1000)
+            let (_ops, len) = frontend
+                .decode_and_lift_with_len(&bytes, 0x1000)
                 .unwrap_or_else(|e| panic!("{language} NOP lift: {e}"));
             assert_eq!(len, 1, "{language}");
         }
@@ -1552,20 +1706,29 @@ mod tests {
         let selection = registry
             .resolve_from_language_pair("JVM:BE:32:default", None)
             .expect("JVM resolve");
-        assert_eq!(selection.runtime_status, RuntimeFrontendStatus::ExecutableCandidate);
+        assert_eq!(
+            selection.runtime_status,
+            RuntimeFrontendStatus::ExecutableCandidate
+        );
     }
 
     // ── MCS96 ────────────────────────────────────────────────────────────
     #[test]
     fn mcs96_lifts_nop_from_spec_template() {
-        let frontend = RuntimeSleighFrontend::new_for_language("MCS96:LE:16:default")
-            .expect("MCS96 runtime");
-        assert_eq!(frontend.status(), RuntimeFrontendStatus::ExecutableCandidate);
+        let frontend =
+            RuntimeSleighFrontend::new_for_language("MCS96:LE:16:default").expect("MCS96 runtime");
+        assert_eq!(
+            frontend.status(),
+            RuntimeFrontendStatus::ExecutableCandidate
+        );
         // MCS96 NOP = 0xFD (1 byte; 0x00 = SKIP, 0x01 = CLR)
         let bytes = [0xfdu8];
-        let decoded = frontend.decode_window(&bytes, 0x2000, 1).expect("MCS96 NOP decode");
+        let decoded = frontend
+            .decode_window(&bytes, 0x2000, 1)
+            .expect("MCS96 NOP decode");
         assert_eq!(decoded.first().map(|i| i.length), Some(1));
-        let (_ops, len) = frontend.decode_and_lift_with_len(&bytes, 0x2000)
+        let (_ops, len) = frontend
+            .decode_and_lift_with_len(&bytes, 0x2000)
             .expect("MCS96 NOP lift");
         assert_eq!(len, 1);
     }
@@ -1580,11 +1743,21 @@ mod tests {
         ] {
             let frontend = RuntimeSleighFrontend::new_for_language(language)
                 .unwrap_or_else(|e| panic!("{language} runtime: {e}"));
-            assert_eq!(frontend.status(), RuntimeFrontendStatus::ExecutableCandidate, "{language}");
-            let decoded = frontend.decode_window(nop_bytes, 0x1000, 1)
+            assert_eq!(
+                frontend.status(),
+                RuntimeFrontendStatus::ExecutableCandidate,
+                "{language}"
+            );
+            let decoded = frontend
+                .decode_window(nop_bytes, 0x1000, 1)
                 .unwrap_or_else(|e| panic!("{language} NOP decode: {e}"));
-            assert_eq!(decoded.first().map(|i| i.length as u64), Some(expected_len), "{language}");
-            let (_ops, len) = frontend.decode_and_lift_with_len(nop_bytes, 0x1000)
+            assert_eq!(
+                decoded.first().map(|i| i.length as u64),
+                Some(expected_len),
+                "{language}"
+            );
+            let (_ops, len) = frontend
+                .decode_and_lift_with_len(nop_bytes, 0x1000)
                 .unwrap_or_else(|e| panic!("{language} NOP lift: {e}"));
             assert_eq!(len, expected_len, "{language}");
         }
@@ -1593,13 +1766,19 @@ mod tests {
     // ── M8C ──────────────────────────────────────────────────────────────
     #[test]
     fn m8c_lifts_nop_from_spec_template() {
-        let frontend = RuntimeSleighFrontend::new_for_language("M8C:BE:16:default")
-            .expect("M8C runtime");
-        assert_eq!(frontend.status(), RuntimeFrontendStatus::ExecutableCandidate);
+        let frontend =
+            RuntimeSleighFrontend::new_for_language("M8C:BE:16:default").expect("M8C runtime");
+        assert_eq!(
+            frontend.status(),
+            RuntimeFrontendStatus::ExecutableCandidate
+        );
         let bytes = [0x00u8]; // NOP = 0x00
-        let decoded = frontend.decode_window(&bytes, 0x0000, 1).expect("M8C NOP decode");
+        let decoded = frontend
+            .decode_window(&bytes, 0x0000, 1)
+            .expect("M8C NOP decode");
         assert_eq!(decoded.first().map(|i| i.length), Some(1));
-        let (_ops, len) = frontend.decode_and_lift_with_len(&bytes, 0x0000)
+        let (_ops, len) = frontend
+            .decode_and_lift_with_len(&bytes, 0x0000)
             .expect("M8C NOP lift");
         assert_eq!(len, 1);
     }
@@ -1613,7 +1792,10 @@ mod tests {
         let selection = registry
             .resolve_from_language_pair("pa-risc:BE:32:default", None)
             .expect("PA-RISC resolve");
-        assert_eq!(selection.runtime_status, RuntimeFrontendStatus::ExecutableCandidate);
+        assert_eq!(
+            selection.runtime_status,
+            RuntimeFrontendStatus::ExecutableCandidate
+        );
     }
 
     // ── NDS32 (BE/LE) ────────────────────────────────────────────────────
@@ -1629,12 +1811,18 @@ mod tests {
         ] {
             let frontend = RuntimeSleighFrontend::new_for_language(language)
                 .unwrap_or_else(|e| panic!("{language} runtime: {e}"));
-            assert_eq!(frontend.status(), RuntimeFrontendStatus::ExecutableCandidate, "{language}");
-            let decoded = frontend.decode_window(&nop_bytes, 0x1000, 1)
+            assert_eq!(
+                frontend.status(),
+                RuntimeFrontendStatus::ExecutableCandidate,
+                "{language}"
+            );
+            let decoded = frontend
+                .decode_window(&nop_bytes, 0x1000, 1)
                 .unwrap_or_else(|e| panic!("{language} NOP decode: {e}"));
             // NOP16 decodes as 4 bytes aligned unit in Fission's NDS32 decoder
             assert_eq!(decoded.first().map(|i| i.length), Some(4), "{language}");
-            let (_ops, len) = frontend.decode_and_lift_with_len(&nop_bytes, 0x1000)
+            let (_ops, len) = frontend
+                .decode_and_lift_with_len(&nop_bytes, 0x1000)
                 .unwrap_or_else(|e| panic!("{language} NOP lift: {e}"));
             assert_eq!(len, 4, "{language}");
         }
@@ -1650,12 +1838,17 @@ mod tests {
         // LE 3-byte store: byte0=bits[7:0]=0x00, byte1=bits[15:8]=0x0F, byte2=bits[23:16]=0x02
         let frontend = RuntimeSleighFrontend::new_for_language("Xtensa:LE:32:default")
             .expect("Xtensa LE runtime");
-        assert_eq!(frontend.status(), RuntimeFrontendStatus::ExecutableCandidate);
+        assert_eq!(
+            frontend.status(),
+            RuntimeFrontendStatus::ExecutableCandidate
+        );
         let nop_bytes = [0x00u8, 0x0f, 0x02];
-        let decoded = frontend.decode_window(&nop_bytes, 0x1000, 1)
+        let decoded = frontend
+            .decode_window(&nop_bytes, 0x1000, 1)
             .expect("Xtensa LE NOP decode");
         assert_eq!(decoded.first().map(|i| i.length), Some(3));
-        let (_ops, len) = frontend.decode_and_lift_with_len(&nop_bytes, 0x1000)
+        let (_ops, len) = frontend
+            .decode_and_lift_with_len(&nop_bytes, 0x1000)
             .expect("Xtensa LE NOP lift");
         assert_eq!(len, 3);
     }
@@ -1668,7 +1861,10 @@ mod tests {
         let selection = registry
             .resolve_from_language_pair("Xtensa:BE:32:default", None)
             .expect("Xtensa BE resolve");
-        assert_eq!(selection.runtime_status, RuntimeFrontendStatus::ExecutableCandidate);
+        assert_eq!(
+            selection.runtime_status,
+            RuntimeFrontendStatus::ExecutableCandidate
+        );
     }
 
     // ── TriCore ───────────────────────────────────────────────────────────
@@ -1676,13 +1872,18 @@ mod tests {
     fn tricore_lifts_nop_from_spec_template() {
         let frontend = RuntimeSleighFrontend::new_for_language("tricore:LE:32:default")
             .expect("TriCore runtime");
-        assert_eq!(frontend.status(), RuntimeFrontendStatus::ExecutableCandidate);
+        assert_eq!(
+            frontend.status(),
+            RuntimeFrontendStatus::ExecutableCandidate
+        );
         // NOP (SR format): op0007=0x0, op0815=0x0 → LE 2 bytes: 0x00 0x00
         let bytes = [0x00u8, 0x00];
-        let decoded = frontend.decode_window(&bytes, 0x80000000, 1)
+        let decoded = frontend
+            .decode_window(&bytes, 0x80000000, 1)
             .expect("TriCore NOP decode");
         assert_eq!(decoded.first().map(|i| i.length), Some(2));
-        let (_ops, len) = frontend.decode_and_lift_with_len(&bytes, 0x80000000)
+        let (_ops, len) = frontend
+            .decode_and_lift_with_len(&bytes, 0x80000000)
             .expect("TriCore NOP lift");
         assert_eq!(len, 2);
     }
@@ -1696,22 +1897,32 @@ mod tests {
         //   and the Ghidra decoder needs a 4-byte aligned window for 24-bit instructions.
         //   NOP24 = 0x000000, with phantom byte → 4 bytes in window.
         for (language, nop_bytes, nop_len) in [
-            ("PIC-12:LE:16:PIC-12C5xx", &[0x00u8, 0x00][..],             2u64),
-            ("PIC-16:LE:16:PIC-16",     &[0x00u8, 0x00][..],             2),
-            ("PIC-16:LE:16:PIC-16F",    &[0x00u8, 0x00][..],             2),
-            ("PIC-18:LE:24:PIC-18",     &[0x00u8, 0x00, 0x00, 0x00][..], 2),
-            ("PIC-24E:LE:24:default",   &[0x00u8, 0x00, 0x00, 0x00][..], 4),
-            ("PIC-24F:LE:24:default",   &[0x00u8, 0x00, 0x00, 0x00][..], 4),
-            ("dsPIC33E:LE:24:default",  &[0x00u8, 0x00, 0x00, 0x00][..], 4),
-            ("dsPIC33F:LE:24:default",  &[0x00u8, 0x00, 0x00, 0x00][..], 4),
+            ("PIC-12:LE:16:PIC-12C5xx", &[0x00u8, 0x00][..], 2u64),
+            ("PIC-16:LE:16:PIC-16", &[0x00u8, 0x00][..], 2),
+            ("PIC-16:LE:16:PIC-16F", &[0x00u8, 0x00][..], 2),
+            ("PIC-18:LE:24:PIC-18", &[0x00u8, 0x00, 0x00, 0x00][..], 2),
+            ("PIC-24E:LE:24:default", &[0x00u8, 0x00, 0x00, 0x00][..], 4),
+            ("PIC-24F:LE:24:default", &[0x00u8, 0x00, 0x00, 0x00][..], 4),
+            ("dsPIC33E:LE:24:default", &[0x00u8, 0x00, 0x00, 0x00][..], 4),
+            ("dsPIC33F:LE:24:default", &[0x00u8, 0x00, 0x00, 0x00][..], 4),
         ] {
             let frontend = RuntimeSleighFrontend::new_for_language(language)
                 .unwrap_or_else(|e| panic!("{language} runtime: {e}"));
-            assert_eq!(frontend.status(), RuntimeFrontendStatus::ExecutableCandidate, "{language}");
-            let decoded = frontend.decode_window(nop_bytes, 0x0000, 1)
+            assert_eq!(
+                frontend.status(),
+                RuntimeFrontendStatus::ExecutableCandidate,
+                "{language}"
+            );
+            let decoded = frontend
+                .decode_window(nop_bytes, 0x0000, 1)
                 .unwrap_or_else(|e| panic!("{language} NOP decode: {e}"));
-            assert_eq!(decoded.first().map(|i| i.length as u64), Some(nop_len), "{language}");
-            let (_ops, len) = frontend.decode_and_lift_with_len(nop_bytes, 0x0000)
+            assert_eq!(
+                decoded.first().map(|i| i.length as u64),
+                Some(nop_len),
+                "{language}"
+            );
+            let (_ops, len) = frontend
+                .decode_and_lift_with_len(nop_bytes, 0x0000)
                 .unwrap_or_else(|e| panic!("{language} NOP lift: {e}"));
             assert_eq!(len, nop_len, "{language}");
         }
@@ -1721,22 +1932,28 @@ mod tests {
     #[test]
     fn powerpc_extended_variants_lift_nop_from_spec_template() {
         for (language, nop_bytes) in [
-            ("PowerPC:BE:32:4xx",    [0x60u8, 0x00, 0x00, 0x00]),
-            ("PowerPC:LE:32:4xx",    [0x00u8, 0x00, 0x00, 0x60]),
-            ("PowerPC:BE:32:e500",   [0x60u8, 0x00, 0x00, 0x00]),
-            ("PowerPC:LE:32:e500",   [0x00u8, 0x00, 0x00, 0x60]),
+            ("PowerPC:BE:32:4xx", [0x60u8, 0x00, 0x00, 0x00]),
+            ("PowerPC:LE:32:4xx", [0x00u8, 0x00, 0x00, 0x60]),
+            ("PowerPC:BE:32:e500", [0x60u8, 0x00, 0x00, 0x00]),
+            ("PowerPC:LE:32:e500", [0x00u8, 0x00, 0x00, 0x60]),
             ("PowerPC:BE:32:e500mc", [0x60u8, 0x00, 0x00, 0x00]),
             ("PowerPC:LE:32:e500mc", [0x00u8, 0x00, 0x00, 0x60]),
-            ("PowerPC:BE:32:MPC8270",[0x60u8, 0x00, 0x00, 0x00]),
-            ("PowerPC:LE:32:QUICC",  [0x00u8, 0x00, 0x00, 0x60]),
+            ("PowerPC:BE:32:MPC8270", [0x60u8, 0x00, 0x00, 0x00]),
+            ("PowerPC:LE:32:QUICC", [0x00u8, 0x00, 0x00, 0x60]),
         ] {
             let frontend = RuntimeSleighFrontend::new_for_language(language)
                 .unwrap_or_else(|e| panic!("{language} runtime: {e}"));
-            assert_eq!(frontend.status(), RuntimeFrontendStatus::ExecutableCandidate, "{language}");
-            let decoded = frontend.decode_window(&nop_bytes, 0x1000, 1)
+            assert_eq!(
+                frontend.status(),
+                RuntimeFrontendStatus::ExecutableCandidate,
+                "{language}"
+            );
+            let decoded = frontend
+                .decode_window(&nop_bytes, 0x1000, 1)
                 .unwrap_or_else(|e| panic!("{language} NOP decode: {e}"));
             assert_eq!(decoded.first().map(|i| i.length), Some(4), "{language}");
-            let (_ops, len) = frontend.decode_and_lift_with_len(&nop_bytes, 0x1000)
+            let (_ops, len) = frontend
+                .decode_and_lift_with_len(&nop_bytes, 0x1000)
                 .unwrap_or_else(|e| panic!("{language} NOP lift: {e}"));
             assert_eq!(len, 4, "{language}");
         }
@@ -1747,12 +1964,18 @@ mod tests {
     fn sparc_v9_32_lifts_sethi_from_spec_template() {
         let frontend = RuntimeSleighFrontend::new_for_language("sparc:BE:32:default")
             .expect("SPARC V9 32 runtime");
-        assert_eq!(frontend.status(), RuntimeFrontendStatus::ExecutableCandidate);
+        assert_eq!(
+            frontend.status(),
+            RuntimeFrontendStatus::ExecutableCandidate
+        );
         // sethi %hi(0), %g0 = NOP = 0x01000000
         let bytes = [0x01u8, 0x00, 0x00, 0x00];
-        let decoded = frontend.decode_window(&bytes, 0x1000, 1).expect("SPARC V9 32 NOP decode");
+        let decoded = frontend
+            .decode_window(&bytes, 0x1000, 1)
+            .expect("SPARC V9 32 NOP decode");
         assert_eq!(decoded.first().map(|i| i.length), Some(4));
-        let (_ops, len) = frontend.decode_and_lift_with_len(&bytes, 0x1000)
+        let (_ops, len) = frontend
+            .decode_and_lift_with_len(&bytes, 0x1000)
             .expect("SPARC V9 32 NOP lift");
         assert_eq!(len, 4);
     }
@@ -1762,18 +1985,28 @@ mod tests {
     fn riscv_andestar_lifts_addi_from_spec_template() {
         let frontend = RuntimeSleighFrontend::new_for_language("RISCV:LE:32:AndeStar_v5")
             .expect("RISC-V AndesStar runtime");
-        assert_eq!(frontend.status(), RuntimeFrontendStatus::ExecutableCandidate);
+        assert_eq!(
+            frontend.status(),
+            RuntimeFrontendStatus::ExecutableCandidate
+        );
         // addi x10, x10, 1 → 0x00150513 LE: 13 05 15 00
         let bytes = [0x13u8, 0x05, 0x15, 0x00];
-        let decoded = frontend.decode_window(&bytes, 0x10000, 1)
+        let decoded = frontend
+            .decode_window(&bytes, 0x10000, 1)
             .expect("RISC-V AndesStar addi decode");
         assert_eq!(decoded.first().map(|i| i.length), Some(4));
-        let (ops, len) = frontend.decode_and_lift_with_len(&bytes, 0x10000)
+        let (ops, len) = frontend
+            .decode_and_lift_with_len(&bytes, 0x10000)
             .expect("RISC-V AndesStar addi lift");
         assert_eq!(len, 4);
-        assert!(!ops.is_empty(), "RISC-V AndesStar addi emitted no p-code; ops={ops:?}");
-        assert!(ops.iter().any(|op| op.opcode == PcodeOpcode::IntAdd),
-            "expected RISC-V AndesStar addi to emit INT_ADD; ops={ops:?}");
+        assert!(
+            !ops.is_empty(),
+            "RISC-V AndesStar addi emitted no p-code; ops={ops:?}"
+        );
+        assert!(
+            ops.iter().any(|op| op.opcode == PcodeOpcode::IntAdd),
+            "expected RISC-V AndesStar addi to emit INT_ADD; ops={ops:?}"
+        );
     }
 
     // ── Toy architectures (internal test arches) ──────────────────────────
@@ -1791,7 +2024,8 @@ mod tests {
             "Toy:BE:32:builder",
             "Toy:LE:32:builder",
         ] {
-            let selection = registry.resolve_from_language_pair(language, None)
+            let selection = registry
+                .resolve_from_language_pair(language, None)
                 .unwrap_or_else(|e| panic!("{language} resolve: {e}"));
             assert_eq!(
                 selection.runtime_status,
@@ -1806,7 +2040,8 @@ mod tests {
     fn data_architectures_resolve_as_executable_candidate() {
         let registry = CompiledRuntimeRegistry::discover().expect("registry");
         for language in ["DATA:BE:64:default", "DATA:LE:64:default"] {
-            let selection = registry.resolve_from_language_pair(language, None)
+            let selection = registry
+                .resolve_from_language_pair(language, None)
                 .unwrap_or_else(|e| panic!("{language} resolve: {e}"));
             assert_eq!(
                 selection.runtime_status,
@@ -1825,7 +2060,8 @@ mod tests {
             "CR16AB:LE:16:default",
             "CR16C:LE:16:default",
         ] {
-            let selection = registry.resolve_from_language_pair(language, None)
+            let selection = registry
+                .resolve_from_language_pair(language, None)
                 .unwrap_or_else(|e| panic!("{language} resolve: {e}"));
             assert_eq!(
                 selection.runtime_status,
@@ -1842,12 +2078,14 @@ mod tests {
         let selection = registry
             .resolve_from_language_pair("avr32:BE:32:default", None)
             .expect("avr32 resolve");
-        assert_eq!(selection.runtime_status, RuntimeFrontendStatus::ExecutableCandidate);
+        assert_eq!(
+            selection.runtime_status,
+            RuntimeFrontendStatus::ExecutableCandidate
+        );
     }
 
     #[test]
     fn cfg_blocks_split_nonconstant_direct_branch_target() {
-
         let ops = vec![
             op(
                 0,
@@ -1890,8 +2128,8 @@ mod tests {
             .join("../../benchmark/binary/x86-64/window/small/binary/c/test_functions.exe");
         let binary = LoadedBinary::from_file(&binary_path).expect("load binary");
         let load_spec = binary.load_spec().expect("load spec");
-        let frontends =
-            RuntimeSleighFrontend::new_candidate_frontends_for_load_spec(load_spec).expect("frontends");
+        let frontends = RuntimeSleighFrontend::new_candidate_frontends_for_load_spec(load_spec)
+            .expect("frontends");
         let frontend = frontends.first().expect("frontend");
         let entry = 0x1400013e0u64;
         let max_bytes = {
@@ -1906,10 +2144,8 @@ mod tests {
         };
         let bytes = binary.view_bytes(entry, max_bytes).expect("bytes");
         let memory_context = DecodeMemoryContext {
-            block_entry_hints: binary.cfg_block_entry_hints_in_range(
-                entry,
-                entry.saturating_add(max_bytes as u64),
-            ),
+            block_entry_hints: binary
+                .cfg_block_entry_hints_in_range(entry, entry.saturating_add(max_bytes as u64)),
             ..DecodeMemoryContext::default()
         };
         let lifted = frontend
@@ -1958,8 +2194,8 @@ mod tests {
             .join("../../benchmark/binary/x86-64/window/small/binary/c/instruction_matrix.exe");
         let binary = LoadedBinary::from_file(&binary_path).expect("load binary");
         let load_spec = binary.load_spec().expect("load spec");
-        let frontends =
-            RuntimeSleighFrontend::new_candidate_frontends_for_load_spec(load_spec).expect("frontends");
+        let frontends = RuntimeSleighFrontend::new_candidate_frontends_for_load_spec(load_spec)
+            .expect("frontends");
         let frontend = frontends.first().expect("frontend");
         let entry = 0x1400014d0u64;
         let max_bytes = 32usize;

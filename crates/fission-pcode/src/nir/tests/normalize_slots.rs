@@ -216,7 +216,7 @@ fn normalize_hir_function_surfaces_repeated_slot_accesses_as_alias() {
     };
     let mut func = HirFunction {
         name: "slot_fn".to_string(),
-            int_param_offsets: Vec::new(),
+        int_param_offsets: Vec::new(),
         params: vec![NirBinding {
             name: "param_1".to_string(),
             ty: NirType::Ptr(Box::new(NirType::Unknown)),
@@ -280,7 +280,7 @@ fn memory_slot_surfacing_assigns_aliases_in_deterministic_first_use_order() {
     };
     let mut func = HirFunction {
         name: "slot_alias_order_fn".to_string(),
-            int_param_offsets: Vec::new(),
+        int_param_offsets: Vec::new(),
         params: vec![NirBinding {
             name: "param_1".to_string(),
             ty: NirType::Ptr(Box::new(NirType::Unknown)),
@@ -360,7 +360,7 @@ fn memory_slot_surfacing_sorts_promoted_bindings_by_final_name() {
     };
     let mut func = HirFunction {
         name: "slot_decl_order_fn".to_string(),
-            int_param_offsets: Vec::new(),
+        int_param_offsets: Vec::new(),
         params: vec![NirBinding {
             name: "param_1".to_string(),
             ty: NirType::Ptr(Box::new(NirType::Unknown)),
@@ -403,7 +403,7 @@ fn memory_slot_surfacing_collapses_zero_offset_direct_alias_source() {
     };
     let mut func = HirFunction {
         name: "slot_alias_source_fn".to_string(),
-            int_param_offsets: Vec::new(),
+        int_param_offsets: Vec::new(),
         params: vec![],
         locals: vec![
             NirBinding {
@@ -460,7 +460,7 @@ fn memory_slot_surfacing_collapses_zero_offset_single_def_body_alias_source() {
     };
     let mut func = HirFunction {
         name: "slot_body_alias_source_fn".to_string(),
-            int_param_offsets: Vec::new(),
+        int_param_offsets: Vec::new(),
         params: vec![],
         locals: vec![NirBinding {
             name: "rax".to_string(),
@@ -499,7 +499,12 @@ fn memory_slot_surfacing_collapses_zero_offset_single_def_body_alias_source() {
         !func.locals.iter().any(|binding| binding.name == "slot_0"),
         "{rendered}"
     );
-    assert!(rendered.contains("*rax + *rax") || rendered.contains("*rax * 2") || rendered.contains("*rax << 1"), "{rendered}");
+    assert!(
+        rendered.contains("*rax + *rax")
+            || rendered.contains("*rax * 2")
+            || rendered.contains("*rax << 1"),
+        "{rendered}"
+    );
 }
 
 #[test]
@@ -514,7 +519,7 @@ fn memory_slot_surfacing_skips_zero_offset_naked_temp_bases() {
     };
     let mut func = HirFunction {
         name: "slot_naked_temp_base_fn".to_string(),
-            int_param_offsets: Vec::new(),
+        int_param_offsets: Vec::new(),
         params: vec![],
         locals: vec![],
         return_type: byte_ty.clone(),
@@ -578,7 +583,7 @@ fn normalize_hir_function_preserves_stack_origin_on_surfaced_slot_alias() {
     };
     let mut func = HirFunction {
         name: "slot_origin_fn".to_string(),
-            int_param_offsets: Vec::new(),
+        int_param_offsets: Vec::new(),
         params: vec![],
         locals: vec![NirBinding {
             name: "local_base".to_string(),
@@ -646,7 +651,7 @@ fn preview_type_hints_apply_stack_local_type_to_surfaced_slot_alias() {
     };
     let mut func = HirFunction {
         name: "slot_hint_fn".to_string(),
-            int_param_offsets: Vec::new(),
+        int_param_offsets: Vec::new(),
         params: vec![],
         locals: vec![NirBinding {
             name: "local_base".to_string(),
@@ -747,7 +752,7 @@ fn normalize_hir_function_rewrites_slot_store_as_index_lvalue() {
     };
     let mut func = HirFunction {
         name: "slot_store_fn".to_string(),
-            int_param_offsets: Vec::new(),
+        int_param_offsets: Vec::new(),
         params: vec![NirBinding {
             name: "param_1".to_string(),
             ty: NirType::Ptr(Box::new(NirType::Unknown)),
@@ -812,7 +817,7 @@ fn normalize_hir_function_does_not_surface_stride_mismatch_as_slot_index() {
     };
     let mut func = HirFunction {
         name: "mismatch_fn".to_string(),
-            int_param_offsets: Vec::new(),
+        int_param_offsets: Vec::new(),
         params: vec![NirBinding {
             name: "param_1".to_string(),
             ty: NirType::Ptr(Box::new(NirType::Unknown)),
@@ -885,7 +890,7 @@ fn normalize_hir_function_surfaces_adjacent_lane_slots_under_same_family() {
     };
     let mut func = HirFunction {
         name: "family_fn".to_string(),
-            int_param_offsets: Vec::new(),
+        int_param_offsets: Vec::new(),
         params: vec![NirBinding {
             name: "param_1".to_string(),
             ty: NirType::Ptr(Box::new(NirType::Unknown)),
@@ -963,7 +968,7 @@ fn normalize_hir_function_canonicalizes_index_bias_into_slot_index() {
     };
     let mut func = HirFunction {
         name: "biased_idx_fn".to_string(),
-            int_param_offsets: Vec::new(),
+        int_param_offsets: Vec::new(),
         params: vec![NirBinding {
             name: "param_1".to_string(),
             ty: NirType::Ptr(Box::new(NirType::Unknown)),
@@ -1048,7 +1053,7 @@ fn normalize_hir_function_applies_cheap_slot_surfacing_to_large_body() {
     })));
     let mut func = HirFunction {
         name: "large_slot_fn".to_string(),
-            int_param_offsets: Vec::new(),
+        int_param_offsets: Vec::new(),
         params: vec![],
         locals: vec![],
         return_type: uint_ty,
@@ -1066,7 +1071,7 @@ fn normalize_hir_function_applies_cheap_slot_surfacing_to_large_body() {
 fn normalize_hir_function_removes_write_only_non_temp_locals() {
     let mut func = HirFunction {
         name: "dead_local_clobber_fn".to_string(),
-            int_param_offsets: Vec::new(),
+        int_param_offsets: Vec::new(),
         params: vec![NirBinding {
             name: "param_1".to_string(),
             ty: NirType::Int {
@@ -1143,7 +1148,7 @@ fn normalize_hir_function_removes_write_only_non_temp_locals() {
 fn normalize_hir_function_keeps_read_locals_and_side_effectful_writes() {
     let mut func = HirFunction {
         name: "keep_local_clobber_fn".to_string(),
-            int_param_offsets: Vec::new(),
+        int_param_offsets: Vec::new(),
         params: vec![],
         locals: vec![
             NirBinding {

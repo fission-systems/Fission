@@ -8,7 +8,6 @@ use fission_signatures::{
 };
 use std::collections::HashMap;
 
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum FactProvenance {
     UserRename,
@@ -169,12 +168,16 @@ impl FactStore {
                         name: user_struct.name,
                         mangled_name: String::new(),
                         kind: "struct".to_string(),
-                        fields: user_struct.fields.into_iter().map(|f| InferredFieldInfo {
-                            name: f.name,
-                            type_name: f.type_name,
-                            offset: f.offset,
-                            size: f.size,
-                        }).collect(),
+                        fields: user_struct
+                            .fields
+                            .into_iter()
+                            .map(|f| InferredFieldInfo {
+                                name: f.name,
+                                type_name: f.type_name,
+                                offset: f.offset,
+                                size: f.size,
+                            })
+                            .collect(),
                         size: user_struct.size,
                         metadata_address: 0,
                     };
@@ -217,7 +220,8 @@ impl FactStore {
 
         for func in &binary.functions {
             // Skip imports/exports and already resolved PDB/Dwarf metadata
-            let has_strong_name = func.is_import || func.is_export || self.pdb_functions.contains_key(&func.address);
+            let has_strong_name =
+                func.is_import || func.is_export || self.pdb_functions.contains_key(&func.address);
             if has_strong_name {
                 continue;
             }
@@ -243,20 +247,32 @@ impl FactStore {
             let func_bytes = &binary_data[offset..end_offset];
 
             // Dissect instructions into FidHashUnits
-            let units = dissect_x86_function_to_fid_units(func_bytes, func.address, &binary.relocation_symbols);
+            let units = dissect_x86_function_to_fid_units(
+                func_bytes,
+                func.address,
+                &binary.relocation_symbols,
+            );
             let view = FidFunctionView { units };
 
             // Attempt matching
             if let Ok(matches) = matcher.identify_function(&view, &FidRelocationView) {
                 if let Some(best_match) = matches.first() {
                     // Ingest matched name fact with tiered priority: FactProvenance::StrongFid
-                    self.ingest_name_fact(func.address, best_match.name.clone(), FactProvenance::StrongFid);
+                    self.ingest_name_fact(
+                        func.address,
+                        best_match.name.clone(),
+                        FactProvenance::StrongFid,
+                    );
                 }
             }
         }
     }
 
-    pub fn ingest_calling_convention(&mut self, address: u64, cc: fission_pcode::nir::CallingConvention) {
+    pub fn ingest_calling_convention(
+        &mut self,
+        address: u64,
+        cc: fission_pcode::nir::CallingConvention,
+    ) {
         self.calling_conventions.insert(address, cc);
     }
 
@@ -606,10 +622,10 @@ mod tests {
 
     #[test]
     fn test_load_sidecar_user_renames() {
-        use std::fs;
+        use fission_loader::loader::types::{DataBuffer, LoadedBinaryInner};
         use std::collections::HashMap;
+        use std::fs;
         use std::sync::Arc;
-        use fission_loader::loader::types::{LoadedBinaryInner, DataBuffer};
 
         let binary_path = std::env::temp_dir().join("fission_test_bin_sidecar.exe");
         fs::write(&binary_path, b"mock").unwrap();
@@ -655,7 +671,10 @@ mod tests {
         let binary = LoadedBinary::from_inner(inner);
         let store = FactStore::from_binary(&binary);
 
-        assert_eq!(store.resolved_name(4198400), Some("custom_name_from_sidecar"));
+        assert_eq!(
+            store.resolved_name(4198400),
+            Some("custom_name_from_sidecar")
+        );
         assert_eq!(store.resolved_name(0x402000), Some("hex_name_from_sidecar"));
 
         let _ = fs::remove_file(binary_path);

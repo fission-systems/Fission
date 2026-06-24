@@ -28,7 +28,9 @@ fn recurse_split_stmt(stmt: &mut HirStmt) -> bool {
         HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
             changed |= split_datatype_in_stmts(body);
         }
-        HirStmt::For { init, update, body, .. } => {
+        HirStmt::For {
+            init, update, body, ..
+        } => {
             if let Some(init) = init {
                 if let HirStmt::Block(body) = init.as_mut() {
                     changed |= split_datatype_in_stmts(body);
@@ -41,7 +43,11 @@ fn recurse_split_stmt(stmt: &mut HirStmt) -> bool {
             }
             changed |= split_datatype_in_stmts(body);
         }
-        HirStmt::If { then_body, else_body, .. } => {
+        HirStmt::If {
+            then_body,
+            else_body,
+            ..
+        } => {
             changed |= split_datatype_in_stmts(then_body);
             changed |= split_datatype_in_stmts(else_body);
         }
@@ -76,7 +82,11 @@ fn try_split_stmt(stmt: &HirStmt) -> Option<Vec<HirStmt>> {
     let HirStmt::Assign { lhs, rhs } = stmt else {
         return None;
     };
-    let HirLValue::Deref { ptr: dest, ty: NirType::Aggregate { fields, .. } } = lhs else {
+    let HirLValue::Deref {
+        ptr: dest,
+        ty: NirType::Aggregate { fields, .. },
+    } = lhs
+    else {
         return None;
     };
     if fields.is_empty() {
@@ -84,7 +94,10 @@ fn try_split_stmt(stmt: &HirStmt) -> Option<Vec<HirStmt>> {
     }
 
     match rhs {
-        HirExpr::Load { ptr: src, ty: NirType::Aggregate { .. } } => {
+        HirExpr::Load {
+            ptr: src,
+            ty: NirType::Aggregate { .. },
+        } => {
             let mut split = Vec::new();
             for field in fields {
                 let new_lhs = HirLValue::Deref {
@@ -95,7 +108,10 @@ fn try_split_stmt(stmt: &HirStmt) -> Option<Vec<HirStmt>> {
                     ptr: Box::new(make_ptr_offset((**src).clone(), field.offset as i64)),
                     ty: field.ty.clone(),
                 };
-                split.push(HirStmt::Assign { lhs: new_lhs, rhs: new_rhs });
+                split.push(HirStmt::Assign {
+                    lhs: new_lhs,
+                    rhs: new_rhs,
+                });
             }
             Some(split)
         }
@@ -110,7 +126,10 @@ fn try_split_stmt(stmt: &HirStmt) -> Option<Vec<HirStmt>> {
                     ptr: Box::new(make_ptr_offset((**src).clone(), field.offset as i64)),
                     ty: field.ty.clone(),
                 };
-                split.push(HirStmt::Assign { lhs: new_lhs, rhs: new_rhs });
+                split.push(HirStmt::Assign {
+                    lhs: new_lhs,
+                    rhs: new_rhs,
+                });
             }
             Some(split)
         }
@@ -122,7 +141,10 @@ fn try_split_stmt(stmt: &HirStmt) -> Option<Vec<HirStmt>> {
                     ty: field.ty.clone(),
                 };
                 let new_rhs = HirExpr::Const(0, field.ty.clone());
-                split.push(HirStmt::Assign { lhs: new_lhs, rhs: new_rhs });
+                split.push(HirStmt::Assign {
+                    lhs: new_lhs,
+                    rhs: new_rhs,
+                });
             }
             Some(split)
         }
@@ -132,12 +154,13 @@ fn try_split_stmt(stmt: &HirStmt) -> Option<Vec<HirStmt>> {
 
 fn make_ptr_offset(ptr: HirExpr, offset: i64) -> HirExpr {
     match ptr {
-        HirExpr::PtrOffset { base, offset: existing_offset } => {
-            HirExpr::PtrOffset {
-                base,
-                offset: existing_offset + offset,
-            }
-        }
+        HirExpr::PtrOffset {
+            base,
+            offset: existing_offset,
+        } => HirExpr::PtrOffset {
+            base,
+            offset: existing_offset + offset,
+        },
         _ => HirExpr::PtrOffset {
             base: Box::new(ptr),
             offset,

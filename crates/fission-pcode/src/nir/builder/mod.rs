@@ -332,11 +332,7 @@ impl<'a> PreviewBuilder<'a> {
                 .then(|| "void".to_string()),
             body,
             calling_convention: self.options.calling_convention,
-            int_param_offsets: self
-                .options
-                .cspec_param_offsets
-                .clone()
-                .unwrap_or_default(),
+            int_param_offsets: self.options.cspec_param_offsets.clone().unwrap_or_default(),
             is_64bit: self.options.is_64bit,
             suppress_entry_register_params: self.suppress_entry_register_params,
             callee_observed_max_arity: IndexMap::new(),
@@ -512,6 +508,12 @@ impl<'a> PreviewBuilder<'a> {
         self.x86_branch_recovery_attempts = 0;
     }
 
+    pub(super) fn invalidate_scoped_materialization_caches(&mut self) {
+        self.terminator_cache.clear();
+        self.selector_representatives.clear();
+        self.x86_branch_recovery_attempts = 0;
+    }
+
     pub(super) fn ensure_temp_binding_for_output(
         &mut self,
         op: &PcodeOp,
@@ -539,10 +541,8 @@ impl<'a> PreviewBuilder<'a> {
             return binding;
         }
 
-
-
         let ty = pcode_output_type_from_size(op.opcode, output.size);
-        
+
         let mut name = None;
         if is_register_space_id(output.space_id) {
             let namer = self.register_namer();
@@ -556,7 +556,9 @@ impl<'a> PreviewBuilder<'a> {
                 let candidate = self
                     .sla_hw_name(output.offset, output.size)
                     .unwrap_or_else(|| "reg".to_string());
-                if !self.params.values().any(|b| b.name == candidate) && !self.locals.values().any(|s| s.name == candidate) {
+                if !self.params.values().any(|b| b.name == candidate)
+                    && !self.locals.values().any(|s| s.name == candidate)
+                {
                     name = Some(candidate);
                 }
             }
@@ -692,7 +694,8 @@ impl<'a> PreviewBuilder<'a> {
     /// ABI-independent hardware register name with SLA-first resolution.
     #[inline]
     pub(crate) fn sla_reg_name(&self, offset: u64, size: u32) -> String {
-        self.sla_hw_name(offset, size).unwrap_or_else(|| "reg".to_string())
+        self.sla_hw_name(offset, size)
+            .unwrap_or_else(|| "reg".to_string())
     }
 
     #[inline]
@@ -700,7 +703,6 @@ impl<'a> PreviewBuilder<'a> {
         crate::nir::cspec::RegisterNamer::from_options(&self.options)
     }
 }
-
 
 fn is_compiler_runtime_param_suppressed_name(name: &str) -> bool {
     let lower = name.to_ascii_lowercase();
@@ -710,4 +712,3 @@ fn is_compiler_runtime_param_suppressed_name(name: &str) -> bool {
 pub(super) fn test_refine_partitions(accesses: &[(i64, u32)]) -> Vec<(i64, u32)> {
     self::materialize::test_refine_partitions(accesses)
 }
-

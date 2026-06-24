@@ -1,5 +1,5 @@
-use std::path::PathBuf;
 use super::FunctionDiscoveryProfileArg;
+use std::path::PathBuf;
 
 /// Internal normalized one-shot execution arguments.
 #[derive(Clone, Debug, PartialEq, Eq)]

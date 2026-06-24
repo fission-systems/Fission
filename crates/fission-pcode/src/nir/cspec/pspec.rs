@@ -152,8 +152,7 @@ impl PspecDocument {
                 }
                 "volatile" => {
                     in_volatile = true;
-                    _volatile_outputop =
-                        extract_attr(segment, "outputop").map(str::to_string);
+                    _volatile_outputop = extract_attr(segment, "outputop").map(str::to_string);
                 }
 
                 // ── Block-interior elements ───────────────────────────────
@@ -206,8 +205,7 @@ impl PspecDocument {
                         }
                         // group="..."
                         if let Some(group) = extract_attr(segment, "group") {
-                            doc.register_groups
-                                .insert(name.clone(), group.to_string());
+                            doc.register_groups.insert(name.clone(), group.to_string());
                         }
                         // vector_lane_sizes="1,2,4,8"
                         if let Some(lanes_str) = extract_attr(segment, "vector_lane_sizes") {
@@ -361,14 +359,16 @@ mod tests {
         assert_eq!(doc.programcounter.as_deref(), Some("RIP"));
 
         assert_eq!(doc.context_set.len(), 2);
-        assert!(doc
-            .context_set
-            .iter()
-            .any(|(n, v)| n == "addrsize" && *v == 2));
-        assert!(doc
-            .context_set
-            .iter()
-            .any(|(n, v)| n == "longMode" && *v == 1));
+        assert!(
+            doc.context_set
+                .iter()
+                .any(|(n, v)| n == "addrsize" && *v == 2)
+        );
+        assert!(
+            doc.context_set
+                .iter()
+                .any(|(n, v)| n == "longMode" && *v == 1)
+        );
 
         assert_eq!(doc.tracked_set.len(), 1);
         assert_eq!(doc.tracked_set[0], ("DF".to_string(), 0));
@@ -479,8 +479,7 @@ mod tests {
             .nth(2)
             .unwrap()
             .to_path_buf();
-        let pspec_path =
-            repo_root.join("utils/sleigh-specs/languages/AARCH64/AARCH64.pspec");
+        let pspec_path = repo_root.join("utils/sleigh-specs/languages/AARCH64/AARCH64.pspec");
         if !pspec_path.exists() {
             return;
         }

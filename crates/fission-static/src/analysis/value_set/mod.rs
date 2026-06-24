@@ -33,9 +33,7 @@ impl AbstractValue {
         }
         match (self, other) {
             (Self::Top, _) | (_, Self::Top) => Self::Top,
-            (Self::Constant(a), Self::Constant(b)) => {
-                Self::Set(vec![*a, *b])
-            }
+            (Self::Constant(a), Self::Constant(b)) => Self::Set(vec![*a, *b]),
             (Self::Set(a), Self::Constant(b)) | (Self::Constant(b), Self::Set(a)) => {
                 let mut s = a.clone();
                 if !s.contains(b) {
@@ -46,7 +44,9 @@ impl AbstractValue {
             (Self::Set(a), Self::Set(b)) => {
                 let mut s = a.clone();
                 for val in b {
-                    if !s.contains(val) { s.push(*val); }
+                    if !s.contains(val) {
+                        s.push(*val);
+                    }
                 }
                 if s.len() > 8 { Self::Top } else { Self::Set(s) }
             }
@@ -111,7 +111,10 @@ impl ValueState {
         if v.is_constant {
             return AbstractValue::Constant(v.constant_val as u64);
         }
-        self.varnodes.get(&VarnodeKey::from(v)).cloned().unwrap_or(AbstractValue::Top)
+        self.varnodes
+            .get(&VarnodeKey::from(v))
+            .cloned()
+            .unwrap_or(AbstractValue::Top)
     }
 
     pub fn set_value(&mut self, v: &Varnode, val: AbstractValue) {
@@ -125,9 +128,18 @@ impl ValueState {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum VsaFact {
-    DataRead { instruction_addr: u64, target_addr: u64 },
-    DataWrite { instruction_addr: u64, target_addr: u64 },
-    JumpTableTarget { instruction_addr: u64, targets: Vec<u64> },
+    DataRead {
+        instruction_addr: u64,
+        target_addr: u64,
+    },
+    DataWrite {
+        instruction_addr: u64,
+        target_addr: u64,
+    },
+    JumpTableTarget {
+        instruction_addr: u64,
+        targets: Vec<u64>,
+    },
 }
 
 /// Computes Value Set Analysis over a Pcode function.
@@ -149,7 +161,10 @@ impl ValueSetAnalyzer {
         let mut xrefs = Vec::new();
         for fact in &self.facts {
             match fact {
-                VsaFact::DataRead { instruction_addr, target_addr } => {
+                VsaFact::DataRead {
+                    instruction_addr,
+                    target_addr,
+                } => {
                     xrefs.push(crate::analysis::xrefs::Xref {
                         from_addr: *instruction_addr,
                         to_addr: *target_addr,
@@ -159,7 +174,10 @@ impl ValueSetAnalyzer {
                         flow_kind: None,
                     });
                 }
-                VsaFact::DataWrite { instruction_addr, target_addr } => {
+                VsaFact::DataWrite {
+                    instruction_addr,
+                    target_addr,
+                } => {
                     xrefs.push(crate::analysis::xrefs::Xref {
                         from_addr: *instruction_addr,
                         to_addr: *target_addr,
@@ -169,7 +187,10 @@ impl ValueSetAnalyzer {
                         flow_kind: None,
                     });
                 }
-                VsaFact::JumpTableTarget { instruction_addr, targets } => {
+                VsaFact::JumpTableTarget {
+                    instruction_addr,
+                    targets,
+                } => {
                     for &target in targets {
                         xrefs.push(crate::analysis::xrefs::Xref {
                             from_addr: *instruction_addr,
@@ -210,7 +231,11 @@ impl ValueSetAnalyzer {
                 continue;
             };
 
-            let mut state = self.block_states.get(&block_idx).cloned().unwrap_or_default();
+            let mut state = self
+                .block_states
+                .get(&block_idx)
+                .cloned()
+                .unwrap_or_default();
 
             for op in &block.ops {
                 self.evaluate_op(&mut state, op);
@@ -240,7 +265,9 @@ impl ValueSetAnalyzer {
                 }
             }
             PcodeOpcode::IntAdd => {
-                if let (Some(out), Some(in0), Some(in1)) = (&op.output, op.inputs.get(0), op.inputs.get(1)) {
+                if let (Some(out), Some(in0), Some(in1)) =
+                    (&op.output, op.inputs.get(0), op.inputs.get(1))
+                {
                     match (state.get_value(in0), state.get_value(in1)) {
                         (AbstractValue::Constant(a), AbstractValue::Constant(b)) => {
                             state.set_value(out, AbstractValue::Constant(a.wrapping_add(b)));
@@ -250,7 +277,9 @@ impl ValueSetAnalyzer {
                 }
             }
             PcodeOpcode::IntSub => {
-                if let (Some(out), Some(in0), Some(in1)) = (&op.output, op.inputs.get(0), op.inputs.get(1)) {
+                if let (Some(out), Some(in0), Some(in1)) =
+                    (&op.output, op.inputs.get(0), op.inputs.get(1))
+                {
                     match (state.get_value(in0), state.get_value(in1)) {
                         (AbstractValue::Constant(a), AbstractValue::Constant(b)) => {
                             state.set_value(out, AbstractValue::Constant(a.wrapping_sub(b)));
@@ -260,7 +289,9 @@ impl ValueSetAnalyzer {
                 }
             }
             PcodeOpcode::IntLeft => {
-                if let (Some(out), Some(in0), Some(in1)) = (&op.output, op.inputs.get(0), op.inputs.get(1)) {
+                if let (Some(out), Some(in0), Some(in1)) =
+                    (&op.output, op.inputs.get(0), op.inputs.get(1))
+                {
                     match (state.get_value(in0), state.get_value(in1)) {
                         (AbstractValue::Constant(a), AbstractValue::Constant(b)) => {
                             state.set_value(out, AbstractValue::Constant(a.wrapping_shl(b as u32)));
@@ -270,7 +301,9 @@ impl ValueSetAnalyzer {
                 }
             }
             PcodeOpcode::IntAnd => {
-                if let (Some(out), Some(in0), Some(in1)) = (&op.output, op.inputs.get(0), op.inputs.get(1)) {
+                if let (Some(out), Some(in0), Some(in1)) =
+                    (&op.output, op.inputs.get(0), op.inputs.get(1))
+                {
                     match (state.get_value(in0), state.get_value(in1)) {
                         (AbstractValue::Constant(a), AbstractValue::Constant(b)) => {
                             state.set_value(out, AbstractValue::Constant(a & b));
@@ -280,7 +313,8 @@ impl ValueSetAnalyzer {
                 }
             }
             PcodeOpcode::Load => {
-                if let Some(addr_in) = op.inputs.get(1) { // inputs[0] is space ID, inputs[1] is pointer
+                if let Some(addr_in) = op.inputs.get(1) {
+                    // inputs[0] is space ID, inputs[1] is pointer
                     match state.get_value(addr_in) {
                         AbstractValue::Constant(addr) => {
                             self.facts.push(VsaFact::DataRead {
@@ -304,7 +338,8 @@ impl ValueSetAnalyzer {
                 }
             }
             PcodeOpcode::Store => {
-                if let Some(addr_in) = op.inputs.get(1) { // inputs[0] is space ID, inputs[1] is pointer
+                if let Some(addr_in) = op.inputs.get(1) {
+                    // inputs[0] is space ID, inputs[1] is pointer
                     match state.get_value(addr_in) {
                         AbstractValue::Constant(addr) => {
                             self.facts.push(VsaFact::DataWrite {
@@ -366,26 +401,30 @@ mod tests {
     #[test]
     fn test_value_set_analyzer_empty() {
         let mut analyzer = ValueSetAnalyzer::new();
-        let function = PcodeFunction {
-            blocks: vec![],
-        };
+        let function = PcodeFunction { blocks: vec![] };
         assert!(!analyzer.analyze(&function));
     }
 
     #[test]
     fn test_vsa_constant_propagation() {
         let mut analyzer = ValueSetAnalyzer::new();
-        
+
         let mut block = PcodeBasicBlock {
             index: 0,
             start_address: 0x1000,
             successors: vec![],
             ops: vec![],
         };
-        let var_out = Varnode { space_id: 1, offset: 0x10, size: 8, is_constant: false, constant_val: 0 };
+        let var_out = Varnode {
+            space_id: 1,
+            offset: 0x10,
+            size: 8,
+            is_constant: false,
+            constant_val: 0,
+        };
         let cst_10 = Varnode::constant(10, 8);
         let cst_20 = Varnode::constant(20, 8);
-        
+
         block.ops.push(PcodeOp {
             seq_num: 0,
             opcode: PcodeOpcode::IntAdd,
@@ -397,7 +436,7 @@ mod tests {
 
         let mut state = ValueState::default();
         analyzer.evaluate_op(&mut state, &block.ops[0]);
-        
+
         assert_eq!(state.get_value(&var_out), AbstractValue::Constant(30));
     }
 }

@@ -1012,7 +1012,9 @@ fn collect_callsites_expr(
             collect_callsites_expr(inner, out);
         }
         HirExpr::Load { ptr, .. } => collect_callsites_expr(ptr, out),
-        HirExpr::PtrOffset { base, .. } | HirExpr::FieldAccess { base, .. } => collect_callsites_expr(base, out),
+        HirExpr::PtrOffset { base, .. } | HirExpr::FieldAccess { base, .. } => {
+            collect_callsites_expr(base, out)
+        }
         HirExpr::Index { base, index, .. } => {
             collect_callsites_expr(base, out);
             collect_callsites_expr(index, out);

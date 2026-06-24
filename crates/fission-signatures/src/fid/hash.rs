@@ -86,8 +86,9 @@ impl FidHasher {
                             } else {
                                 specific_count = specific_count.saturating_add(1);
                             }
-                            specific_update =
-                                specific_update.wrapping_add(((val as i32).wrapping_add(1_234_567)).wrapping_mul(67_999));
+                            specific_update = specific_update.wrapping_add(
+                                ((val as i32).wrapping_add(1_234_567)).wrapping_mul(67_999),
+                            );
                             full_update = full_update.wrapping_add(0xfeed_deadu32 as i32);
                         }
                         FidOperandValue::Register { offset } => {

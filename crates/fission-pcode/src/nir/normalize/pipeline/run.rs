@@ -3,58 +3,59 @@ use super::super::analysis::defuse::{
     stabilize_repeated_pure_exprs,
 };
 use super::super::analysis::preservation::preserved_materialization_names;
+use super::super::apply_rule_normalization;
 use super::super::arith::{
-    canonicalize_condition_expr, canonicalize_flag_intrinsics, canonicalize_integer_expr,
-    cleanup_arithmetic_wrappers, collapse_zero_offset_cast, merge_consecutive_shifts,
-    normalize_boolean_logic, recognize_compiler_runtime_division, recognize_concat_zext_or,
-    recognize_dumpty_hump_cast, recognize_dumpty_hump_late, recognize_hi_lo_extract,
-    recognize_humpty_dumpty_or, recognize_magic_number_division, recognize_mod_div_power_of_two,
-    recognize_wide_integer_recombine, simplify_double_add, simplify_factor_common_mul,
-    simplify_negated_const, simplify_nested_adds_subs, simplify_collect_mul_terms,
-    simplify_distribute_common_factor, simplify_subpiece_chain,
-    apply_double_precision_reconstruction_pass, apply_three_way_compare_pass,
-    apply_conditional_move_pass, apply_subfloat_flow_pass, apply_or_compare_pass,
-    apply_float_sign_pass, apply_ignore_nan_pass,
+    apply_conditional_move_pass, apply_double_precision_reconstruction_pass, apply_float_sign_pass,
+    apply_ignore_nan_pass, apply_or_compare_pass, apply_subfloat_flow_pass,
+    apply_three_way_compare_pass, canonicalize_condition_expr, canonicalize_flag_intrinsics,
+    canonicalize_integer_expr, cleanup_arithmetic_wrappers, collapse_zero_offset_cast,
+    merge_consecutive_shifts, normalize_boolean_logic, recognize_compiler_runtime_division,
+    recognize_concat_zext_or, recognize_dumpty_hump_cast, recognize_dumpty_hump_late,
+    recognize_hi_lo_extract, recognize_humpty_dumpty_or, recognize_magic_number_division,
+    recognize_mod_div_power_of_two, recognize_wide_integer_recombine, simplify_collect_mul_terms,
+    simplify_distribute_common_factor, simplify_double_add, simplify_factor_common_mul,
+    simplify_negated_const, simplify_nested_adds_subs, simplify_subpiece_chain,
 };
 use super::super::cleanup::single_pred_label_inline;
 use super::super::cleanup::{
-    canonicalize_minmax_conditional_returns, cast_elision_pass, cleanup_redundant_boundary_labels,
-    conditional_select_pass,
-    collapse_common_exit_guard_chain, collapse_redundant_conditional_returns,
-    collapse_trivial_assign_returns, collapse_trivial_pointer_alias_bindings,
+    apply_condexe_folding_pass, apply_deindirect_pass, apply_expand_load_pass,
+    apply_iblock_phi_elimination, apply_subvar_trim_pass, collapse_loop_exit_alias_returns,
+    prune_unreachable_after_terminal,
+};
+use super::super::cleanup::{
+    apply_switch_norm_pass, canonicalize_minmax_conditional_returns, cast_elision_pass,
+    cleanup_redundant_boundary_labels, collapse_common_exit_guard_chain,
+    collapse_redundant_conditional_returns, collapse_trivial_assign_returns,
+    collapse_trivial_pointer_alias_bindings, conditional_select_pass,
     elide_unused_popcount_assigns, eliminate_dead_local_clobber_assigns,
     eliminate_dead_temp_assigns, eliminate_redundant_var_assigns,
     fuse_single_predecessor_boundaries, inline_loop_condition_trailing_temps,
-    normalize_dowhile_decrement_condition,
-    inline_single_use_temps, promote_guarded_jump_target_tail, prune_unused_dead_local_bindings,
-    prune_unused_temp_bindings, remove_unreferenced_leading_labels,
+    inline_single_use_temps, normalize_dowhile_decrement_condition,
+    promote_guarded_jump_target_tail, prune_unused_dead_local_bindings, prune_unused_temp_bindings,
+    remove_unreferenced_leading_labels, rescue_undeclared_bindings,
     simplify_empty_and_constant_ifs, simplify_empty_and_constant_ifs_recursive,
-    simplify_fallthrough_edges, strip_redundant_assign_casts, apply_switch_norm_pass,
-    rescue_undeclared_bindings,
+    simplify_fallthrough_edges, strip_redundant_assign_casts,
 };
-use super::super::cleanup::{collapse_loop_exit_alias_returns, prune_unreachable_after_terminal, apply_condexe_folding_pass, apply_iblock_phi_elimination, apply_expand_load_pass, apply_deindirect_pass, apply_subvar_trim_pass};
 use super::super::global_opt::{
-    apply_bit_consume_dead_code_pass, apply_cse_pass, apply_dead_store_elimination,
-    apply_gvn_join_hoist_pass, apply_licm_pass, apply_nz_mask_simplification_pass,
-    apply_post_assign_value_representative_pass, apply_redundant_load_elimination, apply_sccp_pass,
-    apply_conditional_const_pass,
+    apply_bit_consume_dead_code_pass, apply_conditional_const_pass, apply_cse_pass,
+    apply_dead_store_elimination, apply_gvn_join_hoist_pass, apply_licm_pass,
+    apply_nz_mask_simplification_pass, apply_post_assign_value_representative_pass,
+    apply_redundant_load_elimination, apply_sccp_pass,
 };
 use super::super::idioms::{
-    apply_branch_prefix_hoist_pass,
-    apply_split_flow_pass, apply_subflow_pruning,
+    apply_branch_prefix_hoist_pass, apply_split_flow_pass, apply_subflow_pruning,
     remove_callee_save_prologue_epilogue, remove_dead_callee_saved_param_loads,
     remove_entry_stack_scaffold_stores,
 };
 use super::super::memory::{
     apply_aggregate_alias_access_rewrite_pass, apply_aggregate_fields_pass,
-    apply_memory_heritage, apply_memory_slot_surfacing, apply_memory_slot_surfacing_cheap,
-    apply_ptr_arith_recovery_pass, apply_zero_index_deref_pass, normalize_binding_initializers,
-    apply_split_datatype_pass, apply_constant_ptr_recovery_pass, apply_union_resolve_pass,
+    apply_constant_ptr_recovery_pass, apply_memory_heritage, apply_memory_slot_surfacing,
+    apply_memory_slot_surfacing_cheap, apply_ptr_arith_recovery_pass, apply_split_datatype_pass,
+    apply_union_resolve_pass, apply_zero_index_deref_pass, normalize_binding_initializers,
 };
 use super::super::recovery::{
     apply_break_continue_pass, apply_flag_recovery_pass, apply_for_loop_folding,
-    apply_iv_recovery_pass, copy_propagation_pass, join_coalescing_pass,
-    apply_variable_merge_pass,
+    apply_iv_recovery_pass, apply_variable_merge_pass, copy_propagation_pass, join_coalescing_pass,
 };
 use super::super::subvar_flow::apply_subvar_flow_pass;
 use super::super::types::{
@@ -63,7 +64,6 @@ use super::super::types::{
     apply_type_inference_pass, apply_use_driven_type_infer_pass, apply_variadic_stack_region_pass,
 };
 use super::super::wave_stats;
-use super::super::apply_rule_normalization;
 use super::super::*;
 use crate::nir::action_pipeline::{
     EARLY_CLEANUP_BLOCK_BLOCK_LIMIT, EARLY_CLEANUP_BLOCK_STMT_LIMIT, PassBudget,
@@ -260,9 +260,7 @@ fn stmt_contains_popcount_call(stmt: &HirStmt) -> bool {
         }
         HirStmt::Block(stmts)
         | HirStmt::While { body: stmts, .. }
-        | HirStmt::DoWhile { body: stmts, .. } => {
-            stmts.iter().any(stmt_contains_popcount_call)
-        }
+        | HirStmt::DoWhile { body: stmts, .. } => stmts.iter().any(stmt_contains_popcount_call),
         HirStmt::If {
             cond,
             then_body,
@@ -289,7 +287,9 @@ fn stmt_contains_popcount_call(stmt: &HirStmt) -> bool {
             default,
         } => {
             expr_contains_popcount_call(expr)
-                || cases.iter().any(|case| case.body.iter().any(stmt_contains_popcount_call))
+                || cases
+                    .iter()
+                    .any(|case| case.body.iter().any(stmt_contains_popcount_call))
                 || default.iter().any(stmt_contains_popcount_call)
         }
         HirStmt::Return(Some(expr)) => expr_contains_popcount_call(expr),
@@ -360,11 +360,7 @@ pub(crate) struct GlobalSymbolContext {
     pub(crate) sizes: HashMap<u64, u64>,
 }
 
-pub(crate) fn run_canonical_normalize_passes(
-    func: &mut HirFunction,
-    diag: bool,
-    perf: bool,
-) {
+pub(crate) fn run_canonical_normalize_passes(func: &mut HirFunction, diag: bool, perf: bool) {
     use super::stages::{
         run_stage_block_structure_1, run_stage_cleanup, run_stage_deadcode_dynamic,
         run_stage_heritage_value_recovery, run_stage_memory_recovery, run_stage_merge,
@@ -382,11 +378,7 @@ pub(crate) fn run_canonical_normalize_passes(
 }
 
 pub(crate) fn normalize_hir_function(func: &mut HirFunction) {
-    super::groups::run_normalize_pipeline(
-        func,
-        normalize_diag_enabled(),
-        normalize_perf_enabled(),
-    );
+    super::groups::run_normalize_pipeline(func, normalize_diag_enabled(), normalize_perf_enabled());
 }
 
 pub(crate) fn is_large_hir_function(func: &HirFunction) -> bool {
@@ -763,7 +755,12 @@ mod tests {
     }
 }
 
-pub(crate) fn run_cleanup_block<F>(func: &mut HirFunction, pass_name: &str, perf: bool, mut block: F) -> bool
+pub(crate) fn run_cleanup_block<F>(
+    func: &mut HirFunction,
+    pass_name: &str,
+    perf: bool,
+    mut block: F,
+) -> bool
 where
     F: FnMut(&mut HirFunction),
 {
@@ -855,7 +852,8 @@ pub(crate) fn run_cleanup_family_passes(
                 &format!("cleanup_boundary_label_{stage}"),
                 perf,
                 |f| {
-                    let global_refs = crate::nir::normalize::cleanup::utils::collect_referenced_labels(&f.body);
+                    let global_refs =
+                        crate::nir::normalize::cleanup::utils::collect_referenced_labels(&f.body);
                     cleanup_boundary_labels_recursive(&mut f.body, &global_refs)
                 },
             );
@@ -895,7 +893,12 @@ pub(crate) fn run_cleanup_family_passes(
     changed
 }
 
-pub(crate) fn run_pass_logged<F>(func: &mut HirFunction, pass_name: &str, perf: bool, pass_fn: F) -> bool
+pub(crate) fn run_pass_logged<F>(
+    func: &mut HirFunction,
+    pass_name: &str,
+    perf: bool,
+    pass_fn: F,
+) -> bool
 where
     F: FnOnce(&mut HirFunction) -> bool,
 {
@@ -941,7 +944,12 @@ where
     changed
 }
 
-pub(crate) fn run_pass_logged_fn<F>(func: &mut HirFunction, pass_name: &str, perf: bool, pass_fn: F) -> bool
+pub(crate) fn run_pass_logged_fn<F>(
+    func: &mut HirFunction,
+    pass_name: &str,
+    perf: bool,
+    pass_fn: F,
+) -> bool
 where
     F: FnOnce(&mut HirFunction) -> bool,
 {
@@ -1524,7 +1532,8 @@ fn cleanup_stmt_list_with_options_and_preserved(
             global_refs
         };
 
-        if options.include_boundary_labels && cleanup_redundant_boundary_labels(stmts, active_refs) {
+        if options.include_boundary_labels && cleanup_redundant_boundary_labels(stmts, active_refs)
+        {
             changed = true;
             last_changed_pass = Some("cleanup_redundant_boundary_labels");
         }
@@ -1590,9 +1599,12 @@ fn cleanup_stmt_list_with_options_and_preserved(
     }
 }
 
-fn cleanup_boundary_labels_recursive(stmts: &mut Vec<HirStmt>, global_refs: &HashSet<String>) -> bool {
-    let mut changed =
-        cleanup_redundant_boundary_labels(stmts, Some(global_refs)) || remove_unreferenced_leading_labels(stmts, Some(global_refs));
+fn cleanup_boundary_labels_recursive(
+    stmts: &mut Vec<HirStmt>,
+    global_refs: &HashSet<String>,
+) -> bool {
+    let mut changed = cleanup_redundant_boundary_labels(stmts, Some(global_refs))
+        || remove_unreferenced_leading_labels(stmts, Some(global_refs));
     for stmt in stmts.iter_mut() {
         match stmt {
             HirStmt::Block(body)

@@ -346,7 +346,9 @@ fn print_lvalue(lhs: &HirLValue, depth: usize) -> String {
                 _ => format!("(({} *)({inner}))[{index}]", print_type(elem_ty)),
             }
         }
-        HirLValue::FieldAccess { base, field_name, .. } => {
+        HirLValue::FieldAccess {
+            base, field_name, ..
+        } => {
             let inner = print_expr_prec(base, 110, depth + 1);
             let is_ptr = matches!(expr_type(base), NirType::Ptr(_));
             let op = if is_ptr { "->" } else { "." };
@@ -479,7 +481,9 @@ fn print_expr_prec(expr: &HirExpr, parent_prec: u8, depth: usize) -> String {
             };
             (text, 120)
         }
-        HirExpr::FieldAccess { base, field_name, .. } => {
+        HirExpr::FieldAccess {
+            base, field_name, ..
+        } => {
             let inner = print_expr_prec(base, 110, depth + 1);
             let is_ptr = matches!(expr_type(base), NirType::Ptr(_));
             let op = if is_ptr { "->" } else { "." };
@@ -690,7 +694,9 @@ fn print_expr_prec_ctx(
             };
             (text, 60)
         }
-        HirExpr::FieldAccess { base, field_name, .. } => {
+        HirExpr::FieldAccess {
+            base, field_name, ..
+        } => {
             let inner = print_expr_prec_ctx(base, 110, depth + 1, ctx);
             let is_ptr = ctx.expr_is_pointer(base);
             let op = if is_ptr { "->" } else { "." };
@@ -705,9 +711,9 @@ fn print_expr_prec_ctx(
         }
         HirExpr::Var(name) => (name.clone(), 120),
         HirExpr::Const(value, _) => {
-            let name = ctx.global_names.and_then(|names| {
-                names.get(&((*value) as u64)).cloned()
-            });
+            let name = ctx
+                .global_names
+                .and_then(|names| names.get(&((*value) as u64)).cloned());
             if let Some(name) = name {
                 (name, 120)
             } else {
@@ -744,14 +750,17 @@ fn print_expr_prec_ctx(
             let lhs_str = print_expr_prec_ctx(lhs, prec, depth + 1, ctx);
             let rhs_parent_prec = binary_rhs_parent_precedence(*op, rhs, prec + 1);
             let mut rhs_str = print_expr_prec_ctx(rhs, rhs_parent_prec, depth + 1, ctx);
-            
+
             // If both sides are pointers and the operation is Add, this is invalid in C.
             // Cast the rhs to ulonglong to avoid compilation failure.
             if *op == HirBinaryOp::Add && ctx.expr_is_pointer(lhs) && ctx.expr_is_pointer(rhs) {
                 rhs_str = format!("(ulonglong){rhs_str}");
             }
-            
-            (format!("{lhs_str} {} {rhs_str}", print_binary_op(*op)), prec)
+
+            (
+                format!("{lhs_str} {} {rhs_str}", print_binary_op(*op)),
+                prec,
+            )
         }
         HirExpr::Select {
             cond,
@@ -852,7 +861,9 @@ fn print_lvalue_ctx(lhs: &HirLValue, depth: usize, ctx: &PrintCtx<'_>) -> String
     }
     match lhs {
         HirLValue::Var(name) => name.clone(),
-        HirLValue::FieldAccess { base, field_name, .. } => {
+        HirLValue::FieldAccess {
+            base, field_name, ..
+        } => {
             let inner = print_expr_prec_ctx(base, 110, depth + 1, ctx);
             let is_ptr = ctx.expr_is_pointer(base);
             let op = if is_ptr { "->" } else { "." };
@@ -887,8 +898,12 @@ fn print_lvalue_ctx(lhs: &HirLValue, depth: usize, ctx: &PrintCtx<'_>) -> String
 fn is_integer_bitop(op: HirBinaryOp) -> bool {
     matches!(
         op,
-        HirBinaryOp::And | HirBinaryOp::Or | HirBinaryOp::Xor
-            | HirBinaryOp::Shl | HirBinaryOp::Shr | HirBinaryOp::Sar
+        HirBinaryOp::And
+            | HirBinaryOp::Or
+            | HirBinaryOp::Xor
+            | HirBinaryOp::Shl
+            | HirBinaryOp::Shr
+            | HirBinaryOp::Sar
     )
 }
 
@@ -896,7 +911,13 @@ fn try_compound_assignment(lhs: &HirLValue, rhs: &HirExpr, ctx: &PrintCtx<'_>) -
     let HirLValue::Var(var_name) = lhs else {
         return None;
     };
-    let HirExpr::Binary { op, lhs: lhs_expr, rhs: rhs_expr, .. } = rhs else {
+    let HirExpr::Binary {
+        op,
+        lhs: lhs_expr,
+        rhs: rhs_expr,
+        ..
+    } = rhs
+    else {
         return None;
     };
     let HirExpr::Var(lhs_name) = lhs_expr.as_ref() else {
@@ -952,18 +973,16 @@ fn try_compound_assignment(lhs: &HirLValue, rhs: &HirExpr, ctx: &PrintCtx<'_>) -
         HirBinaryOp::Shr => ">>=",
         _ => return None,
     };
-    
+
     let mut rhs_str = print_expr_with_ctx(rhs_expr, ctx);
-    if matches!(op, HirBinaryOp::Add) && ctx.expr_is_pointer(lhs_expr) && ctx.expr_is_pointer(rhs_expr) {
+    if matches!(op, HirBinaryOp::Add)
+        && ctx.expr_is_pointer(lhs_expr)
+        && ctx.expr_is_pointer(rhs_expr)
+    {
         rhs_str = format!("(ulonglong){rhs_str}");
     }
-    
-    Some(format!(
-        "{} {} {};",
-        var_name,
-        op_str,
-        rhs_str
-    ))
+
+    Some(format!("{} {} {};", var_name, op_str, rhs_str))
 }
 
 fn print_stmt_ctx(stmt: &HirStmt, ctx: &PrintCtx<'_>) -> String {
@@ -1212,7 +1231,7 @@ pub fn render_contracted_wrapper_summary(
         .unwrap_or_else(|| "unknown_target".to_string());
     let mut hir = HirFunction {
         name: name.to_string(),
-            int_param_offsets: Vec::new(),
+        int_param_offsets: Vec::new(),
         return_type: NirType::Unknown,
         ..HirFunction::default()
     };

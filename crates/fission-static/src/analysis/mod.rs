@@ -27,8 +27,8 @@ pub use fission_loader::{
 
 pub use callgraph::{CallEdge, CallGraph};
 pub use control_flow_facts::{
-    control_flow_facts_for, decode_memory_context_for, function_max_bytes, ControlFlowFacts,
-    FunctionControlFlowFacts,
+    ControlFlowFacts, FunctionControlFlowFacts, control_flow_facts_for, decode_memory_context_for,
+    function_max_bytes,
 };
 pub use external_symbol::{
     ExternalSymbolIdentity, ExternalSymbolIndex, build_external_symbol_index,
@@ -44,14 +44,14 @@ pub use function_provenance::{
 pub use optimizer::{Optimizer, OptimizerConfig};
 pub use patch::{Patch, PatchManager, QuickPatch};
 pub use prototype_hint::win_api_prototype_hint_json;
+pub use string_xrefs::{
+    StringWithXrefs, StringXrefAnalysis, StringXrefStats, analyze_string_xrefs,
+};
+pub use strings::{ExtractedString, StringType, build_string_lookup, extract_strings};
+pub use value_set::{AbstractValue, ValueSetAnalyzer, ValueState};
 pub use xref_index::{
     FunctionXrefsSummary, XrefEvidence, XrefId, XrefIndex, XrefIndexBuilder, XrefIndexSummary,
     XrefKind, XrefRecord, XrefSource, XrefSourceCategory, XrefSourceLayer, XrefTarget,
     build_xref_index, resolve_enclosing_function,
 };
-pub use string_xrefs::{
-    StringWithXrefs, StringXrefAnalysis, StringXrefStats, analyze_string_xrefs,
-};
-pub use strings::{ExtractedString, StringType, extract_strings, build_string_lookup};
-pub use value_set::{AbstractValue, ValueSetAnalyzer, ValueState};
 pub use xrefs::{OPERAND_INDEX_MNEMONIC, Xref, XrefDatabase, XrefType};

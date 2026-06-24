@@ -1,6 +1,6 @@
-use std::collections::BTreeSet;
 use fission_loader::loader::LoadedBinary;
 use fission_pcode::nir::CallingConvention;
+use std::collections::BTreeSet;
 
 /// Infers the calling convention based on read registers and architecture.
 pub fn infer_calling_convention(
@@ -13,7 +13,7 @@ pub fn infer_calling_convention(
         // x86-64 has two main ABIs: Windows x64 and System V AMD64
         // Windows: RCX (offset ~32?), RDX, R8, R9
         // System V: RDI, RSI, RDX, RCX, R8, R9
-        
+
         // As a simple heuristic for now, we just rely on binary format:
         if binary.format.starts_with("PE") {
             return Some(CallingConvention::WindowsX64);

@@ -222,7 +222,10 @@ fn load_space_map(frontend: &RuntimeSleighFrontend) -> SpaceMap {
     }
 }
 
-fn find_packaged_sla(_entry_id: &str, entry_spec_path: Option<&std::path::Path>) -> Option<PathBuf> {
+fn find_packaged_sla(
+    _entry_id: &str,
+    entry_spec_path: Option<&std::path::Path>,
+) -> Option<PathBuf> {
     let spec_path = entry_spec_path?;
     packaged_sla_for_entry_spec(spec_path).ok().flatten()
 }

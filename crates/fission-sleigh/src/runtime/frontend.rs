@@ -73,9 +73,7 @@ impl RuntimeSleighFrontend {
             None
         };
 
-        Ok(RuntimeFrontendArtifacts {
-            compiled,
-        })
+        Ok(RuntimeFrontendArtifacts { compiled })
     }
 
     fn exact_entry_for_id(entry_id: &str) -> Result<EntrySpec> {

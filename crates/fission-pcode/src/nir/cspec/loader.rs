@@ -10,7 +10,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
-use super::{ldefs::global_ldefs_index, CspecDocument, ResolvedCspec, SlaRegisterMap};
+use super::{CspecDocument, ResolvedCspec, SlaRegisterMap, ldefs::global_ldefs_index};
 
 // ── Per-file document cache ───────────────────────────────────────────────────
 

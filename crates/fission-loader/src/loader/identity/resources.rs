@@ -14,9 +14,9 @@ const MAX_FID_BF_ENUM: usize = 50_000;
 pub(super) fn summarize_identity_resources() -> IdentityResourceSummary {
     use std::sync::OnceLock;
     static CACHED_SUMMARY: OnceLock<IdentityResourceSummary> = OnceLock::new();
-    CACHED_SUMMARY.get_or_init(|| {
-        summarize_identity_resources_for(ResourceProvider::global().paths())
-    }).clone()
+    CACHED_SUMMARY
+        .get_or_init(|| summarize_identity_resources_for(ResourceProvider::global().paths()))
+        .clone()
 }
 
 #[must_use]

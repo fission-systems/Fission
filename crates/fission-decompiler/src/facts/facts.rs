@@ -3,14 +3,16 @@ use crate::pipeline::rust_sleigh::apply_spec_overrides;
 use crate::{
     CallEdgeKind, CallEffectSummarySource, CallTargetProvenance, CallTargetRef,
     NirCallEffectSummary, NirCallParamRule, NirCallPrototypeSummary, NirFunctionHints,
-    NirRenderOptions, NirTypeContext, PcodeFunction, PcodeOpcode, infer_entry_register_param_arity,
-    RegisterNamer,
+    NirRenderOptions, NirTypeContext, PcodeFunction, PcodeOpcode, RegisterNamer,
+    infer_entry_register_param_arity,
 };
-use fission_core::core::ghidra_no_return::{binary_format_to_ghidra_format, ghidra_no_return_index};
+use fission_core::PATHS;
+use fission_core::core::ghidra_no_return::{
+    binary_format_to_ghidra_format, ghidra_no_return_index,
+};
 use fission_core::{normalize_named_type_identity, sanitize_symbol_name};
 use fission_loader::loader::LoadedBinary;
 use fission_loader::loader::types::DwarfLocation;
-use fission_core::PATHS;
 use fission_signatures::SIGNATURE_RESOURCES;
 use fission_signatures::golang_typeinfo::GoTypeinfoDatabase;
 use fission_signatures::win_types::WindowsStructures;
@@ -66,7 +68,6 @@ fn get_go_function_hints(name: &str, binary: &LoadedBinary) -> Option<NirFunctio
         return_type_name,
     })
 }
-
 
 pub(crate) fn build_nir_type_context(
     binary: &LoadedBinary,
@@ -326,12 +327,7 @@ fn build_nir_call_effect_summaries(
             .and_then(|f| f.external_library.as_deref());
 
         let may_exit = ghidra_format.and_then(|fmt| {
-            if no_return_idx.is_no_return(
-                fmt,
-                compiler_key,
-                library_name,
-                &target_ref.symbol,
-            ) {
+            if no_return_idx.is_no_return(fmt, compiler_key, library_name, &target_ref.symbol) {
                 Some(true)
             } else {
                 None
@@ -344,14 +340,16 @@ fn build_nir_call_effect_summaries(
             Some(CallEffectSummarySource::CallTargetRef)
         };
 
-        let entry = result.entry(target_ref.symbol.clone()).or_insert(NirCallEffectSummary {
-            reads_memory: None,
-            writes_memory: None,
-            escapes_args: None,
-            may_call_unknown: None,
-            may_exit,
-            source,
-        });
+        let entry = result
+            .entry(target_ref.symbol.clone())
+            .or_insert(NirCallEffectSummary {
+                reads_memory: None,
+                writes_memory: None,
+                escapes_args: None,
+                may_call_unknown: None,
+                may_exit,
+                source,
+            });
         // Upgrade to may_exit=true if a later address for the same symbol name provides evidence.
         if entry.may_exit.is_none() && may_exit.is_some() {
             entry.may_exit = may_exit;
@@ -457,8 +455,7 @@ fn build_preview_callee_summaries(
     let mut options = NirRenderOptions::from_loaded_binary(binary);
     apply_spec_overrides(binary, &mut options);
     let register_namer = RegisterNamer::from_options(&options);
-    let prototype = infer_entry_register_param_arity(&pcode, &register_namer)
-    .map(|arity| {
+    let prototype = infer_entry_register_param_arity(&pcode, &register_namer).map(|arity| {
         NirCallPrototypeSummary {
             min_arity: arity,
             max_arity: arity,
@@ -860,8 +857,13 @@ fn resolve_nir_struct_name(type_name: &str, structures: &WindowsStructures) -> O
 
 #[cfg(test)]
 mod tests {
-    use super::{build_nir_call_param_rules, resolve_nir_struct_name, summarize_preview_callee_effects};
-    use crate::{CallTargetProvenance, CallEdgeKind, CallTargetRef, PcodeBasicBlock, PcodeFunction, PcodeOp, PcodeOpcode, Varnode};
+    use super::{
+        build_nir_call_param_rules, resolve_nir_struct_name, summarize_preview_callee_effects,
+    };
+    use crate::{
+        CallEdgeKind, CallTargetProvenance, CallTargetRef, PcodeBasicBlock, PcodeFunction, PcodeOp,
+        PcodeOpcode, Varnode,
+    };
     use fission_signatures::win_types::WindowsStructures;
     use std::collections::HashMap;
 
@@ -871,8 +873,8 @@ mod tests {
 
     #[test]
     fn gdt_pattern_match_lp_prefix_resolves_to_struct() {
-        let ws = WindowsStructures::try_new()
-            .expect("structures.json must be loadable from workspace");
+        let ws =
+            WindowsStructures::try_new().expect("structures.json must be loadable from workspace");
         assert_eq!(
             resolve_nir_struct_name("PSECURITY_DESCRIPTOR", &ws),
             Some("SECURITY_DESCRIPTOR".to_string()),
@@ -882,8 +884,8 @@ mod tests {
 
     #[test]
     fn gdt_pattern_match_p_prefix_resolves_sid() {
-        let ws = WindowsStructures::try_new()
-            .expect("structures.json must be loadable from workspace");
+        let ws =
+            WindowsStructures::try_new().expect("structures.json must be loadable from workspace");
         assert_eq!(
             resolve_nir_struct_name("PSID", &ws),
             Some("SID".to_string()),
@@ -893,8 +895,8 @@ mod tests {
 
     #[test]
     fn gdt_pattern_match_lp_prefix_resolves_critical_section() {
-        let ws = WindowsStructures::try_new()
-            .expect("structures.json must be loadable from workspace");
+        let ws =
+            WindowsStructures::try_new().expect("structures.json must be loadable from workspace");
         assert_eq!(
             resolve_nir_struct_name("LPCRITICAL_SECTION", &ws),
             Some("CRITICAL_SECTION".to_string()),
@@ -904,8 +906,8 @@ mod tests {
 
     #[test]
     fn gdt_pattern_match_pointer_star_returns_none() {
-        let ws = WindowsStructures::try_new()
-            .expect("structures.json must be loadable from workspace");
+        let ws =
+            WindowsStructures::try_new().expect("structures.json must be loadable from workspace");
         assert_eq!(
             resolve_nir_struct_name("SECURITY_DESCRIPTOR*", &ws),
             None,
@@ -915,8 +917,8 @@ mod tests {
 
     #[test]
     fn gdt_pattern_match_bare_type_no_prefix_returns_none() {
-        let ws = WindowsStructures::try_new()
-            .expect("structures.json must be loadable from workspace");
+        let ws =
+            WindowsStructures::try_new().expect("structures.json must be loadable from workspace");
         assert_eq!(
             resolve_nir_struct_name("UINT", &ws),
             None,
@@ -926,8 +928,8 @@ mod tests {
 
     #[test]
     fn gdt_pattern_match_p_prefix_unknown_struct_returns_none() {
-        let ws = WindowsStructures::try_new()
-            .expect("structures.json must be loadable from workspace");
+        let ws =
+            WindowsStructures::try_new().expect("structures.json must be loadable from workspace");
         assert_eq!(
             resolve_nir_struct_name("PVOID", &ws),
             None,
@@ -967,8 +969,7 @@ mod tests {
              (has PSECURITY_DESCRIPTOR param)"
         );
         let sd_rule = rules.iter().find(|r| {
-            r.callee_name == "AccessCheckAndAuditAlarmA"
-                && r.pointee_alias == "SECURITY_DESCRIPTOR"
+            r.callee_name == "AccessCheckAndAuditAlarmA" && r.pointee_alias == "SECURITY_DESCRIPTOR"
         });
         assert!(
             sd_rule.is_some(),
@@ -994,7 +995,10 @@ mod tests {
     fn gdt_call_param_rules_no_address_when_not_in_refs() {
         let refs = HashMap::new();
         let rules = build_nir_call_param_rules(&refs);
-        let no_addr_rules: Vec<_> = rules.iter().filter(|r| r.callee_address.is_none()).collect();
+        let no_addr_rules: Vec<_> = rules
+            .iter()
+            .filter(|r| r.callee_address.is_none())
+            .collect();
         assert!(
             !no_addr_rules.is_empty(),
             "rules without a resolved address must still be emitted for signature-only coverage"

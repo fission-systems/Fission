@@ -6,15 +6,19 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock, RwLock};
 
+use super::SlaRegisterMap;
 use super::apply::sleigh_languages_root;
 use super::ldefs::global_language_slaspec_index;
-use super::slaspec_parse::{parse_registers_from_slaspec, ParsedRegister};
-use super::SlaRegisterMap;
-use crate::arch::x86::{unique_x86_register_name, X86_REG_BASE};
+use super::slaspec_parse::{ParsedRegister, parse_registers_from_slaspec};
+use crate::arch::x86::{X86_REG_BASE, unique_x86_register_name};
 use crate::nir::support::CallingConvention;
-use crate::nir::{is_register_space_id, Varnode, REGISTER_SPACE_ID, RUST_SLEIGH_REGISTER_SPACE_ID, RUST_SLEIGH_ALT_REGISTER_SPACE_ID, UNIQUE_SPACE_ID};
+use crate::nir::{
+    REGISTER_SPACE_ID, RUST_SLEIGH_ALT_REGISTER_SPACE_ID, RUST_SLEIGH_REGISTER_SPACE_ID,
+    UNIQUE_SPACE_ID, Varnode, is_register_space_id,
+};
 
-static REGISTER_MODEL_CACHE: OnceLock<RwLock<HashMap<String, Arc<RegisterModel>>>> = OnceLock::new();
+static REGISTER_MODEL_CACHE: OnceLock<RwLock<HashMap<String, Arc<RegisterModel>>>> =
+    OnceLock::new();
 
 fn model_cache() -> &'static RwLock<HashMap<String, Arc<RegisterModel>>> {
     REGISTER_MODEL_CACHE.get_or_init(|| RwLock::new(HashMap::new()))
@@ -49,9 +53,7 @@ impl RegisterModel {
     }
 
     pub fn exact_name_for(&self, offset: u64, size: u32) -> Option<&str> {
-        self.by_offset
-            .get(&(offset, size))
-            .map(String::as_str)
+        self.by_offset.get(&(offset, size)).map(String::as_str)
     }
 
     pub fn family_index(&self, name: &str) -> Option<usize> {
@@ -150,23 +152,13 @@ fn register_family_key(reg: &ParsedRegister) -> u64 {
 fn detect_return_target(by_offset: &HashMap<(u64, u32), String>) -> Option<(u64, u32)> {
     by_offset
         .iter()
-        .find(|(_, name)| {
-            matches!(
-                name.as_str(),
-                "lr" | "x30" | "ra" | "r31" | "blink"
-            )
-        })
+        .find(|(_, name)| matches!(name.as_str(), "lr" | "x30" | "ra" | "r31" | "blink"))
         .map(|((off, sz), _)| (*off, *sz))
 }
 
 /// Ghidra/cspec register synonyms that share the same `(offset, size)`.
 fn add_register_aliases(name_index: &mut SlaRegisterMap, by_offset: &HashMap<(u64, u32), String>) {
-    const SYNONYMS: &[(&str, &str)] = &[
-        ("fp", "s8"),
-        ("s8", "fp"),
-        ("zero", "r0"),
-        ("r0", "zero"),
-    ];
+    const SYNONYMS: &[(&str, &str)] = &[("fp", "s8"), ("s8", "fp"), ("zero", "r0"), ("r0", "zero")];
     for ((off, sz), canonical) in by_offset {
         let upper = canonical.to_ascii_uppercase();
         name_index.entry(upper).or_insert((*off, *sz));
@@ -192,7 +184,9 @@ pub fn register_model_for_language(language_id: &str) -> Option<Arc<RegisterMode
 
 pub fn build_register_model_for_language(language_id: &str) -> Option<Arc<RegisterModel>> {
     let languages_root = sleigh_languages_root();
-    let slaspec = global_language_slaspec_index(&languages_root).get(language_id)?.clone();
+    let slaspec = global_language_slaspec_index(&languages_root)
+        .get(language_id)?
+        .clone();
     let parsed = parse_registers_from_slaspec(&slaspec).ok()?;
     Some(Arc::new(RegisterModel::build_from_parsed(&parsed)))
 }
@@ -200,7 +194,8 @@ pub fn build_register_model_for_language(language_id: &str) -> Option<Arc<Regist
 /// Cached [`RegisterModel`] for a [`CallingConvention`] preview/default language pair.
 pub fn register_model_for_abi(abi: CallingConvention) -> Option<Arc<RegisterModel>> {
     let options = minimal_options_for_abi(abi);
-    super::apply::default_cspec_pair(&options).and_then(|(lang, _)| register_model_for_language(&lang))
+    super::apply::default_cspec_pair(&options)
+        .and_then(|(lang, _)| register_model_for_language(&lang))
 }
 
 fn minimal_options_for_abi(abi: CallingConvention) -> crate::nir::NirRenderOptions {
@@ -297,13 +292,11 @@ impl RegisterNamer {
             }
             if vn.offset >= X86_REG_BASE {
                 let native = vn.offset - X86_REG_BASE;
-                return self
-                    .hw_name_at(native, vn.size)
-                    .or_else(|| {
-                        self.model
-                            .as_ref()
-                            .and_then(|m| m.name_for(native, vn.size).map(str::to_string))
-                    });
+                return self.hw_name_at(native, vn.size).or_else(|| {
+                    self.model
+                        .as_ref()
+                        .and_then(|m| m.name_for(native, vn.size).map(str::to_string))
+                });
             }
             return None;
         }
@@ -331,7 +324,9 @@ impl RegisterNamer {
         }
         if matches!(
             self.abi,
-            CallingConvention::WindowsX64 | CallingConvention::SystemVAmd64 | CallingConvention::X86_32
+            CallingConvention::WindowsX64
+                | CallingConvention::SystemVAmd64
+                | CallingConvention::X86_32
         ) && size == 1
             && (0x200..0x280).contains(&offset)
         {
@@ -457,13 +452,10 @@ impl RegisterNamer {
             _ => {
                 let name_family = self.model.as_ref().and_then(|m| m.family_index(&hw_name))?;
                 self.int_param_offsets.iter().position(|&param_offset| {
-                    self.model
-                        .as_ref()
-                        .and_then(|m| {
-                            m.name_for(param_offset, self.param_slot_size())
-                                .and_then(|n| m.family_index(n))
-                        })
-                        == Some(name_family)
+                    self.model.as_ref().and_then(|m| {
+                        m.name_for(param_offset, self.param_slot_size())
+                            .and_then(|n| m.family_index(n))
+                    }) == Some(name_family)
                 })
             }
         };
@@ -475,8 +467,14 @@ impl RegisterNamer {
 
     pub(crate) fn param_slot_size(&self) -> u32 {
         match self.abi {
-            CallingConvention::AArch64 | CallingConvention::PowerPc64 | CallingConvention::Mips64 | CallingConvention::LoongArch64 => 8,
-            CallingConvention::Arm32 | CallingConvention::PowerPc32 | CallingConvention::Mips32 | CallingConvention::LoongArch32 => 4,
+            CallingConvention::AArch64
+            | CallingConvention::PowerPc64
+            | CallingConvention::Mips64
+            | CallingConvention::LoongArch64 => 8,
+            CallingConvention::Arm32
+            | CallingConvention::PowerPc32
+            | CallingConvention::Mips32
+            | CallingConvention::LoongArch32 => 4,
             CallingConvention::WindowsX64 | CallingConvention::SystemVAmd64 => 8,
             CallingConvention::X86_32 => 4,
         }
@@ -519,9 +517,9 @@ impl RegisterNamer {
             CallingConvention::LoongArch64 => vn.offset == 0x120,
             CallingConvention::Mips32 => vn.offset == 0x08,
             CallingConvention::Mips64 => vn.offset == 0x10,
-            CallingConvention::WindowsX64 | CallingConvention::SystemVAmd64 | CallingConvention::X86_32 => {
-                vn.offset == 0x00
-            }
+            CallingConvention::WindowsX64
+            | CallingConvention::SystemVAmd64
+            | CallingConvention::X86_32 => vn.offset == 0x00,
         }
     }
 
@@ -543,25 +541,26 @@ impl RegisterNamer {
                         == Some(fam)
                 }),
             CallingConvention::Arm32 => vn.offset == 0x58,
-            CallingConvention::PowerPc32 | CallingConvention::PowerPc64 => self
-                .hw_name_at(vn.offset, vn.size)
-                .as_deref()
-                == Some("lr"),
-            CallingConvention::LoongArch32 | CallingConvention::LoongArch64 => self
-                .hw_name_at(vn.offset, vn.size)
-                .as_deref()
-                == Some("ra"),
-            CallingConvention::Mips32 | CallingConvention::Mips64 => self
-                .hw_name_at(vn.offset, vn.size)
-                .as_deref()
-                == Some("ra"),
-            CallingConvention::WindowsX64 | CallingConvention::SystemVAmd64 | CallingConvention::X86_32 => false,
+            CallingConvention::PowerPc32 | CallingConvention::PowerPc64 => {
+                self.hw_name_at(vn.offset, vn.size).as_deref() == Some("lr")
+            }
+            CallingConvention::LoongArch32 | CallingConvention::LoongArch64 => {
+                self.hw_name_at(vn.offset, vn.size).as_deref() == Some("ra")
+            }
+            CallingConvention::Mips32 | CallingConvention::Mips64 => {
+                self.hw_name_at(vn.offset, vn.size).as_deref() == Some("ra")
+            }
+            CallingConvention::WindowsX64
+            | CallingConvention::SystemVAmd64
+            | CallingConvention::X86_32 => false,
         }
     }
 
     pub fn primary_return_registers(&self) -> Vec<Varnode> {
         let pointer_size = self.pointer_size;
-        let offset = self.return_offset.unwrap_or_else(|| default_return_offset(self.abi));
+        let offset = self
+            .return_offset
+            .unwrap_or_else(|| default_return_offset(self.abi));
         let mut out = vec![Varnode {
             space_id: REGISTER_SPACE_ID,
             offset,
@@ -571,7 +570,9 @@ impl RegisterNamer {
         }];
         if matches!(
             self.abi,
-            CallingConvention::WindowsX64 | CallingConvention::SystemVAmd64 | CallingConvention::X86_32
+            CallingConvention::WindowsX64
+                | CallingConvention::SystemVAmd64
+                | CallingConvention::X86_32
         ) {
             out.push(Varnode {
                 space_id: UNIQUE_SPACE_ID,
@@ -589,7 +590,10 @@ impl RegisterNamer {
                 constant_val: 0,
             });
         }
-        if matches!(self.abi, CallingConvention::LoongArch32 | CallingConvention::LoongArch64) {
+        if matches!(
+            self.abi,
+            CallingConvention::LoongArch32 | CallingConvention::LoongArch64
+        ) {
             out.push(Varnode {
                 space_id: RUST_SLEIGH_ALT_REGISTER_SPACE_ID,
                 offset,
@@ -664,7 +668,9 @@ fn default_return_offset(abi: CallingConvention) -> u64 {
         CallingConvention::LoongArch64 => 0x120,
         CallingConvention::Mips32 => 0x08,
         CallingConvention::Mips64 => 0x10,
-        CallingConvention::WindowsX64 | CallingConvention::SystemVAmd64 | CallingConvention::X86_32 => 0x00,
+        CallingConvention::WindowsX64
+        | CallingConvention::SystemVAmd64
+        | CallingConvention::X86_32 => 0x00,
     }
 }
 
@@ -717,16 +723,8 @@ mod tests {
             } else {
                 format!("w{i}")
             };
-            assert_eq!(
-                model.name_for(off, 8),
-                Some(x.as_str()),
-                "x register {i}"
-            );
-            assert_eq!(
-                model.name_for(off, 4),
-                Some(w.as_str()),
-                "w register {i}"
-            );
+            assert_eq!(model.name_for(off, 8), Some(x.as_str()), "x register {i}");
+            assert_eq!(model.name_for(off, 4), Some(w.as_str()), "w register {i}");
         }
         assert_eq!(model.name_for(0x08, 8), Some("sp"));
     }
@@ -794,8 +792,8 @@ mod tests {
 
     #[test]
     fn aarch64_be_namer_resolves_w0_at_high_half() {
-        use crate::nir::{CallingConvention, NirRenderOptions};
         use crate::nir::cspec::{RegisterNamer, test_maps::sync_preview_cspec};
+        use crate::nir::{CallingConvention, NirRenderOptions};
 
         let mut options = NirRenderOptions {
             calling_convention: CallingConvention::AArch64,
@@ -818,7 +816,9 @@ mod tests {
     #[test]
     fn cspec_prototype_registers_resolve_in_register_model() {
         use crate::nir::cspec::apply::{default_cspec_pair, sleigh_languages_root};
-        use crate::nir::cspec::loader::{cspec_path_for_pair, load_cspec_for_pair, load_cspec_path};
+        use crate::nir::cspec::loader::{
+            cspec_path_for_pair, load_cspec_for_pair, load_cspec_path,
+        };
         use crate::nir::cspec::{CspecPentry, CspecPrototype};
         use crate::nir::{CallingConvention, NirRenderOptions};
 
@@ -848,10 +848,7 @@ mod tests {
             let root = sleigh_languages_root();
             let resolved = load_cspec_for_pair(&root, &lang, &comp, &model_map)
                 .unwrap_or_else(|| panic!("cspec resolution failed for {lang}/{comp}"));
-            let proto = resolved
-                .default_proto
-                .as_ref()
-                .expect("default proto");
+            let proto = resolved.default_proto.as_ref().expect("default proto");
             assert!(
                 !proto.int_param_offsets.is_empty() || abi == CallingConvention::X86_32,
                 "expected int params for {abi:?} ({lang}/{comp})"
@@ -888,7 +885,9 @@ mod tests {
                     storage,
                 } = pentry
                 {
-                    if metatype.as_deref() == Some("float") || storage.as_deref() == Some("hiddenret") {
+                    if metatype.as_deref() == Some("float")
+                        || storage.as_deref() == Some("hiddenret")
+                    {
                         continue;
                     }
                     if model.lookup_name(name).is_none() {

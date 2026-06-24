@@ -38,9 +38,9 @@ where
         .iter()
         .find_map(|(addr, name)| (name == PSEUDO_RELOC_LIST_SYMBOL).then_some(*addr))
         .or_else(|| {
-            global_symbols.iter().find_map(|(addr, name)| {
-                name.contains("PSEUDO_RELOC_LIST").then_some(*addr)
-            })
+            global_symbols
+                .iter()
+                .find_map(|(addr, name)| name.contains("PSEUDO_RELOC_LIST").then_some(*addr))
         });
 
     let Some(list_symbol_va) = list_va else {
@@ -57,11 +57,7 @@ where
 
     let ptr_size = if is_64bit { 8 } else { 4 };
     let list_start = read_pointer(&view_bytes, list_symbol_va, is_64bit)
-        .filter(|ptr| {
-            *ptr >= image_base
-                && *ptr != list_symbol_va
-                && view_bytes(*ptr, 8).is_some()
-        })
+        .filter(|ptr| *ptr >= image_base && *ptr != list_symbol_va && view_bytes(*ptr, 8).is_some())
         .unwrap_or(list_symbol_va);
     facts.cfg_label_leaders.push(list_start);
 
@@ -167,8 +163,7 @@ pub(super) fn is_likely_mingw_pe(
     }
     rich_header_records.is_some_and(|records| {
         records.iter().any(|record| {
-            matches!(record.product_id, 0x0103 | 0x0104 | 0x0105)
-                || record.build_number >= 0x0100
+            matches!(record.product_id, 0x0103 | 0x0104 | 0x0105) || record.build_number >= 0x0100
         })
     })
 }

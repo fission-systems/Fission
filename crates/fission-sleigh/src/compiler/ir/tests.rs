@@ -62,7 +62,6 @@ fn compile_frontend_collects_pcode_ops_and_patterns() {
 
 #[test]
 fn arm_frontends_preserve_thumb_context_layout_and_pspec_defaults() {
-
     for entry_id in ["ARM8_le", "ARM8m_le", "ARM8m_be"] {
         let entry_spec = spec_root_for_arch("ARM").join(format!("{entry_id}.slaspec"));
         let compiled = compile_frontend_for_entry_spec(&entry_spec).expect("compile ARM frontend");
@@ -209,7 +208,6 @@ fn sla_native_runtime_ready_constructors_are_canonical() {
 
 #[test]
 fn promoted_non_x86_frontends_have_no_unsupported_sla_templates() {
-
     let entry_specs = [
         (
             "AARCH64",
@@ -251,7 +249,6 @@ fn promoted_non_x86_frontends_have_no_unsupported_sla_templates() {
 
 #[test]
 fn runtime_ready_constructors_do_not_depend_on_compat_token_selectors() {
-
     let legacy_decode_step = ["Consume", "TokenFields"].concat();
     assert!(
         !include_str!("types.rs").contains(&legacy_decode_step),
@@ -290,7 +287,6 @@ fn runtime_ready_constructors_do_not_depend_on_compat_token_selectors() {
 
 #[test]
 fn legacy_source_context_changes_preserve_high_context_words() {
-
     let entry_spec = spec_root_for_arch("JVM").join("JVM.slaspec");
     let compiled = compile_frontend_for_entry_spec(&entry_spec).expect("compile JVM frontend");
     let high_word_change = compiled

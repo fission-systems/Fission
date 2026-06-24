@@ -18,8 +18,28 @@ pub(crate) fn recognize_humpty_dumpty_or(expr: &HirExpr) -> Option<HirExpr> {
     };
 
     let (high, low) = match (lhs.as_ref(), rhs.as_ref()) {
-        (high, low) if matches!(high, HirExpr::Binary { op: HirBinaryOp::Shl, .. }) => (high, low),
-        (low, high) if matches!(high, HirExpr::Binary { op: HirBinaryOp::Shl, .. }) => (low, high),
+        (high, low)
+            if matches!(
+                high,
+                HirExpr::Binary {
+                    op: HirBinaryOp::Shl,
+                    ..
+                }
+            ) =>
+        {
+            (high, low)
+        }
+        (low, high)
+            if matches!(
+                high,
+                HirExpr::Binary {
+                    op: HirBinaryOp::Shl,
+                    ..
+                }
+            ) =>
+        {
+            (low, high)
+        }
         _ => return None,
     };
 
@@ -163,8 +183,20 @@ pub(crate) fn recognize_concat_zext_or(expr: &HirExpr) -> Option<HirExpr> {
     };
 
     let (hi_side, lo_side) = match (lhs.as_ref(), rhs.as_ref()) {
-        (HirExpr::Binary { op: HirBinaryOp::Shl, .. }, lo) => (lhs.as_ref(), lo),
-        (lo, HirExpr::Binary { op: HirBinaryOp::Shl, .. }) => (rhs.as_ref(), lhs.as_ref()),
+        (
+            HirExpr::Binary {
+                op: HirBinaryOp::Shl,
+                ..
+            },
+            lo,
+        ) => (lhs.as_ref(), lo),
+        (
+            lo,
+            HirExpr::Binary {
+                op: HirBinaryOp::Shl,
+                ..
+            },
+        ) => (rhs.as_ref(), lhs.as_ref()),
         _ => return None,
     };
 

@@ -49,11 +49,15 @@ pub(crate) fn apply_deindirect_pass(func: &mut HirFunction) -> bool {
                 }
                 HirExpr::Cast { expr, .. } => {
                     if let HirExpr::Const(val, ty) = expr.as_ref() {
-                        const_initializers.insert(local.name.clone(), HirExpr::Const(*val, ty.clone()));
+                        const_initializers
+                            .insert(local.name.clone(), HirExpr::Const(*val, ty.clone()));
                     }
                 }
                 HirExpr::AddressOfGlobal(global_name) => {
-                    const_initializers.insert(local.name.clone(), HirExpr::AddressOfGlobal(global_name.clone()));
+                    const_initializers.insert(
+                        local.name.clone(),
+                        HirExpr::AddressOfGlobal(global_name.clone()),
+                    );
                 }
                 _ => {}
             }
@@ -93,9 +97,7 @@ fn deindirect_in_stmt(
         HirStmt::Expr(expr) | HirStmt::Return(Some(expr)) => {
             changed |= deindirect_in_expr(expr, initializers, addr_to_symbol);
         }
-        HirStmt::Block(body)
-        | HirStmt::While { body, .. }
-        | HirStmt::DoWhile { body, .. } => {
+        HirStmt::Block(body) | HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
             for s in body.iter_mut() {
                 changed |= deindirect_in_stmt(s, initializers, addr_to_symbol);
             }
@@ -165,7 +167,9 @@ fn deindirect_in_lvalue(
             changed |= deindirect_in_expr(index, initializers, addr_to_symbol);
             changed
         }
-        HirLValue::FieldAccess { base, .. } => deindirect_in_expr(base, initializers, addr_to_symbol),
+        HirLValue::FieldAccess { base, .. } => {
+            deindirect_in_expr(base, initializers, addr_to_symbol)
+        }
     }
 }
 
@@ -188,7 +192,12 @@ fn deindirect_in_expr(
             changed |= deindirect_in_expr(lhs, initializers, addr_to_symbol);
             changed |= deindirect_in_expr(rhs, initializers, addr_to_symbol);
         }
-        HirExpr::Select { cond, then_expr, else_expr, .. } => {
+        HirExpr::Select {
+            cond,
+            then_expr,
+            else_expr,
+            ..
+        } => {
             changed |= deindirect_in_expr(cond, initializers, addr_to_symbol);
             changed |= deindirect_in_expr(then_expr, initializers, addr_to_symbol);
             changed |= deindirect_in_expr(else_expr, initializers, addr_to_symbol);
@@ -215,7 +224,8 @@ fn deindirect_in_expr(
     if let HirExpr::Call { target, args, ty } = expr {
         if target == "__fission_callind_opaque" && !args.is_empty() {
             let fn_ptr = &args[0];
-            if let Some(resolved_symbol) = resolve_call_target(fn_ptr, initializers, addr_to_symbol) {
+            if let Some(resolved_symbol) = resolve_call_target(fn_ptr, initializers, addr_to_symbol)
+            {
                 // Found a static direct target symbol. Re-write the call!
                 let remaining_args = args[1..].to_vec();
                 *expr = HirExpr::Call {
