@@ -5,11 +5,11 @@ use super::*;
 mod dom;
 mod edge;
 mod follow;
+mod goto_selector;
 mod postdom;
 mod scc;
-pub(crate) mod util;
 mod trace_dag;
-mod goto_selector;
+pub(crate) mod util;
 
 pub(crate) use dom::{DomTree, DominanceFrontier, ImmDomTree};
 pub(crate) use edge::{CfgAnalysis, EdgeClass};
@@ -104,14 +104,11 @@ impl<'a> crate::nir::builder::PreviewBuilder<'a> {
                 if succs.len() < 2 {
                     return None;
                 }
-                
+
                 if total_blocks_for_follow <= 500 {
-                    let mut trace_dag = TraceDag::new(
-                        &self.successors,
-                        &self.predecessors,
-                        dom_tree,
-                    );
-                    
+                    let mut trace_dag =
+                        TraceDag::new(&self.successors, &self.predecessors, dom_tree);
+
                     if let Ok(Some(exitblock)) = trace_dag.find_follow_block(i) {
                         if exitblock > i {
                             return Some(exitblock);

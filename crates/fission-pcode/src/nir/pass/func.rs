@@ -1,9 +1,9 @@
-use std::collections::BTreeMap;
 use crate::nir::builder::PreviewBuilder;
-use crate::nir::types::{HirStmt, NirBinding};
-use crate::nir::support::StackSlot;
-use crate::nir::structuring::loop_analysis::LoopBody;
 use crate::nir::structuring::irreducible::NodeSplitResult;
+use crate::nir::structuring::loop_analysis::LoopBody;
+use crate::nir::support::StackSlot;
+use crate::nir::types::{HirStmt, NirBinding};
+use std::collections::BTreeMap;
 
 pub(crate) struct NirFunc<'a, 'b> {
     pub(crate) builder: &'a mut PreviewBuilder<'b>,
@@ -99,17 +99,25 @@ impl<'a, 'b> NirFunc<'a, 'b> {
     }
 
     pub(crate) fn lowered_block_stmts(&self, block_idx: usize) -> Option<&[HirStmt]> {
-        self.builder.lowered_block_stmts_cache.get(&block_idx).map(|v| v.as_slice())
+        self.builder
+            .lowered_block_stmts_cache
+            .get(&block_idx)
+            .map(|v| v.as_slice())
     }
 
     pub(crate) fn lowered_block_stmts_mut(&mut self, block_idx: usize) -> &mut Vec<HirStmt> {
         self.ir_version += 1;
-        self.builder.lowered_block_stmts_cache.entry(block_idx).or_insert_with(Vec::new)
+        self.builder
+            .lowered_block_stmts_cache
+            .entry(block_idx)
+            .or_insert_with(Vec::new)
     }
 
     pub(crate) fn set_lowered_block_stmts(&mut self, block_idx: usize, stmts: Vec<HirStmt>) {
         self.ir_version += 1;
-        self.builder.lowered_block_stmts_cache.insert(block_idx, stmts);
+        self.builder
+            .lowered_block_stmts_cache
+            .insert(block_idx, stmts);
     }
 
     pub(crate) fn apply_virtual_goto_edge(&mut self, from: usize, to: usize) -> bool {

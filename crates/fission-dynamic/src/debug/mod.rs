@@ -134,7 +134,9 @@ impl DebugSessionBuilder {
 impl DebugSession {
     /// Create a new session builder.
     pub fn new() -> DebugSessionBuilder {
-        DebugSessionBuilder { with_timeline: false }
+        DebugSessionBuilder {
+            with_timeline: false,
+        }
     }
 
     /// Convenience: attach to a PID.

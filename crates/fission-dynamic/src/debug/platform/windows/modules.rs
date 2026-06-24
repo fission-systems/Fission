@@ -3,12 +3,12 @@
 //! Wraps `EnumProcessModules` + `GetModuleInformation` into a unified
 //! `ModuleInfo` list.  Also provides address-to-module resolution.
 
+use std::collections::BTreeMap;
 use windows::Win32::Foundation::HANDLE;
 use windows::Win32::System::ProcessStatus::{
     EnumProcessModules, GetModuleBaseNameW, GetModuleFileNameExW, GetModuleInformation,
 };
 use windows::Win32::System::SystemServices::HMODULE;
-use std::collections::BTreeMap;
 
 /// Information about a single loaded module (EXE or DLL).
 #[derive(Debug, Clone)]
@@ -28,7 +28,8 @@ pub fn enumerate_modules(process: HANDLE) -> Result<Vec<ModuleInfo>, String> {
     let modules: Vec<HMODULE> = loop {
         let mut buf = vec![HMODULE::default(); capacity];
         let cb = (capacity * std::mem::size_of::<HMODULE>()) as u32;
-        let ok = unsafe { EnumProcessModules(process, buf.as_mut_ptr(), cb, &mut cb_needed).as_bool() };
+        let ok =
+            unsafe { EnumProcessModules(process, buf.as_mut_ptr(), cb, &mut cb_needed).as_bool() };
         if !ok {
             return Err("EnumProcessModules failed".to_string());
         }
@@ -86,10 +87,7 @@ pub fn build_module_lookup(modules: &[ModuleInfo]) -> BTreeMap<u64, ModuleInfo> 
 }
 
 /// Resolve an address to the module that contains it.
-pub fn resolve_address_to_module(
-    addr: u64,
-    modules: &[ModuleInfo],
-) -> Option<ModuleInfo> {
+pub fn resolve_address_to_module(addr: u64, modules: &[ModuleInfo]) -> Option<ModuleInfo> {
     for m in modules {
         if addr >= m.base && addr < m.base + m.size as u64 {
             return Some(m.clone());

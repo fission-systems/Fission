@@ -10,7 +10,11 @@ impl Debugger for WindowsDebugger {
         let addr = unsafe {
             VirtualAllocEx(
                 h,
-                if address == 0 { None } else { Some(address as *const c_void) },
+                if address == 0 {
+                    None
+                } else {
+                    Some(address as *const c_void)
+                },
                 size,
                 VIRTUAL_ALLOCATION_TYPE(MEM_COMMIT.0 | MEM_RESERVE.0),
                 PAGE_EXECUTE_READWRITE,
@@ -72,5 +76,4 @@ impl Debugger for WindowsDebugger {
         }
         Ok(())
     }
-
 }

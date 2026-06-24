@@ -318,6 +318,7 @@ pub type PreviewWorkerResponse = NirWorkerResponse;
 pub use NirSource as PreviewSource;
 
 #[cfg(test)]
+#[allow(dead_code)]
 pub(crate) fn sanitize_preview_symbol_name(name: &str) -> String {
     let mut sanitized = name.trim().to_string();
     if let Some((_, tail)) = sanitized.rsplit_once('!') {

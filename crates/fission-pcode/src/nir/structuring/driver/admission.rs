@@ -22,7 +22,9 @@ pub(crate) struct StructuringAdmissionInput {
     pub explicit_force_linear: bool,
 }
 
-pub(crate) fn decide_structuring_admission(input: StructuringAdmissionInput) -> StructuringAdmissionReason {
+pub(crate) fn decide_structuring_admission(
+    input: StructuringAdmissionInput,
+) -> StructuringAdmissionReason {
     if input.explicit_force_linear {
         return StructuringAdmissionReason::ExplicitForceLinear;
     }

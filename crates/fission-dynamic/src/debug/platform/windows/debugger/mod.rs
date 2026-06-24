@@ -1,10 +1,10 @@
 //! Windows-specific debugger implementation using Win32 Debug API.
 
-mod process;
 mod breakpoint;
 mod execution;
 mod memory;
 mod pe;
+mod process;
 mod register;
 mod stack;
 
@@ -24,23 +24,21 @@ use std::ffi::c_void;
 use windows::Win32::Foundation::{CloseHandle, HANDLE, NTSTATUS};
 use windows::Win32::System::Diagnostics::Debug::{
     CONTEXT, CONTEXT_FLAGS, CREATE_PROCESS_DEBUG_EVENT, CREATE_THREAD_DEBUG_EVENT,
-    ContinueDebugEvent, DEBUG_EVENT, DebugActiveProcess, DebugActiveProcessStop,
-    DebugBreakProcess, EXCEPTION_DEBUG_EVENT, EXIT_PROCESS_DEBUG_EVENT, EXIT_THREAD_DEBUG_EVENT,
-    GetThreadContext, LOAD_DLL_DEBUG_EVENT, OUTPUT_DEBUG_STRING_DEBUG_EVENT,
-    OUTPUT_DEBUG_STRING_INFO, ReadProcessMemory, SetThreadContext, UNLOAD_DLL_DEBUG_EVENT,
-    WaitForDebugEvent, WriteProcessMemory, WOW64_CONTEXT, WOW64_CONTEXT_ALL,
-    Wow64GetThreadContext, Wow64SetThreadContext,
+    ContinueDebugEvent, DEBUG_EVENT, DebugActiveProcess, DebugActiveProcessStop, DebugBreakProcess,
+    EXCEPTION_DEBUG_EVENT, EXIT_PROCESS_DEBUG_EVENT, EXIT_THREAD_DEBUG_EVENT, GetThreadContext,
+    LOAD_DLL_DEBUG_EVENT, OUTPUT_DEBUG_STRING_DEBUG_EVENT, OUTPUT_DEBUG_STRING_INFO,
+    ReadProcessMemory, SetThreadContext, UNLOAD_DLL_DEBUG_EVENT, WOW64_CONTEXT, WOW64_CONTEXT_ALL,
+    WaitForDebugEvent, Wow64GetThreadContext, Wow64SetThreadContext, WriteProcessMemory,
 };
 use windows::Win32::System::Memory::{
-    PAGE_EXECUTE_READWRITE, PAGE_GUARD, PAGE_NOACCESS, PAGE_PROTECTION_FLAGS,
-    PAGE_READONLY, PAGE_READWRITE, VirtualAllocEx, VirtualFreeEx, VirtualProtectEx,
-    VirtualQueryEx, MEMORY_BASIC_INFORMATION, MEM_COMMIT, MEM_RESERVE,
-    VIRTUAL_ALLOCATION_TYPE, VIRTUAL_FREE_TYPE,
+    MEM_COMMIT, MEM_RESERVE, MEMORY_BASIC_INFORMATION, PAGE_EXECUTE_READWRITE, PAGE_GUARD,
+    PAGE_NOACCESS, PAGE_PROTECTION_FLAGS, PAGE_READONLY, PAGE_READWRITE, VIRTUAL_ALLOCATION_TYPE,
+    VIRTUAL_FREE_TYPE, VirtualAllocEx, VirtualFreeEx, VirtualProtectEx, VirtualQueryEx,
 };
 use windows::Win32::System::SystemInformation::{IMAGE_FILE_MACHINE, IMAGE_FILE_MACHINE_I386};
 use windows::Win32::System::Threading::{
     CreateProcessW, IsWow64Process2, OpenProcess, OpenThread, PROCESS_ALL_ACCESS,
-    PROCESS_INFORMATION, STARTUPINFOW, THREAD_ALL_ACCESS, ResumeThread, SuspendThread,
+    PROCESS_INFORMATION, ResumeThread, STARTUPINFOW, SuspendThread, THREAD_ALL_ACCESS,
     TerminateProcess,
 };
 use windows::core::PWSTR;
@@ -173,26 +171,34 @@ impl WindowsDebugger {
     /// Patches PEB.BeingDebugged, NtGlobalFlag, heap flags, and
     /// NtQueryInformationProcess(ProcessDebugPort) return values.
     /// Requires an active process handle (attach first).
-    pub fn enable_anti_debug_bypass(&mut self) -> FissionResult<Vec<super::anti_debug::AntiDebugBypass>> {
+    pub fn enable_anti_debug_bypass(
+        &mut self,
+    ) -> FissionResult<Vec<super::anti_debug::AntiDebugBypass>> {
         let handle = self.ensure_process_handle()?;
         super::anti_debug::AntiDebugBypassEngine::apply_all(handle)
             .map_err(|e| FissionError::debug(e))
     }
 
     /// Enumerate all virtual-memory regions in the target process.
-    pub fn enumerate_memory_regions(&mut self) -> FissionResult<Vec<super::memory_map::MemoryRegion>> {
+    pub fn enumerate_memory_regions(
+        &mut self,
+    ) -> FissionResult<Vec<super::memory_map::MemoryRegion>> {
         let handle = self.ensure_process_handle()?;
         Ok(super::memory_map::enumerate_memory_regions(handle))
     }
 
     /// Return committed executable regions.
-    pub fn find_executable_regions(&mut self) -> FissionResult<Vec<super::memory_map::MemoryRegion>> {
+    pub fn find_executable_regions(
+        &mut self,
+    ) -> FissionResult<Vec<super::memory_map::MemoryRegion>> {
         let handle = self.ensure_process_handle()?;
         Ok(super::memory_map::find_executable_regions(handle))
     }
 
     /// Return committed RWX regions (common in packers / self-modifying code).
-    pub fn find_writable_executable_regions(&mut self) -> FissionResult<Vec<super::memory_map::MemoryRegion>> {
+    pub fn find_writable_executable_regions(
+        &mut self,
+    ) -> FissionResult<Vec<super::memory_map::MemoryRegion>> {
         let handle = self.ensure_process_handle()?;
         Ok(super::memory_map::find_writable_executable_regions(handle))
     }
@@ -200,33 +206,32 @@ impl WindowsDebugger {
     /// Read the SEH (Structured Exception Handler) chain for a thread.
     pub fn read_seh_chain(&mut self, thread_id: u32) -> FissionResult<Vec<super::seh::SehRecord>> {
         let handle = self.ensure_process_handle()?;
-        super::seh::read_seh_chain(handle, thread_id)
-            .map_err(|e| FissionError::debug(e))
+        super::seh::read_seh_chain(handle, thread_id).map_err(|e| FissionError::debug(e))
     }
 
     /// Read the Process Environment Block (PEB) of the target process.
     pub fn read_peb(&mut self) -> FissionResult<super::os_structs::PebInfo> {
         let handle = self.ensure_process_handle()?;
-        super::os_structs::read_peb(handle)
-            .map_err(|e| FissionError::debug(e))
+        super::os_structs::read_peb(handle).map_err(|e| FissionError::debug(e))
     }
 
     /// Read the Thread Environment Block (TEB) of a specific thread.
     pub fn read_teb(&mut self, thread_id: u32) -> FissionResult<super::os_structs::TebInfo> {
         let handle = self.ensure_process_handle()?;
-        super::os_structs::read_teb(handle, thread_id)
-            .map_err(|e| FissionError::debug(e))
+        super::os_structs::read_teb(handle, thread_id).map_err(|e| FissionError::debug(e))
     }
 
     /// Enumerate all loaded modules in the target process.
     pub fn enumerate_modules(&mut self) -> FissionResult<Vec<super::modules::ModuleInfo>> {
         let handle = self.ensure_process_handle()?;
-        super::modules::enumerate_modules(handle)
-            .map_err(|e| FissionError::debug(e))
+        super::modules::enumerate_modules(handle).map_err(|e| FissionError::debug(e))
     }
 
     /// Resolve an address to the module that contains it.
-    pub fn resolve_address_to_module(&mut self, addr: u64) -> FissionResult<Option<super::modules::ModuleInfo>> {
+    pub fn resolve_address_to_module(
+        &mut self,
+        addr: u64,
+    ) -> FissionResult<Option<super::modules::ModuleInfo>> {
         let modules = self.enumerate_modules()?;
         Ok(super::modules::resolve_address_to_module(addr, &modules))
     }
@@ -288,20 +293,15 @@ impl WindowsDebugger {
                     thread_id,
                     crate::debug::types::ThreadInfo {
                         thread_id,
-                        start_address: info
-                            .lpStartAddress
-                            .map(|p| p as usize as u64)
-                            .unwrap_or(0),
+                        start_address: info.lpStartAddress.map(|p| p as usize as u64).unwrap_or(0),
                         suspended: false,
                         is_main: true,
                     },
                 );
                 // Register main module
                 let base = info.lpBaseOfImage as u64;
-                let module_name = self.read_image_name_safe(
-                    info.lpImageName as u64,
-                    info.fUnicode.0 != 0,
-                );
+                let module_name =
+                    self.read_image_name_safe(info.lpImageName as u64, info.fUnicode.0 != 0);
                 let short = module_short_name(&module_name);
                 let mod_size = self.get_module_size(base) as u64;
                 self.state.modules.insert(
@@ -335,10 +335,7 @@ impl WindowsDebugger {
                     thread_id,
                     crate::debug::types::ThreadInfo {
                         thread_id,
-                        start_address: info
-                            .lpStartAddress
-                            .map(|p| p as usize as u64)
-                            .unwrap_or(0),
+                        start_address: info.lpStartAddress.map(|p| p as usize as u64).unwrap_or(0),
                         suspended: false,
                         is_main: false,
                     },
@@ -362,10 +359,7 @@ impl WindowsDebugger {
             LOAD_DLL_DEBUG_EVENT => {
                 let info = unsafe { debug_event.u.LoadDll };
                 let base = info.lpBaseOfDll as u64;
-                let name = self.read_image_name_safe(
-                    info.lpImageName as u64,
-                    info.fUnicode.0 != 0,
-                );
+                let name = self.read_image_name_safe(info.lpImageName as u64, info.fUnicode.0 != 0);
                 let short = module_short_name(&name);
                 let mod_size = self.get_module_size(base) as u64;
                 self.state.modules.insert(
@@ -445,10 +439,8 @@ impl WindowsDebugger {
                     // Hardware breakpoints also raise STATUS_SINGLE_STEP; inspect Dr6.
                     if let Some(hw_addr) = self.check_hw_breakpoint_hit(thread_id) {
                         self.state.status = DebugStatus::Suspended;
-                        self.state.last_event = Some(format!(
-                            "Hardware breakpoint hit at 0x{:016x}",
-                            hw_addr
-                        ));
+                        self.state.last_event =
+                            Some(format!("Hardware breakpoint hit at 0x{:016x}", hw_addr));
                         (
                             Some(crate::debug::types::DebugEvent::BreakpointHit {
                                 address: hw_addr,
@@ -521,9 +513,10 @@ impl WindowsDebugger {
         address: u64,
         count: usize,
     ) -> FissionResult<Vec<crate::decode::DebugInstruction>> {
-        let decoder = self.decoder.as_ref().ok_or_else(|| {
-            FissionError::debug("No instruction decoder attached")
-        })?;
+        let decoder = self
+            .decoder
+            .as_ref()
+            .ok_or_else(|| FissionError::debug("No instruction decoder attached"))?;
         // Read enough bytes (estimate: 15 bytes/insn for x86, conservative)
         let read_size = (count * 15).min(4096);
         let bytes = self.read_memory(address, read_size)?;
@@ -780,7 +773,9 @@ impl WindowsDebugger {
 
         // Auto-refresh register cache whenever the debuggee is suspended.
         if self.state.status == DebugStatus::Suspended {
-            let thread_id = self.state.last_thread_id
+            let thread_id = self
+                .state
+                .last_thread_id
                 .or(self.state.current_thread_id)
                 .or(self.state.main_thread_id);
             if let Some(tid_for_regs) = thread_id {
@@ -1000,7 +995,10 @@ mod tests {
         evt.dwThreadId = 5678;
         evt.dwDebugEventCode = CREATE_THREAD_DEBUG_EVENT;
         let (de, _) = dbg.process_debug_event(&evt);
-        assert!(matches!(de, Some(DebugEvent::ThreadCreated { thread_id: 5678 })));
+        assert!(matches!(
+            de,
+            Some(DebugEvent::ThreadCreated { thread_id: 5678 })
+        ));
         assert!(dbg.state.threads.contains_key(&5678));
 
         // EXIT_THREAD
@@ -1009,7 +1007,10 @@ mod tests {
         evt2.dwThreadId = 5678;
         evt2.dwDebugEventCode = EXIT_THREAD_DEBUG_EVENT;
         let (de2, _) = dbg.process_debug_event(&evt2);
-        assert!(matches!(de2, Some(DebugEvent::ThreadExited { thread_id: 5678 })));
+        assert!(matches!(
+            de2,
+            Some(DebugEvent::ThreadExited { thread_id: 5678 })
+        ));
         assert!(!dbg.state.threads.contains_key(&5678));
     }
 
@@ -1028,8 +1029,15 @@ mod tests {
         }
         let (de, _) = dbg.process_debug_event(&evt);
         assert!(
-            matches!(de, Some(DebugEvent::DllLoaded { base_address: 0x7ff00000, .. })),
-            "expected DllLoaded, got {:?}", de
+            matches!(
+                de,
+                Some(DebugEvent::DllLoaded {
+                    base_address: 0x7ff00000,
+                    ..
+                })
+            ),
+            "expected DllLoaded, got {:?}",
+            de
         );
         assert!(dbg.state.modules.contains_key(&0x7ff00000));
 
@@ -1042,7 +1050,12 @@ mod tests {
             evt2.u.UnloadDll.lpBaseOfDll = 0x7ff00000 as *mut c_void;
         }
         let (de2, _) = dbg.process_debug_event(&evt2);
-        assert!(matches!(de2, Some(DebugEvent::DllUnloaded { base_address: 0x7ff00000 })));
+        assert!(matches!(
+            de2,
+            Some(DebugEvent::DllUnloaded {
+                base_address: 0x7ff00000
+            })
+        ));
         assert!(!dbg.state.modules.contains_key(&0x7ff00000));
     }
 
@@ -1062,8 +1075,15 @@ mod tests {
         }
         let (de, _) = dbg.process_debug_event(&evt);
         assert!(
-            matches!(de, Some(DebugEvent::BreakpointHit { address: 0x401000, thread_id: 1 })),
-            "expected BreakpointHit, got {:?}", de
+            matches!(
+                de,
+                Some(DebugEvent::BreakpointHit {
+                    address: 0x401000,
+                    thread_id: 1
+                })
+            ),
+            "expected BreakpointHit, got {:?}",
+            de
         );
         assert_eq!(dbg.state.status, DebugStatus::Suspended);
         assert_eq!(dbg.state.last_thread_id, Some(1));
@@ -1082,10 +1102,7 @@ mod tests {
     fn read_debug_string_parses_unicode() {
         let text = "Hello\0world";
         let u16s: Vec<u16> = text.encode_utf16().collect();
-        let bytes: Vec<u8> = u16s
-            .iter()
-            .flat_map(|&c| c.to_le_bytes())
-            .collect();
+        let bytes: Vec<u8> = u16s.iter().flat_map(|&c| c.to_le_bytes()).collect();
         let parsed: Vec<u16> = bytes
             .chunks_exact(2)
             .map(|p| u16::from_le_bytes([p[0], p[1]]))

@@ -74,4 +74,3 @@ pub(crate) struct PreviewBuilder<'a> {
     pub(crate) lower_varnode_cache: BuilderCacheMap<(Option<LoweringSite>, VarnodeKey), HirExpr>,
     pub(crate) structured_body: Option<Vec<HirStmt>>,
 }
-

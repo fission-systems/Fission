@@ -2,7 +2,7 @@ use super::*;
 use std::collections::BTreeMap;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum ReplacementReadClass {
+pub(crate) enum ReplacementReadClass {
     SameBlockData,
     PredicateSensitive,
     SelectorSensitive,
@@ -11,7 +11,7 @@ pub(super) enum ReplacementReadClass {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum MaterializationRejectionReason {
+pub(crate) enum MaterializationRejectionReason {
     AliasUnsafe,
     MissingMergeBinding,
     RepresentativeRootAttribution,
@@ -21,7 +21,7 @@ pub(super) enum MaterializationRejectionReason {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum AliasUnsafeHazardKind {
+pub(crate) enum AliasUnsafeHazardKind {
     MultipleSameBlockConsumers,
     DisallowedSingleConsumer,
     CallBetweenDefUse,
@@ -34,7 +34,7 @@ pub(super) enum AliasUnsafeHazardKind {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum DisallowedSingleConsumerConsumerKind {
+pub(crate) enum DisallowedSingleConsumerConsumerKind {
     BranchCondition,
     Predicate,
     CallArg,
@@ -47,7 +47,7 @@ pub(super) enum DisallowedSingleConsumerConsumerKind {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum DisallowedSingleConsumerRhsKind {
+pub(crate) enum DisallowedSingleConsumerRhsKind {
     VarOrConst,
     UnaryBoolean,
     BinaryBoolean,
@@ -58,7 +58,7 @@ pub(super) enum DisallowedSingleConsumerRhsKind {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum DisallowedSingleConsumerReason {
+pub(crate) enum DisallowedSingleConsumerReason {
     ConsumerIsBranchCondition,
     ConsumerIsPredicate,
     ConsumerIsCallArg,
@@ -73,21 +73,21 @@ pub(super) enum DisallowedSingleConsumerReason {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct DisallowedSingleConsumerProof {
-    pub(super) consumer_block_addr: u64,
-    pub(super) consumer_op_seq: u32,
-    pub(super) consumer_opcode: PcodeOpcode,
-    pub(super) matched_input_indices: Vec<usize>,
-    pub(super) consumer_kind: DisallowedSingleConsumerConsumerKind,
-    pub(super) rhs_kind: DisallowedSingleConsumerRhsKind,
-    pub(super) rhs_low_cost: bool,
-    pub(super) rhs_has_load: bool,
-    pub(super) rhs_has_call: bool,
-    pub(super) reason: DisallowedSingleConsumerReason,
+pub(crate) struct DisallowedSingleConsumerProof {
+    pub(crate) consumer_block_addr: u64,
+    pub(crate) consumer_op_seq: u32,
+    pub(crate) consumer_opcode: PcodeOpcode,
+    pub(crate) matched_input_indices: Vec<usize>,
+    pub(crate) consumer_kind: DisallowedSingleConsumerConsumerKind,
+    pub(crate) rhs_kind: DisallowedSingleConsumerRhsKind,
+    pub(crate) rhs_low_cost: bool,
+    pub(crate) rhs_has_load: bool,
+    pub(crate) rhs_has_call: bool,
+    pub(crate) reason: DisallowedSingleConsumerReason,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum SingleConsumerCallRhsFamily {
+pub(crate) enum SingleConsumerCallRhsFamily {
     KnownPureIntrinsic,
     PreviewCalleeAnalysisUnsafe,
     UnknownInternalCall,
@@ -98,24 +98,24 @@ pub(super) enum SingleConsumerCallRhsFamily {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct SingleConsumerCallRhsProof {
-    pub(super) consumer_block_addr: u64,
-    pub(super) consumer_op_seq: u32,
-    pub(super) consumer_opcode: PcodeOpcode,
-    pub(super) consumer_kind: DisallowedSingleConsumerConsumerKind,
-    pub(super) call_target: String,
-    pub(super) family: SingleConsumerCallRhsFamily,
-    pub(super) rhs_low_cost: bool,
-    pub(super) call_effect_source: Option<CallEffectSummarySource>,
-    pub(super) writes_memory: Option<bool>,
-    pub(super) may_call_unknown: Option<bool>,
-    pub(super) may_exit: Option<bool>,
-    pub(super) return_used: bool,
-    pub(super) downstream_opcode: Option<PcodeOpcode>,
+pub(crate) struct SingleConsumerCallRhsProof {
+    pub(crate) consumer_block_addr: u64,
+    pub(crate) consumer_op_seq: u32,
+    pub(crate) consumer_opcode: PcodeOpcode,
+    pub(crate) consumer_kind: DisallowedSingleConsumerConsumerKind,
+    pub(crate) call_target: String,
+    pub(crate) family: SingleConsumerCallRhsFamily,
+    pub(crate) rhs_low_cost: bool,
+    pub(crate) call_effect_source: Option<CallEffectSummarySource>,
+    pub(crate) writes_memory: Option<bool>,
+    pub(crate) may_call_unknown: Option<bool>,
+    pub(crate) may_exit: Option<bool>,
+    pub(crate) return_used: bool,
+    pub(crate) downstream_opcode: Option<PcodeOpcode>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum CarryIntrinsicPredicateUseFamily {
+pub(crate) enum CarryIntrinsicPredicateUseFamily {
     CarryFeedsBoolOr,
     CarryFeedsCompareZero,
     CarryFeedsCompareNonZero,
@@ -124,7 +124,7 @@ pub(super) enum CarryIntrinsicPredicateUseFamily {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum BoolOrDownstreamUseFamily {
+pub(crate) enum BoolOrDownstreamUseFamily {
     BoolOrFeedsPredicate,
     BoolOrFeedsBranch,
     BoolOrFeedsCompare,
@@ -133,7 +133,7 @@ pub(super) enum BoolOrDownstreamUseFamily {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum CarryIntrinsicFinalPredicateContext {
+pub(crate) enum CarryIntrinsicFinalPredicateContext {
     BoolOrOnly,
     CompareZero,
     CompareNonZero,
@@ -143,20 +143,20 @@ pub(super) enum CarryIntrinsicFinalPredicateContext {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct CarryIntrinsicPredicateProof {
-    pub(super) call_target: String,
-    pub(super) args: Vec<String>,
-    pub(super) consumer_kind: DisallowedSingleConsumerConsumerKind,
-    pub(super) downstream_opcode: PcodeOpcode,
-    pub(super) bool_chain_role: CarryIntrinsicPredicateUseFamily,
-    pub(super) rhs_low_cost: bool,
-    pub(super) args_side_effect_free: bool,
-    pub(super) final_predicate_context: CarryIntrinsicFinalPredicateContext,
-    pub(super) boolor_downstream_use: Option<BoolOrDownstreamUseFamily>,
+pub(crate) struct CarryIntrinsicPredicateProof {
+    pub(crate) call_target: String,
+    pub(crate) args: Vec<String>,
+    pub(crate) consumer_kind: DisallowedSingleConsumerConsumerKind,
+    pub(crate) downstream_opcode: PcodeOpcode,
+    pub(crate) bool_chain_role: CarryIntrinsicPredicateUseFamily,
+    pub(crate) rhs_low_cost: bool,
+    pub(crate) args_side_effect_free: bool,
+    pub(crate) final_predicate_context: CarryIntrinsicFinalPredicateContext,
+    pub(crate) boolor_downstream_use: Option<BoolOrDownstreamUseFamily>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum IntrinsicCompareOnlyFamily {
+pub(crate) enum IntrinsicCompareOnlyFamily {
     BorrowCompareZero,
     CarryCompareZero,
     SignedCarryCompareZero,
@@ -165,7 +165,7 @@ pub(super) enum IntrinsicCompareOnlyFamily {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum IntrinsicCompareFinalPredicateContext {
+pub(crate) enum IntrinsicCompareFinalPredicateContext {
     CompareZero,
     CompareOne,
     CompareNonZero,
@@ -173,19 +173,19 @@ pub(super) enum IntrinsicCompareFinalPredicateContext {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct IntrinsicCompareOnlyProof {
-    pub(super) call_target: String,
-    pub(super) args: Vec<String>,
-    pub(super) downstream_opcode: PcodeOpcode,
-    pub(super) compare_const: Option<i64>,
-    pub(super) family: IntrinsicCompareOnlyFamily,
-    pub(super) rhs_low_cost: bool,
-    pub(super) args_side_effect_free: bool,
-    pub(super) final_predicate_context: IntrinsicCompareFinalPredicateContext,
+pub(crate) struct IntrinsicCompareOnlyProof {
+    pub(crate) call_target: String,
+    pub(crate) args: Vec<String>,
+    pub(crate) downstream_opcode: PcodeOpcode,
+    pub(crate) compare_const: Option<i64>,
+    pub(crate) family: IntrinsicCompareOnlyFamily,
+    pub(crate) rhs_low_cost: bool,
+    pub(crate) args_side_effect_free: bool,
+    pub(crate) final_predicate_context: IntrinsicCompareFinalPredicateContext,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum SingleConsumerLoadRhsFamily {
+pub(crate) enum SingleConsumerLoadRhsFamily {
     LoadFeedsPredicate,
     LoadFeedsArithmetic,
     LoadFeedsAddressComputation,
@@ -194,7 +194,7 @@ pub(super) enum SingleConsumerLoadRhsFamily {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum SingleConsumerLoadAliasClass {
+pub(crate) enum SingleConsumerLoadAliasClass {
     ReadOnlyLocalLoad,
     MayAliasSameBlockStore,
     MayAliasCall,
@@ -204,20 +204,20 @@ pub(super) enum SingleConsumerLoadAliasClass {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct SingleConsumerLoadRhsProof {
-    pub(super) consumer_block_addr: u64,
-    pub(super) consumer_op_seq: u32,
-    pub(super) consumer_opcode: PcodeOpcode,
-    pub(super) consumer_kind: DisallowedSingleConsumerConsumerKind,
-    pub(super) load_ptr: String,
-    pub(super) family: SingleConsumerLoadRhsFamily,
-    pub(super) alias_class: SingleConsumerLoadAliasClass,
-    pub(super) same_block_store_before: bool,
-    pub(super) same_block_store_after: bool,
+pub(crate) struct SingleConsumerLoadRhsProof {
+    pub(crate) consumer_block_addr: u64,
+    pub(crate) consumer_op_seq: u32,
+    pub(crate) consumer_opcode: PcodeOpcode,
+    pub(crate) consumer_kind: DisallowedSingleConsumerConsumerKind,
+    pub(crate) load_ptr: String,
+    pub(crate) family: SingleConsumerLoadRhsFamily,
+    pub(crate) alias_class: SingleConsumerLoadAliasClass,
+    pub(crate) same_block_store_before: bool,
+    pub(crate) same_block_store_after: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum MissingMergeBindingRelation {
+pub(crate) enum MissingMergeBindingRelation {
     JoinMergeMissing,
     LoopHeaderMergeMissing,
     BackedgeMergeMissing,
@@ -228,18 +228,18 @@ pub(super) enum MissingMergeBindingRelation {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct MissingMergeBindingProof {
-    pub(super) merge_block: u64,
-    pub(super) predecessor_count: usize,
-    pub(super) incoming_value_count: usize,
-    pub(super) has_existing_binding: bool,
-    pub(super) consumer_kind: DisallowedSingleConsumerConsumerKind,
-    pub(super) rhs_kind: DisallowedSingleConsumerRhsKind,
-    pub(super) relation: MissingMergeBindingRelation,
+pub(crate) struct MissingMergeBindingProof {
+    pub(crate) merge_block: u64,
+    pub(crate) predecessor_count: usize,
+    pub(crate) incoming_value_count: usize,
+    pub(crate) has_existing_binding: bool,
+    pub(crate) consumer_kind: DisallowedSingleConsumerConsumerKind,
+    pub(crate) rhs_kind: DisallowedSingleConsumerRhsKind,
+    pub(crate) relation: MissingMergeBindingRelation,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum JoinMergeMissingReason {
+pub(crate) enum JoinMergeMissingReason {
     AllIncomingSame,
     MissingIncomingForSomePred,
     ConflictingIncomingValues,
@@ -251,22 +251,22 @@ pub(super) enum JoinMergeMissingReason {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct JoinMergeMissingProof {
-    pub(super) event_block: u64,
-    pub(super) merge_block: u64,
-    pub(super) predecessor_blocks: Vec<u64>,
-    pub(super) incoming_value_count: usize,
-    pub(super) incoming_values: Vec<String>,
-    pub(super) values_same_across_preds: bool,
-    pub(super) has_missing_incoming: bool,
-    pub(super) has_conflicting_incoming: bool,
-    pub(super) consumer_kind: DisallowedSingleConsumerConsumerKind,
-    pub(super) rhs_kind: DisallowedSingleConsumerRhsKind,
-    pub(super) reason: JoinMergeMissingReason,
+pub(crate) struct JoinMergeMissingProof {
+    pub(crate) event_block: u64,
+    pub(crate) merge_block: u64,
+    pub(crate) predecessor_blocks: Vec<u64>,
+    pub(crate) incoming_value_count: usize,
+    pub(crate) incoming_values: Vec<String>,
+    pub(crate) values_same_across_preds: bool,
+    pub(crate) has_missing_incoming: bool,
+    pub(crate) has_conflicting_incoming: bool,
+    pub(crate) consumer_kind: DisallowedSingleConsumerConsumerKind,
+    pub(crate) rhs_kind: DisallowedSingleConsumerRhsKind,
+    pub(crate) reason: JoinMergeMissingReason,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub(super) enum MergeBindingCandidateIncomingKind {
+pub(crate) enum MergeBindingCandidateIncomingKind {
     VarOrConst,
     Predicate,
     Arithmetic,
@@ -276,7 +276,7 @@ pub(super) enum MergeBindingCandidateIncomingKind {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum MergeBindingCandidateResult {
+pub(crate) enum MergeBindingCandidateResult {
     MissingIncomingSemanticsRequired,
     PhiLikeBindingCandidate,
     IncomingKindsUnsafe,
@@ -284,20 +284,20 @@ pub(super) enum MergeBindingCandidateResult {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct MergeBindingCandidateProof {
-    pub(super) merge_block: u64,
-    pub(super) predecessor_count: usize,
-    pub(super) missing_incoming_count: usize,
-    pub(super) conflicting_incoming_count: usize,
-    pub(super) incoming_value_kinds: Vec<MergeBindingCandidateIncomingKind>,
-    pub(super) consumer_kind: DisallowedSingleConsumerConsumerKind,
-    pub(super) rhs_kind: DisallowedSingleConsumerRhsKind,
-    pub(super) can_synthesize_phi_like_binding: bool,
-    pub(super) result: MergeBindingCandidateResult,
+pub(crate) struct MergeBindingCandidateProof {
+    pub(crate) merge_block: u64,
+    pub(crate) predecessor_count: usize,
+    pub(crate) missing_incoming_count: usize,
+    pub(crate) conflicting_incoming_count: usize,
+    pub(crate) incoming_value_kinds: Vec<MergeBindingCandidateIncomingKind>,
+    pub(crate) consumer_kind: DisallowedSingleConsumerConsumerKind,
+    pub(crate) rhs_kind: DisallowedSingleConsumerRhsKind,
+    pub(crate) can_synthesize_phi_like_binding: bool,
+    pub(crate) result: MergeBindingCandidateResult,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum MissingIncomingSemanticsResult {
+pub(crate) enum MissingIncomingSemanticsResult {
     DeadOnlyMissing,
     EntryDefaultRequired,
     PathSensitiveMissing,
@@ -307,23 +307,23 @@ pub(super) enum MissingIncomingSemanticsResult {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct MissingIncomingSemanticsProof {
-    pub(super) merge_block: u64,
-    pub(super) predecessor_count: usize,
-    pub(super) missing_pred_count: usize,
-    pub(super) defined_pred_count: usize,
-    pub(super) defined_incoming_values: Vec<String>,
-    pub(super) missing_pred_kinds: Vec<String>,
-    pub(super) missing_pred_has_prior_def: bool,
-    pub(super) missing_pred_prior_def_status: String,
-    pub(super) consumer_kind: DisallowedSingleConsumerConsumerKind,
-    pub(super) rhs_kind: DisallowedSingleConsumerRhsKind,
-    pub(super) candidate_semantics: String,
-    pub(super) result: MissingIncomingSemanticsResult,
+pub(crate) struct MissingIncomingSemanticsProof {
+    pub(crate) merge_block: u64,
+    pub(crate) predecessor_count: usize,
+    pub(crate) missing_pred_count: usize,
+    pub(crate) defined_pred_count: usize,
+    pub(crate) defined_incoming_values: Vec<String>,
+    pub(crate) missing_pred_kinds: Vec<String>,
+    pub(crate) missing_pred_has_prior_def: bool,
+    pub(crate) missing_pred_prior_def_status: String,
+    pub(crate) consumer_kind: DisallowedSingleConsumerConsumerKind,
+    pub(crate) rhs_kind: DisallowedSingleConsumerRhsKind,
+    pub(crate) candidate_semantics: String,
+    pub(crate) result: MissingIncomingSemanticsResult,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum ExplicitMergeBindingTrialReason {
+pub(crate) enum ExplicitMergeBindingTrialReason {
     PhiLikeBindingMaterialized,
     RejectedMissingIncoming,
     RejectedUnsafeIncomingKind,
@@ -335,7 +335,7 @@ pub(super) enum ExplicitMergeBindingTrialReason {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum MissingIncomingPredKind {
+pub(crate) enum MissingIncomingPredKind {
     MissingBecauseNoPriorDef,
     MissingBecausePriorDefDominates,
     MissingBecauseDeadPred,
@@ -346,20 +346,20 @@ pub(super) enum MissingIncomingPredKind {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct MissingIncomingPredProof {
-    pub(super) event_block: u64,
-    pub(super) merge_block: u64,
-    pub(super) pred_block: u64,
-    pub(super) pred_reaches_merge: bool,
-    pub(super) pred_has_definition: bool,
-    pub(super) pred_has_prior_definition: bool,
-    pub(super) prior_def_block: Option<u64>,
-    pub(super) prior_def_op_seq: Option<u32>,
-    pub(super) incoming_kind: MissingIncomingPredKind,
+pub(crate) struct MissingIncomingPredProof {
+    pub(crate) event_block: u64,
+    pub(crate) merge_block: u64,
+    pub(crate) pred_block: u64,
+    pub(crate) pred_reaches_merge: bool,
+    pub(crate) pred_has_definition: bool,
+    pub(crate) pred_has_prior_definition: bool,
+    pub(crate) prior_def_block: Option<u64>,
+    pub(crate) prior_def_op_seq: Option<u32>,
+    pub(crate) incoming_kind: MissingIncomingPredKind,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum MissingNoPriorDefReason {
+pub(crate) enum MissingNoPriorDefReason {
     TrueNoPriorDef,
     EntryDefaultCandidate,
     DeadPredNoDef,
@@ -371,22 +371,22 @@ pub(super) enum MissingNoPriorDefReason {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct MissingNoPriorDefProof {
-    pub(super) merge_block: u64,
-    pub(super) pred_block: u64,
-    pub(super) pred_reaches_merge: bool,
-    pub(super) pred_is_entry: bool,
-    pub(super) pred_is_dead: bool,
-    pub(super) output_space: u64,
-    pub(super) output_size: u32,
-    pub(super) consumer_kind: DisallowedSingleConsumerConsumerKind,
-    pub(super) rhs_kind: DisallowedSingleConsumerRhsKind,
-    pub(super) default_candidate: String,
-    pub(super) reason: MissingNoPriorDefReason,
+pub(crate) struct MissingNoPriorDefProof {
+    pub(crate) merge_block: u64,
+    pub(crate) pred_block: u64,
+    pub(crate) pred_reaches_merge: bool,
+    pub(crate) pred_is_entry: bool,
+    pub(crate) pred_is_dead: bool,
+    pub(crate) output_space: u64,
+    pub(crate) output_size: u32,
+    pub(crate) consumer_kind: DisallowedSingleConsumerConsumerKind,
+    pub(crate) rhs_kind: DisallowedSingleConsumerRhsKind,
+    pub(crate) default_candidate: String,
+    pub(crate) reason: MissingNoPriorDefReason,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum TempOnlyRepresentativeReason {
+pub(crate) enum TempOnlyRepresentativeReason {
     TempRepresentativeResidue,
     RootAttributedTemp,
     MergeCrossingTemp,
@@ -397,22 +397,22 @@ pub(super) enum TempOnlyRepresentativeReason {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct TempOnlyRepresentativeProof {
-    pub(super) merge_block: u64,
-    pub(super) pred_block: Option<u64>,
-    pub(super) consumer_kind: DisallowedSingleConsumerConsumerKind,
-    pub(super) rhs_kind: DisallowedSingleConsumerRhsKind,
-    pub(super) defining_event: String,
-    pub(super) materialization_event: String,
-    pub(super) has_real_storage: bool,
-    pub(super) has_later_use: bool,
-    pub(super) crosses_merge: bool,
-    pub(super) root_attributed: bool,
-    pub(super) reason: TempOnlyRepresentativeReason,
+pub(crate) struct TempOnlyRepresentativeProof {
+    pub(crate) merge_block: u64,
+    pub(crate) pred_block: Option<u64>,
+    pub(crate) consumer_kind: DisallowedSingleConsumerConsumerKind,
+    pub(crate) rhs_kind: DisallowedSingleConsumerRhsKind,
+    pub(crate) defining_event: String,
+    pub(crate) materialization_event: String,
+    pub(crate) has_real_storage: bool,
+    pub(crate) has_later_use: bool,
+    pub(crate) crosses_merge: bool,
+    pub(crate) root_attributed: bool,
+    pub(crate) reason: TempOnlyRepresentativeReason,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum StableRepresentativeOwnerReason {
+pub(crate) enum StableRepresentativeOwnerReason {
     RootRepresentativeStableRequired,
     TempLifecycleStableRequired,
     RealMergeStableRequired,
@@ -423,18 +423,18 @@ pub(super) enum StableRepresentativeOwnerReason {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct StableRepresentativeOwnerProof {
-    pub(super) consumer_kind: DisallowedSingleConsumerConsumerKind,
-    pub(super) rhs_kind: DisallowedSingleConsumerRhsKind,
-    pub(super) overlaps_representative_root_attribution: bool,
-    pub(super) overlaps_temp_only_lifecycle: bool,
-    pub(super) overlaps_real_missing_merge: bool,
-    pub(super) downstream_opcode: Option<PcodeOpcode>,
-    pub(super) reason: StableRepresentativeOwnerReason,
+pub(crate) struct StableRepresentativeOwnerProof {
+    pub(crate) consumer_kind: DisallowedSingleConsumerConsumerKind,
+    pub(crate) rhs_kind: DisallowedSingleConsumerRhsKind,
+    pub(crate) overlaps_representative_root_attribution: bool,
+    pub(crate) overlaps_temp_only_lifecycle: bool,
+    pub(crate) overlaps_real_missing_merge: bool,
+    pub(crate) downstream_opcode: Option<PcodeOpcode>,
+    pub(crate) reason: StableRepresentativeOwnerReason,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum AliasStableRequiredFamily {
+pub(crate) enum AliasStableRequiredFamily {
     LoadAddrStableRequired,
     StoreAddrStableRequired,
     OtherDataLoadLikeStable,
@@ -445,19 +445,19 @@ pub(super) enum AliasStableRequiredFamily {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct AliasStableRequiredProof {
-    pub(super) consumer_kind: DisallowedSingleConsumerConsumerKind,
-    pub(super) rhs_kind: DisallowedSingleConsumerRhsKind,
-    pub(super) downstream_opcode: Option<PcodeOpcode>,
-    pub(super) same_block_use_count: usize,
-    pub(super) rhs_has_load: bool,
-    pub(super) rhs_has_call: bool,
-    pub(super) requires_preserved_expr: bool,
-    pub(super) reason: AliasStableRequiredFamily,
+pub(crate) struct AliasStableRequiredProof {
+    pub(crate) consumer_kind: DisallowedSingleConsumerConsumerKind,
+    pub(crate) rhs_kind: DisallowedSingleConsumerRhsKind,
+    pub(crate) downstream_opcode: Option<PcodeOpcode>,
+    pub(crate) same_block_use_count: usize,
+    pub(crate) rhs_has_load: bool,
+    pub(crate) rhs_has_call: bool,
+    pub(crate) requires_preserved_expr: bool,
+    pub(crate) reason: AliasStableRequiredFamily,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum AddressStableRequiredFamily {
+pub(crate) enum AddressStableRequiredFamily {
     AddressExprHasLoad,
     AddressExprHasCall,
     AddressExprPureArithmetic,
@@ -470,7 +470,7 @@ pub(super) enum AddressStableRequiredFamily {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum AddressStableRequiredBaseKind {
+pub(crate) enum AddressStableRequiredBaseKind {
     StackRelative,
     GlobalRelative,
     RegisterBase,
@@ -478,7 +478,7 @@ pub(super) enum AddressStableRequiredBaseKind {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum AddressStableRequiredExprKind {
+pub(crate) enum AddressStableRequiredExprKind {
     PureArithmetic,
     HasLoad,
     HasCall,
@@ -486,22 +486,22 @@ pub(super) enum AddressStableRequiredExprKind {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct AddressStableRequiredProof {
-    pub(super) consumer_kind: DisallowedSingleConsumerConsumerKind,
-    pub(super) rhs_kind: DisallowedSingleConsumerRhsKind,
-    pub(super) downstream_opcode: Option<PcodeOpcode>,
-    pub(super) same_block_use_count: usize,
-    pub(super) rhs_has_load: bool,
-    pub(super) rhs_has_call: bool,
-    pub(super) address_base_kind: AddressStableRequiredBaseKind,
-    pub(super) address_expr_kind: AddressStableRequiredExprKind,
-    pub(super) has_intervening_store: bool,
-    pub(super) has_intervening_call: bool,
-    pub(super) reason: AddressStableRequiredFamily,
+pub(crate) struct AddressStableRequiredProof {
+    pub(crate) consumer_kind: DisallowedSingleConsumerConsumerKind,
+    pub(crate) rhs_kind: DisallowedSingleConsumerRhsKind,
+    pub(crate) downstream_opcode: Option<PcodeOpcode>,
+    pub(crate) same_block_use_count: usize,
+    pub(crate) rhs_has_load: bool,
+    pub(crate) rhs_has_call: bool,
+    pub(crate) address_base_kind: AddressStableRequiredBaseKind,
+    pub(crate) address_expr_kind: AddressStableRequiredExprKind,
+    pub(crate) has_intervening_store: bool,
+    pub(crate) has_intervening_call: bool,
+    pub(crate) reason: AddressStableRequiredFamily,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum StackAddressStabilityReason {
+pub(crate) enum StackAddressStabilityReason {
     StackAddrSingleUse,
     StackAddrMultipleUse,
     StackAddrEscapes,
@@ -513,7 +513,7 @@ pub(super) enum StackAddressStabilityReason {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum StackAddressBaseReg {
+pub(crate) enum StackAddressBaseReg {
     Rsp,
     Rbp,
     Esp,
@@ -522,21 +522,21 @@ pub(super) enum StackAddressBaseReg {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct StackAddressStabilityProof {
-    pub(super) consumer_kind: DisallowedSingleConsumerConsumerKind,
-    pub(super) downstream_opcode: Option<PcodeOpcode>,
-    pub(super) base_reg: StackAddressBaseReg,
-    pub(super) offset: Option<i64>,
-    pub(super) same_block_use_count: usize,
-    pub(super) crosses_call: bool,
-    pub(super) crosses_store: bool,
-    pub(super) rsp_redefined_before_use: bool,
-    pub(super) frame_relative_candidate: bool,
-    pub(super) reason: StackAddressStabilityReason,
+pub(crate) struct StackAddressStabilityProof {
+    pub(crate) consumer_kind: DisallowedSingleConsumerConsumerKind,
+    pub(crate) downstream_opcode: Option<PcodeOpcode>,
+    pub(crate) base_reg: StackAddressBaseReg,
+    pub(crate) offset: Option<i64>,
+    pub(crate) same_block_use_count: usize,
+    pub(crate) crosses_call: bool,
+    pub(crate) crosses_store: bool,
+    pub(crate) rsp_redefined_before_use: bool,
+    pub(crate) frame_relative_candidate: bool,
+    pub(crate) reason: StackAddressStabilityReason,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum StackAddrFrameStableTrialReason {
+pub(crate) enum StackAddrFrameStableTrialReason {
     StackAddrFrameStableReplaced,
     RejectedNonFrameStable,
     RejectedMultipleUse,
@@ -547,7 +547,7 @@ pub(super) enum StackAddrFrameStableTrialReason {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum DominatingPriorDefProofResult {
+pub(crate) enum DominatingPriorDefProofResult {
     PriorDefStableToMerge,
     PriorDefRedefinedBeforeMerge,
     PriorDefDoesNotDominateMerge,
@@ -557,23 +557,23 @@ pub(super) enum DominatingPriorDefProofResult {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct DominatingPriorDefIncomingProof {
-    pub(super) merge_block: u64,
-    pub(super) pred_block: u64,
-    pub(super) prior_def_block: u64,
-    pub(super) prior_def_op_seq: u32,
-    pub(super) prior_def_rhs: String,
-    pub(super) prior_def_dominates_pred: bool,
-    pub(super) prior_def_dominates_merge: bool,
-    pub(super) redefined_between_prior_and_merge: bool,
-    pub(super) redefined_on_pred_path: bool,
-    pub(super) consumer_kind: DisallowedSingleConsumerConsumerKind,
-    pub(super) rhs_kind: DisallowedSingleConsumerRhsKind,
-    pub(super) proof_result: DominatingPriorDefProofResult,
+pub(crate) struct DominatingPriorDefIncomingProof {
+    pub(crate) merge_block: u64,
+    pub(crate) pred_block: u64,
+    pub(crate) prior_def_block: u64,
+    pub(crate) prior_def_op_seq: u32,
+    pub(crate) prior_def_rhs: String,
+    pub(crate) prior_def_dominates_pred: bool,
+    pub(crate) prior_def_dominates_merge: bool,
+    pub(crate) redefined_between_prior_and_merge: bool,
+    pub(crate) redefined_on_pred_path: bool,
+    pub(crate) consumer_kind: DisallowedSingleConsumerConsumerKind,
+    pub(crate) rhs_kind: DisallowedSingleConsumerRhsKind,
+    pub(crate) proof_result: DominatingPriorDefProofResult,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum UnknownMissingMergeAttributionReason {
+pub(crate) enum UnknownMissingMergeAttributionReason {
     EntryBlockAttribution,
     SyntheticRootBlock,
     MissingCfgPredecessors,
@@ -584,20 +584,20 @@ pub(super) enum UnknownMissingMergeAttributionReason {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct UnknownMissingMergeAttributionProof {
-    pub(super) merge_block: u64,
-    pub(super) function_entry_block: u64,
-    pub(super) merge_block_is_entry: bool,
-    pub(super) predecessor_count: usize,
-    pub(super) successor_count: usize,
-    pub(super) incoming_value_count: usize,
-    pub(super) consumer_kind: DisallowedSingleConsumerConsumerKind,
-    pub(super) rhs_kind: DisallowedSingleConsumerRhsKind,
-    pub(super) reason: UnknownMissingMergeAttributionReason,
+pub(crate) struct UnknownMissingMergeAttributionProof {
+    pub(crate) merge_block: u64,
+    pub(crate) function_entry_block: u64,
+    pub(crate) merge_block_is_entry: bool,
+    pub(crate) predecessor_count: usize,
+    pub(crate) successor_count: usize,
+    pub(crate) incoming_value_count: usize,
+    pub(crate) consumer_kind: DisallowedSingleConsumerConsumerKind,
+    pub(crate) rhs_kind: DisallowedSingleConsumerRhsKind,
+    pub(crate) reason: UnknownMissingMergeAttributionReason,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum SyntheticRootMergeAttributionReason {
+pub(crate) enum SyntheticRootMergeAttributionReason {
     EntryBlockAsMergeFallback,
     NoNearestJoinFound,
     ForwardJoinExistsButNotSelected,
@@ -608,26 +608,26 @@ pub(super) enum SyntheticRootMergeAttributionReason {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct SyntheticRootMergeAttributionProof {
-    pub(super) event_block: u64,
-    pub(super) entry_block: u64,
-    pub(super) selected_merge_block: u64,
-    pub(super) selected_is_entry: bool,
-    pub(super) event_block_is_entry: bool,
-    pub(super) event_block_dominates: bool,
-    pub(super) nearest_join_block: Option<u64>,
-    pub(super) nearest_join_distance: Option<usize>,
-    pub(super) nearest_postdom_join: Option<u64>,
-    pub(super) postdom_distance: Option<usize>,
-    pub(super) block_successor_count: usize,
-    pub(super) entry_successor_count: usize,
-    pub(super) consumer_kind: DisallowedSingleConsumerConsumerKind,
-    pub(super) rhs_kind: DisallowedSingleConsumerRhsKind,
-    pub(super) reason: SyntheticRootMergeAttributionReason,
+pub(crate) struct SyntheticRootMergeAttributionProof {
+    pub(crate) event_block: u64,
+    pub(crate) entry_block: u64,
+    pub(crate) selected_merge_block: u64,
+    pub(crate) selected_is_entry: bool,
+    pub(crate) event_block_is_entry: bool,
+    pub(crate) event_block_dominates: bool,
+    pub(crate) nearest_join_block: Option<u64>,
+    pub(crate) nearest_join_distance: Option<usize>,
+    pub(crate) nearest_postdom_join: Option<u64>,
+    pub(crate) postdom_distance: Option<usize>,
+    pub(crate) block_successor_count: usize,
+    pub(crate) entry_successor_count: usize,
+    pub(crate) consumer_kind: DisallowedSingleConsumerConsumerKind,
+    pub(crate) rhs_kind: DisallowedSingleConsumerRhsKind,
+    pub(crate) reason: SyntheticRootMergeAttributionReason,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum ForwardJoinNotSelectedRejectedReason {
+pub(crate) enum ForwardJoinNotSelectedRejectedReason {
     JoinDoesNotPostdominate,
     JoinHasMultipleAmbiguousPreds,
     JoinCrossesLoopBoundary,
@@ -639,22 +639,22 @@ pub(super) enum ForwardJoinNotSelectedRejectedReason {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct ForwardJoinNotSelectedProof {
-    pub(super) event_block: u64,
-    pub(super) selected_merge_block: u64,
-    pub(super) forward_join_block: u64,
-    pub(super) forward_join_distance: Option<usize>,
-    pub(super) forward_join_predecessor_count: usize,
-    pub(super) forward_join_successor_count: usize,
-    pub(super) event_reaches_forward_join: bool,
-    pub(super) forward_join_postdominates_event: bool,
-    pub(super) consumer_kind: DisallowedSingleConsumerConsumerKind,
-    pub(super) rhs_kind: DisallowedSingleConsumerRhsKind,
-    pub(super) rejected_reason: ForwardJoinNotSelectedRejectedReason,
+pub(crate) struct ForwardJoinNotSelectedProof {
+    pub(crate) event_block: u64,
+    pub(crate) selected_merge_block: u64,
+    pub(crate) forward_join_block: u64,
+    pub(crate) forward_join_distance: Option<usize>,
+    pub(crate) forward_join_predecessor_count: usize,
+    pub(crate) forward_join_successor_count: usize,
+    pub(crate) event_reaches_forward_join: bool,
+    pub(crate) forward_join_postdominates_event: bool,
+    pub(crate) consumer_kind: DisallowedSingleConsumerConsumerKind,
+    pub(crate) rhs_kind: DisallowedSingleConsumerRhsKind,
+    pub(crate) rejected_reason: ForwardJoinNotSelectedRejectedReason,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum AmbiguousJoinPredReason {
+pub(crate) enum AmbiguousJoinPredReason {
     AllIncomingSame,
     MissingIncomingForSomePred,
     ConflictingIncomingValues,
@@ -665,24 +665,24 @@ pub(super) enum AmbiguousJoinPredReason {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct AmbiguousJoinPredProof {
-    pub(super) event_block: u64,
-    pub(super) forward_join_block: u64,
-    pub(super) predecessor_blocks: Vec<u64>,
-    pub(super) incoming_value_count: usize,
-    pub(super) incoming_values: Vec<String>,
-    pub(super) event_pred_index: Option<usize>,
-    pub(super) event_pred_value: Option<String>,
-    pub(super) values_same_across_preds: bool,
-    pub(super) has_missing_incoming: bool,
-    pub(super) has_conflicting_incoming: bool,
-    pub(super) consumer_kind: DisallowedSingleConsumerConsumerKind,
-    pub(super) rhs_kind: DisallowedSingleConsumerRhsKind,
-    pub(super) reason: AmbiguousJoinPredReason,
+pub(crate) struct AmbiguousJoinPredProof {
+    pub(crate) event_block: u64,
+    pub(crate) forward_join_block: u64,
+    pub(crate) predecessor_blocks: Vec<u64>,
+    pub(crate) incoming_value_count: usize,
+    pub(crate) incoming_values: Vec<String>,
+    pub(crate) event_pred_index: Option<usize>,
+    pub(crate) event_pred_value: Option<String>,
+    pub(crate) values_same_across_preds: bool,
+    pub(crate) has_missing_incoming: bool,
+    pub(crate) has_conflicting_incoming: bool,
+    pub(crate) consumer_kind: DisallowedSingleConsumerConsumerKind,
+    pub(crate) rhs_kind: DisallowedSingleConsumerRhsKind,
+    pub(crate) reason: AmbiguousJoinPredReason,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum UnknownConsumerKindReason {
+pub(crate) enum UnknownConsumerKindReason {
     ConsumerOpcodeUnhandled,
     ConsumerHasMultipleMatchedInputs,
     ConsumerInputRoleUnknown,
@@ -694,17 +694,17 @@ pub(super) enum UnknownConsumerKindReason {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct UnknownConsumerKindProof {
-    pub(super) consumer_block_addr: u64,
-    pub(super) consumer_op_seq: u32,
-    pub(super) consumer_opcode: PcodeOpcode,
-    pub(super) matched_input_indices: Vec<usize>,
-    pub(super) rhs_kind: DisallowedSingleConsumerRhsKind,
-    pub(super) reason: UnknownConsumerKindReason,
+pub(crate) struct UnknownConsumerKindProof {
+    pub(crate) consumer_block_addr: u64,
+    pub(crate) consumer_op_seq: u32,
+    pub(crate) consumer_opcode: PcodeOpcode,
+    pub(crate) matched_input_indices: Vec<usize>,
+    pub(crate) rhs_kind: DisallowedSingleConsumerRhsKind,
+    pub(crate) reason: UnknownConsumerKindReason,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum PopCountResultUseFamily {
+pub(crate) enum PopCountResultUseFamily {
     PopCountFeedsPredicate,
     PopCountFeedsArithmetic,
     PopCountFeedsCompareZero,
@@ -715,20 +715,20 @@ pub(super) enum PopCountResultUseFamily {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct PopCountConsumerProof {
-    pub(super) consumer_op_seq: u32,
-    pub(super) input_width: u32,
-    pub(super) output_width: Option<u32>,
-    pub(super) rhs_kind: DisallowedSingleConsumerRhsKind,
-    pub(super) rhs_low_cost: bool,
-    pub(super) rhs_has_call: bool,
-    pub(super) rhs_has_load: bool,
-    pub(super) popcount_result_used_by: PopCountResultUseFamily,
-    pub(super) downstream_consumer_opcode: Option<PcodeOpcode>,
+pub(crate) struct PopCountConsumerProof {
+    pub(crate) consumer_op_seq: u32,
+    pub(crate) input_width: u32,
+    pub(crate) output_width: Option<u32>,
+    pub(crate) rhs_kind: DisallowedSingleConsumerRhsKind,
+    pub(crate) rhs_low_cost: bool,
+    pub(crate) rhs_has_call: bool,
+    pub(crate) rhs_has_load: bool,
+    pub(crate) popcount_result_used_by: PopCountResultUseFamily,
+    pub(crate) downstream_consumer_opcode: Option<PcodeOpcode>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum PopCountIntAndMaskKind {
+pub(crate) enum PopCountIntAndMaskKind {
     AndOne,
     AndByteMask,
     AndPowerOfTwoMinusOne,
@@ -737,7 +737,7 @@ pub(super) enum PopCountIntAndMaskKind {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum PopCountIntAndDownstreamUseFamily {
+pub(crate) enum PopCountIntAndDownstreamUseFamily {
     FeedsPredicate,
     FeedsCompareZero,
     FeedsCompareConst,
@@ -747,27 +747,27 @@ pub(super) enum PopCountIntAndDownstreamUseFamily {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct PopCountIntAndChainProof {
-    pub(super) popcount_consumer_op_seq: u32,
-    pub(super) intand_op_seq: u32,
-    pub(super) popcount_result: String,
-    pub(super) intand_mask: Option<u64>,
-    pub(super) intand_mask_kind: PopCountIntAndMaskKind,
-    pub(super) intand_result_consumer: PopCountIntAndDownstreamUseFamily,
-    pub(super) downstream_consumer_opcode: Option<PcodeOpcode>,
-    pub(super) chain_low_cost: bool,
-    pub(super) chain_side_effect_free: bool,
+pub(crate) struct PopCountIntAndChainProof {
+    pub(crate) popcount_consumer_op_seq: u32,
+    pub(crate) intand_op_seq: u32,
+    pub(crate) popcount_result: String,
+    pub(crate) intand_mask: Option<u64>,
+    pub(crate) intand_mask_kind: PopCountIntAndMaskKind,
+    pub(crate) intand_result_consumer: PopCountIntAndDownstreamUseFamily,
+    pub(crate) downstream_consumer_opcode: Option<PcodeOpcode>,
+    pub(crate) chain_low_cost: bool,
+    pub(crate) chain_side_effect_free: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum ParityChainRole {
+pub(crate) enum ParityChainRole {
     PopCountInput,
     PopCountResult,
     IntAndResult,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum ParityChainKeepReason {
+pub(crate) enum ParityChainKeepReason {
     PopCountHasMultipleConsumers,
     IntAndMaskNotOne,
     IntAndHasMultipleConsumers,
@@ -780,7 +780,7 @@ pub(super) enum ParityChainKeepReason {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum ParityChainConsumerContext {
+pub(crate) enum ParityChainConsumerContext {
     CompareZero,
     CompareNonZero,
     CompareOne,
@@ -788,19 +788,19 @@ pub(super) enum ParityChainConsumerContext {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct ParityChainProof {
-    pub(super) role: ParityChainRole,
-    pub(super) popcount_op_seq: u32,
-    pub(super) intand_op_seq: u32,
-    pub(super) compare_op_seq: u32,
-    pub(super) compare_opcode: PcodeOpcode,
-    pub(super) compare_const: u64,
-    pub(super) chain_low_cost: bool,
-    pub(super) chain_side_effect_free: bool,
+pub(crate) struct ParityChainProof {
+    pub(crate) role: ParityChainRole,
+    pub(crate) popcount_op_seq: u32,
+    pub(crate) intand_op_seq: u32,
+    pub(crate) compare_op_seq: u32,
+    pub(crate) compare_opcode: PcodeOpcode,
+    pub(crate) compare_const: u64,
+    pub(crate) chain_low_cost: bool,
+    pub(crate) chain_side_effect_free: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum SingleConsumerPredicateFamily {
+pub(crate) enum SingleConsumerPredicateFamily {
     DirectFlag,
     NegatedFlag,
     CompareZero,
@@ -812,22 +812,22 @@ pub(super) enum SingleConsumerPredicateFamily {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct SingleConsumerPredicateProof {
-    pub(super) consumer_block_addr: u64,
-    pub(super) consumer_op_seq: u32,
-    pub(super) consumer_opcode: PcodeOpcode,
-    pub(super) rhs_kind: DisallowedSingleConsumerRhsKind,
-    pub(super) predicate_family: SingleConsumerPredicateFamily,
-    pub(super) guard_family: SingleConsumerPredicateFamily,
-    pub(super) same_guard_as_consumer: bool,
-    pub(super) requires_stable_representative: bool,
-    pub(super) low_cost_if_predicate: bool,
-    pub(super) has_call: bool,
-    pub(super) has_load: bool,
+pub(crate) struct SingleConsumerPredicateProof {
+    pub(crate) consumer_block_addr: u64,
+    pub(crate) consumer_op_seq: u32,
+    pub(crate) consumer_opcode: PcodeOpcode,
+    pub(crate) rhs_kind: DisallowedSingleConsumerRhsKind,
+    pub(crate) predicate_family: SingleConsumerPredicateFamily,
+    pub(crate) guard_family: SingleConsumerPredicateFamily,
+    pub(crate) same_guard_as_consumer: bool,
+    pub(crate) requires_stable_representative: bool,
+    pub(crate) low_cost_if_predicate: bool,
+    pub(crate) has_call: bool,
+    pub(crate) has_load: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum ArithmeticPredicateShape {
+pub(crate) enum ArithmeticPredicateShape {
     LowBitAndOne,
     PowerOfTwoMask,
     NonPowerOfTwoMask,
@@ -836,7 +836,7 @@ pub(super) enum ArithmeticPredicateShape {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum ArithmeticPredicateStableReason {
+pub(crate) enum ArithmeticPredicateStableReason {
     PredicateSensitive,
     ArithmeticMask,
     ConsumerCompare,
@@ -844,18 +844,18 @@ pub(super) enum ArithmeticPredicateStableReason {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct ArithmeticPredicateProof {
-    pub(super) consumer_guard: SingleConsumerPredicateFamily,
-    pub(super) mask_kind: ArithmeticPredicateShape,
-    pub(super) mask_value: Option<u64>,
-    pub(super) boolean_width: bool,
-    pub(super) low_cost: bool,
-    pub(super) stable_required: bool,
-    pub(super) stable_required_reason: Option<ArithmeticPredicateStableReason>,
+pub(crate) struct ArithmeticPredicateProof {
+    pub(crate) consumer_guard: SingleConsumerPredicateFamily,
+    pub(crate) mask_kind: ArithmeticPredicateShape,
+    pub(crate) mask_value: Option<u64>,
+    pub(crate) boolean_width: bool,
+    pub(crate) low_cost: bool,
+    pub(crate) stable_required: bool,
+    pub(crate) stable_required_reason: Option<ArithmeticPredicateStableReason>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum LowBitMaskPredicateFamily {
+pub(crate) enum LowBitMaskPredicateFamily {
     BooleanFlagMask,
     IntegerBitTest,
     MaskFromCompareResult,
@@ -864,7 +864,7 @@ pub(super) enum LowBitMaskPredicateFamily {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum LowBitMaskInputOriginKind {
+pub(crate) enum LowBitMaskInputOriginKind {
     Compare,
     BoolOp,
     Arithmetic,
@@ -874,18 +874,18 @@ pub(super) enum LowBitMaskInputOriginKind {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct LowBitMaskPredicateProof {
-    pub(super) family: LowBitMaskPredicateFamily,
-    pub(super) mask_input: String,
-    pub(super) consumer_guard: SingleConsumerPredicateFamily,
-    pub(super) feeds_only_predicate: bool,
-    pub(super) input_is_boolean_like: bool,
-    pub(super) input_origin_kind: LowBitMaskInputOriginKind,
-    pub(super) stable_required_reason: Option<ArithmeticPredicateStableReason>,
+pub(crate) struct LowBitMaskPredicateProof {
+    pub(crate) family: LowBitMaskPredicateFamily,
+    pub(crate) mask_input: String,
+    pub(crate) consumer_guard: SingleConsumerPredicateFamily,
+    pub(crate) feeds_only_predicate: bool,
+    pub(crate) input_is_boolean_like: bool,
+    pub(crate) input_origin_kind: LowBitMaskInputOriginKind,
+    pub(crate) stable_required_reason: Option<ArithmeticPredicateStableReason>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum MalformedDefUseWindowRelation {
+pub(crate) enum MalformedDefUseWindowRelation {
     DefAfterTerminator,
     ConsumerBeforeDef,
     ConsumerAfterTerminator,
@@ -898,19 +898,19 @@ pub(super) enum MalformedDefUseWindowRelation {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) struct MalformedDefUseWindowDetail {
-    pub(super) relation: MalformedDefUseWindowRelation,
-    pub(super) def_op_idx: usize,
-    pub(super) terminator_idx: Option<usize>,
-    pub(super) consumer_count: usize,
-    pub(super) first_consumer_block: Option<u64>,
-    pub(super) first_consumer_idx: Option<usize>,
-    pub(super) first_consumer_op_seq: Option<u32>,
-    pub(super) rhs_kind: NoConsumerSuppressionRhsKind,
+pub(crate) struct MalformedDefUseWindowDetail {
+    pub(crate) relation: MalformedDefUseWindowRelation,
+    pub(crate) def_op_idx: usize,
+    pub(crate) terminator_idx: Option<usize>,
+    pub(crate) consumer_count: usize,
+    pub(crate) first_consumer_block: Option<u64>,
+    pub(crate) first_consumer_idx: Option<usize>,
+    pub(crate) first_consumer_op_seq: Option<u32>,
+    pub(crate) rhs_kind: NoConsumerSuppressionRhsKind,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum CrossBlockConsumerRelation {
+pub(crate) enum CrossBlockConsumerRelation {
     SuccessorBlock,
     JoinBlock,
     LoopBackedge,
@@ -921,33 +921,33 @@ pub(super) enum CrossBlockConsumerRelation {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) struct CrossBlockConsumerProvenance {
-    pub(super) relation: CrossBlockConsumerRelation,
-    pub(super) consumer_opcode: Option<PcodeOpcode>,
-    pub(super) consumer_is_multiequal: bool,
-    pub(super) immediate_successor: bool,
-    pub(super) consumer_is_join: bool,
-    pub(super) redefined_before_consumer: bool,
-    pub(super) def_successor_count: usize,
-    pub(super) consumer_predecessor_count: usize,
+pub(crate) struct CrossBlockConsumerProvenance {
+    pub(crate) relation: CrossBlockConsumerRelation,
+    pub(crate) consumer_opcode: Option<PcodeOpcode>,
+    pub(crate) consumer_is_multiequal: bool,
+    pub(crate) immediate_successor: bool,
+    pub(crate) consumer_is_join: bool,
+    pub(crate) redefined_before_consumer: bool,
+    pub(crate) def_successor_count: usize,
+    pub(crate) consumer_predecessor_count: usize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) struct CrossBlockReplacementProof {
-    pub(super) relation: CrossBlockConsumerRelation,
-    pub(super) dominates_consumer: bool,
-    pub(super) rhs_low_cost: bool,
-    pub(super) preserve_materialization: bool,
-    pub(super) no_redefinition_before_consumer: bool,
-    pub(super) merge_phi: bool,
-    pub(super) def_successor_count: usize,
-    pub(super) consumer_predecessor_count: usize,
-    pub(super) narrow_candidate: bool,
-    pub(super) consumer_opcode: Option<PcodeOpcode>,
+pub(crate) struct CrossBlockReplacementProof {
+    pub(crate) relation: CrossBlockConsumerRelation,
+    pub(crate) dominates_consumer: bool,
+    pub(crate) rhs_low_cost: bool,
+    pub(crate) preserve_materialization: bool,
+    pub(crate) no_redefinition_before_consumer: bool,
+    pub(crate) merge_phi: bool,
+    pub(crate) def_successor_count: usize,
+    pub(crate) consumer_predecessor_count: usize,
+    pub(crate) narrow_candidate: bool,
+    pub(crate) consumer_opcode: Option<PcodeOpcode>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum CrossBlockRedefinitionRelation {
+pub(crate) enum CrossBlockRedefinitionRelation {
     RedefinedInDefBlockAfterDef,
     RedefinedOnEdge,
     RedefinedInConsumerBlockBeforeUse,
@@ -958,45 +958,45 @@ pub(super) enum CrossBlockRedefinitionRelation {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) struct CrossBlockRedefinitionDetail {
-    pub(super) relation: CrossBlockRedefinitionRelation,
-    pub(super) redef_block_addr: u64,
-    pub(super) redef_op_idx: usize,
-    pub(super) redef_op_seq: u32,
-    pub(super) redef_opcode: PcodeOpcode,
-    pub(super) redef_rhs_kind: SameBlockOverwriteRhsKind,
-    pub(super) overwrite_shape: SameBlockOverwriteShapeKind,
-    pub(super) def_to_redef_gap: usize,
-    pub(super) redef_to_terminator_gap: Option<usize>,
+pub(crate) struct CrossBlockRedefinitionDetail {
+    pub(crate) relation: CrossBlockRedefinitionRelation,
+    pub(crate) redef_block_addr: u64,
+    pub(crate) redef_op_idx: usize,
+    pub(crate) redef_op_seq: u32,
+    pub(crate) redef_opcode: PcodeOpcode,
+    pub(crate) redef_rhs_kind: SameBlockOverwriteRhsKind,
+    pub(crate) overwrite_shape: SameBlockOverwriteShapeKind,
+    pub(crate) def_to_redef_gap: usize,
+    pub(crate) redef_to_terminator_gap: Option<usize>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct CopyOverwriteRestartProof {
-    pub(super) consumer_relation: CrossBlockConsumerRelation,
-    pub(super) redef_op_seq: u32,
-    pub(super) redef_rhs: String,
-    pub(super) same_value: bool,
-    pub(super) redef_dominates_consumer: bool,
-    pub(super) old_def_has_pre_redef_use: bool,
-    pub(super) consumer_block_addr: u64,
-    pub(super) consumer_op_seq: u32,
+pub(crate) struct CopyOverwriteRestartProof {
+    pub(crate) consumer_relation: CrossBlockConsumerRelation,
+    pub(crate) redef_op_seq: u32,
+    pub(crate) redef_rhs: String,
+    pub(crate) same_value: bool,
+    pub(crate) redef_dominates_consumer: bool,
+    pub(crate) old_def_has_pre_redef_use: bool,
+    pub(crate) consumer_block_addr: u64,
+    pub(crate) consumer_op_seq: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct PredicateOverwriteRefreshProof {
-    pub(super) consumer_relation: CrossBlockConsumerRelation,
-    pub(super) redef_op_seq: u32,
-    pub(super) redef_rhs: String,
-    pub(super) predicate_consumer_block_addr: u64,
-    pub(super) predicate_consumer_op_seq: u32,
-    pub(super) predicate_rhs: String,
-    pub(super) same_guard_family: bool,
-    pub(super) old_def_has_pre_redef_use: bool,
-    pub(super) redef_dominates_predicate: bool,
+pub(crate) struct PredicateOverwriteRefreshProof {
+    pub(crate) consumer_relation: CrossBlockConsumerRelation,
+    pub(crate) redef_op_seq: u32,
+    pub(crate) redef_rhs: String,
+    pub(crate) predicate_consumer_block_addr: u64,
+    pub(crate) predicate_consumer_op_seq: u32,
+    pub(crate) predicate_rhs: String,
+    pub(crate) same_guard_family: bool,
+    pub(crate) old_def_has_pre_redef_use: bool,
+    pub(crate) redef_dominates_predicate: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum LoopCarriedValueKind {
+pub(crate) enum LoopCarriedValueKind {
     BooleanFlag,
     CounterIncrement,
     PointerAdvance,
@@ -1005,7 +1005,7 @@ pub(super) enum LoopCarriedValueKind {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum LoopBooleanGuardFamily {
+pub(crate) enum LoopBooleanGuardFamily {
     DirectFlag,
     NegatedFlag,
     EqZero,
@@ -1014,40 +1014,40 @@ pub(super) enum LoopBooleanGuardFamily {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum LoopBoundaryBindingFamily {
+pub(crate) enum LoopBoundaryBindingFamily {
     BoolNegate,
     IntNotEqual,
     OtherBooleanFlag,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct LoopCarriedOverwriteProvenance {
-    pub(super) loop_header: u64,
-    pub(super) backedge_block: u64,
-    pub(super) consumer_block: u64,
-    pub(super) consumer_op_seq: u32,
-    pub(super) redef_op_seq: u32,
-    pub(super) redef_rhs: String,
-    pub(super) has_multiequal: bool,
-    pub(super) phi_input_count: usize,
-    pub(super) induction_like: bool,
-    pub(super) carried_value_kind: LoopCarriedValueKind,
+pub(crate) struct LoopCarriedOverwriteProvenance {
+    pub(crate) loop_header: u64,
+    pub(crate) backedge_block: u64,
+    pub(crate) consumer_block: u64,
+    pub(crate) consumer_op_seq: u32,
+    pub(crate) redef_op_seq: u32,
+    pub(crate) redef_rhs: String,
+    pub(crate) has_multiequal: bool,
+    pub(crate) phi_input_count: usize,
+    pub(crate) induction_like: bool,
+    pub(crate) carried_value_kind: LoopCarriedValueKind,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct LoopBooleanFlagProof {
-    pub(super) consumer_opcode: PcodeOpcode,
-    pub(super) exit_edge: Option<u64>,
-    pub(super) backedge_edge: Option<u64>,
-    pub(super) guard_family: LoopBooleanGuardFamily,
-    pub(super) same_guard_as_exit: bool,
-    pub(super) old_def_has_pre_redef_use: bool,
-    pub(super) redef_dominates_backedge: bool,
-    pub(super) consumer_is_loop_header_predicate: bool,
+pub(crate) struct LoopBooleanFlagProof {
+    pub(crate) consumer_opcode: PcodeOpcode,
+    pub(crate) exit_edge: Option<u64>,
+    pub(crate) backedge_edge: Option<u64>,
+    pub(crate) guard_family: LoopBooleanGuardFamily,
+    pub(crate) same_guard_as_exit: bool,
+    pub(crate) old_def_has_pre_redef_use: bool,
+    pub(crate) redef_dominates_backedge: bool,
+    pub(crate) consumer_is_loop_header_predicate: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum LoopGuardRefreshDominanceReason {
+pub(crate) enum LoopGuardRefreshDominanceReason {
     ProvedBySingleBackedge,
     RedefAfterBackedgeBranch,
     RedefInNonBackedgeBlock,
@@ -1058,105 +1058,105 @@ pub(super) enum LoopGuardRefreshDominanceReason {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct LoopGuardRefreshDominanceProof {
-    pub(super) redef_block: u64,
-    pub(super) backedge_block: u64,
-    pub(super) redef_before_backedge_branch: bool,
-    pub(super) all_backedge_paths_covered: bool,
-    pub(super) header_predicate_uses_redef: bool,
-    pub(super) reason: LoopGuardRefreshDominanceReason,
+pub(crate) struct LoopGuardRefreshDominanceProof {
+    pub(crate) redef_block: u64,
+    pub(crate) backedge_block: u64,
+    pub(crate) redef_before_backedge_branch: bool,
+    pub(crate) all_backedge_paths_covered: bool,
+    pub(crate) header_predicate_uses_redef: bool,
+    pub(crate) reason: LoopGuardRefreshDominanceReason,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct LoopBoundaryBindingCorrelation {
-    pub(super) loop_header: u64,
-    pub(super) family: LoopBoundaryBindingFamily,
-    pub(super) missing_merge_binding: bool,
-    pub(super) stable_representative_required: bool,
-    pub(super) merge_block: Option<u64>,
-    pub(super) candidate_binding: String,
-    pub(super) existing_binding: Option<String>,
+pub(crate) struct LoopBoundaryBindingCorrelation {
+    pub(crate) loop_header: u64,
+    pub(crate) family: LoopBoundaryBindingFamily,
+    pub(crate) missing_merge_binding: bool,
+    pub(crate) stable_representative_required: bool,
+    pub(crate) merge_block: Option<u64>,
+    pub(crate) candidate_binding: String,
+    pub(crate) existing_binding: Option<String>,
 }
 
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub(in crate::nir::builder) struct MaterializeOwnerRepartition {
-    pub(super) alias_unsafe_hazard_kind: BTreeMap<String, usize>,
-    pub(super) disallowed_single_consumer_reason: BTreeMap<String, usize>,
-    pub(super) disallowed_single_consumer_consumer_kind: BTreeMap<String, usize>,
-    pub(super) disallowed_single_consumer_rhs_kind: BTreeMap<String, usize>,
-    pub(super) single_consumer_call_rhs_family: BTreeMap<String, usize>,
-    pub(super) single_consumer_call_rhs_effect_source: BTreeMap<String, usize>,
-    pub(super) single_consumer_call_rhs_consumer_kind: BTreeMap<String, usize>,
-    pub(super) single_consumer_call_rhs_downstream_opcode: BTreeMap<String, usize>,
-    pub(super) carry_intrinsic_predicate_family: BTreeMap<String, usize>,
-    pub(super) carry_intrinsic_boolor_downstream_use: BTreeMap<String, usize>,
-    pub(super) carry_intrinsic_final_predicate_context: BTreeMap<String, usize>,
-    pub(super) intrinsic_compare_only_family: BTreeMap<String, usize>,
-    pub(super) intrinsic_compare_only_final_predicate_context: BTreeMap<String, usize>,
-    pub(super) single_consumer_load_rhs_family: BTreeMap<String, usize>,
-    pub(super) single_consumer_load_rhs_alias_class: BTreeMap<String, usize>,
-    pub(super) missing_merge_binding_relation: BTreeMap<String, usize>,
-    pub(super) join_merge_missing_reason: BTreeMap<String, usize>,
-    pub(super) merge_binding_candidate_result: BTreeMap<String, usize>,
-    pub(super) merge_binding_candidate_incoming_kind: BTreeMap<String, usize>,
-    pub(super) explicit_merge_binding_trial_reason: BTreeMap<String, usize>,
-    pub(super) missing_incoming_pred_kind: BTreeMap<String, usize>,
-    pub(super) missing_incoming_semantics_result: BTreeMap<String, usize>,
-    pub(super) missing_incoming_missing_pred_kind: BTreeMap<String, usize>,
-    pub(super) missing_no_prior_def_reason: BTreeMap<String, usize>,
-    pub(super) temp_only_representative_reason: BTreeMap<String, usize>,
-    pub(super) stable_representative_owner_reason: BTreeMap<String, usize>,
-    pub(super) stable_representative_consumer_kind: BTreeMap<String, usize>,
-    pub(super) stable_representative_downstream_opcode: BTreeMap<String, usize>,
-    pub(super) alias_stable_required_family: BTreeMap<String, usize>,
-    pub(super) alias_stable_required_consumer_kind: BTreeMap<String, usize>,
-    pub(super) alias_stable_required_downstream_opcode: BTreeMap<String, usize>,
-    pub(super) address_stable_required_family: BTreeMap<String, usize>,
-    pub(super) address_stable_required_base_kind: BTreeMap<String, usize>,
-    pub(super) address_stable_required_expr_kind: BTreeMap<String, usize>,
-    pub(super) stack_address_stability_reason: BTreeMap<String, usize>,
-    pub(super) stack_address_base_reg: BTreeMap<String, usize>,
-    pub(super) stack_address_frame_relative_candidate: BTreeMap<String, usize>,
-    pub(super) stack_address_frame_stable_trial_reason: BTreeMap<String, usize>,
-    pub(super) dominating_prior_def_proof_result: BTreeMap<String, usize>,
-    pub(super) unknown_missing_merge_attribution_reason: BTreeMap<String, usize>,
-    pub(super) unknown_missing_merge_consumer_kind: BTreeMap<String, usize>,
-    pub(super) unknown_missing_merge_rhs_kind: BTreeMap<String, usize>,
-    pub(super) synthetic_root_merge_attribution_reason: BTreeMap<String, usize>,
-    pub(super) forward_join_not_selected_rejected_reason: BTreeMap<String, usize>,
-    pub(super) ambiguous_join_pred_reason: BTreeMap<String, usize>,
-    pub(super) unknown_consumer_kind_reason: BTreeMap<String, usize>,
-    pub(super) unknown_consumer_kind_opcode: BTreeMap<String, usize>,
-    pub(super) popcount_consumer_result_use: BTreeMap<String, usize>,
-    pub(super) popcount_consumer_downstream_opcode: BTreeMap<String, usize>,
-    pub(super) popcount_intand_mask_kind: BTreeMap<String, usize>,
-    pub(super) popcount_intand_downstream_use: BTreeMap<String, usize>,
-    pub(super) parity_chain_regression_role: BTreeMap<String, usize>,
-    pub(super) parity_chain_regression_before_event: BTreeMap<String, usize>,
-    pub(super) parity_chain_regression_consumer_context: BTreeMap<String, usize>,
-    pub(super) single_consumer_predicate_family: BTreeMap<String, usize>,
-    pub(super) single_consumer_predicate_guard_family: BTreeMap<String, usize>,
-    pub(super) single_consumer_predicate_same_guard: BTreeMap<String, usize>,
-    pub(super) single_consumer_predicate_requires_stable: BTreeMap<String, usize>,
-    pub(super) arithmetic_predicate_shape: BTreeMap<String, usize>,
-    pub(super) arithmetic_predicate_consumer_guard: BTreeMap<String, usize>,
-    pub(super) arithmetic_predicate_boolean_width: BTreeMap<String, usize>,
-    pub(super) arithmetic_predicate_stable_reason: BTreeMap<String, usize>,
-    pub(super) low_bit_mask_predicate_family: BTreeMap<String, usize>,
-    pub(super) low_bit_mask_input_origin_kind: BTreeMap<String, usize>,
-    pub(super) low_bit_mask_feeds_only_predicate: BTreeMap<String, usize>,
-    pub(super) low_bit_mask_input_is_boolean_like: BTreeMap<String, usize>,
-    pub(super) materialization_rejection_reason: BTreeMap<String, usize>,
-    pub(super) malformed_def_use_window_relation: BTreeMap<String, usize>,
-    pub(super) cross_block_consumer_relation: BTreeMap<String, usize>,
-    pub(super) cross_block_redefinition_relation: BTreeMap<String, usize>,
-    pub(super) same_block_overwrite_shape_kind: BTreeMap<String, usize>,
-    pub(super) loop_carried_value_kind: BTreeMap<String, usize>,
-    pub(super) loop_boolean_guard_family: BTreeMap<String, usize>,
+    pub(crate) alias_unsafe_hazard_kind: BTreeMap<String, usize>,
+    pub(crate) disallowed_single_consumer_reason: BTreeMap<String, usize>,
+    pub(crate) disallowed_single_consumer_consumer_kind: BTreeMap<String, usize>,
+    pub(crate) disallowed_single_consumer_rhs_kind: BTreeMap<String, usize>,
+    pub(crate) single_consumer_call_rhs_family: BTreeMap<String, usize>,
+    pub(crate) single_consumer_call_rhs_effect_source: BTreeMap<String, usize>,
+    pub(crate) single_consumer_call_rhs_consumer_kind: BTreeMap<String, usize>,
+    pub(crate) single_consumer_call_rhs_downstream_opcode: BTreeMap<String, usize>,
+    pub(crate) carry_intrinsic_predicate_family: BTreeMap<String, usize>,
+    pub(crate) carry_intrinsic_boolor_downstream_use: BTreeMap<String, usize>,
+    pub(crate) carry_intrinsic_final_predicate_context: BTreeMap<String, usize>,
+    pub(crate) intrinsic_compare_only_family: BTreeMap<String, usize>,
+    pub(crate) intrinsic_compare_only_final_predicate_context: BTreeMap<String, usize>,
+    pub(crate) single_consumer_load_rhs_family: BTreeMap<String, usize>,
+    pub(crate) single_consumer_load_rhs_alias_class: BTreeMap<String, usize>,
+    pub(crate) missing_merge_binding_relation: BTreeMap<String, usize>,
+    pub(crate) join_merge_missing_reason: BTreeMap<String, usize>,
+    pub(crate) merge_binding_candidate_result: BTreeMap<String, usize>,
+    pub(crate) merge_binding_candidate_incoming_kind: BTreeMap<String, usize>,
+    pub(crate) explicit_merge_binding_trial_reason: BTreeMap<String, usize>,
+    pub(crate) missing_incoming_pred_kind: BTreeMap<String, usize>,
+    pub(crate) missing_incoming_semantics_result: BTreeMap<String, usize>,
+    pub(crate) missing_incoming_missing_pred_kind: BTreeMap<String, usize>,
+    pub(crate) missing_no_prior_def_reason: BTreeMap<String, usize>,
+    pub(crate) temp_only_representative_reason: BTreeMap<String, usize>,
+    pub(crate) stable_representative_owner_reason: BTreeMap<String, usize>,
+    pub(crate) stable_representative_consumer_kind: BTreeMap<String, usize>,
+    pub(crate) stable_representative_downstream_opcode: BTreeMap<String, usize>,
+    pub(crate) alias_stable_required_family: BTreeMap<String, usize>,
+    pub(crate) alias_stable_required_consumer_kind: BTreeMap<String, usize>,
+    pub(crate) alias_stable_required_downstream_opcode: BTreeMap<String, usize>,
+    pub(crate) address_stable_required_family: BTreeMap<String, usize>,
+    pub(crate) address_stable_required_base_kind: BTreeMap<String, usize>,
+    pub(crate) address_stable_required_expr_kind: BTreeMap<String, usize>,
+    pub(crate) stack_address_stability_reason: BTreeMap<String, usize>,
+    pub(crate) stack_address_base_reg: BTreeMap<String, usize>,
+    pub(crate) stack_address_frame_relative_candidate: BTreeMap<String, usize>,
+    pub(crate) stack_address_frame_stable_trial_reason: BTreeMap<String, usize>,
+    pub(crate) dominating_prior_def_proof_result: BTreeMap<String, usize>,
+    pub(crate) unknown_missing_merge_attribution_reason: BTreeMap<String, usize>,
+    pub(crate) unknown_missing_merge_consumer_kind: BTreeMap<String, usize>,
+    pub(crate) unknown_missing_merge_rhs_kind: BTreeMap<String, usize>,
+    pub(crate) synthetic_root_merge_attribution_reason: BTreeMap<String, usize>,
+    pub(crate) forward_join_not_selected_rejected_reason: BTreeMap<String, usize>,
+    pub(crate) ambiguous_join_pred_reason: BTreeMap<String, usize>,
+    pub(crate) unknown_consumer_kind_reason: BTreeMap<String, usize>,
+    pub(crate) unknown_consumer_kind_opcode: BTreeMap<String, usize>,
+    pub(crate) popcount_consumer_result_use: BTreeMap<String, usize>,
+    pub(crate) popcount_consumer_downstream_opcode: BTreeMap<String, usize>,
+    pub(crate) popcount_intand_mask_kind: BTreeMap<String, usize>,
+    pub(crate) popcount_intand_downstream_use: BTreeMap<String, usize>,
+    pub(crate) parity_chain_regression_role: BTreeMap<String, usize>,
+    pub(crate) parity_chain_regression_before_event: BTreeMap<String, usize>,
+    pub(crate) parity_chain_regression_consumer_context: BTreeMap<String, usize>,
+    pub(crate) single_consumer_predicate_family: BTreeMap<String, usize>,
+    pub(crate) single_consumer_predicate_guard_family: BTreeMap<String, usize>,
+    pub(crate) single_consumer_predicate_same_guard: BTreeMap<String, usize>,
+    pub(crate) single_consumer_predicate_requires_stable: BTreeMap<String, usize>,
+    pub(crate) arithmetic_predicate_shape: BTreeMap<String, usize>,
+    pub(crate) arithmetic_predicate_consumer_guard: BTreeMap<String, usize>,
+    pub(crate) arithmetic_predicate_boolean_width: BTreeMap<String, usize>,
+    pub(crate) arithmetic_predicate_stable_reason: BTreeMap<String, usize>,
+    pub(crate) low_bit_mask_predicate_family: BTreeMap<String, usize>,
+    pub(crate) low_bit_mask_input_origin_kind: BTreeMap<String, usize>,
+    pub(crate) low_bit_mask_feeds_only_predicate: BTreeMap<String, usize>,
+    pub(crate) low_bit_mask_input_is_boolean_like: BTreeMap<String, usize>,
+    pub(crate) materialization_rejection_reason: BTreeMap<String, usize>,
+    pub(crate) malformed_def_use_window_relation: BTreeMap<String, usize>,
+    pub(crate) cross_block_consumer_relation: BTreeMap<String, usize>,
+    pub(crate) cross_block_redefinition_relation: BTreeMap<String, usize>,
+    pub(crate) same_block_overwrite_shape_kind: BTreeMap<String, usize>,
+    pub(crate) loop_carried_value_kind: BTreeMap<String, usize>,
+    pub(crate) loop_boolean_guard_family: BTreeMap<String, usize>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum SameBlockOverwriteShapeKind {
+pub(crate) enum SameBlockOverwriteShapeKind {
     OverwriteBeforeBranch,
     OverwriteAtPredicateProducer,
     OverwriteAtLoopUpdate,
@@ -1167,7 +1167,7 @@ pub(super) enum SameBlockOverwriteShapeKind {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum SameBlockOverwriteRhsKind {
+pub(crate) enum SameBlockOverwriteRhsKind {
     CopyLike,
     Predicate,
     Arithmetic,
@@ -1177,15 +1177,15 @@ pub(super) enum SameBlockOverwriteRhsKind {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) struct AliasUnsafeHazard {
-    pub(super) kind: AliasUnsafeHazardKind,
-    pub(super) use_stmt_idx: Option<usize>,
-    pub(super) hazard_stmt_idx: Option<usize>,
-    pub(super) hazard_opcode: Option<PcodeOpcode>,
+pub(crate) struct AliasUnsafeHazard {
+    pub(crate) kind: AliasUnsafeHazardKind,
+    pub(crate) use_stmt_idx: Option<usize>,
+    pub(crate) hazard_stmt_idx: Option<usize>,
+    pub(crate) hazard_opcode: Option<PcodeOpcode>,
 }
 
 impl AliasUnsafeHazard {
-    pub(super) fn new(
+    pub(crate) fn new(
         kind: AliasUnsafeHazardKind,
         use_stmt_idx: Option<usize>,
         hazard_stmt_idx: Option<usize>,
@@ -1201,26 +1201,26 @@ impl AliasUnsafeHazard {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum ReplacementCompleteness {
+pub(crate) enum ReplacementCompleteness {
     Complete,
     Incomplete(MaterializationRejectionReason),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) struct ReplacementValuePlan {
-    pub(super) dominant_read: ReplacementReadClass,
-    pub(super) completeness: ReplacementCompleteness,
+pub(crate) struct ReplacementValuePlan {
+    pub(crate) dominant_read: ReplacementReadClass,
+    pub(crate) completeness: ReplacementCompleteness,
 }
 
 impl ReplacementValuePlan {
-    pub(super) fn complete(dominant_read: ReplacementReadClass) -> Self {
+    pub(crate) fn complete(dominant_read: ReplacementReadClass) -> Self {
         Self {
             dominant_read,
             completeness: ReplacementCompleteness::Complete,
         }
     }
 
-    pub(super) fn incomplete(
+    pub(crate) fn incomplete(
         dominant_read: ReplacementReadClass,
         reason: MaterializationRejectionReason,
     ) -> Self {
@@ -1230,11 +1230,11 @@ impl ReplacementValuePlan {
         }
     }
 
-    pub(super) fn is_complete(self) -> bool {
+    pub(crate) fn is_complete(self) -> bool {
         matches!(self.completeness, ReplacementCompleteness::Complete)
     }
 
-    pub(super) fn rejection_reason(self) -> Option<MaterializationRejectionReason> {
+    pub(crate) fn rejection_reason(self) -> Option<MaterializationRejectionReason> {
         match self.completeness {
             ReplacementCompleteness::Complete => None,
             ReplacementCompleteness::Incomplete(reason) => Some(reason),
@@ -1243,24 +1243,24 @@ impl ReplacementValuePlan {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) struct NoConsumerMaterializationProfile {
-    pub(super) same_block_consumers: usize,
-    pub(super) cross_block_consumers: usize,
-    pub(super) has_later_block_use: bool,
-    pub(super) has_phi_merge_use: bool,
-    pub(super) has_debug_use: bool,
-    pub(super) rhs_side_effectful: bool,
+pub(crate) struct NoConsumerMaterializationProfile {
+    pub(crate) same_block_consumers: usize,
+    pub(crate) cross_block_consumers: usize,
+    pub(crate) has_later_block_use: bool,
+    pub(crate) has_phi_merge_use: bool,
+    pub(crate) has_debug_use: bool,
+    pub(crate) rhs_side_effectful: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum NoConsumerMaterializationDecision {
+pub(crate) enum NoConsumerMaterializationDecision {
     Suppress,
     SuppressAlways,
     Keep(NoConsumerMaterializationKeepReason),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum NoConsumerMaterializationKeepReason {
+pub(crate) enum NoConsumerMaterializationKeepReason {
     NotUnknownNoConsumerFound,
     SuppressionDisabled,
     StateVisibleOutput,
@@ -1275,7 +1275,7 @@ pub(super) enum NoConsumerMaterializationKeepReason {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum NoConsumerSuppressionRhsKind {
+pub(crate) enum NoConsumerSuppressionRhsKind {
     Var,
     Const,
     Cast,
@@ -1291,7 +1291,7 @@ pub(super) enum NoConsumerSuppressionRhsKind {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum NoConsumerSuppressionBlockPosition {
+pub(crate) enum NoConsumerSuppressionBlockPosition {
     Local,
     PreBranch,
     PredicateAdjacent,
@@ -1300,7 +1300,7 @@ pub(super) enum NoConsumerSuppressionBlockPosition {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum NoConsumerSuppressionOutputKind {
+pub(crate) enum NoConsumerSuppressionOutputKind {
     TempOnly,
     RegisterVisible,
     MemoryDerived,

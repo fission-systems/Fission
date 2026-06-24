@@ -3,11 +3,11 @@
 //! Patches common anti-debug checks in the target process so that
 //! analysis can continue without manual intervention.
 
+use std::ffi::c_void;
 use windows::Win32::Foundation::{HANDLE, NTSTATUS};
 use windows::Win32::System::Diagnostics::Debug::ReadProcessMemory;
-use windows::Win32::System::Memory::{VirtualProtectEx, PAGE_PROTECTION_FLAGS, PAGE_READWRITE};
+use windows::Win32::System::Memory::{PAGE_PROTECTION_FLAGS, PAGE_READWRITE, VirtualProtectEx};
 use windows::Win32::System::Threading::NtQueryInformationProcess;
-use std::ffi::c_void;
 
 /// Represents a single anti-debug bypass that was applied.
 #[derive(Debug, Clone, PartialEq, Eq)]

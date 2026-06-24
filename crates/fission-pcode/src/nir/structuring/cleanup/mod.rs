@@ -60,13 +60,15 @@ fn dedupe_structured_region_entry_labels_in_place(stmts: &mut Vec<HirStmt>) {
 fn dedupe_structured_region_entry_labels_stmt(stmt: &mut HirStmt) {
     match stmt {
         HirStmt::Block(body) => dedupe_structured_region_entry_labels_in_place(body),
-        HirStmt::If { then_body, else_body, .. } => {
+        HirStmt::If {
+            then_body,
+            else_body,
+            ..
+        } => {
             dedupe_structured_region_entry_labels_in_place(then_body);
             dedupe_structured_region_entry_labels_in_place(else_body);
         }
-        HirStmt::While { body, .. }
-        | HirStmt::DoWhile { body, .. }
-        | HirStmt::For { body, .. } => {
+        HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } | HirStmt::For { body, .. } => {
             dedupe_structured_region_entry_labels_in_place(body);
         }
         HirStmt::Switch { cases, default, .. } => {
@@ -182,8 +184,6 @@ fn collect_stmt_declared_labels(stmt: &HirStmt, declared: &mut HashSet<String>) 
         | HirStmt::Continue => {}
     }
 }
-
-
 
 // ---------------------------------------------------------------------------
 // Existing label-cleanup utilities
@@ -745,10 +745,13 @@ mod tests {
                     HirStmt::Label("block_140001890".to_string()),
                     HirStmt::Assign {
                         lhs: HirLValue::Var("x".to_string()),
-                        rhs: HirExpr::Const(0, NirType::Int {
-                            bits: 32,
-                            signed: false,
-                        }),
+                        rhs: HirExpr::Const(
+                            0,
+                            NirType::Int {
+                                bits: 32,
+                                signed: false,
+                            },
+                        ),
                     },
                 ],
             },

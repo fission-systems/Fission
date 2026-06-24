@@ -360,7 +360,7 @@ impl<'a> PreviewBuilder<'a> {
         &mut self,
         start_idx: usize,
         exit: LinearExit,
-        mut budget: Option<&mut IfLoweringBudget>,
+        budget: Option<&mut IfLoweringBudget>,
     ) -> Result<Option<(Vec<HirStmt>, usize)>, MlilPreviewError> {
         let mut auto_budget = None;
         let budget_ref = if let Some(b) = budget {
@@ -388,7 +388,7 @@ impl<'a> PreviewBuilder<'a> {
         &mut self,
         start_idx: usize,
         exit: LinearExit,
-        mut budget: Option<&mut IfLoweringBudget>,
+        budget: Option<&mut IfLoweringBudget>,
     ) -> Result<LinearBodyLoweringOutcome, MlilPreviewError> {
         let mut auto_budget = None;
         let budget_ref = if let Some(b) = budget {
@@ -446,7 +446,10 @@ impl<'a> PreviewBuilder<'a> {
 
         self.active_linear_body_keys.remove(&key);
         let should_cache = budget.map_or(true, |b| !b.tripped)
-            || matches!(result, LinearBodyLoweringOutcome::Rejected(LinearBodyRejectReason::BudgetTripped));
+            || matches!(
+                result,
+                LinearBodyLoweringOutcome::Rejected(LinearBodyRejectReason::BudgetTripped)
+            );
         if should_cache {
             let cached = match &result {
                 LinearBodyLoweringOutcome::Lowered(lowered) => {
@@ -619,9 +622,8 @@ impl<'a> PreviewBuilder<'a> {
                     .rule_block_if_no_exit_accepted_count += 1;
                 Some(lhs)
             }
-            (LinearExit::Join(idx), LinearExit::Return) | (LinearExit::Return, LinearExit::Join(idx)) => {
-                Some(LinearExit::Join(idx))
-            }
+            (LinearExit::Join(idx), LinearExit::Return)
+            | (LinearExit::Return, LinearExit::Join(idx)) => Some(LinearExit::Join(idx)),
             (LinearExit::End, LinearExit::Return) | (LinearExit::Return, LinearExit::End) => {
                 Some(LinearExit::End)
             }
@@ -1176,8 +1178,8 @@ impl<'a> PreviewBuilder<'a> {
                     )?;
                     match (true_branch, false_branch) {
                         (
-                             LinearBodyLoweringOutcome::Lowered((then_body, then_skip)),
-                             LinearBodyLoweringOutcome::Lowered((else_body, else_skip)),
+                            LinearBodyLoweringOutcome::Lowered((then_body, then_skip)),
+                            LinearBodyLoweringOutcome::Lowered((else_body, else_skip)),
                         ) => {
                             match self.lower_linear_body_cached(
                                 shared_tail_entry_idx,
@@ -1205,7 +1207,7 @@ impl<'a> PreviewBuilder<'a> {
                                     fallback_mismatch_subtype =
                                         ConditionalTailMismatchSubtype::FollowTailLoweringFailed;
                                 }
-                             }
+                            }
                         }
                         (
                             LinearBodyLoweringOutcome::Rejected(_),
@@ -1660,7 +1662,9 @@ impl<'a> PreviewBuilder<'a> {
                 Self::expr_has_call(lhs) || Self::expr_has_call(rhs)
             }
             HirExpr::Load { ptr, .. } => Self::expr_has_call(ptr),
-            HirExpr::PtrOffset { base, .. } | HirExpr::FieldAccess { base, .. } => Self::expr_has_call(base),
+            HirExpr::PtrOffset { base, .. } | HirExpr::FieldAccess { base, .. } => {
+                Self::expr_has_call(base)
+            }
             HirExpr::Index { base, index, .. } => {
                 Self::expr_has_call(base) || Self::expr_has_call(index)
             }

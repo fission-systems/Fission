@@ -65,7 +65,10 @@ impl<'a> PreviewBuilder<'a> {
             max_skip = max_skip.max(skip_to).max(case_idx + 1);
             if !case_body.iter().any(|s| matches!(s, HirStmt::Label(_))) {
                 let target_addr = self.pcode_block(case_idx).start_address;
-                case_body.insert(0, HirStmt::Label(crate::nir::builder::block_label(target_addr)));
+                case_body.insert(
+                    0,
+                    HirStmt::Label(crate::nir::builder::block_label(target_addr)),
+                );
             }
             cases.push(HirSwitchCase {
                 values: vec![value],
@@ -82,7 +85,10 @@ impl<'a> PreviewBuilder<'a> {
         };
         if !default_body.iter().any(|s| matches!(s, HirStmt::Label(_))) {
             let target_addr = self.pcode_block(parsed.default_idx).start_address;
-            default_body.insert(0, HirStmt::Label(crate::nir::builder::block_label(target_addr)));
+            default_body.insert(
+                0,
+                HirStmt::Label(crate::nir::builder::block_label(target_addr)),
+            );
         }
         max_skip = max_skip.max(default_skip).max(parsed.default_idx + 1);
 
@@ -191,9 +197,7 @@ impl<'a> PreviewBuilder<'a> {
                 break;
             };
             let case_idx = self.canonicalize_switch_target(case_idx);
-            let Some((case_body, skip_to)) =
-                self.lower_linear_body(case_idx, exit)?
-            else {
+            let Some((case_body, skip_to)) = self.lower_linear_body(case_idx, exit)? else {
                 success = false;
                 break;
             };
@@ -216,9 +220,7 @@ impl<'a> PreviewBuilder<'a> {
                 return Ok(None);
             };
             let default_idx = self.canonicalize_switch_target(default_idx);
-            let Some((default_body, skip_to)) =
-                self.lower_linear_body(default_idx, exit)?
-            else {
+            let Some((default_body, skip_to)) = self.lower_linear_body(default_idx, exit)? else {
                 self.active_switch_targets = old_targets;
                 return Ok(None);
             };
@@ -303,7 +305,7 @@ impl<'a> PreviewBuilder<'a> {
                     case_target = false_target;
                     next_compare_target = Some(true_target);
                     case_on_true = false;
-                    
+
                     if let Some(existing) = &selector {
                         if strip_casts(existing) != strip_casts(&range_selector) {
                             return Ok(None);
@@ -314,7 +316,8 @@ impl<'a> PreviewBuilder<'a> {
                     let Some(case_target_addr) = case_target else {
                         return Ok(None);
                     };
-                    let Some(default_idx) = self.find_block_index_by_address(case_target_addr) else {
+                    let Some(default_idx) = self.find_block_index_by_address(case_target_addr)
+                    else {
                         return Ok(None);
                     };
                     guarded_default_idx = Some(self.canonicalize_switch_target(default_idx));
@@ -323,7 +326,7 @@ impl<'a> PreviewBuilder<'a> {
                     case_target = Some(true_target);
                     next_compare_target = false_target;
                     case_on_true = true;
-                    
+
                     if let Some(existing) = &selector {
                         if strip_casts(existing) != strip_casts(&range_selector) {
                             return Ok(None);
@@ -334,7 +337,8 @@ impl<'a> PreviewBuilder<'a> {
                     let Some(case_target_addr) = case_target else {
                         return Ok(None);
                     };
-                    let Some(default_idx) = self.find_block_index_by_address(case_target_addr) else {
+                    let Some(default_idx) = self.find_block_index_by_address(case_target_addr)
+                    else {
                         return Ok(None);
                     };
                     guarded_default_idx = Some(self.canonicalize_switch_target(default_idx));
@@ -652,16 +656,13 @@ pub(super) fn detect_and_patch_case_fallthrough(cases: &mut Vec<HirSwitchCase>) 
     // Collect the first label of each case upfront so we can borrow mutably below.
     let next_labels: Vec<Option<String>> = (0..n)
         .map(|i| {
-            cases[i]
-                .body
-                .iter()
-                .find_map(|s| {
-                    if let HirStmt::Label(l) = s {
-                        Some(l.clone())
-                    } else {
-                        None
-                    }
-                })
+            cases[i].body.iter().find_map(|s| {
+                if let HirStmt::Label(l) = s {
+                    Some(l.clone())
+                } else {
+                    None
+                }
+            })
         })
         .collect();
 
@@ -670,9 +671,11 @@ pub(super) fn detect_and_patch_case_fallthrough(cases: &mut Vec<HirSwitchCase>) 
             continue;
         };
         // Check if the last non-empty statement in case[i] is a Goto targeting next_label.
-        let last_stmt = cases[i].body.iter_mut().rev().find(|s| {
-            !matches!(s, HirStmt::Label(_))
-        });
+        let last_stmt = cases[i]
+            .body
+            .iter_mut()
+            .rev()
+            .find(|s| !matches!(s, HirStmt::Label(_)));
         if let Some(HirStmt::Goto(label)) = last_stmt {
             if label == next_label {
                 *label = SWITCH_FALLTHROUGH_SENTINEL.to_string();
@@ -813,10 +816,7 @@ mod tests {
             },
             HirSwitchCase {
                 values: vec![1],
-                body: vec![
-                    HirStmt::Label(next_label.clone()),
-                    HirStmt::Return(None),
-                ],
+                body: vec![HirStmt::Label(next_label.clone()), HirStmt::Return(None)],
             },
         ];
 
@@ -829,9 +829,7 @@ mod tests {
             &cases[0].body[1]
         );
         // Case[1] should be unchanged.
-        assert!(
-            matches!(&cases[1].body[0], HirStmt::Label(lbl) if lbl == &next_label),
-        );
+        assert!(matches!(&cases[1].body[0], HirStmt::Label(lbl) if lbl == &next_label),);
     }
 
     /// A switch where case 0's goto targets a label NOT in case 1 — must not be patched.
@@ -847,10 +845,7 @@ mod tests {
             },
             HirSwitchCase {
                 values: vec![1],
-                body: vec![
-                    HirStmt::Label("block_b".to_string()),
-                    HirStmt::Return(None),
-                ],
+                body: vec![HirStmt::Label("block_b".to_string()), HirStmt::Return(None)],
             },
         ];
         let patched = detect_and_patch_case_fallthrough(&mut cases);

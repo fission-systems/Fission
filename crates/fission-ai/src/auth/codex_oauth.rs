@@ -109,8 +109,6 @@ struct TokenResponse {
     expires_in: Option<u64>,
 }
 
-
-
 // ── Browser helper ────────────────────────────────────────────────────────────
 fn open_browser(url: &str) {
     let result = {

@@ -237,8 +237,14 @@ fn multi_block_preview_does_not_lower_switch_when_default_exit_differs_from_case
     let code = render_mlil_preview(&func, "switch_skip_guard", 0x5300, &preview_options())
         .expect("preview render");
     assert!(!code.contains("switch ("), "{code}");
-    assert!(code.contains("param_1 == 1") || code.contains("param_1 != 1"), "{code}");
-    assert!(code.contains("param_1 == 2") || code.contains("param_1 != 2"), "{code}");
+    assert!(
+        code.contains("param_1 == 1") || code.contains("param_1 != 1"),
+        "{code}"
+    );
+    assert!(
+        code.contains("param_1 == 2") || code.contains("param_1 != 2"),
+        "{code}"
+    );
 }
 
 #[test]
@@ -926,7 +932,10 @@ fn test_switch_case_fallthrough() {
 
     let code = render_mlil_preview(&func, "fallthrough_switch", 0x7000, &preview_options())
         .expect("preview render");
-    println!("--- FALLTHROUGH SWITCH CODE ---\n{}\n-------------------------------", code);
+    println!(
+        "--- FALLTHROUGH SWITCH CODE ---\n{}\n-------------------------------",
+        code
+    );
     assert!(code.contains("switch (param_1) {"));
     assert!(code.contains("case 1:"));
     assert!(code.contains("case 2:"));
@@ -934,4 +943,3 @@ fn test_switch_case_fallthrough() {
     assert!(code.contains("/* fallthrough */"));
     assert!(!code.contains("goto block_7020"));
 }
-

@@ -1,5 +1,5 @@
-use fission_ai::provider::mock::MockProvider;
 use fission_ai::provider::PseudocodeAnalyzer;
+use fission_ai::provider::mock::MockProvider;
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {

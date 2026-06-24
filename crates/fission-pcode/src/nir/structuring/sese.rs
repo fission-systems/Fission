@@ -1,11 +1,11 @@
 use crate::fast_hash::FastMap as HashMap;
-use crate::nir::structuring::cfg_analysis::{DomTree, PostDomTree};
+use crate::nir::PreviewBuilder;
 use crate::nir::structuring::CollapseRule;
+use crate::nir::structuring::cfg_analysis::{DomTree, PostDomTree};
 use crate::nir::structuring::graph::StructureNode;
 use crate::nir::structuring::regions::{RegionKind, RegionProof};
-use crate::nir::types::HirStmt;
-use crate::nir::PreviewBuilder;
 use crate::nir::support::MlilPreviewError;
+use crate::nir::types::HirStmt;
 use std::collections::HashSet;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -26,7 +26,8 @@ pub(crate) fn compute_rpo_map(successors: &[Vec<usize>]) -> Vec<usize> {
     if successors.is_empty() {
         return rpo_map;
     }
-    let post_order = crate::nir::structuring::cfg_analysis::util::compute_rpo(0, successors, successors.len());
+    let post_order =
+        crate::nir::structuring::cfg_analysis::util::compute_rpo(0, successors, successors.len());
     for (pos, &n) in post_order.iter().enumerate() {
         if n < rpo_map.len() {
             rpo_map[n] = pos;
@@ -156,7 +157,9 @@ pub(crate) fn build_sese_tree(mut regions: Vec<SeseRegion>, total_nodes: usize) 
 
         // Find which existing nested regions are strictly contained inside new_region.
         for r in nested_regions {
-            if r.members.is_subset(&new_region.members) && r.members.len() < new_region.members.len() {
+            if r.members.is_subset(&new_region.members)
+                && r.members.len() < new_region.members.len()
+            {
                 children.push(r);
             } else {
                 remaining.push(r);
@@ -194,7 +197,10 @@ pub(crate) fn sese_structure_region(
         if let Err(err) = sese_structure_region(builder, child, results, total_nodes) {
             match builder.build_linear_sese_child_fallback(child.entry, child.exit) {
                 Ok(body) => {
-                    builder.telemetry.structuring.sese_child_localized_linear_count += 1;
+                    builder
+                        .telemetry
+                        .structuring
+                        .sese_child_localized_linear_count += 1;
                     results.insert((child.entry, child.exit), body);
                 }
                 Err(_) => return Err(err),
@@ -207,12 +213,8 @@ pub(crate) fn sese_structure_region(
     for child in &region.children {
         if let Some(body) = results.get(&(child.entry, child.exit)) {
             // Map the child's entry block to the structured statements, exit block, and proof details.
-            let proof = RegionProof::structured(
-                RegionKind::Sequence,
-                child.entry,
-                child.exit,
-                None,
-            );
+            let proof =
+                RegionProof::structured(RegionKind::Sequence, child.entry, child.exit, None);
             child_map.insert(child.entry, (body.clone(), child.exit, proof));
         }
     }
@@ -226,7 +228,10 @@ pub(crate) fn sese_structure_region(
         Err(err) if is_root => Err(err),
         Err(err) => match builder.build_linear_sese_child_fallback(region.entry, region.exit) {
             Ok(body) => {
-                builder.telemetry.structuring.sese_child_localized_linear_count += 1;
+                builder
+                    .telemetry
+                    .structuring
+                    .sese_child_localized_linear_count += 1;
                 results.insert((region.entry, region.exit), body);
                 Ok(())
             }
@@ -242,7 +247,7 @@ pub(crate) fn structure_cfg_via_sese(
 ) -> Result<Vec<HirStmt>, MlilPreviewError> {
     let dom = builder.cfg_fact_cache().dominators().clone();
     let postdom = builder.cfg_fact_cache().postdominators().clone();
-    
+
     // Find SESE regions and build SESE hierarchy.
     let regions = find_sese_regions(&builder.successors, &builder.predecessors, &dom, &postdom);
     let tree = build_sese_tree(regions, total_nodes);
@@ -250,9 +255,7 @@ pub(crate) fn structure_cfg_via_sese(
     let mut results = HashMap::default();
     sese_structure_region(builder, &tree.root, &mut results, total_nodes)?;
 
-    let final_body = results
-        .remove(&(0, total_nodes))
-        .unwrap_or_default();
-        
+    let final_body = results.remove(&(0, total_nodes)).unwrap_or_default();
+
     Ok(final_body)
 }

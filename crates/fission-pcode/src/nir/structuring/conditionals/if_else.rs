@@ -28,8 +28,7 @@ impl<'a> PreviewBuilder<'a> {
                     body.push(HirStmt::Return(expr));
                     return Ok(Some((body, follow_idx)));
                 }
-                LoweredTerminator::Fallthrough(Some(target))
-                | LoweredTerminator::Goto(target) => {
+                LoweredTerminator::Fallthrough(Some(target)) | LoweredTerminator::Goto(target) => {
                     let Some(next_idx) = self.find_block_index_by_address(target) else {
                         return Ok(None);
                     };

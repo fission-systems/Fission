@@ -257,6 +257,7 @@ impl Debugger for WindowsDebugger {
         }
         self.state.last_event = Some("Break requested".to_string());
         Ok(())
+    }
     fn terminate(&mut self) -> FissionResult<()> {
         let h = self
             .process_handle

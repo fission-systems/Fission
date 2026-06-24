@@ -1,6 +1,6 @@
 //! Explicit CollapseDriver rule engine (Ghidra ActionStructureTransform analog).
 
-use super::driver::collapse::{CollapseRule, ACTIVE_COLLAPSE_RULES};
+use super::driver::collapse::{ACTIVE_COLLAPSE_RULES, CollapseRule};
 use super::*;
 
 /// Ghidra-style collapse rule driver: dispatches [`CollapseRule`] reducers on a block index.
@@ -65,8 +65,8 @@ impl CollapseDriver {
 
     pub(crate) fn run(builder: &mut PreviewBuilder<'_>) -> Result<Vec<HirStmt>, MlilPreviewError> {
         use crate::nir::pass::{
-            NirFunc, AnalysisStore, PassManager, RepeatMode, EarlyReturnPass,
-            IrreducibleReductionPass, SeseStructuringPass, OrphanGotoRepairPass,
+            AnalysisStore, EarlyReturnPass, IrreducibleReductionPass, NirFunc,
+            OrphanGotoRepairPass, PassManager, RepeatMode, SeseStructuringPass,
         };
 
         builder.structuring_start = Some(std::time::Instant::now());
@@ -133,8 +133,15 @@ mod tests {
         assert_eq!(
             names,
             vec![
-                "switch", "for", "dowhile", "while", "loop_control", "infloop", "conditional",
-                "sequence", "unstructured",
+                "switch",
+                "for",
+                "dowhile",
+                "while",
+                "loop_control",
+                "infloop",
+                "conditional",
+                "sequence",
+                "unstructured",
             ]
         );
     }

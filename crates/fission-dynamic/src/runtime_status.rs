@@ -54,5 +54,4 @@ mod tests {
     fn runtime_status_reports_interactive_enabled_when_feature_on() {
         assert!(runtime_status().interactive_runtime_enabled);
     }
-
 }

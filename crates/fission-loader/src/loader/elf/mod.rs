@@ -3054,7 +3054,8 @@ mod tests {
     #[test]
     fn elf64_loongarch_relocatable_branch_relocations_patch_loaded_image() {
         let fixture = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(
-            Path::new("../../benchmark").join("binary/loongarch64_f64/baremetal/small/binary/c/function_calls.o"),
+            Path::new("../../benchmark")
+                .join("binary/loongarch64_f64/baremetal/small/binary/c/function_calls.o"),
         );
         if !fixture.exists() {
             eprintln!("skip: LoongArch64 function_calls fixture missing");
@@ -3084,7 +3085,8 @@ mod tests {
     #[test]
     fn elf32_loongarch_relocatable_branch_relocations_patch_loaded_image() {
         let fixture = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(
-            Path::new("../../benchmark").join("binary/loongarch32_f64/baremetal/small/binary/c/function_calls.o"),
+            Path::new("../../benchmark")
+                .join("binary/loongarch32_f64/baremetal/small/binary/c/function_calls.o"),
         );
         if !fixture.exists() {
             eprintln!("skip: LoongArch32 function_calls fixture missing");

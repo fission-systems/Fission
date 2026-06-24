@@ -222,8 +222,8 @@ int check_license(char *param_1) {
 "#;
 
 async fn run_analyze(args: crate::cli::args::AiAnalyzeArgs) -> Result<()> {
-    use fission_ai::provider::mock::MockProvider;
     use fission_ai::provider::PseudocodeAnalyzer;
+    use fission_ai::provider::mock::MockProvider;
 
     let code = args.code.as_deref().unwrap_or(DEFAULT_PSEUDOCODE);
 

@@ -305,8 +305,7 @@ impl Debugger for WindowsDebugger {
                 "All 4 hardware breakpoint slots are in use",
             ));
         }
-        let used: std::collections::HashSet<u8> =
-            self.hw_breakpoints.values().cloned().collect();
+        let used: std::collections::HashSet<u8> = self.hw_breakpoints.values().cloned().collect();
         let slot = (0..4u8)
             .find(|i| !used.contains(i))
             .ok_or_else(|| FissionError::debug("No free hardware breakpoint slots"))?;
@@ -398,10 +397,7 @@ impl Debugger for WindowsDebugger {
             let _ = CloseHandle(h_thread);
         }
 
-        self.state.last_event = Some(format!(
-            "Hardware breakpoint removed at 0x{:016x}",
-            address
-        ));
+        self.state.last_event = Some(format!("Hardware breakpoint removed at 0x{:016x}", address));
         Ok(())
     }
 
@@ -477,9 +473,10 @@ impl Debugger for WindowsDebugger {
         let rip = regs.rip;
 
         let code_bytes = self.read_memory(rip, 16)?;
-        let decoder = self.decoder.as_ref().ok_or_else(|| {
-            FissionError::debug("No instruction decoder attached for step over")
-        })?;
+        let decoder = self
+            .decoder
+            .as_ref()
+            .ok_or_else(|| FissionError::debug("No instruction decoder attached for step over"))?;
         let insn = decoder.decode_one(&code_bytes, rip)?;
         let is_call = insn.is_call;
         let insn_len = insn.length;
@@ -525,8 +522,7 @@ impl Debugger for WindowsDebugger {
             let rsp = regs.rsp;
             let bytes = self.read_memory(rsp, 8)?;
             u64::from_le_bytes([
-                bytes[0], bytes[1], bytes[2], bytes[3],
-                bytes[4], bytes[5], bytes[6], bytes[7],
+                bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
             ])
         };
 
@@ -586,9 +582,10 @@ impl Debugger for WindowsDebugger {
         let rip = regs.rip;
 
         let code_bytes = self.read_memory(rip, 16)?;
-        let decoder = self.decoder.as_ref().ok_or_else(|| {
-            FissionError::debug("No instruction decoder attached for skip")
-        })?;
+        let decoder = self
+            .decoder
+            .as_ref()
+            .ok_or_else(|| FissionError::debug("No instruction decoder attached for skip"))?;
         let insn = decoder.decode_one(&code_bytes, rip)?;
         let insn_len = insn.length.max(1);
 
@@ -626,14 +623,8 @@ impl Debugger for WindowsDebugger {
 
         unsafe {
             let mut _unused = PAGE_PROTECTION_FLAGS::default();
-            VirtualProtectEx(
-                h,
-                address as *const c_void,
-                size,
-                new_protect,
-                &mut _unused,
-            )
-            .map_err(|e| FissionError::debug(format!("VirtualProtectEx failed: {:?}", e)))?;
+            VirtualProtectEx(h, address as *const c_void, size, new_protect, &mut _unused)
+                .map_err(|e| FissionError::debug(format!("VirtualProtectEx failed: {:?}", e)))?;
         }
 
         self.memory_breakpoints.insert(address, (size, old_protect));
@@ -668,21 +659,12 @@ impl Debugger for WindowsDebugger {
 
         unsafe {
             let mut _unused = PAGE_PROTECTION_FLAGS::default();
-            VirtualProtectEx(
-                h,
-                address as *const c_void,
-                size,
-                old_protect,
-                &mut _unused,
-            )
-            .map_err(|e| FissionError::debug(format!("VirtualProtectEx failed: {:?}", e)))?;
+            VirtualProtectEx(h, address as *const c_void, size, old_protect, &mut _unused)
+                .map_err(|e| FissionError::debug(format!("VirtualProtectEx failed: {:?}", e)))?;
         }
 
         self.state.breakpoints.remove(&address);
-        self.state.last_event = Some(format!(
-            "Memory breakpoint removed at 0x{:016x}",
-            address
-        ));
+        self.state.last_event = Some(format!("Memory breakpoint removed at 0x{:016x}", address));
         Ok(())
     }
 
@@ -701,10 +683,7 @@ impl Debugger for WindowsDebugger {
                 condition: None,
             },
         );
-        self.state.last_event = Some(format!(
-            "DLL breakpoint set for '{}'",
-            dll_name
-        ));
+        self.state.last_event = Some(format!("DLL breakpoint set for '{}'", dll_name));
         Ok(())
     }
 
@@ -726,10 +705,7 @@ impl Debugger for WindowsDebugger {
         for addr in keys_to_remove {
             self.state.breakpoints.remove(&addr);
         }
-        self.state.last_event = Some(format!(
-            "DLL breakpoint removed for '{}'",
-            dll_name
-        ));
+        self.state.last_event = Some(format!("DLL breakpoint removed for '{}'", dll_name));
         Ok(())
     }
 
@@ -747,10 +723,7 @@ impl Debugger for WindowsDebugger {
                 condition: None,
             },
         );
-        self.state.last_event = Some(format!(
-            "Exception breakpoint set for code 0x{:08x}",
-            code
-        ));
+        self.state.last_event = Some(format!("Exception breakpoint set for code 0x{:08x}", code));
         Ok(())
     }
 
@@ -809,9 +782,12 @@ impl Debugger for WindowsDebugger {
                         new_protect,
                         &mut _unused,
                     )
-                    .map_err(|e| FissionError::debug(format!("VirtualProtectEx failed: {:?}", e)))?;
+                    .map_err(|e| {
+                        FissionError::debug(format!("VirtualProtectEx failed: {:?}", e))
+                    })?;
                 }
-                self.memory_breakpoints.insert(address, (*size, old_protect));
+                self.memory_breakpoints
+                    .insert(address, (*size, old_protect));
             }
             _ => {}
         }
@@ -852,7 +828,9 @@ impl Debugger for WindowsDebugger {
                         old_protect,
                         &mut _unused,
                     )
-                    .map_err(|e| FissionError::debug(format!("VirtualProtectEx failed: {:?}", e)))?;
+                    .map_err(|e| {
+                        FissionError::debug(format!("VirtualProtectEx failed: {:?}", e))
+                    })?;
                 }
                 let _ = self.memory_breakpoints.remove(&address);
             }

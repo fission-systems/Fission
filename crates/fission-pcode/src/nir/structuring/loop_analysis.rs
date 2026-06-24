@@ -1,7 +1,6 @@
 use super::cfg_analysis::{CfgAnalysis, EdgeClass};
 use std::collections::{HashMap, HashSet};
 
-
 #[derive(Debug, Clone)]
 pub(crate) struct LoopBody {
     pub head: usize,
@@ -171,10 +170,7 @@ impl LoopBody {
     ///
     /// When called, the caller should use the preferred tail as the latch for do-while
     /// condition extraction, giving priority to the natural loop-closing exit.
-    pub(crate) fn preferred_tail_index(
-        &self,
-        successors: &[Vec<usize>],
-    ) -> Option<usize> {
+    pub(crate) fn preferred_tail_index(&self, successors: &[Vec<usize>]) -> Option<usize> {
         let Some(exit_idx) = self.exit_idx else {
             return None;
         };

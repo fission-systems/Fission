@@ -1,5 +1,5 @@
-use fission_ai::provider::mock::{MockProvider, generate_mock_report};
 use fission_ai::provider::PseudocodeAnalyzer;
+use fission_ai::provider::mock::{MockProvider, generate_mock_report};
 
 #[test]
 fn test_mock_report_empty_string() {
@@ -103,12 +103,15 @@ fn test_mock_report_control_flow_keywords() {
 #[tokio::test]
 async fn test_analyzer_interface_with_edge_cases() {
     let provider = MockProvider::new("test-model".to_string());
-    
+
     // Test empty string
     let result = provider.analyze_pseudocode("").await.unwrap();
     assert!(result.contains("Target Function**: unknown_function"));
 
     // Test normal function via trait
-    let result = provider.analyze_pseudocode("void hello_world() {}").await.unwrap();
+    let result = provider
+        .analyze_pseudocode("void hello_world() {}")
+        .await
+        .unwrap();
     assert!(result.contains("Target Function**: hello_world"));
 }

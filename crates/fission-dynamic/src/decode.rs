@@ -137,9 +137,7 @@ impl InstructionDecoder for SleighDecoder {
         let decoded = self
             .frontend
             .decode_window(bytes, address, 1)
-            .map_err(|e| {
-                FissionError::debug(format!("Sleigh decode at 0x{:x}: {}", address, e))
-            })?;
+            .map_err(|e| FissionError::debug(format!("Sleigh decode at 0x{:x}: {}", address, e)))?;
         decoded
             .into_iter()
             .next()

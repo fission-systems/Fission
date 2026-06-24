@@ -240,13 +240,22 @@ pub(crate) fn compute_fas_virtual_gotos(
                 }
 
                 let postdom = super::PostDomTree::analyze(&temp_succs, &temp_preds);
-                let postdom_score: usize = postdom.postdominators().values().map(|set| set.len()).sum();
+                let postdom_score: usize =
+                    postdom.postdominators().values().map(|set| set.len()).sum();
                 edge_scores.push(((src, dst), postdom_score));
             }
 
             candidate_edges.sort_by(|&a, &b| {
-                let a_score = edge_scores.iter().find(|&&((s, d), _)| s == a.0 && d == a.1).map(|&(_, s)| s).unwrap_or(0);
-                let b_score = edge_scores.iter().find(|&&((s, d), _)| s == b.0 && d == b.1).map(|&(_, s)| s).unwrap_or(0);
+                let a_score = edge_scores
+                    .iter()
+                    .find(|&&((s, d), _)| s == a.0 && d == a.1)
+                    .map(|&(_, s)| s)
+                    .unwrap_or(0);
+                let b_score = edge_scores
+                    .iter()
+                    .find(|&&((s, d), _)| s == b.0 && d == b.1)
+                    .map(|&(_, s)| s)
+                    .unwrap_or(0);
 
                 if a_score != b_score {
                     // Key 1: Post-dominator relationship count (higher is better)
@@ -259,8 +268,10 @@ pub(crate) fn compute_fas_virtual_gotos(
                         b_is_ret.cmp(&a_is_ret)
                     } else {
                         // Key 3: Source node excess out-degree score (higher is better)
-                        let a_excess = successors[a.0].len() as i64 - predecessors[a.0].len() as i64;
-                        let b_excess = successors[b.0].len() as i64 - predecessors[b.0].len() as i64;
+                        let a_excess =
+                            successors[a.0].len() as i64 - predecessors[a.0].len() as i64;
+                        let b_excess =
+                            successors[b.0].len() as i64 - predecessors[b.0].len() as i64;
                         if a_excess != b_excess {
                             b_excess.cmp(&a_excess)
                         } else {
@@ -353,7 +364,14 @@ fn component_has_cycle(
                 continue;
             }
             if !visited.contains(&succ) {
-                if dfs(succ, component_set, successors, removed_edges, visited, on_stack) {
+                if dfs(
+                    succ,
+                    component_set,
+                    successors,
+                    removed_edges,
+                    visited,
+                    on_stack,
+                ) {
                     return true;
                 }
             } else if on_stack.contains(&succ) {
@@ -366,7 +384,14 @@ fn component_has_cycle(
 
     for &node in component_set {
         if !visited.contains(&node) {
-            if dfs(node, component_set, successors, removed_edges, &mut visited, &mut on_stack) {
+            if dfs(
+                node,
+                component_set,
+                successors,
+                removed_edges,
+                &mut visited,
+                &mut on_stack,
+            ) {
                 return true;
             }
         }
@@ -422,7 +447,10 @@ fn tarjan_dfs_iterative(start: usize, succs: &[Vec<usize>], s: &mut TarjanState)
     s.index += 1;
     s.stack.push(start);
     s.on_stack[start] = true;
-    call_stack.push(Frame { v: start, succ_idx: 0 });
+    call_stack.push(Frame {
+        v: start,
+        succ_idx: 0,
+    });
 
     while let Some(frame) = call_stack.last_mut() {
         let v = frame.v;
@@ -527,10 +555,10 @@ mod tests {
     fn test_fas_two_cycle_resolves_to_one_goto() {
         // Nodes: 0, 1 (the irreducible SCC), 2 and 3 (external entry nodes).
         let succs = vec![
-            vec![1],     // 0 → 1
-            vec![0],     // 1 → 0  (back-edge; creates cycle with dual entry)
-            vec![0],     // 2 (entry_a) → 0
-            vec![1],     // 3 (entry_b) → 1  ← second external entry into SCC
+            vec![1], // 0 → 1
+            vec![0], // 1 → 0  (back-edge; creates cycle with dual entry)
+            vec![0], // 2 (entry_a) → 0
+            vec![1], // 3 (entry_b) → 1  ← second external entry into SCC
         ];
         let preds = build_preds(&succs);
         let fas = compute_fas_virtual_gotos(&succs, &preds);
@@ -551,10 +579,10 @@ mod tests {
         // Graph:  entry(3) → 0, entry(3) → 1 (dual entry → irreducible)
         //         0→1→2→0
         let succs = vec![
-            vec![1],        // 0 → 1
-            vec![2],        // 1 → 2
-            vec![0],        // 2 → 0 (back-edge)
-            vec![0, 1],     // 3 (entry) → 0 and → 1 (dual entry)
+            vec![1],    // 0 → 1
+            vec![2],    // 1 → 2
+            vec![0],    // 2 → 0 (back-edge)
+            vec![0, 1], // 3 (entry) → 0 and → 1 (dual entry)
         ];
         let preds = build_preds(&succs);
         let fas = compute_fas_virtual_gotos(&succs, &preds);

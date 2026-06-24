@@ -1,7 +1,7 @@
 //! Function-level Ghidra-style iterative collapse (env-gated alternative to SESE tree).
 
-use super::*;
 use super::cfg_analysis::select_bad_edge;
+use super::*;
 
 pub(crate) fn collapse_loop_admission_enabled() -> bool {
     std::env::var_os("FISSION_COLLAPSE_LOOP").is_some()
@@ -54,9 +54,7 @@ impl<'a> PreviewBuilder<'a> {
         }
         self.fas_virtual_edges.push((from, to));
         self.telemetry.structuring.fas_virtual_goto_count += 1;
-        self.telemetry
-            .structuring
-            .structuring_select_bad_edge_count += 1;
+        self.telemetry.structuring.structuring_select_bad_edge_count += 1;
         self.terminator_cache.remove(&from);
         self.refresh_cfg_fact_cache();
         true

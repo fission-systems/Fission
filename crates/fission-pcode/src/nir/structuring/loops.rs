@@ -34,7 +34,10 @@ fn rewrite_loop_control_gotos_with_stack(
                 // 1. try matching continue: scan top-to-bottom for the innermost Loop frame
                 let mut continue_matched = false;
                 for frame in stack.iter().rev() {
-                    if let ScopeFrame::Loop { continue_labels, .. } = frame {
+                    if let ScopeFrame::Loop {
+                        continue_labels, ..
+                    } = frame
+                    {
                         if continue_labels.contains(&target_label) {
                             *stmt = HirStmt::Continue;
                             stats.continue_rewrites += 1;
@@ -50,7 +53,9 @@ fn rewrite_loop_control_gotos_with_stack(
                 // 2. try matching break: only check the innermost frame (top of stack)
                 if let Some(innermost) = stack.last() {
                     let break_matched = match innermost {
-                        ScopeFrame::Loop { break_labels, .. } => break_labels.contains(&target_label),
+                        ScopeFrame::Loop { break_labels, .. } => {
+                            break_labels.contains(&target_label)
+                        }
                         ScopeFrame::Switch { break_labels } => break_labels.contains(&target_label),
                     };
                     if break_matched {
@@ -71,8 +76,7 @@ fn rewrite_loop_control_gotos_with_stack(
             HirStmt::Block(body) => {
                 rewrite_loop_control_gotos_with_stack(body, stack, stats);
             }
-            HirStmt::While { body, .. }
-            | HirStmt::DoWhile { body, .. } => {
+            HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
                 stats.skipped_nested_scope_count += 1;
                 stack.push(ScopeFrame::Loop {
                     continue_labels: std::collections::HashSet::new(),
@@ -146,7 +150,6 @@ fn rewrite_loop_control_gotos_multi(
     }];
     rewrite_loop_control_gotos_with_stack(stmts, &mut stack, stats);
 }
-
 
 fn collect_defined_labels(stmts: &[HirStmt], labels: &mut HashSet<String>) {
     for stmt in stmts {
@@ -363,7 +366,7 @@ impl<'a> PreviewBuilder<'a> {
                 return Ok(None);
             }
         }
-        
+
         let diag = structuring_diag_enabled();
         let block_addr = self.block_start_address(idx);
         let mut budget = IfLoweringBudget::new(
@@ -719,7 +722,9 @@ impl<'a> PreviewBuilder<'a> {
 
         self.telemetry.structuring.loop_while_subgraph_lowered_count += 1;
         if multi_tail {
-            self.telemetry.structuring.loop_multi_tail_dowhile_lowered_count += 1;
+            self.telemetry
+                .structuring
+                .loop_multi_tail_dowhile_lowered_count += 1;
         }
 
         Ok(Some((
@@ -922,7 +927,7 @@ impl<'a> PreviewBuilder<'a> {
                 return Ok(None);
             }
         }
-        
+
         if body_set.is_empty() {
             return Ok(Some(Vec::new()));
         }
@@ -938,7 +943,7 @@ impl<'a> PreviewBuilder<'a> {
             })
             .filter(|exits: &HashSet<u64>| !exits.is_empty())
             .unwrap_or_else(|| break_addr.into_iter().collect());
-            
+
         let break_indices: HashSet<usize> = self
             .get_loop_body(head_idx)
             .map(|lb| lb.all_exits.iter().copied().collect())
@@ -982,15 +987,27 @@ impl<'a> PreviewBuilder<'a> {
                         LoweredTerminator::Goto(t) | LoweredTerminator::Fallthrough(Some(t)) => {
                             add_if_body(*t, &mut force_labels);
                         }
-                        LoweredTerminator::Cond { true_target, false_target, .. } => {
+                        LoweredTerminator::Cond {
+                            true_target,
+                            false_target,
+                            ..
+                        } => {
                             add_if_body(*true_target, &mut force_labels);
                             if let Some(ft) = false_target {
                                 add_if_body(*ft, &mut force_labels);
                             }
                         }
-                        LoweredTerminator::Switch { targets, default_target, .. } => {
-                            for &t in targets.iter() { add_if_body(t, &mut force_labels); }
-                            if let Some(dt) = default_target { add_if_body(*dt, &mut force_labels); }
+                        LoweredTerminator::Switch {
+                            targets,
+                            default_target,
+                            ..
+                        } => {
+                            for &t in targets.iter() {
+                                add_if_body(t, &mut force_labels);
+                            }
+                            if let Some(dt) = default_target {
+                                add_if_body(*dt, &mut force_labels);
+                            }
                         }
                         _ => {}
                     }
@@ -1011,8 +1028,9 @@ impl<'a> PreviewBuilder<'a> {
         let mut pos = start_pos;
 
         // Helper closure: is the skip_to index within the body set or equal to break_idx?
-        let is_valid_skip =
-            |skip_to: usize| -> bool { body_set.contains(&skip_to) || break_indices.contains(&skip_to) };
+        let is_valid_skip = |skip_to: usize| -> bool {
+            body_set.contains(&skip_to) || break_indices.contains(&skip_to)
+        };
 
         while pos < sorted_body.len() {
             let idx = sorted_body[pos];
@@ -1054,7 +1072,9 @@ impl<'a> PreviewBuilder<'a> {
             // --- Fallback: emit block with loop-context-aware terminator ---
             let block = self.pcode_block(idx).clone();
             let block_key = self.block_target_key(idx);
-            if (idx == start_idx || targeted.contains(&block_key) || force_labels.contains(&block_key))
+            if (idx == start_idx
+                || targeted.contains(&block_key)
+                || force_labels.contains(&block_key))
                 && emitted_labels.insert(block_key)
             {
                 result_stmts.push(HirStmt::Label(block_label(block_key)));
@@ -1143,7 +1163,8 @@ impl<'a> PreviewBuilder<'a> {
                             Vec::new()
                         } else {
                             // Track this as requiring a label if it is in the body.
-                            if let Some(target_idx) = self.find_block_index_by_address(true_target) {
+                            if let Some(target_idx) = self.find_block_index_by_address(true_target)
+                            {
                                 if body_set.contains(&target_idx) {
                                     force_labels.insert(true_target);
                                 }
@@ -1410,19 +1431,17 @@ mod tests {
 
     #[test]
     fn rewrite_loop_control_gotos_with_nested_switch_converts_continue_but_preserves_break() {
-        let mut body = vec![
-            HirStmt::Switch {
-                expr: HirExpr::Const(1, NirType::Bool),
-                cases: vec![HirSwitchCase {
-                    values: vec![1],
-                    body: vec![
-                        HirStmt::Goto("outer_continue".to_string()),
-                        HirStmt::Goto("outer_break".to_string()),
-                    ],
-                }],
-                default: Vec::new(),
-            }
-        ];
+        let mut body = vec![HirStmt::Switch {
+            expr: HirExpr::Const(1, NirType::Bool),
+            cases: vec![HirSwitchCase {
+                values: vec![1],
+                body: vec![
+                    HirStmt::Goto("outer_continue".to_string()),
+                    HirStmt::Goto("outer_break".to_string()),
+                ],
+            }],
+            default: Vec::new(),
+        }];
 
         let mut stats = LoopControlRewriteStats::default();
         rewrite_loop_control_gotos_in_stmts(
@@ -1442,15 +1461,13 @@ mod tests {
 
     #[test]
     fn rewrite_loop_control_gotos_with_nested_loop_preserves_both() {
-        let mut body = vec![
-            HirStmt::While {
-                cond: HirExpr::Const(1, NirType::Bool),
-                body: vec![
-                    HirStmt::Goto("outer_continue".to_string()),
-                    HirStmt::Goto("outer_break".to_string()),
-                ],
-            }
-        ];
+        let mut body = vec![HirStmt::While {
+            cond: HirExpr::Const(1, NirType::Bool),
+            body: vec![
+                HirStmt::Goto("outer_continue".to_string()),
+                HirStmt::Goto("outer_break".to_string()),
+            ],
+        }];
 
         let mut stats = LoopControlRewriteStats::default();
         rewrite_loop_control_gotos_in_stmts(
@@ -1460,14 +1477,16 @@ mod tests {
             &mut stats,
         );
 
-        let HirStmt::While { body: inner_body, .. } = &body[0] else {
+        let HirStmt::While {
+            body: inner_body, ..
+        } = &body[0]
+        else {
             panic!("expected while");
         };
         // Both are shielded by the inner loop frame
         assert!(matches!(inner_body[0], HirStmt::Goto(ref l) if l == "outer_continue"));
         assert!(matches!(inner_body[1], HirStmt::Goto(ref l) if l == "outer_break"));
     }
-
 
     #[test]
     fn undefined_goto_guard_rejects_missing_label_in_structured_loop_body() {

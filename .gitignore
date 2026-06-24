@@ -195,3 +195,6 @@ cargo-flamegraph.trace/
 # Fission local debug / run output files
 /fission.toml.local
 /run_lldb.sh
+
+# Teamwork agent configurations and logs
+/.agents/

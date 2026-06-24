@@ -257,7 +257,10 @@ impl<'a> PreviewBuilder<'a> {
             let mut nondominated_reads = 0usize;
             let always_terminates = statement_sequence_always_terminates(middle);
             if Self::guarded_tail_diag_enabled() {
-                eprintln!("[GT-DEBUG] binding_name={} middle={:?} always_terminates={}", binding_name, middle, always_terminates);
+                eprintln!(
+                    "[GT-DEBUG] binding_name={} middle={:?} always_terminates={}",
+                    binding_name, middle, always_terminates
+                );
             }
             if !always_terminates {
                 for (stmt_idx, stmt) in follow_tail.iter().enumerate() {
@@ -1258,12 +1261,18 @@ fn stmt_always_terminates(stmt: &HirStmt) -> bool {
     match stmt {
         HirStmt::Return(_) | HirStmt::Break | HirStmt::Continue => true,
         HirStmt::Block(inner) => statement_sequence_always_terminates(inner),
-        HirStmt::If { then_body, else_body, .. } => {
+        HirStmt::If {
+            then_body,
+            else_body,
+            ..
+        } => {
             statement_sequence_always_terminates(then_body)
                 && statement_sequence_always_terminates(else_body)
         }
         HirStmt::Switch { cases, default, .. } => {
-            cases.iter().all(|case| statement_sequence_always_terminates(&case.body))
+            cases
+                .iter()
+                .all(|case| statement_sequence_always_terminates(&case.body))
                 && statement_sequence_always_terminates(default)
         }
         _ => false,

@@ -213,8 +213,9 @@ impl<'a> PreviewBuilder<'a> {
         let terminator_index = self.block_terminator_index(block);
         let mut body = self.synthesize_explicit_merge_bindings_for_block(block)?;
         body.extend(self.lower_block_ops_range(block, 0, block.ops.len(), terminator_index)?);
-        
-        self.lowered_block_stmts_cache.insert(block_idx, body.clone());
+
+        self.lowered_block_stmts_cache
+            .insert(block_idx, body.clone());
         Ok(body)
     }
 
@@ -234,10 +235,13 @@ impl<'a> PreviewBuilder<'a> {
                 op_idx += 1;
                 continue;
             }
-            
+
             // Handle intra-block control flow (e.g. from cmov)
-            if op.opcode == PcodeOpcode::CBranch && op.inputs.len() >= 2 && op.inputs[0].is_constant {
-                if let Some(target_seq) = crate::nir::cfg::instruction_local_branch_target_seq(op, &op.inputs[0]) {
+            if op.opcode == PcodeOpcode::CBranch && op.inputs.len() >= 2 && op.inputs[0].is_constant
+            {
+                if let Some(target_seq) =
+                    crate::nir::cfg::instruction_local_branch_target_seq(op, &op.inputs[0])
+                {
                     let target_op_idx_opt = block.ops[op_idx + 1..end_idx]
                         .iter()
                         .position(|candidate| candidate.seq_num == target_seq)
@@ -249,7 +253,12 @@ impl<'a> PreviewBuilder<'a> {
                             expr: Box::new(cond),
                             ty: NirType::Bool,
                         };
-                        let nested_body = self.lower_block_ops_range(block, op_idx + 1, target_op_idx, terminator_index)?;
+                        let nested_body = self.lower_block_ops_range(
+                            block,
+                            op_idx + 1,
+                            target_op_idx,
+                            terminator_index,
+                        )?;
                         body.push(HirStmt::If {
                             cond: inverted_cond,
                             then_body: nested_body,
@@ -259,8 +268,13 @@ impl<'a> PreviewBuilder<'a> {
                         continue;
                     }
                 }
-            } else if op.opcode == PcodeOpcode::Branch && !op.inputs.is_empty() && op.inputs[0].is_constant {
-                if let Some(target_seq) = crate::nir::cfg::instruction_local_branch_target_seq(op, &op.inputs[0]) {
+            } else if op.opcode == PcodeOpcode::Branch
+                && !op.inputs.is_empty()
+                && op.inputs[0].is_constant
+            {
+                if let Some(target_seq) =
+                    crate::nir::cfg::instruction_local_branch_target_seq(op, &op.inputs[0])
+                {
                     let target_op_idx_opt = block.ops[op_idx + 1..end_idx]
                         .iter()
                         .position(|candidate| candidate.seq_num == target_seq)
@@ -707,7 +721,9 @@ impl<'a> PreviewBuilder<'a> {
             self.bind_materialized_output_to_existing_name(op, output, &name, true);
             name
         } else {
-            let fallback_name = self.ensure_temp_binding_for_output(op, output, preserve_materialization).name;
+            let fallback_name = self
+                .ensure_temp_binding_for_output(op, output, preserve_materialization)
+                .name;
             fallback_name
         };
         if self.emit_ready_trace_enabled_for_current_fn() {
@@ -790,8 +806,7 @@ impl<'a> PreviewBuilder<'a> {
             || !is_register_space_id(output.space_id)
             || !Self::rhs_is_safe_scalar_live_register_merge(rhs)
         {
-            if is_register_space_id(output.space_id) {
-            }
+            if is_register_space_id(output.space_id) {}
             return None;
         }
         let proof = self.describe_missing_merge_binding_proof(block, op_idx, output, rhs)?;
@@ -1223,10 +1238,7 @@ impl<'a> PreviewBuilder<'a> {
             && let Some(binding) = self.temps.get_mut(&binding.name)
             && binding.initializer.is_none()
         {
-            binding.initializer = Some(HirExpr::Const(
-                0,
-                type_from_size(output.size, false),
-            ));
+            binding.initializer = Some(HirExpr::Const(0, type_from_size(output.size, false)));
         }
         let predecessor_addrs = preds
             .iter()
@@ -1484,7 +1496,11 @@ impl<'a> PreviewBuilder<'a> {
             );
             return None;
         }
-        let predecessors = self.predecessors.get(block_idx).cloned().unwrap_or_default();
+        let predecessors = self
+            .predecessors
+            .get(block_idx)
+            .cloned()
+            .unwrap_or_default();
         let predecessor_addrs = predecessors
             .iter()
             .filter_map(|idx| self.pcode.blocks.get(*idx).map(|block| block.start_address))
@@ -1633,7 +1649,8 @@ impl<'a> PreviewBuilder<'a> {
             return needs_binding;
         }
 
-        let needs_binding = self.pcode
+        let needs_binding = self
+            .pcode
             .blocks
             .iter()
             .enumerate()
@@ -1643,13 +1660,9 @@ impl<'a> PreviewBuilder<'a> {
                     .is_some_and(|preds| preds.len() >= 2)
                     && block.ops.iter().enumerate().any(|(op_idx, op)| {
                         !self.has_call_between_ops(block, 0, op_idx)
-                            && !block
-                                .ops
-                                .iter()
-                                .take(op_idx)
-                                .any(|candidate| {
-                                    self.op_defines_x86_gpr_family(candidate, family_idx)
-                                })
+                            && !block.ops.iter().take(op_idx).any(|candidate| {
+                                self.op_defines_x86_gpr_family(candidate, family_idx)
+                            })
                             && op.inputs.iter().any(|input| {
                                 !input.is_constant
                                     && input.size < self.options.pointer_size
@@ -1660,8 +1673,9 @@ impl<'a> PreviewBuilder<'a> {
                             })
                     })
             });
-        
-        self.partial_gpr_live_binding_cache.insert(family_idx, needs_binding);
+
+        self.partial_gpr_live_binding_cache
+            .insert(family_idx, needs_binding);
         needs_binding
     }
 
@@ -1948,7 +1962,9 @@ impl<'a> PreviewBuilder<'a> {
         if self.loop_body_has_side_entry_or_irreducible_edge(&loop_body) {
             return Err("side_entry_or_irreducible");
         }
-        if !self.pred_path_has_live_accumulator_def(loop_pred, block_idx, &loop_body, family_idx, false) {
+        if !self
+            .pred_path_has_live_accumulator_def(loop_pred, block_idx, &loop_body, family_idx, false)
+        {
             return Err("missing_loop_exit_live_def");
         }
         let body = loop_body.body.iter().copied().collect::<HashSet<_>>();
@@ -2161,12 +2177,7 @@ impl<'a> PreviewBuilder<'a> {
         }
         self.current_stack_home_ptr = op.inputs.get(1).cloned();
         let res = self.stack_home_accumulator_store_rhs_inner(
-            block,
-            op,
-            slot_name,
-            value,
-            &live_name,
-            family_idx,
+            block, op, slot_name, value, &live_name, family_idx,
         );
         self.current_stack_home_ptr = None;
         res
@@ -2245,7 +2256,9 @@ impl<'a> PreviewBuilder<'a> {
         }
         let value_is_zero = self.varnode_known_const_zero(value, 8);
         let external_zero_seed = store_is_loop_header
-            && self.loop_header_external_predecessors_seed_zero(block_idx, &loop_body, family_idx, true);
+            && self.loop_header_external_predecessors_seed_zero(
+                block_idx, &loop_body, family_idx, true,
+            );
         let zero_entry_default = value_is_zero || external_zero_seed;
         let all_external_preds_have_live_def = store_is_loop_header
             && self.loop_header_external_predecessors_have_live_accumulator_def(
@@ -2369,19 +2382,16 @@ impl<'a> PreviewBuilder<'a> {
             return false;
         }
         let result = self.pcode.blocks.get(idx).is_some_and(|block| {
-            let has_side_effect = |block: &crate::pcode::PcodeBasicBlock, start: usize, end: usize| {
-                if conservative_mem_check {
-                    self.has_aliasing_side_effect_between_ops(block, start, end)
-                } else {
-                    self.has_call_between_ops(block, start, end)
-                }
-            };
+            let has_side_effect =
+                |block: &crate::pcode::PcodeBasicBlock, start: usize, end: usize| {
+                    if conservative_mem_check {
+                        self.has_aliasing_side_effect_between_ops(block, start, end)
+                    } else {
+                        self.has_call_between_ops(block, start, end)
+                    }
+                };
             if let Some(def_idx) = self.last_x86_gpr_family_definition(block, family_idx) {
-                return !has_side_effect(
-                    block,
-                    def_idx + 1,
-                    block.ops.len(),
-                );
+                return !has_side_effect(block, def_idx + 1, block.ops.len());
             }
             if block.ops.iter().any(|op| {
                 matches!(
@@ -2433,20 +2443,17 @@ impl<'a> PreviewBuilder<'a> {
             return false;
         }
         let result = self.pcode.blocks.get(idx).is_some_and(|block| {
-            let has_side_effect = |block: &crate::pcode::PcodeBasicBlock, start: usize, end: usize| {
-                if conservative_mem_check {
-                    self.has_aliasing_side_effect_between_ops(block, start, end)
-                } else {
-                    self.has_call_between_ops(block, start, end)
-                }
-            };
+            let has_side_effect =
+                |block: &crate::pcode::PcodeBasicBlock, start: usize, end: usize| {
+                    if conservative_mem_check {
+                        self.has_aliasing_side_effect_between_ops(block, start, end)
+                    } else {
+                        self.has_call_between_ops(block, start, end)
+                    }
+                };
             if let Some(def_idx) = self.last_x86_gpr_family_definition(block, family_idx) {
                 return self.x86_gpr_definition_is_zero_in_block(block, def_idx, 4)
-                    && !has_side_effect(
-                        block,
-                        def_idx + 1,
-                        block.ops.len(),
-                    );
+                    && !has_side_effect(block, def_idx + 1, block.ops.len());
             }
             if has_side_effect(block, 0, block.ops.len()) {
                 return false;
@@ -2509,13 +2516,13 @@ impl<'a> PreviewBuilder<'a> {
             })
     }
 
-    pub(super) fn canonical_x86_gpr64_name_for_value(&self, value: &Varnode) -> Option<(&'static str, usize)> {
-        let raw_name = self
-            .sla_hw_name(value.offset, value.size)
-            .or_else(|| {
-                crate::arch::x86::unique_x86_register_name(value.offset, value.size)
-                    .map(str::to_string)
-            })?;
+    pub(super) fn canonical_x86_gpr64_name_for_value(
+        &self,
+        value: &Varnode,
+    ) -> Option<(&'static str, usize)> {
+        let raw_name = self.sla_hw_name(value.offset, value.size).or_else(|| {
+            crate::arch::x86::unique_x86_register_name(value.offset, value.size).map(str::to_string)
+        })?;
         Self::canonical_x86_gpr64_name_for_raw_name(raw_name.as_str())
     }
 
@@ -2624,19 +2631,16 @@ impl<'a> PreviewBuilder<'a> {
             return false;
         }
         let result = self.pcode.blocks.get(idx).is_some_and(|block| {
-            let has_side_effect = |block: &crate::pcode::PcodeBasicBlock, start: usize, end: usize| {
-                if conservative_mem_check {
-                    self.has_aliasing_side_effect_between_ops(block, start, end)
-                } else {
-                    self.has_call_between_ops(block, start, end)
-                }
-            };
+            let has_side_effect =
+                |block: &crate::pcode::PcodeBasicBlock, start: usize, end: usize| {
+                    if conservative_mem_check {
+                        self.has_aliasing_side_effect_between_ops(block, start, end)
+                    } else {
+                        self.has_call_between_ops(block, start, end)
+                    }
+                };
             if let Some(def_idx) = self.last_x86_gpr_family_definition(block, family_idx) {
-                return !has_side_effect(
-                    block,
-                    def_idx + 1,
-                    block.ops.len(),
-                );
+                return !has_side_effect(block, def_idx + 1, block.ops.len());
             }
             if has_side_effect(block, 0, block.ops.len()) {
                 return false;
@@ -3460,7 +3464,6 @@ impl<'a> PreviewBuilder<'a> {
     }
 }
 
-
 #[cfg(test)]
 #[path = "mod_tests.rs"]
 mod materialize_tests;
@@ -3468,4 +3471,3 @@ mod materialize_tests;
 pub(super) fn test_refine_partitions(accesses: &[(i64, u32)]) -> Vec<(i64, u32)> {
     self::incremental::refine_partitions(accesses)
 }
-

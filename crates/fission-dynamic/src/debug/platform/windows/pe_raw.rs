@@ -4,9 +4,7 @@
 //! and export tables inside a debuggee or target process.
 
 use windows::{
-    Win32::Foundation::*,
-    Win32::System::Diagnostics::Debug::*,
-    Win32::System::SystemServices::*,
+    Win32::Foundation::*, Win32::System::Diagnostics::Debug::*, Win32::System::SystemServices::*,
 };
 
 /// Raw memory read helper (avoids dependency on the unpacker memory module).

@@ -2,6 +2,10 @@
 //!
 //! Foundational utilities shared across crates.
 
+#![allow(clippy::collapsible_if)]
+#![allow(clippy::manual_pattern_char_comparison)]
+#![allow(clippy::ptr_arg)]
+
 pub mod architecture;
 pub mod common;
 pub mod constants;

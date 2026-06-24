@@ -3,12 +3,12 @@
 //! Wraps `VirtualQueryEx` to walk the full address space and classify
 //! each region by state, type, and protection.
 
+use std::ffi::c_void;
 use windows::Win32::Foundation::HANDLE;
 use windows::Win32::System::Memory::{
-    VirtualQueryEx, MEMORY_BASIC_INFORMATION, PAGE_PROTECTION_FLAGS,
-    MEM_COMMIT, MEM_FREE, MEM_RESERVE, MEM_IMAGE, MEM_MAPPED, MEM_PRIVATE,
+    MEM_COMMIT, MEM_FREE, MEM_IMAGE, MEM_MAPPED, MEM_PRIVATE, MEM_RESERVE,
+    MEMORY_BASIC_INFORMATION, PAGE_PROTECTION_FLAGS, VirtualQueryEx,
 };
-use std::ffi::c_void;
 
 /// Describes a single virtual-memory region in the target process.
 #[derive(Debug, Clone)]
@@ -133,8 +133,6 @@ pub fn find_executable_regions(process: HANDLE) -> Vec<MemoryRegion> {
 pub fn find_writable_executable_regions(process: HANDLE) -> Vec<MemoryRegion> {
     enumerate_memory_regions(process)
         .into_iter()
-        .filter(|r| {
-            r.state == MemoryState::Commit && r.is_writable_executable()
-        })
+        .filter(|r| r.state == MemoryState::Commit && r.is_writable_executable())
         .collect()
 }

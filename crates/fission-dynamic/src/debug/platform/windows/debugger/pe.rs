@@ -16,15 +16,25 @@ impl Debugger for WindowsDebugger {
         let num_sections = u16::from_le_bytes([coff[2], coff[3]]);
         let size_optional = u16::from_le_bytes([coff[16], coff[17]]);
 
-        let is_64 = if machine == 0x8664 && size_optional >= 240 { true }
-            else if machine == 0x014c && size_optional >= 224 { false }
-            else { return Err(FissionError::debug("Unsupported PE format")); };
+        let is_64 = if machine == 0x8664 && size_optional >= 240 {
+            true
+        } else if machine == 0x014c && size_optional >= 224 {
+            false
+        } else {
+            return Err(FissionError::debug("Unsupported PE format"));
+        };
 
         let opt_offset = base + e_lfanew + 24;
-        let dd_offset = if is_64 { opt_offset + 112 } else { opt_offset + 96 };
+        let dd_offset = if is_64 {
+            opt_offset + 112
+        } else {
+            opt_offset + 96
+        };
         let export_dd = self.read_memory(dd_offset, 8)?;
-        let export_rva = u32::from_le_bytes([export_dd[0], export_dd[1], export_dd[2], export_dd[3]]);
-        let _export_size = u32::from_le_bytes([export_dd[4], export_dd[5], export_dd[6], export_dd[7]]);
+        let export_rva =
+            u32::from_le_bytes([export_dd[0], export_dd[1], export_dd[2], export_dd[3]]);
+        let _export_size =
+            u32::from_le_bytes([export_dd[4], export_dd[5], export_dd[6], export_dd[7]]);
 
         if export_rva == 0 {
             return Ok(Vec::new());
@@ -46,7 +56,12 @@ impl Debugger for WindowsDebugger {
 
             for idx in 0..number_of_names.min(10000) {
                 let name_rva_bytes = self.read_memory(names_table + idx as u64 * 4, 4)?;
-                let name_rva = u32::from_le_bytes([name_rva_bytes[0], name_rva_bytes[1], name_rva_bytes[2], name_rva_bytes[3]]);
+                let name_rva = u32::from_le_bytes([
+                    name_rva_bytes[0],
+                    name_rva_bytes[1],
+                    name_rva_bytes[2],
+                    name_rva_bytes[3],
+                ]);
                 let ord_bytes = self.read_memory(ordinals_table + idx as u64 * 2, 2)?;
                 let ordinal = u16::from_le_bytes([ord_bytes[0], ord_bytes[1]]);
 
@@ -55,7 +70,12 @@ impl Debugger for WindowsDebugger {
                     let func_idx = ordinal as u64;
                     if func_idx < number_of_functions as u64 {
                         let func_rva_bytes = self.read_memory(functions_table + func_idx * 4, 4)?;
-                        let func_rva = u32::from_le_bytes([func_rva_bytes[0], func_rva_bytes[1], func_rva_bytes[2], func_rva_bytes[3]]);
+                        let func_rva = u32::from_le_bytes([
+                            func_rva_bytes[0],
+                            func_rva_bytes[1],
+                            func_rva_bytes[2],
+                            func_rva_bytes[3],
+                        ]);
                         if func_rva != 0 {
                             exports.push(crate::debug::types::ExportInfo {
                                 name,
@@ -82,14 +102,23 @@ impl Debugger for WindowsDebugger {
         let machine = u16::from_le_bytes([coff[0], coff[1]]);
         let size_optional = u16::from_le_bytes([coff[16], coff[17]]);
 
-        let is_64 = if machine == 0x8664 && size_optional >= 240 { true }
-            else if machine == 0x014c && size_optional >= 224 { false }
-            else { return Err(FissionError::debug("Unsupported PE format")); };
+        let is_64 = if machine == 0x8664 && size_optional >= 240 {
+            true
+        } else if machine == 0x014c && size_optional >= 224 {
+            false
+        } else {
+            return Err(FissionError::debug("Unsupported PE format"));
+        };
 
         let opt_offset = base + e_lfanew + 24;
-        let dd_offset = if is_64 { opt_offset + 112 } else { opt_offset + 96 };
+        let dd_offset = if is_64 {
+            opt_offset + 112
+        } else {
+            opt_offset + 96
+        };
         let import_dd = self.read_memory(dd_offset + 8, 8)?; // DataDirectory[1]
-        let import_rva = u32::from_le_bytes([import_dd[0], import_dd[1], import_dd[2], import_dd[3]]);
+        let import_rva =
+            u32::from_le_bytes([import_dd[0], import_dd[1], import_dd[2], import_dd[3]]);
 
         if import_rva == 0 {
             return Ok(Vec::new());
@@ -115,7 +144,11 @@ impl Debugger for WindowsDebugger {
                 String::new()
             };
 
-            let thunk_rva = if orig_first_thunk != 0 { orig_first_thunk } else { first_thunk };
+            let thunk_rva = if orig_first_thunk != 0 {
+                orig_first_thunk
+            } else {
+                first_thunk
+            };
             let thunk_size = if is_64 { 8 } else { 4 };
             let mut thunk_offset = base + thunk_rva as u64;
 
@@ -123,11 +156,22 @@ impl Debugger for WindowsDebugger {
                 let thunk_bytes = self.read_memory(thunk_offset, thunk_size)?;
                 let thunk_val = if is_64 {
                     u64::from_le_bytes([
-                        thunk_bytes[0], thunk_bytes[1], thunk_bytes[2], thunk_bytes[3],
-                        thunk_bytes[4], thunk_bytes[5], thunk_bytes[6], thunk_bytes[7],
+                        thunk_bytes[0],
+                        thunk_bytes[1],
+                        thunk_bytes[2],
+                        thunk_bytes[3],
+                        thunk_bytes[4],
+                        thunk_bytes[5],
+                        thunk_bytes[6],
+                        thunk_bytes[7],
                     ])
                 } else {
-                    u32::from_le_bytes([thunk_bytes[0], thunk_bytes[1], thunk_bytes[2], thunk_bytes[3]]) as u64
+                    u32::from_le_bytes([
+                        thunk_bytes[0],
+                        thunk_bytes[1],
+                        thunk_bytes[2],
+                        thunk_bytes[3],
+                    ]) as u64
                 };
 
                 if thunk_val == 0 {
@@ -141,7 +185,9 @@ impl Debugger for WindowsDebugger {
                         module: dll_name.clone(),
                         name: None,
                         ordinal: Some(ordinal),
-                        address: base + first_thunk as u64 + (thunk_offset - (base + thunk_rva as u64)),
+                        address: base
+                            + first_thunk as u64
+                            + (thunk_offset - (base + thunk_rva as u64)),
                     });
                 } else {
                     // Name import
@@ -152,7 +198,9 @@ impl Debugger for WindowsDebugger {
                         module: dll_name.clone(),
                         name: if name.is_empty() { None } else { Some(name) },
                         ordinal: None,
-                        address: base + first_thunk as u64 + (thunk_offset - (base + thunk_rva as u64)),
+                        address: base
+                            + first_thunk as u64
+                            + (thunk_offset - (base + thunk_rva as u64)),
                     });
                 }
 
@@ -173,6 +221,10 @@ impl Debugger for WindowsDebugger {
     }
 
     fn extract_null_terminated_string(bytes: &[u8]) -> String {
-        bytes.iter().take_while(|&&b| b != 0).map(|&b| b as char).collect()
+        bytes
+            .iter()
+            .take_while(|&&b| b != 0)
+            .map(|&b| b as char)
+            .collect()
     }
 }

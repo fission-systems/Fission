@@ -63,7 +63,7 @@ jobs:
               + summarize("🔵 Heavy Validation (ci-heavy.yml) — nightly", heavy)
               + "\n"
               + summarize("🚀 CD Release (cd.yml) — tag-triggered", cd)
-              + f"\n---\n[View all workflow runs](https://github.com/${{{{ github.repository }}}}/actions)\n"
+              + "\n---\n[View all workflow runs](https://github.com/${{ github.repository }}/actions)\n"
           )
 
           with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as f:

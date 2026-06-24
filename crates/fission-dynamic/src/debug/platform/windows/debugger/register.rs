@@ -179,8 +179,7 @@ impl Debugger for WindowsDebugger {
                 "All 4 hardware breakpoint slots are in use",
             ));
         }
-        let used: std::collections::HashSet<u8> =
-            self.hw_breakpoints.values().cloned().collect();
+        let used: std::collections::HashSet<u8> = self.hw_breakpoints.values().cloned().collect();
         let slot = (0..4u8)
             .find(|i| !used.contains(i))
             .ok_or_else(|| FissionError::debug("No free hardware breakpoint slots"))?;
@@ -272,9 +271,7 @@ impl Debugger for WindowsDebugger {
             let _ = CloseHandle(h_thread);
         }
 
-        self.state.last_event = Some(format!(
-            "Hardware breakpoint removed at 0x{:016x}",
-            address
-        ));
+        self.state.last_event = Some(format!("Hardware breakpoint removed at 0x{:016x}", address));
         Ok(())
+    }
 }

@@ -91,7 +91,8 @@ impl TitanLoader {
         if data.len() < 0x80 {
             return 0;
         }
-        let e_lfanew = u32::from_le_bytes([data[0x3C], data[0x3D], data[0x3E], data[0x3F]]) as usize;
+        let e_lfanew =
+            u32::from_le_bytes([data[0x3C], data[0x3D], data[0x3E], data[0x3F]]) as usize;
         if e_lfanew < 0x40 || e_lfanew + 0x100 > data.len() {
             return binary
                 .sections

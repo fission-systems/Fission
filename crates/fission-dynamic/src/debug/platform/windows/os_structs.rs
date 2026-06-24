@@ -3,10 +3,10 @@
 //! Uses `NtQueryInformationProcess` / `NtQueryInformationThread`
 //! to locate the structures, then `ReadProcessMemory` to extract fields.
 
+use std::ffi::c_void;
 use windows::Win32::Foundation::{HANDLE, NTSTATUS};
 use windows::Win32::System::Diagnostics::Debug::ReadProcessMemory;
 use windows::Win32::System::Threading::{NtQueryInformationProcess, NtQueryInformationThread};
-use std::ffi::c_void;
 
 /// Key fields from the Process Environment Block.
 #[derive(Debug, Clone)]
@@ -85,11 +85,46 @@ pub fn read_peb(process: HANDLE) -> Result<PebInfo, String> {
     let mut nt_global: u32 = 0;
 
     unsafe {
-        ReadProcessMemory(process, (peb + 0x02) as *const c_void, &mut being_debugged as *mut _ as *mut c_void, 1, Some(&mut read)).ok()?;
-        ReadProcessMemory(process, (peb + 0x08) as *const c_void, &mut image_base as *mut _ as *mut c_void, 8, Some(&mut read)).ok()?;
-        ReadProcessMemory(process, (peb + 0x18) as *const c_void, &mut ldr as *mut _ as *mut c_void, 8, Some(&mut read)).ok()?;
-        ReadProcessMemory(process, (peb + 0x20) as *const c_void, &mut process_params as *mut _ as *mut c_void, 8, Some(&mut read)).ok()?;
-        ReadProcessMemory(process, (peb + 0xBC) as *const c_void, &mut nt_global as *mut _ as *mut c_void, 4, Some(&mut read)).ok()?;
+        ReadProcessMemory(
+            process,
+            (peb + 0x02) as *const c_void,
+            &mut being_debugged as *mut _ as *mut c_void,
+            1,
+            Some(&mut read),
+        )
+        .ok()?;
+        ReadProcessMemory(
+            process,
+            (peb + 0x08) as *const c_void,
+            &mut image_base as *mut _ as *mut c_void,
+            8,
+            Some(&mut read),
+        )
+        .ok()?;
+        ReadProcessMemory(
+            process,
+            (peb + 0x18) as *const c_void,
+            &mut ldr as *mut _ as *mut c_void,
+            8,
+            Some(&mut read),
+        )
+        .ok()?;
+        ReadProcessMemory(
+            process,
+            (peb + 0x20) as *const c_void,
+            &mut process_params as *mut _ as *mut c_void,
+            8,
+            Some(&mut read),
+        )
+        .ok()?;
+        ReadProcessMemory(
+            process,
+            (peb + 0xBC) as *const c_void,
+            &mut nt_global as *mut _ as *mut c_void,
+            4,
+            Some(&mut read),
+        )
+        .ok()?;
     }
 
     Ok(PebInfo {
@@ -167,13 +202,62 @@ pub fn read_teb(process: HANDLE, thread_id: u32) -> Result<TebInfo, String> {
     let mut peb_ptr: u64 = 0;
 
     unsafe {
-        ReadProcessMemory(process, teb as *const c_void, &mut exception_list as *mut _ as *mut c_void, 8, Some(&mut read)).ok()?;
-        ReadProcessMemory(process, (teb + 0x08) as *const c_void, &mut stack_base as *mut _ as *mut c_void, 8, Some(&mut read)).ok()?;
-        ReadProcessMemory(process, (teb + 0x10) as *const c_void, &mut stack_limit as *mut _ as *mut c_void, 8, Some(&mut read)).ok()?;
-        ReadProcessMemory(process, (teb + 0x30) as *const c_void, &mut self_ptr as *mut _ as *mut c_void, 8, Some(&mut read)).ok()?;
-        ReadProcessMemory(process, (teb + 0x40) as *const c_void, &mut client_id_proc as *mut _ as *mut c_void, 8, Some(&mut read)).ok()?;
-        ReadProcessMemory(process, (teb + 0x48) as *const c_void, &mut client_id_thread as *mut _ as *mut c_void, 8, Some(&mut read)).ok()?;
-        ReadProcessMemory(process, (teb + 0x60) as *const c_void, &mut peb_ptr as *mut _ as *mut c_void, 8, Some(&mut read)).ok()?;
+        ReadProcessMemory(
+            process,
+            teb as *const c_void,
+            &mut exception_list as *mut _ as *mut c_void,
+            8,
+            Some(&mut read),
+        )
+        .ok()?;
+        ReadProcessMemory(
+            process,
+            (teb + 0x08) as *const c_void,
+            &mut stack_base as *mut _ as *mut c_void,
+            8,
+            Some(&mut read),
+        )
+        .ok()?;
+        ReadProcessMemory(
+            process,
+            (teb + 0x10) as *const c_void,
+            &mut stack_limit as *mut _ as *mut c_void,
+            8,
+            Some(&mut read),
+        )
+        .ok()?;
+        ReadProcessMemory(
+            process,
+            (teb + 0x30) as *const c_void,
+            &mut self_ptr as *mut _ as *mut c_void,
+            8,
+            Some(&mut read),
+        )
+        .ok()?;
+        ReadProcessMemory(
+            process,
+            (teb + 0x40) as *const c_void,
+            &mut client_id_proc as *mut _ as *mut c_void,
+            8,
+            Some(&mut read),
+        )
+        .ok()?;
+        ReadProcessMemory(
+            process,
+            (teb + 0x48) as *const c_void,
+            &mut client_id_thread as *mut _ as *mut c_void,
+            8,
+            Some(&mut read),
+        )
+        .ok()?;
+        ReadProcessMemory(
+            process,
+            (teb + 0x60) as *const c_void,
+            &mut peb_ptr as *mut _ as *mut c_void,
+            8,
+            Some(&mut read),
+        )
+        .ok()?;
     }
 
     Ok(TebInfo {

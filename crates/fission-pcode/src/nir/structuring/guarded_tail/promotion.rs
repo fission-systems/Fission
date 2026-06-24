@@ -407,7 +407,8 @@ impl<'a> PreviewBuilder<'a> {
     ) -> bool {
         self.telemetry.structuring.promotion_candidate_count += 1;
         let has_internal = self.region_has_targeted_internal_entry(start_idx, skip_to, targeted);
-        let min_prom_res = self.is_minimal_structured_promotion_candidate(start_idx, skip_to, targeted);
+        let min_prom_res =
+            self.is_minimal_structured_promotion_candidate(start_idx, skip_to, targeted);
         let accepted = !has_internal || min_prom_res.is_ok();
         if !accepted
             && has_internal
@@ -486,9 +487,6 @@ mod tests {
         let rejection =
             PreviewBuilder::classify_must_emit_label_rejection(&body, &middle, 1, 3, "join", 1, 1);
 
-        assert_eq!(
-            rejection,
-            None
-        );
+        assert_eq!(rejection, None);
     }
 }

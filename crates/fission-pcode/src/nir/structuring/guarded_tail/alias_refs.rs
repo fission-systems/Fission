@@ -42,7 +42,9 @@ impl<'a> PreviewBuilder<'a> {
             HirExpr::Binary { lhs, rhs, .. } => {
                 Self::expr_is_pure_value(lhs) && Self::expr_is_pure_value(rhs)
             }
-            HirExpr::PtrOffset { base, .. } | HirExpr::FieldAccess { base, .. } => Self::expr_is_pure_value(base),
+            HirExpr::PtrOffset { base, .. } | HirExpr::FieldAccess { base, .. } => {
+                Self::expr_is_pure_value(base)
+            }
             HirExpr::Index { base, index, .. } => {
                 Self::expr_is_pure_value(base) && Self::expr_is_pure_value(index)
             }

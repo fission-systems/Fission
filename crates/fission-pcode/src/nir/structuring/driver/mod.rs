@@ -135,7 +135,7 @@ impl<'a> PreviewBuilder<'a> {
         candidates: &mut Vec<CollapseCandidate>,
         result: Result<Option<(HirStmt, usize)>, MlilPreviewError>,
     ) -> Result<(), MlilPreviewError> {
-            if let Some((stmt, skip_to)) =
+        if let Some((stmt, skip_to)) =
             Self::capture_structuring_failure(result, last_structuring_failure)?
         {
             let accepted = if matches!(rule, CollapseRule::Switch) {
@@ -179,7 +179,9 @@ impl<'a> PreviewBuilder<'a> {
         if let Some(total_start) = self.structuring_start {
             if total_start.elapsed().as_secs_f64() > 0.5 {
                 if diag {
-                    eprintln!("[DIAG] build_sese_region_body: aborting structuring entry due to 500ms time ceiling");
+                    eprintln!(
+                        "[DIAG] build_sese_region_body: aborting structuring entry due to 500ms time ceiling"
+                    );
                 }
                 return Err(MlilPreviewError::UnsupportedCfgRegionShape);
             }
@@ -205,7 +207,9 @@ impl<'a> PreviewBuilder<'a> {
             if let Some(total_start) = self.structuring_start {
                 if total_start.elapsed().as_secs_f64() > 0.5 {
                     if diag {
-                        eprintln!("[DIAG] build_sese_region_body: aborting collapse loop due to 500ms time ceiling");
+                        eprintln!(
+                            "[DIAG] build_sese_region_body: aborting collapse loop due to 500ms time ceiling"
+                        );
                     }
                     return Err(MlilPreviewError::UnsupportedCfgRegionShape);
                 }
@@ -238,7 +242,8 @@ impl<'a> PreviewBuilder<'a> {
                         .iter()
                         .enumerate()
                         .any(|(peer_idx, block)| {
-                            peer_idx != self.pcode_block_idx(idx) && block.start_address == block_start
+                            peer_idx != self.pcode_block_idx(idx)
+                                && block.start_address == block_start
                         });
                 let is_orphan_unreachable = idx != 0
                     && self.predecessors[idx].is_empty()
@@ -309,7 +314,10 @@ impl<'a> PreviewBuilder<'a> {
                     let skip_to = best.node.skip_to;
                     if skip_to <= idx {
                         if diag {
-                            eprintln!("[DIAG] select_structured_candidate returned non-advancing skip_to: {} <= {}", skip_to, idx);
+                            eprintln!(
+                                "[DIAG] select_structured_candidate returned non-advancing skip_to: {} <= {}",
+                                skip_to, idx
+                            );
                         }
                         idx += 1;
                         continue;
@@ -343,7 +351,8 @@ impl<'a> PreviewBuilder<'a> {
                         .iter()
                         .enumerate()
                         .any(|(peer_idx, block)| {
-                            peer_idx != self.pcode_block_idx(idx) && block.start_address == block_start
+                            peer_idx != self.pcode_block_idx(idx)
+                                && block.start_address == block_start
                         });
                 let is_orphan_unreachable = idx != 0
                     && self.predecessors[idx].is_empty()
@@ -358,14 +367,17 @@ impl<'a> PreviewBuilder<'a> {
 
                 if let Some(err) = last_structuring_failure {
                     let mut temp_emitted_labels = emitted_labels.clone();
-                    if let Some((recovered_body, skip_to)) = self.try_recover_region_linearized_body(
-                        idx,
-                        &err,
-                        &targeted,
-                        &mut temp_emitted_labels,
-                    )? {
+                    if let Some((recovered_body, skip_to)) = self
+                        .try_recover_region_linearized_body(
+                            idx,
+                            &err,
+                            &targeted,
+                            &mut temp_emitted_labels,
+                        )?
+                    {
                         emitted_labels = temp_emitted_labels;
-                        let dummy_proof = RegionProof::structured(RegionKind::Sequence, idx, skip_to, None);
+                        let dummy_proof =
+                            RegionProof::structured(RegionKind::Sequence, idx, skip_to, None);
                         active_child_map.insert(idx, (recovered_body, skip_to, dummy_proof));
                         progress = true;
                         break;
@@ -435,7 +447,10 @@ impl<'a> PreviewBuilder<'a> {
                 let next_idx = *child_exit;
                 if next_idx <= idx {
                     if diag {
-                        eprintln!("[DIAG] final reconstruction SESE scan: non-advancing child_exit: {} <= {}", next_idx, idx);
+                        eprintln!(
+                            "[DIAG] final reconstruction SESE scan: non-advancing child_exit: {} <= {}",
+                            next_idx, idx
+                        );
                     }
                     idx += 1;
                     continue;
@@ -487,9 +502,10 @@ impl<'a> PreviewBuilder<'a> {
                 } => {
                     let next_addr = self.next_block_address(idx);
                     let true_idx = self.find_block_index_by_address(true_target);
-                    let false_idx = false_target
-                        .and_then(|target| self.find_block_index_by_address(target));
-                    let true_virtual = true_idx.is_some_and(|ti| self.is_virtual_goto_edge(idx, ti));
+                    let false_idx =
+                        false_target.and_then(|target| self.find_block_index_by_address(target));
+                    let true_virtual =
+                        true_idx.is_some_and(|ti| self.is_virtual_goto_edge(idx, ti));
                     let false_virtual =
                         false_idx.is_some_and(|fi| self.is_virtual_goto_edge(idx, fi));
                     let mut then_body = if true_virtual || next_addr != Some(true_target) {
@@ -830,7 +846,7 @@ mod tests {
             userops: Default::default(),
             cspec_param_offsets: None,
             cspec_stack_arg_base: None,
-        cspec_extrapop: None,
+            cspec_extrapop: None,
             sla_register_map: None,
             cspec_return_offset: None,
             cspec_return_target: None,
@@ -952,8 +968,10 @@ mod tests {
 
     #[test]
     fn blockgraph_collapse_gate_stays_fail_closed_for_extreme_budget() {
-        let decision =
-            apply_blockgraph_collapse_admission_gate(StructuringAdmissionReason::ExtremeBudget, true);
+        let decision = apply_blockgraph_collapse_admission_gate(
+            StructuringAdmissionReason::ExtremeBudget,
+            true,
+        );
         assert_eq!(decision, StructuringAdmissionReason::ExtremeBudget);
     }
 

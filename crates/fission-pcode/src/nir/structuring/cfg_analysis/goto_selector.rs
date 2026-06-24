@@ -50,12 +50,7 @@ mod tests {
 
     #[test]
     fn select_bad_edge_prefers_back_edge_in_range() {
-        let succs = vec![
-            vec![1],
-            vec![2],
-            vec![1, 3],
-            vec![],
-        ];
+        let succs = vec![vec![1], vec![2], vec![1, 3], vec![]];
         let preds = vec![vec![], vec![0, 2], vec![1], vec![2]];
         let edge = select_bad_edge(0, 4, &succs, &preds, &[]).expect("back edge");
         assert_eq!(edge, (2, 1));
@@ -63,12 +58,7 @@ mod tests {
 
     #[test]
     fn select_bad_edge_skips_already_virtualized_edges() {
-        let succs = vec![
-            vec![1],
-            vec![2],
-            vec![1, 3],
-            vec![],
-        ];
+        let succs = vec![vec![1], vec![2], vec![1, 3], vec![]];
         let preds = vec![vec![], vec![0, 2], vec![1], vec![2]];
         let edge = select_bad_edge(0, 4, &succs, &preds, &[(2, 1)]);
         assert_ne!(edge, Some((2, 1)));

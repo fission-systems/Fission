@@ -55,7 +55,6 @@ where
 
     facts.cfg_label_leaders.push(list_symbol_va);
 
-    let ptr_size = if is_64bit { 8 } else { 4 };
     let list_start = read_pointer(&view_bytes, list_symbol_va, is_64bit)
         .filter(|ptr| *ptr >= image_base && *ptr != list_symbol_va && view_bytes(*ptr, 8).is_some())
         .unwrap_or(list_symbol_va);

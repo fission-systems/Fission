@@ -254,9 +254,7 @@ impl<'a> PreviewBuilder<'a> {
             }
             HirExpr::Load { ptr, .. }
             | HirExpr::PtrOffset { base: ptr, .. }
-            | HirExpr::FieldAccess { base: ptr, .. } => {
-                Self::suffix_expr_contains_call(ptr)
-            }
+            | HirExpr::FieldAccess { base: ptr, .. } => Self::suffix_expr_contains_call(ptr),
             HirExpr::Index { base, index, .. } => {
                 Self::suffix_expr_contains_call(base) || Self::suffix_expr_contains_call(index)
             }

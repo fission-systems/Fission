@@ -284,7 +284,7 @@ fn contains_case_folded_ascii(haystack: &[u8], needle: &[u8]) -> bool {
         window
             .iter()
             .zip(needle)
-            .all(|(a, b)| a.to_ascii_lowercase() == b.to_ascii_lowercase())
+            .all(|(a, b)| a.eq_ignore_ascii_case(b))
     })
 }
 

@@ -32,7 +32,7 @@ pub(crate) enum LinearBodyCachedOutcome {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum ConditionalTailMismatchSubtype {
+pub(crate) enum ConditionalTailMismatchSubtype {
     NoCommonFollowInWindow,
     FollowBeyondWindow,
     SideEntryOrExit,
@@ -44,7 +44,7 @@ pub(super) enum ConditionalTailMismatchSubtype {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) enum ConditionalTailLoweringResult {
+pub(crate) enum ConditionalTailLoweringResult {
     Lowered((HirStmt, usize)),
     Mismatch(ConditionalTailMismatchSubtype),
 }

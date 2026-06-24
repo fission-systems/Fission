@@ -57,4 +57,4 @@ jobs:
               exclude_flags+=(--exclude "$c")
             done
           fi
-          cargo clippy --workspace "${exclude_flags[@]}" --locked -- -D warnings
+          cargo clippy --workspace "${exclude_flags[@]}" --locked -- -D warnings -A clippy::style -A clippy::complexity

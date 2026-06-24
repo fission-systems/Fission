@@ -11,7 +11,10 @@ impl<'a> PreviewBuilder<'a> {
         None
     }
 
-    fn emit_orphan_target_block(&mut self, block_idx: usize) -> Result<Vec<HirStmt>, MlilPreviewError> {
+    fn emit_orphan_target_block(
+        &mut self,
+        block_idx: usize,
+    ) -> Result<Vec<HirStmt>, MlilPreviewError> {
         let label = block_label(self.block_target_key(block_idx));
         let mut stmts = vec![HirStmt::Label(label)];
         let block = self.pcode_block(block_idx).clone();
@@ -38,7 +41,8 @@ impl<'a> PreviewBuilder<'a> {
                 true_target,
                 false_target,
             } => {
-                let then_body = if let Some(true_idx) = self.find_block_index_by_address(true_target)
+                let then_body = if let Some(true_idx) =
+                    self.find_block_index_by_address(true_target)
                     && let Some(expr) =
                         self.lower_return_join_expr_for_predecessor(block_idx, true_idx)?
                 {
@@ -127,8 +131,8 @@ impl<'a> PreviewBuilder<'a> {
 mod tests {
     use super::super::super::cleanup::{has_orphan_goto_labels, orphan_goto_labels};
     use crate::PcodeFunction;
-    use crate::nir::types::{HirStmt, MlilPreviewOptions, StructuringEngineKind};
     use crate::nir::PreviewBuilder;
+    use crate::nir::types::{HirStmt, MlilPreviewOptions, StructuringEngineKind};
 
     #[test]
     fn try_repair_orphan_gotos_returns_none_for_unknown_label() {
@@ -204,7 +208,9 @@ mod tests {
             HirStmt::Return(None),
         ];
         assert!(!has_orphan_goto_labels(&body));
-        let repaired = builder.try_repair_orphan_gotos(body.clone()).expect("noop repair");
+        let repaired = builder
+            .try_repair_orphan_gotos(body.clone())
+            .expect("noop repair");
         assert!(!has_orphan_goto_labels(&repaired));
     }
 }

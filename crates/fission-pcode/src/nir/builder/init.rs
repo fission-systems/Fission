@@ -91,7 +91,7 @@ impl<'a> PreviewBuilder<'a> {
                 );
             }
         }
-        let mut b = Self {
+        let b = Self {
             pcode,
             options,
             binary,

@@ -10,8 +10,8 @@ use windows::Win32::Foundation::HANDLE;
 use windows::Win32::System::Diagnostics::Debug::*;
 use windows::Win32::System::SystemServices::*;
 
-use super::pe_raw;
 use super::import_recon::ImportEntry;
+use super::pe_raw;
 
 /// Dumps the process memory to a file on disk.
 /// This attempts to reconstruct a valid PE file from the memory image.
@@ -21,8 +21,7 @@ pub fn dump_process(
     output_path: &str,
 ) -> Result<(), String> {
     let dos_header = pe_raw::read_dos_header(process_handle, base_address)?;
-    let nt_headers =
-        pe_raw::read_nt_headers64(process_handle, base_address, dos_header.e_lfanew)?;
+    let nt_headers = pe_raw::read_nt_headers64(process_handle, base_address, dos_header.e_lfanew)?;
     let sections = pe_raw::read_section_headers(
         process_handle,
         base_address,
@@ -86,17 +85,14 @@ pub fn rebuild_imports(
 ) -> Result<(), String> {
     let mut file_data = std::fs::read(file_path).map_err(|e| e.to_string())?;
 
-    let dos_header = unsafe {
-        &*(file_data.as_ptr() as *const IMAGE_DOS_HEADER)
-    };
+    let dos_header = unsafe { &*(file_data.as_ptr() as *const IMAGE_DOS_HEADER) };
     if dos_header.e_magic != IMAGE_DOS_SIGNATURE {
         return Err("Invalid DOS Signature".to_string());
     }
 
     let nt_offset = dos_header.e_lfanew as usize;
-    let nt_headers = unsafe {
-        &mut *(file_data.as_mut_ptr().add(nt_offset) as *mut IMAGE_NT_HEADERS64)
-    };
+    let nt_headers =
+        unsafe { &mut *(file_data.as_mut_ptr().add(nt_offset) as *mut IMAGE_NT_HEADERS64) };
 
     if nt_headers.Signature != IMAGE_NT_SIGNATURE {
         return Err("Invalid NT Signature".to_string());
@@ -188,8 +184,7 @@ pub fn rebuild_imports(
             .copy_from_slice(name_bytes);
 
         let mut current_thunk_offset = 0;
-        let mut hint_name_offset_counter =
-            mod_layout.ft_offset + ((imps.len() + 1) * thunk_size);
+        let mut hint_name_offset_counter = mod_layout.ft_offset + ((imps.len() + 1) * thunk_size);
 
         for imp in *imps {
             let thunk_value: u64;
@@ -232,14 +227,12 @@ pub fn rebuild_imports(
 
     let num_sections = nt_headers.FileHeader.NumberOfSections;
     let section_header_size = std::mem::size_of::<IMAGE_SECTION_HEADER>();
-    let section_table_offset =
-        nt_offset + std::mem::size_of::<IMAGE_NT_HEADERS64>();
+    let section_table_offset = nt_offset + std::mem::size_of::<IMAGE_NT_HEADERS64>();
 
     let last_section_offset =
         section_table_offset + (num_sections as usize - 1) * section_header_size;
-    let last_section = unsafe {
-        &*(file_data.as_ptr().add(last_section_offset) as *const IMAGE_SECTION_HEADER)
-    };
+    let last_section =
+        unsafe { &*(file_data.as_ptr().add(last_section_offset) as *const IMAGE_SECTION_HEADER) };
 
     let last_section_end_rva = last_section.VirtualAddress + last_section.VirtualSize;
     let new_section_rva = (last_section_end_rva + sect_align - 1) & !(sect_align - 1);
@@ -282,13 +275,12 @@ pub fn rebuild_imports(
         }
 
         let mut descriptor = IMAGE_IMPORT_DESCRIPTOR::default();
-        descriptor.OriginalFirstThunk =
-            (new_section_rva as usize + mod_layout.iat_offset) as u32;
+        descriptor.OriginalFirstThunk = (new_section_rva as usize + mod_layout.iat_offset) as u32;
         descriptor.FirstThunk = (new_section_rva as usize + mod_layout.ft_offset) as u32;
         descriptor.Name = (new_section_rva as usize + mod_layout.name_offset) as u32;
 
-        let desc_ptr = new_section_data.as_mut_ptr().add(descriptor_offset)
-            as *mut IMAGE_IMPORT_DESCRIPTOR;
+        let desc_ptr =
+            new_section_data.as_mut_ptr().add(descriptor_offset) as *mut IMAGE_IMPORT_DESCRIPTOR;
         unsafe {
             *desc_ptr = descriptor;
         }

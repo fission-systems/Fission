@@ -28,8 +28,9 @@ impl<'a> PreviewBuilder<'a> {
         vn: &Varnode,
     ) -> Option<String> {
         match vn.space_id {
-            UNIQUE_SPACE_ID => crate::arch::x86::unique_x86_register_name(vn.offset, vn.size)
-                .map(str::to_string),
+            UNIQUE_SPACE_ID => {
+                crate::arch::x86::unique_x86_register_name(vn.offset, vn.size).map(str::to_string)
+            }
             space_id if is_register_space_id(space_id) => {
                 if self.options.calling_convention == CallingConvention::X86_32 && vn.size == 4 {
                     match vn.offset {
@@ -41,20 +42,19 @@ impl<'a> PreviewBuilder<'a> {
                 let namer = self.register_namer();
                 namer
                     .register_name_with_param_owned(vn.offset, vn.size)
-                .and_then(|(name, idx)| {
-                    if let Some(idx) = idx {
-                        (idx < self.entry_arity).then_some(name)
-                    } else {
-                        Some(name)
-                    }
-                })
-                .or_else(|| self.sla_hw_name(vn.offset, vn.size))
-                .or_else(|| Some("reg".to_string()))
+                    .and_then(|(name, idx)| {
+                        if let Some(idx) = idx {
+                            (idx < self.entry_arity).then_some(name)
+                        } else {
+                            Some(name)
+                        }
+                    })
+                    .or_else(|| self.sla_hw_name(vn.offset, vn.size))
+                    .or_else(|| Some("reg".to_string()))
             }
             _ => None,
         }
     }
-
 
     pub(in crate::nir::builder) fn live_call_result_binding_for_return_register(
         &self,
@@ -268,7 +268,6 @@ impl<'a> PreviewBuilder<'a> {
         }
         None
     }
-
 
     fn resolve_call_target_by_iat_slot(&mut self, addr: u64) -> Option<String> {
         let Some(ctx) = self.type_context else {
@@ -503,7 +502,10 @@ impl<'a> PreviewBuilder<'a> {
             && candidate.offset == requested.offset
             && candidate.size == 4
             && requested.size == 8
-            && self.register_namer().hw_name_at(candidate.offset, candidate.size).is_some()
+            && self
+                .register_namer()
+                .hw_name_at(candidate.offset, candidate.size)
+                .is_some()
     }
 
     pub(in crate::nir::builder) fn register_key_cross_space_covers(
@@ -543,7 +545,9 @@ impl<'a> PreviewBuilder<'a> {
             return None;
         }
         if is_register_space_id(key.space_id) {
-            return self.register_namer().gpr_family_index_at(key.offset, key.size);
+            return self
+                .register_namer()
+                .gpr_family_index_at(key.offset, key.size);
         }
         if is_unique_space_id(key.space_id) {
             let name = crate::arch::x86::unique_x86_register_name(key.offset, key.size)?;
@@ -721,8 +725,12 @@ impl<'a> PreviewBuilder<'a> {
             let pred_idx = predecessor_idxs[0];
             if pred_idx != site.block_idx {
                 for loop_body in &self.loop_bodies {
-                    if loop_body.body.contains(&pred_idx) && !loop_body.body.contains(&site.block_idx) {
-                        if let Some(name) = self.find_loop_carried_variable_for_register(vn, loop_body) {
+                    if loop_body.body.contains(&pred_idx)
+                        && !loop_body.body.contains(&site.block_idx)
+                    {
+                        if let Some(name) =
+                            self.find_loop_carried_variable_for_register(vn, loop_body)
+                        {
                             return Some(HirExpr::Var(name));
                         }
                     }
@@ -1542,9 +1550,11 @@ impl<'a> PreviewBuilder<'a> {
                 return self
                     .register_namer()
                     .register_name_with_param_owned(target.offset, target.size)
-                .and_then(|(name, param_index)| {
-                    param_index.filter(|&idx| idx < self.entry_arity).map(|_| name.to_string())
-                });
+                    .and_then(|(name, param_index)| {
+                        param_index
+                            .filter(|&idx| idx < self.entry_arity)
+                            .map(|_| name.to_string())
+                    });
             }
             Err(_) => return None,
         };
@@ -1579,7 +1589,9 @@ impl<'a> PreviewBuilder<'a> {
                 .register_namer()
                 .register_name_with_param_owned(ptr.offset, ptr.size)
                 .and_then(|(name, param_index)| {
-                    param_index.filter(|&idx| idx < self.entry_arity).map(|_| name.to_string())
+                    param_index
+                        .filter(|&idx| idx < self.entry_arity)
+                        .map(|_| name.to_string())
                 });
         }
         if ptr.is_constant {
@@ -1804,8 +1816,6 @@ impl<'a> PreviewBuilder<'a> {
             }
         }
 
-
-
         let key = VarnodeKey::from(vn);
         if let Some(site) = self.current_lowering_site {
             if !self.has_prior_local_def_for_varnode(vn, site) {
@@ -1960,10 +1970,7 @@ impl<'a> PreviewBuilder<'a> {
             // instead of the accumulated register name (e.g. "rax").
             if matches!(
                 op.opcode,
-                PcodeOpcode::IntZExt
-                    | PcodeOpcode::IntSExt
-                    | PcodeOpcode::Copy
-                    | PcodeOpcode::Cast
+                PcodeOpcode::IntZExt | PcodeOpcode::IntSExt | PcodeOpcode::Copy | PcodeOpcode::Cast
             ) && op.inputs.first().is_some_and(|input| {
                 !input.is_constant
                     && input.space_id == vn.space_id
@@ -2026,11 +2033,13 @@ impl<'a> PreviewBuilder<'a> {
                     });
             }
             let cycle_name = if is_unique_space_id(vn.space_id) {
-                crate::arch::x86::unique_x86_register_name(vn.offset, vn.size)
-                    .map_or_else(|| {
+                crate::arch::x86::unique_x86_register_name(vn.offset, vn.size).map_or_else(
+                    || {
                         let name = format!("tmp_{:x}", vn.offset);
                         self.ensure_live_register_binding(&name, vn.size)
-                    }, ToString::to_string)
+                    },
+                    ToString::to_string,
+                )
             } else {
                 let name = format!("tmp_{:x}", vn.offset);
                 self.ensure_live_register_binding(&name, vn.size)
@@ -2559,12 +2568,7 @@ impl<'a> PreviewBuilder<'a> {
                 })
             }
             PcodeOpcode::FloatNan => {
-                self.lower_intrinsic_call(
-                    op,
-                    visiting,
-                    "__isnan",
-                    NirType::Bool,
-                )
+                self.lower_intrinsic_call(op, visiting, "__isnan", NirType::Bool)
             }
             PcodeOpcode::IntNegate | PcodeOpcode::BoolNegate | PcodeOpcode::Int2Comp => {
                 let expr = self.lower_varnode(&op.inputs[0], visiting)?;
@@ -2781,8 +2785,6 @@ impl<'a> PreviewBuilder<'a> {
     }
 }
 
-
 #[cfg(test)]
 #[path = "lower_expr_tests.rs"]
 mod tests;
-

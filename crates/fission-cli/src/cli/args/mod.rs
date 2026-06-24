@@ -6,9 +6,7 @@ mod legacy;
 mod oneshot;
 
 pub use decomp::DecompArgs;
-pub use inventory::{
-    InventoryArgs, InventoryCommand,
-};
+pub use inventory::{InventoryArgs, InventoryCommand};
 pub use legacy::{LegacyCliArgs, LegacyInvocationKind, ParsedOneShotArgs, normalize_legacy};
 pub use oneshot::OneShotArgs;
 

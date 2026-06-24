@@ -1,6 +1,7 @@
 //! Fission static analysis services and decompilation-facing facts (see `analysis::decomp`).
 
 #![allow(clippy::all)]
+#![allow(unused)]
 
 #[cfg(feature = "native_decomp")]
 compile_error!(

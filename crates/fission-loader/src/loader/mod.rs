@@ -402,8 +402,11 @@ mod tests {
     #[test]
     fn test_profile_loader_on_fixture() {
         use std::time::Instant;
-        let fixture_path = std::path::Path::new("/Users/sjkim1127/Fission/benchmark")
-            .join(format!("binary/x86-64/window/small/binary/c/test_functions.ex{}", "e"));
+        let fixture_path =
+            std::path::Path::new("/Users/sjkim1127/Fission/benchmark").join(format!(
+                "binary/x86-64/window/small/binary/c/test_functions.ex{}",
+                "e"
+            ));
         if !fixture_path.exists() {
             println!("Fixture not found at {}", fixture_path.display());
             return;
@@ -411,7 +414,7 @@ mod tests {
 
         println!("=== Loader profiling on fixture (RUN 1 - COLD) ===");
         let start1 = Instant::now();
-        let _binary1 = LoadedBinary::from_file(fixture_path).unwrap();
+        let _binary1 = LoadedBinary::from_file(fixture_path.clone()).unwrap();
         println!("LoadedBinary::from_file RUN 1 took: {:?}", start1.elapsed());
 
         println!("=== Loader profiling on fixture (RUN 2 - WARM CACHED) ===");

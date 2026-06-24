@@ -49,7 +49,14 @@ impl Debugger for WindowsDebugger {
                     rdi: ctx.Edi as u64,
                     rbp: ctx.Ebp as u64,
                     rsp: ctx.Esp as u64,
-                    r8: 0, r9: 0, r10: 0, r11: 0, r12: 0, r13: 0, r14: 0, r15: 0,
+                    r8: 0,
+                    r9: 0,
+                    r10: 0,
+                    r11: 0,
+                    r12: 0,
+                    r13: 0,
+                    r14: 0,
+                    r15: 0,
                     rip: ctx.Eip as u64,
                     rflags: ctx.EFlags as u64,
                 };
@@ -61,8 +68,9 @@ impl Debugger for WindowsDebugger {
             } else {
                 let mut ctx: CONTEXT = std::mem::zeroed();
                 ctx.ContextFlags = CONTEXT_FLAGS(CONTEXT_ALL);
-                GetThreadContext(h_thread, &mut ctx)
-                    .map_err(|e| FissionError::debug(format!("GetThreadContext failed: {:?}", e)))?;
+                GetThreadContext(h_thread, &mut ctx).map_err(|e| {
+                    FissionError::debug(format!("GetThreadContext failed: {:?}", e))
+                })?;
 
                 registers = crate::debug::types::RegisterState {
                     rax: ctx.Rax,
@@ -88,8 +96,9 @@ impl Debugger for WindowsDebugger {
 
                 ctx.EFlags |= 0x100; // Set Trap Flag
 
-                SetThreadContext(h_thread, &ctx)
-                    .map_err(|e| FissionError::debug(format!("SetThreadContext failed: {:?}", e)))?;
+                SetThreadContext(h_thread, &ctx).map_err(|e| {
+                    FissionError::debug(format!("SetThreadContext failed: {:?}", e))
+                })?;
             }
 
             let _ = CloseHandle(h_thread);
@@ -113,5 +122,4 @@ impl Debugger for WindowsDebugger {
         self.state.status = DebugStatus::Running;
         Ok(())
     }
-
 }

@@ -1,11 +1,11 @@
-use crate::nir::pass::{NirPass, PassResult, AnalysisStore, NirFunc};
-use crate::nir::types::{HirStmt, MlilPreviewError};
-use crate::nir::structuring::irreducible::{compute_fas_virtual_gotos, compute_node_splits};
+use crate::nir::pass::{AnalysisStore, NirFunc, NirPass, PassResult};
 use crate::nir::structuring::driver::{
-    blockgraph_collapse_admission_enabled, decide_structuring_admission,
-    StructuringAdmissionInput, StructuringAdmissionReason,
+    StructuringAdmissionInput, StructuringAdmissionReason, blockgraph_collapse_admission_enabled,
+    decide_structuring_admission,
 };
+use crate::nir::structuring::irreducible::{compute_fas_virtual_gotos, compute_node_splits};
 use crate::nir::structuring::structuring_diag_enabled;
+use crate::nir::types::{HirStmt, MlilPreviewError};
 
 fn apply_blockgraph_collapse_admission_gate(
     admission: StructuringAdmissionReason,
@@ -25,19 +25,27 @@ impl NirPass for EarlyReturnPass {
         "EarlyReturnPass"
     }
 
-    fn run(&mut self, ir: &mut NirFunc<'_, '_>, _store: &mut AnalysisStore) -> Result<PassResult, String> {
+    fn run(
+        &mut self,
+        ir: &mut NirFunc<'_, '_>,
+        _store: &mut AnalysisStore,
+    ) -> Result<PassResult, String> {
         if ir.structured_body().is_some() {
             return Ok(PassResult::NoChange);
         }
 
-        let body = ir.builder.try_lower_intra_instruction_conditional_return()
+        let body = ir
+            .builder
+            .try_lower_intra_instruction_conditional_return()
             .map_err(|e| e.to_string())?;
         if let Some(body) = body {
             ir.set_structured_body(body);
             return Ok(PassResult::Changed);
         }
 
-        let body = ir.builder.try_lower_conditional_tailcall_after_return()
+        let body = ir
+            .builder
+            .try_lower_conditional_tailcall_after_return()
             .map_err(|e| e.to_string())?;
         if let Some(body) = body {
             ir.set_structured_body(body);
@@ -55,7 +63,11 @@ impl NirPass for IrreducibleReductionPass {
         "IrreducibleReductionPass"
     }
 
-    fn run(&mut self, ir: &mut NirFunc<'_, '_>, store: &mut AnalysisStore) -> Result<PassResult, String> {
+    fn run(
+        &mut self,
+        ir: &mut NirFunc<'_, '_>,
+        store: &mut AnalysisStore,
+    ) -> Result<PassResult, String> {
         if ir.structured_body().is_some() {
             return Ok(PassResult::NoChange);
         }
@@ -76,27 +88,46 @@ impl NirPass for IrreducibleReductionPass {
             )
         };
 
-        ir.builder.telemetry.structuring.structuring_scc_component_count += scc_component_count;
+        ir.builder
+            .telemetry
+            .structuring
+            .structuring_scc_component_count += scc_component_count;
         ir.builder.telemetry.core.max_structuring_scc_component_size = ir
             .builder
             .telemetry
             .core
             .max_structuring_scc_component_size
             .max(max_scc_component_size);
-        ir.builder.telemetry.structuring.structuring_irreducible_scc_count += scc_irreducible_count;
-        ir.builder.telemetry.structuring.structuring_irreducible_header_count += scc_irreducible_header_count;
+        ir.builder
+            .telemetry
+            .structuring
+            .structuring_irreducible_scc_count += scc_irreducible_count;
+        ir.builder
+            .telemetry
+            .structuring
+            .structuring_irreducible_header_count += scc_irreducible_header_count;
 
-        let original_admission =
-            ir.builder.structuring_admission_reason(scc_irreducible_count, max_scc_component_size);
+        let original_admission = ir
+            .builder
+            .structuring_admission_reason(scc_irreducible_count, max_scc_component_size);
         let blockgraph_collapse_enabled = blockgraph_collapse_admission_enabled();
         if blockgraph_collapse_enabled {
-            ir.builder.telemetry.structuring.blockgraph_collapse_admission_enabled_count += 1;
+            ir.builder
+                .telemetry
+                .structuring
+                .blockgraph_collapse_admission_enabled_count += 1;
             match original_admission {
                 StructuringAdmissionReason::IrreducibleBudget => {
-                    ir.builder.telemetry.structuring.blockgraph_collapse_irreducible_budget_bypass_count += 1;
+                    ir.builder
+                        .telemetry
+                        .structuring
+                        .blockgraph_collapse_irreducible_budget_bypass_count += 1;
                 }
                 StructuringAdmissionReason::ExtremeBudget => {
-                    ir.builder.telemetry.structuring.blockgraph_collapse_extreme_budget_blocked_count += 1;
+                    ir.builder
+                        .telemetry
+                        .structuring
+                        .blockgraph_collapse_extreme_budget_blocked_count += 1;
                 }
                 _ => {}
             }
@@ -109,8 +140,13 @@ impl NirPass for IrreducibleReductionPass {
 
         let mut changed = false;
         if scc_irreducible_count > 0 && !force_linear {
-            let block_stmt_counts: Vec<usize> =
-                ir.builder.pcode.blocks.iter().map(|b| b.ops.len()).collect();
+            let block_stmt_counts: Vec<usize> = ir
+                .builder
+                .pcode
+                .blocks
+                .iter()
+                .map(|b| b.ops.len())
+                .collect();
             if let Some(split) =
                 compute_node_splits(ir.successors(), ir.predecessors(), &block_stmt_counts)
             {
@@ -124,8 +160,7 @@ impl NirPass for IrreducibleReductionPass {
                 ir.apply_node_splits(split);
                 changed = true;
             } else {
-                let fas_edges =
-                    compute_fas_virtual_gotos(ir.successors(), ir.predecessors());
+                let fas_edges = compute_fas_virtual_gotos(ir.successors(), ir.predecessors());
                 if !fas_edges.is_empty() {
                     if diag {
                         eprintln!(
@@ -159,7 +194,11 @@ impl NirPass for SeseStructuringPass {
         "SeseStructuringPass"
     }
 
-    fn run(&mut self, ir: &mut NirFunc<'_, '_>, store: &mut AnalysisStore) -> Result<PassResult, String> {
+    fn run(
+        &mut self,
+        ir: &mut NirFunc<'_, '_>,
+        store: &mut AnalysisStore,
+    ) -> Result<PassResult, String> {
         if ir.structured_body().is_some() {
             return Ok(PassResult::NoChange);
         }
@@ -169,7 +208,9 @@ impl NirPass for SeseStructuringPass {
         let scc_irreducible_count = scc.irreducible_count();
         let max_scc_component_size = scc.max_component_size();
 
-        let original_admission = ir.builder.structuring_admission_reason(scc_irreducible_count, max_scc_component_size);
+        let original_admission = ir
+            .builder
+            .structuring_admission_reason(scc_irreducible_count, max_scc_component_size);
         let blockgraph_collapse_enabled = blockgraph_collapse_admission_enabled();
         let admission = apply_blockgraph_collapse_admission_gate(
             original_admission,
@@ -191,25 +232,36 @@ impl NirPass for SeseStructuringPass {
         }
 
         let total_blocks = ir.block_count();
-        let sese_result = if crate::nir::structuring::collapse_loop::collapse_loop_admission_enabled() {
-            match crate::nir::structuring::collapse_loop::structure_cfg_via_collapse_loop(ir.builder, total_blocks) {
-                Ok(body) => Ok(body),
-                Err(err) => {
-                    if diag {
-                        eprintln!(
-                            "[DIAG] collapse loop failed ({err:?}), falling back to SESE tree"
-                        );
+        let sese_result =
+            if crate::nir::structuring::collapse_loop::collapse_loop_admission_enabled() {
+                match crate::nir::structuring::collapse_loop::structure_cfg_via_collapse_loop(
+                    ir.builder,
+                    total_blocks,
+                ) {
+                    Ok(body) => Ok(body),
+                    Err(err) => {
+                        if diag {
+                            eprintln!(
+                                "[DIAG] collapse loop failed ({err:?}), falling back to SESE tree"
+                            );
+                        }
+                        crate::nir::structuring::sese::structure_cfg_via_sese(
+                            ir.builder,
+                            total_blocks,
+                        )
                     }
-                    crate::nir::structuring::sese::structure_cfg_via_sese(ir.builder, total_blocks)
                 }
-            }
-        } else {
-            crate::nir::structuring::sese::structure_cfg_via_sese(ir.builder, total_blocks)
-        };
+            } else {
+                crate::nir::structuring::sese::structure_cfg_via_sese(ir.builder, total_blocks)
+            };
 
         match sese_result {
             Ok(body) => {
-                let elapsed = ir.builder.structuring_start.map(|t| t.elapsed().as_secs_f64()).unwrap_or(0.0);
+                let elapsed = ir
+                    .builder
+                    .structuring_start
+                    .map(|t| t.elapsed().as_secs_f64())
+                    .unwrap_or(0.0);
                 if diag {
                     eprintln!(
                         "[DIAG] structuring done (SESE): elapsed={:.3}s stmts={}",
@@ -241,13 +293,19 @@ impl NirPass for OrphanGotoRepairPass {
         "OrphanGotoRepairPass"
     }
 
-    fn run(&mut self, ir: &mut NirFunc<'_, '_>, store: &mut AnalysisStore) -> Result<PassResult, String> {
+    fn run(
+        &mut self,
+        ir: &mut NirFunc<'_, '_>,
+        store: &mut AnalysisStore,
+    ) -> Result<PassResult, String> {
         let diag = structuring_diag_enabled();
         let scc = store.cfg_facts(ir).scc();
         let scc_irreducible_count = scc.irreducible_count();
         let max_scc_component_size = scc.max_component_size();
 
-        let original_admission = ir.builder.structuring_admission_reason(scc_irreducible_count, max_scc_component_size);
+        let original_admission = ir
+            .builder
+            .structuring_admission_reason(scc_irreducible_count, max_scc_component_size);
         let blockgraph_collapse_enabled = blockgraph_collapse_admission_enabled();
         let admission = apply_blockgraph_collapse_admission_gate(
             original_admission,
@@ -262,11 +320,17 @@ impl NirPass for OrphanGotoRepairPass {
                             "[DIAG] SESE orphan goto labels localized without flat goto fallback"
                         );
                     }
-                    ir.builder.telemetry.structuring.structuring_orphan_goto_localized_count += 1;
-                    
-                    let elapsed = ir.builder.structuring_start.map(|t| t.elapsed().as_secs_f64()).unwrap_or(0.0);
-                    metrics::histogram!("fission.structuring.total_ms")
-                        .record(elapsed * 1000.0);
+                    ir.builder
+                        .telemetry
+                        .structuring
+                        .structuring_orphan_goto_localized_count += 1;
+
+                    let elapsed = ir
+                        .builder
+                        .structuring_start
+                        .map(|t| t.elapsed().as_secs_f64())
+                        .unwrap_or(0.0);
+                    metrics::histogram!("fission.structuring.total_ms").record(elapsed * 1000.0);
                     metrics::counter!("fission.structuring.invocations_total").increment(1);
 
                     ir.set_structured_body(repaired);
@@ -274,54 +338,75 @@ impl NirPass for OrphanGotoRepairPass {
                 }
 
                 if diag {
-                    eprintln!(
-                        "[DIAG] SESE result has orphan goto labels, falling back to linear"
-                    );
+                    eprintln!("[DIAG] SESE result has orphan goto labels, falling back to linear");
                 }
-                ir.builder.telemetry.structuring.forced_linear_structuring_count += 1;
-                ir.builder.telemetry.structuring.structuring_sese_orphan_goto_fallback_count += 1;
-                ir.builder.telemetry.structuring.structuring_orphan_goto_unrepairable_count += 1;
+                ir.builder
+                    .telemetry
+                    .structuring
+                    .forced_linear_structuring_count += 1;
+                ir.builder
+                    .telemetry
+                    .structuring
+                    .structuring_sese_orphan_goto_fallback_count += 1;
+                ir.builder
+                    .telemetry
+                    .structuring
+                    .structuring_orphan_goto_unrepairable_count += 1;
 
-                let fallback_result = ir.builder.build_proof_first_linear_multiblock_body()
+                let fallback_result = ir
+                    .builder
+                    .build_proof_first_linear_multiblock_body()
                     .map_err(|e| e.to_string())?;
-                
-                let elapsed = ir.builder.structuring_start.map(|t| t.elapsed().as_secs_f64()).unwrap_or(0.0);
+
+                let elapsed = ir
+                    .builder
+                    .structuring_start
+                    .map(|t| t.elapsed().as_secs_f64())
+                    .unwrap_or(0.0);
                 if diag {
                     eprintln!(
                         "[DIAG] structuring linear done: elapsed={:.3}s success=true proof_first=true admission={:?}",
-                        elapsed,
-                        admission,
+                        elapsed, admission,
                     );
                 }
 
                 ir.set_structured_body(fallback_result);
                 return Ok(PassResult::Changed);
             } else {
-                let elapsed = ir.builder.structuring_start.map(|t| t.elapsed().as_secs_f64()).unwrap_or(0.0);
-                metrics::histogram!("fission.structuring.total_ms")
-                    .record(elapsed * 1000.0);
+                let elapsed = ir
+                    .builder
+                    .structuring_start
+                    .map(|t| t.elapsed().as_secs_f64())
+                    .unwrap_or(0.0);
+                metrics::histogram!("fission.structuring.total_ms").record(elapsed * 1000.0);
                 metrics::counter!("fission.structuring.invocations_total").increment(1);
-                
+
                 return Ok(PassResult::NoChange);
             }
         } else {
-            ir.builder.telemetry.structuring.forced_linear_structuring_count += 1;
-            
+            ir.builder
+                .telemetry
+                .structuring
+                .forced_linear_structuring_count += 1;
+
             let force_linear = !matches!(admission, StructuringAdmissionReason::GraphCollapse);
             if force_linear {
                 match admission {
                     StructuringAdmissionReason::ExplicitForceLinear => {
-                        ir.builder.telemetry
+                        ir.builder
+                            .telemetry
                             .structuring
                             .structuring_force_linear_explicit_count += 1;
                     }
                     StructuringAdmissionReason::IrreducibleBudget => {
-                        ir.builder.telemetry
+                        ir.builder
+                            .telemetry
                             .structuring
                             .structuring_force_linear_irreducible_budget_count += 1;
                     }
                     StructuringAdmissionReason::ExtremeBudget => {
-                        ir.builder.telemetry
+                        ir.builder
+                            .telemetry
                             .structuring
                             .structuring_force_linear_extreme_budget_count += 1;
                     }
@@ -329,15 +414,20 @@ impl NirPass for OrphanGotoRepairPass {
                 }
             }
 
-            let fallback_result = ir.builder.build_proof_first_linear_multiblock_body()
+            let fallback_result = ir
+                .builder
+                .build_proof_first_linear_multiblock_body()
                 .map_err(|e| e.to_string())?;
 
-            let elapsed = ir.builder.structuring_start.map(|t| t.elapsed().as_secs_f64()).unwrap_or(0.0);
+            let elapsed = ir
+                .builder
+                .structuring_start
+                .map(|t| t.elapsed().as_secs_f64())
+                .unwrap_or(0.0);
             if diag {
                 eprintln!(
                     "[DIAG] structuring linear done: elapsed={:.3}s success=true proof_first=true admission={:?}",
-                    elapsed,
-                    admission,
+                    elapsed, admission,
                 );
             }
 

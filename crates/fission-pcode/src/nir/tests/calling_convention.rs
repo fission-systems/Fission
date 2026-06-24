@@ -85,7 +85,7 @@ fn win64_rsi_is_not_a_param() {
 
 #[test]
 fn win64_pointer_swap_does_not_synthesize_stale_eax_return() {
-    let mut options = preview_options_for(CallingConvention::WindowsX64);
+    let options = preview_options_for(CallingConvention::WindowsX64);
 
     let rcx = reg(0x08, 8);
     let rdx = reg(0x10, 8);
