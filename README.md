@@ -53,7 +53,7 @@ flowchart BT
     Plugin["fission-plugin<br/>contracts, hooks, runtime"] --> Decompiler
 
     Decompiler --> CLI["fission-cli<br/>headless workflows"]
-    Decompiler --> GUI["fission-tauri<br/>desktop UI"]
+    Decompiler --> GUI["fission-dioxus<br/>pure Rust desktop UI"]
     Automation --> CLI
     CLI --> Debug["debug surfaces<br/>script / disasm / xrefs / inventory / triage"]
     GUI --> Debug
@@ -83,7 +83,7 @@ For deeper visual maps, see [`docs/architecture/DIAGRAMS.md`](./docs/architectur
 | **fission-ai** | AI provider orchestration, Codex OAuth & GitHub Copilot auth integrations | AI layer |
 | **fission-automation** | Quality lanes, regression testing, telemetry reporting | Quality layer |
 | **fission-cli** | Headless CLI (one-shot subcommands), Rhai `script`, operator `inventory` | Product layer |
-| **fission-tauri** | Desktop GUI, interactive analysis, visualization | Product layer |
+| **fission-dioxus** | Pure Rust Desktop GUI, interactive analysis, visualization | Product layer |
 ---
 
 ## Documentation Hub
@@ -406,7 +406,7 @@ To bridge this quality gap, Fission's active development plan includes:
 | Crate | Purpose |
 |-------|---------|
 | [`crates/fission-cli`](./crates/fission-cli) | Headless one-shot CLI and operator workflows |
-| [`crates/fission-tauri`](./crates/fission-tauri) | Cross-platform desktop GUI |
+| [`crates/fission-dioxus`](./crates/fission-dioxus) | Pure Rust cross-platform desktop GUI |
 | [`crates/fission-automation`](./crates/fission-automation) | Quality lanes, test automation, CI/CD integration |
 
 ---
@@ -491,23 +491,18 @@ the primary quality oracle.
 
 ### Run the Desktop GUI
 
-The desktop application lives in [`crates/fission-tauri`](./crates/fission-tauri)
-and uses Tauri + Vite for the UI shell.
+The desktop application lives in [`crates/fission-dioxus`](./crates/fission-dioxus)
+and uses Dioxus for the pure Rust UI shell.
 
 ```bash
-# Install GUI frontend dependencies once
-cd crates/fission-tauri
-npm install
-
 # Launch the desktop GUI in development mode
-npm run tauri -- dev
+cargo run -p fission-dioxus
 ```
 
 For a production desktop build:
 
 ```bash
-cd crates/fission-tauri
-npm run tauri -- build
+cargo build --release -p fission-dioxus
 ```
 
 ### Run Quality Assurance
@@ -525,8 +520,7 @@ cargo run -p fission-automation -- nir-check --lane nir
 cargo build --release
 
 # Desktop GUI shell
-cd crates/fission-tauri
-npm run tauri -- build
+cargo build --release -p fission-dioxus
 
 # Full test suite
 cargo nextest run --workspace
