@@ -48,7 +48,6 @@ jobs:
   # Step 2: Core Tests (Linux, ~15 min)
   test-linux:
     name: 🧪 Tests (Linux)
-    needs: [security-check, lint-format]
     uses: ./.github/workflows/reusable-run-tests.yml
     with:
       os: ubuntu-latest
@@ -66,7 +65,6 @@ jobs:
   # Step 3: Build & Test (macOS, ~20 min parallel with linux)
   build-macos:
     name: 🍎 Build & Test (macOS)
-    needs: [security-check, lint-format]
     uses: ./.github/workflows/reusable-build-cli.yml
     with:
       os: macos-latest
@@ -86,7 +84,6 @@ jobs:
   build-windows:
     name: 🪟 Build & Test (Windows) [PR only]
     if: github.event_name == 'pull_request'
-    needs: [security-check, lint-format]
     uses: ./.github/workflows/reusable-build-cli.yml
     with:
       os: windows-latest
