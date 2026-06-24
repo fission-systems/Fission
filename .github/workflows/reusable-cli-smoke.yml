@@ -26,7 +26,7 @@ jobs:
       # Deterministic sleigh specs on clean runners (ignores rogue local overrides)
       FISSION_SLEIGH_SPEC_DIR: ${{ github.workspace }}/utils/sleigh-specs
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: dtolnay/rust-toolchain@stable
 
