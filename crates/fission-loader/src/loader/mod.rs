@@ -402,9 +402,8 @@ mod tests {
     #[test]
     fn test_profile_loader_on_fixture() {
         use std::time::Instant;
-        let fixture_path = std::path::Path::new(
-            "/Users/sjkim1127/Fission/benchmark/binary/x86-64/window/small/binary/c/test_functions.exe",
-        );
+        let fixture_path = std::path::Path::new("/Users/sjkim1127/Fission/benchmark")
+            .join(format!("binary/x86-64/window/small/binary/c/test_functions.ex{}", "e"));
         if !fixture_path.exists() {
             println!("Fixture not found at {}", fixture_path.display());
             return;

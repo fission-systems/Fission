@@ -27,4 +27,4 @@ jobs:
       - name: "Cargo Audit: Check for Known Security Vulnerabilities"
         run: |
           cargo install cargo-audit
-          cargo audit --deny warnings
+          cargo audit

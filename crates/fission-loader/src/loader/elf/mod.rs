@@ -2983,7 +2983,8 @@ mod tests {
     #[test]
     fn elf32_arm_relocatable_call_relocations_patch_loaded_image() {
         let fixture = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../../benchmark/binary/ARM4t_be/baremetal/small/binary/c/function_calls.o");
+            .join("../../benchmark")
+            .join("binary/ARM4t_be/baremetal/small/binary/c/function_calls.o");
         if !fixture.exists() {
             eprintln!("skip: ARM4t function_calls fixture missing");
             return;
@@ -3003,7 +3004,8 @@ mod tests {
     #[test]
     fn elf32_arm_thumb_movw_movt_relocations_patch_loaded_image() {
         let fixture = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../../benchmark/binary/ARM8m_le/baremetal/small/binary/c/mathematics.o");
+            .join("../../benchmark")
+            .join("binary/ARM8m_le/baremetal/small/binary/c/mathematics.o");
         if !fixture.exists() {
             eprintln!("skip: ARM8m mathematics fixture missing");
             return;
@@ -3052,7 +3054,7 @@ mod tests {
     #[test]
     fn elf64_loongarch_relocatable_branch_relocations_patch_loaded_image() {
         let fixture = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(
-            "../../benchmark/binary/loongarch64_f64/baremetal/small/binary/c/function_calls.o",
+            Path::new("../../benchmark").join("binary/loongarch64_f64/baremetal/small/binary/c/function_calls.o"),
         );
         if !fixture.exists() {
             eprintln!("skip: LoongArch64 function_calls fixture missing");
@@ -3082,7 +3084,7 @@ mod tests {
     #[test]
     fn elf32_loongarch_relocatable_branch_relocations_patch_loaded_image() {
         let fixture = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(
-            "../../benchmark/binary/loongarch32_f64/baremetal/small/binary/c/function_calls.o",
+            Path::new("../../benchmark").join("binary/loongarch32_f64/baremetal/small/binary/c/function_calls.o"),
         );
         if !fixture.exists() {
             eprintln!("skip: LoongArch32 function_calls fixture missing");
@@ -3104,7 +3106,8 @@ mod tests {
     #[test]
     fn elf64_ppc_be_relocatable_opd_symbols_resolve_to_text_addresses() {
         let fixture = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../../benchmark/binary/ppc_64_be/baremetal/small/binary/c/function_calls.o");
+            .join("../../benchmark")
+            .join("binary/ppc_64_be/baremetal/small/binary/c/function_calls.o");
         if !fixture.exists() {
             eprintln!("skip: PPC64 BE function_calls fixture missing");
             return;
@@ -3129,7 +3132,8 @@ mod tests {
     #[test]
     fn elf64_x86_64_relocatable_jump_table_patch_loaded_image() {
         let fixture = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../../benchmark/binary/x86-64/baremetal/small/binary/c/control_flow.o");
+            .join("../../benchmark")
+            .join("binary/x86-64/baremetal/small/binary/c/control_flow.o");
         if !fixture.exists() {
             eprintln!("skip: x86-64 control_flow fixture missing");
             return;

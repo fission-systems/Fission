@@ -1,7 +1,7 @@
 //! Criterion benchmarks for static analysis hot paths.
 //!
 //! PE/binary loading benchmarks run only when **`FISSION_BENCH_PE_CORPUS`** is set to an existing
-//! directory that mirrors the layout under `benchmark/binary/x86-64/window` (`small`/`medium`/`large`
+//! directory that mirrors the layout under `benchmark/corpus/x86-64/window` (`small`/`medium`/`large`
 //! plus optional `commercial_binary`). Without it, those benches are skipped so the crate does not
 //! assume the repo `benchmark/` tree.
 

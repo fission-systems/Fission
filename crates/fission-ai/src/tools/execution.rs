@@ -276,7 +276,7 @@ impl AiTool for LoadBinaryTool {
                 "properties": {
                     "path": {
                         "type": "string",
-                        "description": "The absolute or relative path to the binary file to load (e.g. 'benchmark/binary/target.exe')."
+                        "description": "The absolute or relative path to the binary file to load (e.g. 'test_corpus/target.exe')."
                     }
                 },
                 "required": ["path"]

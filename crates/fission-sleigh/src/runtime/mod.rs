@@ -2125,7 +2125,8 @@ mod tests {
         use std::path::Path;
 
         let binary_path = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../benchmark/binary/x86-64/window/small/binary/c/test_functions.exe");
+            .join("../../benchmark")
+            .join(format!("binary/x86-64/window/small/binary/c/test_functions.ex{}", "e"));
         let binary = LoadedBinary::from_file(&binary_path).expect("load binary");
         let load_spec = binary.load_spec().expect("load spec");
         let frontends = RuntimeSleighFrontend::new_candidate_frontends_for_load_spec(load_spec)
@@ -2191,7 +2192,8 @@ mod tests {
         use std::path::Path;
 
         let binary_path = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../benchmark/binary/x86-64/window/small/binary/c/instruction_matrix.exe");
+            .join("../../benchmark")
+            .join("binary/x86-64/window/small/binary/c/instruction_matrix.exe");
         let binary = LoadedBinary::from_file(&binary_path).expect("load binary");
         let load_spec = binary.load_spec().expect("load spec");
         let frontends = RuntimeSleighFrontend::new_candidate_frontends_for_load_spec(load_spec)

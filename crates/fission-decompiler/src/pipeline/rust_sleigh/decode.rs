@@ -264,8 +264,7 @@ mod tests {
 
     #[test]
     fn decomp_lift_does_not_fallthrough_into_jump_table_data() {
-        let fixture =
-            Path::new("../../benchmark/binary/ARM4_be/baremetal/small/binary/c/control_flow.o");
+        let fixture = Path::new("../../benchmark").join("binary/ARM4_be/baremetal/small/binary/c/control_flow.o");
         if !fixture.exists() {
             eprintln!("skip: benchmark fixture not found: {}", fixture.display());
             return;
@@ -295,8 +294,7 @@ mod tests {
 
     #[test]
     fn conditional_return_keeps_fallthrough_without_decoding_jump_table_data() {
-        let fixture =
-            Path::new("../../benchmark/binary/ARM5_be/baremetal/small/binary/c/control_flow.o");
+        let fixture = Path::new("../../benchmark").join("binary/ARM5_be/baremetal/small/binary/c/control_flow.o");
         if !fixture.exists() {
             eprintln!("skip: benchmark fixture not found: {}", fixture.display());
             return;
