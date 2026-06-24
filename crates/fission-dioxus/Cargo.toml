@@ -1,0 +1,17 @@
+[package]
+name = "fission-dioxus"
+version = "0.1.0"
+edition = "2021"
+description = "Pure Rust desktop GUI for Fission using Dioxus"
+
+[dependencies]
+dioxus = { version = "0.6", features = ["desktop"] }
+dioxus-logger = "0.6"
+tracing = "0.1"
+tokio = { version = "1.0", features = ["full"] }
+
+fission-core = { path = "../fission-core" }
+fission-loader = { path = "../fission-loader" }
+fission-static = { path = "../fission-static" }
+fission-decompiler = { path = "../fission-decompiler" }
+fission-signatures = { path = "../fission-signatures" }

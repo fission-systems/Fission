@@ -15,7 +15,7 @@ members = [
     "crates/fission-cli",
     "crates/fission-sleigh",
     "crates/fission-ai",
-    "crates/fission-tui",
+    "crates/fission-tui", "crates/fission-dioxus",
     # fission-dioxus — Pure Rust desktop GUI (Dioxus); to be added when ready
 ]
 

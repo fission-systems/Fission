@@ -1,0 +1,216 @@
+:root {
+  /* Premium Dark Theme Colors */
+  --bg-primary: #1e1e2e;
+  --bg-secondary: #181825;
+  --bg-tertiary: #11111b;
+  --text-primary: #cdd6f4;
+  --text-secondary: #a6adc8;
+  --accent-color: #89b4fa;
+  --accent-hover: #b4befe;
+  --border-color: #313244;
+  
+  --font-sans: 'Inter', sans-serif;
+  --font-mono: 'Fira Code', monospace;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: var(--font-sans);
+  background-color: var(--bg-secondary);
+  color: var(--text-primary);
+  height: 100vh;
+  width: 100vw;
+  overflow: hidden;
+}
+
+.app-container {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+}
+
+/* Title Bar */
+.title-bar {
+  display: flex;
+  align-items: center;
+  height: 40px;
+  background-color: var(--bg-tertiary);
+  border-bottom: 1px solid var(--border-color);
+  padding: 0 16px;
+  -webkit-app-region: drag; /* Makes the title bar draggable in desktop apps */
+}
+
+.title-logo {
+  font-weight: 600;
+  color: var(--accent-color);
+  margin-right: 24px;
+}
+
+.title-menu span {
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin-right: 16px;
+  cursor: pointer;
+  transition: color 0.2s ease;
+}
+
+.title-menu span:hover {
+  color: var(--text-primary);
+}
+
+/* Main Workspace */
+.main-workspace {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+}
+
+/* Sidebar */
+.sidebar {
+  width: 250px;
+  background-color: var(--bg-primary);
+  border-right: 1px solid var(--border-color);
+  display: flex;
+  flex-direction: column;
+}
+
+.sidebar-header {
+  padding: 12px 16px;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  border-bottom: 1px solid var(--border-color);
+}
+
+.function-list {
+  list-style: none;
+  overflow-y: auto;
+}
+
+.function-item {
+  padding: 8px 16px;
+  font-size: 13px;
+  font-family: var(--font-mono);
+  cursor: pointer;
+  border-left: 3px solid transparent;
+  transition: background-color 0.2s, border-color 0.2s;
+}
+
+.function-item:hover {
+  background-color: var(--bg-secondary);
+}
+
+.function-item.active {
+  background-color: var(--bg-secondary);
+  border-left-color: var(--accent-color);
+  color: var(--accent-color);
+}
+
+/* Editor Area */
+.editor-area {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  background-color: var(--bg-secondary);
+}
+
+.editor-container {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.editor-tabs {
+  display: flex;
+  height: 36px;
+  background-color: var(--bg-primary);
+  border-bottom: 1px solid var(--border-color);
+}
+
+.tab {
+  padding: 0 16px;
+  line-height: 36px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  border-right: 1px solid var(--border-color);
+  border-top: 2px solid transparent;
+  transition: all 0.2s ease;
+}
+
+.tab:hover {
+  background-color: var(--bg-secondary);
+}
+
+.tab.active {
+  background-color: var(--bg-secondary);
+  border-top-color: var(--accent-color);
+  color: var(--text-primary);
+}
+
+.editor-content {
+  flex: 1;
+  padding: 16px;
+  overflow: auto;
+}
+
+.code-block code {
+  font-family: var(--font-mono);
+  font-size: 14px;
+  line-height: 1.5;
+  color: #a6e3a1; /* String color */
+}
+
+/* Bottom Panel */
+.bottom-panel {
+  height: 200px;
+  background-color: var(--bg-primary);
+  border-top: 1px solid var(--border-color);
+  display: flex;
+  flex-direction: column;
+}
+
+.bottom-tabs {
+  display: flex;
+  height: 32px;
+  background-color: var(--bg-tertiary);
+  border-bottom: 1px solid var(--border-color);
+}
+
+.bottom-tabs .tab {
+  line-height: 32px;
+}
+
+.bottom-content {
+  flex: 1;
+  padding: 8px 16px;
+  overflow: auto;
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.log-entry {
+  margin-bottom: 4px;
+}
+.log-entry.info {
+  color: var(--text-secondary);
+}
+
+/* Status Bar */
+.status-bar {
+  height: 24px;
+  background-color: var(--accent-color);
+  color: var(--bg-tertiary);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0 16px;
+  font-size: 12px;
+  font-weight: 500;
+}

@@ -50,6 +50,19 @@ jobs:
       - name: Cache Rust Build
         uses: Swatinem/rust-cache@v2
 
+      - name: Install system dependencies (Linux/Dioxus)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libssl-dev \
+            librsvg2-dev \
+            libayatana-appindicator3-dev \
+            build-essential \
+            file
+
+
       - name: Run Tests (Specific Crates)
         if: ${{ inputs.crates != '' }}
         shell: bash
