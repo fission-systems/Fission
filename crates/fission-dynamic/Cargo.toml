@@ -60,4 +60,4 @@ windows = { version = "0.54", features = [
 ], optional = true }
 
 [target.'cfg(target_os = "linux")'.dependencies]
-nix = { version = "0.28", features = ["ptrace", "process"], optional = true }
+nix = { version = "0.29", features = ["ptrace", "process"], optional = true }
