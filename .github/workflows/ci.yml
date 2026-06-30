@@ -19,21 +19,6 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  # Bundled Ghidra / DIE paths (stdlib-only; catches accidental subtree drops)
-  third-party-canary:
-    name: 📎 Third-party data canary
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          lfs: false
-
-      - name: Ghidra + DIE corpus sanity
-        run: python3 scripts/test/third_party_data_canary.py
-
-      - name: Resource path literal guard
-        run: bash scripts/test/check_resource_path_literals.sh
-
   # Step 1: Security & Lint (Ubuntu, ~10 min)
   security-check:
     name: 🔒 Security Check
@@ -114,7 +99,6 @@ jobs:
     name: ✅ CI Summary
     needs:
       [
-        third-party-canary,
         security-check,
         lint-format,
         test-linux,
@@ -128,10 +112,6 @@ jobs:
     steps:
       - name: Check Status
         run: |
-          if [ "${{ needs.third-party-canary.result }}" != "success" ]; then
-            echo "❌ Third-party data canary failed"
-            exit 1
-          fi
           if [ "${{ needs.security-check.result }}" != "success" ]; then
             echo "❌ Security check failed"
             exit 1

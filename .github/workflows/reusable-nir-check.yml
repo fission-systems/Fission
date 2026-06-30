@@ -18,19 +18,37 @@ on:
         required: false
         default: false
         description: "Update latest baseline (caution: only on stable runs)"
+      assets_tag:
+        type: string
+        required: false
+        default: "assets-v1"
 
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  setup-utils:
+    uses: ./.github/workflows/reusable-setup-sleigh.yml
+    with:
+      assets_tag: ${{ inputs.assets_tag }}
+
   nir-check:
+    needs: setup-utils
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    env:
+      FISSION_SLEIGH_SPEC_DIR: ${{ needs.setup-utils.outputs.sleigh_spec_dir }}
     steps:
       - uses: actions/checkout@v7
         with:
           lfs: false
           submodules: recursive
+
+      - name: Restore utils from cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.fission-utils
+          key: fission-utils-${{ inputs.assets_tag }}
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -38,8 +56,6 @@ jobs:
       - name: Cache Rust Build
         uses: Swatinem/rust-cache@v2
 
-      # Lane `nir` points at this path; exe is gitignored like cli-smoke — build from checked-in C source.
-      # Use apt-get directly: cache-apt-pkgs-action can restore without exposing mingw on PATH (exit 127).
       - name: Install MinGW-w64 (PE nir-lane fixture)
         run: |
           sudo apt-get update
@@ -63,10 +79,14 @@ jobs:
         run: cargo test -p fission-automation --locked --verbose
 
       - name: Run NIR-Check Automation
-        # NOTE: Full nir-check run requires Sleigh specs (utils/sleigh-specs, local-only LFS).
-        # Run locally: cargo run -p fission-automation -- nir-check --lane nir
-        # CI validates build + automation crate tests only.
-        run: echo "nir-check skipped in CI (Sleigh specs are local-only)"
+        run: |
+          cargo run -p fission-automation --release -- nir-check \
+            --lane nir \
+            --no-build \
+            ${{ inputs.update_latest && '--update-latest' || '--no-update-latest' }} \
+            --fission-bin target/release/fission_cli \
+            --run-profile ${{ inputs.run_profile }} \
+            --functions-limit ${{ inputs.functions_limit }}
 
       - name: Upload Automation Artifacts
         uses: actions/upload-artifact@v4

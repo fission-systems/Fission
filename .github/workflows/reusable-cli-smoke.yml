@@ -7,21 +7,35 @@ on:
         type: string
         required: false
         default: /tmp/ci-fixtures/test_functions.exe
-        description: "Path to sample binary (repo-relative); built on the runner if absent"
+        description: "Path to sample binary; built on the runner if absent"
       profile:
         type: string
         required: false
         default: debug
         description: "Cargo profile for fission_cli (debug|release)"
+      assets_tag:
+        type: string
+        required: false
+        default: "assets-v1"
+        description: "GitHub Release tag hosting sleigh-specs.tar.gz"
 
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  # Step 1: Download + cache Sleigh specs
+  setup-sleigh:
+    uses: ./.github/workflows/reusable-setup-sleigh.yml
+    with:
+      assets_tag: ${{ inputs.assets_tag }}
+
   cli-smoke:
     name: Smoke
+    needs: setup-sleigh
     runs-on: ubuntu-latest
     timeout-minutes: 25
+    env:
+      FISSION_SLEIGH_SPEC_DIR: ${{ needs.setup-sleigh.outputs.sleigh_spec_dir }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -31,14 +45,18 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
-      # Use apt-get directly: cache-apt-pkgs-action can restore without exposing mingw on PATH (exit 127).
+      - name: Restore Sleigh specs from cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.fission-sleigh-specs
+          key: sleigh-specs-${{ inputs.assets_tag }}
+
       - name: Install MinGW-w64 (PE smoke fixture)
         run: |
           sudo apt-get update
           sudo apt-get install -y gcc-mingw-w64-x86-64
           command -v x86_64-w64-mingw32-gcc
 
-      # CI fixture from .github/fixtures/test_functions.c — compiled on the runner (~150KiB PE)
       - name: Build PE smoke fixture (MinGW-w64)
         run: |
           set -euo pipefail
@@ -72,5 +90,13 @@ jobs:
           CLI="./target/${{ inputs.profile }}/fission_cli"
           "${CLI}" list "${BIN}" --json
           echo "list_ok"
-          # NOTE: decomp requires Sleigh specs (utils/sleigh-specs) which are local-only.
-          # Run 'fission_cli decomp' locally after: git lfs pull --include="utils/sleigh-specs/**"
+
+      - name: fission_cli decomp --json (PE smoke)
+        run: |
+          set -euo pipefail
+          BIN="${{ inputs.binary_relative_path }}"
+          CLI="./target/${{ inputs.profile }}/fission_cli"
+          ADDR="$("${CLI}" list "${BIN}" --json | python3 "${{ github.workspace }}/.github/scripts/pick_pe_smoke_decomp_addr.py")"
+          echo "decomp addr: ${ADDR}"
+          OUT=$("${CLI}" decomp "${BIN}" --addr "${ADDR}" --profile speed --timeout-ms 180000 --json)
+          echo "$OUT" | python3 "${{ github.workspace }}/.github/scripts/check_decomp_output.py"

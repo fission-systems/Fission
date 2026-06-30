@@ -1,0 +1,71 @@
+# Reusable workflow: download full utils/ bundle from GitHub Releases with caching.
+# Provides FISSION_SLEIGH_SPEC_DIR as an output for downstream steps.
+#
+# The utils/ directory is NOT tracked in git (local-only).
+# CI fetches it from the assets-v1 release and caches by tag name.
+
+name: Reusable Setup Utils
+
+on:
+  workflow_call:
+    inputs:
+      assets_tag:
+        type: string
+        required: false
+        default: "assets-v1"
+        description: "GitHub Release tag hosting fission-utils.tar.gz"
+    outputs:
+      sleigh_spec_dir:
+        description: "Absolute path to unpacked Sleigh specs (utils/sleigh-specs)"
+        value: ${{ jobs.setup-utils.outputs.sleigh_spec_dir }}
+      utils_dir:
+        description: "Absolute path to unpacked utils/ root"
+        value: ${{ jobs.setup-utils.outputs.utils_dir }}
+
+jobs:
+  setup-utils:
+    name: 📦 Utils Bundle
+    runs-on: ubuntu-latest
+    outputs:
+      sleigh_spec_dir: ${{ steps.set-outputs.outputs.sleigh_spec_dir }}
+      utils_dir: ${{ steps.set-outputs.outputs.utils_dir }}
+    steps:
+      - name: Restore utils from cache
+        id: cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.fission-utils
+          key: fission-utils-${{ inputs.assets_tag }}
+
+      - name: Download utils bundle (cache miss)
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          echo "Cache miss — downloading fission-utils.tar.gz from release ${{ inputs.assets_tag }}"
+          mkdir -p ~/.fission-utils
+          curl -L --fail --show-error \
+            "https://github.com/sjkim1127/Fission/releases/download/${{ inputs.assets_tag }}/fission-utils.tar.gz" \
+            -o /tmp/fission-utils.tar.gz
+          echo "Unpacking..."
+          tar -xzf /tmp/fission-utils.tar.gz -C ~/.fission-utils --strip-components=1
+          rm /tmp/fission-utils.tar.gz
+          echo "Done."
+
+      - name: Verify bundle
+        run: |
+          echo "=== utils/ contents ==="
+          ls ~/.fission-utils/
+          echo ""
+          echo "=== Sleigh spec count ==="
+          slaspec_count=$(find ~/.fission-utils/sleigh-specs -name "*.slaspec" 2>/dev/null | wc -l)
+          echo "  .slaspec files: $slaspec_count"
+          test "$slaspec_count" -gt 10 || (echo "ERROR: Sleigh specs missing or incomplete" && exit 1)
+          echo ""
+          echo "=== Signature db count ==="
+          fidb_count=$(find ~/.fission-utils/signatures -name "*.fidb" 2>/dev/null | wc -l)
+          echo "  .fidb files: $fidb_count"
+
+      - name: Set outputs
+        id: set-outputs
+        run: |
+          echo "sleigh_spec_dir=$HOME/.fission-utils/sleigh-specs" >> "$GITHUB_OUTPUT"
+          echo "utils_dir=$HOME/.fission-utils" >> "$GITHUB_OUTPUT"

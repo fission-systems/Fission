@@ -2,11 +2,9 @@
 /target/
 /target2/
 /coverage/
-
 # fission-sleigh generated/cache artifacts are build products. The runtime
 # compiles native backends into target/fission-sleigh instead of checking them in.
 /crates/fission-sleigh/generated/
-
 # Native/C++ build artifacts
 /build/
 ghidra_decompiler/build/
@@ -17,12 +15,10 @@ ghidra_decompiler/fission_decomp
 *.pdb
 build_log.txt
 cargo_error*.txt
-
 # Temporary files created during development
 memory_loadimage.hh
 memory_loadimage.cc
 /putty_single.c
-
 # Root-level scratch / one-off experiment files
 # (keep proper source organized in crates/ or scripts/)
 /scratch/
@@ -38,16 +34,12 @@ memory_loadimage.cc
 /sum_array_debug.json
 /fill_matrix*.c
 /fill_matrix*.o
-
 # Rust compiler intermediate artifacts (*.rcgu.o) that can appear at root
 /*.rcgu.o
-
 # Patch files inside crates (use git diff instead)
 crates/**/*.patch
-
 # Backup files
 *.bak
-
 # Python and environment
 .venv/
 .opencode/
@@ -58,29 +50,23 @@ __pycache__/
 *.egg-info/
 scripts/**/__pycache__/
 scripts/**/*.pyc
-
 # Environment files
 .env
 .env.local
-
 # IDE and editor files
 .idea/
 .vscode/
 *.swp
 *.swo
 *~
-
 # OS generated files
 .DS_Store
 Thumbs.db
 Desktop.ini
-
 # Logs
 *.log
-
 # Third-party/vendor dependencies
 vendor/
-
 # Examples and results
 /examples/results/
 /examples/binaries/**/*.exe_ghidra/
@@ -88,22 +74,18 @@ vendor/
 # Keep benchmark test binaries tracked
 !examples/binaries/comparison_test_x64.exe
 !examples/binaries/comparison_test_x86.exe
-
 # Benchmark binaries (compiled output, built in CI)
 # Track source/build inputs only; ignore everything else under benchmark/binary.
 /benchmark/binary/**
 !benchmark/binary/.gitkeep
 !benchmark/binary/**/source/**
 !benchmark/binary/**/build.sh
-
 # Local sample corpora and scratch projects
 samples/
 /benchmark/binary/realworld/**
 !/benchmark/binary/realworld/.gitkeep
-
 # Local thesis working directories (but keep scripts tracked)
 /thesis/
-
 # Script run outputs (result dirs, benchmarks, temp comparison runs)
 # Use ** (not trailing /) so specific files can be un-ignored below
 scripts/result/**
@@ -112,52 +94,41 @@ scripts/result*/**
 !scripts/result/baseline_summary.json
 !scripts/result/baseline_x86_summary.json
 scripts/out/
-
 # Python build artifacts in scripts (keep source files tracked)
 scripts/**/__pycache__/
 scripts/**/*.pyc
-
 # Backup/cache artifacts
 *.backup
 *.cache/
 ghidra_decompiler/.cache/
-
 # Benchmark results (criterion output and run artifacts)
 benchmark_results/
 **/benchmark_results/
 /benchmark/results/
 /benchmark/history/timeline.jsonl
 /benchmark/history/main_latest.json
-
 # Local benchmark/decomp artifacts
 /benchmark/artifacts/**
 !/benchmark/artifacts/.gitkeep
-
 # Keep benchmark documentation and scripts tracked
 !benchmark/BENCHMARK_GUIDE.md
 !benchmark/IMPLEMENTATION_SUMMARY.md
 !/scripts/benchmark/
-
-
 # Local benchmark scratch file
 /test_bench.json
-
 # Local agent/tooling and benchmark workspace state
 /.cursor/
 /.claude/
 /.agent/
 /.sisyphus/
 /.venv-bench/
-
 # Cursor / local IDE prompts (not part of canonical repo surface)
 .github/prompts/
 /SKILL.md
-
 # External repos cloned locally inside scripts/ (not registered as submodules)
 # Use: git submodule add https://github.com/threatrack/ghidra-fid-generator.git scripts/ghidra-fid-generator
 # if you want it tracked.
 /scripts/ghidra-fid-generator/
-
 # ─── Local scratch / diagnostic files ────────────────────────────────────────
 # Root-level diagnostic output files produced during development sessions
 /diag_*.txt
@@ -167,7 +138,6 @@ benchmark_results/
 /check_out.txt
 /diff_mod.txt
 /bt.txt
-
 # Root-level benchmark/analysis scratch JSON files
 /sq.json
 /sq.jsonl
@@ -176,30 +146,24 @@ benchmark_results/
 /pcode.json
 /inventory_temp.jsonl
 /summary_temp.json
-
 # Flamegraph / profiling traces
 *.trace
 cargo-flamegraph.trace/
-
 # Root-level patch files from development sessions
 /scratch*.patch
 /scratch.patch
-
 # Root-level development helper scripts (non-canonical; use scripts/ instead)
 /fix*.py
 /patch*.py
 /auto_refactor.py
 /fix_*.py
 /patch_*.py
-
 # Fission local debug / run output files
 /fission.toml.local
 /run_lldb.sh
-
 # Teamwork agent configurations and logs
 /.agents/
 /.windsurf/
-
 # scripts/ — only scripts/test/ is tracked in GitHub
 # Everything else (benchmark helpers, corpus builders, audit, ghidra-fid-generator)
 # is local-only developer tooling.
@@ -210,16 +174,13 @@ cargo-flamegraph.trace/
 /scripts/gdt_extract_signatures.py
 /scripts/check_no_fission_analysis_dependency.sh
 /scripts/check_signatures_canonical_data.sh
-
 # Python cache files (never commit)
 __pycache__/
 *.pyc
 *.pyo
-
 # benchmark/ — being redesigned; local-only until new infra is ready
 # New design goal: multi-decompiler comparison benchmark (vs Ghidra, IDA, Binary Ninja, RetDec)
 /benchmark/
-
 # vendor/ — reference code only, not committed to GitHub
 /vendor/
 /utils/
