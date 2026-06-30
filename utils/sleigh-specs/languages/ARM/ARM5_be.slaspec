@@ -1,7 +1,3 @@
-
-@define ENDIAN "big"
-@define VERSION_5 ""
-@define VERSION_5E ""
-
-@include "ARM.sinc"
-
+version https://git-lfs.github.com/spec/v1
+oid sha256:a54946301d98aaec3d3c33e89a13de2b069df560920585a526c264142ed75917
+size 87

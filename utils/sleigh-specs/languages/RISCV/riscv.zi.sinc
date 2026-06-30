@@ -1,7 +1,3 @@
-# RV32/RV64  Zifencei Standard Extension
-
-# fence.i  0000100f ffffffff SIMPLE (0, 0) 
-:fence.i  is op0001=0x3 & op0204=0x3 & op0506=0x0 & funct3=0x1 & fm=0x0 & op0711=0x0 & op1527=0x0
-{
-	fence.i();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:aa438b3ce35865cb6e83e61ef3ef282f087d0535036d2ee3edb3471578901a48
+size 200

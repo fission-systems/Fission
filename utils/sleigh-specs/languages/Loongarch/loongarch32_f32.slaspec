@@ -1,13 +1,3 @@
-@define REGSIZE 4
-@define FREGSIZE 4
-@define ADDRSIZE 4
-@include "loongarch_main.sinc"
-@include "loongarch32_instructions.sinc"
-@include "loongarch_float.sinc"
-@include "loongarch_double.sinc"
-
-
-@include "lasx.sinc"
-@include "lbt.sinc"
-@include "lsx.sinc"
-@include "lvz.sinc"
+version https://git-lfs.github.com/spec/v1
+oid sha256:2aa12d45f76074f0c75d0e68d9b08cd36adc66515c944f950f6ba7894fe509a6
+size 276

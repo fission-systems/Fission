@@ -1,17 +1,3 @@
-<?xml version="1.0" encoding="UTF-8"?>
-
-<language_definitions>
-  <language processor="AVR32"
-            endian="big"
-            size="32"
-            variant="default"
-            version="2.0"
-            slafile="avr32a.sla"
-            processorspec="avr32a.pspec"
-            manualindexfile="../manuals/AVR32.idx"
-            id="avr32:BE:32:default">
-    <description>Generic AVR32-A big-endian</description>
-    <compiler name="default" spec="avr32a.cspec" id="default"/>
-    <external_name tool="IDA-PRO" name="avr"/>
-  </language>
-</language_definitions>
+version https://git-lfs.github.com/spec/v1
+oid sha256:88fc21ba3a0167ade6776b28ecc382f2ec2f54e42cb12a23a33a18d7c439cbde
+size 566

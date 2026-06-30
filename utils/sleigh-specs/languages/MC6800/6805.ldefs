@@ -1,15 +1,3 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<language_definitions>
-  <language processor="6805"
-            endian="big"
-            size="16"
-            variant="default"
-            version="1.0"
-            slafile="6805.sla"
-            processorspec="6805.pspec"
-            id="6805:BE:16:default">
-    <description>6805 Microcontroller Family</description>
-    <compiler name="default" spec="6805.cspec" id="default"/>
-	<external_name tool="IDA-PRO" name="6805"/>
-  </language>
-</language_definitions>
+version https://git-lfs.github.com/spec/v1
+oid sha256:70f6f955ca97a0528c1e3676d6675c2ca12bd6da4fcba1a0a9ecc00b386ce704
+size 504

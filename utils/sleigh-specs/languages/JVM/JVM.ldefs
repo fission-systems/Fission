@@ -1,17 +1,3 @@
-<?xml version="1.1" encoding="UTF-8"?>
-
-<language_definitions>
-  <language processor="JVM"
-            endian="big"
-            size="32"
-            variant="default"
-            version="1.1"
-            slafile="JVM.sla"
-            processorspec="JVM.pspec"
-            manualindexfile="../manuals/JVM.idx"
-            id="JVM:BE:32:default">
-    <description>Generic JVM</description>
-    <compiler name="default" spec="JVM.cspec" id="default"/>
-    <external_name tool="IDA-PRO" name="java"/>
-  </language>
-</language_definitions>
+version https://git-lfs.github.com/spec/v1
+oid sha256:b61b0a477c73c4d0b3bc69b6f43c51aa14ddb997125709dafb3fcaac0af29945
+size 537

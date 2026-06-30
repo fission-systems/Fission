@@ -1,36 +1,3 @@
-define endian=little;
-
-@define XLEN 4
-@define XLEN2 8
-@define FLEN 8
-@define CONTEXTLEN 8
-
-@define ADDRSIZE "32"
-@define FPSIZE "64"
-
-@include "riscv.reg.sinc"
-
-define context CONTEXT
-    isExecInstr=(32,32)
-    phase=(33,33)
-    ecdv=(34,34)
-;
-
-@include "riscv.table.sinc"
-
-
-# artificial return register
-
-define register offset=0x6000 size=4 [ ExecRetAddr ];
-
-Dest: is epsilon { export *[ram]:1 ExecRetAddr; }
-
-:^instruction is phase=0 & isExecInstr=1 & instruction [ phase=1; ] { build instruction; local dest:$(XLEN) = ExecRetAddr; goto [dest]; }
-:^instruction is phase=0 & isExecInstr=0 & instruction [ phase=1; ] { build instruction; }
-
-with : phase=1 {
-@include "riscv.instr.sinc"
-
-@include "andestar_v5.instr.sinc"
-
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:f93d54ecb22c9bf13b76ad1e0c9aa1f6759a44731bdc3c7b32bd029323b06cdd
+size 725

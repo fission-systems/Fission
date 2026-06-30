@@ -1,28 +1,3 @@
-<?xml version="1.0" encoding="UTF-8"?>
-
-<language_definitions>
-  <language processor="HC05"
-            endian="big"
-            size="16"
-            variant="default"
-            version="1.0"
-            slafile="HC05.sla"
-            processorspec="HC05.pspec"
-            manualindexfile="../manuals/HC05.idx"
-            id="HC05:BE:16:default">
-    <description>HC05 (6805) Microcontroller Family</description>
-    <compiler name="default" spec="HC05.cspec" id="default"/>
-  </language>
-    <language processor="HC05"
-            endian="big"
-            size="16"
-            variant="M68HC05TB"
-            version="1.0"
-            slafile="HC05.sla"
-            processorspec="HC05-M68HC05TB.pspec"
-            manualindexfile="../manuals/HC05.idx"
-            id="HC05:BE:16:M68HC05TB">
-    <description>HC05 (6805) Microcontroller Family - M68HC05TB</description>
-    <compiler name="default" spec="HC05.cspec" id="default"/>
-  </language>
-</language_definitions>
+version https://git-lfs.github.com/spec/v1
+oid sha256:10825fd5d494df8a5f66777b1ecfb0cbaf9711095a397e6a95a3c35755437aa3
+size 977

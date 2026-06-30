@@ -1,6 +1,3 @@
-@define SIZE      "8"
-
-@include "SparcV9.sinc"
-
-
-
+version https://git-lfs.github.com/spec/v1
+oid sha256:7e1094eea2f590db6c1f0fdd44d778fc7589244299517f842d3922406b392c5b
+size 50

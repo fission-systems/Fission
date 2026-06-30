@@ -1,8 +1,3 @@
-# This module defines SuperH version 4a, but should work against versions 1,2, and 3.
-# DSP Extensions are not yet added
-
-# Based on "Renesas SH-4 Software Manual: Rev 6.00 2006.09 (i.e. rej09b0318_sh_4sm.pdf)
-
-@define ENDIAN "big"
-
-@include "SuperH4.sinc"
+version https://git-lfs.github.com/spec/v1
+oid sha256:eecdf01d18424fbbf0e3e05d1cf2bad063110a68addb8eb42e76aeda1d699f2e
+size 257

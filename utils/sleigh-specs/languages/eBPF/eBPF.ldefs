@@ -1,27 +1,3 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<language_definitions>
-   <language processor="eBPF"
-            endian="big"
-            size="64"
-            variant="default"
-            version="1.0"
-            slafile="eBPF_be.sla"
-            processorspec="eBPF.pspec"
-            id="eBPF:BE:64:default">
-    <description>eBPF processor 64-bit big-endian</description>
-    <compiler name="default" spec="eBPF.cspec" id="default"/>
-    <external_name tool="DWARF.register.mapping.file" name="eBPF.dwarf"/>
-  </language>
-   <language processor="eBPF"
-            endian="little"
-            size="64"
-            variant="default"
-            version="1.0"
-            slafile="eBPF_le.sla"
-            processorspec="eBPF.pspec"
-            id="eBPF:LE:64:default">
-    <description>eBPF processor 64-bit little-endian</description>
-    <compiler name="default" spec="eBPF.cspec" id="default"/>
-    <external_name tool="DWARF.register.mapping.file" name="eBPF.dwarf"/>
-  </language>
-</language_definitions>
+version https://git-lfs.github.com/spec/v1
+oid sha256:ef3b38501a5ca996f5c4cf4a6fb30c5e47fd37b4968ad87a58039bd9063f72cf
+size 1006

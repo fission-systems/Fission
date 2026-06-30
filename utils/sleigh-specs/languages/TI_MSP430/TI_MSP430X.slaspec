@@ -1,5 +1,3 @@
-@define ENDIAN "little"
-@define REG_SIZE "4"
-
-@include "TI430Common.sinc"
-@include "TI430X.sinc"
+version https://git-lfs.github.com/spec/v1
+oid sha256:e4123f0cda29f8dadcf4e2d553ef2ea77c9a4efb9a399b254c68ca874b359c0f
+size 97

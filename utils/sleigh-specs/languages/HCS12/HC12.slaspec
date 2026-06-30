@@ -1,9 +1,3 @@
-# sleigh specification file for Freescale HC12 (68HC12)
-
-@define HC12 "1"
-
-@define SIZE "2"
-
-@define MAXFLASHPage "0xFF"
-
-@include "HCS_HC12.sinc"
+version https://git-lfs.github.com/spec/v1
+oid sha256:5c46fa6ef009b55528f3353d4e00a91042bb2c7a77d13efe7c655aa6b410e6aa
+size 146

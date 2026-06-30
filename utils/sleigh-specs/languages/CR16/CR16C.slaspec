@@ -1,4 +1,3 @@
-
-define endian=little;
-
-@include "CR16C.sinc"
+version https://git-lfs.github.com/spec/v1
+oid sha256:2c9510db4ee830007d73709a1ab6756fd9749832403bb8431705bc8dffb508d5
+size 46

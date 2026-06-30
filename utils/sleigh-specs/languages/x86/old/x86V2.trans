@@ -1,12 +1,3 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<language_translation>
-    <from_language version="2">x86:LE:32:default</from_language>
-    <to_language version="3">x86:LE:32:default</to_language>
-    <map_compiler_spec from="windows" to="windows" />
-    <map_compiler_spec from="clangwindows" to="clangwindows" />
-    <map_compiler_spec from="gcc" to="gcc" />
-    <map_compiler_spec from="borlandcpp" to="borlandcpp" />
-    <map_compiler_spec from="borlanddelphi" to="borlanddelphi" />
-    <map_compiler_spec from="golang" to="golang" />
-</language_translation>
-
+version https://git-lfs.github.com/spec/v1
+oid sha256:6d73ff33f86391effabc9cfb67b08de6d8d05941bb8d23cfc9872cf9ccd9b3f5
+size 555

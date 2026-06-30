@@ -1,7 +1,3 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<language_translation>
-    <from_language version="2">x86:LE:16:Real Mode</from_language>
-    <to_language version="3">x86:LE:16:Real Mode</to_language>
-    <map_compiler_spec from="default" to="default" />
-</language_translation>
-
+version https://git-lfs.github.com/spec/v1
+oid sha256:704897c7ee4d69b2515eb2a3d2f0312fc67ac8cd227a5c39e13c01fb8e677d58
+size 271

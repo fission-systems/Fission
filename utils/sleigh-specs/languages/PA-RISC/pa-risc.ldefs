@@ -1,18 +1,3 @@
-<?xml version="1.0" encoding="UTF-8"?>
-
-<language_definitions>
-  <language processor="PA-RISC"
-            endian="big"
-            size="32"
-            variant="default"
-            version="1.3"
-            slafile="pa-risc32be.sla"
-            processorspec="pa-risc32.pspec"
-            manualindexfile="../manuals/pa11_acd.idx"
-            id="pa-risc:BE:32:default">
-    <description>Generic PA-RISC 32-bit big endian</description>
-    <compiler name="default" spec="pa-risc32.cspec" id="default"/>
-    <external_name tool="gnu" name="hppa2.0w"/>
-    <external_name tool="IDA-PRO" name="hppa"/>
-  </language>
-</language_definitions>
+version https://git-lfs.github.com/spec/v1
+oid sha256:26c4dda87844cc7ffd11b690ce869c7a86463b03d9cfd8fd7b33a5a745e93110
+size 640

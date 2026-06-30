@@ -1,6 +1,3 @@
-<opinions>
-  <constraint loader="Executable and Linking Format (ELF)" compilerSpecID="default">
-    <constraint primary="94"    processor="Xtensa" size="32"/>
-    <constraint primary="43975" processor="Xtensa" size="32"/>
-  </constraint>
-</opinions>
+version https://git-lfs.github.com/spec/v1
+oid sha256:eeef7960f085ae6d4afdaf7ccf027014f479721380002a3d5ac41277f047a089
+size 250

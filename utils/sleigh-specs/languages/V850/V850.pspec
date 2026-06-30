@@ -1,13 +1,3 @@
-<?xml version="1.0" encoding="UTF-8"?>
-
-<processor_spec>
-
-  <programcounter register="PC"/>
-
-  <data_space space="ram"/>
-
-  <volatile outputop="write" inputop="read">
-    <range space="ram" first="0x0" last="0x20"/>
-  </volatile>
-
-</processor_spec>
+version https://git-lfs.github.com/spec/v1
+oid sha256:44eb9479a254979b8712a52a02410d3da049a83df5274d80a71bfd96640e19c5
+size 249

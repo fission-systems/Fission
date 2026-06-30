@@ -1,18 +1,3 @@
-<?xml version="1.0" encoding="UTF-8"?>
-
-<language_definitions>
-  
-  <language processor="8048"
-            endian="little"
-            size="16"
-            variant="default"
-            version="1.0"
-            slafile="8048.sla"
-            processorspec="8048.pspec"
-            manualindexfile="../manuals/8048.idx"
-            id="8048:LE:16:default">
-    <description>8048 Microcontroller Family</description>
-    <compiler name="default" spec="8048.cspec" id="default"/>
-  </language>
-  
-</language_definitions>
+version https://git-lfs.github.com/spec/v1
+oid sha256:4693e3150aa63ca8819639721e4b9454ce1880b514c0104c694a781d3106221f
+size 520

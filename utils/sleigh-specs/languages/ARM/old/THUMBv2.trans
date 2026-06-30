@@ -1,11 +1,3 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<language_translation>
-    <from_language version="1">Sleigh-THUMBv2</from_language>
-    <to_language version="1">ARM:LE:32:v5t</to_language>
-    
-    <!--
-    	Set THUMB mode context everywhere
-    -->
-    <set_context name="TMode" value="1" />
-    
-</language_translation>
+version https://git-lfs.github.com/spec/v1
+oid sha256:3ae7df8fc7ee66d07704a02ce6d9f81faf9741229e47eb2f1521de70231f4dba
+size 314

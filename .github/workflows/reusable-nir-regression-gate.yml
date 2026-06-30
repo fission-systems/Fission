@@ -46,10 +46,10 @@ jobs:
       - name: Build PE nir-lane fixture (MinGW-w64)
         run: |
           set -euo pipefail
-          OUT="benchmark/binary/x86-64/window/small/binary/c/test_functions.exe"
+          OUT="/tmp/ci-fixtures/test_functions.exe"
           mkdir -p "$(dirname "${OUT}")"
           x86_64-w64-mingw32-gcc -O2 -g -m64 -static \
-            benchmark/binary/x86-64/window/small/source/c/test_functions.c \
+            .github/fixtures/test_functions.c \
             -o "${OUT}"
           test -s "${OUT}"
 
@@ -82,7 +82,7 @@ jobs:
           import json, os
           from pathlib import Path
 
-          artifacts_dir = Path("benchmark/artifacts/automation")
+          artifacts_dir = Path("/tmp/nir-check-artifacts")
           summary_file = artifacts_dir / "nir_check_summary.json"
           step_summary = os.environ.get("GITHUB_STEP_SUMMARY", "")
 
@@ -134,6 +134,6 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: nir-regression-gate-${{ github.sha }}
-          path: benchmark/artifacts/automation/
+          path: /tmp/nir-check-artifacts/
           retention-days: 14
           if-no-files-found: warn

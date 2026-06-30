@@ -1,8 +1,3 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<processor_spec>
-	 <programcounter register="PC"/>
-    <default_memory_blocks>
-        <memory_block name="BPF_packet" start_address="packet:800000" length="0x1000" initialized="true"/>    
-        <memory_block name="BPF_packet" start_address="mem:900000" length="0x1000" initialized="true"/>    
-    </default_memory_blocks>
-</processor_spec>
+version https://git-lfs.github.com/spec/v1
+oid sha256:ed807a54cf4d8d66c51628848c47ab46de76d62f6d18eb964c79de6234f0758f
+size 384

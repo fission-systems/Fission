@@ -1,6 +1,3 @@
-@define IA64 "IA64"
-@include "x86.slaspec"
-with : lockprefx=0 {
-@include "sgx.sinc"
-@include "fma.sinc"
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:9d66a01a4219ab0bee0697caf2d1ee389e094e927a857299cebb6182e40a4e6e
+size 106

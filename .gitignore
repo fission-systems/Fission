@@ -215,3 +215,10 @@ cargo-flamegraph.trace/
 __pycache__/
 *.pyc
 *.pyo
+
+# benchmark/ — being redesigned; local-only until new infra is ready
+# New design goal: multi-decompiler comparison benchmark (vs Ghidra, IDA, Binary Ninja, RetDec)
+/benchmark/
+
+# vendor/ — reference code only, not committed to GitHub
+/vendor/

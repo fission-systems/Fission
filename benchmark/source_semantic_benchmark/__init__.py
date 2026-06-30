@@ -1,1 +1,0 @@
-# Source Semantic Benchmark package.

@@ -1,17 +1,3 @@
-define endian=little;
-
-@define XLEN 4
-@define XLEN2 8
-@define FLEN 8
-
-@define CONTEXTLEN 4
-
-@define ADDRSIZE "32"
-@define FPSIZE "64"
-
-@include "riscv.reg.sinc"
-@include "riscv.table.sinc"
-@include "riscv.instr.sinc"
-
-# include placeholder decode for *some* custom instructions
-@include "riscv.custom.sinc"
+version https://git-lfs.github.com/spec/v1
+oid sha256:67b4119997885a9aabc16f33c5cae7ae9fdc21bfc678cb2d799b9d58769f5862
+size 307

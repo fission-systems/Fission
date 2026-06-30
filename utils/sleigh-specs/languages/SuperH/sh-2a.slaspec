@@ -1,4 +1,3 @@
-@define SH_VERSION "2A"
-@define FPU "1"
-
-@include "superh.sinc"
+version https://git-lfs.github.com/spec/v1
+oid sha256:9d3c9bfd9c2a965c5de73a5a60a8ff55d95e7f1a7df94693e3c9e3f1d06073ac
+size 64

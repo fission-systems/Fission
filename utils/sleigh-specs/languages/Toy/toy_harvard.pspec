@@ -1,6 +1,3 @@
-<?xml version="1.0" encoding="UTF-8"?>
-
-<processor_spec>
-  <programcounter register="pc"/>
-  <data_space space="data"/>
-</processor_spec>
+version https://git-lfs.github.com/spec/v1
+oid sha256:7e7d85c746614d246777d577acc20a10bf1b9824d78457b82584db5a4a51f675
+size 138

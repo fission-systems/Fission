@@ -1,3 +1,3 @@
-macro conditionalAssign(dest, cond, trueVal, falseVal) {
-    dest = zext(cond) * trueVal | zext(!cond) * falseVal;	
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:4107a81f9aadd9566c95fff301b68ef3054ee59b44ead8daa83e8808d122d146
+size 117

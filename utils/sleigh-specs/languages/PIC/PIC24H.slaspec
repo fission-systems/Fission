@@ -1,9 +1,3 @@
-# This module defines Microchip PIC-24. 
-
-# Based on "Microchip 16-bit MCU and DSC Programmer's Reference Manual (c)2005-2011 (i.e. PIC24_InstructionSet.pdf)
-
-define endian=little; # little endian only
-
-@define PIC24H "1"     
-
-@include "PIC24.sinc"
+version https://git-lfs.github.com/spec/v1
+oid sha256:d4c45d95f2dcb3b917d3ca896b261a8956a70d00289d065ef8a7722355c92203
+size 250

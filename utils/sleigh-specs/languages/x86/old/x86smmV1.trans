@@ -1,7 +1,3 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<language_translation>
-    <from_language version="1">x86:LE:32:System Management Mode</from_language>
-    <to_language version="2">x86:LE:32:System Management Mode</to_language>
-    <map_compiler_spec from="default" to="default" />
-</language_translation>
-
+version https://git-lfs.github.com/spec/v1
+oid sha256:fbaab22736e45d39b2a9e5269109cdbae27773b8a80ab207e7d54432f2f7ba3a
+size 297

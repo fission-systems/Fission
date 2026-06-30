@@ -1,7 +1,3 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<language_translation>
-    <from_language version="2">x86:LE:16:Protected Mode</from_language>
-    <to_language version="3">x86:LE:16:Protected Mode</to_language>
-    <map_compiler_spec from="default" to="default" />
-</language_translation>
-
+version https://git-lfs.github.com/spec/v1
+oid sha256:d6746c0eb1584a8f62f890b83aa5de74512fc3a7607e0c1d5c57dcb793ab3de4
+size 281

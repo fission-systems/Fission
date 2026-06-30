@@ -1,7 +1,3 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<language_translation>
-    <from_language version="1">Sleigh-PowerPC 32-bit</from_language>
-    <to_language version="1">PowerPC:BE:32:default</to_language>
-    <map_compiler_spec from="Sleigh-PowerPC 32-bit" to="default" />
-</language_translation>
-
+version https://git-lfs.github.com/spec/v1
+oid sha256:eed507e494612ded9b7659bdee9f7cacf42d7d66fa616cb10b4b02f49f72eae1
+size 289

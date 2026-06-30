@@ -1,5 +1,3 @@
-#------------------------------------------------------------------------------------
-#	Sleigh specification file for DALVIK VM (base set of instructions)
-#------------------------------------------------------------------------------------
-
-@include "Dalvik_Base.sinc"
+version https://git-lfs.github.com/spec/v1
+oid sha256:0fac6687f2083c2f445414a4eb30652d7c843f1ad33093a0373f3b0c13c99914
+size 269

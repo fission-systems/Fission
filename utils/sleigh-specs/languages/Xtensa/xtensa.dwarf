@@ -1,7 +1,3 @@
-<dwarf>
-    <register_mappings>
-        <register_mapping dwarf="0" ghidra="a0"/>
-        <register_mapping dwarf="1" ghidra="a1" stackpointer="true"/>
-        <register_mapping dwarf="2" ghidra="a2" auto_count="14"/> <!-- a2..a15 -->
-    </register_mappings>
-</dwarf>
+version https://git-lfs.github.com/spec/v1
+oid sha256:fd1ac24421637c36f37e057d96fa146155ad27e63ffc0e27a225c413bf7431c9
+size 269

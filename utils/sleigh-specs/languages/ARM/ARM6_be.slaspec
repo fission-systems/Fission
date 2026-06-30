@@ -1,12 +1,3 @@
-
-@define ENDIAN "big"
-@define T_VARIANT ""
-@define VERSION_5 ""
-@define VERSION_5E ""
-@define VERSION_6 ""
-@define VERSION_6K ""
-@define VERSION_6T2 ""
-@define VFPv2 ""
-
-@include "ARM.sinc"
-
+version https://git-lfs.github.com/spec/v1
+oid sha256:de4644bf73cc7404a6032b9f32ae9f900465deb01c6e774bd8edbd42fdadf2e1
+size 191

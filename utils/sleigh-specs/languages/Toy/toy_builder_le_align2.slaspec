@@ -1,6 +1,3 @@
-@define ENDIAN "little"
-@define ALIGN "2"
-@define SIZE "4"
-@define DATA_SPACE "ram"
-
-@include "toy_builder.sinc"
+version https://git-lfs.github.com/spec/v1
+oid sha256:3b0b432909ef87605756424a609ebc296d85413a035abca940eca8fab69c06bc
+size 113

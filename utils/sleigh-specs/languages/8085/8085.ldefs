@@ -1,15 +1,3 @@
-<?xml version="1.0" encoding="UTF-8"?>
-
-<language_definitions>
-  <language processor="8085"
-            endian="little"
-            size="16"
-            variant="default"
-            version="1.0"
-            slafile="8085.sla"
-            processorspec="8085.pspec"
-            id="8085:LE:16:default">
-    <description>Intel 8085</description>
-    <compiler name="default" spec="8085.cspec" id="default"/>
-  </language>
-</language_definitions>
+version https://git-lfs.github.com/spec/v1
+oid sha256:ab84d27de5c709870ea9a99573eb9a539f83e3a0b17de2586f043c4e28b5d58f
+size 447

@@ -1,21 +1,3 @@
-<?xml version="1.0" encoding="UTF-8"?>
-
-<processor_spec>
-  <properties>
-    <property key="addressesDoNotAppearDirectlyInCode" value="true"/>
-    <property key="assemblyRating:sparc:BE:32:default" value="PLATINUM"/>
-    <property key="assemblyRating:sparc:BE:64:default" value="PLATINUM"/>
-  </properties>
-  <context_data>
-    <tracked_set space="ram">
-      <set name="didrestore" val="0"/>
-      <set name="DECOMPILE_MODE" val="1"/>
-    </tracked_set>
-  </context_data>
-  
-  <default_symbols>
-    <symbol name="Reset" address="ram:0x0" entry="true"/>
-  </default_symbols>
-  
-  <programcounter register="PC"/>
-</processor_spec>
+version https://git-lfs.github.com/spec/v1
+oid sha256:e7e494b3397f10f96e51eebb8193850eecd4a84537aa28868e0045a7c3faebb0
+size 629

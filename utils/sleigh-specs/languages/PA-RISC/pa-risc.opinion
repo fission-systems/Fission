@@ -1,10 +1,3 @@
-<opinions>
-	<constraint loader="Executable and Linking Format (ELF)" compilerSpecID="default">
-		<constraint primary="15" secondary="528"    processor="PA-RISC"    endian="big"    size="32" />
-	</constraint>
-	<constraint loader="System Object Model (SOM)" compilerSpecID="default">
-		<constraint primary="523" processor="PA-RISC"   endian="big"  size="32" />
-		<constraint primary="528" processor="PA-RISC"   endian="big"  size="32" />
-		<constraint primary="532" processor="PA-RISC"   endian="big"  size="32" />
-	</constraint>
-</opinions>
+version https://git-lfs.github.com/spec/v1
+oid sha256:4a4bd40f9f2aac56d40f1237d07d7b02560838a90ea3a85327f8e104cbaf4c85
+size 540

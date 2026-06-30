@@ -1,5 +1,3 @@
-@define PROCESSOR "PIC_16"
-
-@include "pic16.sinc"
-
-@include "pic16_instructions.sinc"
+version https://git-lfs.github.com/spec/v1
+oid sha256:406425b04b1baa06573bf56912920f0381b37dec8dbd889ab27eb4662fe6b8dd
+size 86

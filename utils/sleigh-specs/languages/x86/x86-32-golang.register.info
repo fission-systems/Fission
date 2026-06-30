@@ -1,11 +1,3 @@
-<golang>
-	<register_info versions="all">
-		<int_registers list=""/>
-		<float_registers list=""/>
-		<stack initialoffset="4" maxalign="4"/>
-		<current_goroutine register=""/>
-		<zero_register register=""/>
-		<duffzero dest="EDI" zero_arg="EAX" zero_type="int"/>
-		<closurecontext register="EDX"/>
-	</register_info>
-</golang>
+version https://git-lfs.github.com/spec/v1
+oid sha256:4e32f5ba6ed53b6022469f9702ba1e4d861495d8e9ed37ed6ab2504ca5b5561c
+size 323

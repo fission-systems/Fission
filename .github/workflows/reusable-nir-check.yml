@@ -36,8 +36,7 @@ jobs:
 
       - name: Download Sleigh specs + NIR fixture source (LFS, ~11 MB)
         run: |
-          git lfs pull --include="utils/sleigh-specs/compiled/**"
-          git lfs pull --include="benchmark/binary/x86-64/window/small/source/**"
+          git lfs pull --include="utils/sleigh-specs/**"
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -56,10 +55,10 @@ jobs:
       - name: Build PE nir-lane fixture (MinGW-w64)
         run: |
           set -euo pipefail
-          OUT="benchmark/binary/x86-64/window/small/binary/c/test_functions.exe"
+          OUT="/tmp/ci-fixtures/test_functions.exe"
           mkdir -p "$(dirname "${OUT}")"
           x86_64-w64-mingw32-gcc -O2 -g -m64 -static \
-            benchmark/binary/x86-64/window/small/source/c/test_functions.c \
+            .github/fixtures/test_functions.c \
             -o "${OUT}"
           test -s "${OUT}"
 
@@ -83,6 +82,6 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: nir-check-artifacts-${{ github.sha }}
-          path: benchmark/artifacts/automation/
+          path: /tmp/nir-check-artifacts/
           retention-days: 14
           if-no-files-found: warn

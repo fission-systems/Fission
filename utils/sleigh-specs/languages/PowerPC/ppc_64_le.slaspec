@@ -1,11 +1,3 @@
-# SLA specification file for PowerPC 64-bit little endian
-
-@define ENDIAN "little"
-
-@define REGISTER_SIZE "8"
-@define BIT_64 "64"
-@define EATRUNC "ea:4"
-
-@include "ppc_common.sinc"
-@include "altivec.sinc"
-@include "g2.sinc"
+version https://git-lfs.github.com/spec/v1
+oid sha256:0fe4cf06d41919d13a9362f470f29fd03b3665d22aa31b2b1b553dd2050c017a
+size 224

@@ -1,3 +1,3 @@
-@define MCS80390 ""
-
-@include "8051_main.sinc"
+version https://git-lfs.github.com/spec/v1
+oid sha256:a23dfb919750e7200c1e4a7e200ea8520a3839ead538e29e4fc9dda1db49a846
+size 47

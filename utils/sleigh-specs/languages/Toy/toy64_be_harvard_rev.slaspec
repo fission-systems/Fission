@@ -1,16 +1,3 @@
-@define ENDIAN "big"
-@define SIZE "8"
-@define WORDSIZE "1"
-@define ALIGN "1"
-
-@define INSTR_PHASE "" # not used by basic toy language
-@define DATA_SPACE "data"
-
-@define ALREADY_ENDIAN_ALIGN
-define endian=$(ENDIAN);
-define alignment=$(ALIGN);
-define space data type=ram_space size=$(SIZE) wordsize=$(WORDSIZE);
-
-@include "toy.sinc"
-
-@include "toyInstructions.sinc"
+version https://git-lfs.github.com/spec/v1
+oid sha256:9d0fb7d5f1e889fde1ccd8bd50618b4dd1f64231aae33c1b995db9701df5d29d
+size 364

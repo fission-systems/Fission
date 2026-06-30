@@ -1,2 +1,3 @@
-@define MC68030 ""
-@include "68000.sinc"
+version https://git-lfs.github.com/spec/v1
+oid sha256:7a55728decb9f0d40cca30245237147e73a3999ffc73e02cfcb214f175976937
+size 41

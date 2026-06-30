@@ -1,8 +1,3 @@
-<?xml version="1.0" encoding="UTF-8"?>
-
-<processor_spec>
-  <properties>
-    <property key="assemblyRating:avr32:BE:32:default" value="PLATINUM"/>
-  </properties>
-  <programcounter register="PC"/>
-</processor_spec>
+version https://git-lfs.github.com/spec/v1
+oid sha256:1cef7127bb288d966b1911315e724b02da40374b23f0ae084afd5990392b35a4
+size 214

@@ -1,12 +1,3 @@
-@define ENDIAN "big"
-@include "xtensaArch.sinc"
-@include "xtensaMain.sinc"
-
-with : phase=1 {
-
-@include "xtensaInstructions.sinc"
-#@include "xtensa_depbits.sinc" #uncomment this to use depbits instruction, collides with floating point
-@include "cust.sinc"
-@include "flix.sinc"
-
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:23881857fec36b6932c707e692dd0d35012f6223618ea106db16fa626e46030a
+size 278

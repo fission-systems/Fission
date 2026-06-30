@@ -1,11 +1,3 @@
-# Xtensa Deposit Bits instruction
-# This is broken out because it collides with the floating point instructions. It is not included by default
-
-# DEPBITS - Add (RRR), pg. 394.
-shiftimm: simm is op2 & op1_0 [ simm = op1_0 << 4 + op2; ] { export *[const]:4 simm; }
-:depbits as, at, shiftimm, u4_12_15 is op1_1_3=0x5 & op_r & as & at & op0 = 0 & shiftimm {
-	mask:4 = (1 << op_r) - 1;
-	bits:4 = (as & mask) << shiftimm;
-	mask = mask << shiftimm;
-	at = (~mask & at) | bits;
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:763629ef918b5e2a1075bf11e7d84c7f8f86900019f9bddc3056dbf444280e6c
+size 471

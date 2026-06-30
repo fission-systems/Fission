@@ -1,31 +1,3 @@
-<?xml version="1.0" encoding="UTF-8"?>
-
-<compiler_spec>
-
-	<data_organization>
-	    <pointer_size value="8" />
-    </data_organization>
-
-	<global>
-		<range space="ram"/>
-		<range space="register"/>
-	</global>
-
-	<stackpointer register="sp" space="ram" growth="negative"/>
-
-	<default_proto>
-  		<prototype name="__stdcall" extrapop="0" stackshift="0">
-  			<input>
-  				<pentry maxsize="8" minsize="1">
-  					<register name="r0"/>
-  				</pentry>
-  			</input>
-	   		<output>
-		        <pentry maxsize="8" minsize="1">
-		            <register name="r0"/>
-		        </pentry>
-	   		</output>
-		</prototype>
-	</default_proto>
-
-</compiler_spec>
+version https://git-lfs.github.com/spec/v1
+oid sha256:9cb93d2eb633c5784fc4b20b1ae04438adbf204ebef5d3e1e7b5c90b32f4dc26
+size 641

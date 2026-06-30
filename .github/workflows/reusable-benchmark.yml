@@ -35,7 +35,7 @@ jobs:
 
       - name: Download LFS assets for benchmark (Sleigh specs + smoke fixture sources)
         run: |
-          git lfs pull --include="utils/sleigh-specs/compiled/**"
+          git lfs pull --include="utils/sleigh-specs/**"
           git lfs pull --include="benchmark/binary/x86-64/window/small/source/**"
 
       - name: Setup Java for Ghidra

@@ -1,8 +1,3 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<language_translation>
-    <from_language version="1">8051:BE:16:default</from_language>
-    <to_language version="2">8051:BE:16:default</to_language>
-    <map_compiler_spec from="default" to="default" />
-    <map_compiler_spec from="Archimedes" to="Archimedes" />
-</language_translation>
-
+version https://git-lfs.github.com/spec/v1
+oid sha256:42dc0d9eaead44408cc81b7a7575060dee7856bbcf223e80aad1e3413e88e1f5
+size 329

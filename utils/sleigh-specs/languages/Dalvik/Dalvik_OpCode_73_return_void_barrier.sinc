@@ -1,7 +1,3 @@
-#------------------------------------------------------------------------------------
-# V(0x73, RETURN_VOID_BARRIER, "return-void-barrier", k10x, false, kNone, kReturn, kVerifyNone) \
-
-:return_void_barrier  is  inst1=0x73 & inst1_padding
-{
-	return [sp];
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:8ff1732e67f6020c0fac8162227da9edd7314eba1b65a67dc4f5cebb3eb6412e
+size 256

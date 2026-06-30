@@ -1,9 +1,3 @@
-# This module defines SuperH version 4, but should work against versions 1,2, and 3. 
-# There is a SuperH version 4A (which has 4 byte instruction length) which has instructions incompatable
-# with this.
-
-# Based on "Renesas SH-4 Software Manual: Rev 6.00 2006.09 (i.e. rej09b0318_sh_4sm.pdf)
-
-@define ENDIAN "little"
-
-@include "SuperH4.sinc"
+version https://git-lfs.github.com/spec/v1
+oid sha256:af64634bd8b130502d8c74b4f078a9e058b2bb477dc285243bb4fecf87d30e51
+size 343

@@ -1,15 +1,3 @@
-<?xml version="1.0" encoding="UTF-8"?>
-
-<language_definitions>
-   <language processor="CP1600"
-            endian="big"
-            size="16"
-            variant="default"
-            version="1.0"
-            slafile="CP1600.sla"
-            processorspec="CP1600.pspec"
-            id="CP1600:BE:16:default">
-    <description>General Instruments CP1600</description>
-    <compiler name="default" spec="CP1600.cspec" id="default"/>
-  </language> 
-</language_definitions>
+version https://git-lfs.github.com/spec/v1
+oid sha256:be81154ec9493fa700c0e3d939ee7f89f7497b85a585dac0fd776fb2697ad462
+size 472

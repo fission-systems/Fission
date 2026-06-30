@@ -1,7 +1,3 @@
-@define MX51 ""
-@define OMIT_RETADDR 1
-@define DUAL_DPTR ""
-@define DPS_REG_NUM 0xa2
-
-@include "8051_main.sinc"
-@include "mx51.sinc"
+version https://git-lfs.github.com/spec/v1
+oid sha256:8a77a51e5ad1de746c6cd355fba4ea10386473eb568a800385ceabb53bccef6c
+size 133

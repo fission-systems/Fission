@@ -1,5 +1,3 @@
-# sleigh specification file for Freescale HCS08 (68HCS08)
-
-@define HCS08 "1"
-
-@include "HCS_HC.sinc"
+version https://git-lfs.github.com/spec/v1
+oid sha256:4f6baf078d8d6ca7ed38f1321c7d6394af7757d42a84b636f16b5d0b5708bb10
+size 101

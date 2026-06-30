@@ -1,20 +1,3 @@
-<?xml version="1.0" encoding="UTF-8"?>
-
-<language_definitions>
-  <!--
-  	Version-1.1 17-Nov-2008 - complete rewrite of M16C_80.slaspec
-  -->
-  <language processor="M16C/80"
-            endian="little"
-            size="16"
-            variant="default"
-            version="1.1"
-            slafile="M16C_80.sla"
-            processorspec="M16C_80.pspec"
-            manualindexfile="../manuals/M16C_80.idx"
-            id="M16C/80:LE:16:default">
-    <description>Renesas M16C/80 16-Bit MicroComputer</description>
-    <compiler name="default" spec="M16C_80.cspec" id="default"/>
-    <external_name tool="gnu" name="m16c"/>
-  </language>
-</language_definitions>
+version https://git-lfs.github.com/spec/v1
+oid sha256:e906234e44190864a6b40b75413cece7cfc9c96052b42a6f66dd5373052ef720
+size 663

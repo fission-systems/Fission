@@ -6,7 +6,7 @@ on:
       binary_relative_path:
         type: string
         required: false
-        default: benchmark/binary/x86-64/window/small/binary/c/test_functions.exe
+        default: /tmp/ci-fixtures/test_functions.exe
         description: "Path to sample binary (repo-relative); built on the runner if absent"
       profile:
         type: string
@@ -31,7 +31,7 @@ jobs:
           lfs: false  # LFS assets downloaded selectively below
 
       - name: Download Sleigh specs (LFS, ~11 MB)
-        run: git lfs pull --include="utils/sleigh-specs/compiled/**"
+        run: git lfs pull --include="utils/sleigh-specs/**"
 
       - uses: dtolnay/rust-toolchain@stable
 
@@ -44,14 +44,14 @@ jobs:
           sudo apt-get install -y gcc-mingw-w64-x86-64
           command -v x86_64-w64-mingw32-gcc
 
-      # benchmark/binary/**/*.exe is gitignored — same path as wiki/docs; build locally on CI (~150KiB PE)
+      # CI fixture from .github/fixtures/test_functions.c — compiled on the runner (~150KiB PE)
       - name: Build PE smoke fixture (MinGW-w64)
         run: |
           set -euo pipefail
           OUT="${{ inputs.binary_relative_path }}"
           mkdir -p "$(dirname "${OUT}")"
           x86_64-w64-mingw32-gcc -O2 -g -m64 -static \
-            benchmark/binary/x86-64/window/small/source/c/test_functions.c \
+            .github/fixtures/test_functions.c \
             -o "${OUT}"
           test -s "${OUT}"
 

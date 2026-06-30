@@ -1,9 +1,3 @@
-<?xml version="1.0" encoding="UTF-8"?>
-
-<processor_spec>
-  <properties>
-    <property key="assemblyRating:pa-risc:BE:32:default" value="PLATINUM"/>
-  </properties>
-
-  <programcounter register="iaoq_front"/>
-</processor_spec>
+version https://git-lfs.github.com/spec/v1
+oid sha256:07e8232608abef39484852d39fcee81add103c656d4f57e5f5bf5367c132e061
+size 225

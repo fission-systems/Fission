@@ -1,11 +1,3 @@
-<?xml version="1.0" encoding="UTF-8"?>
-
-<processor_spec>
-  <programcounter register="PC"/>
-  <default_symbols>
-      <symbol name="VECTOR_Reset"      address="0x2080" entry="true"/>
-  </default_symbols>
-  <default_memory_blocks>
-    <memory_block name="REG_FILE" start_address="RAM:0" length="0x200" initialized="false"/>
-  </default_memory_blocks>
-</processor_spec>
+version https://git-lfs.github.com/spec/v1
+oid sha256:85e11018211b1ae593e96fe1326e613813b47dc3a03e002e691b0b82d64da9a8
+size 367

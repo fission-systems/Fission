@@ -1,17 +1,3 @@
-# Per the manual:
-# CUST0 and CUST1 opcode encodings shown in Table 7–193 are permanently reserved
-# for designer-defined opcodes. In the future, customers who use these spaces
-# exclusively for their own designer-defined opcodes will be able to add new
-# Tensilica-defined options without changing their opcodes or binary executables.
-
-define pcodeop cust0;
-
-:cust0 "{op2="^op2^", r="^ar^", s="^as^", t="^at^"}" is op0=0x0 & op1=0x6 & op2 & ar & as & at {
-	cust0();
-}
-
-define pcodeop cust1;
-
-:cust1 "{op2="^op2^", r="^ar^", s="^as^", t="^at^"}" is op0=0x0 & op1=0x7 & op2 & ar & as & at {
-	cust1();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:bdc111cfa9a76e7e88ad155d715cf1d8af7c34a58b20077a9203150932c0dde0
+size 603

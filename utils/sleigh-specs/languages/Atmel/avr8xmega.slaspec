@@ -1,11 +1,3 @@
-# AVR8 with 22-bit addressable code space
-
-@define PCBYTESIZE "3"
-@define HASEIND "1"
-
-@define IO_START "0"
-@define REGISTER_SPACE "register"
-@define EIND "0x3c"
- 
-@include "avr8.sinc"
-
+version https://git-lfs.github.com/spec/v1
+oid sha256:451c950392290acffe5364448ace72178519f7de65be3e1dd99d5bc8c07bf3ba
+size 186
