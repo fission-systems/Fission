@@ -3198,7 +3198,7 @@ mod tests {
     ///   }
     fn make_infinite_for_with_tail(
         work_stmts: Vec<HirStmt>,
-        iv: &str,
+        iter_var: &str,
         limit: &str,
         update_label: &str,
     ) -> (Vec<HirStmt>, NirType) {
@@ -3207,11 +3207,11 @@ mod tests {
             let mut b = work_stmts;
             b.push(HirStmt::Label(update_label.to_string()));
             b.push(HirStmt::Assign {
-                lhs: HirLValue::Var(iv.to_string()),
-                rhs: add(var(iv), const_i(1), ty.clone()),
+                lhs: HirLValue::Var(iter_var.to_string()),
+                rhs: add(var(iter_var), const_i(1), ty.clone()),
             });
             b.push(HirStmt::If {
-                cond: eq_expr(var(iv), var(limit)),
+                cond: eq_expr(var(iter_var), var(limit)),
                 then_body: vec![HirStmt::Break],
                 else_body: vec![],
             });
@@ -3219,7 +3219,7 @@ mod tests {
         };
         let stmts = vec![
             HirStmt::Assign {
-                lhs: HirLValue::Var(iv.to_string()),
+                lhs: HirLValue::Var(iter_var.to_string()),
                 rhs: const_i(0),
             },
             HirStmt::For {
