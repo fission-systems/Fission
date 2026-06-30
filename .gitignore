@@ -199,3 +199,19 @@ cargo-flamegraph.trace/
 # Teamwork agent configurations and logs
 /.agents/
 /.windsurf/
+
+# scripts/ — only scripts/test/ is tracked in GitHub
+# Everything else (benchmark helpers, corpus builders, audit, ghidra-fid-generator)
+# is local-only developer tooling.
+/scripts/audit/
+/scripts/benchmark/
+/scripts/corpus/
+/scripts/ghidra-fid-generator/
+/scripts/gdt_extract_signatures.py
+/scripts/check_no_fission_analysis_dependency.sh
+/scripts/check_signatures_canonical_data.sh
+
+# Python cache files (never commit)
+__pycache__/
+*.pyc
+*.pyo
