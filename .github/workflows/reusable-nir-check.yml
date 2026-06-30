@@ -32,7 +32,7 @@ jobs:
       - uses: actions/checkout@v7
         
         with:
-          lfs: true
+          lfs: false
         with:
           submodules: recursive
 

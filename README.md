@@ -87,28 +87,20 @@ For deeper visual maps, see [`docs/architecture/DIAGRAMS.md`](./docs/architectur
 
 ---
 
-## Cloning & Resource Assets
+## Cloning
 
-Large binary assets (~536 MB: signature databases, Ghidra data, compiled Sleigh specs)
-are stored in **Git LFS** and downloaded on demand. Rust source code and text files clone immediately.
+The GitHub repository contains **only Rust source code, Python benchmark scripts, and configuration**.
+Large binary assets (`utils/`, compiled benchmark fixtures) are **not tracked in git** — they live locally only.
 
 ```bash
-# Rust source only (fast, no LFS download)
-GIT_LFS_SKIP_SMUDGE=1 git clone https://github.com/sjkim1127/Fission.git
-
-# Full clone including all LFS assets
+# Standard clone — lightweight, Rust source only
 git clone https://github.com/sjkim1127/Fission.git
-
-# Selective download after a skip-smudge clone
-git lfs pull --include="utils/signatures/**"      # function signature DBs
-git lfs pull --include="utils/sleigh-specs/**"    # compiled Sleigh specs
-git lfs pull                                       # everything
 ```
 
-> [!TIP]
-> For Rust development only, use `GIT_LFS_SKIP_SMUDGE=1` — the decompiler
-> will fall back gracefully when signature databases are absent.
-> Download assets only when running the full quality pipeline or benchmarks.
+> [!NOTE]
+> `utils/` (signature databases, Sleigh specs, Ghidra data) and `benchmark/binary/` are gitignored.
+> They must be obtained separately and placed in the repo root before running the full quality pipeline.
+> For Rust development and CI builds, these assets are not required.
 
 
 ## Documentation Hub
