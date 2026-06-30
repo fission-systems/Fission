@@ -1,11 +1,3 @@
-# ─── Local-only asset directories (not tracked in GitHub) ─────────────────────
-# These live on disk locally but are NOT committed to the repository.
-# utils/       : signature DBs, Ghidra data, compiled Sleigh specs (~536 MB)
-# benchmark/binary/ : compiled test fixture binaries (generated locally)
-# To share these across machines, use a release bundle or shared storage.
-/utils/
-/benchmark/binary/
-
 # Rust build artifacts
 /target/
 /target2/
