@@ -18,4 +18,4 @@ interactive_runtime = []
 fission-core = { path = "../fission-core" }
 fission-loader = { path = "../fission-loader" }
 anyhow = "1.0"
-dirs = "5.0"
+dirs = "6.0"
