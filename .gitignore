@@ -198,3 +198,4 @@ cargo-flamegraph.trace/
 
 # Teamwork agent configurations and logs
 /.agents/
+/.windsurf/
