@@ -30,6 +30,9 @@ jobs:
       FISSION_SLEIGH_SPEC_DIR: ${{ github.workspace }}/utils/sleigh-specs
     steps:
       - uses: actions/checkout@v7
+        
+        with:
+          lfs: true
         with:
           submodules: recursive
 

@@ -41,6 +41,9 @@ jobs:
     timeout-minutes: ${{ inputs.timeout_minutes }}
     steps:
       - uses: actions/checkout@v4
+        
+        with:
+          lfs: false
         with:
           submodules: recursive
 
