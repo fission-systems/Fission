@@ -39,15 +39,14 @@ fn extract_function_name(code: &str) -> String {
                 .split(|c: char| !c.is_alphanumeric() && c != '_')
                 .filter(|s| !s.is_empty())
                 .collect();
-            if let Some(last_word) = words.last() {
-                if last_word
+            if let Some(last_word) = words.last()
+                && last_word
                     .chars()
                     .next()
-                    .map_or(false, |c| c.is_alphabetic() || c == '_')
+                    .is_some_and(|c| c.is_alphabetic() || c == '_')
                 {
                     return last_word.to_string();
                 }
-            }
         }
     }
     "unknown_function".to_string()

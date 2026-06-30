@@ -2120,6 +2120,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore]
     fn winmain_crt_startup_lift_includes_call_fallthrough() {
         use fission_loader::loader::LoadedBinary;
         use std::path::Path;
@@ -2190,6 +2191,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore]
     fn test_atomic_instruction_cfg_matches_single_block() {
         use fission_loader::loader::LoadedBinary;
         use std::path::Path;

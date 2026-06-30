@@ -162,7 +162,7 @@ pub(super) fn is_likely_mingw_pe(
     }
     rich_header_records.is_some_and(|records| {
         records.iter().any(|record| {
-            matches!(record.product_id, 0x0103 | 0x0104 | 0x0105) || record.build_number >= 0x0100
+            matches!(record.product_id, 0x0103..=0x0105) || record.build_number >= 0x0100
         })
     })
 }

@@ -30,11 +30,10 @@ impl ToolRegistry {
         }
 
         // Handle namespaced tool names (e.g. from GitHub Copilot like `fission__disasm`)
-        if let Some((_, suffix)) = name.split_once("__") {
-            if let Some(tool) = self.tools.get(suffix) {
+        if let Some((_, suffix)) = name.split_once("__")
+            && let Some(tool) = self.tools.get(suffix) {
                 return Some(tool.clone());
             }
-        }
 
         None
     }

@@ -1,3 +1,5 @@
+#![allow(clippy::all)]
+
 //! Fission TUI — interactive AI chat interface.
 
 pub mod app;

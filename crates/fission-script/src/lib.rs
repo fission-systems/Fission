@@ -1,3 +1,5 @@
+#![allow(clippy::all)]
+
 //! Rust-native embedded scripting over binary inventory (read-only).
 
 mod api;

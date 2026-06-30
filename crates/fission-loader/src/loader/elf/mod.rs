@@ -1328,7 +1328,7 @@ fn apply_loongarch_relocation_to_word(
         R_LARCH_B21 => {
             let imm21 = ((value >> 2) as u32) & 0x1f_ffff;
             Some(
-                (word & !((0x1f << 0) | (0xffff << 10)))
+                (word & !(0x1f | (0xffff << 10)))
                     | ((imm21 >> 16) & 0x1f)
                     | ((imm21 & 0xffff) << 10),
             )
@@ -1336,7 +1336,7 @@ fn apply_loongarch_relocation_to_word(
         R_LARCH_B26 => {
             let imm26 = ((value >> 2) as u32) & 0x03ff_ffff;
             Some(
-                (word & !((0x03ff << 0) | (0xffff << 10)))
+                (word & !(0x03ff | (0xffff << 10)))
                     | ((imm26 >> 16) & 0x03ff)
                     | ((imm26 & 0xffff) << 10),
             )

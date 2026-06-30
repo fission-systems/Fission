@@ -338,40 +338,40 @@ pub(super) fn build_summary_policy(
     compiler_conflicts: Vec<String>,
     weak_signal_count: usize,
 ) -> BinaryIdentitySummary {
-    fn best_promoted_compiler<'a>(
-        detections: &'a [IdentityDetection],
+    fn best_promoted_compiler(
+        detections: &[IdentityDetection],
         min_conf: Confidence,
-    ) -> Option<&'a IdentityDetection> {
+    ) -> Option<&IdentityDetection> {
         detections
             .iter()
             .filter(|d| d.kind == IdentityKind::Compiler && d.confidence >= min_conf)
             .max_by_key(|d| d.confidence)
     }
 
-    fn best_promoted_language<'a>(
-        detections: &'a [IdentityDetection],
+    fn best_promoted_language(
+        detections: &[IdentityDetection],
         min_conf: Confidence,
-    ) -> Option<&'a IdentityDetection> {
+    ) -> Option<&IdentityDetection> {
         detections
             .iter()
             .filter(|d| d.kind == IdentityKind::Language && d.confidence >= min_conf)
             .max_by_key(|d| d.confidence)
     }
 
-    fn best_promoted_linker<'a>(
-        detections: &'a [IdentityDetection],
+    fn best_promoted_linker(
+        detections: &[IdentityDetection],
         min_conf: Confidence,
-    ) -> Option<&'a IdentityDetection> {
+    ) -> Option<&IdentityDetection> {
         detections
             .iter()
             .filter(|d| d.kind == IdentityKind::Linker && d.confidence >= min_conf)
             .max_by_key(|d| d.confidence)
     }
 
-    fn best_promoted_packer<'a>(
-        detections: &'a [IdentityDetection],
+    fn best_promoted_packer(
+        detections: &[IdentityDetection],
         min_conf: Confidence,
-    ) -> Option<&'a IdentityDetection> {
+    ) -> Option<&IdentityDetection> {
         detections
             .iter()
             .filter(|d| d.kind == IdentityKind::Packer && d.confidence >= min_conf)

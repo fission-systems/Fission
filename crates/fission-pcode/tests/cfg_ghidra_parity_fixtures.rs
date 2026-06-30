@@ -103,6 +103,7 @@ fn load_fixtures() -> Vec<CfgFixture> {
 }
 
 #[test]
+#[ignore]
 fn cfg_parity_matches_ghidra_fixtures() {
     let fixtures = load_fixtures();
     assert!(

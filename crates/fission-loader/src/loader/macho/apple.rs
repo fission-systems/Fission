@@ -266,7 +266,7 @@ impl<'a> AppleAnalyzer<'a> {
             let mut type_name = String::new();
             if mangled_type_offset != 0 {
                 let mangled_type_va =
-                    ((va as i64) + (desc_offset as i64) + 0 + (mangled_type_offset as i64)) as u64;
+                    (((va as i64) + (desc_offset as i64)) + (mangled_type_offset as i64)) as u64;
                 if let Some(mangled) = self.read_string_at(mangled_type_va) {
                     type_name = crate::loader::demangle::demangle(&mangled);
                 }

@@ -278,9 +278,9 @@ impl AiPipeline {
                     {
                         let mut cm = context_manager_clone.lock().unwrap();
                         if func_name == "load_binary" || func_name == "fission__load_binary" {
-                            if let Ok(args_json) = serde_json::from_str::<serde_json::Value>(&func_args) {
-                                if let Some(path_val) = args_json.get("path") {
-                                    if let Some(path_str) = path_val.as_str() {
+                            if let Ok(args_json) = serde_json::from_str::<serde_json::Value>(&func_args)
+                                && let Some(path_val) = args_json.get("path")
+                                    && let Some(path_str) = path_val.as_str() {
                                         let path = std::path::PathBuf::from(path_str);
                                         if path.exists() && path.is_file() {
                                             {
@@ -309,12 +309,10 @@ impl AiPipeline {
                                             });
                                         }
                                     }
-                                }
-                            }
                         } else if func_name == "disasm" || func_name == "fission__disasm" {
-                            if let Ok(args_json) = serde_json::from_str::<serde_json::Value>(&func_args) {
-                                if let Some(addr_val) = args_json.get("addr") {
-                                    if let Some(addr_str) = addr_val.as_str() {
+                            if let Ok(args_json) = serde_json::from_str::<serde_json::Value>(&func_args)
+                                && let Some(addr_val) = args_json.get("addr")
+                                    && let Some(addr_str) = addr_val.as_str() {
                                         cm.focus.set_focus(addr_str.to_string(), None);
                                         let clean_addr = addr_str.trim_start_matches("0x").trim_start_matches("0X");
                                         if let Ok(start) = u64::from_str_radix(clean_addr, 16) {
@@ -322,18 +320,14 @@ impl AiPipeline {
                                             cm.focus.last_disasm_range = Some((start, start + count * 4));
                                         }
                                     }
-                                }
-                            }
                             cm.focus.set_disasm_snippet(processed_result.clone());
                         } else if func_name == "xrefs" || func_name == "fission__xrefs" {
-                            if let Ok(args_json) = serde_json::from_str::<serde_json::Value>(&func_args) {
-                                if let Some(addr_val) = args_json.get("addr") {
-                                    if let Some(addr_str) = addr_val.as_str() {
+                            if let Ok(args_json) = serde_json::from_str::<serde_json::Value>(&func_args)
+                                && let Some(addr_val) = args_json.get("addr")
+                                    && let Some(addr_str) = addr_val.as_str() {
                                         cm.focus.set_focus(addr_str.to_string(), None);
                                         update_xrefs_from_output(&mut cm.focus, &processed_result);
                                     }
-                                }
-                            }
                         } else if func_name == "decomp" || func_name == "decompile" || func_name == "fission__decomp" || func_name == "fission__decompile" {
                             cm.focus.set_decomp_snippet(processed_result.clone());
                         } else if func_name == "disasm" || func_name == "disassemble" || func_name == "fission__disasm" || func_name == "fission__disassemble" {
@@ -707,7 +701,7 @@ fn update_xrefs_from_output(focus: &mut crate::session::ReversingFocus, output: 
     for line in output.lines() {
         let trimmed = line.trim();
         if trimmed.to_lowercase().starts_with("caller") {
-            let rest = trimmed.splitn(2, ':').nth(1).unwrap_or("").trim();
+            let rest = trimmed.split_once(':').map(|x| x.1).unwrap_or("").trim();
             for entry in rest.split(',') {
                 let s = entry.trim().to_string();
                 if !s.is_empty() {
@@ -717,7 +711,7 @@ fn update_xrefs_from_output(focus: &mut crate::session::ReversingFocus, output: 
         } else if trimmed.to_lowercase().starts_with("callee")
             || trimmed.to_lowercase().starts_with("call ")
         {
-            let rest = trimmed.splitn(2, ':').nth(1).unwrap_or("").trim();
+            let rest = trimmed.split_once(':').map(|x| x.1).unwrap_or("").trim();
             for entry in rest.split(',') {
                 let s = entry.trim().to_string();
                 if !s.is_empty() {

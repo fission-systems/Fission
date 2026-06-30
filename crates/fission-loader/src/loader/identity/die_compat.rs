@@ -61,7 +61,7 @@ fn index_die_compat(db: &SignatureDatabase) -> DieCompatSummary {
         .filter(|s| {
             s.rules
                 .iter()
-                .any(|r| die_rule_identity_phase2_supported(r))
+                .any(die_rule_identity_phase2_supported)
         })
         .count();
 
@@ -84,7 +84,7 @@ fn filter_die_database(mut db: SignatureDatabase) -> SignatureDatabase {
             let rules: Vec<_> = sig
                 .rules
                 .into_iter()
-                .filter(|r| die_rule_identity_phase2_supported(r))
+                .filter(die_rule_identity_phase2_supported)
                 .collect();
             if rules.is_empty() {
                 return None;

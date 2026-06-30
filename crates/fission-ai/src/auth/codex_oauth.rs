@@ -186,14 +186,14 @@ async fn wait_for_callback() -> AuthResult<CallbackResult> {
         .await
         .map_err(|e| AuthError::Other(format!("could not bind to {addr}: {e}")))?;
 
-    let result = tokio::time::timeout(
+    
+
+    tokio::time::timeout(
         Duration::from_secs(CALLBACK_TIMEOUT_SECS),
         accept_one_request(&listener),
     )
     .await
-    .map_err(|_| AuthError::Other("timed out waiting for browser callback (5 minutes)".into()))?;
-
-    result
+    .map_err(|_| AuthError::Other("timed out waiting for browser callback (5 minutes)".into()))?
 }
 
 async fn accept_one_request(listener: &TcpListener) -> AuthResult<CallbackResult> {
@@ -215,7 +215,7 @@ async fn accept_one_request(listener: &TcpListener) -> AuthResult<CallbackResult
     let path_part = request_line.split_whitespace().nth(1).unwrap_or("");
 
     // Parse query params
-    let query = path_part.splitn(2, '?').nth(1).unwrap_or("");
+    let query = path_part.split_once('?').map(|x| x.1).unwrap_or("");
 
     let mut code = None;
     let mut state = None;
@@ -267,13 +267,12 @@ fn percent_decode(s: &str) -> String {
     let mut i = 0;
     while i < bytes.len() {
         if bytes[i] == b'%' && i + 2 < bytes.len() {
-            if let Ok(hex) = std::str::from_utf8(&bytes[i + 1..i + 3]) {
-                if let Ok(byte) = u8::from_str_radix(hex, 16) {
+            if let Ok(hex) = std::str::from_utf8(&bytes[i + 1..i + 3])
+                && let Ok(byte) = u8::from_str_radix(hex, 16) {
                     out.push(byte as char);
                     i += 3;
                     continue;
                 }
-            }
         } else if bytes[i] == b'+' {
             out.push(' ');
             i += 1;

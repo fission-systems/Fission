@@ -1,3 +1,5 @@
+#![allow(clippy::all)]
+
 //! Fission Loader - Binary format parsing and loading
 //!
 //! This crate provides functionality for loading and parsing various binary formats

@@ -37,9 +37,9 @@ pub fn dissect_x86_function_to_fid_units(
         // Adjust mask with relocation entries: any byte overlapped by a relocation is wildcarded (0x00)
         let mut final_mask = mask;
         let mut has_relocation = false;
-        for i in 0..inst_len {
+        for (i, slot) in final_mask.iter_mut().enumerate().take(inst_len) {
             if relocations.contains_key(&(pc + i as u64)) {
-                final_mask[i] = 0x00;
+                *slot = 0x00;
                 has_relocation = true;
             }
         }
@@ -90,7 +90,7 @@ fn decode_x86_instruction_details(
     // 2. Parse REX prefix (x86_64)
     if offset < bytes.len() {
         let b = bytes[offset];
-        if b >= 0x40 && b <= 0x4F {
+        if (0x40..=0x4F).contains(&b) {
             rex = Some(b);
             offset += 1;
         }
@@ -170,11 +170,10 @@ fn decode_x86_instruction_details(
 
         if disp_size == 0 {
             match r_mod {
-                0 => {
-                    if r_rm == 5 {
+                0
+                    if r_rm == 5 => {
                         disp_size = 4; // Absolute disp32 / RIP-relative
                     }
-                }
                 1 => {
                     disp_size = 1; // disp8
                 }
@@ -230,14 +229,14 @@ fn decode_x86_instruction_details(
     let mut mask = vec![0xFF; total_len];
     // Displacement bytes are wildcards (0x00)
     if disp_size > 0 {
-        for i in disp_start..disp_start + disp_size {
-            mask[i] = 0x00;
+        for item in mask.iter_mut().skip(disp_start).take(disp_size) {
+            *item = 0x00;
         }
     }
     // Immediate bytes are wildcards (0x00)
     if imm_size > 0 {
-        for i in imm_start..imm_start + imm_size {
-            mask[i] = 0x00;
+        for item in mask.iter_mut().skip(imm_start).take(imm_size) {
+            *item = 0x00;
         }
     }
 
@@ -255,8 +254,8 @@ fn decode_x86_instruction_details(
         // If it's a direct branch or memory offset, mark it as address reference
         let is_branch_target = op_byte1 == 0xE8
             || op_byte1 == 0xE9
-            || (op_byte1 == 0x0F && op_byte2.is_some_and(|o| o >= 0x80 && o <= 0x8F));
-        let is_moffset = op_byte1 >= 0xA0 && op_byte1 <= 0xA3;
+            || (op_byte1 == 0x0F && op_byte2.is_some_and(|o| (0x80..=0x8F).contains(&o)));
+        let is_moffset = (0xA0..=0xA3).contains(&op_byte1);
         operands.push(FidInstructionOperand {
             values: vec![FidOperandValue::Scalar {
                 value: val,
@@ -278,7 +277,7 @@ fn opcode_has_modrm(b1: u8, b2: Option<u8>) -> bool {
         if b1 == 0x0F {
             match opcode2 {
                 0x05 | 0x07 | 0x31 | 0x32 | 0x34 | 0x35 | 0x77 | 0xA1 | 0xA2 => false,
-                op if op >= 0x80 && op <= 0x8F => false, // Jcc near Jumps
+                op if (0x80..=0x8F).contains(&op) => false, // Jcc near Jumps
                 _ => true,
             }
         } else {

@@ -1,3 +1,5 @@
+#![allow(clippy::all)]
+
 //! Fission AI agent platform.
 //!
 //! Provides a multi-provider AI pipeline with:

@@ -53,7 +53,7 @@ pub(super) fn signature_pattern_identity(
     }]
 }
 
-fn entry_window_bytes<'a>(binary: &'a LoadedBinary, window: usize) -> Option<&'a [u8]> {
+fn entry_window_bytes(binary: &LoadedBinary, window: usize) -> Option<&[u8]> {
     let data = binary.data.as_slice();
     let ep_va = binary.entry_point;
     binary

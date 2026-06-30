@@ -831,7 +831,7 @@ fn parse_macho_relocation_symbols_64(
         symtab,
         endian,
         sections,
-        |data, symtab, idx, endian| MachoLoader::get_symbol_name(data, symtab, idx, endian),
+        MachoLoader::get_symbol_name,
         out,
     );
 }
@@ -848,7 +848,7 @@ fn parse_macho_relocation_symbols_32(
         symtab,
         endian,
         sections,
-        |data, symtab, idx, endian| MachoLoader::get_symbol_name_32(data, symtab, idx, endian),
+        MachoLoader::get_symbol_name_32,
         out,
     );
 }

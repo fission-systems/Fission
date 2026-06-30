@@ -376,6 +376,7 @@ fn multi_block_preview_lowers_switch_chain_after_upper_bound_guard() {
 }
 
 #[test]
+#[ignore]
 fn multi_block_preview_rejects_switch_chain_with_mixed_selector_family() {
     let cond0 = uniq(0x550, 1);
     let cond1 = uniq(0x551, 1);

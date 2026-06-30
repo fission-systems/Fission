@@ -298,9 +298,9 @@ fn resolve_json_path(version: &str, typeinfo_dir: &Path) -> Option<std::path::Pa
 use once_cell::sync::Lazy;
 use std::sync::Mutex;
 
-static DB_CACHE: Lazy<
-    Mutex<HashMap<(String, String, String), Option<std::sync::Arc<GoTypeinfoDatabase>>>>,
-> = Lazy::new(|| Mutex::new(HashMap::new()));
+type DbCacheMap = HashMap<(String, String, String), Option<std::sync::Arc<GoTypeinfoDatabase>>>;
+
+static DB_CACHE: Lazy<Mutex<DbCacheMap>> = Lazy::new(|| Mutex::new(HashMap::new()));
 
 impl GoTypeinfoDatabase {
     /// Cached variant of [`load_for_binary`]: the JSON is parsed at most once per

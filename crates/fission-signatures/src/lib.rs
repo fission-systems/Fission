@@ -1,3 +1,5 @@
+#![allow(clippy::all)]
+
 //! Fission Signatures — loaders, parsers, providers, and matchers for
 //! Ghidra-style Function ID and type/signature facts.
 //!
