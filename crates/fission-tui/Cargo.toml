@@ -27,4 +27,4 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 unicode-width = "0.2"
 pulldown-cmark = { version = "0.12", default-features = false }
-dirs = "5"
+dirs = "6"
