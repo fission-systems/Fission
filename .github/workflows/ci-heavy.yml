@@ -91,6 +91,31 @@ jobs:
       upload_artifacts: true
       baseline_branch: 'main'
 
+  # Step 8: Miri — unsafe UB detection (~45 min, nightly Rust)
+  miri-check:
+    name: 🧠 Miri UB Check
+    needs: corpus-validation
+    uses: ./.github/workflows/reusable-miri.yml
+    with:
+      crates: "fission-pcode,fission-loader"
+
+  # Step 9: Code Coverage (~30 min)
+  coverage:
+    name: 📈 Code Coverage
+    needs: corpus-validation
+    uses: ./.github/workflows/reusable-coverage.yml
+    with:
+      crates: "fission-pcode,fission-loader,fission-automation"
+      warn_threshold_pct: 60
+
+  # Step 10: MSRV validation
+  msrv-check:
+    name: 🦀 MSRV Check
+    needs: corpus-validation
+    uses: ./.github/workflows/reusable-msrv.yml
+    with:
+      crates: "fission-pcode,fission-loader,fission-decompiler,fission-automation"
+
   # Final summary
   heavy-summary:
     name: ✅ Heavy Validation Summary
@@ -102,13 +127,16 @@ jobs:
       - test-windows-heavy
       - nir-check
       - benchmark
+      - miri-check
+      - coverage
+      - msrv-check
     runs-on: ubuntu-latest
     if: always()
     steps:
       - name: Check Status
         run: |
           FAILED=0
-          
+
           if [ "${{ needs.corpus-validation.result }}" != "success" ]; then
             echo "❌ Corpus validation failed"
             FAILED=1
@@ -138,8 +166,23 @@ jobs:
             echo "❌ Performance benchmark failed"
             FAILED=1
           fi
-          
+          if [ "${{ needs.miri-check.result }}" != "success" ]; then
+            echo "❌ Miri UB check failed — unsafe code undefined behavior detected"
+            FAILED=1
+          fi
+          # Coverage is warn-only — do not block on coverage result
+          if [ "${{ needs.coverage.result }}" == "failure" ]; then
+            echo "⚠️ Coverage job encountered an error (non-blocking)"
+          fi
+          if [ "${{ needs.msrv-check.result }}" != "success" ]; then
+            echo "❌ MSRV check failed — codebase breaks on declared minimum Rust version"
+            FAILED=1
+          fi
+
           if [ $FAILED -eq 1 ]; then
             exit 1
           fi
           echo "✅ All heavy validation checks passed!"
+          echo ""
+          echo "ℹ️  Miri, Coverage, and MSRV results are available in job artifacts."
+

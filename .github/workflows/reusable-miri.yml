@@ -1,0 +1,79 @@
+name: Reusable Miri UB Check
+
+# Runs Miri on unsafe-containing crates to detect undefined behavior.
+# Miri requires nightly Rust. Run in Heavy Nightly only — not Fast Gate.
+#
+# Target crates: fission-pcode (NIR structuring, unsafe CFG ops),
+#               fission-loader (raw byte parsing, pointer arithmetic)
+
+on:
+  workflow_call:
+    inputs:
+      crates:
+        type: string
+        required: false
+        default: "fission-pcode,fission-loader"
+        description: "Crates to run Miri on (comma-separated)"
+
+env:
+  CARGO_TERM_COLOR: always
+  # Strict provenance: catch ptr-int casts that may not be portable
+  MIRIFLAGS: "-Zmiri-strict-provenance -Zmiri-symbolic-alignment-check"
+
+jobs:
+  miri:
+    name: Miri UB Check
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Rust (nightly + Miri)
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: miri, rust-src
+
+      - name: Cache Rust Build
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: miri-nightly
+
+      - name: Install system dependencies (Linux)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libssl-dev \
+            librsvg2-dev \
+            build-essential
+
+      - name: Run Miri (unit tests)
+        shell: bash
+        run: |
+          set +e
+          FAILED=0
+          crates="${{ inputs.crates }}"
+          IFS=',' read -ra CRATE_ARRAY <<< "$crates"
+          for crate in "${CRATE_ARRAY[@]}"; do
+            crate="$(echo "$crate" | tr -d '[:space:]')"
+            echo "::group::Miri: $crate"
+            cargo +nightly miri test -p "$crate" --locked 2>&1
+            exit_code=$?
+            echo "::endgroup::"
+            if [ $exit_code -ne 0 ]; then
+              echo "::error::Miri detected UB in crate: $crate"
+              FAILED=1
+            fi
+          done
+          exit $FAILED
+
+      - name: Upload Miri output on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: miri-output-${{ github.sha }}
+          path: /tmp/miri-*.txt
+          retention-days: 30
+          if-no-files-found: ignore

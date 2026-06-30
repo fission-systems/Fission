@@ -62,6 +62,14 @@ jobs:
     with:
       profile: debug
 
+  # NIR Regression Gate — semantic quality blocker on every PR/push
+  nir-regression-gate:
+    name: 🔬 NIR Regression Gate
+    needs: [test-linux]
+    uses: ./.github/workflows/reusable-nir-regression-gate.yml
+    with:
+      functions_limit: "5"
+
   # Step 3: Build & Test (macOS, ~20 min parallel with linux)
   build-macos:
     name: 🍎 Build & Test (macOS)
@@ -80,10 +88,9 @@ jobs:
       crates: "fission-pcode,fission-automation,fission-loader"
       profile: debug
 
-  # Step 4: Windows tests — PR only (expensive; heavy CI covers main branch)
+  # Step 4: Windows build & test (all events — main push and PR)
   build-windows:
-    name: 🪟 Build & Test (Windows) [PR only]
-    if: github.event_name == 'pull_request'
+    name: 🪟 Build (Windows)
     uses: ./.github/workflows/reusable-build-cli.yml
     with:
       os: windows-latest
@@ -91,14 +98,12 @@ jobs:
       upload_artifact: false
 
   test-windows:
-    name: 🧪 Tests (Windows) [PR only]
-    if: github.event_name == 'pull_request'
+    name: 🧪 Tests (Windows)
     needs: build-windows
     uses: ./.github/workflows/reusable-run-tests.yml
     with:
       os: windows-latest
       crates: "fission-pcode,fission-decompiler,fission-automation"
-      # Match macOS fast gate: debug tests avoid duplicate release rebuild + timeout/cancel churn.
       profile: debug
       timeout_minutes: 90
 
@@ -112,7 +117,9 @@ jobs:
         lint-format,
         test-linux,
         cli-smoke-linux,
+        nir-regression-gate,
         test-macos,
+        test-windows,
       ]
     runs-on: ubuntu-latest
     if: always()
@@ -139,10 +146,18 @@ jobs:
             echo "❌ CLI smoke failed"
             exit 1
           fi
+          if [ "${{ needs.nir-regression-gate.result }}" != "success" ]; then
+            echo "❌ NIR Regression Gate failed — decompiler quality regression detected"
+            exit 1
+          fi
           if [ "${{ needs.test-macos.result }}" != "success" ]; then
             echo "❌ macOS tests failed"
             exit 1
           fi
+          if [ "${{ needs.test-windows.result }}" != "success" ]; then
+            echo "❌ Windows tests failed"
+            exit 1
+          fi
           echo "✅ All CI checks passed!"
           echo ""
-          echo "ℹ️  Windows tests run on PR only. Heavy CI (nightly) covers full platform validation."
+          echo "ℹ️  Heavy CI (nightly) runs Miri, coverage, MSRV, and full benchmark validation."

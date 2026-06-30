@@ -147,6 +147,95 @@ jobs:
               handle.write("\n".join(lines) + "\n")
           PY
 
+      # Download previous baseline for regression comparison.
+      # If no baseline artifact exists yet (first run), this step is skipped gracefully.
+      - name: Download previous benchmark baseline
+        id: baseline_dl
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: benchmark-baseline-latest
+          path: benchmark_baseline/
+
+      - name: Benchmark regression check
+        run: |
+          python3 - <<'PY'
+          import json, os, sys
+          from pathlib import Path
+
+          REGRESSION_THRESHOLD = 0.02  # 2% drop triggers failure
+
+          output_dir = Path("${{ steps.benchmark.outputs.output_dir }}")
+          current_file = output_dir / "benchmark_summary.json"
+          baseline_file = Path("benchmark_baseline/benchmark_summary.json")
+
+          if not current_file.exists():
+              print("⚠️ Current benchmark summary not found, skipping regression check")
+              sys.exit(0)
+
+          current = json.loads(current_file.read_text(encoding="utf-8"))
+
+          if not baseline_file.exists():
+              print("ℹ️ No previous baseline found — this run will become the new baseline")
+              sys.exit(0)
+
+          baseline = json.loads(baseline_file.read_text(encoding="utf-8"))
+
+          step_summary = os.environ.get("GITHUB_STEP_SUMMARY", "")
+          regression_lines = ["", "## Benchmark Regression Check", ""]
+          failed = False
+
+          for arch in ("x86", "x64"):
+              cur_arch = current.get("arch_summary", {}).get(arch, {}) or {}
+              base_arch = baseline.get("arch_summary", {}).get(arch, {}) or {}
+              cur_sim = cur_arch.get("weighted_avg_normalized_similarity", 0.0)
+              base_sim = base_arch.get("weighted_avg_normalized_similarity", 0.0)
+
+              if base_sim == 0.0:
+                  regression_lines.append(f"- {arch}: baseline={base_sim:.3f}, current={cur_sim:.3f} — baseline is zero, skipping")
+                  continue
+
+              delta = cur_sim - base_sim
+              delta_pct = delta / base_sim
+
+              status_emoji = "✅"
+              if delta_pct < -REGRESSION_THRESHOLD:
+                  status_emoji = "❌"
+                  failed = True
+
+              regression_lines.append(
+                  f"- {status_emoji} {arch}: baseline={base_sim:.3f} → current={cur_sim:.3f} "
+                  f"(delta={delta:+.3f}, {delta_pct:+.1%})"
+              )
+
+          if failed:
+              regression_lines += [
+                  "",
+                  "> [!CAUTION]",
+                  f"> Benchmark quality dropped by more than {REGRESSION_THRESHOLD:.0%} from baseline.",
+                  "> Investigate regression before merging.",
+              ]
+
+          if step_summary:
+              with open(step_summary, "a", encoding="utf-8") as f:
+                  f.write("\n".join(regression_lines) + "\n")
+          else:
+              print("\n".join(regression_lines))
+
+          if failed:
+              sys.exit(1)
+          PY
+
+      # Save current run as the new baseline for future comparisons.
+      - name: Save benchmark as new baseline
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-baseline-latest
+          path: ${{ steps.benchmark.outputs.output_dir }}/benchmark_summary.json
+          retention-days: 90
+          overwrite: true
+
       - name: Upload benchmark artifacts
         if: inputs.upload_artifacts
         uses: actions/upload-artifact@v4
@@ -155,3 +244,4 @@ jobs:
           path: ${{ steps.benchmark.outputs.output_dir }}
           retention-days: 30
           if-no-files-found: warn
+

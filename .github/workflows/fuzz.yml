@@ -5,6 +5,7 @@ on:
     branches: ["main"]
     paths:
       - "crates/fission-loader/**"
+      - "crates/fission-pcode/**"
   schedule:
     # Run nightly at 02:00 UTC
     - cron: "0 2 * * *"
@@ -34,9 +35,14 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        target:
-          - fuzz_pe_parser
-          - fuzz_elf_parser
+        include:
+          - target: fuzz_pe_parser
+            crate_dir: crates/fission-loader
+          - target: fuzz_elf_parser
+            crate_dir: crates/fission-loader
+          # fuzz_structuring: added once crates/fission-pcode/fuzz is scaffolded
+          # - target: fuzz_structuring
+          #   crate_dir: crates/fission-pcode
 
     steps:
       - uses: actions/checkout@v7
@@ -62,8 +68,8 @@ jobs:
 
       - name: Generate seed corpus (best effort)
         run: |
-          mkdir -p crates/fission-loader/fuzz/corpus/fuzz_pe_parser
-          mkdir -p crates/fission-loader/fuzz/corpus/fuzz_elf_parser
+          mkdir -p ${{ matrix.crate_dir }}/fuzz/corpus/fuzz_pe_parser
+          mkdir -p ${{ matrix.crate_dir }}/fuzz/corpus/fuzz_elf_parser
           if [ -f scripts/test/gen_fuzz_corpus.sh ]; then
             chmod +x scripts/test/gen_fuzz_corpus.sh
             ./scripts/test/gen_fuzz_corpus.sh
@@ -72,7 +78,7 @@ jobs:
           fi
 
       - name: Run fuzzer — ${{ matrix.target }}
-        working-directory: crates/fission-loader
+        working-directory: ${{ matrix.crate_dir }}
         run: |
           cargo fuzz run ${{ matrix.target }} -- \
             -max_total_time=${{ env.FUZZ_DURATION }} \
@@ -87,7 +93,7 @@ jobs:
         with:
           name: fuzz-crashes-${{ matrix.target }}-${{ github.sha }}
           path: |
-            crates/fission-loader/fuzz/artifacts/${{ matrix.target }}/
+            ${{ matrix.crate_dir }}/fuzz/artifacts/${{ matrix.target }}/
           retention-days: 30
 
       - name: Upload corpus
@@ -96,6 +102,7 @@ jobs:
         with:
           name: fuzz-corpus-${{ matrix.target }}-${{ github.sha }}
           path: |
-            crates/fission-loader/fuzz/corpus/${{ matrix.target }}/
+            ${{ matrix.crate_dir }}/fuzz/corpus/${{ matrix.target }}/
           retention-days: 7
           if-no-files-found: ignore
+

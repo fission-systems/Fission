@@ -1,0 +1,138 @@
+name: Reusable NIR Regression Gate
+
+# PR-time semantic regression blocker.
+# Runs a fast NIR-Check automation lane and fails if the go/stop signal is STOP
+# (quality regressed or critical structuring broke).
+#
+# This is the canonical PR merge-blocker for decompiler semantic quality.
+# The nightly NIR-Check (ci-heavy.yml) runs the full profile and updates baselines.
+
+on:
+  workflow_call:
+    inputs:
+      functions_limit:
+        type: string
+        required: false
+        default: "5"
+        description: "Limit functions analyzed per binary (keep low for PR speed)"
+
+env:
+  CARGO_TERM_COLOR: always
+  FISSION_SLEIGH_SPEC_DIR: ${{ github.workspace }}/utils/sleigh-specs
+
+jobs:
+  nir-regression-gate:
+    name: NIR Regression Gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust Build
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install MinGW-w64 (PE nir-lane fixture)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-mingw-w64-x86-64
+          command -v x86_64-w64-mingw32-gcc
+
+      - name: Build PE nir-lane fixture (MinGW-w64)
+        run: |
+          set -euo pipefail
+          OUT="benchmark/binary/x86-64/window/small/binary/c/test_functions.exe"
+          mkdir -p "$(dirname "${OUT}")"
+          x86_64-w64-mingw32-gcc -O2 -g -m64 -static \
+            benchmark/binary/x86-64/window/small/source/c/test_functions.c \
+            -o "${OUT}"
+          test -s "${OUT}"
+
+      - name: Build fission-cli (Release)
+        run: cargo build -p fission-cli --locked --release
+
+      - name: Run automation crate tests
+        run: cargo test -p fission-automation --locked
+
+      - name: Run NIR-Check (fast profile — PR regression gate)
+        id: nir_gate
+        run: |
+          cargo run -p fission-automation --release -- nir-check \
+            --lane nir \
+            --no-build \
+            --no-update-latest \
+            --fission-bin target/release/fission_cli \
+            --run-profile fast \
+            --functions-limit ${{ inputs.functions_limit }} \
+            2>&1 | tee /tmp/nir_gate_output.txt
+          # Capture exit code (non-zero = STOP signal = regression)
+          EXIT_CODE=${PIPESTATUS[0]}
+          echo "exit_code=$EXIT_CODE" >> "$GITHUB_OUTPUT"
+          exit $EXIT_CODE
+
+      - name: Publish NIR Gate result to Job Summary
+        if: always()
+        run: |
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+
+          artifacts_dir = Path("benchmark/artifacts/automation")
+          summary_file = artifacts_dir / "nir_check_summary.json"
+          step_summary = os.environ.get("GITHUB_STEP_SUMMARY", "")
+
+          lines = ["## NIR Regression Gate — PR Result", ""]
+
+          if summary_file.exists():
+              try:
+                  data = json.loads(summary_file.read_text(encoding="utf-8"))
+                  signal = data.get("signal", "unknown")
+                  lane = data.get("lane", "nir")
+                  run_profile = data.get("run_profile", "fast")
+                  stats = data.get("stats", {})
+
+                  emoji = "✅" if signal == "go" else "❌"
+                  lines += [
+                      f"**Signal**: {emoji} `{signal.upper()}`",
+                      f"**Lane**: `{lane}` | **Profile**: `{run_profile}`",
+                      "",
+                      "### Sentinel Function Results",
+                      "",
+                  ]
+                  for fn_name, fn_data in stats.get("functions", {}).items():
+                      status = fn_data.get("status", "unknown")
+                      gotos = fn_data.get("goto_count", "?")
+                      fn_emoji = "✅" if status == "pass" else "❌"
+                      lines.append(f"- {fn_emoji} `{fn_name}`: {status} (gotos={gotos})")
+
+                  if signal != "go":
+                      lines += [
+                          "",
+                          "> [!CAUTION]",
+                          "> NIR Regression Gate returned **STOP**. This PR introduces a decompiler quality regression.",
+                          "> Merge is blocked until the regression is resolved.",
+                      ]
+              except Exception as e:
+                  lines.append(f"⚠️ Could not parse summary: {e}")
+          else:
+              lines.append("⚠️ No NIR check summary artifact found.")
+
+          if step_summary:
+              with open(step_summary, "a", encoding="utf-8") as f:
+                  f.write("\n".join(lines) + "\n")
+          else:
+              print("\n".join(lines))
+          PY
+
+      - name: Upload NIR Gate Artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nir-regression-gate-${{ github.sha }}
+          path: benchmark/artifacts/automation/
+          retention-days: 14
+          if-no-files-found: warn

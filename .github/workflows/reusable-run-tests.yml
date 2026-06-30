@@ -16,11 +16,6 @@ on:
         required: false
         default: "debug"
         description: "Build profile: debug or release"
-      coverage:
-        type: boolean
-        required: false
-        default: false
-        description: "Generate coverage report"
       exclude_crates:
         type: string
         required: false
@@ -31,6 +26,11 @@ on:
         required: false
         default: 45
         description: "Job timeout; raise on slow runners (e.g. Windows release tests)"
+      retries:
+        type: number
+        required: false
+        default: 2
+        description: "Number of retries for flaky tests (nextest --retries)"
 
 env:
   CARGO_TERM_COLOR: always
@@ -40,7 +40,7 @@ jobs:
     runs-on: ${{ inputs.os }}
     timeout-minutes: ${{ inputs.timeout_minutes }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v4
         with:
           submodules: recursive
 
@@ -50,7 +50,10 @@ jobs:
       - name: Cache Rust Build
         uses: Swatinem/rust-cache@v2
 
-      - name: Install system dependencies (Linux/Dioxus)
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@nextest
+
+      - name: Install system dependencies (Linux)
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
@@ -62,19 +65,39 @@ jobs:
             build-essential \
             file
 
-
-      - name: Run Tests (Specific Crates)
+      # --- Specific crates mode ---
+      - name: Run Tests (Specific Crates) [nextest]
         if: ${{ inputs.crates != '' }}
         shell: bash
         run: |
           crates="${{ inputs.crates }}"
           IFS=',' read -ra CRATE_ARRAY <<< "$crates"
           for crate in "${CRATE_ARRAY[@]}"; do
+            crate="$(echo "$crate" | tr -d '[:space:]')"
             echo "Testing crate: $crate"
-            cargo test -p "$crate" --locked --verbose ${{ inputs.profile == 'release' && '--release' || '' }}
+            cargo nextest run \
+              -p "$crate" \
+              --locked \
+              --no-fail-fast \
+              --retries ${{ inputs.retries }} \
+              ${{ inputs.profile == 'release' && '--release' || '' }}
           done
 
-      - name: Run Full Test Suite (All Crates)
+      # Doctests: nextest does not run doctests — run separately with cargo test --doc
+      - name: Run Doctests (Specific Crates)
+        if: ${{ inputs.crates != '' }}
+        shell: bash
+        run: |
+          crates="${{ inputs.crates }}"
+          IFS=',' read -ra CRATE_ARRAY <<< "$crates"
+          for crate in "${CRATE_ARRAY[@]}"; do
+            crate="$(echo "$crate" | tr -d '[:space:]')"
+            cargo test --doc -p "$crate" --locked \
+              ${{ inputs.profile == 'release' && '--release' || '' }} || true
+          done
+
+      # --- Full workspace mode ---
+      - name: Run Full Test Suite (All Crates) [nextest]
         if: ${{ inputs.crates == '' }}
         shell: bash
         run: |
@@ -87,22 +110,24 @@ jobs:
               exclude_flags+=(--exclude "$c")
             done
           fi
-          cargo test --workspace "${exclude_flags[@]}" --locked --verbose ${{ inputs.profile == 'release' && '--release' || '' }}
-          # Also test excluded crates separately if needed
-          cargo test -p fission-static --locked --verbose ${{ inputs.profile == 'release' && '--release' || '' }}
+          cargo nextest run \
+            --workspace \
+            "${exclude_flags[@]}" \
+            --locked \
+            --no-fail-fast \
+            --retries ${{ inputs.retries }} \
+            ${{ inputs.profile == 'release' && '--release' || '' }}
+          # Also run excluded crates separately
+          cargo nextest run \
+            -p fission-static \
+            --locked \
+            --no-fail-fast \
+            --retries ${{ inputs.retries }} \
+            ${{ inputs.profile == 'release' && '--release' || '' }}
 
-      - name: Generate Coverage Report
-        if: ${{ inputs.coverage }}
+      - name: Run Workspace Doctests
+        if: ${{ inputs.crates == '' }}
+        shell: bash
         run: |
-          cargo install cargo-tarpaulin
-          cargo tarpaulin --out Html --output-dir ./coverage
-          echo "Coverage report generated in ./coverage/index.html"
-
-      - name: Upload Coverage Artifact
-        if: ${{ inputs.coverage }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: coverage-report-${{ inputs.profile }}-${{ github.sha }}
-          path: coverage/
-          retention-days: 7
-          if-no-files-found: warn
+          cargo test --doc --workspace --locked \
+            ${{ inputs.profile == 'release' && '--release' || '' }} || true

@@ -9,14 +9,17 @@ env:
 jobs:
   security:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v4
         with:
           submodules: recursive
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
+
+      - name: Verify Cargo.lock is consistent (--locked sanity)
+        run: cargo metadata --locked --format-version 1 > /dev/null
 
       - name: Install cargo-deny
         run: cargo install cargo-deny --locked
@@ -26,5 +29,6 @@ jobs:
 
       - name: "Cargo Audit: Check for Known Security Vulnerabilities"
         run: |
-          cargo install cargo-audit
-          cargo audit
+          cargo install cargo-audit --locked
+          # --deny warnings: treat advisory warnings as errors
+          cargo audit --deny warnings

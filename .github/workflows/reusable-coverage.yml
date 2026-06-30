@@ -1,0 +1,173 @@
+name: Reusable Code Coverage
+
+# Generates LLVM-based code coverage using cargo-llvm-cov.
+# Produces HTML + LCOV reports and uploads as artifacts.
+# Coverage threshold: warn (not fail) if fission-pcode drops below 60%.
+
+on:
+  workflow_call:
+    inputs:
+      crates:
+        type: string
+        required: false
+        default: "fission-pcode,fission-loader,fission-automation"
+        description: "Crates to measure coverage for (comma-separated)"
+      warn_threshold_pct:
+        type: number
+        required: false
+        default: 60
+        description: "Coverage warn threshold % for fission-pcode (warning only, not failure)"
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  coverage:
+    name: Code Coverage
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Rust (stable + llvm-tools)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: llvm-tools-preview
+
+      - name: Cache Rust Build
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: coverage
+
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@cargo-llvm-cov
+
+      - name: Install system dependencies (Linux)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libssl-dev \
+            librsvg2-dev \
+            build-essential
+
+      - name: Generate coverage report (HTML + LCOV)
+        shell: bash
+        run: |
+          crates="${{ inputs.crates }}"
+          crate_flags=()
+          IFS=',' read -ra CRATE_ARRAY <<< "$crates"
+          for crate in "${CRATE_ARRAY[@]}"; do
+            crate="$(echo "$crate" | tr -d '[:space:]')"
+            crate_flags+=(-p "$crate")
+          done
+
+          cargo llvm-cov \
+            "${crate_flags[@]}" \
+            --locked \
+            --html --output-dir coverage/html \
+            --lcov --output-path coverage/lcov.info
+
+      - name: Check coverage threshold for fission-pcode
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import re, sys
+          from pathlib import Path
+
+          lcov = Path("coverage/lcov.info")
+          if not lcov.exists():
+              print("⚠️ coverage/lcov.info not found, skipping threshold check")
+              sys.exit(0)
+
+          # Sum lines for fission-pcode
+          in_pcode = False
+          found_lines = 0
+          hit_lines = 0
+          for line in lcov.read_text().splitlines():
+              if line.startswith("SF:") and "fission-pcode" in line:
+                  in_pcode = True
+              if line == "end_of_record":
+                  in_pcode = False
+              if in_pcode:
+                  if line.startswith("LF:"):
+                      found_lines += int(line[3:])
+                  elif line.startswith("LH:"):
+                      hit_lines += int(line[3:])
+
+          if found_lines == 0:
+              print("⚠️ No coverage data found for fission-pcode")
+              sys.exit(0)
+
+          pct = (hit_lines / found_lines) * 100
+          threshold = ${{ inputs.warn_threshold_pct }}
+          print(f"fission-pcode coverage: {pct:.1f}% ({hit_lines}/{found_lines} lines)")
+          if pct < threshold:
+              print(f"⚠️ Coverage {pct:.1f}% is below warn threshold {threshold}%")
+              print("This is a WARNING only — not blocking the build.")
+          else:
+              print(f"✅ Coverage {pct:.1f}% meets threshold {threshold}%")
+          PY
+
+      - name: Publish coverage summary
+        if: always()
+        run: |
+          python3 - <<'PY'
+          import re, os
+          from pathlib import Path
+
+          lcov = Path("coverage/lcov.info")
+          step_summary = os.environ.get("GITHUB_STEP_SUMMARY", "")
+          lines = ["## Code Coverage Report", ""]
+
+          if lcov.exists():
+              crate_stats = {}
+              current = None
+              lf = lh = 0
+              for line in lcov.read_text().splitlines():
+                  if line.startswith("SF:"):
+                      parts = line[3:].split("/")
+                      # Find crate name from path
+                      for i, p in enumerate(parts):
+                          if p == "crates" and i + 1 < len(parts):
+                              current = parts[i + 1]
+                              lf = lh = 0
+                              break
+                  elif line.startswith("LF:") and current:
+                      lf += int(line[3:])
+                  elif line.startswith("LH:") and current:
+                      lh += int(line[3:])
+                  elif line == "end_of_record" and current:
+                      if current not in crate_stats:
+                          crate_stats[current] = [0, 0]
+                      crate_stats[current][0] += lf
+                      crate_stats[current][1] += lh
+                      current = None
+
+              lines.append("| Crate | Lines Hit | Total Lines | Coverage % |")
+              lines.append("|---|---|---|---|")
+              for crate, (total, hit) in sorted(crate_stats.items()):
+                  if total == 0:
+                      continue
+                  pct = (hit / total) * 100
+                  lines.append(f"| `{crate}` | {hit} | {total} | {pct:.1f}% |")
+          else:
+              lines.append("⚠️ No LCOV data found.")
+
+          if step_summary:
+              with open(step_summary, "a", encoding="utf-8") as f:
+                  f.write("\n".join(lines) + "\n")
+          else:
+              print("\n".join(lines))
+          PY
+
+      - name: Upload coverage artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report-${{ github.sha }}
+          path: coverage/
+          retention-days: 30
+          if-no-files-found: warn
