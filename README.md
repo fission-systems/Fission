@@ -84,7 +84,32 @@ For deeper visual maps, see [`docs/architecture/DIAGRAMS.md`](./docs/architectur
 | **fission-automation** | Quality lanes, regression testing, telemetry reporting | Quality layer |
 | **fission-cli** | Headless CLI (one-shot subcommands), Rhai `script`, operator `inventory` | Product layer |
 | **fission-dioxus** | Pure Rust Desktop GUI, interactive analysis, visualization | Product layer |
+
 ---
+
+## Cloning & Resource Assets
+
+Large binary assets (~536 MB: signature databases, Ghidra data, compiled Sleigh specs)
+are stored in **Git LFS** and downloaded on demand. Rust source code and text files clone immediately.
+
+```bash
+# Rust source only (fast, no LFS download)
+GIT_LFS_SKIP_SMUDGE=1 git clone https://github.com/sjkim1127/Fission.git
+
+# Full clone including all LFS assets
+git clone https://github.com/sjkim1127/Fission.git
+
+# Selective download after a skip-smudge clone
+git lfs pull --include="utils/signatures/**"      # function signature DBs
+git lfs pull --include="utils/sleigh-specs/**"    # compiled Sleigh specs
+git lfs pull                                       # everything
+```
+
+> [!TIP]
+> For Rust development only, use `GIT_LFS_SKIP_SMUDGE=1` — the decompiler
+> will fall back gracefully when signature databases are absent.
+> Download assets only when running the full quality pipeline or benchmarks.
+
 
 ## Documentation Hub
 
