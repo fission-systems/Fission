@@ -5,9 +5,9 @@ Scope: `crates/fission-automation/`
 
 ## Overview
 
-This crate runs quality lanes against `fission_cli`, aggregates inventory/diagnosis into JSON/Markdown, computes deltas vs baselines, and emits go/stop signals. Telemetry in summaries must stay aligned with `fission_pcode::NirBuildStats` (canonical definition: `crates/fission-pcode/src/nir/types.rs`).
+This crate runs the NIR quality lane against `fission_cli`, aggregates inventory/diagnosis into JSON/Markdown, computes deltas vs baselines, and emits go/stop signals. Telemetry in summaries must stay aligned with `fission_pcode::NirBuildStats` (canonical definition: `crates/fission-pcode/src/nir/types.rs`).
 
-Benchmark runner ownership now lives under `benchmark/full_benchmark/`; this crate only owns automation lanes and their artifact/reporting contract.
+Source-semantic benchmarking is owned by `benchmark/source_semantic_benchmark/` (Python). This crate does **not** wrap or re-invoke that Python script; call it directly.
 
 ## Layout
 
@@ -58,9 +58,8 @@ Heavy workflow builds `fission-cli` (release), runs crate tests, then a **fast**
 
 ```bash
 cargo test -p fission-automation
-cargo run -p fission-automation -- source-semantic-check --no-build --fission-bin target/release/fission_cli
-cargo run -p fission-automation -- check --help   # alias for source-semantic-check
 cargo run -p fission-automation -- nir-check --lane nir --dry-run
+cargo run -p fission-automation -- nir-check --lane nir --run-profile fast --functions-limit 5 --no-update-latest
 ```
 
 ## Conventions

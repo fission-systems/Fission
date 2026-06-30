@@ -5,10 +5,11 @@ Canonical automation runner for Fission quality pipelines.
 This crate is used to:
 
 - run repeatable `nir-check` lanes over sentinel binaries
-- run source-oracle semantic quality checks through `source-semantic-check`
 - emit machine-readable artifacts (`summary.json`, `decision_insights.json`, candidate lists)
 - compare current runs against a baseline
-- provide a **Go/Stop gate** for follow-up recovery work (for example P5H3G readiness)
+- provide a **Go/Stop gate** for follow-up recovery work
+
+Source-semantic benchmarking is owned by **`benchmark/source_semantic_benchmark/`** (Python). Call that directly — do not invoke it through this crate.
 
 ---
 
@@ -27,22 +28,6 @@ By default, outputs are written under:
 and latest is mirrored to:
 
 - `benchmark/artifacts/automation/latest/<lane>/`
-
-Source semantic smoke check:
-
-```bash
-cargo run -p fission-automation -- source-semantic-check \
-  --no-build \
-  --fission-bin target/release/fission_cli \
-  --function-name fibonacci \
-  --jobs 1 \
-  --timeout-sec 30
-```
-
-This wraps `benchmark/source_semantic_benchmark/run_source_semantic_benchmark.py`.
-The Python runner outputs stay under `source_semantic/`; automation-level
-`summary.json`, `summary.md`, `decision_insights.json`, and
-`source_semantic_rows.json` are written at the run root.
 
 ---
 
@@ -76,23 +61,6 @@ The Python runner outputs stay under `source_semantic/`; automation-level
 - `--emit-legacy-preview-artifacts`
   - optional: duplicates candidate JSON under deprecated `preview_*` filenames (same content as `nir_*`).
   - default: only canonical `nir_*` files are written
-
-### Source semantic options
-
-- `--manifest <path>`
-  - defaults to `benchmark/source_semantic_benchmark/manifests/smoke_windows_small_c.json`
-
-- `--baseline-dir <path>`
-  - forwards a source semantic baseline directory to the Python runner
-
-- `--function-name <name>`, `--entry-id <id>`, `--tag <tag>`
-  - narrow the source semantic runner selection
-
-- `--include-ghidra-reference --ghidra-home <path>`
-  - opt-in reference lane only; source oracle remains the gate
-
-- `--fail-on-stop`
-  - exits non-zero when the source semantic go/stop decision is not `go_*`
 
 ---
 
