@@ -18,7 +18,6 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
-  FISSION_SLEIGH_SPEC_DIR: ${{ github.workspace }}/utils/sleigh-specs
 
 jobs:
   nir-regression-gate:

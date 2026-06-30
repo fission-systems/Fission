@@ -22,16 +22,10 @@ jobs:
     name: Smoke
     runs-on: ubuntu-latest
     timeout-minutes: 25
-    env:
-      # Deterministic sleigh specs on clean runners (ignores rogue local overrides)
-      FISSION_SLEIGH_SPEC_DIR: ${{ github.workspace }}/utils/sleigh-specs
     steps:
       - uses: actions/checkout@v7
         with:
-          lfs: false  # LFS assets downloaded selectively below
-
-      - name: Download Sleigh specs (LFS, ~11 MB)
-        run: git lfs pull --include="utils/sleigh-specs/**"
+          lfs: false
 
       - uses: dtolnay/rust-toolchain@stable
 
@@ -71,12 +65,12 @@ jobs:
           CLI="./target/${{ inputs.profile }}/fission_cli"
           "${CLI}" info "${BIN}"
 
-      - name: fission_cli list --json + decomp --json (PE smoke)
+      - name: fission_cli list --json (PE smoke)
         run: |
           set -euo pipefail
           BIN="${{ inputs.binary_relative_path }}"
           CLI="./target/${{ inputs.profile }}/fission_cli"
-          # Prefer symbols from test_functions.c; MinGW CRT helpers (e.g. __mingw_*) sort first but often lack SLA tpl coverage.
-          ADDR="$("${CLI}" list "${BIN}" --json | python3 "${{ github.workspace }}/.github/scripts/pick_pe_smoke_decomp_addr.py")"
-          echo "decomp addr: ${ADDR}"
-          "${CLI}" decomp "${BIN}" --addr "${ADDR}" --profile speed --timeout-ms 180000 --json | python3 -c 'import json,sys; r=json.load(sys.stdin); e=r[0] if isinstance(r,list) else r; assert isinstance(e,dict); (sys.stderr.write("decomp error:\n%s\n"%e["error"]), sys.exit(1)) if e.get("error") else None; assert "code" in e and isinstance(e["code"],str) and e["code"].strip(), e; print("decomp_ok", e.get("name","?"))'
+          "${CLI}" list "${BIN}" --json
+          echo "list_ok"
+          # NOTE: decomp requires Sleigh specs (utils/sleigh-specs) which are local-only.
+          # Run 'fission_cli decomp' locally after: git lfs pull --include="utils/sleigh-specs/**"

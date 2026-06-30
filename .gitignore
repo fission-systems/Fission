@@ -222,3 +222,4 @@ __pycache__/
 
 # vendor/ — reference code only, not committed to GitHub
 /vendor/
+/utils/
