@@ -30,16 +30,19 @@ jobs:
             target: x86_64-unknown-linux-gnu
             artifact_name: fission_cli
             asset_name: fission-linux-x64
+            benchmark_asset_name: fission_cli-x86_64-unknown-linux-gnu
             archive_ext: tar.gz
           - os: macos-latest
             target: aarch64-apple-darwin
             artifact_name: fission_cli
             asset_name: fission-macos-arm64
+            benchmark_asset_name: ""
             archive_ext: tar.gz
           - os: windows-latest
             target: x86_64-pc-windows-msvc
             artifact_name: fission_cli.exe
             asset_name: fission-windows-x64
+            benchmark_asset_name: ""
             archive_ext: zip
 
     steps:
@@ -63,6 +66,35 @@ jobs:
       - name: Build fission-cli (Release)
         run: cargo build -p fission-cli --locked --release --target ${{ matrix.target }} --verbose
 
+      - name: Release CLI smoke
+        shell: bash
+        run: |
+          set -euo pipefail
+          CLI="target/${{ matrix.target }}/release/${{ matrix.artifact_name }}"
+          test -s "${CLI}"
+          "${CLI}" --version
+
+      - name: Benchmark consumer smoke (Linux)
+        if: runner.os == 'Linux'
+        env:
+          FISSION_SLEIGH_SPEC_DIR: ${{ github.workspace }}/utils/sleigh-specs
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y gcc-mingw-w64-x86-64
+          BIN="/tmp/fission-release-smoke/test_functions.exe"
+          mkdir -p "$(dirname "${BIN}")"
+          x86_64-w64-mingw32-gcc -O2 -g -m64 -static \
+            .github/fixtures/test_functions.c \
+            -o "${BIN}"
+          CLI="target/${{ matrix.target }}/release/${{ matrix.artifact_name }}"
+          "${CLI}" info "${BIN}"
+          "${CLI}" list "${BIN}" --json
+          ADDR="$("${CLI}" list "${BIN}" --json | python3 .github/scripts/pick_pe_smoke_decomp_addr.py)"
+          OUT=$("${CLI}" decomp "${BIN}" --addr "${ADDR}" --profile speed --timeout-ms 180000 --json)
+          echo "${OUT}" | python3 .github/scripts/check_decomp_output.py
+
       - name: Prepare Package Directory
         shell: bash
         run: |
@@ -77,6 +109,17 @@ jobs:
           else
             echo "ℹ️  No ghidra resource directory found; skipping copy"
           fi
+
+      - name: Create benchmark raw CLI asset (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp target/${{ matrix.target }}/release/${{ matrix.artifact_name }} "${{ matrix.benchmark_asset_name }}"
+          chmod +x "${{ matrix.benchmark_asset_name }}"
+          "./${{ matrix.benchmark_asset_name }}" --version
+          shasum -a 256 "${{ matrix.benchmark_asset_name }}" > "${{ matrix.benchmark_asset_name }}.sha256"
+          cat "${{ matrix.benchmark_asset_name }}.sha256"
 
       - name: Create Archive (Unix)
         if: runner.os != 'Windows'
@@ -113,6 +156,18 @@ jobs:
           files: |
             ${{ matrix.asset_name }}.${{ matrix.archive_ext }}
             ${{ matrix.asset_name }}.sha256
+          draft: false
+          prerelease: false
+
+      - name: Upload Benchmark CLI Asset
+        uses: softprops/action-gh-release@v1
+        if: startsWith(github.ref, 'refs/tags/') && runner.os == 'Linux'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          files: |
+            ${{ matrix.benchmark_asset_name }}
+            ${{ matrix.benchmark_asset_name }}.sha256
           draft: false
           prerelease: false
 
