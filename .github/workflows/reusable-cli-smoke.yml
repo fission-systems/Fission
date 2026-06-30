@@ -24,23 +24,20 @@ env:
 
 jobs:
   # Step 1: Download + cache Sleigh specs
-  setup-sleigh:
-    uses: ./.github/workflows/reusable-setup-sleigh.yml
-    with:
-      assets_tag: ${{ inputs.assets_tag }}
-
   cli-smoke:
     name: Smoke
-    needs: setup-sleigh
     runs-on: ubuntu-latest
     timeout-minutes: 25
     env:
-      FISSION_SLEIGH_SPEC_DIR: ${{ needs.setup-sleigh.outputs.sleigh_spec_dir }}
+      FISSION_SLEIGH_SPEC_DIR: ${{ github.workspace }}/utils/sleigh-specs
     steps:
       - uses: actions/checkout@v7
         with:
           lfs: false
 
+
+      - name: Setup Utils
+        uses: ./.github/actions/setup-utils
       - uses: dtolnay/rust-toolchain@stable
 
       - uses: Swatinem/rust-cache@v2

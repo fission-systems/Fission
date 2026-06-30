@@ -15,9 +15,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+
         with:
           lfs: false
 
+
+      - name: Setup Utils
+        uses: ./.github/actions/setup-utils
       - name: Fetch Workflow Run Stats
         env:
           GH_TOKEN: ${{ github.token }}

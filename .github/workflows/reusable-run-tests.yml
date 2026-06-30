@@ -41,10 +41,14 @@ jobs:
     timeout-minutes: ${{ inputs.timeout_minutes }}
     steps:
       - uses: actions/checkout@v7
+
         with:
           lfs: false
           submodules: recursive
 
+
+      - name: Setup Utils
+        uses: ./.github/actions/setup-utils
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 

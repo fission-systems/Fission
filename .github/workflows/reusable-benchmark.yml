@@ -29,10 +29,14 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
+
         with:
           submodules: recursive
           lfs: false  # LFS assets downloaded selectively below
 
+
+        - name: Setup Utils
+          uses: ./.github/actions/setup-utils
       - name: Download LFS assets for benchmark (Sleigh specs + smoke fixture sources)
         run: |
           git lfs pull --include="utils/sleigh-specs/**"

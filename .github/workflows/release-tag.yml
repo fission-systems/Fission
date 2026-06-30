@@ -77,9 +77,13 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v7
+
         with:
           lfs: false
 
+
+      - name: Setup Utils
+        uses: ./.github/actions/setup-utils
       - name: Validate tag name
         env:
           TAG: ${{ inputs.tag }}

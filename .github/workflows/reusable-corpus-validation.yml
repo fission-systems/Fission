@@ -9,10 +9,14 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
+
         with:
           lfs: false
           submodules: recursive
 
+
+      - name: Setup Utils
+        uses: ./.github/actions/setup-utils
       - name: Validate Corpus Manifests and Referenced Binaries
         run: |
           python3 - <<'PY'

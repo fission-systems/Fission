@@ -27,10 +27,14 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v7
+
         with:
           lfs: false
           submodules: recursive
 
+
+      - name: Setup Utils
+        uses: ./.github/actions/setup-utils
       - name: Install Rust (nightly + Miri)
         uses: dtolnay/rust-toolchain@nightly
         with:

@@ -46,10 +46,14 @@ jobs:
 
     steps:
       - uses: actions/checkout@v7
+
         with:
           lfs: false
           submodules: recursive
 
+
+      - name: Setup Utils
+        uses: ./.github/actions/setup-utils
       - name: Install Rust (nightly)
         uses: dtolnay/rust-toolchain@nightly
         with:
