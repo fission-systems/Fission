@@ -27,11 +27,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v4
-        
+      - uses: actions/checkout@v7
         with:
           lfs: false
-        with:
           submodules: recursive
 
       - name: Install Rust (stable + llvm-tools)

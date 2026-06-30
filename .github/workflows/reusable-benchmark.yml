@@ -31,7 +31,12 @@ jobs:
         uses: actions/checkout@v7
         with:
           submodules: recursive
-          lfs: true
+          lfs: false  # LFS assets downloaded selectively below
+
+      - name: Download LFS assets for benchmark (Sleigh specs + smoke fixture sources)
+        run: |
+          git lfs pull --include="utils/sleigh-specs/compiled/**"
+          git lfs pull --include="benchmark/binary/x86-64/window/small/source/**"
 
       - name: Setup Java for Ghidra
         uses: actions/setup-java@v5

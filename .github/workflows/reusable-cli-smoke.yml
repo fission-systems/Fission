@@ -28,7 +28,10 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          lfs: true
+          lfs: false  # LFS assets downloaded selectively below
+
+      - name: Download Sleigh specs (LFS, ~11 MB)
+        run: git lfs pull --include="utils/sleigh-specs/compiled/**"
 
       - uses: dtolnay/rust-toolchain@stable
 

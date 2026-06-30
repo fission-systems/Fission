@@ -9,10 +9,8 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
-        
         with:
-          lfs: true
-        with:
+          lfs: false
           submodules: recursive
 
       - name: Validate Corpus Manifests and Referenced Binaries

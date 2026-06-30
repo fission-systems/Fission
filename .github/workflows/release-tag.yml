@@ -77,12 +77,8 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v7
-        
         with:
           lfs: false
-        with:
-          ref: ${{ needs.verify-ci-green.outputs.target_sha }}
-          fetch-depth: 0
 
       - name: Validate tag name
         env:

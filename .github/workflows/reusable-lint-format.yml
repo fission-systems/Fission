@@ -22,10 +22,8 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
-        
         with:
           lfs: false
-        with:
           submodules: recursive
 
       - name: Guard — no fission-analysis dependency (facade removed)

@@ -87,28 +87,25 @@ For deeper visual maps, see [`docs/architecture/DIAGRAMS.md`](./docs/architectur
 
 ---
 
-## Cloning & Resource Assets
+## Cloning
 
-Large binary assets (~536 MB: signature databases, Ghidra data, compiled Sleigh specs)
-are stored in **Git LFS** and downloaded on demand. Rust source code and text files clone immediately.
+`git clone` delivers **only Rust source code, CI configuration, and documentation**.
+Large binary assets (`utils/`, `benchmark/binary/`) are stored in **Git LFS** and downloaded on demand.
 
 ```bash
-# Rust source only (fast, no LFS download)
-GIT_LFS_SKIP_SMUDGE=1 git clone https://github.com/sjkim1127/Fission.git
-
-# Full clone including all LFS assets
+# Standard clone — Rust source only, no LFS download
 git clone https://github.com/sjkim1127/Fission.git
 
-# Selective download after a skip-smudge clone
-git lfs pull --include="utils/signatures/**"      # function signature DBs
-git lfs pull --include="utils/sleigh-specs/**"    # compiled Sleigh specs
-git lfs pull                                       # everything
+# Pull only what you need (after clone)
+git lfs pull --include="utils/sleigh-specs/compiled/**"   # Sleigh specs       ~11 MB
+git lfs pull --include="utils/signatures/**"              # Signature DBs      ~482 MB
+git lfs pull --include="benchmark/binary/**"              # Benchmark fixtures  ~1.3 GB
+git lfs pull                                               # Everything
 ```
 
-> [!TIP]
-> For Rust development only, use `GIT_LFS_SKIP_SMUDGE=1` — the decompiler
-> will fall back gracefully when signature databases are absent.
-> Download assets only when running the full quality pipeline or benchmarks.
+> [!NOTE]
+> CI jobs use selective `git lfs pull` — each job downloads only the assets it needs.
+> Rust builds, tests, and lint run with zero LFS downloads.
 
 
 ## Documentation Hub
@@ -443,6 +440,26 @@ To bridge this quality gap, Fission's active development plan includes:
 - **Rust** 1.85+ ([install](https://www.rust-lang.org/tools/install))
 - **Cargo** (bundled with Rust)
 - C++ compiler (for some dependencies)
+
+### Cloning
+
+`git clone` delivers **only Rust source code, CI configuration, and documentation**.
+Large binary assets (`utils/`, `benchmark/binary/`) are stored in **Git LFS** and downloaded on demand.
+
+```bash
+# Standard clone — Rust source only, no LFS download
+git clone https://github.com/sjkim1127/Fission.git
+
+# Pull only what you need (after clone)
+git lfs pull --include="utils/sleigh-specs/compiled/**"   # Sleigh specs       ~11 MB
+git lfs pull --include="utils/signatures/**"              # Signature DBs      ~482 MB
+git lfs pull --include="benchmark/binary/**"              # Benchmark fixtures  ~1.3 GB
+git lfs pull                                               # Everything
+```
+
+> [!NOTE]
+> CI jobs use selective `git lfs pull` — each job downloads only the assets it needs.
+> Rust builds, tests, and lint run with zero LFS downloads.
 
 ### Build the CLI
 
