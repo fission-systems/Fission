@@ -1,14 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: BJNFNE <bjnfne@web.de>
-// Rewritten by: DosX
-
-// https://en.wikipedia.org/wiki/Vorbis
-meta("library", "Vorbis");
-
-function detect() {
-    if (PE.isLibraryPresentExp(/vorbis/i)) {
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:d28e6f8871dfae513f2127f77da5ccbb5e9f64313859a3baf4030088d075bb12
+size 284

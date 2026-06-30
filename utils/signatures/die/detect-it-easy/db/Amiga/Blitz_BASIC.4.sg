@@ -1,14 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: hypn0 <hypn0@mail.ru>
-
-meta("compiler", "Blitz BASIC");
-
-function detect() {
-    if (Amiga.compareEP("4eb9........60$$207c........227c........4eb9........2c7c........23ce")) {
-        bDetected = true;
-    }
-
-    sLang = "BASIC";
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:08a539c53fb541e3ebf20a3537dd6faacb4219a32a5aa646c6c4897fa9e52bb5
+size 303

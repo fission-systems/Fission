@@ -1,12 +1,3 @@
-// Detect It Easy: detection rule file
-
-meta("cryptor", "ABC Cryptor");
-
-function detect() {
-    if (PE.compareEP("68FF6424F0685858585890FFD4508B40F205B095F6950F850181BBFF")) {
-        sVersion = "1.0";
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:68276a21c401f894c9b9aeec2be48698d84cc487cc39112bf035014cca387863
+size 258

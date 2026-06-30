@@ -1,13 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: hypn0 <hypn0@mail.ru>
-
-meta("cruncher", "MaxPacker");
-
-function detect() {
-    if (Amiga.compareEP("283c........267a....41fa....d1fa....d7fa....49fa....341c121c101c")) {
-        sVersion = "1.2";
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:0064f7fbdb6a4117c9ab4d969800c43579f5f658cd9e0ba5b56b96d966a49c6a
+size 301

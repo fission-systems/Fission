@@ -1,15 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: hypn0 <hypn0@mail.ru>
-
-meta("compiler", "Easy!-C");
-
-function detect() {
-    if (MSDOS.compareEP("9c55568ccd83c5..8db6....56be....56cb")) {
-        sOptions = "1993 by Flight Technologys"; //spelling taken from file
-        bDetected = true;
-    }
-
-    sLang = "C";
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:0c62ba36a1a24166ce4ea1f763b10d875f8574c406910c5f435720299dc48b62
+size 352

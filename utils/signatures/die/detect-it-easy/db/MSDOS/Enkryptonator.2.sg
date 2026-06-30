@@ -1,12 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: hypn0 <hypn0@mail.ru>
-
-meta("protector", "Enkryptonator");
-
-function detect() {
-    if (MSDOS.compareEP("1e1eb430cd21b4..3c..73..cd21be....e8....e8....e8....1f07e9")) {
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:ac6f116d18472bebf0c00c224675b61c43ea6bf77bb1d864fd45d6b11e355465
+size 282

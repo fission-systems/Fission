@@ -1,15 +1,3 @@
-<opinions>
-    <constraint loader="Portable Executable (PE)" compilerSpecID="default">
-        <constraint primary="422"  processor="PIC24"    endian="little"    size="16" />
-    </constraint>
-    <constraint loader="Executable and Linking Format (ELF)" compilerSpecID="default">
-        <!-- Elf treats as 32-bit while our definition indicates 24-bit -->
-        <constraint primary="118" processor="dsPIC30F"  endian="little" />
-        <constraint primary="118" processor="dsPIC33E"  endian="little" />
-        <constraint primary="118" processor="dsPIC33C"  endian="little" />     
-        <constraint primary="118" processor="dsPIC33F"  endian="little" />     
-    </constraint>
-        <constraint loader="Common Object File Format (COFF)" compilerSpecID="default">
-        <constraint primary="4662" processor="dsPIC30F"  endian="little" />     
-    </constraint>
-</opinions>
+version https://git-lfs.github.com/spec/v1
+oid sha256:5efe551409541e109e9dd05042a9eda2db0a9b2d9dc8b43bee2745e6e6689822
+size 883

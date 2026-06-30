@@ -1,14 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: hypn0 <hypn0@mail.ru>
-
-meta("sfx", "MP-ZipTool SFX32");
-
-function detect() {
-    if (PE.compareEP("558bec83c4..33c08945..b8........e8........33c05568........64ff306489206a..68........6a")) {
-        if (PE.compareOverlay("'MPU'0d")) {
-            bDetected = true;
-        }
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:6c93a7f241865ff12c81c203298cb791fbfcd390ba141abe0ee9679b62742c98
+size 364

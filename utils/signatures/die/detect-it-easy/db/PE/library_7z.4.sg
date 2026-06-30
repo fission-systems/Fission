@@ -1,16 +1,3 @@
-// Detect It Easy: detection rule file
-
-// Author: DosX
-// E-Mail: collab@kay-software.ru
-// GitHub: https://github.com/DosX-dev
-// Telegram: @DosX_dev
-
-meta("library", "7-Zip");
-
-function detect() {
-    if (PE.isLibraryPresentExp(/^7z/) || PE.isLibraryPresentExp(/lib7z/i)) {
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:84ccd5cb360a5ed137da673a8548847b60765eaf27884f4194198667d8318011
+size 332

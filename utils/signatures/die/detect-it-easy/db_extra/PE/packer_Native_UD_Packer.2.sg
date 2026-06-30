@@ -1,12 +1,3 @@
-// Detect It Easy: detection rule file
-
-meta("packer", "Native UD Packer");
-
-function detect() {
-    if (PE.compareEP("31C031DB31C9EB0E6A006A006A006A00FF15........FF15........89C768")) {
-        sVersion = "1.1";
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:858ad7f42c16ce5cd5368b6fd83c62b7d7616758f7cdf2504d343d2801b49c56
+size 268

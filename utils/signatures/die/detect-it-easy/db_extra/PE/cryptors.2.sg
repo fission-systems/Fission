@@ -1,12 +1,3 @@
-// Detect It Easy: detection rule file
-
-meta("cryptor", "unknwown cryptor"); // ????????????
-
-function detect() {
-    if (PE.compareEP("909090909090609ce8000000005dd14d..816d..........d709d8ab")) {
-        sOptions = "by TMG";
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:76362ac15dced000e8bdf70edaaf84236af3196b8cfb41f24f3d06ffaeca8134
+size 282

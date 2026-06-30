@@ -1,15 +1,3 @@
-// Detect It Easy: detection rule file
-
-meta("cryptor", "Duals eXe Encryptor");
-
-function detect() {
-    if (PE.compareEP("558BEC81EC00050000E8000000005D81ED0E")) {
-        switch (PE.readWord(PE.getEntryPointOffset() + 18)) {
-            case 0x308: sVersion = "1.0"; break;
-            case 0x43A: sVersion = "1.0b"; break;
-        }
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:9cb5e9b67671a16c00b00d7877dc2f5b7d5105a975313f3801fda6d7e297475a
+size 391

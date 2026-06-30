@@ -1,14 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: LinXP
-
-meta("sfx", "NanoZip");
-
-function detect() {
-    if (PE.compareEP("60be........8dbe........5789e58d9c24........31c05039dc75") && PE.compareOverlay("AE01'NanoZip 0.09 alpha'")) {
-        sVersion = "0.09a";
-        sOptions = "nz_w32c.sfx";
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:20bda77d772ef826f231da2c5542f5412b3b56c93177accfb8b696e798888f94
+size 352

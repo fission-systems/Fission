@@ -1,12 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: hypn0 <hypn0@mail.ru>
-
-meta("cryptor", "The Best Cryptor by FsK");
-
-function detect() {
-    if (PE.findSignature(PE.getSize() - 0x100, 0x100, "8b042483e8..68........ffd0b8........3d..............30..40eb..b8........3d..............30..40eb") != -1) {
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:640e84a533e7ae0b06e6131ea33a9409e3ba789c612e4e147ba35168269cc6fd
+size 356

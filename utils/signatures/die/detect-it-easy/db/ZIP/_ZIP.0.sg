@@ -1,17 +1,3 @@
-// Detect It Easy: detection rule file
-
-meta("format", "ZIP");
-
-function detect() {
-    if (ZIP.isVerbose()) {
-        sName = ZIP.getFileFormatName();
-        sVersion = ZIP.getFileFormatVersion();
-        sOptions = ZIP.getFileFormatOptions();
-        
-        if (sName) {
-            bDetected = true;
-        }
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:a22da3921862f2a7a478b0b976b18bfeac7b2248b2677e42ce427f4adb253622
+size 358

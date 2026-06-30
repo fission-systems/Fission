@@ -1,17 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: KDSS-Research
-
-meta("GameEngine", "Xash3D");
-
-function detect() {
-    var dataSection = PE.section[".data"];
-
-    if (dataSection &&
-        PE.findString(dataSection.FileOffset, dataSection.FileSize, "Xash Error") != -1 &&
-        PE.findString(dataSection.FileOffset, dataSection.FileSize, "xash.dll") != -1 &&
-        PE.findString(dataSection.FileOffset, dataSection.FileSize, "Unable to load the xash.dll") != -1) {
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:3311a3a17ad9f2de0e0a4be7dd8790611bb2eb01530fd40ba2870aef829bd225
+size 526

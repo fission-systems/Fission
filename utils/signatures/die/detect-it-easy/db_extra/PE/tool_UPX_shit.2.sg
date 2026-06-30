@@ -1,21 +1,3 @@
-// Detect It Easy: detection rule file
-
-meta("tool", "UPX shit");
-
-function detect() {
-    if (PE.compareEP("E2FA94FFE06100000000000000")) {
-        sVersion = "0.0.1";
-        bDetected = true;
-    } else if (PE.compareEP("94BC......00B9..00000080340C..E2FA94FFE061")) {
-        sVersion = "0.0.1";
-        bDetected = true;
-    } else if (PE.compareEP("B8....4300B915000000803408..E2FAE9D6FFFFFF")) {
-        sVersion = "0.06";
-        bDetected = true;
-    } else if (PE.compareEP("E8000000005E83C614AD89C7AD89C1AD300747E2FBADFFE0C3")) {
-        sVersion = "0.1";
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:43bed0181c3eb58234755d9e5c0a697e62f97980197cff9c9a2688a75529dbb2
+size 622

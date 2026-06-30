@@ -1,13 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: hypn0 <hypn0@mail.ru>
-
-meta("protector", "Hardlock");
-
-function detect() {
-    if (MSDOS.compareEP("2ec6........be....bf....b9....2ea1....d1e92e8b1d2e31052e030402e12bc6d0c403c34683ef")) {
-        sOptions = "dongle envelope by Aladdin";
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:b9fc72503c13a49e260d024c84025d86c4612068b14b0d004b3a14509ee5c69a
+size 342

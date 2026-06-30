@@ -1,25 +1,3 @@
-// Detect It Easy: detection rule file
-
-meta("packer", ".netshrink");
-
-function detect() {
-    if (PE.isNet()) {
-        if (PE.isSignatureInSectionPresent(0, "20fe2b136028........13..203b28136028........13..11..11..161f4028........26")) {
-            sVersion = "2.01 Demo";
-            sOptions = "Encrypted/Password mode";
-            bDetected = true;
-        } else if (PE.isSignatureInSectionPresent(0, "20ad65133228........13..206866133228........13..11..11..161f4028........26")) {
-            sVersion = "2.01 Demo";
-            sOptions = "Encrypted/Password mode";
-            bDetected = true;
-        } else if (PE.isSignatureInSectionPresent(0, "20b9059f0728........13..2066059f0728........13..11..11..161f4028........26")) {
-            sVersion = "2.01 Demo";
-            bDetected = true;
-        } else if (PE.isSignatureInSectionPresent(0, "20e6ea19be28........13..2039ea19be28........13..11..11..161f4028........26")) {
-            sVersion = "2.01 Demo";
-            bDetected = true;
-        }
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:7226ea72fb1019ea8a2c0c3a28f45712a194ca33b67e47b5972443a766061a1e
+size 1045

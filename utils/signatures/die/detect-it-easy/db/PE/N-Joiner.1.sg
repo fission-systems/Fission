@@ -1,12 +1,3 @@
-// Detect It Easy: detection rule file
-
-meta("joiner", "N-Joiner");
-
-function detect() {
-    if (PE.compareEP("6A0068........68........6A00E8140000006A00E813000000CCFF25........FF25........FF25........FF25")) {
-        sVersion = "0.1";
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:4fc53722f77615bc3dca3ad2e6619cc98eb5a2ad45c12961c083c49baef19bae
+size 300

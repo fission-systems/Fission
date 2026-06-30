@@ -1,35 +1,3 @@
-// Detect It Easy: detection rule file
-
-meta("library", "SDL");
-
-function getSDLVersion() {
-    var sResult = "";
-    var nSection = ELF.getSectionNumber(".dynstr");
-    if (nSection != -1) {
-        var nOffset = ELF.getSectionFileOffset(nSection);
-        var nSize = ELF.getSectionFileSize(nSection);
-
-        var nVersionOffset = ELF.findString(nOffset, nSize, "libSDL-");
-        if (nVersionOffset != -1) {
-            var sSDLVersion = ELF.getString(nVersionOffset);
-            var aVersion = sSDLVersion.match(/libSDL-(.*).so/);
-            if (aVersion) {
-                sResult = aVersion[1];
-            }
-        }
-    }
-
-    return sResult;
-}
-
-function detect() {
-    if (ELF.isStringInTablePresent(".dynstr", "SDL_Init")) {
-        bDetected = true;
-    }
-
-    if (bDetected) {
-        sVersion = getSDLVersion();
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:bd62b52ce2f13e2eb2735a7e9242c697f061928388ea1274d3d6b3e74ab370c7
+size 890

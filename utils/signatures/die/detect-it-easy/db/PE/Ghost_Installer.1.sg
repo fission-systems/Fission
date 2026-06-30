@@ -1,14 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: hypn0 <hypn0@mail.ru>
-
-meta("installer", "Ghost Installer");
-
-function detect() {
-    if (PE.compareEP("60be........8dbe........c787................5783cd..eb") && PE.compareOverlay("c0dececb8d8d8d8d")) {
-        sOptions = "xored MSCF, mask: 8D";
-        sVersion = "1.0.0.0";
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:83e99760064eedb5ed9ffb2b7f2c798a93fbcd0424529f85c6356f93d8f0a5d2
+size 383

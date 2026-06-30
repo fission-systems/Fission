@@ -1,16 +1,3 @@
-// Detect It Easy: detection rule file
-
-// Author: DosX
-// E-Mail: collab@kay-software.ru
-// GitHub: https://github.com/DosX-dev
-// Telegram: @DosX_dev
-
-meta("library", "OpenSSL");
-
-function detect() {
-    if (PE.isLibraryPresentExp(/libssl|libcrypto/i)) {
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:4736d687c29aa8acd16e40b703b861e4d59f25e119101593ed2ca8a833e003a3
+size 312

@@ -1,27 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: Jason Hood <jadoxa@yahoo.com.au>
-
-includeScript("cab");
-
-meta("archive", "CAB");
-
-function detect() {
-    if (!detect_Cab(0, Binary.getSize())) {
-        if (Binary.compare("'ISc('")) {
-            sName = "InstallShield Cabinet File";
-            var nVer = Binary.readWord(4);
-            switch (Binary.readByte(7)) {
-                case 1:
-                    sVersion = (nVer >> 12) & 15;
-                    break;
-                case 2:
-                case 4:
-                    sVersion = (nVer / 100).toFixed(2);
-                    break;
-            }
-            bDetected = true;
-        }
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:7b4b83f1b59a646677ac224cc990cf6514c1afa95c90ef36938b595facf99683
+size 709

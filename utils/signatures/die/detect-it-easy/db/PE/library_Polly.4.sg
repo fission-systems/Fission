@@ -1,17 +1,3 @@
-// Detect It Easy: detection rule file
-
-// Author: DosX
-// E-Mail: collab@kay-software.ru
-// GitHub: https://github.com/DosX-dev
-// Telegram: @DosX_dev
-
-// https://github.com/App-vNext/Polly
-meta("library", "Polly");
-
-function detect() {
-    if (PE.isNetObjectPresent("Polly") || PE.isNetObjectPresent("Polly.Core")) {
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:8fa2fc3f3c2e3c498ecd217f4d3e1ccda83aca5fc276428a7b9a2d1f48cd1d9b
+size 374

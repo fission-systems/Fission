@@ -1,17 +1,3 @@
-// Detect It Easy: detection rule file
-
-// Author: DosX
-// E-Mail: collab@kay-software.ru
-// GitHub: https://github.com/DosX-dev
-// Telegram: @DosX_dev
-
-// https://github.com/GediminasMasaitis/crc-dot-net
-meta("library", "Crc.NET");
-
-function detect() {
-    if (PE.isNetObjectPresent("Crc") && (PE.isNetObjectPresent("CrcBase") || PE.isNetObjectPresent("Crc32Base")) && PE.isNetObjectPresent("Crc32") && PE.isNetObjectPresent("ComputeHash")) {
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:76c467dc5c570a0d4bb2d0562236178b8f06f053992e42c64d1834a8b1773b6d
+size 499

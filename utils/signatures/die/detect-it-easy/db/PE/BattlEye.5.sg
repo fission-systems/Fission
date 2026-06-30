@@ -1,18 +1,3 @@
-// Detect It Easy: detection rule file
-
-// https://www.battleye.com/
-meta("protection", "BattlEye");
-
-function detect() {
-    if (PE.getSectionNameCollision("0", "1") === ".be" && // VMProtect'ed
-        (PE.isLibraryPresentExp(/ntdll/) || PE.isFunctionPresent("CryptCATAdminAcquireContext")) &&
-        PE.isSigned()) {
-        bDetected = true;
-
-        if (PE.isSignaturePresent(0x00, PE.getSize() - PE.getOverlaySize(), "'https://cdn.battleye.com/%S/%s/%s'")) {
-            sVersion = "Launcher";
-        }
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:b2a235388bc059e6c6f5ae4d10e3017f2919e2cb612f8b8b4ae69e1f01cf6875
+size 540

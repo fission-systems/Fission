@@ -1,13 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: BJNFNE <bjnfne@web.de>
-
-// https://www.gnupg.org/
-meta("format", "GPG");
-
-function detect() {
-    if (Binary.compare("2d2d2d2d2d424547494e20'PGP'205349474e41545552452d2d2d2d2d")) {
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:27d5530fb8bbb7937f90789e7acfed8f374881b2af0235d4bbaa4ef9efef9e13
+size 286

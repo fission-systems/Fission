@@ -1,13 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: BJNFNE <bjnfne@web.de>
-
-// https://ffmpeg.com/
-meta("library", "FFmpeg");
-
-function detect() {
-    if (ELF.isLibraryPresent("libffmpeg.so")) {
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:bb19a9897186edb7f0265b9179db89143b51ff2fab8eda139b91eb839c08b61f
+size 248

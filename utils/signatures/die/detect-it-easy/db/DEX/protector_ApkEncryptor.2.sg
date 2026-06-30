@@ -1,14 +1,3 @@
-// Detect It Easy: detection rule file
-
-// Author: DosX
-// E-Mail: collab@kay-software.ru
-// GitHub: https://github.com/DosX-dev
-// Telegram: @DosX_dev
-
-meta("protector", "ApkEncryptor");
-
-function detect() {
-    bDetected = DEX.isDexItemStringPresent("Lcn/beingyi/sub/utils/Native;");
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:0549bd1e9115e1f728a38f8e28bf0d12dda95414f1749712ce1bcd6586ad8891
+size 309

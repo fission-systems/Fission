@@ -1,14 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: hypn0 <hypn0@mail.ru>
-
-meta("patcher", "R!SC Process Patcher");
-
-function detect() {
-    if (PE.compareEP("68........c705................68........68........6a..6a..6a..6a..6a..6a..6a..68........e8")) {
-        sVersion = "1.X";
-        sOptions = "by R!SC";
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:ad77960a65abe9259e9628a1234353e0e3cdac242a30693c09f418427dceae00
+size 374

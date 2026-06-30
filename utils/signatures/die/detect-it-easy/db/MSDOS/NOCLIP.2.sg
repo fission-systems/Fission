@@ -1,14 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: hypn0 <hypn0@mail.ru>
-
-meta("protector", "NOCLIP");
-
-function detect() {
-    if (MSDOS.compareEP("e9$$$$ff26....9c5053518cd8a3")) {
-        sVersion = "4.X";
-        sOptions = "by TD Technologia Digital";
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:3fdcc370d4a6d20211fc59f9f5334702a563b5ea687845af86d8d42d59cb1aca
+size 321

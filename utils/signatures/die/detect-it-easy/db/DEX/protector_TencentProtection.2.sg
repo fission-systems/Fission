@@ -1,14 +1,3 @@
-// Detect It Easy: detection rule file
-
-// Author: DosX
-// E-Mail: collab@kay-software.ru
-// GitHub: https://github.com/DosX-dev
-// Telegram: @DosX_dev
-
-meta("protector", "TencentProtection");
-
-function detect() {
-    bDetected = DEX.isDexItemStringPresent("Lcom/tencent/StubShell/TxAppEntry;");
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:fd50bfcaad6845da037c61ae92a2d171bdeca76aaf233a54a134485e884d824e
+size 319

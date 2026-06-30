@@ -1,12 +1,3 @@
-// Detect It Easy: detection rule file
-
-meta("protector", "Cruncher");
-
-function detect() {
-    if (MSDOS.compareEP("2E........2E......B430CD213C0373..BB....8EDB8D......B409CD210633C050CB")) {
-        sVersion = "1.0";
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:c1155ccb329e1da82e043f6b3a7a548aa8e7c286beee3dc7afa0635b83447f5f
+size 282

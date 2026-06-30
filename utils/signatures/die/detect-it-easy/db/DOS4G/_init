@@ -1,5 +1,3 @@
-// Detect It Easy: DiE-JS framework file
-// Don't change anything unless you're sure about what you're doing
-
-var File = DOS4G;
-var X = DOS4G;
+version https://git-lfs.github.com/spec/v1
+oid sha256:4c27bf99635361d4adb55b8eb4f4c424d8a8457b7ecac3a71bd25184cf8d238f
+size 146

@@ -1,18 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: BJNFNE <bjnfne@web.de>
-
-// https://www.psdevwiki.com/ps3/PKG_files
-meta("archive", "System Software Update Packages");
-
-function detect() {
-    if (Binary.compare("7F 50 4B 47")) {
-        var contentId = Binary.getString(48, 48).trim();
-
-        if (/^[A-Z0-9]{6,7}-[A-Z0-9]{9}_00-[A-Z0-9]{16,18}$/.test(contentId)) {
-            if (X.isVerbose()) sOptions = "ContentID: " + contentId;
-            bDetected = true;
-        }
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:72c1e4df1ba175e82962a05bac01d2be3c321cf9b59c72b7d72828883b18e99e
+size 507

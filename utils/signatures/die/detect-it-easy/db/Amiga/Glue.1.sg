@@ -1,14 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: hypn0 <hypn0@mail.ru>
-
-meta("joiner", "Glue (ANSI Linker)");
-
-function detect() {
-    if (Amiga.compareEP("48e7fffc2c78....93c94eae....2a407a..4aad....66..41ed")) {
-        sVersion = "2.3";
-        sOptions = "1994 by Bigmama Of Focus Design";
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:03773725837d80f8a91005c868a14d87d4911aff7c8149cc094b822dd141ec8e
+size 350

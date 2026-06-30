@@ -1,17 +1,3 @@
-// Detect It Easy: detection rule file
-
-// Author: DosX
-// E-Mail: collab@kay-software.ru
-// GitHub: https://github.com/DosX-dev
-// Telegram: @DosX_dev
-
-// https://www.nuget.org/packages/AWSSDK.SecurityToken
-meta("library", "Amazon Security Token Service");
-
-function detect() {
-    if (PE.isNetObjectPresent("AWSSDK.SecurityToken")) {
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:3a509b65f593d03c064ff272d666596e68b1bc493c045e064df9f8fe37df1014
+size 391

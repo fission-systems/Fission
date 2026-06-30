@@ -1,11 +1,3 @@
-// Detect It Easy: detection rule file
-
-meta("format", "Preferred Executable Format");
-
-function detect() {
-    if (Binary.compare("'Joy!peff'")) {
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:39ca957c3709c6215c66c63a420bb12fb2a822571f42782f52cca4a9313b51d1
+size 210

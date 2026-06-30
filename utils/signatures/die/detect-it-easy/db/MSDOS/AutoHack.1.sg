@@ -1,12 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: hypn0 <hypn0@mail.ru>
-
-meta("other", "AutoHack addition");
-
-function detect() {
-    if (MSDOS.compareEP("0e1fb409ba....cd21fa8e06....be....8b0e....83f9..74..fdd1e1")) {
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:11308b0b91f8d263c2414df2459e3afde5b9c3e6439f9ab2a892ad49d436b706
+size 282

@@ -1,14 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: hypn0 <hypn0@mail.ru>
-
-meta("protector", "MSCC");
-
-function detect() {
-    if (Binary.compare("e9$$$$0e07be....bf....b9....f3a4b9....be....accc9803d8e2")) {
-        sVersion = "1.0a";
-        sOptions = "1997 by Mad $cientist";
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:b82c030a1cab5472b452efaca223cc5cc2d7de57bdb2a9976e4913fb07a94276
+size 343

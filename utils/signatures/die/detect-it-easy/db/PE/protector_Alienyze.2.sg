@@ -1,25 +1,3 @@
-// Detect It Easy: detection rule file
-
-// Author: DosX
-// E-Mail: collab@kay-software.ru
-// GitHub: https://github.com/DosX-dev
-// Telegram: @DosX_dev
-// ---
-// First version of detect made by KDSS-Research
-
-// https://alienyze.com/
-meta("protector", "Alienyze");
-
-function detect() {
-    bDetected = PE.compareEP("55 8b ec") && !PE.getNumberOfImports() && PE.getNumberOfSections() > 4 && PE.getSectionFileOffset(0) == 0x00;
-
-    if (bDetected && PE.isSignaturePresent(0, PE.getSize(), "540068006900730020006D00650073007300610067006500200077006F006E002700740020006100")) {
-        sVersion = "demo";
-    }
-
-    if (bDetected && !PE.isSectionNamePresent(".alien")) {
-        sOptions = "modified";
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:752c2b70498ebb2366ae992b615e9f6d90b0beb486139d6beb7b6d70ad00317b
+size 727

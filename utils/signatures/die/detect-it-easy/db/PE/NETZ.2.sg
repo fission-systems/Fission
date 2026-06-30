@@ -1,11 +1,3 @@
-// Detect It Easy: detection rule file
-
-meta("packer", ".NETZ");
-
-function detect() {
-    if (PE.isNetObjectPresent("NetzStarter") && PE.isSignatureInSectionPresent(0, "00'NetzStarter'00'netz'00")) {
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:89eb6c2ead628cda6bf6a021c7195a1f2b5badad1a43e790f80be159943847df
+size 255

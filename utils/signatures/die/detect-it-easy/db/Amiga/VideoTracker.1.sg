@@ -1,13 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: hypn0 <hypn0@mail.ru>
-
-// https://home.deds.nl/~pvc70/vtindex.htm
-meta("tool", "VideoTracker");
-
-function detect() {
-    if (Amiga.compareEP("6000$$$$93c92c78....4eae....284070..4aac....66..41ec....2c78")) {
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:b3a6a71c77f37a1181165f1b3fbbef2191c988e0079867b7b060e0aa8c6e4a34
+size 313

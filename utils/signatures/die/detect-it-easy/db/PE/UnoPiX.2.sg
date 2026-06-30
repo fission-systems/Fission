@@ -1,25 +1,3 @@
-// Detect It Easy: detection rule file
-
-meta("scrambler", "UnoPiX");
-
-function detect() {
-    if (PE.compareEP("60E8070000006168........C383042418C3")) {
-        sVersion = "0.75";
-        bDetected = true;
-    }
-
-    if (PE.nLastSection >= 2) {
-        var nVirtualSize = PE.section[PE.nLastSection].VirtualSize;
-        if (nVirtualSize == 0x1000) {
-            if (nVirtualSize == PE.section[PE.nLastSection].FileSize) {
-                var nFlags = PE.section[PE.nLastSection].Characteristics;
-                if (nFlags == 0xe0000040 && !PE.section[PE.nLastSection].Name && PE.getMajorLinkerVersion() == 0 && PE.getMinorLinkerVersion() == 0) {
-                    sVersion = "0.94";
-                    bDetected = true;
-                }
-            }
-        }
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:e88391e441506d0b16c78a4345a0e81cb8576310d969693977ccd04777681486
+size 821

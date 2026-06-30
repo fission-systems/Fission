@@ -1,12 +1,3 @@
-// Detect It Easy: detection rule file
-
-meta("tool", "UPX lock");
-
-function detect() {
-    if (PE.compareEP("60E8000000005D81ED........60E82B030000")) {
-        sVersion = "1.0-1.2";
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:5e2523f41635946b2853475928fbc3bcb64f3cb10bc2caec7c54a42ec3017a4e
+size 238

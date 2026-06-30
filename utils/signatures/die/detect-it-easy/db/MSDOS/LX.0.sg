@@ -1,11 +1,3 @@
-// Detect It Easy: detection rule file
-
-meta("type", "LX");
-
-function detect() {
-    if (MSDOS.isLX()) {
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:17ee67be74305d7f9f07417b706337b7eea0acbdc0e1208a32b10ddde5a564a1
+size 167

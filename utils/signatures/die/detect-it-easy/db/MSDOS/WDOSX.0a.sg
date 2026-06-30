@@ -1,14 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: Jason Hood <jadoxa@yahoo.com.au>
-
-meta("extender", "WDos/X");
-
-function detect() {
-    if (MSDOS.compare("'WDOSX'", 52)) {
-        sVersion = MSDOS.getString(58, 4);
-        sOptions = "1996-1999 by Michael Tippach";
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:da4425ed600fda7d1242c5b2f702ad3c4d3313640e90c55322d1fc51e0486f5e
+size 332

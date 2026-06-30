@@ -1,19 +1,3 @@
-// Detect It Easy: detection rule file
-
-// Author: DosX
-// E-Mail: collab@kay-software.ru
-// GitHub: https://github.com/DosX-dev
-// Telegram: @DosX_dev
-
-meta("protector", "AndroidRepublic");
-
-function detect() {
-    if (APK.isArchiveRecordPresentExp(APK.isArchiveRecordPresent(/assets\/androidrepublic\.org\/(.*)\.png/))) {
-        sVersion = "VIP";
-        bDetected = true;
-    } else if (APK.isArchiveRecordPresentExp("assets/emt.androidrepublic/config.png")) {
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:ec699ced1218dd951b0d540515871d7e72ba20252542ae2d7653e61591b79bf2
+size 520

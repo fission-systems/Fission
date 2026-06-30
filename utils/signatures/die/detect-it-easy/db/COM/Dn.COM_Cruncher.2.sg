@@ -1,13 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: hypn0 <hypn0@mail.ru>
-
-meta("packer", "Dn.COM Cruncher");
-
-function detect() {
-    if (Binary.compare("33dbb5..8bf98be9be....57f3a4bf....c3")) {
-        sVersion = "1.2";
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:00b8a4d3704f5bb96a418765bb32eaef62615ac07a3f94bb996495ea8d73c45e
+size 276

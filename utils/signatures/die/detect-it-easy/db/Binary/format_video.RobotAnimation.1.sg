@@ -1,13 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: BJNFNE <bjnfne@web.de>
-
-// https://wiki.multimedia.cx/index.php/Robot_Animation
-meta("format", "Robot Animation");
-
-function detect() {
-    if (Binary.compare("1600534f4c00")) {
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:df711f17bbabc4ad6d4e59d0462ea84aa19cc2a2e67e6d5a1edb96aeef3c883a
+size 283

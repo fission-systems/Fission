@@ -1,13 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: BJNFNE <bjnfne@web.de>
-
-// https://en.wikipedia.org/wiki/Video_for_Windows
-meta("library", "Video for Windows (VFW)");
-
-function detect() {
-    if (PE.isLibraryPresent("MSVFW32.dll")) {
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:92e8a5cee714265f26fb23e57fb72335d97c3d797dddc13d8098869ff4c9d237
+size 291

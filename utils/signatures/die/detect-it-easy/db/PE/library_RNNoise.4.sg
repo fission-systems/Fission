@@ -1,20 +1,3 @@
-// Detect It Easy: detection rule file
-
-// Author: DosX
-// E-Mail: collab@kay-software.ru
-// GitHub: https://github.com/DosX-dev
-// Telegram: @DosX_dev
-
-// https://github.com/xiph/rnnoise
-meta("library", "RNNoise Noise Suppressor");
-
-function detect() {
-    if (PE.isLibraryPresentExp(/rnnoise/i) || PE.isFunctionPresent("rnnoise_init")) {
-        bDetected = true;
-    } else if (PE.isExportFunctionPresentExp(/^rnnoise_/)) {
-        sOptions = "static"; // EAT
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:4c8e595cc91718a1bc46a86e4618d6c41bbf5821ff39dea3bf0a0a5c0a68c4f9
+size 518

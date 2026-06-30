@@ -1,17 +1,3 @@
-// Detect It Easy: detection rule file
-// sign by A.S.L - asl@onet.eu
-
-// https://github.com/ximerus/Kryptonite
-meta("cryptor", "Kryptonite");
-
-function detect() {
-    nOffset = 0x0093;
-    if (PE.compareEP("558BEC")) {
-        if (PE.compare("'Krypton'", nOffset)) {
-            sVersion = "0.1-0.2";
-            bDetected = true;
-        }
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:5ae603d0f8ee2bb41ae7f82cad446803cd9e8d362adb1338b4eb014b6ec70733
+size 384

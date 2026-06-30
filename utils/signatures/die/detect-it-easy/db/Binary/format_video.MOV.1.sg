@@ -1,18 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: BJNFNE <bjnfne@web.de>
-
-// https://en.wikipedia.org/wiki/QuickTime_File_Format
-meta("format", "QuickTime Movie");
-
-function detect() {
-    if (Binary.compare("........'moov'")) {
-        var codec = Binary.getString(11, 5).trim();
-
-        if (/^[a-z]{5}$/.test(codec)) {
-            sOptions = codec;
-            bDetected = true;
-        }
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:435bbc8935c2585c9dbd41fd97b012ffd46d038e240dee3fe190b28b4cc76255
+size 421

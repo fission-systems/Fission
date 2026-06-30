@@ -1,28 +1,3 @@
-// Detect It Easy: detection rule file
-
-meta("packer", "DxPack");
-
-function detect() {
-    if (PE.compareEP("60E8........5D8BFD81ED........2BB9........81EF........83BD..........0F84")) {
-        switch (PE.readByte(PE.getEntryPointOffset() + 32)) {
-            case 0xB9: sVersion = "1.0"; break;
-            case 0xBD: sVersion = "0.86"; break;
-        }
-        bDetected = true;
-    } else if (PE.compareEP("EB03C20C00558BEC81EC00100000B80000....B900100000BA0000....89")) {
-        sVersion = "1.0";
-        bDetected = true;
-    }
-
-    var coderpubSection = PE.section["coderpub"];
-
-    if (bDetected && !coderpubSection) {
-        sOptions = "modified";
-    } else if (!bDetected && coderpubSection) {
-        if (PE.compareEP("558BEC") || PE.compareEP("880D........CC")) {
-            bDetected = true;
-        }
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:a8b055d1a51c5243a0d6a45a79f6672c87721571121d3ffb1c64a416c963db58
+size 875

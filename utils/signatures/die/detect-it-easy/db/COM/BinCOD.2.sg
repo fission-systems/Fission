@@ -1,14 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: hypn0 <hypn0@mail.ru>
-
-meta("protector", "BinCOD");
-
-function detect() {
-    if (Binary.compare("e9$$$$60fa6a000726ff36....26ff36....26c706........26c706........fbb9....bf....03f9ac")) {
-        sVersion = "1.1";
-        sOptions = "by SierraMan";
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:d5e3b4863f64281672da0a44b335731a54d5a549216fcc3e33acc09c0833aeea
+size 353

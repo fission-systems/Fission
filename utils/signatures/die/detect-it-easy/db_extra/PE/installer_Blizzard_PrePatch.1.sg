@@ -1,20 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: hypn0 <hypn0@mail.ru>
-
-meta("installer", "Blizzard PrePatch");
-
-function detect() {
-    if (PE.compareEP("558bec6a..68........68........64a100000000506489250000000083ec..5356578965")) {
-        if (PE.compareOverlay("'MPQ'1a")) {
-            sVersion = "2.XX";
-            bDetected = true;
-        }
-    } else if (PE.compareEP("e8$$$$$$$$e8$$$$$$$$a1........85c075..538b1d........5657be........bf........8d6424")) {
-        if (PE.compareOverlay("'MPQ'1a")) {
-            sVersion = "2.70";
-            bDetected = true;
-        }
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:ae8f8a8fcb7409fec2b2bdcb1377a9aa5f0ee7d318e376642f42a061224d4f32
+size 612

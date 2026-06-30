@@ -1,8 +1,3 @@
-<callfixup name="__rust_try">
-    <target name="__rust_try"/>
-    <pcode>
-	<body><![CDATA[
-	    call [RAX];
-	    ]]></body>
-    </pcode>
-</callfixup>
+version https://git-lfs.github.com/spec/v1
+oid sha256:de72cd5d3329145a514a141d80793b763f371175754e2a0834a1bb4f1a0b256e
+size 150

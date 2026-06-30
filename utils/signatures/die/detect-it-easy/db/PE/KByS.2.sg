@@ -1,21 +1,3 @@
-// Detect It Easy: detection rule file
-
-meta("packer", "KByS");
-
-function detect() {
-    if (PE.compareEP("60E8000000005E83EE0A8B0603C28B08894EF383EE0F56528BF0ADAD03C28BD86A04BF00100000")) {
-        sVersion = "0.28b";
-        bDetected = true;
-    } else if (PE.compareEP("68........E801000000C3C3608B7424248B7C2428FCB28033DBA4")) {
-        sVersion = "0.28";
-        bDetected = true;
-    } else if (PE.compareEP("B8........BA........03C2FFE0........60E800000000")) {
-        sVersion = "0.28";
-        bDetected = true;
-    } else if (PE.compareEP("68........90b8........c3608b7424..8b7c24")) {
-        sVersion = "0.28b";
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:f40f2e2b5c012d4eb7edfa04bd98864d14256e41ab2b1f1316ace11362538c0f
+size 681

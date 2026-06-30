@@ -1,18 +1,3 @@
-// Detect It Easy: detection rule file
-
-meta("library", "QT");
-
-function getVersion() {
-    var current = MACH.getLibraryCurrentVersion("QtCore");
-
-    return ((current >> 16) & 0xFF) + "." + ((current >> 8) & 0xFF) + "." + (current & 0xFF);
-}
-
-function detect() {
-    if (MACH.isLibraryPresent("QtCore")) {
-        sVersion = getVersion();
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:265b101d89bfe514ae1540b2e19aacec8b9c483b5b0eacd8f328e9e78e8a8025
+size 410

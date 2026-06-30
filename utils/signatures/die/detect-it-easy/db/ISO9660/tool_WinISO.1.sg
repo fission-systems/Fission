@@ -1,13 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: BJNFNE <bjnfne@web.de>
-
-// https://winiso.com/
-meta("tool", "WinISO");
-
-function detect() {
-    if (ISO9660.compare("'WinISO software'", 0x0000813e)) {
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:abdadd5a9e3215e668c542eca415bdcdbbc41513af24eec8f5578b18fa13def6
+size 257

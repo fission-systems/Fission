@@ -1,12 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: hypn0 <hypn0@mail.ru>
-
-meta("protector", "anti-tracing add-on");
-
-function detect() {
-    if (MSDOS.compareEP("fc33d28ec2bf....abab8ccb33ff81eb....53bb....531e0733dbcb")) {
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:1c3d2210f044f10cfa1e45ab8b8ac88a4e8e80f8cb1b6dd76ce7e229c7963b66
+size 278

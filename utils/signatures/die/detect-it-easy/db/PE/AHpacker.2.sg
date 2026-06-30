@@ -1,16 +1,3 @@
-// Detect It Easy: detection rule file
-
-meta("packer", "AHpacker");
-
-function detect() {
-    const epackSectionName = "!EPack";
-
-    if (PE.compareEP("6068........B8........FF1068........50B8........FF1068........6A40FFD08905") &&
-        PE.section[0].Name !== epackSectionName &&
-        PE.section[PE.nLastSection].Name !== epackSectionName) {
-        sVersion = "0.1";
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:30b46e419b190f3b221d25abe14722394f82593e5c1d8bdd45b6bfa9c58c8d6e
+size 443

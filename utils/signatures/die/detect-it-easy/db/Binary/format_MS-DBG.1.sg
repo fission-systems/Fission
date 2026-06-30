@@ -1,16 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: LinXP
-// Status: WIP
-
-// https://github.com/libyal/libmdmp/blob/main/documentation/Minidump%20(MDMP)%20format.asciidoc
-meta("format", "Windows Minidump (.DMP)");
-
-function detect() {
-    if (Binary.getSize() >= 9) {
-        if (Binary.compare("'MDMP'93A7")) {
-            bDetected = true;
-        }
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:85ea0c6ff8d42439c1b77b86e6ff04c384acb3d1479a340d3098bf89152c8ed0
+size 379

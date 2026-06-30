@@ -1,18 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: BJNFNE <bjnfne@web.de>
-
-// https://www.3dbrew.org/wiki/SHBIN
-meta("format", "Shader Binary");
-
-function detect() {
-    if (Binary.compare("'DVLB'")) {
-        var dvlp = Binary.getString(12, 4).trim();
-
-        if (/^[A-Z]{4}/.test(dvlp)) {
-            if (X.isVerbose()) sOptions = dvlp;
-            bDetected = true;
-        }
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:987f4e3548d6e82f86114c82380d7a1ee839ed8057286de8ed74f95ba03b19c4
+size 408

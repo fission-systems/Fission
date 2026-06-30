@@ -1,14 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: BJNFNE <bjnfne@web.de>
-
-// https://learn.microsoft.com/en-us/answers/questions/4116358/gamingroot-and-xboxgames-keeps-generating-even-if
-meta("format", "GamingRoot");
-
-function detect() {
-    if (Binary.compare("52 47 42 58 01 00 00 00 58 00 62 00 6F 00 78 00 47 00 61 00 6D 00 65 00 73 00 00 00")) {
-        sVersion = "Xbox Games";
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:5fec0ebc8bf49fa7e0c2cbe6bd705fb2d21ee2f0d25924bc62d8b555a34a24dc
+size 439

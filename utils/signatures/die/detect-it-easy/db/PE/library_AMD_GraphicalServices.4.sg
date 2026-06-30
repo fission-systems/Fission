@@ -1,13 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: BJNFNE <bjnfne@web.de>
-
-// https://gpuopen.com/amd-gpu-services-ags-library/
-meta("library", "AMD Graphical Services");
-
-function detect() {
-    if (PE.isLibraryPresentExp(/^amd_ags_x(86|64)/i)) {
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:568d83f246f3ec1a8a204fcdec7aec671ccd07ea7e514549d4f801ce68925806
+size 302

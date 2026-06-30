@@ -1,16 +1,3 @@
-// Detect It Easy: detection rule file
-
-// Author: DosX
-// E-Mail: collab@kay-software.ru
-// GitHub: https://github.com/DosX-dev
-// Telegram: @DosX_dev
-
-meta("library", "IL2CPP");
-
-function detect() {
-    bDetected = APK.isArchiveRecordPresent("lib/armeabi-v7a/libil2cpp.so");
-
-    sLang = "C#";
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:1c3a7a1e905ebdafb8e36fb1b3a9b228262ff678e72c9be008880a2a6105d85a
+size 319

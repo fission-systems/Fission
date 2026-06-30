@@ -1,32 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: hypn0 <hypn0@mail.ru>
-
-meta("protection", "Unikey/Activator dongle reference");
-
-function detect() {
-    // I'm (adoxa) guessing these don't occur in the overlay, so don't search it (avoid wasting time on big installers).
-    var nSize = PE.isOverlayPresent() ? PE.getOverlayOffset() : PE.getSize();
-
-    if (nSize > 50000000)
-        nSize = 50000000;
-
-    if (PE.findString(0, nSize, "SSIVDDP.DLL") !== -1 ||
-        PE.findSignature(0, nSize, "5C004400650076006900630065005C005300530049005000440044005000") !== -1) { // L"\\Device\\SSIPDDP"
-        bDetected = true;
-    } else {
-        var nOffset = 0;
-        var foundOffset;
-        while (true) {
-            foundOffset = PE.findString(nOffset, nSize - nOffset, "\\.\\");
-            if (foundOffset === -1) break;
-            nOffset = foundOffset + 4;
-            if (PE.compare("'SSIPDDP'", nOffset) ||
-                PE.compare("'PIPE\\SSINetPipe'", nOffset)) {
-                bDetected = true;
-                break;
-            }
-        }
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:86796d497b6a6c5338f5cf97d4298be6262d77073433a223b0d949eaf9a9cbc1
+size 1087

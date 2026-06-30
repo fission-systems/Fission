@@ -1,14 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: BJNFNE <bjnfne@web.de>
-
-// https://www.psdevwiki.com/ps3/PS2_Savedata
-meta("format", "PS2 Memory Card");
-
-function detect() {
-    if (Binary.compare("'Sony PS2 Memory Card Format 1.2.0.0'000000000000020200100000")) {
-        sVersion = "1.2.0.0";
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:4d40a8893bee28fc794845c6c7259923f78c708f8c737219952e1a8f55a496d8
+size 352

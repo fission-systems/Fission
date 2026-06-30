@@ -1,11 +1,3 @@
-// Detect It Easy: detection rule file
-
-meta("tool", "SingleJar");
-
-function detect() {
-    if (JAR.getManifestRecord("Created-By") == "singlejar") {
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:4794ea3fe7c68bae6d9515dbf34f371b048eb6b3a08159de6a1854a4a78dd5a1
+size 206

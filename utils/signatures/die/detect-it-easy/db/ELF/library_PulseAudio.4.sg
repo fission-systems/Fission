@@ -1,13 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: BJNFNE <bjnfne@web.de>
-
-// https://www.freedesktop.org/wiki/Software/PulseAudio/
-meta("library", "PulseAudio");
-
-function detect() {
-    if (ELF.isLibraryPresent("libpulse.so.0")) {
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:4791fa49cd91f5482506d0256e27a3fa584828134eb4785d17aff37ac7298cef
+size 287

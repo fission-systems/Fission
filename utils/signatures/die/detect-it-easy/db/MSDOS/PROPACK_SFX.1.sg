@@ -1,13 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: Jason Hood <jadoxa@yahoo.com.au>
-
-meta("sfx", "PROPACK SFX");
-
-function detect() {
-    if (MSDOS.compareEP("558bec83ec..8c5e..e8....be....e8....b80030cd21ba....0e3c..72..a1....8ec033ff33c0b9....f2aeae75..fec0af75..5a8bd7061f")) {
-        sVersion = "2.18";
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:a7137c495c803b3cced5232f4a4fa725d8dfcfc0038835b5a31934a25ed2bfc8
+size 362

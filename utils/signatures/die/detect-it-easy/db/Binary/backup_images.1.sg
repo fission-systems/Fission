@@ -1,27 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: hypn0 <hypn0@mail.ru>
-
-meta("format", "");
-
-function detect() {
-    if (Binary.compare("7ca0932f")) {
-        bDetected = true;
-        sName = "R-Studio image";
-        if (Binary.compare("78da", 0x38) != -1) {
-            sOptions = "compressed (zlib)";
-        }
-    } else if (Binary.compare("'$CAN'")) {
-        switch (Binary.readByte(4)) {
-            case 0xe4:
-                sOptions = "First or single file";
-                break;
-            case 0x60:
-                sOptions = "next file";
-                break;
-        }
-        bDetected = true;
-        sName = "Norton Ghost image";
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:2d49365fd3e53d530e91a8e4eac1de8257586f51209f8cc699e161857939455b
+size 683

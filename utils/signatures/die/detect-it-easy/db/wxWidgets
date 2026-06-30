@@ -1,15 +1,3 @@
-// Detect It Easy: DiE-JS framework file
-// Don't change anything unless you're sure about what you're doing
-
-// wxWidgets is tested twice - as a library and as a compiler (to distinguish C
-// from C++).  Detect it once here.
-
-var aWx;
-if (typeof aWx === "undefined") {
-    aWx = PE.isLibraryPresentExp(/^wx.*?(univ)?(\d+)(u)?(d)?/i);
-    if (!aWx) {
-        if (PE.isResourceNamePresent("WXWINDOWMENU")) {
-            aWx = 1;
-        }
-    }
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:300b86f717c1fa30d82c9a76ae63a58245cfc5abe46e88356efb51ee8e18a49d
+size 459

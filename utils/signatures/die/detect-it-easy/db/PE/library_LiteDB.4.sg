@@ -1,17 +1,3 @@
-// Detect It Easy: detection rule file
-
-// Author: DosX
-// E-Mail: collab@kay-software.ru
-// GitHub: https://github.com/DosX-dev
-// Telegram: @DosX_dev
-
-// https://github.com/mbdavid/litedb
-meta("library", "LiteDB");
-
-function detect() {
-    if (PE.isNetObjectPresent("LiteDB")) {
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:e19bc912401c52c543c67b326f4679bf60c38e85e3687b498b58d19ce4e646dc
+size 336

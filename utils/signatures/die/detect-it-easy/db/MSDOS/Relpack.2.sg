@@ -1,14 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: hypn0 <hypn0@mail.ru>
-
-meta("packer", "Relpack");
-
-function detect() {
-    if (MSDOS.compareEP("eb$$2e8c1e....2e8c06....8cc383c3..8cc88ed8be....fcad3d........ad3d........03c38ec0ad")) {
-        sVersion = "1.0";
-        sOptions = "by TurboPower Software";
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:3591fc740954110b1e5922496ddbc6218534e86eb6ed6c1511930fc139c50077
+size 372

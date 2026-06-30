@@ -1,12 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: hypn0 <hypn0@mail.ru>
-
-meta("protector", "CEPexe");
-
-function detect() {
-    if (MSDOS.compareEP("8cdd0e070e1fbf....be....b9....fcf3a41f5f8f..8f....8f....8c....8f....8f....595f5e8cc88ec08ed8ea")) {
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:b1b4c95b6175157d94bd33a720abe69c620bdade0cc874c0a904996c0d0f6fd9
+size 311

@@ -1,21 +1,3 @@
-// Detect It Easy: detection rule file
-
-// Author: DosX
-// E-Mail: collab@kay-software.ru
-// GitHub: https://github.com/DosX-dev
-// Telegram: @DosX_dev
-
-// https://www.softpedia.com/get/Security/Encrypting/ExeShield.shtml
-meta("protector", "ExeShield");
-
-function detect() {
-    if (PE.compareEP("E8040000008360EB0C5DEB05") && PE.compareOverlay("85c0") && PE.isRichSignaturePresent() && !PE.getNumberOfImports()) {
-        bDetected = true;
-
-        if (!PE.isSectionNamePresent(".shield")) {
-            sOptions = "modified";
-        }
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:d51d7284a509b06d564e904861f39b8eddb17bd3a3c20bec69f607a1e1e3f5e1
+size 567

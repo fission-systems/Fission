@@ -1,13 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: BJNFNE <bjnfne@web.de>
-
-// https://wiki.scummvm.org/index.php?title=Coktel_Vision
-meta("installer", "Coktel Vision");
-
-function detect() {
-    if (NE.compareOverlay("65000300ea010400fa0c0300e6010400")) {
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:5c946fefa51217ad75e05f87d472b3680ec81d6abe010571b343fe0f2468a8d7
+size 309

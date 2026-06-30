@@ -1,14 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: hypn0 <hypn0@mail.ru>
-
-meta("packer", "MSLite");
-
-function detect() {
-    if (MSDOS.compareEP("538cd315....8beceb$$b8....ffe0")) {
-        sVersion = "2.3";
-        sOptions = "1998 by A.Cheng //Mercury Soft";
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:83a2fa97b61037dfa14d59aee612c7e84045c5e84f253555df776bae57286667
+size 325

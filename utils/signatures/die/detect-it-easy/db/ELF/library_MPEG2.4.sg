@@ -1,13 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: BJNFNE <bjnfne@web.de>
-
-// https://libmpeg2.sourceforge.io/
-meta("library", "MPEG2");
-
-function detect() {
-    if (ELF.isLibraryPresent("libmpeg2.so.0")) {
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:29db57b1d9711565569ff0253890955ab0b2adddc6c486cdf156993641424041
+size 261

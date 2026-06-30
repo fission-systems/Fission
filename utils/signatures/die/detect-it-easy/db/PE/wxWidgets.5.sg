@@ -1,31 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: Jason Hood <jadoxa@yahoo.com.au>
-
-meta("library", "wxWidgets");
-
-includeScript("wxWidgets");
-
-function detect() {
-    if (aWx == 1) {
-        sOptions = "static";
-        bDetected = true;
-    } else if (aWx) {
-        sVersion = (aWx[2] / 10).toFixed(1);
-
-        if (aWx[1]) {
-            sOptions = "universal";
-        }
-
-        if (aWx[3]) {
-            sOptions = sOptions.append("unicode");
-        }
-
-        if (aWx[4]) {
-            sOptions = sOptions.append("debug");
-        }
-
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:45acbece6b51f9ebbd98c5154e4bcadc7e2cdc0484b06df375a19affa385f7da
+size 627

@@ -1,13 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: BJNFNE <bjnfne@web.de>
-
-// https://wiki.scummvm.org/index.php/SCUMM/Technical_Reference/Sound_resources#v5-v6_-_MONSTER.SOU
-meta("audio", "SOU");
-
-function detect() {
-    if (Binary.compare("'SOU'2000000000")) {
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:ac0b20f53795c79e710426bae3a6962ac12ad6852d71993cb486b2a581c78bb8
+size 317

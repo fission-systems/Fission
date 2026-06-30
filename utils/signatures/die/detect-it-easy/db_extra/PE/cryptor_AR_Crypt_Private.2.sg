@@ -1,11 +1,3 @@
-// Detect It Easy: detection rule file
-
-meta("cryptor", "AR Crypt Private");
-
-function detect() {
-    if (PE.compareEP("b8........5033c0c3") && PE.compareEP("b8########6033db33c9b8........3d........74")) {
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:654f515ddc888d026921432f3334f3ebe540b0cd812f7267d2ad3bc7fb08646b
+size 261

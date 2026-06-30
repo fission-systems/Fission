@@ -1,14 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: hypn0 <hypn0@mail.ru>
-
-meta("protector", "PACKWIN");
-
-function detect() {
-    if (MSDOS.compareEP("8cc0fa8ed0bc....fb060e1f2e8b0e....8bf14e8bfe8cdb2e031e....8ec3fdf3a453b8....50cb")) {
-        sVersion = "1.0";
-        sOptions = "by Yellow Rose";
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:0378a167e33efb4736d93fb2d6e682f4d8dce00f975c9023a91b72dfc4fe1d4f
+size 363

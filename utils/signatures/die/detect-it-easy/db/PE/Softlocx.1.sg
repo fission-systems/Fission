@@ -1,13 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: hypn0 <hypn0@mail.ru>
-
-meta("protection", "Softlocx");
-
-function detect() {
-    if (PE.compareEP("eb$$55e8000000005d81ed........8bc555609c2b85........8985........ff74")) {
-        sVersion = "6.0";
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:0722a97f523692686e2c607b9c305b3eec65a9b32db0d1b90db7c4ee8912f748
+size 312

@@ -1,15 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: A.S.L <asl@onet.eu>
-// SIGNATURE CREATED : 2023.10.02
-
-meta("installer", "SQX Archive Installer 2002");
-
-function detect() {
-    var dataSection = PE.section[".data"];
-
-    if (PE.compareEP("558bec83ec44") && dataSection && PE.findString(dataSection.FileOffset, dataSection.FileSize, "SFX kann nicht gestartet werden") != 1) {
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:b918bdf4ada71f95371047b9a6f51590350680aa629b0fbe317f0238ef0a3402
+size 432

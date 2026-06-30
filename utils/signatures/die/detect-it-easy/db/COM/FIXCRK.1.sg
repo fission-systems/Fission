@@ -1,13 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: hypn0 <hypn0@mail.ru>
-
-meta("converter", "FIXCRK");
-
-function detect() {
-    if (Binary.compare("'ROMANOID'32e4b0..cd104c5abf....c606......bd....e8....c606......bf....bd....e8....bd....c606......bf")) {
-        sOptions = "by romanoid";
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:6d4855abe025430360ce3169c14518038cd5efcc263bd3a0c138bbefb0865d3c
+size 351

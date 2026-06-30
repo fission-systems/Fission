@@ -1,14 +1,3 @@
-// Detect It Easy: detection rule file
-
-// Author: DosX
-// E-Mail: collab@kay-software.ru
-// GitHub: https://github.com/DosX-dev
-// Telegram: @DosX_dev
-
-meta("protector", "Medusah");
-
-function detect() {
-    bDetected = DEX.isDexItemStringPresent("Lcom/seworks/medusah/MedusahDex;");
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:de943ae830477b953d937236be352eb0cff6a5a02f1e16424c9736ff0b56606e
+size 307

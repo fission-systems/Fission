@@ -1,15 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: LinXP
-// Status: WIP
-
-meta("archive", "ZPAQ Compressed Archive (.ZPAQ)");
-
-function detect() {
-    if (Binary.getSize() >= 9) {
-        if (Binary.compare("'7kSt'") && Binary.compare("'zPQ'", 0x0D)) {
-            bDetected = true;
-        }
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:ce337cd2cc9217e4f5b403e0925f0fc56cbdb88386ce7081bb4e52fc70651272
+size 320

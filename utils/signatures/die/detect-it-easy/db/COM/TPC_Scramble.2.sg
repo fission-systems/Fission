@@ -1,12 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: hypn0 <hypn0@mail.ru>
-
-meta("protector", "TPC Scramble");
-
-function detect() {
-    if (Binary.compare("e9$$$$b0..bb....5351b9....2e3007fec043e2..bb....c707....c647....33c033db59c3")) {
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:1e863b6354b552cca83b02472a808c616e56afc339960482548492d63ddb13e0
+size 290

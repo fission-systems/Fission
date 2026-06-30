@@ -1,13 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: hypn0 <hypn0@mail.ru>
-
-meta("protector", "Anti-hack encryption system");
-
-function detect() {
-    if (MSDOS.compareEP("eb$$bd....33c08ec026c706........268c0e....8b46..26a3....268c0e....0e07")) {
-        sOptions = "by Rezaul Kabir //Shuvro";
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:d5d65b59dd39e967511e2f3e6c54a310b91b93ca8db9dd4e6a38a573aee3876a
+size 347

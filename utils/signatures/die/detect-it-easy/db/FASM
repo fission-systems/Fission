@@ -1,12 +1,3 @@
-// Detect It Easy: DiE-JS framework file
-// Don't change anything unless you're sure about what you're doing
-
-// FASM's PE DOS stub is tested twice - once to detect FASM as a compiler and
-// again to prevent being detected as a linker (FASM has no linker).  Detect it
-// once here.
-
-var bFASM;
-
-if (!bFASM && PE) {
-    bFASM = PE.compare("'MZ'80000100000004001000FFFF00004001000000000000400000000000000000000000000000000000000000000000000000000000000000000000800000000E1FBA0E00B409CD21B8014CCD21'This program cannot be run in DOS mode.\r\n$'0000000000000000'PE'0000");
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:b8362a6855308cf7c1c23f5d35a259641c41c8f18d51a550bfc21681cc9fe260
+size 581

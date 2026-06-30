@@ -1,13 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: hypn0 <hypn0@mail.ru>
-
-meta("protector", "Entropy Coder");
-
-function detect() {
-    if (Binary.compare("be....bf....b9....fdf3a447fcffe7")) {
-        sOptions = "by Sergey Lukashev";
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:fb664937ff04a6b6b6235697503f6c26a4a55eda742c9d049b157e9736ac3903
+size 288

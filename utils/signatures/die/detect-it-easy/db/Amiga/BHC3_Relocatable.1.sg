@@ -1,12 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: hypn0 <hypn0@mail.ru>
-
-meta("cruncher", "BHC3 Relocatable");
-
-function detect() {
-    if (Amiga.compareEP("41fa....2028....0680........223c........2c78....4eae....2240")) {
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:02e66dc3323f3232234eeff26c8794b695355d104c48b20f50715da6191f6ca9
+size 278

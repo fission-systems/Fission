@@ -1,14 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: hypn0 <hypn0@mail.ru>
-
-meta("protector", "Tiny Xor [tDCE]");
-
-function detect() {
-    if (Binary.compare("e9$$$$fcb8....bb....b9....be....300402c386c486df46e2..be....c704....c644....33c033db33c9ffe6")) {
-        sVersion = "0.52b";
-        sOptions = "by ThE DOCTOr //DiPG";
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:22f818ce8be634799600d453a36e392b4de054d6ff735763a7e726745cc93bf3
+size 380

@@ -1,14 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: Jason Hood <jadoxa@yahoo.com.au>
-
-meta("compiler", "Pelles C")
-
-function detect() {
-    if (PE.compareEP("5589E56AFF68........68........64FF35000000006489250000000083EC0C")) {
-        bDetected = true;
-    }
-
-    sLang = "C";
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:7651b3046502345250db1fe4be477f3f79f54e6ea5623a41c10a6a1738b2617e
+size 299

@@ -1,17 +1,3 @@
-// Detect It Easy: detection rule file
-
-// Author: DosX
-// E-Mail: collab@kay-software.ru
-// GitHub: https://github.com/DosX-dev
-// Telegram: @DosX_dev
-
-// https://github.com/Microsoft/OpenAPI.NET
-meta("library", "Microsoft OpenAPI");
-
-function detect() {
-    if (PE.isNetObjectPresent("Microsoft.OpenApi")) {
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:1f4071427787f6603a6c39c6b4114b551e7898188f794afd6bf066d4ce386499
+size 365

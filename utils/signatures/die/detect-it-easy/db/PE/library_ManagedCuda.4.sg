@@ -1,17 +1,3 @@
-// Detect It Easy: detection rule file
-
-// Author: DosX
-// E-Mail: collab@kay-software.ru
-// GitHub: https://github.com/DosX-dev
-// Telegram: @DosX_dev
-
-// https://github.com/kunzmi/managedCuda
-meta("library", "ManagedCuda");
-
-function detect() {
-    if (PE.isNetObjectPresent("ManagedCuda")) {
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:a4020f1dfd3bd974b671c653215e26c80e825b6fb630afe63c27f40b23c0745b
+size 350

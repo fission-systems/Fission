@@ -1,12 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: hypn0 <hypn0@mail.ru>
-
-meta("protector", "Quadru-Lock");
-
-function detect() {
-    if (MSDOS.compareEP("9c508cda5252bb....8cc8488ed805....8ec0b9....8bf12bf38bfefdf3a44050ffd1")) {
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:91f09c4bb7a2e585c1fffe1405778f2a2e539e6583ff46b1c57295b642c56882
+size 292

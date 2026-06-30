@@ -1,20 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: hypn0 <hypn0@mail.ru>
-
-// Note: GRaphic Animation System for Professionals
-
-meta("compiler", "GRASP Interpreter");
-
-function detect() {
-    if (MSDOS.compareEP("8cd88ec0b8....8ed88c06....8c16....8926....26a1....3b06....77..e9....2b06....8cdf81c7....3bf873..8bc7")) {
-        sVersion = "4.00e - 5.0";
-        sOptions = "1993 by John Bridges";
-        bDetected = true;
-    } else if (MSDOS.compareEP("8cd88ec0b8....8ed88c06....26a1....3b06....77..e9....2b06....8cdf81c7....3bf873..8bc7")) {
-        sVersion = "4.0b";
-        sOptions = "1991 by John Bridges";
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:cb894c758b9c890bb4e1f8d4433d19d9b201ed0e2c0d8f4745dca6f3b6da0514
+size 683

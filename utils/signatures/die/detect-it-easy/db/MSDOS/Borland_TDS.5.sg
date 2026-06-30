@@ -1,14 +1,3 @@
-// Detect It Easy: detection rule file
-
-meta("debug", "Borland TLINK Symbol Table Present");
-
-function detect() {
-    if (MSDOS.compareOverlay("FB52")) {
-        sVersion = (MSDOS.readByte(MSDOS.getOverlayOffset() + 0x3) + MSDOS.readByte(MSDOS.getOverlayOffset() + 0x2) / 100);
-
-        sOptions = "TDS";
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:286a5b965bd93daf717f1b56c789747d3e445f6fa900726f508e843bd3f47fc2
+size 360

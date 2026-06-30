@@ -1,20 +1,3 @@
-// Detect It Easy: detection rule file
-
-// https://learn.microsoft.com/en-us/windows/win32/imapi/imapi-interfaces
-meta("library", "IMAPI");
-
-function detect() {
-    var sDataPreparer = ISO9660.getDataPreparerIdentifier();
-
-    if (sDataPreparer.indexOf("IMAPI ISO-9660 Formatter") !== -1) {
-        sVersion = "1.0";
-        bDetected = true;
-
-        // Check if it's Microsoft & Roxio version
-        if (sDataPreparer.indexOf("Microsoft & Roxio") !== -1) {
-            sOptions = "Microsoft & Roxio";
-        }
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:bedea1183801e16d6f6326fd5f4785d74ce79a9d891e2d051807c7f48ab491df
+size 543

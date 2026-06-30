@@ -1,13 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: hypn0 <hypn0@mail.ru>
-
-meta("packer", "RLE com-packer");
-
-function detect() {
-    if (MSDOS.compareEP("60be....bf....8b0e....f3a4be....bf....57b9....f3a4c3")) {
-        sOptions = "by NOP/PC";
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:f95541ec3e8c38b4b85bea17082e6de699f91f7a02b72f3a87335394a73fab25
+size 298

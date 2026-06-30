@@ -1,14 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: hypn0 <hypn0@mail.ru>
-
-meta("immunizer", "UniVac");
-
-function detect() {
-    if (MSDOS.compareEP("8cd02ea3....8bc42ea3....b8....8ed0b8....8be05553515257561e060e1f8cc82e2b06....2e0106....bf....268e05bf....b9....b0..f2ae")) {
-        sVersion = "1.0";
-        sOptions = "1990 by BVMsoft";
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:ccc03e2c81fa4a37577d6f9aef225d7f4a7a7a5c20b565ee82d58635794c1f81
+size 403

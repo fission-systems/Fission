@@ -1,11 +1,3 @@
-// Detect It Easy: detection rule file
-
-meta("compiler", "dexlib2");
-
-function detect() {
-    if (DEX.getMapItemsHash() == 0x0e27e776) {
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:47f440018b1587b2fd2ffbaaafe08c66c8b5db1d45658db37fc51b406982390d
+size 193

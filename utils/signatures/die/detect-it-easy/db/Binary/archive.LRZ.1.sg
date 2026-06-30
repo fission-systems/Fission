@@ -1,36 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: LinXP
-// Status: WIP
-
-meta("archive", "Long Range ZIP (.LRZ)");
-
-function detect() {
-    if (Binary.getSize() >= 9) {
-        if (Binary.compare("'LRZI'")) {
-            bDetected = true;
-            sVersion = Binary.read_uint8(0x04) + "." + Binary.read_uint8(0x05);
-
-            switch (Binary.read_uint8(0x31)) {
-                case 3: break;
-                case 4: sOption("BZIP2"); break;
-                case 5: sOption("LZO"); break;
-                case 6: sOption("LZMA"); break;
-                case 7: sOption("GZIP"); break;
-                case 8: sOption("ZPAQ"); break;
-                default: bDetected = false;
-            }
-            switch (Binary.read_uint8(0x16)) {
-                case 0: break;
-                case 1: sOption("encrypted"); break;
-                default: bDetected = false;
-            }
-            switch (Binary.read_uint8(0x15)) {
-                case 0: break;
-                case 1: sOption("md5"); break;
-                default: bDetected = false;
-            }
-        }
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:a96d3ee58a4d5e37388b8804935a7ec90e62f63fbdf29400e6353cf80fc2fc9a
+size 1106

@@ -1,13 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: BJNFNE <bjnfne@web.de>
-
-// https://director-online.dasdeck.com/buildArticle.php?id=1121
-meta("format", "Shockwave 3D");
-
-function detect() {
-    if (Binary.compare("'IFX'000800000011000000")) {
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:7834b7c0f028b431c5ef883688b96be98ec492c3c9b8e28e7362b72b8ec93233
+size 299

@@ -1,13 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: hypn0 <hypn0@mail.ru>
-
-meta("immunizer", "Oyster");
-
-function detect() {
-    if (MSDOS.compareEP("061e55565752515350e8$$$$508cc805....8ed858c3")) {
-        sVersion = "3.01 1991-95 by BEST";
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:a5f542e664f372ca0fc8e908a332888ba8b7ce02aa5119b21a4abc871e00aa18
+size 305

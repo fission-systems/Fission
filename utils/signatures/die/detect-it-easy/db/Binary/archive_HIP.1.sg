@@ -1,15 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: BJNFNE <bjnfne@web.de>
-// Used by EvilEngine games
-
-// https://heavyironmodding.org/wiki/EvilEngine/HIP_(File_Format)
-meta("archive", "HIP archive");
-
-function detect() {
-    if (Binary.compare("'HIPA'00000000")) {
-        sVersion = "HIP/HOP";
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:d3fd5e73cb19c1fd063b752093feba823bb0f480844508f94ab45532dd00e6eb
+size 350

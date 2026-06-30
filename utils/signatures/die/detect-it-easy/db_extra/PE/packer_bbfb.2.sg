@@ -1,21 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: sendersu
-/*
-If errors pls contact sendersu on cracklab.team
-*/
-
-// https://www.flashbackrecorder.com/
-
-meta("packer", "Blueberry/FLASHBACK");
-
-function detect() {
-    if (PE.findString(0, PE.getSize(), "BB FlashBack Movie") != -1) {
-        if (PE.compare("'FBPE'", PE.getSize() - 4)) {
-            bDetected = true;
-        }
-
-        sVersion = PE.getFileVersion();
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:2cea668b3def409661a0fa6809c68533d1fc43510311af8989abfdb15a63a85a
+size 447

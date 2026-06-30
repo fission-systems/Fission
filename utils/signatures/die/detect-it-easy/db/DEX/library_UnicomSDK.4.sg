@@ -1,14 +1,3 @@
-// Detect It Easy: detection rule file
-
-// Author: DosX
-// E-Mail: collab@kay-software.ru
-// GitHub: https://github.com/DosX-dev
-// Telegram: @DosX_dev
-
-meta("library", "UnicomSDK");
-
-function detect() {
-    bDetected = DEX.isDexItemStringPresent("Lcom/unicom/dcLoader/Utils;");
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:51faba5fc8605b9e161ead47cfc239f6b5825c4b709291350119aca4cc077b92
+size 302

@@ -1,13 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: LinXP
-// doc-ref:
-meta("archive", "");
-
-function detect() {
-    if (Binary.getSize() >= 9) {
-        bDetected = Binary.compare("89'LZO'000D0A1A0A");
-        sName = "LZOP compressed data";
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:4533506d639679a3bfe5d0eeadbe8d06032cb7374220f614fc9358ea453a1493
+size 269

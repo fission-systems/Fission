@@ -1,13 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: BJNFNE <bjnfne@web.de>
-
-// https://wiki.multimedia.cx/index.php/Engines/Atlas#AtMsg32.dll
-meta("library", "AtMsg32");
-
-function detect() {
-    if (PE.isLibraryPresent("AtMsg32.dll")) {
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:18de5fc7c7747278380d6158ee4bad3cfe2f284c3183978b3ac41f5c31cb4e09
+size 290

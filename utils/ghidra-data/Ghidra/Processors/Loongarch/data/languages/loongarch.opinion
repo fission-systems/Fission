@@ -1,23 +1,3 @@
-<opinions>
-
-    <constraint loader="Executable and Linking Format (ELF)" compilerSpecID="default">
-        <constraint primary="258" processor="Loongarch" size="64" variant="lp64d"
-		secondary= "0b .... .... .... .... .... .... .... .001"/>
-		
-		<constraint primary="258" processor="Loongarch" size="64" variant="lp64f"
-		secondary= "0b .... .... .... .... .... .... .... .010"/>
-		
-		<constraint primary="258" processor="Loongarch" size="64" variant="lp64d"
-		secondary= "0b .... .... .... .... .... .... .... .011"/>
-		
-		<constraint primary="258" processor="Loongarch" size="32" variant="ilp32f"
-		secondary= "0b .... .... .... .... .... .... .... .001"/>
-		
-		<constraint primary="258" processor="Loongarch" size="32" variant="ilp32f"
-		secondary= "0b .... .... .... .... .... .... .... .010"/>
-		
-		<constraint primary="258" processor="Loongarch" size="32" variant="ilp32d"
-		secondary= "0b .... .... .... .... .... .... .... .011"/>
-    </constraint>
-
-</opinions>
+version https://git-lfs.github.com/spec/v1
+oid sha256:b15b3b7169cbfe7dee8ac5b905dfb980178dfb0b35ce48c1168b297e1142a468
+size 970

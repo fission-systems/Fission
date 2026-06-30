@@ -1,14 +1,3 @@
-// Detect It Easy: detection rule file
-
-// https://www.mend.io/blog/theres-a-new-stealer-variant-in-town-and-its-using-electron-to-stay-fully-undetected/
-meta("archive", "Asar Archive (Electron)");
-
-function detect() {
-    if (Binary.getSize() >= 28) {
-        if (Binary.compare("04..............................'{\"files\":{'")) {
-            bDetected = true;
-        }
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:52089414eb40aeec58683f4476842b8bb87844ce50813cfe2e8eb8d683277559
+size 402

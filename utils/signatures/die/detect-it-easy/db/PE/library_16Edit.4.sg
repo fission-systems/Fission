@@ -1,13 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: BJNFNE <bjnfne@web.de>
-
-// http://old-dos.ru/index.php?page=files&mode=files&do=list&cat=231
-meta("library", "16Edit");
-
-function detect() {
-    if (PE.isLibraryPresent("16Edit.dll")) {
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:52144cea688d0a6a27f97d2f0639bbec95ac0870a0f98159449819eec7db7968
+size 291

@@ -1,17 +1,3 @@
-// Detect It Easy: detection rule file
-
-// Author: DosX
-// E-Mail: collab@kay-software.ru
-// GitHub: https://github.com/DosX-dev
-// Telegram: @DosX_dev
-
-// https://www.nuget.org/packages/AWSSDK.S3
-meta("library", "Amazon Simple Storage Service");
-
-function detect() {
-    if (PE.isNetObjectPresent("AWSSDK.S3")) {
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:1cc1484b91b401ab4fa6b19acbd6f2e88f61a70217fd9154ae56c72b2aed6c3a
+size 369

@@ -1,17 +1,3 @@
-// Detect It Easy: detection rule file
-
-// Author: DosX
-// E-Mail: collab@kay-software.ru
-// GitHub: https://github.com/DosX-dev
-// Telegram: @DosX_dev
-
-// https://github.com/DosX-dev/BatchToApp
-meta("compiler", "BatchToApp");
-
-function detect() {
-    bDetected = PE.isNetObjectPresent("GeneratedWithBatchToApp") && PE.isNetUStringPresent("Unable to execute.");
-
-    sLang = "Batch";
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:32e8dedcc13d38cfc171c5f517f7e1c12b3a027f32ebf63cf0b41d381421f874
+size 407

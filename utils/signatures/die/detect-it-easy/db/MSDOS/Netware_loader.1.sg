@@ -1,12 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: hypn0 <hypn0@mail.ru>
-
-meta("loader", "Netware loader");
-
-function detect() {
-    if (MSDOS.compareEP("e9$$$$b8....cd213c..72..a1....3d....75..a1....3d....75..e9$$$$1e8cc88ed833c08ec0268b1e....891e")) {
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:da75735afb8f33c67961a634d247eb8d83557cb17121562b5b92eebf5fc0f003
+size 308

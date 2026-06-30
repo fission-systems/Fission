@@ -1,14 +1,3 @@
-// Detect It Easy: detection rule file
-
-meta("sfx", "ARJ");
-
-function detect() {
-    if (MSDOS.compare("'RJSX'", 0x1c)) {
-        sVersion = "old";
-        bDetected = true;
-    } else if (MSDOS.isSignaturePresent(0, Math.min(1000, MSDOS.getSize()), "'aRJsfX'")) {
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:ff72fd406696a284dc200119b6b137d9097d1047b8248a2553aa69b8d8970560
+size 330

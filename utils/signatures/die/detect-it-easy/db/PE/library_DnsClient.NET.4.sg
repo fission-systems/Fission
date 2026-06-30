@@ -1,17 +1,3 @@
-// Detect It Easy: detection rule file
-
-// Author: DosX
-// E-Mail: collab@kay-software.ru
-// GitHub: https://github.com/DosX-dev
-// Telegram: @DosX_dev
-
-// https://github.com/MichaCo/DnsClient.NET
-meta("library", "DnsClient.NET");
-
-function detect() {
-    if (PE.isNetObjectPresent("DnsClient")) {
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:2dc51d1f8fd3547f545891e06954b7c409f92c3073830f67536c667d0790617c
+size 353

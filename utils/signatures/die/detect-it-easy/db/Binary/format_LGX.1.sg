@@ -1,19 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: BJNFNE <bjnfne@web.de>
-// Used by Lernwerkstatt 7
-
-// http://www.binblind.de/software/Logox/index.html
-meta("format", "Logox4 Speechengine");
-
-function detect() {
-    if (Binary.compare("'LGX'")) {
-        var versionNumber = Binary.getString(7, 5).trim();
-
-        if (/^[0-9]{5}/.test(versionNumber)) {
-            if (X.isVerbose()) sVersion = versionNumber;
-            bDetected = true;
-        }
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:6c16a3ae2900c9ea586c334f5b0ff28357b292cf7a29dda056c9671b033bdec6
+size 482

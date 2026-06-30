@@ -1,15 +1,3 @@
-// Detect It Easy: detection rule file
-
-meta("packer", "Software Compress");
-
-function detect() {
-    if (PE.compareEP("E9BE000000608B7424248B7C2428FCB28033DBA4B302E86D0000")) {
-        sVersion = "1.2";
-        bDetected = true;
-    } else if (PE.compareEP("E800000000812C24AA1A41005DE800000000832C246E8B855D1A4100")) {
-        sVersion = "1.4 LITE";
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:b6477b85094e5ece692e7c9215e60664f9bcbcc6a050a3693d1cae3ae490736c
+size 407

@@ -1,12 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: hypn0 <hypn0@mail.ru>
-
-meta("protector", "Novex Key Envelope");
-
-function detect() {
-    if (MSDOS.compareEP("0e1f06b8....bb....0e07cd012ea1....263947..070675..2ec606......eb..06f8b8....cd212e891e....2e8c06....b8")) {
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:136c53cb96cfcc128218b0984e42adc3f6cec773ee1bea1d5a5671fd383e791b
+size 331

@@ -1,13 +1,3 @@
-// Detect It Easy: detection rule file
-
-// https://www.softpedia.com/get/Compression-tools/32LiTE.shtml
-meta("packer", "32LiTe");
-
-function detect() {
-    if (PE.compareEP("6006FC1E07BE........6A0468........68")) {
-        sVersion = "0.03a";
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:38544cc39ef1d883bda37fb8ac9be74df0620b6da4f824f8e3101bad146d583a
+size 310

@@ -1,13 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: BJNFNE <bjnfne@web.de>
-
-// https://wiki.scummvm.org/index.php?title=List_of_games_embedded_in_Adi_4
-meta("archive", "DatPack");
-
-function detect() {
-    if (Binary.compare("07'DatPack'f75b3500e701")) {
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:557e71b86a048ff8224e473adb58417770069737ed069330e4b2bad8d01305f2
+size 307

@@ -1,14 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: hypn0 <hypn0@mail.ru>
-
-meta("protector", "COMPROTECT (RCP)");
-
-function detect() {
-    if (Binary.compare("b8....15....72..8ac4bb....50515253555657061e50b8....58eb")) {
-        sVersion = "2.10";
-        sOptions = "1988-95 by Ralph Roth";
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:d8cb8d257e6b6c78eac19736ebf351f5b98ac4c3ecc87d56ee171c36cee74e96
+size 355

@@ -1,17 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: hypn0 <hypn0@mail.ru>
-
-meta("installer", "CNetX");
-
-function detect() {
-    if (PE.compareEP("83ec..56ff15........8bf08a063c..75..8a46..4684c074..3c..75")) {
-        for (var i = 0; i < PE.resource.length && !bDetected; i++) {
-            if (PE.compare("784b0304", PE.resource[i].Offset)) {
-                sOptions = "modified ZIP";
-                bDetected = true;
-            }
-        }
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:507410b7191b807f2347591427c1b1342cbc9a29f8bab41219dd79f41000e8e6
+size 472

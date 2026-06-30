@@ -1,13 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: hypn0 <hypn0@mail.ru>
-
-meta("sfx", "PKZIP-SFX");
-
-function detect() {
-    if (NE.compareEP("fca3....891e....49890e....bb....8c1f83e4..8967..b8....508967..f7d0508967..8967..8926....508bc416509a")) {
-        sOptions = "1989-91 by PKWARE Inc.";
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:73e6b9e6b4427c549cfaf1a87144a0a8624745f7fdb994303ebef0d9de3ae033
+size 348

@@ -1,21 +1,3 @@
-// Detect It Easy: detection rule file
-
-// Author: DosX
-// E-Mail: collab@kay-software.ru
-// GitHub: https://github.com/DosX-dev
-// Telegram: @DosX_dev
-
-meta("compiler", "movfuscator");
-
-function detect() {
-    if (ELF.compareEP("A1........8B98........8B03BA........668B9400........8913A1........8B98........")) {
-        bDetected = true;
-        sVersion = "v2";
-
-        _setResult("protection", "M/o/Vfuscator", "", "");
-    }
-
-    sLang = "C";
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:0b370974197f90fe86df0396109cc9192d96bf78f9360801ecd4d2e0ae76d7f4
+size 472

@@ -1,13 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: BJNFNE <bjnfne@web.de>
-
-// https://www.openssh.com/
-meta("format", "OpenSSH Private Key");
-
-function detect() {
-    if (Binary.compare("2d2d2d2d2d424547494e20'OPENSSH PRIVATE KEY'2d2d2d2d2d")) {
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:689917fdf3fc8ed56e4269d3982fa1a3a8e8b44f13cf5e33a8447e85ff696601
+size 300

@@ -1,26 +1,3 @@
-// Detect It Easy: detection rule file
-
-// https://www.gnu.org/software/xorriso/
-meta("tool", "xorriso");
-
-function detect() {
-    var sDataPreparer = ISO9660.getDataPreparerIdentifier();
-
-    if (sDataPreparer.indexOf("XORRISO") !== -1) {
-        bDetected = true;
-
-        // Try to extract version if present
-        // Format: "XORRISO-1.5.4 2021.01.30.150001, LIBISOBURN-1.5.4, LIBISOFS-1.5.4, LIBBURN-1.5.4"
-        var nVerPos = sDataPreparer.indexOf("XORRISO-");
-        if (nVerPos !== -1) {
-            var sVersionPart = sDataPreparer.substring(nVerPos + 8),
-                nSpacePos = sVersionPart.indexOf(" ");
-
-            if (nSpacePos !== -1) {
-                sVersion = sVersionPart.substring(0, nSpacePos);
-            }
-        }
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:3de608ad512466925ac3539a6193ae298afc7ee330ecd7387f44c9dc4cb8bc5a
+size 780

@@ -1,13 +1,3 @@
-// Detect It Easy: detection rule file
-
-meta("format", "DEX");
-
-function detect() {
-    sName = DEX.getFileFormatName();
-    sVersion = DEX.getFileFormatVersion();
-    sOptions = DEX.getFileFormatOptions();
-
-    bDetected = true;
-
-    return result(); 
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:d6f0ab1226f603dc94da95dd0b810fe560b08b4eb2aba79511481d9158c6cd02
+size 268

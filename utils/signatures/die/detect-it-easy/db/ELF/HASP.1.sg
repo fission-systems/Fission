@@ -1,28 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: Hand Mill
-/*
-If errors pls contact HandMill on exelab.ru
-*/
-
-meta("protector", "HASP");
-
-function detect() {
-    if (ELF.getNumberOfSections() == 2) {
-        if (ELF.isSectionNamePresent("protect") && (ELF.getSectionFileSize(0) == 0)) {
-            var nOffset = ELF.getProgramFileOffset(3);
-            var nSize = ELF.getProgramFileSize(3);
-            if (ELF.findString(nOffset, nSize, "hasp") != -1) {
-                bDetected = true;
-            } else {
-                var nOffset = ELF.getProgramFileOffset(1);
-                var nSize = ELF.getProgramFileSize(1);
-                if (ELF.findString(nOffset, nSize, "hasp") != -1) {
-                    bDetected = true;
-                }
-            }
-
-        }
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:2addeaa045aacf5d37bef2186ed4410ea692dabeb05b43f29430908063ed5ad1
+size 829

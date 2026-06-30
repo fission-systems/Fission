@@ -1,12 +1,3 @@
-// Detect It Easy: detection rule file
-// Made by KDSS-Research
-
-meta("protector", "PwdProtect");
-
-function detect() {
-    if (PE.isSectionNamePresent(".pwdprot")) {
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:3e89abca3af0f432b5fd7041b2b83568cd29e3c69e80cc86e60787ee544e09d3
+size 221

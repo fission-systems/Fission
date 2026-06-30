@@ -1,14 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: hypn0 <hypn0@mail.ru>
-
-meta("packer", "AVPACK");
-
-function detect() {
-    if (Binary.compare("eb$$8cda0316....3916....73..b409ba....cd21c3")) {
-        sVersion = "1.22";
-        sOptions = "Andrei Volkov";
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:f9d35f6ac19a88859cd87c6dbe189043a8c72e72686caaf74be4d28644a31bbc
+size 322

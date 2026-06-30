@@ -1,17 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: BJNFNE <bjnfne@web.de>
-
-// https://en.wikipedia.org/wiki/Public-key_cryptography
-meta("format", "SSH Public Key");
-
-function detect() {
-    if (Binary.compare("'ssh-ed25519'20")) {
-        sOptions = "ed25519";
-        bDetected = true;
-    } else if (Binary.compare("'ssh-rsa'20")) {
-        sOptions = "RSA";
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:0abb12a828b6921957bd69cc00e050bb9a953a7e05d3ca443b5be16a58a749b2
+size 416

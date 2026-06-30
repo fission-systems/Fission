@@ -1,14 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: hypn0 <hypn0@mail.ru>
-
-meta("cryptor", "Anti-Lamer Cryptor");
-
-function detect() {
-    if (Binary.compare("e9$$$$fa8cd3ba....8ed233d28ed38bdafb33c08ec026f716....eb")) {
-        sVersion = "1.0";
-        sOptions = "1999 by Ozzman //iHC";
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:b1a0953dfd623ffedc11dfd9281fdf71e5e489f7d99c2adfcb7b38171499fd89
+size 343

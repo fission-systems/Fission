@@ -1,15 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: Kaens (TG @kaens)
-
-meta("image", "Zlib-packed BMP file (.ZBM)");
-
-function detect() {
-
-    // found in ex. Snails for Palm OS, .zbm are simply zlib archives at offset 0x10 of uncompressed bitmap images
-    if (X.c("'ZBMP'") && X.c("78DA", 0x10) && (w = X.U32(4)) && w < 0x10000 && (h = X.U32(8)) && h < 0x10000) {
-        bDetected = true;
-        sOptions = w + 'x' + h; //if(n=X.U32(0xC) sOption(n,'x'))
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:f2ff0c20549143b88bbf1420d346da31301e6abca34cc7d3edbdc49d275ab4bc
+size 486

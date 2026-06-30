@@ -1,17 +1,3 @@
-// Detect It Easy: detection rule file
-
-// Author: DosX
-// E-Mail: collab@kay-software.ru
-// GitHub: https://github.com/DosX-dev
-// Telegram: @DosX_dev
-
-// https://www.nuget.org/packages/AWSSDK.Lambda
-meta("library", "Amazon Lambda");
-
-function detect() {
-    if (PE.isNetObjectPresent("AWSSDK.Lambda")) {
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:5670c05377a157703d76d4a3e6eb6359a3a2b5bb19e1c8ac9189b43fc2893031
+size 361

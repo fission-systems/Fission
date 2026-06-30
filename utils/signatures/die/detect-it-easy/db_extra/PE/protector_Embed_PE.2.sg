@@ -1,22 +1,3 @@
-// Detect It Easy: detection rule file
-
-meta("protector", "Embed PE");
-
-function detect() {
-    if (PE.compareEP("83EC506068........E8....0000")) {
-        switch (PE.readWord(PE.nEP + 10)) {
-            case 0x992F:
-                sVersion = "1.13";
-                break;
-            case 0xFFCB:
-                sVersion = "1.24";
-                break;
-            default:
-                sVersion = "1.X";
-                break;
-        }
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:af1f6146f39721eec5fadf911ad3557a0681a66e986b4cba76726b38bfc5c54e
+size 501

@@ -1,7 +1,3 @@
-<opinions>
-    <constraint loader="Dump File Loader">
-        <constraint compilerSpecID="linux">
-        	<constraint primary="amd64" processor="x86" endian="little" size="64"	variant="default" />
-        </constraint>
-    </constraint>
-</opinions>
+version https://git-lfs.github.com/spec/v1
+oid sha256:2397041e4eaedcbb22ddd6dfaeaf82bca12c56ef0295d7fdff9c75f78fa0a808
+size 250

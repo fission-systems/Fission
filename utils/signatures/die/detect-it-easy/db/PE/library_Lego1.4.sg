@@ -1,17 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: BJNFNE <bjnfne@web.de>
-
-// https://www.legoisland.org/wiki/Local_Files
-meta("library", "Lego1");
-
-function detect() {
-    if (PE.isLibraryPresent("Lego1.dll")) {
-        sVersion = "release";
-        bDetected = true;
-    } else if (PE.isLibraryPresent("Lego1d.dll")) {
-        sVersion = "debug";
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:a7ab94fb0375a32faba510cd1d3202d64e645e209a513233a7dcced0ed17b014
+size 403

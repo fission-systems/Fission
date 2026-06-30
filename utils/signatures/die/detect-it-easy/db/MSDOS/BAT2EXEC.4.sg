@@ -1,16 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: hypn0 <hypn0@mail.ru>
-
-meta("compiler", "BAT2EXEC");
-
-function detect() {
-    if (MSDOS.compareEP("eb$$fcbd....8b....8b......8b......b44acd21a1....8986....8b9e....ffe3")) {
-        sVersion = "1.5";
-        bDetected = true;
-    } else if (MSDOS.compareEP("fcbd....8b....8b......8b......b44acd21a1....8986....8b9e....ffe3")) {
-        sVersion = "1.2";
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:9e183233ff9302231eba3d17863e80a9e6a57a07a52ea4706cf839a9330ec505
+size 470

@@ -1,14 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: hypn0 <hypn0@mail.ru>
-
-meta("installer", "BulletProofSoft");
-
-function detect() {
-    if (PE.compareEP("558bec6a..68........68........64a100000000506489250000000083ec..5356578965")) {
-        if (PE.compareOverlay("1f8b08", 0x3000)) {
-            bDetected = true;
-        }
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:186fa0da1a089f1d680154540bab1cfe3db60f8467d9c4c9d3a9b6531462f120
+size 354

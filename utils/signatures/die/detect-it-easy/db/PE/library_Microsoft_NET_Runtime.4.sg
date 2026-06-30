@@ -1,17 +1,3 @@
-// Detect It Easy: detection rule file
-
-// Author: DosX
-// E-Mail: collab@kay-software.ru
-// GitHub: https://github.com/DosX-dev
-// Telegram: @DosX_dev
-
-meta("library", ".NET Core runtime");
-
-function detect() {
-    if (PE.isLibraryPresent("coreclr.dll")) {
-        bDetected = true;
-        sVersion = "5.XX+";
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:9258e569f9eba067aea975373dfc26ed2bb8540803428804cb8f4cb4c108c5bc
+size 341

@@ -1,22 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: hypn0 <hypn0@mail.ru>
-
-meta("protector", "REC");
-
-function detect() {
-    if (MSDOS.compareEP("061eb430cd213c..73..33c00650cbbf....8b36....2bf781fe....eb$$52ba....5aeb")) {
-        sVersion = "0.33-0.35";
-        bDetected = true;
-    } else if (MSDOS.compareEP("061e52b8....1ecd2186e03d....73..cd200e1fb4..e8$$$$5acd21")) {
-        sVersion = "0.24-0.32";
-        bDetected = true;
-    } else if (MSDOS.compareEP("061eb430cd213c..73..33c00650cb")) {
-        sVersion = "0.40c2";
-        bDetected = true;
-    } else if (MSDOS.compareEP("061e53bb....5beb$$eb$$eb$$2ec606")) {
-        sVersion = "0.40.5, 0.40.6";
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:e480393b9199c1939e2a95916befae926f83edebdeb0c8834f1f2151df6fe3b6
+size 736

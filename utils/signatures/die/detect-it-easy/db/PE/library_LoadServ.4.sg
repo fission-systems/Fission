@@ -1,14 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: BJNFNE <bjnfne@web.de>
-
-// https://wiki.scummvm.org/index.php?title=Gob/DEV6_Information
-meta("library", "LoadServ");
-
-function detect() {
-    if (PE.isLibraryPresent("LoadServ.dll")) {
-        sOptions = "DEV6";
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:89d049e729af54c8ab2b23adf23382b956a4d4224880c452350328ed40f97476
+size 318

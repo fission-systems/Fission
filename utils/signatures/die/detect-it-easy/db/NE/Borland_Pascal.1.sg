@@ -1,13 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: hypn0 <hypn0@mail.ru>
-
-meta("compiler", "Borland Pascal");
-
-function detect() {
-    if (NE.compareEP("9a........9a........9a........9a........9a........5589e56a..9a........ff36....bf....1e5768....9a")) {
-        sVersion = "7.1";
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:735115e9ece8d17dadcb1e753e1b6f017fc59dbc1d4da6399bc6fd55302178f0
+size 335

@@ -1,15 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: hypn0 <hypn0@mail.ru>
-
-meta("installer", "MiKTeX Installer");
-
-function detect() {
-    if (PE.compareEP("e9$$$$$$$$4883ec..e8$$$$$$$$e9$$$$$$$$48895c24..55488bec4883ec..488b05........48bb................483bc375..488365")) {
-        if (PE.compareOverlay("'TARTARTARTARTART'")) {
-            sOptions = "tar";
-            bDetected = true;
-        }
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:d921c1231a30d2d1aa354a2d3578277c6db93ca36d8b1dfd55a6a69d3ccabeab
+size 429

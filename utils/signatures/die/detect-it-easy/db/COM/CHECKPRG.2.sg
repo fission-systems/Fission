@@ -1,13 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: hypn0 <hypn0@mail.ru>
-
-meta("protector", "CHECKPRG");
-
-function detect() {
-    if (Binary.compare("33c0be....8bd8b9....bf....ba....474a74..ac320503d8e2")) {
-        sOptions = "1992 by Jordi Mas Hernandez";
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:fd8867af97d923f6628b7d7e93946cf217b534d1a9f6533e8eba6c58a0e5a0be
+size 321

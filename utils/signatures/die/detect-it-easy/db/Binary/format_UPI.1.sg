@@ -1,18 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: BJNFNE <bjnfne@web.de>
-
-// https://abandonware-magazines.github.io/magazines/magazine.html?m=Wiz&n=057&pagenumbers=1,12 (Used in My Fearless Friend made by Makh Shevet)
-meta("format", "UPI");
-
-function detect() {
-    if (Binary.compare("'UPI'")) {
-        var fri = Binary.getString(13, 3).trim();
-
-        if (/^[A-Z]{3}$/.test(fri)) {
-            if (X.isVerbose()) sOptions = fri;
-            bDetected = true;
-        }
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:f3974fb8a786c813aad31a6ae7ad82e472ff71e1a4624160f3c5513cb1642137
+size 503

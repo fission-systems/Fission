@@ -1,14 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: hypn0 <hypn0@mail.ru>
-
-meta("installer", "CrypKey");
-
-function detect() {
-    if (PE.compareEP("e8$$$$$$$$5668........e8........8bf068........56e8........a3........68........56e8........a3........68........56e8........a3........68........56e8........a3........68........56e8")) {
-        if (PE.compareOverlay("'CK16'")) {
-            bDetected = true;
-        }
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:fec8a0ba53607b51f685e7fab834dbce239affb443db631603f750d85ecc32df
+size 442

@@ -1,17 +1,3 @@
-// Detect It Easy: detection rule file
-
-// Author: DosX
-// E-Mail: collab@kay-software.ru
-// GitHub: https://github.com/DosX-dev
-// Telegram: @DosX_dev
-
-// https://github.com/YUICompressor-NET/YUICompressor.NET
-meta("library", "YUICompressor.NET");
-
-function detect() {
-    if (PE.isNetObjectPresent("Yahoo.Yui.Compressor")) {
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:f89fbfe7219756c0f2d1309d148eb73838f441db68d0f3d428b704ce242c0f28
+size 382

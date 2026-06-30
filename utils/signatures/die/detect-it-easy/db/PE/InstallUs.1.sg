@@ -1,15 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: hypn0 <hypn0@mail.ru>
-
-meta("installer", "InstallUs");
-
-function detect() {
-    if (PE.compareEP("558bec83c4..b8........e8........a1........8b00ba........e8........8b0d........a1........8b008b15")) {
-        if (PE.findSignature(PE.getOverlayOffset(), 0x1000, "'SPIS'1a'LZH'") !== -1) {
-            sOptions = "SPIS LZH";
-            bDetected = true;
-        }
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:8a0aa19828d205d48d79b8bac546bfa54de185c4a3232af5edb311ed39776d35
+size 455

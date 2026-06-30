@@ -1,15 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: Tembo (http://tembolab.pl/products/executable-image-viewer.html)
-
-meta("format", "NVA");
-
-function detect() {
-    if (Binary.getSize() >= 8) {
-        if (Binary.compare("'%NVA'")) {
-            sVersion = Binary.getString(5, 3);
-            bDetected = true;
-        }
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:afe8959aea980e246ff373db2afd6727b2da9785475289d53be276030d3fa045
+size 363

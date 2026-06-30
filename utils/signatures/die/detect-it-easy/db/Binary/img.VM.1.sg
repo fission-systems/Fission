@@ -1,13 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: hypn0 <hypn0@mail.ru> & Arjan Onwezen
-
-meta("format", "VMWare Virtual Disk (VMDK)");
-
-function detect() {
-    if (Binary.compare("'KDMV'01") || Binary.compare("'KDMV'02") || Binary.compare("'KDMV'03")) {
-        bDetected = true;
-        sVersion = "v" + File.read_uint8(4)
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:ae9d794638b1c0b83150b6824035d2e18c451684612b7516b01a1e302657b557
+size 362

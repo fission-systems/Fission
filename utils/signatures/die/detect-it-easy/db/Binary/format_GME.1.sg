@@ -1,13 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: BJNFNE <bjnfne@web.de>
-
-// https://github.com/entropia/tip-toi-reveng/blob/master/GME-Format.md
-meta("format", "GME");
-
-function detect() {
-    if (Binary.compare("'1CHOMPTECH DATA FORMAT CopyRight 2009'", 0x0020)) {
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:0f316329fef7fc65c2fa898d0a9043f15a27ce30287b48388eb3822e0bd74982
+size 322

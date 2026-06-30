@@ -1,15 +1,3 @@
-// Detect It Easy: detection rule file
-
-meta("operation system", "Windows");
-
-function detect() {
-    if (LE.isVerbose()) {
-        sName = LE.getOperationSystemName();
-        sVersion = LE.getOperationSystemVersion();
-        sOptions = LE.getOperationSystemOptions();
-
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:5f46e85e12df1909cc83bbc41860842e183535cf406fbdbcabc16a8ba2d2ee28
+size 338

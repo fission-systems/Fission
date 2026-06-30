@@ -1,13 +1,3 @@
-// Detect It Easy: detection rule file
-
-meta("compiler", "BeRo Tiny Pascal");
-
-function detect() {
-    if (PE.compareEP("E9........' Compiled by: BeRoTinyPascal - (C) Copyright 2006, Benjamin '27'BeRo'27' Rosseaux '")) {
-        bDetected = true;
-    }
-
-    sLang = "Pascal";
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:6f7d3240a287842b92f499c03f24a62720db6f498c28f92187e29d77028e80ad
+size 299

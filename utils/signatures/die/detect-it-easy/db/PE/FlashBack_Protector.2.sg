@@ -1,13 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: hypn0 <hypn0@mail.ru>
-
-meta("protector", "FlashBack");
-
-function detect() {
-    if (PE.compareEP("60609c8cc932c9e3$$9d6190609061eb$$558bec83c4..b8........e8")) {
-        sVersion = "1.0";
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:1a058c148c77561c72a47be156b724a0a7c233434bf896c79c23038abe9c7883
+size 293

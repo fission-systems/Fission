@@ -1,12 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: hypn0 <hypn0@mail.ru>
-
-meta("sfx", "DMS/FMS-Masher by ParCon Software");
-
-function detect() {
-    if (Amiga.compareEP("6000$$$$48e77efe2448240049fa....47fa....303c....421b51c8....47f9")) {
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:09cef03f51528dea8f1afd0ab188a48c4c3a35c3441bd78f5434141090d05612
+size 294

@@ -1,13 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: hypn0 <hypn0@mail.ru>
-
-meta("protector", "LAME GG (PROPHECY protection)");
-
-function detect() {
-    if (Binary.compare("e9$$$$e8$$$$5eb9....314c..33c08ee003c605....faeb$$648b1e....899c....648b1e....899c....64a3....648c0e")) {
-        sOptions = "1999";
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:56e655cb358eada4fca07a8fb5c88212d3648f2e307b0fa5111929badd8b17f3
+size 358

@@ -1,14 +1,3 @@
-// Detect It Easy: detection rule file
-
-// Author: DosX
-// E-Mail: collab@kay-software.ru
-// GitHub: https://github.com/DosX-dev
-// Telegram: @DosX_dev
-
-meta("protector", "APKProtect");
-
-function detect() {
-    bDetected = DEX.isDexStringPresent("APKProtect");
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:5d3ffb97d1dbd4b06cbb6d4478f0123fd5b1435707a90773c6c51b1394ce0083
+size 284

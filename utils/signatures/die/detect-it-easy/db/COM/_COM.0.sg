@@ -1,15 +1,3 @@
-// Detect It Easy: detection rule file
-
-meta("operation system", "MS-DOS");
-
-function detect() {
-    if (COM.isVerbose()) {
-        sName = COM.getOperationSystemName();
-        sVersion = COM.getOperationSystemVersion();
-        sOptions = COM.getOperationSystemOptions();
-
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:b0ad2f7eb470b4d3d1401d196973bdf8c5450b33d5f8cab0bdc3ec50b87834db
+size 330

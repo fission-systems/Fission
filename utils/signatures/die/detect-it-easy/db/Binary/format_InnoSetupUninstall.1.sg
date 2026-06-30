@@ -1,20 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: BJNFNE <bjnfne@web.de>
-
-// https://jrsoftware.org/isinfo.php
-meta("format", "Inno Setup Uninstall Log");
-
-function detect() {
-    if (Binary.compare("'Inno Setup Uninstall Log (b) 64-bit'")) {
-        sVersion = "64-bit";
-
-        var uuid = Binary.getString(64, 39).trim();
-
-        if (/^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$/.test(uuid)) {
-            if (X.isVerbose()) sOptions = "UUID: " + uuid;
-            bDetected = true;
-        }
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:819bc5cd0bda296e5541a0b2ed5d525d92e376f66f643cec201c80c9392cd2bc
+size 574

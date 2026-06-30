@@ -1,14 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: hypn0 <hypn0@mail.ru>
-
-meta("archive", "btoa");
-
-function detect() {
-    var sStr = Binary.getString(0, 11);
-
-    if (sStr == "'xbtoa Begin'") {
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:1a9408f099527c93df9b165370756e991d12179e9023ac381d3b4c38d024249d
+size 250

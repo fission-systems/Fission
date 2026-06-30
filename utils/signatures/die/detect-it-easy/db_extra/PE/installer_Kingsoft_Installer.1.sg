@@ -1,15 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: A.S.L <asl@onet.eu>   2024.10.28
-
-meta("installer", "Kingsoft");
-
-function detect() {
-    if (PE.compareEP("E8") || PE.compareEP("60")) { // MSV C++ or UPX
-        if (PE.compareOverlay("'zzd.'")) {
-            sOptions = "7z archive";
-            bDetected = true;
-        }
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:a231e9877440b1f19fece8bcc99c0aad2514060024ef2244b2d2d929259e1a31
+size 355

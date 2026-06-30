@@ -1,16 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: A.S.L  <asl@onet.eu>
-
-meta("protector", "VaySoft PDF to EXE Converter");
-
-function detect() {
-    if (PE.compareEP("558BECB9")) {
-        if (PE.compareOverlay("255B484220322A")) {
-            sOptions = "PDF Adv.Xor Ovl.";
-            sVersion = 6.82;
-            bDetected = true;
-        }
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:23ac0ebddd26cb40c8a414343cadb23c74766826f1c65d3666ebfbef4c8e0064
+size 387

@@ -1,20 +1,3 @@
-// Detect It Easy: detection rule file
-// doc-ref: https://github.com/dsnet/compress/blob/master/doc/bzip2-format.pdf
-meta("archive", "");
-
-function detect() {
-    if (Binary.getSize() >= 9) {
-        if (Binary.compare("'BZ0'")) {
-            sName = "BZip1 compressed data (.BZ)"
-            bDetected = true;
-        } else if (Binary.compare("'BZh'") && Binary.compare("314159265359", 0x4)) {
-            sName = "BZip2 compressed data (.BZ2)"
-            bDetected = true;
-        }
-        if (bDetected && Binary.isVerbose()) {
-            sOptions = "block-size:" + Binary.getString(3, 1) + "00 kb";
-        }
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:65931a6d4dddb778568a0f829112016da58c50bb31f934780d92d06add5e4830
+size 647

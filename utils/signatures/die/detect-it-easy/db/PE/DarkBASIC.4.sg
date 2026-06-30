@@ -1,13 +1,3 @@
-// Detect It Easy: detection rule file
-
-meta("compiler", "DarkBASIC Professional");
-
-function detect() {
-    if (PE.isOverlayPresent() && PE.isSignaturePresent(PE.getOverlayOffset(), 2048, "'dbprocore.dll'")) {
-        bDetected = true;
-    }
-
-    sLang = "DarkBASIC";
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:b4425921dd42adc9ea75fadd7ac84b69b995460656f6b464c4bf61d48dc04fb0
+size 292

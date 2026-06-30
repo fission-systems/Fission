@@ -1,17 +1,3 @@
-// Detect It Easy: detection rule file
-
-// Author: DosX
-// E-Mail: collab@kay-software.ru
-// GitHub: https://github.com/DosX-dev
-// Telegram: @DosX_dev
-
-// https://www.chilkatsoft.com/
-meta("library", "ChilkatNativeLib");
-
-function detect() {
-    if (PE.isNetObjectPresent("ChilkatNativeLib")) {
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:2dbd3c1462f2713a9d4735503a55325bb78a4c2a62090d09cc0edd9ab81564c8
+size 351

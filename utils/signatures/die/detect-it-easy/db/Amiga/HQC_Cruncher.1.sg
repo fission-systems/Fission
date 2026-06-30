@@ -1,14 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: hypn0 <hypn0@mail.ru>
-
-meta("cruncher", "HQC Cruncher");
-
-function detect() {
-    if (Amiga.compareEP("2c79........4eae....43fa....4eae....4a806700")) {
-        sOptions = "by High Quality Crackings";
-        sVersion = "2.0";
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:77d8afc2efb82470c95dc51ded7192956d727ab01f2b8196f41b6ac469c0df74
+size 332

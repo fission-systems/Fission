@@ -1,17 +1,3 @@
-// Detect It Easy: detection rule file
-
-// Author: DosX
-// E-Mail: collab@kay-software.ru
-// GitHub: https://github.com/DosX-dev
-// Telegram: @DosX_dev
-
-// https://www.dev-c.com/gtav/scripthookv/
-meta("library", "ScriptHookV for GTA V");
-
-function detect() {
-    if (PE.isLibraryPresent("ScriptHookV.dll")) {
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:70a12c03873cf23a8d26ae88e2671cca190dbc279182dcefa8c23f4def34d437
+size 364

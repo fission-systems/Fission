@@ -1,20 +1,3 @@
-// Detect It Easy: detection rule file
-
-// Author: DosX
-// E-Mail: collab@kay-software.ru
-// GitHub: https://github.com/DosX-dev
-// Telegram: @DosX_dev
-
-// https://github.com/P-H-C/phc-winner-argon2
-meta("library", "Argon2");
-
-function detect() {
-    if (PE.isFunctionPresent("argon2_hash")) {
-        bDetected = true;
-    } else if (PE.isExportFunctionPresent("argon2_hash")) {
-        sOptions = "static"; // EAT
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:154ec50c2be31d9a182bfed692531db24eb452e03719e3b7bae7ffd13cdd3ddc
+size 471

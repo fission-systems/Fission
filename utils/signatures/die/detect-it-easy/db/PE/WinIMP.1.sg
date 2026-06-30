@@ -1,15 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: hypn0 <hypn0@mail.ru>
-
-meta("sfx", "WinIMP");
-
-function detect() {
-    if (PE.compareEP("51526a..2eff15........506a..6a..2eff15........50e8........502eff15........5a59c3")) {
-        if (PE.compareOverlay("'IMP'0a")) {
-            sOptions = "1999 by Technelysium Pty Ltd";
-            bDetected = true;
-        }
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:eb7fa0b7b4ba0d047b3bdf0ee1e85105d35095e41bb2501ff02bd9dc754f58a2
+size 404

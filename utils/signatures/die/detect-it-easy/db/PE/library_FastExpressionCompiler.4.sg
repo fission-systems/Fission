@@ -1,17 +1,3 @@
-// Detect It Easy: detection rule file
-
-// Author: DosX
-// E-Mail: collab@kay-software.ru
-// GitHub: https://github.com/DosX-dev
-// Telegram: @DosX_dev
-
-// https://github.com/dadhi/FastExpressionCompiler
-meta("library", "FastExpressionCompiler");
-
-function detect() {
-    if (PE.isNetObjectPresent("FastExpressionCompiler")) {
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:93273a9d40fea700180fee4383665efae2bc80e48d96faa757c999e0c6a82532
+size 382

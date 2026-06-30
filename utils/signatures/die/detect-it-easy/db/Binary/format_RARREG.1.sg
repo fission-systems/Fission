@@ -1,13 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: BJNFNE <bjnfne@web.de>
-
-// https://www.win-rar.com/products-winrar.html
-meta("format", "RAR registration data (.RARREG)");
-
-function detect() {
-    if (Binary.compare("'RAR registration data'0d0a")) {
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:31847a158407165d0f93c28de8c82571f02dec57079dd9dfc7c4da63b0d05dc6
+size 306

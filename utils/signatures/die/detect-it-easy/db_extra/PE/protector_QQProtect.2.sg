@@ -1,16 +1,3 @@
-// Detect It Easy: detection rule file
-
-// Author: DosX
-// E-Mail: collab@kay-software.ru
-// GitHub: https://github.com/DosX-dev
-// Telegram: @DosX_dev
-
-init("protector", "QQProtect");
-
-function detect() {
-    if (PE.isResourceNamePresent("QQPROTECT")) {
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:a4fc154a98f645a9d6a958d608c16d115df56f1d4373cfbfd5fe1ef70fddac74
+size 310

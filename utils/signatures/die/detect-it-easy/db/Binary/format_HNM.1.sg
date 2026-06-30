@@ -1,13 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: BJNFNE <bjnfne@web.de>
-
-// https://en.wikipedia.org/wiki/Woody_Woodpecker:_Escape_from_Buzz_Buzzard_Park
-meta("format", "HNM");
-
-function detect() {
-    if (Binary.compare("'HNM6'0000..108002")) {
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:78fdbdc7c03ed32866da3f58fb634ebc055fd6e439ebdd3106afb2e13beeb68c
+size 302

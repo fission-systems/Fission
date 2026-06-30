@@ -1,11 +1,3 @@
-// Detect It Easy: detection rule file
-
-meta("tool", "UPXcrypter");
-
-function detect() {
-    if (PE.compareEP("BF......0081FF......007410812F..00000083C704BB05....00FFE3BE......00FFE600000000")) {
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:e7445269d10bda147d7586fc7f693dbe2ac6516c113ba0013619f68895f42ad8
+size 252

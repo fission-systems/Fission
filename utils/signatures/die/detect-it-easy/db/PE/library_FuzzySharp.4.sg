@@ -1,17 +1,3 @@
-// Detect It Easy: detection rule file
-
-// Author: DosX
-// E-Mail: collab@kay-software.ru
-// GitHub: https://github.com/DosX-dev
-// Telegram: @DosX_dev
-
-// https://github.com/JakeBayer/FuzzySharp
-meta("library", "FuzzySharp");
-
-function detect() {
-    if (PE.isNetObjectPresent("FuzzySharp")) {
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:5acc85356da6a4f7e853649e3b5636af65ea86b463dd4c3d6852ed3bd3e6844b
+size 350

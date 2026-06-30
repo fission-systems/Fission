@@ -1,16 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: Arjan Onwezen
-
-// Rewritten by: DosX
-
-meta("packer", "Quest PowerGUI");
-
-function detect() {
-    bDetected = PE.isNetObjectPresent("Quest.PowerGUI.ScriptRunner");
-
-    sOptions = (bDetected && !PE.isConsole()) ? "Hide console" : "";
-
-    sLang = "PowerShell";
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:e0d1fc0f1db4a568ef16e1dc68b17df3b237bdfaeaca51068545b306e54ce0e9
+size 333

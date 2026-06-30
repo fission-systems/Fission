@@ -1,21 +1,3 @@
-// Detect It Easy: detection rule file
-
-meta("protector", "SLVc0deProtector");
-
-function detect() {
-    var nLastSection = PE.nLastSection;
-    if (PE.section[nLastSection].Characteristics == 0xA0000020) {
-        if ((PE.section[nLastSection].VirtualSize & 0xFF) &&
-            (PE.section[nLastSection].FileSize & 0xFF)) {
-            if (PE.section[nLastSection].VirtualAddress == PE.getAddressOfEntryPoint()) {
-                sVersion = "0.61";
-                bDetected = true;
-            }
-        }
-    } else if (PE.compareEP("E80000000058C600EBC6400108FFE0E952")) {
-        sVersion = "1.12";
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:726188f5f2ab752c8be23ecddd3e6b2b24bafa414c4d0a0ba9118bf6ed83b97d
+size 676

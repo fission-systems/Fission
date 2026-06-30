@@ -1,12 +1,3 @@
-// Detect It Easy: detection rule file
-
-meta("packer", "CRYPACK");
-
-function detect() {
-    if (MSDOS.compareEP("EB..061E8CD805....8ED833DB0E0733FFBE....8A0726....32C48807473BFE")) {
-        sVersion = "3.0";
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:d3f2d4b141f180c69490678db103be817b71eb80d326d4588110532e17713bc1
+size 272

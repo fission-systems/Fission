@@ -1,17 +1,3 @@
-// Detect It Easy: detection rule file
-
-// Author: DosX
-// E-Mail: collab@kay-software.ru
-// GitHub: https://github.com/DosX-dev
-// Telegram: @DosX_dev
-
-// https://github.com/nsubstitute/NSubstitute
-meta("library", "NSubstitute");
-
-function detect() {
-    if (PE.isNetObjectPresent("NSubstitute")) {
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:1567e22435c450a2c8797ed93e12a82953f90b2f56ef68256c1bb2f791c70902
+size 355

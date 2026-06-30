@@ -1,14 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: hypn0 <hypn0@mail.ru>
-
-meta("protector", "China Locker");
-
-function detect() {
-    if (MSDOS.compareEP("e9$$$$fc2e891e....2e890e....2e8916....2e8936....2e893e....2e8c16....2e8926....2e8c1e....90909090")) {
-        sVersion = "1995.02.02";
-        sOptions = "by China Locker Software";
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:0c61fa86026bbb6e5479af859f5c5f6305f01e73e64d76eef3814f7a4485f51d
+size 391

@@ -1,13 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: hypn0 <hypn0@mail.ru>
-
-meta("loader", "32stub for PE files");
-
-function detect() {
-    if (MSDOS.compareEP("8cc88ed88c1e....8c06....8c06....8c06....8bdc83c3..d1ebd1ebd1ebd1eb8cd003d82b1e....b8....cd21")) {
-        sOptions = "by Borland";
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:2dfc15a00b9c3be88fac1b8f51d10505fe1c8dc620cbe7f46ac7657db0c9c582
+size 353

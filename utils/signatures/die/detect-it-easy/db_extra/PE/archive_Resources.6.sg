@@ -1,18 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: Jason Hood <jadoxa@yahoo.com.au>, based on an idea by hypn0
-
-meta("archive", "Resources");
-
-function detect() {
-    if (PE.getAddressOfEntryPoint() == 0) {
-        bDetected = true;
-        for (var i = 0; i <= PE.nLastSection && !bDetected; i++) {
-            // IMAGE_SCN_MEM_EXECUTE | IMAGE_SCN_CNT_CODE
-            if (PE.section[i].Characteristics & 0x20000020) {
-                bDetected = false;
-            }
-        }
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:a9af86119ae42944286ec9c96917dc901154f14da9ffb8af029eb349633db7e6
+size 507

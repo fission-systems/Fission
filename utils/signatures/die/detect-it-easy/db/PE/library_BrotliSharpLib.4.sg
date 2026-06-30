@@ -1,17 +1,3 @@
-// Detect It Easy: detection rule file
-
-// Author: DosX
-// E-Mail: collab@kay-software.ru
-// GitHub: https://github.com/DosX-dev
-// Telegram: @DosX_dev
-
-// https://github.com/master131/BrotliSharpLib
-meta("library", "BrotliSharpLib");
-
-function detect() {
-    if (PE.isNetObjectPresent("BrotliSharpLib")) {
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:5581d2d928691b4f7969911d9e99691ca59fd2a7c3e201e1cc8e38852c12c755
+size 362

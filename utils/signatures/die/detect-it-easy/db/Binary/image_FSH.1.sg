@@ -1,15 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: BJNFNE <bjnfne@web.de>
-
-// https://www.wiki.sc4devotion.com/index.php?title=FSH_Format
-// https://rewiki.miraheze.org/wiki/EA_SSH_FSH_Image_(Type_1)
-meta("image", "FSH");
-
-function detect() {
-    if (Binary.compare("'SHPI'......00..000000")) {
-        sOptions = "PC";
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:cc8a7916ede69c5b8a91d13c8a0b6f397a47926cf3ba32d3c842d1abe43ceea4
+size 375

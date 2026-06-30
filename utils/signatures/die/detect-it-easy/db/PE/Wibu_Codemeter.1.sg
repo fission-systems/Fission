@@ -1,28 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: sendersu
-// If errors pls contact sendersu on cracklab.team
-
-meta("protection", "Wibu Codemeter");
-
-function detect() {
-    var nFound = 0;
-    var nOffset;
-
-    for (var i = 0; i <= PE.nLastSection; i++) {
-        nOffset = PE.section[i].FileOffset;
-        sSection = PE.section[i].Name;
-        if (sSection == "__wibu00") {
-            ++nFound;
-        } else if (sSection == "__wibu01") {
-            ++nFound;
-        }
-        // actually you may see many more __wibuXX sections,
-        // we test just first two
-        if (nFound == 2) {
-            bDetected = true;
-            break;
-        }
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:239876994cf7b1426e522e717e8635462f94bb89368343a8d44eccaa663af367
+size 687

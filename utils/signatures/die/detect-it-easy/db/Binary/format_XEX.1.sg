@@ -1,13 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: BJNFNE <bjnfne@web.de>
-
-// https://free60.org/System-Software/Formats/XEX/
-meta("format", "Xbox Executable File (.XEX)");
-
-function detect() {
-    if (Binary.compare("'XEX2'000000..00")) {
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:0b5f07ac6f13c22e01c59266ad28753a249d39a4d789e2c9fd5165a80f2470e8
+size 294

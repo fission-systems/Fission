@@ -1,20 +1,3 @@
-// Detect It Easy: detection rule file
-
-meta("tool", "UPX Scrambler");
-
-function detect() {
-    if (PE.compareEP("E8000000005983C10751C3C3BE........83EC04893424B9800000008136........50B80400000050033424585883E903E2E9EBD6")) {
-        sVersion = "3.06";
-        bDetected = true;
-    } else if (PE.compareEP("66C705........7507E9..FEFFFF00")) {
-        bDetected = true;
-    } else if (PE.compareEP("9061BE........8DBE........5783CDFF")) {
-        sVersion = "1.X";
-        bDetected = true;
-    } else if (PE.compareEP("9061BE........8DBE........c787................5783CDFF")) {
-        sVersion = "1.X";
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:fbc75a5707fc3b473c0135420f53b62d5d023b37f8c4a552f037b8874961e3c4
+size 661

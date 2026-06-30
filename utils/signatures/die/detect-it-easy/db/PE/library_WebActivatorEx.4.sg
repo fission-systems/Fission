@@ -1,17 +1,3 @@
-// Detect It Easy: detection rule file
-
-// Author: DosX
-// E-Mail: collab@kay-software.ru
-// GitHub: https://github.com/DosX-dev
-// Telegram: @DosX_dev
-
-// https://github.com/davidebbo/WebActivator
-meta("library", "WebActivator");
-
-function detect() {
-    if (PE.isNetObjectPresent("WebActivatorEx")) {
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:dd2c085aef833fad0e9eea8670c370fd72ad9906640e15234772258670ad7804
+size 358

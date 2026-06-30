@@ -1,15 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: hypn0 <hypn0@mail.ru>
-
-meta("library", "");
-
-function detect() {
-    var nOffset = ELF.findSignature(0, ELF.getSize(), "'@(#) F'");
-    if (nOffset != -1) {
-        sName = ELF.getString(nOffset, 200).match(/\w\S*/i);
-        sVersion = ELF.getString(nOffset, 200).match(/\d\S*/i);
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:193bc786a7762162984d3c81100a476647f1f9e2313aaac627fd4b41b85b2155
+size 398

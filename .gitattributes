@@ -1,27 +1,46 @@
 # ─── Git LFS ──────────────────────────────────────────────────────────────────
-# (LFS not currently configured; add patterns here when adopting LFS)
+# Large binary/data resources tracked with Git LFS.
+# Goal: `git clone` delivers only Rust source + text files (~lightweight).
+# To download LFS assets: `git lfs pull` or selectively:
+#   git lfs pull --include="utils/signatures/**"
+#
+# Adopted: 2026-06-30
+
+# Function signature databases (482 MB) — FID/FIDB/type info/patterns
+utils/signatures/**            filter=lfs diff=lfs merge=lfs -text
+
+# Ghidra data files (28 MB)
+utils/ghidra-data/**           filter=lfs diff=lfs merge=lfs -text
+
+# Compiled Sleigh specs (.sla binaries, 11 MB) — text .sinc/.slaspec stay in git
+utils/sleigh-specs/compiled/** filter=lfs diff=lfs merge=lfs -text
+
+# Compiled test binaries in benchmark/binary (source files stay in git)
+benchmark/binary/**/*.exe      filter=lfs diff=lfs merge=lfs -text
+benchmark/binary/**/*.dll      filter=lfs diff=lfs merge=lfs -text
+benchmark/binary/**/*.so       filter=lfs diff=lfs merge=lfs -text
+benchmark/binary/**/*.elf      filter=lfs diff=lfs merge=lfs -text
+benchmark/binary/**/*.o        filter=lfs diff=lfs merge=lfs -text
+benchmark/binary/**/*.dat      filter=lfs diff=lfs merge=lfs -text
+benchmark/binary/**/*.bak      filter=lfs diff=lfs merge=lfs -text
+benchmark/binary/**/*.prp      filter=lfs diff=lfs merge=lfs -text
+benchmark/binary/**/*.gbf      filter=lfs diff=lfs merge=lfs -text
+benchmark/binary/**/*.gpr      filter=lfs diff=lfs merge=lfs -text
+benchmark/binary/**/*.sys      filter=lfs diff=lfs merge=lfs -text
+benchmark/binary/**/*.jar      filter=lfs diff=lfs merge=lfs -text
+benchmark/binary/**/*.macho    filter=lfs diff=lfs merge=lfs -text
+benchmark/binary/**/*.xz       filter=lfs diff=lfs merge=lfs -text
+benchmark/binary/**/*.plist    filter=lfs diff=lfs merge=lfs -text
 
 # ─── GitHub Linguist overrides ────────────────────────────────────────────────
-# Prevent generated/data files from inflating language stats
-
-# Ghidra symbol export data (auto-generated from PE DLLs — not source code)
 utils/ghidra-data/**/*.exports   linguist-generated=true
-
-# Ghidra type info data files
 utils/ghidra-data/**/*.gdt       linguist-generated=true
-
-# Sleigh specification files are DSL data, not general-purpose language code
 utils/sleigh-specs/**            linguist-language=Sleigh
-
-# DIE signature database scripts (vendor JS patterns, not project source)
 utils/signatures/die/**/*.js     linguist-vendored=true
 utils/signatures/die/**/*.lua    linguist-vendored=true
-
-# Benchmark source files under binary/ are test fixtures, not project source
 benchmark/binary/**/source/**    linguist-generated=true
 
 # ─── Line-ending normalization ────────────────────────────────────────────────
-# Ensure consistent line endings across platforms
 *.rs    text eol=lf
 *.toml  text eol=lf
 *.yml   text eol=lf
@@ -32,8 +51,9 @@ benchmark/binary/**/source/**    linguist-generated=true
 *.c     text eol=lf
 *.cpp   text eol=lf
 *.h     text eol=lf
+*.go    text eol=lf
 
-# Windows-specific binary files
+# ─── Binary file markers ──────────────────────────────────────────────────────
 *.exe   binary
 *.dll   binary
 *.ico   binary

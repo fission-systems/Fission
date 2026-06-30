@@ -1,12 +1,3 @@
-// Detect It Easy: detection rule file
-
-meta("sfx", "WinACE");
-
-function detect() {
-    if (/WinACE|UNACE/i.test(PE.getVersionStringInfo("InternalName"))) {
-        sVersion = PE.getVersionStringInfo("FileVersion");
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:f2d91a4acd6f1be10ba5106f3582aa63d21a5015aff1dde7d55487114bfe86a6
+size 279

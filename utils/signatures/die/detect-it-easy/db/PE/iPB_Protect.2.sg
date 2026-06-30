@@ -1,12 +1,3 @@
-// Detect It Easy: detection rule file
-
-meta("protector", "iPB Protect");
-
-function detect() {
-    if (PE.compareEP("558BEC6AFF68'KCUF'68'TIHS'64A100000000")) {
-        sVersion = "0.1.3-0.1.7";
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:80c3c9b1488a751c1a2a8dc61c8704413b3eb9b44601f8a414578b8ed87686d7
+size 250

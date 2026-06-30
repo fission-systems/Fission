@@ -1,12 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: hypn0 <hypn0@mail.ru>
-
-meta("protector", "Inquartos Obfuscator");
-
-function detect() {
-    if (PE.compareEP("e8$$$$$$$$bb........e8$$$$$$$$e8$$$$$$$$33c064ff306489204bccc3") && PE.isSectionNamePresent(".inq")) {
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:55f8fb7f189259450ddebc8be891df6c74e2c6a4634865ccf42ec709dcbd5260
+size 317

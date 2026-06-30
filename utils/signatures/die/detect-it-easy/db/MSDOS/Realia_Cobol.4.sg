@@ -1,16 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: hypn0 <hypn0@mail.ru>
-
-meta("compiler", "Realia Cobol");
-
-function detect() {
-    if (MSDOS.compareEP("9a########9a########3c..75..8ed38be22bdb2bd2cb")) {
-        sVersion = "4.X";
-        sOptions = "1984-92 by Realia, Inc.";
-        bDetected = true;
-    }
-
-    sLang = "Cobol";
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:a9b124ae6b311857503fb3d6e32b43913b66e8d70a4a2293404a7efd45d17a4f
+size 354

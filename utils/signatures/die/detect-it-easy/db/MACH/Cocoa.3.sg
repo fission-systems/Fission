@@ -1,11 +1,3 @@
-// Detect It Easy: detection rule file
-
-meta("library", "Cocoa");
-
-function detect() {
-    if (MACH.isLibraryPresent("Cocoa")) {
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:8202bf9fe1e8c7debaf5c7c1e2cd2e2c97d293aba3f9ea7de79375e8edd3f386
+size 191

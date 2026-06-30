@@ -1,15 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: BJNFNE <bjnfne@web.de>
-// Used by InstallShield Professional
-
-// https://file.org/extension/rgs
-meta("format", "InstallShield");
-
-function detect() {
-    if (Binary.compare("'HKCR'0d0a7b0d0a09")) {
-        sVersion = "Windows Registry Script";
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:4b9914b000dcd09683e530ea20b923d0f7b15fdcdefbccc140cb09a9f2ab665f
+size 349

@@ -1,17 +1,3 @@
-// Detect It Easy: detection rule file
-
-// Author: DosX
-// E-Mail: collab@kay-software.ru
-// GitHub: https://github.com/DosX-dev
-// Telegram: @DosX_dev
-
-// https://github.com/AngleSharp/AngleSharp
-meta("library", "AngleSharp");
-
-function detect() {
-    if (PE.isNetObjectPresent("AngleSharp")) {
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:525cabbb236b32555fecbc910c9f64a12cedb3453a471a1609f7e4010e034a15
+size 351

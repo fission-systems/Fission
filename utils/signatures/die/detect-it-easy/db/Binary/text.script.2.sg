@@ -1,16 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: Jason Hood <jadoxa@yahoo.com.au>
-
-meta("script");
-
-includeScript("shell-script");
-
-function detect() {
-    if (sInterpreter) {
-        // Capitalize the first letter, lowercase the rest.
-        sName = sInterpreter.substr(0, 1).toUpperCase() + sInterpreter.substr(1).toLowerCase();
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:04aed2ed23e23736eeb1f79cb4ce717db6facdf189eaa71d3f2a10c212049839
+size 400

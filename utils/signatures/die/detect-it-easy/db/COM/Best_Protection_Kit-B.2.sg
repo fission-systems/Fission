@@ -1,16 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: hypn0 <hypn0@mail.ru>
-
-meta("protector", "Best Protection Kit-B");
-
-function detect() {
-    if (Binary.compare("eb$$fc8c06....e421a2....b0..e621fb33c08ed08be0be....8d3e....b9")) {
-        sOptions = "1993 by Eric Zmiro";
-        bDetected = true;
-    } else if (Binary.compare("eb$$fc8c06....e421a2....b0..e621fbf433c08ed08be0be....8d3e....b9")) {
-        sOptions = "1992 by Eric Zmiro";
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:3b23ccda7b4cc82c4d7dc6f6a6bcaa952883a2930a39ecb2ff7321db2bc35661
+size 494

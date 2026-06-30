@@ -1,15 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: A.S.L - <asl@onet.eu> 2019
-
-meta("format", "MP4 Video");
-
-function detect() {
-    if (Binary.getSize() > 100) {
-        if (Binary.compare("000000..'ftyp'")) {
-            sOptions = Binary.getString(16); // example : isomiso2avc1mp41 / isomavc1 / isom
-            bDetected = true;
-        }
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:f4df7e4760337d92bf232e05d5f10cb4e09c5df4ce9f6307b8a14b23e2a919fa
+size 386

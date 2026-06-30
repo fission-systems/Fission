@@ -1,13 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: hypn0 <hypn0@mail.ru>
-
-meta("cruncher", "CopyCat");
-
-function detect() {
-    if (Amiga.compareEP("487a....48e7fffe61$$2c78....43fa....70..4eae....41fa....43fa....2280")) {
-        sVersion = "1.01";
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:78d6edfee49c86039bffb18995372d6505f6158e7e0430a9e4684e55741580d5
+size 304

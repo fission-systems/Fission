@@ -1,23 +1,3 @@
-# Elf function names which do not return
-# (names should not start with '_' since these are stripped during checking)
-exit
-cexit
-c_exit
-abort
-reboot
-longjmp
-longjmp_chk
-siglongjmp
-panic
-stack_chk_fail
-cxa_throw
-cxa_terminate
-cxa_call_unexpected
-cxa_bad_cast
-Unwind_Resume
-assert_fail
-assert_rtn
-fortify_fail
-ZSt9terminatev
-ZN10__cxxabiv111__terminateEPFvvE
-pthread_exit
+version https://git-lfs.github.com/spec/v1
+oid sha256:f1c76795ab15d2e2f954443aa81175e971fae4c954deffc127c801fddab9d9b3
+size 370

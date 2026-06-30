@@ -1,17 +1,3 @@
-// Detect It Easy: detection rule file
-
-includeScript("FPC");
-
-meta("library", "LCL");
-
-function detect() {
-    if (bFPC) {
-        var verInfoOffset = PE.findSignature(PE.section[0].FileOffset, PE.isOverlayPresent() ? PE.getOverlayOffset() : PE.getSize(), "'LCLVersion' ?? ?? %% '.' %%");
-        if (verInfoOffset != -1) {
-            sVersion = PE.getString(verInfoOffset + 12);
-            bDetected = true;
-        }
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:70b6b5cd2442e44cf9ca27ae6dc21c51430816a300aee2f1aa22a559b883faff
+size 467

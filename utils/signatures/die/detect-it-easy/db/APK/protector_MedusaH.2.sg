@@ -1,14 +1,3 @@
-// Detect It Easy: detection rule file
-
-// Author: DosX
-// E-Mail: collab@kay-software.ru
-// GitHub: https://github.com/DosX-dev
-// Telegram: @DosX_dev
-
-meta("protector", "MedusaH");
-
-function detect() {
-    bDetected = APK.isArchiveRecordPresent("lib/armeabi-v7a/libmd.so");
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:db68381ade7395874e6561df0c5819edd4aeb6dc0c5758c7eab11524a60b1705
+size 299

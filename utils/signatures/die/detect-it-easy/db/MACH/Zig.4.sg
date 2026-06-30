@@ -1,18 +1,3 @@
-// Detect It Easy: detection rule file
-
-meta("compiler", "Zig");
-
-function detect() {
-    if ((MACH.isSectionNamePresent("__cstring")) && (MACH.isDeepScan())) {
-        var nIndex = MACH.getSectionNumber("__cstring");
-
-        bDetected = MACH.findSignature(
-            MACH.getSectionFileOffset(nIndex),
-            MACH.getSectionFileSize(nIndex),
-            "5a49475f44454255475f434f4c4f52"); // ANSI ZIG_DEBUG_COLOR
-    }
-
-    sLang = "Zig";
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:1dafde0d069a805ad96e3d1711929683892e5f04a43e46258d990e8f5addd4f6
+size 488

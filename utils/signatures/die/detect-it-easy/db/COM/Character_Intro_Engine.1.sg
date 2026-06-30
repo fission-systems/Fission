@@ -1,16 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: hypn0 <hypn0@mail.ru>
-
-meta("self-displayer", "Character Intro Engine");
-
-function detect() {
-    if (Binary.compare("e9$$$$2e8b26....81c4....2ea1....2ea3....0e588ec08ed88bdc83c3..b1..d3eb43b4..cd21fc")) {
-        sOptions = "by //UCF";
-        bDetected = true;
-    } else if (Binary.compare("e9$$$$2e8b26....81c4....0e588ec08ed88bdc83c3..b1..d3eb43b4..cd21fc")) {
-        sOptions = "by //UCF";
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:bad30725c1bcc9ec81e301ab6d6c1c11a7f0bd218ece7e3b3b1e74a45a87fcd6
+size 502

@@ -1,16 +1,3 @@
-// Detect It Easy: detection rule file
-
-// Author: DosX
-// E-Mail: collab@kay-software.ru
-// GitHub: https://github.com/DosX-dev
-// Telegram: @DosX_dev
-
-meta("protector", "NagaPTProtection");
-
-function detect() {
-    bDetected =
-        APK.isArchiveRecordPresent("lib/armeabi/libddog.so") ||
-        APK.isArchiveRecordPresent("lib/armeabi/libfdog.so");
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:587fe78ff520fb8e55db6d139885fa74f249beb78cc1fb58020cb7d0374e2a9d
+size 378

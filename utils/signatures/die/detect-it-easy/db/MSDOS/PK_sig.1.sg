@@ -1,12 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: hypn0 <hypn0@mail.ru>
-
-meta("other", "PK signature");
-
-function detect() {
-    if (MSDOS.compareEP("c706....'PK'8cd805....50b8....50cb")) {
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:f5f71b906ca46fbf6a2003ca0bab45f81bc82a8f803c951e39828b1f9314e14f
+size 245

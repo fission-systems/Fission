@@ -1,13 +1,3 @@
-// Detect It Easy: detection rule file
-// Author A.S.L
-
-meta("cryptor", "Battleship Crypter");
-
-function detect() {
-    if (PE.compareEP("6818144000E8F0FFFFFF0000000000003000000038000000000000007A88CD659A43264D8DF747BE8615237F")) {
-        sVersion = "1.0";
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:767660afeb8087ae1d07e20b7cd1eeee50db56cf8413daa592e1807d390ee9a5
+size 313

@@ -1,5 +1,3 @@
-// Detect It Easy: DiE-JS framework file
-// Don't change anything unless you're sure about what you're doing
-
-var File = PYC;
-var X = PYC;
+version https://git-lfs.github.com/spec/v1
+oid sha256:42fc4ac174276a43cb3a42743cb3b5272b9394bba270e3347625231b92816ed8
+size 138

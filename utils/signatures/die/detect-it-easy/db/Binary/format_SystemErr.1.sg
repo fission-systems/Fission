@@ -1,18 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: BJNFNE <bjnfne@web.de>
-
-// https://wiki.scummvm.org/index.php?title=Gob/DEV6_Information#Error_Messages (Used in Coktel Vision games)
-meta("format", "System_Err");
-
-function detect() {
-    if (Binary.compare("'System_Err'")) {
-        var errorLine = Binary.getString(11, 32).trim();
-
-        if (/^[ A-Za-z0-9\-\:\\\.]{1,}$/.test(errorLine)) {
-            if (X.isVerbose()) sOptions = errorLine;
-            bDetected = true;
-        }
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:1c17ab6ac12fff0c5dfa6d99d4d21412b4b5ae37ee9637008960813e29f343bf
+size 517

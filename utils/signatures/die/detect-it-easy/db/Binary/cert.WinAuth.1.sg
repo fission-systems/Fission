@@ -1,13 +1,3 @@
-// Detect It Easy: detection rule file
-
-meta("Certificate", "WinAuth");
-
-function detect() {
-    if (Binary.compare("........00020200")) {
-        sVersion = "2.0";
-        sOptions = "PKCS #7";
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:78bb23fb4cc54b9d4f659ba2e0bd94c680e7c54fe9bddddb4118bee2d037f378
+size 250

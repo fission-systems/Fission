@@ -1,22 +1,3 @@
-// Detect It Easy: detection rule file
-
-// https://huaidan.org/archives/983.html
-meta("protector", "FishPE Shield");
-
-function detect() {
-    if (PE.compareEP("558BEC83C4D05356578B451083C00C8B008945DC")) {
-        sVersion = "1.12/1.16";
-        bDetected = true;
-    } else if (PE.compareEP("60E8EAFDFFFFFFD0C38D4000..0000002C000000")) {
-        sVersion = "1.12/1.16";
-        bDetected = true;
-    } else if (PE.compareEP("60E8........C390090000002C000000........C4030000BCA0000000400100")) {
-        sVersion = "1.0X";
-        bDetected = true;
-    } else if (PE.compareEP("60e8........61c3") && PE.compareEP("60e8$$$$$$$$558bec81c470ffffff535657")) {
-        sVersion = "2.0.1";
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:f7c313450f92719b4b0a85845a5f42bafbe5f0f2772185c5572b6e369d4f802f
+size 739

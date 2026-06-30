@@ -1,14 +1,3 @@
-// Detect It Easy: DiE-JS framework file
-// Don't change anything unless you're sure about what you're doing
-
-// Free Pascal
-// Author: Rinat Aminow <rinat84.a@gmail.com>
-
-var bFPC;
-if (typeof bFPC === "undefined" && typeof PE !== "undefined") {
-    if (PE.section[".data"]) {
-        var nOffset = PE.section[".data"].FileOffset + PE.section[".data"].FileSize - 0x1024;
-
-        bFPC = PE.findString(nOffset, 0x1024, "FPC ") != -1;
-    }
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:8f7090f15dec282c0a94e4fd4450d82c8bda81b1c6ce4f7c1c8ff986b798cfa8
+size 453

@@ -1,13 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: hypn0 <hypn0@mail.ru>
-
-meta("self-displayer", "PFL2COM");
-
-function detect() {
-    if (Binary.compare("eb$$be....bf....53bb....8a1780fa..74..80fa..75..c706")) {
-        sOptions = "by C.P.White 1987-90";
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:ee43525c56b51550b2d6aeb7bb49cd24ec9a147a412e004d9d7558fb169e4765
+size 309

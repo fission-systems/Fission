@@ -1,12 +1,3 @@
-// Detect It Easy: detection rule file
-
-meta("protector", "MZ-Crypt");
-
-function detect() {
-    if (PE.compareEP("60E8000000005D81ED251440008BBD771440008B8D7F144000EB28837F1C07751E8B770C03B57B14")) {
-        sVersion = "1.0";
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:a011fa3961eda10e2d822ea94516359c6fe6b2dd6ddd62eeb7ed5e60d65a1eea
+size 281

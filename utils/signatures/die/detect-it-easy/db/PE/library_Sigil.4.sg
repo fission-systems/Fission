@@ -1,17 +1,3 @@
-// Detect It Easy: detection rule file
-
-// Author: DosX
-// E-Mail: collab@kay-software.ru
-// GitHub: https://github.com/DosX-dev
-// Telegram: @DosX_dev
-
-// https://github.com/kevin-montrose/Sigil
-meta("library", "Sigil Helper");
-
-function detect() {
-    if (PE.isNetObjectPresent("Sigil")) {
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:09be7e09b514eb50538d88c15b0eb7545a3be9a18909496e47dcd10e1886aebb
+size 347

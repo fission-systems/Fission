@@ -1,12 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: hypn0 <hypn0@mail.ru>
-
-meta("packer", "mkfPack");
-
-function detect() {
-    if (PE.compareEP("e8$$$$$$$$5b81eb........8b93........536a..68........526a..ff93........5b8bf08bbb........03fb5657e8........83c4..8d93........5253ffe6")) {
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:3cf0074013b1b729db1092756d50fc5759bae48db0435e11967f9d14eae41384
+size 344

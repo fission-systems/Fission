@@ -1,14 +1,3 @@
-// Detect It Easy: detection rule file
-
-// Author: DosX
-// E-Mail: collab@kay-software.ru
-// GitHub: https://github.com/DosX-dev
-// Telegram: @DosX_dev
-
-meta("tool", "ApktoolPlus");
-
-function detect() {
-    bDetected = APK.isArchiveRecordPresent("lib/armeabi-v7a/libapktoolplus_jiagu.so");
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:8ad35e38e14dcb39a45fd86ea9ce837ad5d110f8f786272f729f511f3ec96c7c
+size 313

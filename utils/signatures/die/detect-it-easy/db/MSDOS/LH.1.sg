@@ -1,11 +1,3 @@
-// Detect It Easy: detection rule file
-
-meta("sfx", "LH");
-
-function detect() {
-    if (MSDOS.compare("'LH'27's SFX '", 0x24)) {
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:7f49cc301b299a14f86594a7298758512627e3d2a1dcafb641871642f31078dc
+size 191

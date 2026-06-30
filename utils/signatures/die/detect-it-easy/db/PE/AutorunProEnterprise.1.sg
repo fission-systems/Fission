@@ -1,17 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: KDSS-Research
-
-meta("installer", "Autorun Pro Enterprise");
-
-function detect() {
-    var rsrcSection = PE.section[".rsrc"];
-
-    if (rsrcSection && PE.isSectionNamePresent("CODE")) {
-        if (PE.findString(rsrcSection.FileOffset, rsrcSection.FileSize, "9AutoRunObjects") !== -1 &&
-            PE.findString(rsrcSection.FileOffset, rsrcSection.FileSize, "AutoRunObjects") !== -1) {
-            bDetected = true;
-        }
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:cdfe3695bd66f70a58c2daf5520e2d06f2e0def04fd24af62b3a8fd436599598
+size 503

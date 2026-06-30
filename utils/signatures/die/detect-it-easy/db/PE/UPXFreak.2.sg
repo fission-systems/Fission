@@ -1,12 +1,3 @@
-// Detect It Easy: detection rule file
-
-meta("tool", "UPXFreak");
-
-function detect() {
-    if (PE.compareEP("BE........83C601FFE60000")) {
-        sVersion = "0.1";
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:82b40a396c48a87437a2ad782bc56e66063f33cf86eb3d6504018e60f6a72152
+size 231

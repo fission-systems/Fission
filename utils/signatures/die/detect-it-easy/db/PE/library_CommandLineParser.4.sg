@@ -1,17 +1,3 @@
-// Detect It Easy: detection rule file
-
-// Author: DosX
-// E-Mail: collab@kay-software.ru
-// GitHub: https://github.com/DosX-dev
-// Telegram: @DosX_dev
-
-// https://github.com/commandlineparser/commandline
-meta("library", "CommandLineParser");
-
-function detect() {
-    if (PE.isNetObjectPresent("CommandLine") && PE.isNetObjectPresent("ParseArguments")) {
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:948a1bc60644ace2578d644bd02d9ce80d944e749ff952c9cbeb0066cfcde307
+size 410

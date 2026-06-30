@@ -1,17 +1,3 @@
-// Detect It Easy: detection rule file
-
-// Author: DosX
-// E-Mail: collab@kay-software.ru
-// GitHub: https://github.com/DosX-dev
-// Telegram: @DosX_dev
-
-meta("protector", "Qihoo360Protection");
-
-function detect() {
-    bDetected =
-        APK.isArchiveRecordPresent("lib/armeabi-v7a/libprotectClass.so") ||
-        APK.isArchiveRecordPresent("lib/armeabi/libprotectClass.so") ||
-        APK.isArchiveRecordPresent("lib/x86/libprotectClass.so");
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:5ad3e908f595ddfe3577fb8c316d703c41bfa4758aac05b42022067fdcd1064f
+size 468

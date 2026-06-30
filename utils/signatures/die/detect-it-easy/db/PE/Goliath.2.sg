@@ -1,19 +1,3 @@
-// Detect It Easy: detection rule file
-
-meta("protector", "Goliath");
-
-function detect() {
-    if (PE.isSectionNamePresent(".GOLIATH")) {
-        if (PE.isNetObjectPresent("ObfuscatedByGoliath")) {
-            bDetected = true;
-        } else if (PE.isSignatureInSectionPresent(0, "'.Goliath.NET.CodeShield.'")) {
-            bDetected = true;
-        }
-    }
-
-    if (bDetected && PE.isSignatureInSectionPresent(0, "20006500760061006C007500610074006500")) {
-        sOptions = "demo";
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:89d530d7f70f4ef2d570c992fac685aaa1927be8c8e180d75d759dd7397d2d9d
+size 515

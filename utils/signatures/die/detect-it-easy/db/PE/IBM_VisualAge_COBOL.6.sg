@@ -1,18 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: hypn0 <hypn0@mail.ru>
-
-meta("compiler", "IBM VisualAge COBOL");
-
-function detect() {
-    if (PE.compareEP("558bec81ec........e8$$$$$$$$558becb8........2d........8b40..c9c3")) {
-        sVersion = "2.0";
-        bDetected = true;
-    } else if (PE.compareEP("558bec68........64ff35........648925........e8........e8")) {
-        sVersion = "2.2";
-        bDetected = true;
-    }
-
-    sLang = "COBOL";
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:3e519d4d48e07a76c037d29b6362f9c1fa501d08b7694da068be2811387755fb
+size 473

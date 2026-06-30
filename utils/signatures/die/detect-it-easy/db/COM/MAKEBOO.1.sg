@@ -1,13 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: hypn0 <hypn0@mail.ru>
-
-meta("converter", "MAKEBOO");
-
-function detect() {
-    if (Binary.compare("'XPHPD[0GG0G,0G51G31GB'27'(G+(G:u'27'0g?(G>(GE1G@arwIV_F*=US@<1|_,5wXNg-7muTu(4'")) {
-        sOptions = "executable2text";
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:4c9fe3c060d41138e19529c55fbb60d5e6787fd9f0107ed417d95a8cda210fc8
+size 328

@@ -1,14 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: hypn0 <hypn0@mail.ru>
-
-meta("protector", "MegaShield");
-
-function detect() {
-    if (Binary.compare("90b8....e72133d252be....bd....b9....ad03d0d3c233c2d3ca2bd0e2")) {
-        sVersion = "1.01a";
-        sOptions = "by t-REX //PSA";
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:9c3e58669a06923af875d6773c2136ecaf2b02773a6fb59241a36329aee2a74e
+size 347

@@ -1,17 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: sendersu
-// If errors pls contact sendersu on cracklab.team
-
-meta("library", "Electron package");
-
-function detect() {
-    var cpadInfoSection = PE.section["CPADinfo"];
-
-    if (cpadInfoSection &&
-        PE.isSectionNamePresent(".00cfg")) {
-
-        bDetected = PE.findString(cpadInfoSection.FileOffset, cpadInfoSection.FileSize, "daPC");
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:9c4067bff0b318690abc91f3db91910a2b2ff2da66552566f78c1c69538a0a71
+size 419

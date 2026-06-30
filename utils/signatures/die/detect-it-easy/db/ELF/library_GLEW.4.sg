@@ -1,13 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: BJNFNE <bjnfne@web.de>
-
-// https://glew.sourceforge.net/
-meta("library", "GLEW");
-
-function detect() {
-    if (ELF.isLibraryPresent("libGLEW.so.2.2")) {
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:9847a4a95d2f3824b8da2dc3a308eabcc8f4ad12b2ce2e794c2a662d4f4302dd
+size 258

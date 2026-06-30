@@ -1,13 +1,3 @@
-// Detect It Easy: detection rule file
-
-meta("linker", "Borland TLINK");
-
-function detect() {
-    var nVer = MSDOS.readWord(0x1E);
-    if ((nVer & 0xFF) == 0xFB) {
-        sVersion = ((nVer >> 8) / 16).toFixed(1);
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:bf1243da1127bb7dd06d4870898a0d61066007cad9c67e2add5a0299aebfacab
+size 269

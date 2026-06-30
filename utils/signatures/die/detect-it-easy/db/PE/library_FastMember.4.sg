@@ -1,17 +1,3 @@
-// Detect It Easy: detection rule file
-
-// Author: DosX
-// E-Mail: collab@kay-software.ru
-// GitHub: https://github.com/DosX-dev
-// Telegram: @DosX_dev
-
-// https://github.com/mgravell/fast-member
-meta("library", "FastMember");
-
-function detect() {
-    if (PE.isNetObjectPresent("FastMember")) {
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:ba8e7b2b2c354bb51e4137efcc8e2477e6b771d6a7619e271628cde97d7bd47c
+size 350

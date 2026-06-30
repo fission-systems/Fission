@@ -1,5 +1,3 @@
-// Detect It Easy: DiE-JS framework file
-// Don't change anything unless you're sure about what you're doing
-
-var File = AtariST;
-var X = AtariST;
+version https://git-lfs.github.com/spec/v1
+oid sha256:69461664763e9b7f9443a26968eee3a1da92de5e8f4477792a1f0309b44a2f4d
+size 150

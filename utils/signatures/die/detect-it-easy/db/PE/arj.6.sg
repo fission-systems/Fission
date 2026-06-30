@@ -1,10 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: Jason Hood <jadoxa@yahoo.com.au>
-
-includeScript("arj");
-
-function detect() {
-    detect_ARJ(0);
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:615ad472ee2912787d46be51d5721478a8493557cf41ea6fd0565335d11541ad
+size 175

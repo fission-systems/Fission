@@ -1,15 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: BJNFNE <bjnfne@web.de>
-
-// https://www.radgametools.com/bnkmain.htm
-// https://filext.com/file-extension/BK2
-meta("format", "BinkMovie");
-
-function detect() {
-    if (Binary.compare("'KB2'00")) {
-        sVersion = "2.0";
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:e9625904effce969e0c6613b02ee957feb031c5dc8985eb834ff6b510fd7415f
+size 327

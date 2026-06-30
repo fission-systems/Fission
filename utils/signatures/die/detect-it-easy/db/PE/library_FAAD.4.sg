@@ -1,13 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: BJNFNE <bjnfne@web.de>
-
-// https://www.rarewares.org/aac-decoders.php
-meta("library", "FAAD");
-
-function detect() {
-    if (PE.isLibraryPresentExp(/libfaad/i)) {
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:3f8bf568175a1880d3b8a091b8efdd7fec1f8de7d5f6b790164cf596021a0806
+size 267

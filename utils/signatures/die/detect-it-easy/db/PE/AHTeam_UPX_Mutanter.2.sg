@@ -1,17 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: KDSS-Research <koffidev365supp@gmail.com>
-
-meta("tool", "AHTeam UPX Mutanter");
-
-function detect() {
-    if (PE.compareEP("94 bc 61 62 4d 00 b9 .. 00 00 00 80 34 0c .. e2")) {
-        sOptions = "Method 2";
-        bDetected = true;
-    }
-    if (PE.compareEP("94 bc .. b9 4d 00 b9 .. 00 00 00 80 34 0c .. e2")) {
-        sOptions = "Method 1";
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:0e0e94e166c64e1accd8a64ccd3c016fd73d2afa68c947373b1d6d4de31f79ff
+size 450

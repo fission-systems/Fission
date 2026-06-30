@@ -1,18 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: BJNFNE <bjnfne@web.de>
-
-// https://problemkaputt.de/psxspx-cdrom-file-playstation-exe-and-system-cnf.htm
-meta("format", "PlayStation executable (PS1)");
-
-function detect() {
-    if (Binary.compare("'PS-X EXE'")) {
-        var regionString = Binary.getString(76, 48).trim();
-
-        if (regionString) {
-            if (X.isVerbose()) sOptions = "Region: " + regionString;
-            bDetected = true;
-        }
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:4bffc1f80190c731727baee3f01554dafe24ef253cbcef6f024b1496b776e94c
+size 491

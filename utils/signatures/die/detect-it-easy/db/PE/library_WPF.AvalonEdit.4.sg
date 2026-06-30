@@ -1,17 +1,3 @@
-// Detect It Easy: detection rule file
-
-// Author: DosX
-// E-Mail: collab@kay-software.ru
-// GitHub: https://github.com/DosX-dev
-// Telegram: @DosX_dev
-
-// https://github.com/icsharpcode/AvalonEdit
-meta("library", "AvalonEdit");
-
-function detect() {
-    if (PE.isNetObjectPresent("AvalonEdit")) {
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:e98a8822c828fa3eec59c89106dcb278ac49d9e07d6c2abf1413e2fae8f43290
+size 352

@@ -1,14 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: hypn0 <hypn0@mail.ru>
-
-meta("protector", "CC286x2");
-
-function detect() {
-    if (Binary.compare("e9$$$$eb$$e800005d81ed....eb$$bf....eb$$b0..eb$$e664eb$$b0..eb$$aaeb$$4f8d9e....eb$$538bdf")) {
-        sVersion = "2.1";
-        sOptions = "by Dark Stalker //UCF";
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:d2dc3bc4b1402206e7b5b36462a24f6d4fb99dc50864ba712ee2188c563a3401
+size 379

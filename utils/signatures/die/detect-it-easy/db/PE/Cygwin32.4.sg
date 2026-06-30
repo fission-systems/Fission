@@ -1,11 +1,3 @@
-// Detect It Easy: detection rule file
-
-meta("compiler", "Cygwin32");
-
-function detect() {
-    if (PE.compareEP("5589E583EC04833D")) {
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:f83dfc8425b12674578c87f07ae2d05792fd5db435f37a5f863ee9f7abfea4f3
+size 199

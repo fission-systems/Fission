@@ -1,17 +1,3 @@
-// Detect It Easy: detection rule file
-
-// Author: DosX
-// E-Mail: collab@kay-software.ru
-// GitHub: https://github.com/DosX-dev
-// Telegram: @DosX_dev
-
-// https://github.com/devlooped/moq
-meta("library", "Moq");
-
-function detect() {
-    if (PE.isNetObjectPresent("Moq") && PE.isNetObjectPresent("DownloadExists")) {
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:0b7d221d38d9f3ab8ab890fcd4ebbe44aa01744538a57daef64ff697b24bb233
+size 372

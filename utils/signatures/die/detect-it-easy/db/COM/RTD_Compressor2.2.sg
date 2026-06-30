@@ -1,13 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: hypn0 <hypn0@mail.ru>
-
-meta("packer", "RTD_Compressor 2");
-
-function detect() {
-    if (Binary.compare("fcbf....be....b5..57f3a5c3")) {
-        sOptions = "1997 by mr. Wicked";
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:046c7cf58d39c1db61e0a26c1c0eb4d26e0d0027f2e26442a71aedbabcf2a502
+size 282

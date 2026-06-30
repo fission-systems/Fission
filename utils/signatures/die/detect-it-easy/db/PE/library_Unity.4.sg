@@ -1,24 +1,3 @@
-// Detect It Easy: detection rule file
-
-// Author: DosX
-// E-Mail: collab@kay-software.ru
-// GitHub: https://github.com/DosX-dev
-// Telegram: @DosX_dev
-
-meta("library", "Unity Engine");
-
-function detect() {
-    if (PE.isLibraryPresent("UnityPlayer.dll") || PE.isExportFunctionPresent("UnityMain")) {
-        bDetected = true;
-    }
-
-    if (PE.isExportFunctionPresent("il2cpp_alloc")) {
-        sLang = "Native MSIL/C#";
-        sOptions = "IL2CPP";
-        bDetected = true;
-
-        _setResult("compiler", "IL2CPP Technology", String(), String());
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:b7459692644d8a8203f20fe8b2c503373a106b019e245df3557b1b24aaabea72
+size 579

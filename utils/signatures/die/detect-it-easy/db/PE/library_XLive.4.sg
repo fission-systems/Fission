@@ -1,13 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: BJNFNE <bjnfne@web.de>
-
-// https://www.xbox.com/en-us/live
-meta("library", "Xbox Live");
-
-function detect() {
-    if (PE.isLibraryPresent("xlive.dll")) {
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:2cd44bf533cb660376735a0bae13c57e73a7c98e9c4b477ffc8a3ed16c0261df
+size 259

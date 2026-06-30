@@ -1,35 +1,3 @@
-// Detect It Easy: detection rule file
-
-// Author: DosX
-// E-Mail: collab@kay-software.ru
-// GitHub: https://github.com/DosX-dev
-// Telegram: @DosX_dev
-
-// https://github.com/Fatmike-GH/Fatpack
-meta("packer", "Fatpack");
-
-function detect() {
-    if (!PE.isNet() && PE.is64() && PE.isTLSPresent()) {
-        if (PE.getNumberOfImports() === 1 && PE.isImportPositionHashPresent(0, 0x74244911)) {
-            bDetected = true;
-
-            if (PE.getNumberOfSections() === 6 && PE.getNumberOfResources() > 0) {
-                sOptions = "resources payload";
-
-                if (!PE.isResourceNamePresent("FPACK")) {
-                    sOptions = sOptions.append("modified");
-                }
-            } else if (PE.getNumberOfSections() === 5) {
-                sOptions = "section payload";
-
-                if (PE.section[PE.nLastSection].Name !== ".fpack  ") {
-                    sOptions = sOptions.append("modified");
-                }
-            } else {
-                sVersion = "custom";
-            }
-        }
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:5459ce390ede4fdacf99b2951320ee48f8093df4244a911f26bbc79a7b464a71
+size 1056

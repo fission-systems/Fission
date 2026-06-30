@@ -1,13 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: BJNFNE <bjnfne@web.de>
-
-// https://www.openal.org/
-meta("library", "OpenAL");
-
-function detect() {
-    if (ELF.isLibraryPresent("libopenal.so.1")) {
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:4ac7b23eb91a78c3530805453d797e054155bb2d99548cf983806abb9827e926
+size 254

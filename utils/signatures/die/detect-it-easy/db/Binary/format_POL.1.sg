@@ -1,13 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: BJNFNE <bjnfne@web.de>
-
-// https://learn.microsoft.com/en-us/previous-versions/windows/desktop/policy/registry-policy-file-format
-meta("format", "Registry Policy File");
-
-function detect() {
-    if (Binary.compare("5052656701000000")) {
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:653badc281fcfdd3de242edd502de0c28f40aa29f4374631de6f8177f6d17f7d
+size 342

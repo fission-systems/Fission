@@ -1,5 +1,3 @@
-<opinions>
-    <constraint loader="Executable and Linking Format (ELF)" compilerSpecID="gcc">
-        <constraint primary="44"   processor="tricore"  endian="little" size="32" />
-    </constraint>
-</opinions>
+version https://git-lfs.github.com/spec/v1
+oid sha256:594753c7110dcf84af7877b1cabba11462e7c4f56f158a30218063b91d131cc6
+size 209

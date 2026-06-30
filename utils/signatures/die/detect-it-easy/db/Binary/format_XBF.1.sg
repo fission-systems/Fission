@@ -1,18 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: BJNFNE <bjnfne@web.de>
-
-// https://learn.microsoft.com/en-us/uwp/api/windows.ui.xaml.markup.xamlbinarywriter?view=winrt-26100
-meta("format", "XBF");
-
-function detect() {
-    if (Binary.compare("'XBF'")) {
-        var id = Binary.getString(68, 32).trim();
-
-        if (/^[A-Z0-9]{32}/.test(id)) {
-            if (X.isVerbose()) sOptions = id;
-            bDetected = true;
-        }
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:8f9f9f5657ef453f4bc019c5bbca4f5a334db404897f6fca9141b122ffad0b6d
+size 461

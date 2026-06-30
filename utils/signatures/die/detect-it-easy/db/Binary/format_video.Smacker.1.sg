@@ -1,13 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: BJNFNE <bjnfne@web.de>
-
-// https://wiki.multimedia.cx/index.php/Smacker
-meta("format", "Smacker Video");
-
-function detect() {
-    if (Binary.compare("'SMK2'....0000")) {
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:4c0aaa29c1c5f1d5faa6441a7e07b53746197e039e97bcd243ea54ad42ed9bcf
+size 275

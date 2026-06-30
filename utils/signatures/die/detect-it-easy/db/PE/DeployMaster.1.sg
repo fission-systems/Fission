@@ -1,13 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: hypn0 <hypn0@mail.ru>
-
-meta("installer", "DeployMaster");
-
-function detect() {
-    if (PE.compareEP("558bec81c4........5333c08985........8985........b8........e8........33c05568........64ff30") && PE.compareOverlay("'BZh91'")) {
-        sVersion = "2.8.0";
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:10d806fa9c941056f9971dd38455f97c0b20bb0fd8d0cd5b6b0da55b6afa7278
+size 374

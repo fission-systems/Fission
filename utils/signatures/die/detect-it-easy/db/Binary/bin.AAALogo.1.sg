@@ -1,14 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: Tembo (http://tembolab.pl/products/executable-image-viewer.html)
-
-meta("format", "AAA Logo");
-
-function detect() {
-    if (Binary.getSize() >= 90) {
-        if (Binary.compare("2CA46774")) {
-            bDetected = true;
-        }
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:01bd67595cc80b316854fa0b6aa3bed6cc4a107c7c4e3e41cae40a3154a16ba9
+size 323

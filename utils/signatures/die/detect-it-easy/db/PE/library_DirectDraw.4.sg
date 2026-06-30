@@ -1,13 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: BJNFNE <bjnfne@web.de>
-
-// https://en.wikipedia.org/wiki/DirectDraw
-meta("library", "DirectDraw");
-
-function detect() {
-    if (PE.isLibraryPresent("DDRAW.DLL")) {
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:b2017ad488e40c7fbe367ffe40d36402ddfc8ea410e5b26243e7bd6b964e640d
+size 269

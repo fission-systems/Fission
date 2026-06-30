@@ -1,13 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: BJNFNE <bjnfne@web.de>
-
-// https://freetype.org/
-meta("library", "FreeType");
-
-function detect() {
-    if (ELF.isLibraryPresent("libfreetype.so.6")) {
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:5ec9f747e0988f2f760abd430eb67427157c25c3cf725874154108e64c683725
+size 256

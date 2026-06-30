@@ -1,15 +1,3 @@
-// Detect It Easy: detection rule file
-
-meta("packer", "JDPack");
-
-function detect() {
-    if (PE.compareEP("60E8000000005D8BD581ED........2B95........81EA06......8995........83BD")) {
-        sVersion = "1.01";
-        bDetected = true;
-    } else if (PE.compareEP("558BEC6AFF68........68........64A1000000005064892500000000......E801000000")) {
-        sVersion = "2.00";
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:fa9c95935b20aa9a3d8908420a4cd6ffca24f61c56efc00e8a9cef2324fd88a6
+size 443

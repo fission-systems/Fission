@@ -1,21 +1,3 @@
-<patternconstraints>
-
-  <language id="x86:LE:32:default">
-  	<compiler id="windows">
-  	  <patternfile>x86win_prepatterns.xml</patternfile>
-  	</compiler>
-  	<compiler id="borlandcpp">
-  	  <patternfile>x86win_prepatterns.xml</patternfile>
-  	</compiler>
-  	<compiler id="gcc">
-  	  <patternfile>x86gcc_prepatterns.xml</patternfile>
-  	</compiler>
-  </language>
-  
-  <language id="x86:LE:64:default">
-  	<compiler id="gcc">
-  	  <patternfile>x86gcc_prepatterns.xml</patternfile>
-  	</compiler>
-  </language>
-  
-</patternconstraints>
+version https://git-lfs.github.com/spec/v1
+oid sha256:552202073b2287536476d43523332fe59b832e6909fafff5ebcbefcdaec62902
+size 533

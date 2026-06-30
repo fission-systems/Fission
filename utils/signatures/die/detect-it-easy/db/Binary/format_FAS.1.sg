@@ -1,13 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: BJNFNE <bjnfne@web.de>
-
-// https://www.autodesk.com/support/technical/article/caas/sfdcarticles/sfdcarticles/FAS-and-VLX-files.html
-meta("format", "FAS");
-
-function detect() {
-    if (Binary.compare("0d0a20'FAS4-FILE'")) {
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:1bc89be36697281e371f765e64a0f45f690ddeda7c525f2df54f276754064dad
+size 328

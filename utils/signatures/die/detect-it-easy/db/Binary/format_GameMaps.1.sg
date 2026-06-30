@@ -1,15 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: BJNFNE <bjnfne@web.de>
-// Author of original rule: Arjan Onwezen
-// Info: https://moddingwiki.shikadi.net/wiki/GameMaps_Format
-
-meta("format", "GameMaps (TED editor)");
-
-function detect() {
-    if (Binary.compare("'TED5v1.0'..ff")) {
-        sVersion = "1.0";
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:751b1190b6a9e17fda89be74a3a8d0935b679197d93affdfffe061e80383ddb4
+size 365

@@ -1,13 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: hypn0 <hypn0@mail.ru>
-
-meta("immunizer", "F-XLOCK");
-
-function detect() {
-    if (MSDOS.compareEP("505050535152561e8bdc8cd805....368947..36c747......8e1e....33db8b07433d....74..75..43833f..75..4343")) {
-        sVersion = "1.16";
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:cd8b43472d9e3f5d4a382132be9645c72727278177be23708bc5b08dc1750dc6
+size 344

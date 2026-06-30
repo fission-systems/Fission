@@ -1,22 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: hypn0 <hypn0@mail.ru>
-
-meta("packer", "XPACK/LZCOM");
-
-function detect() {
-    if (Binary.compare("e9$$$$fa8bece8....06bf....57e8....06b8....50be....bf....cb")) {
-        sVersion = "1.67";
-        bDetected = true;
-    } else if (Binary.compare("e9$$$$fa8bece8....fb06bf....57e8....06b8....50be....bf....cb")) {
-        sVersion = "1.67.1";
-        bDetected = true;
-    } else if (Binary.compare("e9$$$$8cc805....8ec0bf....8bf7fcb9....f3a506b8....50cb")) {
-        sVersion = "1.65";
-        bDetected = true;
-    } else if (Binary.compare("e9$$$$8cc8a3....05....8ec0bf....8bf7fcb9....f3a506b8....50cb")) {
-        sVersion = "1.4";
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:8fd9e3ec7a3a77a88be6624c6e9cb7b5fb5c3ce4f7636a5e9bea4b6234928aba
+size 758

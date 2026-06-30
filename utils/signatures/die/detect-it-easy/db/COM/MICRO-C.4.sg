@@ -1,16 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: hypn0 <hypn0@mail.ru>
-
-meta("compiler", "MICRO-C");
-
-function detect() {
-    if (Binary.compare("bb....b44acd21bc....be....bf....bb....b9....8a043c..74..3c..75..46eb")) {
-        sOptions = "by Dave Dunfield";
-        bDetected = true;
-    } else if (Binary.compare("bb....b44acd2133c08be0bf....b9....2bcff3aabe....bf....bb....b9....8a043c..74..46")) {
-        sOptions = "by Dave Dunfield";
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:4599a350287861e8d43720df96ddebed6942153563786db5fa0f65badc370944
+size 509

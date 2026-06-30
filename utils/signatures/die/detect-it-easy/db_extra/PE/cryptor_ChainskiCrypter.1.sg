@@ -1,11 +1,3 @@
-// Detect It Easy: detection rule file
-
-meta("cryptor", "ChainskiCrypter");
-
-function detect() {
-    if (PE.isNetObjectPresent("Chainski")) {
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:72b3ad649d6191d21485006813bc056e5e8d8d9148d741959f67316d34fbbde9
+size 197

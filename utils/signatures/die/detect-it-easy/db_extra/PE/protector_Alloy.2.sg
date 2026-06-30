@@ -1,12 +1,3 @@
-// Detect It Easy: detection rule file
-
-meta("protector", "Alloy");
-
-function detect() {
-    if (PE.compareEP("9C60E802......33C08BC483C004938BE38B5BFC81EB........87DD6A0468001000006800..00006A00FF95........0B")) {
-        sVersion = "4.x";
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:34b338afec8b489302da2880b0c71385e086eda36c69f9616bd9b28f3a5dc26d
+size 296

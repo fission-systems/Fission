@@ -1,18 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: hypn0 <hypn0@mail.ru>
-
-meta("packer", "TPACK");
-
-function detect() {
-    if (Binary.compare("03'TUSCON'030d0a005868....60e9")) {
-        sVersion = "0.5c";
-        sOptions = "1996 by Max //TUSCON";
-        bDetected = true;
-    } else if (Binary.compare("68....fd60be....bf....b9....f3a48bf7bf....fc46e9")) {
-        sVersion = "0.55c";
-        sOptions = "1996 by Max //TUSCON";
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:83fd51f68db5f5de4a2ed98b8087ed71e3a0a1ed4d3d44d53f0c2647966e65ed
+size 500

@@ -1,14 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: hypn0 <hypn0@mail.ru>
-
-meta("sfx", "INFTool");
-
-function detect() {
-    if (PE.compareEP("558bec83c4..e8$$$$$$$$e8........6a..e8........8905........e8........8905........c705")) {
-        if (PE.findString(0, PE.getOverlayOffset(), "INFTool.pkg") !== -1) {
-            bDetected = true;
-        }
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:46941774e9bf188ca9b26d97f1b7159c51dcded0462cf596ec54cd845ced8681
+size 389

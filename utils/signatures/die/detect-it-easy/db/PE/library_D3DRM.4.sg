@@ -1,13 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: BJNFNE <bjnfne@web.de>
-
-// https://en.wikipedia.org/wiki/DirectSound
-meta("library", "Direct3D Retained Mode");
-
-function detect() {
-    if (PE.isLibraryPresent("D3DRM.DLL")) {
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:86e696736d342d22ecdf2f5aacbcf2c51e1cf09f56c69f21bf224f52f8e04106
+size 282

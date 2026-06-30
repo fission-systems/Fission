@@ -1,14 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: hypn0 <hypn0@mail.ru>
-
-meta("protector", "Excalibur");
-
-function detect() {
-    if (PE.compareEP("e9$$$$$$$$60e8$$$$$$$$5861eb$$609c9c6a..73..eb")) {
-        sVersion = "1.03";
-        sOptions = "by forgot/uS/DFCG";
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:2584a6df67036baa21c5961b6dbf9f43822dd50343156471e1a3ee3dbf661303
+size 322

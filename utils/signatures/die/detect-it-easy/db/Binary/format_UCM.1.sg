@@ -1,15 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: BJNFNE <bjnfne@web.de>
-
-// https://tcrf.net/Crazy_Machines
-meta("format", "UCM");
-
-function detect() {
-    if (Binary.compare("'UCM1'02000000")) {
-        sVersion = "1.0";
-        sOptions = Binary.getString(0x0008);
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:809e9f81b95fbb28abb18752d94850ff6e032c0e906a2c844a4d7f5fe7a51a4f
+size 323

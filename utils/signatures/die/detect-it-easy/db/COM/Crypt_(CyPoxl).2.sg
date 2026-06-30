@@ -1,13 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: hypn0 <hypn0@mail.ru>
-
-meta("protector", "Crypt by CyPoxl");
-
-function detect() {
-    if (Binary.compare("e9$$$$e8$$$$8bfc368b2d8bcd81ed....c3")) {
-        sVersion = "1.1";
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:1091d15f2fa69002b0ddd6c799e653b0fc7cfcbe40f07649b33b811ad0d1f257
+size 279

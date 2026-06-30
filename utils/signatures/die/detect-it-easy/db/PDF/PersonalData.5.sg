@@ -1,11 +1,3 @@
-// Detect It Easy: detection rule file
-
-meta("format", "pdf");
-
-function detect() {
-    var list_autor = PDF.getStringValuesByKey("/Author");
-   
-    for (var i = 0; i < list_autor.length; i++) {
-        _setResult("personal data", "Author", "", list_autor[i]);
-    }
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:07e153cb9502f69344ee0bd726121cc4278b90f5935ae3dfd60b9aad65984435
+size 281

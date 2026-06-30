@@ -1,13 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: hypn0 <hypn0@mail.ru>
-
-meta("self-displayer", "ONLINE-HELP");
-
-function detect() {
-    if (Binary.compare("e9$$$$8cc805....2ea3....be....ac3c..74..72..3c..72..3c..77..4e33c033dbba....8a1c80eb..80fb..77")) {
-        sOptions = "1990 by Clockwork Software";
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:62c42c313020b0e088f82030f672c5c47fb1a8c56a17917b0f8e202a3bb9158d
+size 370

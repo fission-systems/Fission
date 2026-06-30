@@ -1,1 +1,3 @@
-D3980A60-910C-1068-9341-00DD010F2F1C v0.1 IWinTypes
+version https://git-lfs.github.com/spec/v1
+oid sha256:45adc25f7df9f984b11254a851c02807bc5e7dd3038b613e93344894ccca7ef3
+size 52

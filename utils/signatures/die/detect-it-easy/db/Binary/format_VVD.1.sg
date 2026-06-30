@@ -1,13 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: BJNFNE <bjnfne@web.de>
-
-// https://developer.valvesoftware.com/wiki/VVD
-meta("format", "VVD");
-
-function detect() {
-    if (Binary.compare("'IDSV'04000000")) {
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:acd7389fe2d3f0000f33093530aa2203d7ef130700c7acb9cde213a2553a1146
+size 265

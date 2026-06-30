@@ -1,16 +1,3 @@
-// Detect It Easy: detection rule file
-
-// Author: DosX
-// E-Mail: collab@kay-software.ru
-// GitHub: https://github.com/DosX-dev
-// Telegram: @DosX_dev
-
-meta("library", "Direct2D");
-
-function detect() {
-    if (PE.isLibraryPresentExp(/^d2d*/i)) {
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:cc8ab930857244d0f11228c14ff27a48be9597f123c96d1f39fe7f01fe7ccd64
+size 302

@@ -1,17 +1,3 @@
-// Detect It Easy: detection rule file
-
-// Author: DosX
-// E-Mail: collab@kay-software.ru
-// GitHub: https://github.com/DosX-dev
-// Telegram: @DosX_dev
-
-// https://github.com/FluentValidation/FluentValidation
-meta("library", "FluentValidation");
-
-function detect() {
-    if (PE.isNetObjectPresent("FluentValidation")) {
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:0e0142207ad465a6b10e924e8dbb480978675a3cbf43614377e84677b072f3fe
+size 375

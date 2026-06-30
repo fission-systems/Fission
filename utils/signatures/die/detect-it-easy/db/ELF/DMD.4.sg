@@ -1,32 +1,3 @@
-// Detect It Easy: detection rule file
-
-meta("compiler", "DMD");
-
-function getVersion() {
-    var nSection = ELF.getSectionNumber(".comment");
-
-    if (nSection != -1) {
-        var nOffset = ELF.findString(
-            ELF.getSectionFileOffset(nSection),
-            ELF.getSectionFileSize(nSection),
-            "DMD v");
-
-        if (nOffset != -1) {
-            return ELF.getString(nOffset + 5, 20);
-        }
-    }
-
-    return String();
-}
-
-function detect() {
-    var versionString = getVersion();
-    if (versionString) {
-        bDetected = true;
-        sVersion = versionString;
-    }
-
-    sLang = "D";
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:d7964175f7b7862fd6d8f402fd3145fdce6bf9698c2913514f88fe2e9000ddc4
+size 667

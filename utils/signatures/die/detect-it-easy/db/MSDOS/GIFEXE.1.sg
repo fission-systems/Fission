@@ -1,16 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: hypn0 <hypn0@mail.ru>
-
-meta("self-displayer", "GIFEXE");
-
-function detect() {
-    if (MSDOS.compareEP("ba....2e8916....b430cd218b2e....8b1e....8edaa3....8c06") &&
-        MSDOS.compareOverlay("'GIF87a'") &&
-        MSDOS.isSignaturePresent(MSDOS.getSize()-6, 6, "'GIFEXE'")) {
-            sVersion = "1.0";
-            sOptions = "1990, 1991 by Steve Enns and Dan Magosse";
-            bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:6bc68caee588eec82fa2f298a12518644fae0c3626973ea0f7f48c5d44ea4799
+size 483

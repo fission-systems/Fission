@@ -1,14 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: LinXP
-
-meta("data");
-includeScript("zlib");
-
-function detect() {
-    if (detect_zlib(Binary, 0)) {
-        sName = "ZLIB data";
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:abc7e56d36dc55162d455e1d76ce02b479583cc8925170309c206369ad19707c
+size 233

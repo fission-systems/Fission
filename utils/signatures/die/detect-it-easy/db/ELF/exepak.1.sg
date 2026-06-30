@@ -1,13 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: hypn0 <hypn0@mail.ru>
-
-meta("packer", "exepak");
-
-function detect() {
-    if (ELF.compareEP("b9........81e9........89cb83e9..be........89f7033d........f3a48b15........b8")) {
-        sVersion = "1.1";
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:eac53476d2c9d7b6abeb8a4760e826cf939b2bcd048f7ef909f64ecdd363bac7
+size 306

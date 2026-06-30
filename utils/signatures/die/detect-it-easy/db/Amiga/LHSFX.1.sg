@@ -1,13 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: hypn0 <hypn0@mail.ru>
-
-meta("sfx", "LHSFX by Mike Kennedy");
-
-function detect() {
-    if (Amiga.compareEP("43f9........23c9........43f9........2c79........4eae....23c0........6700....2c404eae")) {
-        sOptions = "1991";
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:82a901530b896025c516cf8225503d82f58b0e31d45047707f6b55dbf1c54099
+size 329

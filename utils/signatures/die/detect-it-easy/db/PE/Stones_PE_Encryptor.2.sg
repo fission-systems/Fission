@@ -1,18 +1,3 @@
-// Detect It Easy: detection rule file
-
-meta("cryptor", "Stone's PE Encryptor");
-
-function detect() {
-    if (PE.compareEP("555756525153E8........5D8BD581ED........2B95........83EA0B8995")) {
-        switch (PE.getEntryPointSignature(35, 2)) {
-            case "8DB5": sVersion = "1.0"; break;
-            case "0195": sVersion = "1.13"; break;
-        }
-        bDetected = true;
-    } else if (PE.compareEP("535152565755E8........5D81ED........FF95........B8........03C52B85")) {
-        sVersion = "2.0";
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:b1cb6743552de6c0b8c11b88c92228c702b672d0f14ffa1835a87fafbdba36ed
+size 563

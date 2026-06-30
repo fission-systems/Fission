@@ -1,14 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: hypn0 <hypn0@mail.ru>
-
-meta("compiler", "Maxon C++");
-
-function detect() {
-    if (Amiga.compareEP("48e780804eb9........4eb9........70..4eb9")) {
-        bDetected = true;
-    }
-
-    sLang = "C++";
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:8aa01e74d59b6015e9841e37cde93b86a0ed0c4dec31bda8a0261bf0340c0177
+size 271

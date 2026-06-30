@@ -1,15 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: BJNFNE <bjnfne@web.de>
-
-// https://www.psdevwiki.com/ps3/PlayStation_archive_(PSARC)
-meta("archive", "PSARC");
-
-function detect() {
-    if (Binary.compare("50534152000100037a6c6962")) {
-        sVersion = "1.3";
-        sOptions = "zlib";
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:d9b48f314bcef7f969b72d34d9a531f3f030fd20689e600a5eff7cb9155e0f50
+size 344

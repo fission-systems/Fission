@@ -1,10 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: Jason Hood <jadoxa@yahoo.com.au>
-
-includeScript("ACE");
-
-function detect() {
-    detect_ACE(0);
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:7aaa32abd4732ff37d5625315972b15df9029e8dd67a14150126c89928695f51
+size 175

@@ -1,14 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: hypn0 <hypn0@mail.ru>
-
-meta("protector", "SCRAM!");
-
-function detect() {
-    if (Binary.compare("'SCRAM'b430cd213c..77..cd20bc....b9....8bfcb2..584cf6d82ac2d2c8feca32d181ff....73..eb")) {
-        sVersion = "0.8a1";
-        sOptions = "1997 by bushwoelie & ACP";
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:1acfbffd1f393e5448bee1188dba4ebc432bb34219bd630ec55461cd5daddcdf
+size 378

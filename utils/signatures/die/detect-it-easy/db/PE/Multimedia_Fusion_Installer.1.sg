@@ -1,14 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: hypn0 <hypn0@mail.ru>
-
-meta("installer", "Multimedia Fusion Installer");
-
-function detect() {
-    if (PE.compareEP("558bec6a..68........68........64a1........50648925........83ec..5356578965")) {
-        if (PE.compareOverlay("'wwwwI'874712")) {
-            bDetected = true;
-        }
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:5c9658b339e884a1f189bfbb1bce5bd950d3465991a2387dc186e5e284829063
+size 365

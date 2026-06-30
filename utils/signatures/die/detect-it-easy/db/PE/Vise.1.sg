@@ -1,16 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: hypn0 <hypn0@mail.ru>
-
-meta("installer", "Vise");
-
-function detect() {
-    if (PE.compareEP("558bec6a..68........68........64a1........50648925........83ec..5356578965..ff15")) {
-        if (PE.compareOverlay("'ESIV'")) {
-            bDetected = true;
-        } else if (PE.compare("'SIVM'", 0xf000)) {
-            bDetected = true;
-        }
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:ac20bc90d1ab4a6f2b85fa32f9601a7773ec1b0413565a1169e8a37e16feb2da
+size 434

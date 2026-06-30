@@ -1,16 +1,3 @@
-// Detect It Easy: detection rule file
-
-meta("format", "Hermes JavaScript bytecode");
-
-function detect() {
-    if (Binary.getSize() >= 0xC) {
-        if (Binary.compare("C61FBC03C103191F", Binary.read_uint64(0, _BE))) {
-            sVersion = Binary.read_uint32(8);
-            bDetected = true;
-        }
-    }
-
-    sLang = "JavaScript";
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:e1ad8322b9d3ee87e8c4747b46b5304b1cb393a4c58a7830337a41a1a2adfb5e
+size 362

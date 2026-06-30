@@ -1,14 +1,3 @@
-// Detect It Easy: detection rule file
-
-// Author: DosX
-// E-Mail: collab@kay-software.ru
-// GitHub: https://github.com/DosX-dev
-// Telegram: @DosX_dev
-
-meta("protector", "QDBH");
-
-function detect() {
-    bDetected = APK.isArchiveRecordPresent("assets/qdbh");
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:cc20faadf1aec677679151a1997ea95184b265db2dbb1d4fcf56f0b62cead752
+size 283

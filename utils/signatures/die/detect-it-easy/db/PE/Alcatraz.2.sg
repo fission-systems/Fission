@@ -1,13 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: KDSS-Research
-
-// https://www.elastic.co/security-labs/deobfuscating-alcatraz (protector was used in doubleloader)
-meta("protector", "Alcatraz");
-
-function detect() {
-    if (PE.isSectionNamePresent(".0Dev")) { // need more samples
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:5006f087949d317bea05e850deeeb80134c924a9b5ff05a1d9bffa131b253ebc
+size 337

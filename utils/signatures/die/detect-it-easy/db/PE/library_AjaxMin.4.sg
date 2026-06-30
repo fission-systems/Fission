@@ -1,17 +1,3 @@
-// Detect It Easy: detection rule file
-
-// Author: DosX
-// E-Mail: collab@kay-software.ru
-// GitHub: https://github.com/DosX-dev
-// Telegram: @DosX_dev
-
-// http://ajaxmin.codeplex.com/
-meta("library", "AjaxMin");
-
-function detect() {
-    if (PE.isNetObjectPresent("AjaxMin")) {
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:3471458b57489f325e016722d7e93a2cbd1abd72a907c6cecad53d5c3225493b
+size 333

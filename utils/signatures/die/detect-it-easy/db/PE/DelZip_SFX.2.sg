@@ -1,12 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: hypn0 <hypn0@mail.ru>
-
-meta("sfx", "DelZip");
-
-function detect() {
-    if (PE.compareEP("558bec83c4..33c08945..b8........e8........33c05568........64ff306489206a..68........6a") && PE.compareOverlay("'MPV'")) {
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:1cc9f89003d592439481af47d2dd78ca09c82f5a6972d8b2ca76861d1e323acf
+size 316

@@ -1,22 +1,3 @@
-// Detect It Easy: detection rule file
-
-// Author: DosX
-// E-Mail: collab@kay-software.ru
-// GitHub: https://github.com/DosX-dev
-// Telegram: @DosX_dev
-
-// https://github.com/MassTransit/MassTransit
-meta("library", "MassTransit");
-
-function detect() {
-    if (PE.isNetObjectPresent("MassTransit")) {
-        bDetected = true;
-    }
-
-    if (PE.isNetObjectPresent("MassTransit.AmazonSQS")) {
-        sVersion = "AmazonSQS";
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:a86f22f77c61424c49cc772bb47671fe7c393ffa35a9498d21538bfa964b51ee
+size 478

@@ -1,17 +1,3 @@
-// Detect It Easy: detection rule file
-
-// Author: DosX
-// E-Mail: collab@kay-software.ru
-// GitHub: https://github.com/DosX-dev
-// Telegram: @DosX_dev
-
-// https://github.com/Taiizor/ReaLTaiizor
-meta("library", "ReaLTaiizor UI");
-
-function detect() {
-    if (PE.isNetObjectPresent("ReaLTaiizor")) {
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:ea59c90f6e6a03e9585408f93584f9936c5a678d04f1bcd2a1884ff59ae5b40e
+size 354

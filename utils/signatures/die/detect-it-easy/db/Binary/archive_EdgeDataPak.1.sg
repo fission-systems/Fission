@@ -1,14 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: BJNFNE <bjnfne@web.de>
-// https://www.mobygames.com/game/138556/the-energy-thieves/ Used by Adiboo & The Energy Thieves (2004)
-// Header of EdgeDataPak (2004) is based on CKP's (2002/2003) format
-
-meta("archive", "EdgeDataPak (.EDP)");
-
-function detect() {
-    if (Binary.compare("'.EDP'0001")) {
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:377b1d5c6deef537f436aabe81a538ca129db2be91cc3945da5d2a3f8fcf37e1
+size 402

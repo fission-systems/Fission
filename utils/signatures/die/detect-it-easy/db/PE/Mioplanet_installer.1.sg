@@ -1,14 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: hypn0 <hypn0@mail.ru>
-
-meta("installer", "Mioplanet installer");
-
-function detect() {
-    if (PE.compareEP("eb$$a1........c1e0..a3........526a..e8........8bd0e8........5ae8")) {
-        if (PE.compareOverlay("'[(*|*)]MZ'")) {
-            bDetected = true;
-        }
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:0d7fc1ed73786653b67331175c014b784ed7a72aaca97de7f9be1c541b83a7e1
+size 345

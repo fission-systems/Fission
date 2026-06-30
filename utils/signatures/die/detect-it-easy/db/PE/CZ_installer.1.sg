@@ -1,14 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: hypn0 <hypn0@mail.ru>
-
-meta("installer", "CZ installer");
-
-function detect() {
-    if (PE.compareEP("558bec83c4..b8........e8$$$$$$$$538bd833c0a3........6a..e8........a3........a1........a3") &&
-        PE.getNumberOfResources() > 0 &&
-        PE.getResourceNameOffset("CZ_STORAGE") != -1) {
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:a354c3921a53135a0dd665124ac870cc1b13e8ee54f3bb771c5909a0a42d4d3b
+size 397

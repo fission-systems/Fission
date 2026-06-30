@@ -1,6 +1,3 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<LIBRARY_HINTS NAME="KERNEL32.DLL">
-    <HINT ATTR="NO_RETURN" VALUE="y" NAME="ExitProcess" />
-    <HINT ATTR="NO_RETURN" VALUE="y" NAME="ExitThread" />
-    <HINT ATTR="NO_RETURN" VALUE="y" NAME="FreeLibraryAndExitThread" />
-</LIBRARY_HINTS>
+version https://git-lfs.github.com/spec/v1
+oid sha256:08e27ad0678c84f5aabb4e4b0a335e1b9f972ffc8828c1658852706c1b7b0e7f
+size 281

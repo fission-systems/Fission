@@ -1,13 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: BJNFNE <bjnfne@web.de>
-
-// https://www.gburner.com/
-meta("format", "gBurner Image (.GBI)");
-
-function detect() {
-    if (Binary.compare("'GBI'000000000000000000000000004C")) {
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:aa9b7f694b846b192d2abb3273db13e8f9370b5f88f237e9f7aebca89e433565
+size 281

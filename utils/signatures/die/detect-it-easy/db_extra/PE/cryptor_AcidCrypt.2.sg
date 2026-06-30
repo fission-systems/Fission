@@ -1,13 +1,3 @@
-// Detect It Easy: detection rule file
-
-meta("cryptor", "AcidCrypt");
-
-function detect() {
-    if (PE.compareEP("60B9........BA........BE........0238404E75FA8BC28A1832DFC0CB")) {
-        bDetected = true;
-    } else if (PE.compareEP("BE........0238404E75FA8BC28A1832DFC0CB")) {
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:dd1f1ab34ced6aff02651db7bceb91f8dd73bf9f58ec3f34674f4382a13d141d
+size 333

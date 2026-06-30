@@ -1,13 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: BJNFNE <bjnfne@web.de>
-
-// https://en.wikipedia.org/wiki/GNU_GRUB
-meta("bootloader", "Grub");
-
-function detect() {
-    if (ISO9660.compare("'GRUB'", 0x00000180)) {
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:1afee54a5d98996116db9375d97c7bc07d40af46b4e4849150152daefe29c3a4
+size 269

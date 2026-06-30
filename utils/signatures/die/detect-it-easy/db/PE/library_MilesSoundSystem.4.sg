@@ -1,13 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: BJNFNE <bjnfne@web.de>
-
-// https://www.radgametools.com/miles.htm
-meta("library", "Miles Sound System");
-
-function detect() {
-    if (PE.isLibraryPresent("mss32.dll")) {
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:00e347cb60d9105b000744692d28b95c6dabd7c05da713391537c75799aa53a1
+size 275

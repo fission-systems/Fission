@@ -1,12 +1,3 @@
-// Detect It Easy: detection rule file
-
-meta("cryptor", "3dCrypter");
-
-function detect() {
-    if (PE.compareEP("684c124000e8eeffffff0000000000003000000038000000000000003848ee54")) {
-        sVersion = "mod Zion-92";
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:773ccf89fae10dfda4641b506530a334413e76bb75b318707ef6c127518db87a
+size 272

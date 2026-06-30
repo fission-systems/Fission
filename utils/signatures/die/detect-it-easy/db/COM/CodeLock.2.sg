@@ -1,18 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: hypn0 <hypn0@mail.ru>
-
-meta("protector", "CodeLock");
-
-function detect() {
-    if (Binary.compare("e9$$$$bb....535856535981e9....31ff575a5dbe....e9")) {
-        sVersion = "4.0";
-        sOptions = "1993 by Dr. Detergent";
-        bDetected = true;
-    } else if (Binary.compare("e9$$$$b430cd213c037d$$068e06....061f31c0505e565fae")) {
-        sVersion = "3.0";
-        sOptions = "1993 by Dr. Detergent";
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:26db104b80464647622f90b28c1b5a6d2a41f58dda96e6decf15689ae1653348
+size 521

@@ -1,15 +1,3 @@
-meta("image", "JPEG XL");
-
-function detect() {
-    if (Binary.getSize() >= 20) {
-        if (Binary.compare("FF0A")) {
-            sOptions = "codestream";
-            bDetected = true;
-        } else if (Binary.compare("0000000C4A584C200D0A870A")) {
-            sOptions = "ISOBMFF-based container";
-            bDetected = true;
-        }
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:51bb0e86f4de302c334ecbdba555b0863a6a79d8eaf4829c6dc0f64a83eb16a3
+size 381

@@ -1,14 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: hypn0 <hypn0@mail.ru>
-
-meta("compiler", "Upper Deck Forth");
-
-function detect() {
-    if (MSDOS.compareEP("fc2e8c06....b8....cd213c..73..b4..2e8e1e....ba....cd212eff36....33c050cb")) {
-        sVersion = "2.00";
-        sOptions = "1990, 1991 by Upper Deck Systems";
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:255ba47eebe8427bcc1841d6f0132399644cabfe3f1d3cea251e0a911d412d8f
+size 372

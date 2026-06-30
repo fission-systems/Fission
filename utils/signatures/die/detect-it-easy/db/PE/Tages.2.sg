@@ -1,13 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: hypn0 <hypn0@mail.ru>
-
-// http://www.tagesprotection.com/main.htm
-meta("protector", "TAGES");
-
-function detect() {
-    if (PE.compareEP("8925........e8$$$$$$$$6a..6a..c705................e8$$$$$$$$8b4424..0faf4424..506a..ff15........50ff15........c3")) {
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:b70bed548ce9466c4f2e68d29e7b8c239d17022f83b32a628c9cc86fd94c4f0e
+size 372

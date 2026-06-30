@@ -1,25 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: Jupiter
-
-// https://www.xojo.com
-meta("library", "Xojo");
-
-function detect() {
-    if (PE.section["xojoinit"]) {
-        // plugins
-        if (PE.section["xojoplgn"]) {
-            sOptions = sOptions.append("plugins");
-        }
-
-        // x64 | x86
-        if (PE.isLibraryPresent("XojoGUIFramework64.dll")) {
-            sVersion = "x64";
-        } else if (PE.isLibraryPresent("XojoGUIFramework32.dll")) {
-            sVersion = "x86";
-        }
-        //sVersion="2018r2";
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:3a96590738a00d80a12d88eac3b81c130084d8b0da9f1b6b25d968188fa090b0
+size 586

@@ -1,17 +1,3 @@
-// Detect It Easy: detection rule file
-
-// Author: DosX
-// E-Mail: collab@kay-software.ru
-// GitHub: https://github.com/DosX-dev
-// Telegram: @DosX_dev
-
-// https://github.com/dadhi/DryIoc
-meta("library", "Dryloc IoC Container");
-
-function detect() {
-    if (PE.isNetObjectPresent("Dryloc")) {
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:2a34fa3a67858dfea9846b8955b82c2156606ff57eeee64036916af6716b453f
+size 348

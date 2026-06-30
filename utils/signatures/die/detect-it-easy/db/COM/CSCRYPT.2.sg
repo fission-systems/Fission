@@ -1,14 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: hypn0 <hypn0@mail.ru>
-
-meta("cryptor", "CSCRYPT");
-
-function detect() {
-    if (Binary.compare("e9$$$$e8000059eb$$cceb$$e4..bb....ba....eb$$81eb....0c..2bcb")) {
-        sVersion = "3.30";
-        sOptions = "by Christian Schwarz";
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:2dfebca786f590abf565e744ebdbfe8eca6d860ab10533fee3ba03ba5ff21c09
+size 337

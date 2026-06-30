@@ -1,16 +1,3 @@
-// Detect It Easy: detection rule file
-
-// Author: DosX
-// E-Mail: collab@kay-software.ru
-// GitHub: https://github.com/DosX-dev
-// Telegram: @DosX_dev
-
-meta("protector", "TencentProtection");
-
-function detect() {
-    bDetected =
-        APK.isArchiveRecordPresent("assets/tosversion") ||
-        APK.isArchiveRecordPresent("tencent_stub");
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:1b50a656dc27765748a38fc0e3fee9bdaa02a8dbb0beb601fc82e80d1dbce7f4
+size 364

@@ -1,16 +1,3 @@
-// Detect It Easy: detection rule file
-
-// https://www.softpedia.com/get/Security/Encrypting/Anti-Crack-Software-Protector-Basic.shtml
-meta("protector", "AntiCrack Software Basic");
-
-function detect() {
-    if (PE.compareEP("60..................E801000000............................................0000......04")) {
-        sVersion = "1.09";
-        bDetected = true;
-    } else if (PE.compareEP("60................0000........................E801000000..83042406C3..........00")) {
-        sVersion = "1.09";
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:12223d9c7c6e73d718fce1d5daa8c5344c65b5a3673d5973d6e3d7e4f3e27e49
+size 567

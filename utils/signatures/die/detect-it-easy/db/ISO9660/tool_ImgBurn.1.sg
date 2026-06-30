@@ -1,14 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: BJNFNE <bjnfne@web.de>
-
-// https://www.imgburn.com/
-meta("tool", "ImgBurn");
-
-function detect() {
-    if (ISO9660.compare("'ImgBurn'", 0x00008373)) {
-        sVersion = ISO9660.getString(0x0000837C, 7);
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:b77cbadcecb1038c9e466ea387e5b5e053d7477855f701ee34aaa58d608dee29
+size 308

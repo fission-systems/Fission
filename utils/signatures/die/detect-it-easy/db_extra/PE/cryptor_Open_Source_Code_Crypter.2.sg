@@ -1,11 +1,3 @@
-// Detect It Easy: detection rule file
-
-meta("cryptor", "Open Source Code Crypter"); // ????????
-
-function detect() {
-    if (PE.compareEP("558BECB9090000006A006A004975F9535657B8........E828F8FFFF33C05568")) {
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:26488225c9b41f34a6fc25311e8d117b80a0673b2b914a26ebefffb506dc1776
+size 265

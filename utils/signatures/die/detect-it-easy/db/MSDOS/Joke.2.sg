@@ -1,13 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: hypn0 <hypn0@mail.ru>
-
-meta("protector", "Joke fileheader");
-
-function detect() {
-    if (MSDOS.compareEP("bb....e8....bd....2863..53454ee8....9893928a80....52cb")) {
-        sOptions = "by SEN";
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:ec374b6e3bccf931ec3d686c07a9e8680cf35b9f020f463f45a34c3360b0d296
+size 310

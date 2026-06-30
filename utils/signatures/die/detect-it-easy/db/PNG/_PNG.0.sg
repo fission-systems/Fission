@@ -1,15 +1,3 @@
-// Detect It Easy: detection rule file
-
-meta("format", "PNG");
-
-function detect() {
-    sName = PNG.getFileFormatName();
-    sVersion = PNG.getFileFormatVersion();
-    sOptions = PNG.getFileFormatOptions();
-    
-    if (sName) {
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:298e70644226e33931773cfb6af71f6fe0f0f008e98053c126d1a48489a2af66
+size 300

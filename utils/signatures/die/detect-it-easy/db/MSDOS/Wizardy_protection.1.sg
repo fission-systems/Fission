@@ -1,12 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: hypn0 <hypn0@mail.ru>
-
-meta("protector", "Wizardy protection");
-
-function detect() {
-    if (MSDOS.compareEP("2eff16....e9")) {
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:86a5d9a5ac5eca55209b6fbc7dd8ab9716456ed896116521e44c329d0c464274
+size 233

@@ -1,17 +1,3 @@
-// Detect It Easy: detection rule file
-
-// Author: DosX
-// E-Mail: collab@kay-software.ru
-// GitHub: https://github.com/DosX-dev
-// Telegram: @DosX_dev
-
-// https://github.com/buunguyen/combres
-meta("library", "Combres Optimizer");
-
-function detect() {
-    if (PE.isNetObjectPresent("Combres")) {
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:a3911deebd976c2e3fb6624aeaf2ec4c724791afd430e1f02ea7d0d8cebb0164
+size 351

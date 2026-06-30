@@ -1,6 +1,3 @@
-<opinions>
-    <constraint loader="Executable and Linking Format (ELF)" compilerSpecID="default">
-        <constraint primary="6317" processor="AVR32"    endian="big"    size="32" />
-        <constraint primary="185" processor="AVR32"    endian="big"    size="32" />            
-    </constraint>
-</opinions>
+version https://git-lfs.github.com/spec/v1
+oid sha256:48d6c343347c3d387314e01d3f7491ebaa2ddd83ca5e934f3c54fc573bb210cb
+size 309

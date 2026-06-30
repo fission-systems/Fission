@@ -1,13 +1,3 @@
-// Detect It Easy: detection rule file
-
-meta("protector", "Guardant Stealth");
-
-function detect() {
-    if (PE.getNumberOfImports() == 1) {
-        if (PE.getImportLibraryName(0) == "NOVEX32.dll") {
-            bDetected = true;
-        }
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:6842cde43036e6602f8a416dc359cdb83a2d3c8219f7a6ae1ccf2741364a980d
+size 268

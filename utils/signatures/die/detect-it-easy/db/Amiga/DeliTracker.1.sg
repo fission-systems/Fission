@@ -1,14 +1,3 @@
-// Detect It Easy: detection rule file
-
-meta("module", "DeliTracker player");
-
-function detect() {
-    if (Amiga.compareEP("70FF4E75'DELIRIUM'")) {
-        bDetected = true;
-    } else if (Amiga.compareEP("........'DELIRIUM'")) {
-        bDetected = true;
-        sOptions = "Startup code";
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:67579fd148248a114bb181129628e2f5704eec0ec4042d319ac1c1c8ec5d0485
+size 333

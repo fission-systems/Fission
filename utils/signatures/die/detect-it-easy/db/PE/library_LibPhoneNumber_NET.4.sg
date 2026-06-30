@@ -1,17 +1,3 @@
-// Detect It Easy: detection rule file
-
-// Author: DosX
-// E-Mail: collab@kay-software.ru
-// GitHub: https://github.com/DosX-dev
-// Telegram: @DosX_dev
-
-// https://github.com/twcclegg/libphonenumber-csharp
-meta("library", "LibPhoneNumber.NET");
-
-function detect() {
-    if (PE.isNetObjectPresent("PhoneNumbers")) {
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:a3f5294c4e71d4fb9f1ce8fa247312a52f24a31cde384d476606bf608ae69387
+size 370

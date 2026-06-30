@@ -1,16 +1,3 @@
-// Detect It Easy: detection rule file
-meta("source", "Python");
-
-function detect() {
-    var sText = Binary.getHeaderString();
-
-    if ((/import\s/.test(sText)) && (/class\s/.test(sText)) && (/self/.test(sText))) {
-        if (/\sdef\s/.test(sText)) {
-            bDetected = true;
-        }
-    }
-
-    sLang = "Python";
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:b63941ab69066950943efd4813f03b48bbc760e507140deed303a2cad2b527ca
+size 360

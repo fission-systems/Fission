@@ -1,14 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: hypn0 <hypn0@mail.ru>
-
-meta("compiler", "Personal Batch File Compiler");
-
-function detect() {
-    if (Binary.compare("eb$$90fcbd....8b....8b......8b......b44acd21a1....8986")) {
-        sOptions = "1993, 2003 by Kinglion Software Workroom";
-        sVersion = "1.6c";
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:1108000b471f8916ea7be7938615451049f1b4f43f0aa4f80b69569a76562356
+size 373

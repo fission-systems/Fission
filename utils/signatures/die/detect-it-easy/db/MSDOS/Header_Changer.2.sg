@@ -1,13 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: hypn0 <hypn0@mail.ru>
-
-meta("other", "Header Changer");
-
-function detect() {
-    if (MSDOS.compareEP("8cdb81c3....53bb....53501e068cdb81c3....53bb")) {
-        sOptions = "by Shay Lev Ary";
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:4092283133759241478e1931f802273516c98743813231101222ee4a64c4a030
+size 295

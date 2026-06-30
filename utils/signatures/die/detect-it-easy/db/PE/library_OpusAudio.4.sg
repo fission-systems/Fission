@@ -1,20 +1,3 @@
-// Detect It Easy: detection rule file
-
-// Author: DosX
-// E-Mail: collab@kay-software.ru
-// GitHub: https://github.com/DosX-dev
-// Telegram: @DosX_dev
-
-// https://github.com/xiph/opus
-meta("library", "Opus Audio");
-
-function detect() {
-    if (PE.isLibraryPresentExp(/^(opus(enc)?\.)|(ms|lib)opus|bass(_)?opus/i)) {
-        bDetected = true;
-    } else if (PE.isExportFunctionPresentExp(/^opus_(de|en)code/)) {
-        sOptions = "static"; // EAT
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:6100ca77728073de3bfa23d95fca087f7263ce2f8e837bae6125fbc6fd98f7a8
+size 503

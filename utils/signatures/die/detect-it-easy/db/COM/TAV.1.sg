@@ -1,13 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: hypn0 <hypn0@mail.ru>
-
-meta("immunizer", "Turbo Anti-Virus");
-
-function detect() {
-    if (Binary.compare("e9$$$$e9$$$$e800005b81eb....5051525657558beb2ec686......268e06....061f")) {
-        sOptions = "by CARMEL Software Engineering";
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:15fd62a277cced75214264a2e1e34e0ef380f5b001168921351488a202c1300e
+size 341

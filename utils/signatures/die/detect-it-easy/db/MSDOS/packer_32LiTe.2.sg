@@ -1,17 +1,3 @@
-// Detect It Easy: detection rule file
-
-// Author: DosX
-// E-Mail: collab@kay-software.ru
-// GitHub: https://github.com/DosX-dev
-// Telegram: @DosX_dev
-
-// https://www.softpedia.com/get/Compression-tools/32LiTE.shtml
-meta("packer", "32LiTe");
-
-function detect() {
-    if (MSDOS.compareEP("1E060E1F0E07BE....BF....8BCFFC57F3A48CC80106....C333FF")) {
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:0a0afcf7314c493af08c9aaf2f6614b6a1f5d5171b86674aa933ab021a2ed5f2
+size 404

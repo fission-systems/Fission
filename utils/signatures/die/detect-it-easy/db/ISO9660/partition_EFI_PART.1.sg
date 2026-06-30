@@ -1,13 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: BJNFNE <bjnfne@web.de>
-
-// https://en.wikipedia.org/wiki/EFI_system_partition
-meta("partition", "EFI PART");
-
-function detect() {
-    if (ISO9660.compare("'EFI PART'", 0x00000200)) {
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:df720e4cf0af3b9952e14a8de1cee325914f7f61ae1232414946d190b44fd7b5
+size 288

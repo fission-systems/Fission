@@ -1,13 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: BJNFNE <bjnfne@web.de>
-
-// https://otvet.mail.ru/question/64229866
-meta("library", "TNTSI");
-
-function detect() {
-    if (PE.isLibraryPresent("TNTSI.dll")) {
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:aa306e08555587403fe78ae96ce3e8626d9a7402b7466cadcf402355ca26f755
+size 263

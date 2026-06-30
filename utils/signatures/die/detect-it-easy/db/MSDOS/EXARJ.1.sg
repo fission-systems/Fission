@@ -1,13 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: hypn0 <hypn0@mail.ru>
-
-meta("sfx", "EXARJ small");
-
-function detect() {
-    if (MSDOS.compareEP("fcbb....e8....b430cd218bd8063c..72..8e06....33c08bf8b9....f2aeae75..40af061f8bd775..e8")) {
-        sOptions = "1994 by Jakub Jelinek";
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:cd47e95c3da5a86910a4e9b6d04a44373c23a034420b2d3d7d1472622c904404
+size 347

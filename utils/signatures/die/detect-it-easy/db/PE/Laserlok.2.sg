@@ -1,12 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: hypn0 <hypn0@mail.ru>
-
-meta("protector", "Laserlok");
-
-function detect() {
-    if (PE.compareEP("eb$$eb$$5055e8$$$$$$$$5d508bc581ed........2d........3e2b85........3E8985........608d85........508d9d........2bd853")) {
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:4d9710f88adac4523d59160ccda939b3ae7c2ebebe6628d978289ede645a34bc
+size 330

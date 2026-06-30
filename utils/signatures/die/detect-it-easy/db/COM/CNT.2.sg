@@ -1,13 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: hypn0 <hypn0@mail.ru>
-
-meta("protector", "CNT");
-
-function detect() {
-    if (Binary.compare("'CNT'58e8$$$$5e8b4c..bf....ac3306....3306")) {
-        sOptions = "by C0NTRiVER";
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:2aeebc594cde9b041113e40004df9c7b151dc538c2b1afe2769605339417a4b4
+size 290

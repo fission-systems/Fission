@@ -1,13 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: Jason Hood <jadoxa@yahoo.com.au>
-
-meta("installer", "INTENIUM");
-
-function detect() {
-    if (PE.compareOverlay("'stgc_hdr'")) {
-        sVersion = PE.getFileVersion();
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:5fd18c77e1b894e78d5aa441b5cc31d8bf9cc2403c6799b55c4f84483fdd778f
+size 286

@@ -1,18 +1,3 @@
-// Detect It Easy: detection rule file
-
-meta("packer", "Packman");
-
-function detect() {
-    if (PE.compareEP("0F85..FFFFFF8DB3........EB3D8B460C03C350FF5500568B36")) {
-        sVersion = "0.0.0.1";
-        bDetected = true;
-    } else if (PE.compareEP("60E800000000588D..........8D..........8D")) {
-        sVersion = "0.0.0.1";
-        bDetected = true;
-    } else if (PE.compareEP("60E8000000005B8D5BC6011B8B138D73146A08590116AD4975FA")) {
-        sVersion = "1.0";
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:74776284a260fe2e86e2f48e4dc8eb39c6da9467594ba3c369add4cc789cf08a
+size 537

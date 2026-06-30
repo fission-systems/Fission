@@ -1,20 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: hypn0 <hypn0@mail.ru>
-
-meta("packer", "HTML Executable");
-
-function detect() {
-    if (PE.compareEP("558bec83c4..b8........e8$$$$$$$$538bd833c0a3........6a..e8........a3")) {
-        if (PE.compareOverlay("'GHE32'")) {
-            bDetected = true;
-        }
-    } else if (PE.compareEP("558becb9........6a..6a..4975..535657b8........e8$$$$$$$$538bd833c0a3........6a..e8........a3")) {
-        if (PE.compareOverlay("'HEEG'")) {
-            bDetected = true;
-        }
-    }
-
-    sLang = "HTML";
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:0b2f98960a8cd3a939b1c7c8df82c5fd44e1e8dbd5de474fa153baa6f4fc9998
+size 569

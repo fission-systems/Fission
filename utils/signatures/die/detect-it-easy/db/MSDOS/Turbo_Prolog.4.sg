@@ -1,16 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: hypn0 <hypn0@mail.ru>
-
-meta("compiler", "Turbo Prolog");
-
-function detect() {
-    if (MSDOS.compareEP("fab8....8ed8b8....a3....8ed0bc....fb8c06....268e06....8c06....b8....a3....9a")) {
-        sVersion = "2.0";
-        sOptions = "1986-88";
-        bDetected = true;
-    }
-
-    sLang = "Prolog";
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:a62bb1ed3a1161560bbf8ffd3c7745327726c80169aeef31710517b463b70c0d
+size 369

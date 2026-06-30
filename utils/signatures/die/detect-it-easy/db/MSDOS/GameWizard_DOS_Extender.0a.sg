@@ -1,12 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: hypn0 <hypn0@mail.ru>
-
-meta("extender", "GameWizard DOS Extender");
-
-function detect() {
-    if (MSDOS.compareEP("b430cd2186c43d....73..ba....e8....ba....b1..d3ea8cc803d08edafa8ed2bc....fb2e8916....2e8c06....368c0e....2e8c16....e8")) {
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:4c2b7bc0fa84bdbf2184687effdbffaf34bb3d2906d97df14dbef807cf7e4394
+size 341

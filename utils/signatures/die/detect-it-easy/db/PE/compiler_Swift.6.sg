@@ -1,31 +1,3 @@
-// Detect It Easy: detection rule file
-
-// Author: DosX
-// E-Mail: collab@kay-software.ru
-// GitHub: https://github.com/DosX-dev
-// Telegram: @DosX_dev
-
-// https://github.com/swiftlang/swift
-meta("compiler", "Swift");
-
-function detect() {
-    if (PE.isNet() || PE.isRichSignaturePresent()) return; // Doesn't support .NET and files with Rich Signature
-
-    if (PE.isLibraryPresentExp(/^swift/)) {
-        bDetected = true;
-
-        if (PE.isLibraryPresent("swiftCRT.dll")) {
-            sOptions = "dynamic";
-        }
-    }
-
-    if (PE.getNumberOfSections() > 15 && PE.isSectionNamePresentExp(/^.sw5/)) {
-        sVersion = "5.X";
-        bDetected = true;
-    }
-
-    sLang = "Swift";
-    sLangVersion = sVersion;
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:4912f5c6d203a1ab98821c32e57a71ccaa94968164239d61d58649da7377f30c
+size 738

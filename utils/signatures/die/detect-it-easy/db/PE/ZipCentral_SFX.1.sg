@@ -1,16 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: hypn0 <hypn0@mail.ru>
-
-meta("sfx", "ZipCentral SFX-32");
-
-function detect() {
-    if (PE.compareEP("558BEC83C4..33C089....B8........e8........33c05568........64....64....6a")) {
-        if (PE.compareOverlay("'MPV*'")) {
-            sVersion = "2.0";
-            sOptions = PE.getGeneralOptions();
-            bDetected = true;
-        }
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:54521d8e96abec83ceb8351d207b90b68f46615124fe6c8b7bf92696e56c4a17
+size 417

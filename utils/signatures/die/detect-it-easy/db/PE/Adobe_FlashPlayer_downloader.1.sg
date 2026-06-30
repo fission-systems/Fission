@@ -1,17 +1,3 @@
-// Detect It Easy: detection rule file
-// created by A.S.L - asl@onet.eu - 2019
-// 2020.07 fixed
-
-meta("installer", "Adobe FlashPlayer downloader");
-
-function detect() {
-    if (PE.compareEP("B8......005064FF3500") && PE.isOverlayPresent()) {
-        if (PE.getVersionStringInfo("InternalName") == "Adobe Download Manager") {
-            sVersion = "2.0";
-            sOptions = "PECompact"; // packed stub
-            bDetected = true;
-        }
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:f3f6bada5492d938f8e90fe68601023e5918b4406864a6e9bd5f84b27f311b7c
+size 476

@@ -1,15 +1,3 @@
-// Detect It Easy: detection rule file
-
-// Author: DosX
-// E-Mail: collab@kay-software.ru
-// GitHub: https://github.com/DosX-dev
-// Telegram: @DosX_dev
-
-// https://build38.com
-meta("protector", "build38");
-
-function detect() {
-    bDetected = APK.isArchiveRecordPresent("__license.tak") || APK.isArchiveRecordPresent("license.tak");
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:20def790379474dcd3e893a57b86442fa2d46ff3ade4cb7d0cff38394c564a35
+size 356

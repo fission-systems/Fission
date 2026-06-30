@@ -1,13 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: hypn0 <hypn0@mail.ru>
-
-meta("sfx", "DIMP");
-
-function detect() {
-    if (Amiga.compareEP("6000$$$$327c....48e780c02c78....42a7203c........72..48414eae")) {
-        sOptions = "DMS disks packer";
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:0de75900c19b1d75981c9208b400d19322ddd8d6e8e77dede119aa9fc60e0dfe
+size 300

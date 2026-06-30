@@ -1,12 +1,3 @@
-// Detect It Easy: detection rule file
-
-meta("packer", "BobPack");
-
-function detect() {
-    if (PE.compareEP("60E8000000008B0C2489CD83E90681ED........E83D0000008985........89C2B85D0A00008D0408E8E40000008B700401D6E876000000E851010000E80101")) {
-        sVersion = "1.00";
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:a517fdeb9b5043e281831b30a41ee8b3240703ffa3ed651c1af08483f9930ff3
+size 326

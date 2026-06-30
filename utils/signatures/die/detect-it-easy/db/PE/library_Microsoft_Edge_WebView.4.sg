@@ -1,18 +1,3 @@
-// Detect It Easy: detection rule file
-
-// Author: DosX
-// E-Mail: collab@kay-software.ru
-// GitHub: https://github.com/DosX-dev
-// Telegram: @DosX_dev
-
-meta("library", "Microsoft Edge Chromium WebView");
-
-function detect() {
-    if (PE.isLibraryPresent("WebView2Loader.dll") || PE.isLibraryPresent("msedge_elf.dll")) {
-        bDetected = true;
-    } else if (PE.isNetObjectPresent("Microsoft.Web.WebView2") || PE.isNetObjectPresent("Microsoft.Web.WebView2.WinForms") || PE.isNetObjectPresent("Microsoft.Web.Wpf")) {
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:fa1eb945d58051f781ae71a118fcf434766dec81d9b260a98d9dcd5e665303e3
+size 573

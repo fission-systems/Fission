@@ -1,13 +1,3 @@
-// Detect It Easy: detection rule file
-
-// https://yano.informer.com/
-meta("protector", "Yano");
-
-function detect() {
-    if (PE.isNetObjectPresent("YanoAttribute")) {
-        sVersion = "1.X";
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:49389e4782cf22daf305a1975e150b92d01e2e879176ca868a2aaa7ad0073512
+size 249

@@ -1,15 +1,3 @@
-// Detect It Easy: detection rule file
-
-meta("packer", "NakedPacker");
-
-function detect() {
-    if (PE.compareEP("60FC0FB605............7531B8........2B05..............................05........A3........E89A000000A3")) {
-        sVersion = "1.0";
-        sOptions = "by BigBoote";
-        bDetected = true;
-    } else if (PE.isSectionNamePresent(".naked1") && PE.compareEP("60")) {
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:6bbcf9ec2c83f8c9bceb94dee4588f494da9f8c031d5beae1686340008d64eae
+size 452

@@ -1,15 +1,3 @@
-// Detect It Easy: detection rule file
-
-meta("operation system", "macOS");
-
-function detect() {
-    if (MACH.isVerbose()) {
-        sName = MACH.getOperationSystemName();
-        sVersion = MACH.getOperationSystemVersion();
-        sOptions = MACH.getOperationSystemOptions();
-
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:f097585fec12789d5ab9593f6a20146474b93e8355d2dbb0548f8529aa8515f3
+size 344

@@ -1,12 +1,3 @@
-// Detect It Easy: detection rule file
-
-meta("protector", "Encriptor");
-
-function detect() {
-    if (MSDOS.compareEP("EB..B9....BE....BF....ACD0C8AAE2..BE....BF....ACAA")) {
-        sVersion = "1.00c";
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:7a8c11a6521af3f0687c6e226ea61e345125d21a24af90dec0750ec57c142839
+size 265

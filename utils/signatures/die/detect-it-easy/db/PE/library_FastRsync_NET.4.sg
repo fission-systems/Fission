@@ -1,17 +1,3 @@
-// Detect It Easy: detection rule file
-
-// Author: DosX
-// E-Mail: collab@kay-software.ru
-// GitHub: https://github.com/DosX-dev
-// Telegram: @DosX_dev
-
-// https://github.com/GrzegorzBlok/FastRsyncNet
-meta("library", "FastRsync.NET");
-
-function detect() {
-    if (PE.isNetObjectPresent("FastRsync")) {
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:ff72553361331f4c9af69ddfa607257340e1e5fcd4a6c382d68cd95389276342
+size 357

@@ -1,13 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: hypn0 <hypn0@mail.ru>
-
-meta("packer", "Cheat packer");
-
-function detect() {
-    if (Binary.compare("eb$$b9....ba....bf....bb....b8....be....83ec..8becfc8866..32e48976..8bf703c18bf83bfe76..fd574e4f")) {
-        sOptions = "1993 by TWIN of TRSi";
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:85fd4824ad078a096e90019c8d2589d090a6fe686295b0cacf773d9f2e55cfb4
+size 350

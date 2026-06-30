@@ -1,16 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: hypn0 <hypn0@mail.ru>
-
-meta("protector", "MCLock");
-
-function detect() {
-    if (Binary.compare("e9$$$$909090fa29c08ec026c606......26c606......268c0e....26c606......26c606......268c0e....fbcd01")) {
-        sVersion = "1.2, 1.3";
-        bDetected = true;
-    } else if (Binary.compare("e9$$$$eb00e9$$$$909090fa29c08ec026c606......26c606......268c0e....26c606......26c606......268c0e....fbcd01")) {
-        sVersion = "1.2, 1.3";
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:068bc1fcbab5c8fe4df3528e118da234bb0602b075ab060bb5157ce961c2ae2f
+size 550

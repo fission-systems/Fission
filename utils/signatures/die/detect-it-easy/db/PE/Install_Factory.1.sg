@@ -1,14 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: hypn0 <hypn0@mail.ru>
-
-meta("installer", "Install Factory");
-
-function detect() {
-    if (PE.compareOverlay("a7870800")) {
-        if (PE.compareEP("5589e55383ec..55b8........505068........64ff35........648925........83ec..83e4..68")) {
-            bDetected = true;
-        }
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:8ef81edf500f89027a7a29babcb8b90537a2ac63fc263d0120c42d18082a1f29
+size 356

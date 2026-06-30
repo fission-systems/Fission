@@ -1,14 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: hypn0 <hypn0@mail.ru>
-
-meta("protector", "Lock-Master");
-
-function detect() {
-    if (Binary.compare("e9$$$$eb$$31c0061e502d....501f0726ff77..26ff77..8f87....8f87....ffb7....ffb7....585b29c353bb....5a1f07")) {
-        sVersion = "9.0";
-        sOptions = "by Andrew Kacy";
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:f268b2d04485b9700b290be3d7977870e2c75d8639b4d72dc7518911d70697c3
+size 388

@@ -1,14 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: hypn0 <hypn0@mail.ru>
-
-meta("compiler", "Surpas-86 (Pascal compiler)");
-
-function detect() {
-    if (Binary.compare("e9$$$$e9$$$$b8....05....25....b1..d3e88cca03d08eda2ea1....2bc2a3....33db2d....73..8b1e....b1..d3e333c0")) {
-        sVersion = "1.0";
-        sOptions = "1987 by Tixaku Pty Ltd";
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:e3e4907974bf75cf24954bc3239588c2cdc4c6778fe06e87b5e6468677d54361
+size 411

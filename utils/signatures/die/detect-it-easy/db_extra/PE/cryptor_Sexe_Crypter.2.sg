@@ -1,12 +1,3 @@
-// Detect It Easy: detection rule file
-
-meta("cryptor", "Sexe Crypter");
-
-function detect() {
-    if (PE.compareEP("558BEC83C4EC53565733C08945ECB8........E830FAFFFF33C05568........64FF306489")) {
-        sVersion = "1.1";
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:a0efa220ae4b33950f6d8a2b282f77fdba9884db03e82211911f2c17bb4239f1
+size 277

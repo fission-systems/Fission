@@ -1,8 +1,3 @@
-<callfixup name="__rust_try">
-    <target name="__rust_try"/>
-    <pcode>
-	<body><![CDATA[
-	    call [EDI];
-	    ]]></body>
-    </pcode>
-</callfixup>
+version https://git-lfs.github.com/spec/v1
+oid sha256:68c2b2afb09f2d040be1c04890dcb5c38c638fb71832eadb31e1e1172e394c49
+size 150

@@ -1,14 +1,3 @@
-<patternconstraints>
-  <language id="ARM:LE:32:*">
-    <patternfile>ARM_LE_patterns.xml</patternfile>
-  </language>
-  
-  <language id="ARM:BE:32:*">
-    <patternfile>ARM_BE_patterns.xml</patternfile>
-  </language>
-  
-  <language id="ARM:LEBE:32:*">
-    <patternfile>ARM_LE_patterns.xml</patternfile>
-  </language>
-    
-</patternconstraints>
+version https://git-lfs.github.com/spec/v1
+oid sha256:16edf0d8c47b376a9db88ec1d7d90d457c386096ddfaf3db4a351d080fd89950
+size 341

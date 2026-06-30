@@ -1,11 +1,3 @@
-// Detect It Easy: detection rule file
-
-meta("converter", "Ady`s COM2EXE");
-
-function detect() {
-    if (MSDOS.compare("'Ady'27", 28)) {
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:ddbb219bbde328d08aa9aec6015bd44a530440b895bf97ba6ace06f4f90f7cf9
+size 192

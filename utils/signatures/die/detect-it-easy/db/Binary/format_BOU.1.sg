@@ -1,17 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: BJNFNE <bjnfne@web.de>
-// Used by Coktel Vision games
-
-// https://github.com/scummvm/scummvm/blob/master/engines/gob/inter_adibou1.cpp
-meta("format", "BOU");
-
-function detect() {
-    var appli = Binary.getString(0, 20).trim();
-
-    if (/^[CLcl]\d{2}([Cc]alcul|[Ll]ecture) \d ans/.test(appli)) {
-        if (X.isVerbose()) sOptions = appli;
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:775e59a9623c31bde7429b18699f470293c56ffd84dc8b53b79f7f5f5fac7d0d
+size 445

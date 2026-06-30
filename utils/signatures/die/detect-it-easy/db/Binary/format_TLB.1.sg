@@ -1,13 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: BJNFNE <bjnfne@web.de>
-
-// http://justsolve.archiveteam.org/wiki/Microsoft_Type_Library
-meta("format", "Microsoft Type Library");
-
-function detect() {
-    if (Binary.compare("'MSFT'020001000000000009040000")) {
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:e3d55d082440156daff2e0de69175026ff5415c1a7ff8a3c349e501206fda976
+size 316

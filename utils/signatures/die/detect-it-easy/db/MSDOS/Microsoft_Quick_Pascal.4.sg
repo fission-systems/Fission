@@ -1,16 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: hypn0 <hypn0@mail.ru>
-
-meta("compiler", "Microsoft QuickPascal");
-
-function detect() {
-    if (MSDOS.compareEP("b0..9a########50b430cd213c..73..cd20b8....8ed88c06....c706........8c0e....58545b3bdc74..0ac074..be....e8....32c0e9")) {
-        sVersion = "1.0-1.08";
-        sOptions = "1989";
-        bDetected = true;
-    }
-
-    sLang = "Pascal";
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:ef1c8f180b47561cdebe04c7805b73121683423b8858b330680fbdb6db751f0b
+size 418

@@ -1,12 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: BJNFNE <bjnfne@web.de>
-
-meta("format", "Resource Container (.RCO)");
-
-function detect() {
-    if (Binary.compare("0050524600010000")) {
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:d0376470b5c7aaee13ef5ac9b8514046508390f919c935d4ccbd0c3652ce0d26
+size 242

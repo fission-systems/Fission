@@ -1,14 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: BJNFNE <bjnfne@web.de>
-
-// https://wiki.scummvm.org/index.php?title=Director
-meta("engine", "Director Player");
-
-function detect() {
-    if (NE.compareOverlay("140002004d11650000000200c0252500")) {
-        sVersion = "1.0-3.0";
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:3f5a80f670d00614d9508c48d9dcabdc1cef5491f7eb59dc2e0fcd53e770fb63
+size 333

@@ -1,15 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: hypn0 <hypn0@mail.ru>
-
-meta("packer", "Mystic Compressor");
-
-function detect() {
-    if (PE.compareEP("558bec83ec..6a..ff35........6a..ff15........8d55..5268........68........ff15........6a..ff35")) {
-        bDetected = true;
-    }
-    if (PE.compareEP("558bec83c4..68........ff15........8945..68........ff75..ff15........8945..8d55..526a..68")) {
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:fd1b26f9fa28ef941b13152f817868c505ce2d4195060bb61924fbbb6f04f946
+size 454

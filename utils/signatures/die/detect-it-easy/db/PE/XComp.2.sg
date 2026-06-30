@@ -1,14 +1,3 @@
-// Detect It Easy: detection rule file
-
-meta("packer", "XComp");
-
-function detect() {
-    if (PE.getNumberOfImports() == 1 &&
-        PE.isImportPositionHashPresent(0, 0x4bc52e77)) { // GetProcAddress, LoadLibraryA, VirtualAlloc, VirtualFree, VirtualProtect
-        if (PE.compareEP("68........9C60E8$$$$$$$$E8$$$$$$$$5B5D833B00")) {
-            bDetected = true;
-        }
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:643be36f121ed34e550a4e5545879eb792ef1dc3189710c4346b1cbfc2af96e1
+size 416

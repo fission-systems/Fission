@@ -1,14 +1,3 @@
-// Detect It Easy: detection rule file
-
-meta("installer", "Store Installer");
-
-function detect() {
-    if (PE.isNET()) {
-        if (PE.getVersionStringInfo("InternalName") == "StoreInstaller.exe") {
-            sVersion = PE.getVersionStringInfo("FileVersion");
-            bDetected = true;
-        }
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:7ebf7bc9a15ab1b5986819f8210f7c94e5a86a56c06cba5dd8fddc7ddadcaa89
+size 333

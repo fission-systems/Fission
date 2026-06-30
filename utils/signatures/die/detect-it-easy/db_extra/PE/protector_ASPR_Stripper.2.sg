@@ -1,12 +1,3 @@
-// Detect It Easy: detection rule file
-
-meta("protector", "ASPR Stripper");
-
-function detect() {
-    if (PE.compareEP("BB........E9........609CFCBF........B9........F3AA9D61C3558BEC")) {
-        sVersion = "2.X";
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:fb24145048d3c10058e9f622cc78e365024be36715af823d94b26f8f2cd0558a
+size 268

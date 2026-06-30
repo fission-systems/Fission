@@ -1,14 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: hypn0 <hypn0@mail.ru>
-
-meta("immunizer", "Artemis Professional");
-
-function detect() {
-    if (MSDOS.compareEP("e8$$$$5d81ed....2e8c8e....2e8c86....fc268e06....33ff32c0b9....f2ae26803d..75..83c7..2e89be")) {
-        sOptions = "by Panda Software";
-        sVersion = "2.10s";
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:72e116de8bf28d2192fda62ccd377b1c745404ea4ad18ab2641f40be303411c6
+size 381

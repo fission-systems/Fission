@@ -1,14 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: BJNFNE <bjnfne@web.de>
-
-// https://rimage.incom.de/en/
-meta("iso", "Rimage Image Server");
-
-function detect() {
-    if (Binary.compare("'Rimage Image Server Version: 8.6.604.1'", 0x00008373)) {
-        sVersion = "8.6.604.1";
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:fa93d5e867d2b9f0ac8cb4cd09fbaf13435e2a99e1effc68a0c6d6f19014d4bb
+size 331

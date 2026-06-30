@@ -1,18 +1,3 @@
-// Detect It Easy: detection rule file
-
-meta("source", "XML");
-
-function detect() {
-    var sText = Binary.getHeaderString();
-    // Ignore the UTF-8 BOM.
-    if (/^(?:\xef\xbb\xbf)?<\?xml/.test(sText)) {
-        var aVersion = sText.match(/version="(.*?)"/);
-        if (aVersion) {
-            sVersion = aVersion[1];
-        }
-
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:8aa117d71fb78e37fd79c4ea85ff2a1df0649a4534e237d2420aeb6feadeb8e4
+size 400

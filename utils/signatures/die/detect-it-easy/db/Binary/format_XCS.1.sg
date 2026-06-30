@@ -1,18 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: BJNFNE <bjnfne@web.de>
-
-// https://wiki.multimedia.cx/index.php/Engines/XPAT#XCS
-meta("format", "XPAT Compiled Script (.XCS)");
-
-function detect() {
-    if (Binary.compare("58 43 53")) {
-        var platform = Binary.getString(4, 2).trim();
-
-        if (/^[A-Z]{2}$/.test(platform)) {
-            sVersion = platform;
-            bDetected = true;
-        }
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:285bf2b6346e64c3278025c3de55837b95183290b9eb2555908d4798b7865cf5
+size 437

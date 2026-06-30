@@ -1,5 +1,3 @@
-// Detect It Easy: DiE-JS framework file
-// Don't change anything unless you're sure about what you're doing
-
-var File = APK;
-var X = APK;
+version https://git-lfs.github.com/spec/v1
+oid sha256:752869a22fd0287ba0f20c2f4cb487802f9bf0b87a1b62bab55ec34fceae1ca8
+size 142

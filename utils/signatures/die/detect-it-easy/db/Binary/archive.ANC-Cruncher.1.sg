@@ -1,13 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: hypn0 <hypn0@mail.ru>
-
-meta("archive", "ANC-Cruncher");
-
-function detect() {
-    if (Binary.compare("'FVL0'")) {
-        sOptions = "use ANC-Cruncher's CRLoad for unpack and run";
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:f0c4426f16a53bbae31b231916690d7a6cef9b3421d791bde0d262da6d00f739
+size 285

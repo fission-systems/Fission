@@ -1,14 +1,3 @@
-// Detect It Easy: detection rule file
-
-// Author: DosX
-// E-Mail: collab@kay-software.ru
-// GitHub: https://github.com/DosX-dev
-// Telegram: @DosX_dev
-
-meta("protector", "Jiagu");
-
-function detect() {
-    bDetected = DEX.isDexStringPresent("PangXie") || DEX.isDexStringPresent("nsecure");
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:e691996c18f0237905409fe3f01a5b4de386559343f830bf67b653f1f177bee5
+size 313

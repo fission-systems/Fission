@@ -1,5 +1,3 @@
-// Detect It Easy: DiE-JS framework file
-// Don't change anything unless you're sure about what you're doing
-
-var File = ISO9660;
-var X = ISO9660;
+version https://git-lfs.github.com/spec/v1
+oid sha256:4db217155c1f0ce4286c185c0202c160ff9f242df9857157647d8cef2672cda0
+size 146

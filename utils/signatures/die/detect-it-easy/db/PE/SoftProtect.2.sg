@@ -1,13 +1,3 @@
-// Detect It Easy: detection rule file
-
-meta("protector", "SoftProtect");
-
-function detect() {
-    if (PE.compareEP("E8....00008D85....0000C70000000000E8....0000E8....00008D85....000050E8....000083")) {
-        bDetected = true;
-    } else if (PE.compareEP("EB01E360E803......D2EB0B58EB014840EB0135FFE0E76160E803")) {
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:d6ee440090068a49a456f60efff4a75e2db51380fbb9701e6fe2cf97c8f38048
+size 382

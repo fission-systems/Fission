@@ -1,18 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: hypn0 <hypn0@mail.ru>
-
-meta("converter", "NetCode");
-
-function detect() {
-    if (Binary.compare("'T_OOWW3=XXWX5 2PY5w3P_-l.P-KD1Ep-OLPZ-pJP-pw40PQX5fsPu'")) {
-        sVersion = "1.11";
-        sOptions = "by JauMing Tseng //Nide";
-        bDetected = true;
-    } else if (Binary.compare("':?7%00%CCPY-@=PZ5+")) {
-        sVersion = "1.40";
-        sOptions = "by JauMing Tseng //Nide";
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:ff2ac195d22c4b3469e16d2fcdd3fc1f93f385d6b235792c05170a53cfd27521
+size 507

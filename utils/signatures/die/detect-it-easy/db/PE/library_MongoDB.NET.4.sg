@@ -1,25 +1,3 @@
-// Detect It Easy: detection rule file
-
-// Author: DosX
-// E-Mail: collab@kay-software.ru
-// GitHub: https://github.com/DosX-dev
-// Telegram: @DosX_dev
-
-// https://github.com/mongodb/mongo-csharp-driver
-meta("library", "MongoDB.NET Driver");
-
-function detect() {
-    if (PE.isNetObjectPresent("MongoDB") ||
-        PE.isNetObjectPresent("MongoDB.Driver") ||
-        PE.isNetObjectPresent("MongoDB.Driver.Core") ||
-        PE.isNetObjectPresent("MongoDB.Analyzer")) {
-        bDetected = true;
-    }
-
-    if (PE.isNetObjectPresent("MongoDB.AspNetCore.OData")) {
-        sVersion = "ASP.NET Core";
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:0bee8b5993e1c7a9942edbd0f1648f33dfb4d0a2e67075d03dd5b9d069ee896f
+size 651

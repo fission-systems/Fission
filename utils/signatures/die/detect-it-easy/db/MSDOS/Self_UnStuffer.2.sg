@@ -1,16 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: hypn0 <hypn0@mail.ru>
-
-meta("sfx", "Self UnStuffer");
-
-function detect() {
-    if (MSDOS.compareEP("86e303e9ace3$$1000e3$$00e40ec400e3")) {
-        if (MSDOS.compareOverlay("0101'Aladdin'")) {
-            sVersion = "1.1";
-            sOptions = "by Aladdin Systems, Inc.";
-            bDetected = true;
-        }
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:77ee2e5e3e452dd55499608841146cbc7e7c5d2dc7e4662dce8067bacd8adfd5
+size 393

@@ -1,20 +1,3 @@
-// Detect It Easy: detection rule file
-
-meta("protector", "Adept Protector");
-
-function detect() {
-    if (PE.isNET()) {
-        var nOffset = PE.findString(PE.section[0].FileOffset, PE.section[0].FileSize, "ByAdeptProtector");
-        if (nOffset != -1) {
-            if (PE.compare("'Smashed'", nOffset - 7)) {
-                sOptions = "Evaluation";
-            } else if (PE.compare("'STAThreadAttribute'", nOffset + 17)) {
-                sVersion = "2.1";
-            }
-
-            bDetected = true;
-        }
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:2eb2899fa2e0a1900e75a15d111d549d4e1f0950c56f47c3a145fdee57e8d0ae
+size 547

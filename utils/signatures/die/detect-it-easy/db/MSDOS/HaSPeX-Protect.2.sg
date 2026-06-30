@@ -1,13 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: hypn0 <hypn0@mail.ru>
-
-meta("protector", "HaSPeX-Protect");
-
-function detect() {
-    if (MSDOS.compareEP("fa8cc88ed88cd38bd48ed0bc....b9....8bf44444fdad35....50eb")) {
-        sOptions = "1996";
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:306712afe844409429bdd7c1c0fa02f3be5a23cf73fbf700f64262a6949e3a87
+size 300

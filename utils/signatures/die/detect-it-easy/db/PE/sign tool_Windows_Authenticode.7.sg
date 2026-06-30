@@ -1,18 +1,3 @@
-// Detect It Easy: detection rule file
-// Rewritten by: DosX
-
-meta("sign tool", "Windows Authenticode");
-
-function detect() {
-    if (PE.isSigned()) {
-        sVersion = "2.0";
-        sOptions = "PKCS #7";
-        bDetected = true;
-
-        if (!PE.compareOverlay("00020200", 0x04)) {
-            sOptions = sOptions.append("after overlay");
-        }
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:30ec64ee5b6bb6ca72dc983c6b2d49b7758277beb8cc7dfd16c707d7f21f4bae
+size 382

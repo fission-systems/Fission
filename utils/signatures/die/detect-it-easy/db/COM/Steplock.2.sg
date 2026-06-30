@@ -1,14 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: hypn0 <hypn0@mail.ru>
-
-meta("protector", "Steplock");
-
-function detect() {
-    if (Binary.compare("e9$$$$0e1fb9....030e....be....d204282c46e2")) {
-        sVersion = "1.00A";
-        sOptions = "by Morten Pedersens";
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:7da2d0c783e5e2488e33a6be2533e49a5f002b5bfa6b89322dda66f89f7e23c3
+size 332

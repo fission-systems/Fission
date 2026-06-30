@@ -1,13 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: BJNFNE <bjnfne@web.de>
-
-// https://werbespiel.blogspot.com/2010/07/dunkle-schatten.html
-meta("format", "Dunkle Schatten Config");
-
-function detect() {
-    if (Binary.compare("'DSchCFG'000001")) {
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:aeb2f38ac62129552815e8a7620cdaee914399c5b985096a9e58c488a3fb7ac3
+size 301

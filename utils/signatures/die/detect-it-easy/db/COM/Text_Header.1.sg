@@ -1,14 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: hypn0 <hypn0@mail.ru>
-
-meta("other", "Text Header");
-
-function detect() {
-    if (Binary.compare("e9$$$$b9....be....bf....f3a468....c3")) {
-        sVersion = "1.0";
-        sOptions = "from EXE2COM 9.50 by B. Vorontsov";
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:04ef805ea244fa48d78b4b347df117a93d221b5bf4e715d479ee7702fb801eb8
+size 327

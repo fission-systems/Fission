@@ -1,14 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: hypn0 <hypn0@mail.ru>
-
-meta("packer", "PMWLite");
-
-function detect() {
-    if (MSDOS.compareEP("e8$$$$fc1633c033db8ec026c406....26813e........75..26813e........74..26891e....26891e....07c3")) {
-        sVersion = "1.33";
-        sOptions = "by Daredevil & Tran";
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:d6d9a3c9141b4aba870fa01dee57436ab27eacf554ab0bb5c0b3d94d3d1a9059
+size 378

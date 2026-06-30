@@ -1,13 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: BJNFNE <bjnfne@web.de>
-
-// https://curl.se/libcurl/
-meta("library", "Curl");
-
-function detect() {
-    if (ELF.isLibraryPresent("libcurl.so.4")) {
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:00a818853088ab29562aeac775d9a3b46ac0860ff25bd4a995d9dc88f7984f3a
+size 251

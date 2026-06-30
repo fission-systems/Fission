@@ -1,13 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: hypn0 <hypn0@mail.ru>
-
-meta("compiler", "Turbo C++");
-
-function detect() {
-    if (Binary.compare("8cca2e8916....b430cd218b2e....8b1e....8edaa3....8c06....891e....892e....e8....c43e....8bc78bd8b9....fcf2ae")) {
-        sVersion = "1990";
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:06b3d47e42be2a655d17992c242c245cc44d86bd4e1019b99301ce07e467d12f
+size 343

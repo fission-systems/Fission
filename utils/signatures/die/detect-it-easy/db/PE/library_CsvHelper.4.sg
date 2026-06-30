@@ -1,17 +1,3 @@
-// Detect It Easy: detection rule file
-
-// Author: DosX
-// E-Mail: collab@kay-software.ru
-// GitHub: https://github.com/DosX-dev
-// Telegram: @DosX_dev
-
-// https://github.com/JoshClose/CsvHelper
-meta("library", "CsvHelper");
-
-function detect() {
-    if (PE.isNetObjectPresent("CsvHelper")) {
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:436967e58f82ae10728d0c49b0e56d03f67f43fcce10fa836b45bfd74e7cfb5d
+size 347

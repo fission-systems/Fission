@@ -1,13 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: hypn0 <hypn0@mail.ru>
-
-meta("sfx", "ICE SFX");
-
-function detect() {
-    if (MSDOS.compareEP("eb$$be....8bfe8b0e....8b16....b8....50fcad33c2ab8bd0e2")) {
-        sVersion = "1.0";
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:9320ed61c19b0479c3e7d4a5b338a48f41e0f5acbe2f76dad4a3fe60fac5a827
+size 293

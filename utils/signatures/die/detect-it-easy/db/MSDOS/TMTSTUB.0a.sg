@@ -1,14 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: hypn0 <hypn0@mail.ru>
-
-meta("extender", "TMTSTUB DOS Extender");
-
-function detect() {
-    if (MSDOS.compareEP("b462cd218bc38ccb538edb8c0e....8c0e....8c0e....2bd8bd....03ddc1e5..b44acd2173..ba....e9")) {
-        sVersion = "0.31";
-        sOptions = "32bit WDOSX-based DOS-extender and loader by Rustam Gadeyev";
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:6145bae24a7b2ce7cf5fd7725bab97e3097b8d4dcb13eb50ed0005f9a4736660
+size 427

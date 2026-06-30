@@ -1,13 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: hypn0 <hypn0@mail.ru>
-
-meta("extender", "DOS protected mode extender");
-
-function detect() {
-    if (MSDOS.compareEP("fafc0e1fe8....8cc0660fb7c066c1e0..6667a3........66b8........66c1e0..6667a3........66670905........66670905")) {
-        sVersion = "1994 by TRAN (Thomas Pytel)";
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:b376833393241ad1a2ccf23aaa430fed1d234a69af93f43a07aef4579655def5
+size 385

@@ -1,11 +1,3 @@
-// Detect It Easy: detection rule file
-
-meta("packer", "Anskya NTPacker Generator");
-
-function detect() {
-    if (PE.compareEP("558BEC83C4F053B8881D0010E8C7FAFFFF6A0A68201E0010A11431001050")) {
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:9ee5c22196bb9b7aefcdf133916fcd4cfaddf93f0040f9d278791a5b7c969734
+size 249

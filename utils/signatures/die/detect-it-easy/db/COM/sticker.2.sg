@@ -1,13 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: hypn0 <hypn0@mail.ru>
-
-meta("protector", "sticker");
-
-function detect() {
-    if (Binary.compare("be....8bc6b1..d3e88cdb03c30344..a3....8cc805....a3....8b44..b1..d3e8")) {
-        sOptions = "1994 by TigraSoft";
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:58d8d407a90981912934820ce95cc66a4e5f4521eb0c319c7059a4678720aa54
+size 317

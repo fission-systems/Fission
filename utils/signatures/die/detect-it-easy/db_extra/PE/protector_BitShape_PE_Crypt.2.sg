@@ -1,15 +1,3 @@
-// Detect It Easy: detection rule file
-
-meta("protector", "BitShape PE Crypt");
-
-function detect() {
-    if (PE.compareEP("60E8000000005D81ED........B97B0900008DBD........8BF7AC")) {
-        sVersion = "1.5";
-        bDetected = true;
-    } else if (PE.compareEP("E8000000005B83EB05EB04'RND!'EB02CD20EB")) {
-        sVersion = "1.0-1.02";
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:46be467b43e2866f73b324bc50ef075d1076a9120a66b34207debdc3faa978ff
+size 394

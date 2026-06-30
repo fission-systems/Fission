@@ -1,15 +1,3 @@
-// Detect It Easy: detection rule file
-
-meta("operation system", "Android");
-
-function detect() {
-    if (DEX.isVerbose()) {
-        sName = DEX.getOperationSystemName();
-        sVersion = DEX.getOperationSystemVersion();
-        sOptions = DEX.getOperationSystemOptions();
-
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:3b5e28a330760c828a348ed9e6b7cc02c2ca8822fa7b2ab21bb3a67fdc6b8874
+size 342

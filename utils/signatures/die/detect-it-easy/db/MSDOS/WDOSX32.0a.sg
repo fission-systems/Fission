@@ -1,12 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: hypn0 <hypn0@mail.ru>
-
-meta("extender", "WDOSX32");
-
-function detect() {
-    if (MSDOS.compareEP("bc....fcbf....ba....e8....b8....abe8....ba....e8....b0..aabe....bf....89faac3c..75..e8....57444f53584c45")) {
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:7fc0297c417b4cc880efa9b2a78980c70c8cb4bb6dcfaeb6eb3b6cbdbd6c84af
+size 321

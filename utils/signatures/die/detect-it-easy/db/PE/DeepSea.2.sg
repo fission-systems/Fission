@@ -1,20 +1,3 @@
-// Detect It Easy: detection rule file
-
-meta("protector", "DeepSea");
-
-function detect() {
-    if (PE.isNet()) {
-        var nOffset = PE.findString(PE.section[0].FileOffset, PE.section[0].FileSize, "DeepSeaObfuscator");
-
-        if (nOffset !== -1) {
-            if (PE.compare("'Evaluation'", nOffset + 18)) {
-                sOptions = "Evaluation";
-                sVersion = "4.X";
-            }
-
-            bDetected = true;
-        }
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:405249d3ed1bfeda24ed96ab533cdbc2785121511757aaff893704083b47cefa
+size 490

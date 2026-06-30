@@ -1,5 +1,3 @@
-// Detect It Easy: DiE-JS framework file
-// Don't change anything unless you're sure about what you're doing
-
-var File = Image;
-var X = Image;
+version https://git-lfs.github.com/spec/v1
+oid sha256:f0f2352bb5066a9738b495613f291717911b6bc220d9e579f308f0c4998f61a8
+size 146

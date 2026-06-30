@@ -1,13 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: hypn0 <hypn0@mail.ru>
-
-meta("installer", "PIMP Installer");
-
-function detect() {
-    if (PE.compareEP("558bec81ec........56576a..be........598dbd........f3a56a..33c0598dbd........f3ab8d85........68........33f65056ff") &&
-        PE.compareOverlay("'PIMPFILE'00")) {
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:12b3312a586cbbc5dbc0e121094a7c91342c7079b38618498840de19a3764e69
+size 383

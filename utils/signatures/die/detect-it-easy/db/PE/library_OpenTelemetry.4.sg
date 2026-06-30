@@ -1,17 +1,3 @@
-// Detect It Easy: detection rule file
-
-// Author: DosX
-// E-Mail: collab@kay-software.ru
-// GitHub: https://github.com/DosX-dev
-// Telegram: @DosX_dev
-
-// https://github.com/open-telemetry/opentelemetry-dotnet
-meta("library", "OpenTelemetry");
-
-function detect() {
-    if (PE.isNetObjectPresent("OpenTelemetry") || PE.isNetObjectPresent("OpenTelemetry.Api")) {
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:cb325eaa89824e8c229f781f50988d6fc18111b1e2e98493788bff4282af3466
+size 417

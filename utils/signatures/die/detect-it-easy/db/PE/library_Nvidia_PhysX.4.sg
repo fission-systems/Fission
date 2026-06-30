@@ -1,17 +1,3 @@
-// Detect It Easy: detection rule file
-
-// Author: DosX
-// E-Mail: collab@kay-software.ru
-// GitHub: https://github.com/DosX-dev
-// Telegram: @DosX_dev
-
-// https://www.nvidia.com/en-gb/drivers/physx/physx-9-19-0218-driver/
-meta("library", "Nvidia PhysX");
-
-function detect() {
-    if (PE.is64() && PE.section[".rdata"] && PE.isLibraryPresentExp(/^physx/i)) {
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:5f07d935ba13e34b5b4c20db24e4604592d97626094d05968afb97690fb8536a
+size 414

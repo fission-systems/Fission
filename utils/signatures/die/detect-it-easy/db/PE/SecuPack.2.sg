@@ -1,13 +1,3 @@
-// Detect It Easy: detection rule file
-
-meta("packer", "SecuPack");
-
-function detect() {
-    if (PE.compareEP("558BEC83C4F053565733C08945F0B8CC3A4000E8E0FCFFFF33C05568EA3C400064FF306489206A0068800000006A036A006A")) {
-        sVersion = "1.5";
-        sOptions = "Soft Stuttgart";
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:1ff41ab0dbda9e19c532d60a4e423c0292cf1b31b43d8dfba9e77e71542bb43e
+size 347

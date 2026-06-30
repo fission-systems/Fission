@@ -1,14 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: hypn0 <hypn0@mail.ru>
-
-meta("protector", "PCOM");
-
-function detect() {
-    if (MSDOS.compareEP("be....b9....2e8a0434..2e880446e2")) {
-        sVersion = "2.8b2, 2.8b3 -e -i";
-        sOptions = "1999";
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:b2e04ab265b2c362dca3e4c98dbae6e929047183155b97b5d58aac51e93f5abf
+size 317

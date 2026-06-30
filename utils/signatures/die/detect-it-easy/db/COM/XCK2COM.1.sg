@@ -1,12 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: hypn0 <hypn0@mail.ru>
-
-meta("converter", "XCK2COM");
-
-function detect() {
-    if (Binary.compare("e9$$$$be....e8....ad89c15156e8....be....e8")) {
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:59afd02336825fe31f91a3572844ff663fef0c80fd8efba71f758524da4b81e5
+size 259

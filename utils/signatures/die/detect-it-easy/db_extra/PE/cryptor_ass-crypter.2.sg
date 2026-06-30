@@ -1,11 +1,3 @@
-// Detect It Easy: detection rule file
-
-meta("cryptor", "ass-crypter");
-
-function detect() {
-    if (PE.compareEP("558BEC83C4EC53........8945ECB898400010E8ACEAFFFF33C055687851001064........206A0A6888510010A1E097001050E8D8EAFFFF8BD853A1E097001050E812EBFFFF8BF853A1E097001050E8DCEAFFFF8B")) {
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:987d46b472a2888577c02a42a49d0e37520a58d0ae7a544106d47a2fd561fa6d
+size 346

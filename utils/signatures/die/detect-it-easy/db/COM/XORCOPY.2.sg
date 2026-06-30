@@ -1,14 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: hypn0 <hypn0@mail.ru>
-
-meta("protector", "XORCOPY");
-
-function detect() {
-    if (Binary.compare("e9$$$$b8....bb....ba....3107434039d375..c606......c606......c606......31c031db31d2e9")) {
-        sVersion = "1.0";
-        sOptions = "1995 by DeiMoS";
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:1ea200b27048aa5cb0e62b62c6c1070150f48cfdc964d90908558bad1b3f0d39
+size 356

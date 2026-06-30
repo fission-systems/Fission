@@ -1,14 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: hypn0 <hypn0@mail.ru>
-
-meta("compiler", "UR/FORTH");
-
-function detect() {
-    if (MSDOS.compareEP("fc2e8c06....2e8e1e....e8$$$$b430cd213c..73..e8")) {
-        sVersion = "1.03";
-        sOptions = "1986-88 by Laboratory Microsystems, Inc.";
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:85dd157d22fa77a9b20186b5b4d201e0acf2c0e26b9a79614eb49558f908579a
+size 346

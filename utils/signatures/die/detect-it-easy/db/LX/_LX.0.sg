@@ -1,15 +1,3 @@
-// Detect It Easy: detection rule file
-
-meta("operation system", "OS/2");
-
-function detect() {
-    if (LX.isVerbose()) {
-        sName = LX.getOperationSystemName();
-        sVersion = LX.getOperationSystemVersion();
-        sOptions = LX.getOperationSystemOptions();
-
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:efa6e9dcaca19fdfc34ad0999acfaf945a39c1da2709462ce1fd441dd9ccb421
+size 335

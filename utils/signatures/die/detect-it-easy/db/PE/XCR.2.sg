@@ -1,13 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: hypn0 <hypn0@mail.ru>
-
-meta("protector", "XCR");
-
-function detect() {
-    if (PE.compareEP("9371..EB$$EB$$8BD878$$EB$$9C33C0EB$$74$$EB$$6079..EB$$E8$$$$$$$$83C4..E8$$$$$$$$8D05........EB$$5D85ED75")) {
-        sVersion = "0.13";
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:f8dd8087f0da3aa610a27fe06753a9830de447bd959a81d75651816f72101876
+size 343

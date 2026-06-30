@@ -1,12 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: hypn0 <hypn0@mail.ru>
-
-meta("packer", "WordPerfect EXEPack");
-
-function detect() {
-    if (MSDOS.compareEP("958cc005....0e1fa3....0306....8ec08b0e....8bf94f8bf7fdf3a48b16....50b8....50cb")) {
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:d82908200e487bc3b8edb4a4961b352f521139ddcd9ecc6a448ba3462c8466b7
+size 297

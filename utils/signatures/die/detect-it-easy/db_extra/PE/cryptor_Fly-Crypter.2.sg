@@ -1,15 +1,3 @@
-// Detect It Easy: detection rule file
-
-meta("cryptor", "Fly-Crypter");
-
-function detect() {
-    if (PE.compareEP("53565755BB2C....44BE00304444BF20....44807B28007516833F0074118B1789D033D289178B")) {
-        sVersion = "1.0";
-        bDetected = true;
-    } else if (PE.compareEP("558BEC83C4F053B818224444E87FF7FFFFE80AF1FFFFB809000000E85CF1FFFF8BD885DB7505")) {
-        sVersion = "1.0";
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:1f70b870396ad8aed03d10cb6cd3e7f45928900ef5080b70441a856d68e4ceae
+size 443

@@ -1,16 +1,3 @@
-// Detect It Easy: detection rule file
-
-// Author: DosX
-// E-Mail: collab@kay-software.ru
-// GitHub: https://github.com/DosX-dev
-// Telegram: @DosX_dev
-
-meta("library", "Chromium Framework");
-
-function detect() {
-    if (PE.isLibraryPresent("libcef.dll")) {
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:00085fda97476b6afa82910076cfea884be10fd95874291c0044a05bec37a7cb
+size 313

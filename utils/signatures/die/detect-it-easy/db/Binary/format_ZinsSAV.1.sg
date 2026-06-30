@@ -1,13 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: BJNFNE <bjnfne@web.de>
-
-// https://www.mobygames.com/game/9264/captain-zins/
-meta("format", "Captain Zins Save");
-
-function detect() {
-    if (Binary.compare("'ZinsSAV'000001")) {
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:41892929dd41c8fd707375c0c9aa6b71de1f607cc9d054cfceef3d7e5748e1c9
+size 285

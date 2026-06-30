@@ -1,16 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: hypn0 <hypn0@mail.ru>
-
-meta("compiler", "Symantec C/C++");
-
-function detect() {
-    if (PE.compareEP("83ec08535556578b7c24..8b7424..8b6c24..ff15........894424..a9........74..807c24")) {
-        sVersion = "7.2";
-        sOptions = "DLL";
-        bDetected = true;
-    }
-
-    sLang = "C/C++";
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:883caff5876ec4fd2a2dd7f2694475e695fc5fc7c4dd665fbd051a8f926ced04
+size 366

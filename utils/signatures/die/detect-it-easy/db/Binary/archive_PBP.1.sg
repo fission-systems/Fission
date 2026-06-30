@@ -1,18 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: BJNFNE <bjnfne@web.de>
-
-// https://www.psdevwiki.com/ps3/PBP
-meta("archive", "PlayStation Update Package");
-
-function detect() {
-    if (Binary.compare("00 50 42 50")) {
-        var psf = Binary.getString(41, 3).trim();
-
-        if (/^[A-Z]{3}/.test(psf)) {
-            if (X.isVerbose()) sOptions = psf;
-            bDetected = true;
-        }
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:84042034ccd33eb5c64cd6b902aec662e212da9f162468bd16dcd26a6aeacd84
+size 424

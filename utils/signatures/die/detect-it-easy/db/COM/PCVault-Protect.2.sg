@@ -1,13 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: hypn0 <hypn0@mail.ru>
-
-meta("protector", "PCVault-Protect");
-
-function detect() {
-    if (Binary.compare("be....fcac3c..75..e9....ac3c..74..e9....eb")) {
-        sOptions = "1993 by E. Johnson";
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:3cce37d9c80c009bfc803c36844e60415a903ad85b852b42e411227cfb153459
+size 309

@@ -1,12 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: hypn0 <hypn0@mail.ru>
-
-meta("protector", "DirTy CrYpt0r");
-
-function detect() {
-    if (PE.compareEP("b8........32dbfec33018403d........7e..68........e8")) {
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:6d7d12fc3ff28219c27f4b00de722c1f2b2bcc4298d330a75dfdc79f23968fdf
+size 263

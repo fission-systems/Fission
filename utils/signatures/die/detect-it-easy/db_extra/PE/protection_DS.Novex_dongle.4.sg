@@ -1,13 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: hypn0 <hypn0@mail.ru>
-
-meta("protection", "Novex/Guardant dongle reference");
-
-function detect() {
-    // I'm (adoxa) guessing this don't occur in the overlay, so don't search it (avoid wasting time on big installers).
-    if (PE.findString(0, PE.isOverlayPresent() ? PE.getOverlayOffset() : PE.getSize(), "\\\\.\\NVKEY") != -1) {
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:6d9435dc483f1bf66d6146279dc56d4fb002df8b34c3a4657bd690f68a648210
+size 436

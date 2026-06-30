@@ -1,14 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: hypn0 <hypn0@mail.ru>
-
-meta("self-displayer", "TXTmaker");
-
-function detect() {
-    if (Binary.compare("eb$$b4..33dbcd1080fc..74..b0..eb$$b44ccd21")) {
-        sVersion = "1.22";
-        sOptions = "1991 by Jack A. Orman";
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:2cf0743f1ce2b58c4d6d30390e00bd6842df86518ec6b0e93b12be6e8a46a895
+size 338

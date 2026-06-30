@@ -1,13 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: BJNFNE <bjnfne@web.de>
-
-// https://learn.microsoft.com/en-us/windows/win32/sysinfo/registry-hives
-meta("format", "Windows Registry Hive (.HIV)");
-
-function detect() {
-    if (Binary.compare("'regf'..0000000..00000")) {
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:0514e6b6dfbf0963cfdc01737578c7c5386a5ff75f1ccb15f03d31362bb0aeaa
+size 324

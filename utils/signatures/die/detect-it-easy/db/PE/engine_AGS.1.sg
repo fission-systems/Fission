@@ -1,13 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: BJNFNE <bjnfne@web.de>
-
-// https://www.adventuregamestudio.co.uk/
-meta("engine", "Adventure Game Studio (AGS)");
-
-function detect() {
-    if (PE.compareOverlay("434c49421a..00")) {
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:a83ea16e70e0124f17a2a9ecc56343b7a09ee6d692a02671766122646b0eab59
+size 286

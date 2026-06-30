@@ -1,13 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: hypn0 <hypn0@mail.ru>
-
-meta("cruncher", "Sound-Tracker Cruncher");
-
-function detect() {
-    if (Amiga.compareEP("61$$4bfa....2c78....203a....90ba....0680........2b40....43fa....d3e9")) {
-        sVersion = "1.0";
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:193ffa0f15bca39bfc54ec396a2c29ac25bfd6268233c6637ba3846d3435193a
+size 318

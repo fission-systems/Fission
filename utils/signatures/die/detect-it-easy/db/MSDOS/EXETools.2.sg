@@ -1,16 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: hypn0 <hypn0@mail.ru>
-
-meta("protector", "EXETools");
-
-function detect() {
-    if (MSDOS.compareEP("e800005d83ed..1e8cda83c2..8eda8ec2bb....ba....85d274..b4..33ff33f6b9....ac32c4c0c4")) {
-        sVersion = "2.1 /E";
-        bDetected = true;
-    } else if (MSDOS.compareEP("68....68....68....be....bf....57b9....f3a4c3")) {
-        sVersion = "2.1 /E";
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:ea367a5de78d95cfa0f6220733b9a542d8949c0557b78276230a3552cc067e0e
+size 471

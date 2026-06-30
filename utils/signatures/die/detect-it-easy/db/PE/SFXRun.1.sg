@@ -1,14 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: hypn0 <hypn0@mail.ru>
-
-meta("joiner", "SFXRun");
-
-function detect() {
-    if (PE.compareEP("ff15........8038..75..8a48..4080f9..74..84c975..eb..408a0880f9..74..80f9..74")) {
-        sVersion = "1.1";
-        sOptions = "1999 by Sergey Sorokin";
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:4dce54a3427cd376937804739372c3d3fe7497acb2ac35770e0faa021c0dc9e4
+size 360

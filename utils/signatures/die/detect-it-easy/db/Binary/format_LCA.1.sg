@@ -1,18 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: BJNFNE <bjnfne@web.de>
-
-// http://zenhax.com/viewtopic.php@t=17622.html
-meta("format", "LCA");
-
-function detect() {
-    if (Binary.compare("4c45474f")) {
-        var vcaFile = Binary.getString(85, 12).trim();
-
-        if (/^[A-Z0-9/.]{12}$/.test(vcaFile)) {
-            if (X.isVerbose()) sOptions = vcaFile;
-            bDetected = true;
-        }
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:4bc862e5316315a740980227de7c67c9ea2921fa3d78c6706ab83f7f18af324d
+size 428

@@ -1,13 +1,3 @@
-// Detect It Easy: detection rule file
-
-meta("cryptor", "404Crypter");
-
-function detect() {
-    if (PE.isNET()) {
-        if (PE.isNetObjectPresent("Z.resources") && PE.isNetObjectPresent("First")) {
-            bDetected = true;
-        }
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:d4e3ef6c6d47483dda4d164a87ca5b65b97706d58b86ecbb73ec8a3ddcad7a67
+size 269

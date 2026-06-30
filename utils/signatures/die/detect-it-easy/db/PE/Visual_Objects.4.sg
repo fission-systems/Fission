@@ -1,14 +1,3 @@
-// Detect It Easy: detection rule file
-
-meta("compiler", "Visual Objects");
-
-function detect() {
-    if (PE.compare("'This Visual Objects application cannot be run in DOS mode'", 0x312)) {
-        sVersion = "2.XX";
-        bDetected = true;
-    }
-
-    sLang = "Visual Objects";
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:9016f57fb924ad69b0c6e7453b21820c5345e55d96489bb01fcef1e65d3b7326
+size 302

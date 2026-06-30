@@ -1,11 +1,3 @@
-// Detect It Easy: detection rule file
-
-meta("cryptor", "DarkEye");
-
-function detect() {
-    if (PE.isNetObjectPresent("BasicCryptorFromDebil")) {
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:b85abb8aead197146dd58442f50207146e679758defd289f0edfbc4d738a553e
+size 202

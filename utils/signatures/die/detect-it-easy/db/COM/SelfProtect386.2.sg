@@ -1,12 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: hypn0 <hypn0@mail.ru>
-
-meta("protector", "SelfProtect386");
-
-function detect() {
-    if (Binary.compare("'=SYRIUS=DIRE=SERVICE='071a")) {
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:e7bacf869722ed2f11f11dc9b42afbbd3c43c8adf437211488664c0b1c2bc1e3
+size 251

@@ -1,17 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: hypn0 <hypn0@mail.ru>
-
-meta("compiler", "VBCC");
-
-function detect() {
-    if (ELF.getElfHeader_entry() == 0) { // EP == 0
-        if (ELF.compare("6000000048......................7c08....9001....9421....bdc1....3d......902b....3d......39ad....3960....800b....3d......90", ELF.getSectionFileOffset(1))) { // PPC instruction set
-            sVersion = "0.7";
-            bDetected = true;
-        }
-    }
-
-    sLang = "C";
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:b896018a36c854f3a4d42d1e1262ae33e2457b07e3cf93bdb288e214e99a4d50
+size 507

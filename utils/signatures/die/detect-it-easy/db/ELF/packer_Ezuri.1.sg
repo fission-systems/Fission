@@ -1,30 +1,3 @@
-// Rewritten from yara (YARA-Rule by f0wl) by KDSS-Research
-// Optimized and rewritten (again) by DosX
-
-meta("packer", "Ezuri");
-
-function detect() {
-    if (ELF.isSectionNamePresent(".strtab") && ELF.isSectionNamePresent(".gopclntab") && ELF.isSectionNamePresent(".noptrdata") && ELF.isSectionNamePresent(".rodata")) {
-        var strtab = ELF.getSectionNumber(".strtab"),
-            gopclntab = ELF.getSectionNumber(".gopclntab"),
-            noptrdata = ELF.getSectionNumber(".noptrdata"),
-            rodata = ELF.getSectionNumber(".rodata");
-
-
-        var nOffset = ELF.findString(ELF.getSectionFileOffset(strtab), ELF.getSectionFileSize(strtab), "main.runFromMemory");
-
-
-        if (nOffset != -1 &&
-            ELF.findString(ELF.getSectionFileOffset(strtab), ELF.getSectionFileSize(strtab), "main.aesDec") != -1 &&
-            ELF.findString(ELF.getSectionFileOffset(gopclntab), ELF.getSectionFileSize(gopclntab), "crypto/cipher.NewCFBDecrypter") != -1 &&
-            ELF.findString(ELF.getSectionFileOffset(rodata), ELF.getSectionFileSize(rodata), "/proc/self/fd/%d") != -1 &&
-            ELF.findString(ELF.getSectionFileOffset(rodata), ELF.getSectionFileSize(rodata), "/dev/null") != -1 &&
-            ELF.findSignature(ELF.getSectionFileOffset(noptrdata), ELF.getSectionFileSize(noptrdata), "A5 63 63 C6 84 7C 7C F8") != -1 &&
-            ELF.findSignature(ELF.getSectionFileOffset(noptrdata), ELF.getSectionFileSize(noptrdata), "63 7C 77 7B F2 6B 6F C5 30 01 67 2B FE D7 AB 76") != -1) {
-            bDetected = true;
-        }
-
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:bdb4f0bb2e834906cab235dea82c85fc59644cfc4ba932c88103b0697269e955
+size 1572

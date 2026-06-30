@@ -1,22 +1,3 @@
-// Detect It Easy: detection rule file
-
-meta("operation system", "Windows");
-
-function detect() {
-    if (PE.isVerbose()) {
-        sName = PE.getOperationSystemName();
-        sOptions = PE.getOperationSystemOptions();
-
-        bDetected = true;
-
-        var rossymSection = PE.section[".rossym"];
-
-        if (rossymSection && rossymSection.Characteristics == 0x42000802) {
-            sVersion = "React OS, 0.3+";
-        } else {
-            sVersion = PE.getOperationSystemVersion();
-        }
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:c21226c497552d1f62e2864480bb94ee046151ca1d7791964a242d846e5e26a3
+size 549

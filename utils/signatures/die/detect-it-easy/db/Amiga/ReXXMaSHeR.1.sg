@@ -1,13 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: hypn0 <hypn0@mail.ru>
-
-meta("cruncher", "ReXXMaSHeR");
-
-function detect() {
-    if (Amiga.compareEP("6100$$$$48e7808041fa....6100....203a....41f9")) {
-        sOptions = "by DCS";
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:2bf2c973a3a9ea5998c9fdef8349eca3e8152dc81531ac724a1c7e0945eeab7f
+size 285

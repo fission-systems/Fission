@@ -1,13 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: BJNFNE <bjnfne@web.de>
-
-// https://github.com/Wanty5883/Titanfall2/blob/master/documentation/textures/valve-texture-format-vtf/README.md
-meta("format", "Valve Texture");
-
-function detect() {
-    if (Binary.compare("'VTF'0007000000")) {
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:bcdb25d3ae0ec6740e5cb33b1effc21d044fc1fc931442ff18c708ef0c483224
+size 341

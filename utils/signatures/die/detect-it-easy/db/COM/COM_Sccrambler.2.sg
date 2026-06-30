@@ -1,14 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: hypn0 <hypn0@mail.ru>
-
-meta("protector", "COM Sccrambler");
-
-function detect() {
-    if (Binary.compare("e9$$$$fcbe....8bfeb9....515657b4..04..ac90902ac432c4aae2..5f5e5903f183ee..a5a4b8....5083eb..33c9")) {
-        sVersion = "0.1";
-        sOptions = "1995 by Moshe";
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:30395fbd5f3ba7d0852ac4bbdfc5effea4fdc535c9c0aea1f7375e367aa8163f
+size 374

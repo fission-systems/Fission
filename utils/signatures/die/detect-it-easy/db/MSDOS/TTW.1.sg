@@ -1,17 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: hypn0 <hypn0@mail.ru>
-
-meta("immunizer", "TTW");
-
-function detect() {
-    if (MSDOS.compareEP("ab33c08bd88bc889c28bf889c6db52..e9")) {
-        sOptions = "1994-95 by TTW Inc.";
-        bDetected = true;
-    }
-    if (MSDOS.compareEP("d88b....c2....89c6071fcb")) {
-        sOptions = "1994-95 by TTW Inc.";
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:2f49ce31648dfd0ea6347b8c6734445b777500d8fa8fdd10173b9d6501d0d294
+size 424

@@ -1,14 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: BJNFNE <bjnfne@web.de>
-
-// http://www.cdinteractive.co.uk/forums/cdinteractive/viewtopic.php?t=2115
-meta("format", "ZZDATA");
-
-function detect() {
-    if (Binary.compare("'DIRINFO'000000000000000000")) {
-        sVersion = "CD-I";
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:bbc596fe05b96f516fe8a8f70143fa33fca886699393b10e169bc5d04d21714b
+size 336

@@ -1,13 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: hypn0 <hypn0@mail.ru>
-
-meta("sfx", "ARC SFX");
-
-function detect() {
-    if (NE.compareEP("a3....891e....890e....8b0e....bb....e8....72..8b0e....bb....e8....73..b9....890e....bb....e8")) {
-        sOptions = "1991 by SEA, Inc.";
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:73f38a81eb754247b4e937dfc0601c97a5a882837c45b9f963ebf4c96109902e
+size 333

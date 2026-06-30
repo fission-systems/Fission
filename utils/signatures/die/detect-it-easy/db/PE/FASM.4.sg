@@ -1,21 +1,3 @@
-// Detect It Easy: detection rule file
-
-meta("compiler", "FASM");
-
-includeScript("FASM");
-
-function detect() {
-    if (bFASM) {
-        sVersion = PE.getCompilerVersion();
-        bDetected = true;
-
-        // Correct version
-        if (PE.getMajorLinkerVersion() > 2) {
-            sVersion += "*";
-        }
-    }
-
-    sLang = "ASMx" + (PE.is64() ? "64" : "86");
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:1b36e87cc505a6b300d8523ec2a1541254bbbf4f184c537f32bdebe5c73338c0
+size 409

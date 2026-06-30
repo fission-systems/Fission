@@ -1,22 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: hypn0 <hypn0@mail.ru>
-
-meta("protection", "HASP dongle reference");
-
-function detect() {
-    // I'm (adoxa) guessing these don't occur in the overlay, so don't search it (avoid wasting time on big installers).
-    var nSize = PE.isOverlayPresent() ? PE.getOverlayOffset() : PE.getSize();
-
-    if (nSize > 50000000)
-        nSize = 50000000;
-
-    if (PE.findString(0, nSize, "HASPDOSDRV") != -1 ||
-        PE.findString(0, nSize, "HASPUT16.DLL") != -1) {
-        bDetected = true;
-    } else if ((PE.isLibraryPresent("MSVBVM60.DLL") || PE.isLibraryPresent("MSVBVM50.DLL")) && PE.findString(0, nSize, "haspvb32.dll") !== -1) {
-        sVersion = "Visual Basic";
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:b6cd6a9b066d146ea5f4b3be4d2699c6b67c0736dd093b7bd4fe4704a1f140d0
+size 765

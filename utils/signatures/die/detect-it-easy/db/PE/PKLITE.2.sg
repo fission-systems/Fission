@@ -1,15 +1,3 @@
-// Detect It Easy: detection rule file
-
-meta("packer", "PKLITE32");
-
-function detect() {
-    if (PE.compareEP("68........68........68........e8$$$$$$$$558beca1")) {
-        sVersion = "1.1";
-        bDetected = true;
-    } else if (PE.compareEP("68........68........B8........2b4424..50e8$$$$$$$$558beca1")) {
-        sVersion = "1.1";
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:fd8851623122015de2e6dadf4131809edae7ed5da31408ecbae661b4665061a3
+size 402

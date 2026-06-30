@@ -1,17 +1,3 @@
-// Detect It Easy: detection rule file
-
-meta("cryptor", "Simple UPX Cryptor");
-
-function detect() {
-    if (PE.compareEP("60B8........B9....0000803408..E2FA6168........C3")) {
-        if (PE.compareEP("1800", 7)) {
-            sOptions = "multi layer encryption";
-        } else if (PE.compareEP("01", 8)) {
-            sOptions = "single layer encryption";
-        }
-        sVersion = "30.4.2005";
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:07d0ce618a930ebfbd55d25bfeaaa1c2667b50aa3221c74010cf15b568eaafcf
+size 455

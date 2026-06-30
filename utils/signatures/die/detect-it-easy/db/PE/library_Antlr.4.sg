@@ -1,21 +1,3 @@
-// Detect It Easy: detection rule file
-
-// Author: DosX
-// E-Mail: collab@kay-software.ru
-// GitHub: https://github.com/DosX-dev
-// Telegram: @DosX_dev
-
-// https://www.nuget.org/packages/Antlr
-meta("library", "Antlr");
-
-function detect() {
-    if (PE.isNetObjectPresent("Antlr3.Runtime")) {
-        sVersion = "3.X";
-        bDetected = true;
-    } else if (PE.isNetObjectPresent("Antlr4.Runtime")) {
-        sVersion = "4.X";
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:59d5735ee3159db23e3cd88b4536f2a3e95b0992accfd4c660845ef9d5423536
+size 482

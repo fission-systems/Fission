@@ -1,14 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: hypn0 <hypn0@mail.ru>
-
-meta("protector", "TCEC");
-
-function detect() {
-    if (Binary.compare("1aff5fb9....f326ace3..eb")) {
-        sVersion = "3.60";
-        sOptions = "by ThE CLERiC! //LZ0, EVD";
-        bDetected = true;
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:eb5a8060161601848c75446253a25b95f57c91ffc0384383f823ab22d8f82cbd
+size 315

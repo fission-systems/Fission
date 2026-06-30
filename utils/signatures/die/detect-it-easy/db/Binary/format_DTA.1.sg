@@ -1,18 +1,3 @@
-// Detect It Easy: detection rule file
-// Author: BJNFNE <bjnfne@web.de>
-
-// https://zenhax.com/viewtopic.php@t=1382.html
-meta("format", "DTA");
-
-function detect() {
-    if (Binary.compare("03000000....08")) {
-        var model = Binary.getString(7, 8).trim();
-
-        if (/^[a-z0-9]{8}/.test(model)) {
-            if (X.isVerbose()) sOptions = model;
-            bDetected = true;
-        }
-    }
-
-    return result();
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:fd6f7ab245191dd79abd4f5c1bef49407a901d0eb948469827f2c8a6d17171d5
+size 422
