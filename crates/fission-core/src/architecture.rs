@@ -998,6 +998,9 @@ fn collect_files_with_extension(root: &Path, extension: &str) -> Vec<PathBuf> {
         };
         for entry in entries.flatten() {
             let path = entry.path();
+            if is_hidden_or_appledouble_file(&path) {
+                continue;
+            }
             if path.is_dir() {
                 stack.push(path);
             } else if path
@@ -1012,6 +1015,13 @@ fn collect_files_with_extension(root: &Path, extension: &str) -> Vec<PathBuf> {
     }
     out.sort();
     out
+}
+
+fn is_hidden_or_appledouble_file(path: &Path) -> bool {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .map(|name| name.starts_with('.') || name.starts_with("._"))
+        .unwrap_or(false)
 }
 
 #[cfg(test)]
@@ -1033,6 +1043,22 @@ mod tests {
         assert!(
             spec.source
                 .starts_with("opinion: loader=Portable Executable (PE)")
+        );
+    }
+
+    #[test]
+    fn collect_files_ignores_hidden_appledouble_files() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let visible = dir.path().join("valid.opinion");
+        let hidden = dir.path().join(".hidden.opinion");
+        let appledouble = dir.path().join("._valid.opinion");
+        fs::write(&visible, "").expect("write visible");
+        fs::write(&hidden, "").expect("write hidden");
+        fs::write(&appledouble, "\u{fffd}").expect("write appledouble");
+
+        assert_eq!(
+            collect_files_with_extension(dir.path(), "opinion"),
+            vec![visible]
         );
     }
 
