@@ -18,6 +18,7 @@ pub use fission_pcode::*;
 
 // ─── Submodule hierarchy ────────────────────────────────────────────────────
 
+pub mod context;
 pub mod facts;
 pub mod orchestration;
 pub mod pipeline;
@@ -61,6 +62,7 @@ pub use orchestration::engine::{
     select_nir_output_with_facts,
 };
 pub use orchestration::request::{DecompileRequest, DecompileResult, decompile_prebuilt_pcode};
+pub use context::DecompContext;
 
 pub(crate) use pipeline::rust_sleigh::decode_rust_sleigh_pcode;
 pub use pipeline::rust_sleigh::{

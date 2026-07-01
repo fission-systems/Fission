@@ -1,5 +1,4 @@
 use crate::engine::NirEngineMode;
-use crate::request::{DecompileRequest, decompile_prebuilt_pcode};
 use crate::rust_sleigh::decode::render_pcode_text;
 use crate::rust_sleigh::{
     RustSleighDecompileConfig, RustSleighDecompileResult, RustSleighPipelineEvidence,
@@ -174,15 +173,21 @@ pub fn select_nir_output_from_prebuilt_pcode(
     timeout_ms: Option<u64>,
     options: NirRenderOptions,
 ) -> Result<NirSelection, String> {
+    // Phase 1: build FactStore once and call select_nir_output_from_pcode_with_facts
+    // directly, bypassing the DecompileRequest → decompile_prebuilt_pcode indirection
+    // which caused `options` to be cloned in `resolved_render_options()`.
+    //
+    // Phase 2 will refactor `finish_rust_sleigh_render` to pass a pre-built
+    // `DecompContext` so that `FactStore::from_binary` is also eliminated here.
     let fact_store = FactStore::from_binary(binary);
-    let request = DecompileRequest {
+    crate::routing::select_nir_output_from_pcode_with_facts(
+        pcode,
         binary,
-        fact_store: Some(&fact_store),
-        function_address: address,
-        function_name: Some(name),
-        engine_mode: mode,
+        &fact_store,
+        address,
+        name,
+        mode,
         timeout_ms,
-        render_options: Some(options),
-    };
-    decompile_prebuilt_pcode(pcode, &request).map(|result| result.selection)
+        options,
+    )
 }
