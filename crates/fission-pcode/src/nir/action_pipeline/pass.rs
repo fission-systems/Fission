@@ -1,6 +1,6 @@
 //! Pass trait and execution context for the action pipeline.
 
-use super::super::types::{HirFunction, NirBuildStats};
+use super::super::types::{DecompFacts, HirFunction, NirBuildStats};
 use super::budget::hir_shape;
 use super::concept::{GhidraActionConcept, record_ghidra_action_stage};
 use std::time::Instant;
@@ -31,6 +31,7 @@ pub(crate) struct PassCtx<'a> {
     pub perf: bool,
     pub diag: bool,
     pub stats: Option<&'a mut NirBuildStats>,
+    pub decomp_facts: Option<&'a mut dyn DecompFacts>,
 }
 
 impl<'a> PassCtx<'a> {

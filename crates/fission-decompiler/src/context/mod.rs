@@ -108,3 +108,16 @@ impl<'bin> DecompContext<'bin> {
         self.type_context = build_nir_type_context(self.binary, &self.facts, addr);
     }
 }
+
+impl<'bin> fission_pcode::nir::DecompFacts for DecompContext<'bin> {
+    fn record_discovered_hints(&mut self, addr: u64, hints: NirFunctionHints) {
+        self.record_discovered_hints(addr, hints);
+    }
+
+    fn record_inferred_type(&mut self, addr: u64, type_info: fission_loader::loader::types::InferredTypeInfo) {
+        // Just ingest it into native types.
+        self.facts.ingest_native_function_types(addr, vec![type_info]);
+        // Rebuild type context so subsequent passes in the same round can see it
+        self.type_context = build_nir_type_context(self.binary, &self.facts, addr);
+    }
+}

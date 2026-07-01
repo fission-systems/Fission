@@ -110,6 +110,7 @@ pub(crate) fn run_normalize_pipeline(func: &mut HirFunction, diag: bool, perf: b
         perf,
         diag,
         stats: None,
+        decomp_facts: None,
     };
     pipeline.run(&mut ctx);
 

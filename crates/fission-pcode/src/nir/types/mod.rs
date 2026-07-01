@@ -14,10 +14,12 @@ use crate::pcode::{PcodeFunction, PcodeOpcode};
 mod build_stats;
 mod hir;
 pub(crate) mod inference;
+mod decomp_facts;
 mod options;
 mod procedure;
 
 pub use build_stats::*;
 pub use hir::*;
+pub use decomp_facts::*;
 pub use options::*;
 pub use procedure::*;

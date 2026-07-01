@@ -79,6 +79,7 @@ pub(crate) fn run_structuring_pipeline(func: &mut HirFunction, diag: bool, perf:
         diag,
         perf,
         stats: None,
+        decomp_facts: None,
     };
     pipeline.run(&mut ctx);
 }
