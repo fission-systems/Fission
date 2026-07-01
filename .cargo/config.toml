@@ -9,17 +9,17 @@
 [target.x86_64-apple-darwin]
 rustflags = [
   "-C", "split-debuginfo=unpacked",
-  # To use a high-speed linker on macOS, install zld or lld via brew and uncomment below:
+  # To use a high-speed linker on macOS, install zld or lld via brew and set
+  # RUSTFLAGS="-C link-arg=-fuse-ld=zld" or "-C link-arg=-fuse-ld=lld" locally.
   # "-C", "link-arg=-fuse-ld=zld",
-  "-C", "link-arg=-fuse-ld=lld",
 ]
 
 [target.aarch64-apple-darwin]
 rustflags = [
   "-C", "split-debuginfo=unpacked",
-  # To use a high-speed linker on macOS, install zld or lld via brew and uncomment below:
+  # To use a high-speed linker on macOS, install zld or lld via brew and set
+  # RUSTFLAGS="-C link-arg=-fuse-ld=zld" or "-C link-arg=-fuse-ld=lld" locally.
   # "-C", "link-arg=-fuse-ld=zld",
-  "-C", "link-arg=-fuse-ld=lld",
 ]
 
 # Test profile: balance compile speed vs runtime speed

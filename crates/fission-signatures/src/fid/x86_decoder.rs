@@ -170,10 +170,9 @@ fn decode_x86_instruction_details(
 
         if disp_size == 0 {
             match r_mod {
-                0
-                    if r_rm == 5 => {
-                        disp_size = 4; // Absolute disp32 / RIP-relative
-                    }
+                0 if r_rm == 5 => {
+                    disp_size = 4; // Absolute disp32 / RIP-relative
+                }
                 1 => {
                     disp_size = 1; // disp8
                 }

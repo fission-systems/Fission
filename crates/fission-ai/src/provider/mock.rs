@@ -44,9 +44,9 @@ fn extract_function_name(code: &str) -> String {
                     .chars()
                     .next()
                     .is_some_and(|c| c.is_alphabetic() || c == '_')
-                {
-                    return last_word.to_string();
-                }
+            {
+                return last_word.to_string();
+            }
         }
     }
     "unknown_function".to_string()

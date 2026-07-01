@@ -224,9 +224,10 @@ impl AiTool for ApplyPatchTool {
 
         // Initialize maps if missing
         if project.get("user_function_names").is_none()
-            && let Some(obj) = project.as_object_mut() {
-                obj.insert("user_function_names".to_string(), serde_json::json!({}));
-            }
+            && let Some(obj) = project.as_object_mut()
+        {
+            obj.insert("user_function_names".to_string(), serde_json::json!({}));
+        }
 
         // Apply action
         if action == "rename_function" {
@@ -242,12 +243,13 @@ impl AiTool for ApplyPatchTool {
 
         // Fill basic metadata
         if let Some(obj) = project.as_object_mut()
-            && obj.get("binary_path").is_none() {
-                obj.insert(
-                    "binary_path".to_string(),
-                    serde_json::json!(binary.display().to_string()),
-                );
-            }
+            && obj.get("binary_path").is_none()
+        {
+            obj.insert(
+                "binary_path".to_string(),
+                serde_json::json!(binary.display().to_string()),
+            );
+        }
 
         // Save back
         let pretty = serde_json::to_string_pretty(&project)?;
@@ -351,65 +353,68 @@ impl AiTool for DecompileTool {
         if output.status.success() {
             let decomp_code = String::from_utf8_lossy(&output.stdout).into_owned();
             if !decomp_code.starts_with("Error")
-                && let Ok(parsed_addr) = parse_addr(addr) {
-                    let sidecar_path = binary.with_extension("fission.json");
-                    let mut project = if sidecar_path.exists() {
-                        if let Ok(content) = std::fs::read_to_string(&sidecar_path) {
-                            serde_json::from_str::<serde_json::Value>(&content)
-                                .unwrap_or_else(|_| serde_json::json!({}))
-                        } else {
-                            serde_json::json!({})
-                        }
+                && let Ok(parsed_addr) = parse_addr(addr)
+            {
+                let sidecar_path = binary.with_extension("fission.json");
+                let mut project = if sidecar_path.exists() {
+                    if let Ok(content) = std::fs::read_to_string(&sidecar_path) {
+                        serde_json::from_str::<serde_json::Value>(&content)
+                            .unwrap_or_else(|_| serde_json::json!({}))
                     } else {
                         serde_json::json!({})
-                    };
-
-                    let mut name = extract_function_name(&decomp_code, parsed_addr);
-                    if let Some(user_names) = project
-                        .get("user_function_names")
-                        .and_then(|n| n.as_object())
-                        && let Some(n) = user_names
-                            .get(&parsed_addr.to_string())
-                            .and_then(|v| v.as_str())
-                        {
-                            name = n.to_string();
-                        }
-
-                    if project.get("decompilation_cache").is_none()
-                        && let Some(obj) = project.as_object_mut() {
-                            obj.insert("decompilation_cache".to_string(), serde_json::json!({}));
-                        }
-
-                    if let Some(cache) = project
-                        .get_mut("decompilation_cache")
-                        .and_then(|c| c.as_object_mut())
-                    {
-                        let timestamp = std::time::SystemTime::now()
-                            .duration_since(std::time::UNIX_EPOCH)
-                            .map(|d| d.as_secs())
-                            .unwrap_or(0);
-                        cache.insert(
-                            parsed_addr.to_string(),
-                            serde_json::json!({
-                                "name": name,
-                                "code": decomp_code,
-                                "timestamp": timestamp
-                            }),
-                        );
                     }
+                } else {
+                    serde_json::json!({})
+                };
 
-                    if let Some(obj) = project.as_object_mut()
-                        && obj.get("binary_path").is_none() {
-                            obj.insert(
-                                "binary_path".to_string(),
-                                serde_json::json!(binary.display().to_string()),
-                            );
-                        }
-
-                    if let Ok(pretty) = serde_json::to_string_pretty(&project) {
-                        let _ = std::fs::write(&sidecar_path, pretty);
-                    }
+                let mut name = extract_function_name(&decomp_code, parsed_addr);
+                if let Some(user_names) = project
+                    .get("user_function_names")
+                    .and_then(|n| n.as_object())
+                    && let Some(n) = user_names
+                        .get(&parsed_addr.to_string())
+                        .and_then(|v| v.as_str())
+                {
+                    name = n.to_string();
                 }
+
+                if project.get("decompilation_cache").is_none()
+                    && let Some(obj) = project.as_object_mut()
+                {
+                    obj.insert("decompilation_cache".to_string(), serde_json::json!({}));
+                }
+
+                if let Some(cache) = project
+                    .get_mut("decompilation_cache")
+                    .and_then(|c| c.as_object_mut())
+                {
+                    let timestamp = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map(|d| d.as_secs())
+                        .unwrap_or(0);
+                    cache.insert(
+                        parsed_addr.to_string(),
+                        serde_json::json!({
+                            "name": name,
+                            "code": decomp_code,
+                            "timestamp": timestamp
+                        }),
+                    );
+                }
+
+                if let Some(obj) = project.as_object_mut()
+                    && obj.get("binary_path").is_none()
+                {
+                    obj.insert(
+                        "binary_path".to_string(),
+                        serde_json::json!(binary.display().to_string()),
+                    );
+                }
+
+                if let Ok(pretty) = serde_json::to_string_pretty(&project) {
+                    let _ = std::fs::write(&sidecar_path, pretty);
+                }
+            }
             Ok(decomp_code)
         } else {
             Ok(format!(
@@ -815,9 +820,10 @@ impl AiTool for AnnotateFunctionTool {
         };
 
         if project.get("annotations").is_none()
-            && let Some(obj) = project.as_object_mut() {
-                obj.insert("annotations".to_string(), serde_json::json!({}));
-            }
+            && let Some(obj) = project.as_object_mut()
+        {
+            obj.insert("annotations".to_string(), serde_json::json!({}));
+        }
 
         if let Some(annotations) = project
             .get_mut("annotations")
@@ -827,12 +833,13 @@ impl AiTool for AnnotateFunctionTool {
         }
 
         if let Some(obj) = project.as_object_mut()
-            && obj.get("binary_path").is_none() {
-                obj.insert(
-                    "binary_path".to_string(),
-                    serde_json::json!(binary.display().to_string()),
-                );
-            }
+            && obj.get("binary_path").is_none()
+        {
+            obj.insert(
+                "binary_path".to_string(),
+                serde_json::json!(binary.display().to_string()),
+            );
+        }
 
         let pretty = serde_json::to_string_pretty(&project)?;
         std::fs::write(&sidecar_path, pretty)?;

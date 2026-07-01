@@ -62,7 +62,7 @@ fn load_fixtures() -> Vec<FactsFixture> {
 
 #[test]
 #[ignore]
-    fn fact_coverage_fixtures_match_control_flow_facts() {
+fn fact_coverage_fixtures_match_control_flow_facts() {
     for fixture in load_fixtures() {
         let binary_path = repo_root().join(&fixture.binary);
         let binary = LoadedBinary::from_file(&binary_path)

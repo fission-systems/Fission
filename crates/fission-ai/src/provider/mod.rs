@@ -196,9 +196,10 @@ pub struct ProviderConfig {
 pub fn provider_kind_from_env() -> ProviderKind {
     use crate::auth::ENV_FISSION_AI_PROVIDER;
     if let Ok(val) = std::env::var(ENV_FISSION_AI_PROVIDER)
-        && let Ok(kind) = val.parse::<ProviderKind>() {
-            return kind;
-        }
+        && let Ok(kind) = val.parse::<ProviderKind>()
+    {
+        return kind;
+    }
     // Auto-detect: prefer Codex if token exists, then Ollama if reachable.
     ProviderKind::Codex
 }

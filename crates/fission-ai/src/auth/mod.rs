@@ -78,9 +78,10 @@ impl Default for OAuthOptions {
 pub async fn resolve_auth(opts: &OAuthOptions) -> AuthResult<ResolvedAuth> {
     // 1. Stored OAuth token
     if let Ok(store) = token_store::TokenStore::load(&opts.fission_home).await
-        && let Some(token) = store.valid_access_token() {
-            return Ok(ResolvedAuth::OAuthToken(token.to_string()));
-        }
+        && let Some(token) = store.valid_access_token()
+    {
+        return Ok(ResolvedAuth::OAuthToken(token.to_string()));
+    }
 
     // 2. FISSION_AI_API_KEY
     if let Some(key) = api_key::read_fission_api_key() {

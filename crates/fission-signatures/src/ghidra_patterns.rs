@@ -400,14 +400,12 @@ pub fn parse_ghidra_pattern_xml(xml: &str) -> Result<Vec<GhidraFuncPattern>, Str
                         pp_after_cond = None;
                         pp_valid_code_min = None;
                     }
-                    "prepatterns"
-                        if ctx == Ctx::PrePatterns => {
-                            ctx = Ctx::PatternPairs;
-                        }
-                    "postpatterns"
-                        if ctx == Ctx::PostPatterns => {
-                            ctx = Ctx::PatternPairs;
-                        }
+                    "prepatterns" if ctx == Ctx::PrePatterns => {
+                        ctx = Ctx::PatternPairs;
+                    }
+                    "postpatterns" if ctx == Ctx::PostPatterns => {
+                        ctx = Ctx::PatternPairs;
+                    }
                     "data" => {
                         data_slot = DataSlot::None;
                     }

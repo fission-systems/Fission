@@ -1,7 +1,27 @@
 # cargo-audit config (cargo audit does not read deny.toml — keep [advisories].ignore aligned).
 
 [advisories]
-ignore = []
+ignore = [
+  # Temporary baseline for no-fix ecosystem advisories in the desktop UI stack and
+  # unmaintained transitive crates. Keep aligned with deny.toml.
+  "RUSTSEC-2024-0370",
+  "RUSTSEC-2024-0384",
+  "RUSTSEC-2024-0429",
+  "RUSTSEC-2024-0411",
+  "RUSTSEC-2024-0412",
+  "RUSTSEC-2024-0413",
+  "RUSTSEC-2024-0414",
+  "RUSTSEC-2024-0415",
+  "RUSTSEC-2024-0416",
+  "RUSTSEC-2024-0417",
+  "RUSTSEC-2024-0418",
+  "RUSTSEC-2024-0419",
+  "RUSTSEC-2024-0420",
+  "RUSTSEC-2024-0436",
+  "RUSTSEC-2025-0057",
+  "RUSTSEC-2025-0141",
+  "RUSTSEC-2026-0097",
+]
 
 [yanked]
 enabled = true

@@ -238,10 +238,11 @@ impl ContextManager {
 
         // Keep original system prompt if it exists at index 0
         if let Some(first) = messages.first()
-            && first.role == crate::session::Role::System {
-                compacted.push(first.clone());
-                has_system = true;
-            }
+            && first.role == crate::session::Role::System
+        {
+            compacted.push(first.clone());
+            has_system = true;
+        }
 
         // Add context compaction sentinel
         compacted.push(crate::session::Message::system(

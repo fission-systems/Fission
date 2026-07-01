@@ -186,8 +186,6 @@ async fn wait_for_callback() -> AuthResult<CallbackResult> {
         .await
         .map_err(|e| AuthError::Other(format!("could not bind to {addr}: {e}")))?;
 
-    
-
     tokio::time::timeout(
         Duration::from_secs(CALLBACK_TIMEOUT_SECS),
         accept_one_request(&listener),
@@ -268,11 +266,12 @@ fn percent_decode(s: &str) -> String {
     while i < bytes.len() {
         if bytes[i] == b'%' && i + 2 < bytes.len() {
             if let Ok(hex) = std::str::from_utf8(&bytes[i + 1..i + 3])
-                && let Ok(byte) = u8::from_str_radix(hex, 16) {
-                    out.push(byte as char);
-                    i += 3;
-                    continue;
-                }
+                && let Ok(byte) = u8::from_str_radix(hex, 16)
+            {
+                out.push(byte as char);
+                i += 3;
+                continue;
+            }
         } else if bytes[i] == b'+' {
             out.push(' ');
             i += 1;

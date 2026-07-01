@@ -89,6 +89,8 @@ ignore = [
     "RUSTSEC-2024-0436", # paste unmaintained
     "RUSTSEC-2025-0057", # fxhash unmaintained (transitive via Dioxus/wry)
     "RUSTSEC-2024-0384", # instant unmaintained (transitive via Dioxus/tao)
+    "RUSTSEC-2024-0429", # glib unsound VariantStrIter advisory (transitive via Dioxus/wry GTK stack)
+    "RUSTSEC-2026-0097", # rand unsound custom logger advisory (transitive via Dioxus/wry CSS stack)
 ]
 # If this is true, then cargo deny will use the git executable to fetch advisory database.
 # If this is false, then it uses a built-in git library.

@@ -58,11 +58,7 @@ fn index_die_compat(db: &SignatureDatabase) -> DieCompatSummary {
     let signatures_with_supported_rules = db
         .signatures
         .iter()
-        .filter(|s| {
-            s.rules
-                .iter()
-                .any(die_rule_identity_phase2_supported)
-        })
+        .filter(|s| s.rules.iter().any(die_rule_identity_phase2_supported))
         .count();
 
     DieCompatSummary {
