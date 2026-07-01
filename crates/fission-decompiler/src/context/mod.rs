@@ -84,17 +84,27 @@ impl<'bin> DecompContext<'bin> {
         Self { binary, facts, type_context }
     }
 
-    // ── Phase 2+ hooks (stubs, not yet wired into passes) ─────────────────────
+    // ── Phase 2+ write API ─────────────────────────────────────────────────────
 
     /// Record function-level hints discovered during structuring.
     ///
-    /// In Phase 3, structuring passes call this after detecting parameter count,
-    /// local variable layout, or return type from the CFG structure. The next
-    /// normalize round will read the updated hints from `self.type_context`.
+    /// Wired up in Phase 2. Structuring passes call this after detecting
+    /// parameter count, local variable layout, or return type from CFG structure.
     ///
-    /// Currently a no-op stub; wired up in Phase 3.
-    #[allow(dead_code)]
-    pub fn record_discovered_hints(&mut self, _addr: u64, _hints: NirFunctionHints) {
-        // Phase 3: update self.type_context.function_hints and self.facts
+    /// The hints are written back to `self.facts` via `record_structuring_hints`,
+    /// then `self.type_context` is **immediately rebuilt** from the updated facts.
+    /// This means the next normalize round will automatically consume the new hints
+    /// without any additional coordination.
+    ///
+    /// ## Anti-overfitting contract
+    /// Only call this from a pass with `InvariantBasis::DominatorTree` or
+    /// `InvariantBasis::StronglyConnectedComponents` justification. Do NOT call
+    /// for function-name-specific or address-specific heuristics.
+    pub fn record_discovered_hints(&mut self, addr: u64, hints: NirFunctionHints) {
+        // Write hints back to the live FactStore.
+        self.facts.record_structuring_hints(addr, hints);
+        // Rebuild type_context from the updated facts so the next normalize round
+        // sees the new information without any additional indirection.
+        self.type_context = build_nir_type_context(self.binary, &self.facts, addr);
     }
 }
