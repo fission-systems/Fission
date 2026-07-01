@@ -1184,6 +1184,7 @@ fn preview_suppresses_entrypoint_register_alias_params() {
         &options,
         Some(&binary),
         None,
+        None,
     )
     .expect("preview render");
     assert!(code.contains("entrypoint(void)"), "{code}");
@@ -1252,6 +1253,7 @@ fn preview_keeps_params_for_zero_entry_relocatable_function() {
         0,
         &options,
         Some(&binary),
+        None,
         None,
     )
     .expect("preview render");

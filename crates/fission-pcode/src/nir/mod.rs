@@ -60,7 +60,7 @@ pub fn render_mlil_preview(
     address: u64,
     options: &MlilPreviewOptions,
 ) -> Result<String, MlilPreviewError> {
-    render_mlil_preview_with_binary_and_context(pcode, name, address, options, None, None)
+    render_mlil_preview_with_binary_and_context(pcode, name, address, options, None, None, None)
 }
 
 pub fn render_nir(
@@ -79,7 +79,7 @@ pub fn render_mlil_preview_with_context(
     options: &MlilPreviewOptions,
     type_context: Option<&PreviewTypeContext>,
 ) -> Result<String, MlilPreviewError> {
-    render_mlil_preview_with_binary_and_context(pcode, name, address, options, None, type_context)
+    render_mlil_preview_with_binary_and_context(pcode, name, address, options, None, type_context, None)
 }
 
 pub fn render_mlil_preview_with_binary_and_context(
@@ -89,6 +89,7 @@ pub fn render_mlil_preview_with_binary_and_context(
     options: &MlilPreviewOptions,
     binary: Option<&LoadedBinary>,
     type_context: Option<&PreviewTypeContext>,
+    mut decomp_facts: Option<&mut dyn DecompFacts>,
 ) -> Result<String, MlilPreviewError> {
     let debug = RenderDebugFlags::from_env();
     telemetry::reset_preview_telemetry();
@@ -274,8 +275,9 @@ pub fn render_nir_with_context(
     address: u64,
     options: &NirRenderOptions,
     type_context: Option<&NirTypeContext>,
+    mut decomp_facts: Option<&mut dyn DecompFacts>,
 ) -> Result<String, MlilPreviewError> {
-    render_mlil_preview_with_context(pcode, name, address, options, type_context)
+    render_mlil_preview_with_binary_and_context(pcode, name, address, options, None, type_context, decomp_facts)
 }
 
 pub fn render_nir_with_binary_and_context(
@@ -285,6 +287,7 @@ pub fn render_nir_with_binary_and_context(
     options: &NirRenderOptions,
     binary: Option<&LoadedBinary>,
     type_context: Option<&NirTypeContext>,
+    mut decomp_facts: Option<&mut dyn DecompFacts>,
 ) -> Result<String, MlilPreviewError> {
-    render_mlil_preview_with_binary_and_context(pcode, name, address, options, binary, type_context)
+    render_mlil_preview_with_binary_and_context(pcode, name, address, options, binary, type_context, decomp_facts)
 }

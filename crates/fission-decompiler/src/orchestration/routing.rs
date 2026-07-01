@@ -3,7 +3,7 @@ use crate::recovery::{
 };
 use crate::render::{
     build_nir_type_context_from_facts, render_nir_from_json_with_type_context,
-    render_nir_from_pcode_with_type_context_and_options,
+    render_nir_from_pcode_with_decomp_context,
 };
 use crate::taxonomy::classify_native_failure_kind;
 use crate::types::{
@@ -124,21 +124,22 @@ fn try_structuring_recovery_with_facts_rebuild(
 fn render_selection_from_pcode(
     pcode: &PcodeFunction,
     binary: &LoadedBinary,
-    type_context: NirTypeContext,
+    fact_store: &FactStore,
     address: u64,
     name: &str,
     prefer_preview_surface: bool,
     timeout_ms: Option<u64>,
     options: NirRenderOptions,
 ) -> Result<NirSelection, String> {
-    match render_nir_from_pcode_with_type_context_and_options(
+    let decomp_ctx = crate::context::DecompContext::from_facts(binary, fact_store.clone(), address);
+    match crate::render::render_nir_from_pcode_with_decomp_context(
         pcode,
         binary,
         address,
         name,
         prefer_preview_surface,
         timeout_ms,
-        type_context,
+        decomp_ctx,
         options,
         false,
         false,
@@ -160,8 +161,8 @@ fn render_selection_from_pcode(
             // Recovery path: rebuild context from facts.
             // Phase 3 eliminates this rebuild via &mut DecompContext threading.
             let fact_store = FactStore::from_binary(binary);
-            let recovery_type_context =
-                build_nir_type_context_from_facts(binary, &fact_store, address);
+            let recovery_decomp_ctx =
+                crate::context::DecompContext::from_facts(binary, fact_store, address);
             let recovery_options = crate::render::nir_options_with_recovery(binary, false, false);
             if let Some(selection) = try_structuring_recovery_from_pcode(
                 pcode,
@@ -169,7 +170,7 @@ fn render_selection_from_pcode(
                 address,
                 name,
                 timeout_ms,
-                recovery_type_context,
+                recovery_decomp_ctx,
                 recovery_options,
                 &err,
             )? {
@@ -271,12 +272,10 @@ pub fn select_nir_output_from_pcode_with_facts(
     match mode {
         NirEngineMode::Legacy => Ok(NirRoutingResolver::legacy_mode()),
         NirEngineMode::Nir | NirEngineMode::Auto => {
-            // Phase 1: build type_context once here; pass it into render_selection_from_pcode.
-            let type_context = build_nir_type_context_from_facts(binary, fact_store, address);
             render_selection_from_pcode(
                 pcode,
                 binary,
-                type_context,
+                fact_store,
                 address,
                 name,
                 matches!(mode, NirEngineMode::Auto),

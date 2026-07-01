@@ -1,5 +1,5 @@
 use crate::render::{
-    render_nir_from_json_with_type_context, render_nir_from_pcode_with_type_context_and_options,
+    render_nir_from_json_with_type_context, render_nir_from_pcode_with_decomp_context,
 };
 use crate::taxonomy::{classify_nir_failure_refined, structuring_failure_signature};
 use crate::types::{NirRoutingResolver, NirSelection};
@@ -136,13 +136,13 @@ pub(crate) fn try_structuring_recovery(
     }
 }
 
-pub(crate) fn try_structuring_recovery_from_pcode(
+pub(crate) fn try_structuring_recovery_from_pcode<'bin>(
     pcode: &PcodeFunction,
     binary: &LoadedBinary,
     address: u64,
     name: &str,
     timeout_ms: Option<u64>,
-    type_context: NirTypeContext,
+    decomp_ctx: crate::context::DecompContext<'bin>,
     base_options: NirRenderOptions,
     error: &str,
 ) -> Result<Option<NirSelection>, String> {
@@ -156,14 +156,14 @@ pub(crate) fn try_structuring_recovery_from_pcode(
         return Ok(None);
     };
 
-    let region_retry = render_nir_from_pcode_with_type_context_and_options(
+    let region_retry = render_nir_from_pcode_with_decomp_context(
         pcode,
         binary,
         address,
         name,
         false,
         timeout_ms,
-        type_context.clone(),
+        decomp_ctx.clone(),
         base_options.clone(),
         true,
         false,
@@ -186,14 +186,14 @@ pub(crate) fn try_structuring_recovery_from_pcode(
         Ok(None) | Err(_) => take_last_nir_build_stats(),
     };
 
-    match render_nir_from_pcode_with_type_context_and_options(
+    match render_nir_from_pcode_with_decomp_context(
         pcode,
         binary,
         address,
         name,
         false,
         timeout_ms,
-        type_context,
+        decomp_ctx,
         base_options,
         false,
         true,

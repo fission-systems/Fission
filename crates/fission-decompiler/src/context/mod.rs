@@ -36,6 +36,7 @@ use fission_static::analysis::decomp::facts::FactStore;
 /// # Lifetime
 /// `'bin` ties the context to the binary it was built from. The context must not
 /// outlive the [`LoadedBinary`].
+#[derive(Clone)]
 pub struct DecompContext<'bin> {
     /// Immutable binary reference. Never changes during decompilation.
     pub binary: &'bin LoadedBinary,
@@ -53,65 +54,32 @@ pub struct DecompContext<'bin> {
     /// call `ctx.update_type_context(hints)` to feed new information back so that
     /// the next normalize round can consume it.
     pub type_context: NirTypeContext,
+    
+    /// Set to true if a pass wrote to this context, indicating a new round is needed.
+    pub hints_changed: bool,
 }
 
 impl<'bin> DecompContext<'bin> {
-    /// Build a complete decompilation context for the function at `address`.
-    ///
-    /// This is the canonical single entry point that replaces all three of the
-    /// previously scattered constructions:
-    ///
-    /// ```text
-    /// // Before (scattered):
-    /// let facts = FactStore::from_binary(binary);          // A
-    /// let ctx   = build_nir_type_context(binary, &facts, address);  // C
-    ///
-    /// // After:
-    /// let ctx = DecompContext::new(binary, address);
-    /// ```
     pub fn new(binary: &'bin LoadedBinary, address: u64) -> Self {
         let facts = FactStore::from_binary(binary);
         let type_context = build_nir_type_context(binary, &facts, address);
-        Self { binary, facts, type_context }
+        Self { binary, facts, type_context, hints_changed: false }
     }
 
-    /// Build a context using a pre-existing [`FactStore`].
-    ///
-    /// Use this when the caller has already constructed a `FactStore` (e.g. from a
-    /// cached or externally-supplied store). Avoids the redundant `from_binary` clone.
     pub fn from_facts(binary: &'bin LoadedBinary, facts: FactStore, address: u64) -> Self {
         let type_context = build_nir_type_context(binary, &facts, address);
-        Self { binary, facts, type_context }
-    }
-
-    // ── Phase 2+ write API ─────────────────────────────────────────────────────
-
-    /// Record function-level hints discovered during structuring.
-    ///
-    /// Wired up in Phase 2. Structuring passes call this after detecting
-    /// parameter count, local variable layout, or return type from CFG structure.
-    ///
-    /// The hints are written back to `self.facts` via `record_structuring_hints`,
-    /// then `self.type_context` is **immediately rebuilt** from the updated facts.
-    /// This means the next normalize round will automatically consume the new hints
-    /// without any additional coordination.
-    ///
-    /// ## Anti-overfitting contract
-    /// Only call this from a pass with `InvariantBasis::DominatorTree` or
-    /// `InvariantBasis::StronglyConnectedComponents` justification. Do NOT call
-    /// for function-name-specific or address-specific heuristics.
-    pub fn record_discovered_hints(&mut self, addr: u64, hints: NirFunctionHints) {
-        // Write hints back to the live FactStore.
-        self.facts.record_structuring_hints(addr, hints);
-        // Rebuild type_context from the updated facts so the next normalize round
-        // sees the new information without any additional indirection.
-        self.type_context = build_nir_type_context(self.binary, &self.facts, addr);
+        Self { binary, facts, type_context, hints_changed: false }
     }
 }
 
 impl<'bin> fission_pcode::nir::DecompFacts for DecompContext<'bin> {
     fn record_discovered_hints(&mut self, addr: u64, hints: NirFunctionHints) {
-        self.record_discovered_hints(addr, hints);
+        // Write hints back to the live FactStore.
+        self.facts.record_structuring_hints(addr, hints);
+        // Rebuild type_context from the updated facts so the next normalize round
+        // sees the new information without any additional indirection.
+        self.type_context = build_nir_type_context(self.binary, &self.facts, addr);
+        self.hints_changed = true;
     }
 
     fn record_inferred_type(&mut self, addr: u64, type_info: fission_loader::loader::types::InferredTypeInfo) {
@@ -119,5 +87,7 @@ impl<'bin> fission_pcode::nir::DecompFacts for DecompContext<'bin> {
         self.facts.ingest_native_function_types(addr, vec![type_info]);
         // Rebuild type context so subsequent passes in the same round can see it
         self.type_context = build_nir_type_context(self.binary, &self.facts, addr);
+        self.hints_changed = true;
     }
 }
+

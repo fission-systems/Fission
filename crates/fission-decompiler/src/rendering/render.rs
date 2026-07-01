@@ -96,14 +96,14 @@ fn apply_nir_recovery_flags(
     options
 }
 
-pub(crate) fn render_nir_from_pcode_with_type_context_and_options(
+pub(crate) fn render_nir_from_pcode_with_decomp_context<'bin>(
     pcode: &PcodeFunction,
-    binary: &LoadedBinary,
+    binary: &'bin LoadedBinary,
     address: u64,
     name: &str,
     enforce_auto_gate: bool,
     _timeout_ms: Option<u64>,
-    mut type_context: NirTypeContext,
+    mut decomp_ctx: crate::context::DecompContext<'bin>,
     base_options: NirRenderOptions,
     region_linearize_structuring: bool,
     force_linear_structuring: bool,
@@ -117,7 +117,6 @@ pub(crate) fn render_nir_from_pcode_with_type_context_and_options(
         region_linearize_structuring,
         force_linear_structuring,
     );
-    refine_nir_type_context_with_callee_effect_summaries(binary, pcode, &mut type_context);
     if std::env::var_os("FISSION_PREVIEW_DEBUG").is_some() {
         let _ = serde_json::to_string_pretty(pcode).map(|json| {
             std::fs::write(
@@ -126,23 +125,38 @@ pub(crate) fn render_nir_from_pcode_with_type_context_and_options(
             )
         });
     }
+
     let render_start = Instant::now();
-    match catch_unwind(AssertUnwindSafe(|| {
-        render_nir_with_binary_and_context(
-            pcode,
-            name,
-            address,
-            &options,
-            Some(binary),
-            Some(&type_context),
-        )
-    })) {
-        Ok(Ok(code)) => {
-            let build_stats = take_last_nir_build_stats();
-            let hint_stats = take_last_nir_hint_stats();
-            nir_diag_stage(address, "render_preview_done", render_start);
-            Ok(Some((code, build_stats, hint_stats)))
-        }
+    let max_rounds = 3;
+
+    for round in 0..max_rounds {
+        decomp_ctx.hints_changed = false;
+        refine_nir_type_context_with_callee_effect_summaries(binary, pcode, &mut decomp_ctx.type_context);
+
+        let type_context_cloned = decomp_ctx.type_context.clone();
+        match catch_unwind(AssertUnwindSafe(|| {
+            render_nir_with_binary_and_context(
+                pcode,
+                name,
+                address,
+                &options,
+                Some(binary),
+                Some(&type_context_cloned),
+                Some(&mut decomp_ctx as &mut dyn fission_pcode::nir::DecompFacts),
+            )
+        })) {
+            Ok(Ok(code)) => {
+                if decomp_ctx.hints_changed && round < max_rounds - 1 {
+                    if std::env::var_os("FISSION_PREVIEW_DIAG").is_some() {
+                        eprintln!("[PREVIEW-DIAG] fn=0x{address:x} round={} hints_changed, triggering feedback loop", round + 1);
+                    }
+                    continue;
+                }
+                let build_stats = take_last_nir_build_stats();
+                let hint_stats = take_last_nir_hint_stats();
+                nir_diag_stage(address, "render_preview_done", render_start);
+                return Ok(Some((code, build_stats, hint_stats)));
+            }
         Ok(Err(err)) => {
             let surfaced_error = err
                 .structuring_failure_kind()
@@ -154,13 +168,15 @@ pub(crate) fn render_nir_from_pcode_with_type_context_and_options(
                 })
                 .unwrap_or_else(|| format!("Fission NIR unavailable: {err}"));
             nir_diag_stage(address, "render_preview_error", render_start);
-            Err(surfaced_error)
+            return Err(surfaced_error);
         }
         Err(payload) => {
             nir_diag_stage(address, "render_preview_error", render_start);
-            Err(surface_render_panic(address, payload.as_ref()))
+            return Err(surface_render_panic(address, payload.as_ref()));
+        }
         }
     }
+    unreachable!("Feedback loop should always return from within");
 }
 
 pub(crate) fn render_nir_request(
@@ -265,6 +281,7 @@ pub(crate) fn render_nir_request(
             request.address,
             &request.options,
             Some(&request.type_context),
+            None,
         )
     })) {
         Ok(Ok(code)) => {
