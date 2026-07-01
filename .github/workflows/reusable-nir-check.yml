@@ -56,7 +56,7 @@ jobs:
       - name: Build PE nir-lane fixture (MinGW-w64)
         run: |
           set -euo pipefail
-          OUT="/tmp/ci-fixtures/test_functions.exe"
+          OUT="${{ github.workspace }}/benchmark/binary/x86-64/window/small/binary/c/test_functions.exe"
           mkdir -p "$(dirname "${OUT}")"
           x86_64-w64-mingw32-gcc -O2 -g -m64 -static \
             .github/fixtures/test_functions.c \
