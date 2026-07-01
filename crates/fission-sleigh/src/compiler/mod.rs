@@ -134,6 +134,9 @@ fn read_processors_from_spec_tree() -> Result<Vec<String>> {
                 languages_root.display()
             )
         })?;
+        if is_hidden_or_appledouble_path(&entry.path()) {
+            continue;
+        }
         if entry
             .file_type()
             .with_context(|| format!("read file type for {}", entry.path().display()))?
@@ -224,6 +227,9 @@ fn ldefs_metadata_for_processor(
             )
         })?;
         let path = entry.path();
+        if is_hidden_or_appledouble_path(&path) {
+            continue;
+        }
         let is_ldefs = path
             .extension()
             .and_then(|ext| ext.to_str())
@@ -263,6 +269,13 @@ fn ldefs_metadata_for_processor(
         }
     }
     Ok(metadata)
+}
+
+fn is_hidden_or_appledouble_path(path: &Path) -> bool {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .map(|name| name.starts_with('.') || name.starts_with("._"))
+        .unwrap_or(false)
 }
 
 fn infer_endian_from_entry_id(entry_id: &str) -> Option<String> {
@@ -848,6 +861,13 @@ mod tests {
         let path = x86_64_entry_spec_path();
         let arch = infer_arch_from_entry_spec(&path).expect("infer arch");
         assert_eq!(arch, "x86");
+    }
+
+    #[test]
+    fn hidden_or_appledouble_paths_are_skipped() {
+        assert!(is_hidden_or_appledouble_path(Path::new(".hidden")));
+        assert!(is_hidden_or_appledouble_path(Path::new("._x86.ldefs")));
+        assert!(!is_hidden_or_appledouble_path(Path::new("x86.ldefs")));
     }
 
     #[test]
