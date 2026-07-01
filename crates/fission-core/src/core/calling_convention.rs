@@ -2,9 +2,10 @@
 ///
 /// This affects which REGISTER-space varnodes are labelled `param_1`, `param_2`, etc.
 /// in decompiled output. It does **not** affect hardware register names (rax, rbx, …).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, Default)]
 pub enum CallingConvention {
     /// Windows x64 fastcall: first four integer args in RCX, RDX, R8, R9.
+    #[default]
     WindowsX64,
     /// System V AMD64 ABI (Linux / macOS): first six integer args in RDI, RSI, RDX, RCX, R8, R9.
     SystemVAmd64,
@@ -26,10 +27,4 @@ pub enum CallingConvention {
     Mips64,
     /// x86 32-bit cdecl/stdcall calling convention (arguments passed on stack).
     X86_32,
-}
-
-impl Default for CallingConvention {
-    fn default() -> Self {
-        Self::WindowsX64
-    }
 }

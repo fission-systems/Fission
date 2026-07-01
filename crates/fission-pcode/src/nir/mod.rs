@@ -97,7 +97,7 @@ pub fn render_mlil_preview_with_binary_and_context(
     options: &MlilPreviewOptions,
     binary: Option<&LoadedBinary>,
     type_context: Option<&PreviewTypeContext>,
-    mut decomp_facts: Option<&mut dyn DecompFacts>,
+    decomp_facts: Option<&mut dyn DecompFacts>,
 ) -> Result<String, MlilPreviewError> {
     let debug = RenderDebugFlags::from_env();
     telemetry::reset_preview_telemetry();
@@ -283,7 +283,7 @@ pub fn render_nir_with_context(
     address: u64,
     options: &NirRenderOptions,
     type_context: Option<&NirTypeContext>,
-    mut decomp_facts: Option<&mut dyn DecompFacts>,
+    decomp_facts: Option<&mut dyn DecompFacts>,
 ) -> Result<String, MlilPreviewError> {
     render_mlil_preview_with_binary_and_context(
         pcode,
@@ -303,7 +303,7 @@ pub fn render_nir_with_binary_and_context(
     options: &NirRenderOptions,
     binary: Option<&LoadedBinary>,
     type_context: Option<&NirTypeContext>,
-    mut decomp_facts: Option<&mut dyn DecompFacts>,
+    decomp_facts: Option<&mut dyn DecompFacts>,
 ) -> Result<String, MlilPreviewError> {
     render_mlil_preview_with_binary_and_context(
         pcode,

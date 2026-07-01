@@ -1,10 +1,7 @@
 use crate::recovery::{
     is_type_failure_for_nir_rescue, try_structuring_recovery, try_structuring_recovery_from_pcode,
 };
-use crate::render::{
-    build_nir_type_context_from_facts, render_nir_from_json_with_type_context,
-    render_nir_from_pcode_with_decomp_context,
-};
+use crate::render::{build_nir_type_context_from_facts, render_nir_from_json_with_type_context};
 use crate::taxonomy::classify_native_failure_kind;
 use crate::types::{
     NirEngineMode, NirRoutingDecision, NirRoutingResolver, NirSelection, NirSource,
