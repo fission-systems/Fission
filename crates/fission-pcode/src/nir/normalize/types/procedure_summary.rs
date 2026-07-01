@@ -228,9 +228,9 @@ pub(crate) fn summary_soundness_for_wrapper(summary: &ProcedureSummary) -> Summa
 #[cfg(test)]
 mod tests {
     use super::*;
-    use fission_core::CallingConvention;
     use crate::nir::types::{HirExpr, HirFunction, HirStmt, NirBinding, NirType};
     use crate::pcode::{PcodeBasicBlock, PcodeOp, Varnode};
+    use fission_core::CallingConvention;
 
     fn empty_binding(name: &str) -> NirBinding {
         NirBinding {

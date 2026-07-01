@@ -268,11 +268,7 @@ impl FactStore {
         }
     }
 
-    pub fn ingest_calling_convention(
-        &mut self,
-        address: u64,
-        cc: fission_core::CallingConvention,
-    ) {
+    pub fn ingest_calling_convention(&mut self, address: u64, cc: fission_core::CallingConvention) {
         self.calling_conventions.insert(address, cc);
     }
 
@@ -391,11 +387,7 @@ impl FactStore {
             .enumerate()
             .map(|(i, name)| DwarfParamInfo {
                 name: name.clone(),
-                type_name: hints
-                    .param_type_names
-                    .get(&i)
-                    .cloned()
-                    .unwrap_or_default(),
+                type_name: hints.param_type_names.get(&i).cloned().unwrap_or_default(),
                 location: DwarfLocation::Unknown,
             })
             .collect();

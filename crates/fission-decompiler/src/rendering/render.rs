@@ -131,7 +131,11 @@ pub(crate) fn render_nir_from_pcode_with_decomp_context<'bin>(
 
     for round in 0..max_rounds {
         decomp_ctx.hints_changed = false;
-        refine_nir_type_context_with_callee_effect_summaries(binary, pcode, &mut decomp_ctx.type_context);
+        refine_nir_type_context_with_callee_effect_summaries(
+            binary,
+            pcode,
+            &mut decomp_ctx.type_context,
+        );
 
         let type_context_cloned = decomp_ctx.type_context.clone();
         match catch_unwind(AssertUnwindSafe(|| {
@@ -148,7 +152,10 @@ pub(crate) fn render_nir_from_pcode_with_decomp_context<'bin>(
             Ok(Ok(code)) => {
                 if decomp_ctx.hints_changed && round < max_rounds - 1 {
                     if std::env::var_os("FISSION_PREVIEW_DIAG").is_some() {
-                        eprintln!("[PREVIEW-DIAG] fn=0x{address:x} round={} hints_changed, triggering feedback loop", round + 1);
+                        eprintln!(
+                            "[PREVIEW-DIAG] fn=0x{address:x} round={} hints_changed, triggering feedback loop",
+                            round + 1
+                        );
                     }
                     continue;
                 }
@@ -157,23 +164,23 @@ pub(crate) fn render_nir_from_pcode_with_decomp_context<'bin>(
                 nir_diag_stage(address, "render_preview_done", render_start);
                 return Ok(Some((code, build_stats, hint_stats)));
             }
-        Ok(Err(err)) => {
-            let surfaced_error = err
-                .structuring_failure_kind()
-                .map(|kind| {
-                    format!(
-                        "nir_structuring_failure[{}]: {err}",
-                        kind.preview_block_signature()
-                    )
-                })
-                .unwrap_or_else(|| format!("Fission NIR unavailable: {err}"));
-            nir_diag_stage(address, "render_preview_error", render_start);
-            return Err(surfaced_error);
-        }
-        Err(payload) => {
-            nir_diag_stage(address, "render_preview_error", render_start);
-            return Err(surface_render_panic(address, payload.as_ref()));
-        }
+            Ok(Err(err)) => {
+                let surfaced_error = err
+                    .structuring_failure_kind()
+                    .map(|kind| {
+                        format!(
+                            "nir_structuring_failure[{}]: {err}",
+                            kind.preview_block_signature()
+                        )
+                    })
+                    .unwrap_or_else(|| format!("Fission NIR unavailable: {err}"));
+                nir_diag_stage(address, "render_preview_error", render_start);
+                return Err(surfaced_error);
+            }
+            Err(payload) => {
+                nir_diag_stage(address, "render_preview_error", render_start);
+                return Err(surface_render_panic(address, payload.as_ref()));
+            }
         }
     }
     unreachable!("Feedback loop should always return from within");

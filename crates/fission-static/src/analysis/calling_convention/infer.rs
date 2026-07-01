@@ -1,5 +1,5 @@
-use fission_loader::loader::LoadedBinary;
 use fission_core::CallingConvention;
+use fission_loader::loader::LoadedBinary;
 use std::collections::BTreeSet;
 
 /// Infers the calling convention based on read registers and architecture.

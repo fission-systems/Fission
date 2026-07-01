@@ -24,7 +24,7 @@
 
 use crate::facts::build_nir_type_context;
 use fission_loader::loader::LoadedBinary;
-use fission_pcode::nir::{NirTypeContext, NirFunctionHints};
+use fission_pcode::nir::{NirFunctionHints, NirTypeContext};
 use fission_static::analysis::decomp::facts::FactStore;
 
 /// Live decompilation context for a single function.
@@ -54,7 +54,7 @@ pub struct DecompContext<'bin> {
     /// call `ctx.update_type_context(hints)` to feed new information back so that
     /// the next normalize round can consume it.
     pub type_context: NirTypeContext,
-    
+
     /// Set to true if a pass wrote to this context, indicating a new round is needed.
     pub hints_changed: bool,
 }
@@ -63,12 +63,22 @@ impl<'bin> DecompContext<'bin> {
     pub fn new(binary: &'bin LoadedBinary, address: u64) -> Self {
         let facts = FactStore::from_binary(binary);
         let type_context = build_nir_type_context(binary, &facts, address);
-        Self { binary, facts, type_context, hints_changed: false }
+        Self {
+            binary,
+            facts,
+            type_context,
+            hints_changed: false,
+        }
     }
 
     pub fn from_facts(binary: &'bin LoadedBinary, facts: FactStore, address: u64) -> Self {
         let type_context = build_nir_type_context(binary, &facts, address);
-        Self { binary, facts, type_context, hints_changed: false }
+        Self {
+            binary,
+            facts,
+            type_context,
+            hints_changed: false,
+        }
     }
 }
 
@@ -82,12 +92,16 @@ impl<'bin> fission_pcode::nir::DecompFacts for DecompContext<'bin> {
         self.hints_changed = true;
     }
 
-    fn record_inferred_type(&mut self, addr: u64, type_info: fission_loader::loader::types::InferredTypeInfo) {
+    fn record_inferred_type(
+        &mut self,
+        addr: u64,
+        type_info: fission_loader::loader::types::InferredTypeInfo,
+    ) {
         // Just ingest it into native types.
-        self.facts.ingest_native_function_types(addr, vec![type_info]);
+        self.facts
+            .ingest_native_function_types(addr, vec![type_info]);
         // Rebuild type context so subsequent passes in the same round can see it
         self.type_context = build_nir_type_context(self.binary, &self.facts, addr);
         self.hints_changed = true;
     }
 }
-

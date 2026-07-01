@@ -33,7 +33,6 @@ pub(crate) use self::abi::*;
 pub use self::abstract_location::{AbstractStackSlot, ParamSlotIndex};
 pub(crate) use self::action_pipeline::STRUCTURING_TIME_CEILING_SECS;
 
-pub use fission_core::CallingConvention;
 pub(super) use self::support::*;
 pub use self::telemetry::{
     take_last_nir_build_stats, take_last_nir_hint_stats, take_last_preview_build_stats,
@@ -41,6 +40,7 @@ pub use self::telemetry::{
 };
 pub use self::types::*;
 use self::{action_pipeline::*, builder::*, cfg::*, normalize::*, render::*, structuring::*};
+pub use fission_core::CallingConvention;
 
 pub use self::abi::infer_entry_register_param_arity;
 pub use self::cfg::structuring_cfg_edges;
@@ -79,7 +79,15 @@ pub fn render_mlil_preview_with_context(
     options: &MlilPreviewOptions,
     type_context: Option<&PreviewTypeContext>,
 ) -> Result<String, MlilPreviewError> {
-    render_mlil_preview_with_binary_and_context(pcode, name, address, options, None, type_context, None)
+    render_mlil_preview_with_binary_and_context(
+        pcode,
+        name,
+        address,
+        options,
+        None,
+        type_context,
+        None,
+    )
 }
 
 pub fn render_mlil_preview_with_binary_and_context(
@@ -277,7 +285,15 @@ pub fn render_nir_with_context(
     type_context: Option<&NirTypeContext>,
     mut decomp_facts: Option<&mut dyn DecompFacts>,
 ) -> Result<String, MlilPreviewError> {
-    render_mlil_preview_with_binary_and_context(pcode, name, address, options, None, type_context, decomp_facts)
+    render_mlil_preview_with_binary_and_context(
+        pcode,
+        name,
+        address,
+        options,
+        None,
+        type_context,
+        decomp_facts,
+    )
 }
 
 pub fn render_nir_with_binary_and_context(
@@ -289,5 +305,13 @@ pub fn render_nir_with_binary_and_context(
     type_context: Option<&NirTypeContext>,
     mut decomp_facts: Option<&mut dyn DecompFacts>,
 ) -> Result<String, MlilPreviewError> {
-    render_mlil_preview_with_binary_and_context(pcode, name, address, options, binary, type_context, decomp_facts)
+    render_mlil_preview_with_binary_and_context(
+        pcode,
+        name,
+        address,
+        options,
+        binary,
+        type_context,
+        decomp_facts,
+    )
 }

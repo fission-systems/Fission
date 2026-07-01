@@ -81,12 +81,7 @@ fn render_selection_from_json(
             // reuse it. try_structuring_recovery rebuilds a fresh context internally.
             // (Phase 3 will eliminate this by passing &mut DecompContext through.)
             if let Some(selection) = try_structuring_recovery_with_facts_rebuild(
-                pcode_json,
-                binary,
-                address,
-                name,
-                timeout_ms,
-                &err,
+                pcode_json, binary, address, name, timeout_ms, &err,
             )? {
                 Ok(selection)
             } else {
@@ -113,7 +108,15 @@ fn try_structuring_recovery_with_facts_rebuild(
     // &mut DecompContext through the entire pipeline.
     let fact_store = FactStore::from_binary(binary);
     let type_context = build_nir_type_context_from_facts(binary, &fact_store, address);
-    try_structuring_recovery(pcode_json, binary, address, name, timeout_ms, type_context, err)
+    try_structuring_recovery(
+        pcode_json,
+        binary,
+        address,
+        name,
+        timeout_ms,
+        type_context,
+        err,
+    )
 }
 
 /// Render a NIR selection from a pre-lifted pcode function with a pre-built type context.
@@ -210,12 +213,20 @@ pub fn select_nir_output_with_facts<S: NirSource>(
             let prefer_preview_surface = matches!(mode, NirEngineMode::Auto);
             let pcode_start = Instant::now();
             if diag {
-                let mode_label = if prefer_preview_surface { "auto" } else { "nir" };
+                let mode_label = if prefer_preview_surface {
+                    "auto"
+                } else {
+                    "nir"
+                };
                 eprintln!("[NIR-DIAG] get_pcode start: fn=0x{address:x} mode={mode_label}");
             }
             let pcode_json = source.get_pcode_json(address).map_err(|e| e.to_string())?;
             if diag {
-                let mode_label = if prefer_preview_surface { "auto" } else { "nir" };
+                let mode_label = if prefer_preview_surface {
+                    "auto"
+                } else {
+                    "nir"
+                };
                 eprintln!(
                     "[NIR-DIAG] get_pcode done: fn=0x{address:x} mode={mode_label} elapsed_ms={:.1}",
                     pcode_start.elapsed().as_secs_f64() * 1000.0
@@ -271,18 +282,16 @@ pub fn select_nir_output_from_pcode_with_facts(
 ) -> Result<NirSelection, String> {
     match mode {
         NirEngineMode::Legacy => Ok(NirRoutingResolver::legacy_mode()),
-        NirEngineMode::Nir | NirEngineMode::Auto => {
-            render_selection_from_pcode(
-                pcode,
-                binary,
-                fact_store,
-                address,
-                name,
-                matches!(mode, NirEngineMode::Auto),
-                timeout_ms,
-                options,
-            )
-        }
+        NirEngineMode::Nir | NirEngineMode::Auto => render_selection_from_pcode(
+            pcode,
+            binary,
+            fact_store,
+            address,
+            name,
+            matches!(mode, NirEngineMode::Auto),
+            timeout_ms,
+            options,
+        ),
     }
 }
 

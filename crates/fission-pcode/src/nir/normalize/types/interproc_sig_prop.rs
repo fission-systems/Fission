@@ -358,8 +358,8 @@ pub(crate) fn apply_interproc_callsite_arity_pass(func: &mut HirFunction) -> boo
 #[cfg(test)]
 mod tests {
     use super::*;
-    use fission_core::CallingConvention;
     use crate::nir::types::NirBinding;
+    use fission_core::CallingConvention;
 
     fn empty_binding(name: &str) -> NirBinding {
         NirBinding {

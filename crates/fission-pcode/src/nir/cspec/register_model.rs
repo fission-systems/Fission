@@ -11,11 +11,11 @@ use super::apply::sleigh_languages_root;
 use super::ldefs::global_language_slaspec_index;
 use super::slaspec_parse::{ParsedRegister, parse_registers_from_slaspec};
 use crate::arch::x86::{X86_REG_BASE, unique_x86_register_name};
-use fission_core::CallingConvention;
 use crate::nir::{
     REGISTER_SPACE_ID, RUST_SLEIGH_ALT_REGISTER_SPACE_ID, RUST_SLEIGH_REGISTER_SPACE_ID,
     UNIQUE_SPACE_ID, Varnode, is_register_space_id,
 };
+use fission_core::CallingConvention;
 
 static REGISTER_MODEL_CACHE: OnceLock<RwLock<HashMap<String, Arc<RegisterModel>>>> =
     OnceLock::new();

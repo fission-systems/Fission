@@ -49,6 +49,7 @@ pub use rendering::render;
 pub use fission_static::utils;
 pub use pipeline::adapters::{NativeDecompilerBackend, NativeDecompilerSource};
 
+pub use context::DecompContext;
 pub use orchestration::engine::{
     NirEngineMode, NirRoutingDecision, NirRoutingResolver, NirSelection, NirSource, NirSurfaceKind,
     NirWorkerRequest, NirWorkerResponse, PreviewEngineMode, PreviewRoutingDecision,
@@ -62,7 +63,6 @@ pub use orchestration::engine::{
     select_nir_output_with_facts,
 };
 pub use orchestration::request::{DecompileRequest, DecompileResult, decompile_prebuilt_pcode};
-pub use context::DecompContext;
 
 pub(crate) use pipeline::rust_sleigh::decode_rust_sleigh_pcode;
 pub use pipeline::rust_sleigh::{
