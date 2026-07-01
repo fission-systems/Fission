@@ -32,6 +32,48 @@ jobs:
       # `fission-signatures` enables `clippy::pedantic`; `-D warnings` makes pedantic findings release-blocking until we baseline cleanup (FIDBF casts, Win constants).
       exclude_crates: "fission-signatures,fission-dioxus"
 
+  # Anti-overfitting lint: blocks function/address-specific patterns in NIR,
+  # and verifies MAX_STRUCTURING_PASSES constant is declared.
+  pass-gate-lint:
+    name: 🛡️ Pass-Gate Lint (anti-overfitting)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          lfs: false
+
+      - name: Check for function/address-specific patterns in NIR pipeline
+        run: |
+          set -euo pipefail
+          PATTERN_HITS=$(grep -rn \
+            -e 'func_name\s*==' \
+            -e 'func_name\.contains' \
+            -e 'function_name.*==\|==.*function_name' \
+            -e 'addr\s*==\s*0x[0-9a-fA-F]' \
+            crates/fission-pcode/src/nir/structuring/ \
+            crates/fission-pcode/src/nir/normalize/ 2>/dev/null || true)
+          if [ -n "$PATTERN_HITS" ]; then
+            echo "❌ Function/address-specific pattern detected in NIR pipeline:"
+            echo "$PATTERN_HITS"
+            echo ""
+            echo "This is overfitting. Fix at the canonical structural invariant level,"
+            echo "not by targeting specific functions or addresses."
+            exit 1
+          fi
+          echo "✅ No function/address-specific patterns found in NIR pipeline."
+
+      - name: Verify MAX_STRUCTURING_PASSES constant is declared
+        run: |
+          set -euo pipefail
+          if ! grep -q 'MAX_STRUCTURING_PASSES' crates/fission-pcode/src/nir/pass/manager.rs; then
+            echo "❌ MAX_STRUCTURING_PASSES constant missing from nir/pass/manager.rs"
+            echo "The pass count cap is required by the anti-overfitting architecture."
+            exit 1
+          fi
+          CAP=$(grep 'MAX_STRUCTURING_PASSES.*usize.*=' crates/fission-pcode/src/nir/pass/manager.rs \
+                | grep -oE '[0-9]+' | head -1)
+          echo "✅ MAX_STRUCTURING_PASSES = ${CAP} (current cap)."
+
   # Step 2: Core Tests (Linux, ~15 min)
   test-linux:
     name: 🧪 Tests (Linux)
@@ -101,6 +143,7 @@ jobs:
       [
         security-check,
         lint-format,
+        pass-gate-lint,
         test-linux,
         cli-smoke-linux,
         nir-regression-gate,
@@ -130,6 +173,10 @@ jobs:
           fi
           if [ "${{ needs.nir-regression-gate.result }}" != "success" ]; then
             echo "❌ NIR Regression Gate failed — decompiler quality regression detected"
+            exit 1
+          fi
+          if [ "${{ needs.pass-gate-lint.result }}" != "success" ]; then
+            echo "❌ Pass-gate lint failed — overfitting pattern or missing cap detected"
             exit 1
           fi
           if [ "${{ needs.test-macos.result }}" != "success" ]; then

@@ -1,4 +1,4 @@
-use crate::nir::pass::{AnalysisStore, NirFunc, NirPass, PassResult};
+use crate::nir::pass::{AnalysisStore, InvariantBasis, NirFunc, NirPass, PassResult};
 use crate::nir::structuring::driver::{
     StructuringAdmissionInput, StructuringAdmissionReason, blockgraph_collapse_admission_enabled,
     decide_structuring_admission,
@@ -23,6 +23,16 @@ pub(crate) struct EarlyReturnPass;
 impl NirPass for EarlyReturnPass {
     fn name(&self) -> &str {
         "EarlyReturnPass"
+    }
+
+    /// Basis: [`InvariantBasis::EdgeClassification`]
+    ///
+    /// An intra-instruction conditional return exists when the CFG contains a
+    /// single-block function whose only exit is a conditional fall-through to
+    /// the return instruction. The structural criterion is purely edge-based:
+    /// one conditional branch edge + one fall-through edge within a single block.
+    fn invariant_basis(&self) -> InvariantBasis {
+        InvariantBasis::EdgeClassification
     }
 
     fn run(
@@ -61,6 +71,17 @@ pub(crate) struct IrreducibleReductionPass;
 impl NirPass for IrreducibleReductionPass {
     fn name(&self) -> &str {
         "IrreducibleReductionPass"
+    }
+
+    /// Basis: [`InvariantBasis::StronglyConnectedComponents`]
+    ///
+    /// A CFG is irreducible iff it contains an SCC with two or more distinct
+    /// loop headers (no single dom-tree node dominates all back-edges in the
+    /// SCC). This pass applies Tarjan SCC analysis, then eliminates
+    /// irreducibility via node-splitting or FAS edge virtualization — both
+    /// invariant-based CFG transforms that do not depend on binary content.
+    fn invariant_basis(&self) -> InvariantBasis {
+        InvariantBasis::StronglyConnectedComponents
     }
 
     fn run(
@@ -194,6 +215,17 @@ impl NirPass for SeseStructuringPass {
         "SeseStructuringPass"
     }
 
+    /// Basis: [`InvariantBasis::DominatorTree`]
+    ///
+    /// SESE (Single-Entry Single-Exit) region structuring decomposes the CFG
+    /// into dom-tree intervals. A region is valid iff its entry node dominates
+    /// all interior nodes and its exit node post-dominates all interior nodes.
+    /// The collapse loop (Tier 1 + Tier 2) operates solely on these
+    /// dominator/post-dominator invariants — no binary-specific knowledge.
+    fn invariant_basis(&self) -> InvariantBasis {
+        InvariantBasis::DominatorTree
+    }
+
     fn run(
         &mut self,
         ir: &mut NirFunc<'_, '_>,
@@ -291,6 +323,16 @@ pub(crate) struct OrphanGotoRepairPass;
 impl NirPass for OrphanGotoRepairPass {
     fn name(&self) -> &str {
         "OrphanGotoRepairPass"
+    }
+
+    /// Basis: [`InvariantBasis::PostStructuringCleanup`]
+    ///
+    /// After SESE structuring some goto labels may remain unreachable from
+    /// the structured body (orphan gotos). This pass repairs them by
+    /// localized re-linking — it operates only on the already-structured HIR
+    /// statement list, not on raw CFG edges or binary-specific data.
+    fn invariant_basis(&self) -> InvariantBasis {
+        InvariantBasis::PostStructuringCleanup
     }
 
     fn run(

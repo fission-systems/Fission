@@ -12,8 +12,74 @@ pub(crate) enum RepeatMode {
     UntilStable,
 }
 
+/// Hard cap on the number of [`NirPass`] instances registered in a single [`PassManager`].
+///
+/// # Anti-overfitting policy
+///
+/// To raise this limit, you must file an ADR (`docs/adr/`) explaining the structural gap
+/// that the new pass fills. Structural gap = a CFG/dominance/SCC/loop invariant that is
+/// *not* already covered by the existing 4 passes.
+///
+/// **Never raise the cap to accommodate a pass that targets a specific function, binary,
+/// address range, or compiler output pattern.** That is overfitting.
+pub(crate) const MAX_STRUCTURING_PASSES: usize = 6;
+
+/// The structural CFG invariant that justifies a [`NirPass`].
+///
+/// Every pass **must** declare which invariant it operates on. This declaration is:
+/// - Checked at review time to prevent address/function-specific workarounds.
+/// - Documented in [`NirPass::invariant_basis`].
+///
+/// # Rules
+///
+/// - The basis must be provable from CFG facts alone (edge sets, dom/postdom trees,
+///   SCC membership, loop bodies).
+/// - It must **not** depend on: function name, binary address, compiler flags,
+///   specific instruction counts, or any other binary-specific knowledge.
+/// - If no existing variant applies, the pass needs an ADR before proceeding.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum InvariantBasis {
+    /// CFG edge classification: forward, back, cross, tree edges.
+    /// Use for passes that operate on a single well-classified edge type.
+    EdgeClassification,
+
+    /// Dominator tree structure (idom, dominance frontier).
+    /// Use for passes that require `a dom b` or natural interval membership.
+    DominatorTree,
+
+    /// Post-dominator tree structure (ipostdom, control dependence).
+    /// Use for passes that identify common post-dominators (follows, join nodes).
+    PostDominatorTree,
+
+    /// SCC membership and inter-SCC edge structure.
+    /// Use for reducibility analysis, irreducible-graph transforms (node split / FAS).
+    StronglyConnectedComponents,
+
+    /// Loop body analysis: back-edges, natural exits, header dominance.
+    /// Use for while/do-while/for/infloop structuring passes.
+    LoopBody,
+
+    /// Post-structuring cleanup: operates on already-structured HIR statements.
+    /// The pass may read structured HIR but must not re-analyze raw CFG edges
+    /// by function identity or address.
+    PostStructuringCleanup,
+}
+
 pub(crate) trait NirPass {
     fn name(&self) -> &str;
+
+    /// The structural CFG invariant that justifies this pass.
+    ///
+    /// # Contract
+    ///
+    /// The implementation **must not** inspect function names, binary addresses,
+    /// instruction counts tuned to a specific binary, or any other non-structural
+    /// binary-specific data. Passes that do so are overfitting and will be rejected
+    /// at review.
+    ///
+    /// See [`InvariantBasis`] for the allowed variants.
+    fn invariant_basis(&self) -> InvariantBasis;
+
     fn run(
         &mut self,
         ir: &mut NirFunc<'_, '_>,
@@ -37,6 +103,13 @@ impl PassManager {
     }
 
     pub(crate) fn add_pass(&mut self, pass: Box<dyn NirPass>) {
+        debug_assert!(
+            self.passes.len() < MAX_STRUCTURING_PASSES,
+            "Pass count cap ({MAX_STRUCTURING_PASSES}) exceeded when adding '{}'. \
+             Either retire/generalize an existing pass, or file an ADR explaining \
+             the new structural gap before raising the cap.",
+            pass.name()
+        );
         self.passes.push(pass);
     }
 
@@ -113,6 +186,11 @@ mod tests {
     impl NirPass for MockPass {
         fn name(&self) -> &str {
             "MockPass"
+        }
+
+        fn invariant_basis(&self) -> InvariantBasis {
+            // Test-only stub; no real structural invariant.
+            InvariantBasis::EdgeClassification
         }
 
         fn run(
