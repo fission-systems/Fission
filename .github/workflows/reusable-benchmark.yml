@@ -161,7 +161,7 @@ jobs:
       - name: Download previous benchmark baseline
         id: baseline_dl
         continue-on-error: true
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: benchmark-baseline-latest
           path: benchmark_baseline/
