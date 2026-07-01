@@ -41,7 +41,7 @@ pub struct FunctionFacts {
     pub type_facts: Vec<TypeFact>,
     pub dwarf_info: Option<DwarfFunctionInfo>,
     pub pdb_info: Option<PdbFunctionInfo>,
-    pub calling_convention: Option<fission_pcode::nir::CallingConvention>,
+    pub calling_convention: Option<fission_core::CallingConvention>,
 }
 
 impl FunctionFacts {
@@ -81,7 +81,7 @@ pub struct FactStore {
     loader_type_facts: Vec<InferredTypeInfo>,
     dwarf_functions: HashMap<u64, DwarfFunctionInfo>,
     pdb_functions: HashMap<u64, PdbFunctionInfo>,
-    pub calling_conventions: HashMap<u64, fission_pcode::nir::CallingConvention>,
+    pub calling_conventions: HashMap<u64, fission_core::CallingConvention>,
 }
 
 impl FactStore {
@@ -271,7 +271,7 @@ impl FactStore {
     pub fn ingest_calling_convention(
         &mut self,
         address: u64,
-        cc: fission_pcode::nir::CallingConvention,
+        cc: fission_core::CallingConvention,
     ) {
         self.calling_conventions.insert(address, cc);
     }
@@ -353,6 +353,63 @@ impl FactStore {
         self.dwarf_functions
             .get(&address)
             .or_else(|| self.pdb_functions.get(&address))
+    }
+
+    /// Record function-level hints discovered during structuring or normalize.
+    ///
+    /// Called by NIR structuring passes (Phase 3+) when they discover parameter
+    /// count, local variable layout, or return type information from the CFG
+    /// structure. The recorded hints are stored as a synthetic `DwarfFunctionInfo`
+    /// under `FactProvenance::DebugInfo` provenance, so that the next normalize
+    /// round's `build_nir_type_context` call will pick them up via
+    /// `preferred_debug_function`.
+    ///
+    /// ## Invariant
+    /// Only call this when the hints represent a structural invariant (e.g.
+    /// dominance-based parameter detection), not a function-specific heuristic.
+    /// See the anti-overfitting architecture contract in `nir/pass/manager.rs`.
+    pub fn record_structuring_hints(
+        &mut self,
+        address: u64,
+        hints: fission_pcode::nir::NirFunctionHints,
+    ) {
+        use fission_loader::loader::types::{DwarfLocation, DwarfParamInfo};
+        // Synthesize a DwarfFunctionInfo from the structuring hints.
+        // Only overwrite if new hints have more information than existing DWARF/PDB.
+        let existing_param_count = self
+            .preferred_debug_function(address)
+            .map(|f| f.params.len())
+            .unwrap_or(0);
+        let new_param_count = hints.param_names.len();
+        if new_param_count <= existing_param_count {
+            // Don't overwrite higher-quality debug info with structuring hints.
+            return;
+        }
+        let params = hints
+            .param_names
+            .iter()
+            .enumerate()
+            .map(|(i, name)| DwarfParamInfo {
+                name: name.clone(),
+                type_name: hints
+                    .param_type_names
+                    .get(&i)
+                    .cloned()
+                    .unwrap_or_default(),
+                location: DwarfLocation::Unknown,
+            })
+            .collect();
+        let synthesized = fission_loader::loader::types::DwarfFunctionInfo {
+            address,
+            name: self.resolved_name(address).unwrap_or("").to_string(),
+            return_type: hints.return_type_name,
+            params,
+            local_vars: vec![],
+            size: 0,
+        };
+        // Store as synthetic DWARF. `preferred_debug_function` returns DWARF over PDB,
+        // so this will be picked up on the next `build_nir_type_context` call.
+        self.dwarf_functions.insert(address, synthesized);
     }
 
     pub fn function_facts_snapshot(&self, address: u64) -> FunctionFacts {

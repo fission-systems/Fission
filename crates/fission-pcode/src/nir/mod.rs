@@ -32,7 +32,8 @@ mod vsa;
 pub(crate) use self::abi::*;
 pub use self::abstract_location::{AbstractStackSlot, ParamSlotIndex};
 pub(crate) use self::action_pipeline::STRUCTURING_TIME_CEILING_SECS;
-pub use self::support::CallingConvention;
+
+pub use fission_core::CallingConvention;
 pub(super) use self::support::*;
 pub use self::telemetry::{
     take_last_nir_build_stats, take_last_nir_hint_stats, take_last_preview_build_stats,

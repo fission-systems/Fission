@@ -1028,7 +1028,7 @@ fn collect_callsites_expr(
 mod tests {
     use super::super::super::wave_stats::{reset_normalize_wave_stats, take_normalize_wave_stats};
     use super::*;
-    use crate::nir::support::CallingConvention;
+    use fission_core::CallingConvention;
 
     fn unknown_binding(name: &str, origin: Option<NirBindingOrigin>) -> NirBinding {
         NirBinding {

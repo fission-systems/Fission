@@ -5,8 +5,8 @@
 //! alias checks and type hints—without encoding a specific CPU register as the frame base
 //! (that remains in the lifter / [`crate::nir::types::NirBindingOrigin`]).
 //!
-//! Parameter slots use [`ParamSlotIndex`] keyed by [`crate::nir::support::CallingConvention`]
-//! ordering via [`CallingConvention::param_offsets`](crate::nir::support::CallingConvention::param_offsets).
+//! Parameter slots use [`ParamSlotIndex`] keyed by [`fission_core::CallingConvention`]
+//! ordering via [`CallingConvention::param_offsets`](fission_core::CallingConvention::param_offsets).
 
 use crate::nir::types::NirBindingOrigin;
 
@@ -37,7 +37,7 @@ impl AbstractStackSlot {
     }
 }
 
-/// Ordinal parameter slot (0-based), aligned with [`CallingConvention::param_offsets`](crate::nir::support::CallingConvention::param_offsets).
+/// Ordinal parameter slot (0-based), aligned with [`CallingConvention::param_offsets`](fission_core::CallingConvention::param_offsets).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ParamSlotIndex(pub usize);
 

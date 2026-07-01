@@ -22,7 +22,7 @@ pub use crate::core::prelude;
 pub use crate::core::settings;
 
 pub use crate::core::config::{LogConfig, LogLevel};
-pub use crate::core::{CONFIG, FissionError, PATHS, Result};
+pub use crate::core::{CONFIG, FissionError, PATHS, Result, CallingConvention};
 
 pub use crate::core::path_config::find_sla_dir;
 

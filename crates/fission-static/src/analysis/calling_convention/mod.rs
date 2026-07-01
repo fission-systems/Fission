@@ -2,7 +2,7 @@ pub mod infer;
 
 use super::control_flow_facts::FunctionControlFlowFacts;
 use fission_loader::loader::LoadedBinary;
-use fission_pcode::nir::CallingConvention;
+use fission_core::CallingConvention;
 use fission_sleigh::runtime::RuntimeSleighFrontend;
 use std::collections::BTreeSet;
 

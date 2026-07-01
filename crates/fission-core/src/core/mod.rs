@@ -10,6 +10,7 @@
 //! - logging: Level-based logging with file output
 //! - prelude: Common imports for convenience
 
+pub mod calling_convention;
 pub mod config;
 pub mod config_store;
 pub mod constants;
@@ -27,6 +28,7 @@ pub mod toml_config;
 pub mod utils;
 
 // Re-export commonly used items at the core level
+pub use calling_convention::CallingConvention;
 pub use config::{CONFIG, Config};
 pub use constants::*;
 pub use errors::{FissionError, Result};

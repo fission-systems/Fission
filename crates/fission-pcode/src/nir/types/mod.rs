@@ -8,7 +8,7 @@ use indexmap::IndexMap;
 use std::collections::{HashMap, HashSet};
 use thiserror::Error;
 
-use super::support::CallingConvention;
+use fission_core::CallingConvention;
 use crate::pcode::{PcodeFunction, PcodeOpcode};
 
 mod build_stats;
