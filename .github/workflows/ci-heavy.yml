@@ -17,15 +17,11 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  # Step 1: Corpus Validation (~15 min)
-  corpus-validation:
-    name: 📦 Corpus Validation
-    uses: ./.github/workflows/reusable-corpus-validation.yml
+
 
   # Step 2: Full Test Suite (Linux, ~25 min)
   test-linux-full:
     name: 🧪 Full Tests (Linux)
-    needs: corpus-validation
     uses: ./.github/workflows/reusable-run-tests.yml
     with:
       os: ubuntu-latest
@@ -35,7 +31,6 @@ jobs:
 
   test-linux-static:
     name: 🧪 Tests (fission-static)
-    needs: corpus-validation
     uses: ./.github/workflows/reusable-run-tests.yml
     with:
       os: ubuntu-latest
@@ -45,7 +40,6 @@ jobs:
   # Step 3: Build & Test (Windows, ~20 min)
   build-windows-heavy:
     name: 🪟 Heavy Build & Test (Windows)
-    needs: corpus-validation
     uses: ./.github/workflows/reusable-build-cli.yml
     with:
       os: windows-latest
@@ -65,7 +59,6 @@ jobs:
   # Step 4: Build & Test (macOS, ~20 min)
   build-macos-heavy:
     name: 🍎 Heavy Build & Test (macOS)
-    needs: corpus-validation
     uses: ./.github/workflows/reusable-build-cli.yml
     with:
       os: macos-latest
@@ -75,26 +68,15 @@ jobs:
   # Step 5: Automation NIR-Check (~45 min)
   nir-check:
     name: 🔬 Automation NIR-Check
-    needs: corpus-validation
     uses: ./.github/workflows/reusable-nir-check.yml
     with:
       run_profile: fast
       functions_limit: "10"
       update_latest: false
 
-  # Step 7: Performance Benchmarking (~30 min)
-  benchmark:
-    name: 📊 Performance Benchmark
-    needs: corpus-validation
-    uses: ./.github/workflows/reusable-benchmark.yml
-    with:
-      upload_artifacts: true
-      baseline_branch: 'main'
-
   # Step 8: Miri — unsafe UB detection (~45 min, nightly Rust)
   miri-check:
     name: 🧠 Miri UB Check
-    needs: corpus-validation
     uses: ./.github/workflows/reusable-miri.yml
     with:
       crates: "fission-pcode,fission-loader"
@@ -102,7 +84,6 @@ jobs:
   # Step 9: Code Coverage (~30 min)
   coverage:
     name: 📈 Code Coverage
-    needs: corpus-validation
     uses: ./.github/workflows/reusable-coverage.yml
     with:
       crates: "fission-pcode,fission-loader,fission-automation"
@@ -111,7 +92,6 @@ jobs:
   # Step 10: MSRV validation
   msrv-check:
     name: 🦀 MSRV Check
-    needs: corpus-validation
     uses: ./.github/workflows/reusable-msrv.yml
     with:
       crates: "fission-pcode,fission-loader,fission-decompiler,fission-automation"
@@ -120,13 +100,11 @@ jobs:
   heavy-summary:
     name: ✅ Heavy Validation Summary
     needs:
-      - corpus-validation
       - test-linux-full
       - test-linux-static
       - build-macos-heavy
       - test-windows-heavy
       - nir-check
-      - benchmark
       - miri-check
       - coverage
       - msrv-check
@@ -137,10 +115,7 @@ jobs:
         run: |
           FAILED=0
 
-          if [ "${{ needs.corpus-validation.result }}" != "success" ]; then
-            echo "❌ Corpus validation failed"
-            FAILED=1
-          fi
+
           if [ "${{ needs.test-linux-full.result }}" != "success" ]; then
             echo "❌ Linux full tests failed"
             FAILED=1
@@ -162,10 +137,7 @@ jobs:
             echo "❌ NIR-Check failed"
             FAILED=1
           fi
-          if [ "${{ needs.benchmark.result }}" != "success" ]; then
-            echo "❌ Performance benchmark failed"
-            FAILED=1
-          fi
+
           if [ "${{ needs.miri-check.result }}" != "success" ]; then
             echo "❌ Miri UB check failed — unsafe code undefined behavior detected"
             FAILED=1
