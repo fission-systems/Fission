@@ -276,6 +276,192 @@ fn multi_block_preview_lowers_conditional_goto_style_if() {
 }
 
 #[test]
+fn nested_conditionals_preserve_joined_return_register_value() {
+    let value = reg(0x08, 4);
+    let lo = reg(0x10, 4);
+    let hi = reg(0x80, 4);
+    let eax = reg(0x00, 4);
+    let rax = reg(0x00, 8);
+    let cond_lo = uniq(0x510, 1);
+    let cond_hi = uniq(0x520, 1);
+    let func = PcodeFunction {
+        blocks: vec![
+            PcodeBasicBlock {
+                index: 0,
+                start_address: 0x5100,
+                successors: vec![1, 2],
+                ops: vec![
+                    PcodeOp {
+                        seq_num: 0,
+                        opcode: PcodeOpcode::Copy,
+                        address: 0x5100,
+                        output: Some(eax.clone()),
+                        inputs: vec![value.clone()],
+                        asm_mnemonic: Some("mov eax,ecx".to_string()),
+                    },
+                    PcodeOp {
+                        seq_num: 1,
+                        opcode: PcodeOpcode::IntZExt,
+                        address: 0x5100,
+                        output: Some(rax.clone()),
+                        inputs: vec![eax.clone()],
+                        asm_mnemonic: Some("mov eax,ecx".to_string()),
+                    },
+                    PcodeOp {
+                        seq_num: 2,
+                        opcode: PcodeOpcode::Copy,
+                        address: 0x5100,
+                        output: Some(cond_lo.clone()),
+                        inputs: vec![reg(0x30, 1)],
+                        asm_mnemonic: Some("cmp/jge".to_string()),
+                    },
+                    PcodeOp {
+                        seq_num: 3,
+                        opcode: PcodeOpcode::CBranch,
+                        address: 0x5101,
+                        output: None,
+                        inputs: vec![cst(0x5120, 8), cond_lo],
+                        asm_mnemonic: Some("jge".to_string()),
+                    },
+                ],
+            },
+            PcodeBasicBlock {
+                index: 1,
+                start_address: 0x5110,
+                successors: vec![5],
+                ops: vec![
+                    PcodeOp {
+                        seq_num: 0,
+                        opcode: PcodeOpcode::Copy,
+                        address: 0x5110,
+                        output: Some(eax.clone()),
+                        inputs: vec![lo],
+                        asm_mnemonic: Some("mov eax,edx".to_string()),
+                    },
+                    PcodeOp {
+                        seq_num: 1,
+                        opcode: PcodeOpcode::IntZExt,
+                        address: 0x5110,
+                        output: Some(rax.clone()),
+                        inputs: vec![eax.clone()],
+                        asm_mnemonic: Some("mov eax,edx".to_string()),
+                    },
+                    PcodeOp {
+                        seq_num: 2,
+                        opcode: PcodeOpcode::Branch,
+                        address: 0x5112,
+                        output: None,
+                        inputs: vec![cst(0x5150, 8)],
+                        asm_mnemonic: Some("jmp".to_string()),
+                    },
+                ],
+            },
+            PcodeBasicBlock {
+                index: 2,
+                start_address: 0x5120,
+                successors: vec![3, 4],
+                ops: vec![
+                    PcodeOp {
+                        seq_num: 0,
+                        opcode: PcodeOpcode::Copy,
+                        address: 0x5120,
+                        output: Some(cond_hi.clone()),
+                        inputs: vec![reg(0x31, 1)],
+                        asm_mnemonic: Some("cmp/jle".to_string()),
+                    },
+                    PcodeOp {
+                        seq_num: 1,
+                        opcode: PcodeOpcode::CBranch,
+                        address: 0x5121,
+                        output: None,
+                        inputs: vec![cst(0x5140, 8), cond_hi],
+                        asm_mnemonic: Some("jle".to_string()),
+                    },
+                ],
+            },
+            PcodeBasicBlock {
+                index: 3,
+                start_address: 0x5130,
+                successors: vec![5],
+                ops: vec![
+                    PcodeOp {
+                        seq_num: 0,
+                        opcode: PcodeOpcode::Copy,
+                        address: 0x5130,
+                        output: Some(eax.clone()),
+                        inputs: vec![hi],
+                        asm_mnemonic: Some("mov eax,r8d".to_string()),
+                    },
+                    PcodeOp {
+                        seq_num: 1,
+                        opcode: PcodeOpcode::IntZExt,
+                        address: 0x5130,
+                        output: Some(rax.clone()),
+                        inputs: vec![eax.clone()],
+                        asm_mnemonic: Some("mov eax,r8d".to_string()),
+                    },
+                    PcodeOp {
+                        seq_num: 2,
+                        opcode: PcodeOpcode::Branch,
+                        address: 0x5132,
+                        output: None,
+                        inputs: vec![cst(0x5150, 8)],
+                        asm_mnemonic: Some("jmp".to_string()),
+                    },
+                ],
+            },
+            PcodeBasicBlock {
+                index: 4,
+                start_address: 0x5140,
+                successors: vec![5],
+                ops: vec![
+                    PcodeOp {
+                        seq_num: 0,
+                        opcode: PcodeOpcode::Copy,
+                        address: 0x5140,
+                        output: Some(eax.clone()),
+                        inputs: vec![value],
+                        asm_mnemonic: Some("mov eax,ecx".to_string()),
+                    },
+                    PcodeOp {
+                        seq_num: 1,
+                        opcode: PcodeOpcode::IntZExt,
+                        address: 0x5140,
+                        output: Some(rax.clone()),
+                        inputs: vec![eax.clone()],
+                        asm_mnemonic: Some("mov eax,ecx".to_string()),
+                    },
+                ],
+            },
+            PcodeBasicBlock {
+                index: 5,
+                start_address: 0x5150,
+                successors: vec![],
+                ops: vec![PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::Return,
+                    address: 0x5150,
+                    output: None,
+                    inputs: vec![cst(0, 8), rax],
+                    asm_mnemonic: Some("ret".to_string()),
+                }],
+            },
+        ],
+    };
+
+    let code = render_mlil_preview(&func, "clamp_like", 0x5100, &preview_options())
+        .expect("preview render");
+    assert!(
+        code.contains("param_1") && code.contains("param_2") && code.contains("param_3"),
+        "expected all three return candidates to survive:\n{code}"
+    );
+    assert!(
+        code.contains("if ") || code.contains(" ? "),
+        "expected conditional structure for clamp-like return selection:\n{code}"
+    );
+}
+
+#[test]
 fn multi_block_preview_lowers_canonical_if_else() {
     let cond = uniq(0x350, 1);
     let ptr = uniq(0x360, 8);

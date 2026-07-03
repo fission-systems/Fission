@@ -1012,16 +1012,21 @@ impl<'a> PreviewBuilder<'a> {
             return None;
         };
         let predecessor_idxs = predecessor_idxs.clone();
-        if predecessor_idxs.len() != 2 || !predecessor_idxs.contains(&block_idx) {
+        if predecessor_idxs.len() < 2 || !predecessor_idxs.contains(&block_idx) {
             self.trace_direct_successor_accumulator_merge_rejected(
                 block.start_address,
                 output,
-                "not_binary_predecessor_join",
+                "not_multi_predecessor_join",
             );
             return None;
         }
         let succ_block = self.pcode.blocks.get(succ_idx)?;
-        if !self.block_reads_merge_input_before_redefinition(succ_block, output) {
+        let successor_reads_merge = self
+            .block_reads_merge_input_before_redefinition(succ_block, output)
+            || (self.register_namer().is_primary_return_register(output)
+                && self.block_returns_without_redefining_output(succ_block, output)
+                && self.return_join_has_primary_return_evidence(succ_idx));
+        if !successor_reads_merge {
             self.trace_direct_successor_accumulator_merge_rejected(
                 block.start_address,
                 output,
@@ -2060,6 +2065,24 @@ impl<'a> PreviewBuilder<'a> {
             }
         }
         false
+    }
+
+    fn block_returns_without_redefining_output(
+        &self,
+        block: &crate::pcode::PcodeBasicBlock,
+        output: &Varnode,
+    ) -> bool {
+        let Some(term_idx) = self.block_terminator_index(block) else {
+            return false;
+        };
+        if block.ops[term_idx].opcode != PcodeOpcode::Return {
+            return false;
+        }
+        !block.ops.iter().take(term_idx).any(|op| {
+            op.output
+                .as_ref()
+                .is_some_and(|candidate| self.varnode_aliases_value(candidate, output))
+        })
     }
 
     fn last_redefinition_index_before_terminator(

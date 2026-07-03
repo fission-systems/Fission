@@ -620,7 +620,10 @@ impl<'a> PreviewBuilder<'a> {
         None
     }
 
-    fn return_join_has_primary_return_evidence(&self, return_idx: usize) -> bool {
+    pub(in crate::nir::builder) fn return_join_has_primary_return_evidence(
+        &self,
+        return_idx: usize,
+    ) -> bool {
         self.predecessors.get(return_idx).is_some_and(|preds| {
             preds.iter().any(|pred| {
                 *pred != return_idx && self.block_has_primary_return_def_before_terminator(*pred)
