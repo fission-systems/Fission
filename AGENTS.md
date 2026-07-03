@@ -123,6 +123,12 @@ python3 benchmark/source_semantic_benchmark/run_source_semantic_benchmark.py --h
 
 Use this loop for source-semantic or pseudocode-quality work, especially when a concrete row/function motivated the change.
 
+### Pre-implementation gate
+
+Before adding production code for builder, materialize, normalize, structuring, or type/data recovery fixes, fill out [`docs/templates/DECOMPILER_CHANGE_PROPOSAL.md`](docs/templates/DECOMPILER_CHANGE_PROPOSAL.md) as required by [`docs/adr/0006-decompiler-quality-change-gate.md`](docs/adr/0006-decompiler-quality-change-gate.md). The proposal must show row anchor, owner proof, invariant proof, and validation matrix before implementation starts.
+
+Default to extending the existing owner/pass. Add a new pass, helper, or metric only when the proposal shows that no existing owner covers the invariant. Do not claim success from a targeted test alone; crate-level tests, focused row rerun, and smoke/automation regression checks are part of the quality claim.
+
 1. **Anchor the row:** record the source file, binary, address, function name, current behavior status, case pass count, semantic/static scores, and the top missing/extra features.
 2. **Find the owner:** prove whether the bug belongs to SLEIGH/raw p-code, NIR materialization, type recovery, structuring, cleanup, printer, or benchmark/automation. Fix behavior at that owner.
 3. **Add focused coverage:** add or update the smallest targeted Rust/Python test that captures the invariant. Synthetic tests are necessary but not sufficient for decompiler-quality claims.

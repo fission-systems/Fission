@@ -50,6 +50,12 @@ nir/
 - Do not reintroduce deleted narrow idiom passes (`security_cookie`, `xor_swap`, `string_copy`, `recurrence`, `call_artifact`, `bitstream`, `likely_trash`) without a Ghidra Rule/Action reference.
 - Do not add parallel dead-code or bitmask transform layers; use the consolidated owners documented in [`docs/architecture/DECOMPILER_ACTIONS.md`](../../../docs/architecture/DECOMPILER_ACTIONS.md).
 
+## Pre-Implementation Gate
+
+Before adding semantic-layer production code, fill out [`docs/templates/DECOMPILER_CHANGE_PROPOSAL.md`](../../../../docs/templates/DECOMPILER_CHANGE_PROPOSAL.md) and apply [`ADR 0006`](../../../../docs/adr/0006-decompiler-quality-change-gate.md). The proposal must capture the row anchor, owner proof, invariant proof, and validation matrix.
+
+Extend the existing builder/materialize/normalize/structuring/type-data owner by default. Add a new pass, helper, or metric only after proving that no current owner covers the invariant. Targeted tests are required, but success also needs the crate-level gate, focused row rerun, and smoke/automation regression evidence.
+
 ## Regression Prevention
 
 Every semantic fix must pass **both** the targeted unit test and the broader gate. Do not claim success from one targeted test if crate-level regression remains.

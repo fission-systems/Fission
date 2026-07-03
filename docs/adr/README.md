@@ -9,5 +9,6 @@ Short, durable decisions complement [`docs/architecture/ARCHITECTURE.md`](../arc
 | [0003](0003-fail-closed-loader-policy.md) | Fail-closed loader policy |
 | [0004](0004-die-as-detector-resource.md) | DIE as detector resource, not semantic oracle |
 | [0005](0005-ghidra-reference-boundary.md) | Ghidra reference boundary / shipped semantics |
+| [0006](0006-decompiler-quality-change-gate.md) | Decompiler quality change gate |
 
 New decisions: copy [`0000-template.md`](0000-template.md), bump the next number, link from this table.
