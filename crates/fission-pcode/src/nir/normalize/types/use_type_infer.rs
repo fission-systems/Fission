@@ -48,6 +48,15 @@ struct BindingUseRole {
     scalar_use: bool,
 }
 
+#[derive(Default)]
+struct ByteIndexAccumulatorEvidence {
+    def_count: usize,
+    byte_seed_defs: usize,
+    byte_update_defs: usize,
+    byte_pointer_offset_uses: usize,
+    disallowed_uses: usize,
+}
+
 /// Accumulate use-site constraints for all named variables in `stmts`.
 fn collect_constraints(
     stmts: &[HirStmt],
@@ -750,6 +759,347 @@ fn collect_arithmetic_operand_constraint(
     out.entry(name.clone())
         .or_default()
         .push(compare_constraint(result_bits, signed));
+}
+
+fn is_byte_int_type(ty: &NirType) -> bool {
+    matches!(ty, NirType::Int { bits: 8, .. })
+}
+
+fn is_byte_pointer_type(ty: &NirType) -> bool {
+    matches!(ty, NirType::Ptr(pointee) if is_byte_int_type(pointee.as_ref()))
+}
+
+fn is_byte_expr(expr: &HirExpr, known_binding_types: &HashMap<String, NirType>) -> bool {
+    match expr {
+        HirExpr::Var(name) | HirExpr::AddressOfGlobal(name) => {
+            known_binding_types.get(name).is_some_and(is_byte_int_type)
+        }
+        HirExpr::Const(value, ty) => is_byte_int_type(ty) || (0..=0xff).contains(value),
+        HirExpr::Load { ty, .. }
+        | HirExpr::Index { elem_ty: ty, .. }
+        | HirExpr::FieldAccess { ty, .. } => is_byte_int_type(ty),
+        HirExpr::Cast { ty, expr } => {
+            is_byte_int_type(ty) || is_byte_expr(expr, known_binding_types)
+        }
+        _ => false,
+    }
+}
+
+fn is_byte_pointer_expr(expr: &HirExpr, known_binding_types: &HashMap<String, NirType>) -> bool {
+    match expr {
+        HirExpr::Var(name) | HirExpr::AddressOfGlobal(name) => known_binding_types
+            .get(name)
+            .is_some_and(is_byte_pointer_type),
+        HirExpr::Cast { ty, expr } => {
+            is_byte_pointer_type(ty) || is_byte_pointer_expr(expr, known_binding_types)
+        }
+        HirExpr::PtrOffset { base, .. } | HirExpr::FieldAccess { base, .. } => {
+            is_byte_pointer_expr(base, known_binding_types)
+        }
+        _ => false,
+    }
+}
+
+fn expr_is_var(expr: &HirExpr, name: &str) -> bool {
+    matches!(expr, HirExpr::Var(var_name) if var_name == name)
+}
+
+fn is_byte_accumulator_update(
+    expr: &HirExpr,
+    name: &str,
+    known_binding_types: &HashMap<String, NirType>,
+) -> bool {
+    let HirExpr::Binary { op, lhs, rhs, .. } = expr else {
+        return false;
+    };
+    matches!(
+        op,
+        HirBinaryOp::Add | HirBinaryOp::Sub | HirBinaryOp::Xor | HirBinaryOp::And | HirBinaryOp::Or
+    ) && ((expr_is_var(lhs, name) && is_byte_expr(rhs, known_binding_types))
+        || (expr_is_var(rhs, name) && is_byte_expr(lhs, known_binding_types)))
+}
+
+fn collect_byte_index_accumulator_evidence(
+    stmts: &[HirStmt],
+    name: &str,
+    known_binding_types: &HashMap<String, NirType>,
+    evidence: &mut ByteIndexAccumulatorEvidence,
+) {
+    for stmt in stmts {
+        collect_byte_index_accumulator_evidence_stmt(stmt, name, known_binding_types, evidence);
+    }
+}
+
+fn collect_byte_index_accumulator_evidence_stmt(
+    stmt: &HirStmt,
+    name: &str,
+    known_binding_types: &HashMap<String, NirType>,
+    evidence: &mut ByteIndexAccumulatorEvidence,
+) {
+    match stmt {
+        HirStmt::Assign { lhs, rhs } => {
+            let self_def = matches!(lhs, HirLValue::Var(lhs_name) if lhs_name == name);
+            if self_def {
+                evidence.def_count += 1;
+                if is_byte_expr(rhs, known_binding_types) {
+                    evidence.byte_seed_defs += 1;
+                } else if is_byte_accumulator_update(rhs, name, known_binding_types) {
+                    evidence.byte_update_defs += 1;
+                } else {
+                    evidence.disallowed_uses += 1;
+                }
+                if !is_byte_accumulator_update(rhs, name, known_binding_types) {
+                    collect_byte_index_accumulator_evidence_expr(
+                        rhs,
+                        name,
+                        known_binding_types,
+                        evidence,
+                    );
+                }
+            } else {
+                collect_byte_index_accumulator_evidence_lvalue(
+                    lhs,
+                    name,
+                    known_binding_types,
+                    evidence,
+                );
+                collect_byte_index_accumulator_evidence_expr(
+                    rhs,
+                    name,
+                    known_binding_types,
+                    evidence,
+                );
+            }
+        }
+        HirStmt::Expr(expr) | HirStmt::Return(Some(expr)) => {
+            collect_byte_index_accumulator_evidence_expr(expr, name, known_binding_types, evidence);
+        }
+        HirStmt::Block(body) | HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
+            collect_byte_index_accumulator_evidence(body, name, known_binding_types, evidence);
+        }
+        HirStmt::If {
+            cond,
+            then_body,
+            else_body,
+        } => {
+            collect_byte_index_accumulator_evidence_expr(cond, name, known_binding_types, evidence);
+            collect_byte_index_accumulator_evidence(then_body, name, known_binding_types, evidence);
+            collect_byte_index_accumulator_evidence(else_body, name, known_binding_types, evidence);
+        }
+        HirStmt::For {
+            init,
+            cond,
+            update,
+            body,
+        } => {
+            if let Some(init) = init {
+                collect_byte_index_accumulator_evidence_stmt(
+                    init,
+                    name,
+                    known_binding_types,
+                    evidence,
+                );
+            }
+            if let Some(cond) = cond {
+                collect_byte_index_accumulator_evidence_expr(
+                    cond,
+                    name,
+                    known_binding_types,
+                    evidence,
+                );
+            }
+            if let Some(update) = update {
+                collect_byte_index_accumulator_evidence_stmt(
+                    update,
+                    name,
+                    known_binding_types,
+                    evidence,
+                );
+            }
+            collect_byte_index_accumulator_evidence(body, name, known_binding_types, evidence);
+        }
+        HirStmt::Switch {
+            expr,
+            cases,
+            default,
+        } => {
+            collect_byte_index_accumulator_evidence_expr(expr, name, known_binding_types, evidence);
+            for case in cases {
+                collect_byte_index_accumulator_evidence(
+                    &case.body,
+                    name,
+                    known_binding_types,
+                    evidence,
+                );
+            }
+            collect_byte_index_accumulator_evidence(default, name, known_binding_types, evidence);
+        }
+        HirStmt::VaStart { va_list, .. } => {
+            collect_byte_index_accumulator_evidence_expr(
+                va_list,
+                name,
+                known_binding_types,
+                evidence,
+            );
+        }
+        HirStmt::Label(_)
+        | HirStmt::Goto(_)
+        | HirStmt::Return(None)
+        | HirStmt::Break
+        | HirStmt::Continue => {}
+    }
+}
+
+fn collect_byte_index_accumulator_evidence_lvalue(
+    lhs: &HirLValue,
+    name: &str,
+    known_binding_types: &HashMap<String, NirType>,
+    evidence: &mut ByteIndexAccumulatorEvidence,
+) {
+    match lhs {
+        HirLValue::Var(_) => {}
+        HirLValue::Deref { ptr, .. } | HirLValue::FieldAccess { base: ptr, .. } => {
+            collect_byte_index_accumulator_evidence_expr(ptr, name, known_binding_types, evidence);
+        }
+        HirLValue::Index { base, index, .. } => {
+            collect_byte_index_accumulator_evidence_expr(base, name, known_binding_types, evidence);
+            collect_byte_index_accumulator_evidence_expr(
+                index,
+                name,
+                known_binding_types,
+                evidence,
+            );
+        }
+    }
+}
+
+fn collect_byte_index_accumulator_evidence_expr(
+    expr: &HirExpr,
+    name: &str,
+    known_binding_types: &HashMap<String, NirType>,
+    evidence: &mut ByteIndexAccumulatorEvidence,
+) {
+    match expr {
+        HirExpr::Var(var_name) | HirExpr::AddressOfGlobal(var_name) if var_name == name => {
+            evidence.disallowed_uses += 1;
+        }
+        HirExpr::Cast { expr: inner, .. }
+        | HirExpr::Unary { expr: inner, .. }
+        | HirExpr::Load { ptr: inner, .. }
+        | HirExpr::PtrOffset { base: inner, .. }
+        | HirExpr::AggregateCopy { src: inner, .. }
+        | HirExpr::FieldAccess { base: inner, .. } => {
+            collect_byte_index_accumulator_evidence_expr(
+                inner,
+                name,
+                known_binding_types,
+                evidence,
+            );
+        }
+        HirExpr::Binary {
+            op: HirBinaryOp::Add,
+            lhs,
+            rhs,
+            ..
+        } if expr_is_var(lhs, name) && is_byte_pointer_expr(rhs, known_binding_types) => {
+            evidence.byte_pointer_offset_uses += 1;
+        }
+        HirExpr::Binary {
+            op: HirBinaryOp::Add,
+            lhs,
+            rhs,
+            ..
+        } if expr_is_var(rhs, name) && is_byte_pointer_expr(lhs, known_binding_types) => {
+            evidence.byte_pointer_offset_uses += 1;
+        }
+        HirExpr::Binary { lhs, rhs, .. } => {
+            collect_byte_index_accumulator_evidence_expr(lhs, name, known_binding_types, evidence);
+            collect_byte_index_accumulator_evidence_expr(rhs, name, known_binding_types, evidence);
+        }
+        HirExpr::Call { args, .. } => {
+            for arg in args {
+                collect_byte_index_accumulator_evidence_expr(
+                    arg,
+                    name,
+                    known_binding_types,
+                    evidence,
+                );
+            }
+        }
+        HirExpr::Index { base, index, .. } => {
+            collect_byte_index_accumulator_evidence_expr(base, name, known_binding_types, evidence);
+            collect_byte_index_accumulator_evidence_expr(
+                index,
+                name,
+                known_binding_types,
+                evidence,
+            );
+        }
+        HirExpr::Select {
+            cond,
+            then_expr,
+            else_expr,
+            ..
+        } => {
+            collect_byte_index_accumulator_evidence_expr(cond, name, known_binding_types, evidence);
+            collect_byte_index_accumulator_evidence_expr(
+                then_expr,
+                name,
+                known_binding_types,
+                evidence,
+            );
+            collect_byte_index_accumulator_evidence_expr(
+                else_expr,
+                name,
+                known_binding_types,
+                evidence,
+            );
+        }
+        HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) | HirExpr::Const(_, _) => {}
+    }
+}
+
+fn narrow_byte_index_accumulators(func: &mut HirFunction) -> bool {
+    let known_binding_types = collect_known_binding_types(func);
+    let mut changed = false;
+    for binding in &mut func.locals {
+        if binding.surface_type_name.is_some() {
+            continue;
+        }
+        if !matches!(
+            binding.origin,
+            Some(NirBindingOrigin::Temp | NirBindingOrigin::TempPreserved)
+        ) {
+            continue;
+        }
+        let NirType::Int { bits, .. } = binding.ty else {
+            continue;
+        };
+        if bits <= 8 {
+            continue;
+        }
+
+        let mut evidence = ByteIndexAccumulatorEvidence::default();
+        collect_byte_index_accumulator_evidence(
+            &func.body,
+            &binding.name,
+            &known_binding_types,
+            &mut evidence,
+        );
+        if evidence.def_count > 0
+            && evidence.disallowed_uses == 0
+            && evidence.byte_seed_defs > 0
+            && evidence.byte_update_defs > 0
+            && evidence.byte_pointer_offset_uses > 0
+        {
+            binding.ty = NirType::Int {
+                bits: 8,
+                signed: false,
+            };
+            changed = true;
+        }
+    }
+    changed
 }
 
 fn expr_int_bits(expr: &HirExpr, known_binding_types: &HashMap<String, NirType>) -> Option<u32> {
@@ -1492,6 +1842,7 @@ pub(crate) fn apply_use_driven_type_infer_pass(func: &mut HirFunction) -> bool {
         round_changed |= narrow_integer_params_from_wrapping_return_uses(func);
         round_changed |= promote_store_value_only_unsigned_params(func);
         round_changed |= restore_scalar_only_pointer_locals(func);
+        round_changed |= narrow_byte_index_accumulators(func);
         if !round_changed {
             break;
         }
@@ -1564,6 +1915,107 @@ mod tests {
                 signed: false
             }))
         );
+    }
+
+    #[test]
+    fn narrows_byte_accumulator_used_as_byte_pointer_offset() {
+        let u8_ty = NirType::Int {
+            bits: 8,
+            signed: false,
+        };
+        let u32_ty = NirType::Int {
+            bits: 32,
+            signed: false,
+        };
+        let byte_ptr_ty = NirType::Ptr(Box::new(u8_ty.clone()));
+        let body = vec![
+            HirStmt::Assign {
+                lhs: HirLValue::Var("idx".to_owned()),
+                rhs: HirExpr::Load {
+                    ptr: Box::new(HirExpr::Var("p".to_owned())),
+                    ty: u8_ty.clone(),
+                },
+            },
+            HirStmt::Assign {
+                lhs: HirLValue::Var("idx".to_owned()),
+                rhs: HirExpr::Binary {
+                    op: HirBinaryOp::Add,
+                    lhs: Box::new(HirExpr::Var("idx".to_owned())),
+                    rhs: Box::new(HirExpr::Load {
+                        ptr: Box::new(HirExpr::Var("q".to_owned())),
+                        ty: u8_ty.clone(),
+                    }),
+                    ty: u32_ty.clone(),
+                },
+            },
+            HirStmt::Assign {
+                lhs: HirLValue::Var("cursor".to_owned()),
+                rhs: HirExpr::Binary {
+                    op: HirBinaryOp::Add,
+                    lhs: Box::new(HirExpr::Var("p".to_owned())),
+                    rhs: Box::new(HirExpr::Var("idx".to_owned())),
+                    ty: byte_ptr_ty.clone(),
+                },
+            },
+        ];
+        let mut func = make_func(
+            vec![
+                make_typed_binding("p", byte_ptr_ty.clone(), NirBindingOrigin::TempPreserved),
+                make_typed_binding("q", byte_ptr_ty.clone(), NirBindingOrigin::TempPreserved),
+                make_typed_binding("cursor", byte_ptr_ty, NirBindingOrigin::TempPreserved),
+                make_typed_binding("idx", u32_ty, NirBindingOrigin::TempPreserved),
+            ],
+            body,
+            NirType::Unknown,
+        );
+
+        let changed = super::apply_use_driven_type_infer_pass(&mut func);
+        assert!(changed);
+        let idx = func
+            .locals
+            .iter()
+            .find(|local| local.name == "idx")
+            .unwrap();
+        assert_eq!(idx.ty, u8_ty);
+    }
+
+    #[test]
+    fn does_not_narrow_plain_large_pointer_offset() {
+        let u8_ty = NirType::Int {
+            bits: 8,
+            signed: false,
+        };
+        let u32_ty = NirType::Int {
+            bits: 32,
+            signed: false,
+        };
+        let byte_ptr_ty = NirType::Ptr(Box::new(u8_ty));
+        let body = vec![HirStmt::Assign {
+            lhs: HirLValue::Var("cursor".to_owned()),
+            rhs: HirExpr::Binary {
+                op: HirBinaryOp::Add,
+                lhs: Box::new(HirExpr::Var("p".to_owned())),
+                rhs: Box::new(HirExpr::Var("idx".to_owned())),
+                ty: byte_ptr_ty.clone(),
+            },
+        }];
+        let mut func = make_func(
+            vec![
+                make_typed_binding("p", byte_ptr_ty.clone(), NirBindingOrigin::TempPreserved),
+                make_typed_binding("cursor", byte_ptr_ty, NirBindingOrigin::TempPreserved),
+                make_typed_binding("idx", u32_ty.clone(), NirBindingOrigin::TempPreserved),
+            ],
+            body,
+            NirType::Unknown,
+        );
+
+        super::apply_use_driven_type_infer_pass(&mut func);
+        let idx = func
+            .locals
+            .iter()
+            .find(|local| local.name == "idx")
+            .unwrap();
+        assert_eq!(idx.ty, u32_ty);
     }
 
     /// Deref store lhs: *p = val → p: Ptr(val_ty)

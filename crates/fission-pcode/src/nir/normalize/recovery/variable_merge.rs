@@ -70,6 +70,139 @@ fn collect_read_vars(stmts: &[HirStmt]) -> HashSet<String> {
     vars
 }
 
+fn collect_cooccurring_var_pairs(stmts: &[HirStmt]) -> HashSet<(String, String)> {
+    let mut pairs = HashSet::new();
+    collect_cooccurring_var_pairs_in_stmts(stmts, &mut pairs);
+    pairs
+}
+
+fn collect_cooccurring_var_pairs_in_stmts(
+    stmts: &[HirStmt],
+    pairs: &mut HashSet<(String, String)>,
+) {
+    for stmt in stmts {
+        match stmt {
+            HirStmt::Assign { lhs, rhs } => {
+                collect_cooccurring_var_pairs_in_lvalue(lhs, pairs);
+                collect_cooccurring_var_pairs_in_expr(rhs, pairs);
+            }
+            HirStmt::Expr(expr) | HirStmt::Return(Some(expr)) => {
+                collect_cooccurring_var_pairs_in_expr(expr, pairs);
+            }
+            HirStmt::Block(body) | HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
+                collect_cooccurring_var_pairs_in_stmts(body, pairs);
+            }
+            HirStmt::If {
+                cond,
+                then_body,
+                else_body,
+            } => {
+                collect_cooccurring_var_pairs_in_expr(cond, pairs);
+                collect_cooccurring_var_pairs_in_stmts(then_body, pairs);
+                collect_cooccurring_var_pairs_in_stmts(else_body, pairs);
+            }
+            HirStmt::For {
+                init,
+                cond,
+                update,
+                body,
+            } => {
+                if let Some(init) = init {
+                    collect_cooccurring_var_pairs_in_stmts(std::slice::from_ref(init), pairs);
+                }
+                if let Some(cond) = cond {
+                    collect_cooccurring_var_pairs_in_expr(cond, pairs);
+                }
+                if let Some(update) = update {
+                    collect_cooccurring_var_pairs_in_stmts(std::slice::from_ref(update), pairs);
+                }
+                collect_cooccurring_var_pairs_in_stmts(body, pairs);
+            }
+            HirStmt::Switch {
+                expr,
+                cases,
+                default,
+            } => {
+                collect_cooccurring_var_pairs_in_expr(expr, pairs);
+                for case in cases {
+                    collect_cooccurring_var_pairs_in_stmts(&case.body, pairs);
+                }
+                collect_cooccurring_var_pairs_in_stmts(default, pairs);
+            }
+            HirStmt::VaStart { va_list, .. } => {
+                collect_cooccurring_var_pairs_in_expr(va_list, pairs);
+            }
+            HirStmt::Label(_)
+            | HirStmt::Goto(_)
+            | HirStmt::Return(None)
+            | HirStmt::Break
+            | HirStmt::Continue => {}
+        }
+    }
+}
+
+fn collect_cooccurring_var_pairs_in_lvalue(
+    lval: &HirLValue,
+    pairs: &mut HashSet<(String, String)>,
+) {
+    match lval {
+        HirLValue::Var(_) => {}
+        HirLValue::Deref { ptr, .. } => collect_cooccurring_var_pairs_in_expr(ptr, pairs),
+        HirLValue::Index { base, index, .. } => {
+            collect_cooccurring_var_pairs_in_expr(base, pairs);
+            collect_cooccurring_var_pairs_in_expr(index, pairs);
+        }
+        HirLValue::FieldAccess { base, .. } => collect_cooccurring_var_pairs_in_expr(base, pairs),
+    }
+}
+
+fn collect_cooccurring_var_pairs_in_expr(expr: &HirExpr, pairs: &mut HashSet<(String, String)>) {
+    let mut vars = HashSet::new();
+    collect_vars_in_expr(expr, &mut vars);
+    let mut vars = vars.into_iter().collect::<Vec<_>>();
+    vars.sort();
+    for i in 0..vars.len() {
+        for j in (i + 1)..vars.len() {
+            pairs.insert((vars[i].clone(), vars[j].clone()));
+        }
+    }
+
+    match expr {
+        HirExpr::Cast { expr: inner, .. }
+        | HirExpr::Unary { expr: inner, .. }
+        | HirExpr::Load { ptr: inner, .. }
+        | HirExpr::PtrOffset { base: inner, .. }
+        | HirExpr::AggregateCopy { src: inner, .. }
+        | HirExpr::FieldAccess { base: inner, .. } => {
+            collect_cooccurring_var_pairs_in_expr(inner, pairs);
+        }
+        HirExpr::Binary { lhs, rhs, .. } => {
+            collect_cooccurring_var_pairs_in_expr(lhs, pairs);
+            collect_cooccurring_var_pairs_in_expr(rhs, pairs);
+        }
+        HirExpr::Call { args, .. } => {
+            for arg in args {
+                collect_cooccurring_var_pairs_in_expr(arg, pairs);
+            }
+        }
+        HirExpr::Select {
+            cond,
+            then_expr,
+            else_expr,
+            ..
+        } => {
+            collect_cooccurring_var_pairs_in_expr(cond, pairs);
+            collect_cooccurring_var_pairs_in_expr(then_expr, pairs);
+            collect_cooccurring_var_pairs_in_expr(else_expr, pairs);
+        }
+        HirExpr::Index { base, index, .. } => {
+            collect_cooccurring_var_pairs_in_expr(base, pairs);
+            collect_cooccurring_var_pairs_in_expr(index, pairs);
+        }
+        HirExpr::Var(_) | HirExpr::Const(_, _) | HirExpr::AddressOfGlobal(_) => {}
+    }
+}
+
 fn collect_read_vars_in_stmts(stmts: &[HirStmt], vars: &mut HashSet<String>) {
     for stmt in stmts {
         match stmt {
@@ -348,10 +481,19 @@ fn collect_vars_in_expr(expr: &HirExpr, vars: &mut HashSet<String>) {
     }
 }
 
+fn sorted_var_pair(a: &str, b: &str) -> (String, String) {
+    if a <= b {
+        (a.to_string(), b.to_string())
+    } else {
+        (b.to_string(), a.to_string())
+    }
+}
+
 fn transitive_copy_aliases(
     direct_copies: &std::collections::HashSet<(String, String)>,
     local_names: &HashSet<String>,
     copy_merge_barriers: &HashSet<String>,
+    copy_merge_blocked_pairs: &HashSet<(String, String)>,
 ) -> HashMap<String, String> {
     fn root(parent: &HashMap<String, String>, node: &str) -> String {
         let mut cur = node.to_string();
@@ -369,6 +511,7 @@ fn transitive_copy_aliases(
             && !copy_merge_barriers.contains(b)
             && local_names.contains(a)
             && local_names.contains(b)
+            && !copy_merge_blocked_pairs.contains(&sorted_var_pair(a, b))
             && (is_eligible_for_speculative_merge_by_name(a)
                 || is_eligible_for_speculative_merge_by_name(b))
     });
@@ -629,7 +772,13 @@ pub(crate) fn apply_variable_merge_pass(func: &mut HirFunction) -> bool {
         .map(|binding| binding.name.clone())
         .collect();
     let copy_merge_barriers = collect_copy_merge_barrier_vars(&func.body, stack_state_vars);
-    let copy_aliases = transitive_copy_aliases(&direct_copies, &local_names, &copy_merge_barriers);
+    let copy_merge_blocked_pairs = collect_cooccurring_var_pairs(&func.body);
+    let copy_aliases = transitive_copy_aliases(
+        &direct_copies,
+        &local_names,
+        &copy_merge_barriers,
+        &copy_merge_blocked_pairs,
+    );
 
     if !copy_aliases.is_empty() {
         let copy_renames: Vec<(String, String)> = copy_aliases.into_iter().collect();
@@ -1487,6 +1636,79 @@ mod tests {
         assert!(
             rendered_vars.contains("local_8"),
             "RC4 accumulator stack state must remain distinct"
+        );
+    }
+
+    #[test]
+    fn copy_merge_preserves_distinct_temps_that_cooccur_after_seed_copy() {
+        let int_ty = NirType::Int {
+            bits: 32,
+            signed: false,
+        };
+        let primary = NirBinding {
+            name: "uVar20".to_string(),
+            ty: int_ty.clone(),
+            surface_type_name: None,
+            origin: Some(NirBindingOrigin::TempPreserved),
+            initializer: None,
+        };
+        let bias = NirBinding {
+            name: "uVar21".to_string(),
+            ty: int_ty.clone(),
+            surface_type_name: None,
+            origin: Some(NirBindingOrigin::TempPreserved),
+            initializer: None,
+        };
+
+        let mut func = HirFunction {
+            name: "copy_seed_then_subtract_shape".to_string(),
+            int_param_offsets: Vec::new(),
+            params: vec![],
+            locals: vec![primary, bias],
+            return_type: NirType::Unknown,
+            surface_return_type_name: None,
+            body: vec![
+                HirStmt::Assign {
+                    lhs: HirLValue::Var("uVar21".to_string()),
+                    rhs: HirExpr::Var("uVar20".to_string()),
+                },
+                HirStmt::Assign {
+                    lhs: HirLValue::Var("uVar20".to_string()),
+                    rhs: HirExpr::Binary {
+                        op: HirBinaryOp::Add,
+                        lhs: Box::new(HirExpr::Var("uVar20".to_string())),
+                        rhs: Box::new(HirExpr::Var("uVar21".to_string())),
+                        ty: int_ty.clone(),
+                    },
+                },
+                HirStmt::Assign {
+                    lhs: HirLValue::Var("uVar20".to_string()),
+                    rhs: HirExpr::Binary {
+                        op: HirBinaryOp::Sub,
+                        lhs: Box::new(HirExpr::Var("uVar20".to_string())),
+                        rhs: Box::new(HirExpr::Var("uVar21".to_string())),
+                        ty: int_ty,
+                    },
+                },
+            ],
+            ..Default::default()
+        };
+
+        apply_variable_merge_pass(&mut func);
+
+        let rendered_vars = format!("{:?}", func.body);
+        assert!(
+            rendered_vars.contains("uVar20"),
+            "primary temp must remain available after seed copy"
+        );
+        assert!(
+            rendered_vars.contains("uVar21"),
+            "seeded temp must not be rewritten into the primary temp when both co-occur"
+        );
+        assert_eq!(
+            func.locals.len(),
+            2,
+            "copy aliases that co-occur later are distinct live values"
         );
     }
 

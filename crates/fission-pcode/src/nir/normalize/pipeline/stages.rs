@@ -42,7 +42,7 @@ use super::super::recovery::{
 use super::super::subvar_flow::apply_subvar_flow_pass;
 use super::super::types::{
     apply_entry_param_promotion_pass, apply_interproc_callsite_arity_pass,
-    apply_type_inference_pass, apply_variadic_stack_region_pass,
+    apply_variadic_stack_region_pass,
 };
 use super::super::wave_stats;
 use super::run::{
@@ -917,12 +917,7 @@ pub(crate) fn run_stage_cleanup(func: &mut HirFunction, diag: bool, perf: bool) 
     });
     // Subflow / bitmask pruning: optimize redundant bit-widths and bitmasks (subflow.cc).
     run_pass_logged(func, "subflow_pruning_final", perf, apply_subflow_pruning);
-    run_pass_logged(
-        func,
-        "type_inference_final",
-        perf,
-        apply_type_inference_pass,
-    );
+    apply_type_signature_fixed_point(func, diag, perf);
     run_pass_logged(
         func,
         "rescue_undeclared_bindings",
