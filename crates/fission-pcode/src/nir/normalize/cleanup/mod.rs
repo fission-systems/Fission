@@ -28,6 +28,7 @@ pub(crate) use loops_conds::{
     canonicalize_minmax_conditional_returns, collapse_loop_exit_alias_returns,
     collapse_redundant_conditional_returns, conditional_select_pass,
     inline_loop_condition_trailing_temps, normalize_dowhile_decrement_condition,
+    recover_guarded_loop_tail_accumulator_returns,
 };
 pub(crate) use temp_var::{
     coerce_ptr_typed_bitop_vars, collapse_trivial_assign_returns, elide_unused_popcount_assigns,

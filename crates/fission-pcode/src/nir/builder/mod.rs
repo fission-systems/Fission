@@ -99,6 +99,55 @@ pub(super) fn collect_local_surface_hints(
 }
 
 impl<'a> PreviewBuilder<'a> {
+    fn binding_name_exists(&self, name: &str) -> bool {
+        self.temps.contains_key(name)
+            || self.params.values().any(|binding| binding.name == name)
+            || self.locals.values().any(|slot| slot.name == name)
+    }
+
+    fn next_unused_temp_binding_name(&mut self, ty: &NirType) -> String {
+        loop {
+            let candidate = next_temp_name(ty, &mut self.temp_next_id);
+            if !self.binding_name_exists(&candidate) {
+                return candidate;
+            }
+        }
+    }
+
+    pub(super) fn bind_materialized_output_to_fresh_temp(
+        &mut self,
+        op: &PcodeOp,
+        output: &Varnode,
+        ty: NirType,
+        preserve_materialization: bool,
+    ) -> String {
+        let name = self.next_unused_temp_binding_name(&ty);
+        let origin = if preserve_materialization {
+            NirBindingOrigin::TempPreserved
+        } else {
+            NirBindingOrigin::Temp
+        };
+        self.temps.insert(
+            name.clone(),
+            NirBinding {
+                name: name.clone(),
+                ty,
+                surface_type_name: None,
+                origin: Some(origin),
+                initializer: None,
+            },
+        );
+        if preserve_materialization {
+            self.telemetry
+                .materialization
+                .materialization_stabilized_count += 1;
+        }
+        self.materialized_vns
+            .insert(MaterializedVarnodeKey::new(output, op), name.clone());
+        self.invalidate_materialization_dependent_caches();
+        name
+    }
+
     /// Resolve a block index (which may be a virtual split node) to the
     /// corresponding P-code block index.  Virtual blocks (index ≥ pcode.blocks.len())
     /// are created by node-splitting and share content with the original block.
@@ -563,7 +612,7 @@ impl<'a> PreviewBuilder<'a> {
                 }
             }
         }
-        let name = name.unwrap_or_else(|| next_temp_name(&ty, &mut self.temp_next_id));
+        let name = name.unwrap_or_else(|| self.next_unused_temp_binding_name(&ty));
 
         let origin = if preserve_materialization {
             NirBindingOrigin::TempPreserved
@@ -646,7 +695,7 @@ impl<'a> PreviewBuilder<'a> {
                 hw
             }
         } else {
-            next_temp_name(&ty, &mut self.temp_next_id)
+            self.next_unused_temp_binding_name(&ty)
         };
         let binding = NirBinding {
             name: name.clone(),

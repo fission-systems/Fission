@@ -469,6 +469,101 @@ fn collapse_loop_exit_alias_return_rejects_non_alias_expression() {
 }
 
 #[test]
+fn recover_guarded_loop_tail_accumulator_return_rewrites_stale_temp_return() {
+    let mut stmts = vec![
+        HirStmt::Assign {
+            lhs: HirLValue::Var("count".to_string()),
+            rhs: HirExpr::Const(0, int(32)),
+        },
+        HirStmt::If {
+            cond: HirExpr::Var("value".to_string()),
+            then_body: vec![HirStmt::Goto("loop_body".to_string())],
+            else_body: Vec::new(),
+        },
+        HirStmt::Return(Some(HirExpr::Var("bit".to_string()))),
+        HirStmt::Label("loop_body".to_string()),
+        HirStmt::Assign {
+            lhs: HirLValue::Var("bit".to_string()),
+            rhs: HirExpr::Binary {
+                op: HirBinaryOp::And,
+                lhs: Box::new(HirExpr::Var("value".to_string())),
+                rhs: Box::new(HirExpr::Const(1, int(32))),
+                ty: int(32),
+            },
+        },
+        HirStmt::Assign {
+            lhs: HirLValue::Var("count".to_string()),
+            rhs: HirExpr::Binary {
+                op: HirBinaryOp::Add,
+                lhs: Box::new(HirExpr::Var("count".to_string())),
+                rhs: Box::new(HirExpr::Var("bit".to_string())),
+                ty: int(32),
+            },
+        },
+        HirStmt::Assign {
+            lhs: HirLValue::Var("value".to_string()),
+            rhs: HirExpr::Binary {
+                op: HirBinaryOp::Shr,
+                lhs: Box::new(HirExpr::Var("value".to_string())),
+                rhs: Box::new(HirExpr::Const(1, int(32))),
+                ty: int(32),
+            },
+        },
+    ];
+
+    assert!(recover_guarded_loop_tail_accumulator_returns(&mut stmts));
+    assert_eq!(stmts.len(), 3);
+    assert!(
+        matches!(&stmts[1], HirStmt::While { cond: HirExpr::Var(name), .. } if name == "value")
+    );
+    let HirStmt::While { body, .. } = &stmts[1] else {
+        panic!("expected while");
+    };
+    assert_eq!(body.len(), 3);
+    assert!(matches!(
+        &stmts[2],
+        HirStmt::Return(Some(HirExpr::Var(name))) if name == "count"
+    ));
+}
+
+#[test]
+fn recover_guarded_loop_tail_accumulator_return_rejects_without_cond_update() {
+    let mut stmts = vec![
+        HirStmt::Assign {
+            lhs: HirLValue::Var("count".to_string()),
+            rhs: HirExpr::Const(0, int(32)),
+        },
+        HirStmt::If {
+            cond: HirExpr::Var("value".to_string()),
+            then_body: vec![HirStmt::Goto("loop_body".to_string())],
+            else_body: Vec::new(),
+        },
+        HirStmt::Return(Some(HirExpr::Var("bit".to_string()))),
+        HirStmt::Label("loop_body".to_string()),
+        HirStmt::Assign {
+            lhs: HirLValue::Var("bit".to_string()),
+            rhs: HirExpr::Binary {
+                op: HirBinaryOp::And,
+                lhs: Box::new(HirExpr::Var("value".to_string())),
+                rhs: Box::new(HirExpr::Const(1, int(32))),
+                ty: int(32),
+            },
+        },
+        HirStmt::Assign {
+            lhs: HirLValue::Var("count".to_string()),
+            rhs: HirExpr::Binary {
+                op: HirBinaryOp::Add,
+                lhs: Box::new(HirExpr::Var("count".to_string())),
+                rhs: Box::new(HirExpr::Var("bit".to_string())),
+                ty: int(32),
+            },
+        },
+    ];
+
+    assert!(!recover_guarded_loop_tail_accumulator_returns(&mut stmts));
+}
+
+#[test]
 fn eliminate_dead_temp_assigns_removes_dead_preserved_temp() {
     let mut stmts = vec![HirStmt::Assign {
         lhs: HirLValue::Var("uVar0".to_string()),
@@ -485,6 +580,56 @@ fn eliminate_dead_temp_assigns_removes_dead_preserved_temp() {
         &HashSet::from(["uVar0"]),
     ));
     assert!(stmts.is_empty());
+}
+
+#[test]
+fn eliminate_dead_temp_assigns_removes_unused_reg_flag_artifact() {
+    let mut stmts = vec![
+        HirStmt::Assign {
+            lhs: HirLValue::Var("reg".to_string()),
+            rhs: HirExpr::Call {
+                target: "__sborrow".to_string(),
+                args: vec![HirExpr::Var("rsp".to_string()), HirExpr::Const(16, int(64))],
+                ty: NirType::Bool,
+            },
+        },
+        HirStmt::Return(Some(HirExpr::Var("rsp".to_string()))),
+    ];
+
+    assert!(eliminate_dead_temp_assigns(&mut stmts, &HashSet::new()));
+    assert_eq!(
+        stmts,
+        vec![HirStmt::Return(Some(HirExpr::Var("rsp".to_string())))]
+    );
+}
+
+#[test]
+fn eliminate_dead_temp_assigns_keeps_used_reg_flag_artifact() {
+    let mut stmts = vec![
+        HirStmt::Assign {
+            lhs: HirLValue::Var("reg".to_string()),
+            rhs: HirExpr::Call {
+                target: "__sborrow".to_string(),
+                args: vec![HirExpr::Var("rsp".to_string()), HirExpr::Const(16, int(64))],
+                ty: NirType::Bool,
+            },
+        },
+        HirStmt::If {
+            cond: HirExpr::Var("reg".to_string()),
+            then_body: vec![HirStmt::Return(Some(HirExpr::Const(1, int(32))))],
+            else_body: vec![HirStmt::Return(Some(HirExpr::Const(0, int(32))))],
+        },
+    ];
+
+    assert!(!eliminate_dead_temp_assigns(&mut stmts, &HashSet::new()));
+    assert_eq!(stmts.len(), 2);
+    assert!(matches!(
+        &stmts[0],
+        HirStmt::Assign {
+            lhs: HirLValue::Var(name),
+            ..
+        } if name == "reg"
+    ));
 }
 
 #[test]

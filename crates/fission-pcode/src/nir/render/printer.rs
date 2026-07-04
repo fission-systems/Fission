@@ -4,7 +4,7 @@
 //! Policy: `crates/fission-pcode/src/nir/AGENTS.md`.
 
 use super::*;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 const MAX_PRINT_STMT_DEPTH: usize = 512;
 const MAX_PRINT_EXPR_DEPTH: usize = 512;
@@ -13,6 +13,7 @@ const MAX_PRINT_EXPR_DEPTH: usize = 512;
 struct PrintCtx<'a> {
     /// variable name → declared type
     var_types: HashMap<&'a str, &'a NirType>,
+    pointer_decl_names: HashSet<&'a str>,
     return_type: &'a NirType,
     inline_guard_goto: bool,
     global_names: Option<&'a HashMap<u64, String>>,
@@ -21,11 +22,20 @@ struct PrintCtx<'a> {
 impl<'a> PrintCtx<'a> {
     fn build(func: &'a HirFunction) -> Self {
         let mut var_types = HashMap::new();
+        let mut pointer_decl_names = HashSet::new();
         for b in func.locals.iter().chain(func.params.iter()) {
             var_types.insert(b.name.as_str(), &b.ty);
+            if matches!(b.ty, NirType::Ptr(_))
+                || b.surface_type_name
+                    .as_deref()
+                    .is_some_and(|surface| surface.contains('*'))
+            {
+                pointer_decl_names.insert(b.name.as_str());
+            }
         }
         Self {
             var_types,
+            pointer_decl_names,
             return_type: &func.return_type,
             inline_guard_goto: func.body.len() <= 6,
             global_names: None,
@@ -43,6 +53,40 @@ impl<'a> PrintCtx<'a> {
                 ty: NirType::Ptr(_),
                 ..
             } => true,
+            _ => false,
+        }
+    }
+
+    fn expr_has_pointer_like_result(&self, expr: &HirExpr) -> bool {
+        match expr {
+            HirExpr::Binary {
+                op: HirBinaryOp::Add,
+                lhs,
+                rhs,
+                ..
+            } => self.expr_is_pointer(lhs) || self.expr_is_pointer(rhs),
+            HirExpr::Binary {
+                op: HirBinaryOp::Sub,
+                lhs,
+                rhs,
+                ..
+            } => self.expr_is_pointer(lhs) && !self.expr_is_pointer(rhs),
+            other => self.expr_is_pointer(other),
+        }
+    }
+
+    fn simple_deref_target_is_declared_pointer(&self, expr: &HirExpr) -> bool {
+        match expr {
+            HirExpr::Var(name) => self.pointer_decl_names.contains(name.as_str()),
+            HirExpr::AddressOfGlobal(_) => true,
+            HirExpr::Cast {
+                ty: NirType::Ptr(_),
+                expr,
+            } => self.simple_deref_target_is_declared_pointer(expr),
+            HirExpr::PtrOffset { base, offset } if *offset == 0 => {
+                self.simple_deref_target_is_declared_pointer(base)
+            }
+            HirExpr::AggregateCopy { src, .. } => self.simple_deref_target_is_declared_pointer(src),
             _ => false,
         }
     }
@@ -103,7 +147,7 @@ fn print_hir_function_impl(func: &HirFunction, ctx: PrintCtx<'_>) -> String {
         print_stmt_with_indent_ctx(stmt, 1, 0, &ctx, &mut out);
     }
     out.push_str("}\n");
-    out
+    cast_pointer_vars_in_bitop_text(out, &ctx)
 }
 
 fn print_binding_type(binding: &NirBinding) -> String {
@@ -507,6 +551,7 @@ fn peel_simple_deref_target(expr: &HirExpr) -> Option<&str> {
         HirExpr::Var(name) | HirExpr::AddressOfGlobal(name) => Some(name),
         HirExpr::Cast { expr, .. } => peel_simple_deref_target(expr),
         HirExpr::PtrOffset { base, offset } if *offset == 0 => peel_simple_deref_target(base),
+        HirExpr::AggregateCopy { src, .. } => peel_simple_deref_target(src),
         _ => None,
     }
 }
@@ -729,7 +774,10 @@ fn print_expr_prec_ctx(
             // without going through a pointer-sized integer is UB/error in strict C11).
             let expr_is_ptr = ctx.expr_is_pointer(expr);
             let target_is_int = !matches!(ty, NirType::Ptr(_));
-            let inner = print_expr_prec_ctx(expr, 110, depth + 1, ctx);
+            let mut inner = print_expr_prec_ctx(expr, 110, depth + 1, ctx);
+            if matches!(ty, NirType::Ptr(_)) {
+                inner = cast_pointer_vars_in_bitop_text(inner, ctx);
+            }
             if expr_is_ptr && target_is_int {
                 (format!("({})(ulonglong){}", print_type(ty), inner), 110)
             } else {
@@ -743,11 +791,15 @@ fn print_expr_prec_ctx(
                 HirUnaryOp::BitNot => "~",
             };
             let inner = print_expr_prec_ctx(expr, 110, depth + 1, ctx);
-            (format!("{symbol}{inner}"), 110)
+            if matches!(op, HirUnaryOp::Neg | HirUnaryOp::BitNot) && ctx.expr_is_pointer(expr) {
+                (format!("{symbol}(ulonglong){inner}"), 110)
+            } else {
+                (format!("{symbol}{inner}"), 110)
+            }
         }
         HirExpr::Binary { op, lhs, rhs, .. } => {
             let prec = binary_precedence(*op);
-            let lhs_str = print_expr_prec_ctx(lhs, prec, depth + 1, ctx);
+            let mut lhs_str = print_expr_prec_ctx(lhs, prec, depth + 1, ctx);
             let rhs_parent_prec = binary_rhs_parent_precedence(*op, rhs, prec + 1);
             let mut rhs_str = print_expr_prec_ctx(rhs, rhs_parent_prec, depth + 1, ctx);
 
@@ -755,6 +807,14 @@ fn print_expr_prec_ctx(
             // Cast the rhs to ulonglong to avoid compilation failure.
             if *op == HirBinaryOp::Add && ctx.expr_is_pointer(lhs) && ctx.expr_is_pointer(rhs) {
                 rhs_str = format!("(ulonglong){rhs_str}");
+            }
+            if is_integer_bitop(*op) {
+                if ctx.expr_is_pointer(lhs) || printed_operand_is_pointer_var(&lhs_str, ctx) {
+                    lhs_str = format!("(ulonglong){lhs_str}");
+                }
+                if ctx.expr_is_pointer(rhs) || printed_operand_is_pointer_var(&rhs_str, ctx) {
+                    rhs_str = format!("(ulonglong){rhs_str}");
+                }
             }
 
             (
@@ -794,7 +854,9 @@ fn print_expr_prec_ctx(
             }
         }
         HirExpr::Load { ptr, ty } => {
-            if let Some(target) = peel_simple_deref_target(ptr) {
+            if ctx.simple_deref_target_is_declared_pointer(ptr)
+                && let Some(target) = peel_simple_deref_target(ptr)
+            {
                 (format!("*{target}"), 110)
             } else {
                 let inner = print_expr_prec_ctx(ptr, 0, depth + 1, ctx);
@@ -870,7 +932,9 @@ fn print_lvalue_ctx(lhs: &HirLValue, depth: usize, ctx: &PrintCtx<'_>) -> String
             format!("{inner}{op}{field_name}")
         }
         HirLValue::Deref { ptr, ty } => {
-            if let Some(target) = peel_simple_deref_target(ptr) {
+            if ctx.simple_deref_target_is_declared_pointer(ptr)
+                && let Some(target) = peel_simple_deref_target(ptr)
+            {
                 format!("*{target}")
             } else {
                 format!(
@@ -907,6 +971,48 @@ fn is_integer_bitop(op: HirBinaryOp) -> bool {
     )
 }
 
+fn printed_operand_is_pointer_var(operand: &str, ctx: &PrintCtx<'_>) -> bool {
+    ctx.var_types
+        .get(operand)
+        .is_some_and(|ty| matches!(ty, NirType::Ptr(_)))
+}
+
+fn cast_pointer_vars_in_bitop_text(mut text: String, ctx: &PrintCtx<'_>) -> String {
+    if !(text.contains(" ^ ") || text.contains(" & ") || text.contains(" | ")) {
+        return text;
+    }
+    for (name, ty) in &ctx.var_types {
+        if !matches!(ty, NirType::Ptr(_)) {
+            continue;
+        }
+        for op in ["^", "&", "|"] {
+            text = text.replace(
+                &format!(" {op} {name}"),
+                &format!(" {op} (ulonglong){name}"),
+            );
+            text = text.replace(
+                &format!("({name} {op} "),
+                &format!("((ulonglong){name} {op} "),
+            );
+        }
+    }
+    text
+}
+
+fn pointer_scalar_compound_op(op: HirBinaryOp) -> Option<&'static str> {
+    match op {
+        HirBinaryOp::Mul => Some("*"),
+        HirBinaryOp::Div => Some("/"),
+        HirBinaryOp::Mod => Some("%"),
+        HirBinaryOp::And => Some("&"),
+        HirBinaryOp::Or => Some("|"),
+        HirBinaryOp::Xor => Some("^"),
+        HirBinaryOp::Shl => Some("<<"),
+        HirBinaryOp::Shr | HirBinaryOp::Sar => Some(">>"),
+        _ => None,
+    }
+}
+
 fn try_compound_assignment(lhs: &HirLValue, rhs: &HirExpr, ctx: &PrintCtx<'_>) -> Option<String> {
     let HirLValue::Var(var_name) = lhs else {
         return None;
@@ -927,27 +1033,19 @@ fn try_compound_assignment(lhs: &HirLValue, rhs: &HirExpr, ctx: &PrintCtx<'_>) -
         return None;
     }
 
-    // If the LHS variable is a pointer type and the operation is a bitwise integer op,
-    // we cannot emit `ptr &= val` (invalid C). Instead emit:
-    //   var = (ptr_ty)((ulonglong)var OP val);
+    // If the LHS variable is a pointer type and the operation is scalar-only,
+    // we cannot emit `ptr *= val` / `ptr &= val` (invalid C). Keep the same
+    // surface variable but force the arithmetic through a pointer-sized scalar.
     let var_is_ptr = ctx
         .var_types
         .get(var_name.as_str())
         .is_some_and(|ty| matches!(ty, NirType::Ptr(_)));
-    if var_is_ptr && is_integer_bitop(*op) {
+    if var_is_ptr && let Some(op_str) = pointer_scalar_compound_op(*op) {
         let ptr_ty = ctx
             .var_types
             .get(var_name.as_str())
             .map(|ty| print_type(ty))
             .unwrap_or_else(|| "void *".to_string());
-        let op_str = match op {
-            HirBinaryOp::And => "&",
-            HirBinaryOp::Or => "|",
-            HirBinaryOp::Xor => "^",
-            HirBinaryOp::Shl => "<<",
-            HirBinaryOp::Shr | HirBinaryOp::Sar => ">>",
-            _ => return None,
-        };
         let rhs_str = print_expr_with_ctx(rhs_expr, ctx);
         return Some(format!(
             "{var_name} = ({ptr_ty})((ulonglong){var_name} {op_str} {rhs_str});"
@@ -985,6 +1083,38 @@ fn try_compound_assignment(lhs: &HirLValue, rhs: &HirExpr, ctx: &PrintCtx<'_>) -
     Some(format!("{} {} {};", var_name, op_str, rhs_str))
 }
 
+fn print_assignment_rhs(lhs: &HirLValue, rhs: &HirExpr, ctx: &PrintCtx<'_>) -> String {
+    let rhs_str = print_expr_with_ctx(rhs, ctx);
+    let HirLValue::Var(var_name) = lhs else {
+        return rhs_str;
+    };
+    let Some(lhs_ty) = ctx.var_types.get(var_name.as_str()) else {
+        return rhs_str;
+    };
+    match lhs_ty {
+        NirType::Ptr(_) if !ctx.expr_has_pointer_like_result(rhs) => {
+            format!("({})({rhs_str})", print_type(lhs_ty))
+        }
+        NirType::Int { .. } if ctx.expr_has_pointer_like_result(rhs) => {
+            format!("({})(ulonglong)({rhs_str})", print_type(lhs_ty))
+        }
+        _ => rhs_str,
+    }
+}
+
+fn print_return_expr(expr: &HirExpr, ctx: &PrintCtx<'_>) -> String {
+    let expr_str = print_expr_with_ctx(expr, ctx);
+    match ctx.return_type {
+        NirType::Ptr(_) if !ctx.expr_has_pointer_like_result(expr) => {
+            format!("({})({expr_str})", print_type(ctx.return_type))
+        }
+        NirType::Int { .. } if ctx.expr_has_pointer_like_result(expr) => {
+            format!("({})(ulonglong)({expr_str})", print_type(ctx.return_type))
+        }
+        _ => expr_str,
+    }
+}
+
 fn print_stmt_ctx(stmt: &HirStmt, ctx: &PrintCtx<'_>) -> String {
     match stmt {
         HirStmt::Assign { lhs, rhs } => {
@@ -994,7 +1124,7 @@ fn print_stmt_ctx(stmt: &HirStmt, ctx: &PrintCtx<'_>) -> String {
                 format!(
                     "{} = {};",
                     print_lvalue_ctx(lhs, 0, ctx),
-                    print_expr_with_ctx(rhs, ctx)
+                    print_assignment_rhs(lhs, rhs, ctx)
                 )
             }
         }
@@ -1007,7 +1137,7 @@ fn print_stmt_ctx(stmt: &HirStmt, ctx: &PrintCtx<'_>) -> String {
             last_named_param
         ),
         HirStmt::Expr(expr) => format!("{};", print_expr_with_ctx(expr, ctx)),
-        HirStmt::Return(Some(expr)) => format!("return {};", print_expr_with_ctx(expr, ctx)),
+        HirStmt::Return(Some(expr)) => format!("return {};", print_return_expr(expr, ctx)),
         HirStmt::Return(None) => "return;".to_string(),
         HirStmt::Break => "break;".to_string(),
         HirStmt::Continue => "continue;".to_string(),
@@ -1241,4 +1371,282 @@ pub fn render_contracted_wrapper_summary(
         ty: NirType::Unknown,
     }))];
     print_hir_function(&hir)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn u8_ptr() -> NirType {
+        NirType::Ptr(Box::new(NirType::Int {
+            bits: 8,
+            signed: false,
+        }))
+    }
+
+    fn u64_ty() -> NirType {
+        NirType::Int {
+            bits: 64,
+            signed: false,
+        }
+    }
+
+    #[test]
+    fn pointer_scalar_compound_assignment_renders_c_safe_cast_assignment() {
+        let hir = HirFunction {
+            name: "scale_ptr_like_value".to_string(),
+            int_param_offsets: Vec::new(),
+            locals: vec![NirBinding {
+                name: "local_d".to_string(),
+                ty: u8_ptr(),
+                surface_type_name: None,
+                origin: Some(NirBindingOrigin::TempPreserved),
+                initializer: None,
+            }],
+            return_type: NirType::Unknown,
+            body: vec![HirStmt::Assign {
+                lhs: HirLValue::Var("local_d".to_string()),
+                rhs: HirExpr::Binary {
+                    op: HirBinaryOp::Mul,
+                    lhs: Box::new(HirExpr::Var("local_d".to_string())),
+                    rhs: Box::new(HirExpr::Const(2, u64_ty())),
+                    ty: u64_ty(),
+                },
+            }],
+            ..HirFunction::default()
+        };
+
+        let rendered = print_hir_function(&hir);
+
+        assert!(
+            rendered.contains("local_d = (uchar *)((ulonglong)local_d * 2);"),
+            "{rendered}"
+        );
+        assert!(!rendered.contains("local_d *= 2;"), "{rendered}");
+    }
+
+    #[test]
+    fn pointer_assignment_from_scalar_rhs_renders_explicit_cast() {
+        let hir = HirFunction {
+            name: "load_byte_into_pointer_typed_slot".to_string(),
+            int_param_offsets: Vec::new(),
+            locals: vec![NirBinding {
+                name: "local_10".to_string(),
+                ty: u8_ptr(),
+                surface_type_name: None,
+                origin: Some(NirBindingOrigin::TempPreserved),
+                initializer: None,
+            }],
+            return_type: NirType::Unknown,
+            body: vec![HirStmt::Assign {
+                lhs: HirLValue::Var("local_10".to_string()),
+                rhs: HirExpr::Cast {
+                    ty: NirType::Int {
+                        bits: 32,
+                        signed: false,
+                    },
+                    expr: Box::new(HirExpr::Load {
+                        ptr: Box::new(HirExpr::Var("local_10".to_string())),
+                        ty: NirType::Int {
+                            bits: 8,
+                            signed: false,
+                        },
+                    }),
+                },
+            }],
+            ..HirFunction::default()
+        };
+
+        let rendered = print_hir_function(&hir);
+
+        assert!(
+            rendered.contains("local_10 = (uchar *)((uint)*local_10);"),
+            "{rendered}"
+        );
+    }
+
+    #[test]
+    fn integer_assignment_from_pointer_arithmetic_renders_explicit_cast() {
+        let hir = HirFunction {
+            name: "pointer_delta_into_integer".to_string(),
+            int_param_offsets: Vec::new(),
+            params: vec![NirBinding {
+                name: "param_10".to_string(),
+                ty: u8_ptr(),
+                surface_type_name: None,
+                origin: Some(NirBindingOrigin::ParamIndex(0)),
+                initializer: None,
+            }],
+            locals: vec![NirBinding {
+                name: "iVar10".to_string(),
+                ty: NirType::Int {
+                    bits: 64,
+                    signed: true,
+                },
+                surface_type_name: None,
+                origin: Some(NirBindingOrigin::TempPreserved),
+                initializer: None,
+            }],
+            return_type: NirType::Unknown,
+            body: vec![HirStmt::Assign {
+                lhs: HirLValue::Var("iVar10".to_string()),
+                rhs: HirExpr::Binary {
+                    op: HirBinaryOp::Sub,
+                    lhs: Box::new(HirExpr::Var("param_10".to_string())),
+                    rhs: Box::new(HirExpr::Const(255, u64_ty())),
+                    ty: u8_ptr(),
+                },
+            }],
+            ..HirFunction::default()
+        };
+
+        let rendered = print_hir_function(&hir);
+
+        assert!(
+            rendered.contains("iVar10 = (longlong)(ulonglong)(param_10 - 255);"),
+            "{rendered}"
+        );
+    }
+
+    #[test]
+    fn integer_return_from_pointer_expr_renders_explicit_cast() {
+        let hir = HirFunction {
+            name: "return_pointer_as_int".to_string(),
+            int_param_offsets: Vec::new(),
+            locals: vec![NirBinding {
+                name: "local_d".to_string(),
+                ty: u8_ptr(),
+                surface_type_name: None,
+                origin: Some(NirBindingOrigin::TempPreserved),
+                initializer: None,
+            }],
+            return_type: NirType::Int {
+                bits: 32,
+                signed: true,
+            },
+            body: vec![HirStmt::Return(Some(HirExpr::Var("local_d".to_string())))],
+            ..HirFunction::default()
+        };
+
+        let rendered = print_hir_function(&hir);
+
+        assert!(
+            rendered.contains("return (int)(ulonglong)(local_d);"),
+            "{rendered}"
+        );
+    }
+
+    #[test]
+    fn pointer_operand_in_integer_bitop_renders_explicit_cast() {
+        let hir = HirFunction {
+            name: "xor_pointer_like_value".to_string(),
+            int_param_offsets: Vec::new(),
+            locals: vec![NirBinding {
+                name: "local_1c".to_string(),
+                ty: u8_ptr(),
+                surface_type_name: None,
+                origin: Some(NirBindingOrigin::TempPreserved),
+                initializer: None,
+            }],
+            return_type: NirType::Unknown,
+            body: vec![HirStmt::Assign {
+                lhs: HirLValue::Var("local_1c".to_string()),
+                rhs: HirExpr::Binary {
+                    op: HirBinaryOp::Xor,
+                    lhs: Box::new(HirExpr::Cast {
+                        ty: u64_ty(),
+                        expr: Box::new(HirExpr::Var("local_1c".to_string())),
+                    }),
+                    rhs: Box::new(HirExpr::Var("local_1c".to_string())),
+                    ty: u64_ty(),
+                },
+            }],
+            ..HirFunction::default()
+        };
+
+        let rendered = print_hir_function(&hir);
+
+        assert!(
+            rendered.contains(
+                "local_1c = (uchar *)((ulonglong)(ulonglong)local_1c ^ (ulonglong)local_1c);"
+            ),
+            "{rendered}"
+        );
+    }
+
+    #[test]
+    fn pointer_casted_integer_bitop_renders_pointer_operands_as_scalars() {
+        let hir = HirFunction {
+            name: "xor_pointer_like_value_inside_cast".to_string(),
+            int_param_offsets: Vec::new(),
+            locals: vec![NirBinding {
+                name: "local_10".to_string(),
+                ty: u8_ptr(),
+                surface_type_name: None,
+                origin: Some(NirBindingOrigin::TempPreserved),
+                initializer: None,
+            }],
+            return_type: NirType::Unknown,
+            body: vec![HirStmt::Assign {
+                lhs: HirLValue::Var("local_10".to_string()),
+                rhs: HirExpr::Cast {
+                    ty: u8_ptr(),
+                    expr: Box::new(HirExpr::Binary {
+                        op: HirBinaryOp::Xor,
+                        lhs: Box::new(HirExpr::Cast {
+                            ty: u64_ty(),
+                            expr: Box::new(HirExpr::Var("local_10".to_string())),
+                        }),
+                        rhs: Box::new(HirExpr::Var("local_10".to_string())),
+                        ty: u64_ty(),
+                    }),
+                },
+            }],
+            ..HirFunction::default()
+        };
+
+        let rendered = print_hir_function(&hir);
+
+        assert!(
+            rendered.contains(
+                "local_10 = (uchar *)((ulonglong)(ulonglong)local_10 ^ (ulonglong)local_10);"
+            ),
+            "{rendered}"
+        );
+    }
+
+    #[test]
+    fn pointer_operand_in_unary_integer_op_renders_explicit_scalar_cast() {
+        let hir = HirFunction {
+            name: "neg_pointer_like_value".to_string(),
+            int_param_offsets: Vec::new(),
+            locals: vec![NirBinding {
+                name: "local_10".to_string(),
+                ty: u8_ptr(),
+                surface_type_name: None,
+                origin: Some(NirBindingOrigin::TempPreserved),
+                initializer: None,
+            }],
+            return_type: NirType::Unknown,
+            body: vec![HirStmt::Assign {
+                lhs: HirLValue::Var("local_10".to_string()),
+                rhs: HirExpr::Cast {
+                    ty: u8_ptr(),
+                    expr: Box::new(HirExpr::Unary {
+                        op: HirUnaryOp::Neg,
+                        expr: Box::new(HirExpr::Var("local_10".to_string())),
+                        ty: u64_ty(),
+                    }),
+                },
+            }],
+            ..HirFunction::default()
+        };
+
+        let rendered = print_hir_function(&hir);
+
+        assert!(
+            rendered.contains("local_10 = (uchar *)-(ulonglong)local_10;"),
+            "{rendered}"
+        );
+    }
 }

@@ -15,6 +15,136 @@ pub(in crate::nir::builder) use self::contracts::MaterializeOwnerRepartition;
 use self::contracts::*;
 
 impl<'a> PreviewBuilder<'a> {
+    fn collect_var_names_in_expr(expr: &HirExpr, vars: &mut HashSet<String>) {
+        match expr {
+            HirExpr::Var(name) => {
+                vars.insert(name.clone());
+            }
+            HirExpr::Cast { expr, .. }
+            | HirExpr::Unary { expr, .. }
+            | HirExpr::Load { ptr: expr, .. }
+            | HirExpr::PtrOffset { base: expr, .. }
+            | HirExpr::FieldAccess { base: expr, .. }
+            | HirExpr::AggregateCopy { src: expr, .. } => {
+                Self::collect_var_names_in_expr(expr, vars);
+            }
+            HirExpr::Binary { lhs, rhs, .. } => {
+                Self::collect_var_names_in_expr(lhs, vars);
+                Self::collect_var_names_in_expr(rhs, vars);
+            }
+            HirExpr::Call { args, .. } => {
+                for arg in args {
+                    Self::collect_var_names_in_expr(arg, vars);
+                }
+            }
+            HirExpr::Index { base, index, .. } => {
+                Self::collect_var_names_in_expr(base, vars);
+                Self::collect_var_names_in_expr(index, vars);
+            }
+            HirExpr::Select {
+                cond,
+                then_expr,
+                else_expr,
+                ..
+            } => {
+                Self::collect_var_names_in_expr(cond, vars);
+                Self::collect_var_names_in_expr(then_expr, vars);
+                Self::collect_var_names_in_expr(else_expr, vars);
+            }
+            HirExpr::Const(_, _) | HirExpr::AddressOfGlobal(_) => {}
+        }
+    }
+
+    fn rhs_is_load_derived_value(&self, expr: &HirExpr) -> bool {
+        match expr {
+            HirExpr::Load { .. } => true,
+            HirExpr::Var(name) => self.load_value_bindings.contains(name),
+            HirExpr::Cast { expr, .. } | HirExpr::Unary { expr, .. } => {
+                self.rhs_is_load_derived_value(expr)
+            }
+            HirExpr::Binary { lhs, rhs, .. } => {
+                self.rhs_is_load_derived_value(lhs) || self.rhs_is_load_derived_value(rhs)
+            }
+            HirExpr::Call { args, .. } => {
+                args.iter().any(|arg| self.rhs_is_load_derived_value(arg))
+            }
+            HirExpr::PtrOffset { base, .. }
+            | HirExpr::FieldAccess { base, .. }
+            | HirExpr::AggregateCopy { src: base, .. } => self.rhs_is_load_derived_value(base),
+            HirExpr::Index { base, index, .. } => {
+                self.rhs_is_load_derived_value(base) || self.rhs_is_load_derived_value(index)
+            }
+            HirExpr::Select {
+                cond,
+                then_expr,
+                else_expr,
+                ..
+            } => {
+                self.rhs_is_load_derived_value(cond)
+                    || self.rhs_is_load_derived_value(then_expr)
+                    || self.rhs_is_load_derived_value(else_expr)
+            }
+            HirExpr::Const(_, _) | HirExpr::AddressOfGlobal(_) => false,
+        }
+    }
+
+    fn record_load_value_roles(&mut self, lhs_name: &str, rhs: &HirExpr) {
+        fn visit(this: &mut PreviewBuilder<'_>, expr: &HirExpr) {
+            match expr {
+                HirExpr::Load { ptr, .. } => {
+                    let mut ptr_vars = HashSet::new();
+                    PreviewBuilder::collect_var_names_in_expr(ptr, &mut ptr_vars);
+                    this.load_address_bindings.extend(ptr_vars);
+                    visit(this, ptr);
+                }
+                HirExpr::Cast { expr, .. } | HirExpr::Unary { expr, .. } => visit(this, expr),
+                HirExpr::Binary { lhs, rhs, .. } => {
+                    visit(this, lhs);
+                    visit(this, rhs);
+                }
+                HirExpr::Call { args, .. } => {
+                    for arg in args {
+                        visit(this, arg);
+                    }
+                }
+                HirExpr::PtrOffset { base, .. }
+                | HirExpr::FieldAccess { base, .. }
+                | HirExpr::AggregateCopy { src: base, .. } => visit(this, base),
+                HirExpr::Index { base, index, .. } => {
+                    visit(this, base);
+                    visit(this, index);
+                }
+                HirExpr::Select {
+                    cond,
+                    then_expr,
+                    else_expr,
+                    ..
+                } => {
+                    visit(this, cond);
+                    visit(this, then_expr);
+                    visit(this, else_expr);
+                }
+                HirExpr::Var(_) | HirExpr::Const(_, _) | HirExpr::AddressOfGlobal(_) => {}
+            }
+        }
+
+        let is_load_derived = self.rhs_is_load_derived_value(rhs);
+        visit(self, rhs);
+        if is_load_derived {
+            self.load_value_bindings.insert(lhs_name.to_string());
+        }
+    }
+
+    fn materialized_lhs_conflicts_with_load_address_role(
+        &self,
+        lhs_name: &str,
+        rhs: &HirExpr,
+    ) -> bool {
+        self.load_address_bindings.contains(lhs_name)
+            && self.rhs_is_load_derived_value(rhs)
+            && !matches!(expr_type(rhs), NirType::Ptr(_))
+    }
+
     fn is_callee_saved_push_store(&self, op: &PcodeOp) -> bool {
         let Some(asm) = op.asm_mnemonic.as_deref() else {
             return false;
@@ -186,7 +316,7 @@ impl<'a> PreviewBuilder<'a> {
                 )
                 .name;
         };
-        let name = next_temp_name(&type_from_size(ret_reg.size, false), &mut self.temp_next_id);
+        let name = self.next_unused_temp_binding_name(&type_from_size(ret_reg.size, false));
         self.temps.insert(
             name.clone(),
             NirBinding {
@@ -670,7 +800,7 @@ impl<'a> PreviewBuilder<'a> {
             );
         }
         let preserve_materialization = Self::should_preserve_materialized_expr(&rhs);
-        let lhs_name = if let Some(name) = loop_carried_lhs_name {
+        let mut lhs_name = if let Some(name) = loop_carried_lhs_name {
             self.seed_loop_carried_binding_initializer_from_edge_zero(block, output, &name);
             self.bind_materialized_output_to_existing_name(
                 op,
@@ -726,6 +856,15 @@ impl<'a> PreviewBuilder<'a> {
                 .name;
             fallback_name
         };
+        if self.materialized_lhs_conflicts_with_load_address_role(&lhs_name, &rhs) {
+            lhs_name = self.bind_materialized_output_to_fresh_temp(
+                op,
+                output,
+                expr_type(&rhs),
+                preserve_materialization,
+            );
+        }
+        self.record_load_value_roles(&lhs_name, &rhs);
         if self.emit_ready_trace_enabled_for_current_fn() {
             self.emit_ready_trace(format!(
                 "materialized-output-binding block=0x{:x} op_seq={} output=space:{} off:0x{:x} size:{} lhs={} rhs={:?}",
@@ -2310,6 +2449,14 @@ impl<'a> PreviewBuilder<'a> {
             return None;
         }
 
+        self.trace_stack_home_accumulator_store_merge_accepted(
+            block.start_address,
+            op.seq_num,
+            slot_name,
+            value,
+            live_name,
+        );
+
         self.ensure_live_register_binding(live_name, self.options.pointer_size);
         if let Some(binding) = self.temps.get_mut(live_name)
             && binding.initializer.is_none()
@@ -2319,13 +2466,6 @@ impl<'a> PreviewBuilder<'a> {
                 type_from_size(self.options.pointer_size, false),
             ));
         }
-        self.trace_stack_home_accumulator_store_merge_accepted(
-            block.start_address,
-            op.seq_num,
-            slot_name,
-            value,
-            live_name,
-        );
         Some(HirExpr::Var(live_name.to_string()))
     }
 

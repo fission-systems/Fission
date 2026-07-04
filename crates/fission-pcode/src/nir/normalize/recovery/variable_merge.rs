@@ -52,9 +52,306 @@ fn collect_direct_copies(stmts: &[HirStmt]) -> std::collections::HashSet<(String
     copies
 }
 
+fn collect_copy_merge_barrier_vars(
+    stmts: &[HirStmt],
+    stack_state_vars: HashSet<String>,
+) -> HashSet<String> {
+    let mut collector = CopyMergeBarrierCollector {
+        stack_state_vars,
+        ..Default::default()
+    };
+    collector.visit_stmts(stmts);
+    collector.barrier_vars
+}
+
+fn collect_read_vars(stmts: &[HirStmt]) -> HashSet<String> {
+    let mut vars = HashSet::new();
+    collect_read_vars_in_stmts(stmts, &mut vars);
+    vars
+}
+
+fn collect_read_vars_in_stmts(stmts: &[HirStmt], vars: &mut HashSet<String>) {
+    for stmt in stmts {
+        match stmt {
+            HirStmt::Assign { lhs, rhs } => {
+                collect_read_vars_in_lvalue(lhs, vars);
+                collect_vars_in_expr(rhs, vars);
+            }
+            HirStmt::Expr(expr) | HirStmt::Return(Some(expr)) => collect_vars_in_expr(expr, vars),
+            HirStmt::Block(body) | HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
+                collect_read_vars_in_stmts(body, vars);
+            }
+            HirStmt::If {
+                cond,
+                then_body,
+                else_body,
+            } => {
+                collect_vars_in_expr(cond, vars);
+                collect_read_vars_in_stmts(then_body, vars);
+                collect_read_vars_in_stmts(else_body, vars);
+            }
+            HirStmt::For {
+                init,
+                cond,
+                update,
+                body,
+            } => {
+                if let Some(init) = init {
+                    collect_read_vars_in_stmts(std::slice::from_ref(init), vars);
+                }
+                if let Some(cond) = cond {
+                    collect_vars_in_expr(cond, vars);
+                }
+                if let Some(update) = update {
+                    collect_read_vars_in_stmts(std::slice::from_ref(update), vars);
+                }
+                collect_read_vars_in_stmts(body, vars);
+            }
+            HirStmt::Switch {
+                expr,
+                cases,
+                default,
+            } => {
+                collect_vars_in_expr(expr, vars);
+                for case in cases {
+                    collect_read_vars_in_stmts(&case.body, vars);
+                }
+                collect_read_vars_in_stmts(default, vars);
+            }
+            HirStmt::VaStart { va_list, .. } => collect_vars_in_expr(va_list, vars),
+            HirStmt::Label(_)
+            | HirStmt::Goto(_)
+            | HirStmt::Return(None)
+            | HirStmt::Break
+            | HirStmt::Continue => {}
+        }
+    }
+}
+
+fn collect_read_vars_in_lvalue(lval: &HirLValue, vars: &mut HashSet<String>) {
+    match lval {
+        HirLValue::Var(_) => {}
+        HirLValue::Deref { ptr, .. } => collect_vars_in_expr(ptr, vars),
+        HirLValue::Index { base, index, .. } => {
+            collect_vars_in_expr(base, vars);
+            collect_vars_in_expr(index, vars);
+        }
+        HirLValue::FieldAccess { base, .. } => collect_vars_in_expr(base, vars),
+    }
+}
+
+#[derive(Default)]
+struct CopyMergeBarrierCollector {
+    barrier_vars: HashSet<String>,
+    stack_state_vars: HashSet<String>,
+}
+
+impl CopyMergeBarrierCollector {
+    fn visit_stmts(&mut self, stmts: &[HirStmt]) {
+        for stmt in stmts {
+            self.visit_stmt(stmt);
+        }
+    }
+
+    fn visit_stmt(&mut self, stmt: &HirStmt) {
+        match stmt {
+            HirStmt::Assign { lhs, rhs } => {
+                if let HirLValue::Var(lhs_name) = lhs
+                    && self.expr_is_load_derived_barrier(rhs)
+                {
+                    self.barrier_vars.insert(lhs_name.clone());
+                }
+                if let HirLValue::Var(lhs_name) = lhs
+                    && self.stack_state_vars.contains(lhs_name)
+                    && let HirExpr::Var(rhs_name) = rhs
+                    && !self.stack_state_vars.contains(rhs_name)
+                {
+                    self.barrier_vars.insert(lhs_name.clone());
+                }
+                self.visit_lvalue(lhs);
+                self.visit_expr(rhs);
+            }
+            HirStmt::Expr(expr) | HirStmt::Return(Some(expr)) => self.visit_expr(expr),
+            HirStmt::Block(body) | HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
+                self.visit_stmts(body);
+            }
+            HirStmt::If {
+                cond,
+                then_body,
+                else_body,
+            } => {
+                self.visit_expr(cond);
+                self.visit_stmts(then_body);
+                self.visit_stmts(else_body);
+            }
+            HirStmt::For {
+                init,
+                cond,
+                update,
+                body,
+            } => {
+                if let Some(init) = init {
+                    self.visit_stmt(init);
+                }
+                if let Some(cond) = cond {
+                    self.visit_expr(cond);
+                }
+                if let Some(update) = update {
+                    self.visit_stmt(update);
+                }
+                self.visit_stmts(body);
+            }
+            HirStmt::Switch {
+                expr,
+                cases,
+                default,
+            } => {
+                self.visit_expr(expr);
+                for case in cases {
+                    self.visit_stmts(&case.body);
+                }
+                self.visit_stmts(default);
+            }
+            HirStmt::VaStart { va_list, .. } => self.visit_expr(va_list),
+            HirStmt::Return(None)
+            | HirStmt::Label(_)
+            | HirStmt::Goto(_)
+            | HirStmt::Break
+            | HirStmt::Continue => {}
+        }
+    }
+
+    fn visit_lvalue(&mut self, lval: &HirLValue) {
+        match lval {
+            HirLValue::Var(_) => {}
+            HirLValue::Deref { ptr, .. } => {
+                collect_vars_in_expr(ptr, &mut self.barrier_vars);
+                self.visit_expr(ptr);
+            }
+            HirLValue::Index { base, index, .. } => {
+                collect_vars_in_expr(base, &mut self.barrier_vars);
+                self.visit_expr(base);
+                self.visit_expr(index);
+            }
+            HirLValue::FieldAccess { base, .. } => self.visit_expr(base),
+        }
+    }
+
+    fn visit_expr(&mut self, expr: &HirExpr) {
+        match expr {
+            HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) | HirExpr::Const(_, _) => {}
+            HirExpr::Load { ptr, .. } => {
+                collect_vars_in_expr(ptr, &mut self.barrier_vars);
+                self.visit_expr(ptr);
+            }
+            HirExpr::Cast { expr, .. }
+            | HirExpr::Unary { expr, .. }
+            | HirExpr::PtrOffset { base: expr, .. }
+            | HirExpr::AggregateCopy { src: expr, .. }
+            | HirExpr::FieldAccess { base: expr, .. } => self.visit_expr(expr),
+            HirExpr::Binary { lhs, rhs, .. } => {
+                self.visit_expr(lhs);
+                self.visit_expr(rhs);
+            }
+            HirExpr::Call { args, .. } => {
+                for arg in args {
+                    self.visit_expr(arg);
+                }
+            }
+            HirExpr::Select {
+                cond,
+                then_expr,
+                else_expr,
+                ..
+            } => {
+                self.visit_expr(cond);
+                self.visit_expr(then_expr);
+                self.visit_expr(else_expr);
+            }
+            HirExpr::Index { base, index, .. } => {
+                collect_vars_in_expr(base, &mut self.barrier_vars);
+                self.visit_expr(base);
+                self.visit_expr(index);
+            }
+        }
+    }
+
+    fn expr_is_load_derived_barrier(&self, expr: &HirExpr) -> bool {
+        match expr {
+            HirExpr::Load { .. } => true,
+            HirExpr::Var(name) => self.barrier_vars.contains(name),
+            HirExpr::Cast { expr, .. } | HirExpr::Unary { expr, .. } => {
+                self.expr_is_load_derived_barrier(expr)
+            }
+            HirExpr::Binary { lhs, rhs, .. } => {
+                self.expr_is_load_derived_barrier(lhs) || self.expr_is_load_derived_barrier(rhs)
+            }
+            HirExpr::Call { args, .. } => args
+                .iter()
+                .any(|arg| self.expr_is_load_derived_barrier(arg)),
+            HirExpr::PtrOffset { base, .. }
+            | HirExpr::FieldAccess { base, .. }
+            | HirExpr::AggregateCopy { src: base, .. } => self.expr_is_load_derived_barrier(base),
+            HirExpr::Index { base, index, .. } => {
+                self.expr_is_load_derived_barrier(base) || self.expr_is_load_derived_barrier(index)
+            }
+            HirExpr::Select {
+                cond,
+                then_expr,
+                else_expr,
+                ..
+            } => {
+                self.expr_is_load_derived_barrier(cond)
+                    || self.expr_is_load_derived_barrier(then_expr)
+                    || self.expr_is_load_derived_barrier(else_expr)
+            }
+            HirExpr::Const(_, _) | HirExpr::AddressOfGlobal(_) => false,
+        }
+    }
+}
+
+fn collect_vars_in_expr(expr: &HirExpr, vars: &mut HashSet<String>) {
+    match expr {
+        HirExpr::Var(name) => {
+            vars.insert(name.clone());
+        }
+        HirExpr::Cast { expr, .. }
+        | HirExpr::Unary { expr, .. }
+        | HirExpr::Load { ptr: expr, .. }
+        | HirExpr::PtrOffset { base: expr, .. }
+        | HirExpr::AggregateCopy { src: expr, .. }
+        | HirExpr::FieldAccess { base: expr, .. } => collect_vars_in_expr(expr, vars),
+        HirExpr::Binary { lhs, rhs, .. } => {
+            collect_vars_in_expr(lhs, vars);
+            collect_vars_in_expr(rhs, vars);
+        }
+        HirExpr::Call { args, .. } => {
+            for arg in args {
+                collect_vars_in_expr(arg, vars);
+            }
+        }
+        HirExpr::Select {
+            cond,
+            then_expr,
+            else_expr,
+            ..
+        } => {
+            collect_vars_in_expr(cond, vars);
+            collect_vars_in_expr(then_expr, vars);
+            collect_vars_in_expr(else_expr, vars);
+        }
+        HirExpr::Index { base, index, .. } => {
+            collect_vars_in_expr(base, vars);
+            collect_vars_in_expr(index, vars);
+        }
+        HirExpr::AddressOfGlobal(_) | HirExpr::Const(_, _) => {}
+    }
+}
+
 fn transitive_copy_aliases(
     direct_copies: &std::collections::HashSet<(String, String)>,
     local_names: &HashSet<String>,
+    copy_merge_barriers: &HashSet<String>,
 ) -> HashMap<String, String> {
     fn root(parent: &HashMap<String, String>, node: &str) -> String {
         let mut cur = node.to_string();
@@ -68,7 +365,9 @@ fn transitive_copy_aliases(
     }
 
     let eligible_copies = direct_copies.iter().filter(|(a, b)| {
-        local_names.contains(a)
+        !copy_merge_barriers.contains(a)
+            && !copy_merge_barriers.contains(b)
+            && local_names.contains(a)
             && local_names.contains(b)
             && (is_eligible_for_speculative_merge_by_name(a)
                 || is_eligible_for_speculative_merge_by_name(b))
@@ -215,6 +514,7 @@ pub(crate) fn apply_variable_merge_pass(func: &mut HirFunction) -> bool {
     let mut stack_renames = Vec::new();
     let mut stack_locals = func.locals.clone();
     let mut stack_merged = vec![false; stack_locals.len()];
+    let read_vars = collect_read_vars(&func.body);
 
     for i in 0..stack_locals.len() {
         if stack_merged[i] {
@@ -248,7 +548,10 @@ pub(crate) fn apply_variable_merge_pass(func: &mut HirFunction) -> bool {
 
             let is_slot1 = b1_name.starts_with("slot_");
             let is_slot2 = b2_name.starts_with("slot_");
+            let distinct_read_stack_states =
+                offset1 != offset2 && read_vars.contains(&b1_name) && read_vars.contains(&b2_name);
             let can_merge = (!is_slot1 && !is_slot2)
+                && !distinct_read_stack_states
                 && ((is_derived1 == is_derived2
                     && spans_overlap((offset1, size1), (offset2, size2)))
                     || (offset1 == offset2));
@@ -310,7 +613,23 @@ pub(crate) fn apply_variable_merge_pass(func: &mut HirFunction) -> bool {
         direct_copies.insert((b, a));
     }
     let local_names: HashSet<String> = func.locals.iter().map(|b| b.name.clone()).collect();
-    let copy_aliases = transitive_copy_aliases(&direct_copies, &local_names);
+    let stack_state_vars: HashSet<String> = func
+        .locals
+        .iter()
+        .filter(|binding| {
+            matches!(
+                binding.origin,
+                Some(
+                    NirBindingOrigin::StackOffset(_)
+                        | NirBindingOrigin::HomeSlot(_)
+                        | NirBindingOrigin::DerivedFromStackOffset(_)
+                )
+            )
+        })
+        .map(|binding| binding.name.clone())
+        .collect();
+    let copy_merge_barriers = collect_copy_merge_barrier_vars(&func.body, stack_state_vars);
+    let copy_aliases = transitive_copy_aliases(&direct_copies, &local_names, &copy_merge_barriers);
 
     if !copy_aliases.is_empty() {
         let copy_renames: Vec<(String, String)> = copy_aliases.into_iter().collect();
@@ -352,6 +671,9 @@ pub(crate) fn apply_variable_merge_pass(func: &mut HirFunction) -> bool {
         if param_names.contains(&b1_name) || b1_init {
             continue;
         }
+        if copy_merge_barriers.contains(&b1_name) {
+            continue;
+        }
         let Some(&(start1, end1)) = live_ranges.ranges.get(&b1_name) else {
             continue;
         };
@@ -372,6 +694,9 @@ pub(crate) fn apply_variable_merge_pass(func: &mut HirFunction) -> bool {
             let b2_ty = current_locals[j].ty.clone();
             let b2_init = current_locals[j].initializer.is_some();
             if param_names.contains(&b2_name) || b2_init {
+                continue;
+            }
+            if copy_merge_barriers.contains(&b2_name) {
                 continue;
             }
             let Some(&(start2, end2)) = live_ranges.ranges.get(&b2_name) else {
@@ -996,6 +1321,172 @@ mod tests {
                 bits: 32,
                 signed: false
             }
+        );
+    }
+
+    #[test]
+    fn copy_merge_preserves_load_address_cursor_temp() {
+        let byte_ty = NirType::Int {
+            bits: 8,
+            signed: false,
+        };
+        let cursor_slot = NirBinding {
+            name: "local_10".to_string(),
+            ty: NirType::Ptr(Box::new(byte_ty.clone())),
+            surface_type_name: None,
+            origin: Some(NirBindingOrigin::StackOffset(-16)),
+            initializer: None,
+        };
+        let address_tmp = NirBinding {
+            name: "xVar18".to_string(),
+            ty: NirType::Ptr(Box::new(byte_ty.clone())),
+            surface_type_name: None,
+            origin: Some(NirBindingOrigin::TempPreserved),
+            initializer: None,
+        };
+        let byte_tmp = NirBinding {
+            name: "xVar22".to_string(),
+            ty: byte_ty.clone(),
+            surface_type_name: None,
+            origin: Some(NirBindingOrigin::TempPreserved),
+            initializer: None,
+        };
+
+        let mut func = HirFunction {
+            name: "checksum_shape".to_string(),
+            int_param_offsets: Vec::new(),
+            params: vec![],
+            locals: vec![cursor_slot, address_tmp, byte_tmp],
+            return_type: NirType::Unknown,
+            surface_return_type_name: None,
+            body: vec![
+                HirStmt::Assign {
+                    lhs: HirLValue::Var("xVar18".to_string()),
+                    rhs: HirExpr::Var("local_10".to_string()),
+                },
+                HirStmt::Assign {
+                    lhs: HirLValue::Var("xVar18".to_string()),
+                    rhs: HirExpr::Binary {
+                        op: HirBinaryOp::Add,
+                        lhs: Box::new(HirExpr::Var("xVar18".to_string())),
+                        rhs: Box::new(HirExpr::Var("param_10".to_string())),
+                        ty: NirType::Ptr(Box::new(byte_ty.clone())),
+                    },
+                },
+                HirStmt::Assign {
+                    lhs: HirLValue::Var("xVar22".to_string()),
+                    rhs: HirExpr::Load {
+                        ptr: Box::new(HirExpr::Var("xVar18".to_string())),
+                        ty: byte_ty,
+                    },
+                },
+                HirStmt::Assign {
+                    lhs: HirLValue::Var("xVar18".to_string()),
+                    rhs: HirExpr::Cast {
+                        ty: NirType::Int {
+                            bits: 32,
+                            signed: false,
+                        },
+                        expr: Box::new(HirExpr::Var("xVar22".to_string())),
+                    },
+                },
+            ],
+            ..Default::default()
+        };
+
+        apply_variable_merge_pass(&mut func);
+
+        let rendered_vars = format!("{:?}", func.body);
+        assert!(
+            rendered_vars.contains("xVar18"),
+            "load address temp must not be copy-merged into local_10"
+        );
+        assert!(
+            rendered_vars.contains("local_10"),
+            "cursor stack slot must remain distinct from the address temp"
+        );
+    }
+
+    #[test]
+    fn copy_merge_preserves_distinct_stack_state_from_shared_register_seed() {
+        let int_ty = NirType::Int {
+            bits: 32,
+            signed: false,
+        };
+        let wide_int_ty = NirType::Int {
+            bits: 64,
+            signed: false,
+        };
+        let local_i = NirBinding {
+            name: "local_4".to_string(),
+            ty: int_ty.clone(),
+            surface_type_name: None,
+            origin: Some(NirBindingOrigin::StackOffset(-4)),
+            initializer: None,
+        };
+        let local_j = NirBinding {
+            name: "local_8".to_string(),
+            ty: wide_int_ty.clone(),
+            surface_type_name: None,
+            origin: Some(NirBindingOrigin::StackOffset(-8)),
+            initializer: None,
+        };
+        let rax = NirBinding {
+            name: "rax".to_string(),
+            ty: int_ty.clone(),
+            surface_type_name: None,
+            origin: Some(NirBindingOrigin::TempPreserved),
+            initializer: Some(HirExpr::Const(0, int_ty.clone())),
+        };
+
+        let mut func = HirFunction {
+            name: "rc4_state_shape".to_string(),
+            int_param_offsets: Vec::new(),
+            params: vec![],
+            locals: vec![local_i, local_j, rax],
+            return_type: NirType::Unknown,
+            surface_return_type_name: None,
+            body: vec![
+                HirStmt::Assign {
+                    lhs: HirLValue::Var("local_4".to_string()),
+                    rhs: HirExpr::Var("rax".to_string()),
+                },
+                HirStmt::Assign {
+                    lhs: HirLValue::Var("local_8".to_string()),
+                    rhs: HirExpr::Var("rax".to_string()),
+                },
+                HirStmt::Assign {
+                    lhs: HirLValue::Var("local_4".to_string()),
+                    rhs: HirExpr::Binary {
+                        op: HirBinaryOp::Add,
+                        lhs: Box::new(HirExpr::Var("local_4".to_string())),
+                        rhs: Box::new(HirExpr::Const(1, int_ty.clone())),
+                        ty: int_ty.clone(),
+                    },
+                },
+                HirStmt::Assign {
+                    lhs: HirLValue::Var("local_8".to_string()),
+                    rhs: HirExpr::Binary {
+                        op: HirBinaryOp::Add,
+                        lhs: Box::new(HirExpr::Var("local_8".to_string())),
+                        rhs: Box::new(HirExpr::Var("local_4".to_string())),
+                        ty: wide_int_ty,
+                    },
+                },
+            ],
+            ..Default::default()
+        };
+
+        apply_variable_merge_pass(&mut func);
+
+        let rendered_vars = format!("{:?}", func.body);
+        assert!(
+            rendered_vars.contains("local_4"),
+            "loop index stack state must remain distinct"
+        );
+        assert!(
+            rendered_vars.contains("local_8"),
+            "RC4 accumulator stack state must remain distinct"
         );
     }
 

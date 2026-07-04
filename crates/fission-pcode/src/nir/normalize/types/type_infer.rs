@@ -138,6 +138,614 @@ fn collect_known_binding_types(func: &HirFunction) -> HashMap<String, NirType> {
     known
 }
 
+#[derive(Default)]
+struct BindingUseRole {
+    address_use: bool,
+    strong_scalar_use: bool,
+    address_pointee_type: Option<NirType>,
+}
+
+fn scalar_role_type_for_function(func: &HirFunction) -> NirType {
+    NirType::Int {
+        bits: if func.is_64bit { 64 } else { 32 },
+        signed: false,
+    }
+}
+
+fn apply_scalar_role_override_for_pointer_locals(func: &mut HirFunction) -> bool {
+    let mut roles: HashMap<String, BindingUseRole> = HashMap::new();
+    collect_binding_use_roles_stmts(&func.body, &mut roles);
+    let scalar_ty = scalar_role_type_for_function(func);
+    let mut changed = false;
+
+    for binding in &mut func.locals {
+        if binding.surface_type_name.is_some() || !matches!(binding.ty, NirType::Ptr(_)) {
+            continue;
+        }
+        let Some(role) = roles.get(&binding.name) else {
+            continue;
+        };
+        if role.strong_scalar_use && !role.address_use {
+            binding.ty = scalar_ty.clone();
+            changed = true;
+        }
+    }
+
+    changed
+}
+
+fn default_address_pointee_type() -> NirType {
+    NirType::Int {
+        bits: 8,
+        signed: false,
+    }
+}
+
+fn apply_address_role_pointer_override_for_locals(func: &mut HirFunction) -> bool {
+    let mut roles: HashMap<String, BindingUseRole> = HashMap::new();
+    collect_binding_use_roles_stmts(&func.body, &mut roles);
+    let mut changed = false;
+
+    for binding in &mut func.locals {
+        if binding.surface_type_name.is_some() || matches!(binding.ty, NirType::Ptr(_)) {
+            continue;
+        }
+        let Some(role) = roles.get(&binding.name) else {
+            continue;
+        };
+        if role.address_use {
+            let pointee = role
+                .address_pointee_type
+                .clone()
+                .filter(|ty| *ty != NirType::Unknown)
+                .unwrap_or_else(default_address_pointee_type);
+            binding.ty = NirType::Ptr(Box::new(pointee));
+            changed = true;
+        }
+    }
+
+    changed
+}
+
+fn zero_initializer_aliases(func: &HirFunction) -> HashSet<String> {
+    func.locals
+        .iter()
+        .chain(func.params.iter())
+        .filter_map(|binding| match binding.initializer.as_ref() {
+            Some(HirExpr::Const(0, _)) => Some(binding.name.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+fn rewrite_scalar_zero_alias_assignments(func: &mut HirFunction) -> bool {
+    let zero_aliases = zero_initializer_aliases(func);
+    if zero_aliases.is_empty() {
+        return false;
+    }
+    let binding_types = collect_known_binding_types(func);
+    rewrite_scalar_zero_alias_stmts(&mut func.body, &binding_types, &zero_aliases)
+}
+
+fn rewrite_scalar_zero_alias_stmts(
+    stmts: &mut [HirStmt],
+    binding_types: &HashMap<String, NirType>,
+    zero_aliases: &HashSet<String>,
+) -> bool {
+    let mut changed = false;
+    for stmt in stmts {
+        changed |= rewrite_scalar_zero_alias_stmt(stmt, binding_types, zero_aliases);
+    }
+    changed
+}
+
+fn rewrite_scalar_zero_alias_stmt(
+    stmt: &mut HirStmt,
+    binding_types: &HashMap<String, NirType>,
+    zero_aliases: &HashSet<String>,
+) -> bool {
+    match stmt {
+        HirStmt::Assign {
+            lhs: HirLValue::Var(lhs),
+            rhs,
+        } => {
+            let HirExpr::Var(src) = rhs else {
+                return false;
+            };
+            let Some(lhs_ty) = binding_types.get(lhs.as_str()) else {
+                return false;
+            };
+            if !matches!(lhs_ty, NirType::Int { .. }) || !zero_aliases.contains(src.as_str()) {
+                return false;
+            }
+            *rhs = HirExpr::Const(0, lhs_ty.clone());
+            true
+        }
+        HirStmt::Block(stmts) | HirStmt::While { body: stmts, .. } => {
+            rewrite_scalar_zero_alias_stmts(stmts, binding_types, zero_aliases)
+        }
+        HirStmt::DoWhile { body, .. } => {
+            rewrite_scalar_zero_alias_stmts(body, binding_types, zero_aliases)
+        }
+        HirStmt::For {
+            init, update, body, ..
+        } => {
+            let mut changed = false;
+            if let Some(init) = init {
+                changed |= rewrite_scalar_zero_alias_stmt(init, binding_types, zero_aliases);
+            }
+            if let Some(update) = update {
+                changed |= rewrite_scalar_zero_alias_stmt(update, binding_types, zero_aliases);
+            }
+            changed | rewrite_scalar_zero_alias_stmts(body, binding_types, zero_aliases)
+        }
+        HirStmt::If {
+            then_body,
+            else_body,
+            ..
+        } => {
+            rewrite_scalar_zero_alias_stmts(then_body, binding_types, zero_aliases)
+                | rewrite_scalar_zero_alias_stmts(else_body, binding_types, zero_aliases)
+        }
+        HirStmt::Switch { cases, default, .. } => {
+            let mut changed = false;
+            for case in cases {
+                changed |=
+                    rewrite_scalar_zero_alias_stmts(&mut case.body, binding_types, zero_aliases);
+            }
+            changed | rewrite_scalar_zero_alias_stmts(default, binding_types, zero_aliases)
+        }
+        _ => false,
+    }
+}
+
+fn param_name_set(func: &HirFunction) -> HashSet<String> {
+    func.params
+        .iter()
+        .filter(|param| param.surface_type_name.is_none())
+        .map(|param| param.name.clone())
+        .collect()
+}
+
+fn resolve_alias_to_param(
+    name: &str,
+    defs: &HashMap<String, DefEntry>,
+    params: &HashSet<String>,
+    visited: &mut HashSet<String>,
+) -> Option<String> {
+    if !visited.insert(name.to_string()) {
+        return None;
+    }
+    if params.contains(name) {
+        return Some(name.to_string());
+    }
+    match defs.get(name) {
+        Some(DefEntry::Alias(src)) => resolve_alias_to_param(src, defs, params, visited),
+        _ => None,
+    }
+}
+
+fn pointer_type_of_expr(
+    expr: &HirExpr,
+    binding_types: &HashMap<String, NirType>,
+) -> Option<NirType> {
+    match expr {
+        HirExpr::Var(name) => binding_types.get(name).and_then(|ty| match ty {
+            NirType::Ptr(_) => Some(ty.clone()),
+            _ => None,
+        }),
+        HirExpr::Cast {
+            ty: NirType::Ptr(_),
+            ..
+        } => Some(expr_type(expr)),
+        HirExpr::PtrOffset { base, .. }
+        | HirExpr::Load { ptr: base, .. }
+        | HirExpr::FieldAccess { base, .. }
+        | HirExpr::AggregateCopy { src: base, .. } => pointer_type_of_expr(base, binding_types),
+        HirExpr::Index { base, .. } => pointer_type_of_expr(base, binding_types),
+        _ => None,
+    }
+}
+
+fn param_pointer_candidates_from_expr(
+    expr: &HirExpr,
+    defs: &HashMap<String, DefEntry>,
+    binding_types: &HashMap<String, NirType>,
+    params: &HashSet<String>,
+    out: &mut HashMap<String, NirType>,
+) {
+    match expr {
+        HirExpr::Binary {
+            op: HirBinaryOp::Add,
+            lhs,
+            rhs,
+            ..
+        } => {
+            let lhs_ptr = pointer_type_of_expr(lhs, binding_types);
+            let rhs_ptr = pointer_type_of_expr(rhs, binding_types);
+            if let Some(ptr_ty) = lhs_ptr.as_ref()
+                && let HirExpr::Var(rhs_name) = rhs.as_ref()
+                && let Some(param) =
+                    resolve_alias_to_param(rhs_name, defs, params, &mut HashSet::new())
+            {
+                out.entry(param).or_insert_with(|| ptr_ty.clone());
+            }
+            if let Some(ptr_ty) = rhs_ptr.as_ref()
+                && let HirExpr::Var(lhs_name) = lhs.as_ref()
+                && let Some(param) =
+                    resolve_alias_to_param(lhs_name, defs, params, &mut HashSet::new())
+            {
+                out.entry(param).or_insert_with(|| ptr_ty.clone());
+            }
+            param_pointer_candidates_from_expr(lhs, defs, binding_types, params, out);
+            param_pointer_candidates_from_expr(rhs, defs, binding_types, params, out);
+        }
+        HirExpr::Binary { lhs, rhs, .. } => {
+            param_pointer_candidates_from_expr(lhs, defs, binding_types, params, out);
+            param_pointer_candidates_from_expr(rhs, defs, binding_types, params, out);
+        }
+        HirExpr::Cast { expr, .. } | HirExpr::Unary { expr, .. } => {
+            param_pointer_candidates_from_expr(expr, defs, binding_types, params, out);
+        }
+        HirExpr::Select {
+            cond,
+            then_expr,
+            else_expr,
+            ..
+        } => {
+            param_pointer_candidates_from_expr(cond, defs, binding_types, params, out);
+            param_pointer_candidates_from_expr(then_expr, defs, binding_types, params, out);
+            param_pointer_candidates_from_expr(else_expr, defs, binding_types, params, out);
+        }
+        HirExpr::Call { args, .. } => {
+            for arg in args {
+                param_pointer_candidates_from_expr(arg, defs, binding_types, params, out);
+            }
+        }
+        HirExpr::Load { ptr, .. }
+        | HirExpr::PtrOffset { base: ptr, .. }
+        | HirExpr::FieldAccess { base: ptr, .. }
+        | HirExpr::AggregateCopy { src: ptr, .. } => {
+            param_pointer_candidates_from_expr(ptr, defs, binding_types, params, out);
+        }
+        HirExpr::Index { base, index, .. } => {
+            param_pointer_candidates_from_expr(base, defs, binding_types, params, out);
+            param_pointer_candidates_from_expr(index, defs, binding_types, params, out);
+        }
+        HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) | HirExpr::Const(_, _) => {}
+    }
+}
+
+fn param_pointer_candidates_from_lvalue(
+    lhs: &HirLValue,
+    defs: &HashMap<String, DefEntry>,
+    binding_types: &HashMap<String, NirType>,
+    params: &HashSet<String>,
+    out: &mut HashMap<String, NirType>,
+) {
+    match lhs {
+        HirLValue::Var(_) => {}
+        HirLValue::Deref { ptr, .. } | HirLValue::FieldAccess { base: ptr, .. } => {
+            param_pointer_candidates_from_expr(ptr, defs, binding_types, params, out);
+        }
+        HirLValue::Index { base, index, .. } => {
+            param_pointer_candidates_from_expr(base, defs, binding_types, params, out);
+            param_pointer_candidates_from_expr(index, defs, binding_types, params, out);
+        }
+    }
+}
+
+fn collect_param_pointer_candidates_stmts(
+    stmts: &[HirStmt],
+    defs: &HashMap<String, DefEntry>,
+    binding_types: &HashMap<String, NirType>,
+    params: &HashSet<String>,
+    out: &mut HashMap<String, NirType>,
+) {
+    for stmt in stmts {
+        collect_param_pointer_candidates_stmt(stmt, defs, binding_types, params, out);
+    }
+}
+
+fn collect_param_pointer_candidates_stmt(
+    stmt: &HirStmt,
+    defs: &HashMap<String, DefEntry>,
+    binding_types: &HashMap<String, NirType>,
+    params: &HashSet<String>,
+    out: &mut HashMap<String, NirType>,
+) {
+    match stmt {
+        HirStmt::Assign { lhs, rhs } => {
+            param_pointer_candidates_from_lvalue(lhs, defs, binding_types, params, out);
+            param_pointer_candidates_from_expr(rhs, defs, binding_types, params, out);
+        }
+        HirStmt::Expr(expr) | HirStmt::Return(Some(expr)) => {
+            param_pointer_candidates_from_expr(expr, defs, binding_types, params, out);
+        }
+        HirStmt::VaStart { va_list, .. } => {
+            param_pointer_candidates_from_expr(va_list, defs, binding_types, params, out);
+        }
+        HirStmt::Block(stmts) | HirStmt::While { body: stmts, .. } => {
+            collect_param_pointer_candidates_stmts(stmts, defs, binding_types, params, out);
+        }
+        HirStmt::DoWhile { body, cond } => {
+            collect_param_pointer_candidates_stmts(body, defs, binding_types, params, out);
+            param_pointer_candidates_from_expr(cond, defs, binding_types, params, out);
+        }
+        HirStmt::For {
+            init,
+            cond,
+            update,
+            body,
+        } => {
+            if let Some(init) = init {
+                collect_param_pointer_candidates_stmt(init, defs, binding_types, params, out);
+            }
+            if let Some(cond) = cond {
+                param_pointer_candidates_from_expr(cond, defs, binding_types, params, out);
+            }
+            if let Some(update) = update {
+                collect_param_pointer_candidates_stmt(update, defs, binding_types, params, out);
+            }
+            collect_param_pointer_candidates_stmts(body, defs, binding_types, params, out);
+        }
+        HirStmt::If {
+            cond,
+            then_body,
+            else_body,
+        } => {
+            param_pointer_candidates_from_expr(cond, defs, binding_types, params, out);
+            collect_param_pointer_candidates_stmts(then_body, defs, binding_types, params, out);
+            collect_param_pointer_candidates_stmts(else_body, defs, binding_types, params, out);
+        }
+        HirStmt::Switch {
+            expr,
+            cases,
+            default,
+        } => {
+            param_pointer_candidates_from_expr(expr, defs, binding_types, params, out);
+            for case in cases {
+                collect_param_pointer_candidates_stmts(
+                    &case.body,
+                    defs,
+                    binding_types,
+                    params,
+                    out,
+                );
+            }
+            collect_param_pointer_candidates_stmts(default, defs, binding_types, params, out);
+        }
+        HirStmt::Return(None)
+        | HirStmt::Label(_)
+        | HirStmt::Goto(_)
+        | HirStmt::Break
+        | HirStmt::Continue => {}
+    }
+}
+
+fn apply_address_contributor_param_pointer_types(
+    func: &mut HirFunction,
+    defs: &HashMap<String, DefEntry>,
+    binding_types: &HashMap<String, NirType>,
+) -> bool {
+    let params = param_name_set(func);
+    if params.is_empty() {
+        return false;
+    }
+    let mut candidates = HashMap::new();
+    collect_param_pointer_candidates_stmts(
+        &func.body,
+        defs,
+        binding_types,
+        &params,
+        &mut candidates,
+    );
+    let mut changed = false;
+    for param in &mut func.params {
+        let Some(ptr_ty) = candidates.get(&param.name) else {
+            continue;
+        };
+        if param.surface_type_name.is_none() && !matches!(param.ty, NirType::Ptr(_)) {
+            param.ty = ptr_ty.clone();
+            changed = true;
+        }
+    }
+    changed
+}
+
+fn mark_address_use(
+    expr: &HirExpr,
+    pointee_ty: Option<&NirType>,
+    roles: &mut HashMap<String, BindingUseRole>,
+) {
+    fn mark_root(
+        expr: &HirExpr,
+        pointee_ty: Option<&NirType>,
+        roles: &mut HashMap<String, BindingUseRole>,
+    ) {
+        match expr {
+            HirExpr::Var(name) => {
+                let role = roles.entry(name.clone()).or_default();
+                role.address_use = true;
+                if let Some(ty) = pointee_ty
+                    && *ty != NirType::Unknown
+                {
+                    role.address_pointee_type.get_or_insert_with(|| ty.clone());
+                }
+            }
+            HirExpr::Cast { expr, .. } | HirExpr::Unary { expr, .. } => {
+                mark_root(expr, pointee_ty, roles);
+            }
+            HirExpr::PtrOffset { base, .. }
+            | HirExpr::FieldAccess { base, .. }
+            | HirExpr::AggregateCopy { src: base, .. } => {
+                mark_root(base, pointee_ty, roles);
+            }
+            HirExpr::Index { base, .. } => mark_root(base, pointee_ty, roles),
+            HirExpr::Binary { .. }
+            | HirExpr::Select { .. }
+            | HirExpr::Call { .. }
+            | HirExpr::Load { .. }
+            | HirExpr::Const(_, _)
+            | HirExpr::AddressOfGlobal(_) => {}
+        }
+    }
+
+    mark_root(expr, pointee_ty, roles);
+    collect_binding_use_roles_expr(expr, roles);
+}
+
+fn mark_strong_scalar_use(expr: &HirExpr, roles: &mut HashMap<String, BindingUseRole>) {
+    if let HirExpr::Var(name) = expr {
+        roles.entry(name.clone()).or_default().strong_scalar_use = true;
+    }
+    collect_binding_use_roles_expr(expr, roles);
+}
+
+fn scalar_role_op(op: HirBinaryOp) -> bool {
+    matches!(
+        op,
+        HirBinaryOp::Mod
+            | HirBinaryOp::And
+            | HirBinaryOp::Or
+            | HirBinaryOp::Xor
+            | HirBinaryOp::Shl
+            | HirBinaryOp::Shr
+            | HirBinaryOp::Sar
+    )
+}
+
+fn collect_binding_use_roles_stmts(stmts: &[HirStmt], roles: &mut HashMap<String, BindingUseRole>) {
+    for stmt in stmts {
+        collect_binding_use_roles_stmt(stmt, roles);
+    }
+}
+
+fn collect_binding_use_roles_stmt(stmt: &HirStmt, roles: &mut HashMap<String, BindingUseRole>) {
+    match stmt {
+        HirStmt::Assign { lhs, rhs } => {
+            collect_binding_use_roles_lvalue(lhs, roles);
+            collect_binding_use_roles_expr(rhs, roles);
+        }
+        HirStmt::Expr(expr) | HirStmt::Return(Some(expr)) => {
+            collect_binding_use_roles_expr(expr, roles);
+        }
+        HirStmt::VaStart { va_list, .. } => collect_binding_use_roles_expr(va_list, roles),
+        HirStmt::Block(stmts) => collect_binding_use_roles_stmts(stmts, roles),
+        HirStmt::If {
+            cond,
+            then_body,
+            else_body,
+        } => {
+            collect_binding_use_roles_expr(cond, roles);
+            collect_binding_use_roles_stmts(then_body, roles);
+            collect_binding_use_roles_stmts(else_body, roles);
+        }
+        HirStmt::While { cond, body } => {
+            collect_binding_use_roles_expr(cond, roles);
+            collect_binding_use_roles_stmts(body, roles);
+        }
+        HirStmt::DoWhile { body, cond } => {
+            collect_binding_use_roles_stmts(body, roles);
+            collect_binding_use_roles_expr(cond, roles);
+        }
+        HirStmt::For {
+            init,
+            cond,
+            update,
+            body,
+        } => {
+            if let Some(init) = init {
+                collect_binding_use_roles_stmt(init, roles);
+            }
+            if let Some(cond) = cond {
+                collect_binding_use_roles_expr(cond, roles);
+            }
+            if let Some(update) = update {
+                collect_binding_use_roles_stmt(update, roles);
+            }
+            collect_binding_use_roles_stmts(body, roles);
+        }
+        HirStmt::Switch {
+            expr,
+            cases,
+            default,
+        } => {
+            collect_binding_use_roles_expr(expr, roles);
+            for case in cases {
+                collect_binding_use_roles_stmts(&case.body, roles);
+            }
+            collect_binding_use_roles_stmts(default, roles);
+        }
+        HirStmt::Return(None)
+        | HirStmt::Label(_)
+        | HirStmt::Goto(_)
+        | HirStmt::Break
+        | HirStmt::Continue => {}
+    }
+}
+
+fn collect_binding_use_roles_lvalue(lhs: &HirLValue, roles: &mut HashMap<String, BindingUseRole>) {
+    match lhs {
+        HirLValue::Var(_) => {}
+        HirLValue::Deref { ptr, ty } => mark_address_use(ptr, Some(ty), roles),
+        HirLValue::Index {
+            base,
+            index,
+            elem_ty,
+        } => {
+            mark_address_use(base, Some(elem_ty), roles);
+            collect_binding_use_roles_expr(index, roles);
+        }
+        HirLValue::FieldAccess { base, .. } => mark_address_use(base, None, roles),
+    }
+}
+
+fn collect_binding_use_roles_expr(expr: &HirExpr, roles: &mut HashMap<String, BindingUseRole>) {
+    match expr {
+        HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) | HirExpr::Const(_, _) => {}
+        HirExpr::Cast { expr, .. } | HirExpr::Unary { expr, .. } => {
+            collect_binding_use_roles_expr(expr, roles);
+        }
+        HirExpr::Binary { op, lhs, rhs, .. } => {
+            if scalar_role_op(*op) {
+                mark_strong_scalar_use(lhs, roles);
+                mark_strong_scalar_use(rhs, roles);
+            } else {
+                collect_binding_use_roles_expr(lhs, roles);
+                collect_binding_use_roles_expr(rhs, roles);
+            }
+        }
+        HirExpr::Select {
+            cond,
+            then_expr,
+            else_expr,
+            ..
+        } => {
+            collect_binding_use_roles_expr(cond, roles);
+            collect_binding_use_roles_expr(then_expr, roles);
+            collect_binding_use_roles_expr(else_expr, roles);
+        }
+        HirExpr::Call { args, .. } => {
+            for arg in args {
+                collect_binding_use_roles_expr(arg, roles);
+            }
+        }
+        HirExpr::Load { ptr, ty } => mark_address_use(ptr, Some(ty), roles),
+        HirExpr::PtrOffset { base, .. } => mark_address_use(base, None, roles),
+        HirExpr::Index {
+            base,
+            index,
+            elem_ty,
+        } => {
+            mark_address_use(base, Some(elem_ty), roles);
+            collect_binding_use_roles_expr(index, roles);
+        }
+        HirExpr::FieldAccess { base, .. } => mark_address_use(base, None, roles),
+        HirExpr::AggregateCopy { src, .. } => mark_address_use(src, None, roles),
+    }
+}
+
 /// Re-derive the function's return type from its `return` statements.
 ///
 /// The builder sets `return_type` to `expr_type(return_expr)`, but
@@ -688,6 +1296,11 @@ pub(crate) fn apply_type_inference_pass(func: &mut HirFunction) -> bool {
 
     changed |= narrow_zero_extended_return_width(func, &defs, &known_binding_types);
     changed |= strip_zero_extended_casts_to_declared_return_width(func);
+    changed |= apply_scalar_role_override_for_pointer_locals(func);
+    changed |= apply_address_role_pointer_override_for_locals(func);
+    changed |= rewrite_scalar_zero_alias_assignments(func);
+    let address_binding_types = collect_known_binding_types(func);
+    changed |= apply_address_contributor_param_pointer_types(func, &defs, &address_binding_types);
 
     changed
 }
@@ -901,6 +1514,210 @@ mod tests {
         super::apply_type_inference_pass(&mut func);
         // ty must remain Unknown — only surface_type_name is authoritative
         assert_eq!(func.locals[0].ty, NirType::Unknown);
+    }
+
+    #[test]
+    fn scalar_role_demotes_pointer_local_without_address_use() {
+        let mut local = make_binding("acc");
+        local.ty = NirType::Ptr(Box::new(NirType::Int {
+            bits: 8,
+            signed: false,
+        }));
+        let body = vec![make_assign(
+            "acc",
+            HirExpr::Binary {
+                op: HirBinaryOp::Mod,
+                lhs: Box::new(HirExpr::Var("acc".to_owned())),
+                rhs: Box::new(HirExpr::Const(
+                    256,
+                    NirType::Int {
+                        bits: 32,
+                        signed: true,
+                    },
+                )),
+                ty: NirType::Int {
+                    bits: 64,
+                    signed: false,
+                },
+            },
+        )];
+        let mut func = make_func(vec![local], body, NirType::Unknown);
+
+        assert!(super::apply_type_inference_pass(&mut func));
+        assert_eq!(
+            func.locals[0].ty,
+            NirType::Int {
+                bits: 64,
+                signed: false
+            }
+        );
+    }
+
+    #[test]
+    fn scalar_role_keeps_pointer_local_with_address_use() {
+        let mut local = make_binding("ptr");
+        local.ty = NirType::Ptr(Box::new(NirType::Int {
+            bits: 8,
+            signed: false,
+        }));
+        let body = vec![make_assign(
+            "tmp",
+            HirExpr::Load {
+                ptr: Box::new(HirExpr::Var("ptr".to_owned())),
+                ty: NirType::Int {
+                    bits: 8,
+                    signed: false,
+                },
+            },
+        )];
+        let mut func = make_func(vec![local, make_binding("tmp")], body, NirType::Unknown);
+
+        assert!(super::apply_type_inference_pass(&mut func));
+        assert!(matches!(func.locals[0].ty, NirType::Ptr(_)));
+    }
+
+    #[test]
+    fn scalar_zero_alias_assignment_rewrites_pointer_zero_to_scalar_zero() {
+        let mut zero = make_binding("rax");
+        zero.ty = NirType::Ptr(Box::new(NirType::Int {
+            bits: 8,
+            signed: false,
+        }));
+        zero.initializer = Some(HirExpr::Const(0, zero.ty.clone()));
+        let mut scalar = make_binding("acc");
+        scalar.ty = NirType::Int {
+            bits: 64,
+            signed: false,
+        };
+        let mut func = make_func(
+            vec![zero, scalar],
+            vec![make_assign("acc", HirExpr::Var("rax".to_string()))],
+            NirType::Unknown,
+        );
+
+        assert!(super::apply_type_inference_pass(&mut func));
+        assert!(matches!(
+            &func.body[0],
+            HirStmt::Assign {
+                lhs: HirLValue::Var(name),
+                rhs: HirExpr::Const(0, NirType::Int { bits: 64, signed: false }),
+            } if name == "acc"
+        ));
+    }
+
+    #[test]
+    fn scalar_zero_alias_assignment_keeps_pointer_destination() {
+        let mut zero = make_binding("rax");
+        zero.ty = NirType::Ptr(Box::new(NirType::Int {
+            bits: 8,
+            signed: false,
+        }));
+        zero.initializer = Some(HirExpr::Const(0, zero.ty.clone()));
+        let mut ptr = make_binding("ptr");
+        ptr.ty = zero.ty.clone();
+        let mut func = make_func(
+            vec![zero, ptr],
+            vec![make_assign("ptr", HirExpr::Var("rax".to_string()))],
+            NirType::Unknown,
+        );
+
+        assert!(!super::rewrite_scalar_zero_alias_assignments(&mut func));
+        assert!(matches!(
+            &func.body[0],
+            HirStmt::Assign {
+                lhs: HirLValue::Var(name),
+                rhs: HirExpr::Var(src),
+            } if name == "ptr" && src == "rax"
+        ));
+    }
+
+    #[test]
+    fn address_contributor_alias_promotes_param_to_pointer() {
+        let ptr_ty = NirType::Ptr(Box::new(NirType::Int {
+            bits: 8,
+            signed: false,
+        }));
+        let u64_ty = NirType::Int {
+            bits: 64,
+            signed: false,
+        };
+        let mut ptr = make_binding("cursor");
+        ptr.ty = ptr_ty.clone();
+        let mut alias = make_binding("param_10");
+        alias.ty = u64_ty.clone();
+        let body = vec![
+            make_assign("param_10", HirExpr::Var("param_1".to_string())),
+            make_assign(
+                "cursor",
+                HirExpr::Binary {
+                    op: HirBinaryOp::Add,
+                    lhs: Box::new(HirExpr::Var("cursor".to_string())),
+                    rhs: Box::new(HirExpr::Var("param_10".to_string())),
+                    ty: ptr_ty.clone(),
+                },
+            ),
+            make_assign(
+                "byte",
+                HirExpr::Load {
+                    ptr: Box::new(HirExpr::Var("cursor".to_string())),
+                    ty: NirType::Int {
+                        bits: 8,
+                        signed: false,
+                    },
+                },
+            ),
+        ];
+        let mut func = make_func(
+            vec![ptr, alias, make_binding("byte")],
+            body,
+            NirType::Unknown,
+        );
+        func.params = vec![
+            make_param("param_1", u64_ty.clone()),
+            make_param("param_2", u64_ty.clone()),
+        ];
+
+        assert!(super::apply_type_inference_pass(&mut func));
+        assert_eq!(func.params[0].ty, ptr_ty);
+        assert_eq!(func.params[1].ty, u64_ty);
+    }
+
+    #[test]
+    fn scalar_comparison_alias_does_not_promote_param_to_pointer() {
+        let u64_ty = NirType::Int {
+            bits: 64,
+            signed: false,
+        };
+        let body = vec![
+            make_assign("limit", HirExpr::Var("param_1".to_string())),
+            HirStmt::If {
+                cond: HirExpr::Binary {
+                    op: HirBinaryOp::Lt,
+                    lhs: Box::new(HirExpr::Var("i".to_string())),
+                    rhs: Box::new(HirExpr::Var("limit".to_string())),
+                    ty: NirType::Bool,
+                },
+                then_body: Vec::new(),
+                else_body: Vec::new(),
+            },
+        ];
+        let mut limit = make_binding("limit");
+        limit.ty = u64_ty.clone();
+        let mut idx = make_binding("i");
+        idx.ty = u64_ty.clone();
+        let mut func = make_func(vec![limit, idx], body, NirType::Unknown);
+        func.params = vec![make_param("param_1", u64_ty.clone())];
+        let binding_types = super::collect_known_binding_types(&func);
+
+        assert!(!super::apply_address_contributor_param_pointer_types(
+            &mut func,
+            &HashMap::from([(
+                "limit".to_string(),
+                super::DefEntry::Alias("param_1".to_string())
+            )]),
+            &binding_types,
+        ));
+        assert_eq!(func.params[0].ty, u64_ty);
     }
 
     #[test]

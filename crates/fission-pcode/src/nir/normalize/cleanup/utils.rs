@@ -4,6 +4,7 @@ use std::collections::{HashMap, HashSet};
 pub(super) fn is_trivial_temp_name(name: &str) -> bool {
     name == "result"
         || name == "retval"
+        || name == "reg"
         || name.starts_with("uVar")
         || name.starts_with("iVar")
         || name.starts_with("xVar")

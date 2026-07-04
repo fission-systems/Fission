@@ -1,7 +1,7 @@
 use super::super::analysis::defuse::DefUseMap;
 use super::super::*;
 use super::utils::*;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 pub(crate) fn collapse_loop_exit_alias_returns(stmts: &mut Vec<HirStmt>) -> bool {
     let mut changed = false;
@@ -33,6 +33,239 @@ pub(crate) fn collapse_loop_exit_alias_returns(stmts: &mut Vec<HirStmt>) -> bool
     }
 
     changed
+}
+
+pub(crate) fn recover_guarded_loop_tail_accumulator_returns(stmts: &mut Vec<HirStmt>) -> bool {
+    let mut changed = false;
+    let mut idx = 0usize;
+    while idx + 3 < stmts.len() {
+        let Some(replacement) = guarded_loop_tail_replacement(stmts, idx) else {
+            changed |= recover_guarded_loop_tail_accumulator_returns_in_stmt(&mut stmts[idx]);
+            idx += 1;
+            continue;
+        };
+        let end = replacement.end;
+        stmts.splice(
+            idx..end,
+            [
+                HirStmt::While {
+                    cond: replacement.cond,
+                    body: replacement.body,
+                },
+                HirStmt::Return(Some(HirExpr::Var(replacement.accumulator))),
+            ],
+        );
+        changed = true;
+        idx += 2;
+    }
+    while idx < stmts.len() {
+        changed |= recover_guarded_loop_tail_accumulator_returns_in_stmt(&mut stmts[idx]);
+        idx += 1;
+    }
+    changed
+}
+
+struct GuardedLoopTailReplacement {
+    cond: HirExpr,
+    body: Vec<HirStmt>,
+    accumulator: String,
+    end: usize,
+}
+
+fn guarded_loop_tail_replacement(
+    stmts: &[HirStmt],
+    idx: usize,
+) -> Option<GuardedLoopTailReplacement> {
+    let HirStmt::If {
+        cond,
+        then_body,
+        else_body,
+    } = stmts.get(idx)?
+    else {
+        return None;
+    };
+    if !else_body.is_empty() {
+        return None;
+    }
+    let [HirStmt::Goto(label)] = then_body.as_slice() else {
+        return None;
+    };
+    let stale_temp = return_var_name(stmts.get(idx + 1)?)?.to_string();
+    let HirStmt::Label(body_label) = stmts.get(idx + 2)? else {
+        return None;
+    };
+    if body_label != label {
+        return None;
+    }
+    let end = next_label_or_end(stmts, idx + 3);
+    let body = stmts[idx + 3..end].to_vec();
+    if body.is_empty() {
+        return None;
+    }
+    let accumulator = accumulator_updated_from_temp(&body, &stale_temp)?;
+    if !stmts[..idx]
+        .iter()
+        .any(|stmt| stmt_assigns_var(stmt, &accumulator))
+    {
+        return None;
+    }
+    let cond_vars = vars_in_expr(cond);
+    if cond_vars.is_empty()
+        || !cond_vars
+            .iter()
+            .any(|name| body.iter().any(|stmt| stmt_assigns_var(stmt, name)))
+    {
+        return None;
+    }
+    let stale_def_idx = body
+        .iter()
+        .position(|stmt| matches!(stmt, HirStmt::Assign { lhs: HirLValue::Var(lhs), .. } if lhs == &stale_temp))?;
+    let acc_update_idx = body
+        .iter()
+        .position(|stmt| accumulator_update_stmt(stmt, &stale_temp).is_some())?;
+    if stale_def_idx >= acc_update_idx {
+        return None;
+    }
+    Some(GuardedLoopTailReplacement {
+        cond: cond.clone(),
+        body,
+        accumulator,
+        end,
+    })
+}
+
+fn recover_guarded_loop_tail_accumulator_returns_in_stmt(stmt: &mut HirStmt) -> bool {
+    match stmt {
+        HirStmt::Block(stmts)
+        | HirStmt::While { body: stmts, .. }
+        | HirStmt::DoWhile { body: stmts, .. } => {
+            recover_guarded_loop_tail_accumulator_returns(stmts)
+        }
+        HirStmt::For {
+            init, update, body, ..
+        } => {
+            let mut changed = false;
+            if let Some(init) = init
+                && let HirStmt::Block(stmts) = init.as_mut()
+            {
+                changed |= recover_guarded_loop_tail_accumulator_returns(stmts);
+            }
+            if let Some(update) = update
+                && let HirStmt::Block(stmts) = update.as_mut()
+            {
+                changed |= recover_guarded_loop_tail_accumulator_returns(stmts);
+            }
+            changed | recover_guarded_loop_tail_accumulator_returns(body)
+        }
+        HirStmt::If {
+            then_body,
+            else_body,
+            ..
+        } => {
+            recover_guarded_loop_tail_accumulator_returns(then_body)
+                | recover_guarded_loop_tail_accumulator_returns(else_body)
+        }
+        HirStmt::Switch { cases, default, .. } => {
+            let mut changed = false;
+            for case in cases {
+                changed |= recover_guarded_loop_tail_accumulator_returns(&mut case.body);
+            }
+            changed | recover_guarded_loop_tail_accumulator_returns(default)
+        }
+        _ => false,
+    }
+}
+
+fn next_label_or_end(stmts: &[HirStmt], start: usize) -> usize {
+    stmts[start..]
+        .iter()
+        .position(|stmt| matches!(stmt, HirStmt::Label(_)))
+        .map(|offset| start + offset)
+        .unwrap_or(stmts.len())
+}
+
+fn accumulator_updated_from_temp(body: &[HirStmt], temp: &str) -> Option<String> {
+    let mut acc = None;
+    for stmt in body {
+        let Some(candidate) = accumulator_update_stmt(stmt, temp) else {
+            continue;
+        };
+        if acc.is_some() {
+            return None;
+        }
+        acc = Some(candidate);
+    }
+    acc
+}
+
+fn accumulator_update_stmt(stmt: &HirStmt, temp: &str) -> Option<String> {
+    let HirStmt::Assign {
+        lhs: HirLValue::Var(lhs),
+        rhs:
+            HirExpr::Binary {
+                op: HirBinaryOp::Add | HirBinaryOp::Sub,
+                lhs: bin_lhs,
+                rhs: bin_rhs,
+                ..
+            },
+    } = stmt
+    else {
+        return None;
+    };
+    let left = expr_as_var_ignoring_casts(bin_lhs)?;
+    let right = expr_as_var_ignoring_casts(bin_rhs)?;
+    if left == lhs && right == temp {
+        Some(lhs.clone())
+    } else if right == lhs && left == temp {
+        Some(lhs.clone())
+    } else {
+        None
+    }
+}
+
+fn vars_in_expr(expr: &HirExpr) -> HashSet<String> {
+    let mut vars = HashSet::new();
+    collect_vars_in_expr(expr, &mut vars);
+    vars
+}
+
+fn collect_vars_in_expr(expr: &HirExpr, vars: &mut HashSet<String>) {
+    match expr {
+        HirExpr::Var(name) | HirExpr::AddressOfGlobal(name) => {
+            vars.insert(name.clone());
+        }
+        HirExpr::Const(_, _) => {}
+        HirExpr::Cast { expr, .. }
+        | HirExpr::Unary { expr, .. }
+        | HirExpr::Load { ptr: expr, .. }
+        | HirExpr::PtrOffset { base: expr, .. }
+        | HirExpr::FieldAccess { base: expr, .. }
+        | HirExpr::AggregateCopy { src: expr, .. } => collect_vars_in_expr(expr, vars),
+        HirExpr::Binary { lhs, rhs, .. }
+        | HirExpr::Index {
+            base: lhs,
+            index: rhs,
+            ..
+        } => {
+            collect_vars_in_expr(lhs, vars);
+            collect_vars_in_expr(rhs, vars);
+        }
+        HirExpr::Select {
+            cond,
+            then_expr,
+            else_expr,
+            ..
+        } => {
+            collect_vars_in_expr(cond, vars);
+            collect_vars_in_expr(then_expr, vars);
+            collect_vars_in_expr(else_expr, vars);
+        }
+        HirExpr::Call { args, .. } => {
+            for arg in args {
+                collect_vars_in_expr(arg, vars);
+            }
+        }
+    }
 }
 
 fn return_var_name(stmt: &HirStmt) -> Option<&str> {

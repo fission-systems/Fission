@@ -27,7 +27,7 @@
 /// after `apply_type_inference_pass` so that the def-driven types it computed
 /// can serve as additional seeds for backward propagation.
 use super::super::*;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 /// A type constraint derived from the context in which a variable is used.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -42,6 +42,12 @@ enum UseConstraint {
     Exact(NirType),
 }
 
+#[derive(Default)]
+struct BindingUseRole {
+    address_use: bool,
+    scalar_use: bool,
+}
+
 /// Accumulate use-site constraints for all named variables in `stmts`.
 fn collect_constraints(
     stmts: &[HirStmt],
@@ -52,6 +58,213 @@ fn collect_constraints(
     for stmt in stmts {
         collect_constraints_stmt(stmt, return_type, known_binding_types, out);
     }
+}
+
+fn collect_binding_use_roles(stmts: &[HirStmt], out: &mut HashMap<String, BindingUseRole>) {
+    for stmt in stmts {
+        collect_binding_use_roles_stmt(stmt, out);
+    }
+}
+
+fn collect_binding_use_roles_stmt(stmt: &HirStmt, out: &mut HashMap<String, BindingUseRole>) {
+    match stmt {
+        HirStmt::Assign { lhs, rhs } => {
+            collect_binding_use_roles_lvalue(lhs, out);
+            collect_binding_use_roles_expr(rhs, out);
+        }
+        HirStmt::Expr(expr) | HirStmt::Return(Some(expr)) => {
+            collect_binding_use_roles_expr(expr, out);
+        }
+        HirStmt::VaStart { va_list, .. } => collect_binding_use_roles_expr(va_list, out),
+        HirStmt::Block(body) | HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
+            collect_binding_use_roles(body, out);
+        }
+        HirStmt::If {
+            cond,
+            then_body,
+            else_body,
+        } => {
+            collect_binding_use_roles_expr(cond, out);
+            collect_binding_use_roles(then_body, out);
+            collect_binding_use_roles(else_body, out);
+        }
+        HirStmt::For {
+            init,
+            cond,
+            update,
+            body,
+        } => {
+            if let Some(init) = init {
+                collect_binding_use_roles_stmt(init, out);
+            }
+            if let Some(cond) = cond {
+                collect_binding_use_roles_expr(cond, out);
+            }
+            if let Some(update) = update {
+                collect_binding_use_roles_stmt(update, out);
+            }
+            collect_binding_use_roles(body, out);
+        }
+        HirStmt::Switch {
+            expr,
+            cases,
+            default,
+        } => {
+            collect_binding_use_roles_expr(expr, out);
+            for case in cases {
+                collect_binding_use_roles(&case.body, out);
+            }
+            collect_binding_use_roles(default, out);
+        }
+        HirStmt::Return(None)
+        | HirStmt::Label(_)
+        | HirStmt::Goto(_)
+        | HirStmt::Break
+        | HirStmt::Continue => {}
+    }
+}
+
+fn collect_binding_use_roles_lvalue(lhs: &HirLValue, out: &mut HashMap<String, BindingUseRole>) {
+    match lhs {
+        HirLValue::Var(_) => {}
+        HirLValue::Deref { ptr, .. } => mark_address_role(ptr, out),
+        HirLValue::Index { base, index, .. } => {
+            mark_address_role(base, out);
+            collect_binding_use_roles_expr(index, out);
+        }
+        HirLValue::FieldAccess { base, .. } => mark_address_role(base, out),
+    }
+}
+
+fn collect_binding_use_roles_expr(expr: &HirExpr, out: &mut HashMap<String, BindingUseRole>) {
+    match expr {
+        HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) | HirExpr::Const(_, _) => {}
+        HirExpr::Cast { ty, expr } => {
+            if matches!(ty, NirType::Int { .. } | NirType::Bool) {
+                mark_scalar_role(expr, out);
+            } else {
+                collect_binding_use_roles_expr(expr, out);
+            }
+        }
+        HirExpr::Unary { expr, .. } => mark_scalar_role(expr, out),
+        HirExpr::Binary { op, lhs, rhs, .. } => {
+            if role_scalar_op(*op) {
+                mark_scalar_role(lhs, out);
+                mark_scalar_role(rhs, out);
+            } else {
+                collect_binding_use_roles_expr(lhs, out);
+                collect_binding_use_roles_expr(rhs, out);
+            }
+        }
+        HirExpr::Select {
+            cond,
+            then_expr,
+            else_expr,
+            ..
+        } => {
+            collect_binding_use_roles_expr(cond, out);
+            collect_binding_use_roles_expr(then_expr, out);
+            collect_binding_use_roles_expr(else_expr, out);
+        }
+        HirExpr::Call { args, .. } => {
+            for arg in args {
+                collect_binding_use_roles_expr(arg, out);
+            }
+        }
+        HirExpr::Load { ptr, .. } => mark_address_role(ptr, out),
+        HirExpr::PtrOffset { base, .. }
+        | HirExpr::FieldAccess { base, .. }
+        | HirExpr::AggregateCopy { src: base, .. } => mark_address_role(base, out),
+        HirExpr::Index { base, index, .. } => {
+            mark_address_role(base, out);
+            collect_binding_use_roles_expr(index, out);
+        }
+    }
+}
+
+fn mark_address_role(expr: &HirExpr, out: &mut HashMap<String, BindingUseRole>) {
+    match expr {
+        HirExpr::Var(name) => {
+            out.entry(name.clone()).or_default().address_use = true;
+        }
+        HirExpr::Cast { expr, .. }
+        | HirExpr::Unary { expr, .. }
+        | HirExpr::PtrOffset { base: expr, .. }
+        | HirExpr::FieldAccess { base: expr, .. }
+        | HirExpr::AggregateCopy { src: expr, .. } => mark_address_role(expr, out),
+        HirExpr::Index { base, .. } => mark_address_role(base, out),
+        HirExpr::Binary { .. }
+        | HirExpr::Select { .. }
+        | HirExpr::Call { .. }
+        | HirExpr::Load { .. }
+        | HirExpr::Const(_, _)
+        | HirExpr::AddressOfGlobal(_) => collect_binding_use_roles_expr(expr, out),
+    }
+}
+
+fn mark_scalar_role(expr: &HirExpr, out: &mut HashMap<String, BindingUseRole>) {
+    match expr {
+        HirExpr::Var(name) => {
+            out.entry(name.clone()).or_default().scalar_use = true;
+        }
+        HirExpr::Cast { expr, .. }
+        | HirExpr::Unary { expr, .. }
+        | HirExpr::PtrOffset { base: expr, .. }
+        | HirExpr::FieldAccess { base: expr, .. }
+        | HirExpr::AggregateCopy { src: expr, .. } => mark_scalar_role(expr, out),
+        HirExpr::Binary { lhs, rhs, .. } => {
+            mark_scalar_role(lhs, out);
+            mark_scalar_role(rhs, out);
+        }
+        HirExpr::Select {
+            cond,
+            then_expr,
+            else_expr,
+            ..
+        } => {
+            mark_scalar_role(cond, out);
+            mark_scalar_role(then_expr, out);
+            mark_scalar_role(else_expr, out);
+        }
+        HirExpr::Call { args, .. } => {
+            for arg in args {
+                mark_scalar_role(arg, out);
+            }
+        }
+        HirExpr::Index { base, index, .. } => {
+            mark_scalar_role(base, out);
+            mark_scalar_role(index, out);
+        }
+        HirExpr::Load { ptr, .. } => mark_address_role(ptr, out),
+        HirExpr::Const(_, _) | HirExpr::AddressOfGlobal(_) => {}
+    }
+}
+
+fn role_scalar_op(op: HirBinaryOp) -> bool {
+    matches!(
+        op,
+        HirBinaryOp::Add
+            | HirBinaryOp::Sub
+            | HirBinaryOp::Mul
+            | HirBinaryOp::Div
+            | HirBinaryOp::Mod
+            | HirBinaryOp::And
+            | HirBinaryOp::Or
+            | HirBinaryOp::Xor
+            | HirBinaryOp::Shl
+            | HirBinaryOp::Shr
+            | HirBinaryOp::Sar
+            | HirBinaryOp::Eq
+            | HirBinaryOp::Ne
+            | HirBinaryOp::Lt
+            | HirBinaryOp::Le
+            | HirBinaryOp::Gt
+            | HirBinaryOp::Ge
+            | HirBinaryOp::SLt
+            | HirBinaryOp::SLe
+            | HirBinaryOp::SGt
+            | HirBinaryOp::SGe
+    )
 }
 
 fn collect_constraints_stmt(
@@ -1226,6 +1439,29 @@ fn merge_constraint(binding: &mut NirBinding, constraint: &UseConstraint) -> boo
     }
 }
 
+fn restore_scalar_only_pointer_locals(func: &mut HirFunction) -> bool {
+    let mut roles = HashMap::<String, BindingUseRole>::new();
+    collect_binding_use_roles(&func.body, &mut roles);
+    let scalar_ty = NirType::Int {
+        bits: if func.is_64bit { 64 } else { 32 },
+        signed: false,
+    };
+    let mut changed = false;
+    for binding in &mut func.locals {
+        if binding.surface_type_name.is_some() || !matches!(binding.ty, NirType::Ptr(_)) {
+            continue;
+        }
+        let Some(role) = roles.get(&binding.name) else {
+            continue;
+        };
+        if role.scalar_use && !role.address_use {
+            binding.ty = scalar_ty.clone();
+            changed = true;
+        }
+    }
+    changed
+}
+
 /// Apply the use-driven backward type inference pass.
 ///
 /// Iterates to convergence (typically 1–2 rounds).  Returns `true` if any
@@ -1255,6 +1491,7 @@ pub(crate) fn apply_use_driven_type_infer_pass(func: &mut HirFunction) -> bool {
         round_changed |= promote_return_signedness_from_returns(func);
         round_changed |= narrow_integer_params_from_wrapping_return_uses(func);
         round_changed |= promote_store_value_only_unsigned_params(func);
+        round_changed |= restore_scalar_only_pointer_locals(func);
         if !round_changed {
             break;
         }
