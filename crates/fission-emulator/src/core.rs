@@ -15,6 +15,9 @@ pub struct Emulator {
 impl Emulator {
     pub fn new(mut state: MachineState, binary: LoadedBinary, sleigh: RuntimeSleighFrontend) -> Result<Self> {
         let rip = binary.inner().entry_point;
+        
+        crate::loader::map_binary_to_state(&mut state, &binary)?;
+
         // set RIP register (assume space 2, offset some specific value depending on arch).
         // Since we know we are x86/x64 mostly, Sleigh handles RIP internally, but for emulator loop we keep track of it here.
         Ok(Self {
@@ -26,16 +29,18 @@ impl Emulator {
     }
 
     pub fn run_instruction(&mut self) -> Result<bool> {
-        // Fetch up to 16 bytes for decoding
+        // Fetch up to 16 bytes for decoding from RAM (Space 3)
         let max_inst_len = 16;
-        let bytes = self.binary.view_bytes(self.rip, max_inst_len).unwrap_or(&[]);
-        if bytes.is_empty() {
-            tracing::error!("Failed to fetch instruction at 0x{:X}", self.rip);
-            return Ok(false);
-        }
+        let bytes_vec = match self.state.read_space(3, self.rip, max_inst_len) {
+            Ok(b) => b,
+            Err(_) => {
+                tracing::error!("Failed to fetch instruction memory at 0x{:X}", self.rip);
+                return Ok(false);
+            }
+        };
 
         // Decode and lift
-        let (pcode_ops, inst_len) = self.sleigh.decode_and_lift_with_len(bytes, self.rip)
+        let (pcode_ops, inst_len) = self.sleigh.decode_and_lift_with_len(&bytes_vec, self.rip)
             .with_context(|| format!("Failed to lift instruction at 0x{:X}", self.rip))?;
 
         let mut branched = false;

@@ -1,8 +1,8 @@
 use super::WindowsDebugger;
-use crate::debug::traits::Debugger;
+use crate::debug::traits::ExecutionBackend;
 use fission_core::{FissionError, Result as FissionResult};
 
-impl Debugger for WindowsDebugger {
+impl ExecutionBackend for WindowsDebugger {
     fn continue_execution(&mut self) -> FissionResult<()> {
         let pid = self
             .state

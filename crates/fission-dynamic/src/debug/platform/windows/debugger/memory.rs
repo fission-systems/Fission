@@ -1,8 +1,8 @@
 use super::WindowsDebugger;
-use crate::debug::traits::Debugger;
+use crate::debug::traits::ExecutionBackend;
 use fission_core::{FissionError, Result as FissionResult};
 
-impl Debugger for WindowsDebugger {
+impl ExecutionBackend for WindowsDebugger {
     fn remote_alloc(&mut self, address: u64, size: usize) -> FissionResult<u64> {
         let h = self
             .process_handle

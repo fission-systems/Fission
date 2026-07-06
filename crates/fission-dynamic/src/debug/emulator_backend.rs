@@ -115,7 +115,7 @@ impl ExecutionBackend for EmulatorBackend {
         if let Some(emu) = &self.emulator {
             // Create dummy RegisterState and fill with what we can get
             let mut state = RegisterState::default();
-            state.rip = emu.state.get_rip();
+            state.rip = emu.rip;
             // In a full implementation, we'd query registers from emu.state.read(1, offset, size)
             // Need Sleigh to know register offsets, or hardcode typical x86_64 for now
             Ok(state)
@@ -129,8 +129,7 @@ impl ExecutionBackend for EmulatorBackend {
         // Initialize the emulator components
         // This mirrors the logic in `fission_cli::cli::oneshot::run_sandbox`
         
-        let file_data = std::fs::read(path).map_err(|e| fission_core::err!(debug, "Failed to read binary: {}", e))?;
-        let binary = fission_loader::loader::BinaryLoader::load(path.as_ref(), &file_data)
+        let binary = fission_loader::loader::LoadedBinary::from_file(path)
             .map_err(|e| fission_core::err!(debug, "Loader error: {}", e))?;
         
         let path_config = fission_core::core::path_config::PathConfig::detect(None);
@@ -143,32 +142,6 @@ impl ExecutionBackend for EmulatorBackend {
         
         let sleigh = fission_sleigh::runtime::RuntimeSleighFrontend::new(spec);
         let mut state = fission_emulator::core::MachineState::new();
-        
-        // Map PE sections
-        if let fission_loader::loader::BinaryType::Pe(pe) = &binary.binary_type {
-            if let Some(headers) = &pe.headers {
-                for sec in &headers.sections {
-                    let addr = headers.optional_header.image_base + sec.virtual_address as u64;
-                    let size = sec.virtual_size as usize;
-                    let file_size = sec.size_of_raw_data as usize;
-                    
-                    let mut data = vec![0u8; size];
-                    let copy_size = std::cmp::min(size, file_size);
-                    if copy_size > 0 {
-                        let offset = sec.pointer_to_raw_data as usize;
-                        if offset + copy_size <= file_data.len() {
-                            data[..copy_size].copy_from_slice(&file_data[offset..offset+copy_size]);
-                        }
-                    }
-                    
-                    for (i, b) in data.iter().enumerate() {
-                        let _ = state.write(3, addr + i as u64, 1, *b as u64);
-                    }
-                }
-            }
-        }
-        
-        state.set_rip(binary.entry_point.unwrap_or(0));
         
         let emu = Emulator::new(state, binary, sleigh).map_err(|e| fission_core::err!(debug, "Emulator init failed: {}", e))?;
         self.emulator = Some(emu);

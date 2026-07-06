@@ -3,7 +3,7 @@
 //! This module provides debugging capabilities on macOS using the Mach API.
 //! Currently a stub implementation - Mach debugging requires special entitlements.
 
-use crate::debug::traits::Debugger;
+use crate::debug::traits::ExecutionBackend;
 use crate::debug::types::{DebugState, ProcessInfo, RegisterState};
 use fission_core::{FissionError, Result as FissionResult};
 
@@ -70,7 +70,7 @@ pub fn enumerate_processes() -> Vec<ProcessInfo> {
     processes
 }
 
-impl Debugger for MacOSDebugger {
+impl ExecutionBackend for MacOSDebugger {
     fn enumerate_processes() -> Vec<ProcessInfo> {
         enumerate_processes()
     }

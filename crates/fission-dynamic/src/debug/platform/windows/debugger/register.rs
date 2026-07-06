@@ -1,8 +1,8 @@
 use super::WindowsDebugger;
-use crate::debug::traits::Debugger;
+use crate::debug::traits::ExecutionBackend;
 use fission_core::{FissionError, Result as FissionResult};
 
-impl Debugger for WindowsDebugger {
+impl ExecutionBackend for WindowsDebugger {
     fn fetch_registers(
         &mut self,
         thread_id: u32,

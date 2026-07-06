@@ -2,7 +2,7 @@
 //!
 //! This module provides debugging capabilities on Linux using the ptrace system call.
 
-use crate::debug::traits::Debugger;
+use crate::debug::traits::ExecutionBackend;
 use crate::debug::types::{Breakpoint, DebugState, DebugStatus, ProcessInfo, RegisterState};
 use fission_core::{FissionError, Result as FissionResult};
 
@@ -71,7 +71,7 @@ pub fn enumerate_processes() -> Vec<ProcessInfo> {
     processes
 }
 
-impl Debugger for LinuxDebugger {
+impl ExecutionBackend for LinuxDebugger {
     fn enumerate_processes() -> Vec<ProcessInfo> {
         enumerate_processes()
     }

@@ -1,8 +1,8 @@
 use super::WindowsDebugger;
-use crate::debug::traits::Debugger;
+use crate::debug::traits::ExecutionBackend;
 use fission_core::{FissionError, Result as FissionResult};
 
-impl Debugger for WindowsDebugger {
+impl ExecutionBackend for WindowsDebugger {
     fn set_sw_breakpoint(&mut self, address: u64) -> FissionResult<()> {
         // Read original byte
         let original_byte = self.read_memory(address, 1)?[0];

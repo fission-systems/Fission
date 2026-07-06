@@ -1,8 +1,8 @@
 use super::WindowsDebugger;
-use crate::debug::traits::Debugger;
+use crate::debug::traits::ExecutionBackend;
 use fission_core::{FissionError, Result as FissionResult};
 
-impl Debugger for WindowsDebugger {
+impl ExecutionBackend for WindowsDebugger {
     fn get_module_exports(&self, base: u64) -> FissionResult<Vec<crate::debug::types::ExportInfo>> {
         let dos = self.read_memory(base, 64)?;
         let e_lfanew = u32::from_le_bytes([dos[60], dos[61], dos[62], dos[63]]) as u64;
