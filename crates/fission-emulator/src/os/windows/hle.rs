@@ -1,146 +1,131 @@
-use crate::pcode::state::MachineState;
-use anyhow::{Result};
+use anyhow::Result;
 use crate::core::Emulator;
+use crate::os::env::{HleResult, OsEnvironment};
+use crate::pcode::state::MachineState;
+use fission_loader::loader::LoadedBinary;
 
-pub fn dispatch(emu: &mut Emulator, magic_addr: u64) -> Result<bool> {
-    let index = ((magic_addr - 0xFFFFFFF000000000) / 8) as usize;
-    let mut iat_entries: Vec<_> = emu.binary.inner().iat_symbols.iter().collect();
-    iat_entries.sort_by_key(|&(&addr, _)| addr);
-    let full_name = iat_entries.into_iter().nth(index).map(|(_, s)| s.as_str()).unwrap_or("Unknown");
-    let name = full_name.split('!').last().unwrap_or(full_name);
-    
-    tracing::info!("HLE Intercept: {}", name);
-    
-    let mut continue_execution = true;
-    
-    match name {
-        "LoadLibraryA" => handle_load_library_a(emu)?,
-        "GetProcAddress" => handle_get_proc_address(emu)?,
-        "VirtualAlloc" => handle_virtual_alloc(emu)?,
-        "ExitProcess" => {
-            tracing::info!("ExitProcess called. Emulation finished.");
-            continue_execution = false;
+const MAGIC_BASE: u64 = 0xFFFFFFF000000000;
+
+/// Windows PE execution environment.
+///
+/// - Import patching: overwrites IAT entries with sequential magic trampolines.
+/// - Stub resolution: maps magic address back to import name.
+/// - HLE dispatch: emulates Win32 API functions by name.
+pub struct WindowsEnv;
+
+impl OsEnvironment for WindowsEnv {
+    fn patch_imports(&self, state: &mut MachineState, binary: &LoadedBinary) -> Result<()> {
+        if binary.format != "PE" {
+            return Ok(());
         }
-        _ => {
-            tracing::warn!("Unimplemented Win32 API: {}. Returning 0.", name);
-            write_return_64(emu, 0)?;
+        let mut iat_entries: Vec<_> = binary.inner().iat_symbols.iter().collect();
+        iat_entries.sort_by_key(|&(&addr, _)| addr);
+        for (i, (&addr, name)) in iat_entries.into_iter().enumerate() {
+            let trampoline = MAGIC_BASE + (i as u64 * 8);
+            tracing::debug!("IAT patch: {} @ 0x{:X} → trampoline 0x{:X}", name, addr, trampoline);
+            state.write_space(3, addr, &trampoline.to_le_bytes())?;
         }
+        Ok(())
     }
-    
-    // Simulate return (pop RIP from stack, assuming standard x86/x64 call)
-    simulate_return(emu)?;
-    Ok(continue_execution)
+
+    fn resolve_stub(&self, binary: &LoadedBinary, magic_addr: u64) -> Option<String> {
+        let index = ((magic_addr - MAGIC_BASE) / 8) as usize;
+        let mut iat_entries: Vec<_> = binary.inner().iat_symbols.iter().collect();
+        iat_entries.sort_by_key(|&(&addr, _)| addr);
+        iat_entries
+            .into_iter()
+            .nth(index)
+            .map(|(_, name)| name.split('!').last().unwrap_or(name).to_string())
+    }
+
+    fn dispatch_hle(&self, emu: &mut Emulator, func_name: &str) -> Result<HleResult> {
+        tracing::info!("HLE Intercept: {}", func_name);
+        match func_name {
+            "LoadLibraryA"   => handle_load_library_a(emu)?,
+            "LoadLibraryW"   => handle_load_library_w(emu)?,
+            "GetProcAddress" => handle_get_proc_address(emu)?,
+            "VirtualAlloc"   => handle_virtual_alloc(emu)?,
+            "VirtualFree"    => { emu.write_return_val(1)?; } // always succeed
+            "ExitProcess"    => {
+                let code = emu.read_arg(0).unwrap_or(0) as u32;
+                tracing::info!("ExitProcess({}). Emulation finished.", code);
+                return Ok(HleResult::Halt(code));
+            }
+            _ => {
+                tracing::warn!("Unimplemented Win32 API: {}. Returning 0.", func_name);
+                emu.write_return_val(0)?;
+            }
+        }
+        Ok(HleResult::Continue)
+    }
 }
 
-fn simulate_return(emu: &mut Emulator) -> Result<()> {
-    let is_64bit = emu.binary.inner().is_64bit;
-    if is_64bit {
-        let rsp = emu.read_register_u64("rsp")?;
-        let ret_addr_bytes = emu.state.read_space(3, rsp, 8)?;
-        let mut ret_addr = 0u64;
-        for (i, &b) in ret_addr_bytes.iter().enumerate() {
-            ret_addr |= (b as u64) << (i * 8);
-        }
-        emu.rip = ret_addr;
-        emu.write_register_u64("rsp", rsp + 8)?;
-    } else {
-        let esp = emu.read_register_u64("esp")?;
-        let ret_addr_bytes = emu.state.read_space(3, esp, 4)?;
-        let mut ret_addr = 0u64;
-        for (i, &b) in ret_addr_bytes.iter().enumerate() {
-            ret_addr |= (b as u64) << (i * 8);
-        }
-        emu.rip = ret_addr;
-        emu.write_register_u64("esp", esp + 4)?;
+// ── helpers ──────────────────────────────────────────────────────────────────
+
+fn read_string(emu: &mut Emulator, addr: u64) -> Result<String> {
+    let mut bytes = Vec::new();
+    let mut cur = addr;
+    loop {
+        let b = emu.state.read_space(3, cur, 1)?[0];
+        if b == 0 { break; }
+        bytes.push(b);
+        cur += 1;
+        if bytes.len() > 4096 { break; }
     }
+    Ok(String::from_utf8_lossy(&bytes).into_owned())
+}
+
+fn read_wide_string(emu: &mut Emulator, addr: u64) -> Result<String> {
+    let mut chars = Vec::new();
+    let mut cur = addr;
+    loop {
+        let pair = emu.state.read_space(3, cur, 2)?;
+        let wc = pair[0] as u16 | ((pair[1] as u16) << 8);
+        if wc == 0 { break; }
+        chars.push(wc);
+        cur += 2;
+        if chars.len() > 4096 { break; }
+    }
+    Ok(String::from_utf16_lossy(&chars))
+}
+
+// ── Win32 API handlers ────────────────────────────────────────────────────────
+
+fn handle_load_library_a(emu: &mut Emulator) -> Result<()> {
+    let addr = emu.read_arg(0)?;
+    let name = if addr == 0 { String::from("<null>") } else { read_string(emu, addr)? };
+    tracing::info!("LoadLibraryA(\"{}\")", name);
+    emu.write_return_val(0x10000000)?; // dummy HMODULE
     Ok(())
 }
 
-fn read_arg_64(emu: &mut Emulator, index: usize) -> Result<u64> {
-    match index {
-        0 => emu.read_register_u64("rcx"),
-        1 => emu.read_register_u64("rdx"),
-        2 => emu.read_register_u64("r8"),
-        3 => emu.read_register_u64("r9"),
-        _ => {
-            // Stack arguments: [rsp + 40 + (index - 4) * 8]
-            let rsp = emu.read_register_u64("rsp")?;
-            let offset = rsp + 40 + ((index - 4) * 8) as u64;
-            let bytes = emu.state.read_space(3, offset, 8)?;
-            let mut val = 0u64;
-            for (i, &b) in bytes.iter().enumerate() {
-                val |= (b as u64) << (i * 8);
-            }
-            Ok(val)
-        }
-    }
-}
-
-fn write_return_64(emu: &mut Emulator, value: u64) -> Result<()> {
-    emu.write_register_u64("rax", value)
-}
-
-fn read_string(emu: &mut Emulator, addr: u64) -> Result<String> {
-    let mut string_bytes = Vec::new();
-    let mut current_addr = addr;
-    loop {
-        let b = emu.state.read_space(3, current_addr, 1)?[0];
-        if b == 0 {
-            break;
-        }
-        string_bytes.push(b);
-        current_addr += 1;
-        if string_bytes.len() > 4096 {
-            break; // Sanity check
-        }
-    }
-    Ok(String::from_utf8_lossy(&string_bytes).into_owned())
-}
-
-fn handle_load_library_a(emu: &mut Emulator) -> Result<()> {
-    let is_64bit = emu.binary.inner().is_64bit;
-    if is_64bit {
-        let lp_lib_file_name_addr = read_arg_64(emu, 0)?;
-        let lib_name = read_string(emu, lp_lib_file_name_addr)?;
-        tracing::info!("Emulating LoadLibraryA(RCX=0x{:X}) -> \"{}\"", lp_lib_file_name_addr, lib_name);
-        write_return_64(emu, 0x10000000)?; // return dummy HMODULE
-    } else {
-        tracing::warn!("LoadLibraryA 32-bit not fully parsed yet");
-    }
+fn handle_load_library_w(emu: &mut Emulator) -> Result<()> {
+    let addr = emu.read_arg(0)?;
+    let name = if addr == 0 { String::from("<null>") } else { read_wide_string(emu, addr)? };
+    tracing::info!("LoadLibraryW(\"{}\")", name);
+    emu.write_return_val(0x10000001)?; // dummy HMODULE
     Ok(())
 }
 
 fn handle_get_proc_address(emu: &mut Emulator) -> Result<()> {
-    let is_64bit = emu.binary.inner().is_64bit;
-    if is_64bit {
-        let h_module = read_arg_64(emu, 0)?;
-        let lp_proc_name_addr = read_arg_64(emu, 1)?;
-        
-        let proc_name = if lp_proc_name_addr < 0xFFFF {
-            format!("Ordinal({})", lp_proc_name_addr)
-        } else {
-            read_string(emu, lp_proc_name_addr)?
-        };
-        
-        tracing::info!("Emulating GetProcAddress(0x{:X}, \"{}\")", h_module, proc_name);
-        write_return_64(emu, 0x20000000)?; // return dummy FARPROC
+    let h_module = emu.read_arg(0)?;
+    let name_ptr = emu.read_arg(1)?;
+    let proc_name = if name_ptr < 0xFFFF {
+        format!("Ordinal({})", name_ptr)
     } else {
-        tracing::warn!("GetProcAddress 32-bit not fully parsed yet");
-    }
+        read_string(emu, name_ptr)?
+    };
+    tracing::info!("GetProcAddress(0x{:X}, \"{}\")", h_module, proc_name);
+    emu.write_return_val(0x20000000)?; // dummy FARPROC
     Ok(())
 }
 
 fn handle_virtual_alloc(emu: &mut Emulator) -> Result<()> {
-    let is_64bit = emu.binary.inner().is_64bit;
-    if is_64bit {
-        let lp_address = read_arg_64(emu, 0)?;
-        let dw_size = read_arg_64(emu, 1)?;
-        let fl_allocation_type = read_arg_64(emu, 2)?;
-        let fl_protect = read_arg_64(emu, 3)?;
-        tracing::info!("Emulating VirtualAlloc(0x{:X}, 0x{:X}, 0x{:X}, 0x{:X})", lp_address, dw_size, fl_allocation_type, fl_protect);
-        write_return_64(emu, 0x30000000)?; // return dummy allocated address
-    } else {
-        tracing::warn!("VirtualAlloc 32-bit not fully parsed yet");
-    }
+    let lp_address = emu.read_arg(0)?;
+    let dw_size    = emu.read_arg(1)?;
+    let alloc_type = emu.read_arg(2)?;
+    let protect    = emu.read_arg(3)?;
+    tracing::info!("VirtualAlloc(0x{:X}, 0x{:X}, 0x{:X}, 0x{:X})", lp_address, dw_size, alloc_type, protect);
+    emu.write_return_val(0x30000000)?; // dummy allocated address
     Ok(())
 }

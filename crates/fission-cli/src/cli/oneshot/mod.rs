@@ -194,12 +194,23 @@ fn run_sandbox(args: crate::cli::args::SandboxArgs) -> Result<()> {
         .with_context(|| "Failed to create Sleigh frontend candidates")?;
     let sleigh = frontends.into_iter().next().with_context(|| "No suitable Sleigh frontend found")?;
     
+    // Derive ArchInfo from Sleigh Language ID + binary format
+    let lang_id = load_spec.pair.language_id.as_str();
+    let arch = fission_emulator::ArchInfo::from_language_id(lang_id, Some(&binary))
+        .with_context(|| format!("Unsupported architecture: {}", lang_id))?;
+    
+    // Choose OS environment based on binary format
+    let os: Box<dyn fission_emulator::OsEnvironment> = match binary.format.as_str() {
+        "PE"  => Box::new(fission_emulator::WindowsEnv),
+        "ELF" => Box::new(fission_emulator::LinuxEnv),
+        fmt   => anyhow::bail!("Unsupported binary format for sandbox: {}", fmt),
+    };
+    
     // Create Emulator and Run
-    let mut emu = fission_emulator::core::Emulator::new(state, binary, sleigh)?;
-    tracing::info!("Starting Emulator Execution Loop at RIP=0x{:X}", emu.rip);
+    let mut emu = fission_emulator::core::Emulator::new(state, binary, sleigh, arch, os)?;
+    tracing::info!("Starting Emulator Execution Loop at PC=0x{:X}", emu.pc);
     emu.run()?;
     
-    tracing::info!("Sandbox execution finished");
     Ok(())
 }
 
