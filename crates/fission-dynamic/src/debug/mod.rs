@@ -52,7 +52,7 @@ pub mod macos {
 }
 
 // Re-export the Debugger trait and TimeTravelDebugger trait
-pub use traits::{Debugger, TimeTravelDebugger};
+pub use traits::{ExecutionBackend, TimeTravelDebugger};
 
 // Re-export commonly used types
 pub use types::{
@@ -95,8 +95,8 @@ use timeline::Timeline;
 /// ```
 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
 pub struct DebugSession {
-    /// The platform-native debugger instance.
-    pub debugger: PlatformDebugger,
+    /// The platform-native or emulator debugger instance.
+    pub debugger: Box<dyn ExecutionBackend>,
     /// Shared execution timeline (None if not requested at build time).
     pub timeline: Option<Arc<Mutex<Timeline>>>,
 }
@@ -105,6 +105,7 @@ pub struct DebugSession {
 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
 pub struct DebugSessionBuilder {
     with_timeline: bool,
+    use_emulator: bool,
 }
 
 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
@@ -115,8 +116,22 @@ impl DebugSessionBuilder {
         self
     }
 
+    /// Use the emulator backend instead of the native platform debugger.
+    pub fn with_emulator(mut self) -> Self {
+        self.use_emulator = true;
+        self
+    }
+
     /// Build the [`DebugSession`], wiring up the timeline if requested.
     pub fn build(self) -> DebugSession {
+        if self.use_emulator {
+            let debugger = crate::debug::EmulatorBackend::new();
+            return DebugSession {
+                debugger: Box::new(debugger),
+                timeline: None, // Timeline recording with emulator not yet supported
+            };
+        }
+
         let mut debugger = PlatformDebugger::default();
         let timeline = if self.with_timeline {
             let arc = Arc::new(Mutex::new(Timeline::new()));
@@ -126,7 +141,10 @@ impl DebugSessionBuilder {
         } else {
             None
         };
-        DebugSession { debugger, timeline }
+        DebugSession {
+            debugger: Box::new(debugger),
+            timeline,
+        }
     }
 }
 
@@ -136,6 +154,7 @@ impl DebugSession {
     pub fn new() -> DebugSessionBuilder {
         DebugSessionBuilder {
             with_timeline: false,
+            use_emulator: false,
         }
     }
 
@@ -163,3 +182,5 @@ impl DebugSession {
         self.debugger.launch(path, args)
     }
 }
+pub mod emulator_backend;
+pub use emulator_backend::EmulatorBackend;

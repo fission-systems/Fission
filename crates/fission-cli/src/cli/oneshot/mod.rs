@@ -116,14 +116,14 @@ fn run() -> Result<()> {
             }
             return Ok(());
         }
-        ParsedInvocation::Debug(cmd) => {
+        ParsedInvocation::Debug(args) => {
             #[cfg(feature = "debugger")]
             {
-                return debug::run_debug_command(cmd);
+                return debug::run_debug_command(args);
             }
             #[cfg(not(feature = "debugger"))]
             {
-                let _ = cmd;
+                let _ = args;
                 anyhow::bail!(
                     "Debugger support is not compiled into this build. \
                      Rebuild with --features debugger."

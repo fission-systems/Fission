@@ -1,6 +1,6 @@
-//! Debug Traits - Platform-Agnostic Debugger Interface
+//! Debug Traits - Platform-Agnostic ExecutionBackend Interface
 //!
-//! This module defines the [`Debugger`] trait that all platform-specific
+//! This module defines the [`ExecutionBackend`] trait that all platform-specific
 //! debugger implementations must satisfy. It provides a unified API for:
 //!
 //! - Process attachment and detachment
@@ -18,9 +18,9 @@
 //! # Example
 //!
 //! ```ignore
-//! use crate::debug::{Debugger, PlatformDebugger};
+//! use crate::debug::{ExecutionBackend, PlatformExecutionBackend};
 //!
-//! let mut dbg = PlatformDebugger::default();
+//! let mut dbg = PlatformExecutionBackend::default();
 //! dbg.attach(1234)?;
 //! dbg.set_sw_breakpoint(0x401000)?;
 //! dbg.continue_execution()?;
@@ -33,7 +33,7 @@ use fission_core::Result as FissionResult;
 ///
 /// This trait defines the common interface for all platform-specific debugger implementations.
 /// Each platform (Windows, Linux, macOS) provides its own implementation.
-pub trait Debugger: Send {
+pub trait ExecutionBackend: Send {
     /// Enumerate running processes on the system
     fn enumerate_processes() -> Vec<ProcessInfo>
     where
@@ -56,6 +56,15 @@ pub trait Debugger: Send {
 
     /// Single step one instruction
     fn single_step(&mut self) -> FissionResult<()>;
+
+    /// Poll for the next debug event
+    fn poll_event(&mut self, timeout_ms: u32) -> FissionResult<Option<super::types::DebugEvent>> {
+        let _ = timeout_ms;
+        Err(fission_core::err!(
+            debug,
+            "poll_event is not supported on this platform"
+        ))
+    }
 
     /// Set a software breakpoint at the given address
     fn set_sw_breakpoint(&mut self, address: u64) -> FissionResult<()>;

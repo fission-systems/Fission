@@ -24,6 +24,7 @@ interactive_runtime = [
 ]
 
 [dependencies]
+fission-emulator = { path = "../fission-emulator" }
 fission-core = { path = "../fission-core" }
 fission-ttd = { path = "../fission-ttd" }
 fission-plugin = { path = "../fission-plugin", optional = true, default-features = false, features = ["interactive_runtime"] }

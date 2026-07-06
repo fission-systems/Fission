@@ -11,7 +11,7 @@ mod stack;
 pub use process::enumerate_processes;
 
 use crate::debug::timeline::Timeline;
-use crate::debug::traits::Debugger;
+use crate::debug::traits::ExecutionBackend;
 use crate::debug::types::{Breakpoint, DebugState, DebugStatus, ProcessInfo, RegisterState};
 use fission_core::{FissionError, Result as FissionResult};
 
@@ -905,7 +905,7 @@ impl Default for WindowsDebugger {
 // to pass between threads; the debugger is protected by an external Mutex in AppState.
 unsafe impl Send for WindowsDebugger {}
 
-impl Debugger for WindowsDebugger {
+impl ExecutionBackend for WindowsDebugger {
     fn enumerate_processes() -> Vec<ProcessInfo> {
         process::enumerate_processes()
     }

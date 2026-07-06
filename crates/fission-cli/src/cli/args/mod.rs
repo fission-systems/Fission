@@ -45,7 +45,7 @@ pub enum ParsedInvocation {
         json: bool,
         verbose: bool,
     },
-    Debug(DebugCommand),
+    Debug(DebugArgs),
     /// Sandbox (emulator) execution
     Sandbox(SandboxArgs),
     /// AI chat / authentication subcommand.
@@ -770,7 +770,7 @@ fn normalize_canonical(cli: CliArgs) -> ParsedInvocation {
                     }
                 },
                 CliCommand::Debug(debug) => {
-                    return ParsedInvocation::Debug(debug.command);
+                    return ParsedInvocation::Debug(debug);
                 }
                 CliCommand::Ai(ai_args) => {
                     let inv = match ai_args.command {

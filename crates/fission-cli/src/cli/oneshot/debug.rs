@@ -126,11 +126,20 @@ fn print_hex_dump(addr: u64, data: &[u8], json: bool) {
     }
 }
 
-pub fn run_debug_command(cmd: DebugCommand) -> Result<()> {
-    use fission_dynamic::debug::traits::Debugger;
-    match cmd {
+pub fn run_debug_command(args: crate::cli::args::DebugArgs) -> Result<()> {
+    use fission_dynamic::debug::traits::ExecutionBackend;
+    let emulator = args.emulator;
+    let build_session = || {
+        let mut builder = fission_dynamic::debug::DebugSession::new();
+        if emulator {
+            builder = builder.with_emulator();
+        }
+        builder.build()
+    };
+
+    match args.command {
         DebugCommand::Attach(args) => {
-            let mut session = fission_dynamic::debug::DebugSession::new().build();
+            let mut session = build_session();
             session.attach(args.pid).with_context(|| {
                 format!(
                     "Failed to attach to PID {}. Is the process running?",
@@ -184,7 +193,7 @@ pub fn run_debug_command(cmd: DebugCommand) -> Result<()> {
                     .and_then(|s| s.strip_suffix(".json"))
                 {
                     if let Ok(pid) = pid_str.parse::<u32>() {
-                        let mut session = fission_dynamic::debug::DebugSession::new().build();
+                        let mut session = build_session();
                         let _ = session.attach(pid);
                         let _ = session.detach();
                         remove_state(pid);
@@ -198,7 +207,7 @@ pub fn run_debug_command(cmd: DebugCommand) -> Result<()> {
 
         DebugCommand::Continue => {
             let state = find_active_state()?;
-            let mut session = fission_dynamic::debug::DebugSession::new().build();
+            let mut session = build_session();
             session.attach(state.pid)?;
             session.debugger.continue_execution()?;
             println!("Continuing PID {}...", state.pid);
@@ -207,7 +216,7 @@ pub fn run_debug_command(cmd: DebugCommand) -> Result<()> {
 
         DebugCommand::Step => {
             let state = find_active_state()?;
-            let mut session = fission_dynamic::debug::DebugSession::new().build();
+            let mut session = build_session();
             session.attach(state.pid)?;
             session.debugger.single_step()?;
 
@@ -220,7 +229,7 @@ pub fn run_debug_command(cmd: DebugCommand) -> Result<()> {
 
         DebugCommand::Bp(args) => {
             let mut state = find_active_state()?;
-            let mut session = fission_dynamic::debug::DebugSession::new().build();
+            let mut session = build_session();
             session.attach(state.pid)?;
             session.debugger.set_sw_breakpoint(args.addr)?;
             if !state.breakpoints.contains(&args.addr) {
@@ -240,7 +249,7 @@ pub fn run_debug_command(cmd: DebugCommand) -> Result<()> {
 
         DebugCommand::RmBp(args) => {
             let mut state = find_active_state()?;
-            let mut session = fission_dynamic::debug::DebugSession::new().build();
+            let mut session = build_session();
             session.attach(state.pid)?;
             session.debugger.remove_sw_breakpoint(args.addr)?;
             state.breakpoints.retain(|&a| a != args.addr);
@@ -260,7 +269,7 @@ pub fn run_debug_command(cmd: DebugCommand) -> Result<()> {
             #[cfg(target_os = "windows")]
             {
                 let state = find_active_state()?;
-                let mut session = fission_dynamic::debug::DebugSession::new().build();
+                let mut session = build_session();
                 session.attach(state.pid)?;
 
                 let kind = match args.kind {
@@ -292,7 +301,7 @@ pub fn run_debug_command(cmd: DebugCommand) -> Result<()> {
 
         DebugCommand::Regs => {
             let state = find_active_state()?;
-            let mut session = fission_dynamic::debug::DebugSession::new().build();
+            let mut session = build_session();
             session.attach(state.pid)?;
             let tid = state
                 .last_thread_id
@@ -305,7 +314,7 @@ pub fn run_debug_command(cmd: DebugCommand) -> Result<()> {
 
         DebugCommand::Read(args) => {
             find_active_state()?;
-            let session = fission_dynamic::debug::DebugSession::new().build();
+            let session = build_session();
             let mem = session.debugger.read_memory(args.addr, args.size)?;
             print_hex_dump(args.addr, &mem, args.json);
             Ok(())
@@ -313,7 +322,7 @@ pub fn run_debug_command(cmd: DebugCommand) -> Result<()> {
 
         DebugCommand::Write(args) => {
             let state = find_active_state()?;
-            let mut session = fission_dynamic::debug::DebugSession::new().build();
+            let mut session = build_session();
             session.attach(state.pid)?;
             let bytes = hex_bytes_from_str(&args.data)?;
             session.debugger.write_memory(args.addr, &bytes)?;
@@ -331,7 +340,7 @@ pub fn run_debug_command(cmd: DebugCommand) -> Result<()> {
 
         DebugCommand::Modules => {
             find_active_state()?;
-            let session = fission_dynamic::debug::DebugSession::new().build();
+            let session = build_session();
             let modules = session.debugger.state().modules.clone();
             println!("Loaded modules ({}):", modules.len());
             for (base, info) in modules {
@@ -342,7 +351,7 @@ pub fn run_debug_command(cmd: DebugCommand) -> Result<()> {
 
         DebugCommand::Threads => {
             find_active_state()?;
-            let session = fission_dynamic::debug::DebugSession::new().build();
+            let session = build_session();
             let threads = session.debugger.state().threads.clone();
             println!("Active threads ({}):", threads.len());
             for (tid, info) in threads {
@@ -355,7 +364,7 @@ pub fn run_debug_command(cmd: DebugCommand) -> Result<()> {
         }
 
         DebugCommand::Init(args) => {
-            let mut session = fission_dynamic::debug::DebugSession::new().build();
+            let mut session = build_session();
             let pid = session.launch(&args.path, &args.args)?;
 
             let state = DebugStateFile {
@@ -386,7 +395,7 @@ pub fn run_debug_command(cmd: DebugCommand) -> Result<()> {
 
         DebugCommand::Pause => {
             let state = find_active_state()?;
-            let mut session = fission_dynamic::debug::DebugSession::new().build();
+            let mut session = build_session();
             session.attach(state.pid)?;
             session.debugger.pause()?;
             println!("Break requested for PID {}.", state.pid);
@@ -395,7 +404,7 @@ pub fn run_debug_command(cmd: DebugCommand) -> Result<()> {
 
         DebugCommand::Stop => {
             let state = find_active_state()?;
-            let mut session = fission_dynamic::debug::DebugSession::new().build();
+            let mut session = build_session();
             session.attach(state.pid)?;
             session.debugger.terminate()?;
             remove_state(state.pid);
@@ -405,7 +414,7 @@ pub fn run_debug_command(cmd: DebugCommand) -> Result<()> {
 
         DebugCommand::StepOver => {
             let state = find_active_state()?;
-            let mut session = fission_dynamic::debug::DebugSession::new().build();
+            let mut session = build_session();
             session.attach(state.pid)?;
             session.debugger.step_over()?;
             if let Some(tid) = state.last_thread_id {
@@ -417,7 +426,7 @@ pub fn run_debug_command(cmd: DebugCommand) -> Result<()> {
 
         DebugCommand::StepOut => {
             let state = find_active_state()?;
-            let mut session = fission_dynamic::debug::DebugSession::new().build();
+            let mut session = build_session();
             session.attach(state.pid)?;
             session.debugger.step_out()?;
             if let Some(tid) = state.last_thread_id {
@@ -429,7 +438,7 @@ pub fn run_debug_command(cmd: DebugCommand) -> Result<()> {
 
         DebugCommand::Skip => {
             let state = find_active_state()?;
-            let mut session = fission_dynamic::debug::DebugSession::new().build();
+            let mut session = build_session();
             session.attach(state.pid)?;
             session.debugger.skip_instruction()?;
             if let Some(tid) = state.last_thread_id {
@@ -441,7 +450,7 @@ pub fn run_debug_command(cmd: DebugCommand) -> Result<()> {
 
         DebugCommand::SwitchThread(args) => {
             let state = find_active_state()?;
-            let mut session = fission_dynamic::debug::DebugSession::new().build();
+            let mut session = build_session();
             session.attach(state.pid)?;
             session.debugger.set_current_thread(args.tid)?;
             if args.json {
@@ -459,7 +468,7 @@ pub fn run_debug_command(cmd: DebugCommand) -> Result<()> {
             #[cfg(target_os = "windows")]
             {
                 let state = find_active_state()?;
-                let mut session = fission_dynamic::debug::DebugSession::new().build();
+                let mut session = build_session();
                 session.attach(state.pid)?;
                 let event = session.debugger.poll_event(5000)?;
                 if let Some(evt) = event {
@@ -477,7 +486,7 @@ pub fn run_debug_command(cmd: DebugCommand) -> Result<()> {
 
         DebugCommand::BpEnable(args) => {
             let state = find_active_state()?;
-            let mut session = fission_dynamic::debug::DebugSession::new().build();
+            let mut session = build_session();
             session.attach(state.pid)?;
             session.debugger.enable_breakpoint(args.addr)?;
             if args.json {
@@ -493,7 +502,7 @@ pub fn run_debug_command(cmd: DebugCommand) -> Result<()> {
 
         DebugCommand::BpDisable(args) => {
             let state = find_active_state()?;
-            let mut session = fission_dynamic::debug::DebugSession::new().build();
+            let mut session = build_session();
             session.attach(state.pid)?;
             session.debugger.disable_breakpoint(args.addr)?;
             if args.json {
@@ -509,7 +518,7 @@ pub fn run_debug_command(cmd: DebugCommand) -> Result<()> {
 
         DebugCommand::BpList(args) => {
             find_active_state()?;
-            let session = fission_dynamic::debug::DebugSession::new().build();
+            let session = build_session();
             let bps = session.debugger.list_breakpoints();
             if args.json {
                 let arr: Vec<_> = bps
@@ -544,7 +553,7 @@ pub fn run_debug_command(cmd: DebugCommand) -> Result<()> {
 
         DebugCommand::MemBp(args) => {
             let state = find_active_state()?;
-            let mut session = fission_dynamic::debug::DebugSession::new().build();
+            let mut session = build_session();
             session.attach(state.pid)?;
             let kind = match args.kind {
                 crate::cli::args::MemoryBpKindArg::Read => {
@@ -579,7 +588,7 @@ pub fn run_debug_command(cmd: DebugCommand) -> Result<()> {
 
         DebugCommand::RmMemBp(args) => {
             let state = find_active_state()?;
-            let mut session = fission_dynamic::debug::DebugSession::new().build();
+            let mut session = build_session();
             session.attach(state.pid)?;
             session.debugger.remove_memory_breakpoint(args.addr)?;
             if args.json {
@@ -595,7 +604,7 @@ pub fn run_debug_command(cmd: DebugCommand) -> Result<()> {
 
         DebugCommand::DllBp(args) => {
             let state = find_active_state()?;
-            let mut session = fission_dynamic::debug::DebugSession::new().build();
+            let mut session = build_session();
             session.attach(state.pid)?;
             session.debugger.set_dll_breakpoint(&args.name)?;
             if args.json {
@@ -611,7 +620,7 @@ pub fn run_debug_command(cmd: DebugCommand) -> Result<()> {
 
         DebugCommand::RmDllBp(args) => {
             let state = find_active_state()?;
-            let mut session = fission_dynamic::debug::DebugSession::new().build();
+            let mut session = build_session();
             session.attach(state.pid)?;
             session.debugger.remove_dll_breakpoint(&args.name)?;
             if args.json {
@@ -627,7 +636,7 @@ pub fn run_debug_command(cmd: DebugCommand) -> Result<()> {
 
         DebugCommand::ExBp(args) => {
             let state = find_active_state()?;
-            let mut session = fission_dynamic::debug::DebugSession::new().build();
+            let mut session = build_session();
             session.attach(state.pid)?;
             session
                 .debugger
@@ -645,7 +654,7 @@ pub fn run_debug_command(cmd: DebugCommand) -> Result<()> {
 
         DebugCommand::RmExBp(args) => {
             let state = find_active_state()?;
-            let mut session = fission_dynamic::debug::DebugSession::new().build();
+            let mut session = build_session();
             session.attach(state.pid)?;
             session
                 .debugger
@@ -663,7 +672,7 @@ pub fn run_debug_command(cmd: DebugCommand) -> Result<()> {
 
         DebugCommand::SetReg(args) => {
             let state = find_active_state()?;
-            let mut session = fission_dynamic::debug::DebugSession::new().build();
+            let mut session = build_session();
             session.attach(state.pid)?;
             let tid = state
                 .last_thread_id
@@ -682,7 +691,7 @@ pub fn run_debug_command(cmd: DebugCommand) -> Result<()> {
 
         DebugCommand::GetFlag(args) => {
             let state = find_active_state()?;
-            let mut session = fission_dynamic::debug::DebugSession::new().build();
+            let mut session = build_session();
             session.attach(state.pid)?;
             let value = session.debugger.get_flag(&args.name)?;
             if args.json {
@@ -698,7 +707,7 @@ pub fn run_debug_command(cmd: DebugCommand) -> Result<()> {
 
         DebugCommand::SetFlag(args) => {
             let state = find_active_state()?;
-            let mut session = fission_dynamic::debug::DebugSession::new().build();
+            let mut session = build_session();
             session.attach(state.pid)?;
             let value = args
                 .value
@@ -717,7 +726,7 @@ pub fn run_debug_command(cmd: DebugCommand) -> Result<()> {
 
         DebugCommand::Alloc(args) => {
             let state = find_active_state()?;
-            let mut session = fission_dynamic::debug::DebugSession::new().build();
+            let mut session = build_session();
             session.attach(state.pid)?;
             let addr = session.debugger.remote_alloc(args.addr, args.size)?;
             if args.json {
@@ -733,7 +742,7 @@ pub fn run_debug_command(cmd: DebugCommand) -> Result<()> {
 
         DebugCommand::Free(args) => {
             let state = find_active_state()?;
-            let mut session = fission_dynamic::debug::DebugSession::new().build();
+            let mut session = build_session();
             session.attach(state.pid)?;
             session.debugger.remote_free(args.addr)?;
             if args.json {
@@ -749,7 +758,7 @@ pub fn run_debug_command(cmd: DebugCommand) -> Result<()> {
 
         DebugCommand::GetProtect(args) => {
             let state = find_active_state()?;
-            let mut session = fission_dynamic::debug::DebugSession::new().build();
+            let mut session = build_session();
             session.attach(state.pid)?;
             let rights = session.debugger.get_page_rights(args.addr)?;
             if args.json {
@@ -765,7 +774,7 @@ pub fn run_debug_command(cmd: DebugCommand) -> Result<()> {
 
         DebugCommand::SetProtect(args) => {
             let state = find_active_state()?;
-            let mut session = fission_dynamic::debug::DebugSession::new().build();
+            let mut session = build_session();
             session.attach(state.pid)?;
             let protect = args
                 .protect
@@ -789,7 +798,7 @@ pub fn run_debug_command(cmd: DebugCommand) -> Result<()> {
 
         DebugCommand::StackPeek(args) => {
             find_active_state()?;
-            let session = fission_dynamic::debug::DebugSession::new().build();
+            let session = build_session();
             let value = session.debugger.stack_peek(args.offset)?;
             if args.json {
                 println!(
@@ -804,7 +813,7 @@ pub fn run_debug_command(cmd: DebugCommand) -> Result<()> {
 
         DebugCommand::StackPop(args) => {
             find_active_state()?;
-            let mut session = fission_dynamic::debug::DebugSession::new().build();
+            let mut session = build_session();
             let value = session.debugger.stack_pop()?;
             if args.json {
                 println!(
@@ -819,7 +828,7 @@ pub fn run_debug_command(cmd: DebugCommand) -> Result<()> {
 
         DebugCommand::StackPush(args) => {
             find_active_state()?;
-            let mut session = fission_dynamic::debug::DebugSession::new().build();
+            let mut session = build_session();
             session.debugger.stack_push(args.value)?;
             if args.json {
                 println!(
@@ -834,7 +843,7 @@ pub fn run_debug_command(cmd: DebugCommand) -> Result<()> {
 
         DebugCommand::Find(args) => {
             let state = find_active_state()?;
-            let mut session = fission_dynamic::debug::DebugSession::new().build();
+            let mut session = build_session();
             session.attach(state.pid)?;
             let pattern = hex_bytes_from_str(&args.pattern)?;
             let results = session
@@ -857,7 +866,7 @@ pub fn run_debug_command(cmd: DebugCommand) -> Result<()> {
 
         DebugCommand::Exports(args) => {
             let state = find_active_state()?;
-            let mut session = fission_dynamic::debug::DebugSession::new().build();
+            let mut session = build_session();
             session.attach(state.pid)?;
             let exports = session.debugger.get_module_exports(args.base)?;
             if args.json {
@@ -883,7 +892,7 @@ pub fn run_debug_command(cmd: DebugCommand) -> Result<()> {
 
         DebugCommand::Imports(args) => {
             let state = find_active_state()?;
-            let mut session = fission_dynamic::debug::DebugSession::new().build();
+            let mut session = build_session();
             session.attach(state.pid)?;
             let imports = session.debugger.get_module_imports(args.base)?;
             if args.json {

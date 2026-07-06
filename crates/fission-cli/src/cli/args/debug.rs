@@ -13,6 +13,10 @@ use clap::{Args, Subcommand};
     after_help = "Examples:\n  fission_cli debug attach 1234\n  fission_cli debug regs\n  fission_cli debug step\n  fission_cli debug bp 0x401000\n  fission_cli debug read 0x401000 --size 32\n  fission_cli debug modules\n  fission_cli debug continue\n  fission_cli debug detach"
 )]
 pub struct DebugArgs {
+    /// Use emulator backend instead of native OS debugger
+    #[arg(long, global = true)]
+    pub emulator: bool,
+
     #[command(subcommand)]
     pub command: DebugCommand,
 }
