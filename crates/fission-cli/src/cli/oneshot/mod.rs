@@ -174,15 +174,26 @@ fn run_oneshot_inner(parsed: ParsedOneShotArgs) -> Result<()> {
 fn run_sandbox(args: crate::cli::args::SandboxArgs) -> Result<()> {
     tracing::info!("Starting sandbox for {}", args.binary.display());
     
-    // Stub implementation just to verify the CLI integration
-    let binary_data = fs::read(&args.binary)
+    // Parse binary using fission-loader
+    let binary = fission_loader::loader::LoadedBinary::from_file(&args.binary)
         .with_context(|| format!("failed to read binary at {}", args.binary.display()))?;
         
     let mut state = fission_emulator::MachineState::new();
-    fission_emulator::os::windows::loader::load_pe(&mut state, &binary_data)?;
-    fission_emulator::os::windows::peb_teb::initialize_peb_teb(&mut state, true)?;
+    fission_emulator::os::windows::loader::load_pe(&mut state, &binary)?;
+    fission_emulator::os::windows::peb_teb::initialize_peb_teb(&mut state, binary.inner().is_64bit)?;
     
-    tracing::info!("Sandbox initialized successfully (stub execution complete)");
+    // Initialize Sleigh Frontend
+    let load_spec = binary.load_spec().with_context(|| "Binary lacks load_spec")?;
+    let frontends = fission_sleigh::runtime::RuntimeSleighFrontend::new_candidate_frontends_for_load_spec(load_spec)
+        .with_context(|| "Failed to create Sleigh frontend candidates")?;
+    let sleigh = frontends.into_iter().next().with_context(|| "No suitable Sleigh frontend found")?;
+    
+    // Create Emulator and Run
+    let mut emu = fission_emulator::core::Emulator::new(state, binary, sleigh)?;
+    tracing::info!("Starting Emulator Execution Loop at RIP=0x{:X}", emu.rip);
+    emu.run()?;
+    
+    tracing::info!("Sandbox execution finished");
     Ok(())
 }
 
