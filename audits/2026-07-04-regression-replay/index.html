@@ -1,0 +1,2423 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="A cross-platform, Rust-powered reverse engineering and decompilation framework.">
+      
+      
+      
+        <link rel="canonical" href="https://sjkim1127.github.io/Fission/audits/2026-07-04-regression-replay/">
+      
+      
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>Regression Replay Plan - Fission</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#regression-replay-plan" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="Fission" class="md-header__button md-logo" aria-label="Fission" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Fission
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Regression Replay Plan
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m14.3 16-.7-2h-3.2l-.7 2H7.8L11 7h2l3.2 9zM20 8.69V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12zm-9.15 3.96h2.3L12 9z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_2" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to system preference"  type="radio" name="__palette" id="__palette_2">
+    
+      <label class="md-header__button md-icon" title="Switch to system preference" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/sjkim1127/Fission" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    sjkim1127/Fission
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../.." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../PROJECT_MAP/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Project Map
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../CLI/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  CLI Guide
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../architecture/ARCHITECTURE/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Architecture
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../QUALITY_METRICS/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Quality Metrics
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../EVALUATION/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Evaluation
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../contributing/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Contributing
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../MALWARE_SAMPLE_POLICY/" class="md-tabs__link">
+          
+  
+  
+  Developer Policies
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="Fission" class="md-nav__button md-logo" aria-label="Fission" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Fission
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/sjkim1127/Fission" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    sjkim1127/Fission
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../PROJECT_MAP/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Project Map
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../CLI/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI Guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../architecture/ARCHITECTURE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../QUALITY_METRICS/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quality Metrics
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../EVALUATION/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Evaluation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../contributing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contributing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_8" >
+        
+          
+          <label class="md-nav__link" for="__nav_8" id="__nav_8_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Developer Policies
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_8_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_8">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Developer Policies
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../MALWARE_SAMPLE_POLICY/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Malware Sample Policy
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../VERSIONING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Versioning
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../RELEASE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Release
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#method" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Method
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#candidate-commits" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Candidate Commits
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="regression-replay-plan">Regression Replay Plan<a class="headerlink" href="#regression-replay-plan" title="Permanent link">&para;</a></h1>
+<ul>
+<li>Repo: <code>/Users/sjkim1127/Fission</code></li>
+<li>Since: <code>6.months</code></li>
+<li>Candidate commits: <code>302</code></li>
+</ul>
+<h2 id="method">Method<a class="headerlink" href="#method" title="Permanent link">&para;</a></h2>
+<p>For each candidate commit, run the selected benchmark subset at the parent
+commit and at the candidate commit. Count newly passing rows, newly failing
+rows, and net semantic delta. Keep artifacts under <code>docs/audits/</code> or an
+external run directory; do not update dashboards from this audit.</p>
+<h2 id="candidate-commits">Candidate Commits<a class="headerlink" href="#candidate-commits" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Date</th>
+<th>Commit</th>
+<th>Subject</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>2026-07-04</td>
+<td><code>4a48b74f7c10</code></td>
+<td>Improve decompiler semantic recovery for 0.1.2</td>
+</tr>
+<tr>
+<td>2026-07-03</td>
+<td><code>237e5839e4f7</code></td>
+<td>Fix conditional materialization for clamp-like returns</td>
+</tr>
+<tr>
+<td>2026-07-02</td>
+<td><code>d17a0ca63053</code></td>
+<td>ci: fix heavy validation runner by removing benchmark and corpus dependencies</td>
+</tr>
+<tr>
+<td>2026-07-01</td>
+<td><code>c68446a70a2e</code></td>
+<td>fix: clippy warnings and unused muts</td>
+</tr>
+<tr>
+<td>2026-07-01</td>
+<td><code>955ada864540</code></td>
+<td>style: fix formatting</td>
+</tr>
+<tr>
+<td>2026-07-01</td>
+<td><code>d83c18b650e5</code></td>
+<td>feat(decompiler): add write API to FactStore and DecompContext for feedback loop</td>
+</tr>
+<tr>
+<td>2026-07-01</td>
+<td><code>04ee10e1cfcc</code></td>
+<td>refactor(core): move CallingConvention from pcode to core to fix dependency cycle</td>
+</tr>
+<tr>
+<td>2026-07-01</td>
+<td><code>54457e954c7d</code></td>
+<td>refactor(decompiler): Phase 1 — DecompContext struct + pipeline translation boundary consolidation</td>
+</tr>
+<tr>
+<td>2026-07-01</td>
+<td><code>1ba05f057a95</code></td>
+<td>arch: anti-overfitting pass-gate architecture for NIR structuring pipeline</td>
+</tr>
+<tr>
+<td>2026-07-01</td>
+<td><code>c59cfcaabda8</code></td>
+<td>ci: build nir fixture at manifest path</td>
+</tr>
+<tr>
+<td>2026-07-01</td>
+<td><code>74597ee7232f</code></td>
+<td>fix: ignore AppleDouble sleigh metadata files</td>
+</tr>
+<tr>
+<td>2026-07-01</td>
+<td><code>5eeb26656fcc</code></td>
+<td>fix: ignore AppleDouble ghidra metadata files</td>
+</tr>
+<tr>
+<td>2026-07-01</td>
+<td><code>4bc0a850fa12</code></td>
+<td>fix(deps): revert gimli 0.34 to 0.32 to fix compilation errors</td>
+</tr>
+<tr>
+<td>2026-07-01</td>
+<td><code>c6b703a9a548</code></td>
+<td>fix(ci): fix yaml indentation in reusable-benchmark</td>
+</tr>
+<tr>
+<td>2026-07-01</td>
+<td><code>55814befd039</code></td>
+<td>fix(ci): fetch utils as composite action</td>
+</tr>
+<tr>
+<td>2026-07-01</td>
+<td><code>c541d8e81df8</code></td>
+<td>fix(ci): resolve clippy warnings and disable missing fixture tests</td>
+</tr>
+<tr>
+<td>2026-06-30</td>
+<td><code>a854c2188177</code></td>
+<td>chore: remove utils/ from GitHub entirely</td>
+</tr>
+<tr>
+<td>2026-06-30</td>
+<td><code>aa7dc9067bb0</code></td>
+<td>fix: replace white background with dark (#0d1117) in icon.png</td>
+</tr>
+<tr>
+<td>2026-06-30</td>
+<td><code>4e1b2351f595</code></td>
+<td>docs: complete README redesign + new icon</td>
+</tr>
+<tr>
+<td>2026-06-30</td>
+<td><code>adf7427d6087</code></td>
+<td>chore: major repo cleanup — LFS, benchmark/, vendor MANIFEST</td>
+</tr>
+<tr>
+<td>2026-06-30</td>
+<td><code>5c5d1e28831f</code></td>
+<td>chore: keep only scripts/test/ in git tracking</td>
+</tr>
+<tr>
+<td>2026-06-30</td>
+<td><code>8498b42e02c4</code></td>
+<td>chore: migrate benchmark/binary/ to LFS + fix CI selective pull strategy</td>
+</tr>
+<tr>
+<td>2026-06-30</td>
+<td><code>d4c064fb0fca</code></td>
+<td>chore: remove utils/ and benchmark/binary/ from git tracking</td>
+</tr>
+<tr>
+<td>2026-06-30</td>
+<td><code>0d9554c655e5</code></td>
+<td>ci: add lfs: false/true to all actions/checkout steps</td>
+</tr>
+<tr>
+<td>2026-06-30</td>
+<td><code>eaaf39f226ed</code></td>
+<td>chore: migrate large binary assets to Git LFS (~536 MB)</td>
+</tr>
+<tr>
+<td>2026-06-30</td>
+<td><code>80fa47845b93</code></td>
+<td>refactor(automation): remove source-semantic-check subcommand</td>
+</tr>
+<tr>
+<td>2026-06-30</td>
+<td><code>0f071af5f475</code></td>
+<td>ci: overhaul CI/CD pipeline with conservative validation</td>
+</tr>
+<tr>
+<td>2026-06-25</td>
+<td><code>0161802221d3</code></td>
+<td>fix(ci): exclude fission-dioxus from clippy on Linux to avoid webview dependencies</td>
+</tr>
+<tr>
+<td>2026-06-25</td>
+<td><code>c1ba163162d5</code></td>
+<td>fix(ci): run builds and tests in parallel, do not skip them on lint/security failure</td>
+</tr>
+<tr>
+<td>2026-06-24</td>
+<td><code>f4726552da31</code></td>
+<td>fix(ci): Resolve CI/CD failures across workspace and workflows</td>
+</tr>
+<tr>
+<td>2026-06-24</td>
+<td><code>4e79804494be</code></td>
+<td>fix(ci): Resolve CI failures in lint and security steps</td>
+</tr>
+<tr>
+<td>2026-06-24</td>
+<td><code>ffdcb47b92a6</code></td>
+<td>ci: lighten fast gate, remove heavy push trigger, add gitattributes</td>
+</tr>
+<tr>
+<td>2026-06-16</td>
+<td><code>73424aa5a18d</code></td>
+<td>fix(pcode): improve intra-block conditional move structuring and cache budget rejections</td>
+</tr>
+<tr>
+<td>2026-06-06</td>
+<td><code>37033e815347</code></td>
+<td>chore: clean up root directory clutter</td>
+</tr>
+<tr>
+<td>2026-06-06</td>
+<td><code>66dab7e65fbb</code></td>
+<td>Align loader, static, and sleigh CFG fact paths for Ghidra parity.</td>
+</tr>
+<tr>
+<td>2026-06-05</td>
+<td><code>5f4ac85911f9</code></td>
+<td>Replace register_map with SLA-first RegisterNamer and cspec register model.</td>
+</tr>
+<tr>
+<td>2026-06-05</td>
+<td><code>08e406a17b39</code></td>
+<td>Fix fill_matrix nested loop recovery and extend NIR normalize rules.</td>
+</tr>
+<tr>
+<td>2026-06-04</td>
+<td><code>6fa118771c76</code></td>
+<td>feat(pspec): Ghidra-style .pspec runtime integration</td>
+</tr>
+<tr>
+<td>2026-06-04</td>
+<td><code>e7ebd897da38</code></td>
+<td>nir: .cspec-based dynamic ABI resolution (Ghidra-style)</td>
+</tr>
+<tr>
+<td>2026-06-03</td>
+<td><code>62dd550fc8fe</code></td>
+<td>chore: update dependencies and fix cargo deny advisories</td>
+</tr>
+<tr>
+<td>2026-06-02</td>
+<td><code>485b89b0c46f</code></td>
+<td>printer: fix invalid C for pointer arithmetic and ptr-to-int casts</td>
+</tr>
+<tr>
+<td>2026-06-02</td>
+<td><code>8cd139724cfa</code></td>
+<td>Fix memory heritage dropping statements and switch chain panic</td>
+</tr>
+<tr>
+<td>2026-06-02</td>
+<td><code>104f8b7749f0</code></td>
+<td>fix(pcode): Patch severe CFG structuring and normalization bugs</td>
+</tr>
+<tr>
+<td>2026-06-02</td>
+<td><code>cbf7ed25dc65</code></td>
+<td>fix(tui): patch 6 latent bugs found in safety review</td>
+</tr>
+<tr>
+<td>2026-06-02</td>
+<td><code>5a2e29efd91e</code></td>
+<td>fix(tui): never auto-switch view — chat stream must never be interrupted</td>
+</tr>
+<tr>
+<td>2026-06-02</td>
+<td><code>9cfb6c424c58</code></td>
+<td>fix(fission-tui): Fix scroll tracking and add /export command</td>
+</tr>
+<tr>
+<td>2026-06-01</td>
+<td><code>f671413adc50</code></td>
+<td>fix(structuring,normalize): resolve TraceDAG timeouts and I/O bottlenecks</td>
+</tr>
+<tr>
+<td>2026-06-01</td>
+<td><code>891410f1eb8a</code></td>
+<td>fix(nir): fix ZExt passthrough accumulator naming in loop bodies</td>
+</tr>
+<tr>
+<td>2026-06-01</td>
+<td><code>065cd351fe43</code></td>
+<td>pcode: resolve loop-carried register materialization and xVar fallback issues</td>
+</tr>
+<tr>
+<td>2026-05-29</td>
+<td><code>7dd6865a89fb</code></td>
+<td>feat(benchmark): add comprehensive speed benchmark script and fix CLI callgraph routing</td>
+</tr>
+<tr>
+<td>2026-05-29</td>
+<td><code>f95c9dd52617</code></td>
+<td>fix(nir/builder): x86-64 ZExt passthrough look-through for loop accumulator naming</td>
+</tr>
+<tr>
+<td>2026-05-28</td>
+<td><code>1631b97221db</code></td>
+<td>sigs: add ntoskrnl kernel API signatures for call argument pruning</td>
+</tr>
+<tr>
+<td>2026-05-27</td>
+<td><code>fac064534514</code></td>
+<td>feat(signatures): expand GDT signature extraction and fix phi_recovery borrow</td>
+</tr>
+<tr>
+<td>2026-05-26</td>
+<td><code>df6f42d56494</code></td>
+<td>fix(decompiler): restore address-of operator (&amp;) for global symbol constants and fix type inference</td>
+</tr>
+<tr>
+<td>2026-05-26</td>
+<td><code>7335e2d0837e</code></td>
+<td>fix(decompiler): resolve orphan goto fallback and missing temporary declarations</td>
+</tr>
+<tr>
+<td>2026-05-26</td>
+<td><code>d2597cbac13d</code></td>
+<td>structuring(m3): FAS virtualization, switch fallthrough, SAILR H2 postdom exit selection</td>
+</tr>
+<tr>
+<td>2026-05-26</td>
+<td><code>2ca98397a33b</code></td>
+<td>refactor(structuring): prevent pathological hangs via multi-tier auto-budgeting and SESE time boundaries</td>
+</tr>
+<tr>
+<td>2026-05-25</td>
+<td><code>fc046b2c08d9</code></td>
+<td>feat(nir): implement ActionLikelyTrash pass for caller-saved register alias elimination</td>
+</tr>
+<tr>
+<td>2026-05-24</td>
+<td><code>5d5b8df1d4c8</code></td>
+<td>Fix bit_reverse loop off-by-one and bitwise ops recovery</td>
+</tr>
+<tr>
+<td>2026-05-24</td>
+<td><code>f9e6576483fc</code></td>
+<td>feat: implement memory heritage solver, type propagator, and rule normalizer passes, fix loader profiling &amp; spawn overhead</td>
+</tr>
+<tr>
+<td>2026-05-22</td>
+<td><code>0662b00ba3ec</code></td>
+<td>sleigh: remove legacy varnode_from_fixed_handle fallback, use pure ConstructTpl template resolution</td>
+</tr>
+<tr>
+<td>2026-05-21</td>
+<td><code>52cd37260a15</code></td>
+<td>fix(builder): reuse wide aliases for partial gpr updates</td>
+</tr>
+<tr>
+<td>2026-05-21</td>
+<td><code>add12d208638</code></td>
+<td>fix(builder): prevent wide register binding from hijacking narrow loop-carried update</td>
+</tr>
+<tr>
+<td>2026-05-20</td>
+<td><code>d5427e320a9c</code></td>
+<td>feat(windows-debugger): implement anti-debug, memory map, SEH, PEB/TEB, module enumeration</td>
+</tr>
+<tr>
+<td>2026-05-20</td>
+<td><code>19c46de99f4c</code></td>
+<td>refactor: modularize CLI args and merge unpacker into debugger</td>
+</tr>
+<tr>
+<td>2026-05-19</td>
+<td><code>a930ceadb13f</code></td>
+<td>refactor(dynamic): switch exclusively to Sleigh for instruction decoding</td>
+</tr>
+<tr>
+<td>2026-05-19</td>
+<td><code>3efa7e73a66e</code></td>
+<td>feat(dynamic): integrate fission-sleigh for instruction decoding and disassembly</td>
+</tr>
+<tr>
+<td>2026-05-19</td>
+<td><code>db4f7f3fe303</code></td>
+<td>feat(dynamic): complete Windows debugger Phase 1 — event processing, thread/module tracking, step-over</td>
+</tr>
+<tr>
+<td>2026-05-19</td>
+<td><code>5b2ee1ba4344</code></td>
+<td>feat(automation): make source-semantic-check the primary subcommand</td>
+</tr>
+<tr>
+<td>2026-05-19</td>
+<td><code>acd0df191e63</code></td>
+<td>refactor(nir): extract test modules from 5 large files into separate *_tests.rs files</td>
+</tr>
+<tr>
+<td>2026-05-19</td>
+<td><code>42b6cded6030</code></td>
+<td>refactor(nir): extract rendering pipeline, ABI helper, and wrapper summary into dedicated modules</td>
+</tr>
+<tr>
+<td>2026-05-17</td>
+<td><code>5780e9cc4743</code></td>
+<td>Silence merge trial rejection debug logs</td>
+</tr>
+<tr>
+<td>2026-05-16</td>
+<td><code>bc08d561005c</code></td>
+<td>Potential fix for pull request finding</td>
+</tr>
+<tr>
+<td>2026-05-16</td>
+<td><code>fb201e892b43</code></td>
+<td>Potential fix for pull request finding</td>
+</tr>
+<tr>
+<td>2026-05-15</td>
+<td><code>d48556e53bd7</code></td>
+<td>Merge pull request #60 from sjkim1127/codex/source-semantic-nir-quality</td>
+</tr>
+<tr>
+<td>2026-05-15</td>
+<td><code>0074fc0a0efc</code></td>
+<td>Improve NIR source semantic recovery</td>
+</tr>
+<tr>
+<td>2026-05-15</td>
+<td><code>1d7b4c45eefe</code></td>
+<td>Add source semantic score sensitivity metrics</td>
+</tr>
+<tr>
+<td>2026-05-15</td>
+<td><code>92fad63f8800</code></td>
+<td>Batch prewarm source semantic decompilation</td>
+</tr>
+<tr>
+<td>2026-05-15</td>
+<td><code>8b37afc1e3f4</code></td>
+<td>Add source semantic readiness metrics</td>
+</tr>
+<tr>
+<td>2026-05-15</td>
+<td><code>07d5a2495525</code></td>
+<td>Fix cross-block call result register reads</td>
+</tr>
+<tr>
+<td>2026-05-15</td>
+<td><code>5266701eac4d</code></td>
+<td>Fix low-bit Rust-Sleigh decode extent</td>
+</tr>
+<tr>
+<td>2026-05-15</td>
+<td><code>f20e4dc0b79a</code></td>
+<td>Add source semantic quality metrics</td>
+</tr>
+<tr>
+<td>2026-05-15</td>
+<td><code>d1bf74999173</code></td>
+<td>Account for same-source inlining in semantic scoring</td>
+</tr>
+<tr>
+<td>2026-05-15</td>
+<td><code>29eed767d31e</code></td>
+<td>Add roadmap source semantic diagnostics</td>
+</tr>
+<tr>
+<td>2026-05-15</td>
+<td><code>2d6cfb1f20f3</code></td>
+<td>Extract rendered signatures in source semantic scoring</td>
+</tr>
+<tr>
+<td>2026-05-15</td>
+<td><code>0ce2d24cf229</code></td>
+<td>Add source semantic coverage diagnostics</td>
+</tr>
+<tr>
+<td>2026-05-14</td>
+<td><code>6fe0dbc3b530</code></td>
+<td>Add source semantic focus area metrics</td>
+</tr>
+<tr>
+<td>2026-05-14</td>
+<td><code>27141f0dc346</code></td>
+<td>Expand source semantic benchmark metrics</td>
+</tr>
+<tr>
+<td>2026-05-14</td>
+<td><code>83c31a62b3a3</code></td>
+<td>Fix ARM Thumb global relocations</td>
+</tr>
+<tr>
+<td>2026-05-14</td>
+<td><code>75c76124f75d</code></td>
+<td>Add source semantic triage metrics</td>
+</tr>
+<tr>
+<td>2026-05-14</td>
+<td><code>2234a7151502</code></td>
+<td>Fix ARM Thumb operand expression offsets</td>
+</tr>
+<tr>
+<td>2026-05-14</td>
+<td><code>5fb1b96a0d15</code></td>
+<td>Add source semantic coverage breakdown metrics</td>
+</tr>
+<tr>
+<td>2026-05-14</td>
+<td><code>30f7dac837a1</code></td>
+<td>Add source semantic triage metrics</td>
+</tr>
+<tr>
+<td>2026-05-14</td>
+<td><code>80451ddd2bfa</code></td>
+<td>Name SLEIGH build debug op count</td>
+</tr>
+<tr>
+<td>2026-05-14</td>
+<td><code>2e6d6abe5c6a</code></td>
+<td>Expose source semantic triage metrics</td>
+</tr>
+<tr>
+<td>2026-05-14</td>
+<td><code>afa20ac891b4</code></td>
+<td>Expose source semantic scoring denominators</td>
+</tr>
+<tr>
+<td>2026-05-14</td>
+<td><code>9e3a5a3ddcf4</code></td>
+<td>Add source semantic denominator metrics</td>
+</tr>
+<tr>
+<td>2026-05-14</td>
+<td><code>446cc615e0a8</code></td>
+<td>Add source semantic triage metrics</td>
+</tr>
+<tr>
+<td>2026-05-14</td>
+<td><code>e998ae0c88aa</code></td>
+<td>Add source semantic gap metrics</td>
+</tr>
+<tr>
+<td>2026-05-14</td>
+<td><code>24e9377bbd29</code></td>
+<td>Version source semantic debug evidence cache</td>
+</tr>
+<tr>
+<td>2026-05-14</td>
+<td><code>0a14064b7a7b</code></td>
+<td>Add source semantic diagnostic metrics</td>
+</tr>
+<tr>
+<td>2026-05-14</td>
+<td><code>96a18f1cf90c</code></td>
+<td>Add source semantic benchmark filters</td>
+</tr>
+<tr>
+<td>2026-05-14</td>
+<td><code>8484cbd0d592</code></td>
+<td>Lock source semantic missing-row scoring contract</td>
+</tr>
+<tr>
+<td>2026-05-14</td>
+<td><code>0f9336bc9bab</code></td>
+<td>Gate source semantic SLEIGH template sources</td>
+</tr>
+<tr>
+<td>2026-05-13</td>
+<td><code>7ae17d8aba44</code></td>
+<td>docs(benchmark): fold debug canary command details</td>
+</tr>
+<tr>
+<td>2026-05-13</td>
+<td><code>0acbd6203472</code></td>
+<td>docs(github): add benchmark regression issue form</td>
+</tr>
+<tr>
+<td>2026-05-13</td>
+<td><code>9af9fbf9b8a0</code></td>
+<td>Merge pull request #56 from sjkim1127/bench/expand-source-semantic-v1</td>
+</tr>
+<tr>
+<td>2026-05-13</td>
+<td><code>37598a41c067</code></td>
+<td>Merge pull request #55 from sjkim1127/bench/expand-source-semantic-v1</td>
+</tr>
+<tr>
+<td>2026-05-13</td>
+<td><code>e6c2d1aceffd</code></td>
+<td>docs(readme): surface source semantic feature-shape canaries</td>
+</tr>
+<tr>
+<td>2026-05-13</td>
+<td><code>b80a9aef8a1b</code></td>
+<td>Merge pull request #54 from sjkim1127/bench/expand-source-semantic-v1</td>
+</tr>
+<tr>
+<td>2026-05-13</td>
+<td><code>0eb6d5a02db0</code></td>
+<td>docs(source-semantic): document feature-shape canaries</td>
+</tr>
+<tr>
+<td>2026-05-13</td>
+<td><code>4cb0ed80c309</code></td>
+<td>bench(source-semantic): add feature-shape canary manifest</td>
+</tr>
+<tr>
+<td>2026-05-11</td>
+<td><code>dd7c721ed045</code></td>
+<td>Prefer literal source symbol matches in semantic benchmark</td>
+</tr>
+<tr>
+<td>2026-05-11</td>
+<td><code>8acf89f2240e</code></td>
+<td>Add focused AArch64 semantic benchmark lane</td>
+</tr>
+<tr>
+<td>2026-05-11</td>
+<td><code>cfe44ef61a39</code></td>
+<td>Prefer exported operand debug values over fixed fallback</td>
+</tr>
+<tr>
+<td>2026-05-11</td>
+<td><code>b448d93c18ee</code></td>
+<td>Constrain exported fixed display fallback</td>
+</tr>
+<tr>
+<td>2026-05-11</td>
+<td><code>5fed950f936b</code></td>
+<td>Prefer SLA display operands for exported debug values</td>
+</tr>
+<tr>
+<td>2026-05-11</td>
+<td><code>8fb753ee3a01</code></td>
+<td>Constrain exported display fixups to SLA operands</td>
+</tr>
+<tr>
+<td>2026-05-11</td>
+<td><code>7730661c854b</code></td>
+<td>Refresh SLEIGH regression expectations</td>
+</tr>
+<tr>
+<td>2026-05-09</td>
+<td><code>9e3044450338</code></td>
+<td>Match Ghidra offset-plus shift semantics</td>
+</tr>
+<tr>
+<td>2026-05-09</td>
+<td><code>75d27c62f322</code></td>
+<td>Track source semantic benchmark history</td>
+</tr>
+<tr>
+<td>2026-05-09</td>
+<td><code>4cae0dd2ee8d</code></td>
+<td>Materialize regression debug triage in source benchmark</td>
+</tr>
+<tr>
+<td>2026-05-09</td>
+<td><code>c12ff098ac49</code></td>
+<td>Extend source semantic benchmark triage</td>
+</tr>
+<tr>
+<td>2026-05-09</td>
+<td><code>9aade4fdfffc</code></td>
+<td>Stop pattern expressions using debug operands</td>
+</tr>
+<tr>
+<td>2026-05-09</td>
+<td><code>b2fef6652c1d</code></td>
+<td>Remove stale fallback debug affordance</td>
+</tr>
+<tr>
+<td>2026-05-09</td>
+<td><code>8ced2912f1e4</code></td>
+<td>Enhance source semantic debug triage cache reporting</td>
+</tr>
+<tr>
+<td>2026-05-09</td>
+<td><code>395a8517de20</code></td>
+<td>Enhance source semantic benchmark triage artifacts</td>
+</tr>
+<tr>
+<td>2026-05-09</td>
+<td><code>087b61486e3e</code></td>
+<td>Enhance source semantic benchmark history triage</td>
+</tr>
+<tr>
+<td>2026-05-09</td>
+<td><code>c76ef22a8fc3</code></td>
+<td>Aggregate source benchmark debug evidence</td>
+</tr>
+<tr>
+<td>2026-05-09</td>
+<td><code>b31f6a5122b7</code></td>
+<td>Materialize source benchmark debug bundles</td>
+</tr>
+<tr>
+<td>2026-05-09</td>
+<td><code>cd4c4fe287e4</code></td>
+<td>Persist source semantic run history</td>
+</tr>
+<tr>
+<td>2026-05-08</td>
+<td><code>913a30b9a5b9</code></td>
+<td>Expose Rust-Sleigh pcode topology in debug bundles</td>
+</tr>
+<tr>
+<td>2026-05-08</td>
+<td><code>1120c12a296d</code></td>
+<td>Persist source semantic decompile cache</td>
+</tr>
+<tr>
+<td>2026-05-08</td>
+<td><code>893c051f93ce</code></td>
+<td>Add source semantic benchmark comparisons</td>
+</tr>
+<tr>
+<td>2026-05-08</td>
+<td><code>453ec8feca80</code></td>
+<td>Add percent output and parallel jobs to source semantic benchmark</td>
+</tr>
+<tr>
+<td>2026-05-07</td>
+<td><code>b6a9101d7eb6</code></td>
+<td>Fix register alias def-use lowering</td>
+</tr>
+<tr>
+<td>2026-05-06</td>
+<td><code>0c6db9e23689</code></td>
+<td>Add source semantic benchmark</td>
+</tr>
+<tr>
+<td>2026-05-06</td>
+<td><code>0998fd2108c3</code></td>
+<td>fix(pcode): narrow zero-extended return widths</td>
+</tr>
+<tr>
+<td>2026-05-06</td>
+<td><code>f5222af252da</code></td>
+<td>fix(pcode): structure intra-instruction return copies</td>
+</tr>
+<tr>
+<td>2026-05-06</td>
+<td><code>a3c8fe3c5158</code></td>
+<td>fix(pcode): recover rust-sleigh return register values</td>
+</tr>
+<tr>
+<td>2026-05-06</td>
+<td><code>29118f1a7aa8</code></td>
+<td>fix(pcode): narrow runtime register param recovery</td>
+</tr>
+<tr>
+<td>2026-05-06</td>
+<td><code>8b5fbcc8c513</code></td>
+<td>fix(pcode): recover rust-sleigh entry register params</td>
+</tr>
+<tr>
+<td>2026-05-06</td>
+<td><code>6a3a8ecb5fdc</code></td>
+<td>fix(pcode): map x64 subregister aliases to abi params</td>
+</tr>
+<tr>
+<td>2026-05-06</td>
+<td><code>2758d893bfe8</code></td>
+<td>fix(pcode): treat flag helpers as guarded-tail pure calls</td>
+</tr>
+<tr>
+<td>2026-05-06</td>
+<td><code>fcd5f76415da</code></td>
+<td>fix(loader): merge PE pdata extents into COFF symbols</td>
+</tr>
+<tr>
+<td>2026-05-05</td>
+<td><code>e66f1560ac90</code></td>
+<td>feat(static): external symbol index, function provenance, API import lookup</td>
+</tr>
+<tr>
+<td>2026-05-04</td>
+<td><code>56a6783bd052</code></td>
+<td>ci(cd): trigger releases on bare semver tags as well as v-prefix</td>
+</tr>
+<tr>
+<td>2026-05-04</td>
+<td><code>b872da995c36</code></td>
+<td>refactor(fission-dynamic): unify OS debug under platform; rename ttd→timeline</td>
+</tr>
+<tr>
+<td>2026-05-04</td>
+<td><code>834e341ef1af</code></td>
+<td>Canonical WinAPI/type JSON under utils/signatures; drop crate-local data</td>
+</tr>
+<tr>
+<td>2026-05-04</td>
+<td><code>5e182988091b</code></td>
+<td>Remove fission-analysis facade; move benchmarks to fission-static</td>
+</tr>
+<tr>
+<td>2026-05-04</td>
+<td><code>74f0846777a7</code></td>
+<td>refactor(cli,core): rust_decomp modules, rust_sleigh evidence, legacy postprocess quarantine</td>
+</tr>
+<tr>
+<td>2026-05-04</td>
+<td><code>0e549bf5c280</code></td>
+<td>refactor: decouple crate tests from benchmark fixtures</td>
+</tr>
+<tr>
+<td>2026-05-03</td>
+<td><code>a16c028a0044</code></td>
+<td>Fix sqlite SLEIGH raw p-code canaries</td>
+</tr>
+<tr>
+<td>2026-05-03</td>
+<td><code>c3b211f685f2</code></td>
+<td>fix(ci): PE smoke picks add/main over MinGW CRT symbols</td>
+</tr>
+<tr>
+<td>2026-05-03</td>
+<td><code>784eae8f9409</code></td>
+<td>fix(ci): install MinGW via apt-get in cli-smoke (avoid cache PATH gap)</td>
+</tr>
+<tr>
+<td>2026-05-03</td>
+<td><code>765a8a9b20a6</code></td>
+<td>fix(fission-tauri): sync package-lock for @emnapi/* (npm ci on CI)</td>
+</tr>
+<tr>
+<td>2026-05-03</td>
+<td><code>b3de2fa2f2f4</code></td>
+<td>fix(tauri-ui): bump @vitejs/plugin-react for Vite 8 peer range</td>
+</tr>
+<tr>
+<td>2026-05-02</td>
+<td><code>51a7b7f7960f</code></td>
+<td>fix: sync cargo-audit with deny baselines; serialize defuse env tests</td>
+</tr>
+<tr>
+<td>2026-05-02</td>
+<td><code>c6c7ea4535e6</code></td>
+<td>fix(loader): satisfy clippy manual_checked_ops for ELF sym counts</td>
+</tr>
+<tr>
+<td>2026-05-02</td>
+<td><code>06e8bc75959e</code></td>
+<td>fix(ci): unblock clippy -D warnings on stable</td>
+</tr>
+<tr>
+<td>2026-05-02</td>
+<td><code>d903975cb135</code></td>
+<td>fix(deny): allow AGPL/MPL licenses and declare fission-sleigh license</td>
+</tr>
+<tr>
+<td>2026-05-02</td>
+<td><code>7001cbf0c62b</code></td>
+<td>ci: build smoke corpus PE fixtures with MinGW for benchmark job</td>
+</tr>
+<tr>
+<td>2026-05-02</td>
+<td><code>7f48dd495805</code></td>
+<td>fix(loader): use public loader API in fuzz targets</td>
+</tr>
+<tr>
+<td>2026-05-02</td>
+<td><code>35fff09c2d26</code></td>
+<td>fix(loader): use public loader API in fuzz targets</td>
+</tr>
+<tr>
+<td>2026-05-02</td>
+<td><code>c412a57d3708</code></td>
+<td>fix(loader): isolate fuzz crate from workspace</td>
+</tr>
+<tr>
+<td>2026-05-02</td>
+<td><code>4564577e2081</code></td>
+<td>fix(loader): allow legacy clippy pedantic lints</td>
+</tr>
+<tr>
+<td>2026-05-02</td>
+<td><code>ea61720ef213</code></td>
+<td>ci: bash shell + timeouts for Windows tests; fast CI uses debug</td>
+</tr>
+<tr>
+<td>2026-05-02</td>
+<td><code>49b40d7bc16f</code></td>
+<td>ci: install MinGW via apt-get for nir-check PE fixture</td>
+</tr>
+<tr>
+<td>2026-05-02</td>
+<td><code>e15988c81423</code></td>
+<td>fix(sleigh): executable allowlist for manifest; skip SLA tests without Ghidra</td>
+</tr>
+<tr>
+<td>2026-05-02</td>
+<td><code>85b4451616f5</code></td>
+<td>ci: build PE fixture for nir lane sentinel manifest</td>
+</tr>
+<tr>
+<td>2026-05-02</td>
+<td><code>82c251436d62</code></td>
+<td>fix(signatures): add GetClientRect/GetWindowRect/GetMessage* to Win32 API DB</td>
+</tr>
+<tr>
+<td>2026-05-02</td>
+<td><code>ff0a04e3ed2b</code></td>
+<td>fix(ci): clippy-friendly architecture select + serialized sleigh discovery tests</td>
+</tr>
+<tr>
+<td>2026-05-02</td>
+<td><code>6a249e0a5d1a</code></td>
+<td>ci: fix test exclusions and stabilize function discovery fixtures</td>
+</tr>
+<tr>
+<td>2026-05-02</td>
+<td><code>cf0106c10b6a</code></td>
+<td>docs(ci): release gate, security policy, issue forms, third-party canary</td>
+</tr>
+<tr>
+<td>2026-05-02</td>
+<td><code>8d66ac1cf436</code></td>
+<td>benchmark: point smoke/release/parity corpora at benchmark/binary</td>
+</tr>
+<tr>
+<td>2026-05-02</td>
+<td><code>26a659c9fdc5</code></td>
+<td>ci: fix reusable-build-cli TARGET_DIR (bash-only; invalid PROFILE_DIR in expressions)</td>
+</tr>
+<tr>
+<td>2026-05-01</td>
+<td><code>bdc2efb9efba</code></td>
+<td>Fix AArch64 exported handle p-code parity</td>
+</tr>
+<tr>
+<td>2026-05-01</td>
+<td><code>bb69df633e75</code></td>
+<td>Fix ELF relocatable loader byte lookup</td>
+</tr>
+<tr>
+<td>2026-04-30</td>
+<td><code>c2c62c5db7ea</code></td>
+<td>feat(fission-sleigh): x86-32 P-code 100% parity via reloffset propagation</td>
+</tr>
+<tr>
+<td>2026-04-30</td>
+<td><code>a82756cd19c9</code></td>
+<td>feat(sleigh): 100% canonical parity — BRANCH/BRANCHIND/CALLIND SLA opcode alignment</td>
+</tr>
+<tr>
+<td>2026-04-25</td>
+<td><code>05ed3d0b2355</code></td>
+<td>fix(sleigh): robust handle remapping for SLA templates with invisible operands</td>
+</tr>
+<tr>
+<td>2026-04-24</td>
+<td><code>55361383b14b</code></td>
+<td>Cut over compiled-table semantic emission</td>
+</tr>
+<tr>
+<td>2026-04-22</td>
+<td><code>5f05dd0c8482</code></td>
+<td>refactor: include medium binary source code in repository</td>
+</tr>
+<tr>
+<td>2026-04-22</td>
+<td><code>eec748164e97</code></td>
+<td>feat: add comprehensive performance benchmarking dashboard with criterion.rs integration and medium binary samples</td>
+</tr>
+<tr>
+<td>2026-04-20</td>
+<td><code>2242f9ba4f92</code></td>
+<td>Trace missing incoming semantics owners</td>
+</tr>
+<tr>
+<td>2026-04-20</td>
+<td><code>99dcef51db60</code></td>
+<td>Trace no-prior-def incoming semantics</td>
+</tr>
+<tr>
+<td>2026-04-20</td>
+<td><code>6117a036c269</code></td>
+<td>Add parity chain regression attribution trace</td>
+</tr>
+<tr>
+<td>2026-04-19</td>
+<td><code>6e69aaf2253d</code></td>
+<td>Trace no-consumer suppression regressions</td>
+</tr>
+<tr>
+<td>2026-04-18</td>
+<td><code>ffb99b2764de</code></td>
+<td>Internalize known pure helper suffix calls</td>
+</tr>
+<tr>
+<td>2026-04-18</td>
+<td><code>26fb53a5e54a</code></td>
+<td>Subtype guarded-tail suffix side effects</td>
+</tr>
+<tr>
+<td>2026-04-18</td>
+<td><code>36a2063615af</code></td>
+<td>Subtype guarded-tail nested suffix blockers</td>
+</tr>
+<tr>
+<td>2026-04-18</td>
+<td><code>a9255ddb8da3</code></td>
+<td>Close self-terminal guarded tail suffixes</td>
+</tr>
+<tr>
+<td>2026-04-18</td>
+<td><code>23d22703bf2a</code></td>
+<td>Tighten guarded-tail suffix redirect closure</td>
+</tr>
+<tr>
+<td>2026-04-18</td>
+<td><code>e89b78042d06</code></td>
+<td>Add guarded-tail suffix tail rejection diagnostics</td>
+</tr>
+<tr>
+<td>2026-04-17</td>
+<td><code>9a50e43693ee</code></td>
+<td>feat(nir): collapse guard-prefix sink goto chains to terminal return</td>
+</tr>
+<tr>
+<td>2026-04-17</td>
+<td><code>aae44afb1124</code></td>
+<td>feat(nir): allow terminal-safe nested tail exit subcase in guarded-tail canonicalization</td>
+</tr>
+<tr>
+<td>2026-04-17</td>
+<td><code>ecb785f637b6</code></td>
+<td>fix(nir): align guarded-tail verify must-emit gating</td>
+</tr>
+<tr>
+<td>2026-04-15</td>
+<td><code>20d142c98005</code></td>
+<td>feat(nir): join-glue middle refs for guarded-tail promotion</td>
+</tr>
+<tr>
+<td>2026-04-11</td>
+<td><code>97cf69a29fb3</code></td>
+<td>Fix benchmark direct-success reporting</td>
+</tr>
+<tr>
+<td>2026-04-11</td>
+<td><code>91dc4acdbd2b</code></td>
+<td>Consolidate canonical semantics ownership</td>
+</tr>
+<tr>
+<td>2026-04-10</td>
+<td><code>8b31a50f5450</code></td>
+<td>Fix virtual block structuring recovery</td>
+</tr>
+<tr>
+<td>2026-04-10</td>
+<td><code>31457b353a2b</code></td>
+<td>Tighten call semantics and MemSSA ownership</td>
+</tr>
+<tr>
+<td>2026-04-10</td>
+<td><code>8325b2c645ab</code></td>
+<td>Implement semantics-first decompilation core wave</td>
+</tr>
+<tr>
+<td>2026-04-10</td>
+<td><code>4e8c16229c04</code></td>
+<td>fix(automation): restore rust-only nir-check inventory</td>
+</tr>
+<tr>
+<td>2026-04-10</td>
+<td><code>0ceb330d178d</code></td>
+<td>refactor: NIR normalize tree, cfg_analysis split, automation report, sleigh semantic</td>
+</tr>
+<tr>
+<td>2026-04-09</td>
+<td><code>cdc2c970d192</code></td>
+<td>Improve NIR structuring/type fixpoint and refresh 3-gate benchmarks</td>
+</tr>
+<tr>
+<td>2026-04-09</td>
+<td><code>d758fb813bd6</code></td>
+<td>fix(structuring): require matching terminal-kind for no-exit merges</td>
+</tr>
+<tr>
+<td>2026-04-09</td>
+<td><code>18afdab8e673</code></td>
+<td>fix(fission-pcode): refresh dominator cache after CFG mutation</td>
+</tr>
+<tr>
+<td>2026-04-09</td>
+<td><code>20a853686325</code></td>
+<td>feat(pcode): HIR Phase 9 — SCCP, join GVN-lite, wide def-use DCE</td>
+</tr>
+<tr>
+<td>2026-04-09</td>
+<td><code>bc9096b977d3</code></td>
+<td>feat(pcode): HIR Quality Phase 8 — RLE, branch prefix hoist, affine IV, expr_key</td>
+</tr>
+<tr>
+<td>2026-04-09</td>
+<td><code>724d0ab8a253</code></td>
+<td>feat(pcode): HIR Quality Phase 7 — LICM, Local CSE, Sar sign propagation</td>
+</tr>
+<tr>
+<td>2026-04-09</td>
+<td><code>4aac93e4f6ae</code></td>
+<td>feat(pcode): HIR Quality Phase 4 — use-type-infer, ptr-arith, return-type, label-inline</td>
+</tr>
+<tr>
+<td>2026-04-09</td>
+<td><code>04a2e38211dd</code></td>
+<td>feat(pcode): HIR expressiveness phase 3 — EFLAGS recovery, prologue elimination, Cooper postdom structuring</td>
+</tr>
+<tr>
+<td>2026-04-08</td>
+<td><code>113c81301241</code></td>
+<td>feat/x86: 4th lifter reinforcement pass — coverage ~87% → ~93%</td>
+</tr>
+<tr>
+<td>2026-04-06</td>
+<td><code>6fd6a170e882</code></td>
+<td>sleigh/x86: tighten byte div semantics and unsupported marker schema</td>
+</tr>
+<tr>
+<td>2026-04-05</td>
+<td><code>19d652606445</code></td>
+<td>x86 0F3A semantics and CFG branch-target diagnostics</td>
+</tr>
+<tr>
+<td>2026-04-05</td>
+<td><code>a3eb9eec5842</code></td>
+<td>x86: expand F6 group semantics and update changelog</td>
+</tr>
+<tr>
+<td>2026-04-04</td>
+<td><code>86ce1bfe722e</code></td>
+<td>fission-sleigh: split aarch64 semantic modules and tests</td>
+</tr>
+<tr>
+<td>2026-04-03</td>
+<td><code>eac847b49036</code></td>
+<td>docs(changelog): add 2026-04-03 arm64 InvalidRef fix entry</td>
+</tr>
+<tr>
+<td>2026-04-03</td>
+<td><code>831564ba3842</code></td>
+<td>docs(changelog): add 2026-04-03 arm64 InvalidRef fix entry</td>
+</tr>
+<tr>
+<td>2026-03-28</td>
+<td><code>14cc53cdd669</code></td>
+<td>Add builder debug and stats modules</td>
+</tr>
+<tr>
+<td>2026-03-24</td>
+<td><code>64aee7b262ca</code></td>
+<td>Fix CI workflow args and Windows decompiler target build</td>
+</tr>
+<tr>
+<td>2026-03-23</td>
+<td><code>894f0415ac3d</code></td>
+<td>Strengthen CI pipelines and fix decompiler build invocation</td>
+</tr>
+<tr>
+<td>2026-03-23</td>
+<td><code>7d680d74bb42</code></td>
+<td>Tighten region recovery semantics and preserve cached reject reasons</td>
+</tr>
+<tr>
+<td>2026-03-23</td>
+<td><code>fcbbb651b005</code></td>
+<td>Align linear structuring regressions with current lowering behavior</td>
+</tr>
+<tr>
+<td>2026-03-12</td>
+<td><code>7e6b7d2139ed</code></td>
+<td>fix(decomp): recover legacy C output from Duplicate VariablePiece failures</td>
+</tr>
+<tr>
+<td>2026-03-10</td>
+<td><code>a9589dc59f71</code></td>
+<td>fix(gui): sync decompiler option toggles and decompile symbol interactions</td>
+</tr>
+<tr>
+<td>2026-03-10</td>
+<td><code>22c5eb33bf8c</code></td>
+<td>feat(analysis): implement label-prefix sinking to normalize CFG</td>
+</tr>
+<tr>
+<td>2026-03-10</td>
+<td><code>818b65f678d0</code></td>
+<td>Fix unique piece duplication in RulePieceStructure</td>
+</tr>
+<tr>
+<td>2026-03-10</td>
+<td><code>4b02765e6b9b</code></td>
+<td>perf: finalize graceful degradation and 10s baseline</td>
+</tr>
+<tr>
+<td>2026-03-09</td>
+<td><code>0326b9def673</code></td>
+<td>perf: fix multithread timeout (900s→26s) + dynamic worker scaling</td>
+</tr>
+<tr>
+<td>2026-03-09</td>
+<td><code>b769e920248d</code></td>
+<td>fix: 8스레드 멀티스레드 안정화 패치 (UserPcodeOp null 체크, Sleigh 직렬화)</td>
+</tr>
+<tr>
+<td>2026-03-08</td>
+<td><code>eac0431496a4</code></td>
+<td>fix: TypePropagator UAF 수정, Phase D Object Pool(롤백), decomp 직렬화</td>
+</tr>
+<tr>
+<td>2026-03-07</td>
+<td><code>29d5ccc283ce</code></td>
+<td>perf: 디컴파일러 성능 최적화 + 성공률 61%→87% 개선</td>
+</tr>
+<tr>
+<td>2026-03-07</td>
+<td><code>6ee0751e8a83</code></td>
+<td>test: implement pyghidra vs fission decompiler comparison script and fix hidden cli output</td>
+</tr>
+<tr>
+<td>2026-03-04</td>
+<td><code>0d85ae25b0fc</code></td>
+<td>fix(clippy): suppress 36 pedantic lints in fission-loader crate</td>
+</tr>
+<tr>
+<td>2026-03-04</td>
+<td><code>7d6e5c1169f4</code></td>
+<td>fix(clippy): resolve 3 clippy errors across fission-disasm and fission-analysis</td>
+</tr>
+<tr>
+<td>2026-03-04</td>
+<td><code>fec4f59b0da6</code></td>
+<td>fix(core): resolve 5 clippy errors in fission-core</td>
+</tr>
+<tr>
+<td>2026-03-04</td>
+<td><code>ce9e2e7fc075</code></td>
+<td>fix(src): add missing cstring include to 6 source files for Linux GCC compatibility</td>
+</tr>
+<tr>
+<td>2026-03-04</td>
+<td><code>7f07f15e0c26</code></td>
+<td>fix(headers): add missing cstdint include to 11 headers for Linux GCC compatibility</td>
+</tr>
+<tr>
+<td>2026-03-04</td>
+<td><code>ba327559da90</code></td>
+<td>fix(types): add missing cstdint include to PrototypeEnforcer.h</td>
+</tr>
+<tr>
+<td>2026-03-04</td>
+<td><code>58ed1142c259</code></td>
+<td>feat(decompiler): implement Phase 1-4 Ghidra gap mitigations</td>
+</tr>
+<tr>
+<td>2026-03-04</td>
+<td><code>7f9f9d4d3dbc</code></td>
+<td>feat: enable Ghidra analysis flags and fix NoReturnDetector API</td>
+</tr>
+<tr>
+<td>2026-03-04</td>
+<td><code>35a159287c29</code></td>
+<td>feat: rewrite_pointer_arithmetic_to_array — pointer deref → array subscript</td>
+</tr>
+<tr>
+<td>2026-03-03</td>
+<td><code>deac984c175a</code></td>
+<td>feat: implement 8-gap decompiler improvements vs Ghidra</td>
+</tr>
+<tr>
+<td>2026-03-03</td>
+<td><code>ca470bc99a49</code></td>
+<td>fix: resolve Dependabot security alerts</td>
+</tr>
+<tr>
+<td>2026-03-03</td>
+<td><code>e2e33294d83c</code></td>
+<td>fix(decompiler): include cstdint for uint64_t in StructureAnalyzer header</td>
+</tr>
+<tr>
+<td>2026-03-03</td>
+<td><code>7408a172aa66</code></td>
+<td>security: baseline no-fix advisories and restore blocking rust advisory gate</td>
+</tr>
+<tr>
+<td>2026-03-03</td>
+<td><code>d12316d8c695</code></td>
+<td>fix: restore switch reconstruction for generic assignment targets</td>
+</tr>
+<tr>
+<td>2026-03-03</td>
+<td><code>5389762c239a</code></td>
+<td>refactor: Phase 2.6 - Remove remaining unwraps in pcode optimizer tests</td>
+</tr>
+<tr>
+<td>2026-03-03</td>
+<td><code>1495b4788297</code></td>
+<td>refactor: Phase 2.5 - Mutex &amp; path handling safety</td>
+</tr>
+<tr>
+<td>2026-03-03</td>
+<td><code>e9e62bbbe6db</code></td>
+<td>refactor: Phase 2.4 - Additional unwrap removal (CLI, loader, pcode, sigs)</td>
+</tr>
+<tr>
+<td>2026-03-03</td>
+<td><code>719050e91c22</code></td>
+<td>refactor: Constants library and initial stability improvements</td>
+</tr>
+<tr>
+<td>2026-03-01</td>
+<td><code>51bfd8df7b82</code></td>
+<td>fix: Phase A/B optimizer pass safety guards</td>
+</tr>
+<tr>
+<td>2026-03-01</td>
+<td><code>91c6611dcd66</code></td>
+<td>fix: decompiler 4 critical bugs + v4 benchmark system (ARM64 69.4%-&gt;88.9%, Linux 91.6%)</td>
+</tr>
+<tr>
+<td>2026-02-26</td>
+<td><code>b02eae287b67</code></td>
+<td>fix: move strip_shadow_only_params to Step 11.5; fix brace detection</td>
+</tr>
+<tr>
+<td>2026-02-26</td>
+<td><code>de0a65f4fd02</code></td>
+<td>fix: IAT indirect call cleanup + shadow param stripping in C++ pipeline</td>
+</tr>
+<tr>
+<td>2026-02-26</td>
+<td><code>ca6890a23c75</code></td>
+<td>feat: struct field, IAT calls, shadow params, compound assign normalization</td>
+</tr>
+<tr>
+<td>2026-02-25</td>
+<td><code>9b2db76f279d</code></td>
+<td>feat: improve normalize_for_similarity — debug param names, type normalization</td>
+</tr>
+<tr>
+<td>2026-02-25</td>
+<td><code>a193ed27a7f9</code></td>
+<td>analysis: improve -O2 decompiler quality (x64 46%→57.9%, x86 49.8%→62.6%)</td>
+</tr>
+<tr>
+<td>2026-02-25</td>
+<td><code>5e453e9bba37</code></td>
+<td>x86 double synthesis + normalization fixes: x86 90.1% → 92.6%</td>
+</tr>
+<tr>
+<td>2026-02-25</td>
+<td><code>be19a1dc583d</code></td>
+<td>improvement: Track 2/3/4 + benchmark normalization (x86 80% → 90.1%)</td>
+</tr>
+<tr>
+<td>2026-02-24</td>
+<td><code>580c94316ad2</code></td>
+<td>chore: track samples/README.md and fix .gitignore</td>
+</tr>
+<tr>
+<td>2026-02-24</td>
+<td><code>0e0d142f9052</code></td>
+<td>chore: remove orphaned tests/ directory</td>
+</tr>
+<tr>
+<td>2026-02-24</td>
+<td><code>9a05960733b7</code></td>
+<td>Track B: MinGW x86 binary + x86 benchmark suite (baseline 80.0%)</td>
+</tr>
+<tr>
+<td>2026-02-24</td>
+<td><code>32f7fca96f2b</code></td>
+<td>Track A+B: normalizer A-1~A-6 patches + TypePropagator mingw branch → 98.8%</td>
+</tr>
+<tr>
+<td>2026-02-24</td>
+<td><code>b838079ea564</code></td>
+<td>feat: propagateAcrossReturns + normalizer integer-cast stripping (92.1%)</td>
+</tr>
+<tr>
+<td>2026-02-24</td>
+<td><code>0f47dc0eb73d</code></td>
+<td>feat: type propagation guards + normalizer opaque-ptr + FuncCallSpecs fallback</td>
+</tr>
+<tr>
+<td>2026-02-24</td>
+<td><code>06397c76f16e</code></td>
+<td>fix: auto-copy libdecomp.dylib to target/debug on macOS in fission-ffi/build.rs</td>
+</tr>
+<tr>
+<td>2026-02-24</td>
+<td><code>3c47cad53f82</code></td>
+<td>perf/refactor: Group 1-3 improvements (hash fix, static regex, 2-barrier, string cache, O(n) CFG, lazy arch)</td>
+</tr>
+<tr>
+<td>2026-02-24</td>
+<td><code>13459511e5f3</code></td>
+<td>fix: Phase 3 connectivity - batch type propagation + PcodeOptimizationBridge</td>
+</tr>
+<tr>
+<td>2026-02-24</td>
+<td><code>435c78e072b9</code></td>
+<td>refactor: Phase 3 decompiler improvements (A-1~D-1)</td>
+</tr>
+<tr>
+<td>2026-02-24</td>
+<td><code>2eb1e1966f1f</code></td>
+<td>refactor: Phase 2 decompiler refactoring (A-1~B-4, C-2, D-1, E-1~E-2)</td>
+</tr>
+<tr>
+<td>2026-02-24</td>
+<td><code>b38ef4d317a4</code></td>
+<td>arch: fix x86/PE hardcoding in decompiler engine (7 fixes)</td>
+</tr>
+<tr>
+<td>2026-02-24</td>
+<td><code>9b9dc2107043</code></td>
+<td>feat(bench): add compare_decompilers_v3.py + suite_example.yaml</td>
+</tr>
+<tr>
+<td>2026-02-23</td>
+<td><code>0298f08c4ebc</code></td>
+<td>feat(decompiler): implement TypeSharing, FID→Ghidra feedback, PcodeBridge stability</td>
+</tr>
+<tr>
+<td>2026-02-23</td>
+<td><code>2deca1acb6e5</code></td>
+<td>style: split App.css (3386 lines) into src/styles/ zone structure</td>
+</tr>
+<tr>
+<td>2026-02-23</td>
+<td><code>950836e5c5f2</code></td>
+<td>refactor(fission-tauri): Phase 2+3 frontend refactoring</td>
+</tr>
+<tr>
+<td>2026-02-23</td>
+<td><code>086becf25f14</code></td>
+<td>feat: Tauri GUI Phase 1-9 완전 이관 + egui 제거</td>
+</tr>
+<tr>
+<td>2026-02-21</td>
+<td><code>6efbf9a8d4d0</code></td>
+<td>Phase 10: Exports/Patches/Notes tabs, search sidebar, hex nav, clear fix</td>
+</tr>
+<tr>
+<td>2026-02-21</td>
+<td><code>0a8672d30342</code></td>
+<td>feat(tauri-gui): Phase 1-6 완전 구현 + 버그 수정 4건</td>
+</tr>
+<tr>
+<td>2026-02-16</td>
+<td><code>e7d3d0735b20</code></td>
+<td>feat(decomp): expand native feature controls and add quality workflow gate</td>
+</tr>
+<tr>
+<td>2026-02-16</td>
+<td><code>214c54e365cd</code></td>
+<td>fix(loader): update tests for DataBuffer and LoadedBinary refactor</td>
+</tr>
+<tr>
+<td>2026-01-20</td>
+<td><code>936ae9f0f7da</code></td>
+<td>feat: Enhanced type analysis for Go/DWARF and Swift accessor recognition</td>
+</tr>
+<tr>
+<td>2026-01-19</td>
+<td><code>09810a839f88</code></td>
+<td>feat: Swift type recovery and metadata parsing infrastructure</td>
+</tr>
+<tr>
+<td>2026-01-19</td>
+<td><code>7acf289f6567</code></td>
+<td>fix: resolve DecompilerNative thread warning spam with per-instance tracking</td>
+</tr>
+<tr>
+<td>2026-01-11</td>
+<td><code>48287c0bf7a6</code></td>
+<td>feat(debug): enhance RR/TTD integration with structured GDB/MI parsing and register sync</td>
+</tr>
+<tr>
+<td>2026-01-11</td>
+<td><code>b2f199621d84</code></td>
+<td>feat(debug): complete RR/TTD integration and fix macOS dylib loading</td>
+</tr>
+<tr>
+<td>2026-01-11</td>
+<td><code>dc3ff9079b26</code></td>
+<td>feat(debug): Add RR Time Travel Debugging integration</td>
+</tr>
+<tr>
+<td>2026-01-10</td>
+<td><code>12a94865cb9c</code></td>
+<td>feat: Set native_decomp as default feature</td>
+</tr>
+<tr>
+<td>2026-01-10</td>
+<td><code>3ea8b2ea2b8f</code></td>
+<td>feat: Decompiler error handling &amp; recovery improvements</td>
+</tr>
+<tr>
+<td>2026-01-10</td>
+<td><code>704a7fdc3670</code></td>
+<td>perf: LoadedBinary cloning optimization with Arc<Vec\<u8>></td>
+</tr>
+<tr>
+<td>2026-01-10</td>
+<td><code>af733aea4bba</code></td>
+<td>refactor: GUI Architecture &amp; Native Decompiler Stabilization</td>
+</tr>
+<tr>
+<td>2026-01-10</td>
+<td><code>d99ba204bf9b</code></td>
+<td>feat(cfg): Add CFG analysis integration for CLI and GUI</td>
+</tr>
+<tr>
+<td>2026-01-09</td>
+<td><code>7fd05ca751b7</code></td>
+<td>feat: Improve error handling and reorganize GUI module structure (2026-01-09)</td>
+</tr>
+<tr>
+<td>2026-01-09</td>
+<td><code>e022b976c904</code></td>
+<td>fix: Correct function address extraction for PE binaries</td>
+</tr>
+<tr>
+<td>2026-01-08</td>
+<td><code>40d0e5883c88</code></td>
+<td>test: Add comprehensive test suite for complex decompilation patterns</td>
+</tr>
+<tr>
+<td>2026-01-08</td>
+<td><code>3f656f352609</code></td>
+<td>feat: Achieve 97.86% decompiler similarity with Ghidra</td>
+</tr>
+<tr>
+<td>2026-01-05</td>
+<td><code>7332a9a129db</code></td>
+<td>feat: Implement COFF Symbol Table parsing for 100% MinGW function recognition</td>
+</tr>
+<tr>
+<td>2026-01-05</td>
+<td><code>70234f3761aa</code></td>
+<td>feat: Add Mach-O symbol resolution and decompiler comparison framework</td>
+</tr>
+<tr>
+<td>2026-01-05</td>
+<td><code>cf32139d0660</code></td>
+<td>feat: Add Pcode graph visualization with assembly integration</td>
+</tr>
+<tr>
+<td>2026-01-05</td>
+<td><code>6a2365f40132</code></td>
+<td>docs: Reorganize changelog by topic instead of dates</td>
+</tr>
+</tbody>
+</table>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.tabs", "navigation.sections", "navigation.expand", "navigation.top", "search.suggest", "search.highlight", "content.code.copy"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>

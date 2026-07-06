@@ -1,0 +1,2005 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="A cross-platform, Rust-powered reverse engineering and decompilation framework.">
+      
+      
+      
+        <link rel="canonical" href="https://sjkim1127.github.io/Fission/changelog/Legacy/20260501_Changelog/">
+      
+      
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>2026-05-01 Changelog - Fission</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("../../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#2026-05-01-changelog" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../../.." title="Fission" class="md-header__button md-logo" aria-label="Fission" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Fission
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              2026-05-01 Changelog
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m14.3 16-.7-2h-3.2l-.7 2H7.8L11 7h2l3.2 9zM20 8.69V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12zm-9.15 3.96h2.3L12 9z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_2" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to system preference"  type="radio" name="__palette" id="__palette_2">
+    
+      <label class="md-header__button md-icon" title="Switch to system preference" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/sjkim1127/Fission" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    sjkim1127/Fission
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../.." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../../PROJECT_MAP/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Project Map
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../../CLI/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  CLI Guide
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../../architecture/ARCHITECTURE/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Architecture
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../../QUALITY_METRICS/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Quality Metrics
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../../EVALUATION/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Evaluation
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../../contributing/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Contributing
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../../MALWARE_SAMPLE_POLICY/" class="md-tabs__link">
+          
+  
+  
+  Developer Policies
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../../.." title="Fission" class="md-nav__button md-logo" aria-label="Fission" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Fission
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/sjkim1127/Fission" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    sjkim1127/Fission
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../PROJECT_MAP/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Project Map
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../CLI/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI Guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../architecture/ARCHITECTURE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../QUALITY_METRICS/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quality Metrics
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../EVALUATION/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Evaluation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../contributing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contributing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_8" >
+        
+          
+          <label class="md-nav__link" for="__nav_8" id="__nav_8_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Developer Policies
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_8_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_8">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Developer Policies
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../MALWARE_SAMPLE_POLICY/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Malware Sample Policy
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../VERSIONING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Versioning
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../RELEASE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Release
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#sleigh-raw-p-code-constant-varnode-parity-restore" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        SLEIGH Raw P-code Constant Varnode Parity Restore
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#validation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Validation
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#notes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Notes
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#sleigh-canonical-gate-audit" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        SLEIGH Canonical Gate Audit
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#canonical-gate-audit-validation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Canonical Gate Audit Validation
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#raw-p-code-multi-binary-manifest-expansion" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Raw P-code Multi-binary Manifest Expansion
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#multi-binary-validation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Multi-binary Validation
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#ghidra-parity-gap-audit" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Ghidra Parity Gap Audit
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#ghidra-parity-audit-validation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Ghidra Parity Audit Validation
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#architecture-organized-vendor-binary-corpus" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Architecture-organized Vendor Binary Corpus
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#vendor-corpus-copy-validation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Vendor Corpus Copy Validation
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#vendor-binary-multi-corpus-raw-p-code-smoke" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Vendor Binary Multi-corpus Raw P-code Smoke
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#vendor-binary-smoke-validation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Vendor Binary Smoke Validation
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#vendor-x86-pe-sleigh-operand-extent-fix" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Vendor x86 PE SLEIGH Operand Extent Fix
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#vendor-x86-pe-validation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Vendor x86 PE Validation
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#vendor-x86-pe-notes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Vendor x86 PE Notes
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#github-release-corpus-collection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GitHub Release Corpus Collection
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#ghidra-opinion-loadspec-selection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Ghidra Opinion LoadSpec Selection
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#ghidra-opinion-loadspec-validation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Ghidra Opinion LoadSpec Validation
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#ghidra-opinion-loadspec-notes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Ghidra Opinion LoadSpec Notes
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#sleigh-crate-local-spec-snapshot-removal" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        SLEIGH Crate-local Spec Snapshot Removal
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#loader-accuracy-gate" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Loader Accuracy Gate
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#loader-accuracy-validation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Loader Accuracy Validation
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#loader-accuracy-notes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Loader Accuracy Notes
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#ghidra-data-snapshot-vendoring" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Ghidra Data Snapshot Vendoring
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#ghidra-data-snapshot-validation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Ghidra Data Snapshot Validation
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#github-release-corpus-validation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GitHub Release Corpus Validation
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#sleigh-specs-snapshot-migration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        SLEIGH Specs Snapshot Migration
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#sleigh-specs-snapshot-validation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        SLEIGH Specs Snapshot Validation
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#fission-sleigh-module-boundary-and-runtime-index-refactor" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        fission-sleigh Module Boundary and Runtime Index Refactor
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#fission-sleigh-refactor-validation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        fission-sleigh Refactor Validation
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#fission-sleigh-refactor-raw-p-code-gates" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        fission-sleigh Refactor Raw P-code Gates
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#fission-sleigh-refactor-notes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        fission-sleigh Refactor Notes
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#elf-relocatable-loader-byte-lookup-fix" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ELF Relocatable Loader Byte Lookup Fix
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#elf-relocatable-loader-validation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ELF Relocatable Loader Validation
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#elf-relocatable-loader-notes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ELF Relocatable Loader Notes
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#x86-32-bit-sleigh-native-backend-generation-gate" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        x86 32-bit SLEIGH Native Backend Generation Gate
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#x86-32-bit-sleigh-validation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        x86 32-bit SLEIGH Validation
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#x86-32-bit-sleigh-notes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        x86 32-bit SLEIGH Notes
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#aarch64-exported-handle-raw-p-code-parity" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        AArch64 Exported Handle Raw P-code Parity
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#aarch64-validation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        AArch64 Validation
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#aarch64-notes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        AArch64 Notes
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#arm7_le-arm-mode-raw-p-code-lane" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ARM7_le ARM-mode Raw P-code Lane
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#arm7_le-validation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ARM7_le Validation
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#arm7_le-notes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ARM7_le Notes
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="2026-05-01-changelog">2026-05-01 Changelog<a class="headerlink" href="#2026-05-01-changelog" title="Permanent link">&para;</a></h1>
+<h2 id="sleigh-raw-p-code-constant-varnode-parity-restore">SLEIGH Raw P-code Constant Varnode Parity Restore<a class="headerlink" href="#sleigh-raw-p-code-constant-varnode-parity-restore" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Reverted the broad shortcut-purge regression and restored the canonical x86-64 raw P-code lane to perfect structural parity.</li>
+<li>Fixed the remaining <code>feature-fibonacci-lea-dec</code> failure at <code>0x14000148e</code> without instruction-family or architecture-specific fallback.</li>
+<li>Root cause: <code>.sla</code> <code>ConstTpl</code> produced a const-space value of <code>0xffffffffffffffff</code>; Fission rejected it as exceeding <code>i64</code>, while Ghidra emits the same bit pattern as constant <code>-1</code>.</li>
+<li>Change: const-space <code>VarnodeTpl</code> / <code>HandleTpl</code> offsets are now converted through the existing <code>Varnode::constant(i64)</code> representation by preserving the 64-bit bit pattern.</li>
+<li>Added a targeted runtime regression test for <code>8d 41 ff</code> LEA negative displacement emission.</li>
+</ul>
+<h2 id="validation">Validation<a class="headerlink" href="#validation" title="Permanent link">&para;</a></h2>
+<ul>
+<li><code>cargo check -p fission-sleigh</code></li>
+<li><code>cargo test -p fission-sleigh generated_runtime_decodes_lea_negative_displacement_const_without_decode_error -- --test-threads=1</code></li>
+<li><code>cargo build --release -p fission-cli</code></li>
+<li><code>python3 -m py_compile benchmark/raw_p_code_benchmark/*.py</code></li>
+<li>Raw P-code gate:</li>
+<li>Report: <code>benchmark/artifacts/raw_p_code_benchmark/const_signed_restore/aggregate_raw_pcode_parity_report.json</code></li>
+<li><code>full_match = 44</code></li>
+<li><code>average_similarity_score = 1.0</code></li>
+<li><code>average_parity_ratio = 1.0</code></li>
+<li><code>compat_emitter_used = 0</code></li>
+<li><code>fake_placeholder_op = 0</code></li>
+<li><code>invalid_pcode_shape = 0</code></li>
+<li><code>template_source_totals.sla_construct_tpl = 46</code></li>
+</ul>
+<h2 id="notes">Notes<a class="headerlink" href="#notes" title="Permanent link">&para;</a></h2>
+<ul>
+<li>No approximate P-code path was added.</li>
+<li>No mnemonic-family semantic emitter was added.</li>
+<li>No architecture-name branch was added for the fix.</li>
+<li>Benchmark artifacts and Ghidra project DB state remain uncommitted.</li>
+</ul>
+<h2 id="sleigh-canonical-gate-audit">SLEIGH Canonical Gate Audit<a class="headerlink" href="#sleigh-canonical-gate-audit" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Added reporting-only legacy path audit fields to raw P-code probe/report output.</li>
+<li>The audit records debt involvement without changing semantic success: <code>BoundOperand -&gt; FixedHandle</code> fallback, no-export subtable fallback, legacy shared-token policy, direct token parser, compatibility template source, and source-line/opprint remap.</li>
+<li>Promoted the x86-64 canonical perfect gate as the regression command: <code>--require-perfect-canonical --expected-full-match 44</code>.</li>
+<li>Preserved the strict success rule: successful rows must still report real <code>.sla ConstructTpl</code> source and cannot count compatibility or approximate P-code as success.</li>
+</ul>
+<h2 id="canonical-gate-audit-validation">Canonical Gate Audit Validation<a class="headerlink" href="#canonical-gate-audit-validation" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Report: <code>benchmark/artifacts/raw_p_code_benchmark/canonical_gate_audit/aggregate_raw_pcode_parity_report.json</code></li>
+<li><code>full_match = 44</code></li>
+<li><code>average_similarity_score = 1.0</code></li>
+<li><code>average_parity_ratio = 1.0</code></li>
+<li><code>compat_emitter_used = 0</code></li>
+<li><code>fake_placeholder_op = 0</code></li>
+<li><code>invalid_pcode_shape = 0</code></li>
+<li><code>template_source_totals.sla_construct_tpl = 46</code></li>
+<li><code>legacy_path_audit_totals.bound_operand_fixed_handle_fallback = 12</code></li>
+<li><code>legacy_path_audit_totals.legacy_shared_token_policy = 46</code></li>
+<li><code>legacy_path_audit_totals.no_export_subtable_fallback = 14</code></li>
+</ul>
+<h2 id="raw-p-code-multi-binary-manifest-expansion">Raw P-code Multi-binary Manifest Expansion<a class="headerlink" href="#raw-p-code-multi-binary-manifest-expansion" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Added <code>binaries[]</code> manifest support to <code>run_raw_pcode_parity.py</code>.</li>
+<li>The runner now flattens binary-level metadata into the existing row execution path, preserving the legacy <code>rows[]</code> manifest contract.</li>
+<li>Added suite filters for larger manifests: <code>--binary-id</code>, <code>--language-filter</code>, and <code>--max-rows-per-binary</code>.</li>
+<li>Added aggregate <code>binary_count</code>, <code>language_count</code>, <code>binary_totals</code>, and <code>language_totals</code> fields for suite-level reporting.</li>
+<li>Added <code>benchmark/raw_p_code_benchmark/multi_binary_smoke.json</code> as a checked-in example manifest.</li>
+</ul>
+<h2 id="multi-binary-validation">Multi-binary Validation<a class="headerlink" href="#multi-binary-validation" title="Permanent link">&para;</a></h2>
+<ul>
+<li><code>python3 -m py_compile benchmark/raw_p_code_benchmark/*.py</code></li>
+<li><code>python3 -m json.tool benchmark/raw_p_code_benchmark/multi_binary_smoke.json</code></li>
+<li>Filtered smoke report: <code>benchmark/artifacts/raw_p_code_benchmark/multi_binary_smoke_filtered/aggregate_raw_pcode_parity_report.json</code></li>
+<li><code>row_count = 2</code></li>
+<li><code>binary_count = 1</code></li>
+<li><code>full_match = 2</code></li>
+<li><code>average_similarity_score = 1.0</code></li>
+<li><code>average_parity_ratio = 1.0</code></li>
+<li><code>compat_emitter_used = 0</code></li>
+<li><code>fake_placeholder_op = 0</code></li>
+<li><code>invalid_pcode_shape = 0</code></li>
+<li>Schema smoke report: <code>benchmark/artifacts/raw_p_code_benchmark/multi_binary_smoke_filtered_schema/aggregate_raw_pcode_parity_report.json</code></li>
+<li><code>row_count = 1</code></li>
+<li><code>binary_count = 1</code></li>
+<li><code>language_count = 1</code></li>
+<li><code>full_match = 1</code></li>
+<li>Canonical gate report: <code>benchmark/artifacts/raw_p_code_benchmark/multi_manifest_canonical_gate/aggregate_raw_pcode_parity_report.json</code></li>
+<li><code>row_count = 17</code></li>
+<li><code>full_match = 44</code></li>
+<li><code>average_similarity_score = 1.0</code></li>
+<li><code>average_parity_ratio = 1.0</code></li>
+<li><code>template_source_totals.sla_construct_tpl = 46</code></li>
+</ul>
+<h2 id="ghidra-parity-gap-audit">Ghidra Parity Gap Audit<a class="headerlink" href="#ghidra-parity-gap-audit" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Added <code>scripts/audit/ghidra_parity_audit.py</code> as a reporting-only owner-chain audit for Ghidra parity gaps.</li>
+<li>Added <code>docs/architecture/GHIDRA_PARITY_GAP_AUDIT.md</code> to track current SLEIGH, loader, and FID/signature implementation status against Ghidra 12.0.4 structural owners.</li>
+<li>The audit records gaps without changing semantics:</li>
+<li>SLEIGH remains partial because <code>.sla ConstructTpl</code> execution is active, but legacy token cursor and BoundOperand-derived handle debt still appear in successful-row audits.</li>
+<li>Loader remains partial because implemented executable loaders are Fission-owned, while lower-priority Ghidra loader families stay typed unsupported.</li>
+<li>FID remains partial because raw <code>.fidbf</code> records decode through a DBHandle-style reader, while packed <code>.fidb</code> and complete program-seeker/hash input parity remain typed unsupported.</li>
+<li>Updated the raw P-code benchmark README to point at the Ghidra parity audit command.</li>
+</ul>
+<h2 id="ghidra-parity-audit-validation">Ghidra Parity Audit Validation<a class="headerlink" href="#ghidra-parity-audit-validation" title="Permanent link">&para;</a></h2>
+<ul>
+<li><code>python3 scripts/audit/ghidra_parity_audit.py --markdown</code></li>
+<li>Raw P-code gate report: <code>benchmark/artifacts/raw_p_code_benchmark/ghidra_gap_audit/aggregate_raw_pcode_parity_report.json</code></li>
+<li><code>full_match = 44</code></li>
+<li><code>average_similarity_score = 1.0</code></li>
+<li><code>average_parity_ratio = 1.0</code></li>
+<li><code>compat_emitter_used = 0</code></li>
+<li><code>fake_placeholder_op = 0</code></li>
+<li><code>invalid_pcode_shape = 0</code></li>
+<li><code>template_source_totals.sla_construct_tpl = 46</code></li>
+<li>Current audit snapshot:</li>
+<li><code>sleigh_native_model = partial</code></li>
+<li><code>sleigh_token_cursor = legacy_debt</code></li>
+<li><code>sleigh_handle_resolution = legacy_debt</code></li>
+<li><code>sleigh_compatibility_sources = legacy_debt</code></li>
+<li><code>loader_family_matrix = partial</code></li>
+<li><code>loader_raw_binary = typed_unsupported</code></li>
+<li><code>loader_postload_analyzers = legacy_debt</code></li>
+<li><code>fid_raw_dbhandle = partial</code></li>
+<li><code>fid_hash_and_match = partial</code></li>
+</ul>
+<h2 id="architecture-organized-vendor-binary-corpus">Architecture-organized Vendor Binary Corpus<a class="headerlink" href="#architecture-organized-vendor-binary-corpus" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Reorganized <code>vendor/binaries/tests/*</code> into <code>benchmark/binary/&lt;architecture&gt;/vendor_binaries/&lt;source-family&gt;/</code> instead of a single flat vendor corpus copy.</li>
+<li>Copied only the architecture/test binary families from <code>vendor/binaries/tests</code>; excluded <code>vendor/binaries/.git</code>, <code>.github</code>, <code>tests_src</code>, <code>tests_data</code>, and other source/support-only trees.</li>
+<li>Preserved original source-family names under each architecture bucket so provenance remains explicit:</li>
+<li><code>x86_64 -&gt; benchmark/binary/x86-64/vendor_binaries/x86_64</code></li>
+<li><code>x86</code>, <code>i386 -&gt; benchmark/binary/x86/vendor_binaries/*</code></li>
+<li><code>aarch64 -&gt; benchmark/binary/AARCH64/vendor_binaries/aarch64</code></li>
+<li><code>armel</code>, <code>armhf -&gt; benchmark/binary/ARM7_le/vendor_binaries/*</code></li>
+<li>MIPS, PowerPC, RISC-V, JVM/Dalvik, SuperH4, PA-RISC, m68k, s390x, alpha, and mixed corpus families were placed under their matching benchmark architecture buckets.</li>
+</ul>
+<h2 id="vendor-corpus-copy-validation">Vendor Corpus Copy Validation<a class="headerlink" href="#vendor-corpus-copy-validation" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Verified source/destination file counts for all copied families:</li>
+<li><code>25</code> source-family directories copied.</li>
+<li><code>949</code> source files matched <code>949</code> destination files.</li>
+<li>Size audit:</li>
+<li>total copied corpus footprint is approximately <code>350M</code>.</li>
+<li>no copied file exceeded <code>90M</code>, so the corpus does not hit GitHub's single-file size limit.</li>
+</ul>
+<h2 id="vendor-binary-multi-corpus-raw-p-code-smoke">Vendor Binary Multi-corpus Raw P-code Smoke<a class="headerlink" href="#vendor-binary-multi-corpus-raw-p-code-smoke" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Added <code>benchmark/raw_p_code_benchmark/vendor_binary_smoke.json</code> as a <code>binaries[]</code> manifest over newly organized vendor corpus samples.</li>
+<li>The smoke covers four entry-point rows:</li>
+<li>x86-64 ELF: <code>benchmark/binary/x86-64/vendor_binaries/x86_64/fauxware</code></li>
+<li>x86-64 PE: <code>benchmark/binary/x86-64/vendor_binaries/x86_64/windows/not_packed_pe64.exe</code></li>
+<li>x86 ELF: <code>benchmark/binary/x86/vendor_binaries/i386/fauxware</code></li>
+<li>x86 PE: <code>benchmark/binary/x86/vendor_binaries/x86/windows/not_packed_pe32.exe</code></li>
+</ul>
+<h2 id="vendor-binary-smoke-validation">Vendor Binary Smoke Validation<a class="headerlink" href="#vendor-binary-smoke-validation" title="Permanent link">&para;</a></h2>
+<ul>
+<li><code>python3 -m json.tool benchmark/raw_p_code_benchmark/vendor_binary_smoke.json</code></li>
+<li><code>python3 -m py_compile benchmark/raw_p_code_benchmark/*.py</code></li>
+<li>Report: <code>benchmark/artifacts/raw_p_code_benchmark/vendor_binary_smoke/aggregate_raw_pcode_parity_report.json</code></li>
+<li><code>row_count = 4</code></li>
+<li><code>binary_count = 4</code></li>
+<li><code>language_count = 2</code></li>
+<li><code>full_match = 13</code></li>
+<li><code>average_similarity_score = 0.8799006944444444</code></li>
+<li><code>average_parity_ratio = 0.8125</code></li>
+<li><code>compat_emitter_used = 0</code></li>
+<li><code>fake_placeholder_op = 0</code></li>
+<li><code>invalid_pcode_shape = 0</code></li>
+<li><code>template_source_totals.sla_construct_tpl = 16</code></li>
+<li>Per-binary outcome:</li>
+<li><code>vendor-x64-elf-fauxware</code>: 4/4 full match.</li>
+<li><code>vendor-x64-pe-not-packed</code>: 4/4 full match.</li>
+<li><code>vendor-x86-elf-fauxware</code>: 4/4 full match.</li>
+<li><code>vendor-x86-pe-not-packed</code>: 1/4 full match, with remaining owner hints under <code>decode_length</code>, <code>handle_selector_resolution</code>, and <code>template_opcode_sequence</code>.</li>
+</ul>
+<h2 id="vendor-x86-pe-sleigh-operand-extent-fix">Vendor x86 PE SLEIGH Operand Extent Fix<a class="headerlink" href="#vendor-x86-pe-sleigh-operand-extent-fix" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Fixed the <code>vendor-x86-pe-not-packed-entry</code> stream desync at <code>0x4014e3</code> without adding table-name, mnemonic, source-line, or binary-specific mapping.</li>
+<li>Root cause: x86 <code>.sla</code> operand expressions for the PE32 entry stream were not fully decoded; <code>rel32</code> depended on Ghidra-style instruction-boundary pattern expressions, and the walker could under-consume the <code>C7 /0</code> absolute-store immediate slice.</li>
+<li>Added <code>.sla</code> pattern expression support for <code>start_exp</code>, <code>end_exp</code>, and <code>next2_exp</code> as native pattern-expression variants. <code>start_exp</code> and <code>end_exp</code> now feed the existing operand expression evaluator; unresolved <code>next2_exp</code> remains fail-closed.</li>
+<li>The <code>0x4014e3</code> row now decodes as a 10-byte <code>mov dword ptr [0x405034],0x0</code> and emits exact raw P-code: <code>COPY const(0,4) -&gt; ram(0x405034,4)</code>.</li>
+<li>Replaced the old no-export subconstructor fallback with parent-template handle-reference validation. Referenced operands without an exported fixed handle now fail typed instead of receiving a dummy handle; guard-only operands are allowed only when the parent <code>ConstructTpl</code> does not reference that handle.</li>
+<li>Removed the canonical <code>fixed_handle_for_bound_operand</code> helper. Fixed handles used by this path now come from <code>.sla</code> token/expression/export metadata; <code>BoundOperand</code> remains display/debug DTO state.</li>
+<li>Added <code>vendor_x86_pe_c7_moffs_imm32_uses_sla_extents</code> as a targeted x86 regression test.</li>
+</ul>
+<h2 id="vendor-x86-pe-validation">Vendor x86 PE Validation<a class="headerlink" href="#vendor-x86-pe-validation" title="Permanent link">&para;</a></h2>
+<ul>
+<li><code>cargo check -p fission-sleigh</code></li>
+<li><code>cargo test -p fission-sleigh vendor_x86_pe_c7_moffs_imm32_uses_sla_extents -- --test-threads=1</code></li>
+<li><code>cargo test -p fission-sleigh generated_runtime_decodes_startup_call_rel32_without_compatibility_lift -- --test-threads=1</code></li>
+<li><code>cargo build --release -p fission-cli</code></li>
+<li><code>python3 -m py_compile benchmark/raw_p_code_benchmark/*.py</code></li>
+<li>Disassembly smoke: <code>not_packed_pe32.exe @ 0x4014e0</code></li>
+<li><code>0x4014e0</code>: <code>sub ESP,0xc</code>, 3 bytes</li>
+<li><code>0x4014e3</code>: <code>mov dword ptr [0x405034],0x0</code>, 10 bytes</li>
+<li><code>0x4014ed</code>: <code>call 0x402200</code>, 5 bytes</li>
+<li>Vendor smoke report: <code>benchmark/artifacts/raw_p_code_benchmark/vendor_binary_smoke_no_manual_mapping/aggregate_raw_pcode_parity_report.json</code></li>
+<li><code>full_match = 16</code></li>
+<li><code>average_similarity_score = 1.0</code></li>
+<li><code>average_parity_ratio = 1.0</code></li>
+<li><code>compat_emitter_used = 0</code></li>
+<li><code>fake_placeholder_op = 0</code></li>
+<li><code>invalid_pcode_shape = 0</code></li>
+<li><code>template_source_totals.sla_construct_tpl = 16</code></li>
+<li>Canonical gate report: <code>benchmark/artifacts/raw_p_code_benchmark/canonical_gate_no_manual_mapping/aggregate_raw_pcode_parity_report.json</code></li>
+<li><code>full_match = 44</code></li>
+<li><code>average_similarity_score = 1.0</code></li>
+<li><code>average_parity_ratio = 1.0</code></li>
+<li><code>compat_emitter_used = 0</code></li>
+<li><code>fake_placeholder_op = 0</code></li>
+<li><code>invalid_pcode_shape = 0</code></li>
+<li><code>template_source_totals.sla_construct_tpl = 46</code></li>
+</ul>
+<h2 id="vendor-x86-pe-notes">Vendor x86 PE Notes<a class="headerlink" href="#vendor-x86-pe-notes" title="Permanent link">&para;</a></h2>
+<ul>
+<li>No approximate P-code path was added.</li>
+<li>No architecture-name semantic branch was added.</li>
+<li>No table-name or binary-specific rule was added for <code>C7 /0</code>, <code>rel32</code>, <code>addr32</code>, or <code>rm32</code>.</li>
+<li><code>fixed_handle_for_bound_operand</code> and <code>fallback_binding_for_no_export_subtable</code> are absent from active SLEIGH compiler/runtime source outside audit-test string literals.</li>
+</ul>
+<h2 id="github-release-corpus-collection">GitHub Release Corpus Collection<a class="headerlink" href="#github-release-corpus-collection" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Added <code>scripts/corpus/collect_github_release_samples.py</code> for CLI-first GitHub release sample collection.</li>
+<li>The collector queries GitHub release metadata, filters assets by explicit include/exclude regexes, emits a URL list, and only downloads binaries when <code>--download</code> is provided.</li>
+<li>Downloaded assets are stored under <code>benchmark/binary/realworld/github</code> by default and are treated as local corpus artifacts, not source files.</li>
+<li>Generated manifest entries include SHA-256, size, repository, release tag, asset name, asset URL, content type, and source config index.</li>
+</ul>
+<h2 id="ghidra-opinion-loadspec-selection">Ghidra Opinion LoadSpec Selection<a class="headerlink" href="#ghidra-opinion-loadspec-selection" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Replaced the active Rust machine-to-language mapping owner in <code>fission-core::architecture</code> with a Ghidra-style data query path.</li>
+<li>New selection chain: binary loader metadata -&gt; <code>*.opinion</code> query -&gt; <code>*.ldefs</code> language/compiler resolution -&gt; <code>BinaryLoadSpec</code>.</li>
+<li>Added a repo-local <code>OpinionDatabase</code> over <code>utils/ghidra-data/**/*.opinion</code> and <code>utils/sleigh-specs/languages/**/*.ldefs</code>.</li>
+<li>Supported Ghidra query semantics now include nested opinion constraints, primary comma-list matching, secondary exact matching, and secondary <code>0x...</code> / <code>0b...</code> wildcard matching.</li>
+<li>PE, COFF, ELF, and Mach-O selection now use loader names and machine keys through the opinion index instead of active <code>PE_LOAD_SPEC_MAPPINGS</code>, <code>ELF_LOAD_SPEC_MAPPINGS</code>, or <code>MACHO_LOAD_SPEC_MAPPINGS</code>.</li>
+<li>Fail-closed behavior is preserved:</li>
+<li>Unknown machines return <code>UnsupportedMachine</code>.</li>
+<li>Missing language definitions return <code>MissingLanguage</code>.</li>
+<li>Multiple unresolved preferred candidates return <code>AmbiguousLoadSpec</code>.</li>
+<li>PowerPC64 ELF little-endian currently fails closed as ambiguous because the checked-in Ghidra opinion does not constrain enough variant identity to select a single LE 64-bit PowerPC language without guessing.</li>
+</ul>
+<h2 id="ghidra-opinion-loadspec-validation">Ghidra Opinion LoadSpec Validation<a class="headerlink" href="#ghidra-opinion-loadspec-validation" title="Permanent link">&para;</a></h2>
+<ul>
+<li><code>CARGO_TARGET_DIR=/tmp/fission-target-loadspec cargo test -p fission-core architecture -- --test-threads=1</code></li>
+<li><code>15 passed</code></li>
+<li><code>CARGO_TARGET_DIR=/tmp/fission-target-loadspec cargo check -p fission-core</code></li>
+<li><code>CARGO_TARGET_DIR=/tmp/fission-target-loadspec cargo check -p fission-loader</code></li>
+<li><code>CARGO_TARGET_DIR=/tmp/fission-target-loadspec cargo test -p fission-loader --lib -- --test-threads=1</code></li>
+<li><code>55 passed</code></li>
+<li><code>CARGO_TARGET_DIR=/tmp/fission-target-loadspec cargo check -p fission-cli</code></li>
+<li><code>cargo build --release -p fission-cli</code></li>
+<li><code>python3 -m py_compile benchmark/raw_p_code_benchmark/*.py</code></li>
+<li>Canonical raw P-code gate report: <code>benchmark/artifacts/raw_p_code_benchmark/ghidra_opinion_loadspec_selection/aggregate_raw_pcode_parity_report.json</code></li>
+<li><code>full_match = 44</code></li>
+<li><code>average_similarity_score = 1.0</code></li>
+<li><code>average_parity_ratio = 1.0</code></li>
+<li><code>compat_emitter_used = 0</code></li>
+<li><code>fake_placeholder_op = 0</code></li>
+<li><code>invalid_pcode_shape = 0</code></li>
+<li><code>template_source_totals.sla_construct_tpl = 46</code></li>
+</ul>
+<h2 id="ghidra-opinion-loadspec-notes">Ghidra Opinion LoadSpec Notes<a class="headerlink" href="#ghidra-opinion-loadspec-notes" title="Permanent link">&para;</a></h2>
+<ul>
+<li>No bitness-only x86 fallback was added.</li>
+<li>No binary-specific LoadSpec repair was added.</li>
+<li>Exact file-format constants remain spec data, but architecture selection policy now comes from checked-in Ghidra data files.</li>
+<li>Benchmark artifacts and downloaded sample binaries remain uncommitted.</li>
+</ul>
+<h2 id="sleigh-crate-local-spec-snapshot-removal">SLEIGH Crate-local Spec Snapshot Removal<a class="headerlink" href="#sleigh-crate-local-spec-snapshot-removal" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Removed the legacy <code>crates/fission-sleigh/specs</code> snapshot now that <code>utils/sleigh-specs</code> is the active checked-in SLEIGH data root.</li>
+<li>Removed the crate-local spec fallback from <code>fission-sleigh</code> discovery. Resolution now uses:</li>
+<li><code>FISSION_SLEIGH_SPEC_DIR</code></li>
+<li>repo-relative <code>utils/sleigh-specs</code></li>
+<li>Updated the <code>fission-sleigh</code> README so it no longer documents <code>crates/fission-sleigh/specs</code> as a fallback.</li>
+<li>This is a data ownership cleanup only; no SLEIGH semantic fallback, shortcut, or generated P-code path was added.</li>
+<li>Added <code>benchmark/config/benchmark_corpus/github_release_sources.example.json</code> as a non-binary example source config.</li>
+<li>Updated <code>.gitignore</code> so <code>benchmark/binary/realworld/**</code> stays out of git while <code>benchmark/binary/realworld/.gitkeep</code> can keep the local corpus root.</li>
+<li>Updated <code>benchmark/BENCHMARK_GUIDE.md</code> with the GitHub release collection command and the no-binary-staging policy.</li>
+</ul>
+<h2 id="loader-accuracy-gate">Loader Accuracy Gate<a class="headerlink" href="#loader-accuracy-gate" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Strengthened the loader route contract so only inputs with a concrete, format-proven load spec can become executable <code>LoadedBinary</code> instances.</li>
+<li>Removed the generic <code>unknown:LE:32:default</code> success path from raw binary, Intel HEX, Motorola S-record, MZ, NE, and Unix a.out loaders.</li>
+<li>Raw binary loading now remains fail-closed unless an explicit caller-provided raw load hint is supplied.</li>
+<li>Intel HEX, Motorola S-record, MZ, NE, and Unix a.out still validate exact headers/records, but return typed <code>LoadSpecNotFound</code> until a real load-spec source is available.</li>
+<li>Expanded exact container routing for XZ, 7z, RAR, and Unix ar archives. These inputs now return <code>ContainerRequiresExtraction(...)</code> instead of falling through to unknown/raw executable handling.</li>
+<li>Added <code>GzfLoader</code> to the known unsupported loader-family table using the exact Ghidra packed-file magic, returning typed <code>UnsupportedLoaderFamily(GzfLoader)</code>.</li>
+<li>Updated loader smoke classification with explicit <code>load_spec_not_found</code> and <code>malformed_header</code> buckets.</li>
+</ul>
+<h2 id="loader-accuracy-validation">Loader Accuracy Validation<a class="headerlink" href="#loader-accuracy-validation" title="Permanent link">&para;</a></h2>
+<ul>
+<li><code>cargo check -p fission-loader</code></li>
+<li><code>cargo test -p fission-loader --lib -- --test-threads=1</code></li>
+<li><code>55 passed</code></li>
+<li>Note: the plain <code>cargo test -p fission-loader</code> command reached rustdoc/doc-test execution and did not terminate promptly in this workspace; unit tests were run with <code>--lib</code> to isolate loader behavior.</li>
+<li><code>cargo check -p fission-core</code></li>
+<li><code>cargo check -p fission-cli</code></li>
+<li><code>cargo check -p fission-tauri</code></li>
+<li><code>cargo build --release -p fission-cli</code></li>
+<li><code>python3 -m py_compile scripts/benchmark/*.py scripts/corpus/*.py</code></li>
+<li>GitHub release loader smoke:</li>
+<li>Report: <code>benchmark/artifacts/realworld_suite/github_release_loader_accuracy_gate/loader_smoke_report.json</code></li>
+<li><code>row_count = 9</code></li>
+<li><code>loaded = 3</code></li>
+<li><code>load_failed = 6</code></li>
+<li><code>failure_bucket_counts.container_requires_extraction = 6</code></li>
+<li><code>input_classification_counts.executable_loaded = 3</code></li>
+<li><code>input_classification_counts.container:ZipArchive = 2</code></li>
+<li><code>input_classification_counts.container:Xz = 4</code></li>
+<li>Raw P-code canonical gate:</li>
+<li>Report: <code>benchmark/artifacts/raw_p_code_benchmark/loader_accuracy_gate_canonical/aggregate_raw_pcode_parity_report.json</code></li>
+<li><code>full_match = 44</code></li>
+<li><code>average_similarity_score = 1.0</code></li>
+<li><code>average_parity_ratio = 1.0</code></li>
+<li><code>compat_emitter_used = 0</code></li>
+<li><code>fake_placeholder_op = 0</code></li>
+<li><code>invalid_pcode_shape = 0</code></li>
+<li><code>template_source_totals.sla_construct_tpl = 46</code></li>
+</ul>
+<h2 id="loader-accuracy-notes">Loader Accuracy Notes<a class="headerlink" href="#loader-accuracy-notes" title="Permanent link">&para;</a></h2>
+<ul>
+<li>No shortcut MSI/container string detection was added.</li>
+<li>No approximate loader metadata or raw executable fallback was added.</li>
+<li>No downloaded binaries, benchmark output artifacts, or Ghidra project DB files are staged with this change.</li>
+</ul>
+<h2 id="ghidra-data-snapshot-vendoring">Ghidra Data Snapshot Vendoring<a class="headerlink" href="#ghidra-data-snapshot-vendoring" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Added <code>utils/ghidra-data</code> as a checked-in Ghidra data snapshot so future loader/signature/analyzer work can consume local data without runtime/build dependency on <code>vendor/ghidra</code>.</li>
+<li>Copied only data resources, not Java implementation code:</li>
+<li><code>Ghidra/Features/Base/data</code> no-return lists, no-return constraints, PE Rich product table, parser profiles, Win16/Win32/Win64 symbol hint/export data, and string n-gram model.</li>
+<li><code>Ghidra/Features/FileFormats/data/languages/*.opinion</code>.</li>
+<li><code>Ghidra/Processors/*/data/languages/*.opinion</code>.</li>
+<li><code>Ghidra/Processors/*/data/patterns/*</code>.</li>
+<li><code>Ghidra/Processors/*/data/extensions/*</code>.</li>
+<li>Processor thunk metadata such as <code>aarch64-pltThunks.xml</code>.</li>
+<li>Preserved Ghidra <code>LICENSE</code>, <code>NOTICE</code>, and <code>DISCLAIMER.md</code> beside the snapshot.</li>
+<li>Added <code>utils/ghidra-data/MANIFEST.sha256.json</code> with source path, size, and SHA-256 for every vendored file.</li>
+<li>Snapshot size: <code>160</code> data/provenance files, approximately <code>29M</code>.</li>
+</ul>
+<h2 id="ghidra-data-snapshot-validation">Ghidra Data Snapshot Validation<a class="headerlink" href="#ghidra-data-snapshot-validation" title="Permanent link">&para;</a></h2>
+<ul>
+<li><code>python3 -m json.tool utils/ghidra-data/MANIFEST.sha256.json</code></li>
+<li>Verified copied file count: <code>160</code>.</li>
+<li>Verified snapshot size: approximately <code>29M</code>.</li>
+<li>No Ghidra Java source files were copied into <code>utils/ghidra-data</code>.</li>
+</ul>
+<h2 id="github-release-corpus-validation">GitHub Release Corpus Validation<a class="headerlink" href="#github-release-corpus-validation" title="Permanent link">&para;</a></h2>
+<ul>
+<li><code>python3 -m py_compile scripts/corpus/collect_github_release_samples.py scripts/corpus/hash_and_manifest.py scripts/benchmark/run_loader_smoke.py scripts/benchmark/run_realworld_suite.py</code></li>
+<li><code>python3 -m json.tool benchmark/config/benchmark_corpus/github_release_sources.example.json</code></li>
+<li><code>python3 scripts/corpus/collect_github_release_samples.py --help</code></li>
+<li><code>git check-ignore -v benchmark/binary/realworld/github/example.bin</code></li>
+<li><code>git check-ignore -q benchmark/binary/realworld/.gitkeep</code></li>
+</ul>
+<h2 id="sleigh-specs-snapshot-migration">SLEIGH Specs Snapshot Migration<a class="headerlink" href="#sleigh-specs-snapshot-migration" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Added <code>utils/sleigh-specs</code> as the checked-in SLEIGH spec snapshot location for compiler/runtime language discovery.</li>
+<li>Initially preserved the crate-local SLEIGH snapshot during migration, then removed it after <code>utils/sleigh-specs</code> became the active data root.</li>
+<li>Added <code>utils/sleigh-specs/MANIFEST.sha256.json</code> with source path, size, and SHA-256 for every copied spec resource.</li>
+<li>Added <code>utils/sleigh-specs/README.md</code> documenting snapshot ownership and refresh source.</li>
+<li>Updated <code>fission-sleigh</code> discovery to resolve specs in this order:</li>
+<li><code>FISSION_SLEIGH_SPEC_DIR</code></li>
+<li>repo-relative <code>utils/sleigh-specs</code></li>
+<li>Updated runtime registry manifest embedding to use <code>utils/sleigh-specs/ghidra_language_manifest.json</code>.</li>
+<li>Updated <code>fission-sleigh</code> README/AGENTS notes so SLEIGH spec ownership points at <code>utils/sleigh-specs</code>.</li>
+</ul>
+<h2 id="sleigh-specs-snapshot-validation">SLEIGH Specs Snapshot Validation<a class="headerlink" href="#sleigh-specs-snapshot-validation" title="Permanent link">&para;</a></h2>
+<ul>
+<li><code>cargo fmt -p fission-sleigh</code></li>
+<li><code>CARGO_TARGET_DIR=/tmp/fission-target-sleigh-specs cargo check -p fission-sleigh</code></li>
+<li><code>CARGO_TARGET_DIR=/tmp/fission-target-sleigh-specs cargo test -p fission-sleigh x86_64_entry_spec_exists_under_arch_tree -- --test-threads=1</code></li>
+<li><code>CARGO_TARGET_DIR=/tmp/fission-target-sleigh-specs cargo test -p fission-sleigh infer_arch_from_entry_spec_uses_arch_subdirectory -- --test-threads=1</code></li>
+<li><code>CARGO_TARGET_DIR=/tmp/fission-target-sleigh-specs cargo test -p fission-sleigh compile_frontend_for_entry_spec_collects_inventory -- --test-threads=1</code></li>
+<li><code>CARGO_TARGET_DIR=/tmp/fission-target-sleigh-specs cargo build --release -p fission-cli</code></li>
+<li><code>python3 -m json.tool utils/sleigh-specs/MANIFEST.sha256.json</code></li>
+<li>Snapshot size: approximately <code>14M</code>.</li>
+<li>Snapshot file count: <code>698</code> files including the manifest.</li>
+</ul>
+<h2 id="fission-sleigh-module-boundary-and-runtime-index-refactor">fission-sleigh Module Boundary and Runtime Index Refactor<a class="headerlink" href="#fission-sleigh-module-boundary-and-runtime-index-refactor" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Converted the remaining <code>include!</code>-style SLEIGH implementation boundaries into explicit Rust submodules for:</li>
+<li><code>compiler/ir</code></li>
+<li><code>compiler/sla</code></li>
+<li><code>runtime/spine/compiled_table</code></li>
+<li>Preserved the existing public facades while giving the hot-path runtime owners explicit files:</li>
+<li><code>compiled_table/feature_audit.rs</code></li>
+<li><code>compiled_table/runtime_index.rs</code></li>
+<li>explicit <code>legacy_token_policy</code> boundary for the existing token/cursor debt</li>
+<li>Added a frontend-local runtime index helper for constructor-template handle-reference bitmaps.</li>
+<li>Replaced repeated parent-template handle-reference scans in the walker with the precomputed bitmap.</li>
+<li>Kept the index strictly <code>.sla ConstructTpl</code>-derived. No opcode, ModRM/SIB, table-name, mnemonic, source-line, or architecture-name policy was added.</li>
+<li>Fixed decoded reference extraction to walk handle-indexed runtime handles instead of assuming compact display operand order matches the handle vector. This preserves RIP-relative decoded reference metadata without changing raw P-code generation.</li>
+<li>Updated the IR unit test that validates <code>.sla ConstructTpl</code> preservation to use the public compiler orchestration path, because <code>.sla</code> template attachment is owned by <code>compile_frontend_for_entry_spec</code>, not the lower-level AST-only IR compile helper.</li>
+</ul>
+<h2 id="fission-sleigh-refactor-validation">fission-sleigh Refactor Validation<a class="headerlink" href="#fission-sleigh-refactor-validation" title="Permanent link">&para;</a></h2>
+<ul>
+<li><code>cargo fmt --package fission-sleigh</code></li>
+<li><code>CARGO_TARGET_DIR=/tmp/fission-target-sleigh-refactor cargo check -p fission-sleigh</code></li>
+<li><code>CARGO_TARGET_DIR=/tmp/fission-target-sleigh-targeted cargo test -p fission-sleigh compiler::ir::tests::compile_frontend_collects_pcode_ops_and_patterns -- --test-threads=1</code></li>
+<li><code>CARGO_TARGET_DIR=/tmp/fission-target-sleigh-refactor cargo test -p fission-sleigh generated_runtime_decodes_lea_negative_displacement_const_without_decode_error -- --test-threads=1</code></li>
+<li><code>CARGO_TARGET_DIR=/tmp/fission-target-sleigh-refactor cargo test -p fission-sleigh generated_runtime_decodes_startup_rip_relative_load_without_compatibility_lift -- --test-threads=1</code></li>
+<li><code>CARGO_TARGET_DIR=/tmp/fission-target-sleigh-refactor cargo test -p fission-sleigh generated_runtime_decodes_rip_relative_mov32_without_decode_no_match -- --test-threads=1</code></li>
+<li><code>cargo build --release -p fission-cli</code></li>
+<li><code>python3 -m py_compile benchmark/raw_p_code_benchmark/*.py</code></li>
+<li>Attempted <code>CARGO_TARGET_DIR=/tmp/fission-target-sleigh-refactor cargo test -p fission-sleigh -- --test-threads=1</code>; it was stopped after more than 13 minutes without new output while the checked-in entry-spec coverage test was still running.</li>
+</ul>
+<h2 id="fission-sleigh-refactor-raw-p-code-gates">fission-sleigh Refactor Raw P-code Gates<a class="headerlink" href="#fission-sleigh-refactor-raw-p-code-gates" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Canonical gate report: <code>benchmark/artifacts/raw_p_code_benchmark/sleigh_refactor_perf_gate/aggregate_raw_pcode_parity_report.json</code></li>
+<li><code>row_count = 17</code></li>
+<li><code>full_match = 44</code></li>
+<li><code>average_similarity_score = 1.0</code></li>
+<li><code>average_parity_ratio = 1.0</code></li>
+<li><code>compat_emitter_used = 0</code></li>
+<li><code>fake_placeholder_op = 0</code></li>
+<li><code>invalid_pcode_shape = 0</code></li>
+<li><code>template_source_totals.sla_construct_tpl = 46</code></li>
+<li><code>decode_lift_sec = 0.005625834999999999</code></li>
+<li><code>frontend_load_sec = 14.360581624999998</code></li>
+<li><code>process_startup_sec = 16.635162710125552</code></li>
+<li>Vendor smoke report: <code>benchmark/artifacts/raw_p_code_benchmark/sleigh_refactor_perf_vendor/aggregate_raw_pcode_parity_report.json</code></li>
+<li><code>row_count = 4</code></li>
+<li><code>binary_count = 4</code></li>
+<li><code>language_count = 2</code></li>
+<li><code>full_match = 16</code></li>
+<li><code>average_similarity_score = 1.0</code></li>
+<li><code>average_parity_ratio = 1.0</code></li>
+<li><code>compat_emitter_used = 0</code></li>
+<li><code>fake_placeholder_op = 0</code></li>
+<li><code>invalid_pcode_shape = 0</code></li>
+<li><code>template_source_totals.sla_construct_tpl = 16</code></li>
+<li><code>decode_lift_sec = 0.001552752</code></li>
+<li><code>frontend_load_sec = 3.3031671250000003</code></li>
+<li><code>process_startup_sec = 11.122277166021902</code></li>
+</ul>
+<h2 id="fission-sleigh-refactor-notes">fission-sleigh Refactor Notes<a class="headerlink" href="#fission-sleigh-refactor-notes" title="Permanent link">&para;</a></h2>
+<ul>
+<li>No generated SLEIGH frontend artifacts were intentionally regenerated.</li>
+<li>No approximate P-code path was added.</li>
+<li>No architecture-name semantic branch was added.</li>
+<li>No table-name, source-line, pprint/opprint, mnemonic, or binary-specific mapping was added.</li>
+<li>Benchmark output artifacts and Ghidra project DB state remain uncommitted.</li>
+</ul>
+<h2 id="elf-relocatable-loader-byte-lookup-fix">ELF Relocatable Loader Byte Lookup Fix<a class="headerlink" href="#elf-relocatable-loader-byte-lookup-fix" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Fixed the <code>full_benchmark</code> x86-64 compiler-option matrix ELF <code>.o</code> failures where Fission reported <code>rust_sleigh: unable to read bytes at 0x100000</code>.</li>
+<li>Root cause: <code>LoadedBinaryBuilder</code> guaranteed sorted functions but not sorted sections, while <code>LoadedBinary::view_bytes</code> uses binary search over sections.</li>
+<li>Change: builder output now sorts sections deterministically by virtual address, executable-section preference for overlapping relocatable ranges, file offset, and name.</li>
+<li>This matches the Ghidra <code>ElfProgramBuilder.processSectionHeaders -&gt; processSectionHeader -&gt; RelocatableImageBaseProvider</code> ownership boundary: ELF relocatable sections receive synthetic load addresses, then byte lookup must resolve those memory blocks deterministically.</li>
+<li>Added a benchmark failure classifier bucket for <code>loader_byte_read_failed</code> so future row failures are reported as loader mapping failures instead of generic explicit errors.</li>
+<li>Added loader regression coverage for unsorted section binary-search lookup and the x86-64 clang ELF relocatable fixture addresses <code>0x100000</code>, <code>0x100140</code>, and <code>0x1001a0</code>.</li>
+</ul>
+<h2 id="elf-relocatable-loader-validation">ELF Relocatable Loader Validation<a class="headerlink" href="#elf-relocatable-loader-validation" title="Permanent link">&para;</a></h2>
+<ul>
+<li><code>cargo check -p fission-loader</code></li>
+<li><code>cargo test -p fission-loader -- --test-threads=1</code></li>
+<li><code>cargo check -p fission-core</code></li>
+<li><code>cargo check -p fission-cli</code></li>
+<li><code>cargo build --release -p fission-cli</code></li>
+<li><code>python3 -m py_compile benchmark/full_benchmark/*.py benchmark/full_benchmark/grand_finale_support/*.py</code></li>
+<li>Direct decompile smoke:</li>
+<li><code>target/release/fission_cli ... sleigh_option_matrix.o --decomp 0x100000 --engine rust-sleigh --json --benchmark</code></li>
+<li>result: <code>fission_option_matrix</code> produced code; no <code>unable to read bytes</code> error.</li>
+<li>Full benchmark before/after:</li>
+<li>Before report: <code>benchmark/artifacts/full_benchmark/x86_64_compiler_option_matrix_smoke_limit3/benchmark_compact_summary.json</code></li>
+<li>After report: <code>benchmark/artifacts/full_benchmark/x86_64_compiler_option_matrix_loader_fixed_limit3/benchmark_compact_summary.json</code></li>
+<li><code>weighted_avg_normalized_similarity</code>: <code>26.276666666666674 -&gt; 38.226000000000006</code></li>
+<li><code>clang-elf-o0</code>: <code>direct_success 0/3 -&gt; 3/3</code>, <code>avg_normalized_similarity 0.0 -&gt; 31.41</code></li>
+<li><code>clang-elf-o2</code>: <code>direct_success 0/3 -&gt; 3/3</code>, <code>avg_normalized_similarity 0.0 -&gt; 37.19</code></li>
+<li><code>clang-elf-o2-frameptr</code>: <code>direct_success 0/3 -&gt; 3/3</code>, <code>avg_normalized_similarity 0.0 -&gt; 37.19</code></li>
+<li><code>clang-elf-o3</code>: <code>direct_success 0/3 -&gt; 3/3</code>, <code>avg_normalized_similarity 0.0 -&gt; 36.47</code></li>
+<li><code>clang-elf-os</code>: <code>direct_success 0/3 -&gt; 3/3</code>, <code>avg_normalized_similarity 0.0 -&gt; 36.98</code></li>
+<li>Raw P-code canonical gate:</li>
+<li>Report: <code>benchmark/artifacts/raw_p_code_benchmark/elf_loader_fix_canonical_gate/aggregate_raw_pcode_parity_report.json</code></li>
+<li><code>full_match = 44</code></li>
+<li><code>average_similarity_score = 1.0</code></li>
+<li><code>average_parity_ratio = 1.0</code></li>
+<li><code>compat_emitter_used = 0</code></li>
+<li><code>fake_placeholder_op = 0</code></li>
+<li><code>invalid_pcode_shape = 0</code></li>
+<li><code>template_source_totals.sla_construct_tpl = 46</code></li>
+</ul>
+<h2 id="elf-relocatable-loader-notes">ELF Relocatable Loader Notes<a class="headerlink" href="#elf-relocatable-loader-notes" title="Permanent link">&para;</a></h2>
+<ul>
+<li>This change does not alter SLEIGH semantics or raw P-code generation.</li>
+<li>No shortcut load-spec selection, symbol-name repair, source-line remap, or architecture-specific fallback was added.</li>
+<li>Remaining <code>full_benchmark</code> divergence is now NIR/materialization quality work, not ELF byte-read failure.</li>
+<li>Benchmark output artifacts and Ghidra project DB state remain uncommitted.</li>
+</ul>
+<h2 id="x86-32-bit-sleigh-native-backend-generation-gate">x86 32-bit SLEIGH Native Backend Generation Gate<a class="headerlink" href="#x86-32-bit-sleigh-native-backend-generation-gate" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Added single-entry generation support to <code>generate_sleigh_frontends</code>.</li>
+<li>New usage: <code>cargo run -p fission-sleigh --example generate_sleigh_frontends -- --entry x86 --native</code>.</li>
+<li>The command writes only the requested entry into the normal <code>target/fission-sleigh/generated</code> cache and can compile that entry's native backend without forcing a full frontend regeneration.</li>
+<li>Used the Ghidra 12.0.4 SLEIGH owner chain as the structural reference: <code>.sla</code> language data, constructor/template payloads, <code>ParserWalker</code> state, <code>HandleTpl.fix</code>, and <code>ConstructTpl -&gt; PcodeEmit</code>.</li>
+<li>This change is tooling-only for generated frontend promotion. It does not add architecture-specific semantic branches, mnemonic repair, table-name fallback, source-line remap, or approximate P-code.</li>
+<li>Generated target-cache artifacts remain uncommitted.</li>
+</ul>
+<h2 id="x86-32-bit-sleigh-validation">x86 32-bit SLEIGH Validation<a class="headerlink" href="#x86-32-bit-sleigh-validation" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Generated and compiled the x86 32-bit native backend:</li>
+<li><code>cargo run -p fission-sleigh --example generate_sleigh_frontends -- --entry x86 --native</code></li>
+<li>output cache: <code>target/fission-sleigh/generated/x86/x86</code></li>
+<li>Vendor binary smoke report: <code>benchmark/artifacts/raw_p_code_benchmark/x86_32_generated_vendor_baseline/aggregate_raw_pcode_parity_report.json</code></li>
+<li><code>row_count = 4</code></li>
+<li><code>binary_count = 4</code></li>
+<li><code>language_count = 2</code></li>
+<li><code>full_match = 16</code></li>
+<li><code>average_similarity_score = 1.0</code></li>
+<li><code>average_parity_ratio = 1.0</code></li>
+<li><code>compat_emitter_used = 0</code></li>
+<li><code>fake_placeholder_op = 0</code></li>
+<li><code>invalid_pcode_shape = 0</code></li>
+<li><code>template_source_totals.sla_construct_tpl = 16</code></li>
+<li>x86 32-bit per-binary outcome:</li>
+<li><code>vendor-x86-elf-fauxware</code>: <code>4/4</code> full match, <code>x86:LE:32:default</code>.</li>
+<li><code>vendor-x86-pe-not-packed</code>: <code>4/4</code> full match, <code>x86:LE:32:default</code>.</li>
+<li>x86-64 canonical guard report: <code>benchmark/artifacts/raw_p_code_benchmark/x86_32_generated_x86_64_guard/aggregate_raw_pcode_parity_report.json</code></li>
+<li><code>full_match = 44</code></li>
+<li><code>average_similarity_score = 1.0</code></li>
+<li><code>average_parity_ratio = 1.0</code></li>
+<li><code>compat_emitter_used = 0</code></li>
+<li><code>fake_placeholder_op = 0</code></li>
+<li><code>invalid_pcode_shape = 0</code></li>
+<li><code>template_source_totals.sla_construct_tpl = 46</code></li>
+<li><code>perfect_canonical_gate = passed</code></li>
+<li>LLVM architecture smoke was also run as a broader multi-architecture diagnostic under <code>benchmark/artifacts/raw_p_code_benchmark/x86_32_generated_llvm_arch_smoke</code>; its aggregate includes non-x86 rows and is not treated as the x86 32-bit promotion gate.</li>
+</ul>
+<h2 id="x86-32-bit-sleigh-notes">x86 32-bit SLEIGH Notes<a class="headerlink" href="#x86-32-bit-sleigh-notes" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Existing audit counters still show no-export fallback involvement in x86 32-bit vendor smoke rows. This commit does not purge that path because the prior broad purge regressed parity.</li>
+<li>The next safe step is owner-by-owner replacement of no-export fallback with exact <code>.sla</code> exported-handle/guard-only classification while keeping the canonical 1.0 gate intact.</li>
+<li>No generated benchmark artifacts, target-generated frontend files, Ghidra project DB files, or copied sample binaries are staged.</li>
+</ul>
+<h2 id="aarch64-exported-handle-raw-p-code-parity">AArch64 Exported Handle Raw P-code Parity<a class="headerlink" href="#aarch64-exported-handle-raw-p-code-parity" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Closed the AArch64 <code>llvm_smoke.o @ 0x100000</code> raw p-code gap by following the Ghidra SLEIGH owner chain: <code>DecisionNode -&gt; ParserWalker/ConstructState -&gt; HandleTpl.fix -&gt; ConstructTpl -&gt; PcodeEmit</code>.</li>
+<li>The mismatch owner was exported constant handle propagation. <code>movk ... LSL #16/#32/#48</code> subconstructors computed shifted constant handles, but parent pattern/template evaluation could still read the unshifted debug scalar.</li>
+<li>Runtime pattern expression evaluation now prefers exact exported constant fixed handles before display/debug numeric operands.</li>
+<li>Same-token <code>.sla</code> token fields no longer advance the operand cursor when the field is inside the selected constructor minimum byte extent. This keeps AArch64 token-field decoding aligned without adding table-name, mnemonic, opcode, or architecture-specific policy.</li>
+<li><code>InstNext</code> pattern expression handling now uses the later of the current operand cursor and selected constructor minimum extent, preserving x86 rel32 call target calculation while avoiding double-counting cursor progress.</li>
+<li>Added regressions for:</li>
+<li>AArch64 <code>movk x12, #0x5060, LSL #16</code> using <code>INT_OR ..., const(0x50600000,8)</code>.</li>
+<li>x86 PE <code>CALL rel32</code> target <code>0x402200</code>.</li>
+<li>Existing x86 PE <code>C7 /0</code> moffs32 immediate extent remains length 10 and exact.</li>
+</ul>
+<h2 id="aarch64-validation">AArch64 Validation<a class="headerlink" href="#aarch64-validation" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Baseline AArch64 row before this change:</li>
+<li>Manifest: <code>benchmark/raw_p_code_benchmark/llvm_arch_smoke_rows.json</code>, row <code>llvm-aarch64-baremetal</code>.</li>
+<li><code>full_match = 5/8</code></li>
+<li><code>input_varnode_mismatch = 3</code></li>
+<li><code>average_similarity_score = 0.9902500000000001</code></li>
+<li><code>average_parity_ratio = 0.625</code></li>
+<li><code>compat_emitter_used = 0</code></li>
+<li><code>fake_placeholder_op = 0</code></li>
+<li><code>invalid_pcode_shape = 0</code></li>
+<li>Added AArch64 focused manifest: <code>benchmark/raw_p_code_benchmark/aarch64_rows.json</code>.</li>
+<li>AArch64 focused report: <code>benchmark/artifacts/raw_p_code_benchmark/aarch64_exported_handle_parity/aggregate_raw_pcode_parity_report.json</code></li>
+<li><code>full_match = 8</code></li>
+<li><code>average_similarity_score = 1.0</code></li>
+<li><code>average_parity_ratio = 1.0</code></li>
+<li><code>compat_emitter_used = 0</code></li>
+<li><code>fake_placeholder_op = 0</code></li>
+<li><code>invalid_pcode_shape = 0</code></li>
+<li><code>template_source_totals.sla_construct_tpl = 8</code></li>
+<li>x86-64 canonical guard report: <code>benchmark/artifacts/raw_p_code_benchmark/aarch64_work_x86_64_guard/aggregate_raw_pcode_parity_report.json</code></li>
+<li><code>perfect_canonical_gate = passed</code></li>
+<li><code>full_match = 44</code></li>
+<li><code>average_similarity_score = 1.0</code></li>
+<li><code>average_parity_ratio = 1.0</code></li>
+<li><code>compat_emitter_used = 0</code></li>
+<li><code>fake_placeholder_op = 0</code></li>
+<li><code>invalid_pcode_shape = 0</code></li>
+<li><code>template_source_totals.sla_construct_tpl = 46</code></li>
+<li>Vendor smoke report: <code>benchmark/artifacts/raw_p_code_benchmark/aarch64_work_vendor_guard/aggregate_raw_pcode_parity_report.json</code></li>
+<li><code>full_match = 16</code></li>
+<li><code>average_similarity_score = 1.0</code></li>
+<li><code>average_parity_ratio = 1.0</code></li>
+<li><code>compat_emitter_used = 0</code></li>
+<li><code>fake_placeholder_op = 0</code></li>
+<li><code>invalid_pcode_shape = 0</code></li>
+<li><code>template_source_totals.sla_construct_tpl = 16</code></li>
+</ul>
+<h2 id="aarch64-notes">AArch64 Notes<a class="headerlink" href="#aarch64-notes" title="Permanent link">&para;</a></h2>
+<ul>
+<li>No AArch64 opcode, mnemonic, table-name, source-line, binary-identity, or manual mapping branch was added.</li>
+<li><code>BoundOperand</code> remains display/debug data; raw p-code success continues to require decoded <code>.sla ConstructTpl</code> execution.</li>
+<li>Native backend role remains candidate acceleration only; final success is still common Rust terminal verification plus checked <code>.sla ConstructTpl</code> execution.</li>
+<li>Benchmark output artifacts, Ghidra project DB state, generated target cache, and copied sample binaries remain uncommitted.</li>
+</ul>
+<h2 id="arm7_le-arm-mode-raw-p-code-lane">ARM7_le ARM-mode Raw P-code Lane<a class="headerlink" href="#arm7_le-arm-mode-raw-p-code-lane" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Added the first ARM7_le raw p-code parity manifest: <code>benchmark/raw_p_code_benchmark/arm7_le_rows.json</code>.</li>
+<li>Scope is intentionally ARM mode only. Thumb rows remain excluded until an exact context source is available; no low-bit, symbol-name, table-name, mnemonic, or binary-specific ARM/Thumb guessing was added.</li>
+<li>The prior <code>llvm-arm7-le-baremetal @ 0x100000</code> row is now treated as an oracle admission failure rather than a semantic mismatch when Ghidra cannot create an instruction at the row start.</li>
+<li><code>compare_raw_pcode.py</code> now emits an <code>oracle_no_instruction</code> bucket for <code>no instruction</code> Ghidra oracle rows, and the perfect canonical gate allows that bucket as nonsemantic alongside existing decode-error/padding buckets.</li>
+<li>Added targeted runtime regression <code>generated_runtime_decodes_arm7_le_arm_mode_stmdb_from_sla_template</code> using <code>ARM7_le.slaspec</code> from the ARM processor directory and the ARM-mode <code>stmdb</code>/push bytes from the admitted ELF row.</li>
+</ul>
+<h2 id="arm7_le-validation">ARM7_le Validation<a class="headerlink" href="#arm7_le-validation" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Invalid-oracle baseline report: <code>benchmark/artifacts/raw_p_code_benchmark/arm7_le_oracle_no_instruction_baseline/aggregate_raw_pcode_parity_report.json</code></li>
+<li><code>bucket_totals.oracle_no_instruction = 1</code></li>
+<li><code>bucket_totals.ghidra_decode_error = 1</code></li>
+<li><code>bucket_totals.both_decode_error_or_padding = 1</code></li>
+<li><code>compat_emitter_used = 0</code></li>
+<li><code>fake_placeholder_op = 0</code></li>
+<li><code>invalid_pcode_shape = 0</code></li>
+<li>Admitted ARM-mode row: <code>benchmark/binary/ARM7_le/vendor_binaries/armhf/not_packed_elf32 @ 0x102e8</code>, <code>count = 3</code>.</li>
+<li>ARM7_le focused report: <code>benchmark/artifacts/raw_p_code_benchmark/arm7_le_arm_mode_parity/aggregate_raw_pcode_parity_report.json</code></li>
+<li><code>full_match = 3</code></li>
+<li><code>average_similarity_score = 1.0</code></li>
+<li><code>average_parity_ratio = 1.0</code></li>
+<li><code>compat_emitter_used = 0</code></li>
+<li><code>fake_placeholder_op = 0</code></li>
+<li><code>invalid_pcode_shape = 0</code></li>
+<li><code>template_source_totals.sla_construct_tpl = 3</code></li>
+<li>AArch64 guard report: <code>benchmark/artifacts/raw_p_code_benchmark/arm7_le_work_aarch64_guard/aggregate_raw_pcode_parity_report.json</code></li>
+<li><code>full_match = 8</code></li>
+<li><code>average_similarity_score = 1.0</code></li>
+<li><code>average_parity_ratio = 1.0</code></li>
+<li><code>compat_emitter_used = 0</code></li>
+<li><code>fake_placeholder_op = 0</code></li>
+<li><code>invalid_pcode_shape = 0</code></li>
+<li><code>template_source_totals.sla_construct_tpl = 8</code></li>
+<li>x86-64 canonical guard report: <code>benchmark/artifacts/raw_p_code_benchmark/arm7_le_work_x86_64_guard/aggregate_raw_pcode_parity_report.json</code></li>
+<li><code>perfect_canonical_gate = passed</code></li>
+<li><code>full_match = 44</code></li>
+<li><code>average_similarity_score = 1.0</code></li>
+<li><code>average_parity_ratio = 1.0</code></li>
+<li><code>compat_emitter_used = 0</code></li>
+<li><code>fake_placeholder_op = 0</code></li>
+<li><code>invalid_pcode_shape = 0</code></li>
+<li>Vendor smoke report: <code>benchmark/artifacts/raw_p_code_benchmark/arm7_le_work_vendor_guard/aggregate_raw_pcode_parity_report.json</code></li>
+<li><code>full_match = 16</code></li>
+<li><code>average_similarity_score = 1.0</code></li>
+<li><code>average_parity_ratio = 1.0</code></li>
+<li><code>compat_emitter_used = 0</code></li>
+<li><code>fake_placeholder_op = 0</code></li>
+<li><code>invalid_pcode_shape = 0</code></li>
+<li><code>template_source_totals.sla_construct_tpl = 16</code></li>
+</ul>
+<h2 id="arm7_le-notes">ARM7_le Notes<a class="headerlink" href="#arm7_le-notes" title="Permanent link">&para;</a></h2>
+<ul>
+<li>This wave adds row admission and regression coverage; it does not add ARM-specific runtime/compiler policy.</li>
+<li>Successful p-code remains decoded <code>.sla ConstructTpl</code> only.</li>
+<li>No architecture-specific Rust branch, mnemonic/table-name/source-line remap, manual mapping, or approximate p-code was introduced.</li>
+<li>Benchmark output artifacts, Ghidra project DB state, generated target cache, and copied sample binaries remain uncommitted.</li>
+</ul>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../../..", "features": ["navigation.tabs", "navigation.sections", "navigation.expand", "navigation.top", "search.suggest", "search.highlight", "content.code.copy"], "search": "../../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>

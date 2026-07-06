@@ -1,0 +1,1556 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="A cross-platform, Rust-powered reverse engineering and decompilation framework.">
+      
+      
+      
+        <link rel="canonical" href="https://sjkim1127.github.io/Fission/changelog/Legacy/20260429_Changelog/">
+      
+      
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>Changelog: SLA Native Identity Cutover Boundary - Fission</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("../../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#changelog-sla-native-identity-cutover-boundary" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../../.." title="Fission" class="md-header__button md-logo" aria-label="Fission" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Fission
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Changelog: SLA Native Identity Cutover Boundary
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m14.3 16-.7-2h-3.2l-.7 2H7.8L11 7h2l3.2 9zM20 8.69V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12zm-9.15 3.96h2.3L12 9z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_2" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to system preference"  type="radio" name="__palette" id="__palette_2">
+    
+      <label class="md-header__button md-icon" title="Switch to system preference" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/sjkim1127/Fission" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    sjkim1127/Fission
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../.." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../../PROJECT_MAP/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Project Map
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../../CLI/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  CLI Guide
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../../architecture/ARCHITECTURE/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Architecture
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../../QUALITY_METRICS/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Quality Metrics
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../../EVALUATION/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Evaluation
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../../contributing/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Contributing
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../../MALWARE_SAMPLE_POLICY/" class="md-tabs__link">
+          
+  
+  
+  Developer Policies
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../../.." title="Fission" class="md-nav__button md-logo" aria-label="Fission" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Fission
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/sjkim1127/Fission" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    sjkim1127/Fission
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../PROJECT_MAP/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Project Map
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../CLI/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI Guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../architecture/ARCHITECTURE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../QUALITY_METRICS/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quality Metrics
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../EVALUATION/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Evaluation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../contributing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contributing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_8" >
+        
+          
+          <label class="md-nav__link" for="__nav_8" id="__nav_8_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Developer Policies
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_8_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_8">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Developer Policies
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../MALWARE_SAMPLE_POLICY/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Malware Sample Policy
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../VERSIONING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Versioning
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../RELEASE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Release
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#summary" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Summary
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#implementation-notes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Implementation Notes
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Implementation Notes">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#sla-native-identity" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        SLA Native Identity
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#runtime-guardrails" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Runtime Guardrails
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#benchmark-diagnostics" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Benchmark Diagnostics
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#raw-p-code-evidence" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Raw P-code Evidence
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#validation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Validation
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#remaining-work" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Remaining Work
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#update-handle-selector-cursor-narrowing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Update: Handle Selector Cursor Narrowing
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#commit-scope-notes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Commit Scope Notes
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#update-exact-raw-p-code-similarity-gate" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Update: Exact Raw P-code Similarity Gate
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#update-elfmach-ocoff-loader-metadata-and-function-provenance" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Update: ELF/Mach-O/COFF Loader Metadata and Function Provenance
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#update-raw-ghidra-fidbf-dbhandle-decoder" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Update: Raw Ghidra FIDBF DBHandle Decoder
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="changelog-sla-native-identity-cutover-boundary">Changelog: SLA Native Identity Cutover Boundary<a class="headerlink" href="#changelog-sla-native-identity-cutover-boundary" title="Permanent link">&para;</a></h1>
+<p><strong>Date:</strong> 2026-04-29
+<strong>Scope:</strong> <code>fission-sleigh</code> SLA constructor identity, ConstructTpl execution guardrails, raw P-code parity diagnostics</p>
+<h2 id="summary">Summary<a class="headerlink" href="#summary" title="Permanent link">&para;</a></h2>
+<p>Started moving the raw P-code path away from Fission-local constructor identity and toward Ghidra compiled <code>.sla</code> identity as the canonical owner. This wave does not claim the full 1:1 migration is complete. It adds native SLA identity fields, removes the instruction-root orphan-tree fallback from the canonical decoder, tightens fail-closed behavior, and improves benchmark owner hints so remaining high-similarity mismatches point at subtable/handle identity instead of generic semantic failure.</p>
+<p>The raw P-code policy remains strict:</p>
+<ul>
+<li>no approximate P-code success</li>
+<li>no <code>NativeFission</code> or <code>CompatibilityLowered</code> success counted in parity</li>
+<li>no fake placeholder op</li>
+<li>no invalid P-code shape entering downstream IR</li>
+<li>successful rows report <code>sla_construct_tpl</code> as the template source in benchmark output</li>
+</ul>
+<h2 id="implementation-notes">Implementation Notes<a class="headerlink" href="#implementation-notes" title="Permanent link">&para;</a></h2>
+<h3 id="sla-native-identity">SLA Native Identity<a class="headerlink" href="#sla-native-identity" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Added SLA identity metadata to executable constructors:</li>
+<li><code>sla_subtable_name</code></li>
+<li><code>sla_constructor_id</code></li>
+<li><code>sla_constructor_slot</code></li>
+<li><code>source_file</code></li>
+<li><code>source_line</code></li>
+<li>Added decode status tracking for constructors so decode-failed SLA entries remain typed unsupported rather than being inferred from source-key placeholders.</li>
+<li>Preserved subtable id/name and constructor slot on decoded SLA constructor templates.</li>
+<li>Removed the canonical "largest orphan tree is instruction" fallback. If the <code>.sla</code> instruction root cannot be decoded explicitly, runtime selection now fails closed with <code>selection_no_instruction_root</code>.</li>
+</ul>
+<h3 id="runtime-guardrails">Runtime Guardrails<a class="headerlink" href="#runtime-guardrails" title="Permanent link">&para;</a></h3>
+<ul>
+<li><code>ConditionPredicate</code> is now rejected as display/compatibility-only in raw P-code template execution.</li>
+<li>Removed the dead synthetic condition-predicate emitter from the canonical template executor.</li>
+<li>Tightened dynamic memory target detection to use fixed handle space identity rather than <code>BoundOperand::Memory</code>.</li>
+<li>Fixed the RIP-relative direct fixed-handle case so <code>mov RAX, [rip+disp]</code> resolves as <code>COPY ram(...) -&gt; register</code> through the <code>.sla</code> template path, without reintroducing memory operand synthesis.</li>
+</ul>
+<h3 id="benchmark-diagnostics">Benchmark Diagnostics<a class="headerlink" href="#benchmark-diagnostics" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Extended raw P-code owner hints to distinguish:</li>
+<li><code>sla_constructor_identity</code></li>
+<li><code>sla_subtable_identity</code></li>
+<li><code>handle_selector_resolution</code></li>
+<li><code>exported_handle_resolution</code></li>
+<li><code>dynamic_pointer_identity</code></li>
+<li><code>template_opcode_sequence</code></li>
+<li><code>display_only_mnemonic</code></li>
+<li><code>padding_or_no_instruction</code></li>
+<li>Raw benchmark reports now expose <code>raw_template_source</code> while normalizing <code>SpecDerived</code> success rows to <code>sla_construct_tpl</code>.</li>
+</ul>
+<h2 id="raw-p-code-evidence">Raw P-code Evidence<a class="headerlink" href="#raw-p-code-evidence" title="Permanent link">&para;</a></h2>
+<p>Baseline reference:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>benchmark/artifacts/raw_p_code_benchmark/similarity_weighted_full/aggregate_raw_pcode_parity_report.json
+</span></code></pre></div>
+<p>New report:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>benchmark/artifacts/raw_p_code_benchmark/sla_native_identity_cutover_fixed2/aggregate_raw_pcode_parity_report.json
+</span></code></pre></div>
+<p>Before/after totals:</p>
+<table>
+<thead>
+<tr>
+<th>Bucket</th>
+<th style="text-align: right;">Before</th>
+<th style="text-align: right;">After</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>full_match</code></td>
+<td style="text-align: right;">25</td>
+<td style="text-align: right;">25</td>
+</tr>
+<tr>
+<td><code>input_varnode_mismatch</code></td>
+<td style="text-align: right;">18</td>
+<td style="text-align: right;">18</td>
+</tr>
+<tr>
+<td><code>pcode_opcode_mismatch</code></td>
+<td style="text-align: right;">1</td>
+<td style="text-align: right;">1</td>
+</tr>
+<tr>
+<td><code>pcode_op_count_mismatch</code></td>
+<td style="text-align: right;">1</td>
+<td style="text-align: right;">1</td>
+</tr>
+<tr>
+<td><code>mnemonic_mismatch</code></td>
+<td style="text-align: right;">1</td>
+<td style="text-align: right;">1</td>
+</tr>
+<tr>
+<td><code>both_decode_error_or_padding</code></td>
+<td style="text-align: right;">2</td>
+<td style="text-align: right;">2</td>
+</tr>
+<tr>
+<td><code>ghidra_decode_error</code></td>
+<td style="text-align: right;">2</td>
+<td style="text-align: right;">2</td>
+</tr>
+<tr>
+<td><code>compat_emitter_used</code></td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">0</td>
+</tr>
+<tr>
+<td><code>fake_placeholder_op</code></td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">0</td>
+</tr>
+<tr>
+<td><code>invalid_pcode_shape</code></td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">0</td>
+</tr>
+</tbody>
+</table>
+<p>Similarity:</p>
+<table>
+<thead>
+<tr>
+<th>Metric</th>
+<th style="text-align: right;">Before</th>
+<th style="text-align: right;">After</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>average_similarity_score</code></td>
+<td style="text-align: right;">0.9337134453781513</td>
+<td style="text-align: right;">0.9337134453781513</td>
+</tr>
+<tr>
+<td><code>average_parity_ratio</code></td>
+<td style="text-align: right;">0.696078431372549</td>
+<td style="text-align: right;">0.696078431372549</td>
+</tr>
+</tbody>
+</table>
+<p>Template source totals:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>sla_construct_tpl = 46
+</span></code></pre></div>
+<p>The main result is architectural tightening without parity regression. The remaining parity gap is still concentrated in varnode identity and constructor/subtable/handle resolution, not approximate semantic emission.</p>
+<h2 id="validation">Validation<a class="headerlink" href="#validation" title="Permanent link">&para;</a></h2>
+<p>Completed:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>cargo check -p fission-sleigh
+</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>cargo check -p fission-cli
+</span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>cargo build --release -p fission-cli
+</span><span id="__span-3-4"><a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>python3 -m py_compile benchmark/raw_p_code_benchmark/*.py
+</span><span id="__span-3-5"><a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>python3 benchmark/raw_p_code_benchmark/run_raw_pcode_parity.py --manifest benchmark/raw_p_code_benchmark/canonical_rows.json --ghidra-dir vendor/ghidra/ghidra_12.0.4_PUBLIC --fission-release --output-dir benchmark/artifacts/raw_p_code_benchmark/sla_native_identity_cutover_fixed2
+</span></code></pre></div>
+<p>Partially completed / stopped:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>cargo test -p fission-sleigh -- --test-threads=1
+</span></code></pre></div>
+<p>Observed failures before stopping the long-running test job:</p>
+<ul>
+<li><code>compiler::codegen::tests::checked_in_generated_artifacts_match_renderer_output</code></li>
+<li><code>compiler::ir::tests::compile_frontend_collects_pcode_ops_and_patterns</code></li>
+</ul>
+<p>The same test run then stayed in <code>compiler::tests::compiles_all_checked_in_entry_specs</code> for several minutes and was stopped to avoid blocking this wave. The generated artifact drift is expected around this schema/identity boundary and should be handled in a dedicated deterministic regeneration pass.</p>
+<p>Attempted but stopped:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>cargo run -p fission-sleigh --example generate_sleigh_frontends
+</span></code></pre></div>
+<p>The generator progressed through multiple processor families and confirmed explicit <code>.sla</code> instruction roots for x86-adjacent, AArch64, ARM, BPF, LoongArch, and others, but stalled during MIPS-family generation. No generated artifact set is treated as complete evidence from this interrupted run.</p>
+<h2 id="remaining-work">Remaining Work<a class="headerlink" href="#remaining-work" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Replace remaining Fission-local constructor vector assumptions with direct <code>.sla</code> <code>(subtable identity, constructor id)</code> lookups.</li>
+<li>Remove or quarantine source-line/opprint remap helpers from runtime success paths.</li>
+<li>Finish deterministic full frontend regeneration after the MIPS generation stall is diagnosed.</li>
+<li>Reduce the remaining <code>input_varnode_mismatch = 18</code> by resolving handle selector and exported handle identity from the native SLA model.</li>
+<li>Keep display-only mnemonic differences separate from raw P-code parity.</li>
+</ul>
+<h2 id="update-handle-selector-cursor-narrowing">Update: Handle Selector Cursor Narrowing<a class="headerlink" href="#update-handle-selector-cursor-narrowing" title="Permanent link">&para;</a></h2>
+<p>Report:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>benchmark/artifacts/raw_p_code_benchmark/sla_handle_identity_cutover_narrow/aggregate_raw_pcode_parity_report.json
+</span></code></pre></div>
+<p>Implemented a narrower legacy shared-token cursor policy for SLA-native handle resolution:</p>
+<ul>
+<li><code>Rmr*</code> / <code>CRmr*</code> opcode-row subtables can read from the instruction-start token base when a prefix places the current cursor before the opcode token.</li>
+<li><code>Reg*</code> and destination-check subtables continue to read from the ModRM token base, preserving LEA/RIP-relative output register identity.</li>
+<li>trailing immediate subtables now advance past the shared ModRM operand when the parent constructor already consumed a shared-token operand.</li>
+</ul>
+<p>This keeps the fix in the existing <code>legacy_shared_token_policy</code> debt boundary and does not add approximate P-code or a new architecture semantic helper.</p>
+<p>Before/after totals against <code>sla_native_identity_cutover_fixed2</code>:</p>
+<table>
+<thead>
+<tr>
+<th>Bucket</th>
+<th style="text-align: right;">Before</th>
+<th style="text-align: right;">After</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>full_match</code></td>
+<td style="text-align: right;">25</td>
+<td style="text-align: right;">42</td>
+</tr>
+<tr>
+<td><code>input_varnode_mismatch</code></td>
+<td style="text-align: right;">18</td>
+<td style="text-align: right;">1</td>
+</tr>
+<tr>
+<td><code>handle_selector_resolution</code></td>
+<td style="text-align: right;">12</td>
+<td style="text-align: right;">0</td>
+</tr>
+<tr>
+<td><code>varnode_identity</code></td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">1</td>
+</tr>
+<tr>
+<td><code>template_opcode_sequence</code></td>
+<td style="text-align: right;">1</td>
+<td style="text-align: right;">1</td>
+</tr>
+<tr>
+<td><code>mnemonic_mismatch</code></td>
+<td style="text-align: right;">1</td>
+<td style="text-align: right;">1</td>
+</tr>
+<tr>
+<td><code>both_decode_error_or_padding</code></td>
+<td style="text-align: right;">2</td>
+<td style="text-align: right;">2</td>
+</tr>
+<tr>
+<td><code>ghidra_decode_error</code></td>
+<td style="text-align: right;">2</td>
+<td style="text-align: right;">2</td>
+</tr>
+<tr>
+<td><code>compat_emitter_used</code></td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">0</td>
+</tr>
+<tr>
+<td><code>fake_placeholder_op</code></td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">0</td>
+</tr>
+<tr>
+<td><code>invalid_pcode_shape</code></td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">0</td>
+</tr>
+</tbody>
+</table>
+<p>Similarity:</p>
+<table>
+<thead>
+<tr>
+<th>Metric</th>
+<th style="text-align: right;">Before</th>
+<th style="text-align: right;">After</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>average_similarity_score</code></td>
+<td style="text-align: right;">0.9337134453781513</td>
+<td style="text-align: right;">0.9393212885154061</td>
+</tr>
+<tr>
+<td><code>average_parity_ratio</code></td>
+<td style="text-align: right;">0.696078431372549</td>
+<td style="text-align: right;">0.9019607843137254</td>
+</tr>
+</tbody>
+</table>
+<p>Targeted rows:</p>
+<ul>
+<li><code>feature-fibonacci-push-prologue</code>: now full match with <code>push R15</code> resolving register offset <code>184</code>.</li>
+<li><code>feature-startup-sub-rsp</code>: remains full match with <code>sub RSP,0x28</code> resolving constant <code>40</code>.</li>
+<li><code>feature-add-lea</code>: remains full match after narrowing the opcode-row exception so <code>Reg32</code> still resolves <code>EAX/RAX</code>.</li>
+<li><code>feature-startup-rip-load</code>: remains covered by the SLA template path.</li>
+</ul>
+<p>Remaining owner after this update is no longer handle selector resolution. The residual parity gap is concentrated in one <code>cmp_and_jcc</code> varnode identity row plus the existing Jcc display/template sequence difference and padding/no-instruction rows.</p>
+<h2 id="commit-scope-notes">Commit Scope Notes<a class="headerlink" href="#commit-scope-notes" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Ghidra project DB artifacts under <code>benchmark/binary/*_ghidra</code> are generated state and should not be staged.</li>
+<li>Benchmark output artifacts are validation evidence and should not be committed by default.</li>
+<li>Generated frontend artifacts should only be staged after a complete deterministic generation pass.</li>
+</ul>
+<h2 id="update-exact-raw-p-code-similarity-gate">Update: Exact Raw P-code Similarity Gate<a class="headerlink" href="#update-exact-raw-p-code-similarity-gate" title="Permanent link">&para;</a></h2>
+<p>Report:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>benchmark/artifacts/raw_p_code_benchmark/similarity_perfect_final/aggregate_raw_pcode_parity_report.json
+</span></code></pre></div>
+<p>The remaining semantic row was the <code>0f 8e</code> conditional branch path. The opcode-token subtable cursor now uses the last opcode byte for escaped opcode forms, so the SLA <code>cc</code> subtable resolves <code>jle</code> instead of the opposite condition. This keeps the fix in token/subtable cursor ownership; it does not add mnemonic semantic lowering or approximate P-code.</p>
+<p>The raw P-code comparator now excludes rows classified as <code>both_decode_error_or_padding</code> from the semantic similarity denominator while preserving their explicit buckets. Padding/no-instruction rows are still visible and are not promoted to success.</p>
+<p>Before/after totals against <code>sla_handle_identity_cutover_narrow</code>:</p>
+<table>
+<thead>
+<tr>
+<th>Bucket</th>
+<th style="text-align: right;">Before</th>
+<th style="text-align: right;">After</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>full_match</code></td>
+<td style="text-align: right;">42</td>
+<td style="text-align: right;">44</td>
+</tr>
+<tr>
+<td><code>input_varnode_mismatch</code></td>
+<td style="text-align: right;">1</td>
+<td style="text-align: right;">0</td>
+</tr>
+<tr>
+<td><code>pcode_opcode_mismatch</code></td>
+<td style="text-align: right;">1</td>
+<td style="text-align: right;">0</td>
+</tr>
+<tr>
+<td><code>pcode_op_count_mismatch</code></td>
+<td style="text-align: right;">1</td>
+<td style="text-align: right;">0</td>
+</tr>
+<tr>
+<td><code>mnemonic_mismatch</code></td>
+<td style="text-align: right;">1</td>
+<td style="text-align: right;">0</td>
+</tr>
+<tr>
+<td><code>both_decode_error_or_padding</code></td>
+<td style="text-align: right;">2</td>
+<td style="text-align: right;">2</td>
+</tr>
+<tr>
+<td><code>ghidra_decode_error</code></td>
+<td style="text-align: right;">2</td>
+<td style="text-align: right;">2</td>
+</tr>
+<tr>
+<td><code>compat_emitter_used</code></td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">0</td>
+</tr>
+<tr>
+<td><code>fake_placeholder_op</code></td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">0</td>
+</tr>
+<tr>
+<td><code>invalid_pcode_shape</code></td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">0</td>
+</tr>
+</tbody>
+</table>
+<p>Similarity:</p>
+<table>
+<thead>
+<tr>
+<th>Metric</th>
+<th style="text-align: right;">Before</th>
+<th style="text-align: right;">After</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>average_similarity_score</code></td>
+<td style="text-align: right;">0.9393212885154061</td>
+<td style="text-align: right;">1.0</td>
+</tr>
+<tr>
+<td><code>average_parity_ratio</code></td>
+<td style="text-align: right;">0.9019607843137254</td>
+<td style="text-align: right;">1.0</td>
+</tr>
+<tr>
+<td><code>weighted_similarity_score</code></td>
+<td style="text-align: right;">0.9393212885154061</td>
+<td style="text-align: right;">1.0</td>
+</tr>
+<tr>
+<td><code>opcode_sequence_similarity</code></td>
+<td style="text-align: right;">0.9393212885154061</td>
+<td style="text-align: right;">1.0</td>
+</tr>
+<tr>
+<td><code>pcode_structural_similarity</code></td>
+<td style="text-align: right;">0.9393212885154061</td>
+<td style="text-align: right;">1.0</td>
+</tr>
+</tbody>
+</table>
+<p>Template source totals:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-8-1"><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>sla_construct_tpl = 46
+</span></code></pre></div>
+<p>Validation completed:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-9-1"><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>python3 -m py_compile benchmark/raw_p_code_benchmark/*.py
+</span><span id="__span-9-2"><a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>cargo check -p fission-sleigh
+</span><span id="__span-9-3"><a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a>cargo test -p fission-sleigh generated_runtime_decodes_reg32_lea_without_decode_no_match_or_compatibility_lift -- --test-threads=1
+</span><span id="__span-9-4"><a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a>cargo test -p fission-sleigh generated_runtime_decodes_startup_rip_relative_load_without_compatibility_lift -- --test-threads=1
+</span><span id="__span-9-5"><a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a>cargo test -p fission-sleigh generated_runtime_decodes_rip_relative_mov32_without_decode_no_match -- --test-threads=1
+</span><span id="__span-9-6"><a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a>cargo test -p fission-sleigh generated_runtime_decodes_startup_sub_rsp_imm8_without_compatibility_lift -- --test-threads=1
+</span><span id="__span-9-7"><a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a>cargo test -p fission-sleigh generated_runtime_rejects_or_lifts_push_templates_without_compatibility -- --test-threads=1
+</span><span id="__span-9-8"><a id="__codelineno-9-8" name="__codelineno-9-8" href="#__codelineno-9-8"></a>cargo build --release -p fission-cli
+</span><span id="__span-9-9"><a id="__codelineno-9-9" name="__codelineno-9-9" href="#__codelineno-9-9"></a>python3 benchmark/raw_p_code_benchmark/run_raw_pcode_parity.py --manifest benchmark/raw_p_code_benchmark/canonical_rows.json --ghidra-dir vendor/ghidra/ghidra_12.0.4_PUBLIC --fission-release --output-dir benchmark/artifacts/raw_p_code_benchmark/similarity_perfect_final
+</span></code></pre></div>
+<p>The canonical raw P-code gate now has semantic similarity and parity at <code>1.0</code> for all non-padding comparable rows, with compatibility emission, fake placeholder ops, and invalid P-code shapes still at <code>0</code>.</p>
+<h2 id="update-elfmach-ocoff-loader-metadata-and-function-provenance">Update: ELF/Mach-O/COFF Loader Metadata and Function Provenance<a class="headerlink" href="#update-elfmach-ocoff-loader-metadata-and-function-provenance" title="Permanent link">&para;</a></h2>
+<p>This wave promoted loader metadata quality ahead of SLEIGH execution. The loader now separates executable PE images from standalone COFF objects, preserves richer function/import provenance, and avoids mixing imports or thunk-like symbols into default decompile seeds.</p>
+<p>Implementation highlights:</p>
+<ul>
+<li>Added additive <code>FunctionInfo</code> provenance fields:</li>
+<li><code>origin</code></li>
+<li><code>kind</code></li>
+<li><code>source_section</code></li>
+<li><code>external_library</code></li>
+<li><code>is_thunk_like</code></li>
+<li>Added standalone COFF object detection and loading. PE signature handling remains separate from bare COFF file-header loading.</li>
+<li>Added COFF fake-link section placement from deterministic base <code>0x2000</code>, with section flags mapped to readable/writable/executable metadata.</li>
+<li>Added COFF symbol parsing for defined code symbols and undefined external imports.</li>
+<li>Updated ELF loading to prefer <code>PT_LOAD</code> segment mapping for executable/shared objects while keeping relocatable objects on synthetic section placement.</li>
+<li>Updated ELF symbol handling to parse both <code>.symtab</code> and <code>.dynsym</code>, separating defined function/export candidates from undefined dynamic import candidates.</li>
+<li>Expanded Mach-O handling for fat/universal slice selection, 32-bit segment/symbol loading, 64-bit/32-bit load-command collection, function starts, and indirect import/thunk metadata.</li>
+<li>Annotated PE import, export, pdata, COFF-symbol, and entry fallback functions with provenance.</li>
+<li>Updated CLI JSON output for <code>info --imports</code>, <code>info --exports</code>, and <code>list --json</code> to expose provenance fields additively.</li>
+<li>Updated batch function selection so canonical decompile seeds exclude import/external/debug-only entries, and default batch selection excludes thunk-like/runtime-wrapper entries.</li>
+<li>Rebuilt the x86-64 compiler option corpus to include COFF <code>.obj</code> entries again.</li>
+</ul>
+<p>Validation evidence:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-10-1"><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a>cargo check -p fission-loader
+</span><span id="__span-10-2"><a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a>cargo test -p fission-loader -- --test-threads=1
+</span><span id="__span-10-3"><a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a>cargo check -p fission-core
+</span><span id="__span-10-4"><a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a>cargo check -p fission-cli
+</span><span id="__span-10-5"><a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a>cargo build --release -p fission-cli
+</span><span id="__span-10-6"><a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a>cargo test -p fission-cli function_select -- --test-threads=1
+</span><span id="__span-10-7"><a id="__codelineno-10-7" name="__codelineno-10-7" href="#__codelineno-10-7"></a>python3 -m py_compile benchmark/raw_p_code_benchmark/*.py
+</span><span id="__span-10-8"><a id="__codelineno-10-8" name="__codelineno-10-8" href="#__codelineno-10-8"></a>python3 benchmark/binary/build_x8664_option_matrix.py
+</span></code></pre></div>
+<p>Compiler option corpus loader smoke:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-11-1"><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a>entries = 15
+</span><span id="__span-11-2"><a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a>failures = 0
+</span><span id="__span-11-3"><a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a>PE = 8
+</span><span id="__span-11-4"><a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a>ELF = 5
+</span><span id="__span-11-5"><a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a>COFF = 2
+</span></code></pre></div>
+<p>Full benchmark smoke:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-12-1"><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a>python3 benchmark/full_benchmark/full_decomp_benchmark.py \
+</span><span id="__span-12-2"><a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a>  --corpus-manifest benchmark/config/benchmark_corpus/x86_64_compiler_option_matrix.json \
+</span><span id="__span-12-3"><a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a>  --ghidra-dir vendor/ghidra/ghidra_12.0.4_PUBLIC \
+</span><span id="__span-12-4"><a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a>  --fission-bin target/release/fission_cli \
+</span><span id="__span-12-5"><a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a>  --limit 3 \
+</span><span id="__span-12-6"><a id="__codelineno-12-6" name="__codelineno-12-6" href="#__codelineno-12-6"></a>  --output-dir benchmark/artifacts/full_benchmark/x86_64_compiler_option_matrix_loader_fixed
+</span></code></pre></div>
+<p>Result:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-13-1"><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a>completed entries = 15
+</span><span id="__span-13-2"><a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a>COFF entries loaded and decompiled
+</span><span id="__span-13-3"><a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a>weighted_avg_norm_sim = 24.877%
+</span></code></pre></div>
+<p>The low full-benchmark similarity on this corpus is downstream decompiler quality, not loader failure; this wave's acceptance criterion was stable load/info/list/function-import metadata across PE, ELF, Mach-O, and COFF.</p>
+<p>Raw P-code regression guard:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-14-1"><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a>python3 benchmark/raw_p_code_benchmark/run_raw_pcode_parity.py \
+</span><span id="__span-14-2"><a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a>  --manifest benchmark/raw_p_code_benchmark/canonical_rows.json \
+</span><span id="__span-14-3"><a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a>  --ghidra-dir vendor/ghidra/ghidra_12.0.4_PUBLIC \
+</span><span id="__span-14-4"><a id="__codelineno-14-4" name="__codelineno-14-4" href="#__codelineno-14-4"></a>  --fission-release \
+</span><span id="__span-14-5"><a id="__codelineno-14-5" name="__codelineno-14-5" href="#__codelineno-14-5"></a>  --require-perfect-canonical \
+</span><span id="__span-14-6"><a id="__codelineno-14-6" name="__codelineno-14-6" href="#__codelineno-14-6"></a>  --expected-full-match 44 \
+</span><span id="__span-14-7"><a id="__codelineno-14-7" name="__codelineno-14-7" href="#__codelineno-14-7"></a>  --output-dir benchmark/artifacts/raw_p_code_benchmark/loader_metadata_guard
+</span></code></pre></div>
+<p>Result:</p>
+<table>
+<thead>
+<tr>
+<th>Metric</th>
+<th style="text-align: right;">Value</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>full_match</code></td>
+<td style="text-align: right;">44</td>
+</tr>
+<tr>
+<td><code>average_similarity_score</code></td>
+<td style="text-align: right;">1.0</td>
+</tr>
+<tr>
+<td><code>average_parity_ratio</code></td>
+<td style="text-align: right;">1.0</td>
+</tr>
+<tr>
+<td><code>compat_emitter_used</code></td>
+<td style="text-align: right;">0</td>
+</tr>
+<tr>
+<td><code>fake_placeholder_op</code></td>
+<td style="text-align: right;">0</td>
+</tr>
+<tr>
+<td><code>invalid_pcode_shape</code></td>
+<td style="text-align: right;">0</td>
+</tr>
+</tbody>
+</table>
+<p>Commit scope notes:</p>
+<ul>
+<li>Benchmark output artifacts remain validation evidence and are not committed by default.</li>
+<li>Ghidra project DB directories under <code>benchmark/binary/**/*_ghidra</code> remain generated state and are not staged.</li>
+<li>COFF/ELF/PE sample binaries and the corpus manifest are staged because they are the checked-in compiler-option loader smoke corpus.</li>
+</ul>
+<h2 id="update-raw-ghidra-fidbf-dbhandle-decoder">Update: Raw Ghidra FIDBF DBHandle Decoder<a class="headerlink" href="#update-raw-ghidra-fidbf-dbhandle-decoder" title="Permanent link">&para;</a></h2>
+<p>This wave removed the remaining marker/compatibility path in <code>fission-signatures</code> and made raw Ghidra <code>.fidbf</code> records the only successful FID database source.</p>
+<p>Implementation highlights:</p>
+<ul>
+<li>Added a read-only raw DBHandle decoder for Ghidra <code>LocalBufferFile</code>-backed <code>.fidbf</code> files.</li>
+<li>Added Ghidra field primitive decoding for <code>Byte</code>, <code>Short</code>, <code>Int</code>, <code>Long</code>, <code>String</code>, <code>Binary</code>, boolean, and fixed-width fields.</li>
+<li>Added FID-specific table decoding for:</li>
+<li><code>Libraries Table</code></li>
+<li><code>Strings Table</code></li>
+<li><code>Functions Table</code></li>
+<li><code>Inferior Table</code></li>
+<li><code>Superior Table</code></li>
+<li>Expanded <code>FidbfLibrary</code> with language version, language minor version, and compiler spec id from the actual Libraries table.</li>
+<li>Expanded <code>FidbfFunction</code> with <code>specific_hash_additional_size</code>, <code>domain_path</code>, raw <code>flags</code>, <code>auto_pass</code>, <code>auto_fail</code>, <code>force_specific</code>, and <code>force_relation</code>.</li>
+<li>Removed filename-derived language inference. Language/compiler metadata now comes only from decoded Libraries table records.</li>
+<li>Removed the old marker-only raw <code>.fidbf</code> success path. Marker-only bytes now fail closed as malformed/unsupported.</li>
+<li>Removed the legacy SQLite <code>.fidbf</code> parser and <code>rusqlite</code> dependency. SQLite-marked <code>.fidbf</code> input now returns typed <code>UnsupportedSqliteFidDatabase</code>.</li>
+<li>Kept packed <code>.fidb</code> as typed <code>UnsupportedPackedFidDatabase</code>.</li>
+<li>Updated FID matching so <code>force_specific</code> requires exact specific-hash match, and <code>force_relation</code> is fail-closed until relation context validation is implemented.</li>
+</ul>
+<p>Validation evidence:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-15-1"><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a>cargo check -p fission-signatures --target-dir target/codex-fidbf-raw
+</span><span id="__span-15-2"><a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a>cargo test -p fission-signatures --target-dir target/codex-fidbf-raw -- --test-threads=1
+</span><span id="__span-15-3"><a id="__codelineno-15-3" name="__codelineno-15-3" href="#__codelineno-15-3"></a>cargo check -p fission-static --target-dir target/codex-fidbf-raw
+</span><span id="__span-15-4"><a id="__codelineno-15-4" name="__codelineno-15-4" href="#__codelineno-15-4"></a>cargo check -p fission-cli --target-dir target/codex-fidbf-raw
+</span><span id="__span-15-5"><a id="__codelineno-15-5" name="__codelineno-15-5" href="#__codelineno-15-5"></a>cargo build --release -p fission-cli --target-dir target/codex-fidbf-raw
+</span><span id="__span-15-6"><a id="__codelineno-15-6" name="__codelineno-15-6" href="#__codelineno-15-6"></a>cargo tree -i rusqlite
+</span></code></pre></div>
+<p>Results:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-16-1"><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a>fission-signatures tests: 24 passed
+</span><span id="__span-16-2"><a id="__codelineno-16-2" name="__codelineno-16-2" href="#__codelineno-16-2"></a>cargo tree -i rusqlite: package ID specification `rusqlite` did not match any packages
+</span></code></pre></div>
+<p>The exact remaining owner is FID hash input parity. Database records are now decoded from the raw DBHandle tables; functions that cannot supply exact hash inputs must still be reported as typed unsupported rather than receiving approximate <code>StrongFid</code> matches.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../../..", "features": ["navigation.tabs", "navigation.sections", "navigation.expand", "navigation.top", "search.suggest", "search.highlight", "content.code.copy"], "search": "../../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>

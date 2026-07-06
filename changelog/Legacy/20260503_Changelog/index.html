@@ -1,0 +1,1305 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="A cross-platform, Rust-powered reverse engineering and decompilation framework.">
+      
+      
+      
+        <link rel="canonical" href="https://sjkim1127.github.io/Fission/changelog/Legacy/20260503_Changelog/">
+      
+      
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>2026-05-03 Changelog - Fission</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("../../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#2026-05-03-changelog" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../../.." title="Fission" class="md-header__button md-logo" aria-label="Fission" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Fission
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              2026-05-03 Changelog
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m14.3 16-.7-2h-3.2l-.7 2H7.8L11 7h2l3.2 9zM20 8.69V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12zm-9.15 3.96h2.3L12 9z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_2" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to system preference"  type="radio" name="__palette" id="__palette_2">
+    
+      <label class="md-header__button md-icon" title="Switch to system preference" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/sjkim1127/Fission" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    sjkim1127/Fission
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../.." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../../PROJECT_MAP/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Project Map
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../../CLI/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  CLI Guide
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../../architecture/ARCHITECTURE/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Architecture
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../../QUALITY_METRICS/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Quality Metrics
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../../EVALUATION/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Evaluation
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../../contributing/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Contributing
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../../MALWARE_SAMPLE_POLICY/" class="md-tabs__link">
+          
+  
+  
+  Developer Policies
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../../.." title="Fission" class="md-nav__button md-logo" aria-label="Fission" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Fission
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/sjkim1127/Fission" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    sjkim1127/Fission
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../PROJECT_MAP/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Project Map
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../CLI/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI Guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../architecture/ARCHITECTURE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../QUALITY_METRICS/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quality Metrics
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../EVALUATION/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Evaluation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../contributing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contributing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_8" >
+        
+          
+          <label class="md-nav__link" for="__nav_8" id="__nav_8_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Developer Policies
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_8_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_8">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Developer Policies
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../MALWARE_SAMPLE_POLICY/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Malware Sample Policy
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../VERSIONING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Versioning
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../RELEASE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Release
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#decompiler-quality-cycle-sqlite3-sample-row-admission" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Decompiler quality cycle: sqlite3 sample row admission
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#validation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Validation
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#sqlite3-raw-p-code-canary-parity-sib-extent-and-dynamic-copy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        sqlite3 raw p-code canary parity: SIB extent and dynamic COPY
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#sleigh-audit-fatal-gate-rollback-and-decompiler-benchmark-revalidation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        SLEIGH audit fatal gate rollback and decompiler benchmark revalidation
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#benchmark" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Benchmark
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#notes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Notes
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#decompiler-quality-v6-exact-indirect-import-call-target-proof" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Decompiler Quality V6: exact indirect import call target proof
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#v6-validation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        V6 Validation
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#v6-benchmark" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        V6 Benchmark
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#decompiler-quality-v7-folded-indirect-import-call-target-proof" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Decompiler Quality V7: folded indirect import call target proof
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#v7-validation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        V7 Validation
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#v7-benchmark" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        V7 Benchmark
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#raw-p-code-sleigh-preflight-gate-for-decompiler-v7" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Raw P-code SLEIGH preflight gate for decompiler V7
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#raw-p-code-preflight-validation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Raw P-code preflight validation
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="2026-05-03-changelog">2026-05-03 Changelog<a class="headerlink" href="#2026-05-03-changelog" title="Permanent link">&para;</a></h1>
+<h2 id="decompiler-quality-cycle-sqlite3-sample-row-admission">Decompiler quality cycle: sqlite3 sample row admission<a class="headerlink" href="#decompiler-quality-cycle-sqlite3-sample-row-admission" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Fixed <code>full_benchmark</code> seeded function selection so explicit <code>canonical_quality_rows</code>
+  are admitted even when a <code>seed_limit</code> is active.</li>
+<li>Fixed row-fidelity target normalization in the single-binary benchmark path; tuple
+  watchlist rows now become actual row-fidelity targets instead of being dropped.</li>
+<li>Replaced stale sqlite3 export/thunk canary addresses with implementation function
+  rows that Fission and Ghidra both decompile:
+  <code>0x1800085d0</code>, <code>0x180008fd0</code>, <code>0x180009d00</code>.</li>
+<li>Added a benchmark unit test covering required row admission beyond the configured
+  seed limit.</li>
+</ul>
+<h2 id="validation">Validation<a class="headerlink" href="#validation" title="Permanent link">&para;</a></h2>
+<ul>
+<li><code>python3 -m unittest benchmark.full_benchmark.grand_finale_support.test_corpus_benchmark</code>
+  passed.</li>
+<li><code>python3 -m py_compile benchmark/full_benchmark/*.py benchmark/full_benchmark/grand_finale_support/*.py benchmark/asm_benchmark/*.py</code>
+  passed.</li>
+<li><code>cargo build --release -p fission-cli</code> passed.</li>
+<li><code>cargo test -p fission-pcode call_target -- --test-threads=1</code> passed.</li>
+<li><code>cargo test -p fission-decompiler-core call_target -- --test-threads=1</code> passed.</li>
+</ul>
+<h2 id="sqlite3-raw-p-code-canary-parity-sib-extent-and-dynamic-copy">sqlite3 raw p-code canary parity: SIB extent and dynamic COPY<a class="headerlink" href="#sqlite3-raw-p-code-canary-parity-sib-extent-and-dynamic-copy" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Root cause:
+  sqlite3 canary rows <code>0x1800085d0</code> and <code>0x180008fd0</code> decoded <code>mov qword ptr
+  [rsp+disp8], rbx</code> through the correct <code>.sla ConstructTpl</code>, but Fission read
+  the displacement from the SIB byte (<code>0x24</code>) instead of the following <code>disp8</code>
+  byte. After fixing the displacement, the remaining difference was that
+  Fission folded Ghidra's dynamic-output <code>COPY temp &lt;- RBX</code> before the backing
+  <code>STORE</code>.</li>
+<li>Fix:
+  shared-token trailing subtable cursor placement now uses the selected
+  terminal <code>.sla</code> disjoint-pattern instruction byte length when available.
+  This keeps the cursor tied to the verified terminal pattern instead of a
+  one-byte ModRM/SIB assumption.</li>
+<li>Fix:
+  dynamic memory COPY output emission now follows Ghidra <code>PcodeEmit</code> location
+  generation: materialize the dynamic output into its temp varnode first, then
+  emit the backing STORE from that temp. The parent COPY is no longer folded
+  away for register inputs.</li>
+<li>Regression test:
+  added <code>generated_runtime_decodes_sib_stack_disp8_from_sla_terminal_extent</code>
+  for <code>48 89 5c 24 08</code>, asserting the <code>disp8</code> value <code>8</code> comes from after the
+  ModRM+SIB terminal extent and that the op shape is <code>INT_ADD</code>, <code>COPY</code>, <code>STORE</code>.</li>
+<li>sqlite3 raw p-code canary:
+  <code>python3 benchmark/raw_p_code_benchmark/run_raw_pcode_parity.py --manifest benchmark/raw_p_code_benchmark/sqlite3_decompiler_canary_rows.json --ghidra-dir vendor/ghidra/ghidra_12.0.4_PUBLIC --fission-release --output-dir benchmark/artifacts/raw_p_code_benchmark/sqlite3_decompiler_canary_dynamic_copy_fixed</code>
+  improved from <code>full_match=1/3</code>, average similarity
+  <code>0.6795555555555556</code>, average parity ratio <code>0.3333333333333333</code> to
+  <code>full_match=3/3</code>, average similarity <code>1.0</code>, average parity ratio <code>1.0</code>,
+  <code>compat_emitter_used=0</code>, fake placeholder op <code>0</code>, and invalid p-code shape
+  <code>0</code>.</li>
+<li>x86-64 canonical guard:
+  <code>python3 benchmark/raw_p_code_benchmark/run_raw_pcode_parity.py --manifest benchmark/raw_p_code_benchmark/canonical_rows.json --ghidra-dir vendor/ghidra/ghidra_12.0.4_PUBLIC --fission-release --require-perfect-canonical --expected-full-match 44 --output-dir benchmark/artifacts/raw_p_code_benchmark/sib_extent_canonical_guard</code>
+  remained green with <code>full_match=44</code>, average similarity <code>1.0</code>, average
+  parity ratio <code>1.0</code>, <code>compat_emitter_used=0</code>, fake placeholder op <code>0</code>, and
+  invalid p-code shape <code>0</code>.</li>
+<li>sqlite3 full benchmark:
+  <code>python3 benchmark/full_benchmark/full_decomp_benchmark.py --corpus-manifest benchmark/config/benchmark_corpus/sqlite3_decompiler_v4_similarity_attribution.json --ghidra-dir vendor/ghidra/ghidra_12.0.4_PUBLIC --fission-bin target/release/fission_cli --timeout 120 --ghidra-func-timeout 20 --pairwise-similarity-mode shared-full --output-dir benchmark/artifacts/full_benchmark/sqlite3_cycle_sib_extent_dynamic_copy_fixed</code>
+  completed with coverage <code>100%</code>, failed rows <code>0</code>, and weighted average
+  normalized similarity <code>27.640%</code> (<code>+0.030</code> absolute versus the previous
+  <code>27.610%</code> baseline).</li>
+<li>Validation:
+  <code>cargo test -p fission-sleigh generated_runtime_decodes_sib_stack_disp8_from_sla_terminal_extent -- --test-threads=1 --nocapture</code>,
+  <code>cargo check -p fission-sleigh</code>, <code>cargo build --release -p fission-cli</code>, and
+  <code>python3 -m py_compile benchmark/raw_p_code_benchmark/*.py benchmark/full_benchmark/*.py benchmark/full_benchmark/grand_finale_support/*.py</code>
+  passed.</li>
+</ul>
+<h2 id="sleigh-audit-fatal-gate-rollback-and-decompiler-benchmark-revalidation">SLEIGH audit fatal gate rollback and decompiler benchmark revalidation<a class="headerlink" href="#sleigh-audit-fatal-gate-rollback-and-decompiler-benchmark-revalidation" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Root cause:
+  local <code>crates/fission-sleigh/src/runtime/engine.rs</code> had promoted reporting-only
+  <code>RuntimeLegacyPathAudit</code> counters to fatal <code>UnsupportedGeneratedSemantic</code>
+  errors. This converted otherwise successful <code>.sla ConstructTpl</code> executions
+  into raw p-code decode failures before NIR/HIR could run.</li>
+<li>Fix:
+  restored the default compiled-table contract so legacy audit data remains
+  telemetry in <code>RuntimeExecutionDetails</code> instead of a semantic failure gate.
+  No compatibility emitter, approximation, manual mapping, or architecture
+  hardcoding was added.</li>
+<li>Single-row verification:
+  <code>test_functions.exe @ 0x140001450</code> now decodes as <code>lea</code>, length <code>3</code>,
+  <code>template_source=SpecDerived</code>, with audit counters
+  <code>legacy_shared_token_policy=1</code> and <code>no_export_subtable_fallback=1</code> preserved
+  as report-only telemetry.</li>
+<li>Canonical raw p-code gate:
+  <code>python3 benchmark/raw_p_code_benchmark/run_raw_pcode_parity.py --manifest benchmark/raw_p_code_benchmark/canonical_rows.json --ghidra-dir vendor/ghidra/ghidra_12.0.4_PUBLIC --fission-release --require-perfect-canonical --expected-full-match 44 --output-dir benchmark/artifacts/raw_p_code_benchmark/sleigh_preflight_canonical_fixed</code>
+  passed with <code>full_match=44</code>, average similarity <code>1.0</code>, average parity ratio
+  <code>1.0</code>, <code>compat_emitter_used=0</code>, fake placeholder op <code>0</code>, and invalid p-code
+  shape <code>0</code>.</li>
+<li>sqlite3 raw p-code canary:
+  <code>python3 benchmark/raw_p_code_benchmark/run_raw_pcode_parity.py --manifest benchmark/raw_p_code_benchmark/sqlite3_decompiler_canary_rows.json --ghidra-dir vendor/ghidra/ghidra_12.0.4_PUBLIC --fission-release --output-dir benchmark/artifacts/raw_p_code_benchmark/sqlite3_decompiler_canary_fixed</code>
+  reached all three rows with real <code>sla_construct_tpl</code> source. It produced
+  <code>full_match=1/3</code>, average similarity <code>0.6795555555555556</code>, and average
+  parity ratio <code>0.3333333333333333</code>, so the execution blocker is fixed while
+  remaining sqlite3 canary differences are now a separate SLEIGH p-code parity
+  owner issue.</li>
+<li>sqlite3 full decompiler benchmark:
+  <code>python3 benchmark/full_benchmark/full_decomp_benchmark.py --corpus-manifest benchmark/config/benchmark_corpus/sqlite3_decompiler_v4_similarity_attribution.json --ghidra-dir vendor/ghidra/ghidra_12.0.4_PUBLIC --fission-bin target/release/fission_cli --timeout 120 --ghidra-func-timeout 20 --pairwise-similarity-mode shared-full --output-dir benchmark/artifacts/full_benchmark/sqlite3_cycle_engine_audit_fixed</code>
+  completed with coverage <code>100%</code>, failed rows <code>0</code>, and weighted average
+  normalized similarity <code>27.610%</code>.</li>
+<li>Validation:
+  <code>cargo check -p fission-sleigh</code>, <code>cargo build --release -p fission-cli</code>, and
+  <code>python3 -m py_compile benchmark/raw_p_code_benchmark/*.py benchmark/full_benchmark/*.py benchmark/full_benchmark/grand_finale_support/*.py</code>
+  passed.</li>
+<li><code>cargo check -p fission-pcode -p fission-decompiler-core -p fission-static -p fission-cli</code>
+  passed.</li>
+</ul>
+<h2 id="benchmark">Benchmark<a class="headerlink" href="#benchmark" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Command:
+  <code>python3 benchmark/full_benchmark/full_decomp_benchmark.py --corpus-manifest benchmark/config/benchmark_corpus/sqlite3_decompiler_v4_similarity_attribution.json --ghidra-dir vendor/ghidra/ghidra_12.0.4_PUBLIC --fission-bin target/release/fission_cli --timeout 120 --ghidra-func-timeout 20 --pairwise-similarity-mode shared-full --output-dir benchmark/artifacts/full_benchmark/sqlite3_cycle_20260503_after</code></li>
+<li>Artifact:
+  <code>benchmark/artifacts/full_benchmark/sqlite3_cycle_20260503_after</code></li>
+<li>Result:
+  coverage recovered to <code>100.000%</code>, <code>20/20</code> shared successful rows,
+  <code>avg_normalized_similarity=27.610%</code>, median <code>29.970%</code>, aggregate weighted
+  similarity <code>28.250%</code>.</li>
+<li>Row-fidelity snapshot now reports all three sqlite3 implementation canaries as
+  present.</li>
+</ul>
+<h2 id="notes">Notes<a class="headerlink" href="#notes" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Ghidra 11.4.2 was used as the structure reference, but the local benchmark oracle
+  run used Ghidra 12.0.4 because the existing local Ghidra project data was created
+  by a newer Ghidra and 11.4.2 failed with <code>data created with newer version and can
+  not be read</code>.</li>
+<li>Exact call-target owner counters remain <code>0</code> on this sqlite3 seed set. The next
+  cycle should target indirect/import call target proof instead of broad stack-local
+  promotion.</li>
+<li>No benchmark output artifacts, Ghidra DB files, or sample binaries are intended to
+  be staged.</li>
+</ul>
+<h2 id="decompiler-quality-v6-exact-indirect-import-call-target-proof">Decompiler Quality V6: exact indirect import call target proof<a class="headerlink" href="#decompiler-quality-v6-exact-indirect-import-call-target-proof" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Added a separate <code>NirTypeContext.iat_target_refs</code> map so callable target VAs and
+  exact IAT/import data slots are not conflated.</li>
+<li>Wired loader import/IAT metadata into the decompiler type context as exact
+  import-slot identity while keeping direct callable <code>call_target_refs</code> separate.</li>
+<li>Added <code>CALLIND LOAD(const_iat_slot)</code> proof in HIR call lowering. The path only
+  accepts pointer-sized loads from exact IAT slots; non-constant targets, width
+  mismatches, and non-IAT loads remain fallback output with typed telemetry.</li>
+<li>Added additive <code>NirBuildStats</code> and full benchmark owner metrics for IAT slot
+  resolution and indirect-call rejection reasons.</li>
+<li>Fixed full benchmark owner metric aggregation so per-function <code>preview_build_stats</code>
+  counters are surfaced when the engine summary does not carry that specific alias.</li>
+</ul>
+<h2 id="v6-validation">V6 Validation<a class="headerlink" href="#v6-validation" title="Permanent link">&para;</a></h2>
+<ul>
+<li><code>cargo test -p fission-pcode preview_callind -- --test-threads=1</code> passed.</li>
+<li><code>cargo test -p fission-pcode type_hints_imports -- --test-threads=1</code> passed.</li>
+<li><code>cargo test -p fission-decompiler-core call_target -- --test-threads=1</code> passed.</li>
+<li><code>python3 -m unittest benchmark.full_benchmark.grand_finale_support.test_corpus_benchmark</code>
+  passed.</li>
+<li><code>python3 -m py_compile benchmark/full_benchmark/*.py benchmark/full_benchmark/grand_finale_support/*.py benchmark/asm_benchmark/*.py</code>
+  passed.</li>
+<li><code>cargo check -p fission-pcode -p fission-decompiler-core -p fission-static -p fission-cli</code>
+  passed.</li>
+<li><code>cargo build --release -p fission-cli</code> passed.</li>
+</ul>
+<h2 id="v6-benchmark">V6 Benchmark<a class="headerlink" href="#v6-benchmark" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Command:
+  <code>python3 benchmark/full_benchmark/full_decomp_benchmark.py --corpus-manifest benchmark/config/benchmark_corpus/sqlite3_decompiler_v4_similarity_attribution.json --ghidra-dir vendor/ghidra/ghidra_12.0.4_PUBLIC --fission-bin target/release/fission_cli --timeout 120 --ghidra-func-timeout 20 --pairwise-similarity-mode shared-full --output-dir benchmark/artifacts/full_benchmark/sqlite3_cycle_indirect_calls_after</code></li>
+<li>Artifact:
+  <code>benchmark/artifacts/full_benchmark/sqlite3_cycle_indirect_calls_after</code></li>
+<li>Result:
+  coverage stayed <code>100.000%</code>, <code>20/20</code> shared successful rows, and
+  <code>avg_normalized_similarity=27.610%</code>.</li>
+<li>Owner counters:
+  <code>call_target_indirect_rejected_non_const_ptr=156</code>,
+  <code>call_proto_unknown_target_kept=58</code>,
+  <code>call_target_iat_slot_resolved=0</code>,
+  <code>call_target_indirect_load_resolved=0</code>.</li>
+<li>Interpretation:
+  the sqlite3 canary rows do not currently expose a proofable
+  <code>CALLIND LOAD(const_iat_slot)</code> path. The new gate now records the exact blocker
+  instead of guessing call names from temporary variables or rendered text.</li>
+</ul>
+<h2 id="decompiler-quality-v7-folded-indirect-import-call-target-proof">Decompiler Quality V7: folded indirect import call target proof<a class="headerlink" href="#decompiler-quality-v7-folded-indirect-import-call-target-proof" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Extended the Ghidra <code>ActionDeindirect</code>-style owner in HIR call lowering with a
+  strict scalar proof for <code>CALLIND LOAD(pointer_expr)</code>.</li>
+<li>Allowed only exact def-use constants: direct constants, <code>COPY</code>/cast-preserving
+  chains, <code>INT_ADD</code>, <code>INT_SUB</code>, <code>PTRADD</code>, and <code>PTRSUB</code> with exact constant inputs.</li>
+<li>Kept register-derived, memory-derived, unknown, unsupported opcode,
+  non-dominating, no-def, and ambiguous multi-def cases as fallback output with
+  typed telemetry.</li>
+<li>Added additive <code>NirBuildStats</code> and full benchmark owner metrics for folded
+  pointer proof and rejection breakdown:
+  <code>call_target_indirect_ptr_const_folded</code>,
+  <code>call_target_indirect_rejected_unsupported_ptr_opcode</code>,
+  <code>call_target_indirect_rejected_ambiguous_def</code>,
+  <code>call_target_indirect_rejected_non_dominating_def</code>, and
+  <code>call_target_indirect_rejected_no_def</code>.</li>
+<li>Added targeted tests proving <code>CALLIND LOAD(COPY(IAT_CONST))</code> and
+  <code>CALLIND LOAD(INT_ADD(base_const, delta_const))</code> resolve only through exact
+  <code>NirTypeContext.iat_target_refs</code>; unsupported pointer opcodes do not promote
+  API names.</li>
+</ul>
+<h2 id="v7-validation">V7 Validation<a class="headerlink" href="#v7-validation" title="Permanent link">&para;</a></h2>
+<ul>
+<li><code>cargo test -p fission-pcode call_target -- --test-threads=1</code> passed.</li>
+<li><code>cargo test -p fission-pcode type_hints_imports -- --test-threads=1</code> passed.</li>
+<li><code>cargo test -p fission-decompiler-core call_target -- --test-threads=1</code> passed.</li>
+<li><code>python3 -m unittest benchmark.full_benchmark.grand_finale_support.test_corpus_benchmark</code>
+  passed.</li>
+<li><code>python3 -m py_compile benchmark/full_benchmark/*.py benchmark/full_benchmark/grand_finale_support/*.py benchmark/asm_benchmark/*.py</code>
+  passed.</li>
+<li><code>cargo check -p fission-pcode -p fission-decompiler-core -p fission-static -p fission-cli</code>
+  passed.</li>
+<li><code>cargo build --release -p fission-cli</code> passed.</li>
+</ul>
+<h2 id="v7-benchmark">V7 Benchmark<a class="headerlink" href="#v7-benchmark" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Command:
+  <code>python3 benchmark/full_benchmark/full_decomp_benchmark.py --corpus-manifest benchmark/config/benchmark_corpus/sqlite3_decompiler_v4_similarity_attribution.json --ghidra-dir vendor/ghidra/ghidra_12.0.4_PUBLIC --fission-bin target/release/fission_cli --timeout 120 --ghidra-func-timeout 20 --pairwise-similarity-mode shared-full --output-dir benchmark/artifacts/full_benchmark/sqlite3_cycle_deindirect_v7_after</code></li>
+<li>Artifact:
+  <code>benchmark/artifacts/full_benchmark/sqlite3_cycle_deindirect_v7_after</code></li>
+<li>Result:
+  benchmark command completed, but Fission rows failed before the V7 NIR call
+  target path with <code>UnsupportedGeneratedSemantic: x86-64 runtime status is
+  executable_candidate</code>. The active local worktree contains an unrelated
+  unstaged SLEIGH runtime gate change, so this run is not a valid decompiler
+  quality regression measurement.</li>
+<li>Cross-check:
+  a temporary clean worktree with only the V7 patch applied built successfully,
+  but the sqlite3 benchmark still failed before NIR with
+  <code>UnsupportedPcodeTemplate: x86-64: missing_sla_construct_tpl</code>. This indicates
+  the current clean checkout/generated SLEIGH artifact state cannot reproduce
+  the previous sqlite3 V6 benchmark lane without restoring the exact generated
+  SLEIGH runtime artifact state.</li>
+<li>Interpretation:
+  V7 is validated by unit and integration gates, but the sqlite3 full benchmark
+  is blocked by SLEIGH artifact/runtime state before call-target lowering. No
+  benchmark-side repair or call-name guessing was added.</li>
+</ul>
+<h2 id="raw-p-code-sleigh-preflight-gate-for-decompiler-v7">Raw P-code SLEIGH preflight gate for decompiler V7<a class="headerlink" href="#raw-p-code-sleigh-preflight-gate-for-decompiler-v7" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Added <code>benchmark/raw_p_code_benchmark/sqlite3_decompiler_canary_rows.json</code>
+  with sqlite3 decompiler canary rows <code>0x1800085d0</code>, <code>0x180008fd0</code>, and
+  <code>0x180009d00</code>. This manifest is an admission guard: decompiler quality
+  benchmarks should not be interpreted until SLEIGH raw p-code reaches these
+  rows first.</li>
+<li>Ran canonical raw p-code preflight:
+  <code>python3 benchmark/raw_p_code_benchmark/run_raw_pcode_parity.py --manifest benchmark/raw_p_code_benchmark/canonical_rows.json --ghidra-dir vendor/ghidra/ghidra_12.0.4_PUBLIC --fission-release --require-perfect-canonical --expected-full-match 44 --output-dir benchmark/artifacts/raw_p_code_benchmark/sleigh_preflight_canonical_current</code></li>
+<li>Result:
+  canonical gate failed before parity comparison with <code>fission_decode_error=17</code>,
+  <code>missing_fission_instruction=29</code>, <code>full_match=0</code>, average similarity <code>0.0</code>,
+  and average parity ratio <code>0.0</code>. All sampled Fission instruction failures were
+  <code>UnsupportedGeneratedSemantic: x86-64 runtime status is executable_candidate</code>.</li>
+<li>Ran vendor raw p-code smoke:
+  <code>python3 benchmark/raw_p_code_benchmark/run_raw_pcode_parity.py --manifest benchmark/raw_p_code_benchmark/vendor_binary_smoke.json --ghidra-dir vendor/ghidra/ghidra_12.0.4_PUBLIC --fission-release --output-dir benchmark/artifacts/raw_p_code_benchmark/sleigh_preflight_vendor_current</code></li>
+<li>Result:
+  vendor smoke failed before parity comparison with <code>fission_decode_error=4</code>,
+  <code>missing_fission_instruction=12</code>, and Fission instruction count <code>0</code>. x86 and
+  x86-64 rows failed with <code>UnsupportedGeneratedSemantic: &lt;language&gt; runtime
+  status is executable_candidate</code>.</li>
+<li>Ran sqlite3 raw p-code canary:
+  <code>python3 benchmark/raw_p_code_benchmark/run_raw_pcode_parity.py --manifest benchmark/raw_p_code_benchmark/sqlite3_decompiler_canary_rows.json --ghidra-dir vendor/ghidra/ghidra_12.0.4_PUBLIC --fission-release --output-dir benchmark/artifacts/raw_p_code_benchmark/sqlite3_decompiler_canary_current</code></li>
+<li>Result:
+  sqlite3 canary failed before NIR/decompiler entry with <code>fission_decode_error=3</code>
+  and all three rows reporting <code>UnsupportedGeneratedSemantic: x86-64 runtime
+  status is executable_candidate</code>.</li>
+<li>Interpretation:
+  the current local SLEIGH runtime state blocks raw p-code below NIR/HIR, so the
+  sqlite3 full benchmark was intentionally not re-run as a V7 quality gate. The
+  next owner is SLEIGH runtime/generated artifact gating, not call-target
+  decompiler logic.</li>
+</ul>
+<h2 id="raw-p-code-preflight-validation">Raw P-code preflight validation<a class="headerlink" href="#raw-p-code-preflight-validation" title="Permanent link">&para;</a></h2>
+<ul>
+<li><code>cargo check -p fission-sleigh</code> passed.</li>
+<li><code>cargo check -p fission-pcode -p fission-decompiler-core -p fission-static -p fission-cli</code>
+  passed.</li>
+<li><code>cargo build --release -p fission-cli</code> passed.</li>
+<li><code>python3 -m py_compile benchmark/raw_p_code_benchmark/*.py benchmark/full_benchmark/*.py benchmark/full_benchmark/grand_finale_support/*.py</code>
+  passed.</li>
+<li><code>cargo test -p fission-pcode type_hints_imports -- --test-threads=1</code> passed.</li>
+<li><code>cargo test -p fission-pcode call_target -- --test-threads=1</code> passed.</li>
+<li><code>cargo test -p fission-decompiler-core call_target -- --test-threads=1</code> passed.</li>
+</ul>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../../..", "features": ["navigation.tabs", "navigation.sections", "navigation.expand", "navigation.top", "search.suggest", "search.highlight", "content.code.copy"], "search": "../../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>

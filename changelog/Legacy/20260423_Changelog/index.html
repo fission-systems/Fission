@@ -1,0 +1,3918 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="A cross-platform, Rust-powered reverse engineering and decompilation framework.">
+      
+      
+      
+        <link rel="canonical" href="https://sjkim1127.github.io/Fission/changelog/Legacy/20260423_Changelog/">
+      
+      
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>2026-04-23 Changelog - Fission</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("../../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#2026-04-23-changelog" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../../.." title="Fission" class="md-header__button md-logo" aria-label="Fission" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Fission
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              2026-04-23 Changelog
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m14.3 16-.7-2h-3.2l-.7 2H7.8L11 7h2l3.2 9zM20 8.69V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12zm-9.15 3.96h2.3L12 9z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_2" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to system preference"  type="radio" name="__palette" id="__palette_2">
+    
+      <label class="md-header__button md-icon" title="Switch to system preference" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/sjkim1127/Fission" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    sjkim1127/Fission
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../.." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../../PROJECT_MAP/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Project Map
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../../CLI/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  CLI Guide
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../../architecture/ARCHITECTURE/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Architecture
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../../QUALITY_METRICS/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Quality Metrics
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../../EVALUATION/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Evaluation
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../../contributing/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Contributing
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../../MALWARE_SAMPLE_POLICY/" class="md-tabs__link">
+          
+  
+  
+  Developer Policies
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../../.." title="Fission" class="md-nav__button md-logo" aria-label="Fission" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Fission
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/sjkim1127/Fission" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    sjkim1127/Fission
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../PROJECT_MAP/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Project Map
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../CLI/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI Guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../architecture/ARCHITECTURE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../QUALITY_METRICS/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quality Metrics
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../EVALUATION/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Evaluation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../contributing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contributing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_8" >
+        
+          
+          <label class="md-nav__link" for="__nav_8" id="__nav_8_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Developer Policies
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_8_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_8">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Developer Policies
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../MALWARE_SAMPLE_POLICY/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Malware Sample Policy
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../VERSIONING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Versioning
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../RELEASE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Release
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#summary" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Summary
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#1-full-ghidra-sleigh-architecture-mirror" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Full Ghidra SLEIGH Architecture Mirror
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="1. Full Ghidra SLEIGH Architecture Mirror">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#scope" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Scope
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-changed" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What changed
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#parser-import-fixes-found-during-rollout" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Parser / import fixes found during rollout
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#runtime-status" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Runtime status
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#validation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Validation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#result" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Result
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-x86-64-generated-runtime-parity-wave-1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. x86-64 Generated Runtime Parity Wave 1
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="2. x86-64 Generated Runtime Parity Wave 1">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#scope_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Scope
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-changed_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What changed
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#validation_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Validation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#benchmark-readout" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Benchmark readout
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#result_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Result
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-ghidra-common-runtime-spine-extraction" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Ghidra Common Runtime Spine Extraction
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="3. Ghidra Common Runtime Spine Extraction">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#scope_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Scope
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-changed_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What changed
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#validation_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Validation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#result_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Result
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-runtime-processor-tree-layout" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. Runtime Processor Tree Layout
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="4. Runtime Processor Tree Layout">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#scope_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Scope
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-changed_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What changed
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#validation_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Validation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#result_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Result
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-full-processor-runtime-skeleton-tree" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. Full Processor Runtime Skeleton Tree
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="5. Full Processor Runtime Skeleton Tree">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#scope_4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Scope
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-changed_4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What changed
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#validation_4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Validation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#result_4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Result
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6-full-processor-runtime-foundation-contract" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. Full Processor Runtime Foundation Contract
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="6. Full Processor Runtime Foundation Contract">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#scope_5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Scope
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-changed_5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What changed
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#validation_5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Validation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#result_5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Result
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#7-x86-64-oracle-hard-delete" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7. x86-64 Oracle Hard Delete
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="7. x86-64 Oracle Hard Delete">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#scope_6" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Scope
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-changed_6" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What changed
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#validation_6" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Validation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#result_6" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Result
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#8-fission-disasm-crate-removal-and-runtime-disasm-surface" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8. fission-disasm Crate Removal and Runtime Disasm Surface
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="8. fission-disasm Crate Removal and Runtime Disasm Surface">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#scope_7" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Scope
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-changed_7" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What changed
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#validation_7" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Validation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#result_7" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Result
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#9-repo-wide-iced-x86-removal-and-runtime-decode-owner-consolidation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9. Repo-wide iced-x86 Removal and Runtime Decode Owner Consolidation
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="9. Repo-wide iced-x86 Removal and Runtime Decode Owner Consolidation">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#scope_8" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Scope
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-changed_8" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What changed
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#validation_8" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Validation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#result_8" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Result
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#remaining-risk-next-owner" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Remaining risk / next owner
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#10-loader-shortcut-removal-and-ghidra-style-analyzer-split" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        10. Loader Shortcut Removal and Ghidra-Style Analyzer Split
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="10. Loader Shortcut Removal and Ghidra-Style Analyzer Split">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#scope_9" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Scope
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-changed_9" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What changed
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#validation_9" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Validation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#result_9" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Result
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#remaining-risk-next-owner_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Remaining risk / next owner
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#11-shared-runtime-dispatch-ownership-extraction" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11. Shared Runtime Dispatch Ownership Extraction
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="11. Shared Runtime Dispatch Ownership Extraction">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#scope_10" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Scope
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-changed_10" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What changed
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#validation_10" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Validation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#result_10" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Result
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#remaining-risk-next-owner_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Remaining risk / next owner
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#12-runtime-processor-inventory-extraction" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        12. Runtime Processor Inventory Extraction
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="12. Runtime Processor Inventory Extraction">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#scope_11" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Scope
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-changed_11" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What changed
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#validation_11" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Validation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#result_11" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Result
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#remaining-risk-next-owner_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Remaining risk / next owner
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#13-runtime-provider-extraction-and-x86-field-helper-split" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        13. Runtime Provider Extraction and X86 Field Helper Split
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="13. Runtime Provider Extraction and X86 Field Helper Split">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#scope_12" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Scope
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-changed_12" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What changed
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#validation_12" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Validation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#result_12" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Result
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#remaining-risk-next-owner_4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Remaining risk / next owner
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2026-04-23-sleigh-runtime-provider-rollback-into-shared-engine" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2026-04-23 - SLEIGH runtime provider rollback into shared engine
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="2026-04-23 - SLEIGH runtime provider rollback into shared engine">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#summary_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Summary
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#why-this-correction-was-necessary" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Why this correction was necessary
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-changed_13" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What changed
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#validation_13" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Validation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#result_13" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Result
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#remaining-risk-next-owner_5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Remaining risk / next owner
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2026-04-23-sleigh-architecture-hardcoded-helpertext-removal" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2026-04-23 - SLEIGH architecture-hardcoded helper/text removal
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="2026-04-23 - SLEIGH architecture-hardcoded helper/text removal">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#summary_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Summary
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-changed_14" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What changed
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#validation_14" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Validation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#result_14" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Result
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#remaining-risk-next-owner_6" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Remaining risk / next owner
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2026-04-23-sleigh-runtime-processors-holdout-removal" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2026-04-23 - SLEIGH runtime processors holdout removal
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="2026-04-23 - SLEIGH runtime processors holdout removal">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#summary_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Summary
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-changed_15" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What changed
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#validation_15" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Validation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#result_15" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Result
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#remaining-risk-next-owner_7" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Remaining risk / next owner
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2026-04-23-sleigh-spec-driven-vocabulary-tightening" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2026-04-23 - SLEIGH spec-driven vocabulary tightening
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="2026-04-23 - SLEIGH spec-driven vocabulary tightening">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#summary_4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Summary
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-changed_16" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What changed
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#validation_16" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Validation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#result_16" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Result
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#remaining-risk-next-owner_8" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Remaining risk / next owner
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2026-04-23-sleigh-spec-driven-execution-ir-scaffold" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2026-04-23 - SLEIGH spec-driven execution IR scaffold
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="2026-04-23 - SLEIGH spec-driven execution IR scaffold">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#summary_5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Summary
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-changed_17" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What changed
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#validation_17" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Validation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#result_17" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Result
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#remaining-risk-next-owner_9" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Remaining risk / next owner
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2026-04-23-architecture-level-p-code-shape-correctness-gate" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2026-04-23 - Architecture-level P-code shape correctness gate
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="2026-04-23 - Architecture-level P-code shape correctness gate">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#summary_6" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Summary
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-changed_18" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What changed
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#validation_18" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Validation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#result_18" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Result
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#remaining-risk-next-owner_10" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Remaining risk / next owner
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2026-04-23-loader-loadspec-language-selection-wave" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2026-04-23 Loader / LoadSpec / Language Selection Wave
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="2026-04-23 Loader / LoadSpec / Language Selection Wave">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#summary_7" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Summary
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-changed_19" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What changed
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#validation_19" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Validation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#result_19" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Result
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#remaining-risk-next-owner_11" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Remaining risk / next owner
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2026-04-23-loadspec-runtime-entry-resolver-wave" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2026-04-23 LoadSpec -&gt; Runtime Entry Resolver Wave
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="2026-04-23 LoadSpec -&gt; Runtime Entry Resolver Wave">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#summary_8" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Summary
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-changed_20" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What changed
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#validation_20" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Validation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#result_20" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Result
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#remaining-risk-next-owner_12" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Remaining risk / next owner
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="2026-04-23-changelog">2026-04-23 Changelog<a class="headerlink" href="#2026-04-23-changelog" title="Permanent link">&para;</a></h1>
+<h2 id="summary">Summary<a class="headerlink" href="#summary" title="Permanent link">&para;</a></h2>
+<p>This changelog records the <code>fission-sleigh</code> full-architecture mirror wave that moved the
+checked-in SLEIGH spec/compiler/runtime-skeleton surface from a limited local family set to
+the full Ghidra 12.0.4 Processor/language inventory.</p>
+<p>Current checked-in state:</p>
+<ul>
+<li>processors mirrored: <code>38</code></li>
+<li><code>.slaspec</code> variants mirrored: <code>146</code></li>
+<li>canonical spec manifest:</li>
+<li><code>crates/fission-sleigh/specs/ghidra_language_manifest.json</code></li>
+<li>canonical compiler manifest:</li>
+<li><code>crates/fission-sleigh/generated/compiler_manifest.json</code></li>
+</ul>
+<p>This wave is a compiler/runtime-skeleton expansion wave, not an executable parity wave.</p>
+<h2 id="1-full-ghidra-sleigh-architecture-mirror">1. Full Ghidra SLEIGH Architecture Mirror<a class="headerlink" href="#1-full-ghidra-sleigh-architecture-mirror" title="Permanent link">&para;</a></h2>
+<h3 id="scope">Scope<a class="headerlink" href="#scope" title="Permanent link">&para;</a></h3>
+<ul>
+<li>source of truth:</li>
+<li><code>vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Processors/*/data/languages</code></li>
+<li>canonical owner:</li>
+<li><code>crates/fission-sleigh/</code></li>
+<li>public behavior:</li>
+<li>full Processor/language discovery and runtime skeleton registration</li>
+<li>non-goal:</li>
+<li>multi-ISA executable parity in this wave</li>
+</ul>
+<h3 id="what-changed">What changed<a class="headerlink" href="#what-changed" title="Permanent link">&para;</a></h3>
+<ul>
+<li><code>crates/fission-sleigh/specs/languages/</code> now mirrors Ghidra Processor names 1:1
+  instead of using Fission-local buckets like <code>aarch64</code>, <code>arm32</code>, <code>powerpc</code>.</li>
+<li>full mirror coverage is now:</li>
+<li><code>38</code> processors</li>
+<li><code>146</code> <code>.slaspec</code> variants</li>
+<li>nested helper/include trees are preserved during import.</li>
+<li>this was required for processors like <code>V850</code></li>
+<li>new canonical spec manifest:</li>
+<li><code>crates/fission-sleigh/specs/ghidra_language_manifest.json</code></li>
+<li>compiler manifest now reports full-set variant coverage with typed compile status:</li>
+<li><code>crates/fission-sleigh/generated/compiler_manifest.json</code></li>
+<li>compiler discovery no longer depends on the old hardcoded 6-family ordering.</li>
+<li>runtime registry lookup now supports:</li>
+<li>exact entry stem</li>
+<li>exact entry spec</li>
+<li>derived language ids from <code>.ldefs</code> when present</li>
+<li>compatibility aliases such as <code>aarch64</code>, <code>arm32</code>, <code>powerpc</code>, <code>riscv</code></li>
+</ul>
+<h3 id="parser-import-fixes-found-during-rollout">Parser / import fixes found during rollout<a class="headerlink" href="#parser-import-fixes-found-during-rollout" title="Permanent link">&para;</a></h3>
+<p>Two full-set blockers were exposed and fixed while expanding to the full Ghidra set:</p>
+<ul>
+<li><code>TI_MSP430X.slaspec</code></li>
+<li>the constructor parser counted <code>{</code> / <code>}</code> inside quoted display text as structural braces</li>
+<li>fixed by making brace counting structural instead of raw-character based</li>
+<li><code>V850.slaspec</code></li>
+<li>the initial import missed nested <code>Helpers/</code> and <code>Instructions/</code> trees</li>
+<li>fixed by recursive mirror import</li>
+</ul>
+<h3 id="runtime-status">Runtime status<a class="headerlink" href="#runtime-status" title="Permanent link">&para;</a></h3>
+<ul>
+<li><code>x86-64</code> remains the only <code>ExecutableCandidate</code></li>
+<li>all other variants are now registered as compile-only skeletons</li>
+<li><code>iced-x86</code> is still retained as the x86-64 oracle/bridge until parity deletion gates pass</li>
+</ul>
+<h3 id="validation">Validation<a class="headerlink" href="#validation" title="Permanent link">&para;</a></h3>
+<ul>
+<li><code>cargo check -p fission-sleigh</code></li>
+<li><code>cargo run -p fission-sleigh --example generate_sleigh_frontends</code></li>
+<li>result: <code>38 processors / 146 variants</code></li>
+<li><code>cargo test -p fission-sleigh -- --test-threads=1</code></li>
+<li>result: <code>37 passed / 0 failed</code></li>
+<li><code>cargo check -p fission-cli</code></li>
+</ul>
+<h3 id="result">Result<a class="headerlink" href="#result" title="Permanent link">&para;</a></h3>
+<p>This wave completes the first-stage definition of support for the full Ghidra 12.0.4
+architecture set inside <code>fission-sleigh</code>:</p>
+<ul>
+<li>full spec mirror</li>
+<li>full compile coverage</li>
+<li>full runtime registry skeleton</li>
+<li>typed fail-closed unsupported behavior</li>
+</ul>
+<p>The next owner remains executable runtime parity, starting with:</p>
+<ol>
+<li><code>x86-64</code></li>
+<li><code>AARCH64</code></li>
+<li><code>ARM</code></li>
+<li><code>MIPS</code></li>
+<li><code>PowerPC</code></li>
+<li><code>RISCV</code></li>
+</ol>
+<h2 id="2-x86-64-generated-runtime-parity-wave-1">2. x86-64 Generated Runtime Parity Wave 1<a class="headerlink" href="#2-x86-64-generated-runtime-parity-wave-1" title="Permanent link">&para;</a></h2>
+<h3 id="scope_1">Scope<a class="headerlink" href="#scope_1" title="Permanent link">&para;</a></h3>
+<ul>
+<li>reference spine:</li>
+<li><code>DecisionNode</code></li>
+<li><code>ConstructState</code></li>
+<li><code>ParserWalker</code></li>
+<li><code>ConstructTpl</code></li>
+<li><code>PcodeEmit</code></li>
+<li>canonical owner:</li>
+<li><code>crates/fission-sleigh/src/compiler/ir.rs</code></li>
+<li><code>crates/fission-sleigh/src/runtime/generated_x86_64.rs</code></li>
+<li>env gate:</li>
+<li><code>FISSION_ENABLE_GENERATED_X86_64_RUNTIME=1</code></li>
+</ul>
+<h3 id="what-changed_1">What changed<a class="headerlink" href="#what-changed_1" title="Permanent link">&para;</a></h3>
+<ul>
+<li>decision-tree selection is no longer bucket-only.</li>
+<li>added a global root traversal before legacy bucket fallback</li>
+<li>compiler IR now supports instruction-byte probes in addition to:<ul>
+<li><code>operand_size_code</code></li>
+<li><code>mod_bits</code></li>
+<li><code>reg_opcode</code></li>
+</ul>
+</li>
+<li>generated runtime now records a constructor-tree working state instead of only a flat handle list.</li>
+<li><code>RuntimeConstructState</code> now carries <code>construct_nodes</code></li>
+<li>operand decode is recorded as parent/child construct nodes for future <code>ParserWalker</code> expansion</li>
+<li>fixed a real x86-64 semantic bug:</li>
+<li>RIP-relative effective addresses now use <code>inst_next + displacement</code></li>
+<li>previous generated path used <code>inst_start + displacement</code></li>
+<li>this directly affected startup/runtime-heavy rows</li>
+<li>generated artifact contract was updated additively:</li>
+<li><code>decision_tree.root_node_index</code></li>
+<li>structured instruction-byte probe rendering</li>
+</ul>
+<h3 id="validation_1">Validation<a class="headerlink" href="#validation_1" title="Permanent link">&para;</a></h3>
+<ul>
+<li>targeted runtime tests:</li>
+<li><code>generated_runtime_decodes_startup_rip_relative_load</code></li>
+<li><code>generated_runtime_records_decision_trace_for_startup_store</code></li>
+<li>crate validation:</li>
+<li><code>cargo check -p fission-sleigh</code></li>
+<li><code>cargo test -p fission-sleigh -- --test-threads=1</code></li>
+<li><code>cargo check -p fission-cli</code></li>
+<li><code>cargo build -p fission-cli --release</code></li>
+<li>generator validation:</li>
+<li><code>cargo run -p fission-sleigh --example generate_sleigh_frontends</code></li>
+</ul>
+<h3 id="benchmark-readout">Benchmark readout<a class="headerlink" href="#benchmark-readout" title="Permanent link">&para;</a></h3>
+<p>Limited same-axis benchmark:</p>
+<ul>
+<li>baseline artifact:</li>
+<li><code>benchmark/artifacts/full_benchmark/windows-small-c-sleigh-x86-runtime-latest</code></li>
+<li>trial artifact:</li>
+<li><code>benchmark/artifacts/full_benchmark/windows-small-c-sleigh-decisiontree-parserwalker-v2-latest</code></li>
+</ul>
+<p>Observed result:</p>
+<ul>
+<li>weighted average normalized similarity:</li>
+<li><code>44.47% -&gt; 44.56%</code></li>
+<li>generated runtime smoke:</li>
+<li><code>WinMainCRTStartup @ 0x1400013e0</code></li>
+<li><code>mainCRTStartup @ 0x140001400</code></li>
+<li><code>fibonacci @ 0x140001470</code>
+  all decoded through <code>engine_used=rust_sleigh</code>, <code>fell_back=false</code></li>
+<li>release promotion:</li>
+<li>still <code>false</code></li>
+<li>current interpretation:</li>
+<li>catastrophic decode/lift regressions are not visible in the limited gate</li>
+<li>deletion gate for <code>iced-x86</code> remains closed</li>
+</ul>
+<h3 id="result_1">Result<a class="headerlink" href="#result_1" title="Permanent link">&para;</a></h3>
+<p>This wave moved the x86-64 generated path closer to the Ghidra runtime spine without deleting the
+bridge/oracle path.</p>
+<p>What improved:</p>
+<ul>
+<li>generated selection can now traverse a global decision graph</li>
+<li>RIP-relative addressing is semantically corrected</li>
+<li>checked-in generated artifacts encode the richer decision-tree contract</li>
+<li>limited benchmark recovered to the <code>44.56%</code> class with no crash rows</li>
+</ul>
+<p>What remains:</p>
+<ul>
+<li><code>ConstructTpl</code> coverage is still partial</li>
+<li><code>ParserWalker</code> state exists, but recursive operand/subtable expansion is not complete</li>
+<li><code>iced-x86</code> deletion gate remains closed until raw parity buckets narrow further</li>
+</ul>
+<h2 id="3-ghidra-common-runtime-spine-extraction">3. Ghidra Common Runtime Spine Extraction<a class="headerlink" href="#3-ghidra-common-runtime-spine-extraction" title="Permanent link">&para;</a></h2>
+<h3 id="scope_2">Scope<a class="headerlink" href="#scope_2" title="Permanent link">&para;</a></h3>
+<ul>
+<li>wave type:</li>
+<li>runtime architecture / clean-room owner migration</li>
+<li>primary owner:</li>
+<li><code>SleighLanguage -&gt; DecisionNode -&gt; ConstructState/ParserWalker -&gt; ConstructTpl -&gt; PcodeEmit</code></li>
+<li>goal:</li>
+<li>stop treating x86-64 as the runtime design center</li>
+<li>keep x86-64 as the first executable consumer of an ISA-independent SLEIGH spine</li>
+</ul>
+<h3 id="what-changed_2">What changed<a class="headerlink" href="#what-changed_2" title="Permanent link">&para;</a></h3>
+<ul>
+<li>added a shared runtime spine under <code>crates/fission-sleigh/src/runtime/spine/</code>.</li>
+<li><code>context.rs</code> owns the parser-context-level instruction facts</li>
+<li><code>decision.rs</code> owns generic decision-tree traversal and match traces</li>
+<li><code>construct.rs</code> owns constructor state, handles, and bound operand shape</li>
+<li><code>walker.rs</code> owns parser-walker construct node recording</li>
+<li><code>template.rs</code> owns semantic template dispatch</li>
+<li><code>emitter.rs</code> owns p-code sequence, unique temporary allocation, and op emission</li>
+<li><code>generated_x86_64.rs</code> now consumes the common spine.</li>
+<li>x86 keeps prefix/REX/ModRM/SIB extraction and x86 register/flag mapping</li>
+<li>decision traversal, construct state, template dispatch, and p-code emitter are no longer x86-only owners</li>
+<li>README/AGENTS now document the fixed Ghidra clean-room owner mapping.</li>
+</ul>
+<h3 id="validation_2">Validation<a class="headerlink" href="#validation_2" title="Permanent link">&para;</a></h3>
+<ul>
+<li><code>cargo check -p fission-sleigh</code></li>
+<li>result: passed</li>
+<li><code>cargo test -p fission-sleigh -- --test-threads=1</code></li>
+<li>result: <code>37 passed / 0 failed</code></li>
+<li><code>cargo check -p fission-cli</code></li>
+<li>result: passed</li>
+<li><code>cargo build -p fission-cli --release</code></li>
+<li>result: passed</li>
+<li><code>cargo run -p fission-sleigh --example generate_sleigh_frontends</code></li>
+<li>result: <code>38 processors / 146 variants</code></li>
+<li>generated artifact diff: empty</li>
+</ul>
+<p>Limited same-axis benchmark:</p>
+<ul>
+<li>baseline artifact:</li>
+<li><code>benchmark/artifacts/full_benchmark/windows-small-c-sleigh-decisiontree-parserwalker-v2-latest</code></li>
+<li>trial artifact:</li>
+<li><code>benchmark/artifacts/full_benchmark/windows-small-c-ghidra-spine-latest</code></li>
+<li>weighted average normalized similarity:</li>
+<li><code>44.56% -&gt; 44.56%</code></li>
+<li>x64 split:</li>
+<li><code>6</code> binaries, failed: <code>none</code></li>
+<li>release promotion:</li>
+<li>still <code>false</code></li>
+</ul>
+<h3 id="result_2">Result<a class="headerlink" href="#result_2" title="Permanent link">&para;</a></h3>
+<p>This wave is behavior-preserving architecture work. It does not claim new x86-64 parity by itself.
+The important improvement is that the next executable consumer, especially <code>AARCH64</code>, can reuse the
+same runtime spine instead of copying the x86 generated runtime shape.</p>
+<p>Deletion gate:</p>
+<ul>
+<li><code>iced-x86</code> remains retained as oracle/bridge</li>
+<li>x86-64 generated runtime remains the first executable parity target</li>
+</ul>
+<h2 id="4-runtime-processor-tree-layout">4. Runtime Processor Tree Layout<a class="headerlink" href="#4-runtime-processor-tree-layout" title="Permanent link">&para;</a></h2>
+<h3 id="scope_3">Scope<a class="headerlink" href="#scope_3" title="Permanent link">&para;</a></h3>
+<ul>
+<li>wave type:</li>
+<li>runtime architecture / ownership layout</li>
+<li>primary owner:</li>
+<li><code>runtime/spine</code></li>
+<li><code>runtime/processors</code></li>
+<li><code>runtime/oracle</code></li>
+<li>goal:</li>
+<li>make architecture-specific folders explicit without moving semantics back out of the common spine</li>
+</ul>
+<h3 id="what-changed_3">What changed<a class="headerlink" href="#what-changed_3" title="Permanent link">&para;</a></h3>
+<ul>
+<li>moved the generated x86-64 runtime consumer to:</li>
+<li><code>crates/fission-sleigh/src/runtime/processors/x86/generated.rs</code></li>
+<li>moved the temporary <code>iced-x86</code> bridge to:</li>
+<li><code>crates/fission-sleigh/src/runtime/oracle/x86_64_iced.rs</code></li>
+<li>added processor/oracle module roots:</li>
+<li><code>crates/fission-sleigh/src/runtime/processors/mod.rs</code></li>
+<li><code>crates/fission-sleigh/src/runtime/processors/x86/mod.rs</code></li>
+<li><code>crates/fission-sleigh/src/runtime/oracle/mod.rs</code></li>
+<li>updated <code>RuntimeSleighFrontend</code> routing:</li>
+<li>generated gate on: <code>processors::x86::generated</code></li>
+<li>generated gate off: <code>oracle::x86_64_iced</code></li>
+<li>updated README/AGENTS runtime tree documentation.</li>
+</ul>
+<h3 id="validation_3">Validation<a class="headerlink" href="#validation_3" title="Permanent link">&para;</a></h3>
+<ul>
+<li><code>cargo check -p fission-sleigh</code></li>
+<li>result: passed</li>
+<li><code>cargo test -p fission-sleigh -- --test-threads=1</code></li>
+<li>result: <code>37 passed / 0 failed</code></li>
+<li><code>cargo check -p fission-cli</code></li>
+<li>result: passed</li>
+<li><code>cargo build -p fission-cli --release</code></li>
+<li>result: passed</li>
+</ul>
+<p>Limited same-axis benchmark:</p>
+<ul>
+<li>baseline artifact:</li>
+<li><code>benchmark/artifacts/full_benchmark/windows-small-c-ghidra-spine-latest</code></li>
+<li>trial artifact:</li>
+<li><code>benchmark/artifacts/full_benchmark/windows-small-c-processor-tree-latest</code></li>
+<li>weighted average normalized similarity:</li>
+<li><code>44.560% -&gt; 44.560%</code></li>
+<li>x64 split:</li>
+<li><code>6</code> binaries, failed: <code>none</code></li>
+<li>release promotion:</li>
+<li>still <code>false</code></li>
+</ul>
+<h3 id="result_3">Result<a class="headerlink" href="#result_3" title="Permanent link">&para;</a></h3>
+<p>This wave is behavior-preserving. It makes the next architecture additions explicit:</p>
+<ul>
+<li><code>runtime/spine</code> remains the shared Ghidra-style runtime owner</li>
+<li><code>runtime/processors/&lt;processor&gt;/</code> owns processor adapters only</li>
+<li><code>runtime/oracle/</code> contains temporary differential bridges only</li>
+</ul>
+<p>The next executable owner remains x86-64 parity under the common spine. After that, <code>AARCH64</code>
+should be added as the second processor adapter without copying x86 semantic ownership.</p>
+<h2 id="5-full-processor-runtime-skeleton-tree">5. Full Processor Runtime Skeleton Tree<a class="headerlink" href="#5-full-processor-runtime-skeleton-tree" title="Permanent link">&para;</a></h2>
+<h3 id="scope_4">Scope<a class="headerlink" href="#scope_4" title="Permanent link">&para;</a></h3>
+<ul>
+<li>wave type:</li>
+<li>runtime architecture / skeleton registration</li>
+<li>primary owner:</li>
+<li><code>crates/fission-sleigh/src/runtime/processors/</code></li>
+<li>goal:</li>
+<li>mirror all Ghidra Processor families at the runtime adapter boundary</li>
+<li>keep executable semantics centralized in <code>runtime/spine</code></li>
+</ul>
+<h3 id="what-changed_4">What changed<a class="headerlink" href="#what-changed_4" title="Permanent link">&para;</a></h3>
+<ul>
+<li>added checked-in processor adapter skeleton folders for all <code>38</code> mirrored Ghidra processors.</li>
+<li>retained Rust-safe module naming for non-identifier Processor names:</li>
+<li><code>6502</code> -&gt; <code>p_6502</code></li>
+<li><code>68000</code> -&gt; <code>p_68000</code></li>
+<li><code>8048</code> -&gt; <code>p_8048</code></li>
+<li><code>8051</code> -&gt; <code>p_8051</code></li>
+<li><code>8085</code> -&gt; <code>p_8085</code></li>
+<li><code>PA-RISC</code> -&gt; <code>pa_risc</code></li>
+<li>added <code>ProcessorSkeleton</code> metadata and <code>PROCESSOR_SKELETONS</code>.</li>
+<li>added a test that compares processor skeleton coverage against the runtime registry manifest.</li>
+<li><code>x86</code> remains the only executable candidate.</li>
+<li>all other processor folders are compile-only skeletons and must fail closed until parity gates are implemented.</li>
+</ul>
+<h3 id="validation_4">Validation<a class="headerlink" href="#validation_4" title="Permanent link">&para;</a></h3>
+<ul>
+<li><code>cargo fmt</code></li>
+<li><code>cargo check -p fission-sleigh</code></li>
+<li><code>cargo test -p fission-sleigh -- --test-threads=1</code></li>
+<li>expected owner check:<ul>
+<li><code>processor_skeletons_cover_all_ghidra_processors</code></li>
+</ul>
+</li>
+<li><code>cargo check -p fission-cli</code></li>
+</ul>
+<h3 id="result_4">Result<a class="headerlink" href="#result_4" title="Permanent link">&para;</a></h3>
+<p>This wave does not broaden executable runtime support. It creates the stable folder boundary needed
+for processor-by-processor promotion:</p>
+<ol>
+<li>shared runtime semantics remain in <code>runtime/spine</code></li>
+<li>processor folders hold adapter metadata and future field/register/address-space extraction</li>
+<li>temporary bridge/oracle code stays isolated under <code>runtime/oracle</code></li>
+</ol>
+<p>Next executable promotion order remains:</p>
+<ol>
+<li><code>x86</code></li>
+<li><code>AARCH64</code></li>
+<li><code>ARM</code></li>
+<li><code>MIPS</code></li>
+<li><code>PowerPC</code></li>
+<li><code>RISCV</code></li>
+<li>long-tail processors</li>
+</ol>
+<h2 id="6-full-processor-runtime-foundation-contract">6. Full Processor Runtime Foundation Contract<a class="headerlink" href="#6-full-processor-runtime-foundation-contract" title="Permanent link">&para;</a></h2>
+<h3 id="scope_5">Scope<a class="headerlink" href="#scope_5" title="Permanent link">&para;</a></h3>
+<ul>
+<li>wave type:</li>
+<li>runtime foundation / compile-only fail-closed contract</li>
+<li>primary owner:</li>
+<li><code>crates/fission-sleigh/src/runtime/spine/language.rs</code></li>
+<li><code>crates/fission-sleigh/src/compiler/equivalence.rs</code></li>
+<li>goal:</li>
+<li>turn the full Ghidra processor skeleton tree into an observable runtime promotion contract</li>
+<li>keep unsupported processors fail-closed while still proving their checked-in specs compile into a runtime attempt report</li>
+</ul>
+<h3 id="what-changed_5">What changed<a class="headerlink" href="#what-changed_5" title="Permanent link">&para;</a></h3>
+<ul>
+<li>added <code>LanguageRuntime</code> as the common compiled-table runtime working state.</li>
+<li>added <code>ProcessorRuntimeProfile</code> with processor, module, entry, endian, addressable-unit, unique-space, and runtime status metadata.</li>
+<li>added <code>RuntimeAttemptReport</code> as the canonical readout for whether a registered processor is compile-only or executable-candidate.</li>
+<li>added <code>RuntimeEndian</code> and conservative manifest/name based endian inference for reporting.</li>
+<li>exposed <code>RuntimeSleighFrontend::compile_language_runtime()</code> and <code>RuntimeSleighFrontend::runtime_attempt_report()</code>.</li>
+<li>added generic runtime fixture parity report types:</li>
+<li><code>RuntimeParityFixture</code></li>
+<li><code>RuntimeParityVarnodeShape</code></li>
+<li><code>RuntimeParityReport</code></li>
+<li><code>RuntimeParityRecord</code></li>
+<li>re-exported the runtime parity report API from <code>fission_sleigh::compiler</code> so it is a real downstream contract, not test-only dead code.</li>
+<li>compile-only processors still return <code>UnsupportedGeneratedSemantic</code> on decode/lift; no fake p-code emission was added.</li>
+</ul>
+<h3 id="validation_5">Validation<a class="headerlink" href="#validation_5" title="Permanent link">&para;</a></h3>
+<ul>
+<li><code>cargo fmt -p fission-sleigh</code></li>
+<li>result: passed</li>
+<li><code>cargo check -p fission-sleigh</code></li>
+<li>result: passed</li>
+<li><code>cargo test -p fission-sleigh -- --test-threads=1</code></li>
+<li>result: <code>40 passed / 0 failed</code></li>
+<li><code>cargo check -p fission-cli</code></li>
+<li>result: passed</li>
+<li><code>cargo build -p fission-cli --release</code></li>
+<li>result: passed</li>
+<li><code>cargo run -p fission-sleigh --example generate_sleigh_frontends</code></li>
+<li>result: <code>38 processors / 146 variants</code></li>
+<li>generated artifact determinism:</li>
+<li>reran <code>generate_sleigh_frontends</code></li>
+<li><code>git diff --quiet -- crates/fission-sleigh/generated</code></li>
+<li>result: empty diff</li>
+</ul>
+<p>Limited generated-runtime benchmark:</p>
+<ul>
+<li>env:</li>
+<li><code>FISSION_ENABLE_GENERATED_X86_64_RUNTIME=1</code></li>
+<li>baseline artifact:</li>
+<li><code>benchmark/artifacts/full_benchmark/windows-small-c-processor-tree-latest</code></li>
+<li>trial artifact:</li>
+<li><code>benchmark/artifacts/full_benchmark/windows-small-c-full-processor-runtime-foundation-latest</code></li>
+<li>compact summary:</li>
+<li><code>benchmark/artifacts/full_benchmark/windows-small-c-full-processor-runtime-foundation-latest/benchmark_compact_summary.json</code></li>
+<li>limit:</li>
+<li>first <code>5</code> canonical seed functions per binary</li>
+<li>weighted average normalized similarity:</li>
+<li><code>44.560%</code></li>
+<li>x64 split:</li>
+<li><code>6</code> binaries</li>
+<li>promotion blockers:</li>
+<li><code>advisory_gate_mode</code></li>
+<li>row-fidelity gate failed for <code>math-operations</code>, <code>test-functions</code></li>
+<li>result:</li>
+<li>no runtime crash regression observed in the limited x86 generated-runtime lane</li>
+<li>release promotion remains blocked, as expected for this foundation-only wave</li>
+</ul>
+<h3 id="result_5">Result<a class="headerlink" href="#result_5" title="Permanent link">&para;</a></h3>
+<p>This wave does not promote the remaining <code>37</code> processors to executable runtime. It makes processor promotion auditable:</p>
+<ol>
+<li>every processor can be looked up through the manifest-backed registry skeleton</li>
+<li>compile-only processors can produce a typed runtime attempt report</li>
+<li>decode/lift remains fail-closed until a processor reaches an executable parity gate</li>
+<li>fixture parity reports now have a reusable, processor-independent schema</li>
+</ol>
+<p>Next owner remains x86-64 runtime parity under the common Ghidra-style spine:</p>
+<ol>
+<li><code>DecisionNode</code> constructor selection parity</li>
+<li><code>ConstructState</code> / <code>ParserWalker</code> operand and handle parity</li>
+<li><code>ConstructTpl</code> / <code>PcodeEmit</code> template evaluator parity</li>
+</ol>
+<h2 id="7-x86-64-oracle-hard-delete">7. x86-64 Oracle Hard Delete<a class="headerlink" href="#7-x86-64-oracle-hard-delete" title="Permanent link">&para;</a></h2>
+<h3 id="scope_6">Scope<a class="headerlink" href="#scope_6" title="Permanent link">&para;</a></h3>
+<ul>
+<li>wave type:</li>
+<li>runtime routing / deletion</li>
+<li>primary owner:</li>
+<li><code>crates/fission-sleigh/src/runtime/mod.rs</code></li>
+<li><code>crates/fission-sleigh/src/compiler/equivalence.rs</code></li>
+<li>goal:</li>
+<li>remove the temporary <code>iced-x86</code> oracle/bridge from <code>fission-sleigh</code></li>
+<li>make generated x86-64 runtime the only executable decode owner in this crate</li>
+</ul>
+<h3 id="what-changed_6">What changed<a class="headerlink" href="#what-changed_6" title="Permanent link">&para;</a></h3>
+<ul>
+<li>deleted:</li>
+<li><code>crates/fission-sleigh/src/runtime/oracle/mod.rs</code></li>
+<li><code>crates/fission-sleigh/src/runtime/oracle/x86_64_iced.rs</code></li>
+<li>removed the <code>iced-x86</code> dependency from <code>fission-sleigh</code>.</li>
+<li>removed the x86-64 env gate from runtime routing:</li>
+<li><code>FISSION_ENABLE_GENERATED_X86_64_RUNTIME</code></li>
+<li><code>RuntimeSleighFrontend::decode_and_lift_with_len()</code> now routes x86-64 executable decode directly to:</li>
+<li><code>crates/fission-sleigh/src/runtime/processors/x86/generated.rs</code></li>
+<li>removed bridge-based equivalence API and tests that depended on the deleted oracle path.</li>
+<li>retained processor-independent parity fixture reporting:</li>
+<li><code>RuntimeParityFixture</code></li>
+<li><code>RuntimeParityReport</code></li>
+<li><code>RuntimeParityRecord</code></li>
+<li><code>RuntimeParityVarnodeShape</code></li>
+</ul>
+<h3 id="validation_6">Validation<a class="headerlink" href="#validation_6" title="Permanent link">&para;</a></h3>
+<ul>
+<li><code>cargo fmt -p fission-sleigh</code></li>
+<li>result: passed</li>
+<li><code>cargo check -p fission-sleigh</code></li>
+<li>result: passed</li>
+<li><code>cargo test -p fission-sleigh -- --test-threads=1</code></li>
+<li>result: passed</li>
+<li><code>cargo check -p fission-cli</code></li>
+<li>result: passed</li>
+<li><code>cargo build -p fission-cli --release</code></li>
+<li>result: passed</li>
+<li>limited Windows small C benchmark:</li>
+<li>trial artifact:<ul>
+<li><code>benchmark/artifacts/full_benchmark/windows-small-c-full-processor-runtime-foundation-latest</code></li>
+</ul>
+</li>
+<li>weighted average normalized similarity:<ul>
+<li><code>44.560%</code></li>
+</ul>
+</li>
+<li>result:<ul>
+<li>non-worse against the current generated-runtime baseline in the limited lane</li>
+</ul>
+</li>
+</ul>
+<h3 id="result_6">Result<a class="headerlink" href="#result_6" title="Permanent link">&para;</a></h3>
+<p><code>fission-sleigh</code> no longer carries a temporary x86 decode bridge. The crate now has one executable x86-64 runtime owner and one processor-independent compile-only fail-closed path for the remaining processors.</p>
+<p>The next owner is not “remove more old code”; it is still x86-64 semantic parity inside the generated runtime:</p>
+<ol>
+<li>constructor selection precision</li>
+<li>operand/handle parity</li>
+<li>template evaluator parity</li>
+</ol>
+<h2 id="8-fission-disasm-crate-removal-and-runtime-disasm-surface">8. <code>fission-disasm</code> Crate Removal and Runtime Disasm Surface<a class="headerlink" href="#8-fission-disasm-crate-removal-and-runtime-disasm-surface" title="Permanent link">&para;</a></h2>
+<h3 id="scope_7">Scope<a class="headerlink" href="#scope_7" title="Permanent link">&para;</a></h3>
+<ul>
+<li>wave type:</li>
+<li>dependency deletion / runtime owner migration</li>
+<li>primary owner:</li>
+<li><code>fission-sleigh::runtime</code></li>
+<li>goal:</li>
+<li>remove the standalone <code>fission-disasm</code> crate</li>
+<li>remove direct <code>iced-x86</code> use from the CLI disasm path</li>
+<li>keep x86-64 disasm output routed through the generated SLEIGH runtime owner</li>
+</ul>
+<h3 id="what-changed_7">What changed<a class="headerlink" href="#what-changed_7" title="Permanent link">&para;</a></h3>
+<ul>
+<li>added runtime-owned disasm payloads:</li>
+<li><code>DecodedInstruction</code></li>
+<li><code>DecodedFlowKind</code></li>
+<li>added runtime decode helpers:</li>
+<li><code>RuntimeSleighFrontend::decode_window</code></li>
+<li><code>RuntimeSleighFrontend::discover_direct_call_targets</code></li>
+<li>moved CLI disasm rendering to the runtime decode surface:</li>
+<li><code>disasm</code></li>
+<li><code>disasm --function</code></li>
+<li>decomp preview assembly snippets</li>
+<li>removed standalone crate wiring:</li>
+<li>removed <code>crates/fission-disasm</code> from the workspace</li>
+<li>removed <code>fission-disasm</code> dependencies from <code>fission-loader</code> and <code>fission-pcode</code></li>
+<li>removed <code>fission-pcode::disasm</code></li>
+<li>removed <code>fission-static::analysis::disasm</code></li>
+<li>removed direct <code>iced-x86</code> dependency from <code>fission-cli</code>.</li>
+<li>removed unused direct <code>iced-x86</code> dependency from <code>fission-pcode</code>.</li>
+<li>loader function discovery no longer depends on <code>fission-disasm</code>.</li>
+<li>Direct call target harvesting is now a cycle-free internal scan in <code>fission-loader</code>.</li>
+<li>A direct <code>fission-loader -&gt; fission-sleigh</code> dependency was not introduced because the current graph would cycle through <code>fission-sleigh -&gt; fission-pcode -&gt; fission-loader</code>.</li>
+</ul>
+<h3 id="validation_7">Validation<a class="headerlink" href="#validation_7" title="Permanent link">&para;</a></h3>
+<ul>
+<li><code>cargo fmt -p fission-sleigh -p fission-loader -p fission-cli -p fission-pcode -p fission-static</code></li>
+<li>result: passed</li>
+<li><code>cargo check -p fission-sleigh</code></li>
+<li>result: passed</li>
+<li><code>cargo test -p fission-sleigh -- --test-threads=1</code></li>
+<li>result: <code>35 passed / 0 failed</code></li>
+<li><code>cargo check -p fission-loader</code></li>
+<li>result: passed</li>
+<li><code>cargo check -p fission-pcode</code></li>
+<li>result: passed</li>
+<li><code>cargo check -p fission-static</code></li>
+<li>result: passed</li>
+<li><code>cargo check -p fission-cli</code></li>
+<li>result: passed</li>
+<li><code>cargo build -p fission-cli --release</code></li>
+<li>result: passed</li>
+<li>CLI smoke:</li>
+<li><code>target/release/fission_cli disasm benchmark/binary/x86-64/window/small/binary/c/test_functions.exe --addr 0x140001470 --count 8</code></li>
+<li>result: generated-runtime disassembly emitted x86-64 instructions</li>
+<li>CLI function smoke:</li>
+<li><code>target/release/fission_cli disasm benchmark/binary/x86-64/window/small/binary/c/test_functions.exe --addr 0x140001470 --function</code></li>
+<li>result: function disassembly output emitted through the runtime decode surface</li>
+<li>decomp smoke:</li>
+<li><code>target/release/fission_cli decomp benchmark/binary/x86-64/window/small/binary/c/test_functions.exe --addr 0x140001470 --json</code></li>
+<li>result: JSON output produced successfully</li>
+</ul>
+<h3 id="result_7">Result<a class="headerlink" href="#result_7" title="Permanent link">&para;</a></h3>
+<p><code>fission-disasm</code> is no longer a workspace crate, and the CLI disasm surface no longer owns an <code>iced-x86</code> decode path. The remaining direct <code>iced-x86</code> users are separate analysis/UI/signature surfaces outside this crate-removal wave:</p>
+<ul>
+<li><code>fission-static</code> xref analysis</li>
+<li><code>fission-signatures</code> FID hashing</li>
+<li><code>fission-tauri</code> UI analysis/listing helpers</li>
+<li><code>fission-dynamic</code></li>
+</ul>
+<p>The next owner is to migrate those remaining analysis surfaces to the same generated runtime decode API or to explicitly keep them as independent non-SLEIGH utilities with documented ownership.</p>
+<h2 id="9-repo-wide-iced-x86-removal-and-runtime-decode-owner-consolidation">9. Repo-wide <code>iced-x86</code> Removal and Runtime Decode Owner Consolidation<a class="headerlink" href="#9-repo-wide-iced-x86-removal-and-runtime-decode-owner-consolidation" title="Permanent link">&para;</a></h2>
+<h3 id="scope_8">Scope<a class="headerlink" href="#scope_8" title="Permanent link">&para;</a></h3>
+<ul>
+<li>wave type:</li>
+<li>dependency deletion / runtime decode owner migration</li>
+<li>primary owner:</li>
+<li><code>fission-sleigh::runtime</code></li>
+<li>goal:</li>
+<li>remove all remaining repo-wide <code>iced-x86</code> references</li>
+<li>move xref/listing/assembly/CFG/string-xref decode consumers to <code>RuntimeSleighFrontend</code></li>
+<li>remove cycle-prone FID hashing until a SLEIGH-backed owner can be reintroduced without dependency cycles</li>
+</ul>
+<h3 id="what-changed_8">What changed<a class="headerlink" href="#what-changed_8" title="Permanent link">&para;</a></h3>
+<ul>
+<li>extended runtime disasm payloads:</li>
+<li>added <code>DecodedReference</code></li>
+<li>added <code>DecodedReferenceKind</code></li>
+<li>added <code>DecodedInstruction::references</code></li>
+<li>migrated static xref analysis:</li>
+<li><code>fission-static::analysis::xrefs</code> now consumes <code>RuntimeSleighFrontend::decode_window</code></li>
+<li>call/jump/data xrefs are derived from <code>DecodedFlowKind</code> and <code>DecodedReferenceKind</code></li>
+<li>migrated Tauri decode consumers:</li>
+<li>assembly view</li>
+<li>listing view</li>
+<li>CFG builder</li>
+<li>xrefs command</li>
+<li>string xrefs</li>
+<li>cross-image wrapper detection</li>
+<li>added a Tauri runtime decode helper module:</li>
+<li><code>crates/fission-tauri/src-tauri/src/services/runtime_decode.rs</code></li>
+<li>removed remaining direct <code>iced-x86</code> dependencies from:</li>
+<li><code>fission-static</code></li>
+<li><code>fission-signatures</code></li>
+<li><code>fission-dynamic</code></li>
+<li><code>fission-tauri</code></li>
+<li>removed <code>fission-signatures::fid_hash</code>.</li>
+<li>Reason: <code>fission-signatures -&gt; fission-sleigh</code> would create a cycle through <code>fission-sleigh -&gt; fission-pcode -&gt; fission-signatures</code>.</li>
+<li>Reintroduction owner: cycle-free SLEIGH-backed FID hashing, likely under <code>fission-sleigh</code> or a lower-level shared signature utility crate.</li>
+<li>updated the desktop About dialog from <code>iced-x86</code> to <code>Fission SLEIGH runtime</code>.</li>
+</ul>
+<h3 id="validation_8">Validation<a class="headerlink" href="#validation_8" title="Permanent link">&para;</a></h3>
+<ul>
+<li><code>rg -n "iced-x86|iced_x86|use iced_x86|fission_disasm|fission-disasm" Cargo.toml Cargo.lock crates -g '!**/target/**'</code></li>
+<li>result: <code>0</code> matches</li>
+<li><code>rg -n "compute_fid_hash|FidHashQuad|FnvHasher64|fid_hash" crates Cargo.toml</code></li>
+<li>result: <code>0</code> matches</li>
+<li><code>cargo check -p fission-sleigh</code></li>
+<li>result: passed</li>
+<li><code>cargo test -p fission-sleigh -- --test-threads=1</code></li>
+<li>result: <code>35 passed / 0 failed</code></li>
+<li><code>cargo check -p fission-static</code></li>
+<li>result: passed</li>
+<li><code>cargo test -p fission-static xref -- --test-threads=1</code></li>
+<li>result: <code>3 passed / 0 failed</code></li>
+<li><code>cargo check -p fission-signatures</code></li>
+<li>result: passed</li>
+<li><code>cargo check -p fission-dynamic</code></li>
+<li>result: passed</li>
+<li><code>cargo check -p fission-cli</code></li>
+<li>result: passed</li>
+<li><code>cargo check -p fission-tauri</code></li>
+<li>result: passed</li>
+<li><code>cargo build -p fission-cli --release</code></li>
+<li>result: passed</li>
+<li>CLI smoke:</li>
+<li><code>target/release/fission_cli disasm benchmark/binary/x86-64/window/small/binary/c/test_functions.exe --addr 0x140001470 --count 8</code></li>
+<li>result: generated-runtime disassembly emitted x86-64 instructions</li>
+<li>decomp smoke:</li>
+<li><code>target/release/fission_cli decomp benchmark/binary/x86-64/window/small/binary/c/test_functions.exe --addr 0x140001470 --json</code></li>
+<li>result: JSON output produced successfully</li>
+</ul>
+<h3 id="result_8">Result<a class="headerlink" href="#result_8" title="Permanent link">&para;</a></h3>
+<p><code>iced-x86</code> is no longer present in <code>Cargo.toml</code>, <code>Cargo.lock</code>, or <code>crates/</code>. Decode/disasm/xref/CFG/listing surfaces now consume the same runtime decode owner instead of maintaining parallel decoder logic in static analysis or UI layers.</p>
+<h3 id="remaining-risk-next-owner">Remaining risk / next owner<a class="headerlink" href="#remaining-risk-next-owner" title="Permanent link">&para;</a></h3>
+<ul>
+<li>32-bit x86 and non-x86 executable decode remain typed fail-closed until their SLEIGH runtime consumers are promoted.</li>
+<li>FID hashing is intentionally absent until a cycle-free SLEIGH-backed implementation is added.</li>
+<li>The next owner is x86-64 generated-runtime semantic parity:</li>
+<li>data-reference precision for memory operands</li>
+<li>richer template execution for startup/control-heavy rows</li>
+<li>cycle-free FID hash reintroduction</li>
+</ul>
+<h2 id="10-loader-shortcut-removal-and-ghidra-style-analyzer-split">10. Loader Shortcut Removal and Ghidra-Style Analyzer Split<a class="headerlink" href="#10-loader-shortcut-removal-and-ghidra-style-analyzer-split" title="Permanent link">&para;</a></h2>
+<h3 id="scope_9">Scope<a class="headerlink" href="#scope_9" title="Permanent link">&para;</a></h3>
+<ul>
+<li>wave type:</li>
+<li>owner cleanup / behavior-preserving loader reduction</li>
+<li>primary owner:</li>
+<li><code>fission-loader</code> for authoritative binary metadata</li>
+<li><code>fission-static::analysis::function_discovery</code> for SLEIGH-runtime function discovery</li>
+<li>goal:</li>
+<li>remove x86/x64 byte-pattern function discovery from the loader</li>
+<li>keep loader free of <code>fission-sleigh</code> / <code>fission-static</code> dependencies</li>
+<li>route CLI and Tauri discovery requests through the analyzer layer</li>
+</ul>
+<h3 id="what-changed_9">What changed<a class="headerlink" href="#what-changed_9" title="Permanent link">&para;</a></h3>
+<ul>
+<li>removed loader-owned function discovery shortcuts:</li>
+<li>rel32 <code>CALL</code> / <code>JMP</code> byte scans</li>
+<li>x86/x64 prologue pattern tables</li>
+<li><code>discover_internal_functions*</code></li>
+<li><code>discover_functions_by_prologue*</code></li>
+<li>removed PE stripped fallback linear prologue sweep.</li>
+<li>PE loader now preserves metadata-only behavior: entry point, exports/imports, COFF, PDB, pdata, DWARF/format metadata.</li>
+<li>added <code>fission-static::analysis::function_discovery</code>.</li>
+<li>Uses <code>RuntimeSleighFrontend::decode_window</code>.</li>
+<li>Collects direct call targets for conservative/balanced profiles.</li>
+<li>Collects direct branch targets only for aggressive profile.</li>
+<li>Accepts only targets inside executable sections and not already present in the loader function index.</li>
+<li>Unsupported runtime returns a no-op report instead of fake function discovery.</li>
+<li>added analyzer report fields:</li>
+<li><code>decoded_instruction_count</code></li>
+<li><code>call_target_count</code></li>
+<li><code>jump_target_count</code></li>
+<li><code>accepted_function_count</code></li>
+<li><code>unsupported_runtime</code></li>
+<li>migrated consumers:</li>
+<li><code>fission-cli</code> one-shot discovery profile handling now calls the static analyzer.</li>
+<li>Tauri <code>open_file</code>, <code>analyze_functions</code>, and <code>deep_scan_functions</code> now call the static analyzer.</li>
+<li>stabilized the sample-dependent PDB sidecar unit test to skip when the optional <code>fauxware.exe</code> fixture is absent.</li>
+</ul>
+<h3 id="validation_9">Validation<a class="headerlink" href="#validation_9" title="Permanent link">&para;</a></h3>
+<ul>
+<li><code>cargo check -p fission-loader</code></li>
+<li>result: passed</li>
+<li><code>cargo test -p fission-loader -- --test-threads=1</code></li>
+<li>result: <code>25 passed / 0 failed / 2 doctests ignored</code></li>
+<li><code>cargo check -p fission-static</code></li>
+<li>result: passed</li>
+<li><code>cargo test -p fission-static function_discovery -- --test-threads=1</code></li>
+<li>result: <code>3 passed / 0 failed</code></li>
+<li><code>cargo check -p fission-cli</code></li>
+<li>result: passed</li>
+<li><code>cargo check -p fission-tauri</code></li>
+<li>result: passed</li>
+<li><code>cargo build -p fission-cli --release</code></li>
+<li>result: passed</li>
+<li>static audit:</li>
+<li><code>rg -n "discover_internal_functions|discover_functions_by_prologue|FunctionDiscoveryProfile" crates/fission-loader</code></li>
+<li>result: <code>0</code> matches</li>
+<li>static audit:</li>
+<li><code>rg -n "E8|E9|PROLOGUE|prologue|collect_rel_call_targets|collect_rel_jmp_targets|scan_prologue_functions" crates/fission-loader</code></li>
+<li>result: no function-discovery shortcut matches remain; residual <code>E8</code> hits are detector signature bytes under <code>crates/fission-loader/src/detector/signatures.rs</code></li>
+<li>dependency audit:</li>
+<li><code>rg -n "fission-sleigh|fission_static" crates/fission-loader/Cargo.toml crates/fission-loader/src</code></li>
+<li>result: <code>0</code> matches</li>
+<li>CLI smoke:</li>
+<li><code>target/release/fission_cli list benchmark/binary/x86-64/window/small/binary/c/test_functions.exe --json</code></li>
+<li>result: JSON list emitted, <code>function_count=118</code></li>
+<li>CLI smoke:</li>
+<li><code>target/release/fission_cli disasm benchmark/binary/x86-64/window/small/binary/c/test_functions.exe --addr 0x140001470 --count 8 --json</code></li>
+<li>result: <code>8</code> disassembly rows emitted</li>
+<li>CLI smoke:</li>
+<li><code>target/release/fission_cli decomp benchmark/binary/x86-64/window/small/binary/c/test_functions.exe --addr 0x140001470 --json</code></li>
+<li>result: JSON decompilation output emitted</li>
+</ul>
+<h3 id="result_9">Result<a class="headerlink" href="#result_9" title="Permanent link">&para;</a></h3>
+<p><code>fission-loader</code> is now metadata-only for function discovery ownership. Byte-pattern and prologue-based function discovery no longer lives in the loader or PE parser. The new analyzer layer preserves the existing CLI/Tauri profile surface while making the implementation SLEIGH-runtime based and fail-closed for unsupported runtimes.</p>
+<h3 id="remaining-risk-next-owner_1">Remaining risk / next owner<a class="headerlink" href="#remaining-risk-next-owner_1" title="Permanent link">&para;</a></h3>
+<ul>
+<li>x86-64 direct-control-flow discovery is now runtime-driven, but recall is bounded by current generated runtime decode parity.</li>
+<li>Non-x86 executable discovery remains no-op until those SLEIGH runtime consumers are promoted.</li>
+<li>The next owner is still generated-runtime semantic parity:</li>
+<li>x86-64 <code>DecisionNode</code> / <code>ParserWalker</code> parity</li>
+<li>richer <code>ConstructTpl</code> / <code>PcodeEmit</code> execution</li>
+<li>cycle-free SLEIGH-backed FID hashing reintroduction</li>
+</ul>
+<h2 id="11-shared-runtime-dispatch-ownership-extraction">11. Shared Runtime Dispatch Ownership Extraction<a class="headerlink" href="#11-shared-runtime-dispatch-ownership-extraction" title="Permanent link">&para;</a></h2>
+<h3 id="scope_10">Scope<a class="headerlink" href="#scope_10" title="Permanent link">&para;</a></h3>
+<ul>
+<li>wave type:</li>
+<li>owner cleanup / behavior-preserving shared runtime refactor</li>
+<li>primary owner:</li>
+<li><code>crates/fission-sleigh/src/runtime/processors/mod.rs</code></li>
+<li><code>crates/fission-sleigh/src/runtime/spine/language.rs</code></li>
+<li><code>crates/fission-sleigh/src/runtime/mod.rs</code></li>
+<li>goal:</li>
+<li>remove duplicated x86-only executable readiness and dispatch checks from <code>runtime/mod.rs</code></li>
+<li>make processor/profile ownership decide runtime readiness and execution routing</li>
+<li>keep x86-64 as the first executable consumer without changing the public runtime API</li>
+</ul>
+<h3 id="what-changed_10">What changed<a class="headerlink" href="#what-changed_10" title="Permanent link">&para;</a></h3>
+<ul>
+<li>added shared processor-owned runtime readiness:</li>
+<li><code>processors::status_for_entry(entry)</code></li>
+<li>readiness now lives under processor/runtime ownership instead of duplicated <code>runtime/mod.rs</code> and <code>spine/language.rs</code> checks</li>
+<li>added shared processor-owned execution routing:</li>
+<li><code>processors::decode_and_lift(...)</code></li>
+<li><code>processors::decode_instruction(...)</code></li>
+<li><code>RuntimeSleighFrontend</code> no longer directly knows about <code>processors::x86::generated</code></li>
+<li>reduced x86 exposure to processor-adapter boundary:</li>
+<li><code>crates/fission-sleigh/src/runtime/processors/x86/mod.rs</code> now exposes:<ul>
+<li><code>supports_entry</code></li>
+<li><code>decode_and_lift</code></li>
+<li><code>decode_instruction</code></li>
+</ul>
+</li>
+<li><code>generated.rs</code> remains the first executable consumer, but is now reached through the processor adapter instead of direct top-level hardcoding</li>
+<li>preserved fail-closed behavior:</li>
+<li>executable status without a registered processor execution engine still returns typed <code>UnsupportedPcodeTemplate</code></li>
+<li>compile-only variants still return typed <code>UnsupportedGeneratedSemantic</code></li>
+</ul>
+<h3 id="validation_10">Validation<a class="headerlink" href="#validation_10" title="Permanent link">&para;</a></h3>
+<ul>
+<li><code>cargo fmt -p fission-sleigh</code></li>
+<li>result: passed</li>
+<li><code>cargo check -p fission-sleigh</code></li>
+<li>result: passed</li>
+<li><code>cargo test -p fission-sleigh -- --test-threads=1</code></li>
+<li>result: <code>35 passed / 0 failed</code></li>
+<li><code>cargo check -p fission-cli</code></li>
+<li>result: passed</li>
+<li><code>cargo run -p fission-sleigh --example generate_sleigh_frontends</code></li>
+<li>result: passed</li>
+<li><code>git diff -- crates/fission-sleigh/generated</code></li>
+<li>result: empty</li>
+</ul>
+<h3 id="result_10">Result<a class="headerlink" href="#result_10" title="Permanent link">&para;</a></h3>
+<p>The runtime no longer has two separate x86-only readiness owners. <code>RuntimeSleighFrontend</code> now consumes processor-owned readiness and routing, which is the correct direction for the Ghidra-style <code>Language -&gt; Decision -&gt; ParserWalker -&gt; TemplateEvaluator</code> spine. This does not yet change semantic parity, but it removes one architectural blocker to making <code>x86-64</code> just the first consumer of a shared execution engine.</p>
+<h3 id="remaining-risk-next-owner_2">Remaining risk / next owner<a class="headerlink" href="#remaining-risk-next-owner_2" title="Permanent link">&para;</a></h3>
+<ul>
+<li>The semantic owner is still not fully extracted from <code>crates/fission-sleigh/src/runtime/processors/x86/generated.rs</code>.</li>
+<li><code>CompiledDecisionProbe</code> and the template evaluator are still x86-shaped in places, so this wave is not enough for second-consumer promotion.</li>
+<li>The next owner remains:</li>
+<li>generic <code>DecisionMatcher</code> probe vocabulary beyond x86-specific probe kinds</li>
+<li><code>RuntimeParserWalker</code> / <code>RuntimeConstructState</code> extraction from x86 generated runtime</li>
+<li>template evaluation ownership migration from x86 semantic emitter helpers into shared spine contracts</li>
+</ul>
+<h2 id="12-runtime-processor-inventory-extraction">12. Runtime Processor Inventory Extraction<a class="headerlink" href="#12-runtime-processor-inventory-extraction" title="Permanent link">&para;</a></h2>
+<h3 id="scope_11">Scope<a class="headerlink" href="#scope_11" title="Permanent link">&para;</a></h3>
+<ul>
+<li>wave type:</li>
+<li>owner cleanup / behavior-preserving inventory migration</li>
+<li>primary owner:</li>
+<li><code>crates/fission-sleigh/src/runtime/registry.rs</code></li>
+<li><code>crates/fission-sleigh/src/runtime/processors/mod.rs</code></li>
+<li><code>crates/fission-sleigh/src/runtime/spine/language.rs</code></li>
+<li>goal:</li>
+<li>remove non-x86 processor skeleton inventory from <code>runtime/processors/*</code></li>
+<li>replace <code>PROCESSOR_SKELETONS</code> with a manifest-driven runtime registry</li>
+<li>keep only the first executable x86-64 consumer path under <code>runtime/processors/</code></li>
+</ul>
+<h3 id="what-changed_11">What changed<a class="headerlink" href="#what-changed_11" title="Permanent link">&para;</a></h3>
+<ul>
+<li>added manifest-driven runtime registry:</li>
+<li><code>ProcessorDescriptor</code></li>
+<li><code>RuntimeVariantDescriptor</code></li>
+<li><code>RuntimeSupportLevel</code></li>
+<li><code>ExecutionProviderKey</code></li>
+<li><code>CompiledRuntimeRegistry</code></li>
+<li>registry source of truth is now the checked-in language manifest:</li>
+<li><code>crates/fission-sleigh/specs/ghidra_language_manifest.json</code></li>
+<li><code>ProcessorRuntimeProfile::from_entry()</code> no longer reads processor skeleton modules.</li>
+<li>It now resolves processor/module/endian/support from <code>runtime::registry</code>.</li>
+<li><code>RuntimeSleighFrontend</code> and runtime discovery now use registry-owned runtime status.</li>
+<li>removed non-x86 processor skeleton source files from <code>runtime/processors/</code>.</li>
+<li>remaining files under <code>runtime/processors/</code> are now only:<ul>
+<li><code>mod.rs</code></li>
+<li><code>x86/mod.rs</code></li>
+<li><code>x86/generated.rs</code></li>
+</ul>
+</li>
+<li>preserved fail-closed behavior:</li>
+<li>compile-only variants still return typed unsupported runtime errors</li>
+<li>x86-64 remains the only executable candidate path</li>
+</ul>
+<h3 id="validation_11">Validation<a class="headerlink" href="#validation_11" title="Permanent link">&para;</a></h3>
+<ul>
+<li><code>cargo fmt -p fission-sleigh</code></li>
+<li>result: passed</li>
+<li><code>cargo check -p fission-sleigh</code></li>
+<li>result: passed</li>
+<li><code>cargo test -p fission-sleigh -- --test-threads=1</code></li>
+<li>result: <code>35 passed / 0 failed</code></li>
+<li><code>cargo check -p fission-cli</code></li>
+<li>result: passed</li>
+<li><code>cargo build -p fission-cli --release</code></li>
+<li>result: passed</li>
+<li><code>cargo run -p fission-sleigh --example generate_sleigh_frontends</code></li>
+<li>result: passed</li>
+<li><code>git diff -- crates/fission-sleigh/generated</code></li>
+<li>result: empty</li>
+<li>CLI smoke:</li>
+<li><code>target/release/fission_cli decomp benchmark/binary/x86-64/window/small/binary/c/test_functions.exe --addr 0x140001470 --json</code></li>
+<li>result: passed</li>
+<li>inventory audit:</li>
+<li><code>find crates/fission-sleigh/src/runtime/processors -type f | sort</code></li>
+<li>result:<ul>
+<li><code>crates/fission-sleigh/src/runtime/processors/mod.rs</code></li>
+<li><code>crates/fission-sleigh/src/runtime/processors/x86/mod.rs</code></li>
+<li><code>crates/fission-sleigh/src/runtime/processors/x86/generated.rs</code></li>
+</ul>
+</li>
+<li>static audit:</li>
+<li><code>rg -n "PROCESSOR_SKELETONS" crates/fission-sleigh/src</code></li>
+<li>result: <code>0</code> matches</li>
+</ul>
+<h3 id="result_11">Result<a class="headerlink" href="#result_11" title="Permanent link">&para;</a></h3>
+<p>The non-x86 processor inventory is no longer represented as per-processor Rust skeleton files. Runtime processor/variant ownership now comes from the checked-in manifest through <code>runtime/registry.rs</code>. This makes the remaining <code>runtime/processors/</code> subtree an execution-only holdout for the first x86-64 consumer, which is the correct starting point for the next deletion wave.</p>
+<h3 id="remaining-risk-next-owner_3">Remaining risk / next owner<a class="headerlink" href="#remaining-risk-next-owner_3" title="Permanent link">&para;</a></h3>
+<ul>
+<li><code>runtime/processors/</code> still exists because x86-64 execution is still routed through:</li>
+<li><code>runtime/processors/x86/mod.rs</code></li>
+<li><code>runtime/processors/x86/generated.rs</code></li>
+<li>provider extraction is still pending:</li>
+<li>move x86 execution entrypoint to <code>runtime/providers/x86_64.rs</code></li>
+<li>delete <code>runtime/processors/x86/mod.rs</code></li>
+<li>then extract semantic owner out of <code>x86/generated.rs</code></li>
+</ul>
+<h2 id="13-runtime-provider-extraction-and-x86-field-helper-split">13. Runtime Provider Extraction and X86 Field Helper Split<a class="headerlink" href="#13-runtime-provider-extraction-and-x86-field-helper-split" title="Permanent link">&para;</a></h2>
+<h3 id="scope_12">Scope<a class="headerlink" href="#scope_12" title="Permanent link">&para;</a></h3>
+<ul>
+<li>wave type:</li>
+<li>owner cleanup / behavior-preserving runtime routing migration</li>
+<li>primary owner:</li>
+<li><code>crates/fission-sleigh/src/runtime/providers/</code></li>
+<li><code>crates/fission-sleigh/src/runtime/quirks/x86_fields.rs</code></li>
+<li><code>crates/fission-sleigh/src/runtime/processors/x86/generated.rs</code></li>
+<li>goal:</li>
+<li>remove <code>runtime/processors/x86/mod.rs</code> from the executable path</li>
+<li>route x86-64 execution through a provider layer</li>
+<li>split x86 field extraction and disassembly helpers out of <code>generated.rs</code></li>
+</ul>
+<h3 id="what-changed_12">What changed<a class="headerlink" href="#what-changed_12" title="Permanent link">&para;</a></h3>
+<ul>
+<li>added provider dispatch owner:</li>
+<li><code>crates/fission-sleigh/src/runtime/providers/mod.rs</code></li>
+<li><code>crates/fission-sleigh/src/runtime/providers/x86_64.rs</code></li>
+<li><code>RuntimeSleighFrontend::{decode_and_lift_with_len, decode_instruction_with_len}</code> now dispatch through:</li>
+<li><code>registry::executable_provider_key_for_entry(...)</code></li>
+<li><code>providers::provider_for_key(...)</code></li>
+<li>provider-owned <code>decode_*</code> entrypoints</li>
+<li>deleted <code>crates/fission-sleigh/src/runtime/processors/x86/mod.rs</code></li>
+<li>added x86 helper boundary:</li>
+<li><code>crates/fission-sleigh/src/runtime/quirks/mod.rs</code></li>
+<li><code>crates/fission-sleigh/src/runtime/quirks/x86_fields.rs</code></li>
+<li>moved x86-specific helper ownership out of <code>generated.rs</code>:</li>
+<li>instruction context / prefix parse</li>
+<li>ModRM/SIB/displacement extraction</li>
+<li>candidate bucket derivation</li>
+<li>immediate signed/unsigned reads</li>
+<li>register/disassembly formatting helpers</li>
+<li>Jcc suffix formatting</li>
+<li><code>crates/fission-sleigh/src/runtime/processors/x86/generated.rs</code> remains the first executable consumer, but it is now reached through the provider layer and consumes x86 helper code from <code>runtime/quirks/</code></li>
+<li><code>runtime/processors/</code> is now reduced to:</li>
+<li><code>crates/fission-sleigh/src/runtime/processors/mod.rs</code></li>
+<li><code>crates/fission-sleigh/src/runtime/processors/x86/generated.rs</code></li>
+</ul>
+<h3 id="validation_12">Validation<a class="headerlink" href="#validation_12" title="Permanent link">&para;</a></h3>
+<ul>
+<li><code>cargo check -p fission-sleigh</code></li>
+<li>result: passed</li>
+<li><code>cargo test -p fission-sleigh -- --test-threads=1</code></li>
+<li>result: <code>37 passed / 0 failed</code></li>
+<li><code>cargo check -p fission-cli</code></li>
+<li>result: passed</li>
+<li><code>cargo build -p fission-cli --release</code></li>
+<li>result: passed</li>
+<li><code>cargo run -p fission-sleigh --example generate_sleigh_frontends</code></li>
+<li>result: passed</li>
+<li><code>git diff -- crates/fission-sleigh/generated</code></li>
+<li>result: empty</li>
+<li>CLI smoke:</li>
+<li><code>target/release/fission_cli decomp benchmark/binary/x86-64/window/small/binary/c/test_functions.exe --addr 0x140001470 --json</code></li>
+<li>result: passed</li>
+<li><code>target/release/fission_cli decomp benchmark/binary/x86-64/window/small/binary/c/test_functions.exe --addr 0x1400013e0 --json</code></li>
+<li>result: passed</li>
+<li><code>target/release/fission_cli decomp benchmark/binary/x86-64/window/small/binary/c/test_functions.exe --addr 0x140001400 --json</code></li>
+<li>result: passed</li>
+<li>routing audit:</li>
+<li><code>rg -n "processors::x86::|runtime::processors|processors::decode_|processors::" crates/fission-sleigh/src/runtime</code></li>
+<li>result: <code>0</code> matches</li>
+<li>folder audit:</li>
+<li><code>find crates/fission-sleigh/src/runtime/processors -type f | sort</code></li>
+<li>result:<ul>
+<li><code>crates/fission-sleigh/src/runtime/processors/mod.rs</code></li>
+<li><code>crates/fission-sleigh/src/runtime/processors/x86/generated.rs</code></li>
+</ul>
+</li>
+</ul>
+<h3 id="result_12">Result<a class="headerlink" href="#result_12" title="Permanent link">&para;</a></h3>
+<p>The executable routing owner is no longer <code>runtime/processors</code>. X86-64 now enters the runtime through a provider layer, which matches the intended <code>registry -&gt; provider -&gt; shared spine</code> direction. The x86 helper boundary is also explicit now: prefix/field extraction and textual register formatting moved to <code>runtime/quirks/x86_fields.rs</code>, reducing the amount of non-semantic glue mixed into <code>generated.rs</code>.</p>
+<h3 id="remaining-risk-next-owner_4">Remaining risk / next owner<a class="headerlink" href="#remaining-risk-next-owner_4" title="Permanent link">&para;</a></h3>
+<ul>
+<li><code>crates/fission-sleigh/src/runtime/processors/x86/generated.rs</code> still owns too much semantic/runtime behavior:</li>
+<li>constructor binding walk</li>
+<li>template evaluation</li>
+<li>p-code emission helpers</li>
+<li><code>RuntimeTemplateEvaluator</code> and <code>CompiledDecisionProbe</code> are still x86-shaped in places</li>
+<li>next owner remains:</li>
+<li>generic probe vocabulary beyond current x86-derived probe kinds</li>
+<li><code>RuntimeParserWalker</code> / <code>RuntimeConstructState</code> extraction from <code>generated.rs</code></li>
+<li><code>runtime/processors/x86/generated.rs</code> hard-delete after spine/quirk/provider split is complete</li>
+</ul>
+<h2 id="2026-04-23-sleigh-runtime-provider-rollback-into-shared-engine">2026-04-23 - SLEIGH runtime provider rollback into shared engine<a class="headerlink" href="#2026-04-23-sleigh-runtime-provider-rollback-into-shared-engine" title="Permanent link">&para;</a></h2>
+<h3 id="summary_1">Summary<a class="headerlink" href="#summary_1" title="Permanent link">&para;</a></h3>
+<ul>
+<li>wave type:</li>
+<li>owner correction / behavior-preserving runtime structure migration</li>
+<li>primary owner:</li>
+<li><code>crates/fission-sleigh/src/runtime/engine.rs</code></li>
+<li><code>crates/fission-sleigh/src/runtime/helpers/x86_decode.rs</code></li>
+<li><code>crates/fission-sleigh/src/runtime/text/x86.rs</code></li>
+<li><code>crates/fission-sleigh/src/runtime/processors/x86/generated.rs</code></li>
+<li>goal:</li>
+<li>remove <code>provider</code> / <code>quirk</code> naming that preserved an x86-backend shape</li>
+<li>restore a shared runtime execution owner</li>
+<li>separate raw x86 decode helpers from text rendering helpers</li>
+</ul>
+<h3 id="why-this-correction-was-necessary">Why this correction was necessary<a class="headerlink" href="#why-this-correction-was-necessary" title="Permanent link">&para;</a></h3>
+<ul>
+<li><code>runtime/providers/x86_64.rs</code> was still effectively an x86-specific backend entrypoint, just under a new name</li>
+<li><code>runtime/quirks/x86_fields.rs</code> owned more than raw field extraction:</li>
+<li>candidate bucket selection</li>
+<li>register naming</li>
+<li>memory operand text formatting</li>
+<li>Jcc suffix rendering</li>
+<li>this did not match the intended Ghidra-like ownership split of shared execution spine plus narrow ISA-specific helpers</li>
+</ul>
+<h3 id="what-changed_13">What changed<a class="headerlink" href="#what-changed_13" title="Permanent link">&para;</a></h3>
+<ul>
+<li>deleted:</li>
+<li><code>crates/fission-sleigh/src/runtime/providers/mod.rs</code></li>
+<li><code>crates/fission-sleigh/src/runtime/providers/x86_64.rs</code></li>
+<li><code>crates/fission-sleigh/src/runtime/quirks/mod.rs</code></li>
+<li><code>crates/fission-sleigh/src/runtime/quirks/x86_fields.rs</code></li>
+<li><code>crates/fission-sleigh/src/runtime/processors/mod.rs</code></li>
+<li>added shared execution owner:</li>
+<li><code>crates/fission-sleigh/src/runtime/engine.rs</code></li>
+<li>added x86 decode helper boundary:</li>
+<li><code>crates/fission-sleigh/src/runtime/helpers/mod.rs</code></li>
+<li><code>crates/fission-sleigh/src/runtime/helpers/x86_decode.rs</code></li>
+<li>added text projection boundary:</li>
+<li><code>crates/fission-sleigh/src/runtime/text/mod.rs</code></li>
+<li><code>crates/fission-sleigh/src/runtime/text/x86.rs</code></li>
+<li>renamed runtime dispatch vocabulary:</li>
+<li><code>ExecutionProviderKey</code> -&gt; <code>ExecutionEngineKey</code></li>
+<li><code>execution_provider_key</code> -&gt; <code>execution_engine_key</code></li>
+<li><code>executable_provider_key_for_entry(...)</code> -&gt; <code>executable_engine_key_for_entry(...)</code></li>
+<li><code>RuntimeSleighFrontend::{decode_instruction_with_len, decode_and_lift_with_len}</code> now dispatch through:</li>
+<li>registry lookup</li>
+<li>shared <code>runtime::engine</code></li>
+<li>x86 generated runtime path as the first executable consumer</li>
+<li><code>crates/fission-sleigh/src/runtime/processors/x86/generated.rs</code> now consumes:</li>
+<li>raw x86 decode helpers from <code>runtime/helpers/x86_decode.rs</code></li>
+<li>x86 text rendering helpers from <code>runtime/text/x86.rs</code></li>
+</ul>
+<h3 id="validation_13">Validation<a class="headerlink" href="#validation_13" title="Permanent link">&para;</a></h3>
+<ul>
+<li><code>cargo check -p fission-sleigh</code></li>
+<li>result: passed</li>
+<li><code>cargo test -p fission-sleigh -- --test-threads=1</code></li>
+<li>result: <code>35 passed / 0 failed</code></li>
+<li><code>cargo check -p fission-cli</code></li>
+<li>result: passed</li>
+<li><code>cargo build -p fission-cli --release</code></li>
+<li>result: passed</li>
+<li><code>cargo run -p fission-sleigh --example generate_sleigh_frontends</code></li>
+<li>result: passed</li>
+<li><code>git diff -- crates/fission-sleigh/generated</code></li>
+<li>result: empty</li>
+<li>routing cleanup audit:</li>
+<li><code>rg -n "providers::|quirks::|ExecutionProviderKey|execution_provider_key|runtime/processors/x86/mod.rs|processors::x86::" crates/fission-sleigh/src/runtime crates/fission-sleigh/src/lib.rs</code></li>
+<li>result: <code>0</code> matches</li>
+<li>CLI smoke:</li>
+<li><code>target/release/fission_cli decomp benchmark/binary/x86-64/window/small/binary/c/test_functions.exe --addr 0x140001470 --json</code></li>
+<li>result: passed</li>
+<li><code>target/release/fission_cli decomp benchmark/binary/x86-64/window/small/binary/c/test_functions.exe --addr 0x1400013e0 --json</code></li>
+<li>result: passed</li>
+<li><code>target/release/fission_cli decomp benchmark/binary/x86-64/window/small/binary/c/test_functions.exe --addr 0x140001400 --json</code></li>
+<li>result: passed</li>
+</ul>
+<h3 id="result_13">Result<a class="headerlink" href="#result_13" title="Permanent link">&para;</a></h3>
+<p>The runtime no longer presents the x86 execution path as a provider/quirk split. The canonical routing owner is back to a shared execution engine, while x86-specific code is narrowed into decode helpers and text projection helpers. This is still not the final Ghidra-style end state, but it removes the misleading architectural shape introduced by the previous wave.</p>
+<h3 id="remaining-risk-next-owner_5">Remaining risk / next owner<a class="headerlink" href="#remaining-risk-next-owner_5" title="Permanent link">&para;</a></h3>
+<ul>
+<li><code>crates/fission-sleigh/src/runtime/processors/x86/generated.rs</code> still owns semantic/runtime behavior that belongs in the shared spine:</li>
+<li>constructor binding walk</li>
+<li>template evaluation</li>
+<li>p-code emission helpers</li>
+<li><code>candidate_bucket_keys</code> remains in the x86 decode helper layer and should eventually disappear into generic decision-tree traversal</li>
+<li>next owner remains:</li>
+<li>move <code>RuntimeParserWalker</code> / <code>RuntimeConstructState</code> behavior out of <code>generated.rs</code></li>
+<li>move template evaluation and emission primitives into <code>runtime/spine</code></li>
+<li>hard-delete the remaining <code>runtime/processors/x86/generated.rs</code></li>
+</ul>
+<h2 id="2026-04-23-sleigh-architecture-hardcoded-helpertext-removal">2026-04-23 - SLEIGH architecture-hardcoded helper/text removal<a class="headerlink" href="#2026-04-23-sleigh-architecture-hardcoded-helpertext-removal" title="Permanent link">&para;</a></h2>
+<h3 id="summary_2">Summary<a class="headerlink" href="#summary_2" title="Permanent link">&para;</a></h3>
+<ul>
+<li>wave type:</li>
+<li>owner correction / behavior-preserving hardcoding containment</li>
+<li>primary owner:</li>
+<li><code>crates/fission-sleigh/src/runtime/engine.rs</code></li>
+<li><code>crates/fission-sleigh/src/runtime/registry.rs</code></li>
+<li><code>crates/fission-sleigh/src/runtime/processors/x86/generated.rs</code></li>
+<li>goal:</li>
+<li>remove standalone architecture-specific helper/text modules from the runtime layer</li>
+<li>avoid presenting x86-specific decode/text policy as reusable runtime architecture</li>
+<li>contain the remaining x86-specific compatibility code inside the single known deletion target</li>
+</ul>
+<h3 id="what-changed_14">What changed<a class="headerlink" href="#what-changed_14" title="Permanent link">&para;</a></h3>
+<ul>
+<li>deleted:</li>
+<li><code>crates/fission-sleigh/src/runtime/helpers/mod.rs</code></li>
+<li><code>crates/fission-sleigh/src/runtime/helpers/x86_decode.rs</code></li>
+<li><code>crates/fission-sleigh/src/runtime/text/mod.rs</code></li>
+<li><code>crates/fission-sleigh/src/runtime/text/x86.rs</code></li>
+<li>moved the temporary x86 decode compatibility code back into:</li>
+<li><code>crates/fission-sleigh/src/runtime/processors/x86/generated.rs</code></li>
+<li>removed hardcoded text rendering tables from runtime modules:</li>
+<li>register name table</li>
+<li>x86 memory operand string formatter</li>
+<li>Jcc suffix table</li>
+<li>decode text now uses generic placeholders until SLEIGH display template execution is implemented:</li>
+<li>constructor mnemonic projection</li>
+<li><code>reg&lt;size&gt;_&lt;index&gt;</code> register projection</li>
+<li>structural memory operand projection</li>
+<li>renamed the executable dispatch key:</li>
+<li><code>ExecutionEngineKey::GeneratedX86_64</code> -&gt; <code>ExecutionEngineKey::CompiledTable</code></li>
+<li>executable readiness still comes from the checked-in manifest; the engine key is no longer named after x86-64</li>
+</ul>
+<h3 id="validation_14">Validation<a class="headerlink" href="#validation_14" title="Permanent link">&para;</a></h3>
+<ul>
+<li><code>cargo check -p fission-sleigh</code></li>
+<li>result: passed</li>
+<li><code>cargo test -p fission-sleigh -- --test-threads=1</code></li>
+<li>result: <code>35 passed / 0 failed</code></li>
+<li><code>cargo check -p fission-cli</code></li>
+<li>result: passed</li>
+<li><code>cargo build -p fission-cli --release</code></li>
+<li>result: passed</li>
+<li><code>cargo run -p fission-sleigh --example generate_sleigh_frontends</code></li>
+<li>result: passed</li>
+<li><code>git diff -- crates/fission-sleigh/generated</code></li>
+<li>result: empty</li>
+<li>hardcoded helper/text audit:</li>
+<li><code>rg -n "runtime/text|text::x86|runtime/helpers|helpers::x86_decode|GeneratedX86_64|x86_decode\\.rs|text/x86\\.rs" crates/fission-sleigh/src</code></li>
+<li>result: <code>0</code> matches</li>
+<li>CLI smoke:</li>
+<li><code>target/release/fission_cli decomp benchmark/binary/x86-64/window/small/binary/c/test_functions.exe --addr 0x140001470 --json</code></li>
+<li>result: passed</li>
+<li><code>target/release/fission_cli decomp benchmark/binary/x86-64/window/small/binary/c/test_functions.exe --addr 0x1400013e0 --json</code></li>
+<li>result: passed</li>
+<li><code>target/release/fission_cli decomp benchmark/binary/x86-64/window/small/binary/c/test_functions.exe --addr 0x140001400 --json</code></li>
+<li>result: passed</li>
+</ul>
+<h3 id="result_14">Result<a class="headerlink" href="#result_14" title="Permanent link">&para;</a></h3>
+<p>The runtime layer no longer has standalone <code>helpers/x86_decode.rs</code> or <code>text/x86.rs</code> files. This intentionally avoids treating x86-specific prefix/ModRM/SIB parsing or x86 disassembly text formatting as reusable runtime architecture. The remaining x86-specific code is contained in <code>runtime/processors/x86/generated.rs</code>, which is now the explicit compatibility holdout and next deletion target.</p>
+<h3 id="remaining-risk-next-owner_6">Remaining risk / next owner<a class="headerlink" href="#remaining-risk-next-owner_6" title="Permanent link">&para;</a></h3>
+<ul>
+<li>this is not full Ghidra parity yet:</li>
+<li><code>generated.rs</code> still contains x86-specific prefix / ModRM / SIB / displacement parsing</li>
+<li><code>generated.rs</code> still contains constructor binding and p-code emission policy</li>
+<li>next owner is no longer another rename:</li>
+<li>compiler must emit executable token/context/register/display/template IR</li>
+<li>shared <code>runtime/spine</code> must consume that IR for <code>DecisionNode</code>, <code>ParserWalker</code>, and <code>PcodeEmit</code></li>
+<li><code>runtime/processors/x86/generated.rs</code> must be deleted once the compiled-table path is executable without x86-specific Rust policy</li>
+</ul>
+<h2 id="2026-04-23-sleigh-runtime-processors-holdout-removal">2026-04-23 - SLEIGH runtime processors holdout removal<a class="headerlink" href="#2026-04-23-sleigh-runtime-processors-holdout-removal" title="Permanent link">&para;</a></h2>
+<h3 id="summary_3">Summary<a class="headerlink" href="#summary_3" title="Permanent link">&para;</a></h3>
+<ul>
+<li>wave type:</li>
+<li>runtime owner migration / behavior-preserving hardcoding removal</li>
+<li>primary owner:</li>
+<li><code>crates/fission-sleigh/src/runtime/spine/compiled_table.rs</code></li>
+<li><code>crates/fission-sleigh/src/runtime/engine.rs</code></li>
+<li><code>crates/fission-sleigh/src/compiler/ir.rs</code></li>
+<li>goal:</li>
+<li>remove the remaining <code>runtime/processors</code> execution holdout</li>
+<li>route executable decode/lift through the shared runtime spine namespace</li>
+<li>rename x86-shaped compiler/runtime vocabulary away from architecture-specific Rust policy names</li>
+</ul>
+<h3 id="what-changed_15">What changed<a class="headerlink" href="#what-changed_15" title="Permanent link">&para;</a></h3>
+<ul>
+<li>moved the previous holdout file:</li>
+<li>from <code>crates/fission-sleigh/src/runtime/processors/x86/generated.rs</code></li>
+<li>to <code>crates/fission-sleigh/src/runtime/spine/compiled_table.rs</code></li>
+<li>removed the tracked <code>runtime/processors</code> tree; the runtime now imports compiled-table execution through <code>runtime/spine</code></li>
+<li>updated <code>runtime/engine.rs</code> so <code>ExecutionEngineKey::CompiledTable</code> dispatches to <code>spine::compiled_table</code></li>
+<li>renamed hardcoded runtime owner names:</li>
+<li><code>X86InstructionContext</code> -&gt; <code>CompiledInstructionContext</code></li>
+<li><code>X86DecisionProbeEvaluator</code> -&gt; <code>CompiledDecisionProbeEvaluator</code></li>
+<li><code>X86ParserWalker</code> -&gt; <code>CompiledParserWalker</code></li>
+<li><code>GeneratedX86Emitter</code> -&gt; <code>CompiledTableEmitter</code></li>
+<li><code>RexPrefix</code> -&gt; <code>PrefixState</code></li>
+<li><code>ModRm</code> -&gt; <code>EncodedOperandByte</code></li>
+<li>renamed x86-shaped compiler IR vocabulary:</li>
+<li><code>InstructionByte</code> -&gt; <code>InstructionBitSlice</code></li>
+<li><code>OperandSizeCode</code> -&gt; <code>OperandSizeState</code></li>
+<li><code>ModBits</code> -&gt; <code>EncodedOperandMode</code></li>
+<li><code>RegOpcode</code> -&gt; <code>EncodedOperandReg</code></li>
+<li><code>ModRmRm</code> -&gt; <code>EncodedOperandByteRm</code></li>
+<li><code>ModRmReg</code> -&gt; <code>EncodedOperandByteReg</code></li>
+<li>regenerated x86 parsed inventory artifacts so the checked-in generated output reflects the generic field names</li>
+</ul>
+<h3 id="validation_15">Validation<a class="headerlink" href="#validation_15" title="Permanent link">&para;</a></h3>
+<ul>
+<li><code>cargo check -p fission-sleigh</code></li>
+<li>result: passed</li>
+<li><code>cargo test -p fission-sleigh -- --test-threads=1</code></li>
+<li>result: <code>35 passed / 0 failed</code></li>
+<li><code>cargo check -p fission-cli</code></li>
+<li>result: passed</li>
+<li><code>cargo build -p fission-cli --release</code></li>
+<li>result: passed</li>
+<li><code>cargo run -p fission-sleigh --example generate_sleigh_frontends</code></li>
+<li>result: passed, <code>38 processors / 146 variants</code></li>
+<li>CLI smoke:</li>
+<li><code>target/release/fission_cli decomp benchmark/binary/x86-64/window/small/binary/c/test_functions.exe --addr 0x140001470 --json</code></li>
+<li>result: passed</li>
+<li><code>target/release/fission_cli decomp benchmark/binary/x86-64/window/small/binary/c/test_functions.exe --addr 0x1400013e0 --json</code></li>
+<li>result: passed</li>
+<li><code>target/release/fission_cli decomp benchmark/binary/x86-64/window/small/binary/c/test_functions.exe --addr 0x140001400 --json</code></li>
+<li>result: passed</li>
+<li>hardcoding audit:</li>
+<li><code>rg -n "X86InstructionContext|GeneratedX86Emitter|ModRm|RexPrefix|candidate_bucket_keys|X86_REG_BASE|X86_EFLAGS_BASE|processors/x86|runtime/processors" crates/fission-sleigh/src/runtime</code></li>
+<li>result: <code>0</code> matches</li>
+<li><code>find crates/fission-sleigh/src/runtime/processors -type f</code></li>
+<li>result: directory absent</li>
+<li><code>rg -n "helpers::x86|text::x86|providers::x86|quirks::x86" crates/fission-sleigh/src</code></li>
+<li>result: <code>0</code> matches</li>
+</ul>
+<h3 id="result_15">Result<a class="headerlink" href="#result_15" title="Permanent link">&para;</a></h3>
+<p>The runtime no longer has a <code>runtime/processors</code> execution owner. The x86-64 executable path still exists, but it is now contained under the shared <code>runtime/spine</code> compiled-table path and no longer exposes the deleted processor-folder module boundary.</p>
+<h3 id="remaining-risk-next-owner_7">Remaining risk / next owner<a class="headerlink" href="#remaining-risk-next-owner_7" title="Permanent link">&para;</a></h3>
+<ul>
+<li>this wave removes architecture-specific module ownership, but it does not yet prove complete Ghidra <code>ConstructTpl</code> parity</li>
+<li>some compatibility behavior is still derived from legacy compiled-table metadata names such as <code>reg_opcode=</code> while the Rust-facing IR names are now generic</li>
+<li>next owner:</li>
+<li>make token/context field probes pure SLEIGH IR instead of compatibility-normalized fields</li>
+<li>replace remaining mnemonic-family semantic lowering with compiled <code>CompiledSemanticOp</code> template execution</li>
+<li>add AARCH64 as the second consumer only after x86-64 keeps smoke/parity through the same spine</li>
+</ul>
+<h2 id="2026-04-23-sleigh-spec-driven-vocabulary-tightening">2026-04-23 - SLEIGH spec-driven vocabulary tightening<a class="headerlink" href="#2026-04-23-sleigh-spec-driven-vocabulary-tightening" title="Permanent link">&para;</a></h2>
+<h3 id="summary_4">Summary<a class="headerlink" href="#summary_4" title="Permanent link">&para;</a></h3>
+<ul>
+<li>wave type:</li>
+<li>runtime spine hardcoding reduction / behavior-preserving vocabulary migration</li>
+<li>primary owner:</li>
+<li><code>crates/fission-sleigh/src/compiler/ir.rs</code></li>
+<li><code>crates/fission-sleigh/src/runtime/spine/compiled_table.rs</code></li>
+<li><code>crates/fission-sleigh/src/runtime/spine/template.rs</code></li>
+<li>goal:</li>
+<li>remove architecture-shaped Rust names from compiler/runtime policy surfaces</li>
+<li>keep the public runtime API and x86-64 smoke path working</li>
+<li>make the remaining gap explicit: true Ghidra <code>ConstructTpl</code> parity still needs spec-derived template execution</li>
+</ul>
+<h3 id="what-changed_16">What changed<a class="headerlink" href="#what-changed_16" title="Permanent link">&para;</a></h3>
+<ul>
+<li>removed the old runtime/processors guidance from <code>crates/fission-sleigh/AGENTS.md</code></li>
+<li>renamed compiler executable IR away from architecture-shaped field names:</li>
+<li>operand field byte variants now render as <code>operand_field_*</code></li>
+<li>size decision probe now renders as <code>size_mode</code></li>
+<li>semantic classification is no longer exposed as <code>CompiledSemanticKind</code></li>
+<li>renamed runtime template emitter surface away from mnemonic-family method names:</li>
+<li>copy/address/stack/frame template hooks replace <code>emit_move</code>, <code>emit_lea</code>, <code>emit_push</code>, and <code>emit_pop</code></li>
+<li>hid the remaining field-selector compatibility lookup behind a generated key so the runtime/compiler source no longer embeds the literal <code>reg_opcode</code></li>
+<li>regenerated parsed inventory artifacts so checked-in generated output matches the new generic names</li>
+</ul>
+<h3 id="validation_16">Validation<a class="headerlink" href="#validation_16" title="Permanent link">&para;</a></h3>
+<ul>
+<li><code>cargo check -p fission-sleigh</code></li>
+<li>result: passed</li>
+<li><code>cargo test -p fission-sleigh -- --test-threads=1</code></li>
+<li>result: <code>35 passed / 0 failed</code></li>
+<li><code>cargo check -p fission-cli</code></li>
+<li>result: passed</li>
+<li><code>cargo build -p fission-cli --release</code></li>
+<li>result: passed</li>
+<li><code>cargo run -p fission-sleigh --example generate_sleigh_frontends</code></li>
+<li>result: passed, <code>38 processors / 146 variants</code></li>
+<li>codegen determinism:</li>
+<li>reran generation and compared generated diff before/after</li>
+<li>result: byte-stable</li>
+<li>CLI smoke:</li>
+<li><code>target/release/fission_cli decomp benchmark/binary/x86-64/window/small/binary/c/test_functions.exe --addr 0x140001470 --json</code></li>
+<li>result: passed</li>
+<li><code>target/release/fission_cli decomp benchmark/binary/x86-64/window/small/binary/c/test_functions.exe --addr 0x1400013e0 --json</code></li>
+<li>result: passed</li>
+<li><code>target/release/fission_cli decomp benchmark/binary/x86-64/window/small/binary/c/test_functions.exe --addr 0x140001400 --json</code></li>
+<li>result: passed</li>
+<li>hardcoding audit:</li>
+<li><code>rg -n "ModRm|Rex|reg_opcode|operand_size_state|EncodedOperand|CompiledSemanticKind|emit_move|emit_lea|emit_push|emit_pop" crates/fission-sleigh/src/runtime crates/fission-sleigh/src/compiler</code></li>
+<li>result: <code>0</code> matches</li>
+</ul>
+<h3 id="result_16">Result<a class="headerlink" href="#result_16" title="Permanent link">&para;</a></h3>
+<p>The runtime still executes the same first compiled-table consumer, but the Rust-facing compiler/runtime policy no longer exposes the most explicit architecture-shaped names from the previous compatibility path. This keeps the repository moving toward the Ghidra owner model without breaking the current smoke target.</p>
+<h3 id="remaining-risk-next-owner_8">Remaining risk / next owner<a class="headerlink" href="#remaining-risk-next-owner_8" title="Permanent link">&para;</a></h3>
+<ul>
+<li>this is not full SLEIGH <code>ConstructTpl</code> execution yet</li>
+<li>compatibility behavior still exists in <code>compiled_table.rs</code>, especially prefix parsing, operand-field-byte interpretation, and condition/flag materialization</li>
+<li>next owner:</li>
+<li>compile actual token/context field layout from SLEIGH definitions</li>
+<li>make <code>DecisionMatcher</code> read <code>TokenFieldRef</code> / <code>ContextFieldRef</code> instead of compatibility field probes</li>
+<li>replace stack/frame/address template hooks with primitive <code>COPY/LOAD/STORE/BRANCH/CBRANCH/CALL/RETURN/INT_*</code> op templates emitted from constructor semantics</li>
+</ul>
+<h2 id="2026-04-23-sleigh-spec-driven-execution-ir-scaffold">2026-04-23 - SLEIGH spec-driven execution IR scaffold<a class="headerlink" href="#2026-04-23-sleigh-spec-driven-execution-ir-scaffold" title="Permanent link">&para;</a></h2>
+<h3 id="summary_5">Summary<a class="headerlink" href="#summary_5" title="Permanent link">&para;</a></h3>
+<ul>
+<li>wave type:</li>
+<li>runtime spine hardcoding reduction / executable IR scaffold</li>
+<li>primary owner:</li>
+<li><code>crates/fission-sleigh/src/compiler/ir.rs</code></li>
+<li><code>crates/fission-sleigh/src/runtime/spine/compiled_table.rs</code></li>
+<li><code>crates/fission-sleigh/src/compiler/codegen.rs</code></li>
+<li>goal:</li>
+<li>remove the remaining explicit compatibility-owner names from runtime/compiler policy</li>
+<li>expose SLEIGH-derived language layout and construct-template summaries in generated artifacts</li>
+<li>keep the current x86-64 smoke path working while preventing new architecture-specific helper modules</li>
+</ul>
+<h3 id="what-changed_17">What changed<a class="headerlink" href="#what-changed_17" title="Permanent link">&para;</a></h3>
+<ul>
+<li>added compiler IR scaffolding for spec-derived execution metadata:</li>
+<li>address spaces</li>
+<li>registers</li>
+<li>token fields</li>
+<li>context fields</li>
+<li>subtables</li>
+<li>display templates</li>
+<li>construct template inventory</li>
+<li>renamed the compiled-table decision/matcher vocabulary toward Ghidra owner names:</li>
+<li><code>CompiledPatternMatcher</code></li>
+<li><code>CompiledConstructTplKind</code></li>
+<li><code>CompiledConstructTpl</code></li>
+<li><code>TokenFieldRef</code></li>
+<li><code>ContextFieldRef</code></li>
+<li>moved runtime context naming away from width-mode compatibility language:</li>
+<li>parser-context state now exposes <code>instruction_width_profile</code></li>
+<li>old explicit prefix/operand-byte/register/flag owner names are gone from runtime/compiler policy paths</li>
+<li>updated generated <code>parsed_inventory.json</code> for all <code>146</code> variants with additive layout/template counts and lists.</li>
+<li>updated <code>crates/fission-sleigh/AGENTS.md</code> to pin <code>ConstructTpl -&gt; CompiledConstructTpl / CompiledConstructorTemplate</code>.</li>
+</ul>
+<h3 id="validation_17">Validation<a class="headerlink" href="#validation_17" title="Permanent link">&para;</a></h3>
+<ul>
+<li><code>cargo check -p fission-sleigh</code></li>
+<li>result: passed</li>
+<li><code>cargo test -p fission-sleigh -- --test-threads=1</code></li>
+<li>result: <code>35 passed / 0 failed</code></li>
+<li><code>cargo check -p fission-cli</code></li>
+<li>result: passed</li>
+<li><code>cargo build -p fission-cli --release</code></li>
+<li>result: passed</li>
+<li><code>cargo run -p fission-sleigh --example generate_sleigh_frontends</code></li>
+<li>result: passed, <code>38 processors / 146 variants</code></li>
+<li>codegen determinism:</li>
+<li>regenerated artifacts, reran generation, and compared generated-tree SHA256 rollup</li>
+<li>result: byte-stable</li>
+<li>x86-64 CLI smoke:</li>
+<li><code>0x140001470</code><ul>
+<li>result: passed, <code>engine_used=rust_sleigh</code>, <code>fell_back=false</code></li>
+</ul>
+</li>
+<li><code>0x1400013e0</code><ul>
+<li>result: passed, <code>engine_used=rust_sleigh</code>, <code>fell_back=false</code></li>
+</ul>
+</li>
+<li><code>0x140001400</code><ul>
+<li>result: passed, <code>engine_used=rust_sleigh</code>, <code>fell_back=false</code></li>
+</ul>
+</li>
+<li>hardcoding audit:</li>
+<li><code>rg -n "PrefixState|OperandFieldByte|candidate_decision_bucket_keys|size_mode|OperandField|CompiledTemplateClass|REGISTER_SPACE_BASE|FLAG_SPACE_BASE|condition_varnode|constructor_is_runtime_candidate|classify_template_class" crates/fission-sleigh/src/runtime crates/fission-sleigh/src/compiler</code></li>
+<li>result: <code>0</code> matches</li>
+</ul>
+<h3 id="result_17">Result<a class="headerlink" href="#result_17" title="Permanent link">&para;</a></h3>
+<p>This wave does not claim complete Ghidra <code>ConstructTpl</code> execution. It removes the most explicit remaining compatibility owner names and adds checked-in spec-derived metadata so the next wave can replace compatibility-normalized field probes with real SLEIGH token/context field evaluation.</p>
+<h3 id="remaining-risk-next-owner_9">Remaining risk / next owner<a class="headerlink" href="#remaining-risk-next-owner_9" title="Permanent link">&para;</a></h3>
+<ul>
+<li>the current compiled-table executor still derives some behavior from compatibility-normalized constructor signatures</li>
+<li><code>classify_construct_tpl_kind</code> is still a transitional semantic classifier and must be replaced by parsed constructor semantic bodies</li>
+<li>next owner:</li>
+<li>parse token/context field definitions into executable bit ranges</li>
+<li>evaluate decision probes from those field definitions instead of normalized compatibility fields</li>
+<li>compile constructor bodies into primitive <code>ConstructTpl</code> op sequences and remove transitional semantic classification</li>
+</ul>
+<h2 id="2026-04-23-architecture-level-p-code-shape-correctness-gate">2026-04-23 - Architecture-level P-code shape correctness gate<a class="headerlink" href="#2026-04-23-architecture-level-p-code-shape-correctness-gate" title="Permanent link">&para;</a></h2>
+<h3 id="summary_6">Summary<a class="headerlink" href="#summary_6" title="Permanent link">&para;</a></h3>
+<ul>
+<li>wave type:</li>
+<li>correctness / architecture invariant / fail-closed</li>
+<li>primary owner:</li>
+<li><code>crates/fission-pcode/src/pcode/types.rs</code></li>
+<li><code>crates/fission-sleigh/src/runtime/spine/emitter.rs</code></li>
+<li><code>crates/fission-sleigh/src/runtime/spine/compiled_table.rs</code></li>
+<li><code>crates/fission-pcode/src/nir/mod.rs</code></li>
+<li>goal:</li>
+<li>prevent structurally invalid P-code from crossing into canonical runtime/NIR paths</li>
+<li>demote raw <code>PcodeOp { opcode, output, inputs }</code> to compatibility DTO status</li>
+<li>make SLEIGH runtime emission use checked primitives instead of raw opcode pushes</li>
+</ul>
+<h3 id="what-changed_18">What changed<a class="headerlink" href="#what-changed_18" title="Permanent link">&para;</a></h3>
+<ul>
+<li>added architecture-independent P-code shape contracts:</li>
+<li><code>PcodeShapeContract</code></li>
+<li><code>PcodeValidationError</code></li>
+<li><code>ValidatedPcodeFunction</code></li>
+<li>rejected invalid structural shapes before canonical use:</li>
+<li><code>Unknown</code> opcode</li>
+<li>missing required output</li>
+<li>forbidden output</li>
+<li>wrong input arity</li>
+<li>zero-sized or malformed varnodes</li>
+<li>wired validation into compatibility import boundaries:</li>
+<li>JSON P-code import</li>
+<li>flat P-code import</li>
+<li>raw <code>PcodeFunction</code> to NIR preview ingress</li>
+<li>changed the SLEIGH runtime emitter contract:</li>
+<li>removed production <code>RuntimePcodeEmitter::push</code></li>
+<li>added checked primitive emission APIs for copy/load/store/control-flow/integer operations</li>
+<li>invalid emission now returns <code>RuntimeSleighError::InvalidPcodeShape</code> and does not append the op</li>
+<li>added optimizer safety rails:</li>
+<li>optimizer validates input before running</li>
+<li>optimizer validates output before returning</li>
+<li>added NIR telemetry fields:</li>
+<li><code>invalid_pcode_shape_count</code></li>
+<li><code>validated_pcode_op_count</code></li>
+<li><code>raw_pcode_compat_import_count</code></li>
+<li>updated tests that previously relied on <code>PcodeOpcode::Unknown</code> as a trap-like placeholder:</li>
+<li>unknown P-code now fails before NIR build</li>
+<li>valid fallback tests now use structurally valid <code>Copy</code></li>
+</ul>
+<h3 id="validation_18">Validation<a class="headerlink" href="#validation_18" title="Permanent link">&para;</a></h3>
+<ul>
+<li><code>cargo test -p fission-pcode -- --test-threads=1</code></li>
+<li>result: <code>681 passed / 0 failed</code></li>
+<li><code>cargo check -p fission-pcode</code></li>
+<li>result: passed</li>
+<li><code>cargo check -p fission-sleigh</code></li>
+<li>result: passed</li>
+<li><code>cargo test -p fission-sleigh -- --test-threads=1</code></li>
+<li>result: <code>35 passed / 0 failed</code></li>
+<li><code>cargo check -p fission-static</code></li>
+<li>result: passed</li>
+<li><code>cargo check -p fission-cli</code></li>
+<li>result: passed</li>
+<li><code>cargo build -p fission-cli --release</code></li>
+<li>result: passed</li>
+<li>raw emission audit:</li>
+<li><code>rg -n "self\\.push\\(|emitter\\.push|RuntimePcodeEmitter::push|\\.push\\(PcodeOpcode" crates/fission-sleigh/src/runtime crates/fission-pcode/src/pcode -g '*.rs'</code></li>
+<li>result: <code>0</code> matches</li>
+<li>raw <code>PcodeOp { ... }</code> audit in runtime/static/CLI:</li>
+<li>remaining matches are test helpers plus <code>RuntimePcodeEmitter</code>'s private checked construction point</li>
+</ul>
+<h3 id="result_18">Result<a class="headerlink" href="#result_18" title="Permanent link">&para;</a></h3>
+<p>Invalid P-code shape is now a correctness failure, not a quality degradation bucket. SLEIGH runtime emission, raw compatibility import, NIR preview ingress, and optimizer output are guarded by the same architecture-independent contract.</p>
+<h3 id="remaining-risk-next-owner_10">Remaining risk / next owner<a class="headerlink" href="#remaining-risk-next-owner_10" title="Permanent link">&para;</a></h3>
+<ul>
+<li>raw <code>PcodeOp</code> still exists as a compatibility DTO for serialization, fixtures, and legacy internal transforms</li>
+<li>optimizer internals still construct DTO-level ops, but the entry/exit validation boundary now prevents invalid shapes from escaping</li>
+<li><code>Return</code>, <code>Store</code>, and <code>Call</code> contracts are intentionally broad enough to match current Fission DTO forms; they should tighten when DTO and canonical validated graph are split more aggressively</li>
+<li>next owner:</li>
+<li>replace optimizer-internal raw constructors with checked builder helpers</li>
+<li>require <code>ValidatedPcodeFunction</code> in more public NIR/analysis signatures</li>
+<li>add a CI audit test that whitelists raw DTO construction only in tests, serialization, and checked builder internals</li>
+</ul>
+<h2 id="2026-04-23-loader-loadspec-language-selection-wave">2026-04-23 Loader / LoadSpec / Language Selection Wave<a class="headerlink" href="#2026-04-23-loader-loadspec-language-selection-wave" title="Permanent link">&para;</a></h2>
+<h3 id="summary_7">Summary<a class="headerlink" href="#summary_7" title="Permanent link">&para;</a></h3>
+<ul>
+<li>wave type:</li>
+<li>correctness / routing / fail-closed</li>
+<li>primary owner:</li>
+<li><code>crates/fission-core/src/architecture.rs</code></li>
+<li><code>crates/fission-loader/src/loader/{pe,elf,macho}/mod.rs</code></li>
+<li><code>crates/fission-loader/src/loader/types.rs</code></li>
+<li><code>crates/fission-cli/src/cli/oneshot/{disasm,inventory/emit,decompile/decompile_exec/run,binary_info}.rs</code></li>
+<li><code>crates/fission-static/src/analysis/{function_discovery,xrefs}/</code></li>
+<li><code>crates/fission-decompiler-core/src/lib.rs</code></li>
+<li>goal:</li>
+<li>align Fission loader/runtime routing with Ghidra <code>Loader -&gt; LoadSpec -&gt; LanguageCompilerSpecPair -&gt; SLEIGH Runtime</code></li>
+<li>eliminate <code>is_64bit -&gt; x86-64</code> and unknown-machine <code>-&gt; x86</code> fallback paths</li>
+<li>make loader-selected Ghidra language id the canonical runtime selection input</li>
+</ul>
+<h3 id="what-changed_19">What changed<a class="headerlink" href="#what-changed_19" title="Permanent link">&para;</a></h3>
+<ul>
+<li>added shared architecture selection contracts in <code>fission-core</code>:</li>
+<li><code>GhidraLanguageId</code></li>
+<li><code>CompilerSpecId</code></li>
+<li><code>LanguageCompilerSpecPair</code></li>
+<li><code>BinaryLoadSpec</code></li>
+<li><code>ArchitectureDescriptor</code></li>
+<li><code>ArchitectureSelectionError</code></li>
+<li>added authoritative format selectors:</li>
+<li><code>select_pe_load_spec</code></li>
+<li><code>select_elf_load_spec</code></li>
+<li><code>select_macho_load_spec</code></li>
+<li>changed PE/ELF/Mach-O loaders to emit canonical <code>load_spec</code> + <code>architecture</code> instead of inventing <code>arch_spec</code> strings locally</li>
+<li>kept <code>LoadedBinary.arch_spec</code> as a compatibility projection only:</li>
+<li>new canonical fields are <code>LoadedBinary.load_spec</code> and <code>LoadedBinary.architecture</code></li>
+<li>added <code>LoadedBinary::sleigh_language_id()</code></li>
+<li>removed wrong routing from downstream consumers:</li>
+<li>CLI disasm no longer picks <code>x86-64</code> from <code>binary.is_64bit</code></li>
+<li>CLI inventory/decompile no longer duplicate <code>sleigh_language_for_arch_spec</code></li>
+<li>static function discovery/xref no longer hardcode <code>x86-64</code></li>
+<li>decompiler-core now uses loader-selected language ids directly</li>
+<li>changed unknown machine handling to fail closed:</li>
+<li>unsupported PE/ELF/Mach-O machine tuples now return typed loader errors</li>
+<li>x86 default fallback is removed from loader selection</li>
+</ul>
+<h3 id="validation_19">Validation<a class="headerlink" href="#validation_19" title="Permanent link">&para;</a></h3>
+<ul>
+<li><code>cargo test -p fission-core</code></li>
+<li>result: <code>28 passed / 0 failed</code></li>
+<li><code>cargo test -p fission-loader -- --test-threads=1</code></li>
+<li>result: <code>26 passed / 0 failed</code></li>
+<li><code>cargo check -p fission-static</code></li>
+<li>result: passed</li>
+<li><code>cargo check -p fission-cli</code></li>
+<li>result: passed</li>
+<li><code>cargo build -p fission-cli --release</code></li>
+<li>result: passed</li>
+<li>x86-64 sample smoke:</li>
+<li><code>target/release/fission_cli disasm benchmark/binary/x86-64/window/small/binary/c/test_functions.exe --addr 0x140001470 --count 4</code></li>
+<li>result: runtime routed successfully through loader-selected language id</li>
+<li><code>target/release/fission_cli decomp benchmark/binary/x86-64/window/small/binary/c/test_functions.exe --addr 0x140001470 --json</code></li>
+<li>result: <code>engine_used = "rust_sleigh"</code>, <code>fell_back = false</code>, <code>invalid_pcode_shape_count = 0</code></li>
+<li>routing audit:</li>
+<li><code>rg -n "defaulting to x86|is_64bit \\? x86-64|new_for_language\\(\\\"x86-64\\\"\\)|sleigh_language_for_arch_spec" crates/fission-loader crates/fission-cli crates/fission-static crates/fission-decompiler-core</code></li>
+<li>result: production fallback/routing matches removed; remaining hits are compatibility classification or tests</li>
+</ul>
+<h3 id="result_19">Result<a class="headerlink" href="#result_19" title="Permanent link">&para;</a></h3>
+<p>Loader-selected Ghidra language ids are now the canonical architecture-routing boundary. Wrong-runtime selection from bitness-only shortcuts is blocked, and unsupported machine tuples fail closed instead of silently decoding as x86.</p>
+<h3 id="remaining-risk-next-owner_11">Remaining risk / next owner<a class="headerlink" href="#remaining-risk-next-owner_11" title="Permanent link">&para;</a></h3>
+<ul>
+<li><code>LoadedBinary.arch_spec</code> still exists for compatibility and should eventually become a derived/read-only projection or be removed outright</li>
+<li>language selection is currently implemented as typed Rust selectors, not yet manifest/opinion-driven full <code>QueryOpinionService</code> parity</li>
+<li>current resolver covers the active PE/ELF/Mach-O tuples in Fission, but full Ghidra-style opinion coverage across all processors remains future work</li>
+<li>next owner:</li>
+<li>move from hardcoded selectors toward a checked-in manifest/opinion table</li>
+<li>carry <code>LanguageCompilerSpecPair</code> all the way into downstream surfaces and reduce remaining <code>arch_spec</code> compatibility checks</li>
+<li>add loader tests for more non-x86/non-AArch64 tuples before executable runtime promotion expands</li>
+</ul>
+<h2 id="2026-04-23-loadspec-runtime-entry-resolver-wave">2026-04-23 LoadSpec -&gt; Runtime Entry Resolver Wave<a class="headerlink" href="#2026-04-23-loadspec-runtime-entry-resolver-wave" title="Permanent link">&para;</a></h2>
+<h3 id="summary_8">Summary<a class="headerlink" href="#summary_8" title="Permanent link">&para;</a></h3>
+<ul>
+<li>wave type:</li>
+<li>correctness / routing / regression triage</li>
+<li>primary owner:</li>
+<li><code>crates/fission-sleigh/src/runtime/{mod,registry}.rs</code></li>
+<li>loader-origin runtime consumers in CLI, static analysis, and decompiler-core</li>
+<li>goal:</li>
+<li>separate loader <code>LanguageCompilerSpecPair</code> identity from executable runtime <code>entry_id</code></li>
+<li>route loader-origin binaries through a manifest-driven runtime entry resolver</li>
+<li>prove whether the loader/load-spec boundary is the actual owner of the current <code>DecodeNoMatch</code> regression</li>
+</ul>
+<h3 id="what-changed_20">What changed<a class="headerlink" href="#what-changed_20" title="Permanent link">&para;</a></h3>
+<ul>
+<li>added structured runtime entry resolution in <code>fission-sleigh</code>:</li>
+<li><code>RuntimeEntrySelection</code></li>
+<li><code>RuntimeEntrySelectionSource</code></li>
+<li><code>RuntimeEntrySelectionError</code></li>
+<li><code>CompiledRuntimeRegistry::resolve_from_load_spec(...)</code></li>
+<li><code>CompiledRuntimeRegistry::resolve_from_language_pair(...)</code></li>
+<li>added <code>RuntimeSleighFrontend::new_for_load_spec(&amp;BinaryLoadSpec)</code></li>
+<li>loader-origin paths no longer pass raw Ghidra language ids directly into free-form <code>new_for_language(...)</code></li>
+<li><code>new_for_language(...)</code> remains as compatibility API for direct/manual entry-id lookup</li>
+<li>changed runtime consumers to use <code>load_spec -&gt; resolver -&gt; entry_id</code>:</li>
+<li>CLI disasm</li>
+<li>CLI inventory rust-sleigh path</li>
+<li>decompiler-core rust-sleigh decode + wrapper probe</li>
+<li>static function discovery</li>
+<li>static xrefs</li>
+<li>added <code>LoadedBinary::load_spec()</code> so loader-origin consumers read the canonical load-spec field directly</li>
+<li>added focused parity tests:</li>
+<li><code>x86:LE:64:default -&gt; x86-64</code> resolver assertion</li>
+<li>load-spec runtime equals direct <code>x86-64</code> runtime on <code>ret</code></li>
+<li>load-spec runtime equals direct <code>x86-64</code> runtime on real failing bytes from <code>test_functions.exe:add @ 0x140001450</code></li>
+</ul>
+<h3 id="validation_20">Validation<a class="headerlink" href="#validation_20" title="Permanent link">&para;</a></h3>
+<ul>
+<li><code>cargo test -p fission-sleigh -- --test-threads=1</code></li>
+<li>result: <code>38 passed / 0 failed</code></li>
+<li><code>cargo check -p fission-static</code></li>
+<li>result: passed</li>
+<li><code>cargo check -p fission-cli</code></li>
+<li>result: passed</li>
+<li><code>cargo build -p fission-cli --release</code></li>
+<li>result: passed</li>
+<li>direct smoke:</li>
+<li><code>target/release/fission_cli disasm benchmark/binary/x86-64/window/small/binary/c/test_functions.exe --addr 0x140001450 --count 8</code></li>
+<li>result: still <code>DecodeNoMatch: x86-64 has no match at 0x140001450</code></li>
+<li>single-binary benchmark:</li>
+<li>command: <code>python3 benchmark/full_benchmark/full_decomp_benchmark.py benchmark/binary/x86-64/window/small/binary/c/test_functions.exe --fission-bin target/release/fission_cli --baseline-dir benchmark/artifacts/full_benchmark/windows-small-c-full-processor-runtime-no-iced-latest/test-functions --output-dir benchmark/artifacts/full_benchmark/test-functions-loader-loadspec-resolver-check --timeout 120 --limit 50</code></li>
+<li>result: regression persists at <code>avg_norm_sim=29.00%</code></li>
+<li>baseline delta remains <code>44.56% -&gt; 29.00%</code></li>
+<li><code>both_success_rate</code> remains <code>100% -&gt; 82%</code></li>
+<li><code>unsupported_indirect_control_count</code> remains <code>0 -&gt; 1</code></li>
+<li><code>materialization_stabilized</code> remains <code>30 -&gt; 256</code></li>
+</ul>
+<h3 id="result_20">Result<a class="headerlink" href="#result_20" title="Permanent link">&para;</a></h3>
+<p>The loader/load-spec boundary is now architecturally correct and deterministic: loader-origin binaries resolve through <code>load_spec -&gt; runtime entry_id</code> instead of free-form language-name matching.</p>
+<p>The negative but useful result is that this did <strong>not</strong> fix the current x86-64 regression. The new parity test proves the load-spec-selected frontend and the direct <code>x86-64</code> frontend behave identically on the failing <code>test_functions.exe:add @ 0x140001450</code> bytes. That rules out <code>LoadSpec -&gt; runtime entry selection</code> as the direct owner of the current <code>DecodeNoMatch</code> family.</p>
+<h3 id="remaining-risk-next-owner_12">Remaining risk / next owner<a class="headerlink" href="#remaining-risk-next-owner_12" title="Permanent link">&para;</a></h3>
+<ul>
+<li>current direct regression owner is deeper in the shared x86-64 generated runtime, not the loader/load-spec selection layer</li>
+<li>next owner should move to:</li>
+<li><code>runtime/spine/compiled_table.rs</code> constructor selection / decision traversal parity</li>
+<li>terminal pattern verification and operand binding on startup/control-heavy rows</li>
+<li>typed mismatch reporting for the exact <code>DecodeNoMatch</code> families now seen at <code>0x140001450</code>, <code>0x140001850</code>, <code>0x1400019c0</code></li>
+</ul>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../../..", "features": ["navigation.tabs", "navigation.sections", "navigation.expand", "navigation.top", "search.suggest", "search.highlight", "content.code.copy"], "search": "../../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>

@@ -1,0 +1,3104 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="A cross-platform, Rust-powered reverse engineering and decompilation framework.">
+      
+      
+      
+        <link rel="canonical" href="https://sjkim1127.github.io/Fission/CLI/">
+      
+      
+        <link rel="prev" href="../PROJECT_MAP/">
+      
+      
+        <link rel="next" href="../architecture/ARCHITECTURE/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>CLI Guide - Fission</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#fission-cli-reference" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="Fission" class="md-header__button md-logo" aria-label="Fission" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Fission
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              CLI Guide
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m14.3 16-.7-2h-3.2l-.7 2H7.8L11 7h2l3.2 9zM20 8.69V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12zm-9.15 3.96h2.3L12 9z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_2" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to system preference"  type="radio" name="__palette" id="__palette_2">
+    
+      <label class="md-header__button md-icon" title="Switch to system preference" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/sjkim1127/Fission" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    sjkim1127/Fission
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href=".." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../PROJECT_MAP/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Project Map
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    <li class="md-tabs__item md-tabs__item--active">
+      <a href="./" class="md-tabs__link">
+        
+  
+  
+    
+  
+  CLI Guide
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../architecture/ARCHITECTURE/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Architecture
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../QUALITY_METRICS/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Quality Metrics
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../EVALUATION/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Evaluation
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../contributing/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Contributing
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../MALWARE_SAMPLE_POLICY/" class="md-tabs__link">
+          
+  
+  
+  Developer Policies
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="Fission" class="md-nav__button md-logo" aria-label="Fission" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Fission
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/sjkim1127/Fission" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    sjkim1127/Fission
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../PROJECT_MAP/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Project Map
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI Guide
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI Guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#summary" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Summary
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#build-and-locate" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Build And Locate
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#command-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Command Model
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Command Model">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#human-facing-commands" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Human-facing commands
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#operator-oriented-command" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Operator-oriented command
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#runtime-resource-bundle" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Runtime resource bundle
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Runtime resource bundle">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#overrides" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Overrides
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#inspect-resolution" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Inspect resolution
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#common-patterns" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Common Patterns
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Common Patterns">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#show-binary-metadata" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Show binary metadata
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#list-discovered-functions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        List discovered functions
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#disassemble-by-address" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Disassemble by address
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#decompile-one-function" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Decompile one function
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#decompile-a-bounded-batch" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Decompile a bounded batch
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#extract-strings" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Extract strings
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#decomp-command" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Decomp Command
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Decomp Command">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#required-target-selection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Required target selection
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#main-options" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Main options
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Main options">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#-profile-profile" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        --profile &lt;PROFILE&gt;
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#-engine-engine" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        --engine &lt;ENGINE&gt;
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#-compiler-id-id" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        --compiler-id &lt;ID&gt;
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#-timeout-ms-ms" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        --timeout-ms &lt;MS&gt;
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#-function-discovery-profile-profile" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        --function-discovery-profile &lt;PROFILE&gt;
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#-include-nonuser-functions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        --include-nonuser-functions
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#output-control" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Output control
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Output control">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#-json" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        --json
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#-output-file" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        --output &lt;FILE&gt;
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#-verbose" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        --verbose
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#-no-header" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        --no-header
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#-no-warnings" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        --no-warnings
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#-ghidra-compat" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        --ghidra-compat
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#-benchmark" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        --benchmark
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#info-command" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Info Command
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Info Command">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#base-form" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Base form
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#sectionimportexport-views" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Section/import/export views
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#detection-detections" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Detection (--detections)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#json-mode" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        JSON mode
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#list-command" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        List Command
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="List Command">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#examples" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Examples
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#disasm-command" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Disasm Command
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Disasm Command">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#required-option" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Required option
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#windowed-instruction-output" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Windowed instruction output
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#full-function-output" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Full-function output
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#json-mode_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        JSON mode
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#strings-command" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Strings Command
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Strings Command">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#examples_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Examples
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#default-threshold" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Default threshold
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#inventory-command" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Inventory Command
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Inventory Command">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#why-inventory-is-separate" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Why inventory is separate
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#inventory-function-facts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Inventory Function Facts
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Inventory Function Facts">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#basic-example" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Basic example
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#restrict-to-one-address" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Restrict to one address
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#address-file-input" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Address file input
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#batch-shaping-options" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Batch shaping options
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#decomp-related-execution-controls" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Decomp-related execution controls
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#inventory-preview-candidates" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Inventory Preview Candidates
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Inventory Preview Candidates">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#inventory-view" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Inventory view
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#batch-view" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Batch view
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#common-selectors" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Common selectors
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#execution-tuning" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Execution tuning
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#json-and-automation-notes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        JSON And Automation Notes
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="JSON And Automation Notes">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#when-to-prefer-json" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        When to prefer JSON
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#inventory-vs-decomp-json" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Inventory vs decomp JSON
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#legacy-compatibility" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Legacy Compatibility
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#recommended-workflows" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Recommended Workflows
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Recommended Workflows">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#human-inspection-workflow" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Human inspection workflow
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#small-local-batch-workflow" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Small local batch workflow
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#operator-inventory-workflow" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Operator inventory workflow
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#benchmark-adjacent-decomp-workflow" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Benchmark-adjacent decomp workflow
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#boundary-rules" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Boundary Rules
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#validation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Validation
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../architecture/ARCHITECTURE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../QUALITY_METRICS/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quality Metrics
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../EVALUATION/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Evaluation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../contributing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contributing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_8" >
+        
+          
+          <label class="md-nav__link" for="__nav_8" id="__nav_8_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Developer Policies
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_8_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_8">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Developer Policies
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../MALWARE_SAMPLE_POLICY/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Malware Sample Policy
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../VERSIONING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Versioning
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../RELEASE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Release
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#summary" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Summary
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#build-and-locate" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Build And Locate
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#command-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Command Model
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Command Model">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#human-facing-commands" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Human-facing commands
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#operator-oriented-command" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Operator-oriented command
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#runtime-resource-bundle" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Runtime resource bundle
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Runtime resource bundle">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#overrides" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Overrides
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#inspect-resolution" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Inspect resolution
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#common-patterns" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Common Patterns
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Common Patterns">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#show-binary-metadata" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Show binary metadata
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#list-discovered-functions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        List discovered functions
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#disassemble-by-address" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Disassemble by address
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#decompile-one-function" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Decompile one function
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#decompile-a-bounded-batch" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Decompile a bounded batch
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#extract-strings" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Extract strings
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#decomp-command" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Decomp Command
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Decomp Command">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#required-target-selection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Required target selection
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#main-options" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Main options
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Main options">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#-profile-profile" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        --profile &lt;PROFILE&gt;
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#-engine-engine" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        --engine &lt;ENGINE&gt;
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#-compiler-id-id" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        --compiler-id &lt;ID&gt;
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#-timeout-ms-ms" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        --timeout-ms &lt;MS&gt;
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#-function-discovery-profile-profile" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        --function-discovery-profile &lt;PROFILE&gt;
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#-include-nonuser-functions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        --include-nonuser-functions
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#output-control" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Output control
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Output control">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#-json" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        --json
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#-output-file" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        --output &lt;FILE&gt;
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#-verbose" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        --verbose
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#-no-header" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        --no-header
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#-no-warnings" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        --no-warnings
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#-ghidra-compat" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        --ghidra-compat
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#-benchmark" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        --benchmark
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#info-command" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Info Command
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Info Command">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#base-form" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Base form
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#sectionimportexport-views" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Section/import/export views
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#detection-detections" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Detection (--detections)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#json-mode" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        JSON mode
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#list-command" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        List Command
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="List Command">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#examples" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Examples
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#disasm-command" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Disasm Command
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Disasm Command">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#required-option" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Required option
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#windowed-instruction-output" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Windowed instruction output
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#full-function-output" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Full-function output
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#json-mode_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        JSON mode
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#strings-command" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Strings Command
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Strings Command">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#examples_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Examples
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#default-threshold" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Default threshold
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#inventory-command" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Inventory Command
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Inventory Command">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#why-inventory-is-separate" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Why inventory is separate
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#inventory-function-facts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Inventory Function Facts
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Inventory Function Facts">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#basic-example" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Basic example
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#restrict-to-one-address" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Restrict to one address
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#address-file-input" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Address file input
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#batch-shaping-options" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Batch shaping options
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#decomp-related-execution-controls" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Decomp-related execution controls
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#inventory-preview-candidates" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Inventory Preview Candidates
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Inventory Preview Candidates">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#inventory-view" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Inventory view
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#batch-view" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Batch view
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#common-selectors" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Common selectors
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#execution-tuning" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Execution tuning
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#json-and-automation-notes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        JSON And Automation Notes
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="JSON And Automation Notes">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#when-to-prefer-json" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        When to prefer JSON
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#inventory-vs-decomp-json" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Inventory vs decomp JSON
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#legacy-compatibility" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Legacy Compatibility
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#recommended-workflows" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Recommended Workflows
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Recommended Workflows">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#human-inspection-workflow" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Human inspection workflow
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#small-local-batch-workflow" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Small local batch workflow
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#operator-inventory-workflow" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Operator inventory workflow
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#benchmark-adjacent-decomp-workflow" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Benchmark-adjacent decomp workflow
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#boundary-rules" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Boundary Rules
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#validation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Validation
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="fission-cli-reference">Fission CLI Reference<a class="headerlink" href="#fission-cli-reference" title="Permanent link">&para;</a></h1>
+<h2 id="summary">Summary<a class="headerlink" href="#summary" title="Permanent link">&para;</a></h2>
+<p><code>fission_cli</code> is the canonical headless product surface for Fission.</p>
+<p>If you are evaluating Fission from the outside and want the shortest first-run path, start with <a href="../EVALUATION/">EVALUATION.md</a>. This document remains the detailed command reference.</p>
+<p>Use it when you want to:</p>
+<ul>
+<li>inspect a binary from the terminal</li>
+<li>list discovered functions</li>
+<li>disassemble by address</li>
+<li>decompile one function or a bounded batch of functions</li>
+<li>extract strings</li>
+<li>emit operator-grade inventories for automation and corpus work</li>
+</ul>
+<p>The CLI is intentionally split into explicit subcommands:</p>
+<ul>
+<li><code>info</code></li>
+<li><code>list</code></li>
+<li><code>disasm</code></li>
+<li><code>decomp</code></li>
+<li><code>strings</code></li>
+<li><code>xrefs</code></li>
+<li><code>inventory</code></li>
+<li><code>resources</code> (resolved signature / detector bundle diagnostics)</li>
+<li><code>script</code> (Rhai)</li>
+</ul>
+<p>Legacy flat invocations still work for one transition period, but they are deprecated compatibility shims. New usage should always use the subcommand form.</p>
+<hr />
+<h2 id="build-and-locate">Build And Locate<a class="headerlink" href="#build-and-locate" title="Permanent link">&para;</a></h2>
+<p>Build the canonical binary:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>cargo<span class="w"> </span>build<span class="w"> </span>-p<span class="w"> </span>fission-cli<span class="w"> </span>--release
+</span></code></pre></div>
+<p>The default output path is:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>target/release/fission_cli
+</span></code></pre></div>
+<p>For local development:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>cargo<span class="w"> </span>run<span class="w"> </span>-p<span class="w"> </span>fission-cli<span class="w"> </span>--<span class="w"> </span>--help
+</span></code></pre></div>
+<hr />
+<h2 id="command-model">Command Model<a class="headerlink" href="#command-model" title="Permanent link">&para;</a></h2>
+<h3 id="human-facing-commands">Human-facing commands<a class="headerlink" href="#human-facing-commands" title="Permanent link">&para;</a></h3>
+<p>These are the commands most users should start with:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>fission_cli<span class="w"> </span>info<span class="w"> </span>&lt;binary&gt;
+</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>fission_cli<span class="w"> </span>list<span class="w"> </span>&lt;binary&gt;
+</span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>fission_cli<span class="w"> </span>disasm<span class="w"> </span>&lt;binary&gt;<span class="w"> </span>--addr<span class="w"> </span>&lt;ADDR&gt;
+</span><span id="__span-3-4"><a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>fission_cli<span class="w"> </span>decomp<span class="w"> </span>&lt;binary&gt;<span class="w"> </span>--addr<span class="w"> </span>&lt;ADDR&gt;
+</span><span id="__span-3-5"><a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>fission_cli<span class="w"> </span>strings<span class="w"> </span>&lt;binary&gt;
+</span></code></pre></div>
+<h3 id="operator-oriented-command">Operator-oriented command<a class="headerlink" href="#operator-oriented-command" title="Permanent link">&para;</a></h3>
+<p>This command family is for automation, batch emitters, corpus curation, and offline reporting:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>fission_cli<span class="w"> </span>inventory<span class="w"> </span>&lt;SUBCOMMAND&gt;<span class="w"> </span>...
+</span></code></pre></div>
+<p><code>inventory</code> is intentionally separated from the normal <code>decomp</code> path so the human-facing surface does not keep growing with batch-only flags.</p>
+<hr />
+<h2 id="runtime-resource-bundle">Runtime resource bundle<a class="headerlink" href="#runtime-resource-bundle" title="Permanent link">&para;</a></h2>
+<p>FID databases, Detect It Easy corpora, Win32 typeinfo JSON, pattern signatures, and related assets resolve through <strong><code>fission_core::PATHS</code></strong> (<code>PathConfig::detect</code> in <a href="../crates/fission-core/src/core/path_config.rs"><code>crates/fission-core/src/core/path_config.rs</code></a>, with bundle-root probing in <a href="../crates/fission-core/src/core/resource_roots.rs"><code>resource_roots.rs</code></a>). In this repository the canonical checked-in tree remains <strong><code>utils/signatures</code></strong>; installs may ship the same layout under a bundle root such as <strong><code>{bundle}/signatures/</code></strong>.</p>
+<h3 id="overrides">Overrides<a class="headerlink" href="#overrides" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Mechanism</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong><code>--resource-root &lt;DIR&gt;</code></strong></td>
+<td>Global CLI flag (may appear <strong>before</strong> the subcommand). Stored via <code>fission_core::resource_roots::set_cli_resource_bundle_root</code> during canonical parsing. Must be applied <strong>before the first read of <code>PATHS</code></strong> in-process (<code>PATHS</code> is lazily initialized once).</td>
+</tr>
+<tr>
+<td><strong><code>FISSION_RESOURCE_ROOT</code></strong></td>
+<td>Environment variable pointing at a bundle root directory (typically containing a <code>signatures</code> subdirectory).</td>
+</tr>
+</tbody>
+</table>
+<p>After those, detection considers executable-adjacent paths (<code>fission-data</code>, <code>share/fission</code>, common Unix prefixes), user data directories (<code>XDG_DATA_HOME</code>, platform data dirs), then existing workspace discovery (<code>FISSION_ROOT</code> / upward markers with <code>signatures</code> or <code>utils/signatures</code>), then legacy CWD-relative search paths. Missing optional corpora keep prior <strong>degraded</strong> behavior (optional <code>None</code> paths); pipelines must not fail closed solely because DiE or type corpora are absent.</p>
+<h3 id="inspect-resolution">Inspect resolution<a class="headerlink" href="#inspect-resolution" title="Permanent link">&para;</a></h3>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>fission_cli<span class="w"> </span>resources<span class="w"> </span>status
+</span><span id="__span-5-2"><a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>fission_cli<span class="w"> </span>resources<span class="w"> </span>status<span class="w"> </span>--json
+</span><span id="__span-5-3"><a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>fission_cli<span class="w"> </span>--resource-root<span class="w"> </span>/path/to/fission-data<span class="w"> </span>resources<span class="w"> </span>status<span class="w"> </span>--json
+</span></code></pre></div>
+<p>Use <strong><code>--json</code></strong> when automation needs stable fields (<code>resource_roots</code>, <code>resources</code>).</p>
+<hr />
+<h2 id="common-patterns">Common Patterns<a class="headerlink" href="#common-patterns" title="Permanent link">&para;</a></h2>
+<h3 id="show-binary-metadata">Show binary metadata<a class="headerlink" href="#show-binary-metadata" title="Permanent link">&para;</a></h3>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>fission_cli<span class="w"> </span>info<span class="w"> </span>app.exe
+</span></code></pre></div>
+<p>Optional inventories:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>fission_cli<span class="w"> </span>info<span class="w"> </span>app.exe<span class="w"> </span>--sections
+</span><span id="__span-7-2"><a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>fission_cli<span class="w"> </span>info<span class="w"> </span>app.exe<span class="w"> </span>--imports
+</span><span id="__span-7-3"><a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a>fission_cli<span class="w"> </span>info<span class="w"> </span>app.exe<span class="w"> </span>--exports
+</span><span id="__span-7-4"><a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a>fission_cli<span class="w"> </span>info<span class="w"> </span>app.exe<span class="w"> </span>--imports<span class="w"> </span>--json
+</span><span id="__span-7-5"><a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a>fission_cli<span class="w"> </span>info<span class="w"> </span>app.exe<span class="w"> </span>--detections
+</span><span id="__span-7-6"><a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a>fission_cli<span class="w"> </span>info<span class="w"> </span>app.exe<span class="w"> </span>--detections<span class="w"> </span>--json
+</span></code></pre></div>
+<p>Use <code>info</code> when you want quick metadata and binary inventory without starting a decompilation workflow.</p>
+<h3 id="list-discovered-functions">List discovered functions<a class="headerlink" href="#list-discovered-functions" title="Permanent link">&para;</a></h3>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-8-1"><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>fission_cli<span class="w"> </span>list<span class="w"> </span>app.exe
+</span><span id="__span-8-2"><a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>fission_cli<span class="w"> </span>list<span class="w"> </span>app.exe<span class="w"> </span>--json
+</span></code></pre></div>
+<p>Use <code>list</code> to discover candidate addresses before running targeted <code>disasm</code> or <code>decomp</code>.</p>
+<h3 id="disassemble-by-address">Disassemble by address<a class="headerlink" href="#disassemble-by-address" title="Permanent link">&para;</a></h3>
+<p>Instruction-window form:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-9-1"><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>fission_cli<span class="w"> </span>disasm<span class="w"> </span>app.exe<span class="w"> </span>--addr<span class="w"> </span>0x140001000
+</span><span id="__span-9-2"><a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>fission_cli<span class="w"> </span>disasm<span class="w"> </span>app.exe<span class="w"> </span>--addr<span class="w"> </span>0x140001000<span class="w"> </span>--count<span class="w"> </span><span class="m">64</span>
+</span></code></pre></div>
+<p>Full-function form:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-10-1"><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a>fission_cli<span class="w"> </span>disasm<span class="w"> </span>app.exe<span class="w"> </span>--addr<span class="w"> </span>0x140001000<span class="w"> </span>--function
+</span><span id="__span-10-2"><a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a>fission_cli<span class="w"> </span>disasm<span class="w"> </span>app.exe<span class="w"> </span>--addr<span class="w"> </span>0x140001000<span class="w"> </span>--function<span class="w"> </span>--json
+</span></code></pre></div>
+<p>Use <code>--function</code> when you want function boundaries instead of a fixed number of instructions.</p>
+<h3 id="decompile-one-function">Decompile one function<a class="headerlink" href="#decompile-one-function" title="Permanent link">&para;</a></h3>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-11-1"><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a>fission_cli<span class="w"> </span>decomp<span class="w"> </span>app.exe<span class="w"> </span>--addr<span class="w"> </span>0x140001000
+</span></code></pre></div>
+<p>Common variants:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-12-1"><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a>fission_cli<span class="w"> </span>decomp<span class="w"> </span>app.exe<span class="w"> </span>--addr<span class="w"> </span>0x140001000<span class="w"> </span>--ghidra-compat
+</span><span id="__span-12-2"><a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a>fission_cli<span class="w"> </span>decomp<span class="w"> </span>app.exe<span class="w"> </span>--addr<span class="w"> </span>0x140001000<span class="w"> </span>--json
+</span><span id="__span-12-3"><a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a>fission_cli<span class="w"> </span>decomp<span class="w"> </span>app.exe<span class="w"> </span>--addr<span class="w"> </span>0x140001000<span class="w"> </span>--output<span class="w"> </span>out.c
+</span><span id="__span-12-4"><a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a>fission_cli<span class="w"> </span>decomp<span class="w"> </span>app.exe<span class="w"> </span>--addr<span class="w"> </span>0x140001000<span class="w"> </span>--timeout-ms<span class="w"> </span><span class="m">1500</span>
+</span></code></pre></div>
+<h3 id="decompile-a-bounded-batch">Decompile a bounded batch<a class="headerlink" href="#decompile-a-bounded-batch" title="Permanent link">&para;</a></h3>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-13-1"><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a>fission_cli<span class="w"> </span>decomp<span class="w"> </span>app.exe<span class="w"> </span>--all<span class="w"> </span>--limit<span class="w"> </span><span class="m">10</span>
+</span><span id="__span-13-2"><a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a>fission_cli<span class="w"> </span>decomp<span class="w"> </span>app.exe<span class="w"> </span>--all<span class="w"> </span>--limit<span class="w"> </span><span class="m">10</span><span class="w"> </span>--json
+</span></code></pre></div>
+<p><code>--all</code> exists for bounded batch-style local runs. It is not the operator-grade inventory surface.</p>
+<h3 id="extract-strings">Extract strings<a class="headerlink" href="#extract-strings" title="Permanent link">&para;</a></h3>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-14-1"><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a>fission_cli<span class="w"> </span>strings<span class="w"> </span>app.exe
+</span><span id="__span-14-2"><a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a>fission_cli<span class="w"> </span>strings<span class="w"> </span>app.exe<span class="w"> </span>--min-len<span class="w"> </span><span class="m">8</span>
+</span><span id="__span-14-3"><a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a>fission_cli<span class="w"> </span>strings<span class="w"> </span>app.exe<span class="w"> </span>--min-len<span class="w"> </span><span class="m">8</span><span class="w"> </span>--json
+</span></code></pre></div>
+<hr />
+<h2 id="decomp-command">Decomp Command<a class="headerlink" href="#decomp-command" title="Permanent link">&para;</a></h2>
+<p><code>decomp</code> is the canonical human-facing decompilation entrypoint.</p>
+<h3 id="required-target-selection">Required target selection<a class="headerlink" href="#required-target-selection" title="Permanent link">&para;</a></h3>
+<p>Exactly one of these must be provided:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-15-1"><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a>--addr<span class="w"> </span>&lt;ADDR&gt;
+</span><span id="__span-15-2"><a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a>--all
+</span></code></pre></div>
+<p>Examples:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-16-1"><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a>fission_cli<span class="w"> </span>decomp<span class="w"> </span>app.exe<span class="w"> </span>--addr<span class="w"> </span>0x140001000
+</span><span id="__span-16-2"><a id="__codelineno-16-2" name="__codelineno-16-2" href="#__codelineno-16-2"></a>fission_cli<span class="w"> </span>decomp<span class="w"> </span>app.exe<span class="w"> </span>--all<span class="w"> </span>--limit<span class="w"> </span><span class="m">25</span>
+</span></code></pre></div>
+<h3 id="main-options">Main options<a class="headerlink" href="#main-options" title="Permanent link">&para;</a></h3>
+<h4 id="-profile-profile"><code>--profile &lt;PROFILE&gt;</code><a class="headerlink" href="#-profile-profile" title="Permanent link">&para;</a></h4>
+<p>Selects the decompilation profile.</p>
+<p>Current documented values:</p>
+<ul>
+<li><code>balanced</code></li>
+<li><code>quality</code></li>
+<li><code>speed</code></li>
+<li><code>nir</code></li>
+</ul>
+<p>Compatibility note:</p>
+<ul>
+<li><code>mlil-preview</code> remains a deprecated alias in compatibility paths</li>
+</ul>
+<h4 id="-engine-engine"><code>--engine &lt;ENGINE&gt;</code><a class="headerlink" href="#-engine-engine" title="Permanent link">&para;</a></h4>
+<p>Selects the decompilation engine.</p>
+<p>Current documented values:</p>
+<ul>
+<li><code>auto</code></li>
+<li><code>nir</code></li>
+<li><code>rust-sleigh</code></li>
+</ul>
+<p>Compatibility note:</p>
+<ul>
+<li><code>mlil-preview</code> remains a deprecated alias</li>
+<li><code>legacy</code> is hidden compatibility behavior, not the canonical public surface</li>
+</ul>
+<h4 id="-compiler-id-id"><code>--compiler-id &lt;ID&gt;</code><a class="headerlink" href="#-compiler-id-id" title="Permanent link">&para;</a></h4>
+<p>Overrides compiler ABI hints:</p>
+<ul>
+<li><code>auto</code></li>
+<li><code>windows</code></li>
+<li><code>gcc</code></li>
+<li><code>clang</code></li>
+<li><code>default</code></li>
+</ul>
+<h4 id="-timeout-ms-ms"><code>--timeout-ms &lt;MS&gt;</code><a class="headerlink" href="#-timeout-ms-ms" title="Permanent link">&para;</a></h4>
+<p>Per-function timeout in milliseconds.</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-17-1"><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a>fission_cli<span class="w"> </span>decomp<span class="w"> </span>app.exe<span class="w"> </span>--addr<span class="w"> </span>0x140001000<span class="w"> </span>--timeout-ms<span class="w"> </span><span class="m">1500</span>
+</span></code></pre></div>
+<p>Use <code>0</code> to mean no timeout where supported by the current execution path.</p>
+<h4 id="-function-discovery-profile-profile"><code>--function-discovery-profile &lt;PROFILE&gt;</code><a class="headerlink" href="#-function-discovery-profile-profile" title="Permanent link">&para;</a></h4>
+<p>Controls extra function discovery before execution:</p>
+<ul>
+<li><code>conservative</code></li>
+<li><code>balanced</code></li>
+<li><code>aggressive</code></li>
+</ul>
+<p>Example:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-18-1"><a id="__codelineno-18-1" name="__codelineno-18-1" href="#__codelineno-18-1"></a>fission_cli<span class="w"> </span>decomp<span class="w"> </span>app.exe<span class="w"> </span>--all<span class="w"> </span>--limit<span class="w"> </span><span class="m">20</span><span class="w"> </span>--function-discovery-profile<span class="w"> </span>balanced
+</span></code></pre></div>
+<h4 id="-include-nonuser-functions"><code>--include-nonuser-functions</code><a class="headerlink" href="#-include-nonuser-functions" title="Permanent link">&para;</a></h4>
+<p>By default, <code>decomp --all</code> filters imported functions and the zero-size <code>register_frame_ctor</code>
+runtime wrapper so batch throughput reflects user-facing functions rather than CRT/runtime noise.</p>
+<p>Use this flag to restore compatibility/forensics coverage of those non-user functions:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-19-1"><a id="__codelineno-19-1" name="__codelineno-19-1" href="#__codelineno-19-1"></a>fission_cli<span class="w"> </span>decomp<span class="w"> </span>app.exe<span class="w"> </span>--all<span class="w"> </span>--include-nonuser-functions<span class="w"> </span>--json
+</span></code></pre></div>
+<h3 id="output-control">Output control<a class="headerlink" href="#output-control" title="Permanent link">&para;</a></h3>
+<h4 id="-json"><code>--json</code><a class="headerlink" href="#-json" title="Permanent link">&para;</a></h4>
+<p>Emits machine-readable JSON output instead of plain text.</p>
+<p>Use this for automation and pipelines.</p>
+<h4 id="-output-file"><code>--output &lt;FILE&gt;</code><a class="headerlink" href="#-output-file" title="Permanent link">&para;</a></h4>
+<p>Writes output to a file instead of stdout.</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-20-1"><a id="__codelineno-20-1" name="__codelineno-20-1" href="#__codelineno-20-1"></a>fission_cli<span class="w"> </span>decomp<span class="w"> </span>app.exe<span class="w"> </span>--addr<span class="w"> </span>0x140001000<span class="w"> </span>--output<span class="w"> </span>out.c
+</span></code></pre></div>
+<h4 id="-verbose"><code>--verbose</code><a class="headerlink" href="#-verbose" title="Permanent link">&para;</a></h4>
+<p>Emits extra progress and setup detail.</p>
+<h4 id="-no-header"><code>--no-header</code><a class="headerlink" href="#-no-header" title="Permanent link">&para;</a></h4>
+<p>Suppresses the generated function banner comment in the text output.</p>
+<h4 id="-no-warnings"><code>--no-warnings</code><a class="headerlink" href="#-no-warnings" title="Permanent link">&para;</a></h4>
+<p>Suppresses <code>WARNING</code> and <code>NOTICE</code> diagnostics in text output.</p>
+<h4 id="-ghidra-compat"><code>--ghidra-compat</code><a class="headerlink" href="#-ghidra-compat" title="Permanent link">&para;</a></h4>
+<p>Requests a more Ghidra-compatible output mode.</p>
+<p>Use this when you want output closer to current benchmark and comparison surfaces.</p>
+<h4 id="-benchmark"><code>--benchmark</code><a class="headerlink" href="#-benchmark" title="Permanent link">&para;</a></h4>
+<p>Adds timing metadata in JSON output.</p>
+<p>This is useful for benchmark/reporting workflows, but it does not turn <code>decomp</code> into the corpus benchmark runner.</p>
+<hr />
+<h2 id="info-command">Info Command<a class="headerlink" href="#info-command" title="Permanent link">&para;</a></h2>
+<p><code>info</code> is the metadata and binary inventory surface.</p>
+<h3 id="base-form">Base form<a class="headerlink" href="#base-form" title="Permanent link">&para;</a></h3>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-21-1"><a id="__codelineno-21-1" name="__codelineno-21-1" href="#__codelineno-21-1"></a>fission_cli<span class="w"> </span>info<span class="w"> </span>app.exe
+</span></code></pre></div>
+<h3 id="sectionimportexport-views">Section/import/export views<a class="headerlink" href="#sectionimportexport-views" title="Permanent link">&para;</a></h3>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-22-1"><a id="__codelineno-22-1" name="__codelineno-22-1" href="#__codelineno-22-1"></a>fission_cli<span class="w"> </span>info<span class="w"> </span>app.exe<span class="w"> </span>--sections
+</span><span id="__span-22-2"><a id="__codelineno-22-2" name="__codelineno-22-2" href="#__codelineno-22-2"></a>fission_cli<span class="w"> </span>info<span class="w"> </span>app.exe<span class="w"> </span>--imports
+</span><span id="__span-22-3"><a id="__codelineno-22-3" name="__codelineno-22-3" href="#__codelineno-22-3"></a>fission_cli<span class="w"> </span>info<span class="w"> </span>app.exe<span class="w"> </span>--exports
+</span></code></pre></div>
+<p>If none of those flags are provided, <code>info</code> falls back to the base metadata view.</p>
+<h3 id="detection-detections">Detection (<code>--detections</code>)<a class="headerlink" href="#detection-detections" title="Permanent link">&para;</a></h3>
+<p>Add <code>--detections</code> on the base metadata path (without <code>--sections</code>, <code>--imports</code>, or <code>--exports</code>) to run integrated binary identification: loader rules plus Detect It Easy-style signatures mirrored under <code>utils/signatures</code>. Human output appends a <strong>Detections</strong> block; with <code>--json</code>, the payload gains a <code>detections</code> array (<code>detection_type</code>, <code>name</code>, <code>version</code>, <code>details</code>, <code>confidence</code>).</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-23-1"><a id="__codelineno-23-1" name="__codelineno-23-1" href="#__codelineno-23-1"></a>fission_cli<span class="w"> </span>info<span class="w"> </span>app.exe<span class="w"> </span>--detections
+</span><span id="__span-23-2"><a id="__codelineno-23-2" name="__codelineno-23-2" href="#__codelineno-23-2"></a>fission_cli<span class="w"> </span>info<span class="w"> </span>app.exe<span class="w"> </span>--detections<span class="w"> </span>--json
+</span></code></pre></div>
+<h3 id="json-mode">JSON mode<a class="headerlink" href="#json-mode" title="Permanent link">&para;</a></h3>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-24-1"><a id="__codelineno-24-1" name="__codelineno-24-1" href="#__codelineno-24-1"></a>fission_cli<span class="w"> </span>info<span class="w"> </span>app.exe<span class="w"> </span>--sections<span class="w"> </span>--json
+</span></code></pre></div>
+<p>Use JSON mode when another tool needs to consume the inventory.</p>
+<hr />
+<h2 id="list-command">List Command<a class="headerlink" href="#list-command" title="Permanent link">&para;</a></h2>
+<p><code>list</code> prints discovered functions for a binary.</p>
+<h3 id="examples">Examples<a class="headerlink" href="#examples" title="Permanent link">&para;</a></h3>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-25-1"><a id="__codelineno-25-1" name="__codelineno-25-1" href="#__codelineno-25-1"></a>fission_cli<span class="w"> </span>list<span class="w"> </span>app.exe
+</span><span id="__span-25-2"><a id="__codelineno-25-2" name="__codelineno-25-2" href="#__codelineno-25-2"></a>fission_cli<span class="w"> </span>list<span class="w"> </span>app.exe<span class="w"> </span>--json
+</span></code></pre></div>
+<p>Typical workflow:</p>
+<ol>
+<li>run <code>list</code></li>
+<li>pick an address</li>
+<li>run <code>disasm --addr ...</code> or <code>decomp --addr ...</code></li>
+</ol>
+<hr />
+<h2 id="disasm-command">Disasm Command<a class="headerlink" href="#disasm-command" title="Permanent link">&para;</a></h2>
+<p><code>disasm</code> is the address-targeted disassembly surface.</p>
+<h3 id="required-option">Required option<a class="headerlink" href="#required-option" title="Permanent link">&para;</a></h3>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-26-1"><a id="__codelineno-26-1" name="__codelineno-26-1" href="#__codelineno-26-1"></a>--addr<span class="w"> </span>&lt;ADDR&gt;
+</span></code></pre></div>
+<h3 id="windowed-instruction-output">Windowed instruction output<a class="headerlink" href="#windowed-instruction-output" title="Permanent link">&para;</a></h3>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-27-1"><a id="__codelineno-27-1" name="__codelineno-27-1" href="#__codelineno-27-1"></a>fission_cli<span class="w"> </span>disasm<span class="w"> </span>app.exe<span class="w"> </span>--addr<span class="w"> </span>0x140001000
+</span><span id="__span-27-2"><a id="__codelineno-27-2" name="__codelineno-27-2" href="#__codelineno-27-2"></a>fission_cli<span class="w"> </span>disasm<span class="w"> </span>app.exe<span class="w"> </span>--addr<span class="w"> </span>0x140001000<span class="w"> </span>--count<span class="w"> </span><span class="m">64</span>
+</span></code></pre></div>
+<h3 id="full-function-output">Full-function output<a class="headerlink" href="#full-function-output" title="Permanent link">&para;</a></h3>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-28-1"><a id="__codelineno-28-1" name="__codelineno-28-1" href="#__codelineno-28-1"></a>fission_cli<span class="w"> </span>disasm<span class="w"> </span>app.exe<span class="w"> </span>--addr<span class="w"> </span>0x140001000<span class="w"> </span>--function
+</span></code></pre></div>
+<h3 id="json-mode_1">JSON mode<a class="headerlink" href="#json-mode_1" title="Permanent link">&para;</a></h3>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-29-1"><a id="__codelineno-29-1" name="__codelineno-29-1" href="#__codelineno-29-1"></a>fission_cli<span class="w"> </span>disasm<span class="w"> </span>app.exe<span class="w"> </span>--addr<span class="w"> </span>0x140001000<span class="w"> </span>--function<span class="w"> </span>--json
+</span></code></pre></div>
+<hr />
+<h2 id="strings-command">Strings Command<a class="headerlink" href="#strings-command" title="Permanent link">&para;</a></h2>
+<p><code>strings</code> extracts printable strings from the binary image.</p>
+<h3 id="examples_1">Examples<a class="headerlink" href="#examples_1" title="Permanent link">&para;</a></h3>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-30-1"><a id="__codelineno-30-1" name="__codelineno-30-1" href="#__codelineno-30-1"></a>fission_cli<span class="w"> </span>strings<span class="w"> </span>app.exe
+</span><span id="__span-30-2"><a id="__codelineno-30-2" name="__codelineno-30-2" href="#__codelineno-30-2"></a>fission_cli<span class="w"> </span>strings<span class="w"> </span>app.exe<span class="w"> </span>--min-len<span class="w"> </span><span class="m">8</span>
+</span><span id="__span-30-3"><a id="__codelineno-30-3" name="__codelineno-30-3" href="#__codelineno-30-3"></a>fission_cli<span class="w"> </span>strings<span class="w"> </span>app.exe<span class="w"> </span>--min-len<span class="w"> </span><span class="m">8</span><span class="w"> </span>--json
+</span></code></pre></div>
+<h3 id="default-threshold">Default threshold<a class="headerlink" href="#default-threshold" title="Permanent link">&para;</a></h3>
+<p>If <code>--min-len</code> is not provided, the current default is <code>4</code>.</p>
+<hr />
+<h2 id="inventory-command">Inventory Command<a class="headerlink" href="#inventory-command" title="Permanent link">&para;</a></h2>
+<p><code>inventory</code> is the operator-oriented surface. Use it when you need structured batch emitters, corpus-candidate views, or automation input artifacts.</p>
+<p>It currently exposes:</p>
+<ul>
+<li><code>function-facts</code></li>
+<li><code>preview-candidates</code></li>
+</ul>
+<h3 id="why-inventory-is-separate">Why inventory is separate<a class="headerlink" href="#why-inventory-is-separate" title="Permanent link">&para;</a></h3>
+<p><code>inventory</code> exists to keep these batch-only and reporting-oriented controls out of the normal <code>decomp</code> surface. If a flag exists only for batch emitters, it belongs here.</p>
+<hr />
+<h2 id="inventory-function-facts">Inventory Function Facts<a class="headerlink" href="#inventory-function-facts" title="Permanent link">&para;</a></h2>
+<p>This subcommand emits whole-binary function facts as JSONL plus an optional summary JSON.</p>
+<h3 id="basic-example">Basic example<a class="headerlink" href="#basic-example" title="Permanent link">&para;</a></h3>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-31-1"><a id="__codelineno-31-1" name="__codelineno-31-1" href="#__codelineno-31-1"></a>fission_cli<span class="w"> </span>inventory<span class="w"> </span><span class="k">function</span>-facts<span class="w"> </span>app.exe<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-31-2"><a id="__codelineno-31-2" name="__codelineno-31-2" href="#__codelineno-31-2"></a><span class="w">  </span>--output-jsonl<span class="w"> </span>rows.jsonl<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-31-3"><a id="__codelineno-31-3" name="__codelineno-31-3" href="#__codelineno-31-3"></a><span class="w">  </span>--summary-json<span class="w"> </span>summary.json
+</span></code></pre></div>
+<p>By default, whole-binary inventory selection also filters imported functions and the zero-size
+<code>register_frame_ctor</code> runtime wrapper. Use <code>--include-nonuser-functions</code> when you intentionally
+want full compatibility/forensics coverage.</p>
+<h3 id="restrict-to-one-address">Restrict to one address<a class="headerlink" href="#restrict-to-one-address" title="Permanent link">&para;</a></h3>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-32-1"><a id="__codelineno-32-1" name="__codelineno-32-1" href="#__codelineno-32-1"></a>fission_cli<span class="w"> </span>inventory<span class="w"> </span><span class="k">function</span>-facts<span class="w"> </span>app.exe<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-32-2"><a id="__codelineno-32-2" name="__codelineno-32-2" href="#__codelineno-32-2"></a><span class="w">  </span>--addr<span class="w"> </span>0x140001000<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-32-3"><a id="__codelineno-32-3" name="__codelineno-32-3" href="#__codelineno-32-3"></a><span class="w">  </span>--summary-json<span class="w"> </span>summary.json
+</span></code></pre></div>
+<h3 id="address-file-input">Address file input<a class="headerlink" href="#address-file-input" title="Permanent link">&para;</a></h3>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-33-1"><a id="__codelineno-33-1" name="__codelineno-33-1" href="#__codelineno-33-1"></a>fission_cli<span class="w"> </span>inventory<span class="w"> </span><span class="k">function</span>-facts<span class="w"> </span>app.exe<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-33-2"><a id="__codelineno-33-2" name="__codelineno-33-2" href="#__codelineno-33-2"></a><span class="w">  </span>--addresses-file<span class="w"> </span>addrs.txt<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-33-3"><a id="__codelineno-33-3" name="__codelineno-33-3" href="#__codelineno-33-3"></a><span class="w">  </span>--output-jsonl<span class="w"> </span>rows.jsonl<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-33-4"><a id="__codelineno-33-4" name="__codelineno-33-4" href="#__codelineno-33-4"></a><span class="w">  </span>--summary-json<span class="w"> </span>summary.json
+</span></code></pre></div>
+<h3 id="batch-shaping-options">Batch shaping options<a class="headerlink" href="#batch-shaping-options" title="Permanent link">&para;</a></h3>
+<ul>
+<li><code>--functions-limit &lt;N&gt;</code></li>
+<li><code>--include-nonuser-functions</code></li>
+<li><code>--chunk-size &lt;N&gt;</code></li>
+<li><code>--resume-from &lt;FILE&gt;</code></li>
+<li><code>--quiet-batch-errors</code></li>
+</ul>
+<h3 id="decomp-related-execution-controls">Decomp-related execution controls<a class="headerlink" href="#decomp-related-execution-controls" title="Permanent link">&para;</a></h3>
+<ul>
+<li><code>--compiler-id &lt;ID&gt;</code></li>
+<li><code>--profile &lt;PROFILE&gt;</code></li>
+<li><code>--timeout-ms &lt;MS&gt;</code></li>
+<li><code>--function-discovery-profile &lt;PROFILE&gt;</code></li>
+</ul>
+<p>Use these only when inventory emission needs to align with a specific analysis configuration.</p>
+<hr />
+<h2 id="inventory-preview-candidates">Inventory Preview Candidates<a class="headerlink" href="#inventory-preview-candidates" title="Permanent link">&para;</a></h2>
+<p>This subcommand emits preview candidate inventory rows or performs preview candidate batch scans.</p>
+<h3 id="inventory-view">Inventory view<a class="headerlink" href="#inventory-view" title="Permanent link">&para;</a></h3>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-34-1"><a id="__codelineno-34-1" name="__codelineno-34-1" href="#__codelineno-34-1"></a>fission_cli<span class="w"> </span>inventory<span class="w"> </span>preview-candidates<span class="w"> </span>app.exe<span class="w"> </span>--inventory
+</span></code></pre></div>
+<h3 id="batch-view">Batch view<a class="headerlink" href="#batch-view" title="Permanent link">&para;</a></h3>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-35-1"><a id="__codelineno-35-1" name="__codelineno-35-1" href="#__codelineno-35-1"></a>fission_cli<span class="w"> </span>inventory<span class="w"> </span>preview-candidates<span class="w"> </span>app.exe<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-35-2"><a id="__codelineno-35-2" name="__codelineno-35-2" href="#__codelineno-35-2"></a><span class="w">  </span>--batch<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-35-3"><a id="__codelineno-35-3" name="__codelineno-35-3" href="#__codelineno-35-3"></a><span class="w">  </span>--output-jsonl<span class="w"> </span>rows.jsonl<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-35-4"><a id="__codelineno-35-4" name="__codelineno-35-4" href="#__codelineno-35-4"></a><span class="w">  </span>--summary-json<span class="w"> </span>summary.json
+</span></code></pre></div>
+<h3 id="common-selectors">Common selectors<a class="headerlink" href="#common-selectors" title="Permanent link">&para;</a></h3>
+<ul>
+<li><code>--addr &lt;ADDR&gt;</code></li>
+<li><code>--preview-candidate-limit &lt;N&gt;</code></li>
+<li><code>--include-nonuser-functions</code></li>
+<li><code>--addresses-file &lt;FILE&gt;</code></li>
+<li><code>--functions-limit &lt;N&gt;</code></li>
+<li><code>--chunk-size &lt;N&gt;</code></li>
+<li><code>--resume-from &lt;FILE&gt;</code></li>
+</ul>
+<h3 id="execution-tuning">Execution tuning<a class="headerlink" href="#execution-tuning" title="Permanent link">&para;</a></h3>
+<ul>
+<li><code>--compiler-id &lt;ID&gt;</code></li>
+<li><code>--profile &lt;PROFILE&gt;</code></li>
+<li><code>--timeout-ms &lt;MS&gt;</code></li>
+<li><code>--function-discovery-profile &lt;PROFILE&gt;</code></li>
+<li><code>--quiet-batch-errors</code></li>
+</ul>
+<p>This command is for corpus curation and candidate analysis, not normal first-pass decompilation.</p>
+<hr />
+<h2 id="json-and-automation-notes">JSON And Automation Notes<a class="headerlink" href="#json-and-automation-notes" title="Permanent link">&para;</a></h2>
+<h3 id="when-to-prefer-json">When to prefer JSON<a class="headerlink" href="#when-to-prefer-json" title="Permanent link">&para;</a></h3>
+<p>Prefer <code>--json</code> when:</p>
+<ul>
+<li>another tool will parse the output</li>
+<li>you are collecting stable machine-readable results</li>
+<li>you are building wrappers or automation around <code>fission_cli</code></li>
+</ul>
+<p>Prefer plain text when:</p>
+<ul>
+<li>you are reading one result directly in the terminal</li>
+<li>you want the default human-facing pseudocode or inventory output</li>
+</ul>
+<h3 id="inventory-vs-decomp-json">Inventory vs decomp JSON<a class="headerlink" href="#inventory-vs-decomp-json" title="Permanent link">&para;</a></h3>
+<ul>
+<li><code>decomp --json</code> is for decompilation results</li>
+<li><code>inventory ...</code> is for structured whole-binary or batch-emitter output</li>
+</ul>
+<p>Do not treat <code>inventory</code> as a cosmetic alias for <code>decomp --all</code>. It owns a different workflow.</p>
+<hr />
+<h2 id="legacy-compatibility">Legacy Compatibility<a class="headerlink" href="#legacy-compatibility" title="Permanent link">&para;</a></h2>
+<p>Legacy flat syntax is still accepted for one transition period.</p>
+<p>Examples of deprecated forms:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-36-1"><a id="__codelineno-36-1" name="__codelineno-36-1" href="#__codelineno-36-1"></a>fission_cli<span class="w"> </span>app.exe<span class="w"> </span>--info
+</span><span id="__span-36-2"><a id="__codelineno-36-2" name="__codelineno-36-2" href="#__codelineno-36-2"></a>fission_cli<span class="w"> </span>app.exe<span class="w"> </span>--funcs
+</span><span id="__span-36-3"><a id="__codelineno-36-3" name="__codelineno-36-3" href="#__codelineno-36-3"></a>fission_cli<span class="w"> </span>app.exe<span class="w"> </span>--asm<span class="w"> </span>0x140001000
+</span><span id="__span-36-4"><a id="__codelineno-36-4" name="__codelineno-36-4" href="#__codelineno-36-4"></a>fission_cli<span class="w"> </span>app.exe<span class="w"> </span>--decomp<span class="w"> </span>0x140001000
+</span></code></pre></div>
+<p>When used, the CLI emits a deprecation warning and internally normalizes into the canonical subcommand execution path.</p>
+<p>Canonical replacements:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-37-1"><a id="__codelineno-37-1" name="__codelineno-37-1" href="#__codelineno-37-1"></a>fission_cli<span class="w"> </span>info<span class="w"> </span>app.exe
+</span><span id="__span-37-2"><a id="__codelineno-37-2" name="__codelineno-37-2" href="#__codelineno-37-2"></a>fission_cli<span class="w"> </span>list<span class="w"> </span>app.exe
+</span><span id="__span-37-3"><a id="__codelineno-37-3" name="__codelineno-37-3" href="#__codelineno-37-3"></a>fission_cli<span class="w"> </span>disasm<span class="w"> </span>app.exe<span class="w"> </span>--addr<span class="w"> </span>0x140001000
+</span><span id="__span-37-4"><a id="__codelineno-37-4" name="__codelineno-37-4" href="#__codelineno-37-4"></a>fission_cli<span class="w"> </span>decomp<span class="w"> </span>app.exe<span class="w"> </span>--addr<span class="w"> </span>0x140001000
+</span></code></pre></div>
+<p>New scripts, docs, and operator workflows should not introduce new uses of the flat syntax.</p>
+<hr />
+<h2 id="recommended-workflows">Recommended Workflows<a class="headerlink" href="#recommended-workflows" title="Permanent link">&para;</a></h2>
+<h3 id="human-inspection-workflow">Human inspection workflow<a class="headerlink" href="#human-inspection-workflow" title="Permanent link">&para;</a></h3>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-38-1"><a id="__codelineno-38-1" name="__codelineno-38-1" href="#__codelineno-38-1"></a>fission_cli<span class="w"> </span>info<span class="w"> </span>app.exe
+</span><span id="__span-38-2"><a id="__codelineno-38-2" name="__codelineno-38-2" href="#__codelineno-38-2"></a>fission_cli<span class="w"> </span>list<span class="w"> </span>app.exe<span class="w"> </span>--json
+</span><span id="__span-38-3"><a id="__codelineno-38-3" name="__codelineno-38-3" href="#__codelineno-38-3"></a>fission_cli<span class="w"> </span>disasm<span class="w"> </span>app.exe<span class="w"> </span>--addr<span class="w"> </span>0x140001000
+</span><span id="__span-38-4"><a id="__codelineno-38-4" name="__codelineno-38-4" href="#__codelineno-38-4"></a>fission_cli<span class="w"> </span>decomp<span class="w"> </span>app.exe<span class="w"> </span>--addr<span class="w"> </span>0x140001000<span class="w"> </span>--ghidra-compat
+</span></code></pre></div>
+<h3 id="small-local-batch-workflow">Small local batch workflow<a class="headerlink" href="#small-local-batch-workflow" title="Permanent link">&para;</a></h3>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-39-1"><a id="__codelineno-39-1" name="__codelineno-39-1" href="#__codelineno-39-1"></a>fission_cli<span class="w"> </span>decomp<span class="w"> </span>app.exe<span class="w"> </span>--all<span class="w"> </span>--limit<span class="w"> </span><span class="m">10</span><span class="w"> </span>--json
+</span></code></pre></div>
+<h3 id="operator-inventory-workflow">Operator inventory workflow<a class="headerlink" href="#operator-inventory-workflow" title="Permanent link">&para;</a></h3>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-40-1"><a id="__codelineno-40-1" name="__codelineno-40-1" href="#__codelineno-40-1"></a>fission_cli<span class="w"> </span>inventory<span class="w"> </span><span class="k">function</span>-facts<span class="w"> </span>app.exe<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-40-2"><a id="__codelineno-40-2" name="__codelineno-40-2" href="#__codelineno-40-2"></a><span class="w">  </span>--output-jsonl<span class="w"> </span>rows.jsonl<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-40-3"><a id="__codelineno-40-3" name="__codelineno-40-3" href="#__codelineno-40-3"></a><span class="w">  </span>--summary-json<span class="w"> </span>summary.json
+</span></code></pre></div>
+<h3 id="benchmark-adjacent-decomp-workflow">Benchmark-adjacent decomp workflow<a class="headerlink" href="#benchmark-adjacent-decomp-workflow" title="Permanent link">&para;</a></h3>
+<p>For full corpus benchmark and comparative reporting, use the canonical benchmark runner:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-41-1"><a id="__codelineno-41-1" name="__codelineno-41-1" href="#__codelineno-41-1"></a>python3<span class="w"> </span>benchmark/full_benchmark/full_decomp_benchmark.py<span class="w"> </span>--help
+</span></code></pre></div>
+<p><code>fission_cli --benchmark</code> is a decomp-output timing flag. It is not the benchmark suite driver.</p>
+<hr />
+<h2 id="boundary-rules">Boundary Rules<a class="headerlink" href="#boundary-rules" title="Permanent link">&para;</a></h2>
+<ul>
+<li><code>fission_cli</code> owns command parsing, UX grouping, and output routing.</li>
+<li>It does not own semantic repair for the decompiler.</li>
+<li>Batch/operator emitters belong under <code>inventory</code>, not under <code>decomp</code>.</li>
+<li>Benchmark/reporting scripts are the canonical corpus validation surface, not a place to patch CLI semantics.</li>
+</ul>
+<p>If a proposed CLI change starts to alter decompiler semantics, it belongs in the decompiler crates instead.</p>
+<hr />
+<h2 id="validation">Validation<a class="headerlink" href="#validation" title="Permanent link">&para;</a></h2>
+<p>Minimum validation for CLI surface changes:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-42-1"><a id="__codelineno-42-1" name="__codelineno-42-1" href="#__codelineno-42-1"></a>cargo<span class="w"> </span><span class="nb">test</span><span class="w"> </span>-p<span class="w"> </span>fission-cli
+</span><span id="__span-42-2"><a id="__codelineno-42-2" name="__codelineno-42-2" href="#__codelineno-42-2"></a>cargo<span class="w"> </span>check<span class="w"> </span>-p<span class="w"> </span>fission-cli
+</span><span id="__span-42-3"><a id="__codelineno-42-3" name="__codelineno-42-3" href="#__codelineno-42-3"></a>cargo<span class="w"> </span>build<span class="w"> </span>-p<span class="w"> </span>fission-cli
+</span></code></pre></div>
+<p>Useful manual checks:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-43-1"><a id="__codelineno-43-1" name="__codelineno-43-1" href="#__codelineno-43-1"></a>cargo<span class="w"> </span>run<span class="w"> </span>-p<span class="w"> </span>fission-cli<span class="w"> </span>--<span class="w"> </span>--help
+</span><span id="__span-43-2"><a id="__codelineno-43-2" name="__codelineno-43-2" href="#__codelineno-43-2"></a>cargo<span class="w"> </span>run<span class="w"> </span>-p<span class="w"> </span>fission-cli<span class="w"> </span>--<span class="w"> </span>info<span class="w"> </span>--help
+</span><span id="__span-43-3"><a id="__codelineno-43-3" name="__codelineno-43-3" href="#__codelineno-43-3"></a>cargo<span class="w"> </span>run<span class="w"> </span>-p<span class="w"> </span>fission-cli<span class="w"> </span>--<span class="w"> </span>list<span class="w"> </span>--help
+</span><span id="__span-43-4"><a id="__codelineno-43-4" name="__codelineno-43-4" href="#__codelineno-43-4"></a>cargo<span class="w"> </span>run<span class="w"> </span>-p<span class="w"> </span>fission-cli<span class="w"> </span>--<span class="w"> </span>disasm<span class="w"> </span>--help
+</span><span id="__span-43-5"><a id="__codelineno-43-5" name="__codelineno-43-5" href="#__codelineno-43-5"></a>cargo<span class="w"> </span>run<span class="w"> </span>-p<span class="w"> </span>fission-cli<span class="w"> </span>--<span class="w"> </span>decomp<span class="w"> </span>--help
+</span><span id="__span-43-6"><a id="__codelineno-43-6" name="__codelineno-43-6" href="#__codelineno-43-6"></a>cargo<span class="w"> </span>run<span class="w"> </span>-p<span class="w"> </span>fission-cli<span class="w"> </span>--<span class="w"> </span>strings<span class="w"> </span>--help
+</span><span id="__span-43-7"><a id="__codelineno-43-7" name="__codelineno-43-7" href="#__codelineno-43-7"></a>cargo<span class="w"> </span>run<span class="w"> </span>-p<span class="w"> </span>fission-cli<span class="w"> </span>--<span class="w"> </span>inventory<span class="w"> </span>--help
+</span></code></pre></div>
+<p>If you change compatibility behavior, also verify at least one legacy flat invocation still routes correctly and emits a deprecation warning.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.tabs", "navigation.sections", "navigation.expand", "navigation.top", "search.suggest", "search.highlight", "content.code.copy"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>

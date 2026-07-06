@@ -1,0 +1,3648 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="A cross-platform, Rust-powered reverse engineering and decompilation framework.">
+      
+      
+      
+        <link rel="canonical" href="https://sjkim1127.github.io/Fission/changelog/Legacy/20260422_Changelog/">
+      
+      
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>2026-04-22 Changelog - Fission</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("../../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#2026-04-22-changelog" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../../.." title="Fission" class="md-header__button md-logo" aria-label="Fission" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Fission
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              2026-04-22 Changelog
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m14.3 16-.7-2h-3.2l-.7 2H7.8L11 7h2l3.2 9zM20 8.69V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12zm-9.15 3.96h2.3L12 9z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_2" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to system preference"  type="radio" name="__palette" id="__palette_2">
+    
+      <label class="md-header__button md-icon" title="Switch to system preference" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/sjkim1127/Fission" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    sjkim1127/Fission
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../.." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../../PROJECT_MAP/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Project Map
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../../CLI/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  CLI Guide
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../../architecture/ARCHITECTURE/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Architecture
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../../QUALITY_METRICS/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Quality Metrics
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../../EVALUATION/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Evaluation
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../../contributing/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Contributing
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../../MALWARE_SAMPLE_POLICY/" class="md-tabs__link">
+          
+  
+  
+  Developer Policies
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../../.." title="Fission" class="md-nav__button md-logo" aria-label="Fission" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Fission
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/sjkim1127/Fission" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    sjkim1127/Fission
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../PROJECT_MAP/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Project Map
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../CLI/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI Guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../architecture/ARCHITECTURE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../QUALITY_METRICS/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quality Metrics
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../EVALUATION/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Evaluation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../contributing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contributing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_8" >
+        
+          
+          <label class="md-nav__link" for="__nav_8" id="__nav_8_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Developer Policies
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_8_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_8">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Developer Policies
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../MALWARE_SAMPLE_POLICY/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Malware Sample Policy
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../VERSIONING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Versioning
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../RELEASE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Release
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#summary" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Summary
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#1-alias-interleave-owner-narrowing-in-benchmark-compact-artifacts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Alias-Interleave Owner Narrowing In Benchmark / Compact Artifacts
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="1. Alias-Interleave Owner Narrowing In Benchmark / Compact Artifacts">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#scope" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Scope
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-changed" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What changed
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#validation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Validation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#windows-small-c-2-way-benchmark" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Windows small C 2-way benchmark
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-improved" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What improved
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-did-not-improve" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What did not improve
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#duplicate-logic-audit" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Duplicate-logic audit
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#final-status" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Final status
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-windows-small-c-quality-wave-nested-before-alias-ownership-proof" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Windows Small C Quality Wave: nested-before alias ownership proof
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="2. Windows Small C Quality Wave: nested-before alias ownership proof">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#summary_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Summary
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#implementation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Implementation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#validation_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Validation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#windows-small-c-2-way-benchmark_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Windows small C 2-way benchmark
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#reading-of-the-result" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reading of the result
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#final-status_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Final status
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-benchmark-measurement-readout-tightening-for-target-structuring-rows" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Benchmark Measurement Readout Tightening For Target Structuring Rows
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="3. Benchmark Measurement Readout Tightening For Target Structuring Rows">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#summary_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Summary
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-changed_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What changed
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#validation_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Validation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#windows-small-c-benchmark-readout" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Windows small C benchmark readout
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#final-status_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Final status
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#follow-up-completion-canonical-quality-rows-code-hash-verbose-summary-parity" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Follow-up completion: canonical quality rows + code hash + verbose summary parity
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#validation_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Validation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#final-status-for-today" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Final status for today
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-guarded-tail-join-owner-reclassification-at-must-emit-label-gate" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. Guarded-Tail Join-Owner Reclassification At Must-Emit-Label Gate
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="4. Guarded-Tail Join-Owner Reclassification At Must-Emit-Label Gate">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#summary_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Summary
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-changed_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What changed
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#validation_4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Validation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#windows-small-c-2-way-benchmark_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Windows small C 2-way benchmark
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#reading-of-the-result_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reading of the result
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#duplicate-logic-audit_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Duplicate-logic audit
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#final-status_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Final status
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-cli-process-cpu-worker-telemetry-for-parallel-decompilation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. CLI Process CPU / Worker Telemetry For Parallel Decompilation
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="5. CLI Process CPU / Worker Telemetry For Parallel Decompilation">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#summary_4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Summary
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-changed_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What changed
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#validation_5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Validation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#reading-of-the-result_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reading of the result
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#final-status_4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Final status
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6-mir-shadow-contract-wave-1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. MIR Shadow Contract Wave 1
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="6. MIR Shadow Contract Wave 1">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#scope_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Scope
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#added-internal-contract" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Added Internal Contract
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#validation_6" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Validation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#reading-of-the-result_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reading of the Result
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#next-owner" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Next Owner
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#7-mir-blockgraph-admission-gate-trial" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7. MIR BlockGraph Admission Gate Trial
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="7. MIR BlockGraph Admission Gate Trial">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#summary_5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Summary
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#targeted-validation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Targeted Validation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#windows-small-c-2-way-benchmark_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Windows Small C 2-Way Benchmark
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#reading-of-the-result_4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reading of the Result
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#validation_7" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Validation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#duplicate-logic-audit_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Duplicate Logic Audit
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#next-owner_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Next Owner
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-fission-sleigh-x86-64-front-end-migration-compiler-only-wave" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. fission-sleigh x86-64 Front-End Migration: compiler-only wave
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="4. fission-sleigh x86-64 Front-End Migration: compiler-only wave">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#summary_6" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Summary
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#why-x86-64-first" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Why x86-64 first
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-changed_4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What changed
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#front-end-contract-in-this-wave" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Front-end contract in this wave
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#equivalence-harness" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Equivalence harness
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#determinism-checked-in-output" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Determinism / checked-in output
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#validation_8" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Validation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#artifact-shape" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Artifact shape
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-improved_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What improved
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-did-not-improve_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What did not improve
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#duplicate-logic-audit_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Duplicate-logic audit
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#next-owner_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Next owner
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#sleigh-all-variant-generic-compiler-consumer-expansion" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Sleigh All-Variant Generic Compiler Consumer Expansion
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Sleigh All-Variant Generic Compiler Consumer Expansion">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#summary_7" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Summary
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#publicinternal-contract" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Public/internal contract
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#generated-artifact-layout" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Generated artifact layout
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#parser-preprocessor-fixes-required-for-all-variants" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Parser / preprocessor fixes required for all variants
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#validation_9" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Validation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-improved_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What improved
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-did-not-change" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What did not change
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#duplicate-logic-audit_4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Duplicate-logic audit
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#next-owner_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Next owner
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#sleigh-runtime-hard-delete-replacement-wave" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        SLEIGH Runtime Hard-Delete Replacement Wave
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="SLEIGH Runtime Hard-Delete Replacement Wave">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#summary_8" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Summary
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-changed_5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What changed
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#runtime-status" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Runtime status
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#validation_10" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Validation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#benchmark-readout" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Benchmark readout
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#duplicate-logic-audit_5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Duplicate-logic audit
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#next-owner_4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Next owner
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#sleigh-x86-64-runtime-execution-seed" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        SLEIGH x86-64 Runtime Execution Seed
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="SLEIGH x86-64 Runtime Execution Seed">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#what-changed_6" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What changed
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#validation_11" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Validation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#benchmark-readout_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Benchmark readout
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#duplicate-logic-audit_6" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Duplicate-logic audit
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#next-owner_5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Next owner
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#sleigh-x86-64-compiled-table-execution-migration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        SLEIGH x86-64 Compiled-Table Execution Migration
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="SLEIGH x86-64 Compiled-Table Execution Migration">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#what-changed_7" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What changed
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#validation_12" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Validation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#limited-benchmark-readout" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Limited benchmark readout
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#duplicate-logic-audit_7" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Duplicate-logic audit
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#final-status_5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Final status
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#next-owner_6" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Next owner
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="2026-04-22-changelog">2026-04-22 Changelog<a class="headerlink" href="#2026-04-22-changelog" title="Permanent link">&para;</a></h1>
+<h2 id="summary">Summary<a class="headerlink" href="#summary" title="Permanent link">&para;</a></h2>
+<p>This changelog splits out the latest Windows small C quality-program work from the long cumulative <code>20260421_Changelog.md</code>.</p>
+<p>The current quality bottleneck is no longer generic structuring. The owner has been narrowed to:</p>
+<ul>
+<li>guarded-tail / BlockGraph alias ownership</li>
+<li>especially <code>AliasHasNonlocalRef</code></li>
+<li>and inside that family, <code>nested_before</code></li>
+</ul>
+<p>The two waves recorded here reflect that narrower owner:</p>
+<ol>
+<li>alias-interleave owner narrowing in benchmark and compact artifacts</li>
+<li>nested-before alias ownership proof at the canonical guarded-tail owner</li>
+</ol>
+<hr />
+<h2 id="1-alias-interleave-owner-narrowing-in-benchmark-compact-artifacts">1. Alias-Interleave Owner Narrowing In Benchmark / Compact Artifacts<a class="headerlink" href="#1-alias-interleave-owner-narrowing-in-benchmark-compact-artifacts" title="Permanent link">&para;</a></h2>
+<h3 id="scope">Scope<a class="headerlink" href="#scope" title="Permanent link">&para;</a></h3>
+<p>This wave did not broaden guarded-tail acceptance. It narrowed the next quality blocker into explicit benchmark-visible subtype metrics.</p>
+<p>Canonical surface:</p>
+<ul>
+<li>runner:</li>
+<li><code>benchmark/full_benchmark/full_decomp_benchmark.py</code></li>
+<li>samples:</li>
+<li><code>benchmark/binary/x86-64/window/small/binary/c</code></li>
+<li>baseline:</li>
+<li><code>benchmark/artifacts/full_benchmark/windows-small-c-guarded-tail-ownership-latest</code></li>
+<li>trial:</li>
+<li><code>benchmark/artifacts/full_benchmark/windows-small-c-alias-interleave-metrics-latest</code></li>
+</ul>
+<p>Primary owner:</p>
+<ul>
+<li><code>benchmark/full_benchmark/grand_finale_support/benchmark_core.py</code></li>
+<li><code>benchmark/full_benchmark/grand_finale_support/compact_summary.py</code></li>
+</ul>
+<p>This wave exists to answer one concrete question cleanly:</p>
+<ul>
+<li>when <code>canonical_alias_interleave_conflict_count</code> is nonzero, which subtype is actually dominant?</li>
+</ul>
+<h3 id="what-changed">What changed<a class="headerlink" href="#what-changed" title="Permanent link">&para;</a></h3>
+<p>Added a dedicated alias-interleave metric family to verbose JSON, compact JSON, Markdown, and console output.</p>
+<p>New alias-interleave metric vocabulary:</p>
+<ul>
+<li><code>alias_interleave_conflict</code></li>
+<li><code>alias_has_nonlocal_ref</code></li>
+<li><code>alias_has_nonlocal_ref_external_before</code></li>
+<li><code>alias_has_nonlocal_ref_nested_before</code></li>
+<li><code>alias_has_nonlocal_ref_post_segment_ref</code></li>
+<li><code>alias_not_fallthrough</code></li>
+<li><code>alias_not_fallthrough_top_level_after_label</code></li>
+<li><code>alias_not_fallthrough_nested_after_label</code></li>
+<li><code>alias_has_multiple_internal_predecessors</code></li>
+<li><code>payload_crosses_join</code></li>
+</ul>
+<p>Projection cleanup also fixed one contract gap:</p>
+<ul>
+<li>these counters now flow not only into <code>alias_interleave_metric_totals</code></li>
+<li>they also appear in <code>failure_family_distribution</code> as:</li>
+<li><code>canonical_alias_has_nonlocal_ref_count</code></li>
+<li><code>canonical_alias_has_nonlocal_ref_external_before_count</code></li>
+<li><code>canonical_alias_has_nonlocal_ref_nested_before_count</code></li>
+<li><code>canonical_alias_has_nonlocal_ref_post_segment_ref_count</code></li>
+<li><code>canonical_alias_not_fallthrough_count</code></li>
+<li><code>canonical_alias_has_multiple_internal_predecessors_count</code></li>
+<li><code>canonical_payload_crosses_join_count</code></li>
+</ul>
+<p>This is important because the prior state exposed <code>canonical_alias_interleave_conflict_count</code>, but not the internal cause distribution behind it.</p>
+<h3 id="validation">Validation<a class="headerlink" href="#validation" title="Permanent link">&para;</a></h3>
+<p>Python contract:</p>
+<ul>
+<li><code>python3 -m unittest benchmark/full_benchmark/grand_finale_support/test_corpus_benchmark.py</code></li>
+<li><code>python3 -m unittest benchmark/full_benchmark/grand_finale_support/test_llm_advisory.py</code></li>
+</ul>
+<p>Rust / CLI contract:</p>
+<ul>
+<li><code>cargo check -p fission-pcode</code></li>
+<li><code>cargo check -p fission-automation</code></li>
+<li><code>cargo build -p fission-cli --release</code></li>
+<li><code>cargo test -p fission-pcode -- --test-threads=1</code></li>
+</ul>
+<p>Result:</p>
+<ul>
+<li><code>664 passed / 0 failed</code></li>
+</ul>
+<h3 id="windows-small-c-2-way-benchmark">Windows small C 2-way benchmark<a class="headerlink" href="#windows-small-c-2-way-benchmark" title="Permanent link">&para;</a></h3>
+<p>Corpus quality remained neutral:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>weighted_avg_normalized_similarity: 37.604286 -&gt; 37.604286
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>x64 weighted_avg_normalized_similarity: 37.604 -&gt; 37.604
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>new failed rows: 0
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>row gates: passed for all 6 binaries
+</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>promotion_blockers: advisory_gate_mode
+</span></code></pre></div>
+<p>BlockGraph totals remained unchanged from the previous guarded-tail ownership wave:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>candidate: 414 -&gt; 414
+</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>complete: 0 -&gt; 0
+</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>rejected_must_emit_label: 414 -&gt; 414
+</span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>rejected_external_ref: 108 -&gt; 108
+</span><span id="__span-1-5"><a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>rejected_join_owner_conflict: 128 -&gt; 128
+</span><span id="__span-1-6"><a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>rejected_middle_ref: 24 -&gt; 24
+</span></code></pre></div>
+<p>New alias-interleave totals are now first-class in the compact artifact:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>alias_interleave_conflict: 50
+</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>alias_has_nonlocal_ref: 56
+</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>alias_has_nonlocal_ref_external_before: 18
+</span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>alias_has_nonlocal_ref_nested_before: 24
+</span><span id="__span-2-5"><a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>alias_has_nonlocal_ref_post_segment_ref: 2
+</span><span id="__span-2-6"><a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>alias_not_fallthrough: 9
+</span><span id="__span-2-7"><a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a>alias_not_fallthrough_top_level_after_label: 6
+</span><span id="__span-2-8"><a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a>alias_not_fallthrough_nested_after_label: 3
+</span><span id="__span-2-9"><a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a>alias_has_multiple_internal_predecessors: 0
+</span><span id="__span-2-10"><a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a>payload_crosses_join: 0
+</span></code></pre></div>
+<p>The practical reading is now much clearer:</p>
+<ul>
+<li>the dominant alias-interleave owner is not generic</li>
+<li>it is <code>AliasHasNonlocalRef</code></li>
+<li>and inside that family the largest subtype is <code>nested_before</code></li>
+</ul>
+<p>Representative binary-level readout:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>test_functions.exe
+</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>- alias_has_nonlocal_ref: 5
+</span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>- external_before: 2
+</span><span id="__span-3-4"><a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>- nested_before: 2
+</span><span id="__span-3-5"><a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>
+</span><span id="__span-3-6"><a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a>array_operations.exe
+</span><span id="__span-3-7"><a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a>- alias_interleave_conflict: 12
+</span><span id="__span-3-8"><a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a>- alias_has_nonlocal_ref: 12
+</span><span id="__span-3-9"><a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a>- external_before: 6
+</span><span id="__span-3-10"><a id="__codelineno-3-10" name="__codelineno-3-10" href="#__codelineno-3-10"></a>- nested_before: 4
+</span><span id="__span-3-11"><a id="__codelineno-3-11" name="__codelineno-3-11" href="#__codelineno-3-11"></a>- alias_not_fallthrough_nested_after_label: 3
+</span><span id="__span-3-12"><a id="__codelineno-3-12" name="__codelineno-3-12" href="#__codelineno-3-12"></a>
+</span><span id="__span-3-13"><a id="__codelineno-3-13" name="__codelineno-3-13" href="#__codelineno-3-13"></a>math_operations.exe
+</span><span id="__span-3-14"><a id="__codelineno-3-14" name="__codelineno-3-14" href="#__codelineno-3-14"></a>- alias_interleave_conflict: 16
+</span><span id="__span-3-15"><a id="__codelineno-3-15" name="__codelineno-3-15" href="#__codelineno-3-15"></a>- alias_has_nonlocal_ref: 15
+</span><span id="__span-3-16"><a id="__codelineno-3-16" name="__codelineno-3-16" href="#__codelineno-3-16"></a>- external_before: 4
+</span><span id="__span-3-17"><a id="__codelineno-3-17" name="__codelineno-3-17" href="#__codelineno-3-17"></a>- nested_before: 6
+</span><span id="__span-3-18"><a id="__codelineno-3-18" name="__codelineno-3-18" href="#__codelineno-3-18"></a>- post_segment_ref: 2
+</span><span id="__span-3-19"><a id="__codelineno-3-19" name="__codelineno-3-19" href="#__codelineno-3-19"></a>- alias_not_fallthrough_top_level_after_label: 6
+</span></code></pre></div>
+<h3 id="what-improved">What improved<a class="headerlink" href="#what-improved" title="Permanent link">&para;</a></h3>
+<p>Concrete improvement in this wave:</p>
+<ul>
+<li>the compact AI-facing artifact is now short but owner-complete for the next guarded-tail blocker</li>
+<li><code>failure_family_distribution</code> and compact summary now agree on alias-interleave subtype totals</li>
+<li>the next semantic owner is narrower than before:</li>
+<li><code>AliasHasNonlocalRef</code></li>
+<li>especially <code>nested_before</code></li>
+</ul>
+<p>This is a real improvement over the previous state because the previous artifact still forced manual trace reading to separate:</p>
+<ul>
+<li><code>nested_before</code></li>
+<li><code>external_before</code></li>
+<li><code>post_segment_ref</code></li>
+<li><code>alias_not_fallthrough</code></li>
+</ul>
+<h3 id="what-did-not-improve">What did not improve<a class="headerlink" href="#what-did-not-improve" title="Permanent link">&para;</a></h3>
+<p>This wave intentionally did not change decompiler semantics.</p>
+<p>So the expected non-improvements are:</p>
+<ul>
+<li><code>fibonacci</code> remains linearized</li>
+<li>corpus similarity is unchanged</li>
+<li><code>blockgraph_region_complete_count</code> remains <code>0</code></li>
+<li>no control-heavy sample row quality uplift yet</li>
+</ul>
+<h3 id="duplicate-logic-audit">Duplicate-logic audit<a class="headerlink" href="#duplicate-logic-audit" title="Permanent link">&para;</a></h3>
+<p>No new semantic repair layer was introduced.</p>
+<p>The change stayed in benchmark/reporting ownership:</p>
+<ul>
+<li>no printer-side repair</li>
+<li>no CLI-side repair</li>
+<li>no duplicate telemetry vocabulary outside the benchmark support modules</li>
+</ul>
+<h3 id="final-status">Final status<a class="headerlink" href="#final-status" title="Permanent link">&para;</a></h3>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>wave_type: quality-neutral owner-narrowing
+</span><span id="__span-4-2"><a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>primary_owner: benchmark/compact alias-interleave reporting
+</span><span id="__span-4-3"><a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>behavior_changed: no
+</span><span id="__span-4-4"><a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a>release_path_changed: no
+</span><span id="__span-4-5"><a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a>env_gate: none
+</span><span id="__span-4-6"><a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a>promotion impact: unchanged
+</span><span id="__span-4-7"><a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a>next owner: guarded-tail canonicalization proof for AliasHasNonlocalRef nested_before
+</span></code></pre></div>
+<hr />
+<h2 id="2-windows-small-c-quality-wave-nested-before-alias-ownership-proof">2. Windows Small C Quality Wave: nested-before alias ownership proof<a class="headerlink" href="#2-windows-small-c-quality-wave-nested-before-alias-ownership-proof" title="Permanent link">&para;</a></h2>
+<h3 id="summary_1">Summary<a class="headerlink" href="#summary_1" title="Permanent link">&para;</a></h3>
+<p>This wave implemented the first semantic slice of the Ghidra FlowBlock clean-room migration for <code>AliasHasNonlocalRef nested_before</code>.</p>
+<p>The change stayed at the canonical structuring owner:</p>
+<ul>
+<li><code>crates/fission-pcode/src/nir/structuring/guarded_tail/</code></li>
+<li>no printer-side repair</li>
+<li>no CLI-side repair</li>
+<li>no benchmark-script semantic patching</li>
+</ul>
+<p>The concrete change was narrow:</p>
+<ul>
+<li>guarded-tail canonicalization no longer treats every <code>external_nested_before &gt; 0</code> as the same hard reject</li>
+<li>same-guard-family nested conditional refs and paired nested-boundary refs now get a typed ownership proof before rejection</li>
+<li>all other nested-before shapes remain fail-closed</li>
+</ul>
+<h3 id="implementation">Implementation<a class="headerlink" href="#implementation" title="Permanent link">&para;</a></h3>
+<p>New clean-room proof vocabulary was added for the nested-before owner:</p>
+<ul>
+<li><code>AliasOwnershipProof</code></li>
+<li><code>NestedBeforeAliasWitness</code></li>
+<li><code>NestedBeforeOwnershipClass</code></li>
+<li><code>AliasOwnershipLegalityReason</code></li>
+</ul>
+<p>Allowed proof-complete classes:</p>
+<ul>
+<li><code>GuardFamilyInternalizable</code></li>
+<li><code>PairedBoundaryInternalizable</code></li>
+</ul>
+<p>Fail-closed classes retained:</p>
+<ul>
+<li><code>NestedBeforeExternalOwner</code></li>
+<li><code>NestedBeforeNonlocalPayload</code></li>
+<li><code>NestedBeforeUnknown</code></li>
+</ul>
+<p>The key architectural change is ownership reuse:</p>
+<ul>
+<li>canonicalization now consumes suffix-window guard-family / paired-boundary proof helpers</li>
+<li>the nested-before classification logic stays inside guarded-tail ownership</li>
+<li>duplicate semantic logic was reduced instead of adding a second ad hoc path</li>
+</ul>
+<h3 id="validation_1">Validation<a class="headerlink" href="#validation_1" title="Permanent link">&para;</a></h3>
+<p>Rust validation passed:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>cargo test -p fission-pcode suffix_window -- --test-threads=1
+</span><span id="__span-5-2"><a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>- 63 passed / 0 failed
+</span><span id="__span-5-3"><a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>
+</span><span id="__span-5-4"><a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a>cargo test -p fission-pcode structuring_candidate_discovery_ -- --test-threads=1
+</span><span id="__span-5-5"><a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a>- 52 passed / 0 failed
+</span><span id="__span-5-6"><a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a>
+</span><span id="__span-5-7"><a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a>cargo test -p fission-pcode -- --test-threads=1
+</span><span id="__span-5-8"><a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a>- 667 passed / 0 failed
+</span><span id="__span-5-9"><a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a>
+</span><span id="__span-5-10"><a id="__codelineno-5-10" name="__codelineno-5-10" href="#__codelineno-5-10"></a>cargo check -p fission-pcode
+</span><span id="__span-5-11"><a id="__codelineno-5-11" name="__codelineno-5-11" href="#__codelineno-5-11"></a>- passed
+</span><span id="__span-5-12"><a id="__codelineno-5-12" name="__codelineno-5-12" href="#__codelineno-5-12"></a>
+</span><span id="__span-5-13"><a id="__codelineno-5-13" name="__codelineno-5-13" href="#__codelineno-5-13"></a>cargo check -p fission-automation
+</span><span id="__span-5-14"><a id="__codelineno-5-14" name="__codelineno-5-14" href="#__codelineno-5-14"></a>- passed
+</span><span id="__span-5-15"><a id="__codelineno-5-15" name="__codelineno-5-15" href="#__codelineno-5-15"></a>
+</span><span id="__span-5-16"><a id="__codelineno-5-16" name="__codelineno-5-16" href="#__codelineno-5-16"></a>cargo build -p fission-cli --release
+</span><span id="__span-5-17"><a id="__codelineno-5-17" name="__codelineno-5-17" href="#__codelineno-5-17"></a>- passed
+</span></code></pre></div>
+<p>New synthetic positive coverage was added:</p>
+<ul>
+<li>same-guard-family nested-before alias ownership now internalizes</li>
+<li>paired nested-boundary alias ownership now internalizes</li>
+</ul>
+<h3 id="windows-small-c-2-way-benchmark_1">Windows small C 2-way benchmark<a class="headerlink" href="#windows-small-c-2-way-benchmark_1" title="Permanent link">&para;</a></h3>
+<p>Same-axis corpus result remained neutral:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>weighted_avg_normalized_similarity: 37.604286 -&gt; 37.604286
+</span><span id="__span-6-2"><a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>new failed rows: 0
+</span><span id="__span-6-3"><a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>promotion_blockers: advisory_gate_mode
+</span></code></pre></div>
+<p>Alias-interleave totals were unchanged:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>alias_has_nonlocal_ref: 56 -&gt; 56
+</span><span id="__span-7-2"><a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>alias_has_nonlocal_ref_nested_before: 24 -&gt; 24
+</span><span id="__span-7-3"><a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a>alias_has_nonlocal_ref_external_before: 18 -&gt; 18
+</span><span id="__span-7-4"><a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a>alias_has_nonlocal_ref_post_segment_ref: 2 -&gt; 2
+</span><span id="__span-7-5"><a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a>alias_interleave_conflict: 50 -&gt; 50
+</span></code></pre></div>
+<p>BlockGraph totals also remained unchanged:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-8-1"><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>candidate: 414 -&gt; 414
+</span><span id="__span-8-2"><a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>complete: 0 -&gt; 0
+</span><span id="__span-8-3"><a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>rejected_must_emit_label: 414 -&gt; 414
+</span><span id="__span-8-4"><a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a>rejected_external_ref: 108 -&gt; 108
+</span><span id="__span-8-5"><a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a>rejected_join_owner_conflict: 128 -&gt; 128
+</span><span id="__span-8-6"><a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a>rejected_middle_ref: 24 -&gt; 24
+</span></code></pre></div>
+<p>Representative target row remained unchanged:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-9-1"><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>test_functions.exe:fibonacci @ 0x140001470
+</span><span id="__span-9-2"><a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>- forced_linear_structuring_count: 1 -&gt; 1
+</span><span id="__span-9-3"><a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a>- rendered_code_len: 40935 -&gt; 40935
+</span></code></pre></div>
+<h3 id="reading-of-the-result">Reading of the result<a class="headerlink" href="#reading-of-the-result" title="Permanent link">&para;</a></h3>
+<p>What improved:</p>
+<ul>
+<li>the semantic owner is now narrower at the canonical guarded-tail layer</li>
+<li>synthetic same-guard-family / paired-boundary shapes now have a typed acceptance path</li>
+<li>duplicate logic between suffix-window proof and canonicalization was reduced</li>
+</ul>
+<p>What did not improve:</p>
+<ul>
+<li>the current Windows small C corpus did not exercise the newly admitted proof-complete family strongly enough to move benchmark metrics</li>
+<li>no measured row quality changed</li>
+<li><code>blockgraph_region_complete_count</code> is still <code>0</code></li>
+</ul>
+<p>This means the next owner is not generic nested-before anymore. It is the unresolved remainder inside that family:</p>
+<ul>
+<li><code>NestedBeforeExternalOwner</code></li>
+<li>and then <code>MustEmitLabel</code> join/follow ownership after that</li>
+</ul>
+<h3 id="final-status_1">Final status<a class="headerlink" href="#final-status_1" title="Permanent link">&para;</a></h3>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-10-1"><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a>wave_type: behavior-changing semantic trial
+</span><span id="__span-10-2"><a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a>primary_owner: guarded-tail canonicalization nested-before alias ownership
+</span><span id="__span-10-3"><a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a>behavior_changed: yes
+</span><span id="__span-10-4"><a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a>release_path_changed: no
+</span><span id="__span-10-5"><a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a>env_gate: none
+</span><span id="__span-10-6"><a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a>promotion impact: neutral on current corpus
+</span><span id="__span-10-7"><a id="__codelineno-10-7" name="__codelineno-10-7" href="#__codelineno-10-7"></a>next owner: NestedBeforeExternalOwner -&gt; MustEmitLabel join/follow ownership
+</span></code></pre></div>
+<hr />
+<h2 id="3-benchmark-measurement-readout-tightening-for-target-structuring-rows">3. Benchmark Measurement Readout Tightening For Target Structuring Rows<a class="headerlink" href="#3-benchmark-measurement-readout-tightening-for-target-structuring-rows" title="Permanent link">&para;</a></h2>
+<h3 id="summary_2">Summary<a class="headerlink" href="#summary_2" title="Permanent link">&para;</a></h3>
+<p>This follow-up wave checked whether the benchmark was failing to measure quality movement on the current Windows small C owner.</p>
+<p>The answer is:</p>
+<ul>
+<li>the benchmark was <strong>not blind</strong> to <code>fibonacci</code></li>
+<li>the target row was already being measured by row-fidelity gate</li>
+<li>but the compact/Markdown artifact was too coarse to show that quickly</li>
+<li>and one target-row selector path was overmatching a shared bare address across binaries</li>
+</ul>
+<h3 id="what-changed_1">What changed<a class="headerlink" href="#what-changed_1" title="Permanent link">&para;</a></h3>
+<p>Two additive reporting fixes were introduced.</p>
+<p>First, target structuring rows now carry baseline/current quality readout:</p>
+<ul>
+<li><code>previous_normalized_similarity</code></li>
+<li><code>current_normalized_similarity</code></li>
+<li><code>normalized_similarity_delta</code></li>
+<li><code>row_gate_status</code></li>
+<li><code>watchlist_role</code></li>
+<li><code>failure_reasons</code></li>
+</ul>
+<p>This is now projected through:</p>
+<ul>
+<li>corpus compact summary</li>
+<li>single-binary compact summary</li>
+<li>corpus Markdown</li>
+<li>single-binary Markdown</li>
+</ul>
+<p>Second, the target-row selector no longer overmatches a shared address globally across the corpus.</p>
+<p>Previous bug:</p>
+<ul>
+<li><code>0x140001470</code> was treated as a global target address</li>
+<li>this incorrectly pulled <code>function_pointers_and_strings.exe:compare_int_descending</code>
+  into <code>target_structuring_rows</code></li>
+</ul>
+<p>Current contract:</p>
+<ul>
+<li>name-based target rows remain supported for:</li>
+<li><code>fibonacci</code></li>
+<li><code>fibonacci_memo</code></li>
+<li>address-based targeting is now binary-scoped for the known canary row</li>
+</ul>
+<h3 id="validation_2">Validation<a class="headerlink" href="#validation_2" title="Permanent link">&para;</a></h3>
+<p>Python contract passed:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-11-1"><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a>python3 -m unittest benchmark/full_benchmark/grand_finale_support/test_corpus_benchmark.py
+</span><span id="__span-11-2"><a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a>- 25 passed / 0 failed
+</span><span id="__span-11-3"><a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a>
+</span><span id="__span-11-4"><a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a>python3 -m unittest benchmark/full_benchmark/grand_finale_support/test_llm_advisory.py
+</span><span id="__span-11-5"><a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a>- 7 passed / 0 failed
+</span></code></pre></div>
+<p>Added checks:</p>
+<ul>
+<li>target structuring rows inherit row-gate delta fields</li>
+<li>shared-address rows from unrelated binaries no longer overmatch</li>
+</ul>
+<h3 id="windows-small-c-benchmark-readout">Windows small C benchmark readout<a class="headerlink" href="#windows-small-c-benchmark-readout" title="Permanent link">&para;</a></h3>
+<p>New artifact:</p>
+<ul>
+<li><code>benchmark/artifacts/full_benchmark/windows-small-c-target-row-delta-latest/benchmark_compact_summary.json</code></li>
+</ul>
+<p>The updated compact readout now shows the real state directly:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-12-1"><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a>test_functions:fibonacci @ 0x140001470
+</span><span id="__span-12-2"><a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a>- current_normalized_similarity: 11.65
+</span><span id="__span-12-3"><a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a>- previous_normalized_similarity: 11.65
+</span><span id="__span-12-4"><a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a>- normalized_similarity_delta: 0.00
+</span><span id="__span-12-5"><a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a>- row_gate_status: unchanged
+</span><span id="__span-12-6"><a id="__codelineno-12-6" name="__codelineno-12-6" href="#__codelineno-12-6"></a>- forced_linear_structuring_count: 1
+</span><span id="__span-12-7"><a id="__codelineno-12-7" name="__codelineno-12-7" href="#__codelineno-12-7"></a>
+</span><span id="__span-12-8"><a id="__codelineno-12-8" name="__codelineno-12-8" href="#__codelineno-12-8"></a>math_operations:fibonacci_memo @ 0x140001a90
+</span><span id="__span-12-9"><a id="__codelineno-12-9" name="__codelineno-12-9" href="#__codelineno-12-9"></a>- current_normalized_similarity: 15.36
+</span><span id="__span-12-10"><a id="__codelineno-12-10" name="__codelineno-12-10" href="#__codelineno-12-10"></a>- previous_normalized_similarity: 15.36
+</span><span id="__span-12-11"><a id="__codelineno-12-11" name="__codelineno-12-11" href="#__codelineno-12-11"></a>- normalized_similarity_delta: 0.00
+</span><span id="__span-12-12"><a id="__codelineno-12-12" name="__codelineno-12-12" href="#__codelineno-12-12"></a>- row_gate_status: unchanged
+</span></code></pre></div>
+<p>Important conclusion:</p>
+<ul>
+<li>the benchmark was already measuring the current canary rows correctly</li>
+<li>the current semantic wave simply did not change their emitted pseudocode</li>
+<li>the measurement gap was primarily artifact readability and target-row selector precision</li>
+</ul>
+<p>Corpus headline remains unchanged:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-13-1"><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a>weighted_avg_normalized_similarity: 37.604286 -&gt; 37.604286
+</span><span id="__span-13-2"><a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a>new failed rows: 0
+</span></code></pre></div>
+<h3 id="final-status_2">Final status<a class="headerlink" href="#final-status_2" title="Permanent link">&para;</a></h3>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-14-1"><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a>wave_type: additive benchmark contract tightening
+</span><span id="__span-14-2"><a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a>primary_owner: benchmark target-row readout and selector precision
+</span><span id="__span-14-3"><a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a>behavior_changed: no decompiler semantic change
+</span><span id="__span-14-4"><a id="__codelineno-14-4" name="__codelineno-14-4" href="#__codelineno-14-4"></a>release_path_changed: no
+</span><span id="__span-14-5"><a id="__codelineno-14-5" name="__codelineno-14-5" href="#__codelineno-14-5"></a>env_gate: none
+</span><span id="__span-14-6"><a id="__codelineno-14-6" name="__codelineno-14-6" href="#__codelineno-14-6"></a>practical_result: benchmark now shows target-row no-change explicitly instead of forcing manual row-gate inspection
+</span><span id="__span-14-7"><a id="__codelineno-14-7" name="__codelineno-14-7" href="#__codelineno-14-7"></a>next owner: NestedBeforeExternalOwner semantic acceptance, not more telemetry
+</span></code></pre></div>
+<h3 id="follow-up-completion-canonical-quality-rows-code-hash-verbose-summary-parity">Follow-up completion: canonical quality rows + code hash + verbose summary parity<a class="headerlink" href="#follow-up-completion-canonical-quality-rows-code-hash-verbose-summary-parity" title="Permanent link">&para;</a></h3>
+<p>The initial target-row delta tightening exposed one real implementation gap:</p>
+<ul>
+<li><code>build_comparison()</code> was wired for <code>canonical_quality_rows</code> only partially</li>
+<li>single-binary verbose summaries were written before <code>target_structuring_rows</code> were re-annotated from baseline row-gate</li>
+<li>as a result, compact summary had the right answer, but single-binary verbose summary could still hide unchanged target rows</li>
+</ul>
+<p>That follow-up is now closed.</p>
+<p>Additional changes:</p>
+<ul>
+<li>manifest-owned <code>canonical_quality_rows</code> added to:</li>
+<li><code>benchmark/config/benchmark_corpus/windows_small_c_samples.json</code></li>
+<li>row-fidelity snapshot now preserves:</li>
+<li><code>canonical_quality_rows</code></li>
+<li><code>canonical_quality_row_count</code></li>
+<li>target rows now project:</li>
+<li><code>current_code_sha256</code></li>
+<li><code>previous_code_sha256</code></li>
+<li><code>code_changed</code></li>
+<li>compact summary now emits:</li>
+<li><code>unchanged_target_rows</code></li>
+<li>verbose corpus + verbose single benchmark summaries now also emit:</li>
+<li><code>Unchanged Target Rows</code></li>
+</ul>
+<h3 id="validation_3">Validation<a class="headerlink" href="#validation_3" title="Permanent link">&para;</a></h3>
+<p>Python contracts after the follow-up:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-15-1"><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a>python3 -m unittest benchmark/full_benchmark/grand_finale_support/test_corpus_benchmark.py
+</span><span id="__span-15-2"><a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a>- 27 passed / 0 failed
+</span><span id="__span-15-3"><a id="__codelineno-15-3" name="__codelineno-15-3" href="#__codelineno-15-3"></a>
+</span><span id="__span-15-4"><a id="__codelineno-15-4" name="__codelineno-15-4" href="#__codelineno-15-4"></a>python3 -m unittest benchmark/full_benchmark/grand_finale_support/test_llm_advisory.py
+</span><span id="__span-15-5"><a id="__codelineno-15-5" name="__codelineno-15-5" href="#__codelineno-15-5"></a>- 7 passed / 0 failed
+</span></code></pre></div>
+<p>Revalidated artifact:</p>
+<ul>
+<li><code>benchmark/artifacts/full_benchmark/windows-small-c-target-row-delta-latest/benchmark_compact_summary.json</code></li>
+</ul>
+<p>Representative target rows now show explicit no-change evidence:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-16-1"><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a>test_functions:fibonacci @ 0x140001470
+</span><span id="__span-16-2"><a id="__codelineno-16-2" name="__codelineno-16-2" href="#__codelineno-16-2"></a>- current_normalized_similarity: 11.65
+</span><span id="__span-16-3"><a id="__codelineno-16-3" name="__codelineno-16-3" href="#__codelineno-16-3"></a>- previous_normalized_similarity: 11.65
+</span><span id="__span-16-4"><a id="__codelineno-16-4" name="__codelineno-16-4" href="#__codelineno-16-4"></a>- normalized_similarity_delta: 0.00
+</span><span id="__span-16-5"><a id="__codelineno-16-5" name="__codelineno-16-5" href="#__codelineno-16-5"></a>- code_changed: false
+</span><span id="__span-16-6"><a id="__codelineno-16-6" name="__codelineno-16-6" href="#__codelineno-16-6"></a>- current_code_sha256 == previous_code_sha256
+</span><span id="__span-16-7"><a id="__codelineno-16-7" name="__codelineno-16-7" href="#__codelineno-16-7"></a>
+</span><span id="__span-16-8"><a id="__codelineno-16-8" name="__codelineno-16-8" href="#__codelineno-16-8"></a>math_operations:fibonacci_memo @ 0x140001a90
+</span><span id="__span-16-9"><a id="__codelineno-16-9" name="__codelineno-16-9" href="#__codelineno-16-9"></a>- current_normalized_similarity: 15.36
+</span><span id="__span-16-10"><a id="__codelineno-16-10" name="__codelineno-16-10" href="#__codelineno-16-10"></a>- previous_normalized_similarity: 15.36
+</span><span id="__span-16-11"><a id="__codelineno-16-11" name="__codelineno-16-11" href="#__codelineno-16-11"></a>- normalized_similarity_delta: 0.00
+</span><span id="__span-16-12"><a id="__codelineno-16-12" name="__codelineno-16-12" href="#__codelineno-16-12"></a>- code_changed: false
+</span><span id="__span-16-13"><a id="__codelineno-16-13" name="__codelineno-16-13" href="#__codelineno-16-13"></a>- current_code_sha256 == previous_code_sha256
+</span></code></pre></div>
+<p>Corpus headline remains:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-17-1"><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a>weighted_avg_normalized_similarity: 37.604286
+</span><span id="__span-17-2"><a id="__codelineno-17-2" name="__codelineno-17-2" href="#__codelineno-17-2"></a>new_failed_rows: 0
+</span></code></pre></div>
+<p>Interpretation:</p>
+<ul>
+<li>the benchmark was not under-measuring the current quality wave</li>
+<li>the canary rows truly did not change</li>
+<li>the remaining bottleneck is semantic owner movement, not benchmark visibility</li>
+</ul>
+<h3 id="final-status-for-today">Final status for today<a class="headerlink" href="#final-status-for-today" title="Permanent link">&para;</a></h3>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-18-1"><a id="__codelineno-18-1" name="__codelineno-18-1" href="#__codelineno-18-1"></a>wave_type: benchmark contract tightening
+</span><span id="__span-18-2"><a id="__codelineno-18-2" name="__codelineno-18-2" href="#__codelineno-18-2"></a>primary_owner: target-row measurement fidelity
+</span><span id="__span-18-3"><a id="__codelineno-18-3" name="__codelineno-18-3" href="#__codelineno-18-3"></a>behavior_changed: no decompiler semantic change
+</span><span id="__span-18-4"><a id="__codelineno-18-4" name="__codelineno-18-4" href="#__codelineno-18-4"></a>release_path_changed: no
+</span><span id="__span-18-5"><a id="__codelineno-18-5" name="__codelineno-18-5" href="#__codelineno-18-5"></a>env_gate: none
+</span><span id="__span-18-6"><a id="__codelineno-18-6" name="__codelineno-18-6" href="#__codelineno-18-6"></a>artifact_contract_added:
+</span><span id="__span-18-7"><a id="__codelineno-18-7" name="__codelineno-18-7" href="#__codelineno-18-7"></a>  - canonical_quality_rows
+</span><span id="__span-18-8"><a id="__codelineno-18-8" name="__codelineno-18-8" href="#__codelineno-18-8"></a>  - canonical_quality_row_count
+</span><span id="__span-18-9"><a id="__codelineno-18-9" name="__codelineno-18-9" href="#__codelineno-18-9"></a>  - current_code_sha256
+</span><span id="__span-18-10"><a id="__codelineno-18-10" name="__codelineno-18-10" href="#__codelineno-18-10"></a>  - previous_code_sha256
+</span><span id="__span-18-11"><a id="__codelineno-18-11" name="__codelineno-18-11" href="#__codelineno-18-11"></a>  - code_changed
+</span><span id="__span-18-12"><a id="__codelineno-18-12" name="__codelineno-18-12" href="#__codelineno-18-12"></a>  - unchanged_target_rows
+</span><span id="__span-18-13"><a id="__codelineno-18-13" name="__codelineno-18-13" href="#__codelineno-18-13"></a>next owner: BlockGraph / guarded-tail semantic acceptance, not benchmark instrumentation
+</span></code></pre></div>
+<hr />
+<h2 id="4-guarded-tail-join-owner-reclassification-at-must-emit-label-gate">4. Guarded-Tail Join-Owner Reclassification At Must-Emit-Label Gate<a class="headerlink" href="#4-guarded-tail-join-owner-reclassification-at-must-emit-label-gate" title="Permanent link">&para;</a></h2>
+<h3 id="summary_3">Summary<a class="headerlink" href="#summary_3" title="Permanent link">&para;</a></h3>
+<p>This wave implemented the next narrow clean-room migration slice under the canonical guarded-tail owner:</p>
+<ul>
+<li>owner: <code>crates/fission-pcode/src/nir/structuring/guarded_tail/</code></li>
+<li>focus: <code>MustEmitLabel</code> gate classification</li>
+<li>scope: same-guard-family nested-before refs before a guarded-tail candidate</li>
+</ul>
+<p>The goal was not to broaden structuring generally. It was to stop collapsing all pre-candidate nested refs into the same external-reference bucket.</p>
+<h3 id="what-changed_2">What changed<a class="headerlink" href="#what-changed_2" title="Permanent link">&para;</a></h3>
+<p>The <code>MustEmitLabel</code> gate now classifies outside refs with more structure:</p>
+<ul>
+<li>top-level-before</li>
+<li>nested-before</li>
+<li>top-level-after</li>
+<li>nested-after</li>
+</ul>
+<p>Narrow admission added:</p>
+<ul>
+<li>same-guard-family nested-before refs are internalized for join-owner accounting</li>
+<li>unrelated nested-before refs stay fail-closed and are now counted as <code>owner_conflict</code></li>
+</ul>
+<p>Concrete implementation points:</p>
+<ul>
+<li><code>promotion.rs</code></li>
+<li>replaced the old raw <code>outside_refs</code> threshold logic with typed site accounting</li>
+<li><code>promotion_graph.rs</code></li>
+<li>added <code>internalized_guard_family_nested_before_refs_for_join_owner(...)</code></li>
+<li><code>suffix_window.rs</code></li>
+<li>reused <code>exprs_share_guard_family(...)</code> across the guarded-tail owner</li>
+<li><code>structuring_guarded_tail.rs</code></li>
+<li>updated the discovery regression to expect <code>owner_conflict</code> for the unresolved nested-before family</li>
+</ul>
+<h3 id="validation_4">Validation<a class="headerlink" href="#validation_4" title="Permanent link">&para;</a></h3>
+<p>Rust validation for this wave:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-19-1"><a id="__codelineno-19-1" name="__codelineno-19-1" href="#__codelineno-19-1"></a>cargo test -p fission-pcode must_emit_label_internalizes_same_guard_family_nested_before_owner -- --nocapture
+</span><span id="__span-19-2"><a id="__codelineno-19-2" name="__codelineno-19-2" href="#__codelineno-19-2"></a>- passed
+</span><span id="__span-19-3"><a id="__codelineno-19-3" name="__codelineno-19-3" href="#__codelineno-19-3"></a>
+</span><span id="__span-19-4"><a id="__codelineno-19-4" name="__codelineno-19-4" href="#__codelineno-19-4"></a>cargo test -p fission-pcode must_emit_label_rejects_unrelated_nested_before_owner -- --nocapture
+</span><span id="__span-19-5"><a id="__codelineno-19-5" name="__codelineno-19-5" href="#__codelineno-19-5"></a>- passed
+</span><span id="__span-19-6"><a id="__codelineno-19-6" name="__codelineno-19-6" href="#__codelineno-19-6"></a>
+</span><span id="__span-19-7"><a id="__codelineno-19-7" name="__codelineno-19-7" href="#__codelineno-19-7"></a>cargo test -p fission-pcode structuring_candidate_discovery_ -- --test-threads=1
+</span><span id="__span-19-8"><a id="__codelineno-19-8" name="__codelineno-19-8" href="#__codelineno-19-8"></a>- 52 passed / 0 failed
+</span><span id="__span-19-9"><a id="__codelineno-19-9" name="__codelineno-19-9" href="#__codelineno-19-9"></a>
+</span><span id="__span-19-10"><a id="__codelineno-19-10" name="__codelineno-19-10" href="#__codelineno-19-10"></a>cargo test -p fission-pcode suffix_window -- --test-threads=1
+</span><span id="__span-19-11"><a id="__codelineno-19-11" name="__codelineno-19-11" href="#__codelineno-19-11"></a>- 63 passed / 0 failed
+</span><span id="__span-19-12"><a id="__codelineno-19-12" name="__codelineno-19-12" href="#__codelineno-19-12"></a>
+</span><span id="__span-19-13"><a id="__codelineno-19-13" name="__codelineno-19-13" href="#__codelineno-19-13"></a>cargo check -p fission-pcode
+</span><span id="__span-19-14"><a id="__codelineno-19-14" name="__codelineno-19-14" href="#__codelineno-19-14"></a>- passed
+</span><span id="__span-19-15"><a id="__codelineno-19-15" name="__codelineno-19-15" href="#__codelineno-19-15"></a>
+</span><span id="__span-19-16"><a id="__codelineno-19-16" name="__codelineno-19-16" href="#__codelineno-19-16"></a>cargo check -p fission-automation
+</span><span id="__span-19-17"><a id="__codelineno-19-17" name="__codelineno-19-17" href="#__codelineno-19-17"></a>- passed
+</span><span id="__span-19-18"><a id="__codelineno-19-18" name="__codelineno-19-18" href="#__codelineno-19-18"></a>
+</span><span id="__span-19-19"><a id="__codelineno-19-19" name="__codelineno-19-19" href="#__codelineno-19-19"></a>cargo build -p fission-cli --release
+</span><span id="__span-19-20"><a id="__codelineno-19-20" name="__codelineno-19-20" href="#__codelineno-19-20"></a>- passed
+</span></code></pre></div>
+<h3 id="windows-small-c-2-way-benchmark_2">Windows small C 2-way benchmark<a class="headerlink" href="#windows-small-c-2-way-benchmark_2" title="Permanent link">&para;</a></h3>
+<p>Baseline:</p>
+<ul>
+<li><code>benchmark/artifacts/full_benchmark/windows-small-c-target-row-delta-latest</code></li>
+</ul>
+<p>Trial:</p>
+<ul>
+<li><code>benchmark/artifacts/full_benchmark/windows-small-c-join-owner-latest</code></li>
+</ul>
+<p>Corpus headline:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-20-1"><a id="__codelineno-20-1" name="__codelineno-20-1" href="#__codelineno-20-1"></a>weighted_avg_normalized_similarity: 37.604286 -&gt; 37.604286
+</span><span id="__span-20-2"><a id="__codelineno-20-2" name="__codelineno-20-2" href="#__codelineno-20-2"></a>new failed rows: 0
+</span><span id="__span-20-3"><a id="__codelineno-20-3" name="__codelineno-20-3" href="#__codelineno-20-3"></a>release_promotion_allowed: false -&gt; false
+</span></code></pre></div>
+<p>What moved:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-21-1"><a id="__codelineno-21-1" name="__codelineno-21-1" href="#__codelineno-21-1"></a>blockgraph candidate: 414 -&gt; 418
+</span><span id="__span-21-2"><a id="__codelineno-21-2" name="__codelineno-21-2" href="#__codelineno-21-2"></a>blockgraph rejected_external_ref: 108 -&gt; 0
+</span><span id="__span-21-3"><a id="__codelineno-21-3" name="__codelineno-21-3" href="#__codelineno-21-3"></a>blockgraph rejected_join_owner_conflict: 128 -&gt; 232
+</span><span id="__span-21-4"><a id="__codelineno-21-4" name="__codelineno-21-4" href="#__codelineno-21-4"></a>blockgraph rejected_must_emit_label: 414 -&gt; 418
+</span></code></pre></div>
+<p>What did not move:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-22-1"><a id="__codelineno-22-1" name="__codelineno-22-1" href="#__codelineno-22-1"></a>alias_has_nonlocal_ref: 56 -&gt; 56
+</span><span id="__span-22-2"><a id="__codelineno-22-2" name="__codelineno-22-2" href="#__codelineno-22-2"></a>alias_has_nonlocal_ref_nested_before: 24 -&gt; 24
+</span><span id="__span-22-3"><a id="__codelineno-22-3" name="__codelineno-22-3" href="#__codelineno-22-3"></a>alias_has_nonlocal_ref_external_before: 18 -&gt; 18
+</span><span id="__span-22-4"><a id="__codelineno-22-4" name="__codelineno-22-4" href="#__codelineno-22-4"></a>alias_interleave_conflict: 50 -&gt; 50
+</span></code></pre></div>
+<p>Representative canary rows remained byte-stable:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-23-1"><a id="__codelineno-23-1" name="__codelineno-23-1" href="#__codelineno-23-1"></a>test_functions:fibonacci @ 0x140001470
+</span><span id="__span-23-2"><a id="__codelineno-23-2" name="__codelineno-23-2" href="#__codelineno-23-2"></a>- current_normalized_similarity: 11.65 -&gt; 11.65
+</span><span id="__span-23-3"><a id="__codelineno-23-3" name="__codelineno-23-3" href="#__codelineno-23-3"></a>- code_changed: false
+</span><span id="__span-23-4"><a id="__codelineno-23-4" name="__codelineno-23-4" href="#__codelineno-23-4"></a>- forced_linear_structuring_count: 1 -&gt; 1
+</span><span id="__span-23-5"><a id="__codelineno-23-5" name="__codelineno-23-5" href="#__codelineno-23-5"></a>
+</span><span id="__span-23-6"><a id="__codelineno-23-6" name="__codelineno-23-6" href="#__codelineno-23-6"></a>math_operations:fibonacci_memo @ 0x140001a90
+</span><span id="__span-23-7"><a id="__codelineno-23-7" name="__codelineno-23-7" href="#__codelineno-23-7"></a>- current_normalized_similarity: 15.36 -&gt; 15.36
+</span><span id="__span-23-8"><a id="__codelineno-23-8" name="__codelineno-23-8" href="#__codelineno-23-8"></a>- code_changed: false
+</span></code></pre></div>
+<h3 id="reading-of-the-result_1">Reading of the result<a class="headerlink" href="#reading-of-the-result_1" title="Permanent link">&para;</a></h3>
+<p>This wave produced a real owner shift, but not a quality uplift.</p>
+<p>What improved:</p>
+<ul>
+<li><code>MustEmitLabel</code> no longer hides unresolved nested-before cases inside <code>rejected_external_ref</code></li>
+<li>the benchmark proves the current bottleneck is classification/ownership, not measurement blindness</li>
+<li>same-guard-family nested-before refs now have an explicit acceptance path at the promotion gate</li>
+</ul>
+<p>What did not improve:</p>
+<ul>
+<li>no current Windows small C row changed rendered output</li>
+<li><code>blockgraph_region_complete_count</code> is still <code>0</code></li>
+<li><code>fibonacci</code> is still linearized</li>
+</ul>
+<p>Practical interpretation:</p>
+<ul>
+<li>the benchmark is measuring correctly</li>
+<li>the current wave reclassified the remaining blocker more accurately</li>
+<li>the next owner is the unresolved <code>join_owner_conflict</code> family, not generic benchmark infrastructure</li>
+</ul>
+<h3 id="duplicate-logic-audit_1">Duplicate-logic audit<a class="headerlink" href="#duplicate-logic-audit_1" title="Permanent link">&para;</a></h3>
+<p>The change stayed inside the canonical guarded-tail owner:</p>
+<ul>
+<li>no printer-side repair</li>
+<li>no CLI-side repair</li>
+<li>no benchmark-script semantic patching</li>
+</ul>
+<p>Remaining duplication status:</p>
+<ul>
+<li>guard-family relation checking is shared via <code>exprs_share_guard_family(...)</code></li>
+<li>join-owner pre-candidate scanning still exists as a promotion-gate-specific helper because the promotion window is candidate-anchored, not alias-segment-anchored</li>
+</ul>
+<h3 id="final-status_3">Final status<a class="headerlink" href="#final-status_3" title="Permanent link">&para;</a></h3>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-24-1"><a id="__codelineno-24-1" name="__codelineno-24-1" href="#__codelineno-24-1"></a>wave_type: behavior-changing owner reclassification
+</span><span id="__span-24-2"><a id="__codelineno-24-2" name="__codelineno-24-2" href="#__codelineno-24-2"></a>primary_owner: guarded-tail MustEmitLabel join-owner gate
+</span><span id="__span-24-3"><a id="__codelineno-24-3" name="__codelineno-24-3" href="#__codelineno-24-3"></a>behavior_changed: yes
+</span><span id="__span-24-4"><a id="__codelineno-24-4" name="__codelineno-24-4" href="#__codelineno-24-4"></a>release_path_changed: no
+</span><span id="__span-24-5"><a id="__codelineno-24-5" name="__codelineno-24-5" href="#__codelineno-24-5"></a>env_gate: none
+</span><span id="__span-24-6"><a id="__codelineno-24-6" name="__codelineno-24-6" href="#__codelineno-24-6"></a>promotion impact: neutral on current Windows small C corpus
+</span><span id="__span-24-7"><a id="__codelineno-24-7" name="__codelineno-24-7" href="#__codelineno-24-7"></a>next owner: BlockGraph join/follow ownership completion for unresolved join_owner_conflict
+</span></code></pre></div>
+<hr />
+<h2 id="5-cli-process-cpu-worker-telemetry-for-parallel-decompilation">5. CLI Process CPU / Worker Telemetry For Parallel Decompilation<a class="headerlink" href="#5-cli-process-cpu-worker-telemetry-for-parallel-decompilation" title="Permanent link">&para;</a></h2>
+<h3 id="summary_4">Summary<a class="headerlink" href="#summary_4" title="Permanent link">&para;</a></h3>
+<p>This wave added first-class process CPU and worker readout to the CLI benchmark JSON path so hot-machine / fan-noise reports can be separated from actual Fission CPU behavior.</p>
+<p>The immediate investigation found:</p>
+<ul>
+<li>no active <code>fission_cli</code>, benchmark, Ghidra Java, cargo, or rustc process during the heat report</li>
+<li>the dominant CPU process was VS Code <code>Code Helper (Plugin)</code> PID <code>19578</code></li>
+<li>that process was tied to the Continue extension and <code>.continue/index/index.sqlite-shm</code></li>
+</ul>
+<p>So the current heat event was not caused by a running Fission decompilation job.</p>
+<h3 id="what-changed_3">What changed<a class="headerlink" href="#what-changed_3" title="Permanent link">&para;</a></h3>
+<p><code>fission_cli decomp ... --json --benchmark</code> now emits additive <code>_meta</code> fields:</p>
+<ul>
+<li><code>worker_count</code></li>
+<li><code>worker_fanout_enabled</code></li>
+<li><code>available_parallelism</code></li>
+<li><code>worker_env_requested</code></li>
+<li><code>decomp_stack_mb</code></li>
+<li><code>cpu_user_sec</code></li>
+<li><code>cpu_system_sec</code></li>
+<li><code>cpu_total_sec</code></li>
+<li><code>cpu_utilization_pct</code></li>
+<li><code>effective_parallelism</code></li>
+</ul>
+<p>The CPU values are process-local and come from <code>getrusage(RUSAGE_SELF)</code> on Unix/macOS. They are intentionally independent from the benchmark wrapper sampler, which can miss short Fission runs.</p>
+<p>Benchmark summaries now project those values into:</p>
+<ul>
+<li>verbose single-binary summary</li>
+<li>verbose corpus summary</li>
+<li>compact single-binary summary</li>
+<li>compact corpus summary</li>
+<li>per-binary compact rows</li>
+</ul>
+<h3 id="validation_5">Validation<a class="headerlink" href="#validation_5" title="Permanent link">&para;</a></h3>
+<p>Rust / Python validation:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-25-1"><a id="__codelineno-25-1" name="__codelineno-25-1" href="#__codelineno-25-1"></a>cargo check -p fission-cli
+</span><span id="__span-25-2"><a id="__codelineno-25-2" name="__codelineno-25-2" href="#__codelineno-25-2"></a>- passed
+</span><span id="__span-25-3"><a id="__codelineno-25-3" name="__codelineno-25-3" href="#__codelineno-25-3"></a>
+</span><span id="__span-25-4"><a id="__codelineno-25-4" name="__codelineno-25-4" href="#__codelineno-25-4"></a>cargo build -p fission-cli --release
+</span><span id="__span-25-5"><a id="__codelineno-25-5" name="__codelineno-25-5" href="#__codelineno-25-5"></a>- passed
+</span><span id="__span-25-6"><a id="__codelineno-25-6" name="__codelineno-25-6" href="#__codelineno-25-6"></a>
+</span><span id="__span-25-7"><a id="__codelineno-25-7" name="__codelineno-25-7" href="#__codelineno-25-7"></a>cargo check -p fission-automation
+</span><span id="__span-25-8"><a id="__codelineno-25-8" name="__codelineno-25-8" href="#__codelineno-25-8"></a>- passed
+</span><span id="__span-25-9"><a id="__codelineno-25-9" name="__codelineno-25-9" href="#__codelineno-25-9"></a>
+</span><span id="__span-25-10"><a id="__codelineno-25-10" name="__codelineno-25-10" href="#__codelineno-25-10"></a>python3 -m unittest benchmark/full_benchmark/grand_finale_support/test_corpus_benchmark.py
+</span><span id="__span-25-11"><a id="__codelineno-25-11" name="__codelineno-25-11" href="#__codelineno-25-11"></a>- 27 passed / 0 failed
+</span><span id="__span-25-12"><a id="__codelineno-25-12" name="__codelineno-25-12" href="#__codelineno-25-12"></a>
+</span><span id="__span-25-13"><a id="__codelineno-25-13" name="__codelineno-25-13" href="#__codelineno-25-13"></a>python3 -m unittest benchmark/full_benchmark/grand_finale_support/test_llm_advisory.py
+</span><span id="__span-25-14"><a id="__codelineno-25-14" name="__codelineno-25-14" href="#__codelineno-25-14"></a>- 7 passed / 0 failed
+</span></code></pre></div>
+<p>Live worker scaling probe:</p>
+<p>Target:</p>
+<ul>
+<li><code>benchmark/binary/x86-64/window/small/binary/c/array_operations.exe</code></li>
+</ul>
+<p>Command shape:</p>
+<ul>
+<li><code>fission_cli decomp &lt;binary&gt; --all --json --benchmark --include-nonuser-functions</code></li>
+</ul>
+<p>Measured <code>_meta</code> results:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-26-1"><a id="__codelineno-26-1" name="__codelineno-26-1" href="#__codelineno-26-1"></a>workers=1
+</span><span id="__span-26-2"><a id="__codelineno-26-2" name="__codelineno-26-2" href="#__codelineno-26-2"></a>- function_count: 127
+</span><span id="__span-26-3"><a id="__codelineno-26-3" name="__codelineno-26-3" href="#__codelineno-26-3"></a>- wall_clock_sec: 1.441615
+</span><span id="__span-26-4"><a id="__codelineno-26-4" name="__codelineno-26-4" href="#__codelineno-26-4"></a>- cpu_total_sec: 1.289221
+</span><span id="__span-26-5"><a id="__codelineno-26-5" name="__codelineno-26-5" href="#__codelineno-26-5"></a>- cpu_utilization_pct: 89.429
+</span><span id="__span-26-6"><a id="__codelineno-26-6" name="__codelineno-26-6" href="#__codelineno-26-6"></a>- effective_parallelism: 0.894
+</span><span id="__span-26-7"><a id="__codelineno-26-7" name="__codelineno-26-7" href="#__codelineno-26-7"></a>- total_decomp_sec: 1.422880
+</span><span id="__span-26-8"><a id="__codelineno-26-8" name="__codelineno-26-8" href="#__codelineno-26-8"></a>
+</span><span id="__span-26-9"><a id="__codelineno-26-9" name="__codelineno-26-9" href="#__codelineno-26-9"></a>workers=2
+</span><span id="__span-26-10"><a id="__codelineno-26-10" name="__codelineno-26-10" href="#__codelineno-26-10"></a>- function_count: 127
+</span><span id="__span-26-11"><a id="__codelineno-26-11" name="__codelineno-26-11" href="#__codelineno-26-11"></a>- wall_clock_sec: 1.160407
+</span><span id="__span-26-12"><a id="__codelineno-26-12" name="__codelineno-26-12" href="#__codelineno-26-12"></a>- cpu_total_sec: 1.275793
+</span><span id="__span-26-13"><a id="__codelineno-26-13" name="__codelineno-26-13" href="#__codelineno-26-13"></a>- cpu_utilization_pct: 109.944
+</span><span id="__span-26-14"><a id="__codelineno-26-14" name="__codelineno-26-14" href="#__codelineno-26-14"></a>- effective_parallelism: 1.099
+</span><span id="__span-26-15"><a id="__codelineno-26-15" name="__codelineno-26-15" href="#__codelineno-26-15"></a>- total_decomp_sec: 1.327213
+</span><span id="__span-26-16"><a id="__codelineno-26-16" name="__codelineno-26-16" href="#__codelineno-26-16"></a>
+</span><span id="__span-26-17"><a id="__codelineno-26-17" name="__codelineno-26-17" href="#__codelineno-26-17"></a>workers=4
+</span><span id="__span-26-18"><a id="__codelineno-26-18" name="__codelineno-26-18" href="#__codelineno-26-18"></a>- function_count: 127
+</span><span id="__span-26-19"><a id="__codelineno-26-19" name="__codelineno-26-19" href="#__codelineno-26-19"></a>- wall_clock_sec: 1.096661
+</span><span id="__span-26-20"><a id="__codelineno-26-20" name="__codelineno-26-20" href="#__codelineno-26-20"></a>- cpu_total_sec: 1.379144
+</span><span id="__span-26-21"><a id="__codelineno-26-21" name="__codelineno-26-21" href="#__codelineno-26-21"></a>- cpu_utilization_pct: 125.758
+</span><span id="__span-26-22"><a id="__codelineno-26-22" name="__codelineno-26-22" href="#__codelineno-26-22"></a>- effective_parallelism: 1.258
+</span><span id="__span-26-23"><a id="__codelineno-26-23" name="__codelineno-26-23" href="#__codelineno-26-23"></a>- total_decomp_sec: 1.403092
+</span><span id="__span-26-24"><a id="__codelineno-26-24" name="__codelineno-26-24" href="#__codelineno-26-24"></a>
+</span><span id="__span-26-25"><a id="__codelineno-26-25" name="__codelineno-26-25" href="#__codelineno-26-25"></a>workers=8
+</span><span id="__span-26-26"><a id="__codelineno-26-26" name="__codelineno-26-26" href="#__codelineno-26-26"></a>- function_count: 127
+</span><span id="__span-26-27"><a id="__codelineno-26-27" name="__codelineno-26-27" href="#__codelineno-26-27"></a>- wall_clock_sec: 1.129866
+</span><span id="__span-26-28"><a id="__codelineno-26-28" name="__codelineno-26-28" href="#__codelineno-26-28"></a>- cpu_total_sec: 1.773962
+</span><span id="__span-26-29"><a id="__codelineno-26-29" name="__codelineno-26-29" href="#__codelineno-26-29"></a>- cpu_utilization_pct: 157.006
+</span><span id="__span-26-30"><a id="__codelineno-26-30" name="__codelineno-26-30" href="#__codelineno-26-30"></a>- effective_parallelism: 1.570
+</span><span id="__span-26-31"><a id="__codelineno-26-31" name="__codelineno-26-31" href="#__codelineno-26-31"></a>- total_decomp_sec: 2.042907
+</span></code></pre></div>
+<h3 id="reading-of-the-result_2">Reading of the result<a class="headerlink" href="#reading-of-the-result_2" title="Permanent link">&para;</a></h3>
+<p>What improved:</p>
+<ul>
+<li>Fission now reports its own process CPU consumption and parallelism directly in benchmark JSON.</li>
+<li>The compact AI-facing artifact can distinguish wall-clock speed from total CPU burn.</li>
+<li>Worker fan-out can now be evaluated as a throughput/CPU-efficiency tradeoff instead of guessed from wall time.</li>
+</ul>
+<p>What did not change:</p>
+<ul>
+<li>no decompiler semantic behavior changed</li>
+<li>no worker scheduling policy changed</li>
+<li>no quality metric changed</li>
+</ul>
+<p>Practical interpretation:</p>
+<ul>
+<li>current small C corpus runs are not showing an infinite-loop / runaway CPU signature</li>
+<li>the workload has limited parallel efficiency at high worker counts</li>
+<li><code>workers=4</code> gave the best wall time in this probe</li>
+<li><code>workers=8</code> increased total CPU seconds and effective parallelism but did not improve wall time</li>
+</ul>
+<h3 id="final-status_4">Final status<a class="headerlink" href="#final-status_4" title="Permanent link">&para;</a></h3>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-27-1"><a id="__codelineno-27-1" name="__codelineno-27-1" href="#__codelineno-27-1"></a>wave_type: diagnostic/reporting
+</span><span id="__span-27-2"><a id="__codelineno-27-2" name="__codelineno-27-2" href="#__codelineno-27-2"></a>primary_owner: fission-cli benchmark metadata + benchmark compact projection
+</span><span id="__span-27-3"><a id="__codelineno-27-3" name="__codelineno-27-3" href="#__codelineno-27-3"></a>behavior_changed: no decompiler semantic change
+</span><span id="__span-27-4"><a id="__codelineno-27-4" name="__codelineno-27-4" href="#__codelineno-27-4"></a>release_path_changed: no
+</span><span id="__span-27-5"><a id="__codelineno-27-5" name="__codelineno-27-5" href="#__codelineno-27-5"></a>env_gate: none
+</span><span id="__span-27-6"><a id="__codelineno-27-6" name="__codelineno-27-6" href="#__codelineno-27-6"></a>practical_result: CPU usage is now measurable per Fission run; current heat report points outside Fission
+</span><span id="__span-27-7"><a id="__codelineno-27-7" name="__codelineno-27-7" href="#__codelineno-27-7"></a>next owner: adaptive worker policy and per-function progress guards
+</span></code></pre></div>
+<h2 id="6-mir-shadow-contract-wave-1">6. MIR Shadow Contract Wave 1<a class="headerlink" href="#6-mir-shadow-contract-wave-1" title="Permanent link">&para;</a></h2>
+<h3 id="scope_1">Scope<a class="headerlink" href="#scope_1" title="Permanent link">&para;</a></h3>
+<p>This wave introduces the first internal MIR contract between current NIR/HIR normalization and final HIR printing.</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-28-1"><a id="__codelineno-28-1" name="__codelineno-28-1" href="#__codelineno-28-1"></a>wave_type: behavior-preserving shadow contract
+</span><span id="__span-28-2"><a id="__codelineno-28-2" name="__codelineno-28-2" href="#__codelineno-28-2"></a>primary_owner: crates/fission-pcode/src/nir/mir
+</span><span id="__span-28-3"><a id="__codelineno-28-3" name="__codelineno-28-3" href="#__codelineno-28-3"></a>behavior_changed: no semantic output change intended
+</span><span id="__span-28-4"><a id="__codelineno-28-4" name="__codelineno-28-4" href="#__codelineno-28-4"></a>release_path_changed: no
+</span><span id="__span-28-5"><a id="__codelineno-28-5" name="__codelineno-28-5" href="#__codelineno-28-5"></a>env_gate: none
+</span></code></pre></div>
+<p>The new MIR layer is intentionally shadow-only. It projects the current normalized <code>HirFunction</code> into <code>MirFunction</code> for telemetry and ownership-boundary validation, but does not round-trip back into HIR and does not feed the printer.</p>
+<h3 id="added-internal-contract">Added Internal Contract<a class="headerlink" href="#added-internal-contract" title="Permanent link">&para;</a></h3>
+<p>New internal owner:</p>
+<ul>
+<li><code>crates/fission-pcode/src/nir/mir/</code></li>
+</ul>
+<p>Initial MIR concepts:</p>
+<ul>
+<li><code>MirFunction</code></li>
+<li><code>MirBlock</code></li>
+<li><code>MirValueId</code></li>
+<li><code>MirStmt</code></li>
+<li><code>MirTerminator</code></li>
+<li><code>MirValueKind</code></li>
+<li><code>MirMemoryRegion</code></li>
+<li><code>MirJoinProof</code></li>
+<li><code>MirRegionProof</code></li>
+<li><code>MirLoweringStats</code></li>
+</ul>
+<p>Telemetry added to <code>NirBuildStats</code>:</p>
+<ul>
+<li><code>mir_enabled_count</code></li>
+<li><code>mir_function_count</code></li>
+<li><code>mir_block_count</code></li>
+<li><code>mir_value_count</code></li>
+<li><code>mir_memory_region_count</code></li>
+<li><code>mir_join_proof_count</code></li>
+<li><code>mir_region_proof_count</code></li>
+<li><code>mir_projection_duration_ms</code></li>
+</ul>
+<p>Benchmark reporting now exposes MIR metrics in:</p>
+<ul>
+<li>verbose single-binary summary</li>
+<li>verbose corpus summary</li>
+<li>compact single-binary summary</li>
+<li>compact corpus summary</li>
+<li>console summary</li>
+<li>per-binary compact rows</li>
+</ul>
+<h3 id="validation_6">Validation<a class="headerlink" href="#validation_6" title="Permanent link">&para;</a></h3>
+<p>Rust / Python validation:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-29-1"><a id="__codelineno-29-1" name="__codelineno-29-1" href="#__codelineno-29-1"></a>cargo test -p fission-pcode mir_ -- --test-threads=1
+</span><span id="__span-29-2"><a id="__codelineno-29-2" name="__codelineno-29-2" href="#__codelineno-29-2"></a>- passed: 3 passed / 0 failed
+</span><span id="__span-29-3"><a id="__codelineno-29-3" name="__codelineno-29-3" href="#__codelineno-29-3"></a>
+</span><span id="__span-29-4"><a id="__codelineno-29-4" name="__codelineno-29-4" href="#__codelineno-29-4"></a>cargo test -p fission-pcode -- --test-threads=1
+</span><span id="__span-29-5"><a id="__codelineno-29-5" name="__codelineno-29-5" href="#__codelineno-29-5"></a>- passed: 672 passed / 0 failed
+</span><span id="__span-29-6"><a id="__codelineno-29-6" name="__codelineno-29-6" href="#__codelineno-29-6"></a>
+</span><span id="__span-29-7"><a id="__codelineno-29-7" name="__codelineno-29-7" href="#__codelineno-29-7"></a>cargo check -p fission-pcode
+</span><span id="__span-29-8"><a id="__codelineno-29-8" name="__codelineno-29-8" href="#__codelineno-29-8"></a>- passed
+</span><span id="__span-29-9"><a id="__codelineno-29-9" name="__codelineno-29-9" href="#__codelineno-29-9"></a>
+</span><span id="__span-29-10"><a id="__codelineno-29-10" name="__codelineno-29-10" href="#__codelineno-29-10"></a>cargo check -p fission-automation
+</span><span id="__span-29-11"><a id="__codelineno-29-11" name="__codelineno-29-11" href="#__codelineno-29-11"></a>- passed
+</span><span id="__span-29-12"><a id="__codelineno-29-12" name="__codelineno-29-12" href="#__codelineno-29-12"></a>
+</span><span id="__span-29-13"><a id="__codelineno-29-13" name="__codelineno-29-13" href="#__codelineno-29-13"></a>cargo build -p fission-cli --release
+</span><span id="__span-29-14"><a id="__codelineno-29-14" name="__codelineno-29-14" href="#__codelineno-29-14"></a>- passed
+</span><span id="__span-29-15"><a id="__codelineno-29-15" name="__codelineno-29-15" href="#__codelineno-29-15"></a>
+</span><span id="__span-29-16"><a id="__codelineno-29-16" name="__codelineno-29-16" href="#__codelineno-29-16"></a>python3 -m unittest benchmark/full_benchmark/grand_finale_support/test_corpus_benchmark.py
+</span><span id="__span-29-17"><a id="__codelineno-29-17" name="__codelineno-29-17" href="#__codelineno-29-17"></a>- passed: 28 passed / 0 failed
+</span><span id="__span-29-18"><a id="__codelineno-29-18" name="__codelineno-29-18" href="#__codelineno-29-18"></a>
+</span><span id="__span-29-19"><a id="__codelineno-29-19" name="__codelineno-29-19" href="#__codelineno-29-19"></a>python3 -m unittest benchmark/full_benchmark/grand_finale_support/test_llm_advisory.py
+</span><span id="__span-29-20"><a id="__codelineno-29-20" name="__codelineno-29-20" href="#__codelineno-29-20"></a>- passed: 7 passed / 0 failed
+</span></code></pre></div>
+<p>Live targeted validation:</p>
+<p>Target:</p>
+<ul>
+<li><code>benchmark/binary/x86-64/window/small/binary/c/test_functions.exe</code></li>
+<li>function: <code>fibonacci @ 0x140001470</code></li>
+</ul>
+<p>Observed <code>preview_build_stats</code>:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-30-1"><a id="__codelineno-30-1" name="__codelineno-30-1" href="#__codelineno-30-1"></a>mir_enabled_count: 1
+</span><span id="__span-30-2"><a id="__codelineno-30-2" name="__codelineno-30-2" href="#__codelineno-30-2"></a>mir_function_count: 1
+</span><span id="__span-30-3"><a id="__codelineno-30-3" name="__codelineno-30-3" href="#__codelineno-30-3"></a>mir_block_count: 1
+</span><span id="__span-30-4"><a id="__codelineno-30-4" name="__codelineno-30-4" href="#__codelineno-30-4"></a>mir_value_count: 3639
+</span><span id="__span-30-5"><a id="__codelineno-30-5" name="__codelineno-30-5" href="#__codelineno-30-5"></a>mir_memory_region_count: 0
+</span><span id="__span-30-6"><a id="__codelineno-30-6" name="__codelineno-30-6" href="#__codelineno-30-6"></a>mir_join_proof_count: 86
+</span><span id="__span-30-7"><a id="__codelineno-30-7" name="__codelineno-30-7" href="#__codelineno-30-7"></a>mir_region_proof_count: 21
+</span><span id="__span-30-8"><a id="__codelineno-30-8" name="__codelineno-30-8" href="#__codelineno-30-8"></a>mir_projection_duration_ms: 0
+</span><span id="__span-30-9"><a id="__codelineno-30-9" name="__codelineno-30-9" href="#__codelineno-30-9"></a>rendered code length: 40935
+</span></code></pre></div>
+<p>Windows small C 2-way benchmark:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-31-1"><a id="__codelineno-31-1" name="__codelineno-31-1" href="#__codelineno-31-1"></a>baseline: benchmark/artifacts/full_benchmark/windows-small-c-nested-before-ownership-latest
+</span><span id="__span-31-2"><a id="__codelineno-31-2" name="__codelineno-31-2" href="#__codelineno-31-2"></a>trial: benchmark/artifacts/full_benchmark/windows-small-c-mir-latest
+</span><span id="__span-31-3"><a id="__codelineno-31-3" name="__codelineno-31-3" href="#__codelineno-31-3"></a>weighted_avg_normalized_similarity: 37.604%
+</span><span id="__span-31-4"><a id="__codelineno-31-4" name="__codelineno-31-4" href="#__codelineno-31-4"></a>x64 weighted_avg_normalized_similarity: 37.604%
+</span><span id="__span-31-5"><a id="__codelineno-31-5" name="__codelineno-31-5" href="#__codelineno-31-5"></a>row gates: 6 / 6 passed
+</span><span id="__span-31-6"><a id="__codelineno-31-6" name="__codelineno-31-6" href="#__codelineno-31-6"></a>direct_success: 6 / 6 non-worse
+</span><span id="__span-31-7"><a id="__codelineno-31-7" name="__codelineno-31-7" href="#__codelineno-31-7"></a>coverage: 6 / 6 non-worse
+</span><span id="__span-31-8"><a id="__codelineno-31-8" name="__codelineno-31-8" href="#__codelineno-31-8"></a>target rows code_changed: false for fibonacci and fibonacci_memo
+</span></code></pre></div>
+<p>MIR corpus totals:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-32-1"><a id="__codelineno-32-1" name="__codelineno-32-1" href="#__codelineno-32-1"></a>enabled: 294
+</span><span id="__span-32-2"><a id="__codelineno-32-2" name="__codelineno-32-2" href="#__codelineno-32-2"></a>function: 294
+</span><span id="__span-32-3"><a id="__codelineno-32-3" name="__codelineno-32-3" href="#__codelineno-32-3"></a>block: 294
+</span><span id="__span-32-4"><a id="__codelineno-32-4" name="__codelineno-32-4" href="#__codelineno-32-4"></a>value: 9066
+</span><span id="__span-32-5"><a id="__codelineno-32-5" name="__codelineno-32-5" href="#__codelineno-32-5"></a>memory_region: 324
+</span><span id="__span-32-6"><a id="__codelineno-32-6" name="__codelineno-32-6" href="#__codelineno-32-6"></a>join_proof: 658
+</span><span id="__span-32-7"><a id="__codelineno-32-7" name="__codelineno-32-7" href="#__codelineno-32-7"></a>region_proof: 407
+</span><span id="__span-32-8"><a id="__codelineno-32-8" name="__codelineno-32-8" href="#__codelineno-32-8"></a>projection_duration_ms: 0
+</span></code></pre></div>
+<h3 id="reading-of-the-result_3">Reading of the Result<a class="headerlink" href="#reading-of-the-result_3" title="Permanent link">&para;</a></h3>
+<p>What improved:</p>
+<ul>
+<li>Fission now has a concrete internal MIR owner boundary that maps to Ghidra-style <code>Funcdata</code> / <code>Heritage</code> / <code>BlockGraph</code> working-state responsibilities.</li>
+<li>Benchmark artifacts can now confirm whether MIR projection is active and how much semantic surface it sees.</li>
+<li>The compact AI-facing artifact now exposes <code>mir_metric_totals</code>, so future MIR materialization or BlockGraph experiments can be compared without opening full artifacts.</li>
+</ul>
+<p>What did not change:</p>
+<ul>
+<li>no CLI syntax changed</li>
+<li>no HIR output path changed</li>
+<li>no representative/materialization policy moved yet</li>
+<li>no BlockGraph acceptance changed yet</li>
+<li>sample quality stayed neutral rather than improving</li>
+</ul>
+<p>Promotion status:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-33-1"><a id="__codelineno-33-1" name="__codelineno-33-1" href="#__codelineno-33-1"></a>status: blocked
+</span><span id="__span-33-2"><a id="__codelineno-33-2" name="__codelineno-33-2" href="#__codelineno-33-2"></a>reason: corpus gate reported failure_family_distribution canonical_must_emit_label_conflict_count 1088 -&gt; 1092
+</span><span id="__span-33-3"><a id="__codelineno-33-3" name="__codelineno-33-3" href="#__codelineno-33-3"></a>interpretation: this wave is shadow-only and target rows remained code_changed=false, so the blocker is treated as existing/parallel failure-family drift rather than MIR output mutation
+</span></code></pre></div>
+<h3 id="next-owner">Next Owner<a class="headerlink" href="#next-owner" title="Permanent link">&para;</a></h3>
+<p>The next MIR wave should not broaden structuring shortcuts. It should move one narrow representative/materialization read-only decision into MIR behind an env gate:</p>
+<ul>
+<li><code>FISSION_ENABLE_MIR_MATERIALIZATION</code></li>
+<li>target metric: <code>materialization_stabilized_count</code></li>
+<li>acceptance: weighted similarity neutral, new failed rows <code>0</code>, and no increase in <code>canonical_must_emit_label_conflict_count</code></li>
+</ul>
+<h2 id="7-mir-blockgraph-admission-gate-trial">7. MIR BlockGraph Admission Gate Trial<a class="headerlink" href="#7-mir-blockgraph-admission-gate-trial" title="Permanent link">&para;</a></h2>
+<h3 id="summary_5">Summary<a class="headerlink" href="#summary_5" title="Permanent link">&para;</a></h3>
+<p>This wave added a default-off MIR BlockGraph behavior trial for the Ghidra <code>FlowBlock</code> / <code>BlockGraph</code> clean-room migration path.</p>
+<p>Fixed metadata:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-34-1"><a id="__codelineno-34-1" name="__codelineno-34-1" href="#__codelineno-34-1"></a>wave_type: env-gated behavior trial
+</span><span id="__span-34-2"><a id="__codelineno-34-2" name="__codelineno-34-2" href="#__codelineno-34-2"></a>env_gate: FISSION_ENABLE_MIR_BLOCKGRAPH
+</span><span id="__span-34-3"><a id="__codelineno-34-3" name="__codelineno-34-3" href="#__codelineno-34-3"></a>default_status: off
+</span><span id="__span-34-4"><a id="__codelineno-34-4" name="__codelineno-34-4" href="#__codelineno-34-4"></a>primary_owner: MIR BlockGraph / structuring admission
+</span><span id="__span-34-5"><a id="__codelineno-34-5" name="__codelineno-34-5" href="#__codelineno-34-5"></a>release_path_changed: no
+</span></code></pre></div>
+<p>Implementation:</p>
+<ul>
+<li>Added MIR BlockGraph contract types:</li>
+<li><code>MirBlockGraph</code></li>
+<li><code>MirRegionCandidate</code></li>
+<li><code>MirJoinOwnershipProof</code></li>
+<li><code>MirFollowOwnershipProof</code></li>
+<li>Added additive <code>NirBuildStats</code> telemetry:</li>
+<li><code>mir_blockgraph_admission_enabled_count</code></li>
+<li><code>mir_blockgraph_irreducible_budget_bypass_count</code></li>
+<li><code>mir_blockgraph_extreme_budget_blocked_count</code></li>
+<li>Projected the new MIR admission telemetry into verbose and compact benchmark summaries.</li>
+<li>Added an env-gated admission path where <code>IrreducibleBudget</code> can attempt graph-collapse under <code>FISSION_ENABLE_MIR_BLOCKGRAPH=1</code>.</li>
+<li>Kept <code>ExplicitForceLinear</code> and <code>ExtremeBudget</code> fail-closed.</li>
+<li>Added fail-closed fallback when the MIR BlockGraph trial produces no complete region proof.</li>
+</ul>
+<h3 id="targeted-validation">Targeted Validation<a class="headerlink" href="#targeted-validation" title="Permanent link">&para;</a></h3>
+<p>Target:</p>
+<ul>
+<li><code>benchmark/binary/x86-64/window/small/binary/c/test_functions.exe</code></li>
+<li><code>fibonacci @ 0x140001470</code></li>
+</ul>
+<p>Env-off:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-35-1"><a id="__codelineno-35-1" name="__codelineno-35-1" href="#__codelineno-35-1"></a>wall_clock_sec: 0.041012
+</span><span id="__span-35-2"><a id="__codelineno-35-2" name="__codelineno-35-2" href="#__codelineno-35-2"></a>forced_linear_structuring_count: 1
+</span><span id="__span-35-3"><a id="__codelineno-35-3" name="__codelineno-35-3" href="#__codelineno-35-3"></a>structuring_force_linear_irreducible_budget_count: 1
+</span><span id="__span-35-4"><a id="__codelineno-35-4" name="__codelineno-35-4" href="#__codelineno-35-4"></a>mir_blockgraph_admission_enabled_count: 0
+</span><span id="__span-35-5"><a id="__codelineno-35-5" name="__codelineno-35-5" href="#__codelineno-35-5"></a>blockgraph_region_candidate_count: 0
+</span><span id="__span-35-6"><a id="__codelineno-35-6" name="__codelineno-35-6" href="#__codelineno-35-6"></a>blockgraph_region_complete_count: 0
+</span><span id="__span-35-7"><a id="__codelineno-35-7" name="__codelineno-35-7" href="#__codelineno-35-7"></a>rendered_code_len: 40935
+</span><span id="__span-35-8"><a id="__codelineno-35-8" name="__codelineno-35-8" href="#__codelineno-35-8"></a>code_sha256: 3b7597bb307cb3155faba1c9d19b518558b6ce5597ec99fac53d929b0f8ab313
+</span></code></pre></div>
+<p>Env-on:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-36-1"><a id="__codelineno-36-1" name="__codelineno-36-1" href="#__codelineno-36-1"></a>wall_clock_sec: 0.114046
+</span><span id="__span-36-2"><a id="__codelineno-36-2" name="__codelineno-36-2" href="#__codelineno-36-2"></a>forced_linear_structuring_count: 1
+</span><span id="__span-36-3"><a id="__codelineno-36-3" name="__codelineno-36-3" href="#__codelineno-36-3"></a>structuring_force_linear_irreducible_budget_count: 1
+</span><span id="__span-36-4"><a id="__codelineno-36-4" name="__codelineno-36-4" href="#__codelineno-36-4"></a>mir_blockgraph_admission_enabled_count: 1
+</span><span id="__span-36-5"><a id="__codelineno-36-5" name="__codelineno-36-5" href="#__codelineno-36-5"></a>mir_blockgraph_irreducible_budget_bypass_count: 1
+</span><span id="__span-36-6"><a id="__codelineno-36-6" name="__codelineno-36-6" href="#__codelineno-36-6"></a>blockgraph_region_candidate_count: 4
+</span><span id="__span-36-7"><a id="__codelineno-36-7" name="__codelineno-36-7" href="#__codelineno-36-7"></a>blockgraph_region_complete_count: 0
+</span><span id="__span-36-8"><a id="__codelineno-36-8" name="__codelineno-36-8" href="#__codelineno-36-8"></a>blockgraph_region_rejected_must_emit_label_count: 4
+</span><span id="__span-36-9"><a id="__codelineno-36-9" name="__codelineno-36-9" href="#__codelineno-36-9"></a>rendered_code_len: 40843
+</span><span id="__span-36-10"><a id="__codelineno-36-10" name="__codelineno-36-10" href="#__codelineno-36-10"></a>code_sha256: f3f0bafe536ad2a2ce90f174eed8e254b26ea11dc55783acccc2927371eea92f
+</span></code></pre></div>
+<p>Interpretation:</p>
+<ul>
+<li>The env gate reaches the MIR BlockGraph admission path.</li>
+<li>It does not yet produce a complete BlockGraph region.</li>
+<li><code>fibonacci</code> remained forced-linear after fail-closed fallback.</li>
+<li>The fallback is not byte-stable yet because the graph-collapse attempt still mutates builder state before returning to linear output.</li>
+<li>The target row similarity moved only <code>11.65 -&gt; 11.66</code>, so this is not a meaningful quality uplift.</li>
+</ul>
+<h3 id="windows-small-c-2-way-benchmark_3">Windows Small C 2-Way Benchmark<a class="headerlink" href="#windows-small-c-2-way-benchmark_3" title="Permanent link">&para;</a></h3>
+<p>Benchmark:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-37-1"><a id="__codelineno-37-1" name="__codelineno-37-1" href="#__codelineno-37-1"></a>baseline: benchmark/artifacts/full_benchmark/windows-small-c-mir-latest
+</span><span id="__span-37-2"><a id="__codelineno-37-2" name="__codelineno-37-2" href="#__codelineno-37-2"></a>trial: benchmark/artifacts/full_benchmark/windows-small-c-mir-blockgraph-latest
+</span><span id="__span-37-3"><a id="__codelineno-37-3" name="__codelineno-37-3" href="#__codelineno-37-3"></a>artifact: benchmark/artifacts/full_benchmark/windows-small-c-mir-blockgraph-latest/benchmark_compact_summary.json
+</span></code></pre></div>
+<p>Corpus result:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-38-1"><a id="__codelineno-38-1" name="__codelineno-38-1" href="#__codelineno-38-1"></a>weighted_avg_normalized_similarity: 37.604285714285716
+</span><span id="__span-38-2"><a id="__codelineno-38-2" name="__codelineno-38-2" href="#__codelineno-38-2"></a>x64 weighted_avg_normalized_similarity: 37.604285714285716
+</span><span id="__span-38-3"><a id="__codelineno-38-3" name="__codelineno-38-3" href="#__codelineno-38-3"></a>new failed rows: none
+</span><span id="__span-38-4"><a id="__codelineno-38-4" name="__codelineno-38-4" href="#__codelineno-38-4"></a>row gates: 6 / 6 passed
+</span><span id="__span-38-5"><a id="__codelineno-38-5" name="__codelineno-38-5" href="#__codelineno-38-5"></a>release_promotion_allowed: false
+</span></code></pre></div>
+<p>Promotion blockers:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-39-1"><a id="__codelineno-39-1" name="__codelineno-39-1" href="#__codelineno-39-1"></a>advisory_gate_mode
+</span><span id="__span-39-2"><a id="__codelineno-39-2" name="__codelineno-39-2" href="#__codelineno-39-2"></a>failure_family_distribution canonical_must_emit_label_conflict_count: 1092 -&gt; 1100
+</span><span id="__span-39-3"><a id="__codelineno-39-3" name="__codelineno-39-3" href="#__codelineno-39-3"></a>failure_family_distribution canonical_alias_interleave_conflict_count: 50 -&gt; 64
+</span><span id="__span-39-4"><a id="__codelineno-39-4" name="__codelineno-39-4" href="#__codelineno-39-4"></a>failure_family_distribution canonical_emit_ready_failed_count: 1022 -&gt; 1028
+</span></code></pre></div>
+<p>MIR totals:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-40-1"><a id="__codelineno-40-1" name="__codelineno-40-1" href="#__codelineno-40-1"></a>enabled: 294
+</span><span id="__span-40-2"><a id="__codelineno-40-2" name="__codelineno-40-2" href="#__codelineno-40-2"></a>function: 294
+</span><span id="__span-40-3"><a id="__codelineno-40-3" name="__codelineno-40-3" href="#__codelineno-40-3"></a>block: 294
+</span><span id="__span-40-4"><a id="__codelineno-40-4" name="__codelineno-40-4" href="#__codelineno-40-4"></a>value: 9010
+</span><span id="__span-40-5"><a id="__codelineno-40-5" name="__codelineno-40-5" href="#__codelineno-40-5"></a>join_proof: 658
+</span><span id="__span-40-6"><a id="__codelineno-40-6" name="__codelineno-40-6" href="#__codelineno-40-6"></a>region_proof: 407
+</span><span id="__span-40-7"><a id="__codelineno-40-7" name="__codelineno-40-7" href="#__codelineno-40-7"></a>blockgraph_admission_enabled: 208
+</span><span id="__span-40-8"><a id="__codelineno-40-8" name="__codelineno-40-8" href="#__codelineno-40-8"></a>blockgraph_irreducible_budget_bypass: 1
+</span><span id="__span-40-9"><a id="__codelineno-40-9" name="__codelineno-40-9" href="#__codelineno-40-9"></a>blockgraph_extreme_budget_blocked: 0
+</span></code></pre></div>
+<p>BlockGraph totals:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-41-1"><a id="__codelineno-41-1" name="__codelineno-41-1" href="#__codelineno-41-1"></a>candidate: 422
+</span><span id="__span-41-2"><a id="__codelineno-41-2" name="__codelineno-41-2" href="#__codelineno-41-2"></a>complete: 0
+</span><span id="__span-41-3"><a id="__codelineno-41-3" name="__codelineno-41-3" href="#__codelineno-41-3"></a>rejected_must_emit_label: 422
+</span><span id="__span-41-4"><a id="__codelineno-41-4" name="__codelineno-41-4" href="#__codelineno-41-4"></a>rejected_join_owner_conflict: 232
+</span><span id="__span-41-5"><a id="__codelineno-41-5" name="__codelineno-41-5" href="#__codelineno-41-5"></a>rejected_middle_ref: 24
+</span></code></pre></div>
+<h3 id="reading-of-the-result_4">Reading of the Result<a class="headerlink" href="#reading-of-the-result_4" title="Permanent link">&para;</a></h3>
+<p>What improved:</p>
+<ul>
+<li>MIR now has explicit BlockGraph join/follow ownership contract types.</li>
+<li>The benchmark can distinguish MIR BlockGraph admission from ordinary shadow MIR projection.</li>
+<li>The trial proves the next blocker is still not admission itself, but completion of join/follow ownership proof.</li>
+</ul>
+<p>What regressed or stayed blocked:</p>
+<ul>
+<li><code>blockgraph_region_complete_count</code> stayed <code>0</code>.</li>
+<li><code>canonical_must_emit_label_conflict_count</code>, <code>canonical_alias_interleave_conflict_count</code>, and <code>canonical_emit_ready_failed_count</code> increased under env-on trial.</li>
+<li><code>fibonacci</code> still has no meaningful readability uplift.</li>
+<li>The env-on <code>fibonacci</code> output changed despite fail-closed fallback, so future work must snapshot or isolate MIR BlockGraph trial state before admission can be trusted.</li>
+</ul>
+<p>Promotion status:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-42-1"><a id="__codelineno-42-1" name="__codelineno-42-1" href="#__codelineno-42-1"></a>status: blocked
+</span><span id="__span-42-2"><a id="__codelineno-42-2" name="__codelineno-42-2" href="#__codelineno-42-2"></a>reason: env-gated trial did not produce complete BlockGraph regions and increased failure-family blockers
+</span><span id="__span-42-3"><a id="__codelineno-42-3" name="__codelineno-42-3" href="#__codelineno-42-3"></a>default action: keep FISSION_ENABLE_MIR_BLOCKGRAPH off
+</span></code></pre></div>
+<h3 id="validation_7">Validation<a class="headerlink" href="#validation_7" title="Permanent link">&para;</a></h3>
+<p>Passed:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-43-1"><a id="__codelineno-43-1" name="__codelineno-43-1" href="#__codelineno-43-1"></a>cargo test -p fission-pcode mir_ -- --test-threads=1
+</span><span id="__span-43-2"><a id="__codelineno-43-2" name="__codelineno-43-2" href="#__codelineno-43-2"></a>cargo test -p fission-pcode blockgraph_region -- --test-threads=1
+</span><span id="__span-43-3"><a id="__codelineno-43-3" name="__codelineno-43-3" href="#__codelineno-43-3"></a>cargo test -p fission-pcode structuring_admission -- --test-threads=1
+</span><span id="__span-43-4"><a id="__codelineno-43-4" name="__codelineno-43-4" href="#__codelineno-43-4"></a>cargo test -p fission-pcode suffix_window -- --test-threads=1
+</span><span id="__span-43-5"><a id="__codelineno-43-5" name="__codelineno-43-5" href="#__codelineno-43-5"></a>cargo test -p fission-pcode structuring_candidate_discovery_ -- --test-threads=1
+</span><span id="__span-43-6"><a id="__codelineno-43-6" name="__codelineno-43-6" href="#__codelineno-43-6"></a>python3 -m unittest benchmark/full_benchmark/grand_finale_support/test_corpus_benchmark.py
+</span><span id="__span-43-7"><a id="__codelineno-43-7" name="__codelineno-43-7" href="#__codelineno-43-7"></a>python3 -m unittest benchmark/full_benchmark/grand_finale_support/test_llm_advisory.py
+</span><span id="__span-43-8"><a id="__codelineno-43-8" name="__codelineno-43-8" href="#__codelineno-43-8"></a>cargo check -p fission-pcode
+</span><span id="__span-43-9"><a id="__codelineno-43-9" name="__codelineno-43-9" href="#__codelineno-43-9"></a>cargo check -p fission-automation
+</span><span id="__span-43-10"><a id="__codelineno-43-10" name="__codelineno-43-10" href="#__codelineno-43-10"></a>cargo build -p fission-cli --release
+</span></code></pre></div>
+<p>Incomplete:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-44-1"><a id="__codelineno-44-1" name="__codelineno-44-1" href="#__codelineno-44-1"></a>cargo test -p fission-pcode -- --test-threads=1
+</span></code></pre></div>
+<p>Reason:</p>
+<ul>
+<li>A background cargo/rust-analyzer workspace check repeatedly held the build directory lock.</li>
+<li>Retried after killing stale cargo list/check processes, but the debug rustc process stalled at 0% CPU.</li>
+<li>Targeted tests and release build completed successfully.</li>
+</ul>
+<h3 id="duplicate-logic-audit_2">Duplicate Logic Audit<a class="headerlink" href="#duplicate-logic-audit_2" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Builder still only produces CFG/control evidence and telemetry.</li>
+<li>MIR now owns the added BlockGraph proof vocabulary.</li>
+<li>Structuring consumes the env-gated admission decision.</li>
+<li>Printer remains render-only.</li>
+<li>Benchmark changes are telemetry projection only.</li>
+</ul>
+<h3 id="next-owner_1">Next Owner<a class="headerlink" href="#next-owner_1" title="Permanent link">&para;</a></h3>
+<p>Do not broaden <code>FISSION_ENABLE_MIR_BLOCKGRAPH</code> admission further. The next wave should implement actual MIR join/follow proof completion:</p>
+<ol>
+<li>convert <code>MustEmitLabelConflict</code> into typed MIR join-owner subproofs,</li>
+<li>prove smallest-complete-owner follow selection,</li>
+<li>isolate/snapshot builder state for failed MIR BlockGraph trials,</li>
+<li>only then allow graph-collapse output to survive fail-closed fallback.</li>
+</ol>
+<hr />
+<h2 id="4-fission-sleigh-x86-64-front-end-migration-compiler-only-wave">4. fission-sleigh x86-64 Front-End Migration: compiler-only wave<a class="headerlink" href="#4-fission-sleigh-x86-64-front-end-migration-compiler-only-wave" title="Permanent link">&para;</a></h2>
+<h3 id="summary_6">Summary<a class="headerlink" href="#summary_6" title="Permanent link">&para;</a></h3>
+<p>This wave starts the clean-room Sleigh front-end migration inside <code>fission-sleigh</code> with <code>x86-64</code> fixed as the first consumer.</p>
+<p>Scope was intentionally limited to compiler-only ownership:</p>
+<ul>
+<li>tokenizer</li>
+<li>preprocessor</li>
+<li>parser</li>
+<li>compile-time inventory / pattern graph / semantic action IR</li>
+<li>deterministic generated artifact emission</li>
+<li>non-runtime equivalence harness</li>
+</ul>
+<p>The canonical runtime path did not change.</p>
+<h3 id="why-x86-64-first">Why x86-64 first<a class="headerlink" href="#why-x86-64-first" title="Permanent link">&para;</a></h3>
+<p><code>x86-64</code> is the correct first migration target because the canonical validation surface is already the Windows small C corpus:</p>
+<ul>
+<li><code>benchmark/config/benchmark_corpus/windows_small_c_samples.json</code></li>
+<li><code>benchmark/binary/x86-64/window/small/binary/c</code></li>
+</ul>
+<p>This lets the front-end migration use the same sample family that already drives quality and throughput decisions.</p>
+<h3 id="what-changed_4">What changed<a class="headerlink" href="#what-changed_4" title="Permanent link">&para;</a></h3>
+<p>New compiler-only owner tree:</p>
+<ul>
+<li><code>crates/fission-sleigh/src/compiler/mod.rs</code></li>
+<li><code>crates/fission-sleigh/src/compiler/token.rs</code></li>
+<li><code>crates/fission-sleigh/src/compiler/preprocessor.rs</code></li>
+<li><code>crates/fission-sleigh/src/compiler/ast.rs</code></li>
+<li><code>crates/fission-sleigh/src/compiler/ir.rs</code></li>
+<li><code>crates/fission-sleigh/src/compiler/codegen.rs</code></li>
+<li><code>crates/fission-sleigh/src/compiler/equivalence.rs</code></li>
+</ul>
+<p>New generated artifact path:</p>
+<ul>
+<li><code>crates/fission-sleigh/generated/x86/</code></li>
+</ul>
+<p>New regeneration entrypoint:</p>
+<ul>
+<li><code>cargo run -p fission-sleigh --example generate_x86_frontend</code></li>
+</ul>
+<p>Generated artifacts now checked in:</p>
+<ul>
+<li><code>include_expanded_manifest.json</code></li>
+<li><code>parsed_inventory.json</code></li>
+<li><code>normalized_pattern_graph.json</code></li>
+<li><code>semantic_action_ir.txt</code></li>
+<li><code>generated_frontend.rs</code></li>
+</ul>
+<h3 id="front-end-contract-in-this-wave">Front-end contract in this wave<a class="headerlink" href="#front-end-contract-in-this-wave" title="Permanent link">&para;</a></h3>
+<p>The clean-room compiler currently does all of the following for <code>x86-64.slaspec</code>:</p>
+<ul>
+<li>resolves the checked-in include graph</li>
+<li>evaluates <code>@define</code>, <code>@ifdef</code>, <code>@ifndef</code>, <code>@else</code>, <code>@endif</code></li>
+<li>parses <code>define</code>, <code>macro</code>, <code>with</code>, and constructor blocks into AST</li>
+<li>compiles constructor inventory and pcodeop inventory</li>
+<li>emits deterministic generated artifacts</li>
+</ul>
+<p>The wave does <strong>not</strong> yet do:</p>
+<ul>
+<li>runtime decode from compiled tables</li>
+<li>replacement of the hand-written x86 lifter</li>
+<li>CLI behavior change</li>
+<li>benchmark semantic output change</li>
+</ul>
+<h3 id="equivalence-harness">Equivalence harness<a class="headerlink" href="#equivalence-harness" title="Permanent link">&para;</a></h3>
+<p>The new equivalence harness is intentionally compiler-only and fail-closed.</p>
+<p>Current comparison behavior:</p>
+<ul>
+<li>runs existing hand-lifter decode/lift on sampled x86-64 instruction windows</li>
+<li>records decode length, control-flow class, and emitted pcode opcode sequence</li>
+<li>reports generated-front-end side as:</li>
+<li><code>unsupported_generated_semantic</code></li>
+</ul>
+<p>This is the correct behavior for this wave because runtime semantic execution from compiled spec tables has not been enabled yet.</p>
+<p>Sample sources validated:</p>
+<ul>
+<li>fixed x86 unit seeds</li>
+<li>function-entry windows sampled from:</li>
+<li><code>benchmark/binary/x86-64/window/small/binary/c/test_functions.exe</code></li>
+</ul>
+<h3 id="determinism-checked-in-output">Determinism / checked-in output<a class="headerlink" href="#determinism-checked-in-output" title="Permanent link">&para;</a></h3>
+<p>New compiler tests now enforce:</p>
+<ul>
+<li>x86 include graph resolution</li>
+<li>conditional preprocessing correctness</li>
+<li>AST discovery of with-blocks and constructors</li>
+<li>compile-time pcodeop / pattern inventory generation</li>
+<li>deterministic artifact rendering</li>
+<li>checked-in generated artifacts exactly matching renderer output</li>
+</ul>
+<p>This closes the previous gap where generated output could exist without being verified against the checked-in tree.</p>
+<h3 id="validation_8">Validation<a class="headerlink" href="#validation_8" title="Permanent link">&para;</a></h3>
+<p>Passed:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-45-1"><a id="__codelineno-45-1" name="__codelineno-45-1" href="#__codelineno-45-1"></a>cargo test -p fission-sleigh
+</span><span id="__span-45-2"><a id="__codelineno-45-2" name="__codelineno-45-2" href="#__codelineno-45-2"></a>cargo run -p fission-sleigh --example generate_x86_frontend
+</span><span id="__span-45-3"><a id="__codelineno-45-3" name="__codelineno-45-3" href="#__codelineno-45-3"></a>cargo check -p fission-cli
+</span></code></pre></div>
+<p>Observed result:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-46-1"><a id="__codelineno-46-1" name="__codelineno-46-1" href="#__codelineno-46-1"></a>fission-sleigh: 307 passed / 0 failed
+</span><span id="__span-46-2"><a id="__codelineno-46-2" name="__codelineno-46-2" href="#__codelineno-46-2"></a>generated artifact root: crates/fission-sleigh/generated/x86
+</span></code></pre></div>
+<h3 id="artifact-shape">Artifact shape<a class="headerlink" href="#artifact-shape" title="Permanent link">&para;</a></h3>
+<p>Generated artifact sizes in the current snapshot:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-47-1"><a id="__codelineno-47-1" name="__codelineno-47-1" href="#__codelineno-47-1"></a>include_expanded_manifest.json: 573 bytes
+</span><span id="__span-47-2"><a id="__codelineno-47-2" name="__codelineno-47-2" href="#__codelineno-47-2"></a>generated_frontend.rs: 24,961 bytes
+</span><span id="__span-47-3"><a id="__codelineno-47-3" name="__codelineno-47-3" href="#__codelineno-47-3"></a>semantic_action_ir.txt: 432,676 bytes
+</span><span id="__span-47-4"><a id="__codelineno-47-4" name="__codelineno-47-4" href="#__codelineno-47-4"></a>normalized_pattern_graph.json: 669,507 bytes
+</span><span id="__span-47-5"><a id="__codelineno-47-5" name="__codelineno-47-5" href="#__codelineno-47-5"></a>parsed_inventory.json: 730,095 bytes
+</span></code></pre></div>
+<p>This is large but still repo-manageable for a compiler-only artifact set. No runtime path consumes these files yet.</p>
+<h3 id="what-improved_1">What improved<a class="headerlink" href="#what-improved_1" title="Permanent link">&para;</a></h3>
+<ul>
+<li><code>fission-sleigh</code> now has a real clean-room compiler spine instead of only hand-written lift code.</li>
+<li><code>x86-64</code> migration has a deterministic, repo-tracked generated output contract.</li>
+<li>front-end validation is now anchored to the same Windows x86-64 sample family used elsewhere in Fission.</li>
+<li>the compiler-only equivalence harness makes the “not integrated yet” state explicit instead of silently implying parity.</li>
+</ul>
+<h3 id="what-did-not-improve_1">What did not improve<a class="headerlink" href="#what-did-not-improve_1" title="Permanent link">&para;</a></h3>
+<ul>
+<li>runtime decode/lift behavior is unchanged</li>
+<li>benchmark quality numbers are unchanged by design</li>
+<li>generated front-end still reports <code>unsupported_generated_semantic</code> because execution tables are not wired in this wave</li>
+</ul>
+<h3 id="duplicate-logic-audit_3">Duplicate-logic audit<a class="headerlink" href="#duplicate-logic-audit_3" title="Permanent link">&para;</a></h3>
+<p>This wave intentionally avoided duplicating runtime semantics.</p>
+<ul>
+<li>existing hand-lifter remains the only executable semantic owner</li>
+<li>compiler-only front-end owns spec parsing / inventory / generated output</li>
+<li>equivalence harness projects differences without pretending to be a second runtime decoder</li>
+</ul>
+<h3 id="next-owner_2">Next owner<a class="headerlink" href="#next-owner_2" title="Permanent link">&para;</a></h3>
+<p>Do not replace the hand-lifter yet.</p>
+<p>The next migration wave should implement x86-64 compiled front-end execution in this order:</p>
+<ol>
+<li>constructor/table lookup from compiled pattern graph</li>
+<li>decode-length parity for sampled instruction windows</li>
+<li>control-flow class parity</li>
+<li>pcode opcode / varnode-shape parity buckets</li>
+<li>only then consider execution-path swap behind an env gate</li>
+</ol>
+<h2 id="sleigh-all-variant-generic-compiler-consumer-expansion">Sleigh All-Variant Generic Compiler Consumer Expansion<a class="headerlink" href="#sleigh-all-variant-generic-compiler-consumer-expansion" title="Permanent link">&para;</a></h2>
+<h3 id="summary_7">Summary<a class="headerlink" href="#summary_7" title="Permanent link">&para;</a></h3>
+<p>Expanded the <code>fission-sleigh</code> clean-room compiler-only front-end from the x86-64 first consumer to every checked-in <code>.slaspec</code> entry variant using one generic compiler API.</p>
+<p>This remains a compiler-only wave:</p>
+<ul>
+<li>no runtime decoder replacement</li>
+<li>no CLI behavior change</li>
+<li>no decompiler benchmark output change expected</li>
+<li>no dependency on <code>vendor/rsleigh</code></li>
+</ul>
+<h3 id="publicinternal-contract">Public/internal contract<a class="headerlink" href="#publicinternal-contract" title="Permanent link">&para;</a></h3>
+<p>New canonical compiler API surface:</p>
+<ul>
+<li><code>discover_entry_specs_for_arch(arch)</code></li>
+<li><code>discover_all_entry_specs()</code></li>
+<li><code>compile_frontend_for_entry_spec(entry_spec)</code></li>
+<li><code>compile_frontends_for_arch(arch)</code></li>
+<li><code>write_generated_artifacts_for_entry_spec(entry_spec, output_root)</code></li>
+<li><code>write_all_generated_artifacts(output_root)</code></li>
+</ul>
+<p>Compatibility retained:</p>
+<ul>
+<li><code>compile_x86_64_frontend()</code> remains a wrapper over the generic entry-spec compiler.</li>
+</ul>
+<h3 id="generated-artifact-layout">Generated artifact layout<a class="headerlink" href="#generated-artifact-layout" title="Permanent link">&para;</a></h3>
+<p>Generated outputs moved to variant-safe paths:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-48-1"><a id="__codelineno-48-1" name="__codelineno-48-1" href="#__codelineno-48-1"></a>crates/fission-sleigh/generated/&lt;arch&gt;/&lt;entry-spec-stem&gt;/
+</span></code></pre></div>
+<p>Each variant emits the same five compiler-only artifacts:</p>
+<ul>
+<li><code>include_expanded_manifest.json</code></li>
+<li><code>parsed_inventory.json</code></li>
+<li><code>normalized_pattern_graph.json</code></li>
+<li><code>semantic_action_ir.txt</code></li>
+<li><code>generated_frontend.rs</code></li>
+</ul>
+<p>The all-variant manifest is now checked in at:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-49-1"><a id="__codelineno-49-1" name="__codelineno-49-1" href="#__codelineno-49-1"></a>crates/fission-sleigh/generated/compiler_manifest.json
+</span></code></pre></div>
+<p>Observed manifest result:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-50-1"><a id="__codelineno-50-1" name="__codelineno-50-1" href="#__codelineno-50-1"></a>variant_count: 48
+</span><span id="__span-50-2"><a id="__codelineno-50-2" name="__codelineno-50-2" href="#__codelineno-50-2"></a>compile_status ok: 48
+</span><span id="__span-50-3"><a id="__codelineno-50-3" name="__codelineno-50-3" href="#__codelineno-50-3"></a>
+</span><span id="__span-50-4"><a id="__codelineno-50-4" name="__codelineno-50-4" href="#__codelineno-50-4"></a>aarch64: 3
+</span><span id="__span-50-5"><a id="__codelineno-50-5" name="__codelineno-50-5" href="#__codelineno-50-5"></a>arm32: 16
+</span><span id="__span-50-6"><a id="__codelineno-50-6" name="__codelineno-50-6" href="#__codelineno-50-6"></a>mips: 6
+</span><span id="__span-50-7"><a id="__codelineno-50-7" name="__codelineno-50-7" href="#__codelineno-50-7"></a>powerpc: 18
+</span><span id="__span-50-8"><a id="__codelineno-50-8" name="__codelineno-50-8" href="#__codelineno-50-8"></a>riscv: 3
+</span><span id="__span-50-9"><a id="__codelineno-50-9" name="__codelineno-50-9" href="#__codelineno-50-9"></a>x86: 2
+</span></code></pre></div>
+<h3 id="parser-preprocessor-fixes-required-for-all-variants">Parser / preprocessor fixes required for all variants<a class="headerlink" href="#parser-preprocessor-fixes-required-for-all-variants" title="Permanent link">&para;</a></h3>
+<p>The generic compiler needed broader SLEIGH front-end coverage beyond the x86-64 subset:</p>
+<ul>
+<li><code>@if</code> / <code>@elif</code> support added.</li>
+<li>Boolean preprocessor expressions now support <code>defined(NAME)</code>, <code>==</code>, <code>!=</code>, <code>&amp;&amp;</code>, <code>||</code>, and parentheses.</li>
+<li>Comment stripping now respects <code>"#"</code> inside strings.</li>
+<li>Braced block collection now ignores braces in comments.</li>
+<li>Constructor parsing now accepts no-brace <code>unimpl</code> constructors.</li>
+</ul>
+<p>These are language-level SLEIGH parser/compiler improvements, not architecture-specific compilers.</p>
+<h3 id="validation_9">Validation<a class="headerlink" href="#validation_9" title="Permanent link">&para;</a></h3>
+<p>Passed:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-51-1"><a id="__codelineno-51-1" name="__codelineno-51-1" href="#__codelineno-51-1"></a>cargo run -p fission-sleigh --example generate_sleigh_frontends
+</span></code></pre></div>
+<p>Observed result:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-52-1"><a id="__codelineno-52-1" name="__codelineno-52-1" href="#__codelineno-52-1"></a>48 variants -&gt; /Users/sjkim1127/Fission/crates/fission-sleigh/generated
+</span></code></pre></div>
+<p>Additional validation commands passed for this wave:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-53-1"><a id="__codelineno-53-1" name="__codelineno-53-1" href="#__codelineno-53-1"></a>cargo test -p fission-sleigh
+</span><span id="__span-53-2"><a id="__codelineno-53-2" name="__codelineno-53-2" href="#__codelineno-53-2"></a>cargo check -p fission-sleigh
+</span><span id="__span-53-3"><a id="__codelineno-53-3" name="__codelineno-53-3" href="#__codelineno-53-3"></a>cargo check -p fission-cli
+</span></code></pre></div>
+<p>Observed test result:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-54-1"><a id="__codelineno-54-1" name="__codelineno-54-1" href="#__codelineno-54-1"></a>fission-sleigh: 314 passed / 0 failed
+</span><span id="__span-54-2"><a id="__codelineno-54-2" name="__codelineno-54-2" href="#__codelineno-54-2"></a>generated tree checksum stable across repeated generation
+</span></code></pre></div>
+<h3 id="what-improved_2">What improved<a class="headerlink" href="#what-improved_2" title="Permanent link">&para;</a></h3>
+<ul>
+<li><code>fission-sleigh</code> now has one generic compiler-only consumer for all checked-in architecture variants.</li>
+<li>The previous x86-only generated artifact layout no longer risks collisions across variants.</li>
+<li>The compiler manifest makes unsupported/failing future variants visible instead of silently skipping them.</li>
+<li>Runtime hand-lifters remain untouched, so this is a safe compiler-spine expansion.</li>
+</ul>
+<h3 id="what-did-not-change">What did not change<a class="headerlink" href="#what-did-not-change" title="Permanent link">&para;</a></h3>
+<ul>
+<li>No runtime p-code execution uses generated tables yet.</li>
+<li>No decompiler quality metric is expected to move in this wave.</li>
+<li><code>x86</code> and <code>AArch64</code> hand-lifter execution paths remain canonical for runtime behavior.</li>
+</ul>
+<h3 id="duplicate-logic-audit_4">Duplicate-logic audit<a class="headerlink" href="#duplicate-logic-audit_4" title="Permanent link">&para;</a></h3>
+<ul>
+<li>The compiler is generic across architectures; no arch-specific compiler implementation was added.</li>
+<li>x86-64 compatibility APIs only delegate to the generic entry-spec API.</li>
+<li>Generated artifacts are compiler products only and do not duplicate runtime semantic ownership.</li>
+</ul>
+<h3 id="next-owner_3">Next owner<a class="headerlink" href="#next-owner_3" title="Permanent link">&para;</a></h3>
+<p>The next migration wave should stay x86-64-first for runtime execution:</p>
+<ol>
+<li>compile-table constructor lookup</li>
+<li>decode-length parity against current hand-lifter</li>
+<li>control-flow class parity</li>
+<li>p-code opcode and varnode-shape parity</li>
+<li>env-gated execution-path trial only after parity buckets are stable</li>
+</ol>
+<h2 id="sleigh-runtime-hard-delete-replacement-wave">SLEIGH Runtime Hard-Delete Replacement Wave<a class="headerlink" href="#sleigh-runtime-hard-delete-replacement-wave" title="Permanent link">&para;</a></h2>
+<h3 id="summary_8">Summary<a class="headerlink" href="#summary_8" title="Permanent link">&para;</a></h3>
+<p>This wave intentionally removed the old architecture-specific hand-lifter path and
+started the new generated/compiler runtime owner.</p>
+<p>Fixed rollout decision:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-55-1"><a id="__codelineno-55-1" name="__codelineno-55-1" href="#__codelineno-55-1"></a>migration_mode: hard_delete
+</span><span id="__span-55-2"><a id="__codelineno-55-2" name="__codelineno-55-2" href="#__codelineno-55-2"></a>registry_scope: all_skeleton
+</span><span id="__span-55-3"><a id="__codelineno-55-3" name="__codelineno-55-3" href="#__codelineno-55-3"></a>canonical_runtime_owner: crates/fission-sleigh/src/runtime/
+</span><span id="__span-55-4"><a id="__codelineno-55-4" name="__codelineno-55-4" href="#__codelineno-55-4"></a>old_lifter_path: removed
+</span><span id="__span-55-5"><a id="__codelineno-55-5" name="__codelineno-55-5" href="#__codelineno-55-5"></a>rsleigh_dependency: none
+</span></code></pre></div>
+<h3 id="what-changed_5">What changed<a class="headerlink" href="#what-changed_5" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Removed <code>crates/fission-sleigh/src/lifter/</code> and all x86/AArch64 hand-lifter backend modules.</li>
+<li>Added <code>RuntimeSleighFrontend</code>, <code>CompiledRuntimeRegistry</code>, <code>DecodeContract</code>, <code>DecodeStopReason</code>, and typed runtime errors under <code>fission_sleigh::runtime</code>.</li>
+<li>Updated downstream consumers to import <code>fission_sleigh::runtime::*</code> instead of <code>fission_sleigh::lifter::*</code>.</li>
+<li>Registered all 48 checked-in <code>.slaspec</code> variants through the generated/spec discovery path.</li>
+<li>Marked <code>x86-64</code> as <code>ExecutableCandidate</code>; all other variants are <code>RegisteredCompileOnly</code>.</li>
+<li>Extended generated constructor artifacts with runtime-facing metadata:</li>
+<li><code>pattern_signature</code></li>
+<li><code>semantic_template_status</code></li>
+<li><code>semantic_action_hash</code></li>
+<li><code>semantic_op_count</code></li>
+</ul>
+<h3 id="runtime-status">Runtime status<a class="headerlink" href="#runtime-status" title="Permanent link">&para;</a></h3>
+<p>The new runtime is deliberately fail-closed.</p>
+<ul>
+<li><code>x86-64</code> is registered as the first executable candidate, but compiled pattern/action execution is not implemented yet.</li>
+<li>Non-x86-64 variants return <code>UnsupportedGeneratedSemantic</code>.</li>
+<li>x86-64 decode/lift currently returns <code>UnsupportedPcodeTemplate</code> rather than emitting fake p-code.</li>
+</ul>
+<p>This means Rust-SLEIGH decompilation can be degraded until the next runtime execution wave. That is an intentional consequence of hard-deleting the old hand-lifter instead of keeping a fallback shim.</p>
+<h3 id="validation_10">Validation<a class="headerlink" href="#validation_10" title="Permanent link">&para;</a></h3>
+<p>Passed:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-56-1"><a id="__codelineno-56-1" name="__codelineno-56-1" href="#__codelineno-56-1"></a>cargo check -p fission-sleigh
+</span><span id="__span-56-2"><a id="__codelineno-56-2" name="__codelineno-56-2" href="#__codelineno-56-2"></a>cargo run -p fission-sleigh --example generate_sleigh_frontends
+</span><span id="__span-56-3"><a id="__codelineno-56-3" name="__codelineno-56-3" href="#__codelineno-56-3"></a>cargo test -p fission-sleigh runtime_
+</span><span id="__span-56-4"><a id="__codelineno-56-4" name="__codelineno-56-4" href="#__codelineno-56-4"></a>cargo test -p fission-sleigh
+</span></code></pre></div>
+<p>Observed:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-57-1"><a id="__codelineno-57-1" name="__codelineno-57-1" href="#__codelineno-57-1"></a>runtime_ targeted tests: 2 passed / 0 failed
+</span><span id="__span-57-2"><a id="__codelineno-57-2" name="__codelineno-57-2" href="#__codelineno-57-2"></a>fission-sleigh full tests: 25 passed / 0 failed
+</span><span id="__span-57-3"><a id="__codelineno-57-3" name="__codelineno-57-3" href="#__codelineno-57-3"></a>generated variants: 48
+</span></code></pre></div>
+<p>Additional validation after downstream/runtime wiring:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-58-1"><a id="__codelineno-58-1" name="__codelineno-58-1" href="#__codelineno-58-1"></a>cargo check -p fission-cli
+</span><span id="__span-58-2"><a id="__codelineno-58-2" name="__codelineno-58-2" href="#__codelineno-58-2"></a>cargo check -p fission-decompiler-core
+</span><span id="__span-58-3"><a id="__codelineno-58-3" name="__codelineno-58-3" href="#__codelineno-58-3"></a>cargo build -p fission-cli --release
+</span><span id="__span-58-4"><a id="__codelineno-58-4" name="__codelineno-58-4" href="#__codelineno-58-4"></a>cargo check -p fission-automation
+</span><span id="__span-58-5"><a id="__codelineno-58-5" name="__codelineno-58-5" href="#__codelineno-58-5"></a>CLI info/list smoke on test_functions.exe
+</span><span id="__span-58-6"><a id="__codelineno-58-6" name="__codelineno-58-6" href="#__codelineno-58-6"></a>CLI decomp smoke on test_functions.exe:fibonacci
+</span></code></pre></div>
+<p>Observed CLI smoke:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-59-1"><a id="__codelineno-59-1" name="__codelineno-59-1" href="#__codelineno-59-1"></a>info: passed
+</span><span id="__span-59-2"><a id="__codelineno-59-2" name="__codelineno-59-2" href="#__codelineno-59-2"></a>list --json: passed
+</span><span id="__span-59-3"><a id="__codelineno-59-3" name="__codelineno-59-3" href="#__codelineno-59-3"></a>decomp --addr 0x140001470 --json: fail-closed fallback
+</span><span id="__span-59-4"><a id="__codelineno-59-4" name="__codelineno-59-4" href="#__codelineno-59-4"></a>error bucket: UnsupportedPcodeTemplate
+</span></code></pre></div>
+<h3 id="benchmark-readout">Benchmark readout<a class="headerlink" href="#benchmark-readout" title="Permanent link">&para;</a></h3>
+<p>Ran limited Windows small C corpus benchmark to make the hard-delete impact explicit:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-60-1"><a id="__codelineno-60-1" name="__codelineno-60-1" href="#__codelineno-60-1"></a>runner: benchmark/full_benchmark/full_decomp_benchmark.py
+</span><span id="__span-60-2"><a id="__codelineno-60-2" name="__codelineno-60-2" href="#__codelineno-60-2"></a>manifest: benchmark/config/benchmark_corpus/windows_small_c_samples.json
+</span><span id="__span-60-3"><a id="__codelineno-60-3" name="__codelineno-60-3" href="#__codelineno-60-3"></a>output: benchmark/artifacts/full_benchmark/windows-small-c-sleigh-runtime-hard-delete-latest
+</span><span id="__span-60-4"><a id="__codelineno-60-4" name="__codelineno-60-4" href="#__codelineno-60-4"></a>limit: 5
+</span><span id="__span-60-5"><a id="__codelineno-60-5" name="__codelineno-60-5" href="#__codelineno-60-5"></a>baseline: benchmark/artifacts/full_benchmark/windows-small-c-mir-latest
+</span></code></pre></div>
+<p>Observed result:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-61-1"><a id="__codelineno-61-1" name="__codelineno-61-1" href="#__codelineno-61-1"></a>weighted_avg_normalized_similarity: 37.604% -&gt; 0.000%
+</span><span id="__span-61-2"><a id="__codelineno-61-2" name="__codelineno-61-2" href="#__codelineno-61-2"></a>release_promotion_allowed: false
+</span><span id="__span-61-3"><a id="__codelineno-61-3" name="__codelineno-61-3" href="#__codelineno-61-3"></a>x64 failed binaries: 6/6
+</span><span id="__span-61-4"><a id="__codelineno-61-4" name="__codelineno-61-4" href="#__codelineno-61-4"></a>direct_success: 0/5 for each sampled binary
+</span><span id="__span-61-5"><a id="__codelineno-61-5" name="__codelineno-61-5" href="#__codelineno-61-5"></a>cpu process seconds: 0.032143
+</span><span id="__span-61-6"><a id="__codelineno-61-6" name="__codelineno-61-6" href="#__codelineno-61-6"></a>effective parallelism: 4.078
+</span></code></pre></div>
+<p>Promotion blockers:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-62-1"><a id="__codelineno-62-1" name="__codelineno-62-1" href="#__codelineno-62-1"></a>weighted_avg_normalized_similarity regression
+</span><span id="__span-62-2"><a id="__codelineno-62-2" name="__codelineno-62-2" href="#__codelineno-62-2"></a>row_fidelity_gate failed for all six Windows small C sample binaries
+</span><span id="__span-62-3"><a id="__codelineno-62-3" name="__codelineno-62-3" href="#__codelineno-62-3"></a>direct_success changed for at least one binary
+</span><span id="__span-62-4"><a id="__codelineno-62-4" name="__codelineno-62-4" href="#__codelineno-62-4"></a>arch_summary.x64 weighted similarity regression
+</span></code></pre></div>
+<p>This is an expected negative benchmark result for a hard-delete wave where the replacement runtime is registered but not executable yet.</p>
+<h3 id="duplicate-logic-audit_5">Duplicate-logic audit<a class="headerlink" href="#duplicate-logic-audit_5" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Old x86/AArch64 hand-lifter semantic code was removed instead of duplicated under the generated runtime path.</li>
+<li>CFG block reconstruction moved to the runtime owner and remains shared by downstream tests.</li>
+<li>Compiler/codegen remains architecture-generic; no per-architecture compiler was added.</li>
+</ul>
+<h3 id="next-owner_4">Next owner<a class="headerlink" href="#next-owner_4" title="Permanent link">&para;</a></h3>
+<p>The next wave must implement executable compiled-table runtime for x86-64:</p>
+<ol>
+<li>pattern/token table matching</li>
+<li>operand binding extraction</li>
+<li>semantic template lowering into <code>fission_pcode::PcodeOp</code></li>
+<li>differential report against preserved baseline instruction samples</li>
+<li>Windows small C decomp smoke recovery</li>
+</ol>
+<h2 id="sleigh-x86-64-runtime-execution-seed">SLEIGH x86-64 Runtime Execution Seed<a class="headerlink" href="#sleigh-x86-64-runtime-execution-seed" title="Permanent link">&para;</a></h2>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-63-1"><a id="__codelineno-63-1" name="__codelineno-63-1" href="#__codelineno-63-1"></a>wave_type: runtime_recovery
+</span><span id="__span-63-2"><a id="__codelineno-63-2" name="__codelineno-63-2" href="#__codelineno-63-2"></a>runtime_owner: crates/fission-sleigh/src/runtime/
+</span><span id="__span-63-3"><a id="__codelineno-63-3" name="__codelineno-63-3" href="#__codelineno-63-3"></a>primary_arch: x86-64
+</span><span id="__span-63-4"><a id="__codelineno-63-4" name="__codelineno-63-4" href="#__codelineno-63-4"></a>old_lifter_path: still removed
+</span><span id="__span-63-5"><a id="__codelineno-63-5" name="__codelineno-63-5" href="#__codelineno-63-5"></a>rsleigh_dependency: none
+</span><span id="__span-63-6"><a id="__codelineno-63-6" name="__codelineno-63-6" href="#__codelineno-63-6"></a>external_rust_decode_dependency: iced-x86
+</span><span id="__span-63-7"><a id="__codelineno-63-7" name="__codelineno-63-7" href="#__codelineno-63-7"></a>promotion_status: not_ready
+</span></code></pre></div>
+<h3 id="what-changed_6">What changed<a class="headerlink" href="#what-changed_6" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Added an x86-64 executable runtime seed under <code>crates/fission-sleigh/src/runtime/x86_64.rs</code>.</li>
+<li>Kept <code>RuntimeSleighFrontend</code> / <code>CompiledRuntimeRegistry</code> as the canonical runtime owner after the hand-lifter deletion.</li>
+<li>Added decode-only <code>iced-x86</code> usage for instruction decoding while keeping p-code emission owned by Fission runtime code.</li>
+<li>Implemented fail-closed typed p-code emission for the initial x86-64 subset:</li>
+<li><code>ret</code></li>
+<li>direct/indirect <code>call</code> and <code>jmp</code></li>
+<li>conditional branches</li>
+<li><code>mov</code>, <code>lea</code></li>
+<li><code>push</code>, <code>pop</code>, <code>leave</code></li>
+<li>integer arithmetic/logical ops</li>
+<li><code>cmp</code>, <code>test</code></li>
+<li><code>movzx</code>, <code>movsx</code>, <code>movsxd</code></li>
+<li><code>setcc</code></li>
+<li>accumulator sign/zero extension family</li>
+<li>Fixed generated artifact JSON escaping for constructor/source strings containing control characters.</li>
+<li>Regenerated all checked-in SLEIGH compiler artifacts.</li>
+</ul>
+<p>This is not full compiled-table SLEIGH execution yet. It restores x86-64 runtime execution after the hard-delete wave and establishes the runtime lowering owner. Unsupported generated semantics still return typed errors instead of fake p-code.</p>
+<h3 id="validation_11">Validation<a class="headerlink" href="#validation_11" title="Permanent link">&para;</a></h3>
+<p>Passed:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-64-1"><a id="__codelineno-64-1" name="__codelineno-64-1" href="#__codelineno-64-1"></a>cargo test -p fission-sleigh runtime_
+</span><span id="__span-64-2"><a id="__codelineno-64-2" name="__codelineno-64-2" href="#__codelineno-64-2"></a>cargo test -p fission-sleigh
+</span><span id="__span-64-3"><a id="__codelineno-64-3" name="__codelineno-64-3" href="#__codelineno-64-3"></a>cargo check -p fission-sleigh
+</span><span id="__span-64-4"><a id="__codelineno-64-4" name="__codelineno-64-4" href="#__codelineno-64-4"></a>cargo check -p fission-cli
+</span><span id="__span-64-5"><a id="__codelineno-64-5" name="__codelineno-64-5" href="#__codelineno-64-5"></a>cargo check -p fission-decompiler-core
+</span><span id="__span-64-6"><a id="__codelineno-64-6" name="__codelineno-64-6" href="#__codelineno-64-6"></a>cargo check -p fission-automation
+</span><span id="__span-64-7"><a id="__codelineno-64-7" name="__codelineno-64-7" href="#__codelineno-64-7"></a>cargo build -p fission-cli --release
+</span><span id="__span-64-8"><a id="__codelineno-64-8" name="__codelineno-64-8" href="#__codelineno-64-8"></a>cargo fmt -p fission-sleigh --check
+</span><span id="__span-64-9"><a id="__codelineno-64-9" name="__codelineno-64-9" href="#__codelineno-64-9"></a>git diff --check
+</span></code></pre></div>
+<p>Observed:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-65-1"><a id="__codelineno-65-1" name="__codelineno-65-1" href="#__codelineno-65-1"></a>runtime_ targeted tests: 5 passed / 0 failed
+</span><span id="__span-65-2"><a id="__codelineno-65-2" name="__codelineno-65-2" href="#__codelineno-65-2"></a>fission-sleigh full tests: 28 passed / 0 failed
+</span><span id="__span-65-3"><a id="__codelineno-65-3" name="__codelineno-65-3" href="#__codelineno-65-3"></a>generated artifact JSON parse: passed
+</span><span id="__span-65-4"><a id="__codelineno-65-4" name="__codelineno-65-4" href="#__codelineno-65-4"></a>generated artifact determinism: passed
+</span></code></pre></div>
+<p>CLI smoke:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-66-1"><a id="__codelineno-66-1" name="__codelineno-66-1" href="#__codelineno-66-1"></a>target/release/fission_cli info benchmark/binary/x86-64/window/small/binary/c/test_functions.exe
+</span><span id="__span-66-2"><a id="__codelineno-66-2" name="__codelineno-66-2" href="#__codelineno-66-2"></a>target/release/fission_cli decomp benchmark/binary/x86-64/window/small/binary/c/test_functions.exe --addr 0x140001000 --json
+</span><span id="__span-66-3"><a id="__codelineno-66-3" name="__codelineno-66-3" href="#__codelineno-66-3"></a>target/release/fission_cli decomp benchmark/binary/x86-64/window/small/binary/c/test_functions.exe --addr 0x140001470 --json
+</span></code></pre></div>
+<p>Observed:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-67-1"><a id="__codelineno-67-1" name="__codelineno-67-1" href="#__codelineno-67-1"></a>info: passed
+</span><span id="__span-67-2"><a id="__codelineno-67-2" name="__codelineno-67-2" href="#__codelineno-67-2"></a>decomp 0x140001000: exit 0, engine_used=rust_sleigh, fell_back=false
+</span><span id="__span-67-3"><a id="__codelineno-67-3" name="__codelineno-67-3" href="#__codelineno-67-3"></a>decomp 0x140001470: exit 0, engine_used=rust_sleigh, fell_back=false
+</span></code></pre></div>
+<h3 id="benchmark-readout_1">Benchmark readout<a class="headerlink" href="#benchmark-readout_1" title="Permanent link">&para;</a></h3>
+<p>Ran limited Windows small C recovery benchmark:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-68-1"><a id="__codelineno-68-1" name="__codelineno-68-1" href="#__codelineno-68-1"></a>runner: benchmark/full_benchmark/full_decomp_benchmark.py
+</span><span id="__span-68-2"><a id="__codelineno-68-2" name="__codelineno-68-2" href="#__codelineno-68-2"></a>manifest: benchmark/config/benchmark_corpus/windows_small_c_samples.json
+</span><span id="__span-68-3"><a id="__codelineno-68-3" name="__codelineno-68-3" href="#__codelineno-68-3"></a>baseline: benchmark/artifacts/full_benchmark/windows-small-c-sleigh-runtime-hard-delete-latest
+</span><span id="__span-68-4"><a id="__codelineno-68-4" name="__codelineno-68-4" href="#__codelineno-68-4"></a>output: benchmark/artifacts/full_benchmark/windows-small-c-sleigh-x86-runtime-latest
+</span><span id="__span-68-5"><a id="__codelineno-68-5" name="__codelineno-68-5" href="#__codelineno-68-5"></a>limit: 5
+</span><span id="__span-68-6"><a id="__codelineno-68-6" name="__codelineno-68-6" href="#__codelineno-68-6"></a>timeout: 120
+</span></code></pre></div>
+<p>Observed compact summary:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-69-1"><a id="__codelineno-69-1" name="__codelineno-69-1" href="#__codelineno-69-1"></a>weighted_avg_normalized_similarity: 0.000% -&gt; 44.470%
+</span><span id="__span-69-2"><a id="__codelineno-69-2" name="__codelineno-69-2" href="#__codelineno-69-2"></a>x64 weighted_avg_normalized_similarity: 44.470%
+</span><span id="__span-69-3"><a id="__codelineno-69-3" name="__codelineno-69-3" href="#__codelineno-69-3"></a>x64 failed binaries: none
+</span><span id="__span-69-4"><a id="__codelineno-69-4" name="__codelineno-69-4" href="#__codelineno-69-4"></a>direct_success: 5/5 on each sampled binary
+</span><span id="__span-69-5"><a id="__codelineno-69-5" name="__codelineno-69-5" href="#__codelineno-69-5"></a>release_promotion_allowed: false
+</span><span id="__span-69-6"><a id="__codelineno-69-6" name="__codelineno-69-6" href="#__codelineno-69-6"></a>process_cpu_seconds: 0.058375
+</span><span id="__span-69-7"><a id="__codelineno-69-7" name="__codelineno-69-7" href="#__codelineno-69-7"></a>process_cpu_user_sec: 0.032552
+</span><span id="__span-69-8"><a id="__codelineno-69-8" name="__codelineno-69-8" href="#__codelineno-69-8"></a>process_cpu_system_sec: 0.025823
+</span><span id="__span-69-9"><a id="__codelineno-69-9" name="__codelineno-69-9" href="#__codelineno-69-9"></a>process_cpu_utilization_pct: 372.401
+</span><span id="__span-69-10"><a id="__codelineno-69-10" name="__codelineno-69-10" href="#__codelineno-69-10"></a>effective_parallelism: 3.724
+</span><span id="__span-69-11"><a id="__codelineno-69-11" name="__codelineno-69-11" href="#__codelineno-69-11"></a>func_per_cpu_second: 516.550167
+</span></code></pre></div>
+<p>Promotion blockers:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-70-1"><a id="__codelineno-70-1" name="__codelineno-70-1" href="#__codelineno-70-1"></a>advisory_gate_mode
+</span><span id="__span-70-2"><a id="__codelineno-70-2" name="__codelineno-70-2" href="#__codelineno-70-2"></a>per-binary row_fidelity_gate failed for all six Windows small C sample binaries
+</span><span id="__span-70-3"><a id="__codelineno-70-3" name="__codelineno-70-3" href="#__codelineno-70-3"></a>direct_success changed for at least one binary
+</span><span id="__span-70-4"><a id="__codelineno-70-4" name="__codelineno-70-4" href="#__codelineno-70-4"></a>owner_metric_totals materialization_stabilized: 0.000 -&gt; 198.000
+</span></code></pre></div>
+<p>Interpretation:</p>
+<ul>
+<li>The hard-delete regression was partially recovered: x86-64 sample decompilation now executes again instead of returning <code>UnsupportedPcodeTemplate</code> everywhere.</li>
+<li>This is not a quality promotion result. Row-fidelity still fails and output quality remains below the pre-hard-delete hand-lifter baseline.</li>
+<li>The benchmark improvement is measured against the intentional hard-delete fail-closed baseline, not against the older hand-lifter path.</li>
+</ul>
+<h3 id="duplicate-logic-audit_6">Duplicate-logic audit<a class="headerlink" href="#duplicate-logic-audit_6" title="Permanent link">&para;</a></h3>
+<ul>
+<li>No old hand-lifter compatibility shim was reintroduced.</li>
+<li>x86-64 p-code lowering now lives in the new runtime owner, not in CLI/static/printer layers.</li>
+<li>The current runtime seed still duplicates semantic intent that should ultimately come from generated SLEIGH semantic templates. That is accepted only as an executable bridge; the next owner remains compiled-table semantic template lowering.</li>
+</ul>
+<h3 id="next-owner_5">Next owner<a class="headerlink" href="#next-owner_5" title="Permanent link">&para;</a></h3>
+<p>The next runtime wave must replace the x86-64 bridge with real generated-table execution:</p>
+<ol>
+<li>generated pattern matcher over compiled constructor tables</li>
+<li>operand binding extraction from pattern matches</li>
+<li>semantic template lowering into <code>fission_pcode::PcodeOp</code></li>
+<li>differential parity harness against preserved x86-64 p-code samples</li>
+<li>full Windows small C benchmark without <code>--limit</code></li>
+</ol>
+<h2 id="sleigh-x86-64-compiled-table-execution-migration">SLEIGH x86-64 Compiled-Table Execution Migration<a class="headerlink" href="#sleigh-x86-64-compiled-table-execution-migration" title="Permanent link">&para;</a></h2>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-71-1"><a id="__codelineno-71-1" name="__codelineno-71-1" href="#__codelineno-71-1"></a>wave_type: runtime_migration
+</span><span id="__span-71-2"><a id="__codelineno-71-2" name="__codelineno-71-2" href="#__codelineno-71-2"></a>runtime_owner: crates/fission-sleigh/src/runtime/
+</span><span id="__span-71-3"><a id="__codelineno-71-3" name="__codelineno-71-3" href="#__codelineno-71-3"></a>primary_arch: x86-64
+</span><span id="__span-71-4"><a id="__codelineno-71-4" name="__codelineno-71-4" href="#__codelineno-71-4"></a>canonical_reference: vendor/ghidra/ghidra-Ghidra_12.0.4_build
+</span><span id="__span-71-5"><a id="__codelineno-71-5" name="__codelineno-71-5" href="#__codelineno-71-5"></a>cutover_gate: FISSION_ENABLE_GENERATED_X86_64_RUNTIME
+</span><span id="__span-71-6"><a id="__codelineno-71-6" name="__codelineno-71-6" href="#__codelineno-71-6"></a>iced_x86_status: temporary bridge_oracle only
+</span><span id="__span-71-7"><a id="__codelineno-71-7" name="__codelineno-71-7" href="#__codelineno-71-7"></a>promotion_status: not_ready
+</span></code></pre></div>
+<h3 id="what-changed_7">What changed<a class="headerlink" href="#what-changed_7" title="Permanent link">&para;</a></h3>
+<p>This wave moves the x86-64 runtime one owner closer to the Ghidra <code>SleighLanguage -&gt; DecisionNode -&gt; ConstructState/ParserWalker -&gt; PcodeEmit</code> spine without deleting the bridge yet.</p>
+<p>Compiler-side executable IR was promoted from inventory-only metadata to runtime-consumable state:</p>
+<ul>
+<li>added <code>CompiledExecutableConstructor</code></li>
+<li>added <code>CompiledDecisionTree</code></li>
+<li>added <code>CompiledOpcodeMatcher</code></li>
+<li>added <code>CompiledOperandSpec</code></li>
+<li>added <code>CompiledSemanticKind</code></li>
+<li>added additive manifest fields:</li>
+<li><code>runtime_ready</code></li>
+<li><code>decision_node_count</code></li>
+<li><code>constructor_template_count</code></li>
+<li><code>unsupported_template_count</code></li>
+</ul>
+<p>Current x86-64 compile step now produces a typed executable subset rather than just reporting constructor inventory:</p>
+<ul>
+<li>exact-byte and row/page matcher buckets</li>
+<li>operand binding specs for:</li>
+<li><code>ModRmRm</code></li>
+<li><code>ModRmReg</code></li>
+<li><code>OpcodeReg</code></li>
+<li><code>Immediate</code></li>
+<li><code>Relative</code></li>
+<li><code>FixedRegister</code></li>
+<li>typed semantic families for the current executable subset:</li>
+<li><code>ret</code></li>
+<li><code>call</code></li>
+<li><code>jmp</code></li>
+<li><code>jcc</code></li>
+<li><code>mov</code></li>
+<li><code>lea</code></li>
+<li><code>push</code></li>
+<li><code>pop</code></li>
+<li><code>leave</code></li>
+<li>arithmetic/logical core</li>
+<li><code>cmp</code></li>
+<li><code>test</code></li>
+<li><code>movzx</code> / <code>movsx</code> / <code>movsxd</code></li>
+<li><code>setcc</code></li>
+<li><code>cbw</code> / <code>cwde</code> / <code>cdqe</code></li>
+</ul>
+<p>Runtime-side owner changes:</p>
+<ul>
+<li>added env-gated generated runtime entrypoint under:</li>
+<li><code>crates/fission-sleigh/src/runtime/generated_x86_64.rs</code></li>
+<li><code>RuntimeSleighFrontend</code> now precompiles the executable candidate frontend in-memory</li>
+<li><code>decode_and_lift_with_len()</code> now selects:</li>
+<li>gate off: existing <code>iced-x86</code> bridge path</li>
+<li>gate on: generated compiled-table matcher/binder/emitter path</li>
+<li>downstream public runtime API remains unchanged</li>
+</ul>
+<p>Differential harness was upgraded from front-end smoke to runtime parity classification:</p>
+<ul>
+<li><code>decision_tree_no_match</code></li>
+<li><code>constructor_selection_mismatch</code></li>
+<li><code>operand_binding_mismatch</code></li>
+<li><code>semantic_template_unsupported</code></li>
+<li><code>pcode_opcode_mismatch</code></li>
+<li><code>varnode_shape_mismatch</code></li>
+<li><code>branch_target_mismatch</code></li>
+<li><code>temporary_space_mismatch</code></li>
+</ul>
+<p>Generated artifacts remain deterministic and repo-tracked. This wave keeps the generated files as debug/diff/readout outputs while runtime consumes the in-memory compiled IR as the canonical owner.</p>
+<h3 id="validation_12">Validation<a class="headerlink" href="#validation_12" title="Permanent link">&para;</a></h3>
+<p>Passed:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-72-1"><a id="__codelineno-72-1" name="__codelineno-72-1" href="#__codelineno-72-1"></a>cargo check -p fission-sleigh
+</span><span id="__span-72-2"><a id="__codelineno-72-2" name="__codelineno-72-2" href="#__codelineno-72-2"></a>cargo check -p fission-cli
+</span><span id="__span-72-3"><a id="__codelineno-72-3" name="__codelineno-72-3" href="#__codelineno-72-3"></a>cargo build -p fission-cli --release
+</span><span id="__span-72-4"><a id="__codelineno-72-4" name="__codelineno-72-4" href="#__codelineno-72-4"></a>cargo test -p fission-sleigh -- --test-threads=1
+</span><span id="__span-72-5"><a id="__codelineno-72-5" name="__codelineno-72-5" href="#__codelineno-72-5"></a>cargo test -p fission-sleigh generated_runtime_decodes_ret -- --nocapture
+</span><span id="__span-72-6"><a id="__codelineno-72-6" name="__codelineno-72-6" href="#__codelineno-72-6"></a>cargo test -p fission-sleigh runtime::generated_x86_64::tests::generated_runtime_decodes_mov_imm64 -- --nocapture
+</span><span id="__span-72-7"><a id="__codelineno-72-7" name="__codelineno-72-7" href="#__codelineno-72-7"></a>cargo test -p fission-sleigh generated_runtime_decodes_jcc_rel8 -- --nocapture
+</span><span id="__span-72-8"><a id="__codelineno-72-8" name="__codelineno-72-8" href="#__codelineno-72-8"></a>cargo test -p fission-sleigh equivalence_report_runs_for_unit_seeds -- --nocapture
+</span></code></pre></div>
+<p>Observed:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-73-1"><a id="__codelineno-73-1" name="__codelineno-73-1" href="#__codelineno-73-1"></a>fission-sleigh full tests: 31 passed / 0 failed
+</span><span id="__span-73-2"><a id="__codelineno-73-2" name="__codelineno-73-2" href="#__codelineno-73-2"></a>generated runtime seed tests: passed
+</span><span id="__span-73-3"><a id="__codelineno-73-3" name="__codelineno-73-3" href="#__codelineno-73-3"></a>equivalence runtime report test: passed
+</span><span id="__span-73-4"><a id="__codelineno-73-4" name="__codelineno-73-4" href="#__codelineno-73-4"></a>generated artifact determinism: passed
+</span></code></pre></div>
+<p>Determinism check:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-74-1"><a id="__codelineno-74-1" name="__codelineno-74-1" href="#__codelineno-74-1"></a>before=4187a135bd6dd985b5bec98bb48dd1e72ea8667a
+</span><span id="__span-74-2"><a id="__codelineno-74-2" name="__codelineno-74-2" href="#__codelineno-74-2"></a>after=4187a135bd6dd985b5bec98bb48dd1e72ea8667a
+</span><span id="__span-74-3"><a id="__codelineno-74-3" name="__codelineno-74-3" href="#__codelineno-74-3"></a>deterministic=1
+</span></code></pre></div>
+<p>CLI smoke with generated runtime enabled:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-75-1"><a id="__codelineno-75-1" name="__codelineno-75-1" href="#__codelineno-75-1"></a>FISSION_ENABLE_GENERATED_X86_64_RUNTIME=1 \
+</span><span id="__span-75-2"><a id="__codelineno-75-2" name="__codelineno-75-2" href="#__codelineno-75-2"></a>target/release/fission_cli decomp \
+</span><span id="__span-75-3"><a id="__codelineno-75-3" name="__codelineno-75-3" href="#__codelineno-75-3"></a>  benchmark/binary/x86-64/window/small/binary/c/test_functions.exe \
+</span><span id="__span-75-4"><a id="__codelineno-75-4" name="__codelineno-75-4" href="#__codelineno-75-4"></a>  --addr 0x140001470 --json
+</span></code></pre></div>
+<p>Observed:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-76-1"><a id="__codelineno-76-1" name="__codelineno-76-1" href="#__codelineno-76-1"></a>exit=0
+</span><span id="__span-76-2"><a id="__codelineno-76-2" name="__codelineno-76-2" href="#__codelineno-76-2"></a>engine_used=rust_sleigh
+</span><span id="__span-76-3"><a id="__codelineno-76-3" name="__codelineno-76-3" href="#__codelineno-76-3"></a>row.name=fibonacci
+</span><span id="__span-76-4"><a id="__codelineno-76-4" name="__codelineno-76-4" href="#__codelineno-76-4"></a>row.address=0x140001470
+</span><span id="__span-76-5"><a id="__codelineno-76-5" name="__codelineno-76-5" href="#__codelineno-76-5"></a>preview_build_stats present
+</span></code></pre></div>
+<h3 id="limited-benchmark-readout">Limited benchmark readout<a class="headerlink" href="#limited-benchmark-readout" title="Permanent link">&para;</a></h3>
+<p>Ran a limited Windows small C corpus benchmark against the previous bridge baseline:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-77-1"><a id="__codelineno-77-1" name="__codelineno-77-1" href="#__codelineno-77-1"></a>runner: benchmark/full_benchmark/full_decomp_benchmark.py
+</span><span id="__span-77-2"><a id="__codelineno-77-2" name="__codelineno-77-2" href="#__codelineno-77-2"></a>manifest: benchmark/config/benchmark_corpus/windows_small_c_samples.json
+</span><span id="__span-77-3"><a id="__codelineno-77-3" name="__codelineno-77-3" href="#__codelineno-77-3"></a>baseline: benchmark/artifacts/full_benchmark/windows-small-c-sleigh-x86-runtime-latest
+</span><span id="__span-77-4"><a id="__codelineno-77-4" name="__codelineno-77-4" href="#__codelineno-77-4"></a>output: benchmark/artifacts/full_benchmark/windows-small-c-sleigh-compiled-runtime-latest
+</span><span id="__span-77-5"><a id="__codelineno-77-5" name="__codelineno-77-5" href="#__codelineno-77-5"></a>limit: 5
+</span><span id="__span-77-6"><a id="__codelineno-77-6" name="__codelineno-77-6" href="#__codelineno-77-6"></a>timeout: 120
+</span><span id="__span-77-7"><a id="__codelineno-77-7" name="__codelineno-77-7" href="#__codelineno-77-7"></a>env: FISSION_ENABLE_GENERATED_X86_64_RUNTIME=1
+</span></code></pre></div>
+<p>Observed:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-78-1"><a id="__codelineno-78-1" name="__codelineno-78-1" href="#__codelineno-78-1"></a>weighted_avg_normalized_similarity: 44.470% -&gt; 35.990%
+</span><span id="__span-78-2"><a id="__codelineno-78-2" name="__codelineno-78-2" href="#__codelineno-78-2"></a>delta: -8.480pp
+</span><span id="__span-78-3"><a id="__codelineno-78-3" name="__codelineno-78-3" href="#__codelineno-78-3"></a>promotion_status: failed
+</span><span id="__span-78-4"><a id="__codelineno-78-4" name="__codelineno-78-4" href="#__codelineno-78-4"></a>per-binary row_fidelity_gate: failed on all 6 sample binaries
+</span><span id="__span-78-5"><a id="__codelineno-78-5" name="__codelineno-78-5" href="#__codelineno-78-5"></a>crash rows: none observed in the limited corpus run
+</span></code></pre></div>
+<p>Representative degraded rows from compact summary:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-79-1"><a id="__codelineno-79-1" name="__codelineno-79-1" href="#__codelineno-79-1"></a>array-operations: WinMainCRTStartup @ 0x1400013e0
+</span><span id="__span-79-2"><a id="__codelineno-79-2" name="__codelineno-79-2" href="#__codelineno-79-2"></a>- previous_normalized_similarity: 60.26
+</span><span id="__span-79-3"><a id="__codelineno-79-3" name="__codelineno-79-3" href="#__codelineno-79-3"></a>- current_normalized_similarity: 38.22
+</span><span id="__span-79-4"><a id="__codelineno-79-4" name="__codelineno-79-4" href="#__codelineno-79-4"></a>- delta: -22.04
+</span><span id="__span-79-5"><a id="__codelineno-79-5" name="__codelineno-79-5" href="#__codelineno-79-5"></a>
+</span><span id="__span-79-6"><a id="__codelineno-79-6" name="__codelineno-79-6" href="#__codelineno-79-6"></a>bitops-control-flow: WinMainCRTStartup @ 0x1400013e0
+</span><span id="__span-79-7"><a id="__codelineno-79-7" name="__codelineno-79-7" href="#__codelineno-79-7"></a>- previous_normalized_similarity: 60.26
+</span><span id="__span-79-8"><a id="__codelineno-79-8" name="__codelineno-79-8" href="#__codelineno-79-8"></a>- current_normalized_similarity: 38.22
+</span><span id="__span-79-9"><a id="__codelineno-79-9" name="__codelineno-79-9" href="#__codelineno-79-9"></a>- delta: -22.04
+</span></code></pre></div>
+<p>Interpretation:</p>
+<ul>
+<li>the generated compiled-table path is now executable and crash-free on the limited x64 sample corpus</li>
+<li>this is not yet parity-ready</li>
+<li>the current executable subset is selecting/emitting enough p-code to decompile, but not enough to preserve prior x86 bridge fidelity</li>
+<li>therefore <code>iced-x86</code> deletion remains blocked</li>
+</ul>
+<h3 id="duplicate-logic-audit_7">Duplicate-logic audit<a class="headerlink" href="#duplicate-logic-audit_7" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Compiler executable IR remains architecture-generic; no per-architecture compiler was introduced.</li>
+<li>The generated runtime path reuses the canonical <code>RuntimeSleighFrontend</code> owner instead of adding a CLI/static fallback shim.</li>
+<li>A temporary duplication still exists between:</li>
+<li>bridge-side handwritten x86 semantic lowering</li>
+<li>generated runtime typed semantic emitter</li>
+</ul>
+<p>This duplication is intentionally temporary and only acceptable while differential parity is still open. It is the next structural debt to remove once compiled semantic template lowering is complete.</p>
+<h3 id="final-status_5">Final status<a class="headerlink" href="#final-status_5" title="Permanent link">&para;</a></h3>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-80-1"><a id="__codelineno-80-1" name="__codelineno-80-1" href="#__codelineno-80-1"></a>result: negative_but_useful
+</span><span id="__span-80-2"><a id="__codelineno-80-2" name="__codelineno-80-2" href="#__codelineno-80-2"></a>hard_delete_gate: still closed
+</span><span id="__span-80-3"><a id="__codelineno-80-3" name="__codelineno-80-3" href="#__codelineno-80-3"></a>iced_x86_removal: blocked
+</span><span id="__span-80-4"><a id="__codelineno-80-4" name="__codelineno-80-4" href="#__codelineno-80-4"></a>next_owner: compiled semantic template lowering and constructor-selection parity
+</span></code></pre></div>
+<h3 id="next-owner_6">Next owner<a class="headerlink" href="#next-owner_6" title="Permanent link">&para;</a></h3>
+<p>The next executable runtime wave must focus on parity, not broader instruction coverage:</p>
+<ol>
+<li>tighten constructor selection against <code>decision_tree_no_match</code> and selection drift</li>
+<li>close operand binding mismatches on startup/runtime-heavy rows first</li>
+<li>replace handwritten generated-runtime semantic families with compiled semantic template lowering</li>
+<li>rerun limited corpus until bridge-baseline similarity is non-worse</li>
+<li>only then open the <code>iced-x86</code> deletion gate</li>
+</ol>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../../..", "features": ["navigation.tabs", "navigation.sections", "navigation.expand", "navigation.top", "search.suggest", "search.highlight", "content.code.copy"], "search": "../../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>

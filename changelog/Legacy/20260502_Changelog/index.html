@@ -1,0 +1,1790 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="A cross-platform, Rust-powered reverse engineering and decompilation framework.">
+      
+      
+      
+        <link rel="canonical" href="https://sjkim1127.github.io/Fission/changelog/Legacy/20260502_Changelog/">
+      
+      
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>2026-05-02 Changelog - Fission</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("../../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#2026-05-02-changelog" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../../.." title="Fission" class="md-header__button md-logo" aria-label="Fission" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Fission
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              2026-05-02 Changelog
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m14.3 16-.7-2h-3.2l-.7 2H7.8L11 7h2l3.2 9zM20 8.69V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12zm-9.15 3.96h2.3L12 9z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_2" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to system preference"  type="radio" name="__palette" id="__palette_2">
+    
+      <label class="md-header__button md-icon" title="Switch to system preference" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/sjkim1127/Fission" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    sjkim1127/Fission
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../.." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../../PROJECT_MAP/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Project Map
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../../CLI/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  CLI Guide
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../../architecture/ARCHITECTURE/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Architecture
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../../QUALITY_METRICS/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Quality Metrics
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../../EVALUATION/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Evaluation
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../../contributing/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Contributing
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../../MALWARE_SAMPLE_POLICY/" class="md-tabs__link">
+          
+  
+  
+  Developer Policies
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../../.." title="Fission" class="md-nav__button md-logo" aria-label="Fission" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Fission
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/sjkim1127/Fission" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    sjkim1127/Fission
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../PROJECT_MAP/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Project Map
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../CLI/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI Guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../architecture/ARCHITECTURE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../QUALITY_METRICS/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quality Metrics
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../EVALUATION/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Evaluation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../contributing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contributing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_8" >
+        
+          
+          <label class="md-nav__link" for="__nav_8" id="__nav_8_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Developer Policies
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_8_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_8">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Developer Policies
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../MALWARE_SAMPLE_POLICY/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Malware Sample Policy
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../VERSIONING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Versioning
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../RELEASE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Release
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#decompiler-quality-v1-exact-call-prototype-arity" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Decompiler Quality V1: Exact Call Prototype Arity
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Decompiler Quality V1: Exact Call Prototype Arity">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#summary" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Summary
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#implementation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Implementation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#benchmark-baseline" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Benchmark Baseline
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#after-result" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        After Result
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#raw-p-code-guard" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Raw P-code Guard
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#validation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Validation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#remaining-work" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Remaining Work
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#decompiler-quality-v2-callprototype-telemetry-gate" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Decompiler Quality V2: Call/Prototype Telemetry Gate
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Decompiler Quality V2: Call/Prototype Telemetry Gate">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#summary_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Summary
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#implementation_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Implementation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#validation_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Validation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#decompiler-sentinel" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Decompiler Sentinel
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#raw-p-code-guard_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Raw P-code Guard
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#remaining-work_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Remaining Work
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#decompiler-quality-v3-import-call-target-resolution-gate" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Decompiler Quality V3: Import Call Target Resolution Gate
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Decompiler Quality V3: Import Call Target Resolution Gate">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#summary_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Summary
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#implementation_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Implementation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#validation_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Validation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#decompiler-sentinel_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Decompiler Sentinel
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#raw-p-code-guard_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Raw P-code Guard
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#remaining-work_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Remaining Work
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#loader-accuracy-pe-export-thunks-and-assembly-parity-lane" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Loader Accuracy: PE Export Thunks and Assembly Parity Lane
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Loader Accuracy: PE Export Thunks and Assembly Parity Lane">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#summary_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Summary
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#implementation_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Implementation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#sqlite3dll-evidence" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        sqlite3.dll Evidence
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#assembly-parity-benchmark" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Assembly Parity Benchmark
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#full-benchmark-after-loader-fix" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Full Benchmark After Loader Fix
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#validation_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Validation
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#decompiler-quality-v4-similarity-attribution" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Decompiler Quality V4: Similarity Attribution
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Decompiler Quality V4: Similarity Attribution">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#summary_4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Summary
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#implementation_4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Implementation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#decompiler-sentinel_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Decompiler Sentinel
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#assembly-guard" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Assembly Guard
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#validation_4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Validation
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#decompiler-quality-v5-exact-call-target-identity" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Decompiler Quality V5: Exact Call Target Identity
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Decompiler Quality V5: Exact Call Target Identity">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#summary_5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Summary
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#implementation_5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Implementation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#benchmarks" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Benchmarks
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#assembly-guard_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Assembly Guard
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#validation_5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Validation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#notes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Notes
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="2026-05-02-changelog">2026-05-02 Changelog<a class="headerlink" href="#2026-05-02-changelog" title="Permanent link">&para;</a></h1>
+<h2 id="decompiler-quality-v1-exact-call-prototype-arity">Decompiler Quality V1: Exact Call Prototype Arity<a class="headerlink" href="#decompiler-quality-v1-exact-call-prototype-arity" title="Permanent link">&para;</a></h2>
+<h3 id="summary">Summary<a class="headerlink" href="#summary" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Started the decompiler-quality lane after the SLEIGH raw P-code gates stabilized.</li>
+<li>Used Ghidra decompiler owner structure as the reference boundary: <code>FuncProto</code>/<code>ParamID</code>, <code>Heritage</code>, <code>Merge</code>/<code>HighVariable</code>, <code>LocalSymbolMap</code>/<code>Varnode</code>, and <code>PrintC</code>.</li>
+<li>Added a focused sqlite3 sentinel manifest at <code>benchmark/config/benchmark_corpus/sqlite3_decompiler_v1.json</code>.</li>
+<li>Kept the implementation inside NIR callsite type propagation. The printer, CLI, GUI, and benchmark scripts remain downstream consumers and do not perform semantic repair.</li>
+</ul>
+<h3 id="implementation">Implementation<a class="headerlink" href="#implementation" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Added exact API prototype arity pruning in <code>fission-pcode</code> callsite type propagation.</li>
+<li>The pruning rule only applies when an API signature from the existing signature provider resolves the target or wrapper target exactly.</li>
+<li>Calls without a known API signature keep their observed argument list unchanged.</li>
+<li>Wrapper targets are first resolved through call summaries, then checked against the exact API signature.</li>
+<li>Added regression tests proving:</li>
+<li><code>MessageBoxA</code> extra arguments are removed only because a known fixed API signature exists.</li>
+<li>Unknown call targets are not pruned.</li>
+<li>Wrapper-to-import calls use the resolved import signature.</li>
+</ul>
+<h3 id="benchmark-baseline">Benchmark Baseline<a class="headerlink" href="#benchmark-baseline" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Baseline command:</li>
+<li><code>python3 benchmark/full_benchmark/full_decomp_benchmark.py benchmark/binary/x86-64/window/commercial_binary/binary/sqlite3.dll --ghidra-dir vendor/ghidra/ghidra_12.0.4_PUBLIC --fission-bin target/release/fission_cli --limit 5 --timeout 120 --ghidra-func-timeout 20 --pairwise-similarity-mode sampled --pairwise-sample-size 5 --output-dir benchmark/artifacts/full_benchmark/sqlite3_decompiler_v1_baseline</code></li>
+<li>Baseline result:</li>
+<li><code>avg_norm_sim=19.910%</code></li>
+<li><code>coverage=100.000%</code></li>
+<li>Fission functions: <code>5</code></li>
+<li>Ghidra functions: <code>5</code></li>
+</ul>
+<h3 id="after-result">After Result<a class="headerlink" href="#after-result" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Focused manifest command:</li>
+<li><code>python3 benchmark/full_benchmark/full_decomp_benchmark.py --corpus-manifest benchmark/config/benchmark_corpus/sqlite3_decompiler_v1.json --ghidra-dir vendor/ghidra/ghidra_12.0.4_PUBLIC --fission-bin target/release/fission_cli --limit 5 --timeout 120 --ghidra-func-timeout 20 --pairwise-similarity-mode sampled --pairwise-sample-size 5 --output-dir benchmark/artifacts/full_benchmark/sqlite3_decompiler_v1_after</code></li>
+<li>After result:</li>
+<li><code>weighted_avg_norm_sim=19.910%</code></li>
+<li><code>coverage=100.000%</code></li>
+<li>No focused sqlite3 similarity regression.</li>
+<li>This wave is intentionally conservative: it adds exact prototype ownership and tests first. Broader stack-local promotion remains future work because prior stack-address trials showed that internal replacement evidence is not enough without benchmark improvement.</li>
+</ul>
+<h3 id="raw-p-code-guard">Raw P-code Guard<a class="headerlink" href="#raw-p-code-guard" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Command:</li>
+<li><code>python3 benchmark/raw_p_code_benchmark/run_raw_pcode_parity.py --manifest benchmark/raw_p_code_benchmark/canonical_rows.json --ghidra-dir vendor/ghidra/ghidra_12.0.4_PUBLIC --fission-release --require-perfect-canonical --expected-full-match 44 --output-dir benchmark/artifacts/raw_p_code_benchmark/decompiler_v1_x86_64_guard</code></li>
+<li>Result:</li>
+<li><code>perfect_canonical_gate=passed</code></li>
+<li><code>full_match=44</code></li>
+<li><code>average_similarity_score=1.0</code></li>
+<li><code>average_parity_ratio=1.0</code></li>
+<li><code>compat_emitter_used=0</code></li>
+<li><code>fake_placeholder_op=0</code></li>
+<li><code>invalid_pcode_shape=0</code></li>
+<li>success source: <code>sla_construct_tpl</code></li>
+</ul>
+<h3 id="validation">Validation<a class="headerlink" href="#validation" title="Permanent link">&para;</a></h3>
+<ul>
+<li><code>cargo test -p fission-pcode callsite_type_prop_prunes -- --test-threads=1</code></li>
+<li><code>cargo test -p fission-pcode type_hints_imports -- --test-threads=1</code></li>
+<li><code>cargo test -p fission-pcode type_hints_stack_slots -- --test-threads=1</code></li>
+<li><code>cargo check -p fission-pcode -p fission-static -p fission-cli</code></li>
+<li><code>cargo build --release -p fission-cli</code></li>
+<li><code>python3 -m py_compile benchmark/raw_p_code_benchmark/*.py</code></li>
+</ul>
+<h3 id="remaining-work">Remaining Work<a class="headerlink" href="#remaining-work" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Promote stack locals only when the owner proof and row-fidelity result both improve.</li>
+<li>Add the <code>UnknownKiller.sys @ 0x140003360</code> malware sentinel once the sample is present locally.</li>
+<li>Extend call/prototype telemetry so future benchmark reports can show exact prototype hits, rejected unknown targets, and stack-local merge outcomes separately.</li>
+</ul>
+<h2 id="decompiler-quality-v2-callprototype-telemetry-gate">Decompiler Quality V2: Call/Prototype Telemetry Gate<a class="headerlink" href="#decompiler-quality-v2-callprototype-telemetry-gate" title="Permanent link">&para;</a></h2>
+<h3 id="summary_1">Summary<a class="headerlink" href="#summary_1" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Added measurement-first call/prototype owner telemetry without changing call rewrite semantics.</li>
+<li><code>UnknownKiller.sys</code> remains an external qualitative reference only because the sample is not present locally.</li>
+<li>Kept sqlite3 as the focused decompiler sentinel and preserved the existing no-repair boundary: no printer, CLI, GUI, or benchmark semantic fixes.</li>
+</ul>
+<h3 id="implementation_1">Implementation<a class="headerlink" href="#implementation_1" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Added additive <code>NirBuildStats</code> counters:</li>
+<li><code>call_prototype_exact_api_arity_pruned_count</code></li>
+<li><code>call_prototype_unknown_target_kept_count</code></li>
+<li><code>call_prototype_wrapper_resolved_count</code></li>
+<li><code>call_prototype_signature_missing_count</code></li>
+<li>Wired the counters through normalize wave stats and <code>merge_assign</code>.</li>
+<li>Recorded exact API arity pruning only when the existing signature provider proves the API signature.</li>
+<li>Recorded wrapper resolution, missing signature, and unknown-target keep cases without pruning or dropping arguments.</li>
+<li>Exposed the new counters through <code>benchmark/full_benchmark</code> owner metrics:</li>
+<li><code>call_proto_exact_arity_pruned</code></li>
+<li><code>call_proto_unknown_target_kept</code></li>
+<li><code>call_proto_wrapper_resolved</code></li>
+<li><code>call_proto_signature_missing</code></li>
+</ul>
+<h3 id="validation_1">Validation<a class="headerlink" href="#validation_1" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Targeted tests:</li>
+<li><code>cargo test -p fission-pcode callsite_type_prop_prunes -- --test-threads=1</code></li>
+<li><code>cargo test -p fission-pcode callsite_type_prop_keeps_args_when_summary_signature_missing -- --test-threads=1</code></li>
+<li><code>cargo test -p fission-pcode type_hints_imports -- --test-threads=1</code></li>
+<li><code>cargo test -p fission-pcode type_hints_stack_slots -- --test-threads=1</code></li>
+<li>Build/check:</li>
+<li><code>cargo check -p fission-pcode -p fission-static -p fission-cli</code></li>
+<li><code>cargo build --release -p fission-cli</code></li>
+<li><code>python3 -m py_compile benchmark/full_benchmark/*.py benchmark/raw_p_code_benchmark/*.py</code></li>
+</ul>
+<h3 id="decompiler-sentinel">Decompiler Sentinel<a class="headerlink" href="#decompiler-sentinel" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Command:</li>
+<li><code>python3 benchmark/full_benchmark/full_decomp_benchmark.py --corpus-manifest benchmark/config/benchmark_corpus/sqlite3_decompiler_v1.json --ghidra-dir vendor/ghidra/ghidra_12.0.4_PUBLIC --fission-bin target/release/fission_cli --limit 5 --timeout 120 --ghidra-func-timeout 20 --pairwise-similarity-mode sampled --pairwise-sample-size 5 --output-dir benchmark/artifacts/full_benchmark/sqlite3_decompiler_v2_telemetry</code></li>
+<li>Result:</li>
+<li><code>avg_norm_sim=19.910%</code></li>
+<li><code>coverage=100.000%</code></li>
+<li>failed binary rows: <code>0</code></li>
+<li>new owner metrics present in the report</li>
+<li>sqlite3 focused counters were all <code>0.000</code>, which is expected for this measurement-only smoke when no exact prototype pruning is exercised by the selected rows.</li>
+</ul>
+<h3 id="raw-p-code-guard_1">Raw P-code Guard<a class="headerlink" href="#raw-p-code-guard_1" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Command:</li>
+<li><code>python3 benchmark/raw_p_code_benchmark/run_raw_pcode_parity.py --manifest benchmark/raw_p_code_benchmark/canonical_rows.json --ghidra-dir vendor/ghidra/ghidra_12.0.4_PUBLIC --fission-release --require-perfect-canonical --expected-full-match 44 --output-dir benchmark/artifacts/raw_p_code_benchmark/decompiler_v2_x86_64_guard</code></li>
+<li>Result:</li>
+<li><code>perfect_canonical_gate=passed</code></li>
+<li><code>full_match=44</code></li>
+<li><code>average_similarity_score=1.0</code></li>
+<li><code>average_parity_ratio=1.0</code></li>
+<li><code>compat_emitter_used=0</code></li>
+<li><code>fake_placeholder_op=0</code></li>
+<li><code>invalid_pcode_shape=0</code></li>
+<li>success source: <code>sla_construct_tpl</code></li>
+</ul>
+<h3 id="remaining-work_1">Remaining Work<a class="headerlink" href="#remaining-work_1" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Use the new owner counters to decide whether the next decompiler wave should target prototype coverage, wrapper summaries, or stack-local materialization.</li>
+<li>Keep stack-local promotion gated by row-fidelity improvement, not internal trace success alone.</li>
+</ul>
+<h2 id="decompiler-quality-v3-import-call-target-resolution-gate">Decompiler Quality V3: Import Call Target Resolution Gate<a class="headerlink" href="#decompiler-quality-v3-import-call-target-resolution-gate" title="Permanent link">&para;</a></h2>
+<h3 id="summary_2">Summary<a class="headerlink" href="#summary_2" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Connected decompiler call target identity to exact loader import metadata and existing <code>NirTypeContext.call_target_refs</code>.</li>
+<li>Kept <code>UnknownKiller.sys</code> as external qualitative evidence only; it is not present locally and is not a benchmark fixture.</li>
+<li>Preserved the no-repair boundary: no printer-only API name substitution, no benchmark semantic repair, no binary-specific rule, and no shortcut argument deletion.</li>
+</ul>
+<h3 id="implementation_2">Implementation<a class="headerlink" href="#implementation_2" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Added additive <code>NirBuildStats</code> counters:</li>
+<li><code>call_target_import_resolved_count</code></li>
+<li><code>call_target_direct_symbol_resolved_count</code></li>
+<li><code>call_target_unresolved_sub_fallback_count</code></li>
+<li><code>call_target_context_missing_count</code></li>
+<li>Exposed the counters through full-benchmark owner metrics:</li>
+<li><code>call_target_import_resolved</code></li>
+<li><code>call_target_direct_symbol_resolved</code></li>
+<li><code>call_target_unresolved_sub_fallback</code></li>
+<li><code>call_target_context_missing</code></li>
+<li>Updated call lowering so direct constant call targets first consult <code>NirTypeContext.call_target_refs</code>.</li>
+<li>Import provenance resolves to the loader/API symbol in <code>HirExpr::Call.target</code>; the printer only renders that semantic target.</li>
+<li>Missing context or unresolved exact target keeps the existing <code>sub_&lt;addr&gt;</code> fallback and records telemetry.</li>
+<li>Updated <code>fission-decompiler-core</code> context construction so loader imports and IAT symbols are inserted as <code>CallTargetRef { provenance: Import, edge_kind: Import }</code> before direct/global symbols.</li>
+<li>Import symbols now win over same-address function names, avoiding cases where an import thunk name like <code>sub_401000</code> masks an exact loader import such as <code>CloseHandle</code>.</li>
+<li>Added <code>benchmark/config/benchmark_corpus/sqlite3_decompiler_v3_calls.json</code> as a focused sqlite3 reporting lane for call-target owner metrics.</li>
+</ul>
+<h3 id="validation_2">Validation<a class="headerlink" href="#validation_2" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Targeted tests:</li>
+<li><code>cargo test -p fission-pcode call_target -- --test-threads=1</code></li>
+<li><code>cargo test -p fission-decompiler-core loader_imports_drive_preview_call_target_refs_before_function_names -- --test-threads=1</code></li>
+<li><code>cargo test -p fission-pcode callsite_type_prop_prunes -- --test-threads=1</code></li>
+<li><code>cargo test -p fission-pcode type_hints_imports -- --test-threads=1</code></li>
+<li>Benchmark/reporting tests:</li>
+<li><code>python3 -m unittest benchmark.full_benchmark.grand_finale_support.test_corpus_benchmark.CorpusBenchmarkTests.test_extract_owner_metrics_from_engine_summary</code></li>
+<li><code>python3 -m py_compile benchmark/full_benchmark/*.py benchmark/raw_p_code_benchmark/*.py</code></li>
+<li>Build/check:</li>
+<li><code>CARGO_INCREMENTAL=0 cargo check -p fission-pcode -p fission-decompiler-core -p fission-static -p fission-cli</code></li>
+<li><code>CARGO_INCREMENTAL=0 cargo build --release -p fission-cli</code></li>
+</ul>
+<h3 id="decompiler-sentinel_1">Decompiler Sentinel<a class="headerlink" href="#decompiler-sentinel_1" title="Permanent link">&para;</a></h3>
+<ul>
+<li>V1 guard command:</li>
+<li><code>python3 benchmark/full_benchmark/full_decomp_benchmark.py --corpus-manifest benchmark/config/benchmark_corpus/sqlite3_decompiler_v1.json --ghidra-dir vendor/ghidra/ghidra_12.0.4_PUBLIC --fission-bin target/release/fission_cli --limit 5 --timeout 120 --ghidra-func-timeout 20 --pairwise-similarity-mode sampled --pairwise-sample-size 5 --output-dir benchmark/artifacts/full_benchmark/sqlite3_decompiler_v3_v1_guard</code></li>
+<li>V1 guard result:</li>
+<li><code>weighted_avg_norm_sim=19.910%</code></li>
+<li><code>coverage=100.000%</code></li>
+<li>failed binary rows: <code>0</code></li>
+<li>V3 calls command:</li>
+<li><code>python3 benchmark/full_benchmark/full_decomp_benchmark.py --corpus-manifest benchmark/config/benchmark_corpus/sqlite3_decompiler_v3_calls.json --ghidra-dir vendor/ghidra/ghidra_12.0.4_PUBLIC --fission-bin target/release/fission_cli --limit 20 --timeout 120 --ghidra-func-timeout 20 --pairwise-similarity-mode sampled --pairwise-sample-size 5 --output-dir benchmark/artifacts/full_benchmark/sqlite3_decompiler_v3_calls</code></li>
+<li>V3 calls result:</li>
+<li><code>weighted_avg_norm_sim=14.940%</code></li>
+<li><code>coverage=100.000%</code></li>
+<li>failed binary rows: <code>0</code></li>
+<li>new call-target owner metrics were present in the report.</li>
+<li>current sqlite3 selected rows did not exercise call lowering, so the new call-target counters remained <code>0.000</code>; exact resolution is covered by unit tests and the next benchmark lane should select rows that actually lower call expressions.</li>
+</ul>
+<h3 id="raw-p-code-guard_2">Raw P-code Guard<a class="headerlink" href="#raw-p-code-guard_2" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Command:</li>
+<li><code>python3 benchmark/raw_p_code_benchmark/run_raw_pcode_parity.py --manifest benchmark/raw_p_code_benchmark/canonical_rows.json --ghidra-dir vendor/ghidra/ghidra_12.0.4_PUBLIC --fission-release --require-perfect-canonical --expected-full-match 44 --output-dir benchmark/artifacts/raw_p_code_benchmark/decompiler_v3_x86_64_guard</code></li>
+<li>Result:</li>
+<li><code>perfect_canonical_gate=passed</code></li>
+<li><code>full_match=44</code></li>
+<li><code>average_similarity_score=1.0</code></li>
+<li><code>average_parity_ratio=1.0</code></li>
+<li><code>compat_emitter_used=0</code></li>
+<li><code>fake_placeholder_op=0</code></li>
+<li><code>invalid_pcode_shape=0</code></li>
+<li>success source: <code>sla_construct_tpl</code></li>
+</ul>
+<h3 id="remaining-work_2">Remaining Work<a class="headerlink" href="#remaining-work_2" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Choose a decompiler sentinel row that contains real lowered call expressions so corpus metrics can show nonzero import/direct/fallback target counters.</li>
+<li>Continue stack-local and argument materialization only when exact owner proof and row-fidelity both improve.</li>
+</ul>
+<h2 id="loader-accuracy-pe-export-thunks-and-assembly-parity-lane">Loader Accuracy: PE Export Thunks and Assembly Parity Lane<a class="headerlink" href="#loader-accuracy-pe-export-thunks-and-assembly-parity-lane" title="Permanent link">&para;</a></h2>
+<h3 id="summary_3">Summary<a class="headerlink" href="#summary_3" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Fixed the sqlite3 decompiler sentinel seed mismatch at the loader owner.</li>
+<li>PE exports that are exact x86 relative jump thunks are now classified as <code>export_thunk</code> instead of user-facing code seeds.</li>
+<li>Added an additive <code>FunctionInfo.thunk_target</code> field and surfaced it in CLI JSON output.</li>
+<li>Added a Python assembly parity benchmark so instruction listing regressions can be measured separately from raw p-code and decompiler quality.</li>
+</ul>
+<h3 id="implementation_3">Implementation<a class="headerlink" href="#implementation_3" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Added exact PE export thunk target detection for <code>E9 rel32</code> and <code>EB rel8</code> entries.</li>
+<li>Classification is gated by the resolved Ghidra-style load spec language id and requires the target VA to land in an executable section.</li>
+<li>No p-code, HIR, printer, or benchmark-side semantic repair was added.</li>
+<li>Export thunks remain visible through <code>info --exports --json</code> with:</li>
+<li><code>kind = "export_thunk"</code></li>
+<li><code>is_thunk_like = true</code></li>
+<li><code>thunk_target = &lt;exact target VA&gt;</code></li>
+<li>Canonical function listing excludes these thunk-like exports through the existing function view filter.</li>
+</ul>
+<h3 id="sqlite3dll-evidence">sqlite3.dll Evidence<a class="headerlink" href="#sqlite3dll-evidence" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Command:</li>
+<li><code>target/release/fission_cli info benchmark/binary/x86-64/window/commercial_binary/binary/sqlite3.dll --exports --json</code></li>
+<li>Result:</li>
+<li>total exports: <code>378</code></li>
+<li>export thunks: <code>375</code></li>
+<li>example: <code>0x18000104b sqlite3_backup_init -&gt; 0x180017170</code></li>
+<li>Canonical <code>list --json</code> now starts at implementation/code seeds such as <code>_start</code> and <code>.pdata</code>/code functions instead of sqlite3 export jump stubs.</li>
+</ul>
+<h3 id="assembly-parity-benchmark">Assembly Parity Benchmark<a class="headerlink" href="#assembly-parity-benchmark" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Added:</li>
+<li><code>benchmark/asm_benchmark/run_asm_parity.py</code></li>
+<li><code>benchmark/asm_benchmark/sqlite3_export_thunks.json</code></li>
+<li><code>benchmark/asm_benchmark/README.md</code></li>
+<li>Added assembly similarity metrics:</li>
+<li><code>average_similarity_score</code></li>
+<li><code>average_address_score</code></li>
+<li><code>average_bytes_score</code></li>
+<li><code>average_text_score</code></li>
+<li>Command:</li>
+<li><code>python3 benchmark/asm_benchmark/run_asm_parity.py --manifest benchmark/asm_benchmark/sqlite3_export_thunks.json --ghidra-dir vendor/ghidra/ghidra_12.0.4_PUBLIC --fission-bin target/release/fission_cli --output-dir benchmark/artifacts/asm_benchmark/sqlite3_export_thunks</code></li>
+<li>Result:</li>
+<li><code>full_match=3/3</code></li>
+<li><code>average_similarity_score=1.0</code></li>
+<li><code>average_address_score=1.0</code></li>
+<li><code>average_bytes_score=1.0</code></li>
+<li><code>average_text_score=1.0</code></li>
+<li>rows: <code>0x18000104b</code>, <code>0x1800013fc</code>, <code>0x18000140b</code></li>
+</ul>
+<h3 id="full-benchmark-after-loader-fix">Full Benchmark After Loader Fix<a class="headerlink" href="#full-benchmark-after-loader-fix" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Command:</li>
+<li><code>python3 benchmark/full_benchmark/full_decomp_benchmark.py --corpus-manifest benchmark/config/benchmark_corpus/sqlite3_decompiler_v3_calls.json --ghidra-dir vendor/ghidra/ghidra_12.0.4_PUBLIC --fission-bin target/release/fission_cli --limit 20 --timeout 120 --ghidra-func-timeout 20 --pairwise-similarity-mode shared-full --output-dir benchmark/artifacts/full_benchmark/sqlite3_decompiler_v3_calls_loader_thunks</code></li>
+<li>Result:</li>
+<li><code>avg_norm_sim=27.610%</code></li>
+<li><code>coverage=100.000%</code></li>
+<li>failed binary rows: <code>0</code></li>
+<li>Interpretation:</li>
+<li>The prior low similarity was partly caused by comparing Fission export thunk skeletons against Ghidra-followed implementation bodies.</li>
+<li>After thunk classification, both sides are seeded on implementation functions; remaining similarity gap belongs to decompiler/NIR/HIR/structuring quality, not loader seed mismatch.</li>
+</ul>
+<h3 id="validation_3">Validation<a class="headerlink" href="#validation_3" title="Permanent link">&para;</a></h3>
+<ul>
+<li><code>cargo check -p fission-loader -p fission-core -p fission-cli</code></li>
+<li><code>cargo check -p fission-loader -p fission-core -p fission-cli -p fission-tauri -p fission-static -p fission-dynamic</code></li>
+<li><code>cargo test -p fission-loader pe_export_relative_jump_thunk -- --test-threads=1</code></li>
+<li><code>cargo test -p fission-loader -- --test-threads=1</code></li>
+<li><code>cargo build --release -p fission-cli</code></li>
+<li><code>python3 -m py_compile benchmark/asm_benchmark/*.py</code></li>
+</ul>
+<h2 id="decompiler-quality-v4-similarity-attribution">Decompiler Quality V4: Similarity Attribution<a class="headerlink" href="#decompiler-quality-v4-similarity-attribution" title="Permanent link">&para;</a></h2>
+<h3 id="summary_4">Summary<a class="headerlink" href="#summary_4" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Added report-only row-level decompiler similarity attribution for the sqlite3 focused lane.</li>
+<li>Kept this wave diagnostic-only: no stack rewrite, call rewrite expansion, printer repair, benchmark repair, or binary-specific rule was added.</li>
+<li>Added a new focused manifest at <code>benchmark/config/benchmark_corpus/sqlite3_decompiler_v4_similarity_attribution.json</code>.</li>
+<li>The attribution connects rendered-code surface scores and existing owner metrics to owner buckets so low similarity can be triaged before semantic changes.</li>
+</ul>
+<h3 id="implementation_4">Implementation<a class="headerlink" href="#implementation_4" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Added additive per-row scores to full-benchmark pairwise rows:</li>
+<li><code>call_surface_score</code></li>
+<li><code>stack_local_score</code></li>
+<li><code>control_flow_score</code></li>
+<li><code>name_type_score</code></li>
+<li><code>literal_score</code></li>
+<li>Added report-only owner buckets:</li>
+<li><code>call_target_missing</code></li>
+<li><code>prototype_arity_missing</code></li>
+<li><code>stack_local_unmerged</code></li>
+<li><code>control_flow_goto_heavy</code></li>
+<li><code>type_name_surface</code></li>
+<li><code>literal_or_const_surface</code></li>
+<li>Added corpus/single benchmark summary aggregation for bucket counts and average scores.</li>
+<li>Updated compact artifacts and markdown templates so attribution appears in generated reports.</li>
+<li>Added unit coverage for attribution fields and owner bucket extraction.</li>
+</ul>
+<h3 id="decompiler-sentinel_2">Decompiler Sentinel<a class="headerlink" href="#decompiler-sentinel_2" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Command:</li>
+<li><code>python3 benchmark/full_benchmark/full_decomp_benchmark.py --corpus-manifest benchmark/config/benchmark_corpus/sqlite3_decompiler_v4_similarity_attribution.json --ghidra-dir vendor/ghidra/ghidra_12.0.4_PUBLIC --fission-bin target/release/fission_cli --limit 20 --timeout 120 --ghidra-func-timeout 20 --pairwise-similarity-mode shared-full --output-dir benchmark/artifacts/full_benchmark/sqlite3_decompiler_v4_similarity_attribution</code></li>
+<li>Result:</li>
+<li><code>avg_norm_sim=27.610%</code></li>
+<li><code>coverage=100.000%</code></li>
+<li>failed binary rows: <code>0</code></li>
+<li>Attribution bucket counts:</li>
+<li><code>call_target_missing=20</code></li>
+<li><code>prototype_arity_missing=16</code></li>
+<li><code>stack_local_unmerged=16</code></li>
+<li><code>control_flow_goto_heavy=15</code></li>
+<li><code>type_name_surface=20</code></li>
+<li><code>literal_or_const_surface=19</code></li>
+<li>Average surface scores:</li>
+<li><code>call_surface_score=0.000</code></li>
+<li><code>stack_local_score=15.000</code></li>
+<li><code>control_flow_score=44.089</code></li>
+<li><code>name_type_score=1.137</code></li>
+<li><code>literal_score=13.819</code></li>
+<li>Interpretation:</li>
+<li>The remaining gap is now clearly decompiler-quality work, not loader seed mismatch.</li>
+<li>The first exact owner candidates are call-target/prototype materialization and stack-local merging, but they need semantic evidence before promotion.</li>
+</ul>
+<h3 id="assembly-guard">Assembly Guard<a class="headerlink" href="#assembly-guard" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Command:</li>
+<li><code>python3 benchmark/asm_benchmark/run_asm_parity.py --manifest benchmark/asm_benchmark/sqlite3_export_thunks.json --ghidra-dir vendor/ghidra/ghidra_12.0.4_PUBLIC --fission-bin target/release/fission_cli --output-dir benchmark/artifacts/asm_benchmark/sqlite3_export_thunks_v4_guard</code></li>
+<li>Result:</li>
+<li><code>full_match=3/3</code></li>
+<li><code>average_similarity_score=1.0</code></li>
+<li><code>average_address_score=1.0</code></li>
+<li><code>average_bytes_score=1.0</code></li>
+<li><code>average_text_score=1.0</code></li>
+</ul>
+<h3 id="validation_4">Validation<a class="headerlink" href="#validation_4" title="Permanent link">&para;</a></h3>
+<ul>
+<li><code>python3 -m py_compile benchmark/full_benchmark/*.py benchmark/full_benchmark/grand_finale_support/*.py benchmark/asm_benchmark/*.py</code></li>
+<li><code>python3 -m unittest benchmark.full_benchmark.grand_finale_support.test_corpus_benchmark.CorpusBenchmarkTests.test_pairwise_similarity_attribution_adds_owner_buckets benchmark.full_benchmark.grand_finale_support.test_corpus_benchmark.CorpusBenchmarkTests.test_extract_owner_metrics_from_engine_summary</code></li>
+<li><code>python3 -m unittest benchmark.full_benchmark.grand_finale_support.test_corpus_benchmark.CorpusBenchmarkTests.test_pairwise_similarity_attribution_adds_owner_buckets benchmark.full_benchmark.grand_finale_support.test_corpus_benchmark.CorpusBenchmarkTests.test_build_corpus_compact_summary_keeps_capped_binary_rows benchmark.full_benchmark.grand_finale_support.test_corpus_benchmark.CorpusBenchmarkTests.test_render_corpus_markdown_and_console_smoke</code></li>
+<li><code>cargo test -p fission-pcode call_target -- --test-threads=1</code></li>
+<li><code>cargo test -p fission-pcode callsite_type_prop_prunes -- --test-threads=1</code></li>
+<li><code>cargo test -p fission-pcode type_hints_imports -- --test-threads=1</code></li>
+<li><code>cargo check -p fission-pcode -p fission-decompiler-core -p fission-static -p fission-cli</code></li>
+<li><code>cargo build --release -p fission-cli</code></li>
+</ul>
+<h2 id="decompiler-quality-v5-exact-call-target-identity">Decompiler Quality V5: Exact Call Target Identity<a class="headerlink" href="#decompiler-quality-v5-exact-call-target-identity" title="Permanent link">&para;</a></h2>
+<h3 id="summary_5">Summary<a class="headerlink" href="#summary_5" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Added an exact <code>CallTargetIndex</code> owner in <code>fission-decompiler-core</code> so HIR call targets are promoted only from loader/fact-proven identities.</li>
+<li>Matched the Ghidra owner boundary inspected in <code>Features/Decompiler/src/decompile/cpp</code>:</li>
+<li><code>Scope::queryFunction</code></li>
+<li><code>Scope::queryExternalRefFunction</code></li>
+<li><code>ActionDeindirect</code></li>
+<li><code>ActionDefaultParams</code></li>
+<li>Kept printer, benchmark, and CLI surfaces out of semantic repair. <code>HirExpr::Call.target</code> must already be exact before output improves.</li>
+</ul>
+<h3 id="implementation_5">Implementation<a class="headerlink" href="#implementation_5" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Exact call-target provenance priority is now:</li>
+<li><code>Import/IAT</code></li>
+<li><code>Export thunk/export</code></li>
+<li><code>Fact/debug-style resolved name</code></li>
+<li><code>Direct loader function</code></li>
+<li><code>Global symbol</code></li>
+<li>Export thunk identity is connected to both thunk VA and exact thunk target VA when <code>FunctionInfo.thunk_target</code> is present.</li>
+<li>Same-rank conflicting names are recorded as ambiguous and are not promoted to HIR call targets.</li>
+<li>Generic loader names such as <code>sub_*</code>, <code>FUN_*</code>, and <code>tmp_*</code> are not treated as exact identities.</li>
+<li>HIR call lowering now uses exact <code>call_target_refs</code> hits for promotion. Legacy <code>call_targets</code> no longer promotes names.</li>
+<li><code>CALLIND</code> can resolve through a COPY-only constant chain. Load-derived or non-constant indirect calls remain unresolved.</li>
+<li>Added additive telemetry:</li>
+<li><code>call_target_exact_index_hit_count</code></li>
+<li><code>call_target_exact_index_ambiguous_count</code></li>
+<li><code>call_target_export_thunk_target_resolved_count</code></li>
+<li><code>call_target_indirect_const_resolved_count</code></li>
+<li><code>call_target_unresolved_no_exact_identity_count</code></li>
+</ul>
+<h3 id="benchmarks">Benchmarks<a class="headerlink" href="#benchmarks" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Command:</li>
+<li><code>python3 benchmark/full_benchmark/full_decomp_benchmark.py --corpus-manifest benchmark/config/benchmark_corpus/sqlite3_decompiler_v4_similarity_attribution.json --ghidra-dir vendor/ghidra/ghidra_12.0.4_PUBLIC --fission-bin target/release/fission_cli --limit 20 --timeout 120 --ghidra-func-timeout 20 --pairwise-similarity-mode shared-full --output-dir benchmark/artifacts/full_benchmark/sqlite3_decompiler_v5_call_target_identity</code></li>
+<li>Result:</li>
+<li><code>avg_norm_sim=27.610%</code></li>
+<li><code>coverage=100.000%</code></li>
+<li>failed binary rows: <code>0</code></li>
+<li>Note:</li>
+<li>The current sqlite3 first-20 focused rows did not exercise call-target lowering counters; owner metrics are exposed and unit-gated, but benchmark counters remained <code>0</code>.</li>
+</ul>
+<h3 id="assembly-guard_1">Assembly Guard<a class="headerlink" href="#assembly-guard_1" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Command:</li>
+<li><code>python3 benchmark/asm_benchmark/run_asm_parity.py --manifest benchmark/asm_benchmark/sqlite3_export_thunks.json --ghidra-dir vendor/ghidra/ghidra_12.0.4_PUBLIC --fission-bin target/release/fission_cli --output-dir benchmark/artifacts/asm_benchmark/sqlite3_export_thunks_v5_guard</code></li>
+<li>Result:</li>
+<li><code>full_match=3/3</code></li>
+<li><code>average_similarity_score=1.0</code></li>
+<li><code>average_address_score=1.0</code></li>
+<li><code>average_bytes_score=1.0</code></li>
+<li><code>average_text_score=1.0</code></li>
+</ul>
+<h3 id="validation_5">Validation<a class="headerlink" href="#validation_5" title="Permanent link">&para;</a></h3>
+<ul>
+<li><code>cargo test -p fission-pcode call_target --target-dir /tmp/fission-target-v5 -- --test-threads=1</code></li>
+<li><code>cargo test -p fission-pcode preview_callind_copy_only_constant_chain_resolves_exact_target --target-dir /tmp/fission-target-v5 -- --test-threads=1</code></li>
+<li><code>cargo test -p fission-pcode type_hints_imports --target-dir /tmp/fission-target-v5 -- --test-threads=1</code></li>
+<li><code>cargo test -p fission-pcode callsite_type_prop_prunes --target-dir /tmp/fission-target-v5 -- --test-threads=1</code></li>
+<li><code>cargo test -p fission-decompiler-core call_target --target-dir /tmp/fission-target-v5 -- --test-threads=1</code></li>
+<li><code>cargo check -p fission-pcode -p fission-decompiler-core -p fission-static -p fission-cli --target-dir /tmp/fission-target-v5</code></li>
+<li><code>cargo build --release -p fission-cli</code></li>
+<li><code>python3 -m py_compile benchmark/full_benchmark/*.py benchmark/asm_benchmark/*.py</code></li>
+</ul>
+<h3 id="notes">Notes<a class="headerlink" href="#notes" title="Permanent link">&para;</a></h3>
+<ul>
+<li>The default debug target directory had a stale rustc process during this run, so targeted Rust tests/checks used <code>/tmp/fission-target-v5</code>. Release build to <code>target/release/fission_cli</code> succeeded and was used for benchmarks.</li>
+<li>No stack-local, FID, byte-pattern, DIE, GDT, printer-only, or binary-specific repair was added.</li>
+</ul>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../../..", "features": ["navigation.tabs", "navigation.sections", "navigation.expand", "navigation.top", "search.suggest", "search.highlight", "content.code.copy"], "search": "../../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>

@@ -1,0 +1,16 @@
+{
+  "binary": "test_functions",
+  "binary_path": "benchmark/binary/x86-64/window/small/binary/c/test_functions.exe",
+  "format": "PE (binrw)",
+  "arch_spec": "x86:LE:64:default",
+  "functions_total": 1,
+  "rows_emitted": 1,
+  "direct_success_count": 1,
+  "nir_output_class_counts": {
+    "structured": 1
+  },
+  "nir_build_stats_totals": {
+    "materialization_stabilized_count": 1,
+    "replacement_plan_rejected_alias_unsafe_count": 4
+  }
+}

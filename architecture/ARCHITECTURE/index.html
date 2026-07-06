@@ -1,0 +1,1390 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="A cross-platform, Rust-powered reverse engineering and decompilation framework.">
+      
+      
+      
+        <link rel="canonical" href="https://sjkim1127.github.io/Fission/architecture/ARCHITECTURE/">
+      
+      
+        <link rel="prev" href="../../CLI/">
+      
+      
+        <link rel="next" href="../../QUALITY_METRICS/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>Architecture - Fission</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#fission-architecture" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="Fission" class="md-header__button md-logo" aria-label="Fission" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Fission
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Architecture
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m14.3 16-.7-2h-3.2l-.7 2H7.8L11 7h2l3.2 9zM20 8.69V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12zm-9.15 3.96h2.3L12 9z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_2" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to system preference"  type="radio" name="__palette" id="__palette_2">
+    
+      <label class="md-header__button md-icon" title="Switch to system preference" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/sjkim1127/Fission" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    sjkim1127/Fission
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../.." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../PROJECT_MAP/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Project Map
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../CLI/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  CLI Guide
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    <li class="md-tabs__item md-tabs__item--active">
+      <a href="./" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Architecture
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../QUALITY_METRICS/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Quality Metrics
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../EVALUATION/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Evaluation
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../contributing/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Contributing
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../MALWARE_SAMPLE_POLICY/" class="md-tabs__link">
+          
+  
+  
+  Developer Policies
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="Fission" class="md-nav__button md-logo" aria-label="Fission" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Fission
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/sjkim1127/Fission" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    sjkim1127/Fission
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../PROJECT_MAP/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Project Map
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../CLI/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI Guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#ownership" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Ownership
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#decompiler-layers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Decompiler Layers
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Decompiler Layers">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#fission-pcode" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        fission-pcode
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#fission-decompiler" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        fission-decompiler
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#cargo-layering-note" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Cargo layering note
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#fission-static" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        fission-static
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#fission-loader" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        fission-loader
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#structuring-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Structuring Model
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#pass-pipeline-architecture" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Pass Pipeline Architecture
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#decompiler-quality-firewall" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Decompiler Quality Firewall
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#benchmark-telemetry-contract" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Benchmark / Telemetry Contract
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#non-goals" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Non-Goals
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../QUALITY_METRICS/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quality Metrics
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../EVALUATION/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Evaluation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../contributing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contributing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_8" >
+        
+          
+          <label class="md-nav__link" for="__nav_8" id="__nav_8_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Developer Policies
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_8_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_8">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Developer Policies
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../MALWARE_SAMPLE_POLICY/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Malware Sample Policy
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../VERSIONING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Versioning
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../RELEASE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Release
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#ownership" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Ownership
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#decompiler-layers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Decompiler Layers
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Decompiler Layers">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#fission-pcode" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        fission-pcode
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#fission-decompiler" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        fission-decompiler
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#cargo-layering-note" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Cargo layering note
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#fission-static" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        fission-static
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#fission-loader" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        fission-loader
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#structuring-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Structuring Model
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#pass-pipeline-architecture" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Pass Pipeline Architecture
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#decompiler-quality-firewall" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Decompiler Quality Firewall
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#benchmark-telemetry-contract" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Benchmark / Telemetry Contract
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#non-goals" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Non-Goals
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="fission-architecture">Fission Architecture<a class="headerlink" href="#fission-architecture" title="Permanent link">&para;</a></h1>
+<p>Updated: 2026-04-15</p>
+<h2 id="ownership">Ownership<a class="headerlink" href="#ownership" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Semantic owner: <code>fission-pcode</code></li>
+<li>Structuring owner: <code>fission-pcode::nir::structuring</code></li>
+<li>Orchestration owner: <code>fission-decompiler</code></li>
+<li>Facts and native preparation owner: <code>fission-static</code></li>
+<li>Printer surfaces: consume-only</li>
+</ul>
+<p>Ghidra parity gaps are tracked separately in
+<code>docs/architecture/GHIDRA_PARITY_GAP_AUDIT.md</code>. That audit is reporting-only:
+it must not be used as a semantic repair layer or as justification for
+approximate P-code success.</p>
+<h2 id="decompiler-layers">Decompiler Layers<a class="headerlink" href="#decompiler-layers" title="Permanent link">&para;</a></h2>
+<h3 id="fission-pcode"><code>fission-pcode</code><a class="headerlink" href="#fission-pcode" title="Permanent link">&para;</a></h3>
+<p><code>fission-pcode</code> owns the canonical decompiler semantics:</p>
+<ul>
+<li>P-code to NIR/HIR lowering</li>
+<li>normalization and recovery</li>
+<li>structuring legality</li>
+<li><code>StructureGraph</code>, <code>RegionProof</code>, and related telemetry</li>
+<li><code>NirBuildStats</code> and <code>NirHintStats</code></li>
+</ul>
+<p>Structuring decisions must be made here. Downstream crates must not reconstruct semantic policy or region legality.</p>
+<p>Internally, <code>fission-pcode</code> is not a single semantic dumping ground. Treat it as
+a substrate plus owner-layer stack:</p>
+<ul>
+<li><strong>Substrate:</strong> IR/HIR types, p-code/NIR contracts, telemetry, action-pipeline
+  framework, shared CFG facts, def-use facts, type constraints,
+  calling-convention facts, and alias facts.</li>
+<li><strong>Owner layers:</strong> builder/materialize, normalize, type/data recovery,
+  structuring, and render/printer.</li>
+<li><strong>Extraction candidates:</strong> <code>fission-nir-analysis</code>,
+  <code>fission-nir-normalize</code>, and <code>fission-structuring</code>.</li>
+</ul>
+<p>New quality fixes should first ask whether the invariant belongs in shared
+analysis. Repeated special cases must be absorbed into dataflow, def-use,
+type-constraint, calling-convention, CFG, or alias analysis rather than added as
+another narrow pass. A new owner, pass, helper, or metric is acceptable only when
+the proposal shows that no existing owner or shared analysis surface expresses
+the invariant.</p>
+<h3 id="fission-decompiler"><code>fission-decompiler</code><a class="headerlink" href="#fission-decompiler" title="Permanent link">&para;</a></h3>
+<p><code>fission-decompiler</code> owns application-layer orchestration:</p>
+<ul>
+<li>request/result contracts</li>
+<li>engine selection</li>
+<li>routing between legacy and NIR paths</li>
+<li>type-context assembly from facts</li>
+<li>worker execution and render orchestration</li>
+<li>Rust-Sleigh decode → NIR pipeline (<code>rust_sleigh</code>)</li>
+</ul>
+<p>It <strong>re-exports</strong> the <code>fission_pcode</code> IR surface for convenience and consumes canonical semantic policy from <code>fission-pcode</code>. It does not redefine legality or quality counters.</p>
+<h3 id="cargo-layering-note">Cargo layering note<a class="headerlink" href="#cargo-layering-note" title="Permanent link">&para;</a></h3>
+<p><code>fission-sleigh</code> depends only on <code>fission-pcode</code> (IR types). Orchestration therefore lives in <code>fission-decompiler</code>, which depends on both <code>fission-pcode</code> and <code>fission-sleigh</code>, avoiding a workspace dependency cycle.</p>
+<h3 id="fission-static"><code>fission-static</code><a class="headerlink" href="#fission-static" title="Permanent link">&para;</a></h3>
+<p><code>fission-static</code> is a service/provider crate:</p>
+<ul>
+<li>fact extraction and provenance</li>
+<li>native decompiler preparation</li>
+<li>binary-derived static helpers</li>
+</ul>
+<p>It does not own decompiler semantics, region legality, or postprocess policy.</p>
+<h3 id="fission-loader"><code>fission-loader</code><a class="headerlink" href="#fission-loader" title="Permanent link">&para;</a></h3>
+<p><code>fission-loader</code> owns binary format loading and metadata provenance. Its
+canonical pipeline follows the Ghidra Loader owner chain:</p>
+<ol>
+<li><code>detect</code>: identify PE executable, COFF object, ELF, Mach-O, or Mach-O fat.</li>
+<li><code>probe/load-spec</code>: select architecture and load specification from format metadata.</li>
+<li><code>map</code>: build file-offset/RVA/VA memory blocks and permissions.</li>
+<li><code>symbols</code>: classify code/data, imports, exports, thunks, undefined externals, and debug-only symbols.</li>
+<li><code>finalize</code>: build <code>LoadedBinary</code>, <code>FunctionInfo</code>, imports, exports, and canonical function views.</li>
+</ol>
+<p><strong>Binary identity (<code>loader::identity</code>).</strong> After <code>LoaderPipeline::load</code>, Fission attaches an optional structured <code>BinaryIdentityReport</code> on the <code>LoadedBinary</code> wrapper (entropy, overlay tail hints, PE-oriented section/import signals, optional <code>/utils</code> resource summaries, bounded DIE JSON primitive subset telemetry + matches, PE TLS/debug-directory hints, MSVC CRT pattern hits near entry, WinAPI catalog coverage counts, evidence lists). This augments loader provenance for CLI JSON (<code>fission_cli info --identity</code>) and benchmark attribution; it is <strong>not</strong> a decompiler repair layer and does not alter parsing or IR. Flat rule/DiE-style detections remain available via <code>detector::detect</code> (<code>info --detections</code>).</p>
+<p>PE/COFF/ELF/Mach-O parsing is Fission-owned through bounds-checked byte readers.
+<code>object</code> is not a loader decision owner; it may be used only as fixture/debug
+inspection support. <code>gimli</code> and <code>pdb</code> remain specialized DWARF/PDB metadata
+readers rather than primary binary loaders.</p>
+<p>Ghidra loader family coverage is staged. The implemented executable-loader group is
+<code>PeLoader</code>, <code>CoffLoader</code>/<code>MSCoffLoader</code>, <code>ElfLoader</code>, <code>MachoLoader</code>,
+<code>TeLoader</code>, <code>BinaryLoader</code> (explicit raw hint only), <code>IntelHexLoader</code>,
+<code>MotorolaHexLoader</code>, <code>MzLoader</code>/<code>NeLoader</code>, and <code>UnixAoutLoader</code>. Lower-priority or separate-wave
+families are <code>DyldCacheLoader</code>, <code>PefLoader</code>, <code>SomLoader</code>, <code>OmfLoader</code>,
+<code>Omf51Loader</code>, <code>DbgLoader</code>, <code>DefLoader</code>, <code>MapLoader</code>, <code>GdtLoader</code>, <code>GzfLoader</code>,
+and XML/debug helper loaders. Known but unsupported families must fail closed
+with a typed loader message such as <code>UnsupportedLoaderFamily(&lt;name&gt;)</code>. Raw binary
+loading is never an automatic fallback for unknown bytes because that would hide
+malformed or unsupported formats.</p>
+<p>Container inputs are not executable loaders. Archive/file-system inputs such as
+Compound Document, ZIP, gzip, and Cabinet are classified before executable
+loading and fail closed with <code>ContainerRequiresExtraction(&lt;name&gt;)</code> until an exact
+extractor/file-system owner is implemented. Compound Document detection validates
+the CFB header shape; MSI classification is not inferred from strings or names.
+Raw P-code and full benchmark lanes must skip these rows unless an extracted
+executable child is explicitly provided.</p>
+<p>Loader provenance is a public contract shared by CLI and GUI surfaces.
+<code>FunctionInfo.origin</code>, <code>kind</code>, <code>is_import</code>, <code>is_export</code>, <code>is_thunk_like</code>,
+<code>external_library</code>, and <code>source_section</code> classify whether a record is code,
+entry, export, true import, import thunk, undefined external, debug-only symbol,
+or data-derived metadata. User-facing and decompile-seed function lists must go
+through <code>loader::function_view</code>; CLI and GUI must not reconstruct independent
+function/import/export filtering rules.</p>
+<p><strong>Loader Parity and Enrichment Features.</strong> To achieve strict parity with Ghidra's binary analysis ecosystem, <code>fission-loader</code> implements advanced metadata enrichment and validation layers:
+- <strong>PE Delay-Load Imports</strong>: Classifies delayed import directories (<code>ImgDelayDescr</code>) and generates placeholder/import symbols to feed downstream call analysis.
+- <strong>Rich Header Decryption</strong>: Recovers and decrypts MSVC compiler telemetry headers, validating checksum matches against section/PE hashes to verify compiler/linker provenance.
+- <strong>ELF Version Symbols</strong>: Parses GNU/SVR4 dynamic version symbols (<code>.gnu.version</code>, <code>.gnu.version_r</code>) to map version-dependent dynamic symbols to their precise external libraries/libraries requirements.
+- <strong>ELF RELRO Write Protection</strong>: Detects and enforces Read-Only Relocations (<code>PT_GNU_RELRO</code>) block bounds and classifies section/segment write protection permissions accordingly.
+- <strong>Relocations Database</strong>: Maintains a decoupled, indexed database of all base relocation entries to support rapid lookup of relocation-backed pointers during static analysis.
+- <strong>Virtual Header Structure Mapping</strong>: Mapped structures (like ELF, PE, and TE headers) are registered as virtual structures in <code>InferredTypeInfo</code>, allowing symbol annotation and type context recovery.</p>
+<p>Language/runtime analyzers live outside format parsing. <code>loader/analyzers</code>
+contains post-load enrichment such as C++ RTTI, Go pclntab/type metadata, and
+Rust vtable scanning. These analyzers may add functions or inferred types, but
+they do not own format detection, load-spec selection, or memory mapping.</p>
+<h2 id="structuring-model">Structuring Model<a class="headerlink" href="#structuring-model" title="Permanent link">&para;</a></h2>
+<p>The active structuring path is a hard-cutover Ghidra-style CFG owner model.</p>
+<ul>
+<li><code>StructureGraph</code> is the internal collapsed overlay owner.</li>
+<li><code>CollapseDriver</code> applies deterministic collapse rules.</li>
+<li><code>RegionProof</code> and rewrite execution decide whether a region may be promoted.</li>
+<li><code>linear</code> is an explicit fallback surface, not a late semantic repair layer.</li>
+</ul>
+<p>The implementation still parses legacy engine names for compatibility, but active execution resolves to the graph/collapse path.</p>
+<p>The active rule flow is:</p>
+<ol>
+<li>Build a <code>StructureGraph</code> from CFG/basic-block facts.</li>
+<li>Produce <code>RegionProof</code> and replacement/readiness evidence for candidate regions.</li>
+<li>Collapse only proof-complete, replacement-complete, emit-ready regions.</li>
+<li>Surface final HIR from the collapsed graph.</li>
+<li>Fall back to explicit unstructured or goto-based output when legality is incomplete.</li>
+</ol>
+<p>Printer and postprocess must not reconstruct structure after this point.</p>
+<h2 id="pass-pipeline-architecture">Pass Pipeline Architecture<a class="headerlink" href="#pass-pipeline-architecture" title="Permanent link">&para;</a></h2>
+<p>Fission uses an explicit <code>Pass</code> pipeline framework (<code>nir::action_pipeline</code>) for all HIR transformation stages. Each stage is registered as a named <code>Pass</code> with a declared <code>GhidraActionConcept</code>, and is executed by a <code>PassManager</code> (<code>Pipeline</code> + <code>ActionGroup</code>) that owns fixed-point iteration and budget.</p>
+<p><strong>Structuring stage</strong> (<code>nir::structuring::passes</code>) is wired into this framework via <code>run_structuring_pipeline</code>, called from <code>render_mlil_preview_with_binary_and_context</code> after <code>normalize_hir_function</code>.</p>
+<p><strong>Enforcement rules (architectural)</strong>:</p>
+<ol>
+<li>Every new transformation must be expressed as a <code>NirPass</code> implementation — not as an inline patch inside <code>build_sese_region_body</code>, <code>CollapseDriver</code>, or any other internal loop.</li>
+<li>A <code>Pass</code> may only read/write through <code>PassCtx { func: &amp;mut HirFunction, ... }</code>. It must not capture <code>PreviewBuilder</code> internal state or address-specific constants.</li>
+<li><code>AnalysisKey</code> dependencies (Dominance, PostDom, LoopBody, ...) must be declared via <code>fn requires() -&gt; &amp;[AnalysisKey]</code> so <code>PassManager</code> can enforce sane ordering.</li>
+<li><code>PassOutcome::changed: bool</code> must be accurate — returning <code>Changed</code> when nothing changed causes unnecessary fixed-point rounds; returning <code>Unchanged</code> when something changed silently breaks convergence.</li>
+<li>Binary-specific or address-specific guard conditions inside a <code>Pass</code> body are <strong>forbidden</strong>. All admission conditions must derive from CFG properties (block count, SCC shape, dominance, etc.).</li>
+</ol>
+<p><strong>Anti-patterns (will fail code review)</strong>:
+- <code>if func.name == "fibonacci" { ... }</code> inside a Pass body
+- <code>if address == 0x140001470 { skip_rule() }</code> timer skips in Pass
+- Adding a new <code>CollapseRule</code> variant without registering a corresponding <code>Pass</code>
+- Round-about patches that bypass <code>PassCtx</code> by reaching into <code>builder::state</code></p>
+<h2 id="decompiler-quality-firewall">Decompiler Quality Firewall<a class="headerlink" href="#decompiler-quality-firewall" title="Permanent link">&para;</a></h2>
+<p>Decompiler-quality changes are accepted at the architecture boundary, not at the
+CI/dashboard boundary. A benchmark row, AI review prompt, Ghidra comparison, or
+validation-pool result may motivate a change, but none of those surfaces own the
+semantic decision.</p>
+<p>The architectural admission path is:</p>
+<ol>
+<li>Identify the canonical owner: SLEIGH/raw p-code, builder/materialize,
+   normalize, structuring, type/data recovery, or printer.</li>
+<li>State the invariant in owner-native terms: p-code semantics, ABI/ISA rule,
+   CFG/dominance/postdominance fact, def-use fact, type constraint, calling
+   convention fact, or memory-alias fact.</li>
+<li>Implement the rule inside the existing owner/pass by default. New passes,
+   helpers, metrics, or validation knobs require proof that no existing owner
+   covers the invariant.</li>
+<li>Validate with targeted invariant tests plus representative rows. Row
+   improvement is evidence, not the acceptance condition.</li>
+</ol>
+<p>The following are forbidden architectural dependencies for production semantic
+code:</p>
+<ul>
+<li>benchmark function names,</li>
+<li>concrete addresses or row ids,</li>
+<li>binary paths or corpus names,</li>
+<li>compiler tuple labels used only to identify a row,</li>
+<li>AI prompt output that is not restated as an owner-native invariant,</li>
+<li>Ghidra presentation quirks such as comma-in-condition style when a clearer
+  equivalent is possible.</li>
+</ul>
+<p>The AI overfit firewall therefore lives in the same layer as the pass pipeline:
+every AI-suggested or benchmark-motivated change must be translated into an
+owner-native invariant before implementation. Static scans and CI jobs may help
+find violations, but they are mirrors of this architecture contract, not the
+source of the contract.</p>
+<h2 id="benchmark-telemetry-contract">Benchmark / Telemetry Contract<a class="headerlink" href="#benchmark-telemetry-contract" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Canonical telemetry owner: <code>NirBuildStats</code></li>
+<li>Benchmark/report layers project canonical counters only</li>
+<li>Row regression reasons should be derived from canonical structuring/materialization families, not from downstream text matching</li>
+</ul>
+<h2 id="non-goals">Non-Goals<a class="headerlink" href="#non-goals" title="Permanent link">&para;</a></h2>
+<ul>
+<li><code>fission-cli</code> and <code>fission-tauri</code> are not semantic repair layers.</li>
+<li><code>fission-static</code> should not regain decompiler policy ownership.</li>
+<li>printer or postprocess should not recreate structure when proof is absent.</li>
+</ul>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.tabs", "navigation.sections", "navigation.expand", "navigation.top", "search.suggest", "search.highlight", "content.code.copy"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>

@@ -1,0 +1,1329 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="A cross-platform, Rust-powered reverse engineering and decompilation framework.">
+      
+      
+      
+        <link rel="canonical" href="https://sjkim1127.github.io/Fission/architecture/DECOMPILER_ACTIONS/">
+      
+      
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>Fission Decompiler Action Pipeline Contracts - Fission</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#fission-decompiler-action-pipeline-contracts" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="Fission" class="md-header__button md-logo" aria-label="Fission" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Fission
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Fission Decompiler Action Pipeline Contracts
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m14.3 16-.7-2h-3.2l-.7 2H7.8L11 7h2l3.2 9zM20 8.69V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12zm-9.15 3.96h2.3L12 9z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_2" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to system preference"  type="radio" name="__palette" id="__palette_2">
+    
+      <label class="md-header__button md-icon" title="Switch to system preference" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/sjkim1127/Fission" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    sjkim1127/Fission
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../.." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../PROJECT_MAP/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Project Map
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../CLI/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  CLI Guide
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../ARCHITECTURE/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Architecture
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../QUALITY_METRICS/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Quality Metrics
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../EVALUATION/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Evaluation
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../contributing/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Contributing
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../MALWARE_SAMPLE_POLICY/" class="md-tabs__link">
+          
+  
+  
+  Developer Policies
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="Fission" class="md-nav__button md-logo" aria-label="Fission" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Fission
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/sjkim1127/Fission" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    sjkim1127/Fission
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../PROJECT_MAP/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Project Map
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../CLI/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI Guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ARCHITECTURE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../QUALITY_METRICS/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quality Metrics
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../EVALUATION/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Evaluation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../contributing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contributing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_8" >
+        
+          
+          <label class="md-nav__link" for="__nav_8" id="__nav_8_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Developer Policies
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_8_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_8">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Developer Policies
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../MALWARE_SAMPLE_POLICY/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Malware Sample Policy
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../VERSIONING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Versioning
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../RELEASE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Release
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#stage-map" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Stage Map
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#substrate-boundary" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Substrate Boundary
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#single-normalize-entry-point" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Single Normalize Entry Point
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#normalize-action-groups-ghidra-order" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Normalize Action Groups (Ghidra order)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#dead-code-owners-ghidra-aligned" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Dead-Code Owners (Ghidra-aligned)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bitmask-owners-ghidra-aligned" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Bitmask Owners (Ghidra-aligned)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#removed-narrow-idiom-passes-no-ghidra-analog" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Removed Narrow Idiom Passes (no Ghidra analog)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#const-fold-copy-join-conditional-move-owners" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Const-Fold / Copy-Join / Conditional-Move Owners
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#admission-gates" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Admission Gates
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#structuring-contracts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Structuring Contracts
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#stage-regression-gates" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Stage Regression Gates
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#anti-patterns" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Anti-Patterns
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#validation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Validation
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="fission-decompiler-action-pipeline-contracts">Fission Decompiler Action Pipeline Contracts<a class="headerlink" href="#fission-decompiler-action-pipeline-contracts" title="Permanent link">&para;</a></h1>
+<p>This document defines the Ghidra-aligned decompiler stages, their Fission owners, and the
+forbidden cross-stage behaviors that the action pipeline framework enforces.</p>
+<p>Related code:</p>
+<ul>
+<li>Framework: <a href="../crates/fission-pcode/src/nir/action_pipeline/"><code>crates/fission-pcode/src/nir/action_pipeline/</code></a></li>
+<li>Normalize driver: <a href="../crates/fission-pcode/src/nir/normalize/pipeline/groups.rs"><code>crates/fission-pcode/src/nir/normalize/pipeline/groups.rs</code></a> (<code>run_normalize_pipeline</code>)</li>
+<li>Canonical pass sequence: <a href="../crates/fission-pcode/src/nir/normalize/pipeline/run.rs"><code>crates/fission-pcode/src/nir/normalize/pipeline/run.rs</code></a> (<code>run_canonical_normalize_passes</code>)</li>
+<li>ActionGroup registry (Ghidra order, migration target): <code>build_normalize_pipeline</code> in <code>groups.rs</code></li>
+<li>Structuring collapse: <a href="../crates/fission-pcode/src/nir/structuring/collapse_driver.rs"><code>crates/fission-pcode/src/nir/structuring/collapse_driver.rs</code></a></li>
+<li>Telemetry: <a href="../crates/fission-pcode/src/nir/types/build_stats.rs"><code>crates/fission-pcode/src/nir/types/build_stats.rs</code></a></li>
+</ul>
+<h2 id="stage-map">Stage Map<a class="headerlink" href="#stage-map" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Ghidra concept</th>
+<th>Fission owner</th>
+<th>Primary input</th>
+<th>Primary output</th>
+<th>Key responsibilities</th>
+<th>Forbidden</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>FuncdataBuild</code></td>
+<td><code>nir::builder</code></td>
+<td>Raw p-code</td>
+<td>HIR skeleton, CFG layout</td>
+<td>Block graph init, basic lifting</td>
+<td>SSA heritage, type inference, structuring</td>
+</tr>
+<tr>
+<td><code>HeritageValueRecovery</code></td>
+<td><code>nir::builder::materialize</code> + heritage group</td>
+<td>HIR skeleton</td>
+<td>near-SSA HIR</td>
+<td>Stack/param/local recovery, copy-prop, join coalescing, iblock phi elimination</td>
+<td>Control-flow structuring, type inference beyond slot naming</td>
+</tr>
+<tr>
+<td><code>Normalize</code></td>
+<td><code>nir::normalize::pipeline</code></td>
+<td>near-SSA HIR</td>
+<td>normalized HIR</td>
+<td>Dead code, CSE, SCCP, deindirect, memory recovery</td>
+<td>Final prototype fixate, pseudocode rendering</td>
+</tr>
+<tr>
+<td><code>PrototypeTypes</code></td>
+<td><code>nir::normalize::types</code></td>
+<td>normalized HIR</td>
+<td>typed HIR</td>
+<td>Type inference, callsite propagation, merge-type fixpoint</td>
+<td>CFG restructuring</td>
+</tr>
+<tr>
+<td><code>BlockGraphStructuring</code></td>
+<td><code>nir::structuring</code></td>
+<td>typed HIR + CFG facts</td>
+<td>structured HIR</td>
+<td>CollapseDriver rules, SESE regions, loop/if/switch recovery</td>
+<td>Expression semantic repair, printing</td>
+</tr>
+<tr>
+<td><code>PrintC</code></td>
+<td><code>nir::printer</code></td>
+<td>structured typed HIR</td>
+<td>pseudocode string</td>
+<td>Rendering only</td>
+<td>Any semantic recovery</td>
+</tr>
+</tbody>
+</table>
+<h2 id="substrate-boundary">Substrate Boundary<a class="headerlink" href="#substrate-boundary" title="Permanent link">&para;</a></h2>
+<p><code>fission-pcode</code> is physically one crate today, but quality work must follow the
+same dependency direction that a future split would require.</p>
+<table>
+<thead>
+<tr>
+<th>Layer</th>
+<th>May depend on</th>
+<th>Must not depend on</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Substrate (<code>types</code>, <code>cfg</code>, <code>support</code>, <code>action_pipeline</code>, telemetry, shared analysis facts)</td>
+<td>P-code primitives and other substrate modules</td>
+<td>builder, normalize, structuring, render policy</td>
+</tr>
+<tr>
+<td>Builder/materialize</td>
+<td>substrate, cspec/calling-convention facts</td>
+<td>normalize policy, structuring promotion policy, render/printer</td>
+</tr>
+<tr>
+<td>Normalize/type recovery</td>
+<td>substrate, action pipeline, reusable analysis facts</td>
+<td>builder internals, structuring promotion policy, render/printer</td>
+</tr>
+<tr>
+<td>Structuring</td>
+<td>substrate CFG facts, typed HIR</td>
+<td>builder internals, normalize semantic repair, render/printer</td>
+</tr>
+<tr>
+<td>Render/printer</td>
+<td>structured HIR and formatting options</td>
+<td>builder, normalize, structuring recovery, semantic analysis</td>
+</tr>
+</tbody>
+</table>
+<p>Existing cross-layer references are migration debt. Do not use them as precedent
+for new fixes. Move reusable facts downward into substrate modules before adding
+another owner-to-owner dependency.</p>
+<h2 id="single-normalize-entry-point">Single Normalize Entry Point<a class="headerlink" href="#single-normalize-entry-point" title="Permanent link">&para;</a></h2>
+<p><code>normalize_hir_function</code> always dispatches through <code>run_normalize_pipeline</code>, which runs the
+Ghidra-ordered ActionGroup registry via <code>build_normalize_pipeline().run()</code>.</p>
+<p>Each ActionGroup maps 1:1 to a stage function in
+<a href="../crates/fission-pcode/src/nir/normalize/pipeline/stages.rs"><code>stages.rs</code></a>. Stage functions
+contain the canonical pass sequence (conditional cleanups, admission gates, and fixpoints).
+<code>run_canonical_normalize_passes</code> is a thin sequential wrapper over the same stage functions for
+callers that bypass the ActionGroup driver.</p>
+<h2 id="normalize-action-groups-ghidra-order">Normalize Action Groups (Ghidra order)<a class="headerlink" href="#normalize-action-groups-ghidra-order" title="Permanent link">&para;</a></h2>
+<p>The ActionGroup registry in <code>groups.rs</code> declares these groups in order:</p>
+<ol>
+<li><strong>proto_recovery</strong> — early cleanup, flag recovery, prologue/epilogue</li>
+<li><strong>deadcode_dynamic</strong> — constants, SCCP, CSE, copy-prop, join coalescing, branch hoists</li>
+<li><strong>type_early</strong> — type signature fixpoint (bounded repeat)</li>
+<li><strong>stackstall</strong> — nzmask, subvar, cast/load/deindirect rule pool</li>
+<li><strong>heritage_value_recovery</strong> — memory slot surfacing, memory heritage, SSA cleanup</li>
+<li><strong>memory_recovery</strong> — pointer arithmetic, aggregates, float idioms (gated for large functions)</li>
+<li><strong>merge</strong> — merge-type fixpoint (bounded repeat)</li>
+<li><strong>block_structure_1</strong> — loop IV, break/continue, LICM</li>
+<li><strong>cleanup</strong> — jump resolver, rule pool, final type inference</li>
+</ol>
+<p>Each group records its <code>GhidraActionConcept</code> via <code>record_ghidra_action_stage</code>.</p>
+<h2 id="dead-code-owners-ghidra-aligned">Dead-Code Owners (Ghidra-aligned)<a class="headerlink" href="#dead-code-owners-ghidra-aligned" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Ghidra analog</th>
+<th>Fission owner</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>ActionDeadCode</code> (SSA temps)</td>
+<td><code>normalize/analysis/defuse.rs</code> — <code>defuse_dead_assignment_pass</code></td>
+<td>Single-pass SSA dead temp removal</td>
+</tr>
+<tr>
+<td><code>ActionDeadCode</code> (fixpoint after SCCP)</td>
+<td><code>defuse_dead_assignment_fixpoint_pass</code></td>
+<td>Absorbs former <code>apply_wide_dead_assignment_pass</code></td>
+</tr>
+<tr>
+<td><code>ActionDeadCode</code> (consumed bits)</td>
+<td><code>normalize/global_opt/bit_consume.rs</code></td>
+<td>Bit-level consumed-mask dead code</td>
+</tr>
+<tr>
+<td>Memory-SSA dead stores</td>
+<td><code>normalize/global_opt/dead_store.rs</code></td>
+<td>Stack-slot store removal</td>
+</tr>
+</tbody>
+</table>
+<p>Do not reintroduce parallel dead-code layers (<code>prune_unused_*</code> as standalone pass owners,
+duplicate wide-defuse wrappers, or redundant temp-elimination passes outside defuse/cleanup).</p>
+<h2 id="bitmask-owners-ghidra-aligned">Bitmask Owners (Ghidra-aligned)<a class="headerlink" href="#bitmask-owners-ghidra-aligned" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Ghidra analog</th>
+<th>Fission owner</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>ActionNonzeroMask</code></td>
+<td><code>normalize/global_opt/nz_mask.rs</code></td>
+<td>Global non-zero mask propagation</td>
+</tr>
+<tr>
+<td><code>subflow.cc</code> (bit-width prune)</td>
+<td><code>normalize/idioms/subflow.rs</code></td>
+<td>Early + final subflow pruning only</td>
+</tr>
+<tr>
+<td>Consumed-bit dead code</td>
+<td><code>normalize/global_opt/bit_consume.rs</code></td>
+<td>Separate from nz_mask/subflow</td>
+</tr>
+</tbody>
+</table>
+<h2 id="removed-narrow-idiom-passes-no-ghidra-analog">Removed Narrow Idiom Passes (no Ghidra analog)<a class="headerlink" href="#removed-narrow-idiom-passes-no-ghidra-analog" title="Permanent link">&para;</a></h2>
+<p>These passes and their dedicated tests were deleted; do not reintroduce without a Ghidra
+Rule/Action reference:</p>
+<ul>
+<li><code>security_cookie</code>, <code>xor_swap</code>, <code>string_copy</code>, <code>recurrence</code>, <code>call_artifact</code>, <code>bitstream</code></li>
+<li><code>likely_trash</code> (global_opt)</li>
+</ul>
+<p>Retained idiom owners: <code>prologue</code>, <code>subflow</code>, <code>split_flow</code>, <code>branch_hoist</code>.</p>
+<h2 id="const-fold-copy-join-conditional-move-owners">Const-Fold / Copy-Join / Conditional-Move Owners<a class="headerlink" href="#const-fold-copy-join-conditional-move-owners" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Concern</th>
+<th>Canonical owner</th>
+<th>Secondary</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Global constant propagation</td>
+<td><code>global_opt/sccp.rs</code> (<code>apply_sccp_pass</code>)</td>
+<td>—</td>
+</tr>
+<tr>
+<td>Local stmt-tree fold</td>
+<td><code>analysis/defuse.rs</code> (<code>constant_folding_pass</code>)</td>
+<td><code>rule_normalizer</code> <code>RuleFoldConstants</code></td>
+</tr>
+<tr>
+<td>Copy propagation</td>
+<td><code>recovery/copy_prop.rs</code></td>
+<td>absorbs inline-single-use via cleanup loop</td>
+</tr>
+<tr>
+<td>Join coalescing</td>
+<td><code>recovery/join_coalesce.rs</code></td>
+<td><code>gvn_join_hoist</code> at hoist boundary</td>
+</tr>
+<tr>
+<td>Conditional move</td>
+<td><code>arith/conditional_move.rs</code> (<code>apply_conditional_move_pass</code>)</td>
+<td><code>conditional_select_pass</code> in cleanup loop</td>
+</tr>
+</tbody>
+</table>
+<h2 id="admission-gates">Admission Gates<a class="headerlink" href="#admission-gates" title="Permanent link">&para;</a></h2>
+<p>Centralized in <a href="../crates/fission-pcode/src/nir/action_pipeline/gates.rs"><code>action_pipeline/gates.rs</code></a>:</p>
+<table>
+<thead>
+<tr>
+<th>Gate</th>
+<th>Threshold</th>
+<th>Used by</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Large function</td>
+<td>&gt;220 stmts or &gt;160 locals</td>
+<td><code>memory_recovery</code>, expensive memory passes</td>
+</tr>
+<tr>
+<td>Early cleanup budget</td>
+<td>&gt;2000 stmts or &gt;300 blocks</td>
+<td>jump resolver admission</td>
+</tr>
+<tr>
+<td>Jump resolver candidates</td>
+<td>≤16</td>
+<td>VSA jump resolver</td>
+</tr>
+<tr>
+<td>Type signature FP</td>
+<td>max 6 rounds</td>
+<td><code>type_early</code>, merge loop inner</td>
+</tr>
+<tr>
+<td>Merge-type loop</td>
+<td>max 4 rounds</td>
+<td><code>merge</code> group</td>
+</tr>
+<tr>
+<td>Rule pool</td>
+<td>max 15 rounds</td>
+<td><code>rule_normalization</code> ActionPool</td>
+</tr>
+</tbody>
+</table>
+<h2 id="structuring-contracts">Structuring Contracts<a class="headerlink" href="#structuring-contracts" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>CollapseDriver</strong> (<code>structuring/collapse_driver.rs</code>) owns Ghidra-style collapse rule dispatch.</li>
+<li><strong>RegionProof</strong> requires explicit follow/postdom anchor when available (<code>structured_with_follow</code>).</li>
+<li><strong>CFG fallthrough</strong> uses dom-tree edge classification (<code>cfg_analysis/follow.rs</code>), not layout index arithmetic.</li>
+</ul>
+<h2 id="stage-regression-gates">Stage Regression Gates<a class="headerlink" href="#stage-regression-gates" title="Permanent link">&para;</a></h2>
+<p><code>NirBuildStats</code> counters (<code>ghidra_action_*_count</code>) track which stages ran. The framework provides
+<code>stage_boundary_violation(expected, observed)</code> to detect passes registered under the wrong concept.</p>
+<p>Contract tests live in:</p>
+<ul>
+<li><code>nir/normalize/pipeline/heritage_contracts.rs</code></li>
+<li><code>nir/action_pipeline/concept.rs</code> (sequence stability)</li>
+<li><code>nir/structuring/collapse_driver.rs</code> (rule order)</li>
+</ul>
+<h2 id="anti-patterns">Anti-Patterns<a class="headerlink" href="#anti-patterns" title="Permanent link">&para;</a></h2>
+<ol>
+<li>Do not add normalize passes that recover stack/param slots — use <strong>heritage_value_recovery</strong>.</li>
+<li>Do not add structuring reducers that patch expression semantics — fix at normalize owner.</li>
+<li>Do not reintroduce deleted narrow idiom passes without a Ghidra Rule/Action reference.</li>
+<li>Do not duplicate dead-code or bitmask transform layers across defuse, cleanup, and global_opt.</li>
+<li>Do not add sample-specific address/name guards — use CFG/dominance/def-use invariants.</li>
+<li>Do not add owner-to-owner dependencies when a shared analysis fact can be moved into substrate.</li>
+</ol>
+<h2 id="validation">Validation<a class="headerlink" href="#validation" title="Permanent link">&para;</a></h2>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>cargo<span class="w"> </span>nextest<span class="w"> </span>run<span class="w"> </span>-p<span class="w"> </span>fission-pcode
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>cargo<span class="w"> </span>check<span class="w"> </span>-p<span class="w"> </span>fission-pcode<span class="w"> </span>-p<span class="w"> </span>fission-decompiler<span class="w"> </span>-p<span class="w"> </span>fission-automation
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>python3<span class="w"> </span>scripts/audit/nir_boundary_scan.py<span class="w"> </span>--root<span class="w"> </span>.<span class="w"> </span>--format<span class="w"> </span>markdown<span class="w"> </span>--output<span class="w"> </span>docs/audits/YYYY-MM-DD-nir-boundary-scan.md
+</span></code></pre></div>
+<p>For semantic changes, rerun source-semantic benchmark rows with stale caches disabled.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.tabs", "navigation.sections", "navigation.expand", "navigation.top", "search.suggest", "search.highlight", "content.code.copy"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>
