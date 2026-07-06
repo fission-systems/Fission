@@ -12,6 +12,8 @@ pub enum AppAction {
     InsertChar(char),
     /// Backspace pressed.
     DeleteBack,
+    /// Delete pressed.
+    Delete,
     /// Enter pressed — submit the current input.
     Submit,
     /// Arrow-up / scroll up with mouse (col, row) coordinates.
@@ -38,6 +40,8 @@ pub enum AppAction {
     ToggleViewMode,
     /// Toggle focused panel within Code Explorer (Tab when in code explorer).
     TogglePanel,
+    /// Cycle UI pane focus (Tab/ShiftTab outside of explorer)
+    CycleFocus,
     /// Escape pressed (to close menus/overlays).
     Escape,
     /// Move cursor left
@@ -93,8 +97,11 @@ fn map_key(code: KeyCode, modifiers: KeyModifiers) -> AppAction {
         KeyCode::Char('p') if modifiers.contains(KeyModifiers::CONTROL) => {
             AppAction::ToggleProviderMenu
         }
-        // Toggle Model Menu
+        // Toggle Model Menu (Ctrl+O or Ctrl+M)
         KeyCode::Char('o') if modifiers.contains(KeyModifiers::CONTROL) => {
+            AppAction::ToggleModelMenu
+        }
+        KeyCode::Char('m') if modifiers.contains(KeyModifiers::CONTROL) => {
             AppAction::ToggleModelMenu
         }
         // Toggle History Menu
@@ -108,8 +115,8 @@ fn map_key(code: KeyCode, modifiers: KeyModifiers) -> AppAction {
         KeyCode::BackTab if modifiers.contains(KeyModifiers::CONTROL) => AppAction::ToggleViewMode,
         // Toggle Layout Split direction in code explorer
         KeyCode::F(3) => AppAction::ToggleSplitDirection,
-        // Tab — context-sensitive (toggle panel in explorer, toggle agent mode in chat)
-        KeyCode::Tab => AppAction::ToggleMode,
+        // Tab — context-sensitive
+        KeyCode::Tab | KeyCode::BackTab => AppAction::CycleFocus,
         // Help
         KeyCode::Char('?') | KeyCode::F(1) => AppAction::ToggleHelp,
         // Submit or Newline
@@ -117,6 +124,7 @@ fn map_key(code: KeyCode, modifiers: KeyModifiers) -> AppAction {
         KeyCode::Enter => AppAction::Submit,
         // Delete
         KeyCode::Backspace => AppAction::DeleteBack,
+        KeyCode::Delete => AppAction::Delete,
         // Scroll / Cursor Navigation
         KeyCode::PageUp => AppAction::ScrollUp(0, 0),
         KeyCode::PageDown => AppAction::ScrollDown(0, 0),

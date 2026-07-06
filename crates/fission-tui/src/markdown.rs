@@ -15,6 +15,31 @@ use ratatui::{
     style::{Color, Modifier, Style},
     text::{Line, Span},
 };
+use std::sync::LazyLock;
+use syntect::easy::HighlightLines;
+use syntect::highlighting::{Style as SyntectStyle, ThemeSet};
+use syntect::parsing::SyntaxSet;
+
+static SYNTAX_SET: LazyLock<SyntaxSet> = LazyLock::new(|| SyntaxSet::load_defaults_newlines());
+static THEME_SET: LazyLock<ThemeSet> = LazyLock::new(|| ThemeSet::load_defaults());
+
+fn translate_color(c: syntect::highlighting::Color) -> Color {
+    Color::Rgb(c.r, c.g, c.b)
+}
+
+fn translate_style(style: SyntectStyle) -> Style {
+    let mut s = Style::default().fg(translate_color(style.foreground));
+    if style.font_style.contains(syntect::highlighting::FontStyle::BOLD) {
+        s = s.add_modifier(Modifier::BOLD);
+    }
+    if style.font_style.contains(syntect::highlighting::FontStyle::ITALIC) {
+        s = s.add_modifier(Modifier::ITALIC);
+    }
+    if style.font_style.contains(syntect::highlighting::FontStyle::UNDERLINE) {
+        s = s.add_modifier(Modifier::UNDERLINED);
+    }
+    s
+}
 
 /// Convert `markdown` text into a `Vec<Line>` ready to render with ratatui.
 ///
@@ -219,8 +244,8 @@ pub fn render_markdown(input: &str, _width: usize) -> Vec<Line<'static>> {
 
                 TagEnd::CodeBlock => {
                     in_code_block = false;
-                    // Render code block with a dim header and monospace feel
-                    if let Some(lang) = code_lang.take() {
+                    let lang = code_lang.take().unwrap_or_default();
+                    if !lang.is_empty() {
                         lines.push(Line::from(Span::styled(
                             format!(" {} ", lang),
                             Style::default()
@@ -228,11 +253,23 @@ pub fn render_markdown(input: &str, _width: usize) -> Vec<Line<'static>> {
                                 .add_modifier(Modifier::ITALIC),
                         )));
                     }
-                    for code_line in code_buf.lines() {
-                        lines.push(Line::from(vec![
-                            Span::styled("  ", Style::default()),
-                            Span::styled(code_line.to_string(), Style::default().fg(Color::Green)),
-                        ]));
+
+                    let syntax = SYNTAX_SET
+                        .find_syntax_by_token(&lang)
+                        .unwrap_or_else(|| SYNTAX_SET.find_syntax_plain_text());
+                    let theme = &THEME_SET.themes["base16-ocean.dark"];
+                    let mut h = HighlightLines::new(syntax, theme);
+
+                    for code_line in syntect::util::LinesWithEndings::from(&code_buf) {
+                        let ranges = h.highlight_line(code_line, &SYNTAX_SET).unwrap_or_default();
+                        let mut spans = vec![Span::styled("  ", Style::default())];
+                        for (style, text) in ranges {
+                            let trimmed = text.trim_end_matches('\n').trim_end_matches('\r');
+                            if !trimmed.is_empty() {
+                                spans.push(Span::styled(trimmed.to_string(), translate_style(style)));
+                            }
+                        }
+                        lines.push(Line::from(spans));
                     }
                     code_buf.clear();
                     needs_blank = true;

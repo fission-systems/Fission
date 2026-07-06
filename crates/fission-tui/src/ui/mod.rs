@@ -48,6 +48,14 @@ fn render_chat_layout(frame: &mut Frame, app: &App, area: Rect) {
     let input_lines = app.input.matches('\n').count() as u16 + 1;
     let input_height = (input_lines + 2).min(10); // max 10 lines tall
 
+    let h_split = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Length(25), Constraint::Min(0)])
+        .split(area);
+        
+    let sidebar_area = h_split[0];
+    let main_area = h_split[1];
+
     // ── Layout: chat (fill) | status (1) | input (dynamic) ───────────────────
     let outer = Layout::default()
         .direction(Direction::Vertical)
@@ -56,8 +64,9 @@ fn render_chat_layout(frame: &mut Frame, app: &App, area: Rect) {
             Constraint::Length(1),            // Status bar / separator
             Constraint::Length(input_height), // Dynamic Input
         ])
-        .split(area);
+        .split(main_area);
 
+    render_sidebar(frame, app, sidebar_area);
     render_chat(frame, app, outer[0]);
     render_status_bar(frame, app, outer[1]);
     render_input(frame, app, outer[2]);
@@ -77,9 +86,52 @@ fn render_chat_layout(frame: &mut Frame, app: &App, area: Rect) {
         render_slash_popup(frame, app, outer[2]);
     }
 
-    if app.session_history.is_some() {
+    if app.rename_session_input.is_some() {
+        render_rename_popup(frame, app, area);
+    } else if app.delete_session_confirm.is_some() {
+        render_delete_popup(frame, app, area);
+    } else if app.session_history.is_some() {
         render_session_history(frame, app, area);
     }
+}
+
+// ── Sidebar ───────────────────────────────────────────────────────────────────
+
+fn render_sidebar(frame: &mut Frame, app: &App, area: Rect) {
+    let focused = app.active_pane == crate::app::ActivePane::Sidebar;
+    let border_color = if focused { C_ACCENT } else { C_DIM };
+
+    let block = Block::default()
+        .title(" Sessions ")
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(border_color));
+
+    let items: Vec<Line> = if app.session_rows.is_empty() {
+        vec![Line::from(Span::styled(" No sessions", Style::default().fg(C_DIM)))]
+    } else {
+        app.session_rows
+            .iter()
+            .enumerate()
+            .map(|(i, row)| {
+                let is_current = app.current_session_id == Some(row.id);
+                let is_selected = i == app.sidebar_selected_idx && app.active_pane == crate::app::ActivePane::Sidebar;
+                
+                let prefix = if is_selected { "> " } else if is_current { "* " } else { "  " };
+                let style = if is_selected {
+                    Style::default().fg(Color::Black).bg(C_ACCENT)
+                } else if is_current {
+                    Style::default().fg(C_WHITE).add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default().fg(C_DIM)
+                };
+                
+                Line::from(Span::styled(format!("{}{}", prefix, row.title), style))
+            })
+            .collect()
+    };
+
+    let p = Paragraph::new(items).block(block);
+    frame.render_widget(p, area);
 }
 
 // ── Code Explorer (Disasm + Decomp dual-pane) ─────────────────────────────
@@ -604,8 +656,10 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
 fn render_input(frame: &mut Frame, app: &App, area: Rect) {
     let (prompt_hint, border_color) = if app.streaming {
         (" waiting for response… ", C_DIM)
-    } else {
+    } else if app.active_pane == crate::app::ActivePane::ChatInput {
         ("", C_ACCENT)
+    } else {
+        ("", C_DIM)
     };
 
     let block = Block::default()
@@ -803,25 +857,62 @@ fn render_session_history(frame: &mut Frame, app: &App, area: Rect) {
                 .options
                 .iter()
                 .enumerate()
-                .map(|(i, (_path, name))| {
+                .take(30)
+                .map(|(i, (path, title))| {
                     let (prefix, style) = if i == state.selected_idx {
-                        (
-                            "> ",
-                            Style::default()
-                                .fg(Color::Black)
-                                .bg(C_ACCENT)
-                                .add_modifier(Modifier::BOLD),
-                        )
+                        ("> ", Style::default().fg(Color::Black).bg(C_ACCENT))
                     } else {
                         ("  ", Style::default().fg(C_WHITE).bg(Color::Black))
                     };
-                    Line::from(Span::styled(format!("{prefix}{name}"), style))
+                    Line::from(Span::styled(format!("{prefix}{title}"), style))
                 })
                 .collect()
         };
 
-        let list = Paragraph::new(items).block(block);
-        frame.render_widget(list, popup_area);
+        let paragraph = Paragraph::new(items).block(block);
+        frame.render_widget(paragraph, popup_area);
+    }
+}
+
+// ── Session Rename & Delete Popups ───────────────────────────────────────────
+
+fn render_rename_popup(frame: &mut Frame, app: &App, area: Rect) {
+    if let Some(ref text) = app.rename_session_input {
+        let popup_area = centered_rect(40, 5, area);
+        frame.render_widget(Clear, popup_area);
+
+        let block = Block::default()
+            .title(" Rename Session ")
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(C_ACCENT))
+            .style(Style::default().bg(Color::Black));
+
+        let input_text = format!("{}_", text);
+        let para = Paragraph::new(input_text)
+            .block(block)
+            .style(Style::default().fg(C_WHITE));
+
+        frame.render_widget(para, popup_area);
+    }
+}
+
+fn render_delete_popup(frame: &mut Frame, app: &App, area: Rect) {
+    if let Some(_) = app.delete_session_confirm {
+        let popup_area = centered_rect(40, 5, area);
+        frame.render_widget(Clear, popup_area);
+
+        let block = Block::default()
+            .title(" Delete Session? ")
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::Red))
+            .style(Style::default().bg(Color::Black));
+
+        let para = Paragraph::new("Are you sure? (Y/N)")
+            .block(block)
+            .alignment(ratatui::layout::Alignment::Center)
+            .style(Style::default().fg(C_WHITE));
+
+        frame.render_widget(para, popup_area);
     }
 }
 

@@ -32,6 +32,8 @@ fission-loader = { path = "../fission-loader" }
 fission-static = { path = "../fission-static" }
 fission-decompiler = { path = "../fission-decompiler" }
 fission-sleigh = { path = "../fission-sleigh" }
+
+fission-emulator = { path = "../fission-emulator" }
 fission-dynamic = { path = "../fission-dynamic", optional = true, features = ["interactive_runtime"] }
 fission-ai = { path = "../fission-ai" }
 fission-tui = { path = "../fission-tui" }

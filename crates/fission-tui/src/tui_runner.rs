@@ -205,12 +205,14 @@ fn run_event_loop(
                 app.toggle_view_mode();
             }
             AppAction::ToggleMode => {
-                // In code explorer, Tab switches panel focus.
+                app.toggle_mode();
+                pipeline.set_agent_mode(app.agent_mode);
+            }
+            AppAction::CycleFocus => {
                 if app.view_mode == crate::app::ViewMode::CodeExplorer {
                     app.toggle_panel();
                 } else {
-                    app.toggle_mode();
-                    pipeline.set_agent_mode(app.agent_mode);
+                    app.cycle_focus();
                 }
             }
             AppAction::ToggleHelp => app.show_help = !app.show_help,
@@ -249,6 +251,8 @@ fn run_event_loop(
                 app.close_session_history();
                 app.cancel_mention();
                 app.cancel_slash_command();
+                app.rename_session_input = None;
+                app.delete_session_confirm = None;
                 if app.view_mode == crate::app::ViewMode::CodeExplorer {
                     app.cancel_explorer_search();
                 }
@@ -259,13 +263,36 @@ fn run_event_loop(
                     && !app.show_model_menu
                     && app.session_history.is_none() =>
             {
-                if app.view_mode == crate::app::ViewMode::CodeExplorer {
+                if let Some(ref mut text) = app.rename_session_input {
+                    text.push(c);
+                } else if app.delete_session_confirm.is_some() {
+                    if c == 'y' || c == 'Y' {
+                        let id = app.delete_session_confirm.take().unwrap();
+                        if let Some(db) = &app.db {
+                            let _ = db.delete_session(id);
+                            if let Ok(rows) = db.get_sessions() {
+                                app.session_rows = rows;
+                                if app.sidebar_selected_idx >= app.session_rows.len() && !app.session_rows.is_empty() {
+                                    app.sidebar_selected_idx = app.session_rows.len() - 1;
+                                }
+                            }
+                        }
+                    } else if c == 'n' || c == 'N' {
+                        app.delete_session_confirm = None;
+                    }
+                } else if app.active_pane == crate::app::ActivePane::Sidebar {
+                    if c == 'r' || c == 'R' {
+                        app.start_rename_session();
+                    } else if c == 'd' || c == 'D' {
+                        app.start_delete_session();
+                    }
+                } else if app.view_mode == crate::app::ViewMode::CodeExplorer {
                     if app.explorer_search_mode {
                         app.explorer_search_insert_char(c);
                     } else if c == '/' {
                         app.start_explorer_search();
                     }
-                } else {
+                } else if app.active_pane == crate::app::ActivePane::ChatInput {
                     app.insert_char(c);
                     if c == '@' {
                         app.start_mention();
@@ -292,17 +319,24 @@ fn run_event_loop(
                     && !app.show_model_menu
                     && app.session_history.is_none() =>
             {
-                if app.view_mode == crate::app::ViewMode::CodeExplorer {
+                if let Some(ref mut text) = app.rename_session_input {
+                    text.pop();
+                } else if app.view_mode == crate::app::ViewMode::CodeExplorer {
                     if app.explorer_search_mode {
                         app.explorer_search_delete_char_before_cursor();
                     }
-                } else {
+                } else if app.active_pane == crate::app::ActivePane::ChatInput {
                     app.delete_char_before_cursor();
                     if app.mention_state.is_some() {
                         app.update_mention_query();
                     } else if app.slash_state.is_some() {
                         app.update_slash_query();
                     }
+                }
+            }
+            AppAction::Delete => {
+                if app.active_pane == crate::app::ActivePane::Sidebar && app.rename_session_input.is_none() && app.delete_session_confirm.is_none() {
+                    app.start_delete_session();
                 }
             }
             AppAction::ScrollUp(x, y) => {
@@ -326,8 +360,8 @@ fn run_event_loop(
                     app.mention_up();
                 } else if app.slash_state.is_some() {
                     app.slash_up();
-                } else if app.session_history.is_some() {
-                    app.session_history_up();
+                } else if app.active_pane == crate::app::ActivePane::Sidebar {
+                    app.sidebar_up();
                 } else if app.show_provider_menu {
                     app.provider_menu_up();
                 } else if app.show_model_menu {
@@ -343,8 +377,8 @@ fn run_event_loop(
                     app.mention_down();
                 } else if app.slash_state.is_some() {
                     app.slash_down();
-                } else if app.session_history.is_some() {
-                    app.session_history_down();
+                } else if app.active_pane == crate::app::ActivePane::Sidebar {
+                    app.sidebar_down();
                 } else if app.show_provider_menu {
                     app.provider_menu_down();
                 } else if app.show_model_menu {
@@ -456,55 +490,77 @@ fn run_event_loop(
                     app.show_model_menu = false;
                 }
             }
-            AppAction::Submit if app.session_history.is_some() => {
-                if let Some(path) = app.get_selected_session() {
-                    // Load the JSON file into the pipeline
-                    if let Ok(json) = std::fs::read_to_string(&path) {
-                        if let Ok(messages) =
-                            serde_json::from_str::<Vec<fission_ai::session::Message>>(&json)
-                        {
+            AppAction::Submit if app.rename_session_input.is_some() => {
+                if let Some(db) = &app.db {
+                    let title = app.rename_session_input.take().unwrap();
+                    let session_id = app.session_rows[app.sidebar_selected_idx].id;
+                    let _ = db.update_session_title(session_id, &title);
+                    if let Ok(rows) = db.get_sessions() {
+                        app.session_rows = rows;
+                    }
+                }
+            }
+            AppAction::Submit if app.delete_session_confirm.is_some() => {
+                if let Some(db) = &app.db {
+                    let session_id = app.delete_session_confirm.take().unwrap();
+                    let _ = db.delete_session(session_id);
+                    if let Ok(rows) = db.get_sessions() {
+                        app.session_rows = rows;
+                        if app.sidebar_selected_idx >= app.session_rows.len() && !app.session_rows.is_empty() {
+                            app.sidebar_selected_idx = app.session_rows.len() - 1;
+                        }
+                    }
+                }
+            }
+            AppAction::Submit if app.active_pane == crate::app::ActivePane::Sidebar => {
+                if let Some(db) = &app.db {
+                    if app.sidebar_selected_idx < app.session_rows.len() {
+                        let session_id = app.session_rows[app.sidebar_selected_idx].id;
+                        app.current_session_id = Some(session_id);
+                        
+                        if let Ok(messages) = db.get_messages(session_id) {
                             // Update pipeline
                             {
                                 let mut session = pipeline.session.lock().unwrap();
-                                session.messages = messages.clone();
+                                session.messages.clear();
+                                for msg in &messages {
+                                    let role = match msg.role.as_str() {
+                                        "system" => fission_ai::session::Role::System,
+                                        "user" => fission_ai::session::Role::User,
+                                        "assistant" => fission_ai::session::Role::Assistant,
+                                        "tool" => fission_ai::session::Role::Tool,
+                                        _ => fission_ai::session::Role::System,
+                                    };
+                                    session.messages.push(fission_ai::session::Message {
+                                        role,
+                                        content: Some(msg.content.clone()),
+                                        name: None,
+                                        tool_calls: None,
+                                        tool_call_id: None,
+                                    });
+                                }
                             }
                             // Rebuild UI entries
                             app.entries.clear();
                             for msg in messages {
-                                match msg.role {
-                                    fission_ai::session::Role::User => {
-                                        if let Some(c) = msg.content {
-                                            app.push_user(c);
-                                        }
+                                let content = msg.content;
+                                match msg.role.as_str() {
+                                    "user" => {
+                                        app.push_user(content);
                                     }
-                                    fission_ai::session::Role::Assistant => {
-                                        if let Some(c) = msg.content {
-                                            app.entries.push(crate::app::ChatEntry {
-                                                role_label: "Fission AI".to_string(),
-                                                content: c,
-                                                is_streaming: false,
-                                            });
-                                        } else if let Some(tc) = msg.tool_calls {
-                                            for call in tc {
-                                                app.entries.push(crate::app::ChatEntry {
-                                                    role_label: "Fission AI (Tool)".to_string(),
-                                                    content: format!(
-                                                        "Called tool: {} with {}",
-                                                        call.function.name, call.function.arguments
-                                                    ),
-                                                    is_streaming: false,
-                                                });
-                                            }
-                                        }
+                                    "assistant" => {
+                                        app.entries.push(crate::app::ChatEntry {
+                                            role_label: "Fission AI".to_string(),
+                                            content,
+                                            is_streaming: false,
+                                        });
                                     }
-                                    fission_ai::session::Role::Tool => {
-                                        if let Some(c) = msg.content {
-                                            app.entries.push(crate::app::ChatEntry {
-                                                role_label: "Tool Response".to_string(),
-                                                content: c,
-                                                is_streaming: false,
-                                            });
-                                        }
+                                    "tool" => {
+                                        app.entries.push(crate::app::ChatEntry {
+                                            role_label: "Tool Response".to_string(),
+                                            content,
+                                            is_streaming: false,
+                                        });
                                     }
                                     _ => {}
                                 }
@@ -512,7 +568,6 @@ fn run_event_loop(
                             app.scroll_to_bottom();
                         }
                     }
-                    app.close_session_history();
                 }
             }
             AppAction::Submit

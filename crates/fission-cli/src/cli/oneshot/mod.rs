@@ -136,6 +136,9 @@ fn run() -> Result<()> {
                 .context("failed to create tokio runtime for AI subcommand")?;
             rt.block_on(crate::cli::ai::run_ai(inv))
         }
+        ParsedInvocation::Sandbox(args) => {
+            run_sandbox(args)
+        }
         ParsedInvocation::OneShot(parsed) => run_oneshot_inner(parsed),
     }
 }
@@ -165,6 +168,21 @@ fn run_oneshot_inner(parsed: ParsedOneShotArgs) -> Result<()> {
         let span_trace = fission_core::logging::capture_span_trace();
         return Err(error.context(format!("span trace:\n{span_trace}")));
     }
+    Ok(())
+}
+
+fn run_sandbox(args: crate::cli::args::SandboxArgs) -> Result<()> {
+    tracing::info!("Starting sandbox for {}", args.binary.display());
+    
+    // Stub implementation just to verify the CLI integration
+    let binary_data = fs::read(&args.binary)
+        .with_context(|| format!("failed to read binary at {}", args.binary.display()))?;
+        
+    let mut state = fission_emulator::MachineState::new();
+    fission_emulator::os::windows::loader::load_pe(&mut state, &binary_data)?;
+    fission_emulator::os::windows::peb_teb::initialize_peb_teb(&mut state, true)?;
+    
+    tracing::info!("Sandbox initialized successfully (stub execution complete)");
     Ok(())
 }
 

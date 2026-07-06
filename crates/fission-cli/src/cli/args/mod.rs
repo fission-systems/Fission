@@ -46,6 +46,8 @@ pub enum ParsedInvocation {
         verbose: bool,
     },
     Debug(DebugCommand),
+    /// Sandbox (emulator) execution
+    Sandbox(SandboxArgs),
     /// AI chat / authentication subcommand.
     Ai(AiInvocation),
 }
@@ -146,8 +148,19 @@ enum CliCommand {
     Script(ScriptArgs),
     /// Live process debugger (Windows only)
     Debug(DebugArgs),
+    /// Sandbox (emulator) execution
+    Sandbox(SandboxArgs),
     /// AI chat session and authentication (Codex OAuth / OpenAI / Ollama)
     Ai(AiArgs),
+}
+
+// ── Sandbox subcommand types ──────────────────────────────────────────────────
+
+#[derive(Args, Debug, Clone, PartialEq, Eq)]
+pub struct SandboxArgs {
+    /// Path to binary to run in sandbox
+    #[arg(value_name = "BINARY")]
+    pub binary: PathBuf,
 }
 
 // ── AI subcommand types ───────────────────────────────────────────────────────
@@ -774,6 +787,7 @@ fn normalize_canonical(cli: CliArgs) -> ParsedInvocation {
                     };
                     return ParsedInvocation::Ai(inv);
                 }
+                CliCommand::Sandbox(sandbox) => return ParsedInvocation::Sandbox(sandbox),
                 CliCommand::Script(_) => unreachable!("script branch handled above"),
                 CliCommand::Resources(_) => unreachable!("resources branch handled above"),
             };

@@ -3,6 +3,7 @@
 //! Fission TUI — interactive AI chat interface.
 
 pub mod app;
+pub mod db;
 pub mod events;
 pub mod markdown;
 pub mod ui;

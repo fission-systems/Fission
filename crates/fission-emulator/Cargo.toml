@@ -1,0 +1,17 @@
+[package]
+name = "fission-emulator"
+version = "0.1.0"
+edition = "2024"
+authors = ["Fission Dev Team"]
+description = "Fission P-Code Execution Engine and OS HLE"
+
+[dependencies]
+fission-core = { path = "../fission-core" }
+fission-pcode = { path = "../fission-pcode" }
+fission-loader = { path = "../fission-loader" }
+fission-static = { path = "../fission-static" }
+anyhow = "1.0"
+thiserror = "2.0"
+tracing = "0.1"
+byteorder = "1.4"
+serde = { version = "1.0", features = ["derive"] }

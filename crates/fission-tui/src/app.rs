@@ -1,5 +1,12 @@
 //! App state machine for the Fission TUI.
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ActivePane {
+    Sidebar,
+    #[default]
+    ChatInput,
+}
+
 /// Which top-level view is currently displayed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ViewMode {
@@ -103,6 +110,13 @@ pub struct App {
 
     // ── Session History ──────────────────────────────────────────────────────
     pub session_history: Option<SessionHistoryState>,
+    pub db: Option<crate::db::Db>,
+    pub session_rows: Vec<crate::db::SessionRow>,
+    pub current_session_id: Option<i64>,
+    pub sidebar_selected_idx: usize,
+    pub rename_session_input: Option<String>,
+    pub delete_session_confirm: Option<i64>,
+    pub active_pane: ActivePane,
 
     // ── Hybrid Code Explorer ─────────────────────────────────────────────────
     /// Current top-level view mode.
@@ -135,7 +149,7 @@ pub struct App {
 
 impl App {
     pub fn new(status_label: String) -> Self {
-        Self {
+        let mut app = Self {
             entries: Vec::new(),
             input: String::new(),
             input_cursor: 0,
@@ -157,6 +171,13 @@ impl App {
             mention_state: None,
             slash_state: None,
             session_history: None,
+            db: None,
+            session_rows: Vec::new(),
+            current_session_id: None,
+            sidebar_selected_idx: 0,
+            rename_session_input: None,
+            delete_session_confirm: None,
+            active_pane: ActivePane::ChatInput,
             view_mode: ViewMode::Chat,
             active_panel: ActivePanel::Disasm,
             disasm_scroll: 0,
@@ -170,6 +191,49 @@ impl App {
             explorer_search_cursor: 0,
             disasm_area: std::cell::Cell::new(ratatui::layout::Rect::default()),
             decomp_area: std::cell::Cell::new(ratatui::layout::Rect::default()),
+        };
+        
+        if let Ok(db) = crate::db::Db::init() {
+            if let Ok(rows) = db.get_sessions() {
+                app.session_rows = rows;
+            }
+            app.db = Some(db);
+        }
+        
+        app
+    }
+
+    /// Focus cycling between UI panes
+    pub fn cycle_focus(&mut self) {
+        self.active_pane = match self.active_pane {
+            ActivePane::Sidebar => ActivePane::ChatInput,
+            ActivePane::ChatInput => ActivePane::Sidebar,
+        };
+    }
+
+    pub fn sidebar_up(&mut self) {
+        if self.sidebar_selected_idx > 0 {
+            self.sidebar_selected_idx -= 1;
+        }
+    }
+
+    pub fn sidebar_down(&mut self) {
+        if self.sidebar_selected_idx + 1 < self.session_rows.len() {
+            self.sidebar_selected_idx += 1;
+        }
+    }
+
+    pub fn start_rename_session(&mut self) {
+        if self.sidebar_selected_idx < self.session_rows.len() {
+            let row = &self.session_rows[self.sidebar_selected_idx];
+            self.rename_session_input = Some(row.title.clone());
+        }
+    }
+
+    pub fn start_delete_session(&mut self) {
+        if self.sidebar_selected_idx < self.session_rows.len() {
+            let row = &self.session_rows[self.sidebar_selected_idx];
+            self.delete_session_confirm = Some(row.id);
         }
     }
 
@@ -876,41 +940,60 @@ impl App {
     /// Save the current session to a stable, binary-scoped JSON file.
     /// Uses one canonical path per binary (or a single fallback), so this
     /// can be called after every `Done` message without creating new files.
-    pub fn save_current_session(&self, pipeline: &fission_ai::pipeline::AiPipeline) {
-        if let Some(data_dir) = dirs::data_local_dir() {
-            let session_dir = data_dir.join("fission").join("sessions");
-            let _ = std::fs::create_dir_all(&session_dir);
+    pub fn save_current_session(&mut self, pipeline: &fission_ai::pipeline::AiPipeline) {
+        let db = match &self.db {
+            Some(db) => db,
+            None => return,
+        };
 
-            let (messages, binary_path) = {
-                let session = pipeline.session.lock().unwrap();
-                if session.messages.is_empty() {
-                    return;
-                }
-                (session.messages.clone(), session.binary_path.clone())
-            };
-
-            // Derive a stable filename from the binary name, or use "session.json".
-            let stem = binary_path
-                .as_ref()
-                .and_then(|p| p.file_name())
-                .and_then(|n| n.to_str())
-                .unwrap_or("session");
-            // Sanitise: keep only alphanumeric, dash, underscore, dot.
-            let safe_stem: String = stem
-                .chars()
-                .map(|c| {
-                    if c.is_alphanumeric() || c == '-' || c == '_' || c == '.' {
-                        c
-                    } else {
-                        '_'
-                    }
-                })
-                .collect();
-            let path = session_dir.join(format!("{}.json", safe_stem));
-
-            if let Ok(json) = serde_json::to_string_pretty(&messages) {
-                let _ = std::fs::write(path, json);
+        let (messages, binary_path) = {
+            let session = pipeline.session.lock().unwrap();
+            if session.messages.is_empty() {
+                return;
             }
+            (session.messages.clone(), session.binary_path.clone())
+        };
+
+        let title = binary_path
+            .as_ref()
+            .and_then(|p| p.file_name())
+            .and_then(|n| n.to_str())
+            .unwrap_or("New Session");
+
+        // If no session ID exists, create one
+        let session_id = match self.current_session_id {
+            Some(id) => {
+                let _ = db.update_session_title(id, title);
+                id
+            }
+            None => {
+                let id = db.insert_session(title, "unknown", "unknown").unwrap_or(0);
+                self.current_session_id = Some(id);
+                // Also refresh the session rows
+                if let Ok(rows) = db.get_sessions() {
+                    self.session_rows = rows;
+                }
+                id
+            }
+        };
+
+        if session_id == 0 {
+            return;
+        }
+
+        // Simplistic approach: delete all existing messages for this session and re-insert them.
+        // A better approach would be to only insert new ones, but `messages` in pipeline is the source of truth.
+        let _ = db.clear_messages(session_id);
+        
+        for msg in messages {
+            let role_str = match msg.role {
+                fission_ai::session::Role::System => "system",
+                fission_ai::session::Role::User => "user",
+                fission_ai::session::Role::Assistant => "assistant",
+                fission_ai::session::Role::Tool => "tool",
+            };
+            let content = msg.content.unwrap_or_default();
+            let _ = db.insert_message(session_id, role_str, &content);
         }
     }
 
