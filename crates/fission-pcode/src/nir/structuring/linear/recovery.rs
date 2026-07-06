@@ -209,6 +209,15 @@ impl<'a> PreviewBuilder<'a> {
         entry: usize,
         exit: usize,
     ) -> Result<Vec<HirStmt>, MlilPreviewError> {
+        if self.sese_region_proof_budget_exceeded() {
+            if structuring_diag_enabled() {
+                eprintln!(
+                    "[DIAG] build_linear_sese_child_fallback: skipping payload lowering after {}ms proof ceiling",
+                    SESE_REGION_PROOF_BUDGET_MS as usize
+                );
+            }
+            return Err(MlilPreviewError::UnsupportedCfgRegionShape);
+        }
         let exit_spec = if exit >= self.block_count() {
             LinearExit::Return
         } else {

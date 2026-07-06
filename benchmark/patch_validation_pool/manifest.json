@@ -1,0 +1,48 @@
+{
+  "schema_version": 1,
+  "name": "patch-validation-pool-2026q3",
+  "visibility": "private-go-stop-only",
+  "dashboard_exposure": "forbidden",
+  "purpose": "Detect semantic regressions for new decompiler-quality patches without turning dev or holdout rows into tuning targets.",
+  "rotation_policy": {
+    "cadence": "quarterly",
+    "archive_previous_manifests": true,
+    "reuse_for_public_ranking": false
+  },
+  "initial_scope": {
+    "architectures": ["x86_64"],
+    "compilers": ["gcc", "clang"],
+    "optimization_levels": ["O0", "O2"],
+    "patterns": [
+      "comparison",
+      "loop",
+      "recursion",
+      "struct_access",
+      "pointer_arithmetic",
+      "state_machine"
+    ]
+  },
+  "sources": [
+    {
+      "id": "synthetic_control_shapes_2026q3",
+      "kind": "source-built-synthetic",
+      "path": "benchmark/patch_validation_pool/source/control_shapes.c",
+      "license": "repository-owned",
+      "patterns": [
+        "comparison",
+        "loop",
+        "recursion",
+        "struct_access",
+        "pointer_arithmetic",
+        "state_machine"
+      ],
+      "result_policy": "go-stop-only"
+    }
+  ],
+  "rules": [
+    "Do not publish per-function scores from this pool.",
+    "Do not use this pool for repeated tuning.",
+    "Record only regression present or regression absent in PR review.",
+    "Rotate the pool before it becomes a known optimization target."
+  ]
+}

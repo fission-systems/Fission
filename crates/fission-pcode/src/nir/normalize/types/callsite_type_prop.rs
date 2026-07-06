@@ -192,10 +192,7 @@ pub(crate) fn is_known_api_signature(name: &str) -> bool {
 }
 
 pub(crate) fn api_signature(name: &str) -> Option<&'static ApiSignature> {
-    SIGNATURE_RESOURCES
-        .api_signatures()
-        .ok()?
-        .find(|signature| signature.name == name)
+    SIGNATURE_RESOURCES.api_signature(name)
 }
 
 #[inline]

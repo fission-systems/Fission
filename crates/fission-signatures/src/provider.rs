@@ -23,6 +23,10 @@ impl SignatureResourceProvider {
         self.api_types.as_ref().map(ApiTypeDatabase::iter)
     }
 
+    pub fn api_signature(&self, name: &str) -> Option<&ApiSignature> {
+        self.api_types.as_ref().ok()?.get(name)
+    }
+
     pub fn api_signatures_json(&self) -> Option<String> {
         let signatures: Vec<&ApiSignature> = self.api_signatures().ok()?.collect();
         serde_json::to_string(&signatures).ok()

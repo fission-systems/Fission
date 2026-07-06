@@ -14,6 +14,8 @@ Lift P-code blocks into HIR under `PreviewBuilder`: control flow, calls, memory,
 ## Materialization
 
 - Prefer single-definition, dominance-respecting lowering in `materialize.rs` / terminators; large exploratory search must stay bounded and reflected in stats.
+- Repeated binding, cursor, accumulator, or call-argument fixes should become reusable materialization contracts or shared def-use/type facts. Do not add row-shaped recovery branches in `materialize` or expression lowering.
+- Builder may consume substrate CFG/calling-convention/type facts, but must not call normalize, structuring promotion, or render policy as a shortcut. If builder needs such a fact, move the fact into substrate first.
 
 ## Validation
 

@@ -34,3 +34,5 @@ Legacy flat modules at crate root of `normalize/`: `wave_stats.rs` only; other p
 
 - Orchestration lives in `pipeline/`; behavior changes belong in the owning pass directory.
 - `NirBuildStats` fields remain defined only in `nir/types.rs`.
+- New normalize behavior must enter through the ActionGroup/pass registry and an existing owner directory. Repeated special cases should be promoted into shared def-use, type-constraint, alias, or CFG facts before adding another narrow pass.
+- Normalize/type recovery may consume substrate and action-pipeline facts, but must not reach into builder internals, structuring promotion policy, or render/printer output.

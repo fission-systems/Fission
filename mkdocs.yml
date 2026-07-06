@@ -1,0 +1,73 @@
+site_name: Fission
+site_description: A cross-platform, Rust-powered reverse engineering and decompilation framework.
+site_url: https://sjkim1127.github.io/Fission/
+repo_url: https://github.com/sjkim1127/Fission
+repo_name: sjkim1127/Fission
+
+theme:
+  name: material
+  palette:
+    # Palette toggle for automatic mode
+    - media: "(prefers-color-scheme)"
+      toggle:
+        icon: material/brightness-auto
+        name: Switch to light mode
+    # Palette toggle for light mode
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    # Palette toggle for dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Switch to system preference
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.expand
+    - navigation.top
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - toc:
+      permalink: true
+
+plugins:
+  - search
+
+nav:
+  - Home: index.md
+  - Project Map: PROJECT_MAP.md
+  - CLI Guide: CLI.md
+  - Architecture: architecture/ARCHITECTURE.md
+  - Quality Metrics: QUALITY_METRICS.md
+  - Evaluation: EVALUATION.md
+  - Contributing: contributing.md
+  - Developer Policies:
+    - Malware Sample Policy: MALWARE_SAMPLE_POLICY.md
+    - Versioning: VERSIONING.md
+    - Release: RELEASE.md

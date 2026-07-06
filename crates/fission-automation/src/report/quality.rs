@@ -27,578 +27,90 @@ fn ratio(count: usize, total: usize) -> f64 {
     }
 }
 
-fn build_stats_pairs(stats: &NirBuildStats) -> Vec<(&'static str, usize)> {
-    vec![
-        (
-            "build_duration_ms",
-            stats.build_duration_ms,
-        ),
-        (
-            "normalize_duration_ms",
-            stats.normalize_duration_ms,
-        ),
-        (
-            "forced_linear_structuring_count",
-            stats.forced_linear_structuring_count,
-        ),
-        (
-            "region_linearize_structuring_count",
-            stats.region_linearize_structuring_count,
-        ),
-        (
-            "region_linearize_rejected_non_structuring_failure_count",
-            stats.region_linearize_rejected_non_structuring_failure_count,
-        ),
-        (
-            "region_linearize_rejected_no_exit_count",
-            stats.region_linearize_rejected_no_exit_count,
-        ),
-        (
-            "region_linearize_rejected_body_lowering_failed_count",
-            stats.region_linearize_rejected_body_lowering_failed_count,
-        ),
-        (
-            "region_linearize_rejected_body_lowering_conditional_tail_exit_mismatch_count",
-            stats.region_linearize_rejected_body_lowering_conditional_tail_exit_mismatch_count,
-        ),
-        (
-            "region_linearize_rejected_body_lowering_conditional_tail_no_common_follow_in_window_count",
-            stats.region_linearize_rejected_body_lowering_conditional_tail_no_common_follow_in_window_count,
-        ),
-        (
-            "region_linearize_rejected_body_lowering_conditional_tail_follow_beyond_window_count",
-            stats.region_linearize_rejected_body_lowering_conditional_tail_follow_beyond_window_count,
-        ),
-        (
-            "region_linearize_rejected_body_lowering_conditional_tail_side_entry_or_exit_count",
-            stats.region_linearize_rejected_body_lowering_conditional_tail_side_entry_or_exit_count,
-        ),
-        (
-            "region_linearize_rejected_body_lowering_conditional_tail_complex_arm_shape_count",
-            stats.region_linearize_rejected_body_lowering_conditional_tail_complex_arm_shape_count,
-        ),
-        (
-            "region_linearize_rejected_body_lowering_conditional_tail_arm_body_lowering_failed_count",
-            stats.region_linearize_rejected_body_lowering_conditional_tail_arm_body_lowering_failed_count,
-        ),
-        (
-            "region_linearize_rejected_body_lowering_conditional_tail_ambiguous_multiple_follows_count",
-            stats.region_linearize_rejected_body_lowering_conditional_tail_ambiguous_multiple_follows_count,
-        ),
-        (
-            "region_linearize_rejected_body_lowering_successor_inline_rejected_count",
-            stats.region_linearize_rejected_body_lowering_successor_inline_rejected_count,
-        ),
-        (
-            "region_linearize_rejected_body_lowering_revisit_cycle_count",
-            stats.region_linearize_rejected_body_lowering_revisit_cycle_count,
-        ),
-        (
-            "region_linearize_rejected_body_lowering_unsupported_terminator_count",
-            stats.region_linearize_rejected_body_lowering_unsupported_terminator_count,
-        ),
-        (
-            "region_linearize_rejected_non_advancing_count",
-            stats.region_linearize_rejected_non_advancing_count,
-        ),
-        (
-            "region_linearize_rejected_irreducible_cfg_count",
-            stats.region_linearize_rejected_irreducible_cfg_count,
-        ),
-        (
-            "structuring_scc_component_count",
-            stats.structuring_scc_component_count,
-        ),
-        (
-            "structuring_irreducible_scc_count",
-            stats.structuring_irreducible_scc_count,
-        ),
-        (
-            "structuring_irreducible_header_count",
-            stats.structuring_irreducible_header_count,
-        ),
-        (
-            "loop_control_explicit_reducer_count",
-            stats.loop_control_explicit_reducer_count,
-        ),
-        (
-            "loop_control_rewrite_break_count",
-            stats.loop_control_rewrite_break_count,
-        ),
-        (
-            "loop_control_rewrite_continue_count",
-            stats.loop_control_rewrite_continue_count,
-        ),
-        (
-            "loop_control_rewrite_skipped_nested_scope_count",
-            stats.loop_control_rewrite_skipped_nested_scope_count,
-        ),
-        (
-            "region_proof_candidate_count",
-            stats.region_proof_candidate_count,
-        ),
-        (
-            "region_proof_completed_count",
-            stats.region_proof_completed_count,
-        ),
-        (
-            "region_emit_ready_failed_count",
-            stats.region_emit_ready_failed_count,
-        ),
-        (
-            "conditional_region_candidate_count",
-            stats.conditional_region_candidate_count,
-        ),
-        (
-            "conditional_region_promoted_count",
-            stats.conditional_region_promoted_count,
-        ),
-        (
-            "guarded_tail_rejected_side_effectful_callee_count",
-            stats.guarded_tail_rejected_side_effectful_callee_count,
-        ),
-        ("promotion_candidate_count", stats.promotion_candidate_count),
-        ("promoted_region_count", stats.promoted_region_count),
-        (
-            "promotion_rejected_by_shape_count",
-            stats.promotion_rejected_by_shape_count,
-        ),
-        (
-            "promotion_rejected_by_shape_missing_terminal_join_target_count",
-            stats.promotion_rejected_by_shape_missing_terminal_join_target_count,
-        ),
-        (
-            "promotion_rejected_by_shape_empty_nonterminal_tail_count",
-            stats.promotion_rejected_by_shape_empty_nonterminal_tail_count,
-        ),
-        (
-            "promotion_rejected_by_gate_count",
-            stats.promotion_rejected_by_gate_count,
-        ),
-        (
-            "discovery_seen_guarded_tail_like_shape_count",
-            stats.discovery_seen_guarded_tail_like_shape_count,
-        ),
-        (
-            "discovery_rejected_noncanonical_layout_count",
-            stats.discovery_rejected_noncanonical_layout_count,
-        ),
-        (
-            "canonicalized_guarded_tail_shape_count",
-            stats.canonicalized_guarded_tail_shape_count,
-        ),
-        (
-            "canonicalization_failed_multiple_payload_entries",
-            stats.canonicalization_failed_multiple_payload_entries,
-        ),
-        (
-            "canonicalization_failed_interleaved_join_uses",
-            stats.canonicalization_failed_interleaved_join_uses,
-        ),
-        (
-            "canonicalization_failed_interleaved_join_uses_no_next_label_count",
-            stats.canonicalization_failed_interleaved_join_uses_no_next_label_count,
-        ),
-        (
-            "canonicalization_failed_interleaved_join_uses_nontrivial_segment_count",
-            stats.canonicalization_failed_interleaved_join_uses_nontrivial_segment_count,
-        ),
-        (
-            "canonicalization_failed_nonterminal_join_label",
-            stats.canonicalization_failed_nonterminal_join_label,
-        ),
-        (
-            "canonicalization_failed_nested_tail_escape",
-            stats.canonicalization_failed_nested_tail_escape,
-        ),
-        (
-            "canonicalized_interleaved_join_use_count",
-            stats.canonicalized_interleaved_join_use_count,
-        ),
-        (
-            "canonicalized_local_nonfallthrough_alias_count",
-            stats.canonicalized_local_nonfallthrough_alias_count,
-        ),
-        (
-            "canonicalization_failed_alias_not_fallthrough_count",
-            stats.canonicalization_failed_alias_not_fallthrough_count,
-        ),
-        (
-            "canonicalization_failed_alias_not_fallthrough_top_level_after_label_count",
-            stats.canonicalization_failed_alias_not_fallthrough_top_level_after_label_count,
-        ),
-        (
-            "canonicalization_failed_alias_not_fallthrough_nested_after_label_count",
-            stats.canonicalization_failed_alias_not_fallthrough_nested_after_label_count,
-        ),
-        (
-            "canonicalization_failed_alias_has_multiple_internal_predecessors_count",
-            stats.canonicalization_failed_alias_has_multiple_internal_predecessors_count,
-        ),
-        (
-            "canonicalization_failed_alias_has_nonlocal_ref_count",
-            stats.canonicalization_failed_alias_has_nonlocal_ref_count,
-        ),
-        (
-            "canonicalization_failed_alias_has_nonlocal_ref_external_before_count",
-            stats.canonicalization_failed_alias_has_nonlocal_ref_external_before_count,
-        ),
-        (
-            "canonicalization_failed_alias_has_nonlocal_ref_nested_before_count",
-            stats.canonicalization_failed_alias_has_nonlocal_ref_nested_before_count,
-        ),
-        (
-            "canonicalization_failed_alias_has_nonlocal_ref_post_segment_ref_count",
-            stats.canonicalization_failed_alias_has_nonlocal_ref_post_segment_ref_count,
-        ),
-        (
-            "canonicalization_failed_alias_body_not_trivial_count",
-            stats.canonicalization_failed_alias_body_not_trivial_count,
-        ),
-        (
-            "canonicalization_failed_join_has_external_ref_count",
-            stats.canonicalization_failed_join_has_external_ref_count,
-        ),
-        (
-            "canonicalization_failed_payload_crosses_join_count",
-            stats.canonicalization_failed_payload_crosses_join_count,
-        ),
-        ("rejected_must_emit_label", stats.rejected_must_emit_label),
-        (
-            "rejected_must_emit_label_surviving_middle_ref",
-            stats.rejected_must_emit_label_surviving_middle_ref,
-        ),
-        (
-            "rejected_must_emit_label_surviving_external_ref",
-            stats.rejected_must_emit_label_surviving_external_ref,
-        ),
-        (
-            "rejected_must_emit_label_owner_conflict",
-            stats.rejected_must_emit_label_owner_conflict,
-        ),
-        (
-            "rejected_not_single_pred_succ",
-            stats.rejected_not_single_pred_succ,
-        ),
-        ("rejected_external_entry", stats.rejected_external_entry),
-        (
-            "rejected_loop_or_switch_target",
-            stats.rejected_loop_or_switch_target,
-        ),
-        (
-            "condition_fold_and_count",
-            stats.condition_fold_and_count,
-        ),
-        (
-            "condition_fold_or_count",
-            stats.condition_fold_or_count,
-        ),
-        (
-            "condition_fold_rejected_side_effect",
-            stats.condition_fold_rejected_side_effect,
-        ),
-        (
-            "entry_param_promotion_spill_rename_count",
-            stats.entry_param_promotion_spill_rename_count,
-        ),
-        (
-            "variadic_stack_region_fold_count",
-            stats.variadic_stack_region_fold_count,
-        ),
-        ("abi_slot_recovered_count", stats.abi_slot_recovered_count),
-        ("home_slot_promoted_count", stats.home_slot_promoted_count),
-        ("va_start_recovered_count", stats.va_start_recovered_count),
-        (
-            "call_signature_refined_count",
-            stats.call_signature_refined_count,
-        ),
-        (
-            "security_cookie_fold_count",
-            stats.security_cookie_fold_count,
-        ),
-        (
-            "call_artifact_removed_count",
-            stats.call_artifact_removed_count,
-        ),
-        (
-            "object_shape_recovered_count",
-            stats.object_shape_recovered_count,
-        ),
-        (
-            "object_root_recovered_count",
-            stats.object_root_recovered_count,
-        ),
-        (
-            "typed_fact_evidence_count",
-            stats.typed_fact_evidence_count,
-        ),
-        (
-            "typed_fact_conflict_count",
-            stats.typed_fact_conflict_count,
-        ),
-        (
-            "object_root_fact_promotion_count",
-            stats.object_root_fact_promotion_count,
-        ),
-        (
-            "typed_object_shape_refined_count",
-            stats.typed_object_shape_refined_count,
-        ),
-        (
-            "surface_binding_promoted_count",
-            stats.surface_binding_promoted_count,
-        ),
-        (
-            "surface_fact_promotion_count",
-            stats.surface_fact_promotion_count,
-        ),
-        (
-            "prototype_summary_refined_count",
-            stats.prototype_summary_refined_count,
-        ),
-        (
-            "prototype_summary_round_count",
-            stats.prototype_summary_round_count,
-        ),
-        (
-            "call_effect_summary_refined_count",
-            stats.call_effect_summary_refined_count,
-        ),
-        (
-            "wrapper_summary_fold_count",
-            stats.wrapper_summary_fold_count,
-        ),
-        (
-            "cleanup_budget_skip_count",
-            stats.cleanup_budget_skip_count,
-        ),
-        (
-            "cleanup_family_binding_init_count",
-            stats.cleanup_family_binding_init_count,
-        ),
-        (
-            "cleanup_family_stmt_canonical_count",
-            stats.cleanup_family_stmt_canonical_count,
-        ),
-        (
-            "cleanup_stmt_fold_count",
-            stats.cleanup_stmt_fold_count,
-        ),
-        (
-            "cleanup_boundary_label_count",
-            stats.cleanup_boundary_label_count,
-        ),
-        (
-            "cleanup_loopish_rewrite_count",
-            stats.cleanup_loopish_rewrite_count,
-        ),
-        (
-            "cleanup_family_dead_binding_count",
-            stats.cleanup_family_dead_binding_count,
-        ),
-        (
-            "interproc_signature_constraint_rounds",
-            stats.interproc_signature_constraint_rounds,
-        ),
-        (
-            "unsupported_indirect_control_count",
-            stats.unsupported_indirect_control_count,
-        ),
-        (
-            "unsupported_indirect_call_count",
-            stats.unsupported_indirect_call_count,
-        ),
-        (
-            "unsupported_external_target_count",
-            stats.unsupported_external_target_count,
-        ),
-        (
-            "indirect_surface_preserved_count",
-            stats.indirect_surface_preserved_count,
-        ),
-        (
-            "indirect_target_set_refined_count",
-            stats.indirect_target_set_refined_count,
-        ),
-        (
-            "dispatcher_shape_recovered_count",
-            stats.dispatcher_shape_recovered_count,
-        ),
-        (
-            "switch_emit_ready_failed_count",
-            stats.switch_emit_ready_failed_count,
-        ),
-        (
-            "structuring_reason_region_legality_count",
-            stats.structuring_reason_region_legality_count,
-        ),
-        (
-            "structuring_reason_follow_failure_count",
-            stats.structuring_reason_follow_failure_count,
-        ),
-        (
-            "structuring_reason_irreducible_count",
-            stats.structuring_reason_irreducible_count,
-        ),
-        (
-            "structuring_reason_loop_exit_count",
-            stats.structuring_reason_loop_exit_count,
-        ),
-        (
-            "structuring_reason_switch_shape_count",
-            stats.structuring_reason_switch_shape_count,
-        ),
-        (
-            "structuring_reason_budget_count",
-            stats.structuring_reason_budget_count,
-        ),
-    ]
+fn stats_to_map(stats: &NirBuildStats) -> BTreeMap<String, usize> {
+    let value = serde_json::to_value(stats).unwrap_or(serde_json::Value::Null);
+    if let serde_json::Value::Object(map) = value {
+        map.into_iter()
+            .filter_map(|(k, v)| v.as_u64().map(|num| (k, num as usize)))
+            .collect()
+    } else {
+        BTreeMap::new()
+    }
 }
 
 pub(crate) fn build_stat_families(stats: &NirBuildStats) -> Vec<(String, usize)> {
-    let mut families = vec![
-        (
-            "abi".to_string(),
-            stats.entry_param_promotion_spill_rename_count
-                + stats.abi_slot_recovered_count
-                + stats.home_slot_promoted_count,
-        ),
-        (
-            "memory_shape".to_string(),
-            stats.call_artifact_removed_count
-                + stats.object_shape_recovered_count
-                + stats.object_root_recovered_count
-                + stats.object_root_fact_promotion_count
-                + stats.typed_object_shape_refined_count
-                + stats.surface_binding_promoted_count
-                + stats.surface_fact_promotion_count,
-        ),
-        (
-            "variadic".to_string(),
-            stats.variadic_stack_region_fold_count + stats.va_start_recovered_count,
-        ),
-        (
-            "call_signature".to_string(),
-            stats.call_signature_refined_count
-                + stats.prototype_summary_refined_count
-                + stats.prototype_summary_round_count
-                + stats.call_effect_summary_refined_count
-                + stats.wrapper_summary_fold_count
-                + stats.interproc_signature_constraint_rounds
-                + stats.unsupported_indirect_call_count
-                + stats.indirect_target_set_refined_count,
-        ),
-        (
-            "cleanup_budget".to_string(),
-            stats.cleanup_budget_skip_count,
-        ),
-        (
-            "cleanup_binding_init".to_string(),
-            stats.cleanup_family_binding_init_count,
-        ),
-        (
-            "cleanup_stmt_canonical".to_string(),
-            stats.cleanup_family_stmt_canonical_count,
-        ),
-        (
-            "cleanup_stmt_fold".to_string(),
-            stats.cleanup_stmt_fold_count,
-        ),
-        (
-            "cleanup_boundary_label".to_string(),
-            stats.cleanup_boundary_label_count,
-        ),
-        (
-            "cleanup_loopish_rewrite".to_string(),
-            stats.cleanup_loopish_rewrite_count,
-        ),
-        (
-            "cleanup_dead_binding".to_string(),
-            stats.cleanup_family_dead_binding_count,
-        ),
-        (
-            "structuring".to_string(),
-            stats.region_linearize_structuring_count
-                + stats.forced_linear_structuring_count
-                + stats.region_proof_candidate_count
-                + stats.region_proof_completed_count
-                + stats.region_emit_ready_failed_count
-                + stats.conditional_region_candidate_count
-                + stats.conditional_region_promoted_count
-                + stats.structuring_reason_region_legality_count
-                + stats.structuring_reason_follow_failure_count
-                + stats.structuring_reason_irreducible_count
-                + stats.structuring_reason_loop_exit_count
-                + stats.structuring_reason_switch_shape_count
-                + stats.structuring_reason_budget_count
-                + stats.promotion_candidate_count
-                + stats.promoted_region_count,
-        ),
-        (
-            "dispatcher".to_string(),
-            stats.dispatcher_shape_recovered_count
-                + stats.region_emit_ready_failed_count
-                + stats.switch_emit_ready_failed_count
-                + stats.unsupported_indirect_control_count
-                + stats.unsupported_external_target_count
-                + stats.indirect_surface_preserved_count,
-        ),
-        (
-            "canonical_rewrite_conflict".to_string(),
-            stats.region_emit_ready_failed_count
-                + stats.switch_emit_ready_failed_count
-                + stats.guarded_tail_replacement_plan_rejected_missing_merge_count
-                + stats.guarded_tail_replacement_plan_rejected_unstable_read_count
-                + stats.guarded_tail_rejected_side_effectful_callee_count
-                + stats.guarded_tail_rejected_side_entry_conflict_count
-                + stats.guarded_tail_rejected_alias_interleave_conflict_count
-                + stats.guarded_tail_rejected_ambiguous_follow_count,
-        ),
-        ("security".to_string(), stats.security_cookie_fold_count),
-    ];
-    families.retain(|(_, value)| *value > 0);
-    families.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
-    families
+    let map = stats_to_map(stats);
+    let mut families: BTreeMap<String, usize> = BTreeMap::new();
+    
+    for (k, v) in map {
+        if v == 0 { continue; }
+        
+        let family = if k.contains("abi_") || k.contains("param_promotion_spill") || k.contains("home_slot_") {
+            "abi"
+        } else if k.contains("object_shape") || k.contains("object_root") || k.contains("surface_binding") || k.contains("surface_fact") || k == "call_artifact_removed_count" {
+            "memory_shape"
+        } else if k.contains("variadic") || k.contains("va_start") {
+            "variadic"
+        } else if k.contains("call_signature") || k.contains("prototype_summary") || k.contains("call_effect") || k.contains("wrapper_summary") || k.contains("interproc_signature") || k.contains("unsupported_indirect_call") || k.contains("indirect_target_set") {
+            "call_signature"
+        } else if k.starts_with("cleanup_family_binding_init") {
+            "cleanup_binding_init"
+        } else if k.starts_with("cleanup_family_stmt_canonical") {
+            "cleanup_stmt_canonical"
+        } else if k.starts_with("cleanup_stmt_fold") {
+            "cleanup_stmt_fold"
+        } else if k.starts_with("cleanup_boundary_label") {
+            "cleanup_boundary_label"
+        } else if k.starts_with("cleanup_loopish_rewrite") {
+            "cleanup_loopish_rewrite"
+        } else if k.starts_with("cleanup_family_dead_binding") {
+            "cleanup_dead_binding"
+        } else if k.starts_with("cleanup_budget") {
+            "cleanup_budget"
+        } else if k.starts_with("dispatcher_") || k == "switch_emit_ready_failed_count" || k.contains("unsupported_indirect_control") || k.contains("unsupported_external_target") || k.contains("indirect_surface_preserved") {
+            "dispatcher"
+        } else if k.contains("security_cookie") {
+            "security"
+        } else if k.contains("guarded_tail_replacement_plan_rejected") || k.starts_with("guarded_tail_rejected_") || k.contains("ambiguous_follow") || k == "region_emit_ready_failed_count" {
+            "canonical_rewrite_conflict"
+        } else if k.contains("structuring") || k.contains("region_") || k.contains("promotion_") || k.contains("promoted_region") {
+            "structuring"
+        } else {
+            "other"
+        };
+        
+        *families.entry(family.to_string()).or_insert(0) += v;
+    }
+    
+    let mut pairs: Vec<_> = families.into_iter().filter(|(k, v)| *v > 0 && k != "other").collect();
+    pairs.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+    pairs
 }
 
 pub(crate) fn top_build_stats(stats: &NirBuildStats, limit: usize) -> Vec<(String, usize)> {
-    let mut pairs = build_stats_pairs(stats)
+    let mut pairs: Vec<_> = stats_to_map(stats)
         .into_iter()
         .filter(|(_, value)| *value > 0)
-        .map(|(name, value)| (name.to_string(), value))
-        .collect::<Vec<_>>();
+        .collect();
     pairs.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
     pairs.truncate(limit);
     pairs
 }
 
 pub(crate) fn structuring_fallback_reasons(stats: &NirBuildStats) -> Vec<(String, usize)> {
-    let mut pairs = vec![
-        ("non_structuring_failure", stats.region_linearize_rejected_non_structuring_failure_count),
-        ("no_exit", stats.region_linearize_rejected_no_exit_count),
-        ("body_lowering_failed", stats.region_linearize_rejected_body_lowering_failed_count),
-        ("cond_tail_exit_mismatch", stats.region_linearize_rejected_body_lowering_conditional_tail_exit_mismatch_count),
-        ("cond_tail_no_common_follow", stats.region_linearize_rejected_body_lowering_conditional_tail_no_common_follow_in_window_count),
-        ("cond_tail_follow_beyond", stats.region_linearize_rejected_body_lowering_conditional_tail_follow_beyond_window_count),
-        ("cond_tail_side_entry_or_exit", stats.region_linearize_rejected_body_lowering_conditional_tail_side_entry_or_exit_count),
-        ("cond_tail_complex_shape", stats.region_linearize_rejected_body_lowering_conditional_tail_complex_arm_shape_count),
-        ("cond_tail_depth_budget", stats.region_linearize_rejected_body_lowering_conditional_tail_depth_or_budget_exhausted_count),
-        ("cond_tail_arm_lowering_failed", stats.region_linearize_rejected_body_lowering_conditional_tail_arm_body_lowering_failed_count),
-        ("cond_tail_one_arm_lowering_failed", stats.region_linearize_rejected_body_lowering_conditional_tail_one_arm_body_lowering_failed_count),
-        ("cond_tail_both_arms_lowering_failed", stats.region_linearize_rejected_body_lowering_conditional_tail_both_arms_body_lowering_failed_count),
-        ("cond_tail_follow_lowering_failed", stats.region_linearize_rejected_body_lowering_conditional_tail_follow_tail_lowering_failed_count),
-        ("cond_tail_ambiguous_follows", stats.region_linearize_rejected_body_lowering_conditional_tail_ambiguous_multiple_follows_count),
-        ("successor_inline_rejected", stats.region_linearize_rejected_body_lowering_successor_inline_rejected_count),
-        ("revisit_cycle", stats.region_linearize_rejected_body_lowering_revisit_cycle_count),
-        ("unsupported_terminator", stats.region_linearize_rejected_body_lowering_unsupported_terminator_count),
-        ("non_advancing", stats.region_linearize_rejected_non_advancing_count),
-        ("irreducible_cfg", stats.region_linearize_rejected_irreducible_cfg_count),
-    ]
-    .into_iter()
-    .filter(|(_, count)| *count > 0)
-    .map(|(k, v)| (k.to_string(), v))
-    .collect::<Vec<_>>();
-
+    let mut pairs = Vec::new();
+    let map = stats_to_map(stats);
+    for (k, v) in map {
+        if v == 0 {
+            continue;
+        }
+        if k.starts_with("region_linearize_rejected_") {
+            let mut reason = k.strip_prefix("region_linearize_rejected_").unwrap_or(&k).strip_suffix("_count").unwrap_or(&k).to_string();
+            reason = reason.replace("body_lowering_conditional_tail_", "cond_tail_");
+            reason = reason.replace("body_lowering_", "");
+            pairs.push((reason, v));
+        }
+    }
     pairs.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
     pairs
 }

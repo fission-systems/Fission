@@ -123,6 +123,33 @@ python3 benchmark/source_semantic_benchmark/run_source_semantic_benchmark.py --h
 
 Use this loop for source-semantic or pseudocode-quality work, especially when a concrete row/function motivated the change.
 
+## AI Overfit Firewall
+
+AI-assisted decompiler quality work must not leak benchmark identity into the
+proposal prompt. When asking another model for review or implementation ideas,
+describe only the structural failure pattern, owner evidence, invariant
+candidates, forbidden shortcuts, and validation matrix. Redact function names,
+addresses, binary paths, corpus row ids, and compiler tuples unless the prompt is
+strictly local and will not be used for implementation advice.
+
+Use [`docs/templates/AI_DECOMPILER_REVIEW_PROMPT.md`](docs/templates/AI_DECOMPILER_REVIEW_PROMPT.md)
+for external or cross-model review prompts. The template exists to keep prompts
+about invariants, not benchmark rows. Ghidra may be cited as a cleanroom
+correctness/reference oracle, but do not ask models to reproduce Ghidra-specific
+output style or known readability artifacts such as side effects hidden inside
+conditions.
+
+Do not repeatedly tune against dev/holdout corpus results. A semantic quality
+claim needs either an unseen patch-validation-pool signal or a synthetic
+invariant test in addition to the focused motivating row. Patch validation pool
+results are go/stop regression evidence only; they must not be promoted into
+dashboard rankings or used as a new tuning target.
+
+This firewall is an architecture contract before it is a CI rule. Static scans
+can audit for leaks, but the required gate is that any AI suggestion or benchmark
+observation must be restated as an owner-native invariant in the canonical
+semantic layer before production code changes.
+
 ### Pre-implementation gate
 
 Before adding production code for builder, materialize, normalize, structuring, or type/data recovery fixes, fill out [`docs/templates/DECOMPILER_CHANGE_PROPOSAL.md`](docs/templates/DECOMPILER_CHANGE_PROPOSAL.md) as required by [`docs/adr/0006-decompiler-quality-change-gate.md`](docs/adr/0006-decompiler-quality-change-gate.md). The proposal must show row anchor, owner proof, invariant proof, and validation matrix before implementation starts.

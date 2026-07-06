@@ -7,6 +7,12 @@ Scope: `crates/fission-pcode/src/nir/`
 
 This tree owns Rust-side decompiler semantics after p-code lifting: builder state, normalization, structuring, rendering, and the canonical NIR telemetry contract.
 
+Architecturally, this tree is a substrate plus owner-layer stack, not a single
+place to keep adding semantic code. Substrate modules hold IR/HIR types,
+telemetry, action-pipeline framework, and shared CFG/def-use/type/alias facts.
+Owner layers are builder/materialize, normalize, type/data recovery,
+structuring, and render/printer.
+
 ## Structure
 
 ```text
@@ -40,6 +46,8 @@ nir/
 - Add new quality counters in `types.rs` first, then wire through builder snapshot/projection.
 - Prefer typed helpers and deterministic ordering; many tests depend on stable output.
 - Keep semantics in NIR/structuring layers, not static postprocess or UI surfaces.
+- Treat AI suggestions, benchmark rows, Ghidra diffs, and validation-pool signals as evidence only. Production changes must enter this tree as owner-native invariants over p-code semantics, CFG facts, def-use, types, calling convention, or alias facts.
+- Before adding a new pass/helper, ask whether the invariant belongs in shared analysis. Repeated special cases should become dataflow, def-use, type-constraint, calling-convention, CFG, or alias facts instead of another narrow rule.
 
 ## Anti-Patterns
 
@@ -47,6 +55,8 @@ nir/
 - Do not fix structuring bugs only in `printer.rs`.
 - Do not skip large-sample validation when changing rejection/acceptance logic.
 - Do not prevent regressions with downstream workarounds or sample-specific heuristics (address guards, hard-coded function names, etc.). Fix the root cause at the canonical owner (builder, normalize, or structuring) using invariant-based algorithms (CFG, dominance, def-use chains, type-system rules). A builder-level fix that stops the wrong binding from being created is better than a normalize pass that tries to clean it up later.
+- Do not implement an AI-proposed rule until it has been translated into an invariant owned by an existing builder/materialize/normalize/structuring/type-data component. Prompt output is not an owner.
+- Do not add owner-to-owner dependencies when a fact can be moved down into substrate. Existing cross-layer references are migration debt, not precedent.
 - Do not reintroduce deleted narrow idiom passes (`security_cookie`, `xor_swap`, `string_copy`, `recurrence`, `call_artifact`, `bitstream`, `likely_trash`) without a Ghidra Rule/Action reference.
 - Do not add parallel dead-code or bitmask transform layers; use the consolidated owners documented in [`docs/architecture/DECOMPILER_ACTIONS.md`](../../../docs/architecture/DECOMPILER_ACTIONS.md).
 

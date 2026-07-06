@@ -57,8 +57,21 @@ Comparable coverage:
 ## 4. Risk And Ownership Check
 
 - Existing pass/owner that might already own this behavior:
+- Shared analysis/substrate candidate:
+  - [ ] CFG / dominance / postdominance fact
+  - [ ] Def-use / reaching-definition fact
+  - [ ] Type constraint / calling-convention fact
+  - [ ] Memory alias / stack-slot fact
+  - [ ] P-code semantic contract
+  - [ ] None; owner-local rule is justified
 - Why extending that owner is sufficient, or why a new pass/helper is needed:
+- If adding a new pass/helper/metric, why existing shared analysis cannot express
+  the invariant:
 - Possible interaction with existing normalize/structuring/materialize passes:
+- New or changed owner-to-owner dependency:
+  - [ ] None
+  - [ ] Existing migration debt only
+  - [ ] New dependency justified below:
 - Telemetry impact, if any:
 - Known cases that must not change:
 
@@ -79,8 +92,33 @@ Comparable coverage:
 - [ ] Optional related checks:
   - Command:
   - Expected signal:
+- [ ] Boundary audit, if a new pass/helper/dependency was added:
+  - Command: `python3 scripts/audit/nir_boundary_scan.py --root .`
+  - Expected signal:
 
-## 6. Review Notes
+## 6. AI Review / Prompt Firewall
+
+- Was an AI model asked for implementation advice?
+  - [ ] No
+  - [ ] Yes, using `docs/templates/AI_DECOMPILER_REVIEW_PROMPT.md`
+- Information exposed in the AI prompt:
+  - [ ] Structural failure pattern only
+  - [ ] Owner evidence only
+  - [ ] Invariant candidates only
+  - [ ] Validation matrix only
+- Redaction confirmed:
+  - [ ] Function names removed
+  - [ ] Addresses removed
+  - [ ] Binary paths removed
+  - [ ] Corpus row ids removed
+  - [ ] Compiler tuple / row-identifying labels removed
+- Ghidra guidance confirmed:
+  - [ ] Correctness/reference use only; no output-style mimicry request
+- Unseen or synthetic validation evidence:
+  - Patch validation pool command/result:
+  - Synthetic invariant test command/result:
+
+## 7. Review Notes
 
 - Production code contains no hardcoded binary/function/address/corpus guards:
   - [ ] Confirmed

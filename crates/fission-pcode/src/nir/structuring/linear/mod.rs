@@ -99,6 +99,7 @@ impl<'a> PreviewBuilder<'a> {
                 continue;
             }
             if try_switch_recovery
+                && self.switch_recovery_cfg_admitted(idx)
                 && let Some((switch_stmt, skip_to)) = self.try_lower_switch(idx)?
             {
                 if (idx == 0 || targeted.contains(&block_key)) && emitted_labels.insert(block_key) {
@@ -239,9 +240,50 @@ impl<'a> PreviewBuilder<'a> {
             idx += 1;
         }
         let mut body = cleanup_redundant_labels(body, None);
-        while self.promote_single_entry_guarded_tail_regions(&mut body) {}
+        self.promote_guarded_tail_regions_until_stable(&mut body);
         self.discover_guarded_tail_candidates(&body);
         Ok(finalize_structured_body(body))
+    }
+
+    fn switch_recovery_cfg_admitted(&self, start_idx: usize) -> bool {
+        let Some(start_successors) = self.successors.get(start_idx) else {
+            return false;
+        };
+        if start_successors.len() > 2 {
+            return true;
+        }
+        if start_successors.len() != 2 {
+            return false;
+        }
+
+        let mut cursor = start_idx;
+        let mut conditional_nodes = 0usize;
+        let mut visited = HashSet::new();
+        let max_steps = self
+            .successors
+            .len()
+            .min(SWITCH_CHAIN_PARSE_BUDGET_MAX)
+            .max(1);
+        for _ in 0..max_steps {
+            if !visited.insert(cursor) {
+                return false;
+            }
+            let Some(successors) = self.successors.get(cursor) else {
+                return false;
+            };
+            if successors.len() != 2 || successors.iter().any(|succ| *succ <= cursor) {
+                return false;
+            }
+            conditional_nodes += 1;
+            if conditional_nodes >= 2 {
+                return true;
+            }
+            let Some(next_cursor) = successors.iter().copied().min() else {
+                return false;
+            };
+            cursor = next_cursor;
+        }
+        false
     }
 
     pub(super) fn build_linear_multiblock_body(
@@ -510,8 +552,49 @@ impl<'a> PreviewBuilder<'a> {
             }
 
             let block = self.pcode_block(idx).clone();
+            let terminator = self.lower_block_terminator(idx)?;
+            if region_recovery
+                && let LoweredTerminator::Cond {
+                    cond,
+                    true_target,
+                    false_target,
+                } = terminator
+            {
+                let tail_lowering = self.lower_conditional_tail(
+                    idx,
+                    cond,
+                    true_target,
+                    false_target,
+                    exit,
+                    depth + 1,
+                    budget.as_deref_mut(),
+                    region_recovery,
+                )?;
+                let (tail_stmt, skip_to) = match tail_lowering {
+                    ConditionalTailLoweringResult::Lowered(lowered) => lowered,
+                    ConditionalTailLoweringResult::Mismatch(subtype) => {
+                        self.record_conditional_tail_mismatch_subtype(subtype);
+                        self.record_conditional_tail_mismatch_sample(
+                            idx,
+                            self.find_block_index_by_address(true_target),
+                            false_target
+                                .and_then(|target| self.find_block_index_by_address(target)),
+                            exit,
+                            subtype,
+                            "lower_linear_body_with_depth_detailed",
+                        );
+                        return Ok(LinearBodyLoweringOutcome::Rejected(
+                            LinearBodyRejectReason::ConditionalTailExitMismatch,
+                        ));
+                    }
+                };
+                body.extend(self.lower_block_stmts(&block)?);
+                body.push(tail_stmt);
+                return Ok(LinearBodyLoweringOutcome::Lowered((body, skip_to)));
+            }
+
             body.extend(self.lower_block_stmts(&block)?);
-            match self.lower_block_terminator(idx)? {
+            match terminator {
                 LoweredTerminator::Return(expr) => {
                     body.push(HirStmt::Return(expr));
                     return Ok(LinearBodyLoweringOutcome::Lowered((body, idx + 1)));
@@ -1154,6 +1237,15 @@ impl<'a> PreviewBuilder<'a> {
                     Ok(candidates) => candidates,
                     Err(subtype) => {
                         fallback_mismatch_subtype = subtype;
+                        if matches!(
+                            subtype,
+                            ConditionalTailMismatchSubtype::FollowBeyondWindow
+                                | ConditionalTailMismatchSubtype::SideEntryOrExit
+                                | ConditionalTailMismatchSubtype::ComplexArmShape
+                                | ConditionalTailMismatchSubtype::DepthOrBudgetExceeded
+                        ) {
+                            return Ok(ConditionalTailLoweringResult::Mismatch(subtype));
+                        }
                         Vec::new()
                     }
                 };
@@ -1222,6 +1314,10 @@ impl<'a> PreviewBuilder<'a> {
                         }
                     }
                 }
+
+                return Ok(ConditionalTailLoweringResult::Mismatch(
+                    fallback_mismatch_subtype,
+                ));
             }
 
             let true_branch = self.lower_linear_body_cached(

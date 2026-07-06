@@ -23,6 +23,23 @@ Related code:
 | `BlockGraphStructuring` | `nir::structuring` | typed HIR + CFG facts | structured HIR | CollapseDriver rules, SESE regions, loop/if/switch recovery | Expression semantic repair, printing |
 | `PrintC` | `nir::printer` | structured typed HIR | pseudocode string | Rendering only | Any semantic recovery |
 
+## Substrate Boundary
+
+`fission-pcode` is physically one crate today, but quality work must follow the
+same dependency direction that a future split would require.
+
+| Layer | May depend on | Must not depend on |
+|---|---|---|
+| Substrate (`types`, `cfg`, `support`, `action_pipeline`, telemetry, shared analysis facts) | P-code primitives and other substrate modules | builder, normalize, structuring, render policy |
+| Builder/materialize | substrate, cspec/calling-convention facts | normalize policy, structuring promotion policy, render/printer |
+| Normalize/type recovery | substrate, action pipeline, reusable analysis facts | builder internals, structuring promotion policy, render/printer |
+| Structuring | substrate CFG facts, typed HIR | builder internals, normalize semantic repair, render/printer |
+| Render/printer | structured HIR and formatting options | builder, normalize, structuring recovery, semantic analysis |
+
+Existing cross-layer references are migration debt. Do not use them as precedent
+for new fixes. Move reusable facts downward into substrate modules before adding
+another owner-to-owner dependency.
+
 ## Single Normalize Entry Point
 
 `normalize_hir_function` always dispatches through `run_normalize_pipeline`, which runs the
@@ -127,12 +144,14 @@ Contract tests live in:
 3. Do not reintroduce deleted narrow idiom passes without a Ghidra Rule/Action reference.
 4. Do not duplicate dead-code or bitmask transform layers across defuse, cleanup, and global_opt.
 5. Do not add sample-specific address/name guards — use CFG/dominance/def-use invariants.
+6. Do not add owner-to-owner dependencies when a shared analysis fact can be moved into substrate.
 
 ## Validation
 
 ```bash
 cargo nextest run -p fission-pcode
 cargo check -p fission-pcode -p fission-decompiler -p fission-automation
+python3 scripts/audit/nir_boundary_scan.py --root . --format markdown --output docs/audits/YYYY-MM-DD-nir-boundary-scan.md
 ```
 
 For semantic changes, rerun source-semantic benchmark rows with stale caches disabled.

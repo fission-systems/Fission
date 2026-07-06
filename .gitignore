@@ -124,7 +124,9 @@ benchmark_results/
 /.venv-bench/
 # Cursor / local IDE prompts (not part of canonical repo surface)
 .github/prompts/
-/SKILL.md
+# Canonical portable AI skill files are tracked.
+!/SKILL.md
+!/SKILLS.md
 # External repos cloned locally inside scripts/ (not registered as submodules)
 # Use: git submodule add https://github.com/threatrack/ghidra-fid-generator.git scripts/ghidra-fid-generator
 # if you want it tracked.
@@ -167,7 +169,13 @@ cargo-flamegraph.trace/
 # scripts/ — only scripts/test/ is tracked in GitHub
 # Everything else (benchmark helpers, corpus builders, audit, ghidra-fid-generator)
 # is local-only developer tooling.
-/scripts/audit/
+/scripts/audit/*
+!/scripts/audit/benchmark_smell_scan.py
+!/scripts/audit/ai_prompt_leak_scan.py
+!/scripts/audit/arch_isolation_scan.py
+!/scripts/audit/metric_gaming_scan.py
+!/scripts/audit/nir_boundary_scan.py
+!/scripts/audit/regression_replay.py
 /scripts/benchmark/
 /scripts/corpus/
 /scripts/ghidra-fid-generator/
@@ -180,7 +188,14 @@ __pycache__/
 *.pyo
 # benchmark/ — being redesigned; local-only until new infra is ready
 # New design goal: multi-decompiler comparison benchmark (vs Ghidra, IDA, Binary Ninja, RetDec)
-/benchmark/
+/benchmark/*
+!/benchmark/patch_validation_pool/
+!/benchmark/patch_validation_pool/**
 # vendor/ — reference code only, not committed to GitHub
 /vendor/
 /utils/
+
+# Scratch and temp files
+.scratch/
+site/
+.venv-mkdocs/

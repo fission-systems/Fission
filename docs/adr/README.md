@@ -10,5 +10,7 @@ Short, durable decisions complement [`docs/architecture/ARCHITECTURE.md`](../arc
 | [0004](0004-die-as-detector-resource.md) | DIE as detector resource, not semantic oracle |
 | [0005](0005-ghidra-reference-boundary.md) | Ghidra reference boundary / shipped semantics |
 | [0006](0006-decompiler-quality-change-gate.md) | Decompiler quality change gate |
+| [0007](0007-ai-overfit-and-validation-firewall.md) | AI overfit and validation firewall |
+| [0008](0008-nir-substrate-and-owner-boundaries.md) | NIR substrate and owner boundaries |
 
 New decisions: copy [`0000-template.md`](0000-template.md), bump the next number, link from this table.

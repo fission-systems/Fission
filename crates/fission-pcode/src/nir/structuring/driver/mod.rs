@@ -165,8 +165,30 @@ impl<'a> PreviewBuilder<'a> {
         candidates.into_iter().next()
     }
 
+    pub(super) fn promote_guarded_tail_regions_until_stable(&mut self, body: &mut Vec<HirStmt>) {
+        let mut iterations = 0;
+        while self.promote_single_entry_guarded_tail_regions(body) {
+            iterations += 1;
+            if iterations >= 30 {
+                if structuring_diag_enabled() {
+                    eprintln!(
+                        "[DIAG] promote_single_entry_guarded_tail_regions: budget tripped at {} iterations",
+                        iterations
+                    );
+                }
+                break;
+            }
+        }
+    }
+
     pub(crate) fn build_multiblock_body(&mut self) -> Result<Vec<HirStmt>, MlilPreviewError> {
         CollapseDriver::run(self)
+    }
+
+    pub(crate) fn sese_region_proof_budget_exceeded(&self) -> bool {
+        self.structuring_start.is_some_and(|start| {
+            start.elapsed().as_secs_f64() * 1000.0 > SESE_REGION_PROOF_BUDGET_MS
+        })
     }
 
     pub(crate) fn build_sese_region_body(
@@ -176,15 +198,14 @@ impl<'a> PreviewBuilder<'a> {
         child_map: crate::fast_hash::FastMap<usize, (Vec<HirStmt>, usize, RegionProof)>,
     ) -> Result<Vec<HirStmt>, MlilPreviewError> {
         let diag = structuring_diag_enabled();
-        if let Some(total_start) = self.structuring_start {
-            if total_start.elapsed().as_secs_f64() > 0.5 {
-                if diag {
-                    eprintln!(
-                        "[DIAG] build_sese_region_body: aborting structuring entry due to 500ms time ceiling"
-                    );
-                }
-                return Err(MlilPreviewError::UnsupportedCfgRegionShape);
+        if self.sese_region_proof_budget_exceeded() {
+            if diag {
+                eprintln!(
+                    "[DIAG] build_sese_region_body: aborting structuring entry due to {}ms proof ceiling",
+                    SESE_REGION_PROOF_BUDGET_MS as usize
+                );
             }
+            return Err(MlilPreviewError::UnsupportedCfgRegionShape);
         }
         let mut graph = StructureGraph::default();
         let targeted = self.collect_jump_targets()?;
@@ -204,15 +225,14 @@ impl<'a> PreviewBuilder<'a> {
 
         // Tier 1 & Tier 2 Collapsing Loop
         while progress {
-            if let Some(total_start) = self.structuring_start {
-                if total_start.elapsed().as_secs_f64() > 0.5 {
-                    if diag {
-                        eprintln!(
-                            "[DIAG] build_sese_region_body: aborting collapse loop due to 500ms time ceiling"
-                        );
-                    }
-                    return Err(MlilPreviewError::UnsupportedCfgRegionShape);
+            if self.sese_region_proof_budget_exceeded() {
+                if diag {
+                    eprintln!(
+                        "[DIAG] build_sese_region_body: aborting collapse loop due to {}ms proof ceiling",
+                        SESE_REGION_PROOF_BUDGET_MS as usize
+                    );
                 }
+                return Err(MlilPreviewError::UnsupportedCfgRegionShape);
             }
             progress = false;
             collapse_iterations += 1;
@@ -644,19 +664,7 @@ impl<'a> PreviewBuilder<'a> {
         }
 
         let mut body = surface_structure_graph(graph);
-        let mut gt_iterations = 0;
-        while self.promote_single_entry_guarded_tail_regions(&mut body) {
-            gt_iterations += 1;
-            if gt_iterations >= 30 {
-                if diag {
-                    eprintln!(
-                        "[DIAG] promote_single_entry_guarded_tail_regions: budget tripped at {} iterations",
-                        gt_iterations
-                    );
-                }
-                break;
-            }
-        }
+        self.promote_guarded_tail_regions_until_stable(&mut body);
 
         Ok(body)
     }
@@ -726,7 +734,7 @@ pub(crate) fn promote_single_entry_guarded_tail_regions_for_test(
         pspec_hidden_registers: Default::default(),
     };
     let mut builder = PreviewBuilder::new(&dummy, &options, None);
-    while builder.promote_single_entry_guarded_tail_regions(body) {}
+    builder.promote_guarded_tail_regions_until_stable(body);
     builder.preview_build_stats()
 }
 

@@ -57,6 +57,22 @@ struct ByteIndexAccumulatorEvidence {
     disallowed_uses: usize,
 }
 
+type TypeStateSignature = (NirType, Vec<(String, NirType)>, Vec<(String, NirType)>);
+
+fn type_state_signature(func: &HirFunction) -> TypeStateSignature {
+    (
+        func.return_type.clone(),
+        func.params
+            .iter()
+            .map(|binding| (binding.name.clone(), binding.ty.clone()))
+            .collect(),
+        func.locals
+            .iter()
+            .map(|binding| (binding.name.clone(), binding.ty.clone()))
+            .collect(),
+    )
+}
+
 /// Accumulate use-site constraints for all named variables in `stmts`.
 fn collect_constraints(
     stmts: &[HirStmt],
@@ -1812,16 +1828,35 @@ fn restore_scalar_only_pointer_locals(func: &mut HirFunction) -> bool {
     changed
 }
 
+fn should_skip_pointer_constraint_for_scalar_local(
+    binding: &NirBinding,
+    constraint: &UseConstraint,
+    roles: &HashMap<String, BindingUseRole>,
+) -> bool {
+    if !matches!(constraint, UseConstraint::Ptr(_))
+        || matches!(binding.origin, Some(NirBindingOrigin::ParamIndex(_)))
+        || binding.surface_type_name.is_some()
+    {
+        return false;
+    }
+
+    roles
+        .get(&binding.name)
+        .is_some_and(|role| role.scalar_use && !role.address_use)
+}
+
 /// Apply the use-driven backward type inference pass.
 ///
 /// Iterates to convergence (typically 1–2 rounds).  Returns `true` if any
 /// binding type changed.
 pub(crate) fn apply_use_driven_type_infer_pass(func: &mut HirFunction) -> bool {
-    let mut any_changed = false;
+    let before = type_state_signature(func);
     // Iterate to convergence (alias chains may require multiple rounds).
     for _ in 0..4 {
         let mut constraints: HashMap<String, Vec<UseConstraint>> = HashMap::new();
+        let mut roles = HashMap::<String, BindingUseRole>::new();
         let known_binding_types = collect_known_binding_types(func);
+        collect_binding_use_roles(&func.body, &mut roles);
         collect_constraints(
             &func.body,
             &func.return_type,
@@ -1833,6 +1868,10 @@ pub(crate) fn apply_use_driven_type_infer_pass(func: &mut HirFunction) -> bool {
         for binding in func.locals.iter_mut().chain(func.params.iter_mut()) {
             if let Some(constraints_for) = constraints.get(&binding.name) {
                 for constraint in constraints_for {
+                    if should_skip_pointer_constraint_for_scalar_local(binding, constraint, &roles)
+                    {
+                        continue;
+                    }
                     round_changed |= merge_constraint(binding, constraint);
                 }
             }
@@ -1846,9 +1885,8 @@ pub(crate) fn apply_use_driven_type_infer_pass(func: &mut HirFunction) -> bool {
         if !round_changed {
             break;
         }
-        any_changed = true;
     }
-    any_changed
+    type_state_signature(func) != before
 }
 
 #[cfg(test)]
@@ -2016,6 +2054,52 @@ mod tests {
             .find(|local| local.name == "idx")
             .unwrap();
         assert_eq!(idx.ty, u32_ty);
+    }
+
+    #[test]
+    fn scalar_only_local_pointer_constraint_converges_once() {
+        let u8_ty = NirType::Int {
+            bits: 8,
+            signed: false,
+        };
+        let u64_ty = NirType::Int {
+            bits: 64,
+            signed: false,
+        };
+        let byte_ptr_ty = NirType::Ptr(Box::new(u8_ty));
+        let body = vec![
+            HirStmt::Assign {
+                lhs: HirLValue::Var("p".to_owned()),
+                rhs: HirExpr::Cast {
+                    ty: byte_ptr_ty.clone(),
+                    expr: Box::new(HirExpr::Var("x".to_owned())),
+                },
+            },
+            HirStmt::Assign {
+                lhs: HirLValue::Var("sum".to_owned()),
+                rhs: HirExpr::Binary {
+                    op: HirBinaryOp::Add,
+                    lhs: Box::new(HirExpr::Var("x".to_owned())),
+                    rhs: Box::new(HirExpr::Const(1, u64_ty.clone())),
+                    ty: u64_ty.clone(),
+                },
+            },
+        ];
+        let mut func = make_func(
+            vec![
+                make_typed_binding("x", byte_ptr_ty.clone(), NirBindingOrigin::TempPreserved),
+                make_typed_binding("p", byte_ptr_ty, NirBindingOrigin::TempPreserved),
+                make_typed_binding("sum", u64_ty.clone(), NirBindingOrigin::TempPreserved),
+            ],
+            body,
+            NirType::Unknown,
+        );
+        func.is_64bit = true;
+
+        assert!(super::apply_use_driven_type_infer_pass(&mut func));
+        let x = func.locals.iter().find(|local| local.name == "x").unwrap();
+        assert_eq!(x.ty, u64_ty);
+        assert!(!super::apply_use_driven_type_infer_pass(&mut func));
     }
 
     /// Deref store lhs: *p = val → p: Ptr(val_ty)

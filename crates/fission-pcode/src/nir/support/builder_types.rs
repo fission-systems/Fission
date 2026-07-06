@@ -22,6 +22,10 @@ pub(crate) fn is_register_varnode(vn: &Varnode) -> bool {
 
 pub(crate) const CONDITION_RECOVERY_BUDGET_MS: f64 = 10.0;
 pub(crate) const CONDITION_RECOVERY_SUBCALL_LIMIT: usize = 512;
+/// Initial SESE recovery is a proof pass, not the final fallback renderer.
+/// Once proof-oriented recovery exceeds this ceiling, callers should fail
+/// closed and let the cheaper whole-function linear fallback render payloads.
+pub(crate) const SESE_REGION_PROOF_BUDGET_MS: f64 = 500.0;
 pub(crate) const BRANCH_CONDITION_RECOVERY_BUDGET_MIN: usize = 2048;
 pub(crate) const BRANCH_CONDITION_RECOVERY_BUDGET_PER_BLOCK: usize = 32;
 pub(crate) const BRANCH_CONDITION_RECOVERY_BUDGET_MAX: usize = 32768;

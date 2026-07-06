@@ -29,6 +29,24 @@ approximate P-code success.
 
 Structuring decisions must be made here. Downstream crates must not reconstruct semantic policy or region legality.
 
+Internally, `fission-pcode` is not a single semantic dumping ground. Treat it as
+a substrate plus owner-layer stack:
+
+- **Substrate:** IR/HIR types, p-code/NIR contracts, telemetry, action-pipeline
+  framework, shared CFG facts, def-use facts, type constraints,
+  calling-convention facts, and alias facts.
+- **Owner layers:** builder/materialize, normalize, type/data recovery,
+  structuring, and render/printer.
+- **Extraction candidates:** `fission-nir-analysis`,
+  `fission-nir-normalize`, and `fission-structuring`.
+
+New quality fixes should first ask whether the invariant belongs in shared
+analysis. Repeated special cases must be absorbed into dataflow, def-use,
+type-constraint, calling-convention, CFG, or alias analysis rather than added as
+another narrow pass. A new owner, pass, helper, or metric is acceptable only when
+the proposal shows that no existing owner or shared analysis surface expresses
+the invariant.
+
 ### `fission-decompiler`
 
 `fission-decompiler` owns application-layer orchestration:
@@ -154,6 +172,43 @@ Fission uses an explicit `Pass` pipeline framework (`nir::action_pipeline`) for 
 - `if address == 0x140001470 { skip_rule() }` timer skips in Pass
 - Adding a new `CollapseRule` variant without registering a corresponding `Pass`
 - Round-about patches that bypass `PassCtx` by reaching into `builder::state`
+
+## Decompiler Quality Firewall
+
+Decompiler-quality changes are accepted at the architecture boundary, not at the
+CI/dashboard boundary. A benchmark row, AI review prompt, Ghidra comparison, or
+validation-pool result may motivate a change, but none of those surfaces own the
+semantic decision.
+
+The architectural admission path is:
+
+1. Identify the canonical owner: SLEIGH/raw p-code, builder/materialize,
+   normalize, structuring, type/data recovery, or printer.
+2. State the invariant in owner-native terms: p-code semantics, ABI/ISA rule,
+   CFG/dominance/postdominance fact, def-use fact, type constraint, calling
+   convention fact, or memory-alias fact.
+3. Implement the rule inside the existing owner/pass by default. New passes,
+   helpers, metrics, or validation knobs require proof that no existing owner
+   covers the invariant.
+4. Validate with targeted invariant tests plus representative rows. Row
+   improvement is evidence, not the acceptance condition.
+
+The following are forbidden architectural dependencies for production semantic
+code:
+
+- benchmark function names,
+- concrete addresses or row ids,
+- binary paths or corpus names,
+- compiler tuple labels used only to identify a row,
+- AI prompt output that is not restated as an owner-native invariant,
+- Ghidra presentation quirks such as comma-in-condition style when a clearer
+  equivalent is possible.
+
+The AI overfit firewall therefore lives in the same layer as the pass pipeline:
+every AI-suggested or benchmark-motivated change must be translated into an
+owner-native invariant before implementation. Static scans and CI jobs may help
+find violations, but they are mirrors of this architecture contract, not the
+source of the contract.
 
 ## Benchmark / Telemetry Contract
 
