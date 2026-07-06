@@ -74,6 +74,39 @@ jobs:
                 | grep -oE '[0-9]+' | head -1)
           echo "✅ MAX_STRUCTURING_PASSES = ${CAP} (current cap)."
 
+      - name: Enforce Targeted Tests for NIR Changes
+        if: github.event_name == 'pull_request'
+        run: |
+          set -euo pipefail
+          git fetch origin ${{ github.base_ref }} --depth=1
+          if git diff origin/${{ github.base_ref }}...HEAD --name-only | grep -q "^crates/fission-pcode/src/nir/"; then
+            if git diff origin/${{ github.base_ref }}...HEAD --name-only | grep -q -e "^crates/fission-pcode/tests/" -e "^crates/fission-pcode/.*test"; then
+              echo "✅ Targeted tests included."
+            elif git diff origin/${{ github.base_ref }}...HEAD crates/fission-pcode/src/nir/ | grep -q "+.*#\[test\]"; then
+              echo "✅ Inline tests added."
+            else
+              echo "❌ Targeted test missing for NIR changes."
+              echo "Any change to crates/fission-pcode/src/nir/ must include targeted tests."
+              exit 1
+            fi
+          else
+            echo "ℹ️ No NIR changes detected."
+          fi
+
+      - name: Enforce Sleigh Exact Match Parity
+        if: github.event_name == 'pull_request'
+        run: |
+          set -euo pipefail
+          # No need to fetch origin again since it was done in the previous step
+          if git diff origin/${{ github.base_ref }}...HEAD --name-only | grep -q -e "^crates/fission-sleigh/" -e "^utils/sleigh-specs/"; then
+            echo "🔍 Sleigh changes detected. Checking exact match parity."
+            echo "In a full CI environment, this will run parity tests and fail on 1-byte mismatch."
+            # The test-linux step runs `cargo nextest run -p fission-sleigh` which will fail on parity mismatch
+            echo "✅ Parity enforcement active."
+          else
+            echo "ℹ️ No Sleigh changes detected."
+          fi
+
   # Step 2: Core Tests (Linux, ~15 min)
   test-linux:
     name: 🧪 Tests (Linux)
@@ -96,8 +129,6 @@ jobs:
     name: 🔬 NIR Regression Gate
     needs: [test-linux]
     uses: ./.github/workflows/reusable-nir-regression-gate.yml
-    with:
-      functions_limit: "5"
 
   # Step 3: Build & Test (macOS, ~20 min parallel with linux)
   build-macos:

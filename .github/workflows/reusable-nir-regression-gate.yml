@@ -13,8 +13,8 @@ on:
       functions_limit:
         type: string
         required: false
-        default: "5"
-        description: "Limit functions analyzed per binary (keep low for PR speed)"
+        default: ""
+        description: "Limit functions analyzed per binary. Empty means no limit (full benchmark)."
 
 env:
   CARGO_TERM_COLOR: always
@@ -65,14 +65,18 @@ jobs:
       - name: Run NIR-Check (fast profile — PR regression gate)
         id: nir_gate
         run: |
-          cargo run -p fission-automation --release -- nir-check \
-            --lane nir \
-            --no-build \
-            --no-update-latest \
-            --fission-bin target/release/fission_cli \
-            --run-profile fast \
-            --functions-limit ${{ inputs.functions_limit }} \
-            2>&1 | tee /tmp/nir_gate_output.txt
+          CMD_ARGS=(
+            "--lane" "nir"
+            "--no-build"
+            "--no-update-latest"
+            "--fission-bin" "target/release/fission_cli"
+            "--run-profile" "fast"
+          )
+          if [ -n "${{ inputs.functions_limit }}" ]; then
+            CMD_ARGS+=("--functions-limit" "${{ inputs.functions_limit }}")
+          fi
+          
+          cargo run -p fission-automation --release -- nir-check "${CMD_ARGS[@]}" 2>&1 | tee /tmp/nir_gate_output.txt
           # Capture exit code (non-zero = STOP signal = regression)
           EXIT_CODE=${PIPESTATUS[0]}
           echo "exit_code=$EXIT_CODE" >> "$GITHUB_OUTPUT"

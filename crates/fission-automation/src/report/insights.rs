@@ -276,6 +276,8 @@ pub fn build_decision_insights(
                 .aggregate
                 .nir_build_stats_totals
                 .structuring_irreducible_header_count as isize;
+        let has_any_row_regression = row_deltas.iter().any(|d| d.mismatch_delta > 0);
+
         if has_material_improvement
             && structuring_delta <= 0
             && safe_dominant
@@ -285,11 +287,17 @@ pub fn build_decision_insights(
             && variadic_delta >= 0
             && call_signature_delta >= 0
             && security_delta >= 0
+            && !has_any_row_regression
         {
             GoStopDecisionGate {
                 decision: "go_p5h3g_candidate".to_string(),
-                rationale: "semantic family deltas are non-regressive and structuring complexity did not worsen"
+                rationale: "semantic family deltas are non-regressive and no row-level regressions detected"
                     .to_string(),
+            }
+        } else if has_any_row_regression {
+            GoStopDecisionGate {
+                decision: "stop_row_level_regression".to_string(),
+                rationale: "row-level regression detected (zero-tolerance policy)".to_string(),
             }
         } else {
             GoStopDecisionGate {
