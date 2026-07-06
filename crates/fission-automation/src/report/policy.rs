@@ -9,6 +9,34 @@ pub struct GoStopDecisionGate {
     pub rationale: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GatePolicyConfig {
+    pub gate: GateConfig,
+    pub thresholds: ThresholdsConfig,
+    pub safety: SafetyConfig,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GateConfig {
+    pub allow_row_regression: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ThresholdsConfig {
+    pub max_structuring_delta: isize,
+    pub max_irreducible_scc_delta: isize,
+    pub max_irreducible_header_delta: isize,
+    pub min_abi_delta: isize,
+    pub min_variadic_delta: isize,
+    pub min_call_signature_delta: isize,
+    pub min_security_delta: isize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SafetyConfig {
+    pub allowed_dominant_families: Vec<String>,
+}
+
 pub fn evaluate_quality_gate(
     summary: &AutomationSummary,
     baseline_summary: Option<&AutomationSummary>,
@@ -17,6 +45,14 @@ pub fn evaluate_quality_gate(
     baseline_families: Option<&BTreeMap<String, usize>>,
     structuring_family_counts: &BTreeMap<String, usize>,
 ) -> GoStopDecisionGate {
+    let policy_path = fission_core::core::path_config::PATHS
+        .get_gate_policy_path()
+        .expect("FATAL: gate_policy.toml not found. Automation cannot run safely.");
+    let policy_str = std::fs::read_to_string(&policy_path)
+        .unwrap_or_else(|e| panic!("FATAL: Failed to read gate_policy.toml: {}", e));
+    let policy: GatePolicyConfig = toml::from_str(&policy_str)
+        .unwrap_or_else(|e| panic!("FATAL: Failed to parse gate_policy.toml: {}", e));
+
     if let (Some(baseline), Some(base_fams)) = (baseline_summary, baseline_families) {
         let structuring_delta = current_families.get("structuring").copied().unwrap_or(0) as isize
             - base_fams.get("structuring").copied().unwrap_or(0) as isize;
@@ -30,11 +66,11 @@ pub fn evaluate_quality_gate(
         let security_delta = current_families.get("security").copied().unwrap_or(0) as isize
             - base_fams.get("security").copied().unwrap_or(0) as isize;
 
-        let has_material_improvement = structuring_delta < 0
-            || abi_delta > 0
-            || variadic_delta > 0
-            || call_signature_delta > 0
-            || security_delta > 0;
+        let has_material_improvement = structuring_delta < policy.thresholds.max_structuring_delta
+            || abi_delta > policy.thresholds.min_abi_delta
+            || variadic_delta > policy.thresholds.min_variadic_delta
+            || call_signature_delta > policy.thresholds.min_call_signature_delta
+            || security_delta > policy.thresholds.min_security_delta;
 
         let family_ranking = structuring_family_counts
             .iter()
@@ -47,10 +83,9 @@ pub fn evaluate_quality_gate(
             .max_by(|a, b| a.1.cmp(&b.1).then_with(|| b.0.cmp(&a.0)))
             .map(|(name, _)| name.as_str());
 
-        let safe_dominant = matches!(
-            dominant_family,
-            Some("follow_failure") | Some("loop_exit") | Some("region_legality")
-        );
+        let safe_dominant = dominant_family.map_or(false, |f| {
+            policy.safety.allowed_dominant_families.iter().any(|a| a == f)
+        });
 
         let irreducible_scc_delta = summary
             .aggregate
@@ -71,27 +106,28 @@ pub fn evaluate_quality_gate(
                 .structuring_irreducible_header_count as isize;
 
         let has_any_row_regression = row_deltas.iter().any(|d| d.mismatch_delta > 0);
+        let violates_row_regression = !policy.gate.allow_row_regression && has_any_row_regression;
 
         if has_material_improvement
-            && structuring_delta <= 0
+            && structuring_delta <= policy.thresholds.max_structuring_delta
             && safe_dominant
-            && irreducible_scc_delta <= 0
-            && irreducible_header_delta <= 0
-            && abi_delta >= 0
-            && variadic_delta >= 0
-            && call_signature_delta >= 0
-            && security_delta >= 0
-            && !has_any_row_regression
+            && irreducible_scc_delta <= policy.thresholds.max_irreducible_scc_delta
+            && irreducible_header_delta <= policy.thresholds.max_irreducible_header_delta
+            && abi_delta >= policy.thresholds.min_abi_delta
+            && variadic_delta >= policy.thresholds.min_variadic_delta
+            && call_signature_delta >= policy.thresholds.min_call_signature_delta
+            && security_delta >= policy.thresholds.min_security_delta
+            && !violates_row_regression
         {
             GoStopDecisionGate {
                 decision: "go_p5h3g_candidate".to_string(),
                 rationale: "semantic family deltas are non-regressive and no row-level regressions detected"
                     .to_string(),
             }
-        } else if has_any_row_regression {
+        } else if violates_row_regression {
             GoStopDecisionGate {
                 decision: "stop_row_level_regression".to_string(),
-                rationale: "row-level regression detected (zero-tolerance policy)".to_string(),
+                rationale: "row-level regression detected (violates zero-tolerance policy)".to_string(),
             }
         } else {
             GoStopDecisionGate {

@@ -735,6 +735,15 @@ impl PathConfig {
     // Utility
     // ========================================================================
 
+    /// Get gate policy configuration path
+    pub fn get_gate_policy_path(&self) -> Option<PathBuf> {
+        self.workspace_root.as_ref().map(|root| {
+            root.join("benchmark")
+                .join("config")
+                .join("gate_policy.toml")
+        }).filter(|p| p.exists())
+    }
+
     /// Check if paths are properly configured
     pub fn is_configured(&self) -> bool {
         self.fid_dir.is_some() || self.gdt_dir.is_some() || self.die_dir.is_some()
