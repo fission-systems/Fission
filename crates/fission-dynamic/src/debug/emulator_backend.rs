@@ -87,8 +87,8 @@ impl ExecutionBackend for EmulatorBackend {
             let mut buf = vec![0u8; size];
             // Access space id 3 for RAM (as defined in loader mapping)
             for i in 0..size {
-                if let Ok(b) = emu.state.read(3, address + i as u64, 1) {
-                    buf[i] = b as u8;
+                if let Ok(b) = emu.state.read_space_readonly(3, address + i as u64, 1) {
+                    if !b.is_empty() { buf[i] = b[0]; }
                 } else {
                     return Err(fission_core::err!(debug, "Memory read failed at 0x{:x}", address + i as u64));
                 }
@@ -102,7 +102,7 @@ impl ExecutionBackend for EmulatorBackend {
     fn write_memory(&mut self, address: u64, data: &[u8]) -> FissionResult<()> {
         if let Some(emu) = &mut self.emulator {
             for (i, b) in data.iter().enumerate() {
-                let _ = emu.state.write(3, address + i as u64, 1, *b as u64);
+                let _ = emu.state.write_space(3, address + i as u64, &[*b]);
             }
             Ok(())
         } else {
@@ -126,26 +126,36 @@ impl ExecutionBackend for EmulatorBackend {
 
     fn launch(&mut self, path: &str, args: &[String]) -> FissionResult<u32> {
         let _ = args;
-        // Initialize the emulator components
-        // This mirrors the logic in `fission_cli::cli::oneshot::run_sandbox`
         
         let binary = fission_loader::loader::LoadedBinary::from_file(path)
             .map_err(|e| fission_core::err!(debug, "Loader error: {}", e))?;
         
-        let path_config = fission_core::core::path_config::PathConfig::detect(None);
-        let bundle = fission_core::core::path_config::resolve_bundle(&path_config)?;
+        let sleigh = fission_sleigh::runtime::RuntimeSleighFrontend::new_for_language("x86-64")
+            .map_err(|e| fission_core::err!(debug, "Sleigh init failed: {}", e))?;
         
-        let spec_path = bundle.sleigh_root.join("x86-64").join("x86-64.sla");
-        let sla_data = std::fs::read(&spec_path).map_err(|e| fission_core::err!(debug, "Failed to read sla: {}", e))?;
-        let spec = fission_sleigh::spec::SleighSpec::parse(&sla_data)
-            .map_err(|e| fission_core::err!(debug, "Spec error: {}", e))?;
-        
-        let sleigh = fission_sleigh::runtime::RuntimeSleighFrontend::new(spec);
-        let mut state = fission_emulator::core::MachineState::new();
+        let state = fission_emulator::pcode::state::MachineState::new();
         
         let emu = Emulator::new(state, binary, sleigh).map_err(|e| fission_core::err!(debug, "Emulator init failed: {}", e))?;
         self.emulator = Some(emu);
         
         Ok(9999) // Return dummy PID
+    }
+
+    fn get_state(&self) -> crate::debug::types::DebugState {
+        let mut state = crate::debug::types::DebugState::default();
+        if let Some(emu) = &self.emulator {
+            state.attached_pid = Some(9999);
+            state.main_thread_id = Some(1);
+            state.status = crate::debug::types::DebugStatus::Suspended;
+            
+            // Add a single dummy thread
+            state.threads.insert(1, crate::debug::types::ThreadInfo {
+                thread_id: 1,
+                start_address: emu.rip,
+                suspended: true,
+                is_main: true,
+            });
+        }
+        state
     }
 }

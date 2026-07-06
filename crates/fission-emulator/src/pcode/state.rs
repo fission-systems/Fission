@@ -79,6 +79,17 @@ impl MachineState {
         space.read(addr, size)
     }
 
+    pub fn read_space_readonly(&self, space_id: u64, addr: u64, size: usize) -> Result<Vec<u8>> {
+        if space_id == 0 {
+            bail!("Attempted to read from const space via memory read");
+        }
+        if let Some(space) = self.spaces.get(&space_id) {
+            space.read(addr, size)
+        } else {
+            Ok(vec![0; size])
+        }
+    }
+
     pub fn write_space(&mut self, space_id: u64, addr: u64, data: &[u8]) -> Result<()> {
         if space_id == 0 {
             bail!("Attempted to write to const space");

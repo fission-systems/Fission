@@ -363,6 +363,11 @@ pub trait ExecutionBackend: Send {
             "set_flag is not supported on this platform"
         ))
     }
+
+    /// Get current debug state
+    fn get_state(&self) -> super::types::DebugState {
+        super::types::DebugState::default()
+    }
 }
 
 // ============================================================================

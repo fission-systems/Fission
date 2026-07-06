@@ -29,6 +29,8 @@ impl Emulator {
     }
 
     pub fn run_instruction(&mut self) -> Result<bool> {
+        println!("Executing RIP=0x{:X}", self.rip);
+        
         // Fetch up to 16 bytes for decoding from RAM (Space 3)
         let max_inst_len = 16;
         let bytes_vec = match self.state.read_space(3, self.rip, max_inst_len) {

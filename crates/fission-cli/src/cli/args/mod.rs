@@ -539,6 +539,7 @@ const CANONICAL_SUBCOMMANDS: &[&str] = &[
     "resources",
     "script",
     "sandbox",
+    "debug",
     "ai",
 ];
 

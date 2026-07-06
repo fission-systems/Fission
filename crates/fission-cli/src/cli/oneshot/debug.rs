@@ -149,7 +149,7 @@ pub fn run_debug_command(args: crate::cli::args::DebugArgs) -> Result<()> {
 
             let state = DebugStateFile {
                 pid: args.pid,
-                last_thread_id: session.debugger.state().main_thread_id,
+                last_thread_id: session.debugger.get_state().main_thread_id,
                 breakpoints: Vec::new(),
             };
             save_state(&state)?;
@@ -305,7 +305,7 @@ pub fn run_debug_command(args: crate::cli::args::DebugArgs) -> Result<()> {
             session.attach(state.pid)?;
             let tid = state
                 .last_thread_id
-                .or(session.debugger.state().main_thread_id)
+                .or(session.debugger.get_state().main_thread_id)
                 .ok_or_else(|| anyhow::anyhow!("No thread available"))?;
             let regs = session.debugger.fetch_registers(tid)?;
             print_regs(&regs, false);
@@ -341,7 +341,7 @@ pub fn run_debug_command(args: crate::cli::args::DebugArgs) -> Result<()> {
         DebugCommand::Modules => {
             find_active_state()?;
             let session = build_session();
-            let modules = session.debugger.state().modules.clone();
+            let modules = session.debugger.get_state().modules.clone();
             println!("Loaded modules ({}):", modules.len());
             for (base, info) in modules {
                 println!("  {:016x} - {:016x}  {}", base, base + info.size, info.name);
@@ -352,7 +352,7 @@ pub fn run_debug_command(args: crate::cli::args::DebugArgs) -> Result<()> {
         DebugCommand::Threads => {
             find_active_state()?;
             let session = build_session();
-            let threads = session.debugger.state().threads.clone();
+            let threads = session.debugger.get_state().threads.clone();
             println!("Active threads ({}):", threads.len());
             for (tid, info) in threads {
                 println!(
@@ -369,7 +369,7 @@ pub fn run_debug_command(args: crate::cli::args::DebugArgs) -> Result<()> {
 
             let state = DebugStateFile {
                 pid,
-                last_thread_id: session.debugger.state().main_thread_id,
+                last_thread_id: session.debugger.get_state().main_thread_id,
                 breakpoints: Vec::new(),
             };
             save_state(&state)?;

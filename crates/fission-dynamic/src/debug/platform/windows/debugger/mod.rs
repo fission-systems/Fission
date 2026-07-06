@@ -909,6 +909,10 @@ impl ExecutionBackend for WindowsDebugger {
     fn enumerate_processes() -> Vec<ProcessInfo> {
         process::enumerate_processes()
     }
+
+    fn get_state(&self) -> crate::debug::types::DebugState {
+        self.state.clone()
+    }
 }
 
 #[cfg(test)]
