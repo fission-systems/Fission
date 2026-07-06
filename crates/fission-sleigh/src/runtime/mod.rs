@@ -40,7 +40,7 @@ pub use spine::{LanguageRuntime, ProcessorRuntimeProfile, RuntimeAttemptReport, 
 /// Returns `None` if the SLA file is unavailable or the library cannot be decoded.
 pub fn register_map_for_load_spec(
     load_spec: &BinaryLoadSpec,
-) -> Option<std::collections::HashMap<String, (u64, u32)>> {
+) -> Option<std::collections::HashMap<String, (u64, u64, u32)>> {
     use crate::compiler::{packaged_sla_for_entry_spec, sla::load_construct_templates_from_sla};
 
     let language_id = load_spec.pair.language_id.as_str();
@@ -56,7 +56,7 @@ pub fn register_map_for_load_spec(
     let map = library
         .register_map
         .into_iter()
-        .map(|(name, varnode)| (name, (varnode.offset, varnode.size)))
+        .map(|(name, varnode)| (name, (varnode.space.index as u64, varnode.offset, varnode.size)))
         .collect();
 
     Some(map)

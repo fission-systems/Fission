@@ -40,6 +40,9 @@ impl<'a> Evaluator<'a> {
             PcodeOpcode::Copy => {
                 let val = self.read_varnode_u64(&op.inputs[0])?;
                 let output = op.output.as_ref().expect("COPY must have an output");
+                tracing::debug!("      COPY Src(space={}, offset=0x{:X}, size={}, is_const={}) -> Dest(space={}, offset=0x{:X}, size={}) Val=0x{:X}", 
+                    op.inputs[0].space_id, op.inputs[0].offset, op.inputs[0].size, op.inputs[0].is_constant,
+                    output.space_id, output.offset, output.size, val);
                 self.write_varnode_u64(output, val)?;
             }
             PcodeOpcode::Store => {
@@ -54,6 +57,11 @@ impl<'a> Evaluator<'a> {
                 let src_addr = self.read_varnode_u64(&op.inputs[1])?;
                 let output = op.output.as_ref().expect("LOAD must have an output");
                 let val_data = self.state.read_space(space_id_to_load, src_addr, output.size as usize)?;
+                let mut val = 0u64;
+                for (i, &b) in val_data.iter().enumerate() {
+                    val |= (b as u64) << (i * 8);
+                }
+                tracing::debug!("      LOAD Space: {} Addr: 0x{:X} -> Val: 0x{:X}", space_id_to_load, src_addr, val);
                 self.state.write_space(output.space_id, output.offset, &val_data)?;
             }
             PcodeOpcode::IntAdd => {
@@ -265,6 +273,24 @@ impl<'a> Evaluator<'a> {
                 let sval2 = sign_extend(val2, size);
                 let res = sval1.checked_sub(sval2).is_none();
                 self.write_varnode_u64(output, if res { 1 } else { 0 })?;
+            }
+            PcodeOpcode::IntSCarry => {
+                let val1 = self.read_varnode_u64(&op.inputs[0])?;
+                let val2 = self.read_varnode_u64(&op.inputs[1])?;
+                let output = op.output.as_ref().expect("INT_SCARRY must have output");
+                let size = op.inputs[0].size;
+                let sval1 = sign_extend(val1, size);
+                let sval2 = sign_extend(val2, size);
+                let overflow = sval1.checked_add(sval2).is_none();
+                self.write_varnode_u64(output, if overflow { 1 } else { 0 })?;
+            }
+            PcodeOpcode::PopCount => {
+                let val1 = self.read_varnode_u64(&op.inputs[0])?;
+                let output = op.output.as_ref().expect("POPCOUNT must have output");
+                let size = op.inputs[0].size;
+                let mask = if size >= 8 { u64::MAX } else { (1u64 << (size * 8)) - 1 };
+                let count = (val1 & mask).count_ones() as u64;
+                self.write_varnode_u64(output, count)?;
             }
             PcodeOpcode::Int2Comp => {
                 let val1 = self.read_varnode_u64(&op.inputs[0])?;

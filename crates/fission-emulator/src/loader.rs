@@ -30,5 +30,17 @@ pub fn map_binary_to_state(state: &mut MachineState, binary: &LoadedBinary) -> R
         tracing::debug!("Mapped section {} at 0x{:X} (size: 0x{:X})", section.name, section.virtual_address, section.virtual_size);
     }
     
+    // Synthesize IAT with magic addresses for HLE if it's a PE file
+    if binary.format == "PE" {
+        let magic_base = 0xFFFFFFF000000000u64;
+        let mut iat_entries: Vec<_> = binary.inner().iat_symbols.iter().collect();
+        iat_entries.sort_by_key(|&(&addr, _)| addr);
+        for (i, (&addr, name)) in iat_entries.into_iter().enumerate() {
+            let magic_addr = magic_base + (i as u64 * 8);
+            tracing::debug!("Mapping import {} at 0x{:X} -> HLE Trampoline 0x{:X}", name, addr, magic_addr);
+            state.write_space(3, addr, &magic_addr.to_le_bytes())?;
+        }
+    }
+    
     Ok(())
 }

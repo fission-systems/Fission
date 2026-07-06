@@ -172,6 +172,12 @@ fn run_oneshot_inner(parsed: ParsedOneShotArgs) -> Result<()> {
 }
 
 fn run_sandbox(args: crate::cli::args::SandboxArgs) -> Result<()> {
+    let mut logging_options =
+        fission_core::logging::LoggingOptions::from_config(&fission_core::CONFIG.logging);
+    logging_options.level = "debug".to_string(); // Force debug for sandbox
+    logging_options.include_span_events = true;
+    fission_core::logging::init_with_options(logging_options);
+
     tracing::info!("Starting sandbox for {}", args.binary.display());
     
     // Parse binary using fission-loader
