@@ -89,7 +89,7 @@ pub struct MachineState {
     #[serde(skip)]
     pub trace_mem_reads: Vec<(u64, Vec<u8>)>,
     #[serde(skip)]
-    pub trace_mem_writes: Vec<(u64, Vec<u8>)>,
+    pub trace_mem_writes: Vec<(u64, Vec<u8>, Vec<u8>)>,  // (addr, old_bytes, new_bytes)
 }
 
 impl MachineState {
@@ -139,7 +139,13 @@ impl MachineState {
             bail!("Attempted to write to const space");
         }
         if self.tracing_memory && space_id == 3 {
-            self.trace_mem_writes.push((addr, data.to_vec()));
+            // Read the old value before overwriting so TTD can reconstruct undo deltas.
+            let old = if let Some(space) = self.spaces.get(&space_id) {
+                space.read(addr, data.len()).unwrap_or_else(|_| vec![0; data.len()])
+            } else {
+                vec![0; data.len()]
+            };
+            self.trace_mem_writes.push((addr, old, data.to_vec()));
         }
         
         let space = self.spaces.entry(space_id).or_insert_with(|| AddressSpace::new(format!("space_{}", space_id)));

@@ -94,6 +94,87 @@ impl OsEnvironment for WindowsEnv {
                 tracing::info!("ExitProcess({}). Emulation finished.", code);
                 return Ok(HleResult::Halt(code));
             }
+            // Time / Process identity (deterministic, tick-based)
+            "Sleep" => {
+                let ms = emu.read_arg(0).unwrap_or(0);
+                // Advance simulated tick by requested ms (no real sleep).
+                emu.tick_count = emu.tick_count.wrapping_add(ms);
+                tracing::debug!("Sleep({}ms) — tick_count now {}", ms, emu.tick_count);
+                emu.write_return_val(0)?;
+            }
+            "GetTickCount" => {
+                emu.tick_count = emu.tick_count.wrapping_add(15); // ~15ms per call
+                emu.write_return_val(emu.tick_count & 0xFFFF_FFFF)?;
+            }
+            "GetTickCount64" => {
+                emu.tick_count = emu.tick_count.wrapping_add(15);
+                emu.write_return_val(emu.tick_count)?;
+            }
+            "GetSystemTimeAsFileTime" => {
+                // lpSystemTimeAsFileTime: pointer in RCX (arg 0)
+                // Return a deterministic fake FILETIME (100-ns intervals since 1601-01-01).
+                // Use a fixed base (2025-01-01 00:00:00 UTC) plus tick_count offset.
+                let file_time_base: u64 = 133_800_000_000_000_000; // ~2025-01-01 in FILETIME units
+                let fake_time = file_time_base.wrapping_add(emu.tick_count.wrapping_mul(10_000));
+                let ptr = emu.read_arg(0).unwrap_or(0);
+                if ptr != 0 {
+                    let _ = emu.state.write_space(3, ptr, &fake_time.to_le_bytes());
+                }
+                emu.tick_count = emu.tick_count.wrapping_add(1);
+                // void return
+            }
+            "QueryPerformanceCounter" => {
+                // lpPerformanceCount: pointer in RCX
+                let ptr = emu.read_arg(0).unwrap_or(0);
+                if ptr != 0 {
+                    let counter = emu.tick_count.wrapping_mul(10_000);
+                    let _ = emu.state.write_space(3, ptr, &counter.to_le_bytes());
+                }
+                emu.tick_count = emu.tick_count.wrapping_add(1);
+                emu.write_return_val(1)?; // TRUE = success
+            }
+            "QueryPerformanceFrequency" => {
+                let ptr = emu.read_arg(0).unwrap_or(0);
+                if ptr != 0 {
+                    // Return 10,000,000 Hz (100-ns resolution, matches FILETIME)
+                    let freq: u64 = 10_000_000;
+                    let _ = emu.state.write_space(3, ptr, &freq.to_le_bytes());
+                }
+                emu.write_return_val(1)?;
+            }
+            "GetCurrentProcessId" => {
+                emu.write_return_val(1337)?; // Fixed fake PID
+            }
+            "GetCurrentThreadId" => {
+                emu.write_return_val(1)?; // Fixed fake TID
+            }
+            "GetLastError" => {
+                emu.write_return_val(0)?; // ERROR_SUCCESS
+            }
+            "SetLastError" => {
+                // Ignore the error code set by the guest.
+            }
+            "IsDebuggerPresent" => {
+                emu.write_return_val(0)?; // not being debugged
+            }
+            "CheckRemoteDebuggerPresent" => {
+                let ptr = emu.read_arg(1).unwrap_or(0);
+                if ptr != 0 {
+                    let _ = emu.state.write_space(3, ptr, &[0u8; 4]); // FALSE
+                }
+                emu.write_return_val(1)?; // TRUE = success
+            }
+            "OutputDebugStringA" | "OutputDebugStringW" => {
+                // Silently ignore debug output.
+            }
+            "GetEnvironmentVariableA" | "GetEnvironmentVariableW" => {
+                emu.write_return_val(0)?; // not found
+            }
+            "TerminateProcess" => {
+                let code = emu.read_arg(1).unwrap_or(0) as u32;
+                tracing::info!("TerminateProcess(code={}). Emulation finished.", code);
+                return Ok(HleResult::Halt(code));
+            }
             _ => {
                 tracing::warn!("Unimplemented Win32 API: {}. Returning 0.", func_name);
                 emu.write_return_val(0)?;

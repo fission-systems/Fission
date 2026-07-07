@@ -4,7 +4,8 @@ use crate::pcode::state::MachineState;
 use crate::pcode::eval::Evaluator;
 use fission_loader::loader::LoadedBinary;
 use fission_sleigh::runtime::RuntimeSleighFrontend;
-use anyhow::{Result, Context};
+use fission_ttd::{TTDRecorder, RegisterState};
+use anyhow::Result;
 use std::sync::Arc;
 use std::collections::BTreeMap;
 use crate::snapshot::EmulatorSnapshot;
@@ -43,6 +44,13 @@ pub struct Emulator {
     pub max_inst: Option<u64>,
     /// Optional buffer to mock standard input (`stdin`).
     pub stdin_buffer: Option<Vec<u8>>,
+
+    /// TTD (Time-Travel Debugging) recorder.
+    pub ttd: TTDRecorder,
+    /// Interval at which to record full snapshots for TTD (0 = disabled).
+    pub ttd_snapshot_interval: u64,
+    /// Simulated tick counter used for time-related HLE APIs.
+    pub tick_count: u64,
 }
 
 impl Emulator {
@@ -97,6 +105,9 @@ impl Emulator {
             inst_count: 0,
             max_inst: None,
             stdin_buffer: None,
+            ttd: TTDRecorder::new(),
+            ttd_snapshot_interval: 0,
+            tick_count: 0,
         };
 
         // Initialize stack pointer using arch-agnostic sp_reg name.
@@ -114,6 +125,86 @@ impl Emulator {
     pub fn with_stdin_mock(mut self, mock: Option<String>) -> Self {
         self.stdin_buffer = mock.map(|s| s.into_bytes());
         self
+    }
+
+    /// Enable TTD recording with a given snapshot interval (N instructions per snapshot).
+    pub fn with_ttd(mut self, interval: u64) -> Self {
+        self.ttd_snapshot_interval = interval;
+        if interval > 0 {
+            self.ttd.start_recording();
+        }
+        self
+    }
+
+    /// Read all current GP registers into a `RegisterState` for TTD.
+    fn capture_register_state(&mut self) -> RegisterState {
+        let read = |emu: &mut Self, name: &str| emu.read_register_u64(name).unwrap_or(0);
+        RegisterState {
+            rax: read(self, "RAX"),
+            rbx: read(self, "RBX"),
+            rcx: read(self, "RCX"),
+            rdx: read(self, "RDX"),
+            rsi: read(self, "RSI"),
+            rdi: read(self, "RDI"),
+            rbp: read(self, "RBP"),
+            rsp: read(self, "RSP"),
+            r8:  read(self, "R8"),
+            r9:  read(self, "R9"),
+            r10: read(self, "R10"),
+            r11: read(self, "R11"),
+            r12: read(self, "R12"),
+            r13: read(self, "R13"),
+            r14: read(self, "R14"),
+            r15: read(self, "R15"),
+            rip: self.pc,
+            rflags: read(self, "EFLAGS"),
+        }
+    }
+
+    /// Seek the TTD timeline to a given instruction step index.
+    /// Replays forward from the nearest stored snapshot to reach the target.
+    pub fn ttd_seek(&mut self, target_step: u64) -> Result<()> {
+        let snapshot = self.ttd.get_snapshot(target_step)
+            .or_else(|| {
+                // Find the closest snapshot at or before target_step
+                self.ttd.snapshots().into_iter()
+                    .filter(|s| s.step_index <= target_step)
+                    .last()
+            })
+            .cloned();
+
+        let Some(snap) = snapshot else {
+            anyhow::bail!("No TTD snapshot available at or before step {}", target_step);
+        };
+
+        // Restore registers
+        self.write_register_u64("RAX", snap.registers.rax)?;
+        self.write_register_u64("RBX", snap.registers.rbx)?;
+        self.write_register_u64("RCX", snap.registers.rcx)?;
+        self.write_register_u64("RDX", snap.registers.rdx)?;
+        self.write_register_u64("RSI", snap.registers.rsi)?;
+        self.write_register_u64("RDI", snap.registers.rdi)?;
+        self.write_register_u64("RBP", snap.registers.rbp)?;
+        self.write_register_u64("RSP", snap.registers.rsp)?;
+        self.write_register_u64("R8",  snap.registers.r8)?;
+        self.write_register_u64("R9",  snap.registers.r9)?;
+        self.write_register_u64("R10", snap.registers.r10)?;
+        self.write_register_u64("R11", snap.registers.r11)?;
+        self.write_register_u64("R12", snap.registers.r12)?;
+        self.write_register_u64("R13", snap.registers.r13)?;
+        self.write_register_u64("R14", snap.registers.r14)?;
+        self.write_register_u64("R15", snap.registers.r15)?;
+        self.write_register_u64("EFLAGS", snap.registers.rflags)?;
+        self.pc = snap.registers.rip;
+        self.inst_count = snap.step_index;
+
+        // Restore memory via stored deltas (reverse the old_value → new_value)
+        for delta in &snap.memory_deltas {
+            let _ = self.state.write_space(3, delta.address, &delta.new_value);
+        }
+
+        tracing::info!("TTD: Restored to step {} (PC=0x{:X})", snap.step_index, self.pc);
+        Ok(())
     }
 
     // ── Register I/O ─────────────────────────────────────────────────────────
@@ -379,7 +470,7 @@ impl Emulator {
                 .collect();
             let mem_writes = std::mem::take(&mut self.state.trace_mem_writes)
                 .into_iter()
-                .map(|(addr, data)| (addr, hex::encode(data)))
+                .map(|(addr, _old, data)| (addr, hex::encode(data)))
                 .collect();
 
             self.trace.push(TraceEntry::Instruction {
@@ -449,7 +540,30 @@ impl Emulator {
             if !self.run_instruction()? {
                 break;
             }
+
+            // TTD: record a snapshot every N instructions.
+            if self.ttd_snapshot_interval > 0
+                && self.ttd.is_recording()
+                && self.inst_count % self.ttd_snapshot_interval == 0
+            {
+                let regs = self.capture_register_state();
+                // Collect memory writes from this instruction as deltas.
+                let deltas: Vec<fission_ttd::MemoryDelta> = self.state.trace_mem_writes
+                    .iter()
+                    .map(|(addr, old, new)| fission_ttd::MemoryDelta::new(*addr, old.clone(), new.clone()))
+                    .collect();
+                self.ttd.record_step_with_memory(regs, 0, deltas);
+                tracing::trace!("TTD: recorded step {} at PC=0x{:X}", self.inst_count, self.pc);
+            }
+
             self.inst_count += 1;
+        }
+        if self.ttd.is_recording() {
+            let stats = self.ttd.stats();
+            tracing::info!(
+                "TTD recording stopped: {} snapshots, ~{} bytes",
+                stats.count, stats.memory_bytes
+            );
         }
         tracing::info!("Sandbox execution finished");
         Ok(())
