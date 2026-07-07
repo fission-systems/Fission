@@ -113,6 +113,7 @@ impl TTDRecorder {
         registers: RegisterState,
         thread_id: u32,
         memory_deltas: Vec<MemoryDelta>,
+        shadow_deltas: Vec<crate::ShadowDelta>,
     ) -> Option<u64> {
         if self.status != RecordingStatus::Recording {
             return None;
@@ -122,6 +123,9 @@ impl TTDRecorder {
         let mut snapshot = ExecutionSnapshot::new(step_index, registers.clone(), thread_id);
         for delta in memory_deltas {
             snapshot.add_memory_delta(delta);
+        }
+        for delta in shadow_deltas {
+            snapshot.add_shadow_delta(delta);
         }
 
         self.enforce_max_snapshots();

@@ -5,6 +5,7 @@ pub mod core;
 pub mod loader;
 pub mod snapshot;
 pub mod trace;
+pub mod sym;
 
 pub use arch::{ArchInfo, Endianness};
 pub use os::{OsEnvironment, HleResult, WindowsEnv, LinuxEnv, BareMetalEnv};

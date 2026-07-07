@@ -136,7 +136,31 @@ impl OsEnvironment for LinuxEnv {
                         let buf = emu.read_register_u64("RSI").unwrap_or(0);
                         let count = emu.read_register_u64("RDX").unwrap_or(0);
                         tracing::info!("sys_read({}, 0x{:X}, {})", fd, buf, count);
-                        emu.write_register_u64("RAX", 0)?;
+                        if fd == 0 {
+                            if let Some(mut stdin) = emu.stdin_buffer.take() {
+                                let mut bytes_read = 0;
+                                let mut data = Vec::new();
+                                while bytes_read < count && !stdin.is_empty() {
+                                    data.push(stdin.remove(0) as u8);
+                                    bytes_read += 1;
+                                }
+                                emu.stdin_buffer = Some(stdin);
+                                emu.state.write_space(3, buf, &data)?;
+                                
+                                // Taint stdin bytes!
+                                for i in 0..bytes_read {
+                                    let node = emu.solver.register_var(format!("stdin_{}", buf+i), 1);
+                                    emu.state.set_shadow_memory(3, buf + i, node);
+                                }
+                                
+                                emu.write_register_u64("RAX", bytes_read)?;
+                            } else {
+                                // For now, return EOF
+                                emu.write_register_u64("RAX", 0)?;
+                            }
+                        } else {
+                            emu.write_register_u64("RAX", 0)?;
+                        }
                     }
                     1 => { // write
                         let fd = emu.read_register_u64("RDI").unwrap_or(0);

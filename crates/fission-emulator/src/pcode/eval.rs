@@ -13,15 +13,23 @@ pub enum StepResult {
         input_vals: Vec<u64>,
         output_size: u32,
     },
+    /// A conditional branch was evaluated.
+    CBranch {
+        condition_val: bool,
+        /// The target if condition is true. If it's a relative offset within pcode, `rel_idx` is Some.
+        true_rel_idx: Option<usize>,
+        true_addr: Option<u64>,
+    },
 }
 
 pub struct Evaluator<'a> {
     pub state: &'a mut MachineState,
+    pub solver: &'a mut fission_solver::Solver,
 }
 
 impl<'a> Evaluator<'a> {
-    pub fn new(state: &'a mut MachineState) -> Self {
-        Self { state }
+    pub fn new(state: &'a mut MachineState, solver: &'a mut fission_solver::Solver) -> Self {
+        Self { state, solver }
     }
 
     // ── Varnode I/O ───────────────────────────────────────────────────────────
@@ -38,6 +46,23 @@ impl<'a> Evaluator<'a> {
     fn write_varnode_u64(&mut self, vn: &Varnode, val: u64) -> Result<()> {
         let bytes = val.to_le_bytes();
         self.state.write_space(vn.space_id, vn.offset, &bytes[..vn.size as usize])
+    }
+
+    fn read_varnode_shadow(&mut self, vn: &Varnode) -> Option<u32> {
+        if vn.is_constant {
+            return None;
+        }
+        // Just check the first byte for taint to keep it simple for now
+        self.state.shadow_memory.get(&(vn.space_id, vn.offset)).copied()
+    }
+
+    fn write_varnode_shadow(&mut self, vn: &Varnode, node: u32) {
+        if vn.is_constant {
+            return;
+        }
+        for i in 0..vn.size as u64 {
+            self.state.set_shadow_memory(vn.space_id, vn.offset + i, node);
+        }
     }
 
     /// Read a float value from a varnode. Returns (bits, size_bytes).
@@ -102,9 +127,10 @@ impl<'a> Evaluator<'a> {
             PcodeOpcode::Copy => {
                 let val = self.read_varnode_u64(&op.inputs[0])?;
                 let out = op.output.as_ref().expect("COPY must have output");
-                tracing::debug!("      COPY Src(space={}, off=0x{:X}, sz={}, const={}) -> Dest(space={}, off=0x{:X}) = 0x{:X}",
-                    op.inputs[0].space_id, op.inputs[0].offset, op.inputs[0].size, op.inputs[0].is_constant,
-                    out.space_id, out.offset, val);
+                let node = self.read_varnode_shadow(&op.inputs[0]);
+                if let Some(id) = node {
+                    self.write_varnode_shadow(out, id);
+                }
                 self.write_varnode_u64(out, val)?;
             }
 
@@ -113,8 +139,10 @@ impl<'a> Evaluator<'a> {
                 let addr     = self.read_varnode_u64(&op.inputs[1])?;
                 let out      = op.output.as_ref().expect("LOAD must have output");
                 let raw      = self.state.read_space(space_id, addr, out.size as usize)?;
-                let val      = le_bytes_to_u64(&raw);
-                tracing::debug!("      LOAD space={} addr=0x{:X} -> 0x{:X}", space_id, addr, val);
+                let node     = self.state.shadow_memory.get(&(space_id, addr)).copied();
+                if let Some(id) = node {
+                    self.write_varnode_shadow(out, id);
+                }
                 self.state.write_space(out.space_id, out.offset, &raw)?;
             }
 
@@ -122,14 +150,30 @@ impl<'a> Evaluator<'a> {
                 let space_id = op.inputs[0].constant_val as u64;
                 let addr     = self.read_varnode_u64(&op.inputs[1])?;
                 let val      = self.read_varnode_u64(&op.inputs[2])?;
+                let node     = self.read_varnode_shadow(&op.inputs[2]);
                 let bytes    = val.to_le_bytes();
                 self.state.write_space(space_id, addr, &bytes[..op.inputs[2].size as usize])?;
+                if let Some(id) = node {
+                    for i in 0..op.inputs[2].size as u64 {
+                        self.state.set_shadow_memory(space_id, addr + i, id);
+                    }
+                }
             }
 
             // ── Integer arithmetic ────────────────────────────────────────────
 
             PcodeOpcode::IntAdd => {
                 let (a, b, out) = self.int_binary(&op)?;
+                let a_node = self.read_varnode_shadow(&op.inputs[0]);
+                let b_node = self.read_varnode_shadow(&op.inputs[1]);
+                if a_node.is_some() || b_node.is_some() {
+                    use fission_solver::SymExpr;
+                    let a_expr = a_node.and_then(|id| self.solver.nodes.get(&id).cloned()).unwrap_or_else(|| SymExpr::Const { val: a, size: op.inputs[0].size });
+                    let b_expr = b_node.and_then(|id| self.solver.nodes.get(&id).cloned()).unwrap_or_else(|| SymExpr::Const { val: b, size: op.inputs[1].size });
+                    let new_expr = SymExpr::Add(Box::new(a_expr), Box::new(b_expr));
+                    let new_id = self.solver.register_node(new_expr);
+                    self.write_varnode_shadow(out, new_id);
+                }
                 self.write_varnode_u64(out, a.wrapping_add(b))?;
             }
             PcodeOpcode::IntSub => {
@@ -461,12 +505,14 @@ impl<'a> Evaluator<'a> {
             PcodeOpcode::CBranch => {
                 let dest = &op.inputs[0];
                 let condition = self.read_varnode_u64(&op.inputs[1])?;
-                if condition != 0 {
-                    if dest.space_id == 0 || dest.is_constant {
-                        return Ok(StepResult::BranchRel(dest.offset as usize));
-                    }
-                    return Ok(StepResult::Branch(dest.offset));
-                }
+                let condition_val = condition != 0;
+                
+                let is_rel = dest.space_id == 0 || dest.is_constant;
+                return Ok(StepResult::CBranch {
+                    condition_val,
+                    true_rel_idx: if is_rel { Some(dest.offset as usize) } else { None },
+                    true_addr: if !is_rel { Some(dest.offset) } else { None },
+                });
             }
             PcodeOpcode::Call => {
                 let dest = &op.inputs[0];

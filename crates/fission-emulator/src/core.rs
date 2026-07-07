@@ -51,6 +51,22 @@ pub struct Emulator {
     pub ttd_snapshot_interval: u64,
     /// Simulated tick counter used for time-related HLE APIs.
     pub tick_count: u64,
+
+    /// Unexplored conditional branches (used for TTD-based concolic exploration).
+    pub sym_events: Vec<SymBranch>,
+
+    /// The pure-Rust Symbolic Solver context
+    pub solver: fission_solver::Solver,
+}
+
+#[derive(Clone, Debug)]
+pub struct SymBranch {
+    pub step_index: u64,
+    pub pc: u64,
+    pub condition_val_taken: bool,
+    /// Target if we inverted the condition (if false it would be rel_idx, if true it would be fallback rel_idx)
+    pub alt_rel_idx: Option<usize>,
+    pub alt_addr: Option<u64>,
 }
 
 impl Emulator {
@@ -108,6 +124,8 @@ impl Emulator {
             ttd: TTDRecorder::new(),
             ttd_snapshot_interval: 0,
             tick_count: 0,
+            sym_events: Vec::new(),
+            solver: fission_solver::Solver::new(),
         };
 
         // Initialize stack pointer using arch-agnostic sp_reg name.
@@ -201,6 +219,15 @@ impl Emulator {
         // Restore memory via stored deltas (reverse the old_value → new_value)
         for delta in &snap.memory_deltas {
             let _ = self.state.write_space(3, delta.address, &delta.new_value);
+        }
+
+        // Restore shadow state via stored deltas
+        for delta in &snap.shadow_deltas {
+            if let Some(new_node) = delta.new_node {
+                self.state.shadow_memory.insert((delta.space_id, delta.address), new_node);
+            } else {
+                self.state.shadow_memory.remove(&(delta.space_id, delta.address));
+            }
         }
 
         tracing::info!("TTD: Restored to step {} (PC=0x{:X})", snap.step_index, self.pc);
@@ -349,6 +376,7 @@ impl Emulator {
             self.state.tracing_memory = true;
             self.state.trace_mem_reads.clear();
             self.state.trace_mem_writes.clear();
+            self.state.trace_shadow_writes.clear();
 
             bytes_hex = bytes_vec[..inst_len as usize]
                 .iter()
@@ -394,9 +422,9 @@ impl Emulator {
             tracing::debug!("    P-Code: {:?}", op.opcode);
             let current_pc = self.pc;
 
-            // Evaluator only borrows self.state — we scope it tightly.
+            // Evaluator only borrows self.state and self.solver — we scope it tightly.
             let step_result = {
-                let mut evaluator = Evaluator::new(&mut self.state);
+                let mut evaluator = Evaluator::new(&mut self.state, &mut self.solver);
                 evaluator.step(op)?
             };
 
@@ -411,6 +439,39 @@ impl Emulator {
                     branched = true;
                     branch_target = tgt;
                     break 'pcode;
+                }
+                crate::pcode::eval::StepResult::CBranch { condition_val, true_rel_idx, true_addr } => {
+                    // Record unexplored path if TTD is recording (sym_explore active)
+                    if self.ttd.is_recording() {
+                        let (alt_rel, alt_addr) = if condition_val {
+                            // Taken true path, alternate is false path (fallthrough)
+                            (Some(pcode_idx + 1), None)
+                        } else {
+                            // Taken false path, alternate is true path
+                            (true_rel_idx, true_addr)
+                        };
+                        self.sym_events.push(SymBranch {
+                            step_index: self.inst_count,
+                            pc: current_pc,
+                            condition_val_taken: condition_val,
+                            alt_rel_idx: alt_rel,
+                            alt_addr: alt_addr,
+                        });
+                    }
+
+                    // CBranch taken path determines next step
+                    if condition_val {
+                        if let Some(rel_idx) = true_rel_idx {
+                            pcode_idx = rel_idx;
+                        } else if let Some(addr) = true_addr {
+                            branched = true;
+                            branch_target = addr;
+                            break 'pcode;
+                        }
+                    } else {
+                        // Condition false, fall through to next pcode op
+                        pcode_idx += 1;
+                    }
                 }
                 crate::pcode::eval::StepResult::CallOther { userop_id, input_vals, output_size } => {
                     // evaluator is already dropped here (scoped above).
@@ -552,7 +613,17 @@ impl Emulator {
                     .iter()
                     .map(|(addr, old, new)| fission_ttd::MemoryDelta::new(*addr, old.clone(), new.clone()))
                     .collect();
-                self.ttd.record_step_with_memory(regs, 0, deltas);
+                // Collect shadow taint changes from this instruction as deltas.
+                let shadow_deltas: Vec<fission_ttd::ShadowDelta> = self.state.trace_shadow_writes
+                    .iter()
+                    .map(|(space_id, addr, old_node, new_node)| fission_ttd::ShadowDelta {
+                        space_id: *space_id,
+                        address: *addr,
+                        old_node: *old_node,
+                        new_node: *new_node,
+                    })
+                    .collect();
+                self.ttd.record_step_with_memory(regs, 0, deltas, shadow_deltas);
                 tracing::trace!("TTD: recorded step {} at PC=0x{:X}", self.inst_count, self.pc);
             }
 

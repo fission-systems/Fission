@@ -90,6 +90,19 @@ pub struct MachineState {
     pub trace_mem_reads: Vec<(u64, Vec<u8>)>,
     #[serde(skip)]
     pub trace_mem_writes: Vec<(u64, Vec<u8>, Vec<u8>)>,  // (addr, old_bytes, new_bytes)
+
+    /// Shadow memory mapping: (space_id, address) -> SymNodeId.
+    /// Tracks which AST node is currently at which byte.
+    #[serde(skip)]
+    pub shadow_memory: HashMap<(u64, u64), u32>,
+
+    /// Shadow register mapping: (register_offset) -> SymNodeId.
+    /// We can treat register space as just another address space, but usually
+    /// registers are accessed by name/offset, so a separate map or just using shadow_memory with space_id=2 works.
+    /// Let's use shadow_memory with space_id=2 for registers, so we don't need a separate field!
+
+    #[serde(skip)]
+    pub trace_shadow_writes: Vec<(u64, u64, Option<u32>, Option<u32>)>, // (space_id, address, old_node, new_node)
 }
 
 impl MachineState {
@@ -105,6 +118,8 @@ impl MachineState {
             tracing_memory: false,
             trace_mem_reads: Vec::new(),
             trace_mem_writes: Vec::new(),
+            shadow_memory: HashMap::new(),
+            trace_shadow_writes: Vec::new(),
         }
     }
 
@@ -138,6 +153,7 @@ impl MachineState {
         if space_id == 0 {
             bail!("Attempted to write to const space");
         }
+        
         if self.tracing_memory && space_id == 3 {
             // Read the old value before overwriting so TTD can reconstruct undo deltas.
             let old = if let Some(space) = self.spaces.get(&space_id) {
@@ -147,8 +163,26 @@ impl MachineState {
             };
             self.trace_mem_writes.push((addr, old, data.to_vec()));
         }
-        
+
         let space = self.spaces.entry(space_id).or_insert_with(|| AddressSpace::new(format!("space_{}", space_id)));
-        space.write(addr, data)
+        space.write(addr, data)?;
+
+        // When writing concrete bytes, clear their shadow memory taint.
+        for i in 0..data.len() {
+            let addr = addr + i as u64;
+            let old_node = self.shadow_memory.remove(&(space_id, addr));
+            if self.tracing_memory && old_node.is_some() {
+                self.trace_shadow_writes.push((space_id, addr, old_node, None));
+            }
+        }
+
+        Ok(())
+    }
+
+    pub fn set_shadow_memory(&mut self, space_id: u64, addr: u64, node: u32) {
+        let old_node = self.shadow_memory.insert((space_id, addr), node);
+        if self.tracing_memory {
+            self.trace_shadow_writes.push((space_id, addr, old_node, Some(node)));
+        }
     }
 }

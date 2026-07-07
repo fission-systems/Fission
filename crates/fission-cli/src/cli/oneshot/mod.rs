@@ -209,7 +209,8 @@ fn run_sandbox(args: crate::cli::args::SandboxArgs) -> Result<()> {
     // Create Emulator and Run
     let mut emu = fission_emulator::core::Emulator::new(state, binary, sleigh, arch, os)?
         .with_max_inst(args.max_inst)
-        .with_stdin_mock(args.stdin_mock);
+        .with_stdin_mock(args.stdin_mock)
+        .with_ttd(args.ttd_record.unwrap_or(0));
 
     // Setup Ctrl+C handler
     ctrlc::set_handler(move || {
@@ -231,7 +232,21 @@ fn run_sandbox(args: crate::cli::args::SandboxArgs) -> Result<()> {
     }
 
     tracing::info!("Starting Emulator Execution Loop at PC=0x{:X}", emu.pc);
-    emu.run()?;
+    
+    if args.sym_explore {
+        let mut sym_runner = fission_emulator::sym::SymbolicExecutor::new(emu);
+        sym_runner.explore()?;
+        emu = sym_runner.emu;
+    } else {
+        emu.run()?;
+    }
+
+    if let Some(seek_step) = args.ttd_seek {
+        tracing::info!("Seeking to TTD step {} after execution", seek_step);
+        emu.ttd_seek(seek_step)?;
+        tracing::info!("PC after seek: 0x{:X}", emu.pc);
+        // We could also dump registers here if requested, but for now we just seek.
+    }
     
     if let Some(trace_path) = args.dump_trace {
         tracing::info!("Dumping execution trace to {}", trace_path.display());

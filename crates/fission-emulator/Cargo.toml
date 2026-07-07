@@ -12,6 +12,7 @@ fission-pcode = { path = "../fission-pcode" }
 fission-loader = { path = "../fission-loader" }
 fission-static = { path = "../fission-static" }
 fission-ttd = { path = "../fission-ttd" }
+fission-solver = { path = "../fission-solver" }
 anyhow = "1.0"
 thiserror = "2.0"
 tracing = "0.1"

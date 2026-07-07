@@ -30,6 +30,16 @@ impl MemoryDelta {
     }
 }
 
+/// Shadow state change record for Taint tracking
+#[derive(Debug, Clone)]
+pub struct ShadowDelta {
+    pub space_id: u64,
+    pub address: u64,
+    pub old_node: Option<u32>,
+    pub new_node: Option<u32>,
+}
+
+
 /// Complete execution snapshot at a specific point in time
 #[derive(Debug, Clone)]
 pub struct ExecutionSnapshot {
@@ -41,6 +51,8 @@ pub struct ExecutionSnapshot {
     pub registers: RegisterState,
     /// Memory changes that occurred at this step
     pub memory_deltas: Vec<MemoryDelta>,
+    /// Shadow (Taint) changes that occurred at this step
+    pub shadow_deltas: Vec<ShadowDelta>,
     /// Thread ID that was executing
     pub thread_id: u32,
 }
@@ -53,6 +65,7 @@ impl ExecutionSnapshot {
             timestamp: Instant::now(),
             registers,
             memory_deltas: Vec::new(),
+            shadow_deltas: Vec::new(),
             thread_id,
         }
     }
@@ -60,6 +73,11 @@ impl ExecutionSnapshot {
     /// Add a memory change to this snapshot
     pub fn add_memory_delta(&mut self, delta: MemoryDelta) {
         self.memory_deltas.push(delta);
+    }
+
+    /// Add a shadow (taint) change to this snapshot
+    pub fn add_shadow_delta(&mut self, delta: ShadowDelta) {
+        self.shadow_deltas.push(delta);
     }
 
     /// Get the instruction pointer (RIP) at this snapshot

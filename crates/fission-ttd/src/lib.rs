@@ -8,7 +8,7 @@ mod snapshot;
 mod types;
 
 pub use recorder::{RecordingStatus, TTDRecorder};
-pub use snapshot::{ExecutionSnapshot, MemoryDelta, SnapshotStats};
+pub use snapshot::{ExecutionSnapshot, MemoryDelta, ShadowDelta, SnapshotStats};
 pub use types::RegisterState;
 
 /// Object-safe timeline interface for consumers that should not depend on a

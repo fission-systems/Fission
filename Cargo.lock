@@ -2253,6 +2253,7 @@ dependencies = [
  "fission-loader",
  "fission-pcode",
  "fission-sleigh",
+ "fission-solver",
  "fission-static",
  "fission-ttd",
  "hex",
@@ -2371,6 +2372,14 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
+ "tracing",
+]
+
+[[package]]
+name = "fission-solver"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
  "tracing",
 ]
 

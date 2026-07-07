@@ -181,6 +181,18 @@ pub struct SandboxArgs {
     /// Dump execution trace to the specified JSON file
     #[arg(long)]
     pub dump_trace: Option<PathBuf>,
+
+    /// Record TTD snapshot every N instructions (0 = disable)
+    #[arg(long)]
+    pub ttd_record: Option<u64>,
+
+    /// Seek to a specific instruction step (via TTD) after execution halts
+    #[arg(long)]
+    pub ttd_seek: Option<u64>,
+
+    /// Enable concolic/symbolic path exploration on TTD (fork on CBranch)
+    #[arg(long)]
+    pub sym_explore: bool,
 }
 
 // ── AI subcommand types ───────────────────────────────────────────────────────
