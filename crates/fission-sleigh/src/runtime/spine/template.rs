@@ -139,6 +139,7 @@ where
         Ok(RuntimeExecutionDetails {
             template_source: Some(state.constructor_template.template_source),
             pending_context_commits: Vec::new(),
+            userops: std::collections::BTreeMap::new(),
         })
     }
 }

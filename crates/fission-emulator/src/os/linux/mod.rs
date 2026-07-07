@@ -156,6 +156,32 @@ impl OsEnvironment for LinuxEnv {
         }
         Ok(HleResult::Continue)
     }
+
+    fn dispatch_userop(
+        &self,
+        _emu: &mut Emulator,
+        userop_name: &str,
+        inputs: &[u64],
+        _output_size: u32,
+    ) -> Result<HleResult> {
+        match userop_name {
+            "segment_fs" | "segment_gs" => {
+                let offset = inputs.get(0).copied().unwrap_or(0);
+                tracing::debug!("Linux HLE: {} (offset=0x{:X})", userop_name, offset);
+                // TLS/Thread control block usually located at fs/gs in Linux.
+            }
+            "lock" | "rep" | "repne" | "repe" => {
+                tracing::debug!("Linux HLE: Prefix userop '{}'", userop_name);
+            }
+            "rdtsc" | "cpuid" | "syscall" | "sysenter" => {
+                tracing::info!("Linux HLE: Instruct userop '{}' called", userop_name);
+            }
+            _ => {
+                tracing::debug!("Linux HLE: Unhandled USEROP: {} (inputs: {:?})", userop_name, inputs);
+            }
+        }
+        Ok(HleResult::Continue)
+    }
 }
 
 fn read_string(emu: &mut Emulator, addr: u64) -> Result<String> {

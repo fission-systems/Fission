@@ -20,6 +20,8 @@ pub enum HleResult {
 /// 1. Once at load time, to patch import stubs into the RAM image.
 /// 2. On every HLE trap (magic address hit), to identify and emulate the
 ///    intercepted function.
+/// 3. On every `CallOther` (USEROP) P-Code op, to emulate the user-defined
+///    operation (e.g. LOCK prefix, REP string ops, CPUID, RDTSC, etc.).
 pub trait OsEnvironment: Send + Sync {
     /// Patch all external-function stubs in `state` for the given `binary`.
     ///
@@ -45,4 +47,23 @@ pub trait OsEnvironment: Send + Sync {
     ///    `emu.arch.cc.simulate_return(emu)` afterward to restore PC).
     /// 4. Return `HleResult::Halt(code)` for termination requests.
     fn dispatch_hle(&self, emu: &mut Emulator, func_name: &str) -> Result<HleResult>;
+
+    /// Dispatch a Sleigh USEROP (`CallOther`) operation.
+    ///
+    /// `userop_name` is the name from the `.sla` `<userop_head>` table, e.g.
+    /// `"lock_cmpxchg"`, `"rep_stosb"`, `"cpuid"`.
+    /// `input_vals` are the evaluated input operand values.
+    /// `output_size` is the byte-width of the output varnode (0 if no output).
+    ///
+    /// Default: log a warning and treat as no-op (returns 0 to any output).
+    fn dispatch_userop(
+        &self,
+        _emu: &mut Emulator,
+        userop_name: &str,
+        _input_vals: &[u64],
+        _output_size: u32,
+    ) -> Result<HleResult> {
+        tracing::warn!("Unimplemented USEROP: '{}'. Treating as no-op (returns 0).", userop_name);
+        Ok(HleResult::Continue)
+    }
 }

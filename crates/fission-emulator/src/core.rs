@@ -6,7 +6,9 @@ use fission_loader::loader::LoadedBinary;
 use fission_sleigh::runtime::RuntimeSleighFrontend;
 use anyhow::{Result, Context};
 use std::sync::Arc;
+use std::collections::BTreeMap;
 use crate::snapshot::EmulatorSnapshot;
+use crate::trace::{ExecutionTrace, TraceEntry};
 
 /// Arch-agnostic emulator.
 ///
@@ -24,9 +26,15 @@ pub struct Emulator {
     pub arch: ArchInfo,
     /// OS execution environment: import patching, HLE dispatch, …
     pub os: Box<dyn OsEnvironment>,
-    
+
     pub snapshots: Vec<EmulatorSnapshot>,
     pub snapshot_triggers: Vec<u64>,
+
+    /// Execution trace (enabled when `--dump-trace` is requested).
+    pub trace: ExecutionTrace,
+
+    /// USEROP id → name table extracted from the Sleigh compiled frontend.
+    pub userop_map: BTreeMap<u32, String>,
 }
 
 impl Emulator {
@@ -53,16 +61,31 @@ impl Emulator {
             std::collections::HashMap::new()
         };
 
+        let sleigh_arc = Arc::new(sleigh);
+
+        let userop_map = {
+            // Extract the userop table from the compiled frontend if available.
+            // We do a single cheap decode to retrieve the details.
+            let probe_bytes = vec![0u8; 16];
+            if let Ok((_, _, details)) = sleigh_arc.decode_and_lift_with_details(&probe_bytes, pc) {
+                details.userops
+            } else {
+                BTreeMap::new()
+            }
+        };
+
         let mut emu = Self {
             state,
             binary,
-            sleigh: Arc::new(sleigh),
+            sleigh: sleigh_arc,
             pc,
             register_map,
             arch,
             os,
             snapshots: Vec::new(),
             snapshot_triggers: Vec::new(),
+            trace: ExecutionTrace::disabled(),
+            userop_map,
         };
 
         // Initialize stack pointer using arch-agnostic sp_reg name.
@@ -171,15 +194,59 @@ impl Emulator {
         let bytes_vec = match self.state.read_space(3, self.pc, 16) {
             Ok(b)  => b,
             Err(_) => {
-                tracing::error!("Failed to fetch instruction bytes at 0x{:X}", self.pc);
-                return Ok(false);
+                let reason = format!("Failed to fetch instruction bytes at 0x{:X}", self.pc);
+                tracing::error!("{}", reason);
+                self.trace.push(TraceEntry::DecodeError { pc: self.pc, reason });
+                // Advance past unknown area by 1 byte and continue.
+                self.pc += 1;
+                return Ok(true);
             }
         };
 
-        // Decode and lift to P-Code.
-        let (pcode_ops, inst_len) = self.sleigh
-            .decode_and_lift_with_len(&bytes_vec, self.pc)
-            .with_context(|| format!("Failed to lift instruction at 0x{:X}", self.pc))?;
+        // Decode and lift to P-Code. On failure: record, skip 1 byte, continue.
+        let (pcode_ops, inst_len, details) = match self.sleigh
+            .decode_and_lift_with_details(&bytes_vec, self.pc)
+        {
+            Ok(r) => r,
+            Err(e) => {
+                let reason = format!("{:#}", e);
+                tracing::warn!("Decode/lift failed at 0x{:X}: {}", self.pc, reason);
+                self.trace.push(TraceEntry::DecodeError { pc: self.pc, reason });
+                self.pc += 1;
+                return Ok(true);
+            }
+        };
+
+        // Merge any newly-discovered userops into our map.
+        for (id, name) in &details.userops {
+            self.userop_map.entry(*id).or_insert_with(|| name.clone());
+        }
+
+        // Record instruction trace entry if tracing is enabled.
+        if self.trace.enabled {
+            let bytes_hex = bytes_vec[..inst_len as usize]
+                .iter()
+                .map(|b| format!("{:02x}", b))
+                .collect::<Vec<_>>()
+                .join(" ");
+            // Get mnemonic via decode_window(limit=1).
+            let mnemonic = self.sleigh
+                .decode_window(&bytes_vec, self.pc, 1)
+                .ok()
+                .and_then(|v| v.into_iter().next())
+                .map(|d| d.instruction_text())
+                .unwrap_or_else(|| "?".to_string());
+            let pcode_op_names = pcode_ops.iter()
+                .map(|op| format!("{:?}", op.opcode))
+                .collect();
+            self.trace.push(TraceEntry::Instruction {
+                pc: self.pc,
+                bytes_hex,
+                mnemonic,
+                pcode_ops: pcode_op_names,
+                decode_error: None,
+            });
+        }
 
         // Pre-advance the PC register inside the Sleigh state so that
         // %pc-relative addressing and `call` (which pushes the return address)
@@ -188,15 +255,27 @@ impl Emulator {
         let _ = self.write_register_u64(self.arch.pc_reg, next_pc);
 
         // Evaluate P-Code ops.
+        // On CallOther we break out of the evaluator scope (so `evaluator` is dropped
+        // and self.state borrow is released) and then dispatch via `self`.
         let mut branched = false;
         let mut branch_target = 0u64;
-        let mut evaluator = Evaluator::new(&mut self.state);
         let mut pcode_idx = 0;
-        
-        while pcode_idx < pcode_ops.len() {
+
+        'pcode: loop {
+            if pcode_idx >= pcode_ops.len() {
+                break;
+            }
             let op = &pcode_ops[pcode_idx];
             tracing::debug!("    P-Code: {:?}", op.opcode);
-            match evaluator.step(op)? {
+            let current_pc = self.pc;
+
+            // Evaluator only borrows self.state — we scope it tightly.
+            let step_result = {
+                let mut evaluator = Evaluator::new(&mut self.state);
+                evaluator.step(op)?
+            };
+
+            match step_result {
                 crate::pcode::eval::StepResult::Next => {
                     pcode_idx += 1;
                 }
@@ -206,7 +285,41 @@ impl Emulator {
                 crate::pcode::eval::StepResult::Branch(tgt) => {
                     branched = true;
                     branch_target = tgt;
-                    break;
+                    break 'pcode;
+                }
+                crate::pcode::eval::StepResult::CallOther { userop_id, input_vals, output_size } => {
+                    // evaluator is already dropped here (scoped above).
+                    // We handle the dispatch below, then resume from pcode_idx + 1.
+                    pcode_idx += 1;
+
+                    // Resolve userop name (no evaluator borrow active).
+                    let userop_name = self.userop_map
+                        .get(&userop_id)
+                        .cloned()
+                        .unwrap_or_else(|| format!("userop_{userop_id}"));
+
+                    tracing::debug!("    USEROP: {} (id={})", userop_name, userop_id);
+
+                    self.trace.push(TraceEntry::UseropeDispatch {
+                        pc: current_pc,
+                        userop_name: userop_name.clone(),
+                        input_vals: input_vals.clone(),
+                    });
+
+                    let result = {
+                        let os_ptr = &*self.os as *const dyn OsEnvironment;
+                        let os_ref = unsafe { &*os_ptr };
+                        os_ref.dispatch_userop(self, &userop_name, &input_vals, output_size)?
+                    };
+
+                    match result {
+                        HleResult::Halt(code) => {
+                            tracing::info!("USEROP requested halt (code={})", code);
+                            return Ok(false);
+                        }
+                        HleResult::Continue => {}
+                    }
+                    // Continue the pcode loop.
                 }
             }
         }
@@ -217,23 +330,19 @@ impl Emulator {
         // HLE trap check — any address in the upper magic range.
         if self.pc >= 0xFFFFFFF000000000 {
             let magic = self.pc;
-            // Resolve stub name through the OS environment.
-            // We have to borrow binary independently to avoid holding a borrow
-            // on `self.os` (which implements OsEnvironment) while also calling
-            // mutable methods on self.
             let func_name = {
-                // SAFETY: os and binary are separate fields; Rust doesn't see them
-                // as separate without unsafe, so we extract what we need first.
                 let func_name_opt = self.os.resolve_stub(&self.binary, magic);
                 func_name_opt.unwrap_or_else(|| format!("Unknown@0x{:X}", magic))
             };
 
+            // Record HLE dispatch in trace.
+            self.trace.push(TraceEntry::HleDispatch {
+                pc: magic,
+                func_name: func_name.clone(),
+            });
+
             // Dispatch — OS sets the return value.
-            // We must call dispatch_hle via a raw pointer to avoid double-borrow,
-            // because dispatch_hle takes `&mut Emulator` but `self.os` is also on self.
             let result = {
-                // SAFETY: `self.os` and the rest of `Emulator` are separate allocations.
-                // We borrow `self.os` via a raw pointer for the duration of dispatch.
                 let os_ptr = &*self.os as *const dyn OsEnvironment;
                 let os_ref = unsafe { &*os_ptr };
                 os_ref.dispatch_hle(self, &func_name)?

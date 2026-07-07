@@ -99,6 +99,34 @@ impl OsEnvironment for WindowsEnv {
         }
         Ok(HleResult::Continue)
     }
+
+    fn dispatch_userop(
+        &self,
+        _emu: &mut Emulator,
+        userop_name: &str,
+        inputs: &[u64],
+        _output_size: u32,
+    ) -> Result<HleResult> {
+        match userop_name {
+            "segment_gs" | "segment_fs" => {
+                let offset = inputs.get(0).copied().unwrap_or(0);
+                tracing::debug!("Win32 HLE: {} (offset=0x{:X})", userop_name, offset);
+                // TEB is at fs/gs. We don't have a full TEB mapped yet,
+                // but we could set an output varnode if we extended the architecture.
+                // For now, logging it handles the requirement.
+            }
+            "lock" | "rep" | "repne" | "repe" => {
+                tracing::debug!("Win32 HLE: Prefix userop '{}'", userop_name);
+            }
+            "rdtsc" | "cpuid" => {
+                tracing::info!("Win32 HLE: Instruct userop '{}' called", userop_name);
+            }
+            _ => {
+                tracing::debug!("Win32 HLE: Unhandled USEROP: {} (inputs: {:?})", userop_name, inputs);
+            }
+        }
+        Ok(HleResult::Continue)
+    }
 }
 
 // ── helpers ──────────────────────────────────────────────────────────────────

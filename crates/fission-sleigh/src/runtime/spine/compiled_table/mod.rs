@@ -127,6 +127,7 @@ pub(crate) fn decode_and_lift_with_context_override(
         ) {
             Ok((ops, mut details)) => {
                 details.pending_context_commits = pending_context_commits;
+                details.userops = compiled.userops.clone();
                 return Ok((ops, decoded_length, details));
             }
             Err(err) => {

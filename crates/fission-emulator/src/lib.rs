@@ -4,6 +4,7 @@ pub mod pcode;
 pub mod core;
 pub mod loader;
 pub mod snapshot;
+pub mod trace;
 
 pub use arch::{ArchInfo, Endianness};
 pub use os::{OsEnvironment, HleResult, WindowsEnv, LinuxEnv, BareMetalEnv};

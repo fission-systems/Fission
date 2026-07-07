@@ -137,6 +137,10 @@ pub struct RuntimeExecutionDetails {
     /// Each entry: (target_address, word_index, mask, value).
     #[serde(default)]
     pub pending_context_commits: Vec<(u64, u32, u32, u32)>,
+    /// User-defined P-Code operation table: userop_id → name.
+    /// Populated from the compiled frontend's `.sla` `<userop_head>` table.
+    #[serde(default)]
+    pub userops: std::collections::BTreeMap<u32, String>,
 }
 
 #[derive(Debug, Clone)]

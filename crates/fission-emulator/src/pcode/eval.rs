@@ -6,6 +6,13 @@ pub enum StepResult {
     Next,
     Branch(u64),
     BranchRel(usize),
+    /// A `CallOther` (USEROP) op was encountered.
+    /// The emulator's main loop resolves the userop name and calls `dispatch_userop`.
+    CallOther {
+        userop_id: u32,
+        input_vals: Vec<u64>,
+        output_size: u32,
+    },
 }
 
 pub struct Evaluator<'a> {
@@ -540,8 +547,26 @@ impl<'a> Evaluator<'a> {
                     self.write_varnode_u64(&out, 0x60000000)?;
                 }
             }
-            // UserOp and Nop are not present in this PcodeOpcode enum;
-            // they are handled by the catch-all below.
+            PcodeOpcode::CallOther => {
+                // inputs[0] is a constant varnode holding the userop index.
+                // inputs[1..] are the actual arguments.
+                let userop_id = if let Some(vn) = op.inputs.first() {
+                    if vn.is_constant {
+                        vn.constant_val as u32
+                    } else {
+                        vn.offset as u32
+                    }
+                } else {
+                    0
+                };
+                let mut input_vals = Vec::with_capacity(op.inputs.len().saturating_sub(1));
+                for vn in op.inputs.iter().skip(1) {
+                    let v = self.read_varnode_u64(vn).unwrap_or(0);
+                    input_vals.push(v);
+                }
+                let output_size = op.output.as_ref().map(|o| o.size).unwrap_or(0);
+                return Ok(StepResult::CallOther { userop_id, input_vals, output_size });
+            }
 
             _ => {
                 tracing::warn!("Unimplemented P-Code opcode: {:?}", op.opcode);
