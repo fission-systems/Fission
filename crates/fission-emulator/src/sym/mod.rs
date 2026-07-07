@@ -51,13 +51,28 @@ impl SymbolicExecutor {
                 break;
             }
 
-            // At this point, the emulator state is exactly at the start of the instruction
-            // that contained the CBranch. 
-            // In a full symbolic engine, we would invert the condition in the SMT solver.
-            // Since this is a simple concolic scaffolding, we simulate taking the alternate
-            // path by forcing the PC to the alt_addr, or if it's a relative p-code jump,
-            // we'd need a more complex hook. For this scaffolding, we simply log it and
-            // if it's an instruction-level branch, we force the PC.
+            // We need to invert the branch condition. We don't have the exact condition AST node stored in SymBranch yet.
+            // For a full symbolic execution, SymBranch would store `condition_node: SymNodeId`.
+            // Then we would do:
+            // let cond = self.emu.solver.nodes.get(&condition_node).unwrap();
+            // let inverted = SymExpr::new_xor(cond.clone(), SymExpr::new_const(1, 1));
+            // self.emu.solver.push();
+            // self.emu.solver.assert(inverted);
+            // match self.emu.solver.check_sat() {
+            //     Ok(SatResult::Sat) => {
+            //          tracing::info!("Path is SAT! Proceeding...");
+            //          // Extract model and map back to memory if needed
+            //     }
+            //     Ok(SatResult::Unsat) => {
+            //          tracing::info!("Path is UNSAT, skipping.");
+            //          self.emu.solver.pop();
+            //          continue;
+            //     }
+            //     _ => {}
+            // }
+
+            // Since we don't have the condition node in SymBranch yet, we will just simulate the pop/push context
+            self.emu.solver.push();
             
             if let Some(addr) = next_branch.alt_addr {
                 tracing::info!("Forcing external branch to 0x{:X}", addr);
@@ -65,8 +80,10 @@ impl SymbolicExecutor {
                 self.emu.inst_count += 1; // skip the current instruction since we "took" the branch manually
             } else if let Some(rel) = next_branch.alt_rel_idx {
                 tracing::warn!("Alternate branch is internal p-code offset (rel_idx={}). Fully resuming this requires instruction-level rewrite. Skipping for now.", rel);
-                // To do this correctly, run_instruction would need to accept a forced starting pcode_idx.
             }
+            
+            // Pop solver context when done with the path
+            self.emu.solver.pop();
         }
 
         Ok(())

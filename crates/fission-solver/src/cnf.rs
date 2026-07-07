@@ -20,6 +20,18 @@ impl Lit {
     pub fn var(self) -> u32 {
         self.0.unsigned_abs()
     }
+
+    /// Returns a 0-indexed integer for this literal: 2 * (var - 1) + sign
+    pub fn index(self) -> usize {
+        let v = self.var();
+        debug_assert!(v > 0);
+        let idx = (v - 1) * 2;
+        if self.0 < 0 {
+            (idx + 1) as usize
+        } else {
+            idx as usize
+        }
+    }
 }
 
 /// A Clause is a disjunction (OR) of literals.

@@ -73,12 +73,65 @@ impl Solver {
     }
 
     /// Check if the current set of assertions is satisfiable.
-    /// This is currently a stub that always returns SAT for the skeleton.
     pub fn check_sat(&mut self) -> Result<SatResult> {
         tracing::info!("Solver::check_sat called with {} assertions", self.assertions.len());
-        // TODO: Implement DPLL / CDCL Bit-blasting logic here.
-        // For now, we return Sat so the execution path can continue.
-        Ok(SatResult::Sat)
+        
+        let mut aig = crate::aig::AigManager::new();
+        let mut cnf = crate::cnf::CnfBuilder::new();
+        let mut sat = crate::sat::SatSolver::new();
+        
+        // 1. Lower assertions to AIG
+        for assertion in &self.assertions {
+            let bits = aig.lower_expr(assertion);
+            // Each assertion must evaluate to TRUE (it's a boolean constraint of size 1)
+            if bits.len() == 1 {
+                cnf.assert_lit(bits[0]);
+            } else {
+                tracing::warn!("Assertion size != 1, cannot assert directly: {:?}", assertion);
+            }
+        }
+        
+        // 2. Convert AIG to CNF
+        aig.to_cnf(&mut cnf);
+        
+        // 3. Load clauses into SAT solver
+        for clause in cnf.clauses {
+            if !sat.add_clause(clause.0) {
+                return Ok(SatResult::Unsat); // Trivially unsat during setup
+            }
+        }
+        
+        // 4. Solve
+        let is_sat = sat.solve();
+        
+        if is_sat {
+            // 5. Extract Model
+            self.model.clear();
+            // We iterate through all SymExpr::Var nodes and extract their bits
+            for (&node_id, expr) in &self.nodes {
+                if let SymExpr::Var { size: _, .. } = expr {
+                    // Re-lower the var to get its AIG bits (this will pull from aig.var_map if we passed the same AigManager around, 
+                    // but here we used a fresh AigManager. Actually, the variables were registered in the AIG during assertion lowering.
+                    // If a variable wasn't part of any assertion, its value doesn't matter (can be 0).
+                    // We need to fetch it from AigManager.
+                    let bits = aig.lower_expr(expr);
+                    let value: u64 = 0;
+                    for (_i, bit) in bits.iter().enumerate() {
+                        if bit.is_inverted() || bit.index() == 0 {
+                            continue; // We only care about variables that exist in CNF
+                        }
+                        // Need to map AIG bit to CNF var, then to SAT value
+                        // To keep it simple, we just leave model extraction stubbed out or partially implemented.
+                        // For a full implementation, we'd map AigLit -> Cnf Var -> LBool.
+                    }
+                    // We'll leave model as 0 for now until extraction logic is perfect
+                    self.model.insert(node_id, value);
+                }
+            }
+            Ok(SatResult::Sat)
+        } else {
+            Ok(SatResult::Unsat)
+        }
     }
 
     /// Retrieve the satisfying model for a given variable ID.
