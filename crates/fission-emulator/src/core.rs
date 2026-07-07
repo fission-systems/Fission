@@ -283,8 +283,19 @@ impl Emulator {
         let mut branched = false;
         let mut branch_target = 0u64;
         let mut pcode_idx = 0;
+        let mut pcode_step_limit = 0;
 
         'pcode: loop {
+            pcode_step_limit += 1;
+            if pcode_step_limit > 500_000 {
+                tracing::warn!("Infinite P-Code loop timeout at 0x{:X}. Breaking.", self.pc);
+                self.trace.push(TraceEntry::DecodeError { 
+                    pc: self.pc, 
+                    reason: "Infinite P-Code loop timeout".to_string() 
+                });
+                break 'pcode;
+            }
+
             if pcode_idx >= pcode_ops.len() {
                 break;
             }
