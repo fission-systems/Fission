@@ -169,6 +169,14 @@ pub struct SandboxArgs {
     /// Restore snapshot from this directory before executing
     #[arg(long)]
     pub restore_snapshot: Option<PathBuf>,
+
+    /// Maximum number of instructions to execute (for infinite loop prevention)
+    #[arg(long)]
+    pub max_inst: Option<u64>,
+
+    /// Mock standard input string to feed into console reads
+    #[arg(long)]
+    pub stdin_mock: Option<String>,
 }
 
 // ── AI subcommand types ───────────────────────────────────────────────────────

@@ -70,10 +70,31 @@ impl OsEnvironment for LinuxEnv {
             "read" => {
                 let fd = emu.read_arg(0)?;
                 let buf = emu.read_arg(1)?;
-                let count = emu.read_arg(2)?;
-                tracing::info!("read({}, 0x{:X}, {})", fd, buf, count);
-                // Dummy read, just return 0 (EOF) or simulate
-                emu.write_return_val(0)?;
+                let count = emu.read_arg(2)? as usize;
+                
+                if fd == 0 {
+                    // stdin
+                    let mut data = vec![0u8; count];
+                    let mut bytes_read = 0;
+                    if let Some(ref mut mock_buf) = emu.stdin_buffer {
+                        let to_read = std::cmp::min(count, mock_buf.len());
+                        data[..to_read].copy_from_slice(&mock_buf[..to_read]);
+                        mock_buf.drain(..to_read);
+                        bytes_read = to_read;
+                    } else {
+                        use std::io::Read;
+                        if let Ok(n) = std::io::stdin().read(&mut data) {
+                            bytes_read = n;
+                        }
+                    }
+                    if bytes_read > 0 {
+                        emu.state.write_space(3, buf, &data[..bytes_read])?;
+                    }
+                    emu.write_return_val(bytes_read as u64)?;
+                } else {
+                    tracing::info!("read({}, 0x{:X}, {})", fd, buf, count);
+                    emu.write_return_val(0)?;
+                }
             }
             "write" => {
                 let fd = emu.read_arg(0)?;

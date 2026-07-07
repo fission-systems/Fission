@@ -207,7 +207,14 @@ fn run_sandbox(args: crate::cli::args::SandboxArgs) -> Result<()> {
     };
     
     // Create Emulator and Run
-    let mut emu = fission_emulator::core::Emulator::new(state, binary, sleigh, arch, os)?;
+    let mut emu = fission_emulator::core::Emulator::new(state, binary, sleigh, arch, os)?
+        .with_max_inst(args.max_inst)
+        .with_stdin_mock(args.stdin_mock);
+
+    // Setup Ctrl+C handler
+    ctrlc::set_handler(move || {
+        fission_emulator::core::IS_INTERRUPTED.store(true, std::sync::atomic::Ordering::Relaxed);
+    }).unwrap_or_else(|e| tracing::warn!("Failed to set Ctrl+C handler: {}", e));
     
     if let Some(trigger) = args.snapshot_at {
         tracing::info!("Configured snapshot trigger at 0x{:X}", trigger);

@@ -9,6 +9,7 @@ use std::sync::Arc;
 use std::collections::BTreeMap;
 use crate::snapshot::EmulatorSnapshot;
 use crate::trace::{ExecutionTrace, TraceEntry};
+pub static IS_INTERRUPTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 /// Arch-agnostic emulator.
 ///
@@ -35,6 +36,13 @@ pub struct Emulator {
 
     /// USEROP id → name table extracted from the Sleigh compiled frontend.
     pub userop_map: BTreeMap<u32, String>,
+
+    /// Count of executed instructions.
+    pub inst_count: u64,
+    /// Optional limit on the maximum number of instructions to execute.
+    pub max_inst: Option<u64>,
+    /// Optional buffer to mock standard input (`stdin`).
+    pub stdin_buffer: Option<Vec<u8>>,
 }
 
 impl Emulator {
@@ -86,6 +94,9 @@ impl Emulator {
             snapshot_triggers: Vec::new(),
             trace: ExecutionTrace::disabled(),
             userop_map,
+            inst_count: 0,
+            max_inst: None,
+            stdin_buffer: None,
         };
 
         // Initialize stack pointer using arch-agnostic sp_reg name.
@@ -93,6 +104,16 @@ impl Emulator {
         let _ = emu.write_register_u64(emu.arch.sp_reg, sp_init);
 
         Ok(emu)
+    }
+
+    pub fn with_max_inst(mut self, max: Option<u64>) -> Self {
+        self.max_inst = max;
+        self
+    }
+
+    pub fn with_stdin_mock(mut self, mock: Option<String>) -> Self {
+        self.stdin_buffer = mock.map(|s| s.into_bytes());
+        self
     }
 
     // ── Register I/O ─────────────────────────────────────────────────────────
@@ -363,9 +384,22 @@ impl Emulator {
     pub fn run(&mut self) -> Result<()> {
         tracing::info!("Sandbox execution started at PC=0x{:X}", self.pc);
         loop {
+            if IS_INTERRUPTED.load(std::sync::atomic::Ordering::Relaxed) {
+                tracing::warn!("Execution interrupted by Ctrl+C (SIGINT). Halting safely.");
+                break;
+            }
+
+            if let Some(limit) = self.max_inst {
+                if self.inst_count >= limit {
+                    tracing::warn!("Instruction limit ({}) reached. Halting.", limit);
+                    break;
+                }
+            }
+
             if !self.run_instruction()? {
                 break;
             }
+            self.inst_count += 1;
         }
         tracing::info!("Sandbox execution finished");
         Ok(())

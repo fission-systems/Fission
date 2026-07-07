@@ -69,6 +69,8 @@ impl OsEnvironment for WindowsEnv {
             "GetStdHandle"   => { emu.write_return_val(0x77777777)?; } // dummy handle
             "WriteConsoleA"  => handle_write_console_a(emu)?,
             "WriteConsoleW"  => handle_write_console_w(emu)?,
+            "ReadConsoleA"   => handle_read_console_a(emu)?,
+            "ReadConsoleW"   => handle_read_console_w(emu)?,
             "AllocConsole"   => { emu.write_return_val(1)?; }
             
             // Thread / Sync
@@ -333,5 +335,75 @@ fn handle_get_module_file_name_a(emu: &mut Emulator) -> Result<()> {
     let copied = std::cmp::min(bytes.len(), size);
     emu.state.write_space(3, buf, &bytes[..copied])?;
     emu.write_return_val((copied - 1) as u64)?;
+    Ok(())
+}
+
+fn handle_read_console_a(emu: &mut Emulator) -> Result<()> {
+    let _h_console = emu.read_arg(0)?;
+    let buf        = emu.read_arg(1)?;
+    let chars_to_read = emu.read_arg(2)? as usize;
+    let p_chars_read  = emu.read_arg(3)?;
+    let _p_input_ctrl = emu.read_arg(4)?;
+
+    let mut data = vec![0u8; chars_to_read];
+    let mut bytes_read = 0;
+    if let Some(ref mut mock_buf) = emu.stdin_buffer {
+        let to_read = std::cmp::min(chars_to_read, mock_buf.len());
+        data[..to_read].copy_from_slice(&mock_buf[..to_read]);
+        mock_buf.drain(..to_read);
+        bytes_read = to_read;
+    } else {
+        use std::io::Read;
+        if let Ok(n) = std::io::stdin().read(&mut data) {
+            bytes_read = n;
+        }
+    }
+    
+    if bytes_read > 0 {
+        emu.state.write_space(3, buf, &data[..bytes_read])?;
+    }
+    if p_chars_read != 0 {
+        emu.state.write_space(3, p_chars_read, &(bytes_read as u32).to_le_bytes())?;
+    }
+    
+    emu.write_return_val(1)?; // non-zero on success
+    Ok(())
+}
+
+fn handle_read_console_w(emu: &mut Emulator) -> Result<()> {
+    let _h_console = emu.read_arg(0)?;
+    let buf        = emu.read_arg(1)?;
+    let chars_to_read = emu.read_arg(2)? as usize;
+    let p_chars_read  = emu.read_arg(3)?;
+    let _p_input_ctrl = emu.read_arg(4)?;
+
+    let mut data = vec![0u8; chars_to_read];
+    let mut chars_read = 0;
+    if let Some(ref mut mock_buf) = emu.stdin_buffer {
+        let to_read = std::cmp::min(chars_to_read, mock_buf.len());
+        data[..to_read].copy_from_slice(&mock_buf[..to_read]);
+        mock_buf.drain(..to_read);
+        chars_read = to_read;
+    } else {
+        use std::io::Read;
+        if let Ok(n) = std::io::stdin().read(&mut data) {
+            chars_read = n; // Note: for W, ideally read UTF-16, but reading bytes as ASCII usually works for crackmes
+        }
+    }
+    
+    if chars_read > 0 {
+        // Expand ASCII to UTF-16
+        let mut wdata = Vec::with_capacity(chars_read * 2);
+        for &b in &data[..chars_read] {
+            wdata.push(b);
+            wdata.push(0);
+        }
+        emu.state.write_space(3, buf, &wdata)?;
+    }
+    if p_chars_read != 0 {
+        emu.state.write_space(3, p_chars_read, &(chars_read as u32).to_le_bytes())?;
+    }
+    
+    emu.write_return_val(1)?;
     Ok(())
 }
