@@ -442,6 +442,11 @@ fn handle_read_console_a(emu: &mut Emulator) -> Result<()> {
     
     if bytes_read > 0 {
         emu.state.write_space(3, buf, &data[..bytes_read])?;
+        // Taint stdin bytes for symbolic execution
+        for i in 0..bytes_read {
+            let node = emu.solver.register_var(format!("stdin_console_{}", buf+i as u64), 1);
+            emu.state.set_shadow_memory(3, buf + i as u64, node);
+        }
     }
     if p_chars_read != 0 {
         emu.state.write_space(3, p_chars_read, &(bytes_read as u32).to_le_bytes())?;

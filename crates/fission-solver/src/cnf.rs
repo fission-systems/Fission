@@ -81,10 +81,8 @@ impl CnfBuilder {
     pub fn assert_lit(&mut self, lit: AigLit) {
         if lit == AigLit::TRUE { return; }
         if lit == AigLit::FALSE {
-            tracing::warn!("Asserted FALSE literal. Trivially UNSAT.");
-            // We can encode a trivial contradiction
-            self.clauses.push(Clause(vec![Lit(1)]));
-            self.clauses.push(Clause(vec![Lit(-1)]));
+            // Trivially UNSAT: add an empty clause (∅ is always false)
+            self.clauses.push(Clause(vec![]));
             return;
         }
         let cnf_lit = self.get_lit(lit);

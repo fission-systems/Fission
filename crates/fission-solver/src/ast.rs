@@ -62,6 +62,18 @@ impl SymExpr {
         }
     }
 
+    pub fn new_sub(a: SymExpr, b: SymExpr) -> Self {
+        match (&a, &b) {
+            (Self::Const { val: v1, size }, Self::Const { val: v2, .. }) => {
+                let mask = if *size == 64 { u64::MAX } else { (1 << size) - 1 };
+                Self::Const { val: (v1.wrapping_sub(*v2)) & mask, size: *size }
+            },
+            (_, Self::Const { val: 0, .. }) => a,
+            (a_expr, b_expr) if a_expr == b_expr => Self::Const { val: 0, size: a.get_size() },
+            _ => Self::Sub(Box::new(a), Box::new(b)),
+        }
+    }
+
     pub fn new_and(a: SymExpr, b: SymExpr) -> Self {
         match (&a, &b) {
             (Self::Const { val: v1, size }, Self::Const { val: v2, .. }) => Self::Const { val: v1 & v2, size: *size },
@@ -79,6 +91,36 @@ impl SymExpr {
             (_, Self::Const { val: 0, .. }) => a,
             (a, b) if a == b => Self::Const { val: 0, size: a.get_size() },
             _ => Self::Xor(Box::new(a), Box::new(b)),
+        }
+    }
+
+    pub fn new_not(a: SymExpr) -> Self {
+        match &a {
+            Self::Const { val, size } => {
+                let mask = if *size == 64 { u64::MAX } else { (1 << size) - 1 };
+                Self::Const { val: (!val) & mask, size: *size }
+            },
+            _ => {
+                let size = a.get_size();
+                let mask = if size == 64 { u64::MAX } else { (1 << size) - 1 };
+                Self::new_xor(a, Self::Const { val: mask, size })
+            }
+        }
+    }
+
+    pub fn new_eq(a: SymExpr, b: SymExpr) -> Self {
+        match (&a, &b) {
+            (Self::Const { val: v1, .. }, Self::Const { val: v2, .. }) => Self::Const { val: if v1 == v2 { 1 } else { 0 }, size: 1 },
+            (a_expr, b_expr) if a_expr == b_expr => Self::Const { val: 1, size: 1 },
+            _ => Self::Eq(Box::new(a), Box::new(b)),
+        }
+    }
+
+    pub fn new_neq(a: SymExpr, b: SymExpr) -> Self {
+        match (&a, &b) {
+            (Self::Const { val: v1, .. }, Self::Const { val: v2, .. }) => Self::Const { val: if v1 != v2 { 1 } else { 0 }, size: 1 },
+            (a_expr, b_expr) if a_expr == b_expr => Self::Const { val: 0, size: 1 },
+            _ => Self::Neq(Box::new(a), Box::new(b)),
         }
     }
 
