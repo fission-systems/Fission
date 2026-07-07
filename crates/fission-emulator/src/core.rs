@@ -1,11 +1,12 @@
 use crate::arch::ArchInfo;
 use crate::os::env::{HleResult, OsEnvironment};
 use crate::pcode::state::MachineState;
-use crate::pcode::eval::{Evaluator, StepResult};
+use crate::pcode::eval::Evaluator;
 use fission_loader::loader::LoadedBinary;
 use fission_sleigh::runtime::RuntimeSleighFrontend;
 use anyhow::{Result, Context};
 use std::sync::Arc;
+use crate::snapshot::EmulatorSnapshot;
 
 /// Arch-agnostic emulator.
 ///
@@ -23,6 +24,9 @@ pub struct Emulator {
     pub arch: ArchInfo,
     /// OS execution environment: import patching, HLE dispatch, …
     pub os: Box<dyn OsEnvironment>,
+    
+    pub snapshots: Vec<EmulatorSnapshot>,
+    pub snapshot_triggers: Vec<u64>,
 }
 
 impl Emulator {
@@ -57,6 +61,8 @@ impl Emulator {
             register_map,
             arch,
             os,
+            snapshots: Vec::new(),
+            snapshot_triggers: Vec::new(),
         };
 
         // Initialize stack pointer using arch-agnostic sp_reg name.
@@ -152,6 +158,13 @@ impl Emulator {
     // ── Execution ─────────────────────────────────────────────────────────────
 
     pub fn run_instruction(&mut self) -> Result<bool> {
+        if self.snapshot_triggers.contains(&self.pc) {
+            tracing::info!("Triggering snapshot at PC=0x{:X}", self.pc);
+            let snapshot = EmulatorSnapshot::capture(self, self.pc);
+            self.snapshots.push(snapshot);
+            self.snapshot_triggers.retain(|&addr| addr != self.pc);
+        }
+
         tracing::debug!("Executing PC=0x{:X}", self.pc);
 
         // Fetch up to 16 bytes from RAM (Space 3).
@@ -178,12 +191,20 @@ impl Emulator {
         let mut branched = false;
         let mut branch_target = 0u64;
         let mut evaluator = Evaluator::new(&mut self.state);
-        for op in pcode_ops {
+        let mut pcode_idx = 0;
+        
+        while pcode_idx < pcode_ops.len() {
+            let op = &pcode_ops[pcode_idx];
             tracing::debug!("    P-Code: {:?}", op.opcode);
-            match evaluator.step(&op)? {
-                StepResult::Next         => {}
-                StepResult::Branch(tgt)  => {
-                    branched      = true;
+            match evaluator.step(op)? {
+                crate::pcode::eval::StepResult::Next => {
+                    pcode_idx += 1;
+                }
+                crate::pcode::eval::StepResult::BranchRel(rel_idx) => {
+                    pcode_idx = rel_idx;
+                }
+                crate::pcode::eval::StepResult::Branch(tgt) => {
+                    branched = true;
                     branch_target = tgt;
                     break;
                 }

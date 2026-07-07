@@ -1,10 +1,11 @@
-use anyhow::{Result, bail};
+use anyhow::Result;
 use fission_pcode::ir::{PcodeOp, PcodeOpcode, Varnode};
 use crate::pcode::state::MachineState;
 
 pub enum StepResult {
     Next,
     Branch(u64),
+    BranchRel(usize),
 }
 
 pub struct Evaluator<'a> {
@@ -16,363 +17,576 @@ impl<'a> Evaluator<'a> {
         Self { state }
     }
 
+    // ── Varnode I/O ───────────────────────────────────────────────────────────
+
     fn read_varnode_u64(&mut self, vn: &Varnode) -> Result<u64> {
         if vn.is_constant {
             Ok(vn.constant_val as u64)
         } else {
             let data = self.state.read_space(vn.space_id, vn.offset, vn.size as usize)?;
-            let mut val = 0u64;
-            for (i, &b) in data.iter().enumerate() {
-                val |= (b as u64) << (i * 8);
-            }
-            Ok(val)
+            Ok(le_bytes_to_u64(&data))
         }
     }
 
     fn write_varnode_u64(&mut self, vn: &Varnode, val: u64) -> Result<()> {
-        let val_bytes = val.to_le_bytes();
-        self.state.write_space(vn.space_id, vn.offset, &val_bytes[..vn.size as usize])
+        let bytes = val.to_le_bytes();
+        self.state.write_space(vn.space_id, vn.offset, &bytes[..vn.size as usize])
     }
+
+    /// Read a float value from a varnode. Returns (bits, size_bytes).
+    fn read_varnode_f64(&mut self, vn: &Varnode) -> Result<f64> {
+        if vn.is_constant {
+            // Interpret constant bits as IEEE-754
+            return Ok(f64::from_bits(vn.constant_val as u64));
+        }
+        let data = self.state.read_space(vn.space_id, vn.offset, vn.size as usize)?;
+        Ok(match vn.size {
+            4 => f32::from_bits(u32::from_le_bytes(data[..4].try_into().unwrap())) as f64,
+            8 => f64::from_bits(u64::from_le_bytes(data[..8].try_into().unwrap())),
+            10 => {
+                // x87 80-bit extended precision — approximate via f64
+                let frac = u64::from_le_bytes(data[..8].try_into().unwrap());
+                let exp_sign = u16::from_le_bytes(data[8..10].try_into().unwrap());
+                let sign = (exp_sign >> 15) as u64;
+                let exp = (exp_sign & 0x7FFF) as i32 - 16383;
+                let mantissa = frac as f64 / (1u64 << 63) as f64;
+                let val = mantissa * (2.0f64).powi(exp);
+                if sign != 0 { -val } else { val }
+            }
+            _ => {
+                tracing::warn!("read_varnode_f64: unsupported float size {}", vn.size);
+                0.0
+            }
+        })
+    }
+
+    fn write_varnode_f64(&mut self, vn: &Varnode, val: f64) -> Result<()> {
+        match vn.size {
+            4 => {
+                let bits = (val as f32).to_bits().to_le_bytes();
+                self.state.write_space(vn.space_id, vn.offset, &bits)
+            }
+            8 => {
+                let bits = val.to_bits().to_le_bytes();
+                self.state.write_space(vn.space_id, vn.offset, &bits)
+            }
+            10 => {
+                // x87 80-bit — store approximate representation
+                let bits = val.to_bits();
+                let mut buf = [0u8; 10];
+                buf[..8].copy_from_slice(&bits.to_le_bytes());
+                self.state.write_space(vn.space_id, vn.offset, &buf)
+            }
+            _ => {
+                tracing::warn!("write_varnode_f64: unsupported float size {}", vn.size);
+                Ok(())
+            }
+        }
+    }
+
+    // ── Main dispatch ─────────────────────────────────────────────────────────
 
     /// Evaluates a single P-Code operation against the current machine state.
     pub fn step(&mut self, op: &PcodeOp) -> Result<StepResult> {
         match op.opcode {
+
+            // ── Memory ───────────────────────────────────────────────────────
+
             PcodeOpcode::Copy => {
                 let val = self.read_varnode_u64(&op.inputs[0])?;
-                let output = op.output.as_ref().expect("COPY must have an output");
-                tracing::debug!("      COPY Src(space={}, offset=0x{:X}, size={}, is_const={}) -> Dest(space={}, offset=0x{:X}, size={}) Val=0x{:X}", 
+                let out = op.output.as_ref().expect("COPY must have output");
+                tracing::debug!("      COPY Src(space={}, off=0x{:X}, sz={}, const={}) -> Dest(space={}, off=0x{:X}) = 0x{:X}",
                     op.inputs[0].space_id, op.inputs[0].offset, op.inputs[0].size, op.inputs[0].is_constant,
-                    output.space_id, output.offset, output.size, val);
-                self.write_varnode_u64(output, val)?;
+                    out.space_id, out.offset, val);
+                self.write_varnode_u64(out, val)?;
             }
-            PcodeOpcode::Store => {
-                let space_id_to_store = op.inputs[0].constant_val as u64;
-                let dest_addr = self.read_varnode_u64(&op.inputs[1])?;
-                let val = self.read_varnode_u64(&op.inputs[2])?;
-                let val_bytes = val.to_le_bytes();
-                self.state.write_space(space_id_to_store, dest_addr, &val_bytes[..op.inputs[2].size as usize])?;
-            }
+
             PcodeOpcode::Load => {
-                let space_id_to_load = op.inputs[0].constant_val as u64;
-                let src_addr = self.read_varnode_u64(&op.inputs[1])?;
-                let output = op.output.as_ref().expect("LOAD must have an output");
-                let val_data = self.state.read_space(space_id_to_load, src_addr, output.size as usize)?;
-                let mut val = 0u64;
-                for (i, &b) in val_data.iter().enumerate() {
-                    val |= (b as u64) << (i * 8);
-                }
-                tracing::debug!("      LOAD Space: {} Addr: 0x{:X} -> Val: 0x{:X}", space_id_to_load, src_addr, val);
-                self.state.write_space(output.space_id, output.offset, &val_data)?;
+                let space_id = op.inputs[0].constant_val as u64;
+                let addr     = self.read_varnode_u64(&op.inputs[1])?;
+                let out      = op.output.as_ref().expect("LOAD must have output");
+                let raw      = self.state.read_space(space_id, addr, out.size as usize)?;
+                let val      = le_bytes_to_u64(&raw);
+                tracing::debug!("      LOAD space={} addr=0x{:X} -> 0x{:X}", space_id, addr, val);
+                self.state.write_space(out.space_id, out.offset, &raw)?;
             }
+
+            PcodeOpcode::Store => {
+                let space_id = op.inputs[0].constant_val as u64;
+                let addr     = self.read_varnode_u64(&op.inputs[1])?;
+                let val      = self.read_varnode_u64(&op.inputs[2])?;
+                let bytes    = val.to_le_bytes();
+                self.state.write_space(space_id, addr, &bytes[..op.inputs[2].size as usize])?;
+            }
+
+            // ── Integer arithmetic ────────────────────────────────────────────
+
             PcodeOpcode::IntAdd => {
-                let val1 = self.read_varnode_u64(&op.inputs[0])?;
-                let val2 = self.read_varnode_u64(&op.inputs[1])?;
-                let output = op.output.as_ref().expect("INT_ADD must have output");
-                // Wrapping addition and masking according to output size
-                let sum = val1.wrapping_add(val2);
-                self.write_varnode_u64(output, sum)?;
+                let (a, b, out) = self.int_binary(&op)?;
+                self.write_varnode_u64(out, a.wrapping_add(b))?;
             }
             PcodeOpcode::IntSub => {
-                let val1 = self.read_varnode_u64(&op.inputs[0])?;
-                let val2 = self.read_varnode_u64(&op.inputs[1])?;
-                let output = op.output.as_ref().expect("INT_SUB must have output");
-                let diff = val1.wrapping_sub(val2);
-                self.write_varnode_u64(output, diff)?;
-            }
-            PcodeOpcode::IntAnd => {
-                let val1 = self.read_varnode_u64(&op.inputs[0])?;
-                let val2 = self.read_varnode_u64(&op.inputs[1])?;
-                let output = op.output.as_ref().expect("INT_AND must have output");
-                self.write_varnode_u64(output, val1 & val2)?;
-            }
-            PcodeOpcode::IntOr => {
-                let val1 = self.read_varnode_u64(&op.inputs[0])?;
-                let val2 = self.read_varnode_u64(&op.inputs[1])?;
-                let output = op.output.as_ref().expect("INT_OR must have output");
-                self.write_varnode_u64(output, val1 | val2)?;
-            }
-            PcodeOpcode::IntXor => {
-                let val1 = self.read_varnode_u64(&op.inputs[0])?;
-                let val2 = self.read_varnode_u64(&op.inputs[1])?;
-                let output = op.output.as_ref().expect("INT_XOR must have output");
-                self.write_varnode_u64(output, val1 ^ val2)?;
-            }
-            PcodeOpcode::IntLeft => {
-                let val1 = self.read_varnode_u64(&op.inputs[0])?;
-                let val2 = self.read_varnode_u64(&op.inputs[1])?;
-                let output = op.output.as_ref().expect("INT_LEFT must have output");
-                self.write_varnode_u64(output, val1 << (val2 as u32))?;
-            }
-            PcodeOpcode::IntRight => {
-                let val1 = self.read_varnode_u64(&op.inputs[0])?;
-                let val2 = self.read_varnode_u64(&op.inputs[1])?;
-                let output = op.output.as_ref().expect("INT_RIGHT must have output");
-                self.write_varnode_u64(output, val1 >> (val2 as u32))?;
+                let (a, b, out) = self.int_binary(&op)?;
+                self.write_varnode_u64(out, a.wrapping_sub(b))?;
             }
             PcodeOpcode::IntMult => {
-                let val1 = self.read_varnode_u64(&op.inputs[0])?;
-                let val2 = self.read_varnode_u64(&op.inputs[1])?;
-                let output = op.output.as_ref().expect("INT_MULT must have output");
-                self.write_varnode_u64(output, val1.wrapping_mul(val2))?;
+                let (a, b, out) = self.int_binary(&op)?;
+                self.write_varnode_u64(out, a.wrapping_mul(b))?;
             }
-            PcodeOpcode::IntEqual => {
-                let val1 = self.read_varnode_u64(&op.inputs[0])?;
-                let val2 = self.read_varnode_u64(&op.inputs[1])?;
-                let output = op.output.as_ref().expect("INT_EQUAL must have output");
-                self.write_varnode_u64(output, if val1 == val2 { 1 } else { 0 })?;
+            PcodeOpcode::IntDiv => {
+                let (a, b, out) = self.int_binary(&op)?;
+                if b == 0 { tracing::warn!("INT_DIV by zero"); self.write_varnode_u64(out, 0)?; }
+                else { self.write_varnode_u64(out, a.wrapping_div(b))?; }
             }
-            PcodeOpcode::IntNotEqual => {
-                let val1 = self.read_varnode_u64(&op.inputs[0])?;
-                let val2 = self.read_varnode_u64(&op.inputs[1])?;
-                let output = op.output.as_ref().expect("INT_NOTEQUAL must have output");
-                self.write_varnode_u64(output, if val1 != val2 { 1 } else { 0 })?;
+            PcodeOpcode::IntSDiv => {
+                let a_raw = self.read_varnode_u64(&op.inputs[0])?;
+                let b_raw = self.read_varnode_u64(&op.inputs[1])?;
+                let out   = op.output.as_ref().expect("INT_SDIV must have output");
+                let sz    = op.inputs[0].size;
+                let a = sign_extend(a_raw, sz);
+                let b = sign_extend(b_raw, sz);
+                if b == 0 { tracing::warn!("INT_SDIV by zero"); self.write_varnode_u64(out, 0)?; }
+                else { self.write_varnode_u64(out, a.wrapping_div(b) as u64)?; }
             }
+            PcodeOpcode::IntRem => {
+                let (a, b, out) = self.int_binary(&op)?;
+                if b == 0 { tracing::warn!("INT_REM by zero"); self.write_varnode_u64(out, 0)?; }
+                else { self.write_varnode_u64(out, a.wrapping_rem(b))?; }
+            }
+            PcodeOpcode::IntSRem => {
+                let a_raw = self.read_varnode_u64(&op.inputs[0])?;
+                let b_raw = self.read_varnode_u64(&op.inputs[1])?;
+                let out   = op.output.as_ref().expect("INT_SREM must have output");
+                let sz    = op.inputs[0].size;
+                let a = sign_extend(a_raw, sz);
+                let b = sign_extend(b_raw, sz);
+                if b == 0 { tracing::warn!("INT_SREM by zero"); self.write_varnode_u64(out, 0)?; }
+                else { self.write_varnode_u64(out, a.wrapping_rem(b) as u64)?; }
+            }
+
+            // ── Bitwise ───────────────────────────────────────────────────────
+
+            PcodeOpcode::IntAnd  => { let (a, b, o) = self.int_binary(&op)?; self.write_varnode_u64(o, a & b)?; }
+            PcodeOpcode::IntOr   => { let (a, b, o) = self.int_binary(&op)?; self.write_varnode_u64(o, a | b)?; }
+            PcodeOpcode::IntXor  => { let (a, b, o) = self.int_binary(&op)?; self.write_varnode_u64(o, a ^ b)?; }
+            PcodeOpcode::IntLeft => {
+                let (a, b, o) = self.int_binary(&op)?;
+                let shift = (b & 0x7F) as u32;
+                self.write_varnode_u64(o, if shift >= 64 { 0 } else { a << shift })?;
+            }
+            PcodeOpcode::IntRight => {
+                let (a, b, o) = self.int_binary(&op)?;
+                let shift = (b & 0x7F) as u32;
+                self.write_varnode_u64(o, if shift >= 64 { 0 } else { a >> shift })?;
+            }
+            PcodeOpcode::IntSRight => {
+                let a_raw = self.read_varnode_u64(&op.inputs[0])?;
+                let b_raw = self.read_varnode_u64(&op.inputs[1])?;
+                let out   = op.output.as_ref().expect("INT_SRIGHT must have output");
+                let sz    = op.inputs[0].size;
+                let a     = sign_extend(a_raw, sz);
+                let shift = (b_raw & 0x7F) as u32;
+                let res   = if shift >= 64 { if a < 0 { -1i64 } else { 0i64 } } else { a >> shift };
+                self.write_varnode_u64(out, res as u64)?;
+            }
+            PcodeOpcode::IntNegate => {
+                let val = self.read_varnode_u64(&op.inputs[0])?;
+                let out = op.output.as_ref().expect("INT_NEGATE must have output");
+                self.write_varnode_u64(out, !val)?;
+            }
+            PcodeOpcode::Int2Comp => {
+                let val = self.read_varnode_u64(&op.inputs[0])?;
+                let out = op.output.as_ref().expect("INT_2COMP must have output");
+                self.write_varnode_u64(out, (!val).wrapping_add(1))?;
+            }
+
+            // ── Integer comparison ────────────────────────────────────────────
+
+            PcodeOpcode::IntEqual    => { let (a, b, o) = self.int_binary(&op)?; self.write_varnode_u64(o, bool_u64(a == b))?; }
+            PcodeOpcode::IntNotEqual => { let (a, b, o) = self.int_binary(&op)?; self.write_varnode_u64(o, bool_u64(a != b))?; }
+            PcodeOpcode::IntLess     => { let (a, b, o) = self.int_binary(&op)?; self.write_varnode_u64(o, bool_u64(a < b))?; }
+            PcodeOpcode::IntLessEqual=> { let (a, b, o) = self.int_binary(&op)?; self.write_varnode_u64(o, bool_u64(a <= b))?; }
+            PcodeOpcode::IntSLess    => {
+                let a = sign_extend(self.read_varnode_u64(&op.inputs[0])?, op.inputs[0].size);
+                let b = sign_extend(self.read_varnode_u64(&op.inputs[1])?, op.inputs[1].size);
+                let o = op.output.as_ref().expect("INT_SLESS must have output");
+                self.write_varnode_u64(o, bool_u64(a < b))?;
+            }
+            PcodeOpcode::IntSLessEqual => {
+                let a = sign_extend(self.read_varnode_u64(&op.inputs[0])?, op.inputs[0].size);
+                let b = sign_extend(self.read_varnode_u64(&op.inputs[1])?, op.inputs[1].size);
+                let o = op.output.as_ref().expect("INT_SLESSEQUAL must have output");
+                self.write_varnode_u64(o, bool_u64(a <= b))?;
+            }
+
+            // ── Carry / borrow flags (u128 widening for correctness) ──────────
+
+            PcodeOpcode::IntCarry => {
+                // Unsigned addition carry: (a + b) overflows the N-bit range
+                let a   = self.read_varnode_u64(&op.inputs[0])? as u128;
+                let b   = self.read_varnode_u64(&op.inputs[1])? as u128;
+                let out = op.output.as_ref().expect("INT_CARRY must have output");
+                let sz  = op.inputs[0].size as u32;
+                let max = size_max_u128(sz);
+                let carry = (a + b) > max;
+                self.write_varnode_u64(out, bool_u64(carry))?;
+            }
+            PcodeOpcode::IntSCarry => {
+                // Signed addition overflow: (a + b) overflows N-bit signed range
+                let a_raw = self.read_varnode_u64(&op.inputs[0])?;
+                let b_raw = self.read_varnode_u64(&op.inputs[1])?;
+                let out   = op.output.as_ref().expect("INT_SCARRY must have output");
+                let sz    = op.inputs[0].size;
+                let a = sign_extend(a_raw, sz) as i128;
+                let b = sign_extend(b_raw, sz) as i128;
+                let sum = a + b;
+                let bits = sz * 8;
+                let min = -(1i128 << (bits - 1));
+                let max =  (1i128 << (bits - 1)) - 1;
+                let overflow = sum < min || sum > max;
+                self.write_varnode_u64(out, bool_u64(overflow))?;
+            }
+            PcodeOpcode::IntSBorrow => {
+                // Signed subtraction borrow/overflow: (a - b) overflows N-bit signed range
+                let a_raw = self.read_varnode_u64(&op.inputs[0])?;
+                let b_raw = self.read_varnode_u64(&op.inputs[1])?;
+                let out   = op.output.as_ref().expect("INT_SBORROW must have output");
+                let sz    = op.inputs[0].size;
+                let a = sign_extend(a_raw, sz) as i128;
+                let b = sign_extend(b_raw, sz) as i128;
+                let diff = a - b;
+                let bits = sz * 8;
+                let min = -(1i128 << (bits - 1));
+                let max =  (1i128 << (bits - 1)) - 1;
+                let borrow = diff < min || diff > max;
+                self.write_varnode_u64(out, bool_u64(borrow))?;
+            }
+
+            // ── Extension / truncation ────────────────────────────────────────
+
+            PcodeOpcode::IntZExt => {
+                let val = self.read_varnode_u64(&op.inputs[0])?; // Already zero-padded
+                let out = op.output.as_ref().expect("INT_ZEXT must have output");
+                self.write_varnode_u64(out, val)?;
+            }
+            PcodeOpcode::IntSExt => {
+                let val_raw = self.read_varnode_u64(&op.inputs[0])?;
+                let out     = op.output.as_ref().expect("INT_SEXT must have output");
+                let sval    = sign_extend(val_raw, op.inputs[0].size);
+                self.write_varnode_u64(out, sval as u64)?;
+            }
+            PcodeOpcode::SubPiece => {
+                let val   = self.read_varnode_u64(&op.inputs[0])?;
+                let trunc = self.read_varnode_u64(&op.inputs[1])?; // byte offset
+                let out   = op.output.as_ref().expect("SUBPIECE must have output");
+                let shift = trunc.saturating_mul(8);
+                let res   = if shift >= 64 { 0 } else { val >> shift };
+                self.write_varnode_u64(out, res)?;
+            }
+            PcodeOpcode::Piece => {
+                let hi      = self.read_varnode_u64(&op.inputs[0])?;
+                let lo      = self.read_varnode_u64(&op.inputs[1])?;
+                let lo_bits = (op.inputs[1].size * 8) as u64;
+                let out     = op.output.as_ref().expect("PIECE must have output");
+                let res     = (hi << lo_bits) | lo;
+                self.write_varnode_u64(out, res)?;
+            }
+            PcodeOpcode::PopCount => {
+                let val  = self.read_varnode_u64(&op.inputs[0])?;
+                let out  = op.output.as_ref().expect("POPCOUNT must have output");
+                let sz   = op.inputs[0].size;
+                let mask = size_mask_u64(sz);
+                self.write_varnode_u64(out, (val & mask).count_ones() as u64)?;
+            }
+            PcodeOpcode::LzCount => {
+                // Count leading zeros within the input bitwidth
+                let val  = self.read_varnode_u64(&op.inputs[0])?;
+                let out  = op.output.as_ref().expect("LZCOUNT must have output");
+                let bits = (op.inputs[0].size * 8) as u32;
+                let lz   = if val == 0 { bits } else {
+                    val.leading_zeros().saturating_sub(64 - bits)
+                };
+                self.write_varnode_u64(out, lz as u64)?;
+            }
+
+            // ── Boolean ───────────────────────────────────────────────────────
+
+            PcodeOpcode::BoolNegate => {
+                let v = self.read_varnode_u64(&op.inputs[0])?;
+                let o = op.output.as_ref().expect("BOOL_NEGATE must have output");
+                self.write_varnode_u64(o, bool_u64(v == 0))?;
+            }
+            PcodeOpcode::BoolAnd => {
+                let (a, b, o) = self.int_binary(&op)?;
+                self.write_varnode_u64(o, bool_u64(a != 0 && b != 0))?;
+            }
+            PcodeOpcode::BoolOr => {
+                let (a, b, o) = self.int_binary(&op)?;
+                self.write_varnode_u64(o, bool_u64(a != 0 || b != 0))?;
+            }
+            PcodeOpcode::BoolXor => {
+                let (a, b, o) = self.int_binary(&op)?;
+                self.write_varnode_u64(o, bool_u64((a != 0) ^ (b != 0)))?;
+            }
+
+            // ── Float arithmetic ──────────────────────────────────────────────
+
+            PcodeOpcode::FloatAdd => {
+                let a = self.read_varnode_f64(&op.inputs[0])?;
+                let b = self.read_varnode_f64(&op.inputs[1])?;
+                let o = op.output.as_ref().expect("FLOAT_ADD must have output");
+                self.write_varnode_f64(o, a + b)?;
+            }
+            PcodeOpcode::FloatSub => {
+                let a = self.read_varnode_f64(&op.inputs[0])?;
+                let b = self.read_varnode_f64(&op.inputs[1])?;
+                let o = op.output.as_ref().expect("FLOAT_SUB must have output");
+                self.write_varnode_f64(o, a - b)?;
+            }
+            PcodeOpcode::FloatMult => {
+                let a = self.read_varnode_f64(&op.inputs[0])?;
+                let b = self.read_varnode_f64(&op.inputs[1])?;
+                let o = op.output.as_ref().expect("FLOAT_MULT must have output");
+                self.write_varnode_f64(o, a * b)?;
+            }
+            PcodeOpcode::FloatDiv => {
+                let a = self.read_varnode_f64(&op.inputs[0])?;
+                let b = self.read_varnode_f64(&op.inputs[1])?;
+                let o = op.output.as_ref().expect("FLOAT_DIV must have output");
+                self.write_varnode_f64(o, a / b)?; // NaN/Inf handled by IEEE-754
+            }
+            PcodeOpcode::FloatNeg => {
+                let a = self.read_varnode_f64(&op.inputs[0])?;
+                let o = op.output.as_ref().expect("FLOAT_NEG must have output");
+                self.write_varnode_f64(o, -a)?;
+            }
+            PcodeOpcode::FloatAbs => {
+                let a = self.read_varnode_f64(&op.inputs[0])?;
+                let o = op.output.as_ref().expect("FLOAT_ABS must have output");
+                self.write_varnode_f64(o, a.abs())?;
+            }
+            PcodeOpcode::FloatSqrt => {
+                let a = self.read_varnode_f64(&op.inputs[0])?;
+                let o = op.output.as_ref().expect("FLOAT_SQRT must have output");
+                self.write_varnode_f64(o, a.sqrt())?;
+            }
+            PcodeOpcode::FloatCeil => {
+                let a = self.read_varnode_f64(&op.inputs[0])?;
+                let o = op.output.as_ref().expect("FLOAT_CEIL must have output");
+                self.write_varnode_f64(o, a.ceil())?;
+            }
+            PcodeOpcode::FloatFloor => {
+                let a = self.read_varnode_f64(&op.inputs[0])?;
+                let o = op.output.as_ref().expect("FLOAT_FLOOR must have output");
+                self.write_varnode_f64(o, a.floor())?;
+            }
+            PcodeOpcode::FloatRound => {
+                let a = self.read_varnode_f64(&op.inputs[0])?;
+                let o = op.output.as_ref().expect("FLOAT_ROUND must have output");
+                self.write_varnode_f64(o, a.round())?;
+            }
+
+
+            // ── Float comparison ──────────────────────────────────────────────
+
+            PcodeOpcode::FloatEqual => {
+                let a = self.read_varnode_f64(&op.inputs[0])?;
+                let b = self.read_varnode_f64(&op.inputs[1])?;
+                let o = op.output.as_ref().expect("FLOAT_EQUAL must have output");
+                self.write_varnode_u64(o, bool_u64(a == b))?;
+            }
+            PcodeOpcode::FloatNotEqual => {
+                let a = self.read_varnode_f64(&op.inputs[0])?;
+                let b = self.read_varnode_f64(&op.inputs[1])?;
+                let o = op.output.as_ref().expect("FLOAT_NOTEQUAL must have output");
+                self.write_varnode_u64(o, bool_u64(a != b))?;
+            }
+            PcodeOpcode::FloatLess => {
+                let a = self.read_varnode_f64(&op.inputs[0])?;
+                let b = self.read_varnode_f64(&op.inputs[1])?;
+                let o = op.output.as_ref().expect("FLOAT_LESS must have output");
+                self.write_varnode_u64(o, bool_u64(a < b))?;
+            }
+            PcodeOpcode::FloatLessEqual => {
+                let a = self.read_varnode_f64(&op.inputs[0])?;
+                let b = self.read_varnode_f64(&op.inputs[1])?;
+                let o = op.output.as_ref().expect("FLOAT_LESSEQUAL must have output");
+                self.write_varnode_u64(o, bool_u64(a <= b))?;
+            }
+            PcodeOpcode::FloatNan => {
+                let a = self.read_varnode_f64(&op.inputs[0])?;
+                let o = op.output.as_ref().expect("FLOAT_NAN must have output");
+                self.write_varnode_u64(o, bool_u64(a.is_nan()))?;
+            }
+
+            // ── Float ↔ Integer conversions ────────────────────────────────────
+
+            PcodeOpcode::FloatInt2Float => {
+                let val_raw = self.read_varnode_u64(&op.inputs[0])?;
+                let out     = op.output.as_ref().expect("INT2FLOAT must have output");
+                let sz      = op.inputs[0].size;
+                let ival    = sign_extend(val_raw, sz);
+                self.write_varnode_f64(out, ival as f64)?;
+            }
+            PcodeOpcode::FloatFloat2Float => {
+                // Precision conversion (e.g. f32 → f64 or vice versa)
+                let val = self.read_varnode_f64(&op.inputs[0])?;
+                let out = op.output.as_ref().expect("FLOAT2FLOAT must have output");
+                self.write_varnode_f64(out, val)?;
+            }
+            PcodeOpcode::FloatTrunc => {
+                // Float → signed integer (truncate toward zero)
+                let val = self.read_varnode_f64(&op.inputs[0])?;
+                let out = op.output.as_ref().expect("TRUNC must have output");
+                let ival = val.trunc() as i64;
+                self.write_varnode_u64(out, ival as u64)?;
+            }
+
+            // ── Control flow ──────────────────────────────────────────────────
+
             PcodeOpcode::Branch => {
-                let target = self.read_varnode_u64(&op.inputs[0])?;
-                // If it is absolute branch:
-                return Ok(StepResult::Branch(target));
+                let dest = &op.inputs[0];
+                if dest.space_id == 0 || dest.is_constant {
+                    return Ok(StepResult::BranchRel(dest.offset as usize));
+                }
+                return Ok(StepResult::Branch(dest.offset));
             }
             PcodeOpcode::CBranch => {
-                let target = self.read_varnode_u64(&op.inputs[0])?;
+                let dest = &op.inputs[0];
                 let condition = self.read_varnode_u64(&op.inputs[1])?;
                 if condition != 0 {
-                    return Ok(StepResult::Branch(target));
+                    if dest.space_id == 0 || dest.is_constant {
+                        return Ok(StepResult::BranchRel(dest.offset as usize));
+                    }
+                    return Ok(StepResult::Branch(dest.offset));
                 }
             }
             PcodeOpcode::Call => {
-                let target = self.read_varnode_u64(&op.inputs[0])?;
-                return Ok(StepResult::Branch(target)); // The loop will handle pushing RIP if it's a call
+                let dest = &op.inputs[0];
+                // Call always branches to an external address
+                return Ok(StepResult::Branch(dest.offset));
             }
             PcodeOpcode::CallInd | PcodeOpcode::BranchInd => {
                 let target = self.read_varnode_u64(&op.inputs[0])?;
                 return Ok(StepResult::Branch(target));
             }
             PcodeOpcode::Return => {
-                let target = self.read_varnode_u64(&op.inputs[0])?; // Return typically gets target from indirection or stack? Wait, usually RETURN input 0 is the target.
+                let target = self.read_varnode_u64(&op.inputs[0])?;
                 return Ok(StepResult::Branch(target));
             }
-            PcodeOpcode::IntZExt => {
-                let val1 = self.read_varnode_u64(&op.inputs[0])?; // Zero extended automatically by read_varnode_u64
-                let output = op.output.as_ref().expect("INT_ZEXT must have output");
-                self.write_varnode_u64(output, val1)?;
-            }
-            PcodeOpcode::IntSExt => {
-                let data = self.state.read_space(op.inputs[0].space_id, op.inputs[0].offset, op.inputs[0].size as usize)?;
-                let mut val = 0i64;
-                for (i, &b) in data.iter().enumerate() {
-                    val |= (b as i64) << (i * 8);
-                }
-                // Sign extend
-                let shift = 64 - (op.inputs[0].size * 8);
-                let sext_val = (val << shift) >> shift;
-                let output = op.output.as_ref().expect("INT_SEXT must have output");
-                self.write_varnode_u64(output, sext_val as u64)?;
-            }
-            PcodeOpcode::IntSDiv => {
-                let val1 = self.read_varnode_u64(&op.inputs[0])?;
-                let val2 = self.read_varnode_u64(&op.inputs[1])?;
-                let output = op.output.as_ref().expect("INT_SDIV must have output");
-                let size = op.inputs[0].size;
-                let sval1 = sign_extend(val1, size);
-                let sval2 = sign_extend(val2, size);
-                if sval2 == 0 {
-                    tracing::warn!("INT_SDIV division by zero");
-                    self.write_varnode_u64(output, 0)?;
-                } else {
-                    let res = sval1.wrapping_div(sval2);
-                    self.write_varnode_u64(output, res as u64)?;
-                }
-            }
-            PcodeOpcode::IntDiv => {
-                let val1 = self.read_varnode_u64(&op.inputs[0])?;
-                let val2 = self.read_varnode_u64(&op.inputs[1])?;
-                let output = op.output.as_ref().expect("INT_DIV must have output");
-                if val2 == 0 {
-                    tracing::warn!("INT_DIV division by zero");
-                    self.write_varnode_u64(output, 0)?;
-                } else {
-                    let res = val1.wrapping_div(val2);
-                    self.write_varnode_u64(output, res)?;
-                }
-            }
-            PcodeOpcode::IntRem => {
-                let val1 = self.read_varnode_u64(&op.inputs[0])?;
-                let val2 = self.read_varnode_u64(&op.inputs[1])?;
-                let output = op.output.as_ref().expect("INT_REM must have output");
-                if val2 == 0 {
-                    tracing::warn!("INT_REM division by zero");
-                    self.write_varnode_u64(output, 0)?;
-                } else {
-                    let res = val1.wrapping_rem(val2);
-                    self.write_varnode_u64(output, res)?;
-                }
-            }
-            PcodeOpcode::IntSRem => {
-                let val1 = self.read_varnode_u64(&op.inputs[0])?;
-                let val2 = self.read_varnode_u64(&op.inputs[1])?;
-                let output = op.output.as_ref().expect("INT_SREM must have output");
-                let size = op.inputs[0].size;
-                let sval1 = sign_extend(val1, size);
-                let sval2 = sign_extend(val2, size);
-                if sval2 == 0 {
-                    tracing::warn!("INT_SREM division by zero");
-                    self.write_varnode_u64(output, 0)?;
-                } else {
-                    let res = sval1.wrapping_rem(sval2);
-                    self.write_varnode_u64(output, res as u64)?;
-                }
-            }
-            PcodeOpcode::IntLess => {
-                let val1 = self.read_varnode_u64(&op.inputs[0])?;
-                let val2 = self.read_varnode_u64(&op.inputs[1])?;
-                let output = op.output.as_ref().expect("INT_LESS must have output");
-                self.write_varnode_u64(output, if val1 < val2 { 1 } else { 0 })?;
-            }
-            PcodeOpcode::IntSLess => {
-                let val1 = self.read_varnode_u64(&op.inputs[0])?;
-                let val2 = self.read_varnode_u64(&op.inputs[1])?;
-                let size = op.inputs[0].size;
-                let sval1 = sign_extend(val1, size);
-                let sval2 = sign_extend(val2, size);
-                let output = op.output.as_ref().expect("INT_SLESS must have output");
-                self.write_varnode_u64(output, if sval1 < sval2 { 1 } else { 0 })?;
-            }
-            PcodeOpcode::IntLessEqual => {
-                let val1 = self.read_varnode_u64(&op.inputs[0])?;
-                let val2 = self.read_varnode_u64(&op.inputs[1])?;
-                let output = op.output.as_ref().expect("INT_LESSEQUAL must have output");
-                self.write_varnode_u64(output, if val1 <= val2 { 1 } else { 0 })?;
-            }
-            PcodeOpcode::IntSLessEqual => {
-                let val1 = self.read_varnode_u64(&op.inputs[0])?;
-                let val2 = self.read_varnode_u64(&op.inputs[1])?;
-                let size = op.inputs[0].size;
-                let sval1 = sign_extend(val1, size);
-                let sval2 = sign_extend(val2, size);
-                let output = op.output.as_ref().expect("INT_SLESSEQUAL must have output");
-                self.write_varnode_u64(output, if sval1 <= sval2 { 1 } else { 0 })?;
-            }
-            PcodeOpcode::IntCarry => {
-                let val1 = self.read_varnode_u64(&op.inputs[0])?;
-                let val2 = self.read_varnode_u64(&op.inputs[1])?;
-                let output = op.output.as_ref().expect("INT_CARRY must have output");
-                // Shift down to input size to correctly calculate carry
-                let size = op.inputs[0].size;
-                let mask = if size >= 8 { u64::MAX } else { (1u64 << (size * 8)) - 1 };
-                let v1 = val1 & mask;
-                let v2 = val2 & mask;
-                let res = v1.checked_add(v2).is_none() || (v1 + v2) > mask;
-                self.write_varnode_u64(output, if res { 1 } else { 0 })?;
-            }
-            PcodeOpcode::IntSBorrow => {
-                let val1 = self.read_varnode_u64(&op.inputs[0])?;
-                let val2 = self.read_varnode_u64(&op.inputs[1])?;
-                let output = op.output.as_ref().expect("INT_SBORROW must have output");
-                let size = op.inputs[0].size;
-                let sval1 = sign_extend(val1, size);
-                let sval2 = sign_extend(val2, size);
-                let res = sval1.checked_sub(sval2).is_none();
-                self.write_varnode_u64(output, if res { 1 } else { 0 })?;
-            }
-            PcodeOpcode::IntSCarry => {
-                let val1 = self.read_varnode_u64(&op.inputs[0])?;
-                let val2 = self.read_varnode_u64(&op.inputs[1])?;
-                let output = op.output.as_ref().expect("INT_SCARRY must have output");
-                let size = op.inputs[0].size;
-                let sval1 = sign_extend(val1, size);
-                let sval2 = sign_extend(val2, size);
-                let overflow = sval1.checked_add(sval2).is_none();
-                self.write_varnode_u64(output, if overflow { 1 } else { 0 })?;
-            }
-            PcodeOpcode::PopCount => {
-                let val1 = self.read_varnode_u64(&op.inputs[0])?;
-                let output = op.output.as_ref().expect("POPCOUNT must have output");
-                let size = op.inputs[0].size;
-                let mask = if size >= 8 { u64::MAX } else { (1u64 << (size * 8)) - 1 };
-                let count = (val1 & mask).count_ones() as u64;
-                self.write_varnode_u64(output, count)?;
-            }
-            PcodeOpcode::Int2Comp => {
-                let val1 = self.read_varnode_u64(&op.inputs[0])?;
-                let output = op.output.as_ref().expect("INT_2COMP must have output");
-                let res = (!val1).wrapping_add(1);
-                self.write_varnode_u64(output, res)?;
-            }
-            PcodeOpcode::IntNegate => {
-                let val1 = self.read_varnode_u64(&op.inputs[0])?;
-                let output = op.output.as_ref().expect("INT_NEGATE must have output");
-                let res = !val1;
-                self.write_varnode_u64(output, res)?;
-            }
-            PcodeOpcode::BoolNegate => {
-                let val1 = self.read_varnode_u64(&op.inputs[0])?;
-                let output = op.output.as_ref().expect("BOOL_NEGATE must have output");
-                self.write_varnode_u64(output, if val1 == 0 { 1 } else { 0 })?;
-            }
-            PcodeOpcode::BoolAnd => {
-                let val1 = self.read_varnode_u64(&op.inputs[0])?;
-                let val2 = self.read_varnode_u64(&op.inputs[1])?;
-                let output = op.output.as_ref().expect("BOOL_AND must have output");
-                self.write_varnode_u64(output, if val1 != 0 && val2 != 0 { 1 } else { 0 })?;
-            }
-            PcodeOpcode::BoolOr => {
-                let val1 = self.read_varnode_u64(&op.inputs[0])?;
-                let val2 = self.read_varnode_u64(&op.inputs[1])?;
-                let output = op.output.as_ref().expect("BOOL_OR must have output");
-                self.write_varnode_u64(output, if val1 != 0 || val2 != 0 { 1 } else { 0 })?;
-            }
-            PcodeOpcode::BoolXor => {
-                let val1 = self.read_varnode_u64(&op.inputs[0])?;
-                let val2 = self.read_varnode_u64(&op.inputs[1])?;
-                let output = op.output.as_ref().expect("BOOL_XOR must have output");
-                let b1 = val1 != 0;
-                let b2 = val2 != 0;
-                self.write_varnode_u64(output, if b1 ^ b2 { 1 } else { 0 })?;
-            }
-            PcodeOpcode::SubPiece => {
-                let val1 = self.read_varnode_u64(&op.inputs[0])?;
-                let trunc_amount = self.read_varnode_u64(&op.inputs[1])?;
-                let output = op.output.as_ref().expect("SUBPIECE must have output");
-                let res = val1 >> (trunc_amount * 8);
-                self.write_varnode_u64(output, res)?;
-            }
-            PcodeOpcode::Piece => {
-                let val1 = self.read_varnode_u64(&op.inputs[0])?; // high part
-                let val2 = self.read_varnode_u64(&op.inputs[1])?; // low part
-                let output = op.output.as_ref().expect("PIECE must have output");
-                let low_size = op.inputs[1].size;
-                let res = (val1 << (low_size * 8)) | val2;
-                self.write_varnode_u64(output, res)?;
-            }
-            PcodeOpcode::Cast => {
-                let val1 = self.read_varnode_u64(&op.inputs[0])?;
-                let output = op.output.as_ref().expect("CAST must have output");
-                self.write_varnode_u64(output, val1)?;
-            }
+
+            // ── Pointer arithmetic ────────────────────────────────────────────
+
             PcodeOpcode::PtrAdd => {
-                let ptr = self.read_varnode_u64(&op.inputs[0])?;
-                let offset = self.read_varnode_u64(&op.inputs[1])?;
+                let ptr        = self.read_varnode_u64(&op.inputs[0])?;
+                let offset     = self.read_varnode_u64(&op.inputs[1])?;
                 let multiplier = self.read_varnode_u64(&op.inputs[2])?;
-                let output = op.output.as_ref().expect("PTRADD must have output");
-                let res = ptr.wrapping_add(offset.wrapping_mul(multiplier));
-                self.write_varnode_u64(output, res)?;
+                let out        = op.output.as_ref().expect("PTRADD must have output");
+                self.write_varnode_u64(out, ptr.wrapping_add(offset.wrapping_mul(multiplier)))?;
             }
             PcodeOpcode::PtrSub => {
-                let ptr = self.read_varnode_u64(&op.inputs[0])?;
+                let ptr    = self.read_varnode_u64(&op.inputs[0])?;
                 let offset = self.read_varnode_u64(&op.inputs[1])?;
-                let output = op.output.as_ref().expect("PTRSUB must have output");
-                let res = ptr.wrapping_add(offset);
-                self.write_varnode_u64(output, res)?;
+                let out    = op.output.as_ref().expect("PTRSUB must have output");
+                self.write_varnode_u64(out, ptr.wrapping_add(offset))?;
             }
+
+            // ── SSA / type / special ──────────────────────────────────────────
+
+            PcodeOpcode::Cast => {
+                // Type cast — semantics are bit-identical, just copy.
+                let val = self.read_varnode_u64(&op.inputs[0])?;
+                let out = op.output.as_ref().expect("CAST must have output");
+                self.write_varnode_u64(out, val)?;
+            }
+            PcodeOpcode::MultiEqual => {
+                // SSA phi node — pick the first non-zero input or the first input.
+                let val = self.read_varnode_u64(&op.inputs[0])?;
+                let out = op.output.as_ref().expect("MULTIEQUAL must have output");
+                self.write_varnode_u64(out, val)?;
+            }
+            PcodeOpcode::Indirect => {
+                // SSA indirect — if there is an output, copy input 0.
+                if let Some(out) = &op.output {
+                    let val = self.read_varnode_u64(&op.inputs[0])?;
+                    let out = out.clone();
+                    self.write_varnode_u64(&out, val)?;
+                }
+            }
+            PcodeOpcode::SegmentOp => {
+                // Segment base + offset — treat as plain add.
+                if op.inputs.len() >= 2 {
+                    let base   = self.read_varnode_u64(&op.inputs[0])?;
+                    let offset = self.read_varnode_u64(&op.inputs[1])?;
+                    if let Some(out) = &op.output {
+                        let out = out.clone();
+                        self.write_varnode_u64(&out, base.wrapping_add(offset))?;
+                    }
+                }
+            }
+            PcodeOpcode::CPoolRef => {
+                // Constant pool reference — return 0 (stub; real JVM analysis unsupported).
+                tracing::warn!("CPOOLREF not supported; returning 0");
+                if let Some(out) = &op.output {
+                    let out = out.clone();
+                    self.write_varnode_u64(&out, 0)?;
+                }
+            }
+            PcodeOpcode::New => {
+                // Heap allocation op (JVM/CLR) — return a fixed dummy address.
+                tracing::warn!("NEW not supported; returning dummy heap 0x60000000");
+                if let Some(out) = &op.output {
+                    let out = out.clone();
+                    self.write_varnode_u64(&out, 0x60000000)?;
+                }
+            }
+            // UserOp and Nop are not present in this PcodeOpcode enum;
+            // they are handled by the catch-all below.
+
             _ => {
-                tracing::warn!("Unimplemented opcode: {:?}", op.opcode);
+                tracing::warn!("Unimplemented P-Code opcode: {:?}", op.opcode);
             }
         }
         Ok(StepResult::Next)
     }
+
+    // ── Helpers ───────────────────────────────────────────────────────────────
+
+    /// Read two binary inputs + output varnode reference.
+    fn int_binary<'b>(&mut self, op: &'b PcodeOp) -> Result<(u64, u64, &'b Varnode)> {
+        let a   = self.read_varnode_u64(&op.inputs[0])?;
+        let b   = self.read_varnode_u64(&op.inputs[1])?;
+        let out = op.output.as_ref().expect("Binary op must have output");
+        Ok((a, b, out))
+    }
 }
+
+// ── Free functions ────────────────────────────────────────────────────────────
 
 fn sign_extend(val: u64, size: u32) -> i64 {
     let shift = 64 - (size * 8);
     ((val as i64) << shift) >> shift
+}
+
+fn bool_u64(b: bool) -> u64 {
+    if b { 1 } else { 0 }
+}
+
+/// Returns the inclusive maximum unsigned value for `size` bytes.
+fn size_max_u128(size: u32) -> u128 {
+    if size >= 16 { u128::MAX }
+    else { (1u128 << (size * 8)) - 1 }
+}
+
+/// Returns a u64 mask covering `size` bytes.
+fn size_mask_u64(size: u32) -> u64 {
+    if size >= 8 { u64::MAX } else { (1u64 << (size * 8)) - 1 }
+}
+
+fn le_bytes_to_u64(bytes: &[u8]) -> u64 {
+    let mut v = 0u64;
+    for (i, &b) in bytes.iter().enumerate() {
+        v |= (b as u64) << (i * 8);
+    }
+    v
 }

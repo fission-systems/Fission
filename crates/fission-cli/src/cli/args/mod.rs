@@ -161,6 +161,14 @@ pub struct SandboxArgs {
     /// Path to binary to run in sandbox
     #[arg(value_name = "BINARY")]
     pub binary: PathBuf,
+
+    /// Take a snapshot when execution reaches this address
+    #[arg(long, value_parser = parse_hex_address)]
+    pub snapshot_at: Option<u64>,
+
+    /// Restore snapshot from this directory before executing
+    #[arg(long)]
+    pub restore_snapshot: Option<PathBuf>,
 }
 
 // ── AI subcommand types ───────────────────────────────────────────────────────

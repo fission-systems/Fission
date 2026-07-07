@@ -201,13 +201,24 @@ fn run_sandbox(args: crate::cli::args::SandboxArgs) -> Result<()> {
     
     // Choose OS environment based on binary format
     let os: Box<dyn fission_emulator::OsEnvironment> = match binary.format.as_str() {
-        "PE"  => Box::new(fission_emulator::WindowsEnv),
+        "PE"  => Box::new(fission_emulator::WindowsEnv::new()),
         "ELF" => Box::new(fission_emulator::LinuxEnv),
         fmt   => anyhow::bail!("Unsupported binary format for sandbox: {}", fmt),
     };
     
     // Create Emulator and Run
     let mut emu = fission_emulator::core::Emulator::new(state, binary, sleigh, arch, os)?;
+    
+    if let Some(trigger) = args.snapshot_at {
+        tracing::info!("Configured snapshot trigger at 0x{:X}", trigger);
+        emu.snapshot_triggers.push(trigger);
+    }
+    
+    if let Some(snapshot_path) = args.restore_snapshot {
+        tracing::info!("Restoring snapshot from {}", snapshot_path.display());
+        let snapshot = fission_emulator::EmulatorSnapshot::load_from_disk(&snapshot_path)?;
+        snapshot.restore_into(&mut emu);
+    }
     tracing::info!("Starting Emulator Execution Loop at PC=0x{:X}", emu.pc);
     emu.run()?;
     

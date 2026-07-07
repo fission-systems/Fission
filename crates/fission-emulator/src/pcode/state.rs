@@ -1,7 +1,9 @@
 use std::collections::HashMap;
 use anyhow::{Result, bail};
+use serde::{Serialize, Deserialize};
 
 /// Represents a single address space in the emulated machine (e.g. ram, register, unique).
+#[derive(Clone, Serialize, Deserialize)]
 pub struct AddressSpace {
     pub name: String,
     // Page-based memory allocation (4KB pages) to avoid allocating huge blocks
@@ -55,9 +57,32 @@ impl AddressSpace {
     }
 }
 
+#[derive(Clone, Copy, Debug)]
+pub enum AccessKind {
+    Read,
+    Write,
+    Execute,
+}
+
+#[derive(Clone)]
+pub struct MemoryAccess {
+    pub kind: AccessKind,
+    pub space_id: u64,
+    pub addr: u64,
+    pub size: usize,
+    /// For small writes or reads, we can optionally provide the value.
+    pub data: Option<Vec<u8>>,
+}
+
+pub type MemoryAccessHook = std::sync::Arc<dyn Fn(&MemoryAccess) + Send + Sync>;
+
 /// Holds the complete state of the emulated machine.
+#[derive(Clone, Serialize, Deserialize)]
 pub struct MachineState {
     pub spaces: HashMap<u64, AddressSpace>,
+
+    #[serde(skip)]
+    pub hooks: Vec<MemoryAccessHook>,
 }
 
 impl MachineState {
@@ -67,7 +92,7 @@ impl MachineState {
         spaces.insert(1, AddressSpace::new("unique"));
         spaces.insert(2, AddressSpace::new("register"));
         spaces.insert(3, AddressSpace::new("ram"));
-        Self { spaces }
+        Self { spaces, hooks: Vec::new() }
     }
 
     pub fn read_space(&mut self, space_id: u64, addr: u64, size: usize) -> Result<Vec<u8>> {

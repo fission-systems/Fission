@@ -67,6 +67,88 @@ impl OsEnvironment for LinuxEnv {
                 tracing::info!("free(0x{:X})", ptr);
                 emu.write_return_val(0)?;
             }
+            "read" => {
+                let fd = emu.read_arg(0)?;
+                let buf = emu.read_arg(1)?;
+                let count = emu.read_arg(2)?;
+                tracing::info!("read({}, 0x{:X}, {})", fd, buf, count);
+                // Dummy read, just return 0 (EOF) or simulate
+                emu.write_return_val(0)?;
+            }
+            "write" => {
+                let fd = emu.read_arg(0)?;
+                let buf = emu.read_arg(1)?;
+                let count = emu.read_arg(2)?;
+                if fd == 1 || fd == 2 {
+                    let data = emu.state.read_space(3, buf, count as usize)?;
+                    print!("{}", String::from_utf8_lossy(&data));
+                } else {
+                    tracing::info!("write({}, 0x{:X}, {})", fd, buf, count);
+                }
+                emu.write_return_val(count)?;
+            }
+            "mmap" => {
+                let addr = emu.read_arg(0)?;
+                let length = emu.read_arg(1)?;
+                let prot = emu.read_arg(2)?;
+                let flags = emu.read_arg(3)?;
+                let fd = emu.read_arg(4)?;
+                let offset = emu.read_arg(5)?;
+                tracing::info!("mmap(0x{:X}, 0x{:X}, {}, {}, {}, 0x{:X})", addr, length, prot, flags, fd, offset);
+                // Return a dummy heap address
+                emu.write_return_val(0x60000000)?;
+            }
+            "brk" => {
+                let brk = emu.read_arg(0)?;
+                tracing::info!("brk(0x{:X})", brk);
+                // Return the new brk or the current brk if 0
+                let new_brk = if brk == 0 { 0x50000000 } else { brk };
+                emu.write_return_val(new_brk)?;
+            }
+            "syscall" => {
+                // If intercepted via a PLT "syscall" wrapper, RAX has the syscall number
+                let sys_num = emu.read_register_u64("RAX").unwrap_or(0);
+                tracing::info!("syscall({})", sys_num);
+                match sys_num {
+                    0 => { // read
+                        let fd = emu.read_register_u64("RDI").unwrap_or(0);
+                        let buf = emu.read_register_u64("RSI").unwrap_or(0);
+                        let count = emu.read_register_u64("RDX").unwrap_or(0);
+                        tracing::info!("sys_read({}, 0x{:X}, {})", fd, buf, count);
+                        emu.write_register_u64("RAX", 0)?;
+                    }
+                    1 => { // write
+                        let fd = emu.read_register_u64("RDI").unwrap_or(0);
+                        let buf = emu.read_register_u64("RSI").unwrap_or(0);
+                        let count = emu.read_register_u64("RDX").unwrap_or(0);
+                        if fd == 1 || fd == 2 {
+                            let data = emu.state.read_space(3, buf, count as usize).unwrap_or_default();
+                            print!("{}", String::from_utf8_lossy(&data));
+                        }
+                        emu.write_register_u64("RAX", count)?;
+                    }
+                    9 => { // mmap
+                        let length = emu.read_register_u64("RSI").unwrap_or(0);
+                        emu.write_register_u64("RAX", 0x60000000)?;
+                        tracing::info!("sys_mmap(len={}) -> 0x60000000", length);
+                    }
+                    12 => { // brk
+                        let brk = emu.read_register_u64("RDI").unwrap_or(0);
+                        let new_brk = if brk == 0 { 0x50000000 } else { brk };
+                        emu.write_register_u64("RAX", new_brk)?;
+                        tracing::info!("sys_brk(0x{:X}) -> 0x{:X}", brk, new_brk);
+                    }
+                    60 | 231 => { // exit / exit_group
+                        let code = emu.read_register_u64("RDI").unwrap_or(0) as u32;
+                        tracing::info!("sys_exit({}). Emulation finished.", code);
+                        return Ok(HleResult::Halt(code));
+                    }
+                    _ => {
+                        tracing::warn!("Unimplemented Linux x64 syscall: {}", sys_num);
+                        emu.write_register_u64("RAX", 0)?;
+                    }
+                }
+            }
             _ => {
                 tracing::warn!("Unimplemented libc function: {}. Returning 0.", func_name);
                 emu.write_return_val(0)?;
