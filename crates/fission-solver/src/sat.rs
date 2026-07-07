@@ -100,6 +100,11 @@ impl SatSolver {
         }
     }
 
+    /// Returns the assigned value of a CNF variable (1-indexed). Returns Undef if not assigned.
+    pub fn get_var_value(&self, var: u32) -> LBool {
+        self.assigns.get(var as usize).copied().unwrap_or(LBool::Undef)
+    }
+
     pub fn decision_level(&self) -> u32 {
         self.trail_lim.len() as u32
     }

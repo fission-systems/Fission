@@ -64,6 +64,8 @@ pub struct SymBranch {
     pub step_index: u64,
     pub pc: u64,
     pub condition_val_taken: bool,
+    /// The SymNodeId of the boolean condition AST node, if the condition was tainted/symbolic.
+    pub condition_node: Option<fission_solver::ast::SymNodeId>,
     /// Target if we inverted the condition (if false it would be rel_idx, if true it would be fallback rel_idx)
     pub alt_rel_idx: Option<usize>,
     pub alt_addr: Option<u64>,
@@ -440,7 +442,7 @@ impl Emulator {
                     branch_target = tgt;
                     break 'pcode;
                 }
-                crate::pcode::eval::StepResult::CBranch { condition_val, true_rel_idx, true_addr } => {
+                crate::pcode::eval::StepResult::CBranch { condition_val, condition_node, true_rel_idx, true_addr } => {
                     // Record unexplored path if TTD is recording (sym_explore active)
                     if self.ttd.is_recording() {
                         let (alt_rel, alt_addr) = if condition_val {
@@ -454,6 +456,7 @@ impl Emulator {
                             step_index: self.inst_count,
                             pc: current_pc,
                             condition_val_taken: condition_val,
+                            condition_node,
                             alt_rel_idx: alt_rel,
                             alt_addr: alt_addr,
                         });

@@ -72,6 +72,11 @@ impl AigManager {
         bits
     }
 
+    /// Return the AIG literal bits for a previously registered AST variable, if known.
+    pub fn get_var_bits(&self, ast_id: u32) -> Option<&Vec<AigLit>> {
+        self.var_map.get(&ast_id)
+    }
+
     /// Add an AND gate, returning the literal. Applies structural hashing.
     pub fn add_and(&mut self, mut a: AigLit, mut b: AigLit) -> AigLit {
         if a == AigLit::FALSE || b == AigLit::FALSE {

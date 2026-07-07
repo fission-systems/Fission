@@ -16,6 +16,8 @@ pub enum StepResult {
     /// A conditional branch was evaluated.
     CBranch {
         condition_val: bool,
+        /// SymNodeId of the condition AST node, if the condition was tainted.
+        condition_node: Option<fission_solver::ast::SymNodeId>,
         /// The target if condition is true. If it's a relative offset within pcode, `rel_idx` is Some.
         true_rel_idx: Option<usize>,
         true_addr: Option<u64>,
@@ -506,10 +508,12 @@ impl<'a> Evaluator<'a> {
                 let dest = &op.inputs[0];
                 let condition = self.read_varnode_u64(&op.inputs[1])?;
                 let condition_val = condition != 0;
-                
+                // Capture tainted condition for symbolic execution
+                let condition_node = self.read_varnode_shadow(&op.inputs[1]);
                 let is_rel = dest.space_id == 0 || dest.is_constant;
                 return Ok(StepResult::CBranch {
                     condition_val,
+                    condition_node,
                     true_rel_idx: if is_rel { Some(dest.offset as usize) } else { None },
                     true_addr: if !is_rel { Some(dest.offset) } else { None },
                 });

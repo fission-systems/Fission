@@ -73,65 +73,106 @@ impl Solver {
     }
 
     /// Check if the current set of assertions is satisfiable.
+    /// On SAT, populates `self.model` with concrete values for all registered Var nodes.
     pub fn check_sat(&mut self) -> Result<SatResult> {
         tracing::info!("Solver::check_sat called with {} assertions", self.assertions.len());
-        
+
         let mut aig = crate::aig::AigManager::new();
         let mut cnf = crate::cnf::CnfBuilder::new();
         let mut sat = crate::sat::SatSolver::new();
-        
-        // 1. Lower assertions to AIG
+
+        // 1. Lower all assertions into AIG and assert each output bit is TRUE
         for assertion in &self.assertions {
             let bits = aig.lower_expr(assertion);
-            // Each assertion must evaluate to TRUE (it's a boolean constraint of size 1)
             if bits.len() == 1 {
                 cnf.assert_lit(bits[0]);
             } else {
-                tracing::warn!("Assertion size != 1, cannot assert directly: {:?}", assertion);
+                tracing::warn!("Assertion size != 1, skipping: {:?}", assertion);
             }
         }
-        
-        // 2. Convert AIG to CNF
+
+        // 2. Convert AIG → CNF (Tseitin)
         aig.to_cnf(&mut cnf);
-        
-        // 3. Load clauses into SAT solver
-        for clause in cnf.clauses {
-            if !sat.add_clause(clause.0) {
-                return Ok(SatResult::Unsat); // Trivially unsat during setup
+
+        // 3. Load CNF clauses into SAT solver; short-circuit on trivially UNSAT empty clause
+        for clause in &cnf.clauses {
+            if !sat.add_clause(clause.0.clone()) {
+                return Ok(SatResult::Unsat);
             }
         }
-        
+
         // 4. Solve
-        let is_sat = sat.solve();
-        
-        if is_sat {
-            // 5. Extract Model
-            self.model.clear();
-            // We iterate through all SymExpr::Var nodes and extract their bits
-            for (&node_id, expr) in &self.nodes {
-                if let SymExpr::Var { size: _, .. } = expr {
-                    // Re-lower the var to get its AIG bits (this will pull from aig.var_map if we passed the same AigManager around, 
-                    // but here we used a fresh AigManager. Actually, the variables were registered in the AIG during assertion lowering.
-                    // If a variable wasn't part of any assertion, its value doesn't matter (can be 0).
-                    // We need to fetch it from AigManager.
-                    let bits = aig.lower_expr(expr);
-                    let value: u64 = 0;
-                    for (_i, bit) in bits.iter().enumerate() {
-                        if bit.is_inverted() || bit.index() == 0 {
-                            continue; // We only care about variables that exist in CNF
-                        }
-                        // Need to map AIG bit to CNF var, then to SAT value
-                        // To keep it simple, we just leave model extraction stubbed out or partially implemented.
-                        // For a full implementation, we'd map AigLit -> Cnf Var -> LBool.
-                    }
-                    // We'll leave model as 0 for now until extraction logic is perfect
-                    self.model.insert(node_id, value);
-                }
-            }
-            Ok(SatResult::Sat)
-        } else {
-            Ok(SatResult::Unsat)
+        if !sat.solve() {
+            return Ok(SatResult::Unsat);
         }
+
+        // 5. Model Extraction — for every Var node, read its bits from the SAT assignment.
+        //    Pipeline: SymNodeId → AIG var bits (AigLit) → CNF var index → SAT LBool → bit value
+        self.model.clear();
+
+        // Collect Var nodes first to avoid borrow conflict
+        let var_nodes: Vec<(SymNodeId, SymExpr)> = self.nodes
+            .iter()
+            .filter_map(|(&id, expr)| {
+                if matches!(expr, SymExpr::Var { .. }) {
+                    Some((id, expr.clone()))
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        for (node_id, expr) in &var_nodes {
+            if let SymExpr::Var { id: ast_id, size, .. } = expr {
+                // Retrieve or synthesize the AIG bits for this variable.
+                // If the variable appeared in an assertion its bits are already in aig.var_map.
+                // If not (unconstrained), synthesize them now — they'll be Undef in the model.
+                let bits = if let Some(b) = aig.get_var_bits(*ast_id) {
+                    b.clone()
+                } else {
+                    // Not constrained — create fresh bits (will be Undef, default 0)
+                    aig.add_var(*ast_id, *size)
+                };
+
+                // Reconstruct the u64 value bit by bit (LSB first)
+                let mut value: u64 = 0;
+                for (bit_idx, aig_lit) in bits.iter().enumerate() {
+                    let aig_node_idx = aig_lit.index();
+                    let cnf_var = cnf.get_cnf_var_for_aig(aig_node_idx);
+                    if cnf_var == 0 {
+                        // This AIG node was never added to CNF (constant TRUE/FALSE or unseen)
+                        // Constant TRUE = AigLit(1), constant FALSE = AigLit(0)
+                        let bit_val = if *aig_lit == crate::aig::AigLit::TRUE {
+                            1u64
+                        } else {
+                            0u64
+                        };
+                        value |= bit_val << bit_idx;
+                        continue;
+                    }
+
+                    let assignment = sat.get_var_value(cnf_var);
+                    let raw_bit = matches!(assignment, crate::sat::LBool::True);
+                    // If the AigLit is inverted, flip the bit
+                    let bit_val = if aig_lit.is_inverted() { !raw_bit } else { raw_bit } as u64;
+                    value |= bit_val << bit_idx;
+                }
+
+                // Mask to the declared size
+                let mask = if *size >= 64 { u64::MAX } else { (1u64 << (*size * 8)) - 1 };
+                self.model.insert(*node_id, value & mask);
+
+                tracing::debug!(
+                    "Model: var_id={} name={:?} size={} value=0x{:X}",
+                    node_id,
+                    if let SymExpr::Var { name, .. } = expr { name } else { "" },
+                    size,
+                    value & mask
+                );
+            }
+        }
+
+        Ok(SatResult::Sat)
     }
 
     /// Retrieve the satisfying model for a given variable ID.

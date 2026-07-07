@@ -72,6 +72,12 @@ impl CnfBuilder {
         self.var_map[aig_idx as usize]
     }
 
+    /// Public read-only accessor: returns the CNF variable index for a given AIG node index.
+    /// Returns 0 if the AIG node has not been assigned a CNF variable yet.
+    pub fn get_cnf_var_for_aig(&self, aig_idx: u32) -> u32 {
+        self.var_map.get(aig_idx as usize).copied().unwrap_or(0)
+    }
+
     fn get_lit(&mut self, aig_lit: AigLit) -> Lit {
         let var = self.get_cnf_var(aig_lit.index());
         Lit::new(var, aig_lit.is_inverted())
