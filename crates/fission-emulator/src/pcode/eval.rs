@@ -168,9 +168,9 @@ impl<'a> Evaluator<'a> {
                 let b_node = self.read_varnode_shadow(&op.inputs[1]);
                 if a_node.is_some() || b_node.is_some() {
                     use fission_solver::SymExpr;
-                    let a_expr = a_node.and_then(|id| self.solver.nodes.get(&id).cloned()).unwrap_or_else(|| SymExpr::Const { val: a, size: op.inputs[0].size });
-                    let b_expr = b_node.and_then(|id| self.solver.nodes.get(&id).cloned()).unwrap_or_else(|| SymExpr::Const { val: b, size: op.inputs[1].size });
-                    let new_expr = SymExpr::Add(Box::new(a_expr), Box::new(b_expr));
+                    let a_expr = a_node.and_then(|id| self.solver.nodes.get(&id).cloned()).unwrap_or_else(|| SymExpr::new_const(a, op.inputs[0].size));
+                    let b_expr = b_node.and_then(|id| self.solver.nodes.get(&id).cloned()).unwrap_or_else(|| SymExpr::new_const(b, op.inputs[1].size));
+                    let new_expr = SymExpr::new_add(a_expr, b_expr);
                     let new_id = self.solver.register_node(new_expr);
                     self.write_varnode_shadow(out, new_id);
                 }

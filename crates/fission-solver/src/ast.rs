@@ -50,6 +50,38 @@ impl SymExpr {
         Self::Const { val, size }
     }
 
+    pub fn new_add(a: SymExpr, b: SymExpr) -> Self {
+        match (&a, &b) {
+            (Self::Const { val: v1, size }, Self::Const { val: v2, .. }) => {
+                let mask = if *size == 64 { u64::MAX } else { (1 << size) - 1 };
+                Self::Const { val: (v1.wrapping_add(*v2)) & mask, size: *size }
+            },
+            (Self::Const { val: 0, .. }, _) => b,
+            (_, Self::Const { val: 0, .. }) => a,
+            _ => Self::Add(Box::new(a), Box::new(b)),
+        }
+    }
+
+    pub fn new_and(a: SymExpr, b: SymExpr) -> Self {
+        match (&a, &b) {
+            (Self::Const { val: v1, size }, Self::Const { val: v2, .. }) => Self::Const { val: v1 & v2, size: *size },
+            (Self::Const { val: 0, size }, _) => Self::Const { val: 0, size: *size },
+            (_, Self::Const { val: 0, size }) => Self::Const { val: 0, size: *size },
+            (a, b) if a == b => a.clone(),
+            _ => Self::And(Box::new(a), Box::new(b)),
+        }
+    }
+
+    pub fn new_xor(a: SymExpr, b: SymExpr) -> Self {
+        match (&a, &b) {
+            (Self::Const { val: v1, size }, Self::Const { val: v2, .. }) => Self::Const { val: v1 ^ v2, size: *size },
+            (Self::Const { val: 0, .. }, _) => b,
+            (_, Self::Const { val: 0, .. }) => a,
+            (a, b) if a == b => Self::Const { val: 0, size: a.get_size() },
+            _ => Self::Xor(Box::new(a), Box::new(b)),
+        }
+    }
+
     pub fn get_size(&self) -> u32 {
         match self {
             Self::Const { size, .. } => *size,

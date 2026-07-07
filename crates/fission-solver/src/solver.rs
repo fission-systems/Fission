@@ -18,6 +18,8 @@ pub struct Solver {
     pub model: HashMap<SymNodeId, u64>,
     /// Storage for AST nodes by ID.
     pub nodes: HashMap<SymNodeId, SymExpr>,
+    /// Stack of frame boundaries (indices into the assertions list) for push/pop.
+    pub frames: Vec<usize>,
 }
 
 impl Default for Solver {
@@ -32,6 +34,21 @@ impl Solver {
             assertions: Vec::new(),
             model: HashMap::new(),
             nodes: HashMap::new(),
+            frames: Vec::new(),
+        }
+    }
+
+    /// Push a new context frame.
+    pub fn push(&mut self) {
+        self.frames.push(self.assertions.len());
+    }
+
+    /// Pop the most recent context frame, reverting assertions added since then.
+    pub fn pop(&mut self) {
+        if let Some(prev_len) = self.frames.pop() {
+            self.assertions.truncate(prev_len);
+        } else {
+            tracing::warn!("Solver::pop called with no frames on the stack");
         }
     }
 
