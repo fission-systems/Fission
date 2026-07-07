@@ -83,6 +83,13 @@ pub struct MachineState {
 
     #[serde(skip)]
     pub hooks: Vec<MemoryAccessHook>,
+
+    #[serde(skip)]
+    pub tracing_memory: bool,
+    #[serde(skip)]
+    pub trace_mem_reads: Vec<(u64, Vec<u8>)>,
+    #[serde(skip)]
+    pub trace_mem_writes: Vec<(u64, Vec<u8>)>,
 }
 
 impl MachineState {
@@ -92,7 +99,13 @@ impl MachineState {
         spaces.insert(1, AddressSpace::new("unique"));
         spaces.insert(2, AddressSpace::new("register"));
         spaces.insert(3, AddressSpace::new("ram"));
-        Self { spaces, hooks: Vec::new() }
+        Self { 
+            spaces, 
+            hooks: Vec::new(),
+            tracing_memory: false,
+            trace_mem_reads: Vec::new(),
+            trace_mem_writes: Vec::new(),
+        }
     }
 
     pub fn read_space(&mut self, space_id: u64, addr: u64, size: usize) -> Result<Vec<u8>> {
@@ -101,7 +114,13 @@ impl MachineState {
             bail!("Attempted to read from const space via memory read");
         }
         let space = self.spaces.entry(space_id).or_insert_with(|| AddressSpace::new(format!("space_{}", space_id)));
-        space.read(addr, size)
+        let data = space.read(addr, size)?;
+        
+        if self.tracing_memory && space_id == 3 {
+            self.trace_mem_reads.push((addr, data.clone()));
+        }
+        
+        Ok(data)
     }
 
     pub fn read_space_readonly(&self, space_id: u64, addr: u64, size: usize) -> Result<Vec<u8>> {
@@ -119,6 +138,10 @@ impl MachineState {
         if space_id == 0 {
             bail!("Attempted to write to const space");
         }
+        if self.tracing_memory && space_id == 3 {
+            self.trace_mem_writes.push((addr, data.to_vec()));
+        }
+        
         let space = self.spaces.entry(space_id).or_insert_with(|| AddressSpace::new(format!("space_{}", space_id)));
         space.write(addr, data)
     }

@@ -243,37 +243,39 @@ impl Emulator {
             self.userop_map.entry(*id).or_insert_with(|| name.clone());
         }
 
-        // Record instruction trace entry if tracing is enabled.
+        // Pre-advance the PC register inside the Sleigh state so that
+        // %pc-relative addressing and `call` (which pushes the return address)
+        // observe the correct next-instruction address.
+        let original_pc = self.pc;
+        let next_pc = self.pc + inst_len;
+        let _ = self.write_register_u64(self.arch.pc_reg, next_pc);
+
+        let mut bytes_hex = String::new();
+        let mut mnemonic = "?".to_string();
+        let mut pcode_op_names = Vec::new();
+        
         if self.trace.enabled {
-            let bytes_hex = bytes_vec[..inst_len as usize]
+            self.state.tracing_memory = true;
+            self.state.trace_mem_reads.clear();
+            self.state.trace_mem_writes.clear();
+
+            bytes_hex = bytes_vec[..inst_len as usize]
                 .iter()
                 .map(|b| format!("{:02x}", b))
                 .collect::<Vec<_>>()
                 .join(" ");
-            // Get mnemonic via decode_window(limit=1).
-            let mnemonic = self.sleigh
+            mnemonic = self.sleigh
                 .decode_window(&bytes_vec, self.pc, 1)
                 .ok()
                 .and_then(|v| v.into_iter().next())
                 .map(|d| d.instruction_text())
                 .unwrap_or_else(|| "?".to_string());
-            let pcode_op_names = pcode_ops.iter()
+            pcode_op_names = pcode_ops.iter()
                 .map(|op| format!("{:?}", op.opcode))
                 .collect();
-            self.trace.push(TraceEntry::Instruction {
-                pc: self.pc,
-                bytes_hex,
-                mnemonic,
-                pcode_ops: pcode_op_names,
-                decode_error: None,
-            });
+        } else {
+            self.state.tracing_memory = false;
         }
-
-        // Pre-advance the PC register inside the Sleigh state so that
-        // %pc-relative addressing and `call` (which pushes the return address)
-        // observe the correct next-instruction address.
-        let next_pc = self.pc + inst_len;
-        let _ = self.write_register_u64(self.arch.pc_reg, next_pc);
 
         // Evaluate P-Code ops.
         // On CallOther we break out of the evaluator scope (so `evaluator` is dropped
@@ -343,6 +345,43 @@ impl Emulator {
                     // Continue the pcode loop.
                 }
             }
+        }
+        if self.trace.enabled {
+            let mut registers = std::collections::HashMap::new();
+            let reg_names: Vec<String> = self.register_map.iter()
+                .filter(|(name, info)| {
+                    let size = info.2;
+                    size <= 8 && !name.starts_with("tmp") && !name.contains("UNIQUE") && !name.starts_with("#")
+                })
+                .map(|(name, _)| name.clone())
+                .collect();
+
+            for name in reg_names {
+                if let Ok(val) = self.read_register_u64(&name) {
+                    registers.insert(name, val);
+                }
+            }
+
+            let mem_reads = std::mem::take(&mut self.state.trace_mem_reads)
+                .into_iter()
+                .map(|(addr, data)| (addr, hex::encode(data)))
+                .collect();
+            let mem_writes = std::mem::take(&mut self.state.trace_mem_writes)
+                .into_iter()
+                .map(|(addr, data)| (addr, hex::encode(data)))
+                .collect();
+
+            self.trace.push(TraceEntry::Instruction {
+                pc: original_pc,
+                bytes_hex,
+                mnemonic,
+                pcode_ops: pcode_op_names,
+                registers,
+                mem_reads,
+                mem_writes,
+                decode_error: None,
+            });
+            self.state.tracing_memory = false;
         }
 
         // Update our PC tracker.

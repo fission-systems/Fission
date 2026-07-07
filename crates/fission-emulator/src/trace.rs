@@ -12,6 +12,15 @@ pub enum TraceEntry {
         mnemonic: String,
         /// P-Code opcode names in execution order.
         pcode_ops: Vec<String>,
+        /// General purpose registers state immediately after execution.
+        #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+        registers: HashMap<String, u64>,
+        /// Memory reads during this instruction (address, bytes_hex).
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        mem_reads: Vec<(u64, String)>,
+        /// Memory writes during this instruction (address, bytes_hex).
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        mem_writes: Vec<(u64, String)>,
         /// Non-null only when the instruction decoded but had partial lift issues.
         decode_error: Option<String>,
     },

@@ -226,9 +226,27 @@ fn run_sandbox(args: crate::cli::args::SandboxArgs) -> Result<()> {
         let snapshot = fission_emulator::EmulatorSnapshot::load_from_disk(&snapshot_path)?;
         snapshot.restore_into(&mut emu);
     }
+    if args.dump_trace.is_some() {
+        emu.trace.enabled = true;
+    }
+
     tracing::info!("Starting Emulator Execution Loop at PC=0x{:X}", emu.pc);
     emu.run()?;
     
+    if let Some(trace_path) = args.dump_trace {
+        tracing::info!("Dumping execution trace to {}", trace_path.display());
+        let f = std::fs::File::create(&trace_path)
+            .with_context(|| format!("Failed to create trace file {}", trace_path.display()))?;
+        let mut writer = std::io::BufWriter::new(f);
+        // Writing each entry as a separate JSON object per line (JSONL) is better for large traces,
+        // but for simplicity, we serialize the array if it's small enough, or serialize entry by entry.
+        for entry in &emu.trace.entries {
+            serde_json::to_writer(&mut writer, entry)?;
+            use std::io::Write;
+            writer.write_all(b"\n")?;
+        }
+    }
+
     Ok(())
 }
 

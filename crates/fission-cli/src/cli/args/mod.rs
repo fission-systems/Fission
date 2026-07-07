@@ -177,6 +177,10 @@ pub struct SandboxArgs {
     /// Mock standard input string to feed into console reads
     #[arg(long)]
     pub stdin_mock: Option<String>,
+
+    /// Dump execution trace to the specified JSON file
+    #[arg(long)]
+    pub dump_trace: Option<PathBuf>,
 }
 
 // ── AI subcommand types ───────────────────────────────────────────────────────
