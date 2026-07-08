@@ -1,16 +1,17 @@
 use std::collections::HashMap;
 use anyhow::{Result, bail};
 use serde::{Serialize, Deserialize};
+use std::sync::Arc;
 
 #[derive(Clone, Serialize, Deserialize)]
 pub enum MemoryPage {
     /// Pure concrete page (e.g. .text or un-tainted RAM). Length is always page_size.
-    Concrete(Vec<u8>),
+    Concrete(Arc<Vec<u8>>),
     /// Page containing symbolic values at concrete offsets.
     /// The `shadow` vector stores the SymNodeId for each tainted byte.
     Symbolic {
-        concrete: Vec<u8>,
-        shadow: Vec<Option<u32>>,
+        concrete: Arc<Vec<u8>>,
+        shadow: Arc<Vec<Option<u32>>>,
     },
     /// A full fallback to SMT Array theory when a symbolic pointer is written.
     /// `array_id` is the SymNodeId of the current ArrayStore AST node.
@@ -21,15 +22,15 @@ pub enum MemoryPage {
 
 impl MemoryPage {
     pub fn new_concrete(page_size: usize) -> Self {
-        Self::Concrete(vec![0; page_size])
+        Self::Concrete(Arc::new(vec![0; page_size]))
     }
 
     pub fn make_symbolic(&mut self) {
         if let Self::Concrete(data) = self {
             let len = data.len();
             *self = Self::Symbolic {
-                concrete: std::mem::take(data),
-                shadow: vec![None; len],
+                concrete: data.clone(), // COW
+                shadow: Arc::new(vec![None; len]),
             };
         }
     }
@@ -40,7 +41,7 @@ impl MemoryPage {
 pub struct AddressSpace {
     pub name: String,
     // Hybrid Page-based memory allocation (4KB pages)
-    pub pages: HashMap<u64, MemoryPage>,
+    pub pages: im::HashMap<u64, MemoryPage>,
     pub page_size: u64,
     /// Root symbolic array representing this address space in SMT Array Theory
     pub theory_array_id: Option<u32>,
@@ -50,7 +51,7 @@ impl AddressSpace {
     pub fn new(name: impl Into<String>) -> Self {
         Self {
             name: name.into(),
-            pages: HashMap::new(),
+            pages: im::HashMap::new(),
             page_size: 0x1000,
             theory_array_id: None,
         }
@@ -59,9 +60,10 @@ impl AddressSpace {
     fn get_page_mut(&mut self, addr: u64) -> &mut MemoryPage {
         let page_addr = addr & !(self.page_size - 1);
         let ps = self.page_size as usize;
-        self.pages
-            .entry(page_addr)
-            .or_insert_with(|| MemoryPage::new_concrete(ps))
+        if !self.pages.contains_key(&page_addr) {
+            self.pages.insert(page_addr, MemoryPage::new_concrete(ps));
+        }
+        self.pages.get_mut(&page_addr).unwrap()
     }
 
     fn get_page(&self, addr: u64) -> Option<&MemoryPage> {
@@ -91,10 +93,12 @@ impl AddressSpace {
             let offset = (current_addr & (self.page_size - 1)) as usize;
             let page = self.get_page_mut(current_addr);
             match page {
-                MemoryPage::Concrete(page_data) => page_data[offset] = byte,
+                MemoryPage::Concrete(page_data) => {
+                    Arc::make_mut(page_data)[offset] = byte;
+                }
                 MemoryPage::Symbolic { concrete, shadow } => {
-                    concrete[offset] = byte;
-                    shadow[offset] = None;
+                    Arc::make_mut(concrete)[offset] = byte;
+                    Arc::make_mut(shadow)[offset] = None;
                 }
                 MemoryPage::ArrayTheory { .. } => {
                     // For now, if we do a concrete write to an ArrayTheory page, we might just ignore the array part
@@ -123,8 +127,9 @@ impl AddressSpace {
         page.make_symbolic();
         
         if let MemoryPage::Symbolic { shadow, .. } = page {
-            let old = shadow[offset];
-            shadow[offset] = Some(node);
+            let shadow_mut = Arc::make_mut(shadow);
+            let old = shadow_mut[offset];
+            shadow_mut[offset] = Some(node);
             old
         } else {
             None
@@ -134,9 +139,11 @@ impl AddressSpace {
     pub fn clear_shadow(&mut self, addr: u64) -> Option<u32> {
         let current_addr = addr;
         let offset = (current_addr & (self.page_size - 1)) as usize;
-        if let Some(MemoryPage::Symbolic { shadow, .. }) = self.pages.get_mut(&(addr & !(self.page_size - 1))) {
-            let old = shadow[offset];
-            shadow[offset] = None;
+        let page_addr = addr & !(self.page_size - 1);
+        if let Some(MemoryPage::Symbolic { shadow, .. }) = self.pages.get_mut(&page_addr) {
+            let shadow_mut = Arc::make_mut(shadow);
+            let old = shadow_mut[offset];
+            shadow_mut[offset] = None;
             old
         } else {
             None
@@ -166,7 +173,7 @@ pub type MemoryAccessHook = std::sync::Arc<dyn Fn(&MemoryAccess) + Send + Sync>;
 /// Holds the complete state of the emulated machine.
 #[derive(Clone, Serialize, Deserialize)]
 pub struct MachineState {
-    pub spaces: HashMap<u64, AddressSpace>,
+    pub spaces: im::HashMap<u64, AddressSpace>,
 
     #[serde(skip)]
     pub hooks: Vec<MemoryAccessHook>,
@@ -195,7 +202,7 @@ impl fission_solver::solver::MemoryOracle for MachineState {
 
 impl MachineState {
     pub fn new() -> Self {
-        let mut spaces = HashMap::new();
+        let mut spaces = im::HashMap::new();
         // Conventional space IDs: 0=const, 1=unique, 2=register, 3=ram
         spaces.insert(1, AddressSpace::new("unique"));
         spaces.insert(2, AddressSpace::new("register"));
@@ -215,7 +222,10 @@ impl MachineState {
     }
 
     pub fn set_theory_array_id(&mut self, space_id: u64, id: u32) {
-        let space = self.spaces.entry(space_id).or_insert_with(|| AddressSpace::new(format!("space_{}", space_id)));
+        if !self.spaces.contains_key(&space_id) {
+            self.spaces.insert(space_id, AddressSpace::new(format!("space_{}", space_id)));
+        }
+        let space = self.spaces.get_mut(&space_id).unwrap();
         space.theory_array_id = Some(id);
     }
 
@@ -224,7 +234,10 @@ impl MachineState {
             // const space: we shouldn't really read from it this way, but just in case
             bail!("Attempted to read from const space via memory read");
         }
-        let space = self.spaces.entry(space_id).or_insert_with(|| AddressSpace::new(format!("space_{}", space_id)));
+        if !self.spaces.contains_key(&space_id) {
+            self.spaces.insert(space_id, AddressSpace::new(format!("space_{}", space_id)));
+        }
+        let space = self.spaces.get_mut(&space_id).unwrap();
         let data = space.read(addr, size)?;
         
         if self.tracing_memory && space_id == 3 {
@@ -260,7 +273,10 @@ impl MachineState {
             self.trace_mem_writes.push((addr, old, data.to_vec()));
         }
 
-        let space = self.spaces.entry(space_id).or_insert_with(|| AddressSpace::new(format!("space_{}", space_id)));
+        if !self.spaces.contains_key(&space_id) {
+            self.spaces.insert(space_id, AddressSpace::new(format!("space_{}", space_id)));
+        }
+        let space = self.spaces.get_mut(&space_id).unwrap();
         space.write(addr, data)?;
 
         // When writing concrete bytes, clear their shadow memory taint.
@@ -276,7 +292,10 @@ impl MachineState {
     }
 
     pub fn set_shadow_memory(&mut self, space_id: u64, addr: u64, node: u32) {
-        let space = self.spaces.entry(space_id).or_insert_with(|| AddressSpace::new(format!("space_{}", space_id)));
+        if !self.spaces.contains_key(&space_id) {
+            self.spaces.insert(space_id, AddressSpace::new(format!("space_{}", space_id)));
+        }
+        let space = self.spaces.get_mut(&space_id).unwrap();
         let old_node = space.set_shadow(addr, node);
         if self.tracing_memory {
             self.trace_shadow_writes.push((space_id, addr, old_node, Some(node)));

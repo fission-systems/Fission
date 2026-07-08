@@ -15,7 +15,8 @@ pub struct SimulationManager {
 impl SimulationManager {
     /// Convenience constructor for CLI use: creates an initial state from the emulator's current PC.
     pub fn new(emu: Emulator) -> Self {
-        let initial_state = SimState::new(emu.inst_count, emu.pc);
+        let machine_state = emu.state.clone();
+        let initial_state = SimState::new(emu.inst_count, emu.pc, machine_state);
         Self::with_initial_state(emu, initial_state)
     }
 
@@ -37,16 +38,10 @@ impl SimulationManager {
         let mut next_unsat = Vec::new();
 
         for state in active_states {
-            // Seek the emulator to this state's TTD snapshot.
-            // If no snapshot is available (e.g. step=0 before first checkpoint),
-            // fall through and run from the current emulator position.
-            let seek_ok = self.emu.ttd_seek(state.step_index).is_ok();
-            if !seek_ok {
-                tracing::debug!("No TTD snapshot at step {}; running from current position", state.step_index);
-            }
-
-            // Set the PC from the state record
+            // Hot-swap the state via O(1) Copy-On-Write instead of TTD seek
+            self.emu.state = state.machine_state.clone();
             self.emu.pc = state.pc;
+            self.emu.inst_count = state.step_index;
 
             // Run until the next symbolic branch or halt
             self.emu.sym_events.clear();
@@ -56,7 +51,8 @@ impl SimulationManager {
                 // If it halted or errored, it's deadended
                 let final_step = self.emu.inst_count;
                 let final_pc = self.emu.pc;
-                next_deadended.push(SimState::new(final_step, final_pc));
+                let final_ms = self.emu.state.clone();
+                next_deadended.push(SimState::new(final_step, final_pc, final_ms));
                 continue;
             }
 
@@ -64,7 +60,7 @@ impl SimulationManager {
             let branches = std::mem::take(&mut self.emu.sym_events);
             if branches.is_empty() {
                 // No branches, just deadended normally
-                next_deadended.push(SimState::new(self.emu.inst_count, self.emu.pc));
+                next_deadended.push(SimState::new(self.emu.inst_count, self.emu.pc, self.emu.state.clone()));
             } else {
                 // A branch occurred! We fork the state.
                 let branch = branches.into_iter().next().unwrap(); // Take the first branch
@@ -78,18 +74,23 @@ impl SimulationManager {
                             Box::new(SymExpr::Const { val: 0, size: 1 })
                         );
 
+                        // Extract the emulator memory state at the branch point
+                        let fork_ms = self.emu.state.clone();
+
                         // True path state
                         let taken_state = state.with_constraint(
                             if branch.condition_val_taken { true_expr.clone() } else { false_expr.clone() },
                             branch.step_index,
-                            branch.pc
+                            branch.pc,
+                            fork_ms.clone()
                         );
 
                         // Alternate path state
                         let alt_state = state.with_constraint(
                             if branch.condition_val_taken { false_expr } else { true_expr },
                             branch.step_index,
-                            branch.alt_addr.unwrap_or(branch.pc) // simplify
+                            branch.alt_addr.unwrap_or(branch.pc), // simplify
+                            fork_ms
                         );
 
                         // Feasibility check
@@ -109,7 +110,12 @@ impl SimulationManager {
                         }
                     } else {
                         // Unconstrained or missing node
-                        next_deadended.push(state);
+                        // Note: state still needs to be updated with the advanced machine state
+                        let mut advanced_state = state.clone();
+                        advanced_state.step_index = self.emu.inst_count;
+                        advanced_state.pc = self.emu.pc;
+                        advanced_state.machine_state = self.emu.state.clone();
+                        next_deadended.push(advanced_state);
                     }
                 }
             }
