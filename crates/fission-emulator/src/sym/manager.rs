@@ -13,7 +13,13 @@ pub struct SimulationManager {
 }
 
 impl SimulationManager {
-    pub fn new(emu: Emulator, initial_state: SimState) -> Self {
+    /// Convenience constructor for CLI use: creates an initial state from the emulator's current PC.
+    pub fn new(emu: Emulator) -> Self {
+        let initial_state = SimState::new(emu.inst_count, emu.pc);
+        Self::with_initial_state(emu, initial_state)
+    }
+
+    pub fn with_initial_state(emu: Emulator, initial_state: SimState) -> Self {
         let mut stashes = HashMap::new();
         stashes.insert("active".to_string(), vec![initial_state]);
         stashes.insert("deadended".to_string(), Vec::new());
@@ -120,5 +126,10 @@ impl SimulationManager {
             self.step()?;
         }
         Ok(())
+    }
+
+    /// Alias for `step_all()` — used by the CLI `--sym-explore` flag.
+    pub fn explore(&mut self) -> Result<()> {
+        self.step_all()
     }
 }
