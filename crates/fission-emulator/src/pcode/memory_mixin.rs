@@ -23,55 +23,39 @@ impl MemoryMixin {
     ) -> Result<SymNodeId> {
         let ptr_expr = solver.nodes.get(&ptr_node).unwrap().clone();
         
-        // 1. Evaluate possible addresses up to MAX_CONCRETIZATION_LIMIT
-        let possible_addrs = solver.eval(&ptr_expr, Self::MAX_CONCRETIZATION_LIMIT + 1);
+        let array_id = if let Some(id) = state.get_theory_array_id(space_id) {
+            id
+        } else {
+            let arr_expr = SymExpr::new_array_var(&format!("space_{}", space_id), ptr_expr.get_size(), 8);
+            let id = solver.register_node(arr_expr);
+            state.set_theory_array_id(space_id, id);
+            id
+        };
         
-        if possible_addrs.len() > Self::MAX_CONCRETIZATION_LIMIT || possible_addrs.is_empty() {
-            // Too underconstrained. angr returns a fresh unconstrained variable.
-            let unconstrained = SymExpr::new_var("symbolic_read_unconstrained", size_bytes);
-            return Ok(solver.register_node(unconstrained));
+        let array_expr = solver.nodes.get(&array_id).unwrap().clone();
+        
+        // Single byte read vs Multi-byte read.
+        // Memory arrays map addresses to bytes. If size_bytes > 1, we must concat multiple ArraySelects.
+        let mut final_expr = SymExpr::ArraySelect {
+            array: Box::new(array_expr.clone()),
+            index: Box::new(ptr_expr.clone()),
+        };
+        
+        for i in 1..size_bytes {
+            let offset = SymExpr::new_const(i as u64, ptr_expr.get_size());
+            let next_ptr = SymExpr::new_add(ptr_expr.clone(), offset);
+            let next_byte = SymExpr::ArraySelect {
+                array: Box::new(array_expr.clone()),
+                index: Box::new(next_ptr),
+            };
+            // LE concat: next_byte ++ final_expr
+            final_expr = SymExpr::Concat(Box::new(next_byte), Box::new(final_expr));
         }
 
-        // 2. Build ITE tree for the reads
-        // e.g. If(ptr == addr1, val1, If(ptr == addr2, val2, ...))
-        let mut final_expr: Option<SymExpr> = None;
-
-        for &addr in possible_addrs.iter().rev() {
-            // Concrete read
-            let mut val: u64 = 0;
-            if let Ok(raw) = state.read_space(space_id, addr, size_bytes as usize) {
-                for (i, &b) in raw.iter().enumerate() {
-                    val |= (b as u64) << (i * 8);
-                }
-            }
-
-            // Did this concrete byte have a shadow? 
-            // For simplicity, we just use the concrete value or the shadow node if it was a single node.
-            // If it's a multi-byte read, we should theoretically concat shadows, but let's just use the concrete value node
-            // unless it has an exact shadow for the whole block.
-            let val_expr = SymExpr::new_const(val, size_bytes);
-
-            if let Some(curr_expr) = final_expr {
-                // ITE(ptr == addr, val, curr)
-                let cond = SymExpr::Eq(
-                    Box::new(ptr_expr.clone()),
-                    Box::new(SymExpr::new_const(addr, ptr_expr.get_size()))
-                );
-                final_expr = Some(SymExpr::Ite {
-                    cond: Box::new(cond),
-                    t: Box::new(val_expr),
-                    f: Box::new(curr_expr)
-                });
-            } else {
-                final_expr = Some(val_expr);
-            }
-        }
-
-        let expr = final_expr.unwrap();
-        Ok(solver.register_node(expr))
+        Ok(solver.register_node(final_expr))
     }
 
-    /// Handle a symbolic STORE operation.
+    /// Handle a symbolic STORE operation using Pure SMT Array Theory.
     pub fn handle_symbolic_write(
         state: &mut MachineState,
         solver: &mut Solver,
@@ -83,48 +67,38 @@ impl MemoryMixin {
         let ptr_expr = solver.nodes.get(&ptr_node).unwrap().clone();
         let val_expr = solver.nodes.get(&val_node).unwrap().clone();
 
-        // 1. Evaluate possible addresses up to MAX_CONCRETIZATION_LIMIT
-        let possible_addrs = solver.eval(&ptr_expr, Self::MAX_CONCRETIZATION_LIMIT + 1);
+        let array_id = if let Some(id) = state.get_theory_array_id(space_id) {
+            id
+        } else {
+            let arr_expr = SymExpr::new_array_var(&format!("space_{}", space_id), ptr_expr.get_size(), 8);
+            let id = solver.register_node(arr_expr);
+            state.set_theory_array_id(space_id, id);
+            id
+        };
 
-        if possible_addrs.len() > Self::MAX_CONCRETIZATION_LIMIT || possible_addrs.is_empty() {
-            // Too underconstrained. In angr, we might drop the write or add an unconstrained store.
-            // We just drop it for now to avoid state explosion.
-            tracing::warn!("Dropping symbolic write due to underconstrained pointer");
-            return Ok(());
-        }
-
-        // 2. Perform conditional store (ITE) for every possible address
-        for &addr in &possible_addrs {
-            // Read old value
-            let mut old_val: u64 = 0;
-            if let Ok(raw) = state.read_space(space_id, addr, size_bytes as usize) {
-                for (i, &b) in raw.iter().enumerate() {
-                    old_val |= (b as u64) << (i * 8);
-                }
-            }
-            let old_expr = SymExpr::new_const(old_val, size_bytes);
-
-            // new_data = ITE(ptr == addr, val, old)
-            let cond = SymExpr::Eq(
-                Box::new(ptr_expr.clone()),
-                Box::new(SymExpr::new_const(addr, ptr_expr.get_size()))
-            );
-            let ite = SymExpr::Ite {
-                cond: Box::new(cond),
-                t: Box::new(val_expr.clone()),
-                f: Box::new(old_expr)
+        let mut current_array = solver.nodes.get(&array_id).unwrap().clone();
+        
+        // If writing multiple bytes, we need multiple ArrayStores
+        for i in 0..size_bytes {
+            let offset = SymExpr::new_const(i as u64, ptr_expr.get_size());
+            let next_ptr = SymExpr::new_add(ptr_expr.clone(), offset);
+            
+            // Extract byte i from val_expr
+            let byte_val = if size_bytes == 1 {
+                val_expr.clone()
+            } else {
+                SymExpr::Extract { expr: Box::new(val_expr.clone()), lsb: i * 8, size: 8 }
             };
             
-            let ite_id = solver.register_node(ite);
-
-            // Write the ITE shadow back to memory at this concrete address.
-            // Since it's symbolic, we write concrete 0s and tag the shadow.
-            let zeros = vec![0u8; size_bytes as usize];
-            state.write_space(space_id, addr, &zeros)?;
-            for i in 0..size_bytes as u64 {
-                state.set_shadow_memory(space_id, addr + i, ite_id);
-            }
+            current_array = SymExpr::ArrayStore {
+                array: Box::new(current_array),
+                index: Box::new(next_ptr),
+                value: Box::new(byte_val),
+            };
         }
+
+        let new_id = solver.register_node(current_array);
+        state.set_theory_array_id(space_id, new_id);
 
         Ok(())
     }

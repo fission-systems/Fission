@@ -42,6 +42,8 @@ pub struct AddressSpace {
     // Hybrid Page-based memory allocation (4KB pages)
     pub pages: HashMap<u64, MemoryPage>,
     pub page_size: u64,
+    /// Root symbolic array representing this address space in SMT Array Theory
+    pub theory_array_id: Option<u32>,
 }
 
 impl AddressSpace {
@@ -50,6 +52,7 @@ impl AddressSpace {
             name: name.into(),
             pages: HashMap::new(),
             page_size: 0x1000,
+            theory_array_id: None,
         }
     }
 
@@ -184,6 +187,12 @@ pub struct MachineState {
     pub trace_shadow_writes: Vec<(u64, u64, Option<u32>, Option<u32>)>, // (space_id, address, old_node, new_node)
 }
 
+impl fission_solver::solver::MemoryOracle for MachineState {
+    fn read_concrete(&self, space_id: u64, addr: u64) -> Option<u8> {
+        self.read_space_readonly(space_id, addr, 1).ok().map(|v| v[0])
+    }
+}
+
 impl MachineState {
     pub fn new() -> Self {
         let mut spaces = HashMap::new();
@@ -199,6 +208,15 @@ impl MachineState {
             trace_mem_writes: Vec::new(),
             trace_shadow_writes: Vec::new(),
         }
+    }
+
+    pub fn get_theory_array_id(&self, space_id: u64) -> Option<u32> {
+        self.spaces.get(&space_id).and_then(|s| s.theory_array_id)
+    }
+
+    pub fn set_theory_array_id(&mut self, space_id: u64, id: u32) {
+        let space = self.spaces.entry(space_id).or_insert_with(|| AddressSpace::new(format!("space_{}", space_id)));
+        space.theory_array_id = Some(id);
     }
 
     pub fn read_space(&mut self, space_id: u64, addr: u64, size: usize) -> Result<Vec<u8>> {

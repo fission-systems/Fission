@@ -93,15 +93,16 @@ impl SimulationManager {
                         );
 
                         // Feasibility check
-                        let mut solver = &mut self.emu.solver;
+                        let solver = &mut self.emu.solver;
+                        let state_oracle = &self.emu.state;
                         
-                        if solver.satisfiable(&taken_state.history.constraints) {
+                        if solver.satisfiable_with_oracle(&taken_state.history.constraints, Some(state_oracle)) {
                             next_active.push(taken_state);
                         } else {
                             next_unsat.push(taken_state);
                         }
 
-                        if solver.satisfiable(&alt_state.history.constraints) {
+                        if solver.satisfiable_with_oracle(&alt_state.history.constraints, Some(state_oracle)) {
                             next_active.push(alt_state);
                         } else {
                             next_unsat.push(alt_state);

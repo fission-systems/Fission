@@ -43,6 +43,8 @@ pub struct AigManager {
     strash: HashMap<(AigLit, AigLit), u32>,
     /// Maps AST Node ID to its vector of AIG literals (one per bit)
     var_map: HashMap<u32, Vec<AigLit>>,
+    /// Maps ArraySelect nodes to their vector of AIG literals
+    array_select_map: HashMap<SymExpr, Vec<AigLit>>,
 }
 
 impl Default for AigManager {
@@ -57,6 +59,7 @@ impl AigManager {
             nodes: vec![], // Index 0 is reserved (constant 0)
             strash: HashMap::new(),
             var_map: HashMap::new(),
+            array_select_map: HashMap::new(),
         }
     }
 
@@ -75,6 +78,10 @@ impl AigManager {
     /// Return the AIG literal bits for a previously registered AST variable, if known.
     pub fn get_var_bits(&self, ast_id: u32) -> Option<&Vec<AigLit>> {
         self.var_map.get(&ast_id)
+    }
+
+    pub fn get_array_select_bits(&self, expr: &SymExpr) -> Option<&Vec<AigLit>> {
+        self.array_select_map.get(expr)
     }
 
     /// Add an AND gate, returning the literal. Applies structural hashing.
@@ -174,6 +181,21 @@ impl AigManager {
                     bits.clone()
                 } else {
                     self.add_var(*id, sort.expect_bv())
+                }
+            }
+            SymExpr::ArraySelect { .. } => {
+                if let Some(bits) = self.array_select_map.get(expr) {
+                    bits.clone()
+                } else {
+                    let size = expr.get_size();
+                    let mut bits = Vec::with_capacity(size as usize);
+                    for _ in 0..size {
+                        let idx = self.nodes.len() as u32 + 1;
+                        self.nodes.push(AigNode::Var(idx));
+                        bits.push(AigLit::new(idx, false));
+                    }
+                    self.array_select_map.insert(expr.clone(), bits.clone());
+                    bits
                 }
             }
             SymExpr::And(a, b) => {

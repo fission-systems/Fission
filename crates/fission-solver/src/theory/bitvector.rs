@@ -64,7 +64,7 @@ impl BvTheorySolver {
         let var_nodes: Vec<(SymNodeId, SymExpr)> = nodes
             .iter()
             .filter_map(|(&id, expr)| {
-                if matches!(expr, SymExpr::Var { .. }) {
+                if matches!(expr, SymExpr::Var { .. } | SymExpr::ArraySelect { .. }) {
                     Some((id, expr.clone()))
                 } else {
                     None
@@ -73,17 +73,24 @@ impl BvTheorySolver {
             .collect();
 
         for (node_id, expr) in &var_nodes {
-            if let SymExpr::Var { id: ast_id, sort, .. } = expr {
-                // If the sort is an Array, we don't try to extract a concrete BV from the SAT model here.
-                if let crate::ast::Sort::Array { .. } = sort { continue; }
-                
-                let size = sort.expect_bv();
-                let bits = if let Some(b) = self.aig.get_var_bits(*ast_id) {
-                    b.clone()
-                } else {
-                    self.aig.add_var(*ast_id, size)
-                };
+            let bits_opt = match expr {
+                SymExpr::Var { id: ast_id, sort, .. } => {
+                    if let crate::ast::Sort::Array { .. } = sort { continue; }
+                    let size = sort.expect_bv();
+                    Some(if let Some(b) = self.aig.get_var_bits(*ast_id) {
+                        b.clone()
+                    } else {
+                        self.aig.add_var(*ast_id, size)
+                    })
+                }
+                SymExpr::ArraySelect { .. } => {
+                    self.aig.get_array_select_bits(expr).cloned()
+                }
+                _ => None,
+            };
 
+            if let Some(bits) = bits_opt {
+                let size = expr.get_size();
                 let mut value: u64 = 0;
                 for (bit_idx, aig_lit) in bits.iter().enumerate() {
                     let aig_node_idx = aig_lit.index();
@@ -100,10 +107,31 @@ impl BvTheorySolver {
                     value |= bit_val << bit_idx;
                 }
 
-                let mask = if size >= 64 { u64::MAX } else { (1u64 << (size * 8)) - 1 };
+                let mask = if size >= 64 { u64::MAX } else { (1u64 << size) - 1 };
                 model.insert(*node_id, value & mask);
             }
         }
+    }
+
+    pub fn evaluate_expr_in_model(&mut self, sat: &SatSolver, expr: &SymExpr) -> u64 {
+        let bits = self.aig.lower_expr(expr);
+        let mut value: u64 = 0;
+        for (bit_idx, aig_lit) in bits.iter().enumerate() {
+            let aig_node_idx = aig_lit.index();
+            let cnf_var = self.cnf.get_cnf_var_for_aig(aig_node_idx);
+            if cnf_var == 0 {
+                let bit_val = if *aig_lit == AigLit::TRUE { 1u64 } else { 0u64 };
+                value |= bit_val << bit_idx;
+                continue;
+            }
+            let assignment = sat.get_var_value(cnf_var);
+            let raw_bit = matches!(assignment, crate::sat::LBool::True);
+            let bit_val = if aig_lit.is_inverted() { !raw_bit } else { raw_bit } as u64;
+            value |= bit_val << bit_idx;
+        }
+        let size = expr.get_size();
+        let mask = if size >= 64 { u64::MAX } else { (1u64 << size) - 1 };
+        value & mask
     }
 }
 

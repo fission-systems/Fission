@@ -10,6 +10,10 @@ pub enum SatResult {
     Unknown,
 }
 
+pub trait MemoryOracle {
+    fn read_concrete(&self, space_id: u64, addr: u64) -> Option<u8>;
+}
+
 /// A basic interface for an SMT Solver (CDCL/Bitvector skeleton).
 pub struct Solver {
     /// The list of assertions (Path Conditions) that must be satisfied.
@@ -73,38 +77,82 @@ impl Solver {
         self.assertions.push(expr);
     }
 
-    /// Check if the current set of assertions is satisfiable.
-    /// On SAT, populates `self.model` with concrete values for all registered Var nodes.
     pub fn check_sat(&mut self) -> Result<SatResult> {
-        tracing::info!("Solver::check_sat called with {} assertions", self.assertions.len());
+        self.check_sat_with_oracle(None)
+    }
 
-        let mut bv_theory = crate::theory::bitvector::BvTheorySolver::new();
-        let mut sat = crate::sat::SatSolver::new();
+    pub fn check_sat_with_oracle(&mut self, oracle: Option<&dyn MemoryOracle>) -> Result<SatResult> {
+        let mut loop_count = 0;
+        
+        loop {
+            loop_count += 1;
+            if loop_count > 10 {
+                tracing::warn!("CEGAR loop exceeded 10 iterations, bailing out");
+                return Ok(SatResult::Unknown);
+            }
 
-        // 1. Lower all assertions into the Bitvector Theory Solver
-        for assertion in &self.assertions {
-            bv_theory.assert_expr(assertion);
+            tracing::info!("Solver::check_sat_with_oracle (CEGAR iter {}) called with {} assertions", loop_count, self.assertions.len());
+
+            let mut bv_theory = crate::theory::bitvector::BvTheorySolver::new();
+            let mut sat = crate::sat::SatSolver::new();
+
+            // 1. Lower all assertions into the Bitvector Theory Solver
+            for assertion in &self.assertions {
+                bv_theory.assert_expr(assertion);
+            }
+
+            // 2. Load constraints from Theory Solver into SAT core
+            if !bv_theory.load_into_sat(&mut sat) {
+                return Ok(SatResult::Unsat);
+            }
+
+            // 3. Solve pure boolean SAT problem
+            if !sat.solve() {
+                return Ok(SatResult::Unsat);
+            }
+
+            // 4. Model Extraction
+            self.model.clear();
+            bv_theory.extract_model(&sat, &self.nodes, &mut self.model);
+            
+            // 5. Memory CEGAR
+            if let Some(oracle) = oracle {
+                let mut new_lemmas = Vec::new();
+                for (_, expr) in &self.nodes {
+                    if let SymExpr::ArraySelect { array, index } = expr {
+                        if let SymExpr::Var { name, .. } = array.as_ref() {
+                            if name.starts_with("space_") {
+                                let space_id: u64 = name["space_".len()..].parse().unwrap_or(0);
+                                let c_idx = bv_theory.evaluate_expr_in_model(&sat, index);
+                                let c_val = bv_theory.evaluate_expr_in_model(&sat, expr);
+                                
+                                if let Some(oracle_val) = oracle.read_concrete(space_id, c_idx) {
+                                    if c_val != oracle_val as u64 {
+                                        // Lemma: index == c_idx => ArraySelect == oracle_val
+                                        let eq_idx = SymExpr::Eq(index.clone(), Box::new(SymExpr::new_const(c_idx, index.get_size())));
+                                        let eq_val = SymExpr::Eq(Box::new(expr.clone()), Box::new(SymExpr::new_const(oracle_val as u64, expr.get_size())));
+                                        let implies = SymExpr::Or(Box::new(SymExpr::new_not(eq_idx)), Box::new(eq_val));
+                                        new_lemmas.push(implies);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                if !new_lemmas.is_empty() {
+                    for lemma in new_lemmas {
+                        self.assert(lemma);
+                    }
+                    continue; // Restart CEGAR loop
+                }
+            }
+
+            for (node_id, val) in &self.model {
+                tracing::debug!("Model: var_id={} value=0x{:X}", node_id, val);
+            }
+
+            return Ok(SatResult::Sat);
         }
-
-        // 2. Load constraints from Theory Solver into SAT core
-        if !bv_theory.load_into_sat(&mut sat) {
-            return Ok(SatResult::Unsat);
-        }
-
-        // 3. Solve pure boolean SAT problem
-        if !sat.solve() {
-            return Ok(SatResult::Unsat);
-        }
-
-        // 4. Model Extraction — Theory Solver reconstructs domain values from boolean assignment
-        self.model.clear();
-        bv_theory.extract_model(&sat, &self.nodes, &mut self.model);
-
-        for (node_id, val) in &self.model {
-            tracing::debug!("Model: var_id={} value=0x{:X}", node_id, val);
-        }
-
-        Ok(SatResult::Sat)
     }
 
     /// Retrieve the satisfying model for a given variable ID.
@@ -121,13 +169,17 @@ impl Solver {
     /// Check if the current path constraints + optional extra constraints are
     /// satisfiable. On SAT, the model is populated.
     pub fn satisfiable(&mut self, extra: &[SymExpr]) -> bool {
+        self.satisfiable_with_oracle(extra, None)
+    }
+
+    pub fn satisfiable_with_oracle(&mut self, extra: &[SymExpr], oracle: Option<&dyn MemoryOracle>) -> bool {
         if extra.is_empty() {
-            return matches!(self.check_sat().unwrap_or(SatResult::Unknown), SatResult::Sat);
+            return matches!(self.check_sat_with_oracle(oracle).unwrap_or(SatResult::Unknown), SatResult::Sat);
         }
         // Temporarily push extra constraints
         self.push();
         for e in extra { self.assert(e.clone()); }
-        let result = matches!(self.check_sat().unwrap_or(SatResult::Unknown), SatResult::Sat);
+        let result = matches!(self.check_sat_with_oracle(oracle).unwrap_or(SatResult::Unknown), SatResult::Sat);
         self.pop();
         result
     }
