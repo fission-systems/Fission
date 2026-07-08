@@ -2,6 +2,8 @@ use crate::aig::{AigManager, AigLit};
 use crate::cnf::CnfBuilder;
 use crate::ast::{SymExpr, SymNodeId};
 use crate::sat::SatSolver;
+use crate::theory::{Theory, TheoryStatus};
+use crate::cnf::Lit;
 use std::collections::HashMap;
 
 /// The Bitvector Theory Solver.
@@ -102,5 +104,12 @@ impl BvTheorySolver {
                 model.insert(*node_id, value & mask);
             }
         }
+    }
+}
+
+impl Theory for BvTheorySolver {
+    fn check(&mut self, _assignments: &[Lit]) -> TheoryStatus {
+        // Lazy bit2bool mapping and generating constraints
+        TheoryStatus::Satisfied
     }
 }

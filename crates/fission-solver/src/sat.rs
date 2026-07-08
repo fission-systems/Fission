@@ -618,43 +618,43 @@ impl SatSolver {
                 if let Some(th) = &mut theory {
                     // Extract current assignments as a list of True literals for the theory to check
                     let assignments: Vec<Lit> = self.trail.clone();
-                    if let Err(conflict) = th.check(&assignments) {
-                        // The theory found a conflict! 
-                        // The theory returns an unsat core: e.g. [!A, !B]. We will treat this as a learned clause.
-                        let mut lits = conflict.core;
-                        if lits.is_empty() {
-                            return false; // Trivially UNSAT
-                        }
-                        // To reuse our analyze() logic, we need this clause to be in the database and act as the reason
-                        // for the conflict. But our analyze() expects an index to a reason clause.
-                        // Actually, if the theory gives us a clause that is already violated by the current trail,
-                        // we can just add it to the clause database, and it will immediately conflict.
-                        let c_idx = self.clauses.len();
-                        self.clauses.push(Clause(lits.clone()));
-                        // Track it as a learned clause
-                        let lbd = self.compute_lbd(&lits);
-                        if c_idx >= self.learned_start {
-                            self.learned_meta.push(LearnedMeta { lbd, activity: 0 });
-                        }
-                        
-                        // We must watch the first two literals (or unit if size 1)
-                        if lits.len() == 1 {
-                            // It's a unit clause from the theory. It's conflicting right now.
-                            // The easiest way to handle a unit theory conflict is to just backtrack to 0
-                            // and enqueue it.
-                            self.cancel_until(0);
-                            self.enqueue(lits[0], None);
-                            // BCP will immediately see the conflict if it contradicts level 0,
-                            // or it will just propagate. We loop around.
-                            continue;
-                        } else {
-                            let lit0 = lits[0];
-                            let lit1 = lits[1];
-                            self.watches[lit0.not().index()].push(Watcher { clause_idx: c_idx, blocker: lit1 });
-                            self.watches[lit1.not().index()].push(Watcher { clause_idx: c_idx, blocker: lit0 });
+                    
+                    if let crate::theory::TheoryStatus::Lemmas(lemmas) = th.check(&assignments) {
+                        // Theory produced new clauses (lazy constraints or conflicts)
+                        for mut lits in lemmas {
+                            if lits.is_empty() {
+                                return false; // Trivially UNSAT
+                            }
                             
-                            // Now this clause is conflicting under the current trail!
-                            confl_opt = Some(c_idx);
+                            let c_idx = self.clauses.len();
+                            self.clauses.push(Clause(lits.clone()));
+                            
+                            let lbd = self.compute_lbd(&lits);
+                            if c_idx >= self.learned_start {
+                                self.learned_meta.push(LearnedMeta { lbd, activity: 0 });
+                            }
+                            
+                            if lits.len() == 1 {
+                                // Unit clause. Enqueue it.
+                                // It could be conflicting right now, so we backtrack to 0 just in case.
+                                self.cancel_until(0);
+                                self.enqueue(lits[0], None);
+                            } else {
+                                let lit0 = lits[0];
+                                let lit1 = lits[1];
+                                self.watches[lit0.not().index()].push(Watcher { clause_idx: c_idx, blocker: lit1 });
+                                self.watches[lit1.not().index()].push(Watcher { clause_idx: c_idx, blocker: lit0 });
+                                
+                                // Check if this new clause is conflicting under the current trail
+                                // A clause is conflicting if ALL its literals are False.
+                                let is_conflicting = lits.iter().all(|&l| self.assigns[l.var() as usize] == LBool::False && self.phase[l.var() as usize] != LBool::Undef);
+                                // Wait, phase is just phase saving, we should check assigns
+                                let is_conflicting = lits.iter().all(|&l| self.assigns[l.var() as usize] == (if l.0 < 0 { LBool::True } else { LBool::False }));
+                                
+                                if is_conflicting {
+                                    confl_opt = Some(c_idx);
+                                }
+                            }
                         }
                     }
                 }

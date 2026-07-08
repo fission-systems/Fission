@@ -1,4 +1,5 @@
 pub mod bitvector;
+pub mod array;
 
 use crate::cnf::Lit;
 
@@ -11,8 +12,19 @@ pub struct Conflict {
     pub core: Vec<Lit>,
 }
 
+/// Action returned by a theory after checking the assignments.
+#[derive(Debug, Clone)]
+pub enum TheoryStatus {
+    /// The theory is satisfied (or has nothing to say).
+    Satisfied,
+    /// The theory discovered new constraints (lemmas) that must hold.
+    /// Each inner Vec<Lit> is a clause. 
+    /// E.g. an unsat core `vec![!A, !B]` is returned as `Lemmas(vec![vec![!A, !B]])`.
+    Lemmas(Vec<Vec<Lit>>),
+}
+
 pub trait Theory {
     /// Evaluate the current boolean assignments.
-    /// If an inconsistency is found, return `Err(Conflict)` containing the unsat core (lemma).
-    fn check(&mut self, assignments: &[Lit]) -> Result<(), Conflict>;
+    /// Returns `TheoryStatus::Lemmas` if it generates new clauses (like bit-blasting constraints or unsat cores).
+    fn check(&mut self, assignments: &[Lit]) -> TheoryStatus;
 }
