@@ -1,5 +1,6 @@
 use crate::core::Emulator;
 use crate::sym::state::SimState;
+use crate::sym::exploration::ExplorationTechnique;
 use fission_solver::{SatResult, SymExpr};
 use anyhow::Result;
 use std::collections::HashMap;
@@ -10,6 +11,8 @@ pub struct SimulationManager {
     pub emu: Emulator,
     /// Stashes categorize states based on their current status.
     pub stashes: HashMap<String, Vec<SimState>>,
+    /// Active exploration techniques.
+    pub techniques: Vec<Box<dyn ExplorationTechnique>>,
 }
 
 impl SimulationManager {
@@ -26,8 +29,16 @@ impl SimulationManager {
         stashes.insert("deadended".to_string(), Vec::new());
         stashes.insert("unsat".to_string(), Vec::new());
         stashes.insert("unconstrained".to_string(), Vec::new());
+        stashes.insert("deferred".to_string(), Vec::new());
+        stashes.insert("found".to_string(), Vec::new());
+        stashes.insert("avoid".to_string(), Vec::new());
 
-        Self { emu, stashes }
+        Self { emu, stashes, techniques: Vec::new() }
+    }
+
+    pub fn use_technique(&mut self, mut tech: Box<dyn ExplorationTechnique>) {
+        tech.setup(&mut self.stashes);
+        self.techniques.push(tech);
     }
 
     /// Step all states in the `active` stash.
@@ -125,12 +136,25 @@ impl SimulationManager {
         self.stashes.get_mut("deadended").unwrap().extend(next_deadended);
         self.stashes.get_mut("unsat").unwrap().extend(next_unsat);
 
+        // Run techniques
+        let mut techniques = std::mem::take(&mut self.techniques);
+        for tech in techniques.iter_mut() {
+            tech.step(&mut self.stashes);
+        }
+        self.techniques = techniques;
+
         Ok(())
     }
 
-    /// Step until no states remain in the `active` stash.
+    /// Step until no states remain in the `active` stash, or a technique signals completion.
     pub fn step_all(&mut self) -> Result<()> {
-        while !self.stashes.get("active").unwrap().is_empty() {
+        loop {
+            if self.stashes.get("active").unwrap().is_empty() {
+                break;
+            }
+            if self.techniques.iter().any(|t| t.is_complete(&self.stashes)) {
+                break;
+            }
             self.step()?;
         }
         Ok(())

@@ -1,5 +1,6 @@
 pub mod state;
 pub mod manager;
+pub mod exploration;
 
 pub use state::{SimState, SimStateHistory};
 pub use manager::SimulationManager;
