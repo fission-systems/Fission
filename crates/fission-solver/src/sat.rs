@@ -29,6 +29,97 @@ pub struct Watcher {
     pub blocker: Lit, // used for fast check without accessing the clause
 }
 
+#[derive(Debug, Clone)]
+struct VarOrder {
+    heap: Vec<usize>,       // heap[i] = var, 1-indexed for easy math
+    indices: Vec<usize>,    // indices[var] = position in heap, 0 if not in heap
+}
+
+impl VarOrder {
+    fn new() -> Self {
+        Self {
+            heap: vec![0],
+            indices: vec![0],
+        }
+    }
+    
+    fn ensure_var(&mut self, var: usize) {
+        while self.indices.len() <= var {
+            self.indices.push(0);
+        }
+    }
+    
+    fn in_heap(&self, var: usize) -> bool {
+        var < self.indices.len() && self.indices[var] != 0
+    }
+    
+    fn insert(&mut self, var: usize, activity: &[f64]) {
+        if self.in_heap(var) { return; }
+        let idx = self.heap.len();
+        self.heap.push(var);
+        self.indices[var] = idx;
+        self.percolate_up(idx, activity);
+    }
+    
+    fn update(&mut self, var: usize, activity: &[f64]) {
+        if self.in_heap(var) {
+            self.percolate_up(self.indices[var], activity);
+        }
+    }
+    
+    fn pop_max(&mut self, activity: &[f64]) -> Option<usize> {
+        if self.heap.len() <= 1 { return None; }
+        let max_var = self.heap[1];
+        self.indices[max_var] = 0;
+        
+        let last = self.heap.pop().unwrap();
+        if self.heap.len() > 1 {
+            self.heap[1] = last;
+            self.indices[last] = 1;
+            self.percolate_down(1, activity);
+        }
+        Some(max_var)
+    }
+    
+    fn percolate_up(&mut self, mut i: usize, activity: &[f64]) {
+        let var = self.heap[i];
+        let act = activity[var];
+        while i > 1 {
+            let parent = i / 2;
+            let parent_var = self.heap[parent];
+            if activity[parent_var] >= act {
+                break;
+            }
+            self.heap[i] = parent_var;
+            self.indices[parent_var] = i;
+            i = parent;
+        }
+        self.heap[i] = var;
+        self.indices[var] = i;
+    }
+    
+    fn percolate_down(&mut self, mut i: usize, activity: &[f64]) {
+        let var = self.heap[i];
+        let act = activity[var];
+        let len = self.heap.len();
+        while i * 2 < len {
+            let mut child = i * 2;
+            if child + 1 < len && activity[self.heap[child + 1]] > activity[self.heap[child]] {
+                child += 1;
+            }
+            if act >= activity[self.heap[child]] {
+                break;
+            }
+            let child_var = self.heap[child];
+            self.heap[i] = child_var;
+            self.indices[child_var] = i;
+            i = child;
+        }
+        self.heap[i] = var;
+        self.indices[var] = i;
+    }
+}
+
 /// A Conflict-Driven Clause Learning (CDCL) SAT Solver core.
 pub struct SatSolver {
     /// The formula clauses (original + learned)
@@ -54,6 +145,9 @@ pub struct SatSolver {
     /// VSIDS Variable Activity (for decision heuristic)
     activity: Vec<f64>,
     var_inc: f64,
+    
+    order: VarOrder,
+    phase: Vec<LBool>,
 }
 
 impl Default for SatSolver {
@@ -74,6 +168,8 @@ impl SatSolver {
             qhead: 0,
             activity: vec![0.0],
             var_inc: 1.0,
+            order: VarOrder::new(),
+            phase: vec![LBool::False],
         }
     }
 
@@ -84,10 +180,15 @@ impl SatSolver {
             self.assigns.push(LBool::Undef);
             self.vardata.push(VarData { reason: None, level: 0 });
             self.activity.push(0.0);
+            self.phase.push(LBool::False);
             
             // Watch lists for var and !var
             self.watches.push(vec![]);
             self.watches.push(vec![]);
+            
+            let new_var = self.assigns.len() - 1;
+            self.order.ensure_var(new_var);
+            self.order.insert(new_var, &self.activity);
         }
     }
 
@@ -335,8 +436,15 @@ impl SatSolver {
             let limit = self.trail_lim[level as usize];
             for c in (limit..self.trail.len()).rev() {
                 let v = self.trail[c].var() as usize;
+                
+                // Phase saving: remember the last assigned polarity before unassigning
+                self.phase[v] = self.assigns[v];
+                
                 self.assigns[v] = LBool::Undef;
                 self.vardata[v].reason = None;
+                
+                // Re-insert unassigned variable back into the heap
+                self.order.insert(v, &self.activity);
             }
             self.trail.truncate(limit);
             self.trail_lim.truncate(level as usize);
@@ -353,33 +461,24 @@ impl SatSolver {
             }
             self.var_inc *= 1e-100;
         }
+        self.order.update(var, &self.activity);
     }
 
     fn var_decay_activity(&mut self) {
         self.var_inc *= 1.05; // 1 / 0.95
     }
 
-    fn pick_branch_lit(&self) -> Option<Lit> {
-        let mut best_var = 0;
-        let mut best_act = -1.0;
-        
-        // Extremely naive O(N) VSIDS pick for scaffolding.
-        // A production solver would use a priority queue (Binary Heap).
-        for (v, &val) in self.assigns.iter().enumerate().skip(1) {
-            if val == LBool::Undef {
-                if self.activity[v] > best_act {
-                    best_act = self.activity[v];
-                    best_var = v;
-                }
+    fn pick_branch_lit(&mut self) -> Option<Lit> {
+        while let Some(var) = self.order.pop_max(&self.activity) {
+            if self.assigns[var] == LBool::Undef {
+                let p = self.phase[var];
+                // Phase saving: if previously True, try True (inverted=false).
+                // If False (or Undef default), try False (inverted=true).
+                let inverted = p == LBool::False;
+                return Some(Lit::new(var as u32, inverted));
             }
         }
-        
-        if best_var == 0 {
-            None
-        } else {
-            // By default, guess false. (Can be optimized with Phase Saving)
-            Some(Lit::new(best_var as u32, true)) // inverted = true -> value False
-        }
+        None
     }
 
     pub fn solve(&mut self) -> bool {

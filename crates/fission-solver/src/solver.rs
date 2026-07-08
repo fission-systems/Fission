@@ -77,99 +77,30 @@ impl Solver {
     pub fn check_sat(&mut self) -> Result<SatResult> {
         tracing::info!("Solver::check_sat called with {} assertions", self.assertions.len());
 
-        let mut aig = crate::aig::AigManager::new();
-        let mut cnf = crate::cnf::CnfBuilder::new();
+        let mut bv_theory = crate::theory::bitvector::BvTheorySolver::new();
         let mut sat = crate::sat::SatSolver::new();
 
-        // 1. Lower all assertions into AIG and assert each output bit is TRUE
+        // 1. Lower all assertions into the Bitvector Theory Solver
         for assertion in &self.assertions {
-            let bits = aig.lower_expr(assertion);
-            if bits.len() == 1 {
-                cnf.assert_lit(bits[0]);
-            } else {
-                tracing::warn!("Assertion size != 1, skipping: {:?}", assertion);
-            }
+            bv_theory.assert_expr(assertion);
         }
 
-        // 2. Convert AIG → CNF (Tseitin)
-        aig.to_cnf(&mut cnf);
-
-        // 3. Load CNF clauses into SAT solver; short-circuit on trivially UNSAT empty clause
-        for clause in &cnf.clauses {
-            if !sat.add_clause(clause.0.clone()) {
-                return Ok(SatResult::Unsat);
-            }
+        // 2. Load constraints from Theory Solver into SAT core
+        if !bv_theory.load_into_sat(&mut sat) {
+            return Ok(SatResult::Unsat);
         }
 
-        // 4. Solve
+        // 3. Solve pure boolean SAT problem
         if !sat.solve() {
             return Ok(SatResult::Unsat);
         }
 
-        // 5. Model Extraction — for every Var node, read its bits from the SAT assignment.
-        //    Pipeline: SymNodeId → AIG var bits (AigLit) → CNF var index → SAT LBool → bit value
+        // 4. Model Extraction — Theory Solver reconstructs domain values from boolean assignment
         self.model.clear();
+        bv_theory.extract_model(&sat, &self.nodes, &mut self.model);
 
-        // Collect Var nodes first to avoid borrow conflict
-        let var_nodes: Vec<(SymNodeId, SymExpr)> = self.nodes
-            .iter()
-            .filter_map(|(&id, expr)| {
-                if matches!(expr, SymExpr::Var { .. }) {
-                    Some((id, expr.clone()))
-                } else {
-                    None
-                }
-            })
-            .collect();
-
-        for (node_id, expr) in &var_nodes {
-            if let SymExpr::Var { id: ast_id, size, .. } = expr {
-                // Retrieve or synthesize the AIG bits for this variable.
-                // If the variable appeared in an assertion its bits are already in aig.var_map.
-                // If not (unconstrained), synthesize them now — they'll be Undef in the model.
-                let bits = if let Some(b) = aig.get_var_bits(*ast_id) {
-                    b.clone()
-                } else {
-                    // Not constrained — create fresh bits (will be Undef, default 0)
-                    aig.add_var(*ast_id, *size)
-                };
-
-                // Reconstruct the u64 value bit by bit (LSB first)
-                let mut value: u64 = 0;
-                for (bit_idx, aig_lit) in bits.iter().enumerate() {
-                    let aig_node_idx = aig_lit.index();
-                    let cnf_var = cnf.get_cnf_var_for_aig(aig_node_idx);
-                    if cnf_var == 0 {
-                        // This AIG node was never added to CNF (constant TRUE/FALSE or unseen)
-                        // Constant TRUE = AigLit(1), constant FALSE = AigLit(0)
-                        let bit_val = if *aig_lit == crate::aig::AigLit::TRUE {
-                            1u64
-                        } else {
-                            0u64
-                        };
-                        value |= bit_val << bit_idx;
-                        continue;
-                    }
-
-                    let assignment = sat.get_var_value(cnf_var);
-                    let raw_bit = matches!(assignment, crate::sat::LBool::True);
-                    // If the AigLit is inverted, flip the bit
-                    let bit_val = if aig_lit.is_inverted() { !raw_bit } else { raw_bit } as u64;
-                    value |= bit_val << bit_idx;
-                }
-
-                // Mask to the declared size
-                let mask = if *size >= 64 { u64::MAX } else { (1u64 << (*size * 8)) - 1 };
-                self.model.insert(*node_id, value & mask);
-
-                tracing::debug!(
-                    "Model: var_id={} name={:?} size={} value=0x{:X}",
-                    node_id,
-                    if let SymExpr::Var { name, .. } = expr { name } else { "" },
-                    size,
-                    value & mask
-                );
-            }
+        for (node_id, val) in &self.model {
+            tracing::debug!("Model: var_id={} value=0x{:X}", node_id, val);
         }
 
         Ok(SatResult::Sat)
