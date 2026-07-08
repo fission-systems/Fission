@@ -138,26 +138,72 @@ impl<'a> Evaluator<'a> {
 
             PcodeOpcode::Load => {
                 let space_id = op.inputs[0].constant_val as u64;
-                let addr     = self.read_varnode_u64(&op.inputs[1])?;
-                let out      = op.output.as_ref().expect("LOAD must have output");
-                let raw      = self.state.read_space(space_id, addr, out.size as usize)?;
-                let node     = self.state.get_shadow_memory(space_id, addr);
-                if let Some(id) = node {
-                    self.write_varnode_shadow(out, id);
+                let addr_node = self.read_varnode_shadow(&op.inputs[1]);
+                let out = op.output.as_ref().expect("LOAD must have output");
+                
+                if let Some(ptr_node) = addr_node {
+                    // Symbolic pointer! Use the angr-style mixin.
+                    let result_node = crate::pcode::memory_mixin::MemoryMixin::handle_symbolic_read(
+                        self.state,
+                        self.solver,
+                        space_id,
+                        ptr_node,
+                        out.size,
+                    )?;
+                    
+                    // We must still give the output varnode some concrete value (0 is fine)
+                    let zeros = vec![0u8; out.size as usize];
+                    self.state.write_space(out.space_id, out.offset, &zeros)?;
+                    self.write_varnode_shadow(out, result_node);
+                } else {
+                    // Concrete pointer
+                    let addr = self.read_varnode_u64(&op.inputs[1])?;
+                    let raw = self.state.read_space(space_id, addr, out.size as usize)?;
+                    let node = self.state.get_shadow_memory(space_id, addr);
+                    if let Some(id) = node {
+                        self.write_varnode_shadow(out, id);
+                    }
+                    self.state.write_space(out.space_id, out.offset, &raw)?;
                 }
-                self.state.write_space(out.space_id, out.offset, &raw)?;
             }
 
             PcodeOpcode::Store => {
                 let space_id = op.inputs[0].constant_val as u64;
-                let addr     = self.read_varnode_u64(&op.inputs[1])?;
-                let val      = self.read_varnode_u64(&op.inputs[2])?;
-                let node     = self.read_varnode_shadow(&op.inputs[2]);
-                let bytes    = val.to_le_bytes();
-                self.state.write_space(space_id, addr, &bytes[..op.inputs[2].size as usize])?;
-                if let Some(id) = node {
-                    for i in 0..op.inputs[2].size as u64 {
-                        self.state.set_shadow_memory(space_id, addr + i, id);
+                let ptr_node = self.read_varnode_shadow(&op.inputs[1]);
+                let val_node = self.read_varnode_shadow(&op.inputs[2]);
+                
+                if let (Some(p_node), Some(v_node)) = (ptr_node, val_node) {
+                    // Symbolic pointer AND symbolic value
+                    crate::pcode::memory_mixin::MemoryMixin::handle_symbolic_write(
+                        self.state,
+                        self.solver,
+                        space_id,
+                        p_node,
+                        v_node,
+                        op.inputs[2].size,
+                    )?;
+                } else if let Some(p_node) = ptr_node {
+                    // Symbolic pointer, concrete value
+                    let val = self.read_varnode_u64(&op.inputs[2])?;
+                    let v_node = self.solver.register_node(fission_solver::SymExpr::new_const(val, op.inputs[2].size));
+                    crate::pcode::memory_mixin::MemoryMixin::handle_symbolic_write(
+                        self.state,
+                        self.solver,
+                        space_id,
+                        p_node,
+                        v_node,
+                        op.inputs[2].size,
+                    )?;
+                } else {
+                    // Concrete pointer
+                    let addr = self.read_varnode_u64(&op.inputs[1])?;
+                    let val = self.read_varnode_u64(&op.inputs[2])?;
+                    let bytes = val.to_le_bytes();
+                    self.state.write_space(space_id, addr, &bytes[..op.inputs[2].size as usize])?;
+                    if let Some(id) = val_node {
+                        for i in 0..op.inputs[2].size as u64 {
+                            self.state.set_shadow_memory(space_id, addr + i, id);
+                        }
                     }
                 }
             }
