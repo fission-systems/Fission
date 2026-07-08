@@ -234,8 +234,106 @@ impl AigManager {
                 let b_bits = self.lower_expr(b);
                 vec![self.add_neq(&a_bits, &b_bits)]
             }
-            // For other operations, we'd add multipliers etc.
-            // Scaffolding handles basic bitwise and arithmetic.
+            SymExpr::Ult(a, b) => {
+                // Unsigned less-than: a < b
+                // a < b  ⟺  borrow-out of (a - b) = 1
+                //          ⟺  carry-out of (a + ~b + 1) = 0  (two's complement)
+                // We build a single full-adder chain: a + ~b with carry_in = 1
+                // The final carry_out = 1 means a >= b, carry_out = 0 means a < b
+                let a_bits = self.lower_expr(a);
+                let b_bits = self.lower_expr(b);
+                let b_inv: Vec<AigLit> = b_bits.into_iter().map(|l| l.not()).collect();
+                let len = a_bits.len();
+
+                let mut carry = AigLit::TRUE; // carry-in = 1 (for two's complement negation)
+                for i in 0..len {
+                    let ax = a_bits.get(i).copied().unwrap_or(AigLit::FALSE);
+                    let bx = b_inv.get(i).copied().unwrap_or(AigLit::TRUE);
+                    // full adder carry-out: (a & b) | ((a ^ b) & carry_in)
+                    let axb = self.add_xor(ax, bx);
+                    let a_and_b = self.add_and(ax, bx);
+                    let axb_and_c = self.add_and(axb, carry);
+                    carry = self.add_or(a_and_b, axb_and_c);
+                }
+                // carry == 1 means a >= b (no borrow), carry == 0 means a < b (borrow)
+                vec![carry.not()]
+            }
+            SymExpr::Ule(a, b) => {
+                // a <= b  ≡  !(b < a)
+                let blt = SymExpr::Ult(b.clone(), a.clone());
+                let bits = self.lower_expr(&blt);
+                vec![bits[0].not()]
+            }
+            SymExpr::Slt(a, b) => {
+                // Signed less-than: flip sign bits, then do ULT
+                // a <_s b  ≡  (a XOR (1<<N-1)) <_u (b XOR (1<<N-1))
+                let size = a.get_size() as usize;
+                let sign_mask = SymExpr::new_const(1u64 << ((size * 8) - 1), a.get_size());
+                let a_flipped = SymExpr::Xor(a.clone(), Box::new(sign_mask.clone()));
+                let b_flipped = SymExpr::Xor(b.clone(), Box::new(sign_mask));
+                let ult = SymExpr::Ult(Box::new(a_flipped), Box::new(b_flipped));
+                self.lower_expr(&ult)
+            }
+            SymExpr::Sle(a, b) => {
+                // a <=_s b  ≡  !(b <_s a)
+                let blt = SymExpr::Slt(b.clone(), a.clone());
+                let bits = self.lower_expr(&blt);
+                vec![bits[0].not()]
+            }
+            SymExpr::Sgt(a, b) => {
+                // a >_s b  ≡  b <_s a
+                let blt = SymExpr::Slt(b.clone(), a.clone());
+                self.lower_expr(&blt)
+            }
+            SymExpr::Shl(a, b) => {
+                // Constant shift only (symbolic shift amount not yet supported)
+                let a_bits = self.lower_expr(a);
+                let a_len = a_bits.len();
+                if let SymExpr::Const { val: shift, .. } = b.as_ref() {
+                    let shift = *shift as usize;
+                    let mut out = vec![AigLit::FALSE; shift];
+                    let take_count = if shift < a_len { a_len - shift } else { 0 };
+                    out.extend(a_bits.into_iter().take(take_count));
+                    out.truncate(a_len);
+                    // Pad to original length if truncated
+                    while out.len() < a_len { out.push(AigLit::FALSE); }
+                    out
+                } else {
+                    tracing::warn!("Symbolic shift not yet supported — treating as identity");
+                    a_bits
+                }
+            }
+            SymExpr::Lshr(a, b) => {
+                let a_bits = self.lower_expr(a);
+                if let SymExpr::Const { val: shift, .. } = b.as_ref() {
+                    let shift = *shift as usize;
+                    if shift >= a_bits.len() {
+                        vec![AigLit::FALSE; a_bits.len()]
+                    } else {
+                        let mut out = a_bits[shift..].to_vec();
+                        while out.len() < a_bits.len() { out.push(AigLit::FALSE); }
+                        out
+                    }
+                } else {
+                    tracing::warn!("Symbolic shift not yet supported — treating as identity");
+                    a_bits
+                }
+            }
+            SymExpr::Extract { expr, lsb, size } => {
+                let bits = self.lower_expr(expr);
+                let lsb = *lsb as usize;
+                let end = (lsb + *size as usize).min(bits.len());
+                let mut out = bits[lsb..end].to_vec();
+                while out.len() < *size as usize { out.push(AigLit::FALSE); }
+                out
+            }
+            SymExpr::Concat(a, b) => {
+                // Concat(a, b): b is the low bits, a is the high bits
+                let mut out = self.lower_expr(b);
+                out.extend(self.lower_expr(a));
+                out
+            }
+            // Mul, Udiv, Ite, and other ops not yet supported
             _ => {
                 tracing::warn!("Unsupported AIG lowering for {:?}", expr);
                 vec![AigLit::FALSE; expr.get_size() as usize]
@@ -350,5 +448,50 @@ mod tests {
         let x = SymExpr::new_var("x", 8);
         let y = SymExpr::new_var("y", 8);
         assert!(check_sat(SymExpr::new_neq(x, y)));
+    }
+
+    #[test]
+    fn test_ult_sat() {
+        // x < 10 (unsigned)  => SAT (x = 0..9)
+        let x   = SymExpr::new_var("x", 8);
+        let ten = SymExpr::new_const(10, 8);
+        assert!(check_sat(SymExpr::Ult(Box::new(x), Box::new(ten))));
+    }
+
+    #[test]
+    fn test_ult_unsat() {
+        // 10 < 10 => UNSAT (constant fold: false)
+        let ten_a = SymExpr::new_const(10, 8);
+        let ten_b = SymExpr::new_const(10, 8);
+        let ult = SymExpr::new_ult(ten_a, ten_b);
+        assert_eq!(ult, SymExpr::Const { val: 0, size: 1 });
+        assert!(!check_sat(ult));
+    }
+
+    #[test]
+    fn test_slt_signed_wrap() {
+        // -1 <_s 0: i8(-1) = 0xFF, i8(0) = 0x00 => -1 < 0 signed => SAT
+        let neg_one = SymExpr::new_const(0xFF, 1); // 1-byte -1
+        let zero    = SymExpr::new_const(0, 1);
+        assert!(check_sat(SymExpr::new_slt(neg_one, zero)));
+    }
+
+    #[test]
+    fn test_extract_sat() {
+        // Extract bits [7:4] of x, assert they equal 0xA
+        let x = SymExpr::new_var("x", 8);
+        let hi_nibble = SymExpr::Extract { expr: Box::new(x), lsb: 4, size: 4 };
+        let target = SymExpr::new_const(0xA, 4);
+        assert!(check_sat(SymExpr::new_eq(hi_nibble, target)));
+    }
+
+    #[test]
+    fn test_lshr_sat() {
+        // (x >> 1) == 5  => x must be 10 or 11 => SAT
+        let x     = SymExpr::new_var("x", 8);
+        let shift = SymExpr::new_const(1, 8);
+        let five  = SymExpr::new_const(5, 8);
+        let shifted = SymExpr::Lshr(Box::new(x), Box::new(shift));
+        assert!(check_sat(SymExpr::new_eq(shifted, five)));
     }
 }

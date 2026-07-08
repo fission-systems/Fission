@@ -50,6 +50,9 @@ impl BvTheorySolver {
                 return false;
             }
         }
+
+        // Mark boundary between input (original) and learned clauses
+        sat.seal_input_clauses();
         true
     }
 

@@ -31,6 +31,12 @@ pub enum SymExpr {
     Neq(Box<SymExpr>, Box<SymExpr>),
     Ult(Box<SymExpr>, Box<SymExpr>),
     Ule(Box<SymExpr>, Box<SymExpr>),
+    /// Signed less-than (e.g. x86 JLESS, SF ≠ OF)
+    Slt(Box<SymExpr>, Box<SymExpr>),
+    /// Signed less-than-or-equal
+    Sle(Box<SymExpr>, Box<SymExpr>),
+    /// Signed greater-than
+    Sgt(Box<SymExpr>, Box<SymExpr>),
     
     // Control Flow
     Ite { cond: Box<SymExpr>, t: Box<SymExpr>, f: Box<SymExpr> },
@@ -124,13 +130,53 @@ impl SymExpr {
         }
     }
 
+    pub fn new_ult(a: SymExpr, b: SymExpr) -> Self {
+        match (&a, &b) {
+            (Self::Const { val: v1, .. }, Self::Const { val: v2, .. }) => Self::Const { val: if v1 < v2 { 1 } else { 0 }, size: 1 },
+            _ => Self::Ult(Box::new(a), Box::new(b)),
+        }
+    }
+
+    /// Signed less-than: interpret both sides as two's-complement signed integers.
+    pub fn new_slt(a: SymExpr, b: SymExpr) -> Self {
+        match (&a, &b) {
+            (Self::Const { val: v1, size }, Self::Const { val: v2, .. }) => {
+                let bits = *size * 8;
+                let sign_bit = 1u64 << (bits.saturating_sub(1));
+                let a_signed = if v1 & sign_bit != 0 { (v1.wrapping_sub(1u64 << bits)) as i64 } else { *v1 as i64 };
+                let b_signed = if v2 & sign_bit != 0 { (v2.wrapping_sub(1u64 << bits)) as i64 } else { *v2 as i64 };
+                Self::Const { val: if a_signed < b_signed { 1 } else { 0 }, size: 1 }
+            },
+            _ => Self::Slt(Box::new(a), Box::new(b)),
+        }
+    }
+
+    pub fn new_sle(a: SymExpr, b: SymExpr) -> Self {
+        match (&a, &b) {
+            (Self::Const { val: v1, size }, Self::Const { val: v2, .. }) => {
+                let bits = *size * 8;
+                let sign_bit = 1u64 << (bits.saturating_sub(1));
+                let a_signed = if v1 & sign_bit != 0 { (v1.wrapping_sub(1u64 << bits)) as i64 } else { *v1 as i64 };
+                let b_signed = if v2 & sign_bit != 0 { (v2.wrapping_sub(1u64 << bits)) as i64 } else { *v2 as i64 };
+                Self::Const { val: if a_signed <= b_signed { 1 } else { 0 }, size: 1 }
+            },
+            _ => Self::Sle(Box::new(a), Box::new(b)),
+        }
+    }
+
+    pub fn new_sgt(a: SymExpr, b: SymExpr) -> Self {
+        // a > b (signed) ≡ b < a (signed)
+        Self::new_slt(b, a)
+    }
+
     pub fn get_size(&self) -> u32 {
         match self {
             Self::Const { size, .. } => *size,
             Self::Var { size, .. } => *size,
             Self::Add(a, _) | Self::Sub(a, _) | Self::Mul(a, _) | Self::Udiv(a, _) => a.get_size(),
             Self::And(a, _) | Self::Or(a, _) | Self::Xor(a, _) | Self::Shl(a, _) | Self::Lshr(a, _) => a.get_size(),
-            Self::Eq(_, _) | Self::Neq(_, _) | Self::Ult(_, _) | Self::Ule(_, _) => 1,
+            Self::Eq(_, _) | Self::Neq(_, _) | Self::Ult(_, _) | Self::Ule(_, _)
+            | Self::Slt(_, _) | Self::Sle(_, _) | Self::Sgt(_, _) => 1,
             Self::Ite { t, .. } => t.get_size(),
             Self::Extract { size, .. } => *size,
             Self::Concat(a, b) => a.get_size() + b.get_size(),

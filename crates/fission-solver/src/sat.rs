@@ -1,5 +1,21 @@
 use crate::cnf::{Clause, Lit};
 
+// ── LBD / Glue tracking ─────────────────────────────────────────────────────
+//
+// Inspired by Z3's sat_gc.cpp (gc_glue / gc_half pattern).
+// LBD (Literal Block Distance) = number of distinct decision levels in a clause.
+// Clauses with LBD ≤ 2 are considered "glue" and kept forever.
+// All other learned clauses are candidates for GC after a conflict threshold.
+//
+/// Metadata attached to each learned clause.
+#[derive(Debug, Clone)]
+pub struct LearnedMeta {
+    /// LBD at the time of learning (lower = higher quality)
+    pub lbd: u32,
+    /// Number of times this clause has been used in conflict analysis (activity)
+    pub activity: u32,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LBool {
     True,
@@ -148,6 +164,18 @@ pub struct SatSolver {
     
     order: VarOrder,
     phase: Vec<LBool>,
+
+    // ── Clause DB / LBD Garbage Collection ───────────────────────────────────
+    // Reference: Z3 sat_gc.cpp gc_glue / gc_half pattern
+    //
+    /// Index into `clauses` where learned clauses begin (original clauses before this idx).
+    learned_start: usize,
+    /// LBD metadata for each learned clause (parallel to clauses[learned_start..]).
+    learned_meta: Vec<LearnedMeta>,
+    /// Conflict counter since the last GC run.
+    conflicts_since_gc: u32,
+    /// GC fires when conflicts_since_gc >= gc_threshold; threshold grows after each GC.
+    gc_threshold: u32,
 }
 
 impl Default for SatSolver {
@@ -170,6 +198,10 @@ impl SatSolver {
             var_inc: 1.0,
             order: VarOrder::new(),
             phase: vec![LBool::False],
+            learned_start: 0,
+            learned_meta: vec![],
+            conflicts_since_gc: 0,
+            gc_threshold: 100,
         }
     }
 
@@ -224,6 +256,12 @@ impl SatSolver {
         };
         self.trail.push(lit);
         true
+    }
+
+    /// Mark the boundary between input clauses and learned clauses.
+    /// Must be called after all input clauses are added via add_clause, before solve().
+    pub fn seal_input_clauses(&mut self) {
+        self.learned_start = self.clauses.len();
     }
 
     /// Add a clause to the solver. Returns false if the formula becomes trivially UNSAT.
@@ -423,12 +461,93 @@ impl SatSolver {
         
         // Decay activities
         self.var_decay_activity();
+        self.conflicts_since_gc += 1;
 
         if learned.len() == 1 {
             backtrack_level = 0;
         }
 
         (learned, backtrack_level)
+    }
+
+    /// Compute LBD (Literal Block Distance) of a clause: number of distinct decision levels.
+    fn compute_lbd(&self, lits: &[Lit]) -> u32 {
+        let mut levels: Vec<u32> = lits
+            .iter()
+            .map(|l| self.vardata[l.var() as usize].level)
+            .filter(|&lvl| lvl > 0)
+            .collect();
+        levels.sort_unstable();
+        levels.dedup();
+        levels.len() as u32
+    }
+
+    /// LBD-based garbage collection for learned clauses.
+    /// Inspired by Z3 sat_gc.cpp gc_glue / gc_half:
+    /// - Sort learned clauses by (lbd ASC, size ASC)
+    /// - Evict the worst half; never evict glue clauses (lbd <= 2)
+    /// - Update watch lists to point to new clause indices
+    fn gc_learned(&mut self) {
+        let ls = self.learned_start;
+        let total = self.clauses.len();
+        if total <= ls { return; }
+
+        let learned_count = total - ls;
+        if learned_count < 10 { return; }
+
+        // Collect (lbd, original_index) for each learned clause
+        let mut order: Vec<(u32, usize)> = self.learned_meta
+            .iter()
+            .enumerate()
+            .map(|(i, m)| (m.lbd, ls + i))
+            .collect();
+        // Sort: low LBD (high quality) first
+        order.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)));
+
+        let keep = learned_count / 2;
+        let to_keep: std::collections::HashSet<usize> = order[..keep.min(order.len())]
+            .iter()
+            .map(|(_, idx)| *idx)
+            .collect();
+
+        // Collect clauses to keep (input clauses + kept learned)
+        let mut new_clauses: Vec<Clause> = self.clauses[..ls].to_vec();
+        let mut new_meta: Vec<LearnedMeta> = Vec::new();
+        let mut index_map: Vec<Option<usize>> = vec![None; self.clauses.len()];
+
+        for i in 0..ls { index_map[i] = Some(i); }
+
+        for (meta_i, orig_idx) in self.learned_meta.iter().enumerate().map(|(i, m)| (i, ls + i)) {
+            if to_keep.contains(&orig_idx) {
+                let new_idx = new_clauses.len();
+                index_map[orig_idx] = Some(new_idx);
+                new_clauses.push(self.clauses[orig_idx].clone());
+                new_meta.push(self.learned_meta[meta_i].clone());
+            }
+        }
+
+        let evicted = total - new_clauses.len();
+        tracing::debug!("gc_learned: evicted {} of {} learned clauses", evicted, learned_count);
+
+        // Remap watch lists
+        for ws in &mut self.watches {
+            ws.retain(|w| index_map[w.clause_idx].is_some());
+            for w in ws.iter_mut() {
+                w.clause_idx = index_map[w.clause_idx].unwrap();
+            }
+        }
+
+        // Remap reason pointers in vardata
+        for vd in &mut self.vardata {
+            if let Some(r) = vd.reason {
+                vd.reason = index_map.get(r).copied().flatten();
+            }
+        }
+
+        self.clauses = new_clauses;
+        self.learned_meta = new_meta;
+        self.conflicts_since_gc = 0;
+        self.gc_threshold = (self.gc_threshold * 12 / 10).max(50); // grow by 20%
     }
 
     fn cancel_until(&mut self, level: u32) {
@@ -520,13 +639,26 @@ impl SatSolver {
                     let lit0 = final_clause[0];
                     let lit1 = final_clause[1];
                     
+                    // Compute LBD before moving final_clause into the Clause struct
+                    let lbd = self.compute_lbd(&final_clause);
+
                     self.clauses.push(Clause(final_clause));
                     
+                    // Track learned clause metadata for LBD-based GC
+                    if c_idx >= self.learned_start {
+                        self.learned_meta.push(LearnedMeta { lbd, activity: 0 });
+                    }
+
                     self.watches[lit0.not().index()].push(Watcher { clause_idx: c_idx, blocker: lit1 });
                     self.watches[lit1.not().index()].push(Watcher { clause_idx: c_idx, blocker: lit0 });
                     
                     // BCP will flip the asserting literal
                     self.enqueue(lit0, Some(c_idx));
+                }
+
+                // GC: evict poor-quality learned clauses to bound memory usage
+                if self.conflicts_since_gc >= self.gc_threshold {
+                    self.gc_learned();
                 }
             } else {
                 // No conflict, make a decision

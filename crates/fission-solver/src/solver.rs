@@ -110,4 +110,163 @@ impl Solver {
     pub fn get_value(&self, var_id: SymNodeId) -> Option<u64> {
         self.model.get(&var_id).copied()
     }
+
+    // ── High-level API (inspired by angr SimSolver) ───────────────────────────
+    //
+    // All query entry-points first try the "concrete shortcut": if the expression
+    // is a constant, return the concrete value immediately without invoking the
+    // SAT backend (reference: angr solver.py `@concrete_path_*` decorators).
+
+    /// Check if the current path constraints + optional extra constraints are
+    /// satisfiable. On SAT, the model is populated.
+    pub fn satisfiable(&mut self, extra: &[SymExpr]) -> bool {
+        if extra.is_empty() {
+            return matches!(self.check_sat().unwrap_or(SatResult::Unknown), SatResult::Sat);
+        }
+        // Temporarily push extra constraints
+        self.push();
+        for e in extra { self.assert(e.clone()); }
+        let result = matches!(self.check_sat().unwrap_or(SatResult::Unknown), SatResult::Sat);
+        self.pop();
+        result
+    }
+
+    /// Evaluate the expression and return up to `n` concrete values that satisfy
+    /// the current path constraints.
+    ///
+    /// Concrete shortcut: if `expr` is a constant, returns `vec![const_val]`
+    /// immediately without invoking the SAT core.
+    pub fn eval(&mut self, expr: &SymExpr, n: usize) -> Vec<u64> {
+        // Concrete shortcut (angr pattern #13)
+        if let SymExpr::Const { val, .. } = expr {
+            return vec![*val];
+        }
+
+        let mut results = Vec::new();
+        if !matches!(self.check_sat().unwrap_or(SatResult::Unknown), SatResult::Sat) {
+            return results;
+        }
+
+        // Get first solution from model by looking up by structure
+        // For a Var node: look it up directly
+        if let SymExpr::Var { id, .. } = expr {
+            if let Some(val) = self.model.get(id) {
+                results.push(*val);
+            }
+        }
+
+        // For additional solutions (up to n), exclude each found solution and re-solve
+        // This is standard SMT enumeration: assert (expr != prev_val) and re-check
+        let mut extra_exclusions: Vec<SymExpr> = Vec::new();
+        while results.len() < n {
+            let last = *results.last().unwrap_or(&0);
+            let exclusion = SymExpr::new_neq(expr.clone(), SymExpr::new_const(last, expr.get_size()));
+            extra_exclusions.push(exclusion);
+
+            self.push();
+            for excl in &extra_exclusions {
+                self.assert(excl.clone());
+            }
+            let sat = matches!(self.check_sat().unwrap_or(SatResult::Unknown), SatResult::Sat);
+            if sat {
+                if let SymExpr::Var { id, .. } = expr {
+                    if let Some(val) = self.model.get(id) {
+                        results.push(*val);
+                    } else { self.pop(); break; }
+                } else { self.pop(); break; }
+            } else {
+                self.pop();
+                break;
+            }
+            self.pop();
+        }
+
+        results
+    }
+
+    /// Returns true if `expr` is definitely true under all satisfying assignments.
+    /// Concrete shortcut: if const, compare directly.
+    pub fn is_true(&mut self, expr: &SymExpr) -> bool {
+        match expr {
+            SymExpr::Const { val, .. } => *val != 0,
+            _ => {
+                // Check that NOT(expr) is UNSAT
+                let negated = SymExpr::new_eq(expr.clone(), SymExpr::new_const(0, 1));
+                !self.satisfiable(&[negated])
+            }
+        }
+    }
+
+    /// Returns true if `expr` is definitely false under all satisfying assignments.
+    /// Concrete shortcut: if const, compare directly.
+    pub fn is_false(&mut self, expr: &SymExpr) -> bool {
+        match expr {
+            SymExpr::Const { val, .. } => *val == 0,
+            _ => {
+                // Check that expr is UNSAT
+                let positive = SymExpr::new_neq(expr.clone(), SymExpr::new_const(0, 1));
+                !self.satisfiable(&[positive])
+            }
+        }
+    }
+
+    /// Find the minimum concrete value of `expr` satisfying the current constraints.
+    /// Uses binary search over constraint space (reference: angr min/max with signed flag).
+    pub fn min(&mut self, expr: &SymExpr) -> Option<u64> {
+        // Concrete shortcut
+        if let SymExpr::Const { val, .. } = expr { return Some(*val); }
+
+        let solutions = self.eval(expr, 1);
+        if solutions.is_empty() { return None; }
+
+        let mut lo = 0u64;
+        let mut hi = solutions[0];
+        let mut best = hi;
+
+        // Binary search downward
+        while lo < hi {
+            let mid = lo + (hi - lo) / 2;
+            let constraint = SymExpr::Ule(
+                Box::new(expr.clone()),
+                Box::new(SymExpr::new_const(mid, expr.get_size())),
+            );
+            if self.satisfiable(&[constraint]) {
+                best = mid;
+                hi = mid;
+            } else {
+                lo = mid + 1;
+            }
+        }
+        Some(best)
+    }
+
+    /// Find the maximum concrete value of `expr` satisfying the current constraints.
+    pub fn max(&mut self, expr: &SymExpr) -> Option<u64> {
+        // Concrete shortcut
+        if let SymExpr::Const { val, .. } = expr { return Some(*val); }
+
+        let solutions = self.eval(expr, 1);
+        if solutions.is_empty() { return None; }
+
+        let mut lo = solutions[0];
+        let size_bits = expr.get_size() * 8;
+        let mut hi = if size_bits >= 64 { u64::MAX } else { (1u64 << size_bits) - 1 };
+        let mut best = lo;
+
+        // Binary search upward
+        while lo < hi {
+            let mid = lo + (hi - lo + 1) / 2;
+            let constraint = SymExpr::Ult(
+                Box::new(SymExpr::new_const(mid, expr.get_size())),
+                Box::new(expr.clone()),
+            );
+            if self.satisfiable(&[constraint]) {
+                best = mid;
+                lo = mid;
+            } else {
+                hi = mid - 1;
+            }
+        }
+        Some(best)
+    }
 }
