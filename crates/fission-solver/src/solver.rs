@@ -22,8 +22,10 @@ pub struct Solver {
     pub model: HashMap<SymNodeId, u64>,
     /// Storage for AST nodes by ID.
     pub nodes: HashMap<SymNodeId, SymExpr>,
-    /// Stack of frame boundaries (indices into the assertions list) for push/pop.
-    pub frames: Vec<usize>,
+    
+    pub bv_theory: crate::theory::bitvector::BvTheorySolver,
+    pub sat: crate::sat::SatSolver,
+    pub lowered_assertions: usize,
 }
 
 impl Default for Solver {
@@ -38,21 +40,9 @@ impl Solver {
             assertions: Vec::new(),
             model: HashMap::new(),
             nodes: HashMap::new(),
-            frames: Vec::new(),
-        }
-    }
-
-    /// Push a new context frame.
-    pub fn push(&mut self) {
-        self.frames.push(self.assertions.len());
-    }
-
-    /// Pop the most recent context frame, reverting assertions added since then.
-    pub fn pop(&mut self) {
-        if let Some(prev_len) = self.frames.pop() {
-            self.assertions.truncate(prev_len);
-        } else {
-            tracing::warn!("Solver::pop called with no frames on the stack");
+            bv_theory: crate::theory::bitvector::BvTheorySolver::new(),
+            sat: crate::sat::SatSolver::new(),
+            lowered_assertions: 0,
         }
     }
 
@@ -74,15 +64,25 @@ impl Solver {
         if expr.get_size() != 1 {
             tracing::warn!("Asserted expression does not evaluate to a boolean (size != 1)");
         }
-        self.assertions.push(expr);
+        self.assertions.push(expr.clone());
+        self.bv_theory.assert_expr(&expr);
+        // Load into SAT immediately so it's ready
+        self.bv_theory.load_into_sat(&mut self.sat);
     }
 
     pub fn check_sat(&mut self) -> Result<SatResult> {
-        self.check_sat_with_oracle(None)
+        self.check_sat_with_oracle(None, &[])
     }
 
-    pub fn check_sat_with_oracle(&mut self, oracle: Option<&dyn MemoryOracle>) -> Result<SatResult> {
+    pub fn check_sat_with_oracle(&mut self, oracle: Option<&dyn MemoryOracle>, extra: &[SymExpr]) -> Result<SatResult> {
         let mut loop_count = 0;
+        
+        // Push missing assertions to SAT (if any somehow bypassed assert)
+        while self.lowered_assertions < self.assertions.len() {
+            self.bv_theory.assert_expr(&self.assertions[self.lowered_assertions]);
+            self.lowered_assertions += 1;
+        }
+        self.bv_theory.load_into_sat(&mut self.sat);
         
         loop {
             loop_count += 1;
@@ -91,29 +91,24 @@ impl Solver {
                 return Ok(SatResult::Unknown);
             }
 
-            tracing::info!("Solver::check_sat_with_oracle (CEGAR iter {}) called with {} assertions", loop_count, self.assertions.len());
-
-            let mut bv_theory = crate::theory::bitvector::BvTheorySolver::new();
-            let mut sat = crate::sat::SatSolver::new();
-
-            // 1. Lower all assertions into the Bitvector Theory Solver
-            for assertion in &self.assertions {
-                bv_theory.assert_expr(assertion);
+            // Lower extra constraints to assumptions
+            let mut assumptions = Vec::new();
+            for e in extra {
+                if let Some(lit) = self.bv_theory.lower_to_literal(e, &mut self.sat) {
+                    assumptions.push(lit);
+                } else {
+                    return Ok(SatResult::Unsat);
+                }
             }
 
-            // 2. Load constraints from Theory Solver into SAT core
-            if !bv_theory.load_into_sat(&mut sat) {
-                return Ok(SatResult::Unsat);
-            }
-
-            // 3. Solve pure boolean SAT problem
-            if !sat.solve() {
+            // 3. Solve pure boolean SAT problem with assumptions
+            if !self.sat.solve_with_assumptions(None, &assumptions) {
                 return Ok(SatResult::Unsat);
             }
 
             // 4. Model Extraction
             self.model.clear();
-            bv_theory.extract_model(&sat, &self.nodes, &mut self.model);
+            self.bv_theory.extract_model(&self.sat, &self.nodes, &mut self.model);
             
             // 5. Memory CEGAR
             if let Some(oracle) = oracle {
@@ -123,8 +118,8 @@ impl Solver {
                         if let SymExpr::Var { name, .. } = array.as_ref() {
                             if name.starts_with("space_") {
                                 let space_id: u64 = name["space_".len()..].parse().unwrap_or(0);
-                                let c_idx = bv_theory.evaluate_expr_in_model(&sat, index);
-                                let c_val = bv_theory.evaluate_expr_in_model(&sat, expr);
+                                let c_idx = self.bv_theory.evaluate_expr_in_model(&self.sat, index);
+                                let c_val = self.bv_theory.evaluate_expr_in_model(&self.sat, expr);
                                 
                                 if let Some(oracle_val) = oracle.read_concrete(space_id, c_idx) {
                                     if c_val != oracle_val as u64 {
@@ -173,15 +168,7 @@ impl Solver {
     }
 
     pub fn satisfiable_with_oracle(&mut self, extra: &[SymExpr], oracle: Option<&dyn MemoryOracle>) -> bool {
-        if extra.is_empty() {
-            return matches!(self.check_sat_with_oracle(oracle).unwrap_or(SatResult::Unknown), SatResult::Sat);
-        }
-        // Temporarily push extra constraints
-        self.push();
-        for e in extra { self.assert(e.clone()); }
-        let result = matches!(self.check_sat_with_oracle(oracle).unwrap_or(SatResult::Unknown), SatResult::Sat);
-        self.pop();
-        result
+        matches!(self.check_sat_with_oracle(oracle, extra).unwrap_or(SatResult::Unknown), SatResult::Sat)
     }
 
     /// Evaluate the expression and return up to `n` concrete values that satisfy
@@ -216,22 +203,16 @@ impl Solver {
             let exclusion = SymExpr::new_neq(expr.clone(), SymExpr::new_const(last, expr.get_size()));
             extra_exclusions.push(exclusion);
 
-            self.push();
-            for excl in &extra_exclusions {
-                self.assert(excl.clone());
-            }
-            let sat = matches!(self.check_sat().unwrap_or(SatResult::Unknown), SatResult::Sat);
+            let sat = matches!(self.check_sat_with_oracle(None, &extra_exclusions).unwrap_or(SatResult::Unknown), SatResult::Sat);
             if sat {
                 if let SymExpr::Var { id, .. } = expr {
                     if let Some(val) = self.model.get(id) {
                         results.push(*val);
-                    } else { self.pop(); break; }
-                } else { self.pop(); break; }
+                    } else { break; }
+                } else { break; }
             } else {
-                self.pop();
                 break;
             }
-            self.pop();
         }
 
         results

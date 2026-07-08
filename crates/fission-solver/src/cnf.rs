@@ -78,7 +78,7 @@ impl CnfBuilder {
         self.var_map.get(aig_idx as usize).copied().unwrap_or(0)
     }
 
-    fn get_lit(&mut self, aig_lit: AigLit) -> Lit {
+    pub fn get_cnf_lit(&mut self, aig_lit: AigLit) -> Lit {
         let var = self.get_cnf_var(aig_lit.index());
         Lit::new(var, aig_lit.is_inverted())
     }
@@ -91,7 +91,7 @@ impl CnfBuilder {
             self.clauses.push(Clause(vec![]));
             return;
         }
-        let cnf_lit = self.get_lit(lit);
+        let cnf_lit = self.get_cnf_lit(lit);
         self.clauses.push(Clause(vec![cnf_lit]));
     }
 
@@ -101,8 +101,8 @@ impl CnfBuilder {
     /// = (!out OR a) AND (!out OR b) AND (!a OR !b OR out)
     pub fn add_and_gate(&mut self, out_idx: u32, a_lit: AigLit, b_lit: AigLit) {
         let out = Lit::new(self.get_cnf_var(out_idx), false);
-        let a = self.get_lit(a_lit);
-        let b = self.get_lit(b_lit);
+        let a = self.get_cnf_lit(a_lit);
+        let b = self.get_cnf_lit(b_lit);
 
         self.clauses.push(Clause(vec![out.not(), a]));
         self.clauses.push(Clause(vec![out.not(), b]));

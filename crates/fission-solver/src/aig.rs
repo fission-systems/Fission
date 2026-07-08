@@ -45,6 +45,7 @@ pub struct AigManager {
     var_map: HashMap<u32, Vec<AigLit>>,
     /// Maps ArraySelect nodes to their vector of AIG literals
     array_select_map: HashMap<SymExpr, Vec<AigLit>>,
+    pub last_cnf_node: usize,
 }
 
 impl Default for AigManager {
@@ -60,6 +61,7 @@ impl AigManager {
             strash: HashMap::new(),
             var_map: HashMap::new(),
             array_select_map: HashMap::new(),
+            last_cnf_node: 0,
         }
     }
 
@@ -364,13 +366,15 @@ impl AigManager {
     }
 
     /// Converts the entire AIG into a CNF formula.
-    pub fn to_cnf(&self, cnf: &mut crate::cnf::CnfBuilder) {
-        for (i, node) in self.nodes.iter().enumerate() {
+    pub fn to_cnf(&mut self, cnf: &mut crate::cnf::CnfBuilder) {
+        for i in self.last_cnf_node..self.nodes.len() {
+            let node = &self.nodes[i];
             let idx = (i + 1) as u32;
             if let AigNode::And(a, b) = node {
                 cnf.add_and_gate(idx, *a, *b);
             }
         }
+        self.last_cnf_node = self.nodes.len();
     }
 }
 

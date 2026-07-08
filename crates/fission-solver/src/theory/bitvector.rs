@@ -47,15 +47,32 @@ impl BvTheorySolver {
     pub fn load_into_sat(&mut self, sat: &mut SatSolver) -> bool {
         self.aig.to_cnf(&mut self.cnf);
         
-        for clause in &self.cnf.clauses {
-            if !sat.add_clause(clause.0.clone()) {
+        for clause in self.cnf.clauses.drain(..) {
+            if !sat.add_clause(clause.0) {
                 return false;
             }
         }
-
-        // Mark boundary between input (original) and learned clauses
-        sat.seal_input_clauses();
+        
         true
+    }
+
+    /// Lower an expression into a single CNF literal, to be used as an assumption.
+    /// This also ensures the SAT solver gets any newly generated CNF clauses.
+    pub fn lower_to_literal(&mut self, expr: &SymExpr, sat: &mut SatSolver) -> Option<Lit> {
+        let bits = self.aig.lower_expr(expr);
+        if bits.len() == 1 {
+            // Ensure the newly generated AIG nodes are loaded into the SAT solver
+            if !self.load_into_sat(sat) {
+                return None; // trivially UNSAT
+            }
+            
+            let aig_lit = bits[0];
+            let cnf_lit = self.cnf.get_cnf_lit(aig_lit);
+            Some(cnf_lit)
+        } else {
+            tracing::warn!("Expression size != 1, cannot lower to literal: {:?}", expr);
+            None
+        }
     }
 
     /// Given a satisfying assignment from the SAT solver, reconstructs the concrete 

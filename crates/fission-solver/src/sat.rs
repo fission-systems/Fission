@@ -601,10 +601,26 @@ impl SatSolver {
     }
 
     pub fn solve(&mut self) -> bool {
-        self.solve_with_theory(None)
+        self.solve_with_assumptions(None, &[])
     }
 
-    pub fn solve_with_theory(&mut self, mut theory: Option<&mut dyn crate::theory::Theory>) -> bool {
+    pub fn solve_with_theory(&mut self, theory: Option<&mut dyn crate::theory::Theory>) -> bool {
+        self.solve_with_assumptions(theory, &[])
+    }
+
+    pub fn solve_with_assumptions(&mut self, mut theory: Option<&mut dyn crate::theory::Theory>, assumptions: &[Lit]) -> bool {
+        self.cancel_until(0);
+
+        for &lit in assumptions {
+            self.trail_lim.push(self.trail.len());
+            if !self.enqueue(lit, None) {
+                return false;
+            }
+            if self.propagate().is_some() {
+                return false;
+            }
+        }
+
         // Initial BCP
         if self.propagate().is_some() {
             return false;
@@ -662,11 +678,17 @@ impl SatSolver {
 
             if let Some(confl) = confl_opt {
                 // Conflict
-                if self.decision_level() == 0 {
-                    return false; // Root level conflict -> UNSAT
+                if self.decision_level() <= assumptions.len() as u32 {
+                    return false; // Root or assumption level conflict -> UNSAT
                 }
                 
-                let (learned_clause, backtrack_level) = self.analyze(confl);
+                let (learned_clause, mut backtrack_level) = self.analyze(confl);
+                
+                // Do not backtrack past assumptions
+                if backtrack_level < assumptions.len() as u32 {
+                    backtrack_level = assumptions.len() as u32;
+                }
+                
                 self.cancel_until(backtrack_level);
                 
                 if learned_clause.len() == 1 {
