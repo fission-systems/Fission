@@ -140,6 +140,17 @@ benchmark_results/
 /check_out.txt
 /diff_mod.txt
 /bt.txt
+/sandbox.err
+/sandbox.log
+/sandbox.out
+/sandbox_hle.log
+/sandbox_test.*
+/scratch_test*
+/test.bin
+/test.c
+/test.rs
+/test_sat.rs
+/test_simple.*
 # Root-level benchmark/analysis scratch JSON files
 /sq.json
 /sq.jsonl

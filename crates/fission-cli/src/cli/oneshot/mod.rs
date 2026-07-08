@@ -185,9 +185,19 @@ fn run_sandbox(args: crate::cli::args::SandboxArgs) -> Result<()> {
         .with_context(|| format!("failed to read binary at {}", args.binary.display()))?;
         
     let mut state = fission_emulator::MachineState::new();
-    fission_emulator::os::windows::loader::load_pe(&mut state, &binary)?;
-    fission_emulator::os::windows::peb_teb::initialize_peb_teb(&mut state, binary.inner().is_64bit)?;
-    
+
+    // Load binary sections into emulator RAM (format-aware)
+    match binary.format.as_str() {
+        "PE" => {
+            fission_emulator::os::windows::loader::load_pe(&mut state, &binary)?;
+            fission_emulator::os::windows::peb_teb::initialize_peb_teb(&mut state, binary.inner().is_64bit)?;
+        }
+        "ELF" | "ELF64" => {
+            fission_emulator::os::linux::loader::load_elf(&mut state, &binary)?;
+        }
+        fmt => anyhow::bail!("Unsupported binary format for sandbox loader: {}", fmt),
+    }
+
     // Initialize Sleigh Frontend
     let load_spec = binary.load_spec().with_context(|| "Binary lacks load_spec")?;
     let frontends = fission_sleigh::runtime::RuntimeSleighFrontend::new_candidate_frontends_for_load_spec(load_spec)
@@ -202,7 +212,7 @@ fn run_sandbox(args: crate::cli::args::SandboxArgs) -> Result<()> {
     // Choose OS environment based on binary format
     let os: Box<dyn fission_emulator::OsEnvironment> = match binary.format.as_str() {
         "PE"  => Box::new(fission_emulator::WindowsEnv::new()),
-        "ELF" => Box::new(fission_emulator::LinuxEnv),
+        "ELF" | "ELF64" => Box::new(fission_emulator::LinuxEnv),
         fmt   => anyhow::bail!("Unsupported binary format for sandbox: {}", fmt),
     };
     

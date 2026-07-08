@@ -47,7 +47,9 @@ impl<'a> Evaluator<'a> {
 
     fn write_varnode_u64(&mut self, vn: &Varnode, val: u64) -> Result<()> {
         let bytes = val.to_le_bytes();
-        self.state.write_space(vn.space_id, vn.offset, &bytes[..vn.size as usize])
+        // Clamp to 8 bytes — SIMD varnodes (XMM = 16B, YMM = 32B) are wider than u64
+        let size = (vn.size as usize).min(8);
+        self.state.write_space(vn.space_id, vn.offset, &bytes[..size])
     }
 
     fn read_varnode_shadow(&mut self, vn: &Varnode) -> Option<u32> {
@@ -199,7 +201,8 @@ impl<'a> Evaluator<'a> {
                     let addr = self.read_varnode_u64(&op.inputs[1])?;
                     let val = self.read_varnode_u64(&op.inputs[2])?;
                     let bytes = val.to_le_bytes();
-                    self.state.write_space(space_id, addr, &bytes[..op.inputs[2].size as usize])?;
+                    let store_size = (op.inputs[2].size as usize).min(8);
+                    self.state.write_space(space_id, addr, &bytes[..store_size])?;
                     if let Some(id) = val_node {
                         for i in 0..op.inputs[2].size as u64 {
                             self.state.set_shadow_memory(space_id, addr + i, id);

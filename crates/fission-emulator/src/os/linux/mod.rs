@@ -1,3 +1,5 @@
+pub mod loader;
+
 use anyhow::Result;
 use crate::core::Emulator;
 use crate::pcode::state::MachineState;

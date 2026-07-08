@@ -37,14 +37,15 @@ impl SimulationManager {
         let mut next_unsat = Vec::new();
 
         for state in active_states {
-            // Seek the emulator to this state's TTD snapshot
-            if let Err(e) = self.emu.ttd_seek(state.step_index) {
-                tracing::warn!("Failed to seek to step {}: {}", state.step_index, e);
-                next_deadended.push(state);
-                continue;
+            // Seek the emulator to this state's TTD snapshot.
+            // If no snapshot is available (e.g. step=0 before first checkpoint),
+            // fall through and run from the current emulator position.
+            let seek_ok = self.emu.ttd_seek(state.step_index).is_ok();
+            if !seek_ok {
+                tracing::debug!("No TTD snapshot at step {}; running from current position", state.step_index);
             }
 
-            // Set the PC (just in case the seek didn't fully capture it or it was forced)
+            // Set the PC from the state record
             self.emu.pc = state.pc;
 
             // Run until the next symbolic branch or halt
