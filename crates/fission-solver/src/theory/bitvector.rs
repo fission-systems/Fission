@@ -71,11 +71,15 @@ impl BvTheorySolver {
             .collect();
 
         for (node_id, expr) in &var_nodes {
-            if let SymExpr::Var { id: ast_id, size, .. } = expr {
+            if let SymExpr::Var { id: ast_id, sort, .. } = expr {
+                // If the sort is an Array, we don't try to extract a concrete BV from the SAT model here.
+                if let crate::ast::Sort::Array { .. } = sort { continue; }
+                
+                let size = sort.expect_bv();
                 let bits = if let Some(b) = self.aig.get_var_bits(*ast_id) {
                     b.clone()
                 } else {
-                    self.aig.add_var(*ast_id, *size)
+                    self.aig.add_var(*ast_id, size)
                 };
 
                 let mut value: u64 = 0;
@@ -94,7 +98,7 @@ impl BvTheorySolver {
                     value |= bit_val << bit_idx;
                 }
 
-                let mask = if *size >= 64 { u64::MAX } else { (1u64 << (*size * 8)) - 1 };
+                let mask = if size >= 64 { u64::MAX } else { (1u64 << (size * 8)) - 1 };
                 model.insert(*node_id, value & mask);
             }
         }

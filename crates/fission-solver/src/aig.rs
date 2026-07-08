@@ -169,11 +169,11 @@ impl AigManager {
                 }
                 bits
             }
-            SymExpr::Var { id, size, .. } => {
+            SymExpr::Var { id, sort, .. } => {
                 if let Some(bits) = self.var_map.get(id) {
                     bits.clone()
                 } else {
-                    self.add_var(*id, *size)
+                    self.add_var(*id, sort.expect_bv())
                 }
             }
             SymExpr::And(a, b) => {

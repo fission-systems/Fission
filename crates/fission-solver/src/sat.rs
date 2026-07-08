@@ -601,13 +601,66 @@ impl SatSolver {
     }
 
     pub fn solve(&mut self) -> bool {
+        self.solve_with_theory(None)
+    }
+
+    pub fn solve_with_theory(&mut self, mut theory: Option<&mut dyn crate::theory::Theory>) -> bool {
         // Initial BCP
         if self.propagate().is_some() {
             return false;
         }
 
         loop {
-            if let Some(confl) = self.propagate() {
+            let mut confl_opt = self.propagate();
+
+            // If BCP found no conflict, ask the Theory if we have one
+            if confl_opt.is_none() {
+                if let Some(th) = &mut theory {
+                    // Extract current assignments as a list of True literals for the theory to check
+                    let assignments: Vec<Lit> = self.trail.clone();
+                    if let Err(conflict) = th.check(&assignments) {
+                        // The theory found a conflict! 
+                        // The theory returns an unsat core: e.g. [!A, !B]. We will treat this as a learned clause.
+                        let mut lits = conflict.core;
+                        if lits.is_empty() {
+                            return false; // Trivially UNSAT
+                        }
+                        // To reuse our analyze() logic, we need this clause to be in the database and act as the reason
+                        // for the conflict. But our analyze() expects an index to a reason clause.
+                        // Actually, if the theory gives us a clause that is already violated by the current trail,
+                        // we can just add it to the clause database, and it will immediately conflict.
+                        let c_idx = self.clauses.len();
+                        self.clauses.push(Clause(lits.clone()));
+                        // Track it as a learned clause
+                        let lbd = self.compute_lbd(&lits);
+                        if c_idx >= self.learned_start {
+                            self.learned_meta.push(LearnedMeta { lbd, activity: 0 });
+                        }
+                        
+                        // We must watch the first two literals (or unit if size 1)
+                        if lits.len() == 1 {
+                            // It's a unit clause from the theory. It's conflicting right now.
+                            // The easiest way to handle a unit theory conflict is to just backtrack to 0
+                            // and enqueue it.
+                            self.cancel_until(0);
+                            self.enqueue(lits[0], None);
+                            // BCP will immediately see the conflict if it contradicts level 0,
+                            // or it will just propagate. We loop around.
+                            continue;
+                        } else {
+                            let lit0 = lits[0];
+                            let lit1 = lits[1];
+                            self.watches[lit0.not().index()].push(Watcher { clause_idx: c_idx, blocker: lit1 });
+                            self.watches[lit1.not().index()].push(Watcher { clause_idx: c_idx, blocker: lit0 });
+                            
+                            // Now this clause is conflicting under the current trail!
+                            confl_opt = Some(c_idx);
+                        }
+                    }
+                }
+            }
+
+            if let Some(confl) = confl_opt {
                 // Conflict
                 if self.decision_level() == 0 {
                     return false; // Root level conflict -> UNSAT

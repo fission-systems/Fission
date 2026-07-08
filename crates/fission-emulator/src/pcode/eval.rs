@@ -55,7 +55,7 @@ impl<'a> Evaluator<'a> {
             return None;
         }
         // Just check the first byte for taint to keep it simple for now
-        self.state.shadow_memory.get(&(vn.space_id, vn.offset)).copied()
+        self.state.get_shadow_memory(vn.space_id, vn.offset)
     }
 
     fn write_varnode_shadow(&mut self, vn: &Varnode, node: u32) {
@@ -141,7 +141,7 @@ impl<'a> Evaluator<'a> {
                 let addr     = self.read_varnode_u64(&op.inputs[1])?;
                 let out      = op.output.as_ref().expect("LOAD must have output");
                 let raw      = self.state.read_space(space_id, addr, out.size as usize)?;
-                let node     = self.state.shadow_memory.get(&(space_id, addr)).copied();
+                let node     = self.state.get_shadow_memory(space_id, addr);
                 if let Some(id) = node {
                     self.write_varnode_shadow(out, id);
                 }

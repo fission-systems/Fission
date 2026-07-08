@@ -5,13 +5,30 @@ pub type SymNodeId = u32;
 /// A global counter for generating unique variable IDs.
 pub(crate) static VAR_COUNTER: AtomicU32 = AtomicU32::new(1);
 
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum Sort {
+    /// A bitvector of a specific size in bytes
+    BitVector(u32),
+    /// An array mapping a domain sort to a range sort
+    Array { domain: Box<Sort>, range: Box<Sort> },
+}
+
+impl Sort {
+    pub fn expect_bv(&self) -> u32 {
+        match self {
+            Sort::BitVector(sz) => *sz,
+            _ => panic!("Expected BitVector sort, got {:?}", self),
+        }
+    }
+}
+
 /// A node in the Symbolic Expression (AST) tree.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum SymExpr {
     /// A concrete value (constant)
     Const { val: u64, size: u32 },
     /// A symbolic variable (e.g. tainted input byte)
-    Var { id: SymNodeId, name: String, size: u32 },
+    Var { id: SymNodeId, name: String, sort: Sort },
     
     // Arithmetic
     Add(Box<SymExpr>, Box<SymExpr>),
@@ -44,12 +61,28 @@ pub enum SymExpr {
     // Bit extraction / concat
     Extract { expr: Box<SymExpr>, lsb: u32, size: u32 },
     Concat(Box<SymExpr>, Box<SymExpr>),
+    
+    // Theory of Arrays
+    ArraySelect { array: Box<SymExpr>, index: Box<SymExpr> },
+    ArrayStore { array: Box<SymExpr>, index: Box<SymExpr>, value: Box<SymExpr> },
 }
 
 impl SymExpr {
-    pub fn new_var(name: impl Into<String>, size: u32) -> Self {
+    pub fn new_var(name: &str, size: u32) -> Self {
         let id = VAR_COUNTER.fetch_add(1, Ordering::SeqCst);
-        Self::Var { id, name: name.into(), size }
+        Self::Var { id, name: name.to_string(), sort: Sort::BitVector(size) }
+    }
+    
+    pub fn new_array_var(name: &str, domain: u32, range: u32) -> Self {
+        let id = VAR_COUNTER.fetch_add(1, Ordering::SeqCst);
+        Self::Var { 
+            id, 
+            name: name.to_string(), 
+            sort: Sort::Array { 
+                domain: Box::new(Sort::BitVector(domain)), 
+                range: Box::new(Sort::BitVector(range)) 
+            } 
+        }
     }
 
     pub fn new_const(val: u64, size: u32) -> Self {
@@ -169,17 +202,29 @@ impl SymExpr {
         Self::new_slt(b, a)
     }
 
-    pub fn get_size(&self) -> u32 {
+    pub fn get_sort(&self) -> Sort {
         match self {
-            Self::Const { size, .. } => *size,
-            Self::Var { size, .. } => *size,
-            Self::Add(a, _) | Self::Sub(a, _) | Self::Mul(a, _) | Self::Udiv(a, _) => a.get_size(),
-            Self::And(a, _) | Self::Or(a, _) | Self::Xor(a, _) | Self::Shl(a, _) | Self::Lshr(a, _) => a.get_size(),
+            Self::Const { size, .. } => Sort::BitVector(*size),
+            Self::Var { sort, .. } => sort.clone(),
+            Self::Add(a, _) | Self::Sub(a, _) | Self::Mul(a, _) | Self::Udiv(a, _) => a.get_sort(),
+            Self::And(a, _) | Self::Or(a, _) | Self::Xor(a, _) | Self::Shl(a, _) | Self::Lshr(a, _) => a.get_sort(),
             Self::Eq(_, _) | Self::Neq(_, _) | Self::Ult(_, _) | Self::Ule(_, _)
-            | Self::Slt(_, _) | Self::Sle(_, _) | Self::Sgt(_, _) => 1,
-            Self::Ite { t, .. } => t.get_size(),
-            Self::Extract { size, .. } => *size,
-            Self::Concat(a, b) => a.get_size() + b.get_size(),
+            | Self::Slt(_, _) | Self::Sle(_, _) | Self::Sgt(_, _) => Sort::BitVector(1),
+            Self::Ite { t, .. } => t.get_sort(),
+            Self::Extract { size, .. } => Sort::BitVector(*size),
+            Self::Concat(a, b) => Sort::BitVector(a.get_size() + b.get_size()),
+            Self::ArraySelect { array, .. } => {
+                if let Sort::Array { range, .. } = array.get_sort() {
+                    *range
+                } else {
+                    panic!("ArraySelect on non-array")
+                }
+            }
+            Self::ArrayStore { array, .. } => array.get_sort(),
         }
+    }
+
+    pub fn get_size(&self) -> u32 {
+        self.get_sort().expect_bv()
     }
 }

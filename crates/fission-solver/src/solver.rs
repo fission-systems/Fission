@@ -1,4 +1,4 @@
-use crate::ast::{SymExpr, SymNodeId};
+use crate::ast::{SymExpr, SymNodeId, Sort};
 use anyhow::Result;
 use std::collections::HashMap;
 
@@ -60,7 +60,8 @@ impl Solver {
 
     pub fn register_var(&mut self, name: String, size: u32) -> SymNodeId {
         let id = crate::ast::VAR_COUNTER.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        self.nodes.insert(id, SymExpr::Var { id, name, size });
+        let expr = SymExpr::Var { id, name, sort: Sort::BitVector(size) };
+        self.nodes.insert(id, expr);
         id
     }
 

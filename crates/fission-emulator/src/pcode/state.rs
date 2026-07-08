@@ -2,12 +2,45 @@ use std::collections::HashMap;
 use anyhow::{Result, bail};
 use serde::{Serialize, Deserialize};
 
+#[derive(Clone, Serialize, Deserialize)]
+pub enum MemoryPage {
+    /// Pure concrete page (e.g. .text or un-tainted RAM). Length is always page_size.
+    Concrete(Vec<u8>),
+    /// Page containing symbolic values at concrete offsets.
+    /// The `shadow` vector stores the SymNodeId for each tainted byte.
+    Symbolic {
+        concrete: Vec<u8>,
+        shadow: Vec<Option<u32>>,
+    },
+    /// A full fallback to SMT Array theory when a symbolic pointer is written.
+    /// `array_id` is the SymNodeId of the current ArrayStore AST node.
+    ArrayTheory {
+        array_id: u32,
+    },
+}
+
+impl MemoryPage {
+    pub fn new_concrete(page_size: usize) -> Self {
+        Self::Concrete(vec![0; page_size])
+    }
+
+    pub fn make_symbolic(&mut self) {
+        if let Self::Concrete(data) = self {
+            let len = data.len();
+            *self = Self::Symbolic {
+                concrete: std::mem::take(data),
+                shadow: vec![None; len],
+            };
+        }
+    }
+}
+
 /// Represents a single address space in the emulated machine (e.g. ram, register, unique).
 #[derive(Clone, Serialize, Deserialize)]
 pub struct AddressSpace {
     pub name: String,
-    // Page-based memory allocation (4KB pages) to avoid allocating huge blocks
-    pub pages: HashMap<u64, Vec<u8>>,
+    // Hybrid Page-based memory allocation (4KB pages)
+    pub pages: HashMap<u64, MemoryPage>,
     pub page_size: u64,
 }
 
@@ -20,16 +53,17 @@ impl AddressSpace {
         }
     }
 
-    fn get_page_mut(&mut self, addr: u64) -> &mut [u8] {
+    fn get_page_mut(&mut self, addr: u64) -> &mut MemoryPage {
         let page_addr = addr & !(self.page_size - 1);
+        let ps = self.page_size as usize;
         self.pages
             .entry(page_addr)
-            .or_insert_with(|| vec![0; self.page_size as usize])
+            .or_insert_with(|| MemoryPage::new_concrete(ps))
     }
 
-    fn get_page(&self, addr: u64) -> Option<&[u8]> {
+    fn get_page(&self, addr: u64) -> Option<&MemoryPage> {
         let page_addr = addr & !(self.page_size - 1);
-        self.pages.get(&page_addr).map(|v| v.as_slice())
+        self.pages.get(&page_addr)
     }
 
     pub fn read(&self, addr: u64, size: usize) -> Result<Vec<u8>> {
@@ -38,7 +72,9 @@ impl AddressSpace {
             let current_addr = addr + i;
             let offset = (current_addr & (self.page_size - 1)) as usize;
             let byte = match self.get_page(current_addr) {
-                Some(page) => page[offset],
+                Some(MemoryPage::Concrete(data)) => data[offset],
+                Some(MemoryPage::Symbolic { concrete, .. }) => concrete[offset],
+                Some(MemoryPage::ArrayTheory { .. }) => 0, // Fallback for pure concrete read
                 None => 0, // Uninitialized memory reads as 0
             };
             result.push(byte);
@@ -51,9 +87,57 @@ impl AddressSpace {
             let current_addr = addr + i as u64;
             let offset = (current_addr & (self.page_size - 1)) as usize;
             let page = self.get_page_mut(current_addr);
-            page[offset] = byte;
+            match page {
+                MemoryPage::Concrete(page_data) => page_data[offset] = byte,
+                MemoryPage::Symbolic { concrete, shadow } => {
+                    concrete[offset] = byte;
+                    shadow[offset] = None;
+                }
+                MemoryPage::ArrayTheory { .. } => {
+                    // For now, if we do a concrete write to an ArrayTheory page, we might just ignore the array part
+                    // or convert it back. We will handle ArrayTheory separately later.
+                }
+            }
         }
         Ok(())
+    }
+
+    pub fn get_shadow(&self, addr: u64) -> Option<u32> {
+        let current_addr = addr;
+        let offset = (current_addr & (self.page_size - 1)) as usize;
+        match self.get_page(current_addr) {
+            Some(MemoryPage::Symbolic { shadow, .. }) => shadow[offset],
+            _ => None,
+        }
+    }
+
+    pub fn set_shadow(&mut self, addr: u64, node: u32) -> Option<u32> {
+        let current_addr = addr;
+        let offset = (current_addr & (self.page_size - 1)) as usize;
+        let page = self.get_page_mut(current_addr);
+        
+        // Ensure the page is symbolic
+        page.make_symbolic();
+        
+        if let MemoryPage::Symbolic { shadow, .. } = page {
+            let old = shadow[offset];
+            shadow[offset] = Some(node);
+            old
+        } else {
+            None
+        }
+    }
+    
+    pub fn clear_shadow(&mut self, addr: u64) -> Option<u32> {
+        let current_addr = addr;
+        let offset = (current_addr & (self.page_size - 1)) as usize;
+        if let Some(MemoryPage::Symbolic { shadow, .. }) = self.pages.get_mut(&(addr & !(self.page_size - 1))) {
+            let old = shadow[offset];
+            shadow[offset] = None;
+            old
+        } else {
+            None
+        }
     }
 }
 
@@ -91,11 +175,6 @@ pub struct MachineState {
     #[serde(skip)]
     pub trace_mem_writes: Vec<(u64, Vec<u8>, Vec<u8>)>,  // (addr, old_bytes, new_bytes)
 
-    /// Shadow memory mapping: (space_id, address) -> SymNodeId.
-    /// Tracks which AST node is currently at which byte.
-    #[serde(skip)]
-    pub shadow_memory: HashMap<(u64, u64), u32>,
-
     /// Shadow register mapping: (register_offset) -> SymNodeId.
     /// We can treat register space as just another address space, but usually
     /// registers are accessed by name/offset, so a separate map or just using shadow_memory with space_id=2 works.
@@ -118,7 +197,6 @@ impl MachineState {
             tracing_memory: false,
             trace_mem_reads: Vec::new(),
             trace_mem_writes: Vec::new(),
-            shadow_memory: HashMap::new(),
             trace_shadow_writes: Vec::new(),
         }
     }
@@ -169,10 +247,10 @@ impl MachineState {
 
         // When writing concrete bytes, clear their shadow memory taint.
         for i in 0..data.len() {
-            let addr = addr + i as u64;
-            let old_node = self.shadow_memory.remove(&(space_id, addr));
+            let curr_addr = addr + i as u64;
+            let old_node = space.clear_shadow(curr_addr);
             if self.tracing_memory && old_node.is_some() {
-                self.trace_shadow_writes.push((space_id, addr, old_node, None));
+                self.trace_shadow_writes.push((space_id, curr_addr, old_node, None));
             }
         }
 
@@ -180,9 +258,65 @@ impl MachineState {
     }
 
     pub fn set_shadow_memory(&mut self, space_id: u64, addr: u64, node: u32) {
-        let old_node = self.shadow_memory.insert((space_id, addr), node);
+        let space = self.spaces.entry(space_id).or_insert_with(|| AddressSpace::new(format!("space_{}", space_id)));
+        let old_node = space.set_shadow(addr, node);
         if self.tracing_memory {
             self.trace_shadow_writes.push((space_id, addr, old_node, Some(node)));
         }
+    }
+
+    pub fn get_shadow_memory(&self, space_id: u64, addr: u64) -> Option<u32> {
+        self.spaces.get(&space_id).and_then(|s| s.get_shadow(addr))
+    }
+
+    pub fn clear_shadow_memory(&mut self, space_id: u64, addr: u64) {
+        if let Some(space) = self.spaces.get_mut(&space_id) {
+            let old_node = space.clear_shadow(addr);
+            if self.tracing_memory && old_node.is_some() {
+                self.trace_shadow_writes.push((space_id, addr, old_node, None));
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_hybrid_memory_model() {
+        let mut state = MachineState::new();
+        // Read unitialized (concrete 0)
+        let data = state.read_space(3, 0x1000, 4).unwrap();
+        assert_eq!(data, vec![0, 0, 0, 0]);
+
+        // Write concrete
+        state.write_space(3, 0x1000, &[0xDE, 0xAD, 0xBE, 0xEF]).unwrap();
+        let data = state.read_space(3, 0x1000, 4).unwrap();
+        assert_eq!(data, vec![0xDE, 0xAD, 0xBE, 0xEF]);
+
+        // Shadow memory starts empty
+        assert_eq!(state.get_shadow_memory(3, 0x1000), None);
+
+        // Set shadow memory on first two bytes
+        state.set_shadow_memory(3, 0x1000, 42);
+        state.set_shadow_memory(3, 0x1001, 43);
+
+        assert_eq!(state.get_shadow_memory(3, 0x1000), Some(42));
+        assert_eq!(state.get_shadow_memory(3, 0x1001), Some(43));
+        assert_eq!(state.get_shadow_memory(3, 0x1002), None);
+
+        // Read concrete after shadow is set
+        let data = state.read_space(3, 0x1000, 4).unwrap();
+        assert_eq!(data, vec![0xDE, 0xAD, 0xBE, 0xEF]);
+
+        // Write concrete to partially clear shadow memory
+        state.write_space(3, 0x1001, &[0xCC, 0xDD]).unwrap();
+        assert_eq!(state.get_shadow_memory(3, 0x1000), Some(42)); // Unaffected
+        assert_eq!(state.get_shadow_memory(3, 0x1001), None); // Cleared
+        assert_eq!(state.get_shadow_memory(3, 0x1002), None); // Cleared
+        
+        let data = state.read_space(3, 0x1000, 4).unwrap();
+        assert_eq!(data, vec![0xDE, 0xCC, 0xDD, 0xEF]);
     }
 }

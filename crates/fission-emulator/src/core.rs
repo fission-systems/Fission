@@ -226,9 +226,9 @@ impl Emulator {
         // Restore shadow state via stored deltas
         for delta in &snap.shadow_deltas {
             if let Some(new_node) = delta.new_node {
-                self.state.shadow_memory.insert((delta.space_id, delta.address), new_node);
+                self.state.set_shadow_memory(delta.space_id, delta.address, new_node);
             } else {
-                self.state.shadow_memory.remove(&(delta.space_id, delta.address));
+                self.state.clear_shadow_memory(delta.space_id, delta.address);
             }
         }
 
