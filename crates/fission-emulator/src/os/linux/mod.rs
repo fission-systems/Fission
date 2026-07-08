@@ -1,6 +1,7 @@
 pub mod loader;
 pub mod libc;
 pub mod syscall;
+pub mod abi;
 
 use anyhow::Result;
 use crate::core::Emulator;
@@ -36,6 +37,9 @@ impl LinuxEnv {
         // Register Syscalls
         simos.register_syscall(0, Box::new(syscall::SysRead));
         simos.register_syscall(1, Box::new(syscall::SysWrite));
+        simos.register_syscall(2, Box::new(syscall::SysOpen));
+        simos.register_syscall(3, Box::new(syscall::SysClose));
+        simos.register_syscall(5, Box::new(syscall::SysFstat));
         simos.register_syscall(9, Box::new(syscall::SysMmap));
         simos.register_syscall(12, Box::new(syscall::SysBrk));
         simos.register_syscall(60, Box::new(syscall::SysExit));

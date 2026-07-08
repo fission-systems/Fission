@@ -2,6 +2,8 @@ use anyhow::Result;
 use crate::core::Emulator;
 use crate::os::env::HleResult;
 use crate::os::procedure::SimProcedure;
+use crate::os::linux::abi::TargetStat;
+use crate::os::linux::libc::read_string; // Re-use the helper
 
 pub struct SysRead;
 impl SimProcedure for SysRead {
@@ -12,31 +14,29 @@ impl SimProcedure for SysRead {
         
         tracing::info!("SimProcedure: sys_read({}, 0x{:X}, {})", fd, buf, count);
         
-        if fd == 0 {
-            if let Some(mut stdin) = emu.stdin_buffer.take() {
-                let mut bytes_read = 0;
-                let mut data = Vec::new();
-                while bytes_read < count && !stdin.is_empty() {
-                    data.push(stdin.remove(0) as u8);
-                    bytes_read += 1;
-                }
-                emu.stdin_buffer = Some(stdin);
-                emu.state.write_space(3, buf, &data)?;
-                
-                // Taint stdin bytes!
-                for i in 0..bytes_read {
-                    let node = emu.solver.register_var(format!("stdin_{}", buf+i), 1);
-                    emu.state.set_shadow_memory(3, buf + i, node);
+        match emu.vfs.read(fd, count as usize) {
+            Ok(data) => {
+                let bytes_read = data.len();
+                if bytes_read > 0 {
+                    emu.state.write_space(3, buf, &data)?;
                 }
                 
-                emu.write_register_u64("RAX", bytes_read)?;
-            } else {
-                // For now, return EOF
-                emu.write_register_u64("RAX", 0)?;
+                // If it's stdin, taint it for symbolic execution
+                if fd == 0 {
+                    for i in 0..bytes_read {
+                        let node = emu.solver.register_var(format!("stdin_{}", buf+(i as u64)), 1);
+                        emu.state.set_shadow_memory(3, buf + (i as u64), node);
+                    }
+                }
+                
+                emu.write_register_u64("RAX", bytes_read as u64)?;
             }
-        } else {
-            emu.write_register_u64("RAX", 0)?;
+            Err(_) => {
+                // Return -1 (error)
+                emu.write_register_u64("RAX", (-1i64) as u64)?;
+            }
         }
+        
         Ok(HleResult::Continue)
     }
 }
@@ -47,13 +47,80 @@ impl SimProcedure for SysWrite {
         let fd = emu.read_register_u64("RDI").unwrap_or(0);
         let buf = emu.read_register_u64("RSI").unwrap_or(0);
         let count = emu.read_register_u64("RDX").unwrap_or(0);
-        if fd == 1 || fd == 2 {
-            let data = emu.state.read_space(3, buf, count as usize).unwrap_or_default();
-            print!("{}", String::from_utf8_lossy(&data));
-        } else {
-            tracing::info!("SimProcedure: sys_write({}, 0x{:X}, {})", fd, buf, count);
+        
+        tracing::info!("SimProcedure: sys_write({}, 0x{:X}, {})", fd, buf, count);
+        
+        let data = emu.state.read_space(3, buf, count as usize).unwrap_or_default();
+        match emu.vfs.write(fd, &data) {
+            Ok(written) => {
+                if fd == 1 || fd == 2 {
+                    print!("{}", String::from_utf8_lossy(&data[..written]));
+                }
+                emu.write_register_u64("RAX", written as u64)?;
+            }
+            Err(_) => {
+                emu.write_register_u64("RAX", (-1i64) as u64)?;
+            }
         }
-        emu.write_register_u64("RAX", count)?;
+
+        Ok(HleResult::Continue)
+    }
+}
+
+pub struct SysOpen;
+impl SimProcedure for SysOpen {
+    fn run(&self, emu: &mut Emulator) -> Result<HleResult> {
+        let filename_ptr = emu.read_register_u64("RDI").unwrap_or(0);
+        let _flags = emu.read_register_u64("RSI").unwrap_or(0);
+        let _mode = emu.read_register_u64("RDX").unwrap_or(0);
+        
+        let filename = read_string(emu, filename_ptr).unwrap_or_else(|_| "unknown".to_string());
+        tracing::info!("SimProcedure: sys_open(\"{}\")", filename);
+        
+        // Open empty file in VFS (we can expand this to load host files later)
+        let fd = emu.vfs.open(&filename, Vec::new());
+        emu.write_register_u64("RAX", fd)?;
+        
+        Ok(HleResult::Continue)
+    }
+}
+
+pub struct SysClose;
+impl SimProcedure for SysClose {
+    fn run(&self, emu: &mut Emulator) -> Result<HleResult> {
+        let fd = emu.read_register_u64("RDI").unwrap_or(0);
+        tracing::info!("SimProcedure: sys_close({})", fd);
+        
+        if emu.vfs.close(fd).is_ok() {
+            emu.write_register_u64("RAX", 0)?;
+        } else {
+            emu.write_register_u64("RAX", (-1i64) as u64)?;
+        }
+        
+        Ok(HleResult::Continue)
+    }
+}
+
+pub struct SysFstat;
+impl SimProcedure for SysFstat {
+    fn run(&self, emu: &mut Emulator) -> Result<HleResult> {
+        let fd = emu.read_register_u64("RDI").unwrap_or(0);
+        let statbuf = emu.read_register_u64("RSI").unwrap_or(0);
+        
+        tracing::info!("SimProcedure: sys_fstat({}, 0x{:X})", fd, statbuf);
+        
+        if let Some(file) = emu.vfs.files.get(&fd) {
+            let mut target_st = TargetStat::default();
+            target_st.st_size = file.content.len() as i64;
+            target_st.st_mode = 0x81B4; // Regular file, 0664
+            
+            let bytes = target_st.to_bytes();
+            emu.state.write_space(3, statbuf, &bytes)?;
+            emu.write_register_u64("RAX", 0)?;
+        } else {
+            emu.write_register_u64("RAX", (-1i64) as u64)?;
+        }
+        
         Ok(HleResult::Continue)
     }
 }

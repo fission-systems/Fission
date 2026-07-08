@@ -3,6 +3,7 @@ pub mod linux;
 pub mod windows;
 pub mod bare_metal;
 pub mod procedure;
+pub mod vfs;
 
 pub use env::{OsEnvironment, HleResult};
 pub use windows::WindowsEnv;

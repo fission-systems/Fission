@@ -55,6 +55,9 @@ pub struct Emulator {
     /// Unexplored conditional branches (used for TTD-based concolic exploration).
     pub sym_events: Vec<SymBranch>,
 
+    /// The Virtual File System.
+    pub vfs: crate::os::vfs::SimVFS,
+
     /// The pure-Rust Symbolic Solver context
     pub solver: fission_solver::Solver,
 }
@@ -127,6 +130,7 @@ impl Emulator {
             ttd_snapshot_interval: 0,
             tick_count: 0,
             sym_events: Vec::new(),
+            vfs: crate::os::vfs::SimVFS::new(),
             solver: fission_solver::Solver::new(),
         };
 
