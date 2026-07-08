@@ -1,7 +1,8 @@
+pub mod env;
 pub mod linux;
 pub mod windows;
 pub mod bare_metal;
-pub mod env;
+pub mod procedure;
 
 pub use env::{OsEnvironment, HleResult};
 pub use windows::WindowsEnv;
