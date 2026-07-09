@@ -84,7 +84,9 @@ Callouts: `jit_read_space` / `jit_write_space` / `jit_call_other` / `jit_exit_tb
 - [x] JIT shadow prop: COPY/LOAD/STORE + int ALU/compare
 - [x] Full symbolic AST on JIT ALU (`jit_shadow_binop` builds `SymExpr` Add/Sub/…/Eq)
 - [x] Unary/float AST: `jit_shadow_unop` + solver IEEE float theory (`FAdd`/`FNeg`/… with concrete fold)
+- [x] Float theory SAT bit-blast: AIG lowering for `FNeg`/`FAbs`/`FIsNan`/cmp + free-bit `FAdd`/`FMul`/…
 - [x] CallOther register dirty → one `jit_reg_bulk_flush` callout (not N× write_space)
+- [x] TB-exit register writeback also uses `jit_reg_bulk_flush` (unique/ram still per-slot)
 - [x] Exploration manager clears stop flag between forks (`sym/manager.rs`)
 
 ### Phase E — Maturity / smoke (in progress)
@@ -107,6 +109,7 @@ Callouts: `jit_read_space` / `jit_write_space` / `jit_call_other` / `jit_exit_tb
 - [x] Dynlink bootstrap: VFS seed/alias for main binary, openat/read, file-backed mmap,
       `apply_rela_x86_64` (RELATIVE/JUMP_SLOT/GLOB_DAT)
 - [x] DT_NEEDED shared-lib load loop + BIND_NOW (`DynlinkMode::SharedLibs`, `FISSION_LIB_PATH`)
+- [x] Lazy PLT bind (`FISSION_LAZY_BIND=1`): GOT markers → first-call bind → JumpTo / nested HLE
 - [x] Automation `sandbox-check` lane (subprocess over CLI JSON + budget gate)
 
 ## Validation

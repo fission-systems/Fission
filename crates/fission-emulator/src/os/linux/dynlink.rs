@@ -50,6 +50,9 @@ pub struct DynlinkInfo {
     /// Whether DF_BIND_NOW / DT_FLAGS_1 NOW was applied eagerly.
     #[serde(default)]
     pub bind_now: bool,
+    /// Global symbols from main + DT_NEEDED (for lazy PLT resolution).
+    #[serde(default)]
+    pub global_symbols: std::collections::HashMap<String, u64>,
 }
 
 const PT_INTERP: u32 = 3;
@@ -60,6 +63,88 @@ const DEFAULT_INTERP_BASE: u64 = 0x0000_5555_5555_0000;
 /// First guest base for DT_NEEDED shared libraries (grows upward).
 const SHARED_LIB_BASE_START: u64 = 0x0000_7F00_0000_0000;
 const LIB_BASE_STRIDE: u64 = 0x0000_0000_0200_0000; // 32 MiB slots
+
+/// Magic PLT lazy-resolver entry (not a real GOT slot index).
+/// First call through an unresolved PLT jumps here; the stub binds then tail-calls.
+pub const PLT_RESOLVER_STUB: u64 = 0xFFFFFFF1_FFFF_FFF0;
+/// Per-slot lazy marker base: GOT entries hold `PLT_LAZY_MARK | (index << 3)` until bound.
+pub const PLT_LAZY_MARK: u64 = 0xFFFFFFF1_8000_0000;
+
+/// True when lazy PLT binding is requested (`FISSION_LAZY_BIND=1`).
+pub fn lazy_bind_enabled() -> bool {
+    matches!(
+        std::env::var("FISSION_LAZY_BIND").as_deref(),
+        Ok("1") | Ok("true") | Ok("yes")
+    )
+}
+
+/// Decode a lazy GOT marker into a table index.
+pub fn lazy_mark_index(addr: u64) -> Option<usize> {
+    if addr & 0xFFFF_FFFF_8000_0000 == PLT_LAZY_MARK {
+        Some(((addr & 0x7FFF_FFF8) >> 3) as usize)
+    } else if (PLT_LAZY_MARK..PLT_LAZY_MARK + 0x1000_0000).contains(&addr) {
+        Some(((addr - PLT_LAZY_MARK) >> 3) as usize)
+    } else {
+        None
+    }
+}
+
+pub fn make_lazy_mark(index: usize) -> u64 {
+    PLT_LAZY_MARK | ((index as u64) << 3)
+}
+
+/// Runtime table for deferred PLT/GOT binding.
+#[derive(Clone, Debug, Default)]
+pub struct PltLazyTable {
+    /// index → (GOT virtual address, symbol name)
+    pub entries: Vec<(u64, String)>,
+    /// Global symbol VA map accumulated from main + DT_NEEDED libs.
+    pub globals: std::collections::HashMap<String, u64>,
+}
+
+impl PltLazyTable {
+    /// Resolve `name` to a guest VA: table globals, extra globals, then HLE trampoline.
+    pub fn resolve_target(
+        &self,
+        name: &str,
+        hle_magic_base: u64,
+        extra_globals: &std::collections::HashMap<String, u64>,
+    ) -> u64 {
+        if let Some(&va) = self.globals.get(name).or_else(|| extra_globals.get(name)) {
+            return va;
+        }
+        if let Some((idx, _)) = self
+            .entries
+            .iter()
+            .enumerate()
+            .find(|(_, (_, n))| n == name)
+        {
+            return hle_magic_base + (idx as u64) * 8;
+        }
+        hle_magic_base
+    }
+
+    /// Bind slot `index`: write final target into GOT, return target VA.
+    pub fn bind_slot(
+        &self,
+        state: &mut MachineState,
+        index: usize,
+        hle_magic_base: u64,
+        extra_globals: &std::collections::HashMap<String, u64>,
+    ) -> Option<u64> {
+        let (got_va, name) = self.entries.get(index)?.clone();
+        let target = self.resolve_target(&name, hle_magic_base, extra_globals);
+        let _ = state.write_space(state.ram_space(), got_va, &target.to_le_bytes());
+        tracing::info!(
+            "plt lazy bind: [{}] {} @ GOT 0x{:X} -> 0x{:X}",
+            index,
+            name,
+            got_va,
+            target
+        );
+        Some(target)
+    }
+}
 
 // DT_* tags (ELF)
 const DT_NULL: i64 = 0;
@@ -192,6 +277,7 @@ pub fn prepare_dynlink(
                             main_entry,
                             loaded_libs: Vec::new(),
                             bind_now: false,
+                            global_symbols: std::collections::HashMap::new(),
                         });
                     }
                     Err(e) => {
@@ -211,13 +297,18 @@ pub fn prepare_dynlink(
     }
 
     // Mini-dynlink: try DT_NEEDED shared lib load + BIND_NOW (no host ld.so required).
+    // Even when we fall back to HleGot, keep collected globals for lazy PLT resolve.
+    let mut hle_globals = std::collections::HashMap::new();
     if has_got || guest_interp.is_some() {
         match load_shared_libraries(state, binary) {
-            Ok(shared) if !shared.loaded_libs.is_empty() || shared.bind_now_applied => {
+            Ok(shared)
+                if !shared.loaded_libs.is_empty() || shared.bind_now_applied =>
+            {
                 tracing::info!(
-                    "dynlink: SharedLibs mode — {} libs, bind_now={}",
+                    "dynlink: SharedLibs mode — {} libs, bind_now={}, globals={}",
                     shared.loaded_libs.len(),
-                    shared.bind_now_applied
+                    shared.bind_now_applied,
+                    shared.globals.len()
                 );
                 return Ok(DynlinkInfo {
                     mode: DynlinkMode::SharedLibs,
@@ -227,10 +318,14 @@ pub fn prepare_dynlink(
                     interp_entry: 0,
                     main_entry,
                     loaded_libs: shared.loaded_libs,
-                    bind_now: shared.bind_now_applied,
+                    // bind_now false when lazy mode forced even if DT flags say NOW
+                    bind_now: shared.bind_now_applied && !lazy_bind_enabled(),
+                    global_symbols: shared.globals,
                 });
             }
-            Ok(_) => {}
+            Ok(shared) => {
+                hle_globals = shared.globals;
+            }
             Err(e) => {
                 tracing::debug!("dynlink: shared lib load skipped: {e:#}");
             }
@@ -246,6 +341,7 @@ pub fn prepare_dynlink(
         main_entry,
         loaded_libs: Vec::new(),
         bind_now: false,
+        global_symbols: hle_globals,
     })
 }
 
@@ -254,6 +350,7 @@ pub fn prepare_dynlink(
 struct SharedLoadResult {
     loaded_libs: Vec<(String, u64)>,
     bind_now_applied: bool,
+    globals: std::collections::HashMap<String, u64>,
 }
 
 fn lib_search_paths() -> Vec<PathBuf> {
@@ -529,20 +626,65 @@ fn load_shared_libraries(
     }
 
     let mut bind_now_applied = false;
-    if bind_now {
+    let eager = bind_now && !lazy_bind_enabled();
+    if eager {
         // Eager BIND_NOW: RELATIVE + symbols found in loaded modules.
         // Unresolved JUMP_SLOT left for LinuxEnv::patch_imports HLE trampolines.
         let stats = apply_rela_x86_64(state, main_data, main_base, |name| {
             globals.get(name).copied()
         })?;
         bind_now_applied = stats.jump_slot > 0 || stats.relative > 0 || stats.glob_dat > 0;
+    } else {
+        // Lazy mode: still apply RELATIVE (base fixups), leave JUMP_SLOT for lazy PLT.
+        let stats = apply_rela_x86_64(state, main_data, main_base, |_name| None)?;
+        tracing::info!(
+            "dynlink: lazy bind mode — applied {} RELATIVE, JUMP_SLOT deferred",
+            stats.relative
+        );
+        // Also apply RELATIVE for each already-mapped lib (done above in loop).
+        let _ = stats;
     }
 
-    let _ = globals; // used during load/resolve
     Ok(SharedLoadResult {
         loaded_libs,
         bind_now_applied,
+        globals,
     })
+}
+
+/// Build a lazy PLT table from main binary `iat_symbols` + shared globals.
+pub fn build_plt_lazy_table(
+    binary: &LoadedBinary,
+    globals: std::collections::HashMap<String, u64>,
+) -> PltLazyTable {
+    let mut entries: Vec<(u64, String)> = binary
+        .inner()
+        .iat_symbols
+        .iter()
+        .map(|(&addr, name)| {
+            let bare = name
+                .split('@')
+                .next()
+                .unwrap_or(name)
+                .split('!')
+                .last()
+                .unwrap_or(name)
+                .to_string();
+            (addr, bare)
+        })
+        .collect();
+    entries.sort_by_key(|(addr, _)| *addr);
+    PltLazyTable { entries, globals }
+}
+
+/// Write lazy markers into GOT slots (in-memory). Call after sections are mapped.
+pub fn install_lazy_got(state: &mut MachineState, table: &PltLazyTable) -> Result<()> {
+    for (i, (got_va, name)) in table.entries.iter().enumerate() {
+        let mark = make_lazy_mark(i);
+        state.write_space(state.ram_space(), *got_va, &mark.to_le_bytes())?;
+        tracing::debug!("plt lazy install: [{}] {} GOT 0x{:X} mark=0x{:X}", i, name, got_va, mark);
+    }
+    Ok(())
 }
 
 struct MappedInterp {
@@ -900,5 +1042,32 @@ mod tests {
             "expected libc/ld in DT_NEEDED, got {needed:?}"
         );
         assert!(bind_now, "mini-dynlink defaults BIND_NOW");
+    }
+
+    #[test]
+    fn lazy_mark_roundtrip() {
+        let m = make_lazy_mark(3);
+        assert_eq!(lazy_mark_index(m), Some(3));
+        assert!(lazy_mark_index(0x400000).is_none());
+    }
+
+    #[test]
+    fn plt_lazy_bind_writes_got() {
+        let mut state = MachineState::new();
+        let got = 0x1000u64;
+        state
+            .page_map
+            .map_region(got, 0x1000, prot::RW, true);
+        state
+            .write_space(state.ram_space(), got, &make_lazy_mark(0).to_le_bytes())
+            .unwrap();
+        let mut table = PltLazyTable::default();
+        table.entries.push((got, "puts".into()));
+        table.globals.insert("puts".into(), 0x401000);
+        let empty = std::collections::HashMap::new();
+        let t = table.bind_slot(&mut state, 0, 0xFFFFFFF100000000, &empty).unwrap();
+        assert_eq!(t, 0x401000);
+        let bytes = state.read_space(state.ram_space(), got, 8).unwrap();
+        assert_eq!(u64::from_le_bytes(bytes.try_into().unwrap()), 0x401000);
     }
 }

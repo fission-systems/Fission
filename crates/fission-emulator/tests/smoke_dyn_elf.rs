@@ -72,3 +72,38 @@ fn smoke_dyn_puts_via_got_hle() {
     }
     eprintln!("dyn puts smoke ok: {}", emu.metrics.summary_line());
 }
+
+/// Lazy PLT: GOT markers until first call; bind then HLE/jump (FISSION_LAZY_BIND=1).
+#[test]
+fn smoke_dyn_puts_lazy_bind() {
+    let path = fixture();
+    assert!(path.is_file(), "missing {}", path.display());
+    // Scope env so other tests in the same process are not polluted.
+    // SAFETY: test-only env mutation; serial within this process for this test body.
+    unsafe {
+        std::env::set_var("FISSION_LAZY_BIND", "1");
+    }
+    let result = std::panic::catch_unwind(|| run_dyn(&path, 50_000));
+    unsafe {
+        std::env::remove_var("FISSION_LAZY_BIND");
+    }
+    let emu = match result {
+        Ok(Ok(e)) => e,
+        Ok(Err(e)) => panic!("lazy dyn ELF smoke failed: {e:#}"),
+        Err(payload) => std::panic::resume_unwind(payload),
+    };
+    assert!(
+        emu.halt_requested,
+        "lazy bind expected clean halt, metrics={}",
+        emu.metrics.summary_line()
+    );
+    assert!(
+        emu.metrics.instructions > 5,
+        "lazy bind too few instructions: {}",
+        emu.metrics.summary_line()
+    );
+    if let Err(msg) = emu.metrics.check_unimplemented_budget(128, 16) {
+        panic!("{msg}; full={}", emu.metrics.summary_line());
+    }
+    eprintln!("dyn puts lazy-bind smoke ok: {}", emu.metrics.summary_line());
+}

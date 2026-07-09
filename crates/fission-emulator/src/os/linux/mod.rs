@@ -24,9 +24,12 @@ const POST_MAIN_EXIT_STUB: u64 = 0xFFFFFFF1000000F8;
 /// Linux ELF execution environment.
 ///
 /// - Import patching: overwrites GOT slots for PLT-reachable symbols.
+/// - Optional lazy PLT: GOT holds markers until first call binds the slot.
 /// - HLE dispatch: emulates libc functions and syscalls using SimProcedures.
 pub struct LinuxEnv {
     pub simos: SimOS,
+    /// Deferred PLT/GOT binding table (when `FISSION_LAZY_BIND=1`).
+    pub plt_lazy: std::sync::Mutex<Option<dynlink::PltLazyTable>>,
 }
 
 impl LinuxEnv {
@@ -93,7 +96,15 @@ impl LinuxEnv {
         simos.register_syscall(302, Box::new(syscall::SysPrlimit64));
         simos.register_syscall(318, Box::new(syscall::SysGetrandom));
 
-        Self { simos }
+        Self {
+            simos,
+            plt_lazy: std::sync::Mutex::new(None),
+        }
+    }
+
+    /// Install a lazy PLT table (called after shared-lib load when lazy bind is on).
+    pub fn set_plt_lazy(&self, table: dynlink::PltLazyTable) {
+        *self.plt_lazy.lock().unwrap_or_else(|e| e.into_inner()) = Some(table);
     }
 }
 
@@ -114,8 +125,37 @@ impl OsEnvironment for LinuxEnv {
             tracing::info!("dynlink: skipping GOT HLE patch (interpreter path active)");
             return Ok(());
         }
+
         let mut plt_entries: Vec<_> = binary.inner().iat_symbols.iter().collect();
         plt_entries.sort_by_key(|&(&addr, _)| addr);
+
+        if dynlink::lazy_bind_enabled() && !plt_entries.is_empty() {
+            // Lazy PLT: install markers; first call binds via resolve_stub path.
+            let mut table = dynlink::PltLazyTable::default();
+            for (i, (addr, name)) in plt_entries.iter().enumerate() {
+                let addr = **addr;
+                let bare = name
+                    .split('@')
+                    .next()
+                    .unwrap_or(name)
+                    .split('!')
+                    .last()
+                    .unwrap_or(name)
+                    .to_string();
+                table.entries.push((addr, bare));
+                let mark = dynlink::make_lazy_mark(i);
+                tracing::debug!(
+                    "PLT lazy patch: {} @ 0x{:X} → mark 0x{:X}",
+                    name,
+                    addr,
+                    mark
+                );
+                state.write_space(state.ram_space(), addr, &mark.to_le_bytes())?;
+            }
+            self.set_plt_lazy(table);
+            return Ok(());
+        }
+
         for (i, (&addr, name)) in plt_entries.into_iter().enumerate() {
             let trampoline = MAGIC_BASE + (i as u64 * 8);
             tracing::debug!("PLT/GOT patch: {} @ 0x{:X} → trampoline 0x{:X}", name, addr, trampoline);
@@ -127,6 +167,13 @@ impl OsEnvironment for LinuxEnv {
     fn resolve_stub(&self, binary: &LoadedBinary, magic_addr: u64) -> Option<String> {
         if magic_addr == POST_MAIN_EXIT_STUB {
             return Some("__fission_post_main_exit".into());
+        }
+        // Lazy PLT marker: synthetic name consumed by dispatch_hle.
+        if let Some(idx) = dynlink::lazy_mark_index(magic_addr) {
+            return Some(format!("__plt_lazy_{idx}"));
+        }
+        if magic_addr == dynlink::PLT_RESOLVER_STUB {
+            return Some("__plt_resolver".into());
         }
         if magic_addr < MAGIC_BASE {
             return None;
@@ -141,6 +188,38 @@ impl OsEnvironment for LinuxEnv {
     }
 
     fn dispatch_hle(&self, emu: &mut Emulator, func_name: &str) -> Result<HleResult> {
+        // Lazy PLT: bind GOT slot then jump to resolved target (no return).
+        if let Some(idx_str) = func_name.strip_prefix("__plt_lazy_") {
+            if let Ok(idx) = idx_str.parse::<usize>() {
+                let table = self.plt_lazy.lock().unwrap_or_else(|e| e.into_inner());
+                if let Some(ref tbl) = *table {
+                    let extra = emu
+                        .image_info
+                        .as_ref()
+                        .map(|i| i.dynlink.global_symbols.clone())
+                        .unwrap_or_default();
+                    if let Some(target) = tbl.bind_slot(&mut emu.state, idx, MAGIC_BASE, &extra) {
+                        // If target is still in HLE magic range, dispatch that name instead.
+                        if target >= MAGIC_BASE && dynlink::lazy_mark_index(target).is_none() {
+                            drop(table);
+                            let name = self
+                                .resolve_stub(&emu.binary, target)
+                                .unwrap_or_else(|| format!("Unknown@0x{target:X}"));
+                            return self.dispatch_hle(emu, &name);
+                        }
+                        return Ok(HleResult::JumpTo(target));
+                    }
+                }
+                tracing::warn!("plt lazy: missing table/slot {idx}");
+                return Ok(HleResult::Halt(127));
+            }
+        }
+        if func_name == "__plt_resolver" {
+            // Classic resolver entry without index — treat as halt diagnostic.
+            tracing::warn!("plt resolver stub hit without slot index");
+            return Ok(HleResult::Halt(127));
+        }
+
         if func_name == "syscall" {
             let sys_num = emu.read_register_u64("RAX").unwrap_or(0);
             emu.metrics.note_syscall(sys_num);

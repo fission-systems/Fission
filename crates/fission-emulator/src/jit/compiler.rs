@@ -1656,24 +1656,49 @@ impl JitCompiler {
         builder.seal_block(exit_block);
         let next_pc = builder.block_params(exit_block)[0];
 
-        let mut last: HashMap<(u64, u64), (u32, Variable)> = HashMap::new();
-        for (sp, off, sz, v) in dirty {
-            last.insert((sp, off), (sz, v));
-        }
-        for ((sp, off), (sz, v)) in last {
-            if sp == 0 {
-                continue;
+        // TB exit writeback: registers → one bulk flush; unique/ram → per-slot.
+        {
+            let mut last: HashMap<(u64, u64), (u32, Variable)> = HashMap::new();
+            for (sp, off, sz, v) in dirty {
+                last.insert((sp, off), (sz, v));
             }
-            // Register slots: host_reg_file was updated mid-TB via IR store.
-            // Still write once at exit so AddressSpace stays coherent for any
-            // non-host path; this is one callout per dirty reg (not per access).
-            let val = builder.use_var(v);
-            let spv = builder.ins().iconst(types::I64, sp as i64);
-            let offv = builder.ins().iconst(types::I64, off as i64);
-            let szv = builder.ins().iconst(types::I64, sz as i64);
-            builder
-                .ins()
-                .call(write_space_ref, &[emu_ptr, spv, offv, szv, val]);
+            let mut reg_entries: Vec<(u64, u32, Variable)> = Vec::new();
+            for ((sp, off), (sz, v)) in last {
+                if sp == 0 {
+                    continue;
+                }
+                if sp == register_space && (off as usize) + (sz as usize) <= HOST_REG_FILE_SIZE {
+                    reg_entries.push((off, sz, v));
+                    continue;
+                }
+                let val = builder.use_var(v);
+                let spv = builder.ins().iconst(types::I64, sp as i64);
+                let offv = builder.ins().iconst(types::I64, off as i64);
+                let szv = builder.ins().iconst(types::I64, sz as i64);
+                builder
+                    .ins()
+                    .call(write_space_ref, &[emu_ptr, spv, offv, szv, val]);
+            }
+            if !reg_entries.is_empty() {
+                let n = reg_entries.len();
+                let slot = builder.create_sized_stack_slot(StackSlotData::new(
+                    StackSlotKind::ExplicitSlot,
+                    (n * 24) as u32,
+                    0,
+                ));
+                for (i, (off, sz, v)) in reg_entries.iter().enumerate() {
+                    let base = (i * 24) as i32;
+                    let offv = builder.ins().iconst(types::I64, *off as i64);
+                    let szv = builder.ins().iconst(types::I64, *sz as i64);
+                    let val = builder.use_var(*v);
+                    builder.ins().stack_store(offv, slot, base);
+                    builder.ins().stack_store(szv, slot, base + 8);
+                    builder.ins().stack_store(val, slot, base + 16);
+                }
+                let ptr = builder.ins().stack_addr(types::I64, slot, 0);
+                let cnt = builder.ins().iconst(types::I64, n as i64);
+                builder.ins().call(reg_bulk_ref, &[emu_ptr, ptr, cnt]);
+            }
         }
 
         // Hard/soft TB exit — next_pc may be fallthrough or absolute branch/call.
