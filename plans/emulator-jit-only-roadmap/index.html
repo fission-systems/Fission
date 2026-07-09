@@ -1051,7 +1051,8 @@
 <li>[x] Symbolic CBranch gate (<code>jit_sym_cbranch_gate</code> → <code>sym_events</code> + <code>sym_stop_requested</code>)</li>
 <li>[x] JIT shadow prop: COPY/LOAD/STORE + int ALU/compare</li>
 <li>[x] Full symbolic AST on JIT ALU (<code>jit_shadow_binop</code> builds <code>SymExpr</code> Add/Sub/…/Eq)</li>
-<li>[x] Unary/float AST: <code>jit_shadow_unop</code> (Not/Neg/BoolNot) + float Var leaves</li>
+<li>[x] Unary/float AST: <code>jit_shadow_unop</code> + solver IEEE float theory (<code>FAdd</code>/<code>FNeg</code>/… with concrete fold)</li>
+<li>[x] CallOther register dirty → one <code>jit_reg_bulk_flush</code> callout (not N× write_space)</li>
 <li>[x] Exploration manager clears stop flag between forks (<code>sym/manager.rs</code>)</li>
 </ul>
 <h3 id="phase-e-maturity-smoke-in-progress">Phase E — Maturity / smoke (in progress)<a class="headerlink" href="#phase-e-maturity-smoke-in-progress" title="Permanent link">&para;</a></h3>
@@ -1073,6 +1074,7 @@
       opt-in host ld.so map (<code>FISSION_ENABLE_DYNLINK</code> + <code>FISSION_LD_SO</code>)</li>
 <li>[x] Dynlink bootstrap: VFS seed/alias for main binary, openat/read, file-backed mmap,
       <code>apply_rela_x86_64</code> (RELATIVE/JUMP_SLOT/GLOB_DAT)</li>
+<li>[x] DT_NEEDED shared-lib load loop + BIND_NOW (<code>DynlinkMode::SharedLibs</code>, <code>FISSION_LIB_PATH</code>)</li>
 <li>[x] Automation <code>sandbox-check</code> lane (subprocess over CLI JSON + budget gate)</li>
 </ul>
 <h2 id="validation">Validation<a class="headerlink" href="#validation" title="Permanent link">&para;</a></h2>
