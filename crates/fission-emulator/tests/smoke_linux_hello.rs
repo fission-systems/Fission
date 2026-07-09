@@ -1,14 +1,9 @@
-//! Optional end-to-end smoke: run a static Linux x86_64 hello binary in the sandbox.
+//! End-to-end smoke against the checked-in minimal ELF fixture (no libc).
 //!
-//! Skipped when the binary is absent (CI without fixtures). Produce one with:
-//!
-//! ```bash
-//! zig cc -target x86_64-linux-musl -O0 -o /tmp/fission-emu-test/hello_linux_x64 hello.c
-//! export FISSION_SMOKE_ELF=/tmp/fission-emu-test/hello_linux_x64
-//! cargo nextest run -p fission-emulator smoke_linux_hello
-//! ```
+//! Optional larger binaries: set `FISSION_SMOKE_ELF=/path/to/binary` explicitly.
+//! Auto-discovery of `/tmp` paths is intentionally avoided so local nextest stays bounded.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use fission_emulator::arch::ArchInfo;
@@ -18,24 +13,28 @@ use fission_emulator::MachineState;
 use fission_loader::loader::LoadedBinary;
 use fission_sleigh::runtime::RuntimeSleighFrontend;
 
-fn smoke_elf_path() -> Option<PathBuf> {
-    if let Ok(p) = std::env::var("FISSION_SMOKE_ELF") {
-        let pb = PathBuf::from(p);
-        if pb.is_file() {
-            return Some(pb);
-        }
-    }
-    let default = PathBuf::from("/tmp/fission-emu-test/hello_linux_x64");
-    if default.is_file() {
-        Some(default)
-    } else {
-        None
-    }
+fn fixture_elf() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("testdata/linux_x64_hello_sys.elf")
 }
 
-fn run_smoke(path: &std::path::Path) -> Result<()> {
-    let binary = LoadedBinary::from_file(path)
-        .with_context(|| format!("load {}", path.display()))?;
+/// Opt-in only: never auto-pick developer `/tmp` trees (those can hang for minutes).
+fn optional_large_elf() -> Option<PathBuf> {
+    let p = std::env::var("FISSION_SMOKE_ELF").ok()?;
+    let pb = PathBuf::from(p);
+    pb.is_file().then_some(pb)
+}
+
+struct SmokeExpect {
+    max_inst: u64,
+    require_write: bool,
+    /// Strict zero-gap budget for the tiny CI fixture; looser for large libc paths.
+    max_unimpl_events: u64,
+    max_unimpl_kinds: usize,
+}
+
+fn run_binary(path: &Path, expect: SmokeExpect) -> Result<Emulator> {
+    let binary =
+        LoadedBinary::from_file(path).with_context(|| format!("load {}", path.display()))?;
     let mut state = MachineState::new();
     let info = fission_emulator::os::linux::loader::load_elf(&mut state, &binary)?;
 
@@ -43,8 +42,7 @@ fn run_smoke(path: &std::path::Path) -> Result<()> {
         .load_spec()
         .context("binary missing load_spec")?
         .clone();
-    let frontends =
-        RuntimeSleighFrontend::new_candidate_frontends_for_load_spec(&load_spec)?;
+    let frontends = RuntimeSleighFrontend::new_candidate_frontends_for_load_spec(&load_spec)?;
     let sleigh = frontends
         .into_iter()
         .next()
@@ -55,36 +53,74 @@ fn run_smoke(path: &std::path::Path) -> Result<()> {
         .with_context(|| format!("arch {lang_id}"))?;
     let os = Box::new(LinuxEnv::new());
 
-    let mut emu = Emulator::new(state, binary, sleigh, arch, os)?
-        .with_max_inst(Some(50_000));
+    let mut emu = Emulator::new(state, binary, sleigh, arch, os)?.with_max_inst(Some(expect.max_inst));
     emu.apply_linux_image(info)?;
     emu.run()?;
 
     assert!(
-        emu.halt_requested || emu.metrics.exit_reason.as_deref() == Some("halt"),
+        emu.halt_requested,
         "expected clean halt, metrics={}",
         emu.metrics.summary_line()
     );
+    emu.metrics
+        .check_unimplemented_budget(expect.max_unimpl_events, expect.max_unimpl_kinds)
+        .map_err(|e| anyhow::anyhow!("{e}; full={}", emu.metrics.summary_line()))?;
+    if expect.require_write {
+        assert!(
+            emu.metrics.syscalls.get(&1).copied().unwrap_or(0) >= 1,
+            "expected write syscall, got {:?}",
+            emu.metrics.syscalls
+        );
+    }
     assert!(
-        emu.inst_count > 100 && emu.inst_count < 50_000,
-        "unexpected inst_count={}",
-        emu.inst_count
-    );
-    // write(1,...) and exit should have been seen on a normal hello.
-    assert!(
-        emu.metrics.syscalls.contains_key(&1) || emu.metrics.syscalls.contains_key(&60),
-        "expected write and/or exit syscalls, got {:?}",
+        emu.metrics.syscalls.contains_key(&60) || emu.metrics.syscalls.contains_key(&231),
+        "expected exit/exit_group, got {:?}",
         emu.metrics.syscalls
     );
-    eprintln!("smoke ok: {}", emu.metrics.summary_line());
-    Ok(())
+    eprintln!(
+        "smoke ok ({}): {}",
+        path.display(),
+        emu.metrics.summary_line()
+    );
+    Ok(emu)
 }
 
 #[test]
-fn smoke_linux_static_hello() {
-    let Some(path) = smoke_elf_path() else {
-        eprintln!("skip smoke_linux_static_hello: set FISSION_SMOKE_ELF or build /tmp/fission-emu-test/hello_linux_x64");
+fn smoke_ci_fixture_hello_sys() {
+    let path = fixture_elf();
+    assert!(
+        path.is_file(),
+        "missing checked-in fixture {}",
+        path.display()
+    );
+    run_binary(
+        &path,
+        SmokeExpect {
+            max_inst: 64,
+            require_write: true,
+            max_unimpl_events: 0,
+            max_unimpl_kinds: 0,
+        },
+    )
+    .unwrap_or_else(|e| panic!("fixture smoke failed: {e:#}"));
+}
+
+/// Large musl/CRT hello — opt-in via `FISSION_SMOKE_ELF`. Not part of default CI.
+#[test]
+fn smoke_optional_musl_hello() {
+    let Some(path) = optional_large_elf() else {
+        eprintln!("skip optional musl hello (set FISSION_SMOKE_ELF=/path/to/elf to enable)");
         return;
     };
-    run_smoke(&path).unwrap_or_else(|e| panic!("smoke failed: {e:#}"));
+    run_binary(
+        &path,
+        SmokeExpect {
+            max_inst: 50_000,
+            require_write: true,
+            // Large CRT paths still exercise unimplemented ops; gate is soft.
+            max_unimpl_events: 256,
+            max_unimpl_kinds: 16,
+        },
+    )
+    .unwrap_or_else(|e| panic!("musl smoke failed: {e:#}"));
 }

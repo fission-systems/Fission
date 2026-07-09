@@ -15,6 +15,22 @@ fn metrics_tracks_unimplemented() {
     let top = m.top_unimplemented(1);
     assert_eq!(top[0].0, "CPoolRef");
     assert!(m.summary_line().contains("CPoolRef=2"));
+    assert_eq!(m.unimplemented_total(), 3);
+    assert_eq!(m.unimplemented_kinds(), 2);
+}
+
+#[test]
+fn unimplemented_budget_gate() {
+    let mut m = EmulatorMetrics::default();
+    assert!(m.check_unimplemented_budget(0, 0).is_ok());
+    m.note_unimplemented(PcodeOpcode::CPoolRef);
+    assert!(m.check_unimplemented_budget(0, 0).is_err());
+    assert!(m.check_unimplemented_budget(1, 1).is_ok());
+    m.note_unimplemented(PcodeOpcode::New);
+    assert!(m.check_unimplemented_budget(2, 1).is_err()); // kinds=2 > 1
+    assert!(m.check_unimplemented_budget(2, 2).is_ok());
+    let err = m.check_unimplemented_budget(0, 0).unwrap_err();
+    assert!(err.contains("budget exceeded"), "{err}");
 }
 
 #[test]

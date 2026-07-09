@@ -992,6 +992,28 @@ impl JitCompiler {
                 }
 
                 PcodeOpcode::CallOther => {
+                    // Flush dirty register/memory so HLE (syscall, etc.) sees
+                    // the current SSA values — writeback only at TB exit is too late.
+                    {
+                        let mut last: HashMap<(u64, u64), (u32, cranelift_frontend::Variable)> =
+                            HashMap::new();
+                        for (sp, off, sz, v) in &dirty {
+                            last.insert((*sp, *off), (*sz, *v));
+                        }
+                        for ((sp, off), (sz, v)) in last {
+                            if sp == 0 {
+                                continue;
+                            }
+                            let val = builder.use_var(v);
+                            let spv = builder.ins().iconst(types::I64, sp as i64);
+                            let offv = builder.ins().iconst(types::I64, off as i64);
+                            let szv = builder.ins().iconst(types::I64, sz as i64);
+                            builder
+                                .ins()
+                                .call(write_space_ref, &[emu_ptr, spv, offv, szv, val]);
+                        }
+                    }
+
                     let userop_id = if let Some(vn) = op.inputs.first() {
                         if vn.is_constant {
                             vn.constant_val as u32

@@ -80,6 +80,40 @@ impl EmulatorMetrics {
             self.exit_reason
         )
     }
+
+    /// Total count of unimplemented-opcode events observed at compile time.
+    pub fn unimplemented_total(&self) -> u64 {
+        self.unimplemented_opcodes.values().sum()
+    }
+
+    /// Distinct unimplemented opcode kinds.
+    pub fn unimplemented_kinds(&self) -> usize {
+        self.unimplemented_opcodes.len()
+    }
+
+    /// Budget gate: fail if too many unimplemented events or kinds.
+    ///
+    /// Returns `Ok(())` when within budget, else an error with a short report.
+    pub fn check_unimplemented_budget(
+        &self,
+        max_events: u64,
+        max_kinds: usize,
+    ) -> Result<(), String> {
+        let events = self.unimplemented_total();
+        let kinds = self.unimplemented_kinds();
+        if events <= max_events && kinds <= max_kinds {
+            return Ok(());
+        }
+        let top = self
+            .top_unimplemented(8)
+            .into_iter()
+            .map(|(k, c)| format!("{k}={c}"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        Err(format!(
+            "unimplemented opcode budget exceeded: events={events} (max {max_events}), kinds={kinds} (max {max_kinds}); top=[{top}]"
+        ))
+    }
 }
 
 /// Opcodes the JIT currently lowers (for coverage reports).

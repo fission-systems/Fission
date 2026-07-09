@@ -74,6 +74,8 @@ vendor/
 # Keep benchmark test binaries tracked
 !examples/binaries/comparison_test_x64.exe
 !examples/binaries/comparison_test_x86.exe
+# Emulator CI PE fixture (magic-detected; checked-in for nextest without zig/msvc)
+!crates/fission-emulator/testdata/win_x64_exit.exe
 # Benchmark binaries (compiled output, built in CI)
 # Track source/build inputs only; ignore everything else under benchmark/binary.
 /benchmark/binary/**

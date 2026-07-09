@@ -81,20 +81,23 @@ Callouts: `jit_read_space` / `jit_write_space` / `jit_call_other` / `jit_exit_tb
 
 - [x] `EmulatorMetrics` (unimplemented ops, syscalls, TB/chain counters)
 - [x] JIT: Piece / Extract / Insert / LzCount / SegmentOp
-- [x] Optional E2E smoke (`tests/smoke_linux_hello.rs`, `FISSION_SMOKE_ELF`)
+- [x] Optional E2E smoke (`tests/smoke_linux_hello.rs`, opt-in `FISSION_SMOKE_ELF` only)
 - [x] Direct CALL address fix + x86 userop fallback (syscall)
-- [ ] Checked-in tiny ELF fixture for CI (no zig required)
-- [ ] Unimplemented-opcode budget gate in automation
-- [ ] Dynamic-linked ELF / PE CRT smoke
+- [x] CallOther mid-TB dirty register flush (HLE sees current SSA)
+- [x] Checked-in tiny ELF fixture: `testdata/linux_x64_hello_sys.elf` + `smoke_ci_fixture_hello_sys`
+- [x] PE ExitProcess fixture: `testdata/win_x64_exit.exe` + `smoke_pe_exit_process`
+- [x] Unimplemented-opcode budget gate (`EmulatorMetrics::check_unimplemented_budget`)
+- [ ] Dynamic-linked ELF / full PE CRT (WriteFile + more HLE)
+- [ ] Wire budget gate into automation/report surfaces (optional)
 
 ## Validation
 
 ```bash
 cargo check -p fission-emulator
 cargo nextest run -p fission-emulator
-# optional real binary:
+# optional large musl binary (explicit path only — no /tmp auto-discovery):
 #   zig cc -target x86_64-linux-musl -O0 -o /tmp/fission-emu-test/hello_linux_x64 hello.c
-#   FISSION_SMOKE_ELF=/tmp/fission-emu-test/hello_linux_x64 cargo nextest run -p fission-emulator smoke_linux
+#   FISSION_SMOKE_ELF=/tmp/fission-emu-test/hello_linux_x64 cargo nextest run -p fission-emulator smoke_optional
 cargo check -p fission-cli
 ./target/release/fission_cli sandbox /path/to/elf --max-inst 50000
 ```
