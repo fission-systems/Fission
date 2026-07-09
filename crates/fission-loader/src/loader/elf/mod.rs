@@ -37,8 +37,14 @@ const EM_LOONGARCH: u16 = 258;
 const EM_X86_64: u16 = 62;
 const R_X86_64_64: u32 = 1;
 const R_X86_64_PC32: u32 = 2;
+const R_X86_64_GLOB_DAT: u32 = 6;
+const R_X86_64_JUMP_SLOT: u32 = 7;
 const R_X86_64_32: u32 = 10;
 const R_X86_64_32S: u32 = 11;
+// i386 uses the same type ids as x86_64 for GLOB_DAT/JMP_SLOT (6/7).
+// AArch64 dynamic import slots
+const R_AARCH64_GLOB_DAT: u32 = 1025;
+const R_AARCH64_JUMP_SLOT: u32 = 1026;
 const R_ARM_PC24: u32 = 1;
 const R_ARM_ABS32: u32 = 2;
 const R_ARM_CALL: u32 = 28;
@@ -107,6 +113,7 @@ impl ElfLoader {
         let mut global_symbols = HashMap::new();
         let mut global_symbol_sizes = HashMap::new();
         let mut relocation_symbols = HashMap::new();
+        let mut iat_symbols = HashMap::new();
         let mut relocs = Vec::new();
         let mut symbol_versions = HashMap::new();
         let phdrs = read_program_headers_64(bytes, &header, endian);
@@ -250,6 +257,14 @@ impl ElfLoader {
                 &mut relocation_symbols,
                 endian,
             );
+            parse_elf_iat_symbols_64(
+                bytes,
+                &shdrs,
+                &section_addresses,
+                is_relocatable,
+                endian,
+                &mut iat_symbols,
+            );
             let patches_riscv = if is_relocatable && header.machine == EM_RISCV {
                 Some(riscv_relocation_patches_64(
                     bytes,
@@ -367,6 +382,7 @@ impl ElfLoader {
             .add_global_symbols(global_symbols)
             .add_global_symbol_sizes(global_symbol_sizes)
             .add_relocation_symbols(relocation_symbols)
+            .add_iat_symbols(iat_symbols)
             .add_inferred_types(header_types)
             .add_relocations(relocs)
             .add_symbol_versions(symbol_versions)
@@ -390,6 +406,7 @@ impl ElfLoader {
         let mut global_symbols = HashMap::new();
         let mut global_symbol_sizes = HashMap::new();
         let mut relocation_symbols = HashMap::new();
+        let mut iat_symbols = HashMap::new();
         let mut relocs = Vec::new();
         let mut symbol_versions = HashMap::new();
         let phdrs = read_program_headers_32(bytes, &header, endian);
@@ -520,6 +537,14 @@ impl ElfLoader {
                 &mut relocation_symbols,
                 endian,
             );
+            parse_elf_iat_symbols_32(
+                bytes,
+                &shdrs,
+                &section_addresses,
+                is_relocatable,
+                endian,
+                &mut iat_symbols,
+            );
             let patches_arm = if is_relocatable && header.machine == EM_ARM {
                 Some(arm_relocation_patches_32(
                     bytes,
@@ -623,6 +648,7 @@ impl ElfLoader {
             .add_global_symbols(global_symbols)
             .add_global_symbol_sizes(global_symbol_sizes)
             .add_relocation_symbols(relocation_symbols)
+            .add_iat_symbols(iat_symbols)
             .add_inferred_types(header_types)
             .add_relocations(relocs)
             .add_symbol_versions(symbol_versions)
@@ -927,6 +953,152 @@ impl ElfLoader {
                     thunk_target: None,
                 },
             );
+        }
+    }
+}
+
+/// True for dynamic-link import slot relocation types (GOT/PLT).
+/// x86/i386 share GLOB_DAT=6 and JUMP_SLOT=7; AArch64 uses 1025/1026.
+fn is_elf_import_reloc_type(r_type: u32) -> bool {
+    matches!(
+        r_type,
+        R_X86_64_GLOB_DAT | R_X86_64_JUMP_SLOT | R_AARCH64_GLOB_DAT | R_AARCH64_JUMP_SLOT
+    )
+}
+
+/// Resolve relocation site VA.
+/// ET_REL: section base + r_offset; ET_EXEC/ET_DYN: r_offset is already VA.
+fn elf_reloc_site_addr(is_relocatable: bool, section_base: u64, r_offset: u64) -> u64 {
+    if is_relocatable {
+        section_base.saturating_add(r_offset)
+    } else {
+        r_offset
+    }
+}
+
+/// Populate `iat_symbols` from ELF JUMP_SLOT / GLOB_DAT relocations (GOT slots).
+///
+/// Keys are guest virtual addresses of the GOT/PLT slots so the emulator can
+/// patch them like PE IAT entries.
+fn parse_elf_iat_symbols_64(
+    full_data: &[u8],
+    shdrs: &[Elf64Shdr],
+    section_addresses: &[u64],
+    is_relocatable: bool,
+    endian: Endian,
+    out: &mut HashMap<u64, String>,
+) {
+    let reader = ByteReader::new(full_data, endian);
+    for shdr in shdrs
+        .iter()
+        .filter(|shdr| matches!(shdr.sh_type, SHT_RELA | SHT_REL))
+    {
+        let section_base = section_addresses
+            .get(shdr.sh_info as usize)
+            .copied()
+            .unwrap_or(0);
+        let Some(symtab) = shdrs.get(shdr.sh_link as usize) else {
+            continue;
+        };
+        let Some(strtab) = symbol_string_table_64(full_data, shdrs, symtab) else {
+            continue;
+        };
+        let entry_size = if shdr.sh_entsize > 0 {
+            shdr.sh_entsize as usize
+        } else if shdr.sh_type == SHT_RELA {
+            24
+        } else {
+            16
+        };
+        let count = (shdr.sh_size as usize).checked_div(entry_size).unwrap_or(0);
+        let start = shdr.sh_offset as usize;
+        for index in 0..count {
+            let offset = start + index * entry_size;
+            if offset + entry_size > full_data.len() {
+                break;
+            }
+            let Ok(r_offset) = reader.u64(offset) else {
+                break;
+            };
+            let Ok(r_info) = reader.u64(offset + 8) else {
+                break;
+            };
+            let r_type = (r_info & 0xffff_ffff) as u32;
+            if !is_elf_import_reloc_type(r_type) {
+                continue;
+            }
+            let sym_index = (r_info >> 32) as usize;
+            let Some(name) = symbol_name_64(full_data, symtab, strtab, sym_index, endian) else {
+                continue;
+            };
+            if name.is_empty() {
+                continue;
+            }
+            // Strip version suffix: puts@GLIBC_2.2.5 → puts
+            let bare = name.split('@').next().unwrap_or(&name).to_string();
+            let addr = elf_reloc_site_addr(is_relocatable, section_base, r_offset);
+            out.entry(addr).or_insert(bare);
+        }
+    }
+}
+
+fn parse_elf_iat_symbols_32(
+    full_data: &[u8],
+    shdrs: &[Elf32Shdr],
+    section_addresses: &[u64],
+    is_relocatable: bool,
+    endian: Endian,
+    out: &mut HashMap<u64, String>,
+) {
+    let reader = ByteReader::new(full_data, endian);
+    for shdr in shdrs
+        .iter()
+        .filter(|shdr| matches!(shdr.sh_type, SHT_RELA | SHT_REL))
+    {
+        let section_base = section_addresses
+            .get(shdr.sh_info as usize)
+            .copied()
+            .unwrap_or(0);
+        let Some(symtab) = shdrs.get(shdr.sh_link as usize) else {
+            continue;
+        };
+        let Some(strtab) = symbol_string_table_32(full_data, shdrs, symtab) else {
+            continue;
+        };
+        let entry_size = if shdr.sh_entsize > 0 {
+            shdr.sh_entsize as usize
+        } else if shdr.sh_type == SHT_RELA {
+            12
+        } else {
+            8
+        };
+        let count = (shdr.sh_size as usize).checked_div(entry_size).unwrap_or(0);
+        let start = shdr.sh_offset as usize;
+        for index in 0..count {
+            let offset = start + index * entry_size;
+            if offset + entry_size > full_data.len() {
+                break;
+            }
+            let Ok(r_offset) = reader.u32(offset) else {
+                break;
+            };
+            let Ok(r_info) = reader.u32(offset + 4) else {
+                break;
+            };
+            let r_type = r_info & 0xff;
+            if !is_elf_import_reloc_type(r_type) {
+                continue;
+            }
+            let sym_index = (r_info >> 8) as usize;
+            let Some(name) = symbol_name_32(full_data, symtab, strtab, sym_index, endian) else {
+                continue;
+            };
+            if name.is_empty() {
+                continue;
+            }
+            let bare = name.split('@').next().unwrap_or(&name).to_string();
+            let addr = elf_reloc_site_addr(is_relocatable, section_base, r_offset as u64);
+            out.entry(addr).or_insert(bare);
         }
     }
 }
@@ -2902,6 +3074,7 @@ fn map_symbol_versions_32(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
 
     #[test]
     fn riscv_relocation_patch_encodes_hi20_and_lo12_fields() {
@@ -3365,5 +3538,32 @@ mod tests {
             .get(&0x2020)
             .expect("should find version for address 0x2020");
         assert_eq!(ver, "GLIBC_2.2.5");
+    }
+
+    #[test]
+    fn dynamic_elf_populates_iat_symbols_from_got_plt() {
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("testdata/x64_dyn_puts.elf");
+        assert!(
+            path.is_file(),
+            "missing fixture {} (rebuild with zig if needed)",
+            path.display()
+        );
+        let bin = LoadedBinary::from_file(&path).expect("load dynamic ELF");
+        assert!(
+            !bin.inner().iat_symbols.is_empty(),
+            "expected JUMP_SLOT/GLOB_DAT iat_symbols, got empty"
+        );
+        let names: Vec<_> = bin.inner().iat_symbols.values().cloned().collect();
+        assert!(
+            names.iter().any(|n| n == "puts" || n.starts_with("puts")),
+            "expected puts in iat_symbols, got {names:?}"
+        );
+        // Addresses must look like guest VAs (not zero).
+        assert!(
+            bin.inner().iat_symbols.keys().all(|&a| a > 0x1000),
+            "iat keys look invalid: {:?}",
+            bin.inner().iat_symbols.keys().collect::<Vec<_>>()
+        );
     }
 }

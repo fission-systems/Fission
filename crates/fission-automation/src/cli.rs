@@ -18,6 +18,26 @@ pub struct Cli {
 pub enum Commands {
     /// Run the NIR inventory quality lane against sentinel binaries.
     NirCheck(NirCheckArgs),
+    /// Run emulator sandbox fixtures and gate on unimplemented-opcode budget.
+    SandboxCheck(SandboxCheckArgs),
+}
+
+#[derive(Parser, Debug)]
+pub struct SandboxCheckArgs {
+    #[arg(long)]
+    pub release: bool,
+    #[arg(long)]
+    pub no_build: bool,
+    #[arg(long)]
+    pub fission_bin: Option<PathBuf>,
+    #[arg(long)]
+    pub output_dir: Option<PathBuf>,
+    /// Exit non-zero unless decision starts with `go_`.
+    #[arg(long)]
+    pub fail_on_stop: bool,
+    /// Resolve fixtures and write a dry-run summary without executing sandbox.
+    #[arg(long)]
+    pub dry_run: bool,
 }
 
 #[derive(Parser, Debug)]
@@ -104,11 +124,15 @@ mod tests {
     fn parses_nir_check_defaults() {
         let cli = Cli::try_parse_from(["fission-automation", "nir-check"])
             .expect("nir-check command parses");
-        let Commands::NirCheck(args) = cli.command;
-        assert!(matches!(args.run_profile, RunProfile::Mid));
-        assert!(!args.release);
-        assert!(!args.no_build);
-        assert!(args.manifest.is_none());
+        match cli.command {
+            Commands::NirCheck(args) => {
+                assert!(matches!(args.run_profile, RunProfile::Mid));
+                assert!(!args.release);
+                assert!(!args.no_build);
+                assert!(args.manifest.is_none());
+            }
+            other => panic!("expected NirCheck, got {other:?}"),
+        }
     }
 
     #[test]
@@ -128,15 +152,39 @@ mod tests {
             "--no-update-latest",
         ])
         .expect("nir-check flags parse");
-        let Commands::NirCheck(args) = cli.command;
-        assert_eq!(args.lane, "nir");
-        assert!(args.no_build);
-        assert_eq!(
-            args.fission_bin,
-            Some(PathBuf::from("target/release/fission_cli"))
-        );
-        assert!(matches!(args.run_profile, RunProfile::Fast));
-        assert_eq!(args.functions_limit, Some(5));
-        assert!(args.no_update_latest);
+        match cli.command {
+            Commands::NirCheck(args) => {
+                assert_eq!(args.lane, "nir");
+                assert!(args.no_build);
+                assert_eq!(
+                    args.fission_bin,
+                    Some(PathBuf::from("target/release/fission_cli"))
+                );
+                assert!(matches!(args.run_profile, RunProfile::Fast));
+                assert_eq!(args.functions_limit, Some(5));
+                assert!(args.no_update_latest);
+            }
+            other => panic!("expected NirCheck, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_sandbox_check_flags() {
+        let cli = Cli::try_parse_from([
+            "fission-automation",
+            "sandbox-check",
+            "--no-build",
+            "--fail-on-stop",
+            "--dry-run",
+        ])
+        .expect("sandbox-check parse");
+        match cli.command {
+            Commands::SandboxCheck(args) => {
+                assert!(args.no_build);
+                assert!(args.fail_on_stop);
+                assert!(args.dry_run);
+            }
+            other => panic!("expected SandboxCheck, got {other:?}"),
+        }
     }
 }

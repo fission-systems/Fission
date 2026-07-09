@@ -29,6 +29,12 @@ pub struct EmulatorMetrics {
     pub memory_faults: u64,
     /// Exit reason (human string).
     pub exit_reason: Option<String>,
+    /// Persistent register-cache hits (MachineState::reg_cache).
+    #[serde(default)]
+    pub reg_cache_hits: u64,
+    /// Persistent register-cache misses.
+    #[serde(default)]
+    pub reg_cache_misses: u64,
 }
 
 impl EmulatorMetrics {

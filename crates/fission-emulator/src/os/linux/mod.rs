@@ -91,7 +91,8 @@ impl Default for LinuxEnv {
 
 impl OsEnvironment for LinuxEnv {
     fn patch_imports(&self, state: &mut MachineState, binary: &LoadedBinary) -> Result<()> {
-        if binary.format != "ELF" {
+        // Loader uses "ELF64" / "ELF32" / "ELF".
+        if !binary.format.starts_with("ELF") {
             return Ok(());
         }
         let mut plt_entries: Vec<_> = binary.inner().iat_symbols.iter().collect();

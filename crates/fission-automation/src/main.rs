@@ -42,5 +42,13 @@ fn run_main() -> Result<()> {
     lanes::nir_check::init_automation_logging(&lanes::nir_check::repo_root());
     match cli.command {
         Commands::NirCheck(args) => lanes::nir_check::run(args),
+        Commands::SandboxCheck(args) => lanes::sandbox_check::run(lanes::sandbox_check::SandboxCheckArgs {
+            release: args.release,
+            no_build: args.no_build,
+            fission_bin: args.fission_bin,
+            output_dir: args.output_dir,
+            fail_on_stop: args.fail_on_stop,
+            dry_run: args.dry_run,
+        }),
     }
 }

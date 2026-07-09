@@ -435,7 +435,11 @@ impl Emulator {
     }
 
     /// Seek the TTD timeline to a given instruction step index.
-    /// Replays forward from the nearest stored snapshot to reach the target.
+    ///
+    /// 1. Restore the nearest snapshot at or before `target_step` (registers +
+    ///    forward memory/shadow deltas recorded with that snapshot).
+    /// 2. If still short of `target_step`, **recompute** by running JIT with
+    ///    chaining disabled and `max_inst` set to the remaining steps.
     pub fn ttd_seek(&mut self, target_step: u64) -> Result<()> {
         let snapshot = self.ttd.get_snapshot(target_step)
             .or_else(|| {
@@ -449,6 +453,9 @@ impl Emulator {
         let Some(snap) = snapshot else {
             anyhow::bail!("No TTD snapshot available at or before step {}", target_step);
         };
+
+        // Bulk restore: drop register cache so restored values are authoritative.
+        self.state.invalidate_reg_cache();
 
         // Restore registers
         self.write_register_u64("RAX", snap.registers.rax)?;
@@ -471,7 +478,7 @@ impl Emulator {
         self.pc = snap.registers.rip;
         self.inst_count = snap.step_index;
 
-        // Restore memory via stored deltas (reverse the old_value → new_value)
+        // Restore memory via stored deltas (forward apply new_value at keyframe).
         for delta in &snap.memory_deltas {
             let _ = self.state.write_space(self.state.ram_space(), delta.address, &delta.new_value);
         }
@@ -486,6 +493,32 @@ impl Emulator {
         }
 
         tracing::info!("TTD: Restored to step {} (PC=0x{:X})", snap.step_index, self.pc);
+
+        // Recompute remaining guest instructions to reach target_step.
+        if self.inst_count < target_step {
+            let remaining = target_step - self.inst_count;
+            let saved_max = self.max_inst;
+            let saved_ttd_interval = self.ttd_snapshot_interval;
+            let saved_halt = self.halt_requested;
+            // Pause TTD recording during recompute to avoid nested snapshots.
+            self.ttd_snapshot_interval = 0;
+            self.max_inst = Some(self.inst_count.saturating_add(remaining));
+            self.halt_requested = false;
+            self.sym_stop_requested = false;
+            let _ = self.run();
+            self.max_inst = saved_max;
+            self.ttd_snapshot_interval = saved_ttd_interval;
+            // Don't force-clear halt if recompute hit a real halt.
+            if !self.halt_requested {
+                self.halt_requested = saved_halt;
+            }
+            tracing::info!(
+                "TTD: recomputed to step {} (target {}, PC=0x{:X})",
+                self.inst_count,
+                target_step,
+                self.pc
+            );
+        }
         Ok(())
     }
 
@@ -869,6 +902,8 @@ impl Emulator {
             );
         }
         self.metrics.instructions = self.inst_count;
+        self.metrics.reg_cache_hits = self.state.reg_cache_hits;
+        self.metrics.reg_cache_misses = self.state.reg_cache_misses;
         if self.metrics.exit_reason.is_none() {
             self.metrics.exit_reason = Some(if self.halt_requested {
                 "halt".into()

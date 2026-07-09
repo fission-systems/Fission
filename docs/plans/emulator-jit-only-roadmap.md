@@ -69,13 +69,14 @@ Callouts: `jit_read_space` / `jit_write_space` / `jit_call_other` / `jit_exit_tb
 - [x] Soft direct block chaining (`jit_chain`)
 - [x] Hard chaining via **global** guest-PC → host-fn table (`jit_exit_tb`) — fallthrough **and absolute** branch/call
 - [x] CallOther flush **+ reload** (HLE cannot be clobbered by stale SSA at TB exit)
-- [ ] Persistent host-side register file cache across TBs (fewer callouts)
+- [x] Persistent register cache (`MachineState::reg_cache` for 8B-aligned register space)
+- [ ] Host-pointer reg file (zero callout) still open
 - [x] Optional pure-Rust softfloat path (`feature = "softfloat"`, NaN quieting policy)
 
 ### Phase D — Analysis features
 
 - [x] TTD: enable `tracing_memory` on `with_ttd`, clear deltas after record, disable chain while recording
-- [ ] TTD: full keyframe recompute between snapshots (seek still nearest-snapshot + delta apply)
+- [x] TTD: recompute remaining steps after nearest-snapshot restore (`ttd_seek`)
 - [x] Symbolic CBranch gate (`jit_sym_cbranch_gate` → `sym_events` + `sym_stop_requested`)
 - [ ] Full shadow propagation on JIT ALU/LOAD (Evaluator-only today; concolic branch gate first)
 - [x] Exploration manager clears stop flag between forks (`sym/manager.rs`)
@@ -93,8 +94,8 @@ Callouts: `jit_read_space` / `jit_write_space` / `jit_call_other` / `jit_exit_tb
 - [x] Unimplemented-opcode budget gate (`EmulatorMetrics::check_unimplemented_budget`)
 - [x] IAT table + GetProcAddress dynamic trampolines + CRT bootstrap stubs
 - [x] CLI sandbox: `--json` / `--metrics-out` / `--max-unimpl-*` / `--fail-on-budget`
-- [ ] Dynamic-linked ELF GOT/`iat_symbols` fill in `fission-loader`
-- [ ] Automation `sandbox-check` lane (subprocess over CLI JSON)
+- [x] Dynamic-linked ELF GOT/`iat_symbols` from JUMP_SLOT/GLOB_DAT (`fission-loader`)
+- [x] Automation `sandbox-check` lane (subprocess over CLI JSON + budget gate)
 
 ## Validation
 
