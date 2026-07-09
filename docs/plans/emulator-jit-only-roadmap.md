@@ -83,7 +83,8 @@ Callouts: `jit_read_space` / `jit_write_space` / `jit_call_other` / `jit_exit_tb
 - [x] Symbolic CBranch gate (`jit_sym_cbranch_gate` → `sym_events` + `sym_stop_requested`)
 - [x] JIT shadow prop: COPY/LOAD/STORE + int ALU/compare
 - [x] Full symbolic AST on JIT ALU (`jit_shadow_binop` builds `SymExpr` Add/Sub/…/Eq)
-- [x] Unary/float AST: `jit_shadow_unop` (Not/Neg/BoolNot) + float Var leaves
+- [x] Unary/float AST: `jit_shadow_unop` + solver IEEE float theory (`FAdd`/`FNeg`/… with concrete fold)
+- [x] CallOther register dirty → one `jit_reg_bulk_flush` callout (not N× write_space)
 - [x] Exploration manager clears stop flag between forks (`sym/manager.rs`)
 
 ### Phase E — Maturity / smoke (in progress)
@@ -105,6 +106,7 @@ Callouts: `jit_read_space` / `jit_write_space` / `jit_call_other` / `jit_exit_tb
       opt-in host ld.so map (`FISSION_ENABLE_DYNLINK` + `FISSION_LD_SO`)
 - [x] Dynlink bootstrap: VFS seed/alias for main binary, openat/read, file-backed mmap,
       `apply_rela_x86_64` (RELATIVE/JUMP_SLOT/GLOB_DAT)
+- [x] DT_NEEDED shared-lib load loop + BIND_NOW (`DynlinkMode::SharedLibs`, `FISSION_LIB_PATH`)
 - [x] Automation `sandbox-check` lane (subprocess over CLI JSON + budget gate)
 
 ## Validation

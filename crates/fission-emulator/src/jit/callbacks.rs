@@ -268,6 +268,36 @@ pub extern "C" fn jit_host_reg_base(emu_ptr: *mut Emulator) -> u64 {
     emu.state.host_reg_file_ptr() as u64
 }
 
+/// Bulk-sync dirty register slots from SSA values into guest register space.
+///
+/// `entries` is a packed array of `(offset:u64, size:u64, value:u64)` triples
+/// (`count` triples). One callout replaces N `jit_write_space` calls at CallOther.
+#[unsafe(no_mangle)]
+pub extern "C" fn jit_reg_bulk_flush(
+    emu_ptr: *mut Emulator,
+    entries: *const u64,
+    count: u64,
+) {
+    if entries.is_null() || count == 0 {
+        return;
+    }
+    let emu = unsafe { &mut *emu_ptr };
+    let n = count as usize;
+    let slice = unsafe { std::slice::from_raw_parts(entries, n * 3) };
+    let reg = emu.state.register_space();
+    for i in 0..n {
+        let off = slice[i * 3];
+        let size = (slice[i * 3 + 1] as usize).min(8).max(1);
+        let mut val = slice[i * 3 + 2];
+        let mut bytes = Vec::with_capacity(size);
+        for _ in 0..size {
+            bytes.push((val & 0xff) as u8);
+            val >>= 8;
+        }
+        let _ = emu.state.write_space(reg, off, &bytes);
+    }
+}
+
 // ── Shadow / taint propagation (concolic) ────────────────────────────────────
 
 /// Copy shadow from `src` varnode to `dst` (COPY). Clears dst if src is concrete.
@@ -478,16 +508,14 @@ pub extern "C" fn jit_shadow_binop(
         x if x == SymBinOpKind::Ule as u32 => SymExpr::Ule(Box::new(a_expr), Box::new(b_expr)),
         x if x == SymBinOpKind::Slt as u32 => SymExpr::new_slt(a_expr, b_expr),
         x if x == SymBinOpKind::Sle as u32 => SymExpr::new_sle(a_expr, b_expr),
-        x if (20..=27).contains(&x) => {
-            // Float binary: no IEEE AST — fresh symbolic leaf keyed by both nodes.
-            let name = format!(
-                "fbin_{op_kind}_{}_{}",
-                a_node.unwrap_or(0),
-                b_node.unwrap_or(0)
-            );
-            let out_sz = (dst_sz as u32).max(1).min(8);
-            SymExpr::new_var(&name, out_sz)
-        }
+        x if x == SymBinOpKind::FloatAdd as u32 => SymExpr::new_fadd(a_expr, b_expr),
+        x if x == SymBinOpKind::FloatSub as u32 => SymExpr::new_fsub(a_expr, b_expr),
+        x if x == SymBinOpKind::FloatMul as u32 => SymExpr::new_fmul(a_expr, b_expr),
+        x if x == SymBinOpKind::FloatDiv as u32 => SymExpr::new_fdiv(a_expr, b_expr),
+        x if x == SymBinOpKind::FloatEq as u32 => SymExpr::new_feq(a_expr, b_expr),
+        x if x == SymBinOpKind::FloatNeq as u32 => SymExpr::new_fneq(a_expr, b_expr),
+        x if x == SymBinOpKind::FloatLt as u32 => SymExpr::new_flt(a_expr, b_expr),
+        x if x == SymBinOpKind::FloatLe as u32 => SymExpr::new_fle(a_expr, b_expr),
         _ => {
             // Unknown op: fall back to first taint id (legacy union).
             let id = a_node.or(b_node).unwrap();
@@ -548,11 +576,15 @@ pub extern "C" fn jit_shadow_unop(
         x if x == SymUnOpKind::BoolNot as u32 => {
             SymExpr::new_eq(a_expr, SymExpr::new_const(0, 1))
         }
-        // Float family: mint a distinct symbolic variable (solver has no IEEE ops).
-        x if (10..=27).contains(&x) => {
+        x if x == SymUnOpKind::FloatNeg as u32 => SymExpr::new_fneg(a_expr),
+        x if x == SymUnOpKind::FloatAbs as u32 => SymExpr::new_fabs(a_expr),
+        x if x == SymUnOpKind::FloatSqrt as u32 => SymExpr::new_fsqrt(a_expr),
+        x if x == SymUnOpKind::FloatNan as u32 => SymExpr::new_fisnan(a_expr),
+        // Ceil/Floor/Round/Trunc/casts: keep as float-sorted symbolic leaf for now.
+        x if (14..=19).contains(&x) => {
             let name = format!("fsym_{op_kind}_{}", a_node.unwrap_or(0));
             let out_sz = (dst_sz as u32).max(1).min(8);
-            SymExpr::new_var(&name, out_sz)
+            SymExpr::new_float_var(&name, out_sz)
         }
         _ => a_expr,
     };

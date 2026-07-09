@@ -9,6 +9,8 @@ pub(crate) static VAR_COUNTER: AtomicU32 = AtomicU32::new(1);
 pub enum Sort {
     /// A bitvector of a specific size in bytes
     BitVector(u32),
+    /// IEEE floating-point value stored as bit-pattern payload; `size` is 4 or 8.
+    Float(u32),
     /// An array mapping a domain sort to a range sort
     Array { domain: Box<Sort>, range: Box<Sort> },
 }
@@ -17,7 +19,15 @@ impl Sort {
     pub fn expect_bv(&self) -> u32 {
         match self {
             Sort::BitVector(sz) => *sz,
-            _ => panic!("Expected BitVector sort, got {:?}", self),
+            Sort::Float(sz) => *sz, // bit-pattern width
+            _ => panic!("Expected BitVector/Float sort, got {:?}", self),
+        }
+    }
+
+    pub fn byte_size(&self) -> u32 {
+        match self {
+            Sort::BitVector(sz) | Sort::Float(sz) => *sz,
+            Sort::Array { range, .. } => range.byte_size(),
         }
     }
 }
@@ -25,7 +35,7 @@ impl Sort {
 /// A node in the Symbolic Expression (AST) tree.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum SymExpr {
-    /// A concrete value (constant)
+    /// A concrete value (constant) — for floats, `val` holds the IEEE bit pattern.
     Const { val: u64, size: u32 },
     /// A symbolic variable (e.g. tainted input byte)
     Var { id: SymNodeId, name: String, sort: Sort },
@@ -54,6 +64,21 @@ pub enum SymExpr {
     Sle(Box<SymExpr>, Box<SymExpr>),
     /// Signed greater-than
     Sgt(Box<SymExpr>, Box<SymExpr>),
+
+    // IEEE float theory (payloads are bit-patterns / Float-sorted nodes)
+    FAdd(Box<SymExpr>, Box<SymExpr>),
+    FSub(Box<SymExpr>, Box<SymExpr>),
+    FMul(Box<SymExpr>, Box<SymExpr>),
+    FDiv(Box<SymExpr>, Box<SymExpr>),
+    FNeg(Box<SymExpr>),
+    FAbs(Box<SymExpr>),
+    FSqrt(Box<SymExpr>),
+    /// Ordered float comparisons → 1-bit boolean
+    FEq(Box<SymExpr>, Box<SymExpr>),
+    FNeq(Box<SymExpr>, Box<SymExpr>),
+    FLt(Box<SymExpr>, Box<SymExpr>),
+    FLe(Box<SymExpr>, Box<SymExpr>),
+    FIsNan(Box<SymExpr>),
     
     // Control Flow
     Ite { cond: Box<SymExpr>, t: Box<SymExpr>, f: Box<SymExpr> },
@@ -202,6 +227,153 @@ impl SymExpr {
         Self::new_slt(b, a)
     }
 
+    /// Construct a float-sorted variable (IEEE bits live in the concrete domain).
+    pub fn new_float_var(name: &str, size: u32) -> Self {
+        let id = VAR_COUNTER.fetch_add(1, Ordering::SeqCst);
+        let size = if size == 4 || size == 8 { size } else { 8 };
+        Self::Var {
+            id,
+            name: name.to_string(),
+            sort: Sort::Float(size),
+        }
+    }
+
+    fn float_size_of(e: &SymExpr) -> u32 {
+        match e.get_sort() {
+            Sort::Float(sz) | Sort::BitVector(sz) => {
+                if sz == 4 || sz == 8 {
+                    sz
+                } else {
+                    8
+                }
+            }
+            _ => 8,
+        }
+    }
+
+    fn as_f64_bits(e: &SymExpr) -> Option<(f64, u32)> {
+        match e {
+            Self::Const { val, size } => {
+                let sz = if *size == 4 { 4 } else { 8 };
+                let f = if sz == 4 {
+                    f32::from_bits(*val as u32) as f64
+                } else {
+                    f64::from_bits(*val)
+                };
+                Some((f, sz))
+            }
+            _ => None,
+        }
+    }
+
+    fn fconst(val: f64, size: u32) -> Self {
+        let bits = if size == 4 {
+            (val as f32).to_bits() as u64
+        } else {
+            val.to_bits()
+        };
+        Self::Const { val: bits, size }
+    }
+
+    pub fn new_fadd(a: SymExpr, b: SymExpr) -> Self {
+        match (Self::as_f64_bits(&a), Self::as_f64_bits(&b)) {
+            (Some((x, sz)), Some((y, _))) => Self::fconst(x + y, sz),
+            _ => Self::FAdd(Box::new(a), Box::new(b)),
+        }
+    }
+
+    pub fn new_fsub(a: SymExpr, b: SymExpr) -> Self {
+        match (Self::as_f64_bits(&a), Self::as_f64_bits(&b)) {
+            (Some((x, sz)), Some((y, _))) => Self::fconst(x - y, sz),
+            _ => Self::FSub(Box::new(a), Box::new(b)),
+        }
+    }
+
+    pub fn new_fmul(a: SymExpr, b: SymExpr) -> Self {
+        match (Self::as_f64_bits(&a), Self::as_f64_bits(&b)) {
+            (Some((x, sz)), Some((y, _))) => Self::fconst(x * y, sz),
+            _ => Self::FMul(Box::new(a), Box::new(b)),
+        }
+    }
+
+    pub fn new_fdiv(a: SymExpr, b: SymExpr) -> Self {
+        match (Self::as_f64_bits(&a), Self::as_f64_bits(&b)) {
+            (Some((x, sz)), Some((y, _))) => Self::fconst(x / y, sz),
+            _ => Self::FDiv(Box::new(a), Box::new(b)),
+        }
+    }
+
+    pub fn new_fneg(a: SymExpr) -> Self {
+        match Self::as_f64_bits(&a) {
+            Some((x, sz)) => Self::fconst(-x, sz),
+            None => Self::FNeg(Box::new(a)),
+        }
+    }
+
+    pub fn new_fabs(a: SymExpr) -> Self {
+        match Self::as_f64_bits(&a) {
+            Some((x, sz)) => Self::fconst(x.abs(), sz),
+            None => Self::FAbs(Box::new(a)),
+        }
+    }
+
+    pub fn new_fsqrt(a: SymExpr) -> Self {
+        match Self::as_f64_bits(&a) {
+            Some((x, sz)) => Self::fconst(x.sqrt(), sz),
+            None => Self::FSqrt(Box::new(a)),
+        }
+    }
+
+    pub fn new_feq(a: SymExpr, b: SymExpr) -> Self {
+        match (Self::as_f64_bits(&a), Self::as_f64_bits(&b)) {
+            (Some((x, _)), Some((y, _))) => Self::Const {
+                val: u64::from(x == y),
+                size: 1,
+            },
+            _ => Self::FEq(Box::new(a), Box::new(b)),
+        }
+    }
+
+    pub fn new_fneq(a: SymExpr, b: SymExpr) -> Self {
+        match (Self::as_f64_bits(&a), Self::as_f64_bits(&b)) {
+            (Some((x, _)), Some((y, _))) => Self::Const {
+                val: u64::from(x != y),
+                size: 1,
+            },
+            _ => Self::FNeq(Box::new(a), Box::new(b)),
+        }
+    }
+
+    pub fn new_flt(a: SymExpr, b: SymExpr) -> Self {
+        match (Self::as_f64_bits(&a), Self::as_f64_bits(&b)) {
+            (Some((x, _)), Some((y, _))) => Self::Const {
+                val: u64::from(x < y),
+                size: 1,
+            },
+            _ => Self::FLt(Box::new(a), Box::new(b)),
+        }
+    }
+
+    pub fn new_fle(a: SymExpr, b: SymExpr) -> Self {
+        match (Self::as_f64_bits(&a), Self::as_f64_bits(&b)) {
+            (Some((x, _)), Some((y, _))) => Self::Const {
+                val: u64::from(x <= y),
+                size: 1,
+            },
+            _ => Self::FLe(Box::new(a), Box::new(b)),
+        }
+    }
+
+    pub fn new_fisnan(a: SymExpr) -> Self {
+        match Self::as_f64_bits(&a) {
+            Some((x, _)) => Self::Const {
+                val: u64::from(x.is_nan()),
+                size: 1,
+            },
+            None => Self::FIsNan(Box::new(a)),
+        }
+    }
+
     pub fn get_sort(&self) -> Sort {
         match self {
             Self::Const { size, .. } => Sort::BitVector(*size),
@@ -210,6 +382,12 @@ impl SymExpr {
             Self::And(a, _) | Self::Or(a, _) | Self::Xor(a, _) | Self::Shl(a, _) | Self::Lshr(a, _) => a.get_sort(),
             Self::Eq(_, _) | Self::Neq(_, _) | Self::Ult(_, _) | Self::Ule(_, _)
             | Self::Slt(_, _) | Self::Sle(_, _) | Self::Sgt(_, _) => Sort::BitVector(1),
+            Self::FAdd(a, _) | Self::FSub(a, _) | Self::FMul(a, _) | Self::FDiv(a, _)
+            | Self::FNeg(a) | Self::FAbs(a) | Self::FSqrt(a) => {
+                Sort::Float(Self::float_size_of(a))
+            }
+            Self::FEq(_, _) | Self::FNeq(_, _) | Self::FLt(_, _) | Self::FLe(_, _)
+            | Self::FIsNan(_) => Sort::BitVector(1),
             Self::Ite { t, .. } => t.get_sort(),
             Self::Extract { size, .. } => Sort::BitVector(*size),
             Self::Concat(a, b) => Sort::BitVector(a.get_size() + b.get_size()),
@@ -225,6 +403,42 @@ impl SymExpr {
     }
 
     pub fn get_size(&self) -> u32 {
-        self.get_sort().expect_bv()
+        self.get_sort().byte_size()
+    }
+}
+
+#[cfg(test)]
+mod float_tests {
+    use super::*;
+
+    #[test]
+    fn fadd_folds_concrete() {
+        let a = SymExpr::Const {
+            val: 1.5f64.to_bits(),
+            size: 8,
+        };
+        let b = SymExpr::Const {
+            val: 2.25f64.to_bits(),
+            size: 8,
+        };
+        let r = SymExpr::new_fadd(a, b);
+        match r {
+            SymExpr::Const { val, size } => {
+                assert_eq!(size, 8);
+                assert!((f64::from_bits(val) - 3.75).abs() < 1e-9);
+            }
+            other => panic!("expected folded const, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn fadd_symbolic_builds_node() {
+        let a = SymExpr::new_float_var("x", 8);
+        let b = SymExpr::Const {
+            val: 1.0f64.to_bits(),
+            size: 8,
+        };
+        let r = SymExpr::new_fadd(a, b);
+        assert!(matches!(r, SymExpr::FAdd(_, _)));
     }
 }
