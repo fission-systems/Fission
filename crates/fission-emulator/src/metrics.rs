@@ -35,6 +35,9 @@ pub struct EmulatorMetrics {
     pub memory_faults: u64,
     /// Exit reason (human string).
     pub exit_reason: Option<String>,
+    /// Guest PC when the run loop last stopped (budget / halt / gate).
+    #[serde(default)]
+    pub stop_pc: u64,
     /// Persistent register-cache hits (MachineState::reg_cache).
     #[serde(default)]
     pub reg_cache_hits: u64,

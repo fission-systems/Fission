@@ -737,6 +737,39 @@ mod tests {
     }
 
     #[test]
+    fn test_eq_var_const_sat() {
+        let x = SymExpr::new_var("cx", 8);
+        let five = SymExpr::new_const(5, 8);
+        assert!(check_sat(SymExpr::new_eq(x, five)), "x==5 must be SAT");
+    }
+
+    #[test]
+    fn test_eq_and_neq_same_const_unsat() {
+        // Structural: And(eq, eq.not()) collapses to FALSE in AIG.
+        let x = SymExpr::new_var("cx2", 8);
+        let five = SymExpr::new_const(5, 8);
+        let eq = SymExpr::new_eq(x.clone(), five.clone());
+        let ne = SymExpr::new_neq(x, five);
+        let both = SymExpr::And(Box::new(eq), Box::new(ne));
+        assert!(!check_sat(both), "Eq ∧ Neq same const must be UNSAT");
+    }
+
+    /// Known gap: multi-equality on one var (x==5 ∧ x==6) needs stronger CDCL/BCP;
+    /// tracked for path-SAT prune hardening (do not remove without fixing sat.rs).
+    #[test]
+    #[ignore = "CDCL gap: And(Eq(x,5), Eq(x,6)) still SAT — fix propagate/watches"]
+    fn test_eq_var_two_consts_contradiction() {
+        let x = SymExpr::new_var("cx3", 8);
+        let five = SymExpr::new_const(5, 8);
+        let six = SymExpr::new_const(6, 8);
+        let both = SymExpr::And(
+            Box::new(SymExpr::new_eq(x.clone(), five)),
+            Box::new(SymExpr::new_eq(x, six)),
+        );
+        assert!(!check_sat(both));
+    }
+
+    #[test]
     fn test_slt_signed_wrap() {
         // -1 <_s 0: i8(-1) = 0xFF, i8(0) = 0x00 => -1 < 0 signed => SAT
         let neg_one = SymExpr::new_const(0xFF, 1); // 1-byte -1

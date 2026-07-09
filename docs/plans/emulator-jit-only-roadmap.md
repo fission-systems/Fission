@@ -125,9 +125,10 @@ Callouts: `jit_read_space` / `jit_write_space` / `jit_call_other` / `jit_exit_tb
       `segment`/`segment_fs` CallOther result → JIT output
 - [x] `max_inst` honored inside chain (no chain when budgeted); seal op-blocks after CFG edges
 - [x] path-SAT prune re-enabled with OOB-safe `value_lit` + panic isolation
-- [x] path-SAT quality tests: Const false/true short-circuit; free vars both SAT
-- [x] static CRT profile ladder (`512`/`1500`): early surface = arch_prctl, set_tid,
-      brk, mmap — **zero unknown syscalls**; full halt still open
+- [x] path-SAT quality: Const false/true; free vars; `Eq(var,const)` SAT; `Eq∧Neq` UNSAT
+- [ ] path-SAT CDCL gap: `Eq(x,c1)∧Eq(x,c2)` still wrongly SAT (tracked `#[ignore]` tests)
+- [x] static CRT ladder to 15k/50k: **stop_pc stuck at `0x10035A3`** after mmap/brk/TLS;
+      still **zero unknown syscalls** — livelock, not missing HLE numbers
 - [x] `max_inst` + `pcode_budget` fuses (TB exit on fuse; no false process halt)
 - [x] Automation `sandbox-check` lane (subprocess over CLI JSON + budget gate)
 

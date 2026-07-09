@@ -1013,6 +1013,7 @@ impl Emulator {
             );
         }
         self.metrics.instructions = self.inst_count;
+        self.metrics.stop_pc = self.pc;
         self.metrics.reg_cache_hits = self.state.reg_cache_hits;
         self.metrics.reg_cache_misses = self.state.reg_cache_misses;
         if self.metrics.exit_reason.is_none() {

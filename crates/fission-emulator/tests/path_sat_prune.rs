@@ -129,3 +129,98 @@ fn path_sat_free_vars_both_sat() {
     assert!(emu.solver.satisfiable_with_oracle(&[eq0], Some(&ms)));
     assert!(emu.solver.satisfiable_with_oracle(&[ne0], Some(&ms)));
 }
+
+/// Symbolic `Eq(var, const)` is SAT and can be used as a path constraint.
+#[test]
+fn path_sat_eq_var_const_sat() {
+    let mut emu = mini_emu();
+    let x = SymExpr::new_var("path_x", 8);
+    let five = SymExpr::new_const(5, 8);
+    let eq = SymExpr::new_eq(x, five);
+    // Must not fold to a const (x is symbolic).
+    assert!(matches!(eq, SymExpr::Eq(_, _)), "expected symbolic Eq, got {eq:?}");
+    assert!(
+        emu.solver.satisfiable(&[eq.clone()]),
+        "Eq(x, 5) must be SAT"
+    );
+}
+
+/// Bit-blast AND of boolean constraints via AIG (path-condition conjunction).
+fn aig_and_sat(constraints: &[SymExpr]) -> bool {
+    use fission_solver::aig::AigManager;
+    use fission_solver::cnf::CnfBuilder;
+    use fission_solver::sat::SatSolver;
+
+    if constraints.is_empty() {
+        return true;
+    }
+    let mut aig = AigManager::new();
+    let mut acc = aig.lower_expr(&constraints[0]);
+    assert_eq!(acc.len(), 1, "constraint must be boolean");
+    for c in constraints.iter().skip(1) {
+        let b = aig.lower_expr(c);
+        assert_eq!(b.len(), 1);
+        acc = vec![aig.add_and(acc[0], b[0])];
+    }
+    let mut cnf = CnfBuilder::new();
+    aig.to_cnf(&mut cnf);
+    cnf.assert_lit(acc[0]);
+    let mut sat = SatSolver::new();
+    for clause in &cnf.clauses {
+        if !sat.add_clause(clause.0.clone()) {
+            return false;
+        }
+    }
+    sat.solve()
+}
+
+/// `Eq(x, 5) ∧ Neq(x, 5)` is UNSAT (structural And(eq, !eq) → FALSE).
+#[test]
+fn path_sat_eq_and_neq_same_const_unsat() {
+    let x = SymExpr::new_var("path_z", 8);
+    let five = SymExpr::new_const(5, 8);
+    let eq = SymExpr::new_eq(x.clone(), five.clone());
+    let ne = SymExpr::new_neq(x, five);
+    assert!(
+        !aig_and_sat(&[eq, ne]),
+        "Eq(x,5) ∧ Neq(x,5) must be UNSAT under AIG bit-blast"
+    );
+}
+
+/// Two different path constraints on the same symbolic byte: sat vs unsat fork shape.
+///
+/// Note: `Eq(x,5) ∧ Eq(x,6)` is a known CDCL gap (`#[ignore]` in fission-solver aig tests).
+/// Prune today relies on Const false short-circuit and Eq∧Neq structural unsat.
+#[test]
+fn path_sat_prune_eq_var_const_forks() {
+    let x = SymExpr::new_var("fork_x", 8);
+    let five = SymExpr::new_const(5, 8);
+    let c_eq5 = SymExpr::new_eq(x.clone(), five.clone());
+    let c_ne5 = SymExpr::new_neq(x, five);
+    assert!(aig_and_sat(&[c_eq5.clone()]), "x==5 path must be SAT");
+    assert!(
+        !aig_and_sat(&[c_eq5, c_ne5]),
+        "x==5 ∧ x!=5 path must be UNSAT (structural)"
+    );
+}
+
+/// Solver high-level API: single Eq(var,const) SAT.
+#[test]
+fn path_sat_solver_eq_var_const_sat_api() {
+    let mut emu = mini_emu();
+    let x = SymExpr::new_var("api_x", 8);
+    let five = SymExpr::new_const(5, 8);
+    let eq = SymExpr::new_eq(x, five);
+    assert!(matches!(eq, SymExpr::Eq(_, _)));
+    assert!(emu.solver.satisfiable(&[eq]));
+}
+
+/// Known CDCL gap — keep visible as ignored until sat propagate is fixed.
+#[test]
+#[ignore = "CDCL gap: Eq(x,5)∧Eq(x,6) still SAT; see aig::test_eq_var_two_consts_contradiction"]
+fn path_sat_eq_var_two_consts_contradiction_ignored() {
+    let x = SymExpr::new_var("path_y", 8);
+    let c1 = SymExpr::new_eq(x.clone(), SymExpr::new_const(5, 8));
+    let c2 = SymExpr::new_eq(x, SymExpr::new_const(6, 8));
+    assert!(!aig_and_sat(&[c1, c2]));
+}
