@@ -1099,6 +1099,18 @@
       still <strong>zero unknown syscalls</strong> — livelock, not missing HLE numbers</li>
 <li>[x] <code>max_inst</code> + <code>pcode_budget</code> fuses (TB exit on fuse; no false process halt)</li>
 <li>[x] Automation <code>sandbox-check</code> lane (subprocess over CLI JSON + budget gate)</li>
+<li>[x] <strong>Semantic Replay Diff (SRD)</strong> — owner-native multi-run regression language:<ul>
+<li><code>fission-emulator::srd</code>: <code>SemanticReplaySnapshot</code> / <code>SemanticReplayDelta</code> / <code>OwnerLayer</code></li>
+<li>Capture: stop_pc, freeable/bin (optional mallocng probe), syscall timeline,
+    path-assertion summary, metrics (decode/faults/TB/HLE)</li>
+<li>Diff: field-level deltas with owner triage
+    (<code>sleigh_lift</code> / <code>jit_runtime</code> / <code>page_mem</code> / <code>hle_os</code> / <code>control_flow</code> /
+    <code>path_constraints</code>) — same “fix at owner” vocabulary as decompiler quality loop</li>
+<li>CLI: <code>sandbox --srd-out</code> / <code>--srd-label</code> / <code>--srd-mallocng</code>;
+    offline <code>sandbox --srd-diff LEFT RIGHT [--srd-diff-out PATH]</code> (no BINARY required)</li>
+<li>Fixture: <code>tests/srd_semantic_replay.rs</code> dual-budget non-identical + self-identical</li>
+</ul>
+</li>
 </ul>
 <h2 id="validation">Validation<a class="headerlink" href="#validation" title="Permanent link">&para;</a></h2>
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>cargo<span class="w"> </span>check<span class="w"> </span>-p<span class="w"> </span>fission-emulator
@@ -1109,8 +1121,15 @@
 </span><span id="__span-1-6"><a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>cargo<span class="w"> </span>check<span class="w"> </span>-p<span class="w"> </span>fission-cli
 </span><span id="__span-1-7"><a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>./target/release/fission_cli<span class="w"> </span>sandbox<span class="w"> </span>crates/fission-emulator/testdata/linux_x64_hello_sys.elf<span class="w"> </span><span class="se">\</span>
 </span><span id="__span-1-8"><a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="w">  </span>--max-inst<span class="w"> </span><span class="m">64</span><span class="w"> </span>--json<span class="w"> </span>--fail-on-budget<span class="w"> </span>--max-unimpl-events<span class="w"> </span><span class="m">0</span><span class="w"> </span>--max-unimpl-kinds<span class="w"> </span><span class="m">0</span>
+</span><span id="__span-1-9"><a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a>
+</span><span id="__span-1-10"><a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a><span class="c1"># SRD capture + offline owner-layered delta:</span>
+</span><span id="__span-1-11"><a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a>./target/release/fission_cli<span class="w"> </span>sandbox<span class="w"> </span>crates/fission-emulator/testdata/x64_static_printf_malloc.elf<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-1-12"><a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a><span class="w">  </span>--max-inst<span class="w"> </span><span class="m">512</span><span class="w"> </span>--srd-out<span class="w"> </span>/tmp/srd_a.json<span class="w"> </span>--srd-label<span class="w"> </span>budget_512<span class="w"> </span>--srd-mallocng
+</span><span id="__span-1-13"><a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a>./target/release/fission_cli<span class="w"> </span>sandbox<span class="w"> </span>crates/fission-emulator/testdata/x64_static_printf_malloc.elf<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-1-14"><a id="__codelineno-1-14" name="__codelineno-1-14" href="#__codelineno-1-14"></a><span class="w">  </span>--max-inst<span class="w"> </span><span class="m">2500</span><span class="w"> </span>--srd-out<span class="w"> </span>/tmp/srd_b.json<span class="w"> </span>--srd-label<span class="w"> </span>budget_2500<span class="w"> </span>--srd-mallocng
+</span><span id="__span-1-15"><a id="__codelineno-1-15" name="__codelineno-1-15" href="#__codelineno-1-15"></a>./target/release/fission_cli<span class="w"> </span>sandbox<span class="w"> </span>--srd-diff<span class="w"> </span>/tmp/srd_a.json<span class="w"> </span>/tmp/srd_b.json
 </span></code></pre></div>
-<p>Future: differential execution against a <strong>separate</strong> offline oracle harness is allowed for CI measurement only — never linked into <code>fission-emulator</code>.</p>
+<p>Future: differential execution against a <strong>separate</strong> offline oracle harness is allowed for CI measurement only — never linked into <code>fission-emulator</code>. SRD is the in-tree multi-run contract language for policy/commit comparisons (not a vendor oracle).</p>
 <h2 id="anti-patterns">Anti-patterns<a class="headerlink" href="#anti-patterns" title="Permanent link">&para;</a></h2>
 <ul>
 <li>Restoring a P-Code interpreter as execution engine</li>
