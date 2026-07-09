@@ -94,6 +94,9 @@ pub struct Emulator {
 
     /// Coverage / quality telemetry for the current run.
     pub metrics: crate::metrics::EmulatorMetrics,
+
+    /// Bump-pointer heap cursor for libc `malloc`/`calloc` HLE (0 = init from brk).
+    pub heap_cursor: u64,
 }
 
 /// Max guest instructions per translation block.
@@ -278,6 +281,7 @@ impl Emulator {
             win_last_error: 0,
             pc_override: None,
             metrics: crate::metrics::EmulatorMetrics::default(),
+            heap_cursor: 0,
         };
 
         // Default SP if no ELF image_info applied yet (Windows / bare-metal).
@@ -294,6 +298,36 @@ impl Emulator {
         Ok(emu)
     }
 
+    /// Bump-allocate `size` bytes from the guest heap (extends `brk` as needed).
+    ///
+    /// Aligns to 16 bytes. `free` is a no-op for this allocator (no reuse).
+    pub fn heap_alloc(&mut self, size: u64) -> Result<u64> {
+        let size = size.max(1u64).saturating_add(15) & !15u64;
+        if self.heap_cursor == 0 {
+            let base = self
+                .state
+                .page_map
+                .brk
+                .max(self.state.page_map.brk_base);
+            if base == 0 {
+                self.state.page_map.set_brk_base(0x0000_0000_5000_0000);
+            }
+            self.heap_cursor = self.state.page_map.brk.max(self.state.page_map.brk_base);
+        }
+        let ptr = self.heap_cursor;
+        let end = ptr.saturating_add(size);
+        if end > self.state.page_map.brk {
+            self.state.page_map.set_brk(end);
+        }
+        // Ensure bytes are resident under page-fault enforcement.
+        let zeros = vec![0u8; size as usize];
+        self.state
+            .write_space(self.state.ram_space(), ptr, &zeros)
+            .map_err(|e| anyhow::anyhow!("heap_alloc write 0x{ptr:X}: {e}"))?;
+        self.heap_cursor = end;
+        Ok(ptr)
+    }
+
     /// Attach ELF image metadata and apply stack pointer / PC / brk from it.
     pub fn apply_linux_image(
         &mut self,
@@ -303,6 +337,8 @@ impl Emulator {
         crate::os::linux::image_info::apply_stack_pointer(self, &info)?;
         self.state.page_map.brk = info.brk;
         self.state.page_map.brk_base = info.brk;
+        // Heap bump starts at program break.
+        self.heap_cursor = info.brk;
 
         // Seed VFS so openat/read/mmap (ld.so path) can see the main binary.
         let guest_name = info.execfn.clone();

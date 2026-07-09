@@ -253,6 +253,7 @@ impl OsEnvironment for WindowsEnv {
             }
             _ => {
                 tracing::warn!("Unimplemented Win32 API: {}. Returning 0.", func_name);
+                emu.metrics.note_hle_miss(func_name);
                 emu.win_last_error = 127; // ERROR_PROC_NOT_FOUND-ish
                 emu.write_return_val(0)?;
             }

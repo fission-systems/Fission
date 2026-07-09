@@ -81,6 +81,14 @@ impl Default for ProcessArgs {
 
 /// Map ELF image sections, compute brk, and build initial stack with argc/argv/envp/auxv.
 ///
+/// Load order (mini-dynlink correctness):
+/// 1. Map main `PT_LOAD`/sections into guest RAM  
+/// 2. `prepare_dynlink` (shared libs + RELA/BIND_NOW on the live image)  
+/// 3. Stack/auxv  
+///
+/// RELA must run **after** section bytes are installed; otherwise JUMP_SLOT/RELATIVE
+/// writes are wiped when sections are copied in.
+///
 /// Returns [`ImageInfo`] and leaves `state.page_map.brk` aligned to the heap base.
 pub fn load_elf_image(
     state: &mut MachineState,
@@ -90,20 +98,6 @@ pub fn load_elf_image(
     let inner = binary.inner();
     let is_64bit = inner.is_64bit;
     let image_base = inner.image_base;
-    // Dynlink decision before final entry selection (interpreter may override).
-    let dynlink = dynlink::prepare_dynlink(state, binary)?;
-    let entry = match dynlink.mode {
-        DynlinkMode::Interpreter if dynlink.interp_entry != 0 => dynlink.interp_entry,
-        _ => inner.entry_point,
-    };
-
-    tracing::info!(
-        "ELF image load: entry=0x{:X} base=0x{:X} 64bit={} dynlink={:?}",
-        entry,
-        image_base,
-        is_64bit,
-        dynlink.mode
-    );
 
     let mut start_code = u64::MAX;
     let mut end_code = 0u64;
@@ -111,6 +105,7 @@ pub fn load_elf_image(
     let mut end_data = 0u64;
     let mut max_end = 0u64;
 
+    // 1) Map main image first so later RELA writes stick.
     for sec in &inner.sections {
         if sec.virtual_address == 0 || sec.virtual_size == 0 {
             continue;
@@ -167,6 +162,21 @@ pub fn load_elf_image(
     // Program break: page after highest mapped image byte.
     let brk_base = page_align_up(max_end.max(image_base));
     state.page_map.set_brk_base(brk_base);
+
+    // 2) Dynlink after main image is resident (RELA/JUMP_SLOT on live GOT).
+    let dynlink = dynlink::prepare_dynlink(state, binary)?;
+    let entry = match dynlink.mode {
+        DynlinkMode::Interpreter if dynlink.interp_entry != 0 => dynlink.interp_entry,
+        _ => inner.entry_point,
+    };
+
+    tracing::info!(
+        "ELF image load: entry=0x{:X} base=0x{:X} 64bit={} dynlink={:?}",
+        entry,
+        image_base,
+        is_64bit,
+        dynlink.mode
+    );
 
     // Stack region near top of user canonical space.
     let stack_size = 8 * 1024 * 1024u64; // 8 MiB

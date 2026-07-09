@@ -210,7 +210,16 @@ pub struct SandboxArgs {
     #[arg(long)]
     pub max_unimpl_kinds: Option<usize>,
 
-    /// Exit non-zero when unimplemented budget is exceeded (implies budget defaults 0/0 if unset)
+    /// Max missing HLE procedures allowed (fake-success returns 0)
+    #[arg(long)]
+    pub max_hle_misses: Option<u64>,
+
+    /// Max unknown Linux syscalls allowed (fake RAX=0 path)
+    #[arg(long)]
+    pub max_unknown_syscalls: Option<u64>,
+
+    /// Exit non-zero when quality budget is exceeded (implies opcode defaults 0/0 if unset;
+    /// HLE/syscall defaults to unlimited unless --max-hle-misses / --max-unknown-syscalls set)
     #[arg(long)]
     pub fail_on_budget: bool,
 }
@@ -878,6 +887,7 @@ mod tests {
             }
             ParsedInvocation::Debug(_) => panic!("expected one-shot canonical parse"),
             ParsedInvocation::Ai(_) => panic!("expected one-shot canonical parse"),
+            ParsedInvocation::Sandbox(_) => panic!("expected one-shot canonical parse"),
         }
     }
 
@@ -890,6 +900,7 @@ mod tests {
             }
             ParsedInvocation::Debug(_) => panic!("legacy parser cannot emit debug"),
             ParsedInvocation::Ai(_) => panic!("legacy parser cannot emit AI"),
+            ParsedInvocation::Sandbox(_) => panic!("legacy parser cannot emit sandbox"),
         }
     }
 

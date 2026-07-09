@@ -38,6 +38,7 @@ impl LinuxEnv {
         
         // Register Libc Procedures
         simos.register_procedure("malloc", Box::new(libc::Malloc));
+        simos.register_procedure("calloc", Box::new(libc::Calloc));
         simos.register_procedure("free", Box::new(libc::Free));
         simos.register_procedure("puts", Box::new(libc::Puts));
         simos.register_procedure("printf", Box::new(libc::Printf));
@@ -157,6 +158,22 @@ impl OsEnvironment for LinuxEnv {
         }
 
         for (i, (&addr, name)) in plt_entries.into_iter().enumerate() {
+            // Preserve mini-dynlink BIND_NOW / SharedLibs resolutions: if the GOT
+            // already holds a non-magic guest VA, leave it alone.
+            if let Ok(cur) = state.read_space(state.ram_space(), addr, 8) {
+                if cur.len() == 8 {
+                    let val = u64::from_le_bytes(cur.try_into().unwrap_or([0; 8]));
+                    if dynlink::is_resolved_got_target(val) {
+                        tracing::debug!(
+                            "PLT/GOT keep resolved: {} @ 0x{:X} → 0x{:X}",
+                            name,
+                            addr,
+                            val
+                        );
+                        continue;
+                    }
+                }
+            }
             let trampoline = MAGIC_BASE + (i as u64 * 8);
             tracing::debug!("PLT/GOT patch: {} @ 0x{:X} → trampoline 0x{:X}", name, addr, trampoline);
             state.write_space(state.ram_space(), addr, &trampoline.to_le_bytes())?;
@@ -227,6 +244,7 @@ impl OsEnvironment for LinuxEnv {
                 return proc.run(emu);
             } else {
                 tracing::warn!("Unimplemented Linux x64 syscall: {}", sys_num);
+                emu.metrics.note_unknown_syscall(sys_num);
                 emu.write_register_u64("RAX", 0)?;
                 return Ok(HleResult::Continue);
             }
@@ -243,6 +261,7 @@ impl OsEnvironment for LinuxEnv {
             proc.run(emu)
         } else {
             tracing::warn!("Unimplemented libc function or procedure: {}. Returning 0.", func_name);
+            emu.metrics.note_hle_miss(func_name);
             emu.write_return_val(0)?;
             Ok(HleResult::Continue)
         }

@@ -110,6 +110,10 @@ Callouts: `jit_read_space` / `jit_write_space` / `jit_call_other` / `jit_exit_tb
       `apply_rela_x86_64` (RELATIVE/JUMP_SLOT/GLOB_DAT)
 - [x] DT_NEEDED shared-lib load loop + BIND_NOW (`DynlinkMode::SharedLibs`, `FISSION_LIB_PATH`)
 - [x] Lazy PLT bind (`FISSION_LAZY_BIND=1`): GOT markers → first-call bind → JumpTo / nested HLE
+- [x] ELF load order: map sections → `prepare_dynlink`/RELA → stack (RELA no longer wiped)
+- [x] GOT patch preserves mini-dynlink resolved targets (`is_resolved_got_target`)
+- [x] HLE quality metrics: `hle_misses` / `unknown_syscalls` + `check_hle_budget` / CLI `--max-hle-misses`
+- [x] Bump heap HLE: `malloc`/`calloc` via `brk`; `printf` `%s/%d/%x/%p/%%` (+ `l`)
 - [x] Automation `sandbox-check` lane (subprocess over CLI JSON + budget gate)
 
 ## Validation

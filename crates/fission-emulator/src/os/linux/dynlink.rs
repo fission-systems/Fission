@@ -93,6 +93,27 @@ pub fn make_lazy_mark(index: usize) -> u64 {
     PLT_LAZY_MARK | ((index as u64) << 3)
 }
 
+/// True when `val` looks like a mini-dynlink **shared-lib** binding we should keep.
+///
+/// Unresolved JUMP_SLOT entries in the ELF image usually still point into the
+/// main binary's PLT stub (non-zero, non-magic). Those must **not** be treated
+/// as resolved — HLE / lazy markers still need to overwrite them.
+///
+/// Successful SharedLibs resolves land at [`SHARED_LIB_BASE_START`] and above.
+pub fn is_resolved_got_target(val: u64) -> bool {
+    if val == 0 {
+        return false;
+    }
+    if lazy_mark_index(val).is_some() {
+        return false;
+    }
+    // Linux HLE trampolines live at/above 0xFFFFFFF0_0000_0000.
+    if val >= 0xFFFFFFF0_0000_0000 {
+        return false;
+    }
+    val >= SHARED_LIB_BASE_START
+}
+
 /// Runtime table for deferred PLT/GOT binding.
 #[derive(Clone, Debug, Default)]
 pub struct PltLazyTable {
@@ -1069,5 +1090,59 @@ mod tests {
         assert_eq!(t, 0x401000);
         let bytes = state.read_space(state.ram_space(), got, 8).unwrap();
         assert_eq!(u64::from_le_bytes(bytes.try_into().unwrap()), 0x401000);
+    }
+
+    #[test]
+    fn is_resolved_got_target_filters_magic_and_plt_stubs() {
+        // Main-image PLT stubs must NOT count as resolved.
+        assert!(!is_resolved_got_target(0x401000));
+        assert!(!is_resolved_got_target(0));
+        assert!(!is_resolved_got_target(0xFFFFFFF1_0000_0000));
+        assert!(!is_resolved_got_target(make_lazy_mark(2)));
+        // Shared-lib slot range used by mini-dynlink.
+        assert!(is_resolved_got_target(SHARED_LIB_BASE_START + 0x1234));
+    }
+
+    /// After full image load, RELA JUMP_SLOT writes must stick (map → rela order).
+    #[test]
+    fn load_elf_then_rela_jump_slot_persists() {
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("testdata/x64_dyn_puts.elf");
+        if !path.is_file() {
+            return;
+        }
+        let binary = LoadedBinary::from_file(&path).unwrap();
+        let mut state = MachineState::new();
+        let info = crate::os::linux::image_info::load_elf_image(
+            &mut state,
+            &binary,
+            &crate::os::linux::image_info::ProcessArgs::default(),
+        )
+        .unwrap();
+        let data = binary.inner().data.as_slice();
+        let sentinel = 0x0000_0000_0042_4242u64;
+        let stats = apply_rela_x86_64(&mut state, data, info.load_addr, |name| {
+            if name == "puts" || name == "__libc_start_main" {
+                Some(sentinel)
+            } else {
+                None
+            }
+        })
+        .expect("apply_rela");
+        assert!(
+            stats.jump_slot >= 1 || stats.glob_dat >= 1,
+            "expected JUMP_SLOT/GLOB_DAT: {stats:?}"
+        );
+        // At least one iat slot should now hold the sentinel.
+        let mut found = false;
+        for &addr in binary.inner().iat_symbols.keys() {
+            if let Ok(bytes) = state.read_space(state.ram_space(), addr, 8) {
+                let v = u64::from_le_bytes(bytes.try_into().unwrap());
+                if v == sentinel {
+                    found = true;
+                    break;
+                }
+            }
+        }
+        assert!(found, "RELA sentinel wiped or not applied to any GOT slot");
     }
 }

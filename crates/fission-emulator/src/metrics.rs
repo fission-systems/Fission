@@ -23,6 +23,12 @@ pub struct EmulatorMetrics {
     pub syscalls: BTreeMap<u64, u64>,
     /// Unimplemented P-Code opcodes observed at compile time (no-op lowered).
     pub unimplemented_opcodes: BTreeMap<String, u64>,
+    /// Missing libc / Win32 HLE procedures (name → count). Fake-success returns 0.
+    #[serde(default)]
+    pub hle_misses: BTreeMap<String, u64>,
+    /// Unimplemented Linux syscall numbers (fake RAX=0 path).
+    #[serde(default)]
+    pub unknown_syscalls: BTreeMap<u64, u64>,
     /// Decode / fetch failures.
     pub decode_errors: u64,
     /// PageFault / memory errors.
@@ -53,6 +59,14 @@ impl EmulatorMetrics {
         *self.syscalls.entry(num).or_insert(0) += 1;
     }
 
+    pub fn note_hle_miss(&mut self, name: &str) {
+        *self.hle_misses.entry(name.to_string()).or_insert(0) += 1;
+    }
+
+    pub fn note_unknown_syscall(&mut self, num: u64) {
+        *self.unknown_syscalls.entry(num).or_insert(0) += 1;
+    }
+
     /// Top-N unimplemented opcodes by count (descending).
     pub fn top_unimplemented(&self, n: usize) -> Vec<(String, u64)> {
         let mut v: Vec<_> = self
@@ -65,6 +79,14 @@ impl EmulatorMetrics {
         v
     }
 
+    pub fn hle_miss_total(&self) -> u64 {
+        self.hle_misses.values().sum()
+    }
+
+    pub fn unknown_syscall_total(&self) -> u64 {
+        self.unknown_syscalls.values().sum()
+    }
+
     /// One-line summary for logs.
     pub fn summary_line(&self) -> String {
         let top = self
@@ -74,7 +96,7 @@ impl EmulatorMetrics {
             .collect::<Vec<_>>()
             .join(", ");
         format!(
-            "inst={} tbs_compiled={} cache_hits={} hard_chain={} soft_chain={} decode_err={} mem_fault={} unimplemented=[{}] exit={:?}",
+            "inst={} tbs_compiled={} cache_hits={} hard_chain={} soft_chain={} decode_err={} mem_fault={} unimplemented=[{}] hle_miss={} unk_sys={} exit={:?}",
             self.instructions,
             self.tbs_compiled,
             self.tbs_cache_hits,
@@ -83,6 +105,8 @@ impl EmulatorMetrics {
             self.decode_errors,
             self.memory_faults,
             top,
+            self.hle_miss_total(),
+            self.unknown_syscall_total(),
             self.exit_reason
         )
     }
@@ -120,6 +144,42 @@ impl EmulatorMetrics {
             "unimplemented opcode budget exceeded: events={events} (max {max_events}), kinds={kinds} (max {max_kinds}); top=[{top}]"
         ))
     }
+
+    /// Budget gate for fake-success HLE / unknown syscalls.
+    pub fn check_hle_budget(
+        &self,
+        max_hle_misses: u64,
+        max_unknown_syscalls: u64,
+    ) -> Result<(), String> {
+        let hle = self.hle_miss_total();
+        let unk = self.unknown_syscall_total();
+        if hle <= max_hle_misses && unk <= max_unknown_syscalls {
+            return Ok(());
+        }
+        let top_hle: Vec<_> = self
+            .hle_misses
+            .iter()
+            .map(|(k, c)| format!("{k}={c}"))
+            .take(8)
+            .collect();
+        Err(format!(
+            "HLE quality budget exceeded: hle_misses={hle} (max {max_hle_misses}), unknown_syscalls={unk} (max {max_unknown_syscalls}); hle_top=[{}]",
+            top_hle.join(", ")
+        ))
+    }
+
+    /// Combined opcode + HLE budget (all must pass).
+    pub fn check_quality_budget(
+        &self,
+        max_unimpl_events: u64,
+        max_unimpl_kinds: usize,
+        max_hle_misses: u64,
+        max_unknown_syscalls: u64,
+    ) -> Result<(), String> {
+        self.check_unimplemented_budget(max_unimpl_events, max_unimpl_kinds)?;
+        self.check_hle_budget(max_hle_misses, max_unknown_syscalls)?;
+        Ok(())
+    }
 }
 
 /// Opcodes the JIT currently lowers (for coverage reports).
@@ -148,10 +208,24 @@ pub struct BudgetReport {
     pub max_kinds: usize,
     pub events: u64,
     pub kinds: usize,
+    #[serde(default)]
+    pub max_hle_misses: u64,
+    #[serde(default)]
+    pub hle_misses: u64,
+    #[serde(default)]
+    pub max_unknown_syscalls: u64,
+    #[serde(default)]
+    pub unknown_syscalls: u64,
     pub ok: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
 }
+
+/// Optional quality budgets for sandbox runs.
+///
+/// `(max_unimpl_events, max_unimpl_kinds, max_hle_misses, max_unknown_syscalls)`.
+/// Use `u64::MAX` / large kinds to disable a sub-gate.
+pub type QualityBudget = (u64, usize, u64, u64);
 
 /// Serializable sandbox run summary for CLI `--json` / automation.
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -174,15 +248,34 @@ impl SandboxMetricsReport {
         metrics: EmulatorMetrics,
         budget: Option<(u64, usize)>,
     ) -> Self {
-        let budget = budget.map(|(max_events, max_kinds)| {
+        // Backward-compatible: opcode-only budget disables HLE gates (MAX).
+        let quality = budget.map(|(e, k)| (e, k, u64::MAX, u64::MAX));
+        Self::from_run_quality(binary, format, halt_requested, pc, metrics, quality)
+    }
+
+    pub fn from_run_quality(
+        binary: impl Into<String>,
+        format: impl Into<String>,
+        halt_requested: bool,
+        pc: u64,
+        metrics: EmulatorMetrics,
+        budget: Option<QualityBudget>,
+    ) -> Self {
+        let budget = budget.map(|(max_events, max_kinds, max_hle, max_unk)| {
             let events = metrics.unimplemented_total();
             let kinds = metrics.unimplemented_kinds();
-            match metrics.check_unimplemented_budget(max_events, max_kinds) {
+            let hle_misses = metrics.hle_miss_total();
+            let unknown_syscalls = metrics.unknown_syscall_total();
+            match metrics.check_quality_budget(max_events, max_kinds, max_hle, max_unk) {
                 Ok(()) => BudgetReport {
                     max_events,
                     max_kinds,
                     events,
                     kinds,
+                    max_hle_misses: max_hle,
+                    hle_misses,
+                    max_unknown_syscalls: max_unk,
+                    unknown_syscalls,
                     ok: true,
                     error: None,
                 },
@@ -191,6 +284,10 @@ impl SandboxMetricsReport {
                     max_kinds,
                     events,
                     kinds,
+                    max_hle_misses: max_hle,
+                    hle_misses,
+                    max_unknown_syscalls: max_unk,
+                    unknown_syscalls,
                     ok: false,
                     error: Some(error),
                 },

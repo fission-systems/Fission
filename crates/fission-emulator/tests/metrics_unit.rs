@@ -34,6 +34,23 @@ fn unimplemented_budget_gate() {
 }
 
 #[test]
+fn hle_and_quality_budget_gate() {
+    let mut m = EmulatorMetrics::default();
+    assert!(m.check_hle_budget(0, 0).is_ok());
+    m.note_hle_miss("strlen");
+    m.note_hle_miss("strlen");
+    m.note_unknown_syscall(999);
+    assert_eq!(m.hle_miss_total(), 2);
+    assert_eq!(m.unknown_syscall_total(), 1);
+    assert!(m.check_hle_budget(1, 1).is_err());
+    assert!(m.check_hle_budget(2, 1).is_ok());
+    assert!(m.check_quality_budget(0, 0, 2, 1).is_ok());
+    m.note_unimplemented(PcodeOpcode::CPoolRef);
+    assert!(m.check_quality_budget(0, 0, 2, 1).is_err());
+    assert!(m.summary_line().contains("hle_miss=2"));
+}
+
+#[test]
 fn sandbox_metrics_report_json_budget() {
     use fission_emulator::SandboxMetricsReport;
     let mut m = EmulatorMetrics::default();

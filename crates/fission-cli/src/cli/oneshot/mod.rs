@@ -284,26 +284,36 @@ fn run_sandbox(args: crate::cli::args::SandboxArgs) -> Result<()> {
         }
     }
 
-    // Metrics JSON + optional unimplemented-opcode budget gate.
-    let budget = if args.fail_on_budget
+    // Metrics JSON + optional quality budget (opcodes + HLE misses + unknown syscalls).
+    let want_budget = args.fail_on_budget
         || args.max_unimpl_events.is_some()
         || args.max_unimpl_kinds.is_some()
-    {
-        Some((
-            args.max_unimpl_events.unwrap_or(0),
-            args.max_unimpl_kinds.unwrap_or(0),
-        ))
+        || args.max_hle_misses.is_some()
+        || args.max_unknown_syscalls.is_some();
+    let report = if want_budget {
+        let max_events = args.max_unimpl_events.unwrap_or(0);
+        let max_kinds = args.max_unimpl_kinds.unwrap_or(0);
+        // HLE gates: unlimited unless explicitly set (or fail_on_budget with explicit flags).
+        let max_hle = args.max_hle_misses.unwrap_or(u64::MAX);
+        let max_unk = args.max_unknown_syscalls.unwrap_or(u64::MAX);
+        fission_emulator::SandboxMetricsReport::from_run_quality(
+            args.binary.display().to_string(),
+            emu.binary.format.clone(),
+            emu.halt_requested,
+            emu.pc,
+            emu.metrics.clone(),
+            Some((max_events, max_kinds, max_hle, max_unk)),
+        )
     } else {
-        None
+        fission_emulator::SandboxMetricsReport::from_run(
+            args.binary.display().to_string(),
+            emu.binary.format.clone(),
+            emu.halt_requested,
+            emu.pc,
+            emu.metrics.clone(),
+            None,
+        )
     };
-    let report = fission_emulator::SandboxMetricsReport::from_run(
-        args.binary.display().to_string(),
-        emu.binary.format.clone(),
-        emu.halt_requested,
-        emu.pc,
-        emu.metrics.clone(),
-        budget,
-    );
     if let Some(path) = args.metrics_out {
         let json = report
             .to_json_pretty()
@@ -325,7 +335,7 @@ fn run_sandbox(args: crate::cli::args::SandboxArgs) -> Result<()> {
             .budget
             .as_ref()
             .and_then(|b| b.error.clone())
-            .unwrap_or_else(|| "unimplemented opcode budget exceeded".into());
+            .unwrap_or_else(|| "quality budget exceeded".into());
         anyhow::bail!("{err}");
     }
 
