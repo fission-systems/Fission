@@ -135,9 +135,11 @@ impl JitCompiler {
         for insn in insns {
             let base = flat.len();
             insn_starts.push((base, insn.pc, insn.len));
-            for op in &insn.ops {
+            for (local_i, op) in insn.ops.iter().enumerate() {
                 let mut op = op.clone();
-                remap_relative_branches(&mut op, base);
+                // SLEIGH relative BRANCH/CBRANCH offsets are from the *current*
+                // p-code op, not the instruction start. Convert to absolute flat index.
+                remap_relative_branches(&mut op, base, local_i);
                 flat.push(op);
             }
         }
@@ -1385,9 +1387,9 @@ impl JitCompiler {
                 PcodeOpcode::Branch => {
                     let dest = &op.inputs[0];
                     if dest.space_id == 0 || dest.is_constant {
-                        let rel = dest.constant_val as usize;
-                        if rel < n_ops {
-                            builder.ins().jump(op_blocks[rel], &[]);
+                        let abs = dest.constant_val;
+                        if abs >= 0 && (abs as usize) < n_ops {
+                            builder.ins().jump(op_blocks[abs as usize], &[]);
                         } else {
                             builder
                                 .ins()
@@ -1464,9 +1466,9 @@ impl JitCompiler {
                     let is_true = builder.ins().icmp_imm(IntCC::NotEqual, cond, 0);
 
                     if dest.space_id == 0 || dest.is_constant {
-                        let rel = dest.constant_val as usize;
-                        let taken = if rel < n_ops {
-                            op_blocks[rel]
+                        let abs = dest.constant_val;
+                        let taken = if abs >= 0 && (abs as usize) < n_ops {
+                            op_blocks[abs as usize]
                         } else {
                             exit_block
                         };
@@ -1797,15 +1799,22 @@ fn space_const(vn: &Varnode) -> u64 {
     }
 }
 
-fn remap_relative_branches(op: &mut PcodeOp, base: usize) {
+/// Convert SLEIGH relative BRANCH/CBRANCH destinations to absolute flat indices.
+///
+/// In lifted p-code, a constant branch target is an offset **relative to the
+/// current op** within the instruction (e.g. TZCNT loop: `CBranch +5` from the
+/// LSB test, `Branch -6` back to the loop head). Adding only `base` (instruction
+/// start in the flat stream) treats the constant as absolute-within-insn and
+/// breaks backward loops: `-6 as usize` becomes a huge out-of-range index and
+/// the JIT falls through, so `tzcnt` never iterates and size-class recovery
+/// livelocks (static CRT stop_pc `0x10035A3`).
+fn remap_relative_branches(op: &mut PcodeOp, base: usize, local_index: usize) {
     match op.opcode {
         PcodeOpcode::Branch | PcodeOpcode::CBranch => {
             if let Some(dest) = op.inputs.first_mut() {
                 if dest.space_id == 0 || dest.is_constant {
-                    // Relative p-code branch targets are offsets into the flat
-                    // op stream; use wrapping arithmetic (large signed bases).
-                    dest.constant_val =
-                        (dest.constant_val as i128 + base as i128) as i64;
+                    let abs = base as i128 + local_index as i128 + dest.constant_val as i128;
+                    dest.constant_val = abs as i64;
                     dest.offset = dest.constant_val as u64;
                 }
             }
