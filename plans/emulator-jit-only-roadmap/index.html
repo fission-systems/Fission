@@ -1037,13 +1037,14 @@
 <li>[x] Soft direct block chaining (<code>jit_chain</code>)</li>
 <li>[x] Hard chaining via <strong>global</strong> guest-PC → host-fn table (<code>jit_exit_tb</code>) — fallthrough <strong>and absolute</strong> branch/call</li>
 <li>[x] CallOther flush <strong>+ reload</strong> (HLE cannot be clobbered by stale SSA at TB exit)</li>
-<li>[ ] Persistent host-side register file cache across TBs (fewer callouts)</li>
+<li>[x] Persistent register cache (<code>MachineState::reg_cache</code> for 8B-aligned register space)</li>
+<li>[ ] Host-pointer reg file (zero callout) still open</li>
 <li>[x] Optional pure-Rust softfloat path (<code>feature = "softfloat"</code>, NaN quieting policy)</li>
 </ul>
 <h3 id="phase-d-analysis-features">Phase D — Analysis features<a class="headerlink" href="#phase-d-analysis-features" title="Permanent link">&para;</a></h3>
 <ul>
 <li>[x] TTD: enable <code>tracing_memory</code> on <code>with_ttd</code>, clear deltas after record, disable chain while recording</li>
-<li>[ ] TTD: full keyframe recompute between snapshots (seek still nearest-snapshot + delta apply)</li>
+<li>[x] TTD: recompute remaining steps after nearest-snapshot restore (<code>ttd_seek</code>)</li>
 <li>[x] Symbolic CBranch gate (<code>jit_sym_cbranch_gate</code> → <code>sym_events</code> + <code>sym_stop_requested</code>)</li>
 <li>[ ] Full shadow propagation on JIT ALU/LOAD (Evaluator-only today; concolic branch gate first)</li>
 <li>[x] Exploration manager clears stop flag between forks (<code>sym/manager.rs</code>)</li>
@@ -1061,8 +1062,8 @@
 <li>[x] Unimplemented-opcode budget gate (<code>EmulatorMetrics::check_unimplemented_budget</code>)</li>
 <li>[x] IAT table + GetProcAddress dynamic trampolines + CRT bootstrap stubs</li>
 <li>[x] CLI sandbox: <code>--json</code> / <code>--metrics-out</code> / <code>--max-unimpl-*</code> / <code>--fail-on-budget</code></li>
-<li>[ ] Dynamic-linked ELF GOT/<code>iat_symbols</code> fill in <code>fission-loader</code></li>
-<li>[ ] Automation <code>sandbox-check</code> lane (subprocess over CLI JSON)</li>
+<li>[x] Dynamic-linked ELF GOT/<code>iat_symbols</code> from JUMP_SLOT/GLOB_DAT (<code>fission-loader</code>)</li>
+<li>[x] Automation <code>sandbox-check</code> lane (subprocess over CLI JSON + budget gate)</li>
 </ul>
 <h2 id="validation">Validation<a class="headerlink" href="#validation" title="Permanent link">&para;</a></h2>
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>cargo<span class="w"> </span>check<span class="w"> </span>-p<span class="w"> </span>fission-emulator
