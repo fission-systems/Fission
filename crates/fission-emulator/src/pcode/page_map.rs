@@ -130,12 +130,19 @@ impl PageMap {
     }
 
     /// Map `[start, start+len)` with the given protection. Overlapping pages are replaced.
+    ///
+    /// Page span is computed from the **original** half-open range, not from
+    /// `align_down(start) + len`. Using the latter drops the trailing page when
+    /// `start` is unaligned (e.g. ELF `.bss` at `0x…7D00` with size spanning
+    /// into the next page) — silent `jit_write_space` failures then corrupt
+    /// musl mallocng globals (`brk_cur`, size-class counters, locks).
     pub fn map_region(&mut self, start: u64, len: u64, mut page_prot: u8, anon: bool) {
         if len == 0 {
             return;
         }
+        let end_addr = start.saturating_add(len);
         let start = page_align_down(start);
-        let end = page_align_up(start.saturating_add(len));
+        let end = page_align_up(end_addr);
         page_prot |= prot::VALID;
         if anon {
             page_prot |= prot::ANON;
@@ -168,8 +175,9 @@ impl PageMap {
         if len == 0 {
             return;
         }
+        let end_addr = start.saturating_add(len);
         let start = page_align_down(start);
-        let end = page_align_up(start.saturating_add(len));
+        let end = page_align_up(end_addr);
         let mut page = start;
         while page < end {
             self.flags.remove(&page);
@@ -203,17 +211,36 @@ impl PageMap {
         self.mappings.sort_by_key(|m| m.start);
     }
 
-    pub fn mprotect(&mut self, start: u64, len: u64, mut new_prot: u8) {
+    pub fn mprotect(&mut self, start: u64, len: u64, new_prot: u8) {
+        let _ = self.mprotect_checked(start, len, new_prot);
+    }
+
+    /// Update protections on `[start, start+len)`. Returns `false` if any page
+    /// in the range is unmapped (Linux `mprotect` → `-ENOMEM`).
+    pub fn mprotect_checked(&mut self, start: u64, len: u64, mut new_prot: u8) -> bool {
         if len == 0 {
-            return;
+            return true;
         }
+        let end_addr = start.saturating_add(len);
         let start = page_align_down(start);
-        let end = page_align_up(start.saturating_add(len));
+        let end = page_align_up(end_addr);
         new_prot |= prot::VALID;
         if new_prot & prot::WRITE != 0 {
             new_prot |= prot::WRITE_ORG;
         }
+        // Fail if any page is unmapped — do not partially apply.
         let mut page = start;
+        while page < end {
+            if !self
+                .flags
+                .get(&page)
+                .is_some_and(|f| *f & prot::VALID != 0)
+            {
+                return false;
+            }
+            page += PAGE_SIZE;
+        }
+        page = start;
         while page < end {
             if let Some(f) = self.flags.get_mut(&page) {
                 let anon = *f & prot::ANON;
@@ -231,6 +258,7 @@ impl PageMap {
                 m.prot = new_prot | if m.anon { prot::ANON } else { 0 };
             }
         }
+        true
     }
 
     pub fn page_flags(&self, addr: u64) -> Option<u8> {
@@ -298,6 +326,10 @@ impl PageMap {
     }
 
     /// Adjust the program break. Returns the new break.
+    ///
+    /// Linux `brk` returns the **exact** requested address on success (musl
+    /// compares `rax` to the request). Pages are mapped with page-aligned
+    /// extents covering the expanded range.
     pub fn set_brk(&mut self, request: u64) -> u64 {
         if self.brk_base == 0 {
             // Lazy default heap if never initialized from the loader.
@@ -306,18 +338,26 @@ impl PageMap {
         if request == 0 {
             return self.brk;
         }
-        let new_brk = page_align_up(request);
-        if new_brk < self.brk_base {
+        // Failure: cannot move below heap base — return current break.
+        if request < self.brk_base {
             return self.brk;
         }
-        if new_brk > self.brk {
-            let len = new_brk - self.brk;
-            self.map_region(self.brk, len, prot::RW | prot::ANON, true);
-        } else if new_brk < self.brk {
-            self.unmap_region(new_brk, self.brk - new_brk);
+        let old_brk = self.brk;
+        if request > old_brk {
+            let start = page_align_down(old_brk.max(self.brk_base));
+            let end = page_align_up(request);
+            if end > start {
+                self.map_region(start, end - start, prot::RW | prot::ANON, true);
+            }
+        } else if request < old_brk {
+            let unmap_from = page_align_up(request);
+            let unmap_to = page_align_up(old_brk);
+            if unmap_to > unmap_from {
+                self.unmap_region(unmap_from, unmap_to - unmap_from);
+            }
         }
-        self.brk = new_brk;
-        self.brk
+        self.brk = request;
+        request
     }
 
     /// Returns true if any page in `[addr, addr+size)` is executable.
@@ -412,9 +452,14 @@ mod tests {
         let mut pm = PageMap::new();
         pm.set_brk_base(0x5000_0000);
         assert_eq!(pm.set_brk(0), 0x5000_0000);
+        // Exact return (not force page-aligned) — musl checks rax == request.
         let new = pm.set_brk(0x5000_1000);
         assert_eq!(new, 0x5000_1000);
         assert!(pm.is_mapped(0x5000_0000));
+        // Non-page-aligned request still returns exact address.
+        let mid = pm.set_brk(0x5000_1800);
+        assert_eq!(mid, 0x5000_1800);
+        assert!(pm.is_mapped(0x5000_1000));
 
         let base = pm.mmap_anon(0x3000, prot::RW);
         assert!(base >= 0x6000_0000 || base >= 0x4000_0000);
@@ -438,5 +483,34 @@ mod tests {
             pm.check_access(0xdead_beef, AccessKind::Read),
             Err(PageFault::NotMapped { .. })
         ));
+    }
+
+    /// ELF `.bss` is often unaligned (e.g. `0x1007D00`, size `0x9E0` → ends
+    /// `0x10086E0`). Both the first and second pages must be mapped.
+    #[test]
+    fn map_region_unaligned_start_covers_tail_page() {
+        let mut pm = PageMap::new();
+        // Mirrors static musl .bss layout that held mallocng brk_cur / bins.
+        pm.map_region(0x1007D00, 0x9E0, prot::RW, false);
+        assert!(pm.is_mapped(0x1007D00), "bss base");
+        assert!(pm.is_mapped(0x1007F20), "init flag page");
+        assert!(
+            pm.is_mapped(0x10082B0),
+            "tail page (brk_cur) must be mapped — align_down(start)+len drops it"
+        );
+        assert!(pm.is_mapped(0x10086DF), "last bss byte");
+        assert!(!pm.is_mapped(0x1009000), "must not over-map past page_align_up(end)");
+    }
+
+    #[test]
+    fn mprotect_unmapped_returns_false() {
+        let mut pm = PageMap::new();
+        pm.map_region(0x1000, 0x1000, prot::RW, true);
+        assert!(pm.mprotect_checked(0x1000, 0x1000, prot::READ));
+        assert!(!pm.mprotect_checked(0x2000, 0x1000, prot::RW), "unmapped");
+        assert!(
+            !pm.mprotect_checked(0x1000, 0x2000, prot::RW),
+            "partial unmapped must fail"
+        );
     }
 }

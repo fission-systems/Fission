@@ -188,9 +188,6 @@ fn path_sat_eq_and_neq_same_const_unsat() {
 }
 
 /// Two different path constraints on the same symbolic byte: sat vs unsat fork shape.
-///
-/// Note: `Eq(x,5) ∧ Eq(x,6)` is a known CDCL gap (`#[ignore]` in fission-solver aig tests).
-/// Prune today relies on Const false short-circuit and Eq∧Neq structural unsat.
 #[test]
 fn path_sat_prune_eq_var_const_forks() {
     let x = SymExpr::new_var("fork_x", 8);
@@ -215,12 +212,14 @@ fn path_sat_solver_eq_var_const_sat_api() {
     assert!(emu.solver.satisfiable(&[eq]));
 }
 
-/// Known CDCL gap — keep visible as ignored until sat propagate is fixed.
+/// Multi-equality contradiction via CDCL BCP (watch polarity fixed in sat.rs).
 #[test]
-#[ignore = "CDCL gap: Eq(x,5)∧Eq(x,6) still SAT; see aig::test_eq_var_two_consts_contradiction"]
-fn path_sat_eq_var_two_consts_contradiction_ignored() {
+fn path_sat_eq_var_two_consts_contradiction() {
     let x = SymExpr::new_var("path_y", 8);
     let c1 = SymExpr::new_eq(x.clone(), SymExpr::new_const(5, 8));
     let c2 = SymExpr::new_eq(x, SymExpr::new_const(6, 8));
-    assert!(!aig_and_sat(&[c1, c2]));
+    assert!(
+        !aig_and_sat(&[c1, c2]),
+        "Eq(x,5) ∧ Eq(x,6) must be UNSAT"
+    );
 }

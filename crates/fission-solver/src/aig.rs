@@ -754,11 +754,9 @@ mod tests {
         assert!(!check_sat(both), "Eq ∧ Neq same const must be UNSAT");
     }
 
-    /// Known gap: multi-equality on one var (x==5 ∧ x==6) needs stronger CDCL/BCP;
-    /// tracked for path-SAT prune hardening (do not remove without fixing sat.rs).
     #[test]
-    #[ignore = "CDCL gap: And(Eq(x,5), Eq(x,6)) still SAT — fix propagate/watches"]
     fn test_eq_var_two_consts_contradiction() {
+        // Watch-list BCP (MiniSat polarity) must force bit conflicts across eqs.
         let x = SymExpr::new_var("cx3", 8);
         let five = SymExpr::new_const(5, 8);
         let six = SymExpr::new_const(6, 8);
@@ -766,7 +764,7 @@ mod tests {
             Box::new(SymExpr::new_eq(x.clone(), five)),
             Box::new(SymExpr::new_eq(x, six)),
         );
-        assert!(!check_sat(both));
+        assert!(!check_sat(both), "x==5 ∧ x==6 must be UNSAT");
     }
 
     #[test]
@@ -795,4 +793,5 @@ mod tests {
         let shifted = SymExpr::Lshr(Box::new(x), Box::new(shift));
         assert!(check_sat(SymExpr::new_eq(shifted, five)));
     }
+
 }

@@ -302,7 +302,14 @@ impl SatSolver {
         if lits.is_empty() {
             return false;
         } else if lits.len() == 1 {
-            return self.enqueue(lits[0], None);
+            // Unit clause at decision level 0: enqueue + BCP so Tseitin chains fire.
+            if !self.enqueue(lits[0], None) {
+                return false;
+            }
+            if self.decision_level() == 0 && self.propagate().is_some() {
+                return false;
+            }
+            return true;
         }
 
         let c_idx = self.clauses.len();
@@ -319,36 +326,39 @@ impl SatSolver {
 
     /// Unit propagation (Boolean Constraint Propagation).
     /// Returns Some(clause_idx) if a conflict is found, otherwise None.
+    ///
+    /// Watch lists follow MiniSat: clauses are attached under `watches[~lit]` for
+    /// each watched `lit`, and when `p` is assigned true we scan `watches[p]`
+    /// (clauses that had `~p` as a watched literal — now false).
     fn propagate(&mut self) -> Option<usize> {
         while self.qhead < self.trail.len() {
             let p = self.trail[self.qhead];
             self.qhead += 1;
-            
-            // `p` became true, so `!p` became false. Clauses watching `!p` need to find a new watcher.
+
+            // `p` became true ⇒ `!p` became false. Registration uses watches[~watched],
+            // so the list to process is watches[p] (not watches[~p]).
             let false_lit = p.not();
             let mut i = 0;
-            
-            // We use standard index trickery to remove elements while iterating
-            // Since borrow checker prevents mutable access to self.watches and self.clauses simultaneously,
-            // we will drain the list and re-add.
-            let mut ws = std::mem::take(&mut self.watches[false_lit.index()]);
+
+            // Drain watchers: need simultaneous access to clauses + other watch lists.
+            let mut ws = std::mem::take(&mut self.watches[p.index()]);
             let mut j = 0;
             let mut conflict = None;
-            
+
             while i < ws.len() {
                 let w = ws[i].clone();
                 i += 1;
-                
+
                 if self.value_lit(w.blocker) == LBool::True {
                     ws[j] = w;
                     j += 1;
                     continue;
                 }
-                
+
                 let c_idx = w.clause_idx;
                 let mut c0 = self.clauses[c_idx].0[0];
                 let mut c1 = self.clauses[c_idx].0[1];
-                
+
                 // Ensure false_lit is at index 1
                 if c0 == false_lit {
                     c0 = c1;
@@ -410,8 +420,8 @@ impl SatSolver {
             }
             
             ws.truncate(j);
-            self.watches[false_lit.index()] = ws;
-            
+            self.watches[p.index()] = ws;
+
             if conflict.is_some() {
                 return conflict;
             }

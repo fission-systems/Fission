@@ -338,18 +338,32 @@ impl SimProcedure for SysMprotect {
         let addr = emu.read_register_u64("RDI").unwrap_or(0);
         let len = emu.read_register_u64("RSI").unwrap_or(0);
         let prot_bits = emu.read_register_u64("RDX").unwrap_or(0) as u8;
-        emu.state
+        // Linux: mprotect on a fully/partially unmapped range returns -ENOMEM.
+        // Returning success for unmapped pages made musl mallocng treat a huge
+        // corrupted page-count as infinite free pages (silent write failures).
+        let ok = emu
+            .state
             .page_map
-            .mprotect(addr, len, prot_bits & 0x07 | prot::VALID);
-        // SMC: any drop of EXEC or change may need invalidation — invalidate range pages.
-        let mut page = page_align_down(addr);
-        let end = page_align_up(addr.saturating_add(len.max(1)));
-        while page < end {
-            emu.jit_cache.invalidate_page(page);
-            page = page.saturating_add(0x1000);
+            .mprotect_checked(addr, len.max(1), prot_bits & 0x07 | prot::VALID);
+        if ok {
+            let mut page = page_align_down(addr);
+            let end = page_align_up(addr.saturating_add(len.max(1)));
+            while page < end {
+                emu.jit_cache.invalidate_page(page);
+                page = page.saturating_add(0x1000);
+            }
+            tracing::info!("sys_mprotect(0x{:X}, {}, 0x{:X}) -> 0", addr, len, prot_bits);
+            emu.write_register_u64("RAX", 0)?;
+        } else {
+            // -ENOMEM
+            tracing::info!(
+                "sys_mprotect(0x{:X}, {}, 0x{:X}) -> -ENOMEM",
+                addr,
+                len,
+                prot_bits
+            );
+            emu.write_register_u64("RAX", (-12i64) as u64)?;
         }
-        tracing::info!("sys_mprotect(0x{:X}, {}, 0x{:X})", addr, len, prot_bits);
-        emu.write_register_u64("RAX", 0)?;
         Ok(HleResult::Continue)
     }
 }
@@ -712,8 +726,22 @@ impl SimProcedure for SysIoctl {
 pub struct SysFutex;
 impl SimProcedure for SysFutex {
     fn run(&self, emu: &mut Emulator) -> Result<HleResult> {
-        // WAKE/WAIT stubs: return 0 so single-threaded guests proceed.
-        tracing::debug!("sys_futex (stub -> 0)");
+        // Single-threaded: WAIT always succeeds immediately; WAKE reports 0 waiters.
+        // op: 0=WAIT, 1=WAKE (low nibble); higher bits are flags.
+        let uaddr = emu.read_register_u64("RDI").unwrap_or(0);
+        let op = emu.read_register_u64("RSI").unwrap_or(0) & 0x7f;
+        let val = emu.read_register_u64("RDX").unwrap_or(0);
+        if op == 0 && uaddr != 0 {
+            // FUTEX_WAIT: if *uaddr != val, return -EAGAIN (would not sleep).
+            if let Ok(bytes) = emu.state.read_space(emu.state.ram_space(), uaddr, 4) {
+                let cur = u32::from_le_bytes(bytes.try_into().unwrap_or([0; 4]));
+                if cur as u64 != (val & 0xffff_ffff) {
+                    emu.write_register_u64("RAX", (-11i64) as u64)?; // EAGAIN
+                    return Ok(HleResult::Continue);
+                }
+            }
+        }
+        tracing::debug!("sys_futex op={} uaddr=0x{:X} -> 0", op, uaddr);
         emu.write_register_u64("RAX", 0)?;
         Ok(HleResult::Continue)
     }
