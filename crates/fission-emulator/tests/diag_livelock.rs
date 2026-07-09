@@ -89,3 +89,30 @@ fn dump_state_at_malloc_hot() {
         emu.metrics.unknown_syscalls
     );
 }
+
+/// After InstNext fix: alloc_meta must set init flag and keep mask sane.
+#[test]
+fn alloc_meta_init_and_mask_sane_after_first_meta() {
+    let mut emu = make_emu(950);
+    emu.run().unwrap();
+    let ram = emu.state.ram_space();
+    let init = {
+        let b = emu.state.read_space(ram, 0x1007F20, 4).unwrap();
+        u32::from_le_bytes(b.try_into().unwrap())
+    };
+    let mask = {
+        let b = emu.state.read_space(ram, 0x1007F40, 8).unwrap();
+        u64::from_le_bytes(b.try_into().unwrap())
+    };
+    let secret = {
+        let b = emu.state.read_space(ram, 0x1007F18, 8).unwrap();
+        u64::from_le_bytes(b.try_into().unwrap())
+    };
+    assert_eq!(init, 1, "alloc_meta init_done must stick (RIP-relative mov imm)");
+    assert_ne!(secret, 0, "secret from AT_RANDOM");
+    // mask is page count remaining — must not be the bogus (2<<56)-1 pattern
+    assert!(
+        mask < 0x1000,
+        "mask=0x{mask:X} looks like InstNext-corrupted page count"
+    );
+}

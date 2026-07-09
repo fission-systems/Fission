@@ -1440,3 +1440,45 @@ fn canonical_template_executor_does_not_materialize_from_bound_operand_helpers()
         );
     }
 }
+
+/// RIP-relative with trailing immediates must use full instruction length for
+/// `inst_next` (Intel: relative to end of whole insn). Real musl alloc_meta encodings.
+#[test]
+fn rip_relative_trailing_imm_inst_next_targets() {
+    require_packaged_ghidra_sla!();
+    let compiled = compile_x86_64_frontend().expect("compile");
+
+    let ram_off = |ops: &[PcodeOp]| -> Option<u64> {
+        ops.iter().find_map(|op| {
+            op.output
+                .as_ref()
+                .filter(|o| o.space_id == 3)
+                .map(|o| o.offset)
+                .or_else(|| op.inputs.iter().find(|vn| vn.space_id == 3).map(|vn| vn.offset))
+        })
+    };
+
+    // mov qword [rip+0x511e], rax @ 0x1002E1B → 0x1007F40
+    let bytes = [0x48u8, 0x89, 0x05, 0x1e, 0x51, 0x00, 0x00];
+    let (ops, len, _) =
+        decode_and_lift_with_details(&compiled, &bytes, 0x1002E1B).expect("lift mov");
+    assert_eq!(len as usize, 7);
+    assert_eq!(ram_off(&ops), Some(0x1007F40));
+
+    // add qword [rip+0x511e], 1 @ 0x1002E22 → 0x1007F48 (was off-by-1 before two-pass)
+    let bytes = [0x48u8, 0x83, 0x05, 0x1e, 0x51, 0x00, 0x00, 0x01];
+    let (ops, len, _) =
+        decode_and_lift_with_details(&compiled, &bytes, 0x1002E22).expect("lift add");
+    assert_eq!(len as usize, 8);
+    assert_eq!(ram_off(&ops), Some(0x1007F48));
+
+    // mov dword [rip+0x527b], 1 @ 0x1002C9B → 0x1007F20 (was off-by-4)
+    let bytes = [0xc7u8, 0x05, 0x7b, 0x52, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00];
+    let (ops, len, _) =
+        decode_and_lift_with_details(&compiled, &bytes, 0x1002C9B).expect("lift mov imm");
+    assert_eq!(len as usize, 10);
+    assert_eq!(ram_off(&ops), Some(0x1007F20));
+}
+
+
+

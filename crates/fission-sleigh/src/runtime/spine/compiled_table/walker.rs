@@ -1,11 +1,51 @@
 use super::*;
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
+use std::rc::Rc;
 
 struct DecodePool {
     handles: Vec<Option<RuntimeHandle>>,
     operand_absolute_offsets: Vec<Option<usize>>,
     operand_relative_lengths: Vec<Option<usize>>,
     handle_reference_bitmap: Vec<bool>,
+}
+
+/// Shared root-instruction fallthrough for `inst_next` (RIP-relative).
+///
+/// Nested exports may evaluate `inst_next` before trailing root immediates are
+/// bound and before the cursor advances past in-constructor-minimum fields.
+/// We track:
+/// - progress through bound content / local construct end
+/// - remaining SLA minimum lengths of not-yet-started root operands
+#[derive(Debug)]
+struct InstNextShared {
+    /// Root instruction VA.
+    inst_address: u64,
+    /// Buffer offset of instruction start (`ctx.cursor` at root entry).
+    inst_buf_start: usize,
+    /// Max absolute buffer end of finished root content / cursor progress.
+    bound_end: Cell<usize>,
+    /// Sum of `handles[i].minimum_length` for root operands not yet started.
+    unbound_min: Cell<usize>,
+    /// Growing floor from root `minimum_length` (updated as root learns size).
+    root_min_length: Cell<usize>,
+}
+
+impl InstNextShared {
+    fn estimated_rel_len(&self, cursor: usize, local_construct_end: usize) -> usize {
+        let end = self
+            .bound_end
+            .get()
+            .max(cursor)
+            .max(local_construct_end);
+        let progress = end.saturating_sub(self.inst_buf_start);
+        let with_trailing = progress.saturating_add(self.unbound_min.get());
+        with_trailing.max(self.root_min_length.get())
+    }
+
+    fn inst_next_addr(&self, cursor: usize, local_construct_end: usize) -> u64 {
+        self.inst_address
+            .saturating_add(self.estimated_rel_len(cursor, local_construct_end) as u64)
+    }
 }
 
 thread_local! {
@@ -38,9 +78,52 @@ pub(super) fn bind_instruction<'a>(
     ctx: &CompiledInstructionContext<'_>,
     selection: RuntimeSelection<'a>,
 ) -> Result<RuntimeConstructState> {
+    bind_instruction_with_inst_next(compiled, strategy, ctx, selection, None)
+}
+
+fn bind_instruction_with_inst_next<'a>(
+    compiled: &'a CompiledFrontend,
+    strategy: RuntimeDecodeStrategy,
+    ctx: &CompiledInstructionContext<'_>,
+    selection: RuntimeSelection<'a>,
+    parent_inst_next: Option<Rc<InstNextShared>>,
+) -> Result<RuntimeConstructState> {
     let result = (|| {
         constructor_matches(ctx, selection.constructor)?;
-        CompiledParserWalker::new(compiled, strategy, ctx, selection)?.walk()
+        // Root instruction: two-pass so `inst_next` sees the full length (Ghidra
+        // resolveHandles-after-resolve). Nested walkers inherit the parent's shared
+        // fallthrough from the second pass.
+        if parent_inst_next.is_none() && selection.trace.root_bucket == "instruction" {
+            let probe = CompiledParserWalker::new(
+                compiled,
+                strategy,
+                ctx,
+                selection.clone(),
+                None,
+            )?
+            .walk()?;
+            // Prefer absolute end-relative-to-start: length may be absolute buffer end.
+            let full_len = probe
+                .relative_length
+                .max(probe.length.saturating_sub(ctx.cursor));
+            let shared = Rc::new(InstNextShared {
+                inst_address: ctx.address,
+                inst_buf_start: ctx.cursor,
+                bound_end: Cell::new(ctx.cursor),
+                unbound_min: Cell::new(0),
+                root_min_length: Cell::new(full_len),
+            });
+            // owns=false: root_min_length already set to full probe length.
+            return CompiledParserWalker::new(
+                compiled,
+                strategy,
+                ctx,
+                selection,
+                Some(shared),
+            )?
+            .walk();
+        }
+        CompiledParserWalker::new(compiled, strategy, ctx, selection, parent_inst_next)?.walk()
     })();
 
     match result {
@@ -97,6 +180,10 @@ pub(super) struct CompiledParserWalker<'a, 'b> {
     cursor: usize,
     pool_guard: PoolGuard,
     walker: spine::RuntimeParserWalker,
+    /// Root fallthrough estimate for `inst_next` (shared with nested walkers).
+    inst_next_shared: Rc<InstNextShared>,
+    /// True when this walker owns/updates the shared fallthrough (root only).
+    owns_inst_next: bool,
 }
 
 impl<'a, 'b> std::ops::Deref for CompiledParserWalker<'a, 'b> {
@@ -359,6 +446,7 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
         strategy: RuntimeDecodeStrategy,
         ctx: &'a CompiledInstructionContext<'b>,
         selection: RuntimeSelection<'a>,
+        parent_inst_next: Option<Rc<InstNextShared>>,
     ) -> Result<Self> {
         let replace_current_wrapper = constructor_replaces_current(selection.constructor);
         let opcode_len = if replace_current_wrapper {
@@ -418,6 +506,28 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
             &mut pool_item.handle_reference_bitmap,
         )?;
 
+        let (inst_next_shared, owns_inst_next) = if let Some(shared) = parent_inst_next {
+            (shared, false)
+        } else {
+            let unbound_min = selection
+                .constructor
+                .constructor_template
+                .handles
+                .iter()
+                .map(|h| h.minimum_length as usize)
+                .sum();
+            (
+                Rc::new(InstNextShared {
+                    inst_address: ctx.address,
+                    inst_buf_start: ctx.cursor,
+                    bound_end: Cell::new(ctx.cursor),
+                    unbound_min: Cell::new(unbound_min),
+                    root_min_length: Cell::new(minimum_length),
+                }),
+                true,
+            )
+        };
+
         Ok(Self {
             compiled,
             strategy,
@@ -434,7 +544,22 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                 handle_reference_bitmap: pool_item.handle_reference_bitmap,
             },
             walker: spine::RuntimeParserWalker::new(ctx.cursor, opcode_len),
+            inst_next_shared,
+            owns_inst_next,
         })
+    }
+
+    fn resolve_inst_next_addr(&self) -> Result<u64> {
+        // Nested export often leaves `cursor` at the field base (fields inside
+        // constructor minimum do not advance the cursor). Use construct end and
+        // operand ends so InstNext is at least past the current field.
+        let local_construct_end = self.constructor_minimum_end()?;
+        let local_end = local_construct_end
+            .max(self.cursor)
+            .max(self.max_operand_end().unwrap_or(self.cursor));
+        Ok(self
+            .inst_next_shared
+            .inst_next_addr(local_end, local_construct_end))
     }
 
     fn walk(mut self) -> Result<RuntimeConstructState> {
@@ -770,14 +895,7 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                 Ok(value)
             }
             CompiledConstTpl::InstStart => Ok(self.ctx.address),
-            CompiledConstTpl::InstNext => {
-                let minimum_length =
-                    checked_usize_to_u64(self.minimum_length, "export InstNext minimum length")?;
-                self.ctx
-                    .address
-                    .checked_add(minimum_length)
-                    .ok_or_else(|| anyhow!("export InstNext address overflowed"))
-            }
+            CompiledConstTpl::InstNext => self.resolve_inst_next_addr(),
             other => bail!("export ConstTpl {:?} is unsupported", other),
         }
     }
@@ -799,6 +917,20 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
             .ok_or_else(|| anyhow!("missing handle template {operand_index}"))?
             .clone();
         let _guard = WalkStackGuard::new(format!("operand({})", operand_index));
+        if self.owns_inst_next {
+            // Active operand is counted via local construct/cursor progress; keep
+            // only *later* operands in unbound_min.
+            let op_min = template.minimum_length as usize;
+            let u = self.inst_next_shared.unbound_min.get();
+            self.inst_next_shared
+                .unbound_min
+                .set(u.saturating_sub(op_min));
+            // Keep floor in sync if root minimum_length grew.
+            let r = self.inst_next_shared.root_min_length.get();
+            self.inst_next_shared
+                .root_min_length
+                .set(r.max(self.minimum_length));
+        }
         let operand_absolute_offset = self.operand_absolute_offset(&template.spec)?;
         let binding = self.bind_operand(&template, operand_absolute_offset)?;
         let handle_index = operand_index;
@@ -807,6 +939,11 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
             None => usize::try_from(template.minimum_length)
                 .map_err(|_| anyhow!("operand minimum length exceeds usize"))?,
         };
+        if self.owns_inst_next {
+            let end = operand_absolute_offset.saturating_add(operand_relative_length);
+            let b = self.inst_next_shared.bound_end.get();
+            self.inst_next_shared.bound_end.set(b.max(end).max(self.cursor));
+        }
         self.walker.record_operand_node(
             operand_index,
             0,
@@ -1200,6 +1337,12 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                 } else {
                     self.cursor = self.cursor.max(sub_state.length);
                 }
+                if self.owns_inst_next {
+                    let r = self.inst_next_shared.root_min_length.get();
+                    self.inst_next_shared
+                        .root_min_length
+                        .set(r.max(self.minimum_length));
+                }
                 // Return the exported handle from the sub-constructor. If no
                 // handle is exported, only pure guard subtables may continue:
                 // the parent ConstructTpl must not reference this operand
@@ -1364,22 +1507,8 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
             CompiledPatternExpression::Constant(value) => Ok(*value),
             CompiledPatternExpression::InstStart => Ok(u64_to_i64_bits(self.ctx.address)),
             CompiledPatternExpression::InstNext => {
-                let construct_end = self
-                    .ctx
-                    .cursor
-                    .checked_add(checked_u32_to_usize(
-                        self.selection.constructor.minimum_length,
-                        "constructor minimum length",
-                    )?)
-                    .ok_or_else(|| anyhow!("pattern InstNext construct end overflowed"))?;
-                let next_offset = self.cursor.max(construct_end);
-                let next_offset = checked_usize_to_u64(next_offset, "pattern InstNext offset")?;
-                let address = self
-                    .ctx
-                    .address
-                    .checked_add(next_offset)
-                    .ok_or_else(|| anyhow!("pattern InstNext address overflowed"))?;
-                Ok(u64_to_i64_bits(address))
+                // Prefer shared root fallthrough so trailing immediates are included.
+                Ok(u64_to_i64_bits(self.resolve_inst_next_addr()?))
             }
             CompiledPatternExpression::InstNext2 => {
                 bail!("pattern expression inst_next2 requires delayed instruction context")
@@ -1647,7 +1776,13 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
             );
         }
 
-        bind_instruction(self.compiled, self.strategy, &sub_ctx, selection)
+        bind_instruction_with_inst_next(
+            self.compiled,
+            self.strategy,
+            &sub_ctx,
+            selection,
+            Some(Rc::clone(&self.inst_next_shared)),
+        )
     }
 }
 
