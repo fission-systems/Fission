@@ -943,3 +943,36 @@ fn debug_aarch64_rm_gpr64_operand_symbol_shape() {
         }
     }
 }
+
+#[test]
+fn x86_64_sla_userops_include_syscall() {
+    use crate::compiler::sla::load_construct_templates_from_sla;
+    use std::path::PathBuf;
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../utils/sleigh-specs/compiled/x86/x86-64.sla");
+    if !path.is_file() {
+        eprintln!("skip: missing {}", path.display());
+        return;
+    }
+    let lib = load_construct_templates_from_sla(&path).expect("load x86-64.sla");
+    assert!(
+        !lib.userops.is_empty(),
+        "expected USEROP_HEAD entries in x86-64.sla"
+    );
+    let has_syscall = lib.userops.values().any(|n| n == "syscall");
+    assert!(
+        has_syscall,
+        "expected syscall userop, got first entries: {:?}",
+        lib.userops.iter().take(12).collect::<Vec<_>>()
+    );
+    // CallOther const ids are dense (syscall is early, typically index 5 on x86).
+    let max_id = lib.userops.keys().copied().max().unwrap_or(0);
+    assert!(
+        max_id < 10_000,
+        "userop indices look like symbol IDs (max={max_id}), not dense CallOther indices"
+    );
+    // Sanity: index 5 is "syscall" in current Ghidra x86-64.sla / ia.sinc order.
+    if let Some(name) = lib.userops.get(&5) {
+        assert_eq!(name, "syscall", "unexpected userop 5: {name}");
+    }
+}

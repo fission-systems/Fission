@@ -217,9 +217,8 @@ impl Emulator {
                 }
             }
         }
-        // Fallback: Ghidra x86 `define pcodeop` order from ia.sinc when SLA
-        // USEROP_HEAD parse is empty (packed .sla table currently not populated).
         if userop_map.is_empty() {
+            // Last-resort x86 ia.sinc order if SLA USEROP_HEAD still missing.
             let lang = binary
                 .load_spec()
                 .map(|s| s.pair.language_id.as_str())
@@ -228,8 +227,8 @@ impl Emulator {
                 for (id, name) in X86_FALLBACK_USEROPS {
                     userop_map.insert(*id, (*name).to_string());
                 }
-                tracing::info!(
-                    "Using x86 fallback userop table ({} entries)",
+                tracing::warn!(
+                    "SLA userops empty; using x86 fallback table ({} entries)",
                     userop_map.len()
                 );
             } else {

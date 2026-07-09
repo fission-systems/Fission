@@ -55,6 +55,7 @@ impl JitCompiler {
             ("jit_write_bytes", crate::jit::callbacks::jit_write_bytes as *const u8),
             ("jit_float_binop", crate::jit::callbacks::jit_float_binop as *const u8),
             ("jit_float_unop", crate::jit::callbacks::jit_float_unop as *const u8),
+            ("jit_int_flag", crate::jit::callbacks::jit_int_flag as *const u8),
             ("jit_call_other", crate::jit::callbacks::jit_call_other as *const u8),
             ("jit_count_insn", crate::jit::callbacks::jit_count_insn as *const u8),
             ("jit_chain", crate::jit::callbacks::jit_chain as *const u8),
@@ -199,6 +200,19 @@ impl JitCompiler {
             .declare_function("jit_float_unop", Linkage::Import, &sig_fun)
             .unwrap();
 
+        let mut sig_iflag = self.module.make_signature();
+        sig_iflag.params.extend([
+            AbiParam::new(types::I32), // kind
+            AbiParam::new(types::I32), // size
+            AbiParam::new(types::I64), // a
+            AbiParam::new(types::I64), // b
+        ]);
+        sig_iflag.returns.push(AbiParam::new(types::I64));
+        let int_flag_fn = self
+            .module
+            .declare_function("jit_int_flag", Linkage::Import, &sig_iflag)
+            .unwrap();
+
         let mut sig_callother = self.module.make_signature();
         sig_callother.params.extend([
             AbiParam::new(types::I64),
@@ -251,6 +265,7 @@ impl JitCompiler {
         let write_bytes_ref = self.module.declare_func_in_func(write_bytes_fn, builder.func);
         let float_binop_ref = self.module.declare_func_in_func(float_binop_fn, builder.func);
         let float_unop_ref = self.module.declare_func_in_func(float_unop_fn, builder.func);
+        let int_flag_ref = self.module.declare_func_in_func(int_flag_fn, builder.func);
         let call_other_ref = self.module.declare_func_in_func(call_other_fn, builder.func);
         let count_ref = self.module.declare_func_in_func(count_fn, builder.func);
         let exit_tb_ref = self.module.declare_func_in_func(exit_tb_fn, builder.func);
@@ -475,59 +490,21 @@ impl JitCompiler {
                         store_vn!(out, builder.ins().iadd(a, b));
                     }
                 }
-                // INT_CARRY: unsigned carry-out of a+b (result as 0/1)
-                PcodeOpcode::IntCarry => {
+                // INT_CARRY / INT_SCARRY / INT_SBORROW — size-aware via host callout.
+                PcodeOpcode::IntCarry | PcodeOpcode::IntSCarry | PcodeOpcode::IntSBorrow => {
                     if let Some(out) = op.output.as_ref() {
                         let a = load_vn!(&op.inputs[0]);
                         let b = load_vn!(&op.inputs[1]);
-                        let sum = builder.ins().iadd(a, b);
-                        // carry if sum < a (unsigned)
-                        let c = builder.ins().icmp(
-                            cranelift_codegen::ir::condcodes::IntCC::UnsignedLessThan,
-                            sum,
-                            a,
-                        );
-                        store_vn!(out, builder.ins().uextend(types::I64, c));
-                    }
-                }
-                // INT_SCARRY: signed overflow of a+b
-                PcodeOpcode::IntSCarry => {
-                    if let Some(out) = op.output.as_ref() {
-                        let a = load_vn!(&op.inputs[0]);
-                        let b = load_vn!(&op.inputs[1]);
-                        let sum = builder.ins().iadd(a, b);
-                        // overflow if (a^sum) & (b^sum) has sign bit set
-                        let a_x = builder.ins().bxor(a, sum);
-                        let b_x = builder.ins().bxor(b, sum);
-                        let both = builder.ins().band(a_x, b_x);
-                        let sign = builder.ins().iconst(types::I64, i64::MIN);
-                        let ov = builder.ins().band(both, sign);
-                        let c = builder.ins().icmp_imm(
-                            cranelift_codegen::ir::condcodes::IntCC::NotEqual,
-                            ov,
-                            0,
-                        );
-                        store_vn!(out, builder.ins().uextend(types::I64, c));
-                    }
-                }
-                // INT_SBORROW: signed overflow of a-b
-                PcodeOpcode::IntSBorrow => {
-                    if let Some(out) = op.output.as_ref() {
-                        let a = load_vn!(&op.inputs[0]);
-                        let b = load_vn!(&op.inputs[1]);
-                        let diff = builder.ins().isub(a, b);
-                        // overflow if (a^b) & (a^diff) has sign bit
-                        let a_b = builder.ins().bxor(a, b);
-                        let a_d = builder.ins().bxor(a, diff);
-                        let both = builder.ins().band(a_b, a_d);
-                        let sign = builder.ins().iconst(types::I64, i64::MIN);
-                        let ov = builder.ins().band(both, sign);
-                        let c = builder.ins().icmp_imm(
-                            cranelift_codegen::ir::condcodes::IntCC::NotEqual,
-                            ov,
-                            0,
-                        );
-                        store_vn!(out, builder.ins().uextend(types::I64, c));
+                        let kind = match op.opcode {
+                            PcodeOpcode::IntCarry => 0i64,
+                            PcodeOpcode::IntSCarry => 1,
+                            _ => 2,
+                        };
+                        let size = op.inputs[0].size.max(1) as i64;
+                        let k = builder.ins().iconst(types::I32, kind);
+                        let s = builder.ins().iconst(types::I32, size);
+                        let call = builder.ins().call(int_flag_ref, &[k, s, a, b]);
+                        store_vn!(out, builder.inst_results(call)[0]);
                     }
                 }
                 PcodeOpcode::IntSub | PcodeOpcode::PtrSub => {

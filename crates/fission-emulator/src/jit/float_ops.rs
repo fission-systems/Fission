@@ -136,6 +136,55 @@ fn sign_extend_u64(val: u64, size: u32) -> i64 {
     ((val as i64) << shift) >> shift
 }
 
+/// Size-aware integer carry / signed overflow / signed borrow flags.
+/// `kind`: 0=INT_CARRY, 1=INT_SCARRY, 2=INT_SBORROW. Returns 0/1.
+pub fn int_flag_op(kind: u32, size: u32, a: u64, b: u64) -> u64 {
+    let size = size.clamp(1, 8);
+    let bits = (size * 8) as u32;
+    let mask = if bits >= 64 {
+        u64::MAX
+    } else {
+        (1u64 << bits) - 1
+    };
+    let a = a & mask;
+    let b = b & mask;
+    let result = match kind {
+        0 => {
+            // unsigned carry of a+b
+            let sum = (a as u128) + (b as u128);
+            sum > mask as u128
+        }
+        1 => {
+            // signed overflow of a+b
+            let sa = sign_extend_n(a, bits) as i128;
+            let sb = sign_extend_n(b, bits) as i128;
+            let sum = sa + sb;
+            let min = -(1i128 << (bits - 1));
+            let max = (1i128 << (bits - 1)) - 1;
+            sum < min || sum > max
+        }
+        2 => {
+            // signed overflow of a-b
+            let sa = sign_extend_n(a, bits) as i128;
+            let sb = sign_extend_n(b, bits) as i128;
+            let diff = sa - sb;
+            let min = -(1i128 << (bits - 1));
+            let max = (1i128 << (bits - 1)) - 1;
+            diff < min || diff > max
+        }
+        _ => false,
+    };
+    u64::from(result)
+}
+
+fn sign_extend_n(val: u64, bits: u32) -> i64 {
+    if bits >= 64 {
+        return val as i64;
+    }
+    let shift = 64 - bits;
+    ((val as i64) << shift) >> shift
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -154,5 +203,18 @@ mod tests {
         let b = 3.0f64.to_bits();
         let r = float_binop(FloatBinOp::Mul as u32, 8, a, b);
         assert!((f64::from_bits(r) - 6.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn int_carry_u8() {
+        assert_eq!(int_flag_op(0, 1, 0xFF, 1), 1);
+        assert_eq!(int_flag_op(0, 1, 0x10, 1), 0);
+    }
+
+    #[test]
+    fn int_scarry_i8() {
+        // 0x7F + 1 overflows signed 8-bit
+        assert_eq!(int_flag_op(1, 1, 0x7F, 1), 1);
+        assert_eq!(int_flag_op(1, 1, 1, 1), 0);
     }
 }

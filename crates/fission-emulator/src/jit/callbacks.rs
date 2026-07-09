@@ -142,6 +142,12 @@ pub extern "C" fn jit_float_unop(op: u32, in_size: u32, out_size: u32, a: u64) -
     float_unop(op, in_size, out_size, a)
 }
 
+/// Integer flag ops: kind 0=CARRY, 1=SCARRY, 2=SBORROW.
+#[unsafe(no_mangle)]
+pub extern "C" fn jit_int_flag(kind: u32, size: u32, a: u64, b: u64) -> u64 {
+    crate::jit::float_ops::int_flag_op(kind, size, a, b)
+}
+
 // ── Instruction accounting + chaining ───────────────────────────────────────
 
 /// Count one guest instruction inside a multi-instruction TB.

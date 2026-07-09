@@ -534,15 +534,30 @@ pub(super) fn decode_construct_templates(
         );
     }
 
+    // USEROP_HEAD: CallOther encodes a *dense sequential* userop index
+    // (0,1,2… in definition order). ATTR_ID on the packed symbol is the global
+    // symbol-table id (often large), not the CallOther index. Prefer ATTR_INDEX
+    // when present; otherwise assign indices in document order.
     let mut userops = BTreeMap::new();
-    for head in root.descendants_with_id(sla_format::ELEM_USEROP_HEAD) {
-        if let Some(index_val) = head.attr_unsigned(sla_format::ATTR_INDEX) {
-            if let Some(name_val) = head.attr_string(sla_format::ATTR_NAME) {
-                if let Ok(index) = u32::try_from(index_val) {
-                    userops.insert(index, name_val.to_string());
-                }
-            }
+    let heads = root.descendants_with_id(sla_format::ELEM_USEROP_HEAD);
+    let mut sequential = 0u32;
+    for head in heads {
+        let Some(name_val) = head.attr_string(sla_format::ATTR_NAME) else {
+            continue;
+        };
+        let index = head
+            .attr_unsigned(sla_format::ATTR_INDEX)
+            .and_then(|v| u32::try_from(v).ok())
+            .unwrap_or_else(|| {
+                let i = sequential;
+                sequential = sequential.saturating_add(1);
+                i
+            });
+        // Keep sequential counter in sync when ATTR_INDEX is present.
+        if head.attr_unsigned(sla_format::ATTR_INDEX).is_some() {
+            sequential = sequential.max(index.saturating_add(1));
         }
+        userops.insert(index, name_val.to_string());
     }
 
     let mut library = CompiledSlaTemplateLibrary {
