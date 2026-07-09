@@ -1078,6 +1078,10 @@
       <code>apply_rela_x86_64</code> (RELATIVE/JUMP_SLOT/GLOB_DAT)</li>
 <li>[x] DT_NEEDED shared-lib load loop + BIND_NOW (<code>DynlinkMode::SharedLibs</code>, <code>FISSION_LIB_PATH</code>)</li>
 <li>[x] Lazy PLT bind (<code>FISSION_LAZY_BIND=1</code>): GOT markers → first-call bind → JumpTo / nested HLE</li>
+<li>[x] ELF load order: map sections → <code>prepare_dynlink</code>/RELA → stack (RELA no longer wiped)</li>
+<li>[x] GOT patch preserves mini-dynlink resolved targets (<code>is_resolved_got_target</code>)</li>
+<li>[x] HLE quality metrics: <code>hle_misses</code> / <code>unknown_syscalls</code> + <code>check_hle_budget</code> / CLI <code>--max-hle-misses</code></li>
+<li>[x] Bump heap HLE: <code>malloc</code>/<code>calloc</code> via <code>brk</code>; <code>printf</code> <code>%s/%d/%x/%p/%%</code> (+ <code>l</code>)</li>
 <li>[x] Automation <code>sandbox-check</code> lane (subprocess over CLI JSON + budget gate)</li>
 </ul>
 <h2 id="validation">Validation<a class="headerlink" href="#validation" title="Permanent link">&para;</a></h2>
