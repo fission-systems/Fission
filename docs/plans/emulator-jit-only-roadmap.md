@@ -131,6 +131,16 @@ Callouts: `jit_read_space` / `jit_write_space` / `jit_call_other` / `jit_exit_tb
       still **zero unknown syscalls** — livelock, not missing HLE numbers
 - [x] `max_inst` + `pcode_budget` fuses (TB exit on fuse; no false process halt)
 - [x] Automation `sandbox-check` lane (subprocess over CLI JSON + budget gate)
+- [x] **Semantic Replay Diff (SRD)** — owner-native multi-run regression language:
+      - `fission-emulator::srd`: `SemanticReplaySnapshot` / `SemanticReplayDelta` / `OwnerLayer`
+      - Capture: stop_pc, freeable/bin (optional mallocng probe), syscall timeline,
+        path-assertion summary, metrics (decode/faults/TB/HLE)
+      - Diff: field-level deltas with owner triage
+        (`sleigh_lift` / `jit_runtime` / `page_mem` / `hle_os` / `control_flow` /
+        `path_constraints`) — same “fix at owner” vocabulary as decompiler quality loop
+      - CLI: `sandbox --srd-out` / `--srd-label` / `--srd-mallocng`;
+        offline `sandbox --srd-diff LEFT RIGHT [--srd-diff-out PATH]` (no BINARY required)
+      - Fixture: `tests/srd_semantic_replay.rs` dual-budget non-identical + self-identical
 
 ## Validation
 
@@ -143,9 +153,16 @@ cargo nextest run -p fission-emulator
 cargo check -p fission-cli
 ./target/release/fission_cli sandbox crates/fission-emulator/testdata/linux_x64_hello_sys.elf \
   --max-inst 64 --json --fail-on-budget --max-unimpl-events 0 --max-unimpl-kinds 0
+
+# SRD capture + offline owner-layered delta:
+./target/release/fission_cli sandbox crates/fission-emulator/testdata/x64_static_printf_malloc.elf \
+  --max-inst 512 --srd-out /tmp/srd_a.json --srd-label budget_512 --srd-mallocng
+./target/release/fission_cli sandbox crates/fission-emulator/testdata/x64_static_printf_malloc.elf \
+  --max-inst 2500 --srd-out /tmp/srd_b.json --srd-label budget_2500 --srd-mallocng
+./target/release/fission_cli sandbox --srd-diff /tmp/srd_a.json /tmp/srd_b.json
 ```
 
-Future: differential execution against a **separate** offline oracle harness is allowed for CI measurement only — never linked into `fission-emulator`.
+Future: differential execution against a **separate** offline oracle harness is allowed for CI measurement only — never linked into `fission-emulator`. SRD is the in-tree multi-run contract language for policy/commit comparisons (not a vendor oracle).
 
 ## Anti-patterns
 

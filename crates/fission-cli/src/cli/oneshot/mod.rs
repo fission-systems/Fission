@@ -172,17 +172,44 @@ fn run_oneshot_inner(parsed: ParsedOneShotArgs) -> Result<()> {
 }
 
 fn run_sandbox(args: crate::cli::args::SandboxArgs) -> Result<()> {
+    // Offline SRD diff: no guest execution required.
+    if let Some(paths) = &args.srd_diff {
+        anyhow::ensure!(
+            paths.len() == 2,
+            "--srd-diff expects exactly two snapshot paths"
+        );
+        let left = fission_emulator::SemanticReplaySnapshot::read_json_file(&paths[0])
+            .with_context(|| format!("read SRD left {}", paths[0].display()))?;
+        let right = fission_emulator::SemanticReplaySnapshot::read_json_file(&paths[1])
+            .with_context(|| format!("read SRD right {}", paths[1].display()))?;
+        let delta = fission_emulator::SemanticReplayDelta::diff(&left, &right);
+        let json = delta
+            .to_json_pretty()
+            .context("serialize SRD delta")?;
+        if let Some(out) = &args.srd_diff_out {
+            std::fs::write(out, &json)
+                .with_context(|| format!("write SRD delta to {}", out.display()))?;
+            tracing::info!("Wrote SRD delta to {}", out.display());
+        }
+        println!("{json}");
+        return Ok(());
+    }
+
+    let binary_path = args.binary.as_ref().ok_or_else(|| {
+        anyhow::anyhow!("sandbox requires BINARY (or use --srd-diff LEFT RIGHT for offline SRD)")
+    })?;
+
     let mut logging_options =
         fission_core::logging::LoggingOptions::from_config(&fission_core::CONFIG.logging);
     logging_options.level = "debug".to_string(); // Force debug for sandbox
     logging_options.include_span_events = true;
     fission_core::logging::init_with_options(logging_options);
 
-    tracing::info!("Starting sandbox for {}", args.binary.display());
+    tracing::info!("Starting sandbox for {}", binary_path.display());
     
     // Parse binary using fission-loader
-    let binary = fission_loader::loader::LoadedBinary::from_file(&args.binary)
-        .with_context(|| format!("failed to read binary at {}", args.binary.display()))?;
+    let binary = fission_loader::loader::LoadedBinary::from_file(binary_path)
+        .with_context(|| format!("failed to read binary at {}", binary_path.display()))?;
         
     let mut state = fission_emulator::MachineState::new();
 
@@ -290,6 +317,7 @@ fn run_sandbox(args: crate::cli::args::SandboxArgs) -> Result<()> {
         || args.max_unimpl_kinds.is_some()
         || args.max_hle_misses.is_some()
         || args.max_unknown_syscalls.is_some();
+    let binary_label = binary_path.display().to_string();
     let report = if want_budget {
         let max_events = args.max_unimpl_events.unwrap_or(0);
         let max_kinds = args.max_unimpl_kinds.unwrap_or(0);
@@ -297,7 +325,7 @@ fn run_sandbox(args: crate::cli::args::SandboxArgs) -> Result<()> {
         let max_hle = args.max_hle_misses.unwrap_or(u64::MAX);
         let max_unk = args.max_unknown_syscalls.unwrap_or(u64::MAX);
         fission_emulator::SandboxMetricsReport::from_run_quality(
-            args.binary.display().to_string(),
+            binary_label.clone(),
             emu.binary.format.clone(),
             emu.halt_requested,
             emu.pc,
@@ -306,7 +334,7 @@ fn run_sandbox(args: crate::cli::args::SandboxArgs) -> Result<()> {
         )
     } else {
         fission_emulator::SandboxMetricsReport::from_run(
-            args.binary.display().to_string(),
+            binary_label.clone(),
             emu.binary.format.clone(),
             emu.halt_requested,
             emu.pc,
@@ -337,6 +365,27 @@ fn run_sandbox(args: crate::cli::args::SandboxArgs) -> Result<()> {
             .and_then(|b| b.error.clone())
             .unwrap_or_else(|| "quality budget exceeded".into());
         anyhow::bail!("{err}");
+    }
+
+    if let Some(path) = args.srd_out {
+        let label = args.srd_label.clone().unwrap_or_else(|| {
+            binary_path
+                .file_name()
+                .map(|s| s.to_string_lossy().into_owned())
+                .unwrap_or_else(|| "run".into())
+        });
+        let snap = fission_emulator::SemanticReplaySnapshot::capture(
+            &mut emu,
+            fission_emulator::CaptureOpts {
+                label,
+                binary: binary_label,
+                probe_mallocng: args.srd_mallocng,
+                ..Default::default()
+            },
+        );
+        snap.write_json_file(&path)
+            .with_context(|| format!("write SRD snapshot to {}", path.display()))?;
+        tracing::info!("Wrote SRD snapshot to {}", path.display());
     }
 
     Ok(())

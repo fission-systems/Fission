@@ -8,6 +8,7 @@ pub mod trace;
 pub mod sym;
 pub mod jit;
 pub mod metrics;
+pub mod srd;
 
 pub use arch::{ArchInfo, Endianness};
 pub use os::{OsEnvironment, HleResult, WindowsEnv, LinuxEnv, BareMetalEnv};
@@ -16,3 +17,7 @@ pub use pcode::eval::Evaluator;
 pub use core::Emulator;
 pub use snapshot::EmulatorSnapshot;
 pub use metrics::{BudgetReport, EmulatorMetrics, SandboxMetricsReport};
+pub use srd::{
+    CaptureOpts, FieldDelta, MallocngProbe, OwnerLayer, SemanticReplayDelta,
+    SemanticReplaySnapshot,
+};

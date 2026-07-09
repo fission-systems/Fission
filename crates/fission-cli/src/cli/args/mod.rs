@@ -158,9 +158,9 @@ enum CliCommand {
 
 #[derive(Args, Debug, Clone, PartialEq, Eq)]
 pub struct SandboxArgs {
-    /// Path to binary to run in sandbox
+    /// Path to binary to run in sandbox (optional when using --srd-diff only)
     #[arg(value_name = "BINARY")]
-    pub binary: PathBuf,
+    pub binary: Option<PathBuf>,
 
     /// Take a snapshot when execution reaches this address
     #[arg(long, value_parser = parse_hex_address)]
@@ -201,6 +201,26 @@ pub struct SandboxArgs {
     /// Write sandbox metrics report JSON to this path
     #[arg(long, value_name = "PATH")]
     pub metrics_out: Option<PathBuf>,
+
+    /// Write Semantic Replay Diff snapshot JSON (owner-native run facts) to this path
+    #[arg(long, value_name = "PATH")]
+    pub srd_out: Option<PathBuf>,
+
+    /// Label stored inside the SRD snapshot (default: binary file name)
+    #[arg(long, value_name = "LABEL")]
+    pub srd_label: Option<String>,
+
+    /// Include static musl mallocng BSS probes in the SRD snapshot (fixture layout)
+    #[arg(long)]
+    pub srd_mallocng: bool,
+
+    /// Diff two existing SRD snapshot JSON files and print the structured delta
+    #[arg(long, value_name = "PATH", num_args = 2, value_names = ["LEFT", "RIGHT"])]
+    pub srd_diff: Option<Vec<PathBuf>>,
+
+    /// Write SRD delta JSON to this path (use with --srd-diff)
+    #[arg(long, value_name = "PATH")]
+    pub srd_diff_out: Option<PathBuf>,
 
     /// Max unimplemented opcode events allowed (budget gate; requires --max-unimpl-kinds or defaults kinds=16)
     #[arg(long)]
