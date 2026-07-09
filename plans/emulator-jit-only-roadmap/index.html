@@ -1049,18 +1049,21 @@
 <ul>
 <li>[x] <code>EmulatorMetrics</code> (unimplemented ops, syscalls, TB/chain counters)</li>
 <li>[x] JIT: Piece / Extract / Insert / LzCount / SegmentOp</li>
-<li>[x] Optional E2E smoke (<code>tests/smoke_linux_hello.rs</code>, <code>FISSION_SMOKE_ELF</code>)</li>
+<li>[x] Optional E2E smoke (<code>tests/smoke_linux_hello.rs</code>, opt-in <code>FISSION_SMOKE_ELF</code> only)</li>
 <li>[x] Direct CALL address fix + x86 userop fallback (syscall)</li>
-<li>[ ] Checked-in tiny ELF fixture for CI (no zig required)</li>
-<li>[ ] Unimplemented-opcode budget gate in automation</li>
-<li>[ ] Dynamic-linked ELF / PE CRT smoke</li>
+<li>[x] CallOther mid-TB dirty register flush (HLE sees current SSA)</li>
+<li>[x] Checked-in tiny ELF fixture: <code>testdata/linux_x64_hello_sys.elf</code> + <code>smoke_ci_fixture_hello_sys</code></li>
+<li>[x] PE ExitProcess fixture: <code>testdata/win_x64_exit.exe</code> + <code>smoke_pe_exit_process</code></li>
+<li>[x] Unimplemented-opcode budget gate (<code>EmulatorMetrics::check_unimplemented_budget</code>)</li>
+<li>[ ] Dynamic-linked ELF / full PE CRT (WriteFile + more HLE)</li>
+<li>[ ] Wire budget gate into automation/report surfaces (optional)</li>
 </ul>
 <h2 id="validation">Validation<a class="headerlink" href="#validation" title="Permanent link">&para;</a></h2>
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>cargo<span class="w"> </span>check<span class="w"> </span>-p<span class="w"> </span>fission-emulator
 </span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>cargo<span class="w"> </span>nextest<span class="w"> </span>run<span class="w"> </span>-p<span class="w"> </span>fission-emulator
-</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="c1"># optional real binary:</span>
+</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="c1"># optional large musl binary (explicit path only — no /tmp auto-discovery):</span>
 </span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="c1">#   zig cc -target x86_64-linux-musl -O0 -o /tmp/fission-emu-test/hello_linux_x64 hello.c</span>
-</span><span id="__span-1-5"><a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="c1">#   FISSION_SMOKE_ELF=/tmp/fission-emu-test/hello_linux_x64 cargo nextest run -p fission-emulator smoke_linux</span>
+</span><span id="__span-1-5"><a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="c1">#   FISSION_SMOKE_ELF=/tmp/fission-emu-test/hello_linux_x64 cargo nextest run -p fission-emulator smoke_optional</span>
 </span><span id="__span-1-6"><a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>cargo<span class="w"> </span>check<span class="w"> </span>-p<span class="w"> </span>fission-cli
 </span><span id="__span-1-7"><a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>./target/release/fission_cli<span class="w"> </span>sandbox<span class="w"> </span>/path/to/elf<span class="w"> </span>--max-inst<span class="w"> </span><span class="m">50000</span>
 </span></code></pre></div>
