@@ -1082,6 +1082,10 @@
 <li>[x] GOT patch preserves mini-dynlink resolved targets (<code>is_resolved_got_target</code>)</li>
 <li>[x] HLE quality metrics: <code>hle_misses</code> / <code>unknown_syscalls</code> + <code>check_hle_budget</code> / CLI <code>--max-hle-misses</code></li>
 <li>[x] Bump heap HLE: <code>malloc</code>/<code>calloc</code> via <code>brk</code>; <code>printf</code> <code>%s/%d/%x/%p/%%</code> (+ <code>l</code>)</li>
+<li>[x] libc HLE: <code>strlen</code> / <code>memcpy</code> / <code>memmove</code> / <code>memset</code> / <code>mmap</code></li>
+<li>[x] CI fixtures: <code>x64_dyn_printf_malloc.elf</code> (HLE path); static printf opt-in</li>
+<li>[x] Concolic mini-fixture: <code>x64_concolic_branch_sys.elf</code> (stdin taint → branch);
+      gate records always, stops only when <code>concolic_stop_on_branch</code></li>
 <li>[x] Automation <code>sandbox-check</code> lane (subprocess over CLI JSON + budget gate)</li>
 </ul>
 <h2 id="validation">Validation<a class="headerlink" href="#validation" title="Permanent link">&para;</a></h2>
