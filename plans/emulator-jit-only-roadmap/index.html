@@ -1036,14 +1036,17 @@
 <li>[x] Multi-instruction TBs (up to 8 insns; stop on absolute branch / page / cached edge)</li>
 <li>[x] Soft direct block chaining (<code>jit_chain</code>)</li>
 <li>[x] Hard chaining via <strong>global</strong> guest-PC → host-fn table (<code>jit_exit_tb</code>) — fallthrough <strong>and absolute</strong> branch/call</li>
-<li>[ ] Hot-path register caching with fewer callouts</li>
-<li>[ ] Optional pure-Rust softfloat for IEEE edge cases</li>
+<li>[x] CallOther flush <strong>+ reload</strong> (HLE cannot be clobbered by stale SSA at TB exit)</li>
+<li>[ ] Persistent host-side register file cache across TBs (fewer callouts)</li>
+<li>[x] Optional pure-Rust softfloat path (<code>feature = "softfloat"</code>, NaN quieting policy)</li>
 </ul>
 <h3 id="phase-d-analysis-features">Phase D — Analysis features<a class="headerlink" href="#phase-d-analysis-features" title="Permanent link">&para;</a></h3>
 <ul>
-<li>[ ] TTD snapshot &amp; recompute over JIT segments</li>
-<li>[ ] Symbolic gate: drop to solver when shadow memory is live (still no interpreter for concrete ops)</li>
-<li>[ ] Exploration strategies (already seeded under <code>sym/</code>)</li>
+<li>[x] TTD: enable <code>tracing_memory</code> on <code>with_ttd</code>, clear deltas after record, disable chain while recording</li>
+<li>[ ] TTD: full keyframe recompute between snapshots (seek still nearest-snapshot + delta apply)</li>
+<li>[x] Symbolic CBranch gate (<code>jit_sym_cbranch_gate</code> → <code>sym_events</code> + <code>sym_stop_requested</code>)</li>
+<li>[ ] Full shadow propagation on JIT ALU/LOAD (Evaluator-only today; concolic branch gate first)</li>
+<li>[x] Exploration manager clears stop flag between forks (<code>sym/manager.rs</code>)</li>
 </ul>
 <h3 id="phase-e-maturity-smoke-in-progress">Phase E — Maturity / smoke (in progress)<a class="headerlink" href="#phase-e-maturity-smoke-in-progress" title="Permanent link">&para;</a></h3>
 <ul>
@@ -1054,9 +1057,12 @@
 <li>[x] CallOther mid-TB dirty register flush (HLE sees current SSA)</li>
 <li>[x] Checked-in tiny ELF fixture: <code>testdata/linux_x64_hello_sys.elf</code> + <code>smoke_ci_fixture_hello_sys</code></li>
 <li>[x] PE ExitProcess fixture: <code>testdata/win_x64_exit.exe</code> + <code>smoke_pe_exit_process</code></li>
+<li>[x] PE WriteFile fixture: <code>testdata/win_x64_write.exe</code> + <code>smoke_pe_write_file</code></li>
 <li>[x] Unimplemented-opcode budget gate (<code>EmulatorMetrics::check_unimplemented_budget</code>)</li>
-<li>[ ] Dynamic-linked ELF / full PE CRT (WriteFile + more HLE)</li>
-<li>[ ] Wire budget gate into automation/report surfaces (optional)</li>
+<li>[x] IAT table + GetProcAddress dynamic trampolines + CRT bootstrap stubs</li>
+<li>[x] CLI sandbox: <code>--json</code> / <code>--metrics-out</code> / <code>--max-unimpl-*</code> / <code>--fail-on-budget</code></li>
+<li>[ ] Dynamic-linked ELF GOT/<code>iat_symbols</code> fill in <code>fission-loader</code></li>
+<li>[ ] Automation <code>sandbox-check</code> lane (subprocess over CLI JSON)</li>
 </ul>
 <h2 id="validation">Validation<a class="headerlink" href="#validation" title="Permanent link">&para;</a></h2>
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>cargo<span class="w"> </span>check<span class="w"> </span>-p<span class="w"> </span>fission-emulator
@@ -1065,7 +1071,8 @@
 </span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="c1">#   zig cc -target x86_64-linux-musl -O0 -o /tmp/fission-emu-test/hello_linux_x64 hello.c</span>
 </span><span id="__span-1-5"><a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="c1">#   FISSION_SMOKE_ELF=/tmp/fission-emu-test/hello_linux_x64 cargo nextest run -p fission-emulator smoke_optional</span>
 </span><span id="__span-1-6"><a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>cargo<span class="w"> </span>check<span class="w"> </span>-p<span class="w"> </span>fission-cli
-</span><span id="__span-1-7"><a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>./target/release/fission_cli<span class="w"> </span>sandbox<span class="w"> </span>/path/to/elf<span class="w"> </span>--max-inst<span class="w"> </span><span class="m">50000</span>
+</span><span id="__span-1-7"><a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>./target/release/fission_cli<span class="w"> </span>sandbox<span class="w"> </span>crates/fission-emulator/testdata/linux_x64_hello_sys.elf<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-1-8"><a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="w">  </span>--max-inst<span class="w"> </span><span class="m">64</span><span class="w"> </span>--json<span class="w"> </span>--fail-on-budget<span class="w"> </span>--max-unimpl-events<span class="w"> </span><span class="m">0</span><span class="w"> </span>--max-unimpl-kinds<span class="w"> </span><span class="m">0</span>
 </span></code></pre></div>
 <p>Future: differential execution against a <strong>separate</strong> offline oracle harness is allowed for CI measurement only — never linked into <code>fission-emulator</code>.</p>
 <h2 id="anti-patterns">Anti-patterns<a class="headerlink" href="#anti-patterns" title="Permanent link">&para;</a></h2>
