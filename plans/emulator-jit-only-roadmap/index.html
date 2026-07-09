@@ -1093,7 +1093,10 @@
       <code>segment</code>/<code>segment_fs</code> CallOther result → JIT output</li>
 <li>[x] <code>max_inst</code> honored inside chain (no chain when budgeted); seal op-blocks after CFG edges</li>
 <li>[x] path-SAT prune re-enabled with OOB-safe <code>value_lit</code> + panic isolation</li>
-<li>[x] static CRT profile smoke (<code>static_crt_profile</code>, budgeted) — still not full halt CI</li>
+<li>[x] path-SAT quality tests: Const false/true short-circuit; free vars both SAT</li>
+<li>[x] static CRT profile ladder (<code>512</code>/<code>1500</code>): early surface = arch_prctl, set_tid,
+      brk, mmap — <strong>zero unknown syscalls</strong>; full halt still open</li>
+<li>[x] <code>max_inst</code> + <code>pcode_budget</code> fuses (TB exit on fuse; no false process halt)</li>
 <li>[x] Automation <code>sandbox-check</code> lane (subprocess over CLI JSON + budget gate)</li>
 </ul>
 <h2 id="validation">Validation<a class="headerlink" href="#validation" title="Permanent link">&para;</a></h2>
