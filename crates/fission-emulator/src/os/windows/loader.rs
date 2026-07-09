@@ -1,23 +1,20 @@
+use crate::os::windows::image_info::{self, PeImageInfo, PeProcessArgs};
 use crate::pcode::state::MachineState;
 use anyhow::Result;
 use fission_loader::loader::LoadedBinary;
 
-/// Maps PE sections into the emulator's machine state (Space 3 / RAM).
-///
-/// IAT patching is now handled by `WindowsEnv::patch_imports` which is called
-/// by the Emulator constructor. This function only performs section mapping
-/// for legacy compatibility with the PEB/TEB initialization path.
-pub fn load_pe(state: &mut MachineState, binary: &LoadedBinary) -> Result<()> {
-    tracing::info!("Mapping PE sections into RAM...");
-    for sec in &binary.inner().sections {
-        tracing::debug!(
-            "Mapping section {} at 0x{:X} (size: 0x{:X})",
-            sec.name, sec.virtual_address, sec.virtual_size
-        );
-        let sec_data = binary
-            .view_bytes(sec.virtual_address, sec.virtual_size as usize)
-            .unwrap_or(&[]);
-        state.write_space(3, sec.virtual_address, sec_data)?;
-    }
-    Ok(())
+/// Maps PE image into guest RAM with page protections, PEB/TEB, stack, and heap.
+pub fn load_pe(state: &mut MachineState, binary: &LoadedBinary) -> Result<PeImageInfo> {
+    load_pe_with_args(state, binary, &PeProcessArgs::default())
 }
+
+/// Same as [`load_pe`] with explicit module path / command line.
+pub fn load_pe_with_args(
+    state: &mut MachineState,
+    binary: &LoadedBinary,
+    args: &PeProcessArgs,
+) -> Result<PeImageInfo> {
+    image_info::load_pe_image(state, binary, args)
+}
+
+pub use image_info::apply_stack_and_entry;

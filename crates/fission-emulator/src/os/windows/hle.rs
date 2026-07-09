@@ -35,7 +35,7 @@ impl OsEnvironment for WindowsEnv {
         for (i, (&addr, name)) in iat_entries.into_iter().enumerate() {
             let trampoline = MAGIC_BASE + (i as u64 * 8);
             tracing::debug!("IAT patch: {} @ 0x{:X} → trampoline 0x{:X}", name, addr, trampoline);
-            state.write_space(3, addr, &trampoline.to_le_bytes())?;
+            state.write_space(state.ram_space(), addr, &trampoline.to_le_bytes())?;
         }
         Ok(())
     }
@@ -53,45 +53,129 @@ impl OsEnvironment for WindowsEnv {
     fn dispatch_hle(&self, emu: &mut Emulator, func_name: &str) -> Result<HleResult> {
         tracing::info!("HLE Intercept: {}", func_name);
         match func_name {
-            "LoadLibraryA"   => handle_load_library_a(emu)?,
-            "LoadLibraryW"   => handle_load_library_w(emu)?,
+            "LoadLibraryA" | "LoadLibraryExA" => handle_load_library_a(emu)?,
+            "LoadLibraryW" | "LoadLibraryExW" => handle_load_library_w(emu)?,
             "GetProcAddress" => handle_get_proc_address(emu)?,
-            "VirtualAlloc"   => handle_virtual_alloc(emu)?,
-            "VirtualFree"    => { emu.write_return_val(1)?; } // always succeed
-            
+            "FreeLibrary" => { emu.write_return_val(1)?; }
+            "VirtualAlloc" | "VirtualAllocEx" => handle_virtual_alloc(emu)?,
+            "VirtualFree" | "VirtualFreeEx" => {
+                let addr = emu.read_arg(0).unwrap_or(0);
+                let size = emu.read_arg(1).unwrap_or(0);
+                if size > 0 {
+                    emu.state.page_map.unmap_region(addr, size);
+                }
+                emu.write_return_val(1)?;
+            }
+            "VirtualProtect" => handle_virtual_protect(emu)?,
+            "VirtualQuery" => handle_virtual_query(emu)?,
+
             // Heap
-            "GetProcessHeap" => { emu.write_return_val(0x20000000)?; } // dummy handle
-            "HeapAlloc"      => handle_heap_alloc(emu, self)?,
-            "HeapFree"       => handle_heap_free(emu, self)?,
-            "HeapReAlloc"    => handle_heap_realloc(emu, self)?,
-            
-            // Console
-            "GetStdHandle"   => { emu.write_return_val(0x77777777)?; } // dummy handle
-            "WriteConsoleA"  => handle_write_console_a(emu)?,
-            "WriteConsoleW"  => handle_write_console_w(emu)?,
-            "ReadConsoleA"   => handle_read_console_a(emu)?,
-            "ReadConsoleW"   => handle_read_console_w(emu)?,
-            "AllocConsole"   => { emu.write_return_val(1)?; }
-            
-            // Thread / Sync
-            "CreateThread"   => handle_create_thread(emu)?,
-            "WaitForSingleObject" => { emu.write_return_val(0)?; } // WAIT_OBJECT_0
-            "CloseHandle"    => { emu.write_return_val(1)?; }
-            "InitializeCriticalSection" | "EnterCriticalSection" | "LeaveCriticalSection" | "DeleteCriticalSection" => {}
-            
-            // Str / Mem
-            "lstrcpyA"       => handle_lstrcpy_a(emu)?,
-            "lstrcatA"       => handle_lstrcat_a(emu)?,
-            "lstrlenA"       => handle_lstrlen_a(emu)?,
-            "RtlMoveMemory"  => handle_rtl_move_memory(emu)?,
-            
+            "GetProcessHeap" => { emu.write_return_val(0x20000000)?; }
+            "HeapCreate" => { emu.write_return_val(0x20000000)?; }
+            "HeapAlloc" | "RtlAllocateHeap" => handle_heap_alloc(emu, self)?,
+            "HeapFree" | "RtlFreeHeap" => handle_heap_free(emu, self)?,
+            "HeapReAlloc" => handle_heap_realloc(emu, self)?,
+            "HeapSize" => {
+                let _h = emu.read_arg(0)?;
+                let _f = emu.read_arg(1)?;
+                let _p = emu.read_arg(2)?;
+                emu.write_return_val(0x1000)?;
+            }
+
+            // Console / stdio
+            "GetStdHandle" => { emu.write_return_val(0x77777777)?; }
+            "WriteConsoleA" | "WriteFile" => handle_write_console_a(emu)?,
+            "WriteConsoleW" => handle_write_console_w(emu)?,
+            "ReadConsoleA" | "ReadFile" => handle_read_console_a(emu)?,
+            "ReadConsoleW" => handle_read_console_w(emu)?,
+            "AllocConsole" | "AttachConsole" | "FreeConsole" => { emu.write_return_val(1)?; }
+            "FlushFileBuffers" | "SetEndOfFile" => { emu.write_return_val(1)?; }
+            "CreateFileA" => handle_create_file_a(emu)?,
+            "CreateFileW" => handle_create_file_w(emu)?,
+            "GetFileSize" | "GetFileSizeEx" => {
+                emu.write_return_val(0)?;
+            }
+
+            // Thread / Sync / process identity
+            "CreateThread" => handle_create_thread(emu)?,
+            "WaitForSingleObject" | "WaitForSingleObjectEx" => { emu.write_return_val(0)?; }
+            "CloseHandle" => { emu.write_return_val(1)?; }
+            "GetCurrentProcess" => { emu.write_return_val(!0u64)?; } // pseudo -1
+            "GetCurrentProcessId" => { emu.write_return_val(1000)?; }
+            "GetCurrentThread" => { emu.write_return_val(!1u64 + 1)?; }
+            "GetCurrentThreadId" => { emu.write_return_val(1000)?; }
+            "TlsAlloc" => { emu.write_return_val(1)?; }
+            "TlsGetValue" => { emu.write_return_val(0)?; }
+            "TlsSetValue" => { emu.write_return_val(1)?; }
+            "TlsFree" => { emu.write_return_val(1)?; }
+            "InitializeCriticalSection"
+            | "InitializeCriticalSectionEx"
+            | "EnterCriticalSection"
+            | "LeaveCriticalSection"
+            | "DeleteCriticalSection"
+            | "InitializeSListHead" => {}
+
+            // Error state
+            "GetLastError" => {
+                emu.write_return_val(emu.win_last_error as u64)?;
+            }
+            "SetLastError" => {
+                emu.win_last_error = emu.read_arg(0).unwrap_or(0) as u32;
+                emu.write_return_val(0)?;
+            }
+            "SetUnhandledExceptionFilter" => { emu.write_return_val(0)?; }
+            "IsDebuggerPresent" => { emu.write_return_val(0)?; }
+            "CheckRemoteDebuggerPresent" => {
+                let p = emu.read_arg(1).unwrap_or(0);
+                if p != 0 {
+                    let _ = emu.state.write_space(emu.state.ram_space(), p, &[0u8; 4]);
+                }
+                emu.write_return_val(1)?;
+            }
+            "OutputDebugStringA" => {
+                let p = emu.read_arg(0).unwrap_or(0);
+                if p != 0 {
+                    if let Ok(s) = read_string(emu, p) {
+                        tracing::debug!("OutputDebugStringA: {}", s);
+                    }
+                }
+                emu.write_return_val(0)?;
+            }
+            "OutputDebugStringW" => { emu.write_return_val(0)?; }
+
+            // Str / Mem / codepage
+            "lstrcpyA" | "strcpy" => handle_lstrcpy_a(emu)?,
+            "lstrcatA" | "strcat" => handle_lstrcat_a(emu)?,
+            "lstrlenA" | "strlen" => handle_lstrlen_a(emu)?,
+            "RtlMoveMemory" | "memmove" | "memcpy" => handle_rtl_move_memory(emu)?,
+            "RtlZeroMemory" | "memset" => handle_rtl_zero_memory(emu)?,
+            "MultiByteToWideChar" => handle_multi_byte_to_wide_char(emu)?,
+            "WideCharToMultiByte" => handle_wide_char_to_multi_byte(emu)?,
+
             // Module
-            "GetModuleHandleA" | "GetModuleHandleW" => { emu.write_return_val(0x140000000)?; }
+            "GetModuleHandleA" | "GetModuleHandleW" | "GetModuleHandleExA" | "GetModuleHandleExW" => {
+                emu.write_return_val(0x140000000)?;
+            }
             "GetModuleFileNameA" => handle_get_module_file_name_a(emu)?,
-            
-            "ExitProcess"    => {
+            "GetModuleFileNameW" => handle_get_module_file_name_w(emu)?,
+            "GetCommandLineA" => handle_get_command_line_a(emu)?,
+            "GetCommandLineW" => handle_get_command_line_w(emu)?,
+            "GetEnvironmentStringsW" => {
+                // Return a dummy env block pointer in guest heap region.
+                let base = 0x0000_0000_2100_0000u64;
+                let data = "PATH=C:\\Windows\\System32\0\0".encode_utf16().flat_map(|c| c.to_le_bytes()).collect::<Vec<_>>();
+                let _ = emu.state.write_space(emu.state.ram_space(), base, &data);
+                emu.write_return_val(base)?;
+            }
+            "FreeEnvironmentStringsW" | "FreeEnvironmentStringsA" => { emu.write_return_val(1)?; }
+
+            "ExitProcess" | "TerminateProcess" => {
                 let code = emu.read_arg(0).unwrap_or(0) as u32;
                 tracing::info!("ExitProcess({}). Emulation finished.", code);
+                return Ok(HleResult::Halt(code));
+            }
+            "ExitThread" => {
+                let code = emu.read_arg(0).unwrap_or(0) as u32;
                 return Ok(HleResult::Halt(code));
             }
             // Time / Process identity (deterministic, tick-based)
@@ -118,7 +202,7 @@ impl OsEnvironment for WindowsEnv {
                 let fake_time = file_time_base.wrapping_add(emu.tick_count.wrapping_mul(10_000));
                 let ptr = emu.read_arg(0).unwrap_or(0);
                 if ptr != 0 {
-                    let _ = emu.state.write_space(3, ptr, &fake_time.to_le_bytes());
+                    let _ = emu.state.write_space(emu.state.ram_space(), ptr, &fake_time.to_le_bytes());
                 }
                 emu.tick_count = emu.tick_count.wrapping_add(1);
                 // void return
@@ -128,7 +212,7 @@ impl OsEnvironment for WindowsEnv {
                 let ptr = emu.read_arg(0).unwrap_or(0);
                 if ptr != 0 {
                     let counter = emu.tick_count.wrapping_mul(10_000);
-                    let _ = emu.state.write_space(3, ptr, &counter.to_le_bytes());
+                    let _ = emu.state.write_space(emu.state.ram_space(), ptr, &counter.to_le_bytes());
                 }
                 emu.tick_count = emu.tick_count.wrapping_add(1);
                 emu.write_return_val(1)?; // TRUE = success
@@ -138,45 +222,16 @@ impl OsEnvironment for WindowsEnv {
                 if ptr != 0 {
                     // Return 10,000,000 Hz (100-ns resolution, matches FILETIME)
                     let freq: u64 = 10_000_000;
-                    let _ = emu.state.write_space(3, ptr, &freq.to_le_bytes());
+                    let _ = emu.state.write_space(emu.state.ram_space(), ptr, &freq.to_le_bytes());
                 }
                 emu.write_return_val(1)?;
-            }
-            "GetCurrentProcessId" => {
-                emu.write_return_val(1337)?; // Fixed fake PID
-            }
-            "GetCurrentThreadId" => {
-                emu.write_return_val(1)?; // Fixed fake TID
-            }
-            "GetLastError" => {
-                emu.write_return_val(0)?; // ERROR_SUCCESS
-            }
-            "SetLastError" => {
-                // Ignore the error code set by the guest.
-            }
-            "IsDebuggerPresent" => {
-                emu.write_return_val(0)?; // not being debugged
-            }
-            "CheckRemoteDebuggerPresent" => {
-                let ptr = emu.read_arg(1).unwrap_or(0);
-                if ptr != 0 {
-                    let _ = emu.state.write_space(3, ptr, &[0u8; 4]); // FALSE
-                }
-                emu.write_return_val(1)?; // TRUE = success
-            }
-            "OutputDebugStringA" | "OutputDebugStringW" => {
-                // Silently ignore debug output.
             }
             "GetEnvironmentVariableA" | "GetEnvironmentVariableW" => {
                 emu.write_return_val(0)?; // not found
             }
-            "TerminateProcess" => {
-                let code = emu.read_arg(1).unwrap_or(0) as u32;
-                tracing::info!("TerminateProcess(code={}). Emulation finished.", code);
-                return Ok(HleResult::Halt(code));
-            }
             _ => {
                 tracing::warn!("Unimplemented Win32 API: {}. Returning 0.", func_name);
+                emu.win_last_error = 127; // ERROR_PROC_NOT_FOUND-ish
                 emu.write_return_val(0)?;
             }
         }
@@ -218,7 +273,7 @@ fn read_string(emu: &mut Emulator, addr: u64) -> Result<String> {
     let mut bytes = Vec::new();
     let mut cur = addr;
     loop {
-        let b = emu.state.read_space(3, cur, 1)?[0];
+        let b = emu.state.read_space(emu.state.ram_space(), cur, 1)?[0];
         if b == 0 { break; }
         bytes.push(b);
         cur += 1;
@@ -231,7 +286,7 @@ fn read_wide_string(emu: &mut Emulator, addr: u64) -> Result<String> {
     let mut chars = Vec::new();
     let mut cur = addr;
     loop {
-        let pair = emu.state.read_space(3, cur, 2)?;
+        let pair = emu.state.read_space(emu.state.ram_space(), cur, 2)?;
         let wc = pair[0] as u16 | ((pair[1] as u16) << 8);
         if wc == 0 { break; }
         chars.push(wc);
@@ -273,12 +328,224 @@ fn handle_get_proc_address(emu: &mut Emulator) -> Result<()> {
 }
 
 fn handle_virtual_alloc(emu: &mut Emulator) -> Result<()> {
+    use crate::pcode::page_map::prot;
     let lp_address = emu.read_arg(0)?;
-    let dw_size    = emu.read_arg(1)?;
+    let dw_size = emu.read_arg(1)?;
     let alloc_type = emu.read_arg(2)?;
-    let protect    = emu.read_arg(3)?;
-    tracing::info!("VirtualAlloc(0x{:X}, 0x{:X}, 0x{:X}, 0x{:X})", lp_address, dw_size, alloc_type, protect);
-    emu.write_return_val(0x30000000)?; // dummy allocated address
+    let protect = emu.read_arg(3)?;
+    // Map PAGE_* protect bits loosely onto page_map prot.
+    let mut page_prot = prot::VALID | prot::READ;
+    if protect & 0x04 != 0 || protect & 0x40 != 0 {
+        // PAGE_READWRITE / EXECUTE_READWRITE
+        page_prot |= prot::WRITE;
+    }
+    if protect & 0x10 != 0 || protect & 0x20 != 0 || protect & 0x40 != 0 {
+        page_prot |= prot::EXEC;
+    }
+    if protect & 0x02 != 0 {
+        page_prot |= prot::READ;
+    }
+    let size = dw_size.max(0x1000);
+    let base = if lp_address == 0 {
+        emu.state.page_map.mmap_anon(size, page_prot)
+    } else {
+        emu.state.page_map.map_region(lp_address, size, page_prot, true);
+        lp_address
+    };
+    let fill = (size as usize).min(0x10_0000);
+    let zeros = vec![0u8; fill];
+    let _ = emu.state.write_space(emu.state.ram_space(), base, &zeros);
+    tracing::info!(
+        "VirtualAlloc(0x{:X}, 0x{:X}, type=0x{:X}, prot=0x{:X}) -> 0x{:X}",
+        lp_address,
+        dw_size,
+        alloc_type,
+        protect,
+        base
+    );
+    emu.win_last_error = 0;
+    emu.write_return_val(base)?;
+    Ok(())
+}
+
+fn handle_virtual_protect(emu: &mut Emulator) -> Result<()> {
+    use crate::pcode::page_map::prot;
+    let addr = emu.read_arg(0)?;
+    let size = emu.read_arg(1)?;
+    let new_prot = emu.read_arg(2)? as u8;
+    let old_ptr = emu.read_arg(3)?;
+    if old_ptr != 0 {
+        let _ = emu
+            .state
+            .write_space(emu.state.ram_space(), old_ptr, &4u32.to_le_bytes());
+    }
+    let mut p = prot::VALID | prot::READ;
+    if new_prot & 0x04 != 0 || new_prot & 0x40 != 0 {
+        p |= prot::WRITE;
+    }
+    if new_prot & 0x10 != 0 || new_prot & 0x20 != 0 || new_prot & 0x40 != 0 {
+        p |= prot::EXEC;
+    }
+    emu.state.page_map.mprotect(addr, size.max(1), p);
+    // SMC
+    let mut page = addr & !0xFFF;
+    let end = (addr + size.max(1) + 0xFFF) & !0xFFF;
+    while page < end {
+        emu.jit_cache.invalidate_page(page);
+        page = page.saturating_add(0x1000);
+    }
+    emu.write_return_val(1)?;
+    Ok(())
+}
+
+fn handle_virtual_query(emu: &mut Emulator) -> Result<()> {
+    // MEMORY_BASIC_INFORMATION lite: fill BaseAddress + RegionSize + Protect + State
+    let addr = emu.read_arg(0)?;
+    let buf = emu.read_arg(1)?;
+    let _len = emu.read_arg(2)?;
+    if buf != 0 {
+        let mut mbi = vec![0u8; 48];
+        mbi[0..8].copy_from_slice(&addr.to_le_bytes());
+        mbi[16..24].copy_from_slice(&0x1000u64.to_le_bytes()); // RegionSize
+        mbi[24..28].copy_from_slice(&0x1000u32.to_le_bytes()); // MEM_COMMIT
+        mbi[28..32].copy_from_slice(&0x04u32.to_le_bytes()); // PAGE_READWRITE
+        let _ = emu.state.write_space(emu.state.ram_space(), buf, &mbi);
+        emu.write_return_val(48)?;
+    } else {
+        emu.write_return_val(0)?;
+    }
+    Ok(())
+}
+
+fn handle_create_file_a(emu: &mut Emulator) -> Result<()> {
+    let name_ptr = emu.read_arg(0)?;
+    let name = if name_ptr == 0 {
+        "<null>".into()
+    } else {
+        read_string(emu, name_ptr)?
+    };
+    tracing::info!("CreateFileA(\"{}\")", name);
+    // Return a pseudo handle
+    emu.win_last_error = 0;
+    emu.write_return_val(0x50000000)?;
+    Ok(())
+}
+
+fn handle_create_file_w(emu: &mut Emulator) -> Result<()> {
+    let name_ptr = emu.read_arg(0)?;
+    let name = if name_ptr == 0 {
+        "<null>".into()
+    } else {
+        read_wide_string(emu, name_ptr)?
+    };
+    tracing::info!("CreateFileW(\"{}\")", name);
+    emu.win_last_error = 0;
+    emu.write_return_val(0x50000001)?;
+    Ok(())
+}
+
+fn handle_rtl_zero_memory(emu: &mut Emulator) -> Result<()> {
+    let dst = emu.read_arg(0)?;
+    let len = emu.read_arg(1)? as usize;
+    let zeros = vec![0u8; len.min(0x10_0000)];
+    emu.state.write_space(emu.state.ram_space(), dst, &zeros)?;
+    emu.write_return_val(0)?;
+    Ok(())
+}
+
+fn handle_multi_byte_to_wide_char(emu: &mut Emulator) -> Result<()> {
+    // MultiByteToWideChar(CodePage, dwFlags, lpMultiByteStr, cbMultiByte, lpWideCharStr, cchWideChar)
+    let src = emu.read_arg(2)?;
+    let cb = emu.read_arg(3)? as i64;
+    let dst = emu.read_arg(4)?;
+    let cch = emu.read_arg(5)? as i64;
+    let s = if src == 0 {
+        String::new()
+    } else if cb < 0 {
+        read_string(emu, src)?
+    } else {
+        let raw = emu.state.read_space(emu.state.ram_space(), src, cb as usize)?;
+        String::from_utf8_lossy(&raw).into_owned()
+    };
+    let wide: Vec<u16> = s.encode_utf16().chain(std::iter::once(0)).collect();
+    if cch == 0 {
+        emu.write_return_val(wide.len() as u64)?;
+    } else if dst != 0 {
+        let n = (cch as usize).min(wide.len());
+        let mut bytes = Vec::with_capacity(n * 2);
+        for &c in &wide[..n] {
+            bytes.extend_from_slice(&c.to_le_bytes());
+        }
+        emu.state.write_space(emu.state.ram_space(), dst, &bytes)?;
+        emu.write_return_val(n as u64)?;
+    } else {
+        emu.write_return_val(0)?;
+    }
+    Ok(())
+}
+
+fn handle_wide_char_to_multi_byte(emu: &mut Emulator) -> Result<()> {
+    let src = emu.read_arg(2)?;
+    let cch = emu.read_arg(3)? as i64;
+    let dst = emu.read_arg(4)?;
+    let cb = emu.read_arg(5)? as i64;
+    let s = if src == 0 {
+        String::new()
+    } else {
+        read_wide_string(emu, src)?
+    };
+    let mut bytes = s.into_bytes();
+    bytes.push(0);
+    if cb == 0 {
+        emu.write_return_val(bytes.len() as u64)?;
+    } else if dst != 0 {
+        let n = (cb as usize).min(bytes.len());
+        emu.state.write_space(emu.state.ram_space(), dst, &bytes[..n])?;
+        emu.write_return_val(n as u64)?;
+    } else {
+        emu.write_return_val(0)?;
+    }
+    let _ = cch;
+    Ok(())
+}
+
+fn handle_get_module_file_name_w(emu: &mut Emulator) -> Result<()> {
+    let _h = emu.read_arg(0)?;
+    let buf = emu.read_arg(1)?;
+    let size = emu.read_arg(2)? as usize;
+    let path: Vec<u16> = "C:\\sandbox\\test.exe"
+        .encode_utf16()
+        .chain(std::iter::once(0))
+        .collect();
+    let n = path.len().min(size.max(1));
+    let mut bytes = Vec::with_capacity(n * 2);
+    for &c in &path[..n] {
+        bytes.extend_from_slice(&c.to_le_bytes());
+    }
+    if buf != 0 {
+        emu.state.write_space(emu.state.ram_space(), buf, &bytes)?;
+    }
+    emu.write_return_val((n.saturating_sub(1)) as u64)?;
+    Ok(())
+}
+
+fn handle_get_command_line_a(emu: &mut Emulator) -> Result<()> {
+    let base = 0x0000_0000_2110_0000u64;
+    let data = b"test.exe\0";
+    emu.state.write_space(emu.state.ram_space(), base, data)?;
+    emu.write_return_val(base)?;
+    Ok(())
+}
+
+fn handle_get_command_line_w(emu: &mut Emulator) -> Result<()> {
+    let base = 0x0000_0000_2110_1000u64;
+    let wide: Vec<u16> = "test.exe".encode_utf16().chain(std::iter::once(0)).collect();
+    let mut bytes = Vec::new();
+    for c in wide {
+        bytes.extend_from_slice(&c.to_le_bytes());
+    }
+    emu.state.write_space(emu.state.ram_space(), base, &bytes)?;
+    emu.write_return_val(base)?;
     Ok(())
 }
 
@@ -289,7 +556,7 @@ fn handle_heap_alloc(emu: &mut Emulator, env: &WindowsEnv) -> Result<()> {
     let addr = env.heap.lock().unwrap().alloc(bytes);
     if (flags & 8) != 0 { // HEAP_ZERO_MEMORY
         let zeros = vec![0u8; bytes];
-        emu.state.write_space(3, addr, &zeros)?;
+        emu.state.write_space(emu.state.ram_space(), addr, &zeros)?;
     }
     tracing::info!("HeapAlloc(size: {}) -> 0x{:X}", bytes, addr);
     emu.write_return_val(addr)?;
@@ -329,12 +596,12 @@ fn handle_write_console_a(emu: &mut Emulator) -> Result<()> {
     let n_chars    = emu.read_arg(2)? as usize;
     let p_written  = emu.read_arg(3)?;
     
-    let raw = emu.state.read_space(3, buf_ptr, n_chars)?;
+    let raw = emu.state.read_space(emu.state.ram_space(), buf_ptr, n_chars)?;
     let s = String::from_utf8_lossy(&raw);
     print!("{}", s); // Print to real stdout
     
     if p_written != 0 {
-        emu.state.write_space(3, p_written, &(n_chars as u32).to_le_bytes())?;
+        emu.state.write_space(emu.state.ram_space(), p_written, &(n_chars as u32).to_le_bytes())?;
     }
     emu.write_return_val(1)?;
     Ok(())
@@ -346,13 +613,13 @@ fn handle_write_console_w(emu: &mut Emulator) -> Result<()> {
     let n_chars    = emu.read_arg(2)? as usize;
     let p_written  = emu.read_arg(3)?;
     
-    let raw = emu.state.read_space(3, buf_ptr, n_chars * 2)?;
+    let raw = emu.state.read_space(emu.state.ram_space(), buf_ptr, n_chars * 2)?;
     let chars: Vec<u16> = raw.chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]])).collect();
     let s = String::from_utf16_lossy(&chars);
     print!("{}", s);
     
     if p_written != 0 {
-        emu.state.write_space(3, p_written, &(n_chars as u32).to_le_bytes())?;
+        emu.state.write_space(emu.state.ram_space(), p_written, &(n_chars as u32).to_le_bytes())?;
     }
     emu.write_return_val(1)?;
     Ok(())
@@ -371,7 +638,7 @@ fn handle_lstrcpy_a(emu: &mut Emulator) -> Result<()> {
     let s = read_string(emu, src)?;
     let mut bytes = s.into_bytes();
     bytes.push(0);
-    emu.state.write_space(3, dst, &bytes)?;
+    emu.state.write_space(emu.state.ram_space(), dst, &bytes)?;
     emu.write_return_val(dst)?;
     Ok(())
 }
@@ -383,7 +650,7 @@ fn handle_lstrcat_a(emu: &mut Emulator) -> Result<()> {
     let s = read_string(emu, src)?;
     let mut bytes = format!("{}{}", d, s).into_bytes();
     bytes.push(0);
-    emu.state.write_space(3, dst, &bytes)?;
+    emu.state.write_space(emu.state.ram_space(), dst, &bytes)?;
     emu.write_return_val(dst)?;
     Ok(())
 }
@@ -399,8 +666,8 @@ fn handle_rtl_move_memory(emu: &mut Emulator) -> Result<()> {
     let dst = emu.read_arg(0)?;
     let src = emu.read_arg(1)?;
     let len = emu.read_arg(2)? as usize;
-    let data = emu.state.read_space(3, src, len)?;
-    emu.state.write_space(3, dst, &data)?;
+    let data = emu.state.read_space(emu.state.ram_space(), src, len)?;
+    emu.state.write_space(emu.state.ram_space(), dst, &data)?;
     emu.write_return_val(0)?; // void
     Ok(())
 }
@@ -414,7 +681,7 @@ fn handle_get_module_file_name_a(emu: &mut Emulator) -> Result<()> {
     let mut bytes = path.as_bytes().to_vec();
     bytes.push(0);
     let copied = std::cmp::min(bytes.len(), size);
-    emu.state.write_space(3, buf, &bytes[..copied])?;
+    emu.state.write_space(emu.state.ram_space(), buf, &bytes[..copied])?;
     emu.write_return_val((copied - 1) as u64)?;
     Ok(())
 }
@@ -441,15 +708,16 @@ fn handle_read_console_a(emu: &mut Emulator) -> Result<()> {
     }
     
     if bytes_read > 0 {
-        emu.state.write_space(3, buf, &data[..bytes_read])?;
+        emu.state.write_space(emu.state.ram_space(), buf, &data[..bytes_read])?;
         // Taint stdin bytes for symbolic execution
         for i in 0..bytes_read {
             let node = emu.solver.register_var(format!("stdin_console_{}", buf+i as u64), 1);
-            emu.state.set_shadow_memory(3, buf + i as u64, node);
+            emu.state
+                .set_shadow_memory(emu.state.ram_space(), buf + i as u64, node);
         }
     }
     if p_chars_read != 0 {
-        emu.state.write_space(3, p_chars_read, &(bytes_read as u32).to_le_bytes())?;
+        emu.state.write_space(emu.state.ram_space(), p_chars_read, &(bytes_read as u32).to_le_bytes())?;
     }
     
     emu.write_return_val(1)?; // non-zero on success
@@ -484,10 +752,10 @@ fn handle_read_console_w(emu: &mut Emulator) -> Result<()> {
             wdata.push(b);
             wdata.push(0);
         }
-        emu.state.write_space(3, buf, &wdata)?;
+        emu.state.write_space(emu.state.ram_space(), buf, &wdata)?;
     }
     if p_chars_read != 0 {
-        emu.state.write_space(3, p_chars_read, &(chars_read as u32).to_le_bytes())?;
+        emu.state.write_space(emu.state.ram_space(), p_chars_read, &(chars_read as u32).to_le_bytes())?;
     }
     
     emu.write_return_val(1)?;

@@ -1,7 +1,6 @@
 use crate::arch::ArchInfo;
 use crate::os::env::{HleResult, OsEnvironment};
 use crate::pcode::state::MachineState;
-use crate::pcode::eval::Evaluator;
 use fission_loader::loader::LoadedBinary;
 use fission_sleigh::runtime::RuntimeSleighFrontend;
 use fission_ttd::{TTDRecorder, RegisterState};
@@ -60,7 +59,66 @@ pub struct Emulator {
 
     /// The pure-Rust Symbolic Solver context
     pub solver: fission_solver::Solver,
+    
+    /// Native JIT Compiler instance
+    pub jit: Option<crate::jit::JitCompiler>,
+    
+    /// Native JIT Block Cache
+    pub jit_cache: crate::jit::cache::JitCache,
+
+    /// Soft TB-chaining depth (reset at outer run-loop entry).
+    pub chain_depth: u32,
+
+    /// Set by HLE/CallOther when guest requests process exit.
+    pub halt_requested: bool,
+
+    /// Linux ELF process image metadata (stack/auxv/brk) when loaded via ELF loader.
+    pub image_info: Option<crate::os::linux::image_info::ImageInfo>,
+
+    /// Windows PE process image metadata (stack/PEB/TEB/heap) when loaded via PE loader.
+    pub pe_image_info: Option<crate::os::windows::image_info::PeImageInfo>,
+
+    /// Linux signal pending/actions/blocked mask (user-mode).
+    pub signals: crate::os::linux::signal::SignalState,
+
+    /// Windows `GetLastError` / `SetLastError` thread state (deterministic HLE).
+    pub win_last_error: u32,
+
+    /// If set, the next TB exit / outer PC update uses this instead of the
+    /// computed next PC (e.g. `rt_sigreturn`).
+    pub pc_override: Option<u64>,
+
+    /// Coverage / quality telemetry for the current run.
+    pub metrics: crate::metrics::EmulatorMetrics,
 }
+
+/// Max guest instructions per translation block.
+pub const MAX_TB_INSNS: usize = 8;
+
+/// Ghidra x86 `define pcodeop` order (ia.sinc) — indices match CallOther const ids.
+const X86_FALLBACK_USEROPS: &[(u32, &str)] = &[
+    (0, "segment"),
+    (1, "in"),
+    (2, "out"),
+    (3, "sysenter"),
+    (4, "sysexit"),
+    (5, "syscall"),
+    (6, "sysret"),
+    (7, "swapgs"),
+    (8, "invlpg"),
+    (9, "invlpga"),
+    (10, "invpcid"),
+    (11, "rdtscp"),
+    (12, "mwait"),
+    (13, "mwaitx"),
+    (14, "monitor"),
+    (15, "monitorx"),
+    (16, "swi"),
+    (17, "LOCK"),
+    (18, "UNLOCK"),
+    (19, "XACQUIRE"),
+    (20, "XRELEASE"),
+];
 
 #[derive(Clone, Debug)]
 pub struct SymBranch {
@@ -100,16 +158,90 @@ impl Emulator {
 
         let sleigh_arc = Arc::new(sleigh);
 
-        let userop_map = {
-            // Extract the userop table from the compiled frontend if available.
-            // We do a single cheap decode to retrieve the details.
+        // Resolve SLA-native space indices. Guest image may already have been
+        // loaded under the fallback ram id (3); migrate pages if SLA differs.
+        let layout = sleigh_arc
+            .compiled_frontend()
+            .map(crate::pcode::spaces::SpaceLayout::from_compiled)
+            .unwrap_or_default();
+        let old_ram = state.spaces_layout.ram;
+        let old_reg = state.spaces_layout.register;
+        let old_unique = state.spaces_layout.unique;
+        if old_ram != layout.ram {
+            if let Some(space) = state.spaces.remove(&old_ram) {
+                state.spaces.insert(layout.ram, space);
+            }
+        }
+        if old_reg != layout.register {
+            if let Some(space) = state.spaces.remove(&old_reg) {
+                state.spaces.insert(layout.register, space);
+            }
+        }
+        if old_unique != layout.unique {
+            if let Some(space) = state.spaces.remove(&old_unique) {
+                state.spaces.insert(layout.unique, space);
+            }
+        }
+        state.spaces_layout = layout.clone();
+        for (name, &idx) in &layout.by_name {
+            if !state.spaces.contains_key(&idx) {
+                state
+                    .spaces
+                    .insert(idx, crate::pcode::state::AddressSpace::new(name.clone()));
+            }
+        }
+        tracing::info!(
+            "SpaceLayout: ram={}, register={}, unique={} (from SLA)",
+            layout.ram,
+            layout.register,
+            layout.unique
+        );
+
+        // Prefer SLA `<userop_head>` (via packaged .sla) so CallOther names resolve
+        // ("syscall", "cpuid", …). CompiledFrontend may ship without the table.
+        let mut userop_map = if let Some(spec) = binary.load_spec() {
+            fission_sleigh::runtime::userop_map_for_load_spec(spec).unwrap_or_default()
+        } else {
+            BTreeMap::new()
+        };
+        if let Some(cf) = sleigh_arc.compiled_frontend() {
+            for (id, name) in &cf.userops {
+                userop_map.entry(*id).or_insert_with(|| name.clone());
+            }
+        }
+        {
             let probe_bytes = vec![0u8; 16];
             if let Ok((_, _, details)) = sleigh_arc.decode_and_lift_with_details(&probe_bytes, pc) {
-                details.userops
-            } else {
-                BTreeMap::new()
+                for (id, name) in details.userops {
+                    userop_map.entry(id).or_insert(name);
+                }
             }
-        };
+        }
+        // Fallback: Ghidra x86 `define pcodeop` order from ia.sinc when SLA
+        // USEROP_HEAD parse is empty (packed .sla table currently not populated).
+        if userop_map.is_empty() {
+            let lang = binary
+                .load_spec()
+                .map(|s| s.pair.language_id.as_str())
+                .unwrap_or("");
+            if lang.starts_with("x86:") {
+                for (id, name) in X86_FALLBACK_USEROPS {
+                    userop_map.insert(*id, (*name).to_string());
+                }
+                tracing::info!(
+                    "Using x86 fallback userop table ({} entries)",
+                    userop_map.len()
+                );
+            } else {
+                tracing::warn!("No Sleigh userop table loaded; CallOther names may be userop_N");
+            }
+        } else {
+            tracing::info!(
+                "Loaded {} Sleigh userops (sample: {:?})",
+                userop_map.len(),
+                userop_map.iter().take(8).collect::<Vec<_>>()
+            );
+        }
 
         let mut emu = Self {
             state,
@@ -132,13 +264,122 @@ impl Emulator {
             sym_events: Vec::new(),
             vfs: crate::os::vfs::SimVFS::new(),
             solver: fission_solver::Solver::new(),
+            jit: crate::jit::JitCompiler::new().ok(),
+            jit_cache: crate::jit::cache::JitCache::new(),
+            chain_depth: 0,
+            halt_requested: false,
+            image_info: None,
+            pe_image_info: None,
+            signals: crate::os::linux::signal::SignalState::default(),
+            win_last_error: 0,
+            pc_override: None,
+            metrics: crate::metrics::EmulatorMetrics::default(),
         };
 
-        // Initialize stack pointer using arch-agnostic sp_reg name.
-        let sp_init = if emu.arch.pointer_size == 8 { 0x7FFFFFFF0000u64 } else { 0x7FFF0000u64 };
+        // Default SP if no ELF image_info applied yet (Windows / bare-metal).
+        let sp_init = if emu.arch.pointer_size == 8 {
+            0x0000_7FFF_FFFF_F000u64
+        } else {
+            0x7FFF_E000u64
+        };
         let _ = emu.write_register_u64(emu.arch.sp_reg, sp_init);
 
+        // Enable PageFault checks for user-mode RAM after layout is ready.
+        emu.state.enforce_page_faults = true;
+
         Ok(emu)
+    }
+
+    /// Attach ELF image metadata and apply stack pointer / PC / brk from it.
+    pub fn apply_linux_image(
+        &mut self,
+        info: crate::os::linux::image_info::ImageInfo,
+    ) -> Result<()> {
+        self.pc = info.entry;
+        crate::os::linux::image_info::apply_stack_pointer(self, &info)?;
+        self.state.page_map.brk = info.brk;
+        self.state.page_map.brk_base = info.brk;
+        self.image_info = Some(info);
+        Ok(())
+    }
+
+    /// Attach PE image metadata and apply stack pointer / PC from it.
+    pub fn apply_windows_image(
+        &mut self,
+        info: crate::os::windows::image_info::PeImageInfo,
+    ) -> Result<()> {
+        crate::os::windows::image_info::apply_stack_and_entry(self, &info)?;
+        self.pe_image_info = Some(info);
+        Ok(())
+    }
+
+    /// Queue a Linux signal for later delivery between TBs.
+    pub fn raise_signal(&mut self, signo: i32) {
+        if self.signals.queue(signo) {
+            tracing::info!("Signal {} queued (pending=0x{:X})", signo, self.signals.pending);
+        }
+    }
+
+    /// Deliver at most one pending unblocked signal. May rewrite PC or halt.
+    pub fn process_pending_signals(&mut self) -> Result<bool> {
+        use crate::os::linux::signal::DeliverResult;
+        match self.signals.take_delivery(self.pc) {
+            DeliverResult::None => Ok(true),
+            DeliverResult::Ignored { signo } => {
+                tracing::debug!("Signal {} ignored", signo);
+                Ok(true)
+            }
+            DeliverResult::Stop { signo } => {
+                tracing::info!("Signal {} stop (single-thread: resume)", signo);
+                Ok(true)
+            }
+            DeliverResult::Terminate { signo } => {
+                tracing::warn!("Signal {} → process terminate", signo);
+                self.halt_requested = true;
+                Ok(false)
+            }
+            DeliverResult::Handler {
+                signo,
+                handler,
+                old_pc,
+            } => {
+                tracing::info!(
+                    "Deliver signal {} to handler 0x{:X} (return PC 0x{:X})",
+                    signo,
+                    handler,
+                    old_pc
+                );
+                // Minimal frame: push old PC so a cooperative handler can return via stack,
+                // and set PC to the handler. Full ucontext is future work.
+                let sp_reg = self.arch.sp_reg;
+                let ptr_size = self.arch.pointer_size as u64;
+                if let Ok(sp) = self.read_register_u64(sp_reg) {
+                    let new_sp = sp.saturating_sub(ptr_size);
+                    let _ = self.write_register_u64(sp_reg, new_sp);
+                    let ram = self.state.ram_space();
+                    if ptr_size == 8 {
+                        let _ = self.state.write_space(ram, new_sp, &old_pc.to_le_bytes());
+                    } else {
+                        let _ = self
+                            .state
+                            .write_space(ram, new_sp, &(old_pc as u32).to_le_bytes());
+                    }
+                }
+                // First argument: signo in the first integer arg register when possible.
+                let _ = self.write_arg0_signo(signo as u64);
+                self.pc = handler;
+                Ok(true)
+            }
+        }
+    }
+
+    fn write_arg0_signo(&mut self, signo: u64) -> Result<()> {
+        // Best-effort: use arch calling convention first integer arg register.
+        let regs = self.arch.cc.arg_regs();
+        if let Some(reg) = regs.first() {
+            self.write_register_u64(reg, signo)?;
+        }
+        Ok(())
     }
 
     pub fn with_max_inst(mut self, max: Option<u64>) -> Self {
@@ -224,7 +465,7 @@ impl Emulator {
 
         // Restore memory via stored deltas (reverse the old_value → new_value)
         for delta in &snap.memory_deltas {
-            let _ = self.state.write_space(3, delta.address, &delta.new_value);
+            let _ = self.state.write_space(self.state.ram_space(), delta.address, &delta.new_value);
         }
 
         // Restore shadow state via stored deltas
@@ -294,7 +535,8 @@ impl Emulator {
             let ptr_size  = self.arch.pointer_size as usize;
             let sp_reg    = self.arch.sp_reg;
             let sp        = self.read_register_u64(sp_reg)?;
-            let bytes     = self.state.read_space(3, sp + stack_off, ptr_size)?;
+            let ram = self.state.ram_space();
+            let bytes     = self.state.read_space(ram, sp + stack_off, ptr_size)?;
             Ok(crate::arch::calling_convention::le_bytes_to_u64(&bytes))
         }
     }
@@ -315,7 +557,8 @@ impl Emulator {
         } else {
             let sp_reg = self.arch.sp_reg;
             let sp     = self.read_register_u64(sp_reg)?;
-            let bytes  = self.state.read_space(3, sp, ptr_size)?;
+            let ram = self.state.ram_space();
+            let bytes  = self.state.read_space(ram, sp, ptr_size)?;
             let ret_addr = crate::arch::calling_convention::le_bytes_to_u64(&bytes);
             self.pc = ret_addr;
             self.write_register_u64(sp_reg, sp + ptr_size as u64)?;
@@ -325,7 +568,85 @@ impl Emulator {
 
     // ── Execution ─────────────────────────────────────────────────────────────
 
+    /// Collect a multi-instruction TB starting at `self.pc`.
+    fn collect_translation_block(&mut self) -> Result<Vec<crate::jit::compiler::GuestInsn>> {
+        use crate::jit::compiler::GuestInsn;
+        use fission_pcode::ir::PcodeOpcode;
+
+        let mut out = Vec::new();
+        let mut cur = self.pc;
+        let page = cur & !0xFFF;
+        let ram = self.state.ram_space();
+
+        for _ in 0..MAX_TB_INSNS {
+            if (cur & !0xFFF) != page {
+                break;
+            }
+            // Stop before an already-compiled TB so soft chaining can re-enter it.
+            if !out.is_empty() && self.jit_cache.lookup(cur).is_some() {
+                break;
+            }
+            if cur >= 0xFFFFFFF0_00000000 {
+                break;
+            }
+
+            let bytes_vec = self.state.read_space(ram, cur, 16).map_err(|_| {
+                anyhow::anyhow!("Failed to fetch instruction bytes at 0x{:X}", cur)
+            })?;
+
+            let (pcode_ops, inst_len, details) = self
+                .sleigh
+                .decode_and_lift_with_details(&bytes_vec, cur)
+                .map_err(|e| anyhow::anyhow!("Decode/lift failed at 0x{:X}: {:#}", cur, e))?;
+
+            for (id, name) in &details.userops {
+                self.userop_map.entry(*id).or_insert_with(|| name.clone());
+            }
+
+            let terminates = pcode_ops.iter().any(|op| {
+                matches!(
+                    op.opcode,
+                    PcodeOpcode::Call
+                        | PcodeOpcode::CallInd
+                        | PcodeOpcode::Return
+                        | PcodeOpcode::BranchInd
+                        | PcodeOpcode::Branch
+                        | PcodeOpcode::CBranch
+                ) && {
+                    // Relative branches stay inside the insn; absolute exit the TB.
+                    match op.opcode {
+                        PcodeOpcode::Branch | PcodeOpcode::CBranch => {
+                            let dest = &op.inputs[0];
+                            !(dest.space_id == 0 || dest.is_constant)
+                        }
+                        _ => true,
+                    }
+                }
+            });
+
+            let len = inst_len as u32;
+            out.push(GuestInsn {
+                pc: cur,
+                len,
+                ops: pcode_ops,
+            });
+            cur = cur.wrapping_add(len as u64);
+            if terminates {
+                break;
+            }
+        }
+
+        if out.is_empty() {
+            anyhow::bail!("TB collection produced no instructions at 0x{:X}", self.pc);
+        }
+        Ok(out)
+    }
+
     pub fn run_instruction(&mut self) -> Result<bool> {
+        if self.halt_requested {
+            return Ok(false);
+        }
+
         if self.snapshot_triggers.contains(&self.pc) {
             tracing::info!("Triggering snapshot at PC=0x{:X}", self.pc);
             let snapshot = EmulatorSnapshot::capture(self, self.pc);
@@ -335,266 +656,109 @@ impl Emulator {
 
         tracing::debug!("Executing PC=0x{:X}", self.pc);
 
-        // Fetch up to 16 bytes from RAM (Space 3).
-        let bytes_vec = match self.state.read_space(3, self.pc, 16) {
-            Ok(b)  => b,
-            Err(_) => {
-                let reason = format!("Failed to fetch instruction bytes at 0x{:X}", self.pc);
-                tracing::error!("{}", reason);
-                self.trace.push(TraceEntry::DecodeError { pc: self.pc, reason });
-                // Advance past unknown area by 1 byte and continue.
-                self.pc += 1;
-                return Ok(true);
+        // ─── JIT-only multi-instruction TB path ───────────────────────────────
+        //
+        //   1. Cache hit  → run host TB (counts insns + soft-chains internally).
+        //   2. Cache miss → collect TB → compile → insert → run.
+        //   3. Compile fail → hard error (no interpreter).
+
+        if let Some(block) = self.jit_cache.lookup(self.pc) {
+            tracing::debug!(
+                "JIT: cache hit TB@0x{:X} ({} guest insns)",
+                self.pc,
+                block.guest_insns
+            );
+            self.metrics.tbs_cache_hits += 1;
+            let func: extern "C" fn(*mut Emulator) -> u64 =
+                unsafe { std::mem::transmute(block.host_func_ptr) };
+            // inst_count is advanced inside the TB via jit_count_insn.
+            let next_pc = func(self as *mut _);
+            self.pc = next_pc;
+            return Ok(!self.halt_requested);
+        }
+
+        let insns = self.collect_translation_block().map_err(|e| {
+            self.metrics.decode_errors += 1;
+            self.trace.push(TraceEntry::DecodeError {
+                pc: self.pc,
+                reason: e.to_string(),
+            });
+            e
+        })?;
+
+        // Telemetry: count opcodes the JIT will no-op.
+        for insn in &insns {
+            for op in &insn.ops {
+                if !crate::metrics::is_jit_supported(op.opcode) {
+                    self.metrics.note_unimplemented(op.opcode);
+                }
             }
+        }
+
+        let start_pc = insns[0].pc;
+        let total_bytes: usize = insns.iter().map(|i| i.len as usize).sum();
+        let guest_insns = insns.len() as u32;
+        let mut pages = Vec::new();
+        for insn in &insns {
+            let p = insn.pc & !0xFFF;
+            if !pages.contains(&p) {
+                pages.push(p);
+            }
+        }
+        let fallthrough = {
+            let last = insns.last().unwrap();
+            last.pc.wrapping_add(last.len as u64)
         };
 
-        // Decode and lift to P-Code. On failure: record, skip 1 byte, continue.
-        let (pcode_ops, inst_len, details) = match self.sleigh
-            .decode_and_lift_with_details(&bytes_vec, self.pc)
-        {
-            Ok(r) => r,
-            Err(e) => {
-                let reason = format!("{:#}", e);
-                tracing::warn!("Decode/lift failed at 0x{:X}: {}", self.pc, reason);
-                self.trace.push(TraceEntry::DecodeError { pc: self.pc, reason });
-                self.pc += 1;
-                return Ok(true);
-            }
-        };
+        let jit = self
+            .jit
+            .as_mut()
+            .ok_or_else(|| anyhow::anyhow!("JIT compiler unavailable (host ISA unsupported)"))?;
 
-        // Merge any newly-discovered userops into our map.
-        for (id, name) in &details.userops {
-            self.userop_map.entry(*id).or_insert_with(|| name.clone());
-        }
+        let func_ptr = jit.compile_translation_block(&insns).map_err(|e| {
+            anyhow::anyhow!(
+                "JIT compile failed at TB@0x{:X} ({} insns): {:#}",
+                start_pc,
+                guest_insns,
+                e
+            )
+        })?;
+        self.metrics.tbs_compiled += 1;
 
-        // Pre-advance the PC register inside the Sleigh state so that
-        // %pc-relative addressing and `call` (which pushes the return address)
-        // observe the correct next-instruction address.
-        let original_pc = self.pc;
-        let next_pc = self.pc + inst_len;
-        let _ = self.write_register_u64(self.arch.pc_reg, next_pc);
+        let block = std::sync::Arc::new(crate::jit::cache::JitBlock {
+            guest_pc: start_pc,
+            host_func_ptr: func_ptr,
+            block_size: total_bytes,
+            guest_insns,
+            next_pc: Some(fallthrough),
+            pages,
+            abs_exit_targets: Vec::new(),
+        });
+        self.jit_cache.insert(start_pc, block.clone());
 
-        let mut bytes_hex = String::new();
-        let mut mnemonic = "?".to_string();
-        let mut pcode_op_names = Vec::new();
-        
-        if self.trace.enabled {
-            self.state.tracing_memory = true;
-            self.state.trace_mem_reads.clear();
-            self.state.trace_mem_writes.clear();
-            self.state.trace_shadow_writes.clear();
-
-            bytes_hex = bytes_vec[..inst_len as usize]
-                .iter()
-                .map(|b| format!("{:02x}", b))
-                .collect::<Vec<_>>()
-                .join(" ");
-            mnemonic = self.sleigh
-                .decode_window(&bytes_vec, self.pc, 1)
-                .ok()
-                .and_then(|v| v.into_iter().next())
-                .map(|d| d.instruction_text())
-                .unwrap_or_else(|| "?".to_string());
-            pcode_op_names = pcode_ops.iter()
-                .map(|op| format!("{:?}", op.opcode))
-                .collect();
-        } else {
-            self.state.tracing_memory = false;
-        }
-
-        // Evaluate P-Code ops.
-        // On CallOther we break out of the evaluator scope (so `evaluator` is dropped
-        // and self.state borrow is released) and then dispatch via `self`.
-        let mut branched = false;
-        let mut branch_target = 0u64;
-        let mut pcode_idx = 0;
-        let mut pcode_step_limit = 0;
-
-        'pcode: loop {
-            pcode_step_limit += 1;
-            if pcode_step_limit > 500_000 {
-                tracing::warn!("Infinite P-Code loop timeout at 0x{:X}. Breaking.", self.pc);
-                self.trace.push(TraceEntry::DecodeError { 
-                    pc: self.pc, 
-                    reason: "Infinite P-Code loop timeout".to_string() 
-                });
-                break 'pcode;
-            }
-
-            if pcode_idx >= pcode_ops.len() {
-                break;
-            }
-            let op = &pcode_ops[pcode_idx];
-            tracing::debug!("    P-Code: {:?}", op.opcode);
-            let current_pc = self.pc;
-
-            // Evaluator only borrows self.state and self.solver — we scope it tightly.
-            let step_result = {
-                let mut evaluator = Evaluator::new(&mut self.state, &mut self.solver);
-                evaluator.step(op)?
-            };
-
-            match step_result {
-                crate::pcode::eval::StepResult::Next => {
-                    pcode_idx += 1;
-                }
-                crate::pcode::eval::StepResult::BranchRel(rel_idx) => {
-                    pcode_idx = rel_idx;
-                }
-                crate::pcode::eval::StepResult::Branch(tgt) => {
-                    branched = true;
-                    branch_target = tgt;
-                    break 'pcode;
-                }
-                crate::pcode::eval::StepResult::CBranch { condition_val, condition_node, true_rel_idx, true_addr } => {
-                    // Record unexplored path if TTD is recording (sym_explore active)
-                    if self.ttd.is_recording() {
-                        let (alt_rel, alt_addr) = if condition_val {
-                            // Taken true path, alternate is false path (fallthrough)
-                            (Some(pcode_idx + 1), None)
-                        } else {
-                            // Taken false path, alternate is true path
-                            (true_rel_idx, true_addr)
-                        };
-                        self.sym_events.push(SymBranch {
-                            step_index: self.inst_count,
-                            pc: current_pc,
-                            condition_val_taken: condition_val,
-                            condition_node,
-                            alt_rel_idx: alt_rel,
-                            alt_addr: alt_addr,
-                        });
-                    }
-
-                    // CBranch taken path determines next step
-                    if condition_val {
-                        if let Some(rel_idx) = true_rel_idx {
-                            pcode_idx = rel_idx;
-                        } else if let Some(addr) = true_addr {
-                            branched = true;
-                            branch_target = addr;
-                            break 'pcode;
-                        }
-                    } else {
-                        // Condition false, fall through to next pcode op
-                        pcode_idx += 1;
-                    }
-                }
-                crate::pcode::eval::StepResult::CallOther { userop_id, input_vals, output_size } => {
-                    // evaluator is already dropped here (scoped above).
-                    // We handle the dispatch below, then resume from pcode_idx + 1.
-                    pcode_idx += 1;
-
-                    // Resolve userop name (no evaluator borrow active).
-                    let userop_name = self.userop_map
-                        .get(&userop_id)
-                        .cloned()
-                        .unwrap_or_else(|| format!("userop_{userop_id}"));
-
-                    tracing::debug!("    USEROP: {} (id={})", userop_name, userop_id);
-
-                    self.trace.push(TraceEntry::UseropeDispatch {
-                        pc: current_pc,
-                        userop_name: userop_name.clone(),
-                        input_vals: input_vals.clone(),
-                    });
-
-                    let result = {
-                        let os_ptr = &*self.os as *const dyn OsEnvironment;
-                        let os_ref = unsafe { &*os_ptr };
-                        os_ref.dispatch_userop(self, &userop_name, &input_vals, output_size)?
-                    };
-
-                    match result {
-                        HleResult::Halt(code) => {
-                            tracing::info!("USEROP requested halt (code={})", code);
-                            return Ok(false);
-                        }
-                        HleResult::Continue => {}
-                    }
-                    // Continue the pcode loop.
-                }
-            }
-        }
-        if self.trace.enabled {
-            let mut registers = std::collections::HashMap::new();
-            let reg_names: Vec<String> = self.register_map.iter()
-                .filter(|(name, info)| {
-                    let size = info.2;
-                    size <= 8 && !name.starts_with("tmp") && !name.contains("UNIQUE") && !name.starts_with("#")
-                })
-                .map(|(name, _)| name.clone())
-                .collect();
-
-            for name in reg_names {
-                if let Ok(val) = self.read_register_u64(&name) {
-                    registers.insert(name, val);
-                }
-            }
-
-            let mem_reads = std::mem::take(&mut self.state.trace_mem_reads)
-                .into_iter()
-                .map(|(addr, data)| (addr, hex::encode(data)))
-                .collect();
-            let mem_writes = std::mem::take(&mut self.state.trace_mem_writes)
-                .into_iter()
-                .map(|(addr, _old, data)| (addr, hex::encode(data)))
-                .collect();
-
-            self.trace.push(TraceEntry::Instruction {
-                pc: original_pc,
-                bytes_hex,
-                mnemonic,
-                pcode_ops: pcode_op_names,
-                registers,
-                mem_reads,
-                mem_writes,
-                decode_error: None,
-            });
-            self.state.tracing_memory = false;
-        }
-
-        // Update our PC tracker.
-        self.pc = if branched { branch_target } else { next_pc };
-
-        // HLE trap check — any address in the upper magic range.
-        if self.pc >= 0xFFFFFFF000000000 {
-            let magic = self.pc;
-            let func_name = {
-                let func_name_opt = self.os.resolve_stub(&self.binary, magic);
-                func_name_opt.unwrap_or_else(|| format!("Unknown@0x{:X}", magic))
-            };
-
-            // Record HLE dispatch in trace.
-            self.trace.push(TraceEntry::HleDispatch {
-                pc: magic,
-                func_name: func_name.clone(),
-            });
-
-            // Dispatch — OS sets the return value.
-            let result = {
-                let os_ptr = &*self.os as *const dyn OsEnvironment;
-                let os_ref = unsafe { &*os_ptr };
-                os_ref.dispatch_hle(self, &func_name)?
-            };
-
-            match result {
-                HleResult::Halt(_code) => return Ok(false),
-                HleResult::Continue    => {
-                    // Restore PC from the return address (stack or link register).
-                    self.simulate_return()?;
-                }
-            }
-        }
-
-        Ok(true)
+        tracing::debug!(
+            "JIT: compiled TB@0x{:X} ({} insns, {} bytes)",
+            start_pc,
+            guest_insns,
+            total_bytes
+        );
+        let func: extern "C" fn(*mut Emulator) -> u64 =
+            unsafe { std::mem::transmute(block.host_func_ptr) };
+        let next_pc = func(self as *mut _);
+        self.pc = next_pc;
+        Ok(!self.halt_requested)
     }
 
     pub fn run(&mut self) -> Result<()> {
         tracing::info!("Sandbox execution started at PC=0x{:X}", self.pc);
+        self.halt_requested = false;
+        self.chain_depth = 0;
         loop {
             if IS_INTERRUPTED.load(std::sync::atomic::Ordering::Relaxed) {
                 tracing::warn!("Execution interrupted by Ctrl+C (SIGINT). Halting safely.");
+                break;
+            }
+            if self.halt_requested {
                 break;
             }
 
@@ -609,19 +773,62 @@ impl Emulator {
                 break;
             }
 
+            // ── Pending Linux signals (between TBs) ───────────────────────────
+            if !self.process_pending_signals()? {
+                break;
+            }
+            if self.halt_requested {
+                break;
+            }
+
+            // ── HLE Trap Check ────────────────────────────────────────────────
+            if self.pc >= 0xFFFFFFF000000000 {
+                let magic = self.pc;
+                let func_name = {
+                    let opt = self.os.resolve_stub(&self.binary, magic);
+                    opt.unwrap_or_else(|| format!("Unknown@0x{:X}", magic))
+                };
+
+                self.trace.push(crate::trace::TraceEntry::HleDispatch {
+                    pc: magic,
+                    func_name: func_name.clone(),
+                });
+
+                let result = {
+                    let os_ptr = &*self.os as *const dyn OsEnvironment;
+                    let os_ref = unsafe { &*os_ptr };
+                    os_ref.dispatch_hle(self, &func_name)?
+                };
+
+                match result {
+                    HleResult::Halt(_) => {
+                        self.halt_requested = true;
+                        break;
+                    }
+                    HleResult::Continue => {
+                        self.simulate_return()?;
+                    }
+                }
+            }
+
             // TTD: record a snapshot every N instructions.
             if self.ttd_snapshot_interval > 0
                 && self.ttd.is_recording()
+                && self.inst_count > 0
                 && self.inst_count % self.ttd_snapshot_interval == 0
             {
                 let regs = self.capture_register_state();
-                // Collect memory writes from this instruction as deltas.
-                let deltas: Vec<fission_ttd::MemoryDelta> = self.state.trace_mem_writes
+                let deltas: Vec<fission_ttd::MemoryDelta> = self
+                    .state
+                    .trace_mem_writes
                     .iter()
-                    .map(|(addr, old, new)| fission_ttd::MemoryDelta::new(*addr, old.clone(), new.clone()))
+                    .map(|(addr, old, new)| {
+                        fission_ttd::MemoryDelta::new(*addr, old.clone(), new.clone())
+                    })
                     .collect();
-                // Collect shadow taint changes from this instruction as deltas.
-                let shadow_deltas: Vec<fission_ttd::ShadowDelta> = self.state.trace_shadow_writes
+                let shadow_deltas: Vec<fission_ttd::ShadowDelta> = self
+                    .state
+                    .trace_shadow_writes
                     .iter()
                     .map(|(space_id, addr, old_node, new_node)| fission_ttd::ShadowDelta {
                         space_id: *space_id,
@@ -633,17 +840,32 @@ impl Emulator {
                 self.ttd.record_step_with_memory(regs, 0, deltas, shadow_deltas);
                 tracing::trace!("TTD: recorded step {} at PC=0x{:X}", self.inst_count, self.pc);
             }
-
-            self.inst_count += 1;
         }
         if self.ttd.is_recording() {
             let stats = self.ttd.stats();
             tracing::info!(
                 "TTD recording stopped: {} snapshots, ~{} bytes",
-                stats.count, stats.memory_bytes
+                stats.count,
+                stats.memory_bytes
             );
         }
-        tracing::info!("Sandbox execution finished");
+        self.metrics.instructions = self.inst_count;
+        if self.metrics.exit_reason.is_none() {
+            self.metrics.exit_reason = Some(if self.halt_requested {
+                "halt".into()
+            } else if self.max_inst.is_some_and(|m| self.inst_count >= m) {
+                "max_inst".into()
+            } else {
+                "loop_exit".into()
+            });
+        }
+        tracing::info!(
+            "Sandbox execution finished at PC=0x{:X} ({} instructions)",
+            self.pc,
+            self.inst_count
+        );
+        tracing::info!("Emulator metrics: {}", self.metrics.summary_line());
         Ok(())
     }
 }
+

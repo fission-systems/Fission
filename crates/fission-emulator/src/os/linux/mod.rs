@@ -2,6 +2,11 @@ pub mod loader;
 pub mod libc;
 pub mod syscall;
 pub mod abi;
+pub mod image_info;
+pub mod signal;
+
+pub use image_info::{ImageInfo, ProcessArgs};
+pub use signal::{DeliverResult, SigAction, SignalState};
 
 use anyhow::Result;
 use crate::core::Emulator;
@@ -34,16 +39,45 @@ impl LinuxEnv {
         simos.register_procedure("exit", Box::new(libc::Exit));
         simos.register_procedure("_exit", Box::new(libc::Exit));
 
-        // Register Syscalls
+        // Register Syscalls (x86-64 Linux numbers)
         simos.register_syscall(0, Box::new(syscall::SysRead));
         simos.register_syscall(1, Box::new(syscall::SysWrite));
         simos.register_syscall(2, Box::new(syscall::SysOpen));
         simos.register_syscall(3, Box::new(syscall::SysClose));
         simos.register_syscall(5, Box::new(syscall::SysFstat));
+        simos.register_syscall(8, Box::new(syscall::SysLseek));
         simos.register_syscall(9, Box::new(syscall::SysMmap));
+        simos.register_syscall(10, Box::new(syscall::SysMprotect));
+        simos.register_syscall(11, Box::new(syscall::SysMunmap));
         simos.register_syscall(12, Box::new(syscall::SysBrk));
+        simos.register_syscall(13, Box::new(syscall::SysRtSigaction));
+        simos.register_syscall(14, Box::new(syscall::SysRtSigprocmask));
+        simos.register_syscall(15, Box::new(syscall::SysRtSigreturn));
+        simos.register_syscall(16, Box::new(syscall::SysIoctl));
+        simos.register_syscall(62, Box::new(syscall::SysKill));
+        simos.register_syscall(200, Box::new(syscall::SysTkill));
+        simos.register_syscall(20, Box::new(syscall::SysWritev));
+        simos.register_syscall(21, Box::new(syscall::SysAccess));
+        simos.register_syscall(24, Box::new(syscall::SysSchedYield));
+        simos.register_syscall(39, Box::new(syscall::SysGetpid));
         simos.register_syscall(60, Box::new(syscall::SysExit));
+        simos.register_syscall(63, Box::new(syscall::SysUname));
+        simos.register_syscall(96, Box::new(syscall::SysGettimeofday));
+        simos.register_syscall(102, Box::new(syscall::SysGetuid));
+        simos.register_syscall(104, Box::new(syscall::SysGetgid));
+        simos.register_syscall(107, Box::new(syscall::SysGeteuid));
+        simos.register_syscall(108, Box::new(syscall::SysGetegid));
+        simos.register_syscall(158, Box::new(syscall::SysArchPrctl));
+        simos.register_syscall(186, Box::new(syscall::SysGettid));
+        simos.register_syscall(201, Box::new(syscall::SysTime));
+        simos.register_syscall(202, Box::new(syscall::SysFutex));
+        simos.register_syscall(218, Box::new(syscall::SysSetTidAddress));
+        simos.register_syscall(228, Box::new(syscall::SysClockGettime));
         simos.register_syscall(231, Box::new(syscall::SysExit)); // exit_group
+        simos.register_syscall(257, Box::new(syscall::SysOpenat));
+        simos.register_syscall(262, Box::new(syscall::SysNewfstatat));
+        simos.register_syscall(302, Box::new(syscall::SysPrlimit64));
+        simos.register_syscall(318, Box::new(syscall::SysGetrandom));
 
         Self { simos }
     }
@@ -65,7 +99,7 @@ impl OsEnvironment for LinuxEnv {
         for (i, (&addr, name)) in plt_entries.into_iter().enumerate() {
             let trampoline = MAGIC_BASE + (i as u64 * 8);
             tracing::debug!("PLT/GOT patch: {} @ 0x{:X} → trampoline 0x{:X}", name, addr, trampoline);
-            state.write_space(3, addr, &trampoline.to_le_bytes())?;
+            state.write_space(state.ram_space(), addr, &trampoline.to_le_bytes())?;
         }
         Ok(())
     }
@@ -83,6 +117,7 @@ impl OsEnvironment for LinuxEnv {
     fn dispatch_hle(&self, emu: &mut Emulator, func_name: &str) -> Result<HleResult> {
         if func_name == "syscall" {
             let sys_num = emu.read_register_u64("RAX").unwrap_or(0);
+            emu.metrics.note_syscall(sys_num);
             if let Some(proc) = self.simos.syscalls.get(&sys_num) {
                 return proc.run(emu);
             } else {

@@ -1,32 +1,23 @@
+use crate::os::linux::image_info::{self, ImageInfo, ProcessArgs};
 use crate::pcode::state::MachineState;
 use anyhow::Result;
 use fission_loader::loader::LoadedBinary;
 
-/// Maps ELF PT_LOAD segments into the emulator's machine state (Space 3 / RAM).
+/// Maps ELF image into guest RAM, records page protections, sets brk, and
+/// builds the initial process stack (argc/argv/envp/auxv).
 ///
-/// For static ELFs, each program header with `p_type = PT_LOAD` defines a region
-/// that must be mapped at its virtual address before execution begins.
-/// If the binary lacks program headers (only sections), fall back to section mapping.
-pub fn load_elf(state: &mut MachineState, binary: &LoadedBinary) -> Result<()> {
-    tracing::info!("Mapping ELF sections into RAM...");
-
-    for sec in &binary.inner().sections {
-        if sec.virtual_address == 0 || sec.virtual_size == 0 {
-            tracing::debug!(
-                "Skipping non-loaded section {} (va=0x{:X})",
-                sec.name, sec.virtual_address
-            );
-            continue;
-        }
-        tracing::debug!(
-            "Mapping section {} at 0x{:X} (size: 0x{:X})",
-            sec.name, sec.virtual_address, sec.virtual_size
-        );
-        let sec_data = binary
-            .view_bytes(sec.virtual_address, sec.virtual_size as usize)
-            .unwrap_or(&[]);
-        state.write_space(3, sec.virtual_address, sec_data)?;
-    }
-
-    Ok(())
+/// Prefer this over raw section dumps when running user-mode Linux guests.
+pub fn load_elf(state: &mut MachineState, binary: &LoadedBinary) -> Result<ImageInfo> {
+    load_elf_with_args(state, binary, &ProcessArgs::default())
 }
+
+/// Same as [`load_elf`] with explicit argv/envp.
+pub fn load_elf_with_args(
+    state: &mut MachineState,
+    binary: &LoadedBinary,
+    args: &ProcessArgs,
+) -> Result<ImageInfo> {
+    image_info::load_elf_image(state, binary, args)
+}
+
+pub use image_info::apply_stack_pointer;

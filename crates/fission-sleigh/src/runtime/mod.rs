@@ -62,6 +62,27 @@ pub fn register_map_for_load_spec(
     Some(map)
 }
 
+/// Extract the Sleigh USEROP id → name table for the given `BinaryLoadSpec`.
+///
+/// Same SLA discovery path as [`register_map_for_load_spec`]. Used by the
+/// emulator so CallOther names (`syscall`, `cpuid`, …) resolve correctly.
+pub fn userop_map_for_load_spec(
+    load_spec: &BinaryLoadSpec,
+) -> Option<std::collections::BTreeMap<u32, String>> {
+    use crate::compiler::{packaged_sla_for_entry_spec, sla::load_construct_templates_from_sla};
+
+    let language_id = load_spec.pair.language_id.as_str();
+
+    let entries = discover_all_entry_specs().ok()?;
+    let entry = entries
+        .into_iter()
+        .find(|e| frontend::entry_matches_language_name(e, language_id))?;
+
+    let sla_path = packaged_sla_for_entry_spec(&entry.path).ok()??;
+    let library = load_construct_templates_from_sla(&sla_path).ok()?;
+    Some(library.userops)
+}
+
 const DEFAULT_FUNCTION_INSTRUCTION_LIMIT: usize = 512;
 
 pub const UNIQUE_SPACE_ID: u64 = 3;

@@ -10,10 +10,10 @@ pub fn initialize_peb_teb(state: &mut MachineState, is_64bit: bool) -> Result<()
         let peb_addr = 0x000000007FFDF000u64;
 
         // TEB
-        state.write_space(3, teb_addr + 0x60, &peb_addr.to_le_bytes())?;
+        state.write_space(state.ram_space(), teb_addr + 0x60, &peb_addr.to_le_bytes())?;
         
         // PEB
-        state.write_space(3, peb_addr + 0x2, &[1])?; // BeingDebugged = 1 (just to test anti-debug)
+        state.write_space(state.ram_space(), peb_addr + 0x2, &[1])?; // BeingDebugged = 1 (just to test anti-debug)
         
         tracing::info!("Initialized x64 TEB at 0x{:X}, PEB at 0x{:X}", teb_addr, peb_addr);
     } else {
@@ -22,10 +22,10 @@ pub fn initialize_peb_teb(state: &mut MachineState, is_64bit: bool) -> Result<()
         let peb_addr = 0x7FFDF000u64;
 
         // TEB
-        state.write_space(3, teb_addr + 0x30, &(peb_addr as u32).to_le_bytes())?;
+        state.write_space(state.ram_space(), teb_addr + 0x30, &(peb_addr as u32).to_le_bytes())?;
         
         // PEB
-        state.write_space(3, peb_addr + 0x2, &[1])?; // BeingDebugged = 1
+        state.write_space(state.ram_space(), peb_addr + 0x2, &[1])?; // BeingDebugged = 1
         
         tracing::info!("Initialized x86 TEB at 0x{:X}, PEB at 0x{:X}", teb_addr, peb_addr);
     }

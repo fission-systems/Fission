@@ -67,7 +67,7 @@ impl SimProcedure for Read {
                 }
             }
             if bytes_read > 0 {
-                emu.state.write_space(3, buf, &data[..bytes_read])?;
+                emu.state.write_space(emu.state.ram_space(), buf, &data[..bytes_read])?;
             }
             emu.write_return_val(bytes_read as u64)?;
         } else {
@@ -86,7 +86,7 @@ impl SimProcedure for Write {
         let count = emu.read_arg(2).unwrap_or(0);
 
         if fd == 1 || fd == 2 {
-            let data = emu.state.read_space(3, buf, count as usize).unwrap_or_default();
+            let data = emu.state.read_space(emu.state.ram_space(), buf, count as usize).unwrap_or_default();
             print!("{}", String::from_utf8_lossy(&data));
         } else {
             tracing::info!("SimProcedure: write({}, 0x{:X}, {})", fd, buf, count);
@@ -110,7 +110,7 @@ pub fn read_string(emu: &mut Emulator, addr: u64) -> Result<String> {
     let mut bytes = Vec::new();
     let mut cur = addr;
     loop {
-        let b = emu.state.read_space(3, cur, 1).unwrap_or(vec![0])[0];
+        let b = emu.state.read_space(emu.state.ram_space(), cur, 1).unwrap_or(vec![0])[0];
         if b == 0 { break; }
         bytes.push(b);
         cur += 1;

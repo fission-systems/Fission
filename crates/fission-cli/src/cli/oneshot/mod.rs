@@ -187,13 +187,18 @@ fn run_sandbox(args: crate::cli::args::SandboxArgs) -> Result<()> {
     let mut state = fission_emulator::MachineState::new();
 
     // Load binary sections into emulator RAM (format-aware)
+    let mut linux_image = None;
+    let mut pe_image = None;
     match binary.format.as_str() {
         "PE" => {
-            fission_emulator::os::windows::loader::load_pe(&mut state, &binary)?;
-            fission_emulator::os::windows::peb_teb::initialize_peb_teb(&mut state, binary.inner().is_64bit)?;
+            pe_image = Some(fission_emulator::os::windows::loader::load_pe(
+                &mut state, &binary,
+            )?);
         }
         "ELF" | "ELF64" => {
-            fission_emulator::os::linux::loader::load_elf(&mut state, &binary)?;
+            linux_image = Some(fission_emulator::os::linux::loader::load_elf(
+                &mut state, &binary,
+            )?);
         }
         fmt => anyhow::bail!("Unsupported binary format for sandbox loader: {}", fmt),
     }
@@ -212,7 +217,7 @@ fn run_sandbox(args: crate::cli::args::SandboxArgs) -> Result<()> {
     // Choose OS environment based on binary format
     let os: Box<dyn fission_emulator::OsEnvironment> = match binary.format.as_str() {
         "PE"  => Box::new(fission_emulator::WindowsEnv::new()),
-        "ELF" | "ELF64" => Box::new(fission_emulator::LinuxEnv),
+        "ELF" | "ELF64" => Box::new(fission_emulator::LinuxEnv::new()),
         fmt   => anyhow::bail!("Unsupported binary format for sandbox: {}", fmt),
     };
     
@@ -221,6 +226,13 @@ fn run_sandbox(args: crate::cli::args::SandboxArgs) -> Result<()> {
         .with_max_inst(args.max_inst)
         .with_stdin_mock(args.stdin_mock)
         .with_ttd(args.ttd_record.unwrap_or(0));
+
+    if let Some(info) = linux_image {
+        emu.apply_linux_image(info)?;
+    }
+    if let Some(info) = pe_image {
+        emu.apply_windows_image(info)?;
+    }
 
     // Setup Ctrl+C handler
     ctrlc::set_handler(move || {

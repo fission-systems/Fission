@@ -1,7 +1,8 @@
-use std::collections::HashMap;
 use anyhow::{Result, bail};
 use serde::{Serialize, Deserialize};
 use std::sync::Arc;
+use crate::pcode::page_map::PageMap;
+use crate::pcode::spaces::SpaceLayout;
 
 #[derive(Clone, Serialize, Deserialize)]
 pub enum MemoryPage {
@@ -175,6 +176,17 @@ pub type MemoryAccessHook = std::sync::Arc<dyn Fn(&MemoryAccess) + Send + Sync>;
 pub struct MachineState {
     pub spaces: im::HashMap<u64, AddressSpace>,
 
+    /// Guest virtual memory map + protections (user-mode).
+    /// Cleanroom design inspired by QEMU linux-user page flags; no vendor dependency.
+    pub page_map: PageMap,
+
+    /// SLA-native address space indices (ram / register / unique / …).
+    pub spaces_layout: SpaceLayout,
+
+    /// When true, RAM accesses must hit a mapped page with matching R/W prot.
+    /// Unmapped or wrong-prot accesses return [`crate::pcode::page_map::PageFault`].
+    pub enforce_page_faults: bool,
+
     #[serde(skip)]
     pub hooks: Vec<MemoryAccessHook>,
 
@@ -202,19 +214,52 @@ impl fission_solver::solver::MemoryOracle for MachineState {
 
 impl MachineState {
     pub fn new() -> Self {
+        Self::with_layout(SpaceLayout::fallback())
+    }
+
+    pub fn with_layout(layout: SpaceLayout) -> Self {
         let mut spaces = im::HashMap::new();
-        // Conventional space IDs: 0=const, 1=unique, 2=register, 3=ram
-        spaces.insert(1, AddressSpace::new("unique"));
-        spaces.insert(2, AddressSpace::new("register"));
-        spaces.insert(3, AddressSpace::new("ram"));
-        Self { 
-            spaces, 
+        spaces.insert(layout.unique, AddressSpace::new("unique"));
+        spaces.insert(layout.register, AddressSpace::new("register"));
+        spaces.insert(layout.ram, AddressSpace::new("ram"));
+        // Also materialize any other named spaces from the SLA table.
+        for (name, &idx) in &layout.by_name {
+            if !spaces.contains_key(&idx) {
+                spaces.insert(idx, AddressSpace::new(name.clone()));
+            }
+        }
+        Self {
+            spaces,
+            page_map: PageMap::new(),
+            spaces_layout: layout,
+            enforce_page_faults: false,
             hooks: Vec::new(),
             tracing_memory: false,
             trace_mem_reads: Vec::new(),
             trace_mem_writes: Vec::new(),
             trace_shadow_writes: Vec::new(),
         }
+    }
+
+    /// Enable PageFault checks on the RAM space (user-mode).
+    pub fn with_page_faults(mut self, enabled: bool) -> Self {
+        self.enforce_page_faults = enabled;
+        self
+    }
+
+    #[inline]
+    pub fn ram_space(&self) -> u64 {
+        self.spaces_layout.ram
+    }
+
+    #[inline]
+    pub fn register_space(&self) -> u64 {
+        self.spaces_layout.register
+    }
+
+    #[inline]
+    pub fn unique_space(&self) -> u64 {
+        self.spaces_layout.unique
     }
 
     pub fn get_theory_array_id(&self, space_id: u64) -> Option<u32> {
@@ -234,13 +279,19 @@ impl MachineState {
             // const space: we shouldn't really read from it this way, but just in case
             bail!("Attempted to read from const space via memory read");
         }
+        if self.enforce_page_faults && space_id == self.spaces_layout.ram {
+            use crate::pcode::page_map::AccessKind;
+            self.page_map
+                .check_range(addr, size, AccessKind::Read)
+                .map_err(|e| anyhow::anyhow!(e))?;
+        }
         if !self.spaces.contains_key(&space_id) {
             self.spaces.insert(space_id, AddressSpace::new(format!("space_{}", space_id)));
         }
         let space = self.spaces.get_mut(&space_id).unwrap();
         let data = space.read(addr, size)?;
         
-        if self.tracing_memory && space_id == 3 {
+        if self.tracing_memory && space_id == self.spaces_layout.ram {
             self.trace_mem_reads.push((addr, data.clone()));
         }
         
@@ -262,8 +313,15 @@ impl MachineState {
         if space_id == 0 {
             bail!("Attempted to write to const space");
         }
+
+        if self.enforce_page_faults && space_id == self.spaces_layout.ram {
+            use crate::pcode::page_map::AccessKind;
+            self.page_map
+                .check_range(addr, data.len(), AccessKind::Write)
+                .map_err(|e| anyhow::anyhow!(e))?;
+        }
         
-        if self.tracing_memory && space_id == 3 {
+        if self.tracing_memory && space_id == self.spaces_layout.ram {
             // Read the old value before overwriting so TTD can reconstruct undo deltas.
             let old = if let Some(space) = self.spaces.get(&space_id) {
                 space.read(addr, data.len()).unwrap_or_else(|_| vec![0; data.len()])
@@ -323,37 +381,38 @@ mod tests {
     #[test]
     fn test_hybrid_memory_model() {
         let mut state = MachineState::new();
+        let ram = state.ram_space();
         // Read unitialized (concrete 0)
-        let data = state.read_space(3, 0x1000, 4).unwrap();
+        let data = state.read_space(ram, 0x1000, 4).unwrap();
         assert_eq!(data, vec![0, 0, 0, 0]);
 
         // Write concrete
-        state.write_space(3, 0x1000, &[0xDE, 0xAD, 0xBE, 0xEF]).unwrap();
-        let data = state.read_space(3, 0x1000, 4).unwrap();
+        state.write_space(ram, 0x1000, &[0xDE, 0xAD, 0xBE, 0xEF]).unwrap();
+        let data = state.read_space(ram, 0x1000, 4).unwrap();
         assert_eq!(data, vec![0xDE, 0xAD, 0xBE, 0xEF]);
 
         // Shadow memory starts empty
-        assert_eq!(state.get_shadow_memory(3, 0x1000), None);
+        assert_eq!(state.get_shadow_memory(ram, 0x1000), None);
 
         // Set shadow memory on first two bytes
-        state.set_shadow_memory(3, 0x1000, 42);
-        state.set_shadow_memory(3, 0x1001, 43);
+        state.set_shadow_memory(ram, 0x1000, 42);
+        state.set_shadow_memory(ram, 0x1001, 43);
 
-        assert_eq!(state.get_shadow_memory(3, 0x1000), Some(42));
-        assert_eq!(state.get_shadow_memory(3, 0x1001), Some(43));
-        assert_eq!(state.get_shadow_memory(3, 0x1002), None);
+        assert_eq!(state.get_shadow_memory(ram, 0x1000), Some(42));
+        assert_eq!(state.get_shadow_memory(ram, 0x1001), Some(43));
+        assert_eq!(state.get_shadow_memory(ram, 0x1002), None);
 
         // Read concrete after shadow is set
-        let data = state.read_space(3, 0x1000, 4).unwrap();
+        let data = state.read_space(ram, 0x1000, 4).unwrap();
         assert_eq!(data, vec![0xDE, 0xAD, 0xBE, 0xEF]);
 
         // Write concrete to partially clear shadow memory
-        state.write_space(3, 0x1001, &[0xCC, 0xDD]).unwrap();
-        assert_eq!(state.get_shadow_memory(3, 0x1000), Some(42)); // Unaffected
-        assert_eq!(state.get_shadow_memory(3, 0x1001), None); // Cleared
-        assert_eq!(state.get_shadow_memory(3, 0x1002), None); // Cleared
+        state.write_space(ram, 0x1001, &[0xCC, 0xDD]).unwrap();
+        assert_eq!(state.get_shadow_memory(ram, 0x1000), Some(42)); // Unaffected
+        assert_eq!(state.get_shadow_memory(ram, 0x1001), None); // Cleared
+        assert_eq!(state.get_shadow_memory(ram, 0x1002), None); // Cleared
         
-        let data = state.read_space(3, 0x1000, 4).unwrap();
+        let data = state.read_space(ram, 0x1000, 4).unwrap();
         assert_eq!(data, vec![0xDE, 0xCC, 0xDD, 0xEF]);
     }
 }

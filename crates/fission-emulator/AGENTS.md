@@ -1,50 +1,63 @@
 # fission-emulator Agent Guide
 
-Generated: 2026-07-07
+Generated: 2026-07-09
 Scope: `crates/fission-emulator`
 
 ## Overview
 
-`fission-emulator` is Fission's pure-Rust P-Code execution engine. It evaluates Ghidra/Sleigh P-Code operations directly, providing a dynamic analysis platform for taint tracking, time-travel debugging, and concolic path exploration.
+`fission-emulator` is Fission's pure-Rust **JIT-only** guest execution engine. Guest instructions are lifted with Sleigh to P-Code, then compiled to host code with Cranelift. It supports taint tracking, time-travel debugging, OS HLE, and concolic exploration around that JIT path.
 
 This crate is a **dynamic analysis pillar**, not a decompiler semantic repair layer. Do not use it to patch decompiler output.
+
+**Execution policy: JIT only.** Do not restore a P-Code interpreter as a runtime fallback. Expand Cranelift lowering and host callouts instead.
+
+**QEMU reference:** `vendor/qemu-11.0.2` may be consulted for structure (TB cache, page protection, linux-user mmap/brk, SMC invalidation). Never link, bind, shell out to, or copy QEMU into production paths. See `docs/plans/emulator-jit-only-roadmap.md`.
 
 ## Module Map
 
 | Module | File | Purpose |
 |---|---|---|
-| `Emulator` | `src/core.rs` | Main state machine: run loop, TTD hooks, register I/O, arch-agnostic CC helpers |
-| `MachineState` | `src/pcode/state.rs` | Address spaces, shadow memory (taint map), memory trace buffers |
-| `Evaluator` | `src/pcode/eval.rs` | P-Code opcode dispatch, taint propagation, CBranch emission |
+| `Emulator` | `src/core.rs` | Main state machine: JIT run loop, TTD hooks, register I/O, arch-agnostic CC helpers |
+| `MachineState` | `src/pcode/state.rs` | Address spaces, shadow memory (taint map), page map, memory trace buffers |
+| `PageMap` | `src/pcode/page_map.rs` | Guest virtual map + R/W/X protections + mmap/brk |
+| `SpaceLayout` | `src/pcode/spaces.rs` | SLA-native ram/register/unique indices |
+| `Evaluator` | `src/pcode/eval.rs` | Offline / symbolic helper dispatch (not the primary run loop) |
+| `JitCompiler` | `src/jit/compiler.rs` | Multi-insn TB: P-Code → Cranelift (sole execution engine) |
+| `JitCache` | `src/jit/cache.rs` | Guest PC → host TB; page-level SMC invalidation |
+| JIT callbacks | `src/jit/callbacks.rs` | space I/O, float, bulk bytes, CallOther, soft chain |
 | `SymbolicExecutor` | `src/sym/mod.rs` | TTD-backed concolic exploration driver |
 | `TraceLog` | `src/trace.rs` | Per-instruction audit trail |
-| Linux HLE | `src/os/linux/mod.rs` | Linux syscall HLE: read, write, mmap, brk, exit, stat, open, close |
-| Windows HLE | `src/os/windows/hle.rs` | Windows HLE stubs: VirtualAlloc, HeapAlloc, WriteFile, ExitProcess |
+| Linux HLE | `src/os/linux/mod.rs` | Linux syscall HLE + `image_info` + `signal` delivery |
+| Windows HLE | `src/os/windows/hle.rs` | Win32 HLE; PE `image_info` (stack/PEB/TEB/heap) |
 | Bare Metal HLE | `src/os/bare_metal/mod.rs` | Minimal semihosting-style HLE |
 | Arch descriptors | `src/arch/` | Architecture metadata, calling convention traits, register maps |
 
 ## Key Invariants
 
-1. **No external runtime** — The emulator must never depend on QEMU, Unicorn, Capstone, or any native C/C++ binary emulation library. It evaluates P-Code semantics directly.
-2. **Taint is per-byte** — Shadow memory tracks taint at individual byte granularity via `shadow_memory: HashMap<(space_id, addr), SymNodeId>`.
-3. **Concrete write clears taint** — When `write_space()` stores concrete bytes, the corresponding shadow entries are removed.
-4. **TTD snapshots are complete** — Each `ExecutionSnapshot` must include `MemoryDelta` and `ShadowDelta` so that `ttd_seek()` can fully reconstruct both concrete and symbolic state.
-5. **Taint sources are explicit** — Only designated OS HLE handlers (e.g., `sys_read`) may tag new `SymExpr::Var` nodes as taint sources. Do not introduce implicit taint sources in the evaluator.
-6. **CBranch emits SymBranch events** — Every conditional P-Code branch records a `SymBranch` so the `SymbolicExecutor` can queue alternate paths.
-7. **Emulator is not a semantic repair layer** — If decompiler output is wrong, fix it in `fission-pcode`, not here.
+1. **JIT only** — Runtime execution is Cranelift-compiled blocks only. Compile failure is a hard error, not a silent skip and not an interpreter fallback.
+2. **No external runtime** — Never depend on QEMU, Unicorn, Capstone, or any native C/C++ binary emulation library.
+3. **Taint is per-byte** — Shadow memory tracks taint at individual byte granularity via page-level symbolic maps.
+4. **Concrete write clears taint** — When `write_space()` stores concrete bytes, the corresponding shadow entries are removed.
+5. **TTD snapshots are complete** — Each `ExecutionSnapshot` must include `MemoryDelta` and `ShadowDelta` so that `ttd_seek()` can fully reconstruct both concrete and symbolic state.
+6. **Taint sources are explicit** — Only designated OS HLE handlers (e.g., `sys_read`) may tag new `SymExpr::Var` nodes as taint sources.
+7. **SMC invalidation** — Writes that touch EXEC-mapped guest pages must invalidate `JitCache` entries for those pages.
+8. **Emulator is not a semantic repair layer** — If decompiler output is wrong, fix it in `fission-pcode`, not here.
 
 ## Where To Look
 
 | Task | Location |
 |---|---|
-| Add a new syscall handler (Linux) | `src/os/linux/mod.rs` |
+| Lower a new P-Code opcode in the JIT | `src/jit/compiler.rs` |
+| Host callouts (mem/reg/userop) | `src/jit/callbacks.rs` |
+| JIT cache / SMC invalidation | `src/jit/cache.rs`, `jit_write_space` |
+| Guest page map / mmap / brk | `src/pcode/page_map.rs`, `src/os/linux/syscall.rs` |
+| Add a new syscall handler (Linux) | `src/os/linux/mod.rs` + `syscall.rs` |
 | Add a new syscall handler (Windows) | `src/os/windows/hle.rs` |
-| Add taint propagation to a new P-Code opcode | `src/pcode/eval.rs` — find the opcode match arm and add shadow read/write calls |
-| Change how shadow memory works | `src/pcode/state.rs` — `shadow_memory`, `set_shadow_memory`, `trace_shadow_writes` |
+| Symbolic / taint helpers | `src/pcode/eval.rs`, `src/pcode/state.rs` |
 | Change TTD snapshot interval or format | `src/core.rs` — `run()` loop, `ttd_seek()` |
 | Add a new architecture | `src/arch/` — implement `CallingConvention` trait and register map |
 | Change exploration strategy | `src/sym/mod.rs` — `SymbolicExecutor::explore()` |
-| Change how taint variables are named | `src/os/linux/mod.rs` — `sys_read` handler |
+| Roadmap | `docs/plans/emulator-jit-only-roadmap.md` |
 
 ## Core Data Flow
 
@@ -83,13 +96,15 @@ SymbolicExecutor.explore()
 
 ## Anti-Patterns
 
-- Do not add QEMU, Unicorn, or Capstone as dependencies.
+- Do not reintroduce a P-Code interpreter as the run-loop execution engine.
+- Do not add QEMU, Unicorn, or Capstone as dependencies (vendor QEMU is reference-only).
 - Do not hardcode register offsets or syscall numbers for specific binaries.
 - Do not invent new calling convention or type rules in HLE handlers — consume ABI facts from `arch/`.
 - Do not taint data that did not come from a recognized taint source.
 - Do not use the emulator as a decompiler semantic patch.
 - Do not add Z3, STP, or any C++ SMT solver as a dependency. The solver must remain pure Rust via `fission-solver`.
 - Do not record shadow deltas for memory spaces that are not `ram` (space_id=3) or `register` (space_id=2) unless you add a new canonical taint space.
+- Do not silently skip instructions on JIT compile failure.
 
 ## Build / Test Commands
 
@@ -97,17 +112,17 @@ SymbolicExecutor.explore()
 # Type-check emulator crate
 cargo check -p fission-emulator
 
-# Run all emulator tests (if any)
+# Unit + optional smoke tests
 cargo nextest run -p fission-emulator
 
-# Type-check solver
-cargo check -p fission-solver
+# Optional real-binary smoke (static musl x86_64 hello)
+#   zig cc -target x86_64-linux-musl -O0 -o /tmp/fission-emu-test/hello_linux_x64 hello.c
+#   FISSION_SMOKE_ELF=/tmp/fission-emu-test/hello_linux_x64 cargo nextest run -p fission-emulator smoke_linux
 
-# Type-check downstream CLI
-cargo check -p fission-cli
-
-# Build release CLI (includes emulator)
+# Sandbox CLI
 cargo build -p fission-cli --release
+./target/release/fission_cli sandbox /path/to/elf --max-inst 50000
+# End-of-run log line: "Emulator metrics: ..."
 ```
 
 ## Workflow Bias
@@ -127,5 +142,7 @@ None currently. Add them if `os/`, `arch/`, or `sym/` grow large enough to warra
 - `crates/fission-solver/` — Pure-Rust SMT constraint engine
 - `crates/fission-sleigh/` — Produces P-Code ops consumed by this evaluator
 - `crates/fission-cli/src/cli/oneshot/mod.rs` — CLI surface integrating the emulator
-- `vendor/angr-master/` — Reference implementation (read-only reference, no dependencies)
+- `vendor/qemu-11.0.2/` — Structural reference only (TB, pages, linux-user); no dependencies
+- `vendor/angr-master/` — Symbolic/HLE reference only; no dependencies
+- `docs/plans/emulator-jit-only-roadmap.md` — JIT-only roadmap
 - Root `AGENTS.md` — Repository-level rules that override anything here if they conflict
