@@ -114,6 +114,10 @@ Callouts: `jit_read_space` / `jit_write_space` / `jit_call_other` / `jit_exit_tb
 - [x] GOT patch preserves mini-dynlink resolved targets (`is_resolved_got_target`)
 - [x] HLE quality metrics: `hle_misses` / `unknown_syscalls` + `check_hle_budget` / CLI `--max-hle-misses`
 - [x] Bump heap HLE: `malloc`/`calloc` via `brk`; `printf` `%s/%d/%x/%p/%%` (+ `l`)
+- [x] libc HLE: `strlen` / `memcpy` / `memmove` / `memset` / `mmap`
+- [x] CI fixtures: `x64_dyn_printf_malloc.elf` (HLE path); static printf opt-in
+- [x] Concolic mini-fixture: `x64_concolic_branch_sys.elf` (stdin taint → branch);
+      gate records always, stops only when `concolic_stop_on_branch`
 - [x] Automation `sandbox-check` lane (subprocess over CLI JSON + budget gate)
 
 ## Validation

@@ -58,6 +58,11 @@ pub struct Emulator {
     /// symbolic branch (concolic gate). Cleared when exploration resumes.
     pub sym_stop_requested: bool,
 
+    /// When true, a tainted CBranch records `sym_events` **and** requests a run
+    /// stop (`sym_stop_requested`). Default false so concrete sandbox runs with
+    /// tainted stdin continue on the concrete path; enable for concolic explore.
+    pub concolic_stop_on_branch: bool,
+
     /// The Virtual File System.
     pub vfs: crate::os::vfs::SimVFS,
 
@@ -269,6 +274,7 @@ impl Emulator {
             tick_count: 0,
             sym_events: Vec::new(),
             sym_stop_requested: false,
+            concolic_stop_on_branch: false,
             vfs: crate::os::vfs::SimVFS::new(),
             solver: fission_solver::Solver::new(),
             jit: crate::jit::JitCompiler::new().ok(),
@@ -451,6 +457,32 @@ impl Emulator {
 
     pub fn with_stdin_mock(mut self, mock: Option<String>) -> Self {
         self.stdin_buffer = mock.map(|s| s.into_bytes());
+        // Keep VFS fd 0 in sync so `sys_read` (not only libc read) sees the mock.
+        if let Some(ref bytes) = self.stdin_buffer {
+            if let Some(f) = self.vfs.files.get_mut(&0) {
+                f.content = bytes.clone();
+                f.cursor = 0;
+            }
+        }
+        self
+    }
+
+    /// Seed guest stdin (fd 0) with concrete bytes and optional taint sources.
+    ///
+    /// When `taint` is true, each byte is registered as a solver var and tagged
+    /// in shadow memory only after a later read fills guest RAM — the read HLE
+    /// path already taints the destination buffer. This helper mainly seeds VFS.
+    pub fn seed_stdin(&mut self, data: &[u8]) {
+        self.stdin_buffer = Some(data.to_vec());
+        if let Some(f) = self.vfs.files.get_mut(&0) {
+            f.content = data.to_vec();
+            f.cursor = 0;
+        }
+    }
+
+    /// Enable run-loop stops on tainted CBranch (for `SimulationManager` / explore).
+    pub fn with_concolic_stop(mut self, enabled: bool) -> Self {
+        self.concolic_stop_on_branch = enabled;
         self
     }
 

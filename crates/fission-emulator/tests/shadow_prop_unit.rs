@@ -108,9 +108,18 @@ fn shadow_load_copy_binop_reaches_cbranch_gate() {
     jit_shadow_store(emu_ptr, ram, 0x7000_0010, 1, uniq, 0x40);
     assert_eq!(emu.state.get_shadow_memory(ram, 0x7000_0010), Some(cond_id));
 
-    // CBranch gate should stop
+    // CBranch gate: record always; stop only when concolic_stop_on_branch.
     emu.sym_events.clear();
     emu.sym_stop_requested = false;
+    emu.concolic_stop_on_branch = false;
+    let stop_record = jit_sym_cbranch_gate(emu_ptr, 1, uniq, 0x40, 0x401000, 0x401010);
+    assert_eq!(stop_record, 0, "record-only must not stop");
+    assert!(!emu.sym_stop_requested);
+    assert_eq!(emu.sym_events.len(), 1);
+    assert_eq!(emu.sym_events[0].condition_node, Some(cond_id));
+
+    emu.sym_events.clear();
+    emu.concolic_stop_on_branch = true;
     let stop = jit_sym_cbranch_gate(emu_ptr, 1, uniq, 0x40, 0x401000, 0x401010);
     assert_eq!(stop, 1);
     assert!(emu.sym_stop_requested);

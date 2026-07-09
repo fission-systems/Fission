@@ -1737,7 +1737,10 @@ fn remap_relative_branches(op: &mut PcodeOp, base: usize) {
         PcodeOpcode::Branch | PcodeOpcode::CBranch => {
             if let Some(dest) = op.inputs.first_mut() {
                 if dest.space_id == 0 || dest.is_constant {
-                    dest.constant_val = (dest.constant_val as usize + base) as i64;
+                    // Relative p-code branch targets are offsets into the flat
+                    // op stream; use wrapping arithmetic (large signed bases).
+                    dest.constant_val =
+                        (dest.constant_val as i128 + base as i128) as i64;
                     dest.offset = dest.constant_val as u64;
                 }
             }

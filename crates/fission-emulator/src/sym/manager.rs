@@ -23,7 +23,9 @@ impl SimulationManager {
         Self::with_initial_state(emu, initial_state)
     }
 
-    pub fn with_initial_state(emu: Emulator, initial_state: SimState) -> Self {
+    pub fn with_initial_state(mut emu: Emulator, initial_state: SimState) -> Self {
+        // Exploration needs the JIT symbolic gate to stop at tainted branches.
+        emu.concolic_stop_on_branch = true;
         let mut stashes = HashMap::new();
         stashes.insert("active".to_string(), vec![initial_state]);
         stashes.insert("deadended".to_string(), Vec::new());

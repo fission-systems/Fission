@@ -44,6 +44,139 @@ impl SimProcedure for Free {
     }
 }
 
+pub struct Strlen;
+impl SimProcedure for Strlen {
+    fn run(&self, emu: &mut Emulator) -> Result<HleResult> {
+        let s = emu.read_arg(0).unwrap_or(0);
+        let mut n = 0u64;
+        let mut cur = s;
+        loop {
+            let b = emu
+                .state
+                .read_space(emu.state.ram_space(), cur, 1)
+                .unwrap_or_else(|_| vec![0])[0];
+            if b == 0 {
+                break;
+            }
+            n += 1;
+            cur += 1;
+            if n > 1 << 20 {
+                break;
+            }
+        }
+        tracing::info!("SimProcedure: strlen(0x{:X}) -> {}", s, n);
+        emu.write_return_val(n)?;
+        Ok(HleResult::Continue)
+    }
+}
+
+pub struct Memcpy;
+impl SimProcedure for Memcpy {
+    fn run(&self, emu: &mut Emulator) -> Result<HleResult> {
+        let dst = emu.read_arg(0).unwrap_or(0);
+        let src = emu.read_arg(1).unwrap_or(0);
+        let n = emu.read_arg(2).unwrap_or(0) as usize;
+        let n = n.min(1 << 20);
+        if n > 0 {
+            let data = emu
+                .state
+                .read_space(emu.state.ram_space(), src, n)
+                .unwrap_or_else(|_| vec![0u8; n]);
+            // Propagate taint byte-wise when present.
+            for i in 0..n {
+                if let Some(node) = emu
+                    .state
+                    .get_shadow_memory(emu.state.ram_space(), src + i as u64)
+                {
+                    emu.state
+                        .set_shadow_memory(emu.state.ram_space(), dst + i as u64, node);
+                }
+            }
+            emu.state
+                .write_space(emu.state.ram_space(), dst, &data[..n.min(data.len())])?;
+        }
+        tracing::info!("SimProcedure: memcpy(0x{:X}, 0x{:X}, {})", dst, src, n);
+        emu.write_return_val(dst)?;
+        Ok(HleResult::Continue)
+    }
+}
+
+pub struct Memmove;
+impl SimProcedure for Memmove {
+    fn run(&self, emu: &mut Emulator) -> Result<HleResult> {
+        // Overlap-safe: buffer then write (same as memcpy for HLE purposes).
+        Memcpy.run(emu)
+    }
+}
+
+pub struct Memset;
+impl SimProcedure for Memset {
+    fn run(&self, emu: &mut Emulator) -> Result<HleResult> {
+        let dst = emu.read_arg(0).unwrap_or(0);
+        let c = emu.read_arg(1).unwrap_or(0) as u8;
+        let n = emu.read_arg(2).unwrap_or(0) as usize;
+        let n = n.min(1 << 20);
+        if n > 0 {
+            let fill = vec![c; n];
+            emu.state.write_space(emu.state.ram_space(), dst, &fill)?;
+            // Concrete write clears taint via write_space path.
+        }
+        tracing::info!("SimProcedure: memset(0x{:X}, {}, {})", dst, c, n);
+        emu.write_return_val(dst)?;
+        Ok(HleResult::Continue)
+    }
+}
+
+/// libc `mmap` — same semantics as the mmap syscall HLE.
+pub struct Mmap;
+impl SimProcedure for Mmap {
+    fn run(&self, emu: &mut Emulator) -> Result<HleResult> {
+        use crate::pcode::page_map::{page_align_down, page_align_up, prot};
+        // SysV: mmap(addr, length, prot, flags, fd, offset)
+        let addr = emu.read_arg(0).unwrap_or(0);
+        let length = emu.read_arg(1).unwrap_or(0);
+        let prot_bits = emu.read_arg(2).unwrap_or(0) as u8;
+        let flags = emu.read_arg(3).unwrap_or(0);
+        let fd = emu.read_arg(4).unwrap_or(u64::MAX) as i64;
+        let offset = emu.read_arg(5).unwrap_or(0) as usize;
+        let page_prot = (prot_bits & 0x07) | prot::VALID;
+        let map_fixed = flags & 0x10 != 0;
+        let map_anon = flags & 0x20 != 0;
+
+        let base = if addr == 0 && !map_fixed {
+            emu.state.page_map.mmap_anon(length.max(1), page_prot)
+        } else {
+            emu.state
+                .page_map
+                .map_region(addr, length.max(1), page_prot, true);
+            page_align_down(addr)
+        };
+        let len = page_align_up(length.max(1));
+        if !map_anon && fd >= 0 {
+            let want = length.max(1) as usize;
+            if let Ok(data) = emu.vfs.peek(fd as u64, offset, want) {
+                let _ = emu.state.write_space(emu.state.ram_space(), base, &data);
+            }
+        } else {
+            let fill = len.min(0x10_0000) as usize;
+            if fill > 0 {
+                let zeros = vec![0u8; fill];
+                let _ = emu.state.write_space(emu.state.ram_space(), base, &zeros);
+            }
+        }
+        tracing::info!(
+            "SimProcedure: mmap(0x{:X}, {}, prot=0x{:X}, flags=0x{:X}) -> 0x{:X}",
+            addr,
+            length,
+            page_prot,
+            flags,
+            base
+        );
+        emu.write_return_val(base)?;
+        Ok(HleResult::Continue)
+    }
+}
+
 pub struct Puts;
 impl SimProcedure for Puts {
     fn run(&self, emu: &mut Emulator) -> Result<HleResult> {
@@ -80,7 +213,15 @@ impl SimProcedure for Read {
         if fd == 0 {
             let mut data = vec![0u8; count];
             let mut bytes_read = 0;
-            if let Some(ref mut mock_buf) = emu.stdin_buffer {
+            // Prefer VFS stdin (seeded by with_stdin_mock / seed_stdin).
+            if let Ok(v) = emu.vfs.read(0, count) {
+                bytes_read = v.len();
+                data[..bytes_read].copy_from_slice(&v);
+                if let Some(ref mut mock_buf) = emu.stdin_buffer {
+                    let drop = bytes_read.min(mock_buf.len());
+                    mock_buf.drain(..drop);
+                }
+            } else if let Some(ref mut mock_buf) = emu.stdin_buffer {
                 let to_read = std::cmp::min(count, mock_buf.len());
                 data[..to_read].copy_from_slice(&mock_buf[..to_read]);
                 mock_buf.drain(..to_read);
@@ -92,7 +233,16 @@ impl SimProcedure for Read {
                 }
             }
             if bytes_read > 0 {
-                emu.state.write_space(emu.state.ram_space(), buf, &data[..bytes_read])?;
+                emu.state
+                    .write_space(emu.state.ram_space(), buf, &data[..bytes_read])?;
+                // Taint stdin bytes for concolic exploration.
+                for i in 0..bytes_read {
+                    let node = emu
+                        .solver
+                        .register_var(format!("stdin_{}", buf + i as u64), 1);
+                    emu.state
+                        .set_shadow_memory(emu.state.ram_space(), buf + i as u64, node);
+                }
             }
             emu.write_return_val(bytes_read as u64)?;
         } else {

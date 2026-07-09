@@ -40,6 +40,11 @@ impl LinuxEnv {
         simos.register_procedure("malloc", Box::new(libc::Malloc));
         simos.register_procedure("calloc", Box::new(libc::Calloc));
         simos.register_procedure("free", Box::new(libc::Free));
+        simos.register_procedure("strlen", Box::new(libc::Strlen));
+        simos.register_procedure("memcpy", Box::new(libc::Memcpy));
+        simos.register_procedure("memmove", Box::new(libc::Memmove));
+        simos.register_procedure("memset", Box::new(libc::Memset));
+        simos.register_procedure("mmap", Box::new(libc::Mmap));
         simos.register_procedure("puts", Box::new(libc::Puts));
         simos.register_procedure("printf", Box::new(libc::Printf));
         simos.register_procedure("read", Box::new(libc::Read));

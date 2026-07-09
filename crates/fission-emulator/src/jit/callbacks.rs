@@ -626,14 +626,26 @@ pub extern "C" fn jit_sym_cbranch_gate(
         alt_rel_idx: None,
         alt_addr: Some(if taken { not_taken_addr } else { taken_addr }),
     });
-    emu.sym_stop_requested = true;
-    tracing::debug!(
-        "Symbolic CBranch gate: node={} taken={} pc=0x{:X}",
-        node,
-        taken,
-        emu.pc
-    );
-    1
+    // Only stop the run when concolic exploration is enabled; otherwise keep
+    // following the concrete path (tainted stdin in normal sandbox).
+    if emu.concolic_stop_on_branch {
+        emu.sym_stop_requested = true;
+        tracing::debug!(
+            "Symbolic CBranch gate STOP: node={} taken={} pc=0x{:X}",
+            node,
+            taken,
+            emu.pc
+        );
+        1
+    } else {
+        tracing::debug!(
+            "Symbolic CBranch gate record-only: node={} taken={} pc=0x{:X}",
+            node,
+            taken,
+            emu.pc
+        );
+        0
+    }
 }
 
 // ── CallOther / HLE ──────────────────────────────────────────────────────────
