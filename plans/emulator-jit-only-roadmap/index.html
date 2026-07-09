@@ -1040,6 +1040,8 @@
 <li>[x] Persistent register cache (<code>MachineState::reg_cache</code> for 8B-aligned register space)</li>
 <li>[x] Zero-callout host reg file loads (<code>host_reg_file</code> + <code>jit_host_reg_base</code>)</li>
 <li>[x] Zero-callout host reg file stores (IR <code>store</code> to <code>host_reg_file</code> in <code>store_vn</code>)</li>
+<li>[x] Mid-TB register access zero-callout (IR load/store to <code>host_reg_file</code>);
+      CallOther/TB-exit still one writeback per dirty unique/ram (and reg for AddressSpace)</li>
 <li>[x] Optional pure-Rust softfloat path (<code>feature = "softfloat"</code>, NaN quieting policy)</li>
 </ul>
 <h3 id="phase-d-analysis-features">Phase D — Analysis features<a class="headerlink" href="#phase-d-analysis-features" title="Permanent link">&para;</a></h3>
@@ -1049,6 +1051,7 @@
 <li>[x] Symbolic CBranch gate (<code>jit_sym_cbranch_gate</code> → <code>sym_events</code> + <code>sym_stop_requested</code>)</li>
 <li>[x] JIT shadow prop: COPY/LOAD/STORE + int ALU/compare</li>
 <li>[x] Full symbolic AST on JIT ALU (<code>jit_shadow_binop</code> builds <code>SymExpr</code> Add/Sub/…/Eq)</li>
+<li>[x] Unary/float AST: <code>jit_shadow_unop</code> (Not/Neg/BoolNot) + float Var leaves</li>
 <li>[x] Exploration manager clears stop flag between forks (<code>sym/manager.rs</code>)</li>
 </ul>
 <h3 id="phase-e-maturity-smoke-in-progress">Phase E — Maturity / smoke (in progress)<a class="headerlink" href="#phase-e-maturity-smoke-in-progress" title="Permanent link">&para;</a></h3>
@@ -1068,6 +1071,8 @@
 <li>[x] Dyn ELF run without ld.so: <code>__libc_start_main</code> JumpTo(main) + puts HLE + GOT patch</li>
 <li>[x] Dynlink scaffold: PT_INTERP parse, <code>DynlinkMode::{Static,HleGot,Interpreter}</code>,
       opt-in host ld.so map (<code>FISSION_ENABLE_DYNLINK</code> + <code>FISSION_LD_SO</code>)</li>
+<li>[x] Dynlink bootstrap: VFS seed/alias for main binary, openat/read, file-backed mmap,
+      <code>apply_rela_x86_64</code> (RELATIVE/JUMP_SLOT/GLOB_DAT)</li>
 <li>[x] Automation <code>sandbox-check</code> lane (subprocess over CLI JSON + budget gate)</li>
 </ul>
 <h2 id="validation">Validation<a class="headerlink" href="#validation" title="Permanent link">&para;</a></h2>
