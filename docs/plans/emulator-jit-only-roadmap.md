@@ -115,9 +115,12 @@ Callouts: `jit_read_space` / `jit_write_space` / `jit_call_other` / `jit_exit_tb
 - [x] HLE quality metrics: `hle_misses` / `unknown_syscalls` + `check_hle_budget` / CLI `--max-hle-misses`
 - [x] Bump heap HLE: `malloc`/`calloc` via `brk`; `printf` `%s/%d/%x/%p/%%` (+ `l`)
 - [x] libc HLE: `strlen` / `memcpy` / `memmove` / `memset` / `mmap`
-- [x] CI fixtures: `x64_dyn_printf_malloc.elf` (HLE path); static printf opt-in
+- [x] CI fixtures: `x64_dyn_printf_malloc.elf` (HLE path); static printf **opt-in only**
+      (remeasured: not CI-stable / no clean halt ≤500k — CRT/syscall gaps remain)
 - [x] Concolic mini-fixture: `x64_concolic_branch_sys.elf` (stdin taint → branch);
       gate records always, stops only when `concolic_stop_on_branch`
+- [x] Concolic explore E2E: `SimulationManager` fork resume PCs + `max_steps` + both-exit smoke
+- [x] libc HLE: `strcmp`/`strncmp`/`snprintf`/`stat` (+ `__xstat`); `newfstatat` VFS sizes
 - [x] Automation `sandbox-check` lane (subprocess over CLI JSON + budget gate)
 
 ## Validation

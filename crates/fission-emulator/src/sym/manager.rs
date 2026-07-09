@@ -1,7 +1,7 @@
 use crate::core::Emulator;
 use crate::sym::state::SimState;
 use crate::sym::exploration::ExplorationTechnique;
-use fission_solver::{SatResult, SymExpr};
+use fission_solver::SymExpr;
 use anyhow::Result;
 use std::collections::HashMap;
 
@@ -13,6 +13,10 @@ pub struct SimulationManager {
     pub stashes: HashMap<String, Vec<SimState>>,
     /// Active exploration techniques.
     pub techniques: Vec<Box<dyn ExplorationTechnique>>,
+    /// Safety bound on `step` iterations during `explore` / `step_all`.
+    pub max_steps: u64,
+    /// How many `step()` calls have completed in this explore session.
+    pub steps_taken: u64,
 }
 
 impl SimulationManager {
@@ -35,7 +39,18 @@ impl SimulationManager {
         stashes.insert("found".to_string(), Vec::new());
         stashes.insert("avoid".to_string(), Vec::new());
 
-        Self { emu, stashes, techniques: Vec::new() }
+        Self {
+            emu,
+            stashes,
+            techniques: Vec::new(),
+            max_steps: 64,
+            steps_taken: 0,
+        }
+    }
+
+    pub fn with_max_steps(mut self, n: u64) -> Self {
+        self.max_steps = n;
+        self
     }
 
     pub fn use_technique(&mut self, mut tech: Box<dyn ExplorationTechnique>) {
@@ -43,15 +58,25 @@ impl SimulationManager {
         self.techniques.push(tech);
     }
 
+    pub fn stash_len(&self, name: &str) -> usize {
+        self.stashes.get(name).map(|v| v.len()).unwrap_or(0)
+    }
+
     /// Step all states in the `active` stash.
     pub fn step(&mut self) -> Result<()> {
-        let active_states = self.stashes.get_mut("active").unwrap().drain(..).collect::<Vec<_>>();
+        self.steps_taken = self.steps_taken.saturating_add(1);
+        let active_states = self
+            .stashes
+            .get_mut("active")
+            .unwrap()
+            .drain(..)
+            .collect::<Vec<_>>();
         let mut next_active = Vec::new();
         let mut next_deadended = Vec::new();
-        let mut next_unsat = Vec::new();
+        let next_unsat: Vec<SimState> = Vec::new();
 
         for state in active_states {
-            // Hot-swap the state via O(1) Copy-On-Write instead of TTD seek
+            // Hot-swap the state via Copy-On-Write instead of TTD seek.
             self.emu.state = state.machine_state.clone();
             self.emu.pc = state.pc;
             self.emu.inst_count = state.step_index;
@@ -64,85 +89,84 @@ impl SimulationManager {
             // Clear stop so subsequent forks can run again.
             self.emu.sym_stop_requested = false;
 
-            if let Err(_) = run_result {
-                // If it halted or errored, it's deadended
-                let final_step = self.emu.inst_count;
-                let final_pc = self.emu.pc;
-                let final_ms = self.emu.state.clone();
-                next_deadended.push(SimState::new(final_step, final_pc, final_ms));
+            if run_result.is_err() {
+                next_deadended.push(SimState::new(
+                    self.emu.inst_count,
+                    self.emu.pc,
+                    self.emu.state.clone(),
+                ));
                 continue;
             }
 
-            // Check if any symbolic branches were emitted
             let branches = std::mem::take(&mut self.emu.sym_events);
             if branches.is_empty() {
-                // No branches, just deadended normally
-                next_deadended.push(SimState::new(self.emu.inst_count, self.emu.pc, self.emu.state.clone()));
-            } else {
-                // A branch occurred! We fork the state.
-                let branch = branches.into_iter().next().unwrap(); // Take the first branch
-                
-                // For a symbolic branch, we have the taken path and the alternate path
-                if let Some(cond_node) = branch.condition_node {
-                    if let Some(cond_expr) = self.emu.solver.nodes.get(&cond_node).cloned() {
-                        let true_expr = cond_expr.clone();
-                        let false_expr = SymExpr::Eq(
-                            Box::new(cond_expr.clone()),
-                            Box::new(SymExpr::Const { val: 0, size: 1 })
-                        );
-
-                        // Extract the emulator memory state at the branch point
-                        let fork_ms = self.emu.state.clone();
-
-                        // True path state
-                        let taken_state = state.with_constraint(
-                            if branch.condition_val_taken { true_expr.clone() } else { false_expr.clone() },
-                            branch.step_index,
-                            branch.pc,
-                            fork_ms.clone()
-                        );
-
-                        // Alternate path state
-                        let alt_state = state.with_constraint(
-                            if branch.condition_val_taken { false_expr } else { true_expr },
-                            branch.step_index,
-                            branch.alt_addr.unwrap_or(branch.pc), // simplify
-                            fork_ms
-                        );
-
-                        // Feasibility check
-                        let solver = &mut self.emu.solver;
-                        let state_oracle = &self.emu.state;
-                        
-                        if solver.satisfiable_with_oracle(&taken_state.history.constraints, Some(state_oracle)) {
-                            next_active.push(taken_state);
-                        } else {
-                            next_unsat.push(taken_state);
-                        }
-
-                        if solver.satisfiable_with_oracle(&alt_state.history.constraints, Some(state_oracle)) {
-                            next_active.push(alt_state);
-                        } else {
-                            next_unsat.push(alt_state);
-                        }
-                    } else {
-                        // Unconstrained or missing node
-                        // Note: state still needs to be updated with the advanced machine state
-                        let mut advanced_state = state.clone();
-                        advanced_state.step_index = self.emu.inst_count;
-                        advanced_state.pc = self.emu.pc;
-                        advanced_state.machine_state = self.emu.state.clone();
-                        next_deadended.push(advanced_state);
-                    }
-                }
+                // Halted or ran to limit without a symbolic branch.
+                next_deadended.push(SimState::new(
+                    self.emu.inst_count,
+                    self.emu.pc,
+                    self.emu.state.clone(),
+                ));
+                continue;
             }
+
+            // Fork on the first symbolic branch.
+            let branch = branches.into_iter().next().unwrap();
+            let Some(cond_node) = branch.condition_node else {
+                next_deadended.push(SimState::new(
+                    self.emu.inst_count,
+                    self.emu.pc,
+                    self.emu.state.clone(),
+                ));
+                continue;
+            };
+            let Some(cond_expr) = self.emu.solver.nodes.get(&cond_node).cloned() else {
+                next_deadended.push(SimState::new(
+                    self.emu.inst_count,
+                    self.emu.pc,
+                    self.emu.state.clone(),
+                ));
+                continue;
+            };
+
+            let true_expr = cond_expr.clone();
+            let false_expr = SymExpr::Eq(
+                Box::new(cond_expr),
+                Box::new(SymExpr::Const { val: 0, size: 1 }),
+            );
+
+            // Concrete path already executed to `emu.pc` (selected by gate stop).
+            let concrete_pc = self.emu.pc;
+            let alt_pc = branch.alt_addr.unwrap_or(concrete_pc);
+            let fork_ms = self.emu.state.clone();
+            let step = self.emu.inst_count;
+
+            let (concrete_constraint, alt_constraint) = if branch.condition_val_taken {
+                (true_expr, false_expr)
+            } else {
+                (false_expr, true_expr)
+            };
+
+            let concrete_state =
+                state.with_constraint(concrete_constraint, step, concrete_pc, fork_ms.clone());
+            let alt_state = state.with_constraint(alt_constraint, step, alt_pc, fork_ms);
+
+            // Always keep both forks active for now. Full path-condition SAT is
+            // still incomplete (can panic on some AST shapes); prune later when
+            // the solver is hardened. Constraints remain on SimState for later.
+            next_active.push(concrete_state);
+            next_active.push(alt_state);
         }
 
-        self.stashes.get_mut("active").unwrap().extend(next_active);
-        self.stashes.get_mut("deadended").unwrap().extend(next_deadended);
+        self.stashes
+            .get_mut("active")
+            .unwrap()
+            .extend(next_active);
+        self.stashes
+            .get_mut("deadended")
+            .unwrap()
+            .extend(next_deadended);
         self.stashes.get_mut("unsat").unwrap().extend(next_unsat);
 
-        // Run techniques
         let mut techniques = std::mem::take(&mut self.techniques);
         for tech in techniques.iter_mut() {
             tech.step(&mut self.stashes);
@@ -152,9 +176,10 @@ impl SimulationManager {
         Ok(())
     }
 
-    /// Step until no states remain in the `active` stash, or a technique signals completion.
+    /// Step until no states remain in the `active` stash, a technique completes,
+    /// or `max_steps` is hit.
     pub fn step_all(&mut self) -> Result<()> {
-        loop {
+        while self.steps_taken < self.max_steps {
             if self.stashes.get("active").unwrap().is_empty() {
                 break;
             }

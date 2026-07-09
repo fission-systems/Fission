@@ -174,6 +174,17 @@ impl SimProcedure for SysNewfstatat {
         tracing::info!("sys_newfstatat(\"{}\")", name);
         let mut target_st = TargetStat::default();
         target_st.st_mode = 0x81B4;
+        target_st.st_nlink = 1;
+        target_st.st_blksize = 4096;
+        if let Some(content) = emu.vfs.path_seeds.get(&name).cloned().or_else(|| {
+            std::path::Path::new(&name)
+                .file_name()
+                .and_then(|s| s.to_str())
+                .and_then(|b| emu.vfs.path_seeds.get(b).cloned())
+        }) {
+            target_st.st_size = content.len() as i64;
+            target_st.st_blocks = (content.len() as i64 + 511) / 512;
+        }
         ram_write(emu, statbuf, &target_st.to_bytes())?;
         emu.write_register_u64("RAX", 0)?;
         Ok(HleResult::Continue)

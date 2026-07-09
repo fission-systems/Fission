@@ -1368,8 +1368,10 @@ impl JitCompiler {
 
                     // Symbolic gate: if condition is tainted, stop TB for manager fork.
                     {
+                        // Absolute guest target when dest is a RAM/code address;
+                        // relative p-code indices have no guest VA — fall back to
+                        // fallthrough so the concrete path still has a resume PC.
                         let taken_addr = if dest.space_id == 0 || dest.is_constant {
-                            // Relative within TB or fallthrough — use start_pc as anchor.
                             fallthrough_pc
                         } else {
                             dest.offset
@@ -1404,9 +1406,15 @@ impl JitCompiler {
                         builder.ins().brif(is_stop, stop_b, &[], cont_sym, &[]);
                         builder.switch_to_block(stop_b);
                         builder.seal_block(stop_b);
+                        // Exit at the concrete branch target so SimulationManager
+                        // can resume both forks at real guest PCs.
+                        let is_true =
+                            builder.ins().icmp_imm(IntCC::NotEqual, cond, 0);
+                        let concrete_next =
+                            builder.ins().select(is_true, t_a, n_a);
                         builder
                             .ins()
-                            .jump(exit_block, &[BlockArg::from(default_next)]);
+                            .jump(exit_block, &[BlockArg::from(concrete_next)]);
                         builder.switch_to_block(cont_sym);
                         builder.seal_block(cont_sym);
                     }

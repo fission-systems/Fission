@@ -48,24 +48,34 @@ pub struct Strlen;
 impl SimProcedure for Strlen {
     fn run(&self, emu: &mut Emulator) -> Result<HleResult> {
         let s = emu.read_arg(0).unwrap_or(0);
-        let mut n = 0u64;
-        let mut cur = s;
-        loop {
-            let b = emu
-                .state
-                .read_space(emu.state.ram_space(), cur, 1)
-                .unwrap_or_else(|_| vec![0])[0];
-            if b == 0 {
-                break;
-            }
-            n += 1;
-            cur += 1;
-            if n > 1 << 20 {
-                break;
-            }
-        }
+        let n = c_strlen(emu, s, 1 << 20);
         tracing::info!("SimProcedure: strlen(0x{:X}) -> {}", s, n);
         emu.write_return_val(n)?;
+        Ok(HleResult::Continue)
+    }
+}
+
+pub struct Strcmp;
+impl SimProcedure for Strcmp {
+    fn run(&self, emu: &mut Emulator) -> Result<HleResult> {
+        let a = emu.read_arg(0).unwrap_or(0);
+        let b = emu.read_arg(1).unwrap_or(0);
+        let r = c_strcmp(emu, a, b, None);
+        tracing::info!("SimProcedure: strcmp(0x{:X}, 0x{:X}) -> {}", a, b, r);
+        emu.write_return_val(r as u64)?;
+        Ok(HleResult::Continue)
+    }
+}
+
+pub struct Strncmp;
+impl SimProcedure for Strncmp {
+    fn run(&self, emu: &mut Emulator) -> Result<HleResult> {
+        let a = emu.read_arg(0).unwrap_or(0);
+        let b = emu.read_arg(1).unwrap_or(0);
+        let n = emu.read_arg(2).unwrap_or(0) as usize;
+        let r = c_strcmp(emu, a, b, Some(n));
+        tracing::info!("SimProcedure: strncmp(0x{:X}, 0x{:X}, {}) -> {}", a, b, n, r);
+        emu.write_return_val(r as u64)?;
         Ok(HleResult::Continue)
     }
 }
@@ -199,6 +209,77 @@ impl SimProcedure for Printf {
         print!("{}", out);
         tracing::info!("SimProcedure: printf => {:?}", out);
         emu.write_return_val(out.len() as u64)?;
+        Ok(HleResult::Continue)
+    }
+}
+
+/// `snprintf(buf, size, fmt, ...)` — writes formatted string into guest buffer.
+pub struct Snprintf;
+impl SimProcedure for Snprintf {
+    fn run(&self, emu: &mut Emulator) -> Result<HleResult> {
+        let buf = emu.read_arg(0).unwrap_or(0);
+        let size = emu.read_arg(1).unwrap_or(0) as usize;
+        let fmt_addr = emu.read_arg(2).unwrap_or(0);
+        let fmt = read_string(emu, fmt_addr)?;
+        // Args after fmt start at index 3.
+        let out = format_printf(emu, &fmt, 3)?;
+        if size > 0 && buf != 0 {
+            let mut bytes = out.as_bytes().to_vec();
+            // C snprintf: write at most size-1 chars + NUL when size > 0.
+            if bytes.len() >= size {
+                bytes.truncate(size.saturating_sub(1));
+            }
+            bytes.push(0);
+            let _ = emu
+                .state
+                .write_space(emu.state.ram_space(), buf, &bytes);
+        }
+        tracing::info!(
+            "SimProcedure: snprintf(0x{:X}, {}, \"{}\") -> {}",
+            buf,
+            size,
+            fmt.escape_debug(),
+            out.len()
+        );
+        // Return would-be length (excluding NUL), like real snprintf.
+        emu.write_return_val(out.len() as u64)?;
+        Ok(HleResult::Continue)
+    }
+}
+
+/// libc `stat` / `__xstat` style: write a synthetic TargetStat for known VFS paths.
+pub struct Stat;
+impl SimProcedure for Stat {
+    fn run(&self, emu: &mut Emulator) -> Result<HleResult> {
+        use crate::os::linux::abi::TargetStat;
+        let path = emu.read_arg(0).unwrap_or(0);
+        let statbuf = emu.read_arg(1).unwrap_or(0);
+        let name = read_string(emu, path).unwrap_or_default();
+        let mut st = TargetStat::default();
+        if let Some(content) = emu.vfs.path_seeds.get(&name).cloned().or_else(|| {
+            // basename lookup
+            std::path::Path::new(&name)
+                .file_name()
+                .and_then(|s| s.to_str())
+                .and_then(|b| emu.vfs.path_seeds.get(b).cloned())
+        }) {
+            st.st_size = content.len() as i64;
+            st.st_mode = 0x81B4; // regular 0644
+            st.st_nlink = 1;
+            st.st_blksize = 4096;
+            st.st_blocks = (content.len() as i64 + 511) / 512;
+        } else {
+            // Missing path: still return a regular file stub so simple tools proceed
+            // (ENOENT would be more correct; keep pragmatic HLE for CRT probes).
+            st.st_mode = 0x81B4;
+            st.st_nlink = 1;
+            st.st_blksize = 4096;
+        }
+        let _ = emu
+            .state
+            .write_space(emu.state.ram_space(), statbuf, &st.to_bytes());
+        tracing::info!("SimProcedure: stat(\"{}\") -> 0", name);
+        emu.write_return_val(0)?;
         Ok(HleResult::Continue)
     }
 }
@@ -337,6 +418,45 @@ pub fn read_string(emu: &mut Emulator, addr: u64) -> Result<String> {
         if bytes.len() > 4096 { break; }
     }
     Ok(String::from_utf8_lossy(&bytes).into_owned())
+}
+
+fn c_strlen(emu: &mut Emulator, s: u64, max: usize) -> u64 {
+    let mut n = 0u64;
+    let mut cur = s;
+    while (n as usize) < max {
+        let b = emu
+            .state
+            .read_space(emu.state.ram_space(), cur, 1)
+            .unwrap_or_else(|_| vec![0])[0];
+        if b == 0 {
+            break;
+        }
+        n += 1;
+        cur += 1;
+    }
+    n
+}
+
+/// C strcmp/strncmp: returns negative/0/positive as i64 (sign-extended for RAX).
+fn c_strcmp(emu: &mut Emulator, a: u64, b: u64, limit: Option<usize>) -> i64 {
+    let max = limit.unwrap_or(1 << 20).min(1 << 20);
+    for i in 0..max {
+        let ba = emu
+            .state
+            .read_space(emu.state.ram_space(), a + i as u64, 1)
+            .unwrap_or_else(|_| vec![0])[0];
+        let bb = emu
+            .state
+            .read_space(emu.state.ram_space(), b + i as u64, 1)
+            .unwrap_or_else(|_| vec![0])[0];
+        if ba != bb {
+            return ba as i64 - bb as i64;
+        }
+        if ba == 0 {
+            return 0;
+        }
+    }
+    0
 }
 
 /// Minimal printf formatter: `%%`, `%s`, `%c`, `%d`/`%i`, `%u`, `%x`/`%X`, `%p`,
@@ -494,5 +614,42 @@ mod tests {
         // Region is mapped and zeroed.
         let bytes = emu.state.read_space(emu.state.ram_space(), a, 8).unwrap();
         assert_eq!(bytes, vec![0u8; 8]);
+    }
+
+    #[test]
+    fn strcmp_and_snprintf_hle() {
+        let mut emu = tiny_emu();
+        let base = 0x402000u64;
+        emu.state
+            .page_map
+            .map_region(base, 0x2000, crate::pcode::page_map::prot::RW, true);
+        emu.state
+            .write_space(emu.state.ram_space(), base, b"abc\0xyz\0")
+            .unwrap();
+        // strcmp("abc","abc") == 0
+        emu.write_register_u64("RDI", base).unwrap();
+        emu.write_register_u64("RSI", base).unwrap();
+        Strcmp.run(&mut emu).unwrap();
+        assert_eq!(emu.read_register_u64("RAX").unwrap(), 0);
+        // strcmp("abc","xyz") < 0
+        emu.write_register_u64("RDI", base).unwrap();
+        emu.write_register_u64("RSI", base + 4).unwrap();
+        Strcmp.run(&mut emu).unwrap();
+        assert!((emu.read_register_u64("RAX").unwrap() as i64) < 0);
+
+        // snprintf(buf, 16, "n=%d", 7)
+        let buf = base + 0x100;
+        let fmt = base + 0x200;
+        emu.state
+            .write_space(emu.state.ram_space(), fmt, b"n=%d\0")
+            .unwrap();
+        emu.write_register_u64("RDI", buf).unwrap();
+        emu.write_register_u64("RSI", 16).unwrap();
+        emu.write_register_u64("RDX", fmt).unwrap();
+        emu.write_register_u64("RCX", 7).unwrap(); // arg3
+        Snprintf.run(&mut emu).unwrap();
+        let got = read_string(&mut emu, buf).unwrap();
+        assert_eq!(got, "n=7");
+        assert_eq!(emu.read_register_u64("RAX").unwrap(), 3);
     }
 }

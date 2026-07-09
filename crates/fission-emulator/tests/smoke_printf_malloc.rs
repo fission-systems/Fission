@@ -62,11 +62,19 @@ fn smoke_dyn_printf_malloc_hle() {
     eprintln!("dyn printf_malloc ok: {}", emu.metrics.summary_line());
 }
 
-/// Static musl CRT — opt-in only (overflow fix applied; still soft-gated).
+/// Static musl CRT — **opt-in only, not default CI**.
+///
+/// Remeasure (2026-07-09, post relative-branch overflow fix): still does not
+/// cleanly halt within 500k insns in sandbox (CRT path incomplete: more
+/// syscalls/TLS/locale). Keep checked-in for manual progress tracking.
+///
+/// Enable: `FISSION_SMOKE_STATIC_PRINTF=1 cargo nextest run -p fission-emulator smoke_static`
 #[test]
 fn smoke_static_printf_malloc_optional() {
     if std::env::var("FISSION_SMOKE_STATIC_PRINTF").ok().as_deref() != Some("1") {
-        eprintln!("skip static printf_malloc (set FISSION_SMOKE_STATIC_PRINTF=1)");
+        eprintln!(
+            "skip static printf_malloc (not CI-stable; set FISSION_SMOKE_STATIC_PRINTF=1 to try)"
+        );
         return;
     }
     let path =
@@ -74,8 +82,8 @@ fn smoke_static_printf_malloc_optional() {
     assert!(path.is_file(), "missing {}", path.display());
     let emu = run_linux(&path, 500_000).unwrap_or_else(|e| panic!("static printf_malloc: {e:#}"));
     assert!(
-        emu.halt_requested || emu.metrics.instructions >= 50,
-        "expected progress/halt: {}",
+        emu.halt_requested,
+        "static CRT expected clean halt (still incomplete if this fails): {}",
         emu.metrics.summary_line()
     );
     emu.metrics
