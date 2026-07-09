@@ -3,6 +3,7 @@
 use fission_emulator::core::Emulator;
 use fission_emulator::jit::callbacks::{
     jit_shadow_binop, jit_shadow_copy, jit_shadow_load, jit_shadow_store, jit_sym_cbranch_gate,
+    SymBinOpKind,
 };
 use fission_emulator::pcode::page_map::prot;
 use fission_emulator::MachineState;
@@ -56,22 +57,65 @@ fn shadow_load_copy_binop_reaches_cbranch_gate() {
     jit_shadow_copy(emu_ptr, uniq, 0x20, 1, uniq, 0x10);
     assert_eq!(emu.state.get_shadow_memory(uniq, 0x20), Some(77));
 
-    // BINOP (compare-like union) → unique:0x30 condition
-    jit_shadow_binop(emu_ptr, uniq, 0x30, 1, uniq, 0x20, 0, 0);
-    assert_eq!(emu.state.get_shadow_memory(uniq, 0x30), Some(77));
+    // BINOP builds a full AST (Add of tainted leaf + const), not mere taint union.
+    jit_shadow_binop(
+        emu_ptr,
+        uniq,
+        0x30,
+        1,
+        uniq,
+        0x20,
+        0x2A,
+        1,
+        0,
+        0,
+        1,
+        1,
+        SymBinOpKind::Add as u32,
+    );
+    let add_id = emu.state.get_shadow_memory(uniq, 0x30).expect("add shadow");
+    assert_ne!(add_id, 77, "AST node should be a new solver id, not raw taint union");
+    let expr = emu
+        .solver
+        .nodes
+        .get(&add_id)
+        .expect("solver node for add");
+    assert!(
+        matches!(expr, fission_solver::SymExpr::Add(_, _))
+            || matches!(expr, fission_solver::SymExpr::Const { .. }),
+        "expected Add AST (or folded const), got {expr:?}"
+    );
+
+    // Compare AST → condition for gate
+    jit_shadow_binop(
+        emu_ptr,
+        uniq,
+        0x40,
+        1,
+        uniq,
+        0x30,
+        0,
+        1,
+        0,
+        0,
+        0,
+        1,
+        SymBinOpKind::Neq as u32,
+    );
+    let cond_id = emu.state.get_shadow_memory(uniq, 0x40).expect("cmp shadow");
 
     // STORE taint back to memory
-    jit_shadow_store(emu_ptr, ram, 0x7000_0010, 1, uniq, 0x30);
-    assert_eq!(emu.state.get_shadow_memory(ram, 0x7000_0010), Some(77));
+    jit_shadow_store(emu_ptr, ram, 0x7000_0010, 1, uniq, 0x40);
+    assert_eq!(emu.state.get_shadow_memory(ram, 0x7000_0010), Some(cond_id));
 
     // CBranch gate should stop
     emu.sym_events.clear();
     emu.sym_stop_requested = false;
-    let stop = jit_sym_cbranch_gate(emu_ptr, 1, uniq, 0x30, 0x401000, 0x401010);
+    let stop = jit_sym_cbranch_gate(emu_ptr, 1, uniq, 0x40, 0x401000, 0x401010);
     assert_eq!(stop, 1);
     assert!(emu.sym_stop_requested);
     assert_eq!(emu.sym_events.len(), 1);
-    assert_eq!(emu.sym_events[0].condition_node, Some(77));
+    assert_eq!(emu.sym_events[0].condition_node, Some(cond_id));
 }
 
 #[test]

@@ -355,8 +355,28 @@ pub extern "C" fn jit_shadow_store(
     }
 }
 
-/// Binary ALU: if either input is tainted, mark output with the first taint id
-/// (concolic union — full AST building stays in the offline Evaluator).
+/// Binary ALU op kinds for full symbolic AST construction on the JIT path.
+#[repr(u32)]
+#[derive(Clone, Copy, Debug)]
+pub enum SymBinOpKind {
+    Add = 0,
+    Sub = 1,
+    Mul = 2,
+    And = 3,
+    Or = 4,
+    Xor = 5,
+    Eq = 6,
+    Neq = 7,
+    Ult = 8,
+    Ule = 9,
+    Slt = 10,
+    Sle = 11,
+}
+
+/// Binary ALU: if either input is tainted, build a full [`SymExpr`] AST node
+/// (not merely taint-id union) and attach it to the destination varnode.
+///
+/// Concrete values are supplied so untainted inputs become `Const` leaves.
 #[unsafe(no_mangle)]
 pub extern "C" fn jit_shadow_binop(
     emu_ptr: *mut Emulator,
@@ -365,31 +385,73 @@ pub extern "C" fn jit_shadow_binop(
     dst_sz: u64,
     a_sp: u64,
     a_off: u64,
+    a_val: u64,
+    a_size: u64,
     b_sp: u64,
     b_off: u64,
+    b_val: u64,
+    b_size: u64,
+    op_kind: u32,
 ) {
     let emu = unsafe { &mut *emu_ptr };
     if dst_sp == 0 {
         return;
     }
-    let a = if a_sp == 0 {
+    let a_node = if a_sp == 0 {
         None
     } else {
         emu.state.get_shadow_memory(a_sp, a_off)
     };
-    let b = if b_sp == 0 {
+    let b_node = if b_sp == 0 {
         None
     } else {
         emu.state.get_shadow_memory(b_sp, b_off)
     };
-    let node = a.or(b);
-    let n = (dst_sz as usize).min(64) as u64;
-    for i in 0..n {
-        if let Some(id) = node {
-            emu.state.set_shadow_memory(dst_sp, dst_off + i, id);
-        } else {
+    if a_node.is_none() && b_node.is_none() {
+        let n = (dst_sz as usize).min(64) as u64;
+        for i in 0..n {
             emu.state.clear_shadow_memory(dst_sp, dst_off + i);
         }
+        return;
+    }
+
+    use fission_solver::SymExpr;
+    let a_sz = (a_size as u32).max(1).min(8);
+    let b_sz = (b_size as u32).max(1).min(8);
+    let a_expr = a_node
+        .and_then(|id| emu.solver.nodes.get(&id).cloned())
+        .unwrap_or_else(|| SymExpr::new_const(a_val, a_sz));
+    let b_expr = b_node
+        .and_then(|id| emu.solver.nodes.get(&id).cloned())
+        .unwrap_or_else(|| SymExpr::new_const(b_val, b_sz));
+
+    let new_expr = match op_kind {
+        x if x == SymBinOpKind::Add as u32 => SymExpr::new_add(a_expr, b_expr),
+        x if x == SymBinOpKind::Sub as u32 => SymExpr::new_sub(a_expr, b_expr),
+        x if x == SymBinOpKind::Mul as u32 => SymExpr::Mul(Box::new(a_expr), Box::new(b_expr)),
+        x if x == SymBinOpKind::And as u32 => SymExpr::new_and(a_expr, b_expr),
+        x if x == SymBinOpKind::Or as u32 => SymExpr::Or(Box::new(a_expr), Box::new(b_expr)),
+        x if x == SymBinOpKind::Xor as u32 => SymExpr::new_xor(a_expr, b_expr),
+        x if x == SymBinOpKind::Eq as u32 => SymExpr::new_eq(a_expr, b_expr),
+        x if x == SymBinOpKind::Neq as u32 => SymExpr::new_neq(a_expr, b_expr),
+        x if x == SymBinOpKind::Ult as u32 => SymExpr::new_ult(a_expr, b_expr),
+        x if x == SymBinOpKind::Ule as u32 => SymExpr::Ule(Box::new(a_expr), Box::new(b_expr)),
+        x if x == SymBinOpKind::Slt as u32 => SymExpr::new_slt(a_expr, b_expr),
+        x if x == SymBinOpKind::Sle as u32 => SymExpr::new_sle(a_expr, b_expr),
+        _ => {
+            // Unknown op: fall back to first taint id (legacy union).
+            let id = a_node.or(b_node).unwrap();
+            let n = (dst_sz as usize).min(64) as u64;
+            for i in 0..n {
+                emu.state.set_shadow_memory(dst_sp, dst_off + i, id);
+            }
+            return;
+        }
+    };
+    let new_id = emu.solver.register_node(new_expr);
+    let n = (dst_sz as usize).min(64) as u64;
+    for i in 0..n {
+        emu.state.set_shadow_memory(dst_sp, dst_off + i, new_id);
     }
 }
 

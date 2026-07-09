@@ -70,7 +70,8 @@ Callouts: `jit_read_space` / `jit_write_space` / `jit_call_other` / `jit_exit_tb
 - [x] Hard chaining via **global** guest-PC → host-fn table (`jit_exit_tb`) — fallthrough **and absolute** branch/call
 - [x] CallOther flush **+ reload** (HLE cannot be clobbered by stale SSA at TB exit)
 - [x] Persistent register cache (`MachineState::reg_cache` for 8B-aligned register space)
-- [x] Zero-callout host reg file (`host_reg_file` + `jit_host_reg_base` loads in TB)
+- [x] Zero-callout host reg file loads (`host_reg_file` + `jit_host_reg_base`)
+- [x] Zero-callout host reg file stores (IR `store` to `host_reg_file` in `store_vn`)
 - [x] Optional pure-Rust softfloat path (`feature = "softfloat"`, NaN quieting policy)
 
 ### Phase D — Analysis features
@@ -78,8 +79,8 @@ Callouts: `jit_read_space` / `jit_write_space` / `jit_call_other` / `jit_exit_tb
 - [x] TTD: enable `tracing_memory` on `with_ttd`, clear deltas after record, disable chain while recording
 - [x] TTD: recompute remaining steps after nearest-snapshot restore (`ttd_seek`)
 - [x] Symbolic CBranch gate (`jit_sym_cbranch_gate` → `sym_events` + `sym_stop_requested`)
-- [x] JIT shadow prop: COPY/LOAD/STORE + int ALU/compare union (`jit_shadow_*`)
-- [ ] Full symbolic AST on every ALU (Evaluator-grade); JIT path is concolic taint union
+- [x] JIT shadow prop: COPY/LOAD/STORE + int ALU/compare
+- [x] Full symbolic AST on JIT ALU (`jit_shadow_binop` builds `SymExpr` Add/Sub/…/Eq)
 - [x] Exploration manager clears stop flag between forks (`sym/manager.rs`)
 
 ### Phase E — Maturity / smoke (in progress)
@@ -97,6 +98,8 @@ Callouts: `jit_read_space` / `jit_write_space` / `jit_call_other` / `jit_exit_tb
 - [x] CLI sandbox: `--json` / `--metrics-out` / `--max-unimpl-*` / `--fail-on-budget`
 - [x] Dynamic-linked ELF GOT/`iat_symbols` from JUMP_SLOT/GLOB_DAT (`fission-loader`)
 - [x] Dyn ELF run without ld.so: `__libc_start_main` JumpTo(main) + puts HLE + GOT patch
+- [x] Dynlink scaffold: PT_INTERP parse, `DynlinkMode::{Static,HleGot,Interpreter}`,
+      opt-in host ld.so map (`FISSION_ENABLE_DYNLINK` + `FISSION_LD_SO`)
 - [x] Automation `sandbox-check` lane (subprocess over CLI JSON + budget gate)
 
 ## Validation

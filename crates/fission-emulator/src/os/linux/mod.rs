@@ -2,9 +2,11 @@ pub mod loader;
 pub mod libc;
 pub mod syscall;
 pub mod abi;
+pub mod dynlink;
 pub mod image_info;
 pub mod signal;
 
+pub use dynlink::{DynlinkInfo, DynlinkMode};
 pub use image_info::{ImageInfo, ProcessArgs};
 pub use signal::{DeliverResult, SigAction, SignalState};
 
@@ -105,6 +107,11 @@ impl OsEnvironment for LinuxEnv {
     fn patch_imports(&self, state: &mut MachineState, binary: &LoadedBinary) -> Result<()> {
         // Loader uses "ELF64" / "ELF32" / "ELF".
         if !binary.format.starts_with("ELF") {
+            return Ok(());
+        }
+        // When a real interpreter is mapped, leave GOT for ld.so to fill.
+        if dynlink::should_skip_got_hle(binary) {
+            tracing::info!("dynlink: skipping GOT HLE patch (interpreter path active)");
             return Ok(());
         }
         let mut plt_entries: Vec<_> = binary.inner().iat_symbols.iter().collect();

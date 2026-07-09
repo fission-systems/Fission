@@ -18,6 +18,7 @@ use cranelift_module::{default_libcall_names, Linkage, Module};
 use fission_pcode::ir::{PcodeOp, PcodeOpcode, Varnode};
 use std::collections::HashMap;
 
+use crate::jit::callbacks::SymBinOpKind;
 use crate::jit::float_ops::{FloatBinOp, FloatUnOp};
 
 /// One guest instruction already lifted to P-Code.
@@ -330,17 +331,13 @@ impl JitCompiler {
             .declare_function("jit_shadow_store", Linkage::Import, &sig_sh_store)
             .unwrap();
 
+        // jit_shadow_binop(emu, dst_sp, dst_off, dst_sz,
+        //   a_sp, a_off, a_val, a_size, b_sp, b_off, b_val, b_size, op_kind)
         let mut sig_sh_bin = self.module.make_signature();
-        sig_sh_bin.params.extend([
-            AbiParam::new(types::I64), // emu
-            AbiParam::new(types::I64), // dst_sp
-            AbiParam::new(types::I64), // dst_off
-            AbiParam::new(types::I64), // dst_sz
-            AbiParam::new(types::I64), // a_sp
-            AbiParam::new(types::I64), // a_off
-            AbiParam::new(types::I64), // b_sp
-            AbiParam::new(types::I64), // b_off
-        ]);
+        for _ in 0..13 {
+            sig_sh_bin.params.push(AbiParam::new(types::I64));
+        }
+        // op_kind is i32-compatible but we pass i64 for ABI simplicity
         let shadow_binop_fn = self
             .module
             .declare_function("jit_shadow_binop", Linkage::Import, &sig_sh_bin)
@@ -453,10 +450,13 @@ impl JitCompiler {
         }
 
         macro_rules! emit_shadow_binop {
-            ($out:expr, $a:expr, $b:expr) => {{
+            ($out:expr, $a:expr, $b:expr, $a_val:expr, $b_val:expr, $kind:expr) => {{
                 let out: &Varnode = $out;
                 let a: &Varnode = $a;
                 let b: &Varnode = $b;
+                let a_val = $a_val;
+                let b_val = $b_val;
+                let kind: u32 = $kind;
                 if !out.is_constant {
                     let dsp = builder.ins().iconst(types::I64, out.space_id as i64);
                     let doff = builder.ins().iconst(types::I64, out.offset as i64);
@@ -473,6 +473,14 @@ impl JitCompiler {
                             a.offset as i64
                         },
                     );
+                    let asz = builder.ins().iconst(
+                        types::I64,
+                        if a.is_constant {
+                            8
+                        } else {
+                            a.size as i64
+                        },
+                    );
                     let bsp = builder.ins().iconst(
                         types::I64,
                         if b.is_constant { 0 } else { b.space_id as i64 },
@@ -485,9 +493,21 @@ impl JitCompiler {
                             b.offset as i64
                         },
                     );
+                    let bsz = builder.ins().iconst(
+                        types::I64,
+                        if b.is_constant {
+                            8
+                        } else {
+                            b.size as i64
+                        },
+                    );
+                    let kind_v = builder.ins().iconst(types::I64, kind as i64);
                     builder.ins().call(
                         shadow_binop_ref,
-                        &[emu_ptr, dsp, doff, dsz, asp, aoff, bsp, boff],
+                        &[
+                            emu_ptr, dsp, doff, dsz, asp, aoff, a_val, asz, bsp, boff, b_val,
+                            bsz, kind_v,
+                        ],
                     );
                 }
             }};
@@ -516,6 +536,16 @@ impl JitCompiler {
                 if !vn.is_constant {
                     let v = ensure_var!(vn.space_id, vn.offset, vn.size.min(8));
                     builder.def_var(v, val);
+                    // Zero-callout register store into host_reg_file.
+                    if vn.space_id == register_space
+                        && (vn.offset as usize) + (vn.size.min(8) as usize) <= HOST_REG_FILE_SIZE
+                    {
+                        let ptr = builder
+                            .ins()
+                            .iadd_imm(host_reg_base, vn.offset as i64);
+                        let flags = MemFlagsData::trusted();
+                        builder.ins().store(flags, val, ptr, 0);
+                    }
                     dirty.push((vn.space_id, vn.offset, vn.size.min(8), v));
                 }
             }};
@@ -729,7 +759,14 @@ impl JitCompiler {
                         let a = load_vn!(&op.inputs[0]);
                         let b = load_vn!(&op.inputs[1]);
                         store_vn!(out, builder.ins().iadd(a, b));
-                        emit_shadow_binop!(out, &op.inputs[0], &op.inputs[1]);
+                        emit_shadow_binop!(
+                            out,
+                            &op.inputs[0],
+                            &op.inputs[1],
+                            a,
+                            b,
+                            SymBinOpKind::Add as u32
+                        );
                     }
                 }
                 // INT_CARRY / INT_SCARRY / INT_SBORROW — size-aware via host callout.
@@ -754,7 +791,14 @@ impl JitCompiler {
                         let a = load_vn!(&op.inputs[0]);
                         let b = load_vn!(&op.inputs[1]);
                         store_vn!(out, builder.ins().isub(a, b));
-                        emit_shadow_binop!(out, &op.inputs[0], &op.inputs[1]);
+                        emit_shadow_binop!(
+                            out,
+                            &op.inputs[0],
+                            &op.inputs[1],
+                            a,
+                            b,
+                            SymBinOpKind::Sub as u32
+                        );
                     }
                 }
                 PcodeOpcode::IntMult => {
@@ -762,7 +806,14 @@ impl JitCompiler {
                         let a = load_vn!(&op.inputs[0]);
                         let b = load_vn!(&op.inputs[1]);
                         store_vn!(out, builder.ins().imul(a, b));
-                        emit_shadow_binop!(out, &op.inputs[0], &op.inputs[1]);
+                        emit_shadow_binop!(
+                            out,
+                            &op.inputs[0],
+                            &op.inputs[1],
+                            a,
+                            b,
+                            SymBinOpKind::Mul as u32
+                        );
                     }
                 }
                 PcodeOpcode::IntDiv => {
@@ -798,7 +849,14 @@ impl JitCompiler {
                         let a = load_vn!(&op.inputs[0]);
                         let b = load_vn!(&op.inputs[1]);
                         store_vn!(out, builder.ins().band(a, b));
-                        emit_shadow_binop!(out, &op.inputs[0], &op.inputs[1]);
+                        emit_shadow_binop!(
+                            out,
+                            &op.inputs[0],
+                            &op.inputs[1],
+                            a,
+                            b,
+                            SymBinOpKind::And as u32
+                        );
                     }
                 }
                 PcodeOpcode::IntOr | PcodeOpcode::BoolOr => {
@@ -806,7 +864,14 @@ impl JitCompiler {
                         let a = load_vn!(&op.inputs[0]);
                         let b = load_vn!(&op.inputs[1]);
                         store_vn!(out, builder.ins().bor(a, b));
-                        emit_shadow_binop!(out, &op.inputs[0], &op.inputs[1]);
+                        emit_shadow_binop!(
+                            out,
+                            &op.inputs[0],
+                            &op.inputs[1],
+                            a,
+                            b,
+                            SymBinOpKind::Or as u32
+                        );
                     }
                 }
                 PcodeOpcode::IntXor | PcodeOpcode::BoolXor => {
@@ -814,7 +879,14 @@ impl JitCompiler {
                         let a = load_vn!(&op.inputs[0]);
                         let b = load_vn!(&op.inputs[1]);
                         store_vn!(out, builder.ins().bxor(a, b));
-                        emit_shadow_binop!(out, &op.inputs[0], &op.inputs[1]);
+                        emit_shadow_binop!(
+                            out,
+                            &op.inputs[0],
+                            &op.inputs[1],
+                            a,
+                            b,
+                            SymBinOpKind::Xor as u32
+                        );
                     }
                 }
                 PcodeOpcode::IntLeft => {
@@ -876,8 +948,16 @@ impl JitCompiler {
                         };
                         let b_res = builder.ins().icmp(cc, a, b);
                         store_vn!(out, builder.ins().uextend(types::I64, b_res));
-                        // Comparisons feed CBranch — propagate taint so the symbolic gate can fire.
-                        emit_shadow_binop!(out, &op.inputs[0], &op.inputs[1]);
+                        let sk = match op.opcode {
+                            PcodeOpcode::IntEqual => SymBinOpKind::Eq as u32,
+                            PcodeOpcode::IntNotEqual => SymBinOpKind::Neq as u32,
+                            PcodeOpcode::IntSLess => SymBinOpKind::Slt as u32,
+                            PcodeOpcode::IntSLessEqual => SymBinOpKind::Sle as u32,
+                            PcodeOpcode::IntLess => SymBinOpKind::Ult as u32,
+                            PcodeOpcode::IntLessEqual => SymBinOpKind::Ule as u32,
+                            _ => SymBinOpKind::Eq as u32,
+                        };
+                        emit_shadow_binop!(out, &op.inputs[0], &op.inputs[1], a, b, sk);
                     }
                 }
                 PcodeOpcode::IntZExt => {

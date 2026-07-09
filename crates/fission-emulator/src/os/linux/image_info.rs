@@ -3,6 +3,7 @@
 //! Cleanroom design inspired by QEMU linux-user `struct image_info` and
 //! `create_elf_tables` — no vendor code dependency.
 
+use crate::os::linux::dynlink::{self, DynlinkInfo, DynlinkMode};
 use crate::pcode::page_map::{page_align_up, prot, PAGE_SIZE};
 use crate::pcode::state::MachineState;
 use anyhow::{bail, Context, Result};
@@ -54,6 +55,8 @@ pub struct ImageInfo {
     pub auxv_len: u64,
     pub execfn: String,
     pub is_64bit: bool,
+    /// Dynamic linker scaffolding result (static / hle_got / interpreter).
+    pub dynlink: DynlinkInfo,
 }
 
 /// Options for initial process stack / argv.
@@ -86,14 +89,20 @@ pub fn load_elf_image(
 ) -> Result<ImageInfo> {
     let inner = binary.inner();
     let is_64bit = inner.is_64bit;
-    let entry = inner.entry_point;
     let image_base = inner.image_base;
+    // Dynlink decision before final entry selection (interpreter may override).
+    let dynlink = dynlink::prepare_dynlink(state, binary)?;
+    let entry = match dynlink.mode {
+        DynlinkMode::Interpreter if dynlink.interp_entry != 0 => dynlink.interp_entry,
+        _ => inner.entry_point,
+    };
 
     tracing::info!(
-        "ELF image load: entry=0x{:X} base=0x{:X} 64bit={}",
+        "ELF image load: entry=0x{:X} base=0x{:X} 64bit={} dynlink={:?}",
         entry,
         image_base,
-        is_64bit
+        is_64bit,
+        dynlink.mode
     );
 
     let mut start_code = u64::MAX;
@@ -209,6 +218,7 @@ pub fn load_elf_image(
         auxv_len: 0,
         execfn: execfn.clone(),
         is_64bit,
+        dynlink,
     };
 
     let sp = create_elf_tables(state, &mut info, args, &random16)?;
@@ -289,15 +299,26 @@ fn create_elf_tables(
         Ok(())
     };
 
-    // auxv pairs (must end with AT_NULL)
+    // auxv pairs (must end with AT_NULL).
+    // AT_BASE: interpreter base when using real ld.so; else 0 for PIE-like HLE.
+    // AT_ENTRY: main binary's original entry (ld.so jumps there after relocate).
+    let at_base = match info.dynlink.mode {
+        DynlinkMode::Interpreter => info.dynlink.interp_base,
+        _ => 0,
+    };
+    let at_entry = if info.dynlink.main_entry != 0 {
+        info.dynlink.main_entry
+    } else {
+        info.entry
+    };
     let aux: Vec<(u64, u64)> = vec![
         (at::PHDR, info.phdr_addr),
         (at::PHENT, info.phent),
         (at::PHNUM, info.phnum),
         (at::PAGESZ, PAGE_SIZE),
-        (at::BASE, info.load_addr),
+        (at::BASE, at_base),
         (at::FLAGS, 0),
-        (at::ENTRY, info.entry),
+        (at::ENTRY, at_entry),
         (at::UID, 1000),
         (at::EUID, 1000),
         (at::GID, 1000),
