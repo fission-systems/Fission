@@ -254,11 +254,18 @@ impl SatSolver {
         }
 
         let var = lit.var() as usize;
+        self.ensure_var(lit.var());
+        // ensure_var grows assigns; re-read after growth
+        if self.assigns.get(var).copied().unwrap_or(LBool::Undef) != LBool::Undef {
+            return self.value_lit(lit) == LBool::True;
+        }
         self.assigns[var] = if lit.0 > 0 { LBool::True } else { LBool::False };
-        self.vardata[var] = VarData {
-            reason,
-            level: self.decision_level(),
-        };
+        if var < self.vardata.len() {
+            self.vardata[var] = VarData {
+                reason,
+                level: self.decision_level(),
+            };
+        }
         self.trail.push(lit);
         true
     }

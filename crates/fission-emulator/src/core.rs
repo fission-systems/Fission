@@ -41,6 +41,8 @@ pub struct Emulator {
     pub inst_count: u64,
     /// Optional limit on the maximum number of instructions to execute.
     pub max_inst: Option<u64>,
+    /// P-Code ops retired (intra-insn loops); used with `max_inst` as a soft fuse.
+    pub pcode_ops: u64,
     /// Optional buffer to mock standard input (`stdin`).
     pub stdin_buffer: Option<Vec<u8>>,
 
@@ -277,6 +279,7 @@ impl Emulator {
             userop_map,
             inst_count: 0,
             max_inst: None,
+            pcode_ops: 0,
             stdin_buffer: None,
             ttd: TTDRecorder::new(),
             ttd_snapshot_interval: 0,

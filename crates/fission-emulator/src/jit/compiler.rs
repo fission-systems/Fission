@@ -61,6 +61,7 @@ impl JitCompiler {
             ("jit_call_other", crate::jit::callbacks::jit_call_other as *const u8),
             ("jit_callother_result", crate::jit::callbacks::jit_callother_result as *const u8),
             ("jit_count_insn", crate::jit::callbacks::jit_count_insn as *const u8),
+            ("jit_count_pcode", crate::jit::callbacks::jit_count_pcode as *const u8),
             ("jit_chain", crate::jit::callbacks::jit_chain as *const u8),
             ("jit_exit_tb", crate::jit::callbacks::jit_exit_tb as *const u8),
             ("jit_sym_cbranch_gate", crate::jit::callbacks::jit_sym_cbranch_gate as *const u8),
@@ -257,6 +258,14 @@ impl JitCompiler {
             .declare_function("jit_count_insn", Linkage::Import, &sig_count)
             .unwrap();
 
+        let mut sig_pcode = self.module.make_signature();
+        sig_pcode.params.push(AbiParam::new(types::I64));
+        sig_pcode.returns.push(AbiParam::new(types::I64));
+        let count_pcode_fn = self
+            .module
+            .declare_function("jit_count_pcode", Linkage::Import, &sig_pcode)
+            .unwrap();
+
         // jit_callother_result(emu) -> u64
         let mut sig_cor = self.module.make_signature();
         sig_cor.params.push(AbiParam::new(types::I64));
@@ -405,6 +414,9 @@ impl JitCompiler {
             .module
             .declare_func_in_func(callother_result_fn, builder.func);
         let count_ref = self.module.declare_func_in_func(count_fn, builder.func);
+        let count_pcode_ref = self
+            .module
+            .declare_func_in_func(count_pcode_fn, builder.func);
         let exit_tb_ref = self.module.declare_func_in_func(exit_tb_fn, builder.func);
         let sym_gate_ref = self.module.declare_func_in_func(sym_gate_fn, builder.func);
         let host_reg_base_ref = self
@@ -658,6 +670,23 @@ impl JitCompiler {
 
         for (idx, op) in flat.iter().enumerate() {
             builder.switch_to_block(op_blocks[idx]);
+
+            // Per-pcode-op fuse (breaks relative CBRANCH livelocks under max_inst).
+            {
+                let tick = builder.ins().call(count_pcode_ref, &[emu_ptr]);
+                let stop = builder.inst_results(tick)[0];
+                let is_stop = builder.ins().icmp_imm(IntCC::NotEqual, stop, 0);
+                let stop_b = builder.create_block();
+                let cont_b = builder.create_block();
+                builder.ins().brif(is_stop, stop_b, &[], cont_b, &[]);
+                builder.switch_to_block(stop_b);
+                builder.seal_block(stop_b);
+                builder
+                    .ins()
+                    .jump(exit_block, &[BlockArg::from(default_next)]);
+                builder.switch_to_block(cont_b);
+                builder.seal_block(cont_b);
+            }
 
             // Guest-insn boundary accounting.
             if insn_start_set.contains_key(&idx) {

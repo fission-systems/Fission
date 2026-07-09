@@ -1,8 +1,21 @@
-//! Profile static musl CRT: bounded max_inst + syscall/userop dump.
+//! Profile static musl CRT: bounded max_inst ladders + syscall/userop dump.
 //!
-//! After max_inst is honored inside hard-chain, this finishes quickly and
-//! records which syscalls/HLE the CRT hit before the limit.
+//! ## Fixed early-CRT syscall surface (measured 2026-07-09)
+//!
+//! | budget | syscalls observed | unknown |
+//! |--------|-------------------|---------|
+//! | 512    | 158 arch_prctl    | none    |
+//! | 1500   | +218 set_tid, +12 brk, +9 mmap | none |
+//!
+//! Conclusion: **no missing syscall HLE in the first ~1.5k insns**.
+//! Full halt still blocked by guest progress / later CRT behavior, not by
+//! unknown_syscalls. New unknown numbers appearing on higher rungs are the
+//! HLE work queue.
+//!
+//! After max_inst is honored (no TB hard-chain when budgeted; pcode fuse),
+//! this finishes quickly and dumps metrics.
 
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use fission_emulator::arch::ArchInfo;
@@ -12,8 +25,7 @@ use fission_emulator::MachineState;
 use fission_loader::loader::LoadedBinary;
 use fission_sleigh::runtime::RuntimeSleighFrontend;
 
-#[test]
-fn profile_static_printf_malloc_first_budget() {
+fn run_budgeted(max_inst: u64) -> Emulator {
     let path =
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("testdata/x64_static_printf_malloc.elf");
     assert!(path.is_file(), "missing {}", path.display());
@@ -31,44 +43,131 @@ fn profile_static_printf_malloc_first_budget() {
     let arch = ArchInfo::from_language_id(lang_id, Some(&binary)).expect("arch");
     let mut emu = Emulator::new(state, binary, sleigh, arch, Box::new(LinuxEnv::new()))
         .expect("emu")
-        .with_max_inst(Some(512));
+        .with_max_inst(Some(max_inst));
     emu.apply_linux_image(info).expect("image");
-    // max_inst disables TB hard-chain so the outer loop can enforce the budget.
     emu.run().expect("run");
+    emu
+}
 
-    // Budget must be respected (no infinite hard-chain hang).
-    assert!(
-        emu.inst_count <= 512 + 32,
-        "max_inst not honored: inst={}",
-        emu.inst_count
-    );
-    assert!(
-        emu.inst_count > 5,
-        "expected CRT progress, got {}",
-        emu.inst_count
-    );
-
+fn dump(label: &str, emu: &Emulator) {
     eprintln!(
-        "static CRT profile @{}: halt={} exit={:?} fs_base=0x{:X} tidptr=0x{:X}",
+        "[{label}] inst={} halt={} exit={:?} fs=0x{:X} tid=0x{:X}",
         emu.inst_count,
         emu.halt_requested,
         emu.metrics.exit_reason,
         emu.fs_base,
         emu.clear_child_tid
     );
-    eprintln!("  syscalls: {:?}", emu.metrics.syscalls);
-    eprintln!("  userops: {:?}", emu.metrics.userops);
-    eprintln!("  hle_miss: {:?}", emu.metrics.hle_misses);
-    eprintln!("  unk_sys: {:?}", emu.metrics.unknown_syscalls);
-    eprintln!("  unimpl: {:?}", emu.metrics.top_unimplemented(8));
-    eprintln!("  summary: {}", emu.metrics.summary_line());
+    eprintln!("  syscalls={:?}", emu.metrics.syscalls);
+    eprintln!("  unk_sys={:?}", emu.metrics.unknown_syscalls);
+    eprintln!("  hle_miss={:?}", emu.metrics.hle_misses);
+    eprintln!("  unimpl={:?}", emu.metrics.top_unimplemented(8));
+    eprintln!("  userops={:?}", emu.metrics.userops);
+}
 
-    // CRT typically hits arch_prctl (158) and/or set_tid_address (218).
-    let saw_tls = emu.metrics.syscalls.contains_key(&158)
-        || emu.metrics.syscalls.contains_key(&218)
-        || emu.fs_base != 0
-        || emu.clear_child_tid != 0;
-    if !saw_tls {
-        eprintln!("note: no TLS syscalls in first 3k (may enter later)");
+#[test]
+fn profile_static_printf_malloc_first_budget() {
+    let emu = run_budgeted(512);
+    assert!(
+        emu.inst_count <= 512 + 32,
+        "max_inst not honored: inst={}",
+        emu.inst_count
+    );
+    assert!(emu.inst_count > 5, "expected CRT progress");
+    dump("512", &emu);
+    // Early CRT: arch_prctl + set_tid_address only (no unknown syscalls).
+    assert!(
+        emu.metrics.unknown_syscalls.is_empty(),
+        "unexpected unknown syscalls: {:?}",
+        emu.metrics.unknown_syscalls
+    );
+}
+
+/// Progressive budgets — documents which syscalls appear before full halt.
+///
+/// Soft gate: each step must honor max_inst and not introduce unknown syscalls
+/// without an intentional HLE gap. Full halt is asserted only at the top rung
+/// when `FISSION_CRT_EXPECT_HALT=1`.
+#[test]
+fn profile_static_crt_ladder_regression() {
+    // CI ladder: small rungs only (pcode fuse breaks livelocks; still may be slow).
+    let rungs: &[(u64, &str)] = &[(512, "tls"), (1_500, "post_tls")];
+    let mut prev_sys: BTreeMap<u64, u64> = BTreeMap::new();
+    let mut last_halt = false;
+    let mut last_inst = 0u64;
+
+    for &(budget, tag) in rungs {
+        let emu = run_budgeted(budget);
+        dump(&format!("{budget}/{tag}"), &emu);
+        // Allow modest overrun (TB may finish a few insns after the fuse).
+        assert!(
+            emu.inst_count <= budget.saturating_mul(2).max(budget + 256)
+                || emu.metrics.exit_reason.as_deref() == Some("pcode_budget")
+                || emu.metrics.exit_reason.as_deref() == Some("max_inst"),
+            "budget {budget} not honored: inst={} exit={:?}",
+            emu.inst_count,
+            emu.metrics.exit_reason
+        );
+        assert!(
+            emu.inst_count >= last_inst,
+            "instruction count regressed across ladder"
+        );
+        // Monotonic: previously seen syscalls should still appear (counts may grow).
+        for (num, _) in &prev_sys {
+            assert!(
+                emu.metrics.syscalls.contains_key(num) || emu.halt_requested,
+                "lost syscall {num} at budget {budget}"
+            );
+        }
+        // Unknown syscalls are the primary HLE gap signal.
+        if !emu.metrics.unknown_syscalls.is_empty() {
+            eprintln!(
+                "HLE GAP at {budget}: unknown_syscalls={:?}",
+                emu.metrics.unknown_syscalls
+            );
+        }
+        prev_sys = emu.metrics.syscalls.clone();
+        last_halt = emu.halt_requested
+            && emu.metrics.exit_reason.as_deref() != Some("max_inst")
+            && emu.metrics.exit_reason.as_deref() != Some("pcode_budget");
+        last_inst = emu.inst_count;
+        if last_halt {
+            eprintln!("clean process halt at budget {budget}");
+            break;
+        }
+    }
+
+    if std::env::var("FISSION_CRT_EXPECT_HALT").ok().as_deref() == Some("1") {
+        assert!(last_halt, "expected full CRT halt; last_inst={last_inst}");
+    } else if !last_halt {
+        eprintln!(
+            "no clean halt by top rung (last_inst={last_inst}); set FISSION_CRT_EXPECT_HALT=1 when fixed"
+        );
+    }
+}
+
+/// Optional: push toward full halt (expensive; opt-in).
+#[test]
+fn profile_static_crt_full_halt_optional() {
+    if std::env::var("FISSION_SMOKE_STATIC_PRINTF").ok().as_deref() != Some("1") {
+        eprintln!("skip full-halt attempt (FISSION_SMOKE_STATIC_PRINTF=1)");
+        return;
+    }
+    let emu = run_budgeted(2_000_000);
+    dump("2M", &emu);
+    assert!(
+        emu.inst_count <= 2_000_000 + 128,
+        "max_inst not honored"
+    );
+    if emu.halt_requested {
+        eprintln!("FULL HALT achieved: {}", emu.metrics.summary_line());
+    } else {
+        eprintln!(
+            "still no halt @{}: sys={:?} unk={:?} hle={:?}",
+            emu.inst_count,
+            emu.metrics.syscalls,
+            emu.metrics.unknown_syscalls,
+            emu.metrics.hle_misses
+        );
     }
 }

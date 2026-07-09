@@ -76,13 +76,27 @@ impl Solver {
 
     pub fn check_sat_with_oracle(&mut self, oracle: Option<&dyn MemoryOracle>, extra: &[SymExpr]) -> Result<SatResult> {
         let mut loop_count = 0;
+
+        // Concrete-boolean short-circuit (avoids incomplete AIG/CNF for Const 0/1).
+        let is_false = |e: &SymExpr| matches!(e, SymExpr::Const { val: 0, size: 1 });
+        let is_true = |e: &SymExpr| matches!(e, SymExpr::Const { val: 1, size: 1 });
+        for e in self.assertions.iter().chain(extra.iter()) {
+            if is_false(e) {
+                return Ok(SatResult::Unsat);
+            }
+        }
         
         // Push missing assertions to SAT (if any somehow bypassed assert)
         while self.lowered_assertions < self.assertions.len() {
-            self.bv_theory.assert_expr(&self.assertions[self.lowered_assertions]);
+            let expr = &self.assertions[self.lowered_assertions];
+            if !is_true(expr) {
+                self.bv_theory.assert_expr(expr);
+            }
             self.lowered_assertions += 1;
         }
-        self.bv_theory.load_into_sat(&mut self.sat);
+        if !self.bv_theory.load_into_sat(&mut self.sat) {
+            return Ok(SatResult::Unsat);
+        }
         
         loop {
             loop_count += 1;
@@ -94,6 +108,12 @@ impl Solver {
             // Lower extra constraints to assumptions
             let mut assumptions = Vec::new();
             for e in extra {
+                if is_true(e) {
+                    continue;
+                }
+                if is_false(e) {
+                    return Ok(SatResult::Unsat);
+                }
                 if let Some(lit) = self.bv_theory.lower_to_literal(e, &mut self.sat) {
                     assumptions.push(lit);
                 } else {

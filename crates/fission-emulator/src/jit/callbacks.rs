@@ -155,11 +155,46 @@ pub extern "C" fn jit_int_flag(kind: u32, size: u32, a: u64, b: u64) -> u64 {
 pub extern "C" fn jit_count_insn(emu_ptr: *mut Emulator) {
     let emu = unsafe { &mut *emu_ptr };
     emu.inst_count = emu.inst_count.saturating_add(1);
+    if let Some(m) = emu.max_inst {
+        if emu.inst_count >= m && emu.metrics.exit_reason.is_none() {
+            emu.metrics.exit_reason = Some("max_inst".into());
+        }
+    }
+}
+
+/// Count one p-code op (detects infinite relative CBRANCH loops inside a TB).
+///
+/// Returns 1 when the TB should exit early (guest insn budget or pcode fuse).
+/// Does **not** set `halt_requested` for `max_inst` (process exit stays separate).
+#[unsafe(no_mangle)]
+pub extern "C" fn jit_count_pcode(emu_ptr: *mut Emulator) -> u64 {
+    let emu = unsafe { &mut *emu_ptr };
+    emu.pcode_ops = emu.pcode_ops.saturating_add(1);
+    if emu.halt_requested {
+        return 1;
+    }
+    if let Some(m) = emu.max_inst {
+        if emu.inst_count >= m {
+            if emu.metrics.exit_reason.is_none() {
+                emu.metrics.exit_reason = Some("max_inst".into());
+            }
+            return 1;
+        }
+        // Tight fuse: pcode ops under a budgeted run (livelock protection).
+        let cap = m.saturating_mul(2048).max(16_384);
+        if emu.pcode_ops >= cap {
+            if emu.metrics.exit_reason.is_none() {
+                emu.metrics.exit_reason = Some("pcode_budget".into());
+            }
+            return 1;
+        }
+    }
+    0
 }
 
 #[inline]
 fn max_inst_reached(emu: &Emulator) -> bool {
-    emu.max_inst.is_some_and(|m| emu.inst_count >= m)
+    emu.halt_requested || emu.max_inst.is_some_and(|m| emu.inst_count >= m)
 }
 
 /// Soft direct chaining: if `next_pc` is already compiled, enter it (bounded depth).
