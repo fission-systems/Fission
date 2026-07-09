@@ -59,6 +59,7 @@ impl JitCompiler {
             ("jit_float_unop", crate::jit::callbacks::jit_float_unop as *const u8),
             ("jit_int_flag", crate::jit::callbacks::jit_int_flag as *const u8),
             ("jit_call_other", crate::jit::callbacks::jit_call_other as *const u8),
+            ("jit_callother_result", crate::jit::callbacks::jit_callother_result as *const u8),
             ("jit_count_insn", crate::jit::callbacks::jit_count_insn as *const u8),
             ("jit_chain", crate::jit::callbacks::jit_chain as *const u8),
             ("jit_exit_tb", crate::jit::callbacks::jit_exit_tb as *const u8),
@@ -256,6 +257,15 @@ impl JitCompiler {
             .declare_function("jit_count_insn", Linkage::Import, &sig_count)
             .unwrap();
 
+        // jit_callother_result(emu) -> u64
+        let mut sig_cor = self.module.make_signature();
+        sig_cor.params.push(AbiParam::new(types::I64));
+        sig_cor.returns.push(AbiParam::new(types::I64));
+        let callother_result_fn = self
+            .module
+            .declare_function("jit_callother_result", Linkage::Import, &sig_cor)
+            .unwrap();
+
         let mut sig_exit = self.module.make_signature();
         sig_exit.params.push(AbiParam::new(types::I64)); // emu
         sig_exit.params.push(AbiParam::new(types::I64)); // next_pc
@@ -391,6 +401,9 @@ impl JitCompiler {
         let float_unop_ref = self.module.declare_func_in_func(float_unop_fn, builder.func);
         let int_flag_ref = self.module.declare_func_in_func(int_flag_fn, builder.func);
         let call_other_ref = self.module.declare_func_in_func(call_other_fn, builder.func);
+        let callother_result_ref = self
+            .module
+            .declare_func_in_func(callother_result_fn, builder.func);
         let count_ref = self.module.declare_func_in_func(count_fn, builder.func);
         let exit_tb_ref = self.module.declare_func_in_func(exit_tb_fn, builder.func);
         let sym_gate_ref = self.module.declare_func_in_func(sym_gate_fn, builder.func);
@@ -1619,6 +1632,16 @@ impl JitCompiler {
                     // Drop pre-HLE dirty so TB exit does not re-write stale SSA.
                     dirty.clear();
 
+                    // CallOther data result after reload so it is not clobbered
+                    // (e.g. segment_fs → linear address into unique/output).
+                    if let Some(out) = op.output.as_ref() {
+                        let rcall = builder
+                            .ins()
+                            .call(callother_result_ref, &[emu_ptr]);
+                        let val = builder.inst_results(rcall)[0];
+                        store_vn!(out, val);
+                    }
+
                     if let Some(ft) = fallthrough {
                         builder.ins().jump(ft, &[]);
                     } else {
@@ -1656,7 +1679,12 @@ impl JitCompiler {
                         .jump(exit_block, &[BlockArg::from(default_next)]);
                 }
             }
-            builder.seal_block(op_blocks[idx]);
+            // Do not seal op_blocks here: relative CBRANCH may jump backward to
+            // an earlier p-code op (common in CRT). Seal after all edges exist.
+        }
+
+        for &b in &op_blocks {
+            builder.seal_block(b);
         }
 
         // ── Exit: writeback + soft chain ─────────────────────────────────────

@@ -121,6 +121,11 @@ Callouts: `jit_read_space` / `jit_write_space` / `jit_call_other` / `jit_exit_tb
       gate records always, stops only when `concolic_stop_on_branch`
 - [x] Concolic explore E2E: `SimulationManager` fork resume PCs + `max_steps` + both-exit smoke
 - [x] libc HLE: `strcmp`/`strncmp`/`snprintf`/`stat` (+ `__xstat`); `newfstatat` VFS sizes
+- [x] TLS path: `fs_base`/`gs_base`, `arch_prctl` SET/GET FS/GS, `set_tid_address`,
+      `segment`/`segment_fs` CallOther result → JIT output
+- [x] `max_inst` honored inside chain (no chain when budgeted); seal op-blocks after CFG edges
+- [x] path-SAT prune re-enabled with OOB-safe `value_lit` + panic isolation
+- [x] static CRT profile smoke (`static_crt_profile`, budgeted) — still not full halt CI
 - [x] Automation `sandbox-check` lane (subprocess over CLI JSON + budget gate)
 
 ## Validation

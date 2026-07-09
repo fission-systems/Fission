@@ -617,6 +617,35 @@ mod tests {
     }
 
     #[test]
+    fn arch_prctl_and_segment_fs() {
+        use crate::os::env::OsEnvironment;
+        let mut emu = tiny_emu();
+        // SET_FS
+        emu.write_register_u64("RDI", 0x1002).unwrap();
+        emu.write_register_u64("RSI", 0x7fff_0000_1000).unwrap();
+        crate::os::linux::syscall::SysArchPrctl
+            .run(&mut emu)
+            .unwrap();
+        assert_eq!(emu.fs_base, 0x7fff_0000_1000);
+        // segment_fs offset
+        let env = LinuxEnv::new();
+        env.dispatch_userop(&mut emu, "segment_fs", &[0x2a0], 8)
+            .unwrap();
+        assert_eq!(emu.callother_result, 0x7fff_0000_1000 + 0x2a0);
+        // set_tid_address
+        let tid_slot = 0x403000u64;
+        emu.state
+            .page_map
+            .map_region(tid_slot, 0x1000, crate::pcode::page_map::prot::RW, true);
+        emu.write_register_u64("RDI", tid_slot).unwrap();
+        crate::os::linux::syscall::SysSetTidAddress
+            .run(&mut emu)
+            .unwrap();
+        assert_eq!(emu.clear_child_tid, tid_slot);
+        assert_eq!(emu.read_register_u64("RAX").unwrap(), 1000);
+    }
+
+    #[test]
     fn strcmp_and_snprintf_hle() {
         let mut emu = tiny_emu();
         let base = 0x402000u64;

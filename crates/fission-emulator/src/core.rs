@@ -102,6 +102,15 @@ pub struct Emulator {
 
     /// Bump-pointer heap cursor for libc `malloc`/`calloc` HLE (0 = init from brk).
     pub heap_cursor: u64,
+
+    /// Linux FS base (ARCH_SET_FS / TLS). Used by `segment` / `segment_fs` userops.
+    pub fs_base: u64,
+    /// Linux GS base (ARCH_SET_GS).
+    pub gs_base: u64,
+    /// `set_tid_address` clear_child_tid pointer (0 = none).
+    pub clear_child_tid: u64,
+    /// Last CallOther/userop data result (consumed by JIT after `jit_call_other`).
+    pub callother_result: u64,
 }
 
 /// Max guest instructions per translation block.
@@ -288,6 +297,10 @@ impl Emulator {
             pc_override: None,
             metrics: crate::metrics::EmulatorMetrics::default(),
             heap_cursor: 0,
+            fs_base: 0,
+            gs_base: 0,
+            clear_child_tid: 0,
+            callother_result: 0,
         };
 
         // Default SP if no ELF image_info applied yet (Windows / bare-metal).

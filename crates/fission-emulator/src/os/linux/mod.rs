@@ -281,16 +281,51 @@ impl OsEnvironment for LinuxEnv {
 
     fn dispatch_userop(
         &self,
-        _emu: &mut Emulator,
+        emu: &mut Emulator,
         userop_name: &str,
         inputs: &[u64],
         _output_size: u32,
     ) -> Result<HleResult> {
         match userop_name {
-            "segment_fs" | "segment_gs" => {
-                let offset = inputs.get(0).copied().unwrap_or(0);
-                tracing::debug!("Linux HLE: {} (offset=0x{:X})", userop_name, offset);
-                // TLS/Thread control block usually located at fs/gs in Linux.
+            // Ghidra x86: `segment(FS, off)` / named `segment_fs` → linear address.
+            "segment_fs" => {
+                let offset = inputs.last().copied().unwrap_or(0);
+                emu.callother_result = emu.fs_base.wrapping_add(offset);
+                tracing::debug!(
+                    "Linux HLE: segment_fs base=0x{:X} off=0x{:X} -> 0x{:X}",
+                    emu.fs_base,
+                    offset,
+                    emu.callother_result
+                );
+            }
+            "segment_gs" => {
+                let offset = inputs.last().copied().unwrap_or(0);
+                emu.callother_result = emu.gs_base.wrapping_add(offset);
+            }
+            "segment" => {
+                // inputs: [seg_id_or_base, offset] — if first looks like FS selector
+                // (0x63 / common) or we only have offset, use fs_base.
+                let (base, offset) = match inputs.len() {
+                    0 => (emu.fs_base, 0),
+                    1 => (emu.fs_base, inputs[0]),
+                    _ => {
+                        let a = inputs[0];
+                        let b = inputs[1];
+                        // Heuristic: small first arg is selector → use FS/GS base.
+                        if a <= 0x100 {
+                            (emu.fs_base, b)
+                        } else {
+                            (a, b)
+                        }
+                    }
+                };
+                emu.callother_result = base.wrapping_add(offset);
+                tracing::debug!(
+                    "Linux HLE: segment base=0x{:X} off=0x{:X} -> 0x{:X}",
+                    base,
+                    offset,
+                    emu.callother_result
+                );
             }
             "lock" | "rep" | "repne" | "repe" => {
                 tracing::debug!("Linux HLE: Prefix userop '{}'", userop_name);
@@ -299,7 +334,11 @@ impl OsEnvironment for LinuxEnv {
                 tracing::info!("Linux HLE: Instruct userop '{}' called", userop_name);
             }
             _ => {
-                tracing::debug!("Linux HLE: Unhandled USEROP: {} (inputs: {:?})", userop_name, inputs);
+                tracing::debug!(
+                    "Linux HLE: Unhandled USEROP: {} (inputs: {:?})",
+                    userop_name,
+                    inputs
+                );
             }
         }
         Ok(HleResult::Continue)

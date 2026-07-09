@@ -468,23 +468,37 @@ impl SimProcedure for SysUname {
 pub struct SysArchPrctl;
 impl SimProcedure for SysArchPrctl {
     fn run(&self, emu: &mut Emulator) -> Result<HleResult> {
-        // ARCH_SET_FS = 0x1002, ARCH_GET_FS = 0x1003, ARCH_SET_GS = 0x1001
+        // ARCH_SET_GS=0x1001, ARCH_SET_FS=0x1002, ARCH_GET_FS=0x1003, ARCH_GET_GS=0x1004
         let code = emu.read_register_u64("RDI").unwrap_or(0);
         let addr = emu.read_register_u64("RSI").unwrap_or(0);
         tracing::info!("sys_arch_prctl(code=0x{:X}, addr=0x{:X})", code, addr);
-        // Store FS base in a fixed guest location for segment_fs userops later.
         match code {
+            0x1001 => {
+                // ARCH_SET_GS
+                emu.gs_base = addr;
+                emu.write_register_u64("RAX", 0)?;
+            }
             0x1002 => {
-                // SET_FS — remember in tick_count high bit area / vfs side channel
-                emu.tick_count = addr; // temporary store; better field later
+                // ARCH_SET_FS — TLS thread pointer
+                emu.fs_base = addr;
                 emu.write_register_u64("RAX", 0)?;
             }
             0x1003 => {
-                // GET_FS
-                let _ = ram_write(emu, addr, &emu.tick_count.to_le_bytes());
+                // ARCH_GET_FS
+                if addr != 0 {
+                    let _ = ram_write(emu, addr, &emu.fs_base.to_le_bytes());
+                }
+                emu.write_register_u64("RAX", 0)?;
+            }
+            0x1004 => {
+                // ARCH_GET_GS
+                if addr != 0 {
+                    let _ = ram_write(emu, addr, &emu.gs_base.to_le_bytes());
+                }
                 emu.write_register_u64("RAX", 0)?;
             }
             _ => {
+                // Unknown subcode: success no-op (some probes).
                 emu.write_register_u64("RAX", 0)?;
             }
         }
@@ -732,7 +746,15 @@ impl SimProcedure for SysSchedYield {
 pub struct SysSetTidAddress;
 impl SimProcedure for SysSetTidAddress {
     fn run(&self, emu: &mut Emulator) -> Result<HleResult> {
-        // Returns caller's tid.
+        // set_tid_address(tidptr) — store clear_child_tid; return tid.
+        let tidptr = emu.read_register_u64("RDI").unwrap_or(0);
+        emu.clear_child_tid = tidptr;
+        tracing::info!("sys_set_tid_address(0x{:X}) -> tid=1000", tidptr);
+        // Optionally write current tid into *tidptr if mapped.
+        if tidptr != 0 {
+            let tid: u64 = 1000;
+            let _ = ram_write(emu, tidptr, &tid.to_le_bytes());
+        }
         emu.write_register_u64("RAX", 1000)?;
         Ok(HleResult::Continue)
     }

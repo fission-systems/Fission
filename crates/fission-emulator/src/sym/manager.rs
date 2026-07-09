@@ -62,6 +62,22 @@ impl SimulationManager {
         self.stashes.get(name).map(|v| v.len()).unwrap_or(0)
     }
 
+    /// Best-effort path-condition SAT. Panics are treated as SAT (keep the fork).
+    fn path_sat(&mut self, constraints: &[SymExpr], ms: &crate::pcode::state::MachineState) -> bool {
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            self.emu
+                .solver
+                .satisfiable_with_oracle(constraints, Some(ms))
+        }));
+        match result {
+            Ok(v) => v,
+            Err(_) => {
+                tracing::warn!("path-SAT panic; treating as SAT");
+                true
+            }
+        }
+    }
+
     /// Step all states in the `active` stash.
     pub fn step(&mut self) -> Result<()> {
         self.steps_taken = self.steps_taken.saturating_add(1);
@@ -73,7 +89,7 @@ impl SimulationManager {
             .collect::<Vec<_>>();
         let mut next_active = Vec::new();
         let mut next_deadended = Vec::new();
-        let next_unsat: Vec<SimState> = Vec::new();
+        let mut next_unsat = Vec::new();
 
         for state in active_states {
             // Hot-swap the state via Copy-On-Write instead of TTD seek.
@@ -100,7 +116,6 @@ impl SimulationManager {
 
             let branches = std::mem::take(&mut self.emu.sym_events);
             if branches.is_empty() {
-                // Halted or ran to limit without a symbolic branch.
                 next_deadended.push(SimState::new(
                     self.emu.inst_count,
                     self.emu.pc,
@@ -109,7 +124,6 @@ impl SimulationManager {
                 continue;
             }
 
-            // Fork on the first symbolic branch.
             let branch = branches.into_iter().next().unwrap();
             let Some(cond_node) = branch.condition_node else {
                 next_deadended.push(SimState::new(
@@ -134,7 +148,6 @@ impl SimulationManager {
                 Box::new(SymExpr::Const { val: 0, size: 1 }),
             );
 
-            // Concrete path already executed to `emu.pc` (selected by gate stop).
             let concrete_pc = self.emu.pc;
             let alt_pc = branch.alt_addr.unwrap_or(concrete_pc);
             let fork_ms = self.emu.state.clone();
@@ -150,11 +163,14 @@ impl SimulationManager {
                 state.with_constraint(concrete_constraint, step, concrete_pc, fork_ms.clone());
             let alt_state = state.with_constraint(alt_constraint, step, alt_pc, fork_ms);
 
-            // Always keep both forks active for now. Full path-condition SAT is
-            // still incomplete (can panic on some AST shapes); prune later when
-            // the solver is hardened. Constraints remain on SimState for later.
-            next_active.push(concrete_state);
-            next_active.push(alt_state);
+            // Path-SAT prune with panic isolation (solver hardened for OOB assigns).
+            for st in [concrete_state, alt_state] {
+                if self.path_sat(&st.history.constraints, &st.machine_state) {
+                    next_active.push(st);
+                } else {
+                    next_unsat.push(st);
+                }
+            }
         }
 
         self.stashes

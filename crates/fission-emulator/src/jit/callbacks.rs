@@ -157,11 +157,19 @@ pub extern "C" fn jit_count_insn(emu_ptr: *mut Emulator) {
     emu.inst_count = emu.inst_count.saturating_add(1);
 }
 
+#[inline]
+fn max_inst_reached(emu: &Emulator) -> bool {
+    emu.max_inst.is_some_and(|m| emu.inst_count >= m)
+}
+
 /// Soft direct chaining: if `next_pc` is already compiled, enter it (bounded depth).
 /// Returns the final next PC once chaining stops (miss or depth limit).
 #[unsafe(no_mangle)]
 pub extern "C" fn jit_chain(emu_ptr: *mut Emulator, next_pc: u64) -> u64 {
     let emu = unsafe { &mut *emu_ptr };
+    if max_inst_reached(emu) || emu.halt_requested || emu.sym_stop_requested {
+        return next_pc;
+    }
     if emu.chain_depth >= MAX_CHAIN_DEPTH {
         return next_pc;
     }
@@ -190,7 +198,7 @@ pub extern "C" fn jit_chain(emu_ptr: *mut Emulator, next_pc: u64) -> u64 {
 pub extern "C" fn jit_exit_tb(emu_ptr: *mut Emulator, next_pc: u64) -> u64 {
     let emu = unsafe { &mut *emu_ptr };
 
-    if emu.halt_requested {
+    if emu.halt_requested || max_inst_reached(emu) {
         return next_pc;
     }
     // Honor PC rewrite from syscalls like rt_sigreturn.
@@ -210,12 +218,20 @@ pub extern "C" fn jit_exit_tb(emu_ptr: *mut Emulator, next_pc: u64) -> u64 {
     if emu.ttd_snapshot_interval > 0 && emu.ttd.is_recording() {
         return next_pc;
     }
+    // Budgeted runs: return to the outer loop every TB so `max_inst` is checked.
+    if emu.max_inst.is_some() {
+        return next_pc;
+    }
     if emu.chain_depth >= MAX_CHAIN_DEPTH {
         return next_pc;
     }
 
     // Hard chain: any published host for next_pc (absolute branch/call or fallthrough).
     if let Some(host) = emu.jit_cache.hard_chain_host(next_pc) {
+        // Re-check budget before diving into another TB (tight loops).
+        if max_inst_reached(emu) {
+            return next_pc;
+        }
         emu.metrics.hard_chains += 1;
         emu.chain_depth += 1;
         let func: extern "C" fn(*mut Emulator) -> u64 =
@@ -681,6 +697,7 @@ pub extern "C" fn jit_call_other(
         || userop_name.eq_ignore_ascii_case("syscall")
         || userop_name.contains("syscall");
 
+    emu.callother_result = 0;
     let result = if is_syscall {
         let os_ptr = &*emu.os as *const dyn OsEnvironment;
         let os_ref = unsafe { &*os_ptr };
@@ -711,6 +728,13 @@ pub extern "C" fn jit_call_other(
         }
         HleResult::Continue => 0,
     }
+}
+
+/// Data result of the most recent CallOther / userop (e.g. `segment_fs` address).
+#[unsafe(no_mangle)]
+pub extern "C" fn jit_callother_result(emu_ptr: *mut Emulator) -> u64 {
+    let emu = unsafe { &*emu_ptr };
+    emu.callother_result
 }
 
 #[unsafe(no_mangle)]

@@ -225,7 +225,12 @@ impl SatSolver {
     }
 
     pub fn value_lit(&self, lit: Lit) -> LBool {
-        let val = self.assigns[lit.var() as usize];
+        // CNF vars are often 1-indexed; never panic on sparse indices.
+        let val = self
+            .assigns
+            .get(lit.var() as usize)
+            .copied()
+            .unwrap_or(LBool::Undef);
         if lit.0 < 0 {
             val.not()
         } else {
