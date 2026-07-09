@@ -1089,6 +1089,11 @@
       gate records always, stops only when <code>concolic_stop_on_branch</code></li>
 <li>[x] Concolic explore E2E: <code>SimulationManager</code> fork resume PCs + <code>max_steps</code> + both-exit smoke</li>
 <li>[x] libc HLE: <code>strcmp</code>/<code>strncmp</code>/<code>snprintf</code>/<code>stat</code> (+ <code>__xstat</code>); <code>newfstatat</code> VFS sizes</li>
+<li>[x] TLS path: <code>fs_base</code>/<code>gs_base</code>, <code>arch_prctl</code> SET/GET FS/GS, <code>set_tid_address</code>,
+      <code>segment</code>/<code>segment_fs</code> CallOther result → JIT output</li>
+<li>[x] <code>max_inst</code> honored inside chain (no chain when budgeted); seal op-blocks after CFG edges</li>
+<li>[x] path-SAT prune re-enabled with OOB-safe <code>value_lit</code> + panic isolation</li>
+<li>[x] static CRT profile smoke (<code>static_crt_profile</code>, budgeted) — still not full halt CI</li>
 <li>[x] Automation <code>sandbox-check</code> lane (subprocess over CLI JSON + budget gate)</li>
 </ul>
 <h2 id="validation">Validation<a class="headerlink" href="#validation" title="Permanent link">&para;</a></h2>
