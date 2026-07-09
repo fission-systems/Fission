@@ -1,7 +1,10 @@
 //! Host-side IEEE float helpers for JIT callouts.
 //!
-//! Sizes 4 and 8 use native f32/f64. Size 10 (x87 extended) is approximated
-//! via f64 (same policy as the offline evaluator). No softfloat dependency.
+//! Sizes 4 and 8 use native f32/f64 by default. Size 10 (x87 extended) is
+//! approximated via f64 (same policy as the offline evaluator).
+//!
+//! Enable feature `softfloat` for the pure-Rust path in [`super::softfloat`]
+//! (NaN quieting + deterministic policy; still no QEMU vendor code).
 
 #[repr(u32)]
 #[derive(Clone, Copy, Debug)]
@@ -48,6 +51,9 @@ fn f64_to_bits(val: f64, size: u32) -> u64 {
 }
 
 pub fn float_binop(op: u32, size: u32, a_bits: u64, b_bits: u64) -> u64 {
+    if cfg!(feature = "softfloat") {
+        return crate::jit::softfloat::soft_binop(op, size, a_bits, b_bits);
+    }
     let a = bits_to_f64(a_bits, size);
     let b = bits_to_f64(b_bits, size);
     match op {
@@ -67,6 +73,9 @@ pub fn float_binop(op: u32, size: u32, a_bits: u64, b_bits: u64) -> u64 {
 }
 
 pub fn float_unop(op: u32, in_size: u32, out_size: u32, a_bits: u64) -> u64 {
+    if cfg!(feature = "softfloat") {
+        return crate::jit::softfloat::soft_unop(op, in_size, out_size, a_bits);
+    }
     match op {
         x if x == FloatUnOp::Neg as u32 => {
             let a = bits_to_f64(a_bits, in_size);

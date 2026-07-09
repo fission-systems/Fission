@@ -68,14 +68,17 @@ Callouts: `jit_read_space` / `jit_write_space` / `jit_call_other` / `jit_exit_tb
 - [x] Multi-instruction TBs (up to 8 insns; stop on absolute branch / page / cached edge)
 - [x] Soft direct block chaining (`jit_chain`)
 - [x] Hard chaining via **global** guest-PC → host-fn table (`jit_exit_tb`) — fallthrough **and absolute** branch/call
-- [ ] Hot-path register caching with fewer callouts
-- [ ] Optional pure-Rust softfloat for IEEE edge cases
+- [x] CallOther flush **+ reload** (HLE cannot be clobbered by stale SSA at TB exit)
+- [ ] Persistent host-side register file cache across TBs (fewer callouts)
+- [x] Optional pure-Rust softfloat path (`feature = "softfloat"`, NaN quieting policy)
 
 ### Phase D — Analysis features
 
-- [ ] TTD snapshot & recompute over JIT segments
-- [ ] Symbolic gate: drop to solver when shadow memory is live (still no interpreter for concrete ops)
-- [ ] Exploration strategies (already seeded under `sym/`)
+- [x] TTD: enable `tracing_memory` on `with_ttd`, clear deltas after record, disable chain while recording
+- [ ] TTD: full keyframe recompute between snapshots (seek still nearest-snapshot + delta apply)
+- [x] Symbolic CBranch gate (`jit_sym_cbranch_gate` → `sym_events` + `sym_stop_requested`)
+- [ ] Full shadow propagation on JIT ALU/LOAD (Evaluator-only today; concolic branch gate first)
+- [x] Exploration manager clears stop flag between forks (`sym/manager.rs`)
 
 ### Phase E — Maturity / smoke (in progress)
 
@@ -86,9 +89,12 @@ Callouts: `jit_read_space` / `jit_write_space` / `jit_call_other` / `jit_exit_tb
 - [x] CallOther mid-TB dirty register flush (HLE sees current SSA)
 - [x] Checked-in tiny ELF fixture: `testdata/linux_x64_hello_sys.elf` + `smoke_ci_fixture_hello_sys`
 - [x] PE ExitProcess fixture: `testdata/win_x64_exit.exe` + `smoke_pe_exit_process`
+- [x] PE WriteFile fixture: `testdata/win_x64_write.exe` + `smoke_pe_write_file`
 - [x] Unimplemented-opcode budget gate (`EmulatorMetrics::check_unimplemented_budget`)
-- [ ] Dynamic-linked ELF / full PE CRT (WriteFile + more HLE)
-- [ ] Wire budget gate into automation/report surfaces (optional)
+- [x] IAT table + GetProcAddress dynamic trampolines + CRT bootstrap stubs
+- [x] CLI sandbox: `--json` / `--metrics-out` / `--max-unimpl-*` / `--fail-on-budget`
+- [ ] Dynamic-linked ELF GOT/`iat_symbols` fill in `fission-loader`
+- [ ] Automation `sandbox-check` lane (subprocess over CLI JSON)
 
 ## Validation
 
@@ -99,7 +105,8 @@ cargo nextest run -p fission-emulator
 #   zig cc -target x86_64-linux-musl -O0 -o /tmp/fission-emu-test/hello_linux_x64 hello.c
 #   FISSION_SMOKE_ELF=/tmp/fission-emu-test/hello_linux_x64 cargo nextest run -p fission-emulator smoke_optional
 cargo check -p fission-cli
-./target/release/fission_cli sandbox /path/to/elf --max-inst 50000
+./target/release/fission_cli sandbox crates/fission-emulator/testdata/linux_x64_hello_sys.elf \
+  --max-inst 64 --json --fail-on-budget --max-unimpl-events 0 --max-unimpl-kinds 0
 ```
 
 Future: differential execution against a **separate** offline oracle harness is allowed for CI measurement only — never linked into `fission-emulator`.

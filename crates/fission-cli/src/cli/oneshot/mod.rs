@@ -284,6 +284,51 @@ fn run_sandbox(args: crate::cli::args::SandboxArgs) -> Result<()> {
         }
     }
 
+    // Metrics JSON + optional unimplemented-opcode budget gate.
+    let budget = if args.fail_on_budget
+        || args.max_unimpl_events.is_some()
+        || args.max_unimpl_kinds.is_some()
+    {
+        Some((
+            args.max_unimpl_events.unwrap_or(0),
+            args.max_unimpl_kinds.unwrap_or(0),
+        ))
+    } else {
+        None
+    };
+    let report = fission_emulator::SandboxMetricsReport::from_run(
+        args.binary.display().to_string(),
+        emu.binary.format.clone(),
+        emu.halt_requested,
+        emu.pc,
+        emu.metrics.clone(),
+        budget,
+    );
+    if let Some(path) = args.metrics_out {
+        let json = report
+            .to_json_pretty()
+            .context("serialize sandbox metrics report")?;
+        std::fs::write(&path, json)
+            .with_context(|| format!("write metrics to {}", path.display()))?;
+        tracing::info!("Wrote sandbox metrics to {}", path.display());
+    }
+    if args.json {
+        println!(
+            "{}",
+            report
+                .to_json_pretty()
+                .context("serialize sandbox metrics report")?
+        );
+    }
+    if args.fail_on_budget && !report.budget_ok() {
+        let err = report
+            .budget
+            .as_ref()
+            .and_then(|b| b.error.clone())
+            .unwrap_or_else(|| "unimplemented opcode budget exceeded".into());
+        anyhow::bail!("{err}");
+    }
+
     Ok(())
 }
 

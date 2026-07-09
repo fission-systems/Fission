@@ -34,6 +34,28 @@ fn unimplemented_budget_gate() {
 }
 
 #[test]
+fn sandbox_metrics_report_json_budget() {
+    use fission_emulator::SandboxMetricsReport;
+    let mut m = EmulatorMetrics::default();
+    m.instructions = 12;
+    m.note_unimplemented(PcodeOpcode::CPoolRef);
+    let ok = SandboxMetricsReport::from_run(
+        "x.elf",
+        "ELF",
+        true,
+        0x400000,
+        m.clone(),
+        Some((1, 1)),
+    );
+    assert!(ok.budget_ok());
+    let bad = SandboxMetricsReport::from_run("x.elf", "ELF", true, 0x400000, m, Some((0, 0)));
+    assert!(!bad.budget_ok());
+    let json = bad.to_json_pretty().expect("json");
+    assert!(json.contains("unimplemented_opcodes"));
+    assert!(json.contains("\"ok\": false") || json.contains("\"ok\":false"));
+}
+
+#[test]
 fn piece_and_lzcount_are_supported() {
     assert!(is_jit_supported(PcodeOpcode::Piece));
     assert!(is_jit_supported(PcodeOpcode::LzCount));

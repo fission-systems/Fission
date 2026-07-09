@@ -54,9 +54,13 @@ impl SimulationManager {
             self.emu.pc = state.pc;
             self.emu.inst_count = state.step_index;
 
-            // Run until the next symbolic branch or halt
+            // Run until the next symbolic branch or halt (Phase D gate).
             self.emu.sym_events.clear();
+            self.emu.sym_stop_requested = false;
+            self.emu.halt_requested = false;
             let run_result = self.emu.run();
+            // Clear stop so subsequent forks can run again.
+            self.emu.sym_stop_requested = false;
 
             if let Err(_) = run_result {
                 // If it halted or errored, it's deadended

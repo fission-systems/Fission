@@ -134,3 +134,77 @@ pub fn jit_supported_opcodes() -> &'static [PcodeOpcode] {
 pub fn is_jit_supported(op: PcodeOpcode) -> bool {
     jit_supported_opcodes().contains(&op)
 }
+
+/// Budget evaluation embedded in a sandbox metrics JSON report.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct BudgetReport {
+    pub max_events: u64,
+    pub max_kinds: usize,
+    pub events: u64,
+    pub kinds: usize,
+    pub ok: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+/// Serializable sandbox run summary for CLI `--json` / automation.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SandboxMetricsReport {
+    pub binary: String,
+    pub format: String,
+    pub halt_requested: bool,
+    pub pc: u64,
+    pub metrics: EmulatorMetrics,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub budget: Option<BudgetReport>,
+}
+
+impl SandboxMetricsReport {
+    pub fn from_run(
+        binary: impl Into<String>,
+        format: impl Into<String>,
+        halt_requested: bool,
+        pc: u64,
+        metrics: EmulatorMetrics,
+        budget: Option<(u64, usize)>,
+    ) -> Self {
+        let budget = budget.map(|(max_events, max_kinds)| {
+            let events = metrics.unimplemented_total();
+            let kinds = metrics.unimplemented_kinds();
+            match metrics.check_unimplemented_budget(max_events, max_kinds) {
+                Ok(()) => BudgetReport {
+                    max_events,
+                    max_kinds,
+                    events,
+                    kinds,
+                    ok: true,
+                    error: None,
+                },
+                Err(error) => BudgetReport {
+                    max_events,
+                    max_kinds,
+                    events,
+                    kinds,
+                    ok: false,
+                    error: Some(error),
+                },
+            }
+        });
+        Self {
+            binary: binary.into(),
+            format: format.into(),
+            halt_requested,
+            pc,
+            metrics,
+            budget,
+        }
+    }
+
+    pub fn to_json_pretty(&self) -> Result<String, serde_json::Error> {
+        serde_json::to_string_pretty(self)
+    }
+
+    pub fn budget_ok(&self) -> bool {
+        self.budget.as_ref().map(|b| b.ok).unwrap_or(true)
+    }
+}

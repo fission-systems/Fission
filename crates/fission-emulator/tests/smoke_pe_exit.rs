@@ -1,4 +1,4 @@
-//! PE CRT/minimal path smoke: checked-in `win_x64_exit.exe` calls ExitProcess(0).
+//! PE CRT/minimal path smokes: ExitProcess + WriteFile fixtures.
 
 use std::path::PathBuf;
 
@@ -10,8 +10,8 @@ use fission_emulator::MachineState;
 use fission_loader::loader::LoadedBinary;
 use fission_sleigh::runtime::RuntimeSleighFrontend;
 
-fn fixture_pe() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("testdata/win_x64_exit.exe")
+fn fixture_pe(name: &str) -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("testdata").join(name)
 }
 
 fn run_pe(path: &std::path::Path, max_inst: u64) -> Result<Emulator> {
@@ -43,7 +43,7 @@ fn run_pe(path: &std::path::Path, max_inst: u64) -> Result<Emulator> {
 
 #[test]
 fn smoke_pe_exit_process() {
-    let path = fixture_pe();
+    let path = fixture_pe("win_x64_exit.exe");
     assert!(path.is_file(), "missing PE fixture {}", path.display());
     let emu = run_pe(&path, 5_000).unwrap_or_else(|e| panic!("PE smoke failed: {e:#}"));
     assert!(
@@ -55,5 +55,41 @@ fn smoke_pe_exit_process() {
     if let Err(msg) = emu.metrics.check_unimplemented_budget(64, 8) {
         panic!("{msg}; full={}", emu.metrics.summary_line());
     }
-    eprintln!("pe smoke ok: {}", emu.metrics.summary_line());
+    assert!(
+        emu.metrics.userops.keys().any(|k| k.contains("ExitProcess")),
+        "expected ExitProcess HLE, userops={:?}",
+        emu.metrics.userops
+    );
+    eprintln!("pe exit smoke ok: {}", emu.metrics.summary_line());
+}
+
+#[test]
+fn smoke_pe_write_file() {
+    let path = fixture_pe("win_x64_write.exe");
+    assert!(path.is_file(), "missing PE WriteFile fixture {}", path.display());
+    let emu = run_pe(&path, 10_000).unwrap_or_else(|e| panic!("PE WriteFile smoke failed: {e:#}"));
+    assert!(
+        emu.halt_requested,
+        "expected ExitProcess after WriteFile, metrics={}",
+        emu.metrics.summary_line()
+    );
+    if let Err(msg) = emu.metrics.check_unimplemented_budget(64, 8) {
+        panic!("{msg}; full={}", emu.metrics.summary_line());
+    }
+    let saw_write = emu
+        .metrics
+        .userops
+        .keys()
+        .any(|k| k.contains("WriteFile") || k.contains("WriteConsole"));
+    let saw_std = emu
+        .metrics
+        .userops
+        .keys()
+        .any(|k| k.contains("GetStdHandle"));
+    assert!(
+        saw_write || saw_std,
+        "expected WriteFile/GetStdHandle HLE, userops={:?}",
+        emu.metrics.userops
+    );
+    eprintln!("pe write smoke ok: {}", emu.metrics.summary_line());
 }

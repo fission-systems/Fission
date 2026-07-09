@@ -60,6 +60,7 @@ impl JitCompiler {
             ("jit_count_insn", crate::jit::callbacks::jit_count_insn as *const u8),
             ("jit_chain", crate::jit::callbacks::jit_chain as *const u8),
             ("jit_exit_tb", crate::jit::callbacks::jit_exit_tb as *const u8),
+            ("jit_sym_cbranch_gate", crate::jit::callbacks::jit_sym_cbranch_gate as *const u8),
             ("jit_read_register", crate::jit::callbacks::jit_read_register as *const u8),
             ("jit_write_register", crate::jit::callbacks::jit_write_register as *const u8),
             ("jit_read_memory", crate::jit::callbacks::jit_read_memory as *const u8),
@@ -243,6 +244,22 @@ impl JitCompiler {
             .declare_function("jit_exit_tb", Linkage::Import, &sig_exit)
             .unwrap();
 
+        // jit_sym_cbranch_gate(emu, cond_val, space, offset, taken, not_taken) -> u64
+        let mut sig_sym = self.module.make_signature();
+        sig_sym.params.extend([
+            AbiParam::new(types::I64),
+            AbiParam::new(types::I64),
+            AbiParam::new(types::I64),
+            AbiParam::new(types::I64),
+            AbiParam::new(types::I64),
+            AbiParam::new(types::I64),
+        ]);
+        sig_sym.returns.push(AbiParam::new(types::I64));
+        let sym_gate_fn = self
+            .module
+            .declare_function("jit_sym_cbranch_gate", Linkage::Import, &sig_sym)
+            .unwrap();
+
         // ── Blocks ───────────────────────────────────────────────────────────
         let entry = builder.create_block();
         builder.append_block_params_for_function_params(entry);
@@ -269,6 +286,7 @@ impl JitCompiler {
         let call_other_ref = self.module.declare_func_in_func(call_other_fn, builder.func);
         let count_ref = self.module.declare_func_in_func(count_fn, builder.func);
         let exit_tb_ref = self.module.declare_func_in_func(exit_tb_fn, builder.func);
+        let sym_gate_ref = self.module.declare_func_in_func(sym_gate_fn, builder.func);
 
         let default_next = builder.ins().iconst(types::I64, fallthrough_pc as i64);
 
@@ -924,7 +942,54 @@ impl JitCompiler {
 
                 PcodeOpcode::CBranch => {
                     let dest = &op.inputs[0];
-                    let cond = load_vn!(&op.inputs[1]);
+                    let cond_vn = &op.inputs[1];
+                    let cond = load_vn!(cond_vn);
+
+                    // Symbolic gate: if condition is tainted, stop TB for manager fork.
+                    {
+                        let taken_addr = if dest.space_id == 0 || dest.is_constant {
+                            // Relative within TB or fallthrough — use start_pc as anchor.
+                            fallthrough_pc
+                        } else {
+                            dest.offset
+                        };
+                        let not_taken_addr = fallthrough_pc;
+                        let csp = builder.ins().iconst(
+                            types::I64,
+                            if cond_vn.is_constant {
+                                0i64
+                            } else {
+                                cond_vn.space_id as i64
+                            },
+                        );
+                        let coff = builder.ins().iconst(
+                            types::I64,
+                            if cond_vn.is_constant {
+                                0i64
+                            } else {
+                                cond_vn.offset as i64
+                            },
+                        );
+                        let t_a = builder.ins().iconst(types::I64, taken_addr as i64);
+                        let n_a = builder.ins().iconst(types::I64, not_taken_addr as i64);
+                        let gcall = builder.ins().call(
+                            sym_gate_ref,
+                            &[emu_ptr, cond, csp, coff, t_a, n_a],
+                        );
+                        let stop = builder.inst_results(gcall)[0];
+                        let is_stop = builder.ins().icmp_imm(IntCC::NotEqual, stop, 0);
+                        let stop_b = builder.create_block();
+                        let cont_sym = builder.create_block();
+                        builder.ins().brif(is_stop, stop_b, &[], cont_sym, &[]);
+                        builder.switch_to_block(stop_b);
+                        builder.seal_block(stop_b);
+                        builder
+                            .ins()
+                            .jump(exit_block, &[BlockArg::from(default_next)]);
+                        builder.switch_to_block(cont_sym);
+                        builder.seal_block(cont_sym);
+                    }
+
                     let is_true = builder.ins().icmp_imm(IntCC::NotEqual, cond, 0);
 
                     if dest.space_id == 0 || dest.is_constant {
@@ -992,26 +1057,26 @@ impl JitCompiler {
                 }
 
                 PcodeOpcode::CallOther => {
-                    // Flush dirty register/memory so HLE (syscall, etc.) sees
-                    // the current SSA values — writeback only at TB exit is too late.
-                    {
-                        let mut last: HashMap<(u64, u64), (u32, cranelift_frontend::Variable)> =
-                            HashMap::new();
-                        for (sp, off, sz, v) in &dirty {
-                            last.insert((*sp, *off), (*sz, *v));
+                    // Flush dirty so HLE sees live SSA; after the call, reload
+                    // those slots so exit writeback cannot clobber HLE updates
+                    // (e.g. syscall RAX). This is the hot-path reg cache coherence
+                    // point for mid-TB HLE.
+                    let mut flushed: HashMap<(u64, u64), (u32, cranelift_frontend::Variable)> =
+                        HashMap::new();
+                    for (sp, off, sz, v) in &dirty {
+                        flushed.insert((*sp, *off), (*sz, *v));
+                    }
+                    for ((sp, off), (sz, v)) in &flushed {
+                        if *sp == 0 {
+                            continue;
                         }
-                        for ((sp, off), (sz, v)) in last {
-                            if sp == 0 {
-                                continue;
-                            }
-                            let val = builder.use_var(v);
-                            let spv = builder.ins().iconst(types::I64, sp as i64);
-                            let offv = builder.ins().iconst(types::I64, off as i64);
-                            let szv = builder.ins().iconst(types::I64, sz as i64);
-                            builder
-                                .ins()
-                                .call(write_space_ref, &[emu_ptr, spv, offv, szv, val]);
-                        }
+                        let val = builder.use_var(*v);
+                        let spv = builder.ins().iconst(types::I64, *sp as i64);
+                        let offv = builder.ins().iconst(types::I64, *off as i64);
+                        let szv = builder.ins().iconst(types::I64, *sz as i64);
+                        builder
+                            .ins()
+                            .call(write_space_ref, &[emu_ptr, spv, offv, szv, val]);
                     }
 
                     let userop_id = if let Some(vn) = op.inputs.first() {
@@ -1060,6 +1125,25 @@ impl JitCompiler {
                         .jump(exit_block, &[BlockArg::from(default_next)]);
                     builder.switch_to_block(cont_b);
                     builder.seal_block(cont_b);
+
+                    // Reload flushed vars from guest memory (HLE may have mutated them).
+                    for ((sp, off), (sz, v)) in flushed {
+                        if sp == 0 {
+                            continue;
+                        }
+                        let spv = builder.ins().iconst(types::I64, sp as i64);
+                        let offv = builder.ins().iconst(types::I64, off as i64);
+                        let szv = builder.ins().iconst(types::I64, sz as i64);
+                        let rcall =
+                            builder
+                                .ins()
+                                .call(read_space_ref, &[emu_ptr, spv, offv, szv]);
+                        let val = builder.inst_results(rcall)[0];
+                        builder.def_var(v, val);
+                    }
+                    // Drop pre-HLE dirty so TB exit does not re-write stale SSA.
+                    dirty.clear();
+
                     if let Some(ft) = fallthrough {
                         builder.ins().jump(ft, &[]);
                     } else {

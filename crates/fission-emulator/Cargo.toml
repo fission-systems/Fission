@@ -5,6 +5,11 @@ edition = "2024"
 authors = ["Fission Dev Team"]
 description = "Fission P-Code Execution Engine and OS HLE"
 
+[features]
+default = []
+## Route float callouts through pure-Rust softfloat policy (NaN quieting).
+softfloat = []
+
 [dependencies]
 fission-sleigh = { path = "../fission-sleigh" }
 fission-core = { path = "../fission-core" }

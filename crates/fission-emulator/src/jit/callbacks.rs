@@ -183,6 +183,9 @@ pub extern "C" fn jit_chain(emu_ptr: *mut Emulator, next_pc: u64) -> u64 {
 /// TB exit: hard-chain to `next_pc` if a host entry is published in the
 /// global chain table (covers **fallthrough and absolute** branch/call targets).
 /// Falls back to soft [`jit_chain`] / return of `next_pc`.
+///
+/// When TTD is recording, chaining is disabled so the outer run loop can take
+/// snapshots at TB boundaries (Phase D: TTD over JIT segments).
 #[unsafe(no_mangle)]
 pub extern "C" fn jit_exit_tb(emu_ptr: *mut Emulator, next_pc: u64) -> u64 {
     let emu = unsafe { &mut *emu_ptr };
@@ -197,6 +200,14 @@ pub extern "C" fn jit_exit_tb(emu_ptr: *mut Emulator, next_pc: u64) -> u64 {
         next_pc
     };
     if next_pc >= 0xFFFFFFF0_00000000 {
+        return next_pc;
+    }
+    // Stop at symbolic branch gate (concolic).
+    if emu.sym_stop_requested {
+        return next_pc;
+    }
+    // TTD segment boundary: no hard/soft chain while recording.
+    if emu.ttd_snapshot_interval > 0 && emu.ttd.is_recording() {
         return next_pc;
     }
     if emu.chain_depth >= MAX_CHAIN_DEPTH {
@@ -246,6 +257,47 @@ pub extern "C" fn jit_read_memory(emu_ptr: *mut Emulator, offset: u64, size: u64
 pub extern "C" fn jit_write_memory(emu_ptr: *mut Emulator, offset: u64, size: u64, val: u64) {
     let emu = unsafe { &*emu_ptr };
     jit_write_space(emu_ptr, emu.state.ram_space(), offset, size, val);
+}
+
+// ── Symbolic gate (concolic) ─────────────────────────────────────────────────
+
+/// If the condition varnode is tainted (shadow live), record a [`SymBranch`]
+/// and request a stop so `SimulationManager` can fork. Returns 1 when stopped.
+///
+/// Concrete-only conditions return 0 and leave control to normal CBranch IR.
+#[unsafe(no_mangle)]
+pub extern "C" fn jit_sym_cbranch_gate(
+    emu_ptr: *mut Emulator,
+    cond_val: u64,
+    cond_space: u64,
+    cond_offset: u64,
+    taken_addr: u64,
+    not_taken_addr: u64,
+) -> u64 {
+    let emu = unsafe { &mut *emu_ptr };
+    if cond_space == 0 {
+        return 0;
+    }
+    let Some(node) = emu.state.get_shadow_memory(cond_space, cond_offset) else {
+        return 0;
+    };
+    let taken = cond_val != 0;
+    emu.sym_events.push(crate::core::SymBranch {
+        step_index: emu.inst_count,
+        pc: emu.pc,
+        condition_val_taken: taken,
+        condition_node: Some(node),
+        alt_rel_idx: None,
+        alt_addr: Some(if taken { not_taken_addr } else { taken_addr }),
+    });
+    emu.sym_stop_requested = true;
+    tracing::debug!(
+        "Symbolic CBranch gate: node={} taken={} pc=0x{:X}",
+        node,
+        taken,
+        emu.pc
+    );
+    1
 }
 
 // ── CallOther / HLE ──────────────────────────────────────────────────────────

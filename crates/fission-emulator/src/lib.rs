@@ -15,4 +15,4 @@ pub use pcode::state::MachineState;
 pub use pcode::eval::Evaluator;
 pub use core::Emulator;
 pub use snapshot::EmulatorSnapshot;
-pub use metrics::EmulatorMetrics;
+pub use metrics::{BudgetReport, EmulatorMetrics, SandboxMetricsReport};

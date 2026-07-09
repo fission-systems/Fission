@@ -1,61 +1,67 @@
 use anyhow::Result;
 use crate::core::Emulator;
 use crate::os::env::{HleResult, OsEnvironment};
+use crate::os::windows::heap::DummyHeap;
+use crate::os::windows::imports::{ImportTable, SharedImportTable};
 use crate::pcode::state::MachineState;
 use fission_loader::loader::LoadedBinary;
 use std::sync::Mutex;
-use crate::os::windows::heap::DummyHeap;
 
-const MAGIC_BASE: u64 = 0xFFFFFFF000000000;
+/// Standard handle cookies returned by GetStdHandle (and accepted by WriteFile).
+const STD_INPUT_HANDLE: u64 = 0x50;
+const STD_OUTPUT_HANDLE: u64 = 0x51;
+const STD_ERROR_HANDLE: u64 = 0x52;
+/// Legacy cookie used by older HLE paths.
+const LEGACY_STDOUT: u64 = 0x77777777;
 
 /// Windows PE execution environment.
 ///
 /// - Import patching: overwrites IAT entries with sequential magic trampolines.
-/// - Stub resolution: maps magic address back to import name.
+/// - Stub resolution: maps magic address back to import name (O(1) table).
+/// - GetProcAddress allocates new magic stubs into the same table.
 /// - HLE dispatch: emulates Win32 API functions by name.
 pub struct WindowsEnv {
     pub heap: Mutex<DummyHeap>,
+    imports: SharedImportTable,
 }
 
 impl WindowsEnv {
     pub fn new() -> Self {
         Self {
             heap: Mutex::new(DummyHeap::new(0x20000000)), // Dummy heap base
+            imports: Mutex::new(ImportTable::default()),
         }
+    }
+}
+
+impl Default for WindowsEnv {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
 impl OsEnvironment for WindowsEnv {
     fn patch_imports(&self, state: &mut MachineState, binary: &LoadedBinary) -> Result<()> {
-        if binary.format != "PE" {
-            return Ok(());
-        }
-        let mut iat_entries: Vec<_> = binary.inner().iat_symbols.iter().collect();
-        iat_entries.sort_by_key(|&(&addr, _)| addr);
-        for (i, (&addr, name)) in iat_entries.into_iter().enumerate() {
-            let trampoline = MAGIC_BASE + (i as u64 * 8);
-            tracing::debug!("IAT patch: {} @ 0x{:X} → trampoline 0x{:X}", name, addr, trampoline);
-            state.write_space(state.ram_space(), addr, &trampoline.to_le_bytes())?;
-        }
-        Ok(())
+        self.imports
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .patch_iat(state, binary)
     }
 
-    fn resolve_stub(&self, binary: &LoadedBinary, magic_addr: u64) -> Option<String> {
-        let index = ((magic_addr - MAGIC_BASE) / 8) as usize;
-        let mut iat_entries: Vec<_> = binary.inner().iat_symbols.iter().collect();
-        iat_entries.sort_by_key(|&(&addr, _)| addr);
-        iat_entries
-            .into_iter()
-            .nth(index)
-            .map(|(_, name)| name.split('!').last().unwrap_or(name).to_string())
+    fn resolve_stub(&self, _binary: &LoadedBinary, magic_addr: u64) -> Option<String> {
+        self.imports
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .resolve(magic_addr)
     }
 
     fn dispatch_hle(&self, emu: &mut Emulator, func_name: &str) -> Result<HleResult> {
         tracing::info!("HLE Intercept: {}", func_name);
+        emu.metrics.note_userop(&format!("win32:{func_name}"));
         match func_name {
             "LoadLibraryA" | "LoadLibraryExA" => handle_load_library_a(emu)?,
             "LoadLibraryW" | "LoadLibraryExW" => handle_load_library_w(emu)?,
-            "GetProcAddress" => handle_get_proc_address(emu)?,
+            "GetProcAddress" => handle_get_proc_address(emu, self)?,
             "FreeLibrary" => { emu.write_return_val(1)?; }
             "VirtualAlloc" | "VirtualAllocEx" => handle_virtual_alloc(emu)?,
             "VirtualFree" | "VirtualFreeEx" => {
@@ -82,9 +88,12 @@ impl OsEnvironment for WindowsEnv {
                 emu.write_return_val(0x1000)?;
             }
 
-            // Console / stdio
-            "GetStdHandle" => { emu.write_return_val(0x77777777)?; }
-            "WriteConsoleA" | "WriteFile" => handle_write_console_a(emu)?,
+            // Console / stdio / CRT bootstrap
+            "GetStdHandle" => handle_get_std_handle(emu)?,
+            "GetConsoleMode" => handle_get_console_mode(emu)?,
+            "SetConsoleMode" => { emu.write_return_val(1)?; }
+            "WriteConsoleA" => handle_write_console_a(emu)?,
+            "WriteFile" => handle_write_file(emu)?,
             "WriteConsoleW" => handle_write_console_w(emu)?,
             "ReadConsoleA" | "ReadFile" => handle_read_console_a(emu)?,
             "ReadConsoleW" => handle_read_console_w(emu)?,
@@ -95,7 +104,17 @@ impl OsEnvironment for WindowsEnv {
             "GetFileSize" | "GetFileSizeEx" => {
                 emu.write_return_val(0)?;
             }
-
+            "GetStartupInfoA" => handle_get_startup_info_a(emu)?,
+            "GetStartupInfoW" => handle_get_startup_info_w(emu)?,
+            "GetACP" | "GetOEMCP" => { emu.write_return_val(65001)?; } // UTF-8
+            "IsProcessorFeaturePresent" => { emu.write_return_val(0)?; }
+            "GetSystemDirectoryA" | "GetWindowsDirectoryA" => {
+                // Return empty / failure — CRT often tolerates 0.
+                emu.write_return_val(0)?;
+            }
+            "FlsAlloc" => { emu.write_return_val(1)?; }
+            "FlsGetValue" => { emu.write_return_val(0)?; }
+            "FlsSetValue" | "FlsFree" => { emu.write_return_val(1)?; }
             // Thread / Sync / process identity
             "CreateThread" => handle_create_thread(emu)?,
             "WaitForSingleObject" | "WaitForSingleObjectEx" => { emu.write_return_val(0)?; }
@@ -110,10 +129,13 @@ impl OsEnvironment for WindowsEnv {
             "TlsFree" => { emu.write_return_val(1)?; }
             "InitializeCriticalSection"
             | "InitializeCriticalSectionEx"
+            | "InitializeCriticalSectionAndSpinCount"
             | "EnterCriticalSection"
             | "LeaveCriticalSection"
             | "DeleteCriticalSection"
-            | "InitializeSListHead" => {}
+            | "InitializeSListHead" => {
+                emu.write_return_val(1)?;
+            }
 
             // Error state
             "GetLastError" => {
@@ -314,16 +336,128 @@ fn handle_load_library_w(emu: &mut Emulator) -> Result<()> {
     Ok(())
 }
 
-fn handle_get_proc_address(emu: &mut Emulator) -> Result<()> {
+fn handle_get_proc_address(emu: &mut Emulator, env: &WindowsEnv) -> Result<()> {
     let h_module = emu.read_arg(0)?;
     let name_ptr = emu.read_arg(1)?;
     let proc_name = if name_ptr < 0xFFFF {
-        format!("Ordinal({})", name_ptr)
+        format!("Ordinal_{}", name_ptr)
     } else {
         read_string(emu, name_ptr)?
     };
-    tracing::info!("GetProcAddress(0x{:X}, \"{}\")", h_module, proc_name);
-    emu.write_return_val(0x20000000)?; // dummy FARPROC
+    let magic = env
+        .imports
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .alloc_stub(&proc_name);
+    tracing::info!(
+        "GetProcAddress(0x{:X}, \"{}\") -> trampoline 0x{:X}",
+        h_module,
+        proc_name,
+        magic
+    );
+    emu.win_last_error = 0;
+    emu.write_return_val(magic)?;
+    Ok(())
+}
+
+fn handle_get_std_handle(emu: &mut Emulator) -> Result<()> {
+    // nStdHandle: -10 stdin, -11 stdout, -12 stderr (as unsigned 32/64).
+    let n = emu.read_arg(0)? as i32;
+    let h = match n {
+        -10 => STD_INPUT_HANDLE,
+        -11 => STD_OUTPUT_HANDLE,
+        -12 => STD_ERROR_HANDLE,
+        _ => 0xFFFF_FFFF_FFFF_FFFF, // INVALID_HANDLE_VALUE
+    };
+    if h == 0xFFFF_FFFF_FFFF_FFFF {
+        emu.win_last_error = 6; // ERROR_INVALID_HANDLE
+    } else {
+        emu.win_last_error = 0;
+    }
+    emu.write_return_val(h)?;
+    Ok(())
+}
+
+fn handle_get_console_mode(emu: &mut Emulator) -> Result<()> {
+    let _h = emu.read_arg(0)?;
+    let mode_ptr = emu.read_arg(1)?;
+    if mode_ptr != 0 {
+        // ENABLE_PROCESSED_OUTPUT | ENABLE_WRAP_AT_EOL_OUTPUT
+        let mode: u32 = 0x3;
+        let _ = emu
+            .state
+            .write_space(emu.state.ram_space(), mode_ptr, &mode.to_le_bytes());
+    }
+    emu.write_return_val(1)?;
+    Ok(())
+}
+
+fn handle_get_startup_info_a(emu: &mut Emulator) -> Result<()> {
+    // STARTUPINFOA: first field cb (DWORD). Zero the rest; set cb = 68.
+    let ptr = emu.read_arg(0)?;
+    if ptr != 0 {
+        let mut buf = vec![0u8; 68];
+        buf[0..4].copy_from_slice(&68u32.to_le_bytes());
+        let _ = emu.state.write_space(emu.state.ram_space(), ptr, &buf);
+    }
+    Ok(())
+}
+
+fn handle_get_startup_info_w(emu: &mut Emulator) -> Result<()> {
+    let ptr = emu.read_arg(0)?;
+    if ptr != 0 {
+        let mut buf = vec![0u8; 104];
+        buf[0..4].copy_from_slice(&104u32.to_le_bytes());
+        let _ = emu.state.write_space(emu.state.ram_space(), ptr, &buf);
+    }
+    Ok(())
+}
+
+fn is_console_or_stdout_handle(h: u64) -> bool {
+    matches!(
+        h,
+        STD_INPUT_HANDLE | STD_OUTPUT_HANDLE | STD_ERROR_HANDLE | LEGACY_STDOUT
+    )
+}
+
+/// WriteFile(hFile, lpBuffer, nNumberOfBytesToWrite, lpNumberOfBytesWritten, lpOverlapped)
+fn handle_write_file(emu: &mut Emulator) -> Result<()> {
+    let h = emu.read_arg(0)?;
+    let buf_ptr = emu.read_arg(1)?;
+    let n = emu.read_arg(2)? as usize;
+    let p_written = emu.read_arg(3)?;
+    let _overlapped = emu.read_arg(4).unwrap_or(0);
+
+    if !is_console_or_stdout_handle(h) && h != 0x50000000 && h != 0x50000001 {
+        // Unknown disk handle — still attempt a best-effort write to host for debugging.
+        tracing::debug!("WriteFile: non-std handle 0x{:X}, treating as console-like", h);
+    }
+
+    let raw = if n == 0 || buf_ptr == 0 {
+        Vec::new()
+    } else {
+        emu.state
+            .read_space(emu.state.ram_space(), buf_ptr, n.min(0x10_0000))?
+    };
+    if is_console_or_stdout_handle(h) || h == LEGACY_STDOUT {
+        let s = String::from_utf8_lossy(&raw);
+        print!("{}", s);
+    } else {
+        // Route through SimVFS when available (best-effort path).
+        let s = String::from_utf8_lossy(&raw);
+        tracing::debug!("WriteFile(disk-ish): {} bytes: {:?}", raw.len(), s.chars().take(64).collect::<String>());
+        print!("{}", s);
+    }
+
+    if p_written != 0 {
+        emu.state.write_space(
+            emu.state.ram_space(),
+            p_written,
+            &(raw.len() as u32).to_le_bytes(),
+        )?;
+    }
+    emu.win_last_error = 0;
+    emu.write_return_val(1)?;
     Ok(())
 }
 

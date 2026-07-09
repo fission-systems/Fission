@@ -54,6 +54,10 @@ pub struct Emulator {
     /// Unexplored conditional branches (used for TTD-based concolic exploration).
     pub sym_events: Vec<SymBranch>,
 
+    /// When true, JIT exits TBs without chaining so the outer loop can stop at a
+    /// symbolic branch (concolic gate). Cleared when exploration resumes.
+    pub sym_stop_requested: bool,
+
     /// The Virtual File System.
     pub vfs: crate::os::vfs::SimVFS,
 
@@ -261,6 +265,7 @@ impl Emulator {
             ttd_snapshot_interval: 0,
             tick_count: 0,
             sym_events: Vec::new(),
+            sym_stop_requested: false,
             vfs: crate::os::vfs::SimVFS::new(),
             solver: fission_solver::Solver::new(),
             jit: crate::jit::JitCompiler::new().ok(),
@@ -392,10 +397,14 @@ impl Emulator {
     }
 
     /// Enable TTD recording with a given snapshot interval (N instructions per snapshot).
+    ///
+    /// Enables memory/shadow delta tracing and disables hard TB chaining while
+    /// recording so snapshots land at outer-loop (segment) boundaries.
     pub fn with_ttd(mut self, interval: u64) -> Self {
         self.ttd_snapshot_interval = interval;
         if interval > 0 {
             self.ttd.start_recording();
+            self.state.tracing_memory = true;
         }
         self
     }
@@ -760,6 +769,14 @@ impl Emulator {
             if self.halt_requested {
                 break;
             }
+            if self.sym_stop_requested {
+                tracing::debug!(
+                    "Symbolic gate stop at PC=0x{:X} ({} events)",
+                    self.pc,
+                    self.sym_events.len()
+                );
+                break;
+            }
 
             if let Some(limit) = self.max_inst {
                 if self.inst_count >= limit {
@@ -837,6 +854,9 @@ impl Emulator {
                     })
                     .collect();
                 self.ttd.record_step_with_memory(regs, 0, deltas, shadow_deltas);
+                self.state.trace_mem_writes.clear();
+                self.state.trace_mem_reads.clear();
+                self.state.trace_shadow_writes.clear();
                 tracing::trace!("TTD: recorded step {} at PC=0x{:X}", self.inst_count, self.pc);
             }
         }
@@ -852,6 +872,8 @@ impl Emulator {
         if self.metrics.exit_reason.is_none() {
             self.metrics.exit_reason = Some(if self.halt_requested {
                 "halt".into()
+            } else if self.sym_stop_requested {
+                "sym_gate".into()
             } else if self.max_inst.is_some_and(|m| self.inst_count >= m) {
                 "max_inst".into()
             } else {

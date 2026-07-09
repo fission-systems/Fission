@@ -193,6 +193,26 @@ pub struct SandboxArgs {
     /// Enable concolic/symbolic path exploration on TTD (fork on CBranch)
     #[arg(long)]
     pub sym_explore: bool,
+
+    /// Print sandbox metrics report as JSON on stdout
+    #[arg(long)]
+    pub json: bool,
+
+    /// Write sandbox metrics report JSON to this path
+    #[arg(long, value_name = "PATH")]
+    pub metrics_out: Option<PathBuf>,
+
+    /// Max unimplemented opcode events allowed (budget gate; requires --max-unimpl-kinds or defaults kinds=16)
+    #[arg(long)]
+    pub max_unimpl_events: Option<u64>,
+
+    /// Max distinct unimplemented opcode kinds allowed
+    #[arg(long)]
+    pub max_unimpl_kinds: Option<usize>,
+
+    /// Exit non-zero when unimplemented budget is exceeded (implies budget defaults 0/0 if unset)
+    #[arg(long)]
+    pub fail_on_budget: bool,
 }
 
 // ── AI subcommand types ───────────────────────────────────────────────────────
