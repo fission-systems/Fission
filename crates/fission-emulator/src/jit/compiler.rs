@@ -18,7 +18,7 @@ use cranelift_module::{default_libcall_names, Linkage, Module};
 use fission_pcode::ir::{PcodeOp, PcodeOpcode, Varnode};
 use std::collections::HashMap;
 
-use crate::jit::callbacks::SymBinOpKind;
+use crate::jit::callbacks::{SymBinOpKind, SymUnOpKind};
 use crate::jit::float_ops::{FloatBinOp, FloatUnOp};
 
 /// One guest instruction already lifted to P-Code.
@@ -68,6 +68,7 @@ impl JitCompiler {
             ("jit_shadow_load", crate::jit::callbacks::jit_shadow_load as *const u8),
             ("jit_shadow_store", crate::jit::callbacks::jit_shadow_store as *const u8),
             ("jit_shadow_binop", crate::jit::callbacks::jit_shadow_binop as *const u8),
+            ("jit_shadow_unop", crate::jit::callbacks::jit_shadow_unop as *const u8),
             ("jit_read_register", crate::jit::callbacks::jit_read_register as *const u8),
             ("jit_write_register", crate::jit::callbacks::jit_write_register as *const u8),
             ("jit_read_memory", crate::jit::callbacks::jit_read_memory as *const u8),
@@ -343,6 +344,16 @@ impl JitCompiler {
             .declare_function("jit_shadow_binop", Linkage::Import, &sig_sh_bin)
             .unwrap();
 
+        // jit_shadow_unop(emu, dst_sp, dst_off, dst_sz, a_sp, a_off, a_val, a_size, op_kind)
+        let mut sig_sh_un = self.module.make_signature();
+        for _ in 0..9 {
+            sig_sh_un.params.push(AbiParam::new(types::I64));
+        }
+        let shadow_unop_fn = self
+            .module
+            .declare_function("jit_shadow_unop", Linkage::Import, &sig_sh_un)
+            .unwrap();
+
         // ── Blocks ───────────────────────────────────────────────────────────
         let entry = builder.create_block();
         builder.append_block_params_for_function_params(entry);
@@ -385,6 +396,9 @@ impl JitCompiler {
         let shadow_binop_ref = self
             .module
             .declare_func_in_func(shadow_binop_fn, builder.func);
+        let shadow_unop_ref = self
+            .module
+            .declare_func_in_func(shadow_unop_fn, builder.func);
 
         let default_next = builder.ins().iconst(types::I64, fallthrough_pc as i64);
 
@@ -513,6 +527,45 @@ impl JitCompiler {
             }};
         }
 
+        macro_rules! emit_shadow_unop {
+            ($out:expr, $a:expr, $a_val:expr, $kind:expr) => {{
+                let out: &Varnode = $out;
+                let a: &Varnode = $a;
+                let a_val = $a_val;
+                let kind: u32 = $kind;
+                if !out.is_constant {
+                    let dsp = builder.ins().iconst(types::I64, out.space_id as i64);
+                    let doff = builder.ins().iconst(types::I64, out.offset as i64);
+                    let dsz = builder.ins().iconst(types::I64, out.size as i64);
+                    let asp = builder.ins().iconst(
+                        types::I64,
+                        if a.is_constant { 0 } else { a.space_id as i64 },
+                    );
+                    let aoff = builder.ins().iconst(
+                        types::I64,
+                        if a.is_constant {
+                            0
+                        } else {
+                            a.offset as i64
+                        },
+                    );
+                    let asz = builder.ins().iconst(
+                        types::I64,
+                        if a.is_constant {
+                            8
+                        } else {
+                            a.size as i64
+                        },
+                    );
+                    let kind_v = builder.ins().iconst(types::I64, kind as i64);
+                    builder.ins().call(
+                        shadow_unop_ref,
+                        &[emu_ptr, dsp, doff, dsz, asp, aoff, a_val, asz, kind_v],
+                    );
+                }
+            }};
+        }
+
         macro_rules! load_vn {
             ($vn:expr) => {{
                 let vn: &Varnode = $vn;
@@ -536,15 +589,29 @@ impl JitCompiler {
                 if !vn.is_constant {
                     let v = ensure_var!(vn.space_id, vn.offset, vn.size.min(8));
                     builder.def_var(v, val);
-                    // Zero-callout register store into host_reg_file.
+                    // Zero-callout register store into host_reg_file (size-correct).
+                    let rsz = vn.size.min(8) as u32;
                     if vn.space_id == register_space
-                        && (vn.offset as usize) + (vn.size.min(8) as usize) <= HOST_REG_FILE_SIZE
+                        && (vn.offset as usize) + (rsz as usize) <= HOST_REG_FILE_SIZE
                     {
                         let ptr = builder
                             .ins()
                             .iadd_imm(host_reg_base, vn.offset as i64);
                         let flags = MemFlagsData::trusted();
-                        builder.ins().store(flags, val, ptr, 0);
+                        match rsz {
+                            1 => {
+                                builder.ins().istore8(flags, val, ptr, 0);
+                            }
+                            2 => {
+                                builder.ins().istore16(flags, val, ptr, 0);
+                            }
+                            4 => {
+                                builder.ins().istore32(flags, val, ptr, 0);
+                            }
+                            _ => {
+                                builder.ins().store(flags, val, ptr, 0);
+                            }
+                        }
                     }
                     dirty.push((vn.space_id, vn.offset, vn.size.min(8), v));
                 }
@@ -914,18 +981,21 @@ impl JitCompiler {
                     if let Some(out) = op.output.as_ref() {
                         let a = load_vn!(&op.inputs[0]);
                         store_vn!(out, builder.ins().bnot(a));
+                        emit_shadow_unop!(out, &op.inputs[0], a, SymUnOpKind::Not as u32);
                     }
                 }
                 PcodeOpcode::Int2Comp => {
                     if let Some(out) = op.output.as_ref() {
                         let a = load_vn!(&op.inputs[0]);
                         store_vn!(out, builder.ins().ineg(a));
+                        emit_shadow_unop!(out, &op.inputs[0], a, SymUnOpKind::Neg as u32);
                     }
                 }
                 PcodeOpcode::BoolNegate => {
                     if let Some(out) = op.output.as_ref() {
                         let a = load_vn!(&op.inputs[0]);
                         store_vn!(out, builder.ins().bxor_imm(a, 1));
+                        emit_shadow_unop!(out, &op.inputs[0], a, SymUnOpKind::BoolNot as u32);
                     }
                 }
                 PcodeOpcode::IntEqual
@@ -1190,6 +1260,18 @@ impl JitCompiler {
                                 .ins()
                                 .call(float_binop_ref, &[opi, szi, a, b]);
                         store_vn!(out, builder.inst_results(call)[0]);
+                        let sk = match op.opcode {
+                            PcodeOpcode::FloatAdd => SymBinOpKind::FloatAdd as u32,
+                            PcodeOpcode::FloatSub => SymBinOpKind::FloatSub as u32,
+                            PcodeOpcode::FloatMult => SymBinOpKind::FloatMul as u32,
+                            PcodeOpcode::FloatDiv => SymBinOpKind::FloatDiv as u32,
+                            PcodeOpcode::FloatEqual => SymBinOpKind::FloatEq as u32,
+                            PcodeOpcode::FloatNotEqual => SymBinOpKind::FloatNeq as u32,
+                            PcodeOpcode::FloatLess => SymBinOpKind::FloatLt as u32,
+                            PcodeOpcode::FloatLessEqual => SymBinOpKind::FloatLe as u32,
+                            _ => SymBinOpKind::FloatAdd as u32,
+                        };
+                        emit_shadow_binop!(out, &op.inputs[0], &op.inputs[1], a, b, sk);
                     }
                 }
                 PcodeOpcode::FloatNeg
@@ -1227,6 +1309,20 @@ impl JitCompiler {
                                 .ins()
                                 .call(float_unop_ref, &[opi, isz, osz, a]);
                         store_vn!(out, builder.inst_results(call)[0]);
+                        let sk = match op.opcode {
+                            PcodeOpcode::FloatNeg => SymUnOpKind::FloatNeg as u32,
+                            PcodeOpcode::FloatAbs => SymUnOpKind::FloatAbs as u32,
+                            PcodeOpcode::FloatSqrt => SymUnOpKind::FloatSqrt as u32,
+                            PcodeOpcode::FloatNan => SymUnOpKind::FloatNan as u32,
+                            PcodeOpcode::FloatCeil => SymUnOpKind::FloatCeil as u32,
+                            PcodeOpcode::FloatFloor => SymUnOpKind::FloatFloor as u32,
+                            PcodeOpcode::FloatRound => SymUnOpKind::FloatRound as u32,
+                            PcodeOpcode::FloatTrunc => SymUnOpKind::FloatTrunc as u32,
+                            PcodeOpcode::FloatInt2Float => SymUnOpKind::FloatInt2Float as u32,
+                            PcodeOpcode::FloatFloat2Float => SymUnOpKind::FloatFloat2Float as u32,
+                            _ => SymUnOpKind::FloatNeg as u32,
+                        };
+                        emit_shadow_unop!(out, &op.inputs[0], a, sk);
                     }
                 }
 
@@ -1377,6 +1473,8 @@ impl JitCompiler {
                     for (sp, off, sz, v) in &dirty {
                         flushed.insert((*sp, *off), (*sz, *v));
                     }
+                    // Always flush dirty to guest state before HLE so argument
+                    // registers are coherent even if host_reg_file and SSA diverge.
                     for ((sp, off), (sz, v)) in &flushed {
                         if *sp == 0 {
                             continue;
@@ -1437,9 +1535,19 @@ impl JitCompiler {
                     builder.switch_to_block(cont_b);
                     builder.seal_block(cont_b);
 
-                    // Reload flushed vars from guest memory (HLE may have mutated them).
+                    // Reload flushed vars (HLE may have mutated them).
+                    // Registers: zero-callout load from host_reg_file.
                     for ((sp, off), (sz, v)) in flushed {
                         if sp == 0 {
+                            continue;
+                        }
+                        if sp == register_space
+                            && (off as usize) + (sz as usize) <= HOST_REG_FILE_SIZE
+                        {
+                            let ptr = builder.ins().iadd_imm(host_reg_base, off as i64);
+                            let flags = MemFlagsData::trusted();
+                            let val = builder.ins().load(types::I64, flags, ptr, 0);
+                            builder.def_var(v, val);
                             continue;
                         }
                         let spv = builder.ins().iconst(types::I64, sp as i64);
@@ -1508,6 +1616,9 @@ impl JitCompiler {
             if sp == 0 {
                 continue;
             }
+            // Register slots: host_reg_file was updated mid-TB via IR store.
+            // Still write once at exit so AddressSpace stays coherent for any
+            // non-host path; this is one callout per dirty reg (not per access).
             let val = builder.use_var(v);
             let spv = builder.ins().iconst(types::I64, sp as i64);
             let offv = builder.ins().iconst(types::I64, off as i64);

@@ -2,8 +2,8 @@
 
 use fission_emulator::core::Emulator;
 use fission_emulator::jit::callbacks::{
-    jit_shadow_binop, jit_shadow_copy, jit_shadow_load, jit_shadow_store, jit_sym_cbranch_gate,
-    SymBinOpKind,
+    jit_shadow_binop, jit_shadow_copy, jit_shadow_load, jit_shadow_store, jit_shadow_unop,
+    jit_sym_cbranch_gate, SymBinOpKind, SymUnOpKind,
 };
 use fission_emulator::pcode::page_map::prot;
 use fission_emulator::MachineState;
@@ -116,6 +116,28 @@ fn shadow_load_copy_binop_reaches_cbranch_gate() {
     assert!(emu.sym_stop_requested);
     assert_eq!(emu.sym_events.len(), 1);
     assert_eq!(emu.sym_events[0].condition_node, Some(cond_id));
+
+    // Unary: IntNegate → Not AST
+    jit_shadow_unop(
+        emu_ptr,
+        uniq,
+        0x50,
+        1,
+        uniq,
+        0x20,
+        0x2A,
+        1,
+        SymUnOpKind::Not as u32,
+    );
+    let not_id = emu.state.get_shadow_memory(uniq, 0x50).expect("not shadow");
+    let not_expr = emu.solver.nodes.get(&not_id).expect("not node");
+    // new_not may be Xor with mask or Const; just ensure a node was registered.
+    assert!(
+        !matches!(not_expr, fission_solver::SymExpr::Var { .. })
+            || matches!(not_expr, fission_solver::SymExpr::Xor(_, _))
+            || matches!(not_expr, fission_solver::SymExpr::Const { .. }),
+        "unexpected not expr {not_expr:?}"
+    );
 }
 
 #[test]

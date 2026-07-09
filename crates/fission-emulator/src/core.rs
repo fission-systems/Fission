@@ -303,6 +303,28 @@ impl Emulator {
         crate::os::linux::image_info::apply_stack_pointer(self, &info)?;
         self.state.page_map.brk = info.brk;
         self.state.page_map.brk_base = info.brk;
+
+        // Seed VFS so openat/read/mmap (ld.so path) can see the main binary.
+        let guest_name = info.execfn.clone();
+        let host_path = self.binary.inner().path.clone();
+        let bytes = self.binary.inner().data.as_slice().to_vec();
+        self.vfs.seed_path(&guest_name, bytes.clone());
+        self.vfs.seed_path(&host_path, bytes);
+        if !host_path.is_empty() {
+            self.vfs
+                .alias_host(&guest_name, std::path::PathBuf::from(&host_path));
+            self.vfs
+                .alias_host(&host_path, std::path::PathBuf::from(&host_path));
+        }
+        // Also seed argv[0]-style basenames.
+        if let Some(base) = std::path::Path::new(&guest_name)
+            .file_name()
+            .and_then(|s| s.to_str())
+        {
+            self.vfs
+                .seed_path(base, self.binary.inner().data.as_slice().to_vec());
+        }
+
         self.image_info = Some(info);
         Ok(())
     }
@@ -819,19 +841,7 @@ impl Emulator {
                 }
             }
 
-            if !self.run_instruction()? {
-                break;
-            }
-
-            // ── Pending Linux signals (between TBs) ───────────────────────────
-            if !self.process_pending_signals()? {
-                break;
-            }
-            if self.halt_requested {
-                break;
-            }
-
-            // ── HLE Trap Check ────────────────────────────────────────────────
+            // ── HLE Trap Check (before fetch/compile — magic is not code) ────
             if self.pc >= 0xFFFFFFF000000000 {
                 let magic = self.pc;
                 let func_name = {
@@ -862,6 +872,19 @@ impl Emulator {
                         self.pc = pc;
                     }
                 }
+                continue;
+            }
+
+            if !self.run_instruction()? {
+                break;
+            }
+
+            // ── Pending Linux signals (between TBs) ───────────────────────────
+            if !self.process_pending_signals()? {
+                break;
+            }
+            if self.halt_requested {
+                break;
             }
 
             // TTD: record a snapshot every N instructions.

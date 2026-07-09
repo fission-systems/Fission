@@ -286,6 +286,185 @@ fn map_interpreter(
     })
 }
 
+// ── RELA application (mini dynamic linker for HLE / bootstrap) ─────────────
+
+const R_X86_64_64: u32 = 1;
+const R_X86_64_GLOB_DAT: u32 = 6;
+const R_X86_64_JUMP_SLOT: u32 = 7;
+const R_X86_64_RELATIVE: u32 = 8;
+const SHT_RELA: u32 = 4;
+
+/// Result of applying dynamic relocations to a guest image.
+#[derive(Clone, Debug, Default)]
+pub struct RelaApplyStats {
+    pub relative: u64,
+    pub jump_slot: u64,
+    pub glob_dat: u64,
+    pub other: u64,
+}
+
+/// Apply SHT_RELA entries for an already-mapped ELF image in guest memory.
+///
+/// - `R_X86_64_RELATIVE`: `*slot = base + addend`
+/// - `R_X86_64_JUMP_SLOT` / `GLOB_DAT`: write `resolve(name)` (typically HLE magic)
+/// - Others: counted but left unchanged
+///
+/// This is the Fission mini-dynlink path used when full `ld.so` is unavailable.
+pub fn apply_rela_x86_64(
+    state: &mut MachineState,
+    elf_bytes: &[u8],
+    load_bias: u64,
+    mut resolve: impl FnMut(&str) -> Option<u64>,
+) -> Result<RelaApplyStats> {
+    if elf_bytes.len() < 64 || elf_bytes[0..4] != [0x7f, b'E', b'L', b'F'] {
+        anyhow::bail!("apply_rela: not ELF");
+    }
+    if elf_bytes[4] != 2 || elf_bytes[5] != 1 {
+        anyhow::bail!("apply_rela: only ELF64 LE");
+    }
+    let shoff = u64::from_le_bytes(elf_bytes[40..48].try_into().unwrap()) as usize;
+    let shentsize = u16::from_le_bytes(elf_bytes[58..60].try_into().unwrap()) as usize;
+    let shnum = u16::from_le_bytes(elf_bytes[60..62].try_into().unwrap()) as usize;
+    if shentsize < 64 || shoff == 0 {
+        return Ok(RelaApplyStats::default());
+    }
+
+    // Collect section headers lightly.
+    let mut stats = RelaApplyStats::default();
+    for si in 0..shnum {
+        let soff = shoff + si * shentsize;
+        if soff + 64 > elf_bytes.len() {
+            break;
+        }
+        let sh_type = u32::from_le_bytes(elf_bytes[soff + 4..soff + 8].try_into().unwrap());
+        if sh_type != SHT_RELA {
+            continue;
+        }
+        let sh_offset = u64::from_le_bytes(elf_bytes[soff + 24..soff + 32].try_into().unwrap()) as usize;
+        let sh_size = u64::from_le_bytes(elf_bytes[soff + 32..soff + 40].try_into().unwrap()) as usize;
+        let sh_link = u32::from_le_bytes(elf_bytes[soff + 40..soff + 44].try_into().unwrap()) as usize;
+        let sh_entsize = u64::from_le_bytes(elf_bytes[soff + 56..soff + 64].try_into().unwrap()) as usize;
+        let entsz = if sh_entsize > 0 { sh_entsize } else { 24 };
+        let count = sh_size / entsz;
+
+        // Symbol table for name resolution.
+        let (symtab, strtab) = symtab_strtab(elf_bytes, shoff, shentsize, shnum, sh_link);
+
+        for ri in 0..count {
+            let roff = sh_offset + ri * entsz;
+            if roff + 24 > elf_bytes.len() {
+                break;
+            }
+            let r_offset = u64::from_le_bytes(elf_bytes[roff..roff + 8].try_into().unwrap());
+            let r_info = u64::from_le_bytes(elf_bytes[roff + 8..roff + 16].try_into().unwrap());
+            let r_addend = i64::from_le_bytes(elf_bytes[roff + 16..roff + 24].try_into().unwrap());
+            let r_type = (r_info & 0xffff_ffff) as u32;
+            let r_sym = (r_info >> 32) as usize;
+            // ET_EXEC/DYN: r_offset is VA (may already include image base).
+            let slot = if r_offset >= load_bias {
+                r_offset
+            } else {
+                r_offset.saturating_add(load_bias)
+            };
+
+            match r_type {
+                R_X86_64_RELATIVE => {
+                    let val = (load_bias as i64).wrapping_add(r_addend) as u64;
+                    state.write_space(state.ram_space(), slot, &val.to_le_bytes())?;
+                    stats.relative += 1;
+                }
+                R_X86_64_JUMP_SLOT | R_X86_64_GLOB_DAT | R_X86_64_64 => {
+                    let name = sym_name(elf_bytes, symtab, strtab, r_sym).unwrap_or_default();
+                    let bare = name.split('@').next().unwrap_or(&name);
+                    if let Some(target) = resolve(bare) {
+                        let val = target.wrapping_add(r_addend as u64);
+                        state.write_space(state.ram_space(), slot, &val.to_le_bytes())?;
+                        if r_type == R_X86_64_JUMP_SLOT {
+                            stats.jump_slot += 1;
+                        } else {
+                            stats.glob_dat += 1;
+                        }
+                    } else {
+                        stats.other += 1;
+                    }
+                }
+                _ => {
+                    stats.other += 1;
+                }
+            }
+        }
+    }
+    tracing::info!(
+        "apply_rela: relative={} jump_slot={} glob_dat={} other={}",
+        stats.relative,
+        stats.jump_slot,
+        stats.glob_dat,
+        stats.other
+    );
+    Ok(stats)
+}
+
+fn symtab_strtab(
+    data: &[u8],
+    shoff: usize,
+    shentsize: usize,
+    shnum: usize,
+    sh_link: usize,
+) -> (Option<(usize, usize, usize)>, Option<(usize, usize)>) {
+    if sh_link >= shnum {
+        return (None, None);
+    }
+    let soff = shoff + sh_link * shentsize;
+    if soff + 64 > data.len() {
+        return (None, None);
+    }
+    let sym_off = u64::from_le_bytes(data[soff + 24..soff + 32].try_into().unwrap()) as usize;
+    let sym_size = u64::from_le_bytes(data[soff + 32..soff + 40].try_into().unwrap()) as usize;
+    let sym_entsize =
+        u64::from_le_bytes(data[soff + 56..soff + 64].try_into().unwrap()) as usize;
+    let str_link = u32::from_le_bytes(data[soff + 40..soff + 44].try_into().unwrap()) as usize;
+    if str_link >= shnum {
+        return (Some((sym_off, sym_size, sym_entsize.max(24))), None);
+    }
+    let stroff_hdr = shoff + str_link * shentsize;
+    if stroff_hdr + 64 > data.len() {
+        return (Some((sym_off, sym_size, sym_entsize.max(24))), None);
+    }
+    let str_off =
+        u64::from_le_bytes(data[stroff_hdr + 24..stroff_hdr + 32].try_into().unwrap()) as usize;
+    let str_size =
+        u64::from_le_bytes(data[stroff_hdr + 32..stroff_hdr + 40].try_into().unwrap()) as usize;
+    (
+        Some((sym_off, sym_size, if sym_entsize > 0 { sym_entsize } else { 24 })),
+        Some((str_off, str_size)),
+    )
+}
+
+fn sym_name(
+    data: &[u8],
+    symtab: Option<(usize, usize, usize)>,
+    strtab: Option<(usize, usize)>,
+    index: usize,
+) -> Option<String> {
+    let (sym_off, sym_size, entsz) = symtab?;
+    let (str_off, str_size) = strtab?;
+    let eoff = sym_off + index * entsz;
+    if eoff + 4 > data.len() || eoff + entsz > sym_off + sym_size {
+        return None;
+    }
+    let st_name = u32::from_le_bytes(data[eoff..eoff + 4].try_into().ok()?) as usize;
+    if st_name >= str_size || str_off + st_name >= data.len() {
+        return None;
+    }
+    let start = str_off + st_name;
+    let end = data[start..]
+        .iter()
+        .position(|&b| b == 0)
+        .map(|i| start + i)
+        .unwrap_or(data.len().min(start + 256));
+    Some(String::from_utf8_lossy(&data[start..end]).into_owned())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -319,5 +498,37 @@ mod tests {
         let info = prepare_dynlink(&mut state, &binary).unwrap();
         assert_eq!(info.mode, DynlinkMode::HleGot);
         assert!(info.interp_path.is_some());
+    }
+
+    #[test]
+    fn apply_rela_writes_jump_slots_for_dyn_puts() {
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("testdata/x64_dyn_puts.elf");
+        if !path.is_file() {
+            return;
+        }
+        let binary = LoadedBinary::from_file(&path).unwrap();
+        let mut state = MachineState::new();
+        // Map sections like the image loader would.
+        let info = crate::os::linux::image_info::load_elf_image(
+            &mut state,
+            &binary,
+            &crate::os::linux::image_info::ProcessArgs::default(),
+        )
+        .unwrap();
+        let data = binary.inner().data.as_slice();
+        let mut resolved = 0u64;
+        let stats = apply_rela_x86_64(&mut state, data, info.load_addr, |name| {
+            if name == "puts" || name == "__libc_start_main" {
+                resolved += 1;
+                Some(0xFFFFFFF1_00000000 + resolved * 8)
+            } else {
+                Some(0)
+            }
+        })
+        .expect("apply_rela");
+        assert!(
+            stats.jump_slot >= 1 || stats.glob_dat >= 1,
+            "expected JUMP_SLOT/GLOB_DAT applies: {stats:?}"
+        );
     }
 }

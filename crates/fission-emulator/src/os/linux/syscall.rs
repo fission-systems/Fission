@@ -98,11 +98,28 @@ impl SimProcedure for SysOpen {
 pub struct SysOpenat;
 impl SimProcedure for SysOpenat {
     fn run(&self, emu: &mut Emulator) -> Result<HleResult> {
-        // openat(dirfd, pathname, flags, mode)
+        // openat(dirfd, pathname, flags, mode) — x86-64: rdi, rsi, rdx, r10
+        let _dirfd = emu.read_register_u64("RDI").unwrap_or(0) as i64;
         let pathname = emu.read_register_u64("RSI").unwrap_or(0);
+        let flags = emu.read_register_u64("RDX").unwrap_or(0);
         let filename = read_string(emu, pathname).unwrap_or_else(|_| "unknown".into());
-        tracing::info!("sys_openat(\"{}\")", filename);
+        tracing::info!("sys_openat(dirfd={}, \"{}\", flags=0x{:X})", _dirfd, filename, flags);
+        // O_DIRECTORY / missing file: still return a seed fd when path is registered.
         let fd = emu.vfs.open(&filename, Vec::new());
+        // If open produced an empty never-seeded file and path is absolute missing, return -ENOENT.
+        if let Some(sz) = emu.vfs.file_size(fd) {
+            if sz == 0
+                && !emu.vfs.path_seeds.contains_key(&filename)
+                && !std::path::Path::new(&filename).is_file()
+                && !filename.is_empty()
+                && filename.starts_with('/')
+            {
+                let _ = emu.vfs.close(fd);
+                // ENOENT = 2
+                emu.write_register_u64("RAX", (-2i64) as u64)?;
+                return Ok(HleResult::Continue);
+            }
+        }
         emu.write_register_u64("RAX", fd)?;
         Ok(HleResult::Continue)
     }
@@ -244,12 +261,19 @@ impl SimProcedure for SysAccess {
 pub struct SysMmap;
 impl SimProcedure for SysMmap {
     fn run(&self, emu: &mut Emulator) -> Result<HleResult> {
+        // mmap(addr, length, prot, flags, fd, offset)
+        // x86-64 syscall ABI: rdi, rsi, rdx, r10, r8, r9
         let addr = emu.read_register_u64("RDI").unwrap_or(0);
         let length = emu.read_register_u64("RSI").unwrap_or(0);
         let prot_bits = emu.read_register_u64("RDX").unwrap_or(0) as u8;
-        let page_prot = prot_bits & 0x07;
+        let flags = emu.read_register_u64("R10").unwrap_or(0);
+        let fd = emu.read_register_u64("R8").unwrap_or(u64::MAX) as i64;
+        let offset = emu.read_register_u64("R9").unwrap_or(0) as usize;
+        let page_prot = (prot_bits & 0x07) | prot::VALID;
+        let map_fixed = flags & 0x10 != 0; // MAP_FIXED
+        let map_anon = flags & 0x20 != 0; // MAP_ANONYMOUS
 
-        let base = if addr == 0 {
+        let base = if addr == 0 && !map_fixed {
             emu.state.page_map.mmap_anon(length.max(1), page_prot)
         } else {
             emu.state
@@ -259,18 +283,38 @@ impl SimProcedure for SysMmap {
         };
 
         let len = page_align_up(length.max(1));
-        let fill = len.min(0x10_0000) as usize;
-        if fill > 0 {
-            let zeros = vec![0u8; fill];
-            let _ = ram_write(emu, base, &zeros);
+        // File-backed mmap: copy from VFS fd when not MAP_ANONYMOUS.
+        if !map_anon && fd >= 0 {
+            let want = length.max(1) as usize;
+            match emu.vfs.peek(fd as u64, offset, want) {
+                Ok(data) => {
+                    let _ = ram_write(emu, base, &data);
+                }
+                Err(_) => {
+                    let fill = len.min(0x10_0000) as usize;
+                    if fill > 0 {
+                        let zeros = vec![0u8; fill];
+                        let _ = ram_write(emu, base, &zeros);
+                    }
+                }
+            }
+        } else {
+            let fill = len.min(0x10_0000) as usize;
+            if fill > 0 {
+                let zeros = vec![0u8; fill];
+                let _ = ram_write(emu, base, &zeros);
+            }
         }
 
         emu.write_register_u64("RAX", base)?;
         tracing::info!(
-            "sys_mmap(addr=0x{:X}, len={}, prot=0x{:X}) -> 0x{:X}",
+            "sys_mmap(addr=0x{:X}, len={}, prot=0x{:X}, flags=0x{:X}, fd={}, off={}) -> 0x{:X}",
             addr,
             length,
             page_prot,
+            flags,
+            fd,
+            offset,
             base
         );
         Ok(HleResult::Continue)

@@ -371,6 +371,46 @@ pub enum SymBinOpKind {
     Ule = 9,
     Slt = 10,
     Sle = 11,
+    /// Float binops: mint a fresh symbolic Var (no IEEE theory in solver).
+    FloatAdd = 20,
+    FloatSub = 21,
+    FloatMul = 22,
+    FloatDiv = 23,
+    FloatEq = 24,
+    FloatNeq = 25,
+    FloatLt = 26,
+    FloatLe = 27,
+}
+
+/// Unary / float op kinds for symbolic AST on the JIT path.
+#[repr(u32)]
+#[derive(Clone, Copy, Debug)]
+pub enum SymUnOpKind {
+    /// Bitwise not (INT_NEGATE)
+    Not = 0,
+    /// Two's complement negate (INT_2COMP)
+    Neg = 1,
+    /// Boolean not (BOOL_NEGATE)
+    BoolNot = 2,
+    /// Float ops: no IEEE AST in solver yet — mint a fresh symbolic Var leaf.
+    FloatNeg = 10,
+    FloatAbs = 11,
+    FloatSqrt = 12,
+    FloatNan = 13,
+    FloatCeil = 14,
+    FloatFloor = 15,
+    FloatRound = 16,
+    FloatTrunc = 17,
+    FloatInt2Float = 18,
+    FloatFloat2Float = 19,
+    FloatAdd = 20,
+    FloatSub = 21,
+    FloatMul = 22,
+    FloatDiv = 23,
+    FloatEq = 24,
+    FloatNeq = 25,
+    FloatLt = 26,
+    FloatLe = 27,
 }
 
 /// Binary ALU: if either input is tainted, build a full [`SymExpr`] AST node
@@ -438,6 +478,16 @@ pub extern "C" fn jit_shadow_binop(
         x if x == SymBinOpKind::Ule as u32 => SymExpr::Ule(Box::new(a_expr), Box::new(b_expr)),
         x if x == SymBinOpKind::Slt as u32 => SymExpr::new_slt(a_expr, b_expr),
         x if x == SymBinOpKind::Sle as u32 => SymExpr::new_sle(a_expr, b_expr),
+        x if (20..=27).contains(&x) => {
+            // Float binary: no IEEE AST — fresh symbolic leaf keyed by both nodes.
+            let name = format!(
+                "fbin_{op_kind}_{}_{}",
+                a_node.unwrap_or(0),
+                b_node.unwrap_or(0)
+            );
+            let out_sz = (dst_sz as u32).max(1).min(8);
+            SymExpr::new_var(&name, out_sz)
+        }
         _ => {
             // Unknown op: fall back to first taint id (legacy union).
             let id = a_node.or(b_node).unwrap();
@@ -447,6 +497,64 @@ pub extern "C" fn jit_shadow_binop(
             }
             return;
         }
+    };
+    let new_id = emu.solver.register_node(new_expr);
+    let n = (dst_sz as usize).min(64) as u64;
+    for i in 0..n {
+        emu.state.set_shadow_memory(dst_sp, dst_off + i, new_id);
+    }
+}
+
+/// Unary int / float: build AST when the input is tainted.
+#[unsafe(no_mangle)]
+pub extern "C" fn jit_shadow_unop(
+    emu_ptr: *mut Emulator,
+    dst_sp: u64,
+    dst_off: u64,
+    dst_sz: u64,
+    a_sp: u64,
+    a_off: u64,
+    a_val: u64,
+    a_size: u64,
+    op_kind: u32,
+) {
+    let emu = unsafe { &mut *emu_ptr };
+    if dst_sp == 0 {
+        return;
+    }
+    let a_node = if a_sp == 0 {
+        None
+    } else {
+        emu.state.get_shadow_memory(a_sp, a_off)
+    };
+    if a_node.is_none() {
+        let n = (dst_sz as usize).min(64) as u64;
+        for i in 0..n {
+            emu.state.clear_shadow_memory(dst_sp, dst_off + i);
+        }
+        return;
+    }
+    use fission_solver::SymExpr;
+    let a_sz = (a_size as u32).max(1).min(8);
+    let a_expr = a_node
+        .and_then(|id| emu.solver.nodes.get(&id).cloned())
+        .unwrap_or_else(|| SymExpr::new_const(a_val, a_sz));
+
+    let new_expr = match op_kind {
+        x if x == SymUnOpKind::Not as u32 => SymExpr::new_not(a_expr),
+        x if x == SymUnOpKind::Neg as u32 => {
+            SymExpr::new_sub(SymExpr::new_const(0, a_sz), a_expr)
+        }
+        x if x == SymUnOpKind::BoolNot as u32 => {
+            SymExpr::new_eq(a_expr, SymExpr::new_const(0, 1))
+        }
+        // Float family: mint a distinct symbolic variable (solver has no IEEE ops).
+        x if (10..=27).contains(&x) => {
+            let name = format!("fsym_{op_kind}_{}", a_node.unwrap_or(0));
+            let out_sz = (dst_sz as u32).max(1).min(8);
+            SymExpr::new_var(&name, out_sz)
+        }
+        _ => a_expr,
     };
     let new_id = emu.solver.register_node(new_expr);
     let n = (dst_sz as usize).min(64) as u64;
