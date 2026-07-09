@@ -259,6 +259,140 @@ pub extern "C" fn jit_write_memory(emu_ptr: *mut Emulator, offset: u64, size: u6
     jit_write_space(emu_ptr, emu.state.ram_space(), offset, size, val);
 }
 
+// ── Host register file (zero-callout loads) ──────────────────────────────────
+
+/// Base pointer of the contiguous host register mirror (`MachineState::host_reg_file`).
+#[unsafe(no_mangle)]
+pub extern "C" fn jit_host_reg_base(emu_ptr: *mut Emulator) -> u64 {
+    let emu = unsafe { &mut *emu_ptr };
+    emu.state.host_reg_file_ptr() as u64
+}
+
+// ── Shadow / taint propagation (concolic) ────────────────────────────────────
+
+/// Copy shadow from `src` varnode to `dst` (COPY). Clears dst if src is concrete.
+#[unsafe(no_mangle)]
+pub extern "C" fn jit_shadow_copy(
+    emu_ptr: *mut Emulator,
+    dst_sp: u64,
+    dst_off: u64,
+    dst_sz: u64,
+    src_sp: u64,
+    src_off: u64,
+) {
+    let emu = unsafe { &mut *emu_ptr };
+    if dst_sp == 0 {
+        return;
+    }
+    let node = if src_sp == 0 {
+        None
+    } else {
+        emu.state.get_shadow_memory(src_sp, src_off)
+    };
+    let n = (dst_sz as usize).min(64) as u64;
+    for i in 0..n {
+        if let Some(id) = node {
+            emu.state.set_shadow_memory(dst_sp, dst_off + i, id);
+        } else {
+            emu.state.clear_shadow_memory(dst_sp, dst_off + i);
+        }
+    }
+}
+
+/// After LOAD: if memory at `addr` is tainted, mark dest varnode.
+#[unsafe(no_mangle)]
+pub extern "C" fn jit_shadow_load(
+    emu_ptr: *mut Emulator,
+    dst_sp: u64,
+    dst_off: u64,
+    dst_sz: u64,
+    mem_sp: u64,
+    addr: u64,
+) {
+    let emu = unsafe { &mut *emu_ptr };
+    if dst_sp == 0 {
+        return;
+    }
+    let node = emu.state.get_shadow_memory(mem_sp, addr);
+    let n = (dst_sz as usize).min(64) as u64;
+    for i in 0..n {
+        if let Some(id) = node {
+            // Prefer per-byte shadow when present.
+            let b = emu
+                .state
+                .get_shadow_memory(mem_sp, addr + i)
+                .unwrap_or(id);
+            emu.state.set_shadow_memory(dst_sp, dst_off + i, b);
+        } else {
+            emu.state.clear_shadow_memory(dst_sp, dst_off + i);
+        }
+    }
+}
+
+/// After STORE: if value varnode is tainted, taint memory; else clear.
+#[unsafe(no_mangle)]
+pub extern "C" fn jit_shadow_store(
+    emu_ptr: *mut Emulator,
+    mem_sp: u64,
+    addr: u64,
+    size: u64,
+    val_sp: u64,
+    val_off: u64,
+) {
+    let emu = unsafe { &mut *emu_ptr };
+    let node = if val_sp == 0 {
+        None
+    } else {
+        emu.state.get_shadow_memory(val_sp, val_off)
+    };
+    let n = (size as usize).min(64) as u64;
+    for i in 0..n {
+        if let Some(id) = node {
+            emu.state.set_shadow_memory(mem_sp, addr + i, id);
+        } else {
+            emu.state.clear_shadow_memory(mem_sp, addr + i);
+        }
+    }
+}
+
+/// Binary ALU: if either input is tainted, mark output with the first taint id
+/// (concolic union — full AST building stays in the offline Evaluator).
+#[unsafe(no_mangle)]
+pub extern "C" fn jit_shadow_binop(
+    emu_ptr: *mut Emulator,
+    dst_sp: u64,
+    dst_off: u64,
+    dst_sz: u64,
+    a_sp: u64,
+    a_off: u64,
+    b_sp: u64,
+    b_off: u64,
+) {
+    let emu = unsafe { &mut *emu_ptr };
+    if dst_sp == 0 {
+        return;
+    }
+    let a = if a_sp == 0 {
+        None
+    } else {
+        emu.state.get_shadow_memory(a_sp, a_off)
+    };
+    let b = if b_sp == 0 {
+        None
+    } else {
+        emu.state.get_shadow_memory(b_sp, b_off)
+    };
+    let node = a.or(b);
+    let n = (dst_sz as usize).min(64) as u64;
+    for i in 0..n {
+        if let Some(id) = node {
+            emu.state.set_shadow_memory(dst_sp, dst_off + i, id);
+        } else {
+            emu.state.clear_shadow_memory(dst_sp, dst_off + i);
+        }
+    }
+}
+
 // ── Symbolic gate (concolic) ─────────────────────────────────────────────────
 
 /// If the condition varnode is tainted (shadow live), record a [`SymBranch`]
@@ -357,6 +491,10 @@ pub extern "C" fn jit_call_other(
             emu.halt_requested = true;
             1
         }
+        HleResult::JumpTo(pc) => {
+            emu.pc_override = Some(pc);
+            0
+        }
         HleResult::Continue => 0,
     }
 }
@@ -385,6 +523,10 @@ pub extern "C" fn jit_hle_trap(emu_ptr: *mut Emulator, magic_pc: u64) -> u64 {
         HleResult::Halt(_) => {
             emu.halt_requested = true;
             1
+        }
+        HleResult::JumpTo(pc) => {
+            emu.pc_override = Some(pc);
+            0
         }
         HleResult::Continue => {
             let _ = emu.simulate_return();

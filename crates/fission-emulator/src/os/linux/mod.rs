@@ -16,6 +16,8 @@ use crate::os::procedure::SimOS;
 use fission_loader::loader::LoadedBinary;
 
 const MAGIC_BASE: u64 = 0xFFFFFFF100000000;
+/// Synthetic return target after `__libc_start_main` → main; HLE as `exit(RAX)`.
+const POST_MAIN_EXIT_STUB: u64 = 0xFFFFFFF1000000F8;
 
 /// Linux ELF execution environment.
 ///
@@ -38,6 +40,16 @@ impl LinuxEnv {
         simos.register_procedure("write", Box::new(libc::Write));
         simos.register_procedure("exit", Box::new(libc::Exit));
         simos.register_procedure("_exit", Box::new(libc::Exit));
+        // Dynamic CRT without ld.so: start_main → JumpTo(main); GOT already HLE-patched.
+        simos.register_procedure("__libc_start_main", Box::new(libc::LibcStartMain));
+        simos.register_procedure("__libc_csu_init", Box::new(libc::NopOk));
+        simos.register_procedure("__libc_csu_fini", Box::new(libc::NopOk));
+        simos.register_procedure("_init", Box::new(libc::NopOk));
+        simos.register_procedure("_fini", Box::new(libc::NopOk));
+        simos.register_procedure("__cxa_atexit", Box::new(libc::NopOk));
+        simos.register_procedure("__cxa_finalize", Box::new(libc::NopOk));
+        simos.register_procedure("atexit", Box::new(libc::NopOk));
+        simos.register_procedure("__errno_location", Box::new(libc::NopOk));
 
         // Register Syscalls (x86-64 Linux numbers)
         simos.register_syscall(0, Box::new(syscall::SysRead));
@@ -106,6 +118,12 @@ impl OsEnvironment for LinuxEnv {
     }
 
     fn resolve_stub(&self, binary: &LoadedBinary, magic_addr: u64) -> Option<String> {
+        if magic_addr == POST_MAIN_EXIT_STUB {
+            return Some("__fission_post_main_exit".into());
+        }
+        if magic_addr < MAGIC_BASE {
+            return None;
+        }
         let index = ((magic_addr - MAGIC_BASE) / 8) as usize;
         let mut plt_entries: Vec<_> = binary.inner().iat_symbols.iter().collect();
         plt_entries.sort_by_key(|&(&addr, _)| addr);
@@ -126,6 +144,13 @@ impl OsEnvironment for LinuxEnv {
                 emu.write_register_u64("RAX", 0)?;
                 return Ok(HleResult::Continue);
             }
+        }
+
+        // After main returns into our synthetic stub: exit code is in RAX.
+        if func_name == "__fission_post_main_exit" {
+            let code = emu.read_register_u64("RAX").unwrap_or(0) as u32;
+            tracing::info!("post-main exit stub: code={}", code);
+            return Ok(HleResult::Halt(code));
         }
 
         if let Some(proc) = self.simos.procedures.get(func_name) {

@@ -7,7 +7,8 @@
 
 use anyhow::Result;
 use cranelift_codegen::ir::{
-    types, AbiParam, BlockArg, InstBuilder, StackSlotData, StackSlotKind, condcodes::IntCC,
+    types, AbiParam, BlockArg, InstBuilder, MemFlagsData, StackSlotData, StackSlotKind,
+    condcodes::IntCC,
 };
 use cranelift_codegen::settings::{self, Configurable};
 use cranelift_codegen::Context;
@@ -61,6 +62,11 @@ impl JitCompiler {
             ("jit_chain", crate::jit::callbacks::jit_chain as *const u8),
             ("jit_exit_tb", crate::jit::callbacks::jit_exit_tb as *const u8),
             ("jit_sym_cbranch_gate", crate::jit::callbacks::jit_sym_cbranch_gate as *const u8),
+            ("jit_host_reg_base", crate::jit::callbacks::jit_host_reg_base as *const u8),
+            ("jit_shadow_copy", crate::jit::callbacks::jit_shadow_copy as *const u8),
+            ("jit_shadow_load", crate::jit::callbacks::jit_shadow_load as *const u8),
+            ("jit_shadow_store", crate::jit::callbacks::jit_shadow_store as *const u8),
+            ("jit_shadow_binop", crate::jit::callbacks::jit_shadow_binop as *const u8),
             ("jit_read_register", crate::jit::callbacks::jit_read_register as *const u8),
             ("jit_write_register", crate::jit::callbacks::jit_write_register as *const u8),
             ("jit_read_memory", crate::jit::callbacks::jit_read_memory as *const u8),
@@ -87,20 +93,32 @@ impl JitCompiler {
         pc: u64,
         inst_len: u32,
         ops: &[PcodeOp],
+        register_space: u64,
     ) -> Result<*const u8> {
-        self.compile_translation_block(&[GuestInsn {
-            pc,
-            len: inst_len,
-            ops: ops.to_vec(),
-        }])
+        self.compile_translation_block(
+            &[GuestInsn {
+                pc,
+                len: inst_len,
+                ops: ops.to_vec(),
+            }],
+            register_space,
+        )
     }
 
     /// Compile a multi-instruction translation block.
     ///
     /// Host signature: `extern "C" fn(*mut Emulator) -> u64` → final next PC
     /// (after hard/soft chaining via global chain table).
-    pub fn compile_translation_block(&mut self, insns: &[GuestInsn]) -> Result<*const u8> {
+    ///
+    /// `register_space` is the SLA register-space id used for zero-callout
+    /// host register-file loads.
+    pub fn compile_translation_block(
+        &mut self,
+        insns: &[GuestInsn],
+        register_space: u64,
+    ) -> Result<*const u8> {
         anyhow::ensure!(!insns.is_empty(), "empty translation block");
+        use crate::pcode::state::HOST_REG_FILE_SIZE;
 
         let start_pc = insns[0].pc;
 
@@ -260,6 +278,74 @@ impl JitCompiler {
             .declare_function("jit_sym_cbranch_gate", Linkage::Import, &sig_sym)
             .unwrap();
 
+        // jit_host_reg_base(emu) -> ptr
+        let mut sig_regbase = self.module.make_signature();
+        sig_regbase.params.push(AbiParam::new(types::I64));
+        sig_regbase.returns.push(AbiParam::new(types::I64));
+        let host_reg_base_fn = self
+            .module
+            .declare_function("jit_host_reg_base", Linkage::Import, &sig_regbase)
+            .unwrap();
+
+        // shadow helpers share similar shapes
+        let mut sig_sh_copy = self.module.make_signature();
+        sig_sh_copy.params.extend([
+            AbiParam::new(types::I64), // emu
+            AbiParam::new(types::I64), // dst_sp
+            AbiParam::new(types::I64), // dst_off
+            AbiParam::new(types::I64), // dst_sz
+            AbiParam::new(types::I64), // src_sp
+            AbiParam::new(types::I64), // src_off
+        ]);
+        let shadow_copy_fn = self
+            .module
+            .declare_function("jit_shadow_copy", Linkage::Import, &sig_sh_copy)
+            .unwrap();
+
+        let mut sig_sh_load = self.module.make_signature();
+        sig_sh_load.params.extend([
+            AbiParam::new(types::I64),
+            AbiParam::new(types::I64),
+            AbiParam::new(types::I64),
+            AbiParam::new(types::I64),
+            AbiParam::new(types::I64),
+            AbiParam::new(types::I64),
+        ]);
+        let shadow_load_fn = self
+            .module
+            .declare_function("jit_shadow_load", Linkage::Import, &sig_sh_load)
+            .unwrap();
+
+        let mut sig_sh_store = self.module.make_signature();
+        sig_sh_store.params.extend([
+            AbiParam::new(types::I64),
+            AbiParam::new(types::I64),
+            AbiParam::new(types::I64),
+            AbiParam::new(types::I64),
+            AbiParam::new(types::I64),
+            AbiParam::new(types::I64),
+        ]);
+        let shadow_store_fn = self
+            .module
+            .declare_function("jit_shadow_store", Linkage::Import, &sig_sh_store)
+            .unwrap();
+
+        let mut sig_sh_bin = self.module.make_signature();
+        sig_sh_bin.params.extend([
+            AbiParam::new(types::I64), // emu
+            AbiParam::new(types::I64), // dst_sp
+            AbiParam::new(types::I64), // dst_off
+            AbiParam::new(types::I64), // dst_sz
+            AbiParam::new(types::I64), // a_sp
+            AbiParam::new(types::I64), // a_off
+            AbiParam::new(types::I64), // b_sp
+            AbiParam::new(types::I64), // b_off
+        ]);
+        let shadow_binop_fn = self
+            .module
+            .declare_function("jit_shadow_binop", Linkage::Import, &sig_sh_bin)
+            .unwrap();
+
         // ── Blocks ───────────────────────────────────────────────────────────
         let entry = builder.create_block();
         builder.append_block_params_for_function_params(entry);
@@ -287,8 +373,27 @@ impl JitCompiler {
         let count_ref = self.module.declare_func_in_func(count_fn, builder.func);
         let exit_tb_ref = self.module.declare_func_in_func(exit_tb_fn, builder.func);
         let sym_gate_ref = self.module.declare_func_in_func(sym_gate_fn, builder.func);
+        let host_reg_base_ref = self
+            .module
+            .declare_func_in_func(host_reg_base_fn, builder.func);
+        let shadow_copy_ref = self
+            .module
+            .declare_func_in_func(shadow_copy_fn, builder.func);
+        let shadow_load_ref = self
+            .module
+            .declare_func_in_func(shadow_load_fn, builder.func);
+        let shadow_store_ref = self
+            .module
+            .declare_func_in_func(shadow_store_fn, builder.func);
+        let shadow_binop_ref = self
+            .module
+            .declare_func_in_func(shadow_binop_fn, builder.func);
 
         let default_next = builder.ins().iconst(types::I64, fallthrough_pc as i64);
+
+        // One host-reg-base load per TB — subsequent register loads use MemFlags.
+        let reg_base_call = builder.ins().call(host_reg_base_ref, &[emu_ptr]);
+        let host_reg_base = builder.inst_results(reg_base_call)[0];
 
         let mut var_map: HashMap<(u64, u64), Variable> = HashMap::new();
         let mut dirty: Vec<(u64, u64, u32, Variable)> = Vec::new();
@@ -308,6 +413,27 @@ impl JitCompiler {
                     if $space == 0 {
                         let c = builder.ins().iconst(types::I64, $offset as i64);
                         builder.def_var(v, c);
+                    } else if $space == register_space
+                        && ($offset as usize) + ($size as usize).min(8) <= HOST_REG_FILE_SIZE
+                    {
+                        // Zero-callout register load from host_reg_file.
+                        let ptr = builder
+                            .ins()
+                            .iadd_imm(host_reg_base, $offset as i64);
+                        let flags = MemFlagsData::trusted();
+                        let val = builder.ins().load(types::I64, flags, ptr, 0);
+                        // Mask to size if < 8
+                        let val = if ($size as u32) < 8 && ($size as u32) > 0 {
+                            let mask = if $size >= 8 {
+                                u64::MAX
+                            } else {
+                                (1u64 << ($size * 8)) - 1
+                            };
+                            builder.ins().band_imm(val, mask as i64)
+                        } else {
+                            val
+                        };
+                        builder.def_var(v, val);
                     } else {
                         let sp = builder.ins().iconst(types::I64, $space as i64);
                         let off = builder.ins().iconst(types::I64, $offset as i64);
@@ -322,6 +448,47 @@ impl JitCompiler {
                         builder.def_var(v, val);
                     }
                     v
+                }
+            }};
+        }
+
+        macro_rules! emit_shadow_binop {
+            ($out:expr, $a:expr, $b:expr) => {{
+                let out: &Varnode = $out;
+                let a: &Varnode = $a;
+                let b: &Varnode = $b;
+                if !out.is_constant {
+                    let dsp = builder.ins().iconst(types::I64, out.space_id as i64);
+                    let doff = builder.ins().iconst(types::I64, out.offset as i64);
+                    let dsz = builder.ins().iconst(types::I64, out.size as i64);
+                    let asp = builder.ins().iconst(
+                        types::I64,
+                        if a.is_constant { 0 } else { a.space_id as i64 },
+                    );
+                    let aoff = builder.ins().iconst(
+                        types::I64,
+                        if a.is_constant {
+                            0
+                        } else {
+                            a.offset as i64
+                        },
+                    );
+                    let bsp = builder.ins().iconst(
+                        types::I64,
+                        if b.is_constant { 0 } else { b.space_id as i64 },
+                    );
+                    let boff = builder.ins().iconst(
+                        types::I64,
+                        if b.is_constant {
+                            0
+                        } else {
+                            b.offset as i64
+                        },
+                    );
+                    builder.ins().call(
+                        shadow_binop_ref,
+                        &[emu_ptr, dsp, doff, dsz, asp, aoff, bsp, boff],
+                    );
                 }
             }};
         }
@@ -424,6 +591,30 @@ impl JitCompiler {
                             } else {
                                 let val = load_vn!(src);
                                 store_vn!(out, val);
+                                // Shadow COPY
+                                let dsp = builder.ins().iconst(types::I64, out.space_id as i64);
+                                let doff = builder.ins().iconst(types::I64, out.offset as i64);
+                                let dsz = builder.ins().iconst(types::I64, out.size as i64);
+                                let ssp = builder.ins().iconst(
+                                    types::I64,
+                                    if src.is_constant {
+                                        0
+                                    } else {
+                                        src.space_id as i64
+                                    },
+                                );
+                                let soff = builder.ins().iconst(
+                                    types::I64,
+                                    if src.is_constant {
+                                        0
+                                    } else {
+                                        src.offset as i64
+                                    },
+                                );
+                                builder.ins().call(
+                                    shadow_copy_ref,
+                                    &[emu_ptr, dsp, doff, dsz, ssp, soff],
+                                );
                             }
                         }
                     }
@@ -461,6 +652,15 @@ impl JitCompiler {
                                 let val = builder.inst_results(call)[0];
                                 store_vn!(out, val);
                             }
+                            // Taint from loaded memory bytes → dest varnode
+                            let dsp = builder.ins().iconst(types::I64, out.space_id as i64);
+                            let doff = builder.ins().iconst(types::I64, out.offset as i64);
+                            let dsz = builder.ins().iconst(types::I64, out.size as i64);
+                            let msp = builder.ins().iconst(types::I64, space_id as i64);
+                            builder.ins().call(
+                                shadow_load_ref,
+                                &[emu_ptr, dsp, doff, dsz, msp, addr],
+                            );
                         }
                     }
                 }
@@ -498,6 +698,29 @@ impl JitCompiler {
                                 .ins()
                                 .call(write_space_ref, &[emu_ptr, sp, addr, sz, val]);
                         }
+                        // Taint memory from value varnode
+                        let msp = builder.ins().iconst(types::I64, space_id as i64);
+                        let sz = builder.ins().iconst(types::I64, val_vn.size as i64);
+                        let vsp = builder.ins().iconst(
+                            types::I64,
+                            if val_vn.is_constant {
+                                0
+                            } else {
+                                val_vn.space_id as i64
+                            },
+                        );
+                        let voff = builder.ins().iconst(
+                            types::I64,
+                            if val_vn.is_constant {
+                                0
+                            } else {
+                                val_vn.offset as i64
+                            },
+                        );
+                        builder.ins().call(
+                            shadow_store_ref,
+                            &[emu_ptr, msp, addr, sz, vsp, voff],
+                        );
                     }
                 }
 
@@ -506,6 +729,7 @@ impl JitCompiler {
                         let a = load_vn!(&op.inputs[0]);
                         let b = load_vn!(&op.inputs[1]);
                         store_vn!(out, builder.ins().iadd(a, b));
+                        emit_shadow_binop!(out, &op.inputs[0], &op.inputs[1]);
                     }
                 }
                 // INT_CARRY / INT_SCARRY / INT_SBORROW — size-aware via host callout.
@@ -530,6 +754,7 @@ impl JitCompiler {
                         let a = load_vn!(&op.inputs[0]);
                         let b = load_vn!(&op.inputs[1]);
                         store_vn!(out, builder.ins().isub(a, b));
+                        emit_shadow_binop!(out, &op.inputs[0], &op.inputs[1]);
                     }
                 }
                 PcodeOpcode::IntMult => {
@@ -537,6 +762,7 @@ impl JitCompiler {
                         let a = load_vn!(&op.inputs[0]);
                         let b = load_vn!(&op.inputs[1]);
                         store_vn!(out, builder.ins().imul(a, b));
+                        emit_shadow_binop!(out, &op.inputs[0], &op.inputs[1]);
                     }
                 }
                 PcodeOpcode::IntDiv => {
@@ -572,6 +798,7 @@ impl JitCompiler {
                         let a = load_vn!(&op.inputs[0]);
                         let b = load_vn!(&op.inputs[1]);
                         store_vn!(out, builder.ins().band(a, b));
+                        emit_shadow_binop!(out, &op.inputs[0], &op.inputs[1]);
                     }
                 }
                 PcodeOpcode::IntOr | PcodeOpcode::BoolOr => {
@@ -579,6 +806,7 @@ impl JitCompiler {
                         let a = load_vn!(&op.inputs[0]);
                         let b = load_vn!(&op.inputs[1]);
                         store_vn!(out, builder.ins().bor(a, b));
+                        emit_shadow_binop!(out, &op.inputs[0], &op.inputs[1]);
                     }
                 }
                 PcodeOpcode::IntXor | PcodeOpcode::BoolXor => {
@@ -586,6 +814,7 @@ impl JitCompiler {
                         let a = load_vn!(&op.inputs[0]);
                         let b = load_vn!(&op.inputs[1]);
                         store_vn!(out, builder.ins().bxor(a, b));
+                        emit_shadow_binop!(out, &op.inputs[0], &op.inputs[1]);
                     }
                 }
                 PcodeOpcode::IntLeft => {
@@ -647,6 +876,8 @@ impl JitCompiler {
                         };
                         let b_res = builder.ins().icmp(cc, a, b);
                         store_vn!(out, builder.ins().uextend(types::I64, b_res));
+                        // Comparisons feed CBranch — propagate taint so the symbolic gate can fire.
+                        emit_shadow_binop!(out, &op.inputs[0], &op.inputs[1]);
                     }
                 }
                 PcodeOpcode::IntZExt => {

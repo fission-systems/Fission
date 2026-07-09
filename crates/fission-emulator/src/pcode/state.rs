@@ -214,7 +214,15 @@ pub struct MachineState {
     pub reg_cache_hits: u64,
     #[serde(skip)]
     pub reg_cache_misses: u64,
+
+    /// Contiguous host-side register file for zero-callout JIT loads/stores.
+    /// Mirrors the low `HOST_REG_FILE_SIZE` bytes of register space.
+    #[serde(skip)]
+    pub host_reg_file: Box<[u8]>,
 }
+
+/// Bytes of register space mirrored for zero-callout JIT access.
+pub const HOST_REG_FILE_SIZE: usize = 0x2000;
 
 impl fission_solver::solver::MemoryOracle for MachineState {
     fn read_concrete(&self, space_id: u64, addr: u64) -> Option<u8> {
@@ -251,12 +259,26 @@ impl MachineState {
             reg_cache: std::collections::HashMap::new(),
             reg_cache_hits: 0,
             reg_cache_misses: 0,
+            host_reg_file: vec![0u8; HOST_REG_FILE_SIZE].into_boxed_slice(),
         }
     }
 
     /// Drop persistent register cache (TTD restore / snapshot).
     pub fn invalidate_reg_cache(&mut self) {
         self.reg_cache.clear();
+        self.host_reg_file.fill(0);
+    }
+
+    /// Stable host pointer for JIT register-file loads (valid for emulator lifetime).
+    #[inline]
+    pub fn host_reg_file_ptr(&mut self) -> *mut u8 {
+        self.host_reg_file.as_mut_ptr()
+    }
+
+    #[inline]
+    pub fn host_reg_in_range(&self, offset: u64, size: usize) -> bool {
+        let end = offset as usize + size;
+        end <= HOST_REG_FILE_SIZE && offset as usize + size >= size
     }
 
     /// Enable PageFault checks on the RAM space (user-mode).
@@ -297,18 +319,30 @@ impl MachineState {
             // const space: we shouldn't really read from it this way, but just in case
             bail!("Attempted to read from const space via memory read");
         }
-        // Hot path: 1–8 byte register reads via persistent cache.
-        if space_id == self.spaces_layout.register && (1..=8).contains(&size) && addr % 8 == 0 {
-            let key = addr;
-            if let Some(&cached) = self.reg_cache.get(&key) {
-                self.reg_cache_hits = self.reg_cache_hits.saturating_add(1);
-                let mut out = vec![0u8; size];
-                for i in 0..size {
-                    out[i] = ((cached >> (i * 8)) & 0xff) as u8;
+        // Hot path: register space via host_reg_file mirror / slot cache.
+        if space_id == self.spaces_layout.register && self.host_reg_in_range(addr, size) {
+            if (1..=8).contains(&size) && addr % 8 == 0 {
+                let key = addr;
+                if let Some(&cached) = self.reg_cache.get(&key) {
+                    self.reg_cache_hits = self.reg_cache_hits.saturating_add(1);
+                    let mut out = vec![0u8; size];
+                    for i in 0..size {
+                        out[i] = ((cached >> (i * 8)) & 0xff) as u8;
+                    }
+                    return Ok(out);
                 }
-                return Ok(out);
+                self.reg_cache_misses = self.reg_cache_misses.saturating_add(1);
             }
-            self.reg_cache_misses = self.reg_cache_misses.saturating_add(1);
+            let start = addr as usize;
+            let data = self.host_reg_file[start..start + size].to_vec();
+            if size == 8 && addr % 8 == 0 {
+                let mut val = 0u64;
+                for (i, &b) in data.iter().enumerate() {
+                    val |= (b as u64) << (i * 8);
+                }
+                self.reg_cache.insert(addr, val);
+            }
+            return Ok(data);
         }
         if self.enforce_page_faults && space_id == self.spaces_layout.ram {
             use crate::pcode::page_map::AccessKind;
@@ -376,11 +410,29 @@ impl MachineState {
         if !self.spaces.contains_key(&space_id) {
             self.spaces.insert(space_id, AddressSpace::new(format!("space_{}", space_id)));
         }
-        let space = self.spaces.get_mut(&space_id).unwrap();
-        space.write(addr, data)?;
+        let is_reg = space_id == self.spaces_layout.register;
+        let host_ok = is_reg && self.host_reg_in_range(addr, data.len());
+        {
+            let space = self.spaces.get_mut(&space_id).unwrap();
+            space.write(addr, data)?;
 
-        // Keep persistent register cache coherent with writes.
-        if space_id == self.spaces_layout.register {
+            // When writing concrete bytes, clear their shadow memory taint.
+            for i in 0..data.len() {
+                let curr_addr = addr + i as u64;
+                let old_node = space.clear_shadow(curr_addr);
+                if self.tracing_memory && old_node.is_some() {
+                    self.trace_shadow_writes
+                        .push((space_id, curr_addr, old_node, None));
+                }
+            }
+        }
+
+        // Keep host register file + slot cache coherent with writes.
+        if is_reg {
+            if host_ok {
+                let start = addr as usize;
+                self.host_reg_file[start..start + data.len()].copy_from_slice(data);
+            }
             if data.len() == 8 && addr % 8 == 0 {
                 let mut val = 0u64;
                 for (i, &b) in data.iter().enumerate() {
@@ -388,7 +440,6 @@ impl MachineState {
                 }
                 self.reg_cache.insert(addr, val);
             } else {
-                // Partial/unaligned write: drop any overlapping 8-byte slots.
                 let start = addr & !7;
                 let end = addr.saturating_add(data.len() as u64);
                 let mut k = start;
@@ -396,15 +447,6 @@ impl MachineState {
                     self.reg_cache.remove(&k);
                     k = k.saturating_add(8);
                 }
-            }
-        }
-
-        // When writing concrete bytes, clear their shadow memory taint.
-        for i in 0..data.len() {
-            let curr_addr = addr + i as u64;
-            let old_node = space.clear_shadow(curr_addr);
-            if self.tracing_memory && old_node.is_some() {
-                self.trace_shadow_writes.push((space_id, curr_addr, old_node, None));
             }
         }
 

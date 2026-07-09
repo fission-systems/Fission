@@ -9,6 +9,8 @@ pub enum HleResult {
     Continue,
     /// The emulated program has requested termination with the given exit code.
     Halt(u32),
+    /// Jump to `pc` without popping a return address (e.g. `__libc_start_main` → main).
+    JumpTo(u64),
 }
 
 /// Abstraction over an OS execution environment.

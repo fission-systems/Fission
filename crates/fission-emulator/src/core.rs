@@ -756,7 +756,8 @@ impl Emulator {
             .as_mut()
             .ok_or_else(|| anyhow::anyhow!("JIT compiler unavailable (host ISA unsupported)"))?;
 
-        let func_ptr = jit.compile_translation_block(&insns).map_err(|e| {
+        let reg_sp = self.state.register_space();
+        let func_ptr = jit.compile_translation_block(&insns, reg_sp).map_err(|e| {
             anyhow::anyhow!(
                 "JIT compile failed at TB@0x{:X} ({} insns): {:#}",
                 start_pc,
@@ -856,6 +857,9 @@ impl Emulator {
                     }
                     HleResult::Continue => {
                         self.simulate_return()?;
+                    }
+                    HleResult::JumpTo(pc) => {
+                        self.pc = pc;
                     }
                 }
             }
