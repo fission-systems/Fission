@@ -366,53 +366,53 @@ impl<'a> PreviewBuilder<'a> {
                 continue;
             }
 
-            // Handle intra-block control flow (e.g. from cmov)
-            if op.opcode == PcodeOpcode::CBranch && op.inputs.len() >= 2 && op.inputs[0].is_constant
-            {
-                if let Some(target_seq) =
-                    crate::nir::cfg::instruction_local_branch_target_seq(op, &op.inputs[0])
-                {
-                    let target_op_idx_opt = block.ops[op_idx + 1..end_idx]
-                        .iter()
-                        .position(|candidate| candidate.seq_num == target_seq)
-                        .map(|pos| op_idx + 1 + pos);
-                    if let Some(target_op_idx) = target_op_idx_opt {
-                        let cond = self.lower_varnode(&op.inputs[1], &mut HashSet::new())?;
-                        let inverted_cond = HirExpr::Unary {
-                            op: HirUnaryOp::Not,
-                            expr: Box::new(cond),
-                            ty: NirType::Bool,
-                        };
-                        let nested_body = self.lower_block_ops_range(
-                            block,
-                            op_idx + 1,
-                            target_op_idx,
-                            terminator_index,
-                        )?;
-                        body.push(HirStmt::If {
-                            cond: inverted_cond,
-                            then_body: nested_body,
-                            else_body: Vec::new(),
-                        });
-                        op_idx = target_op_idx;
-                        continue;
-                    }
+            // Handle intra-block control flow (e.g. from cmov).
+            // Targets may be relative p-code deltas *or* absolute next-instruction
+            // addresses (x86 SLEIGH cmov); both must lower as guarded skips.
+            if op.opcode == PcodeOpcode::CBranch && op.inputs.len() >= 2 {
+                if let Some(target_op_idx) = crate::nir::cfg::same_block_forward_branch_target_op_idx(
+                    block,
+                    op_idx,
+                    end_idx,
+                    op,
+                    &op.inputs[0],
+                ) {
+                    // Scope condition lowering to this op so reused unique temps
+                    // (x86 cmov BoolNegate slots) resolve to the *prior* def, not a
+                    // later cmov in the same block.
+                    let site = LoweringSite { block_idx, op_idx };
+                    let cond = self.with_lowering_site(site, |this| {
+                        this.lower_varnode(&op.inputs[1], &mut HashSet::new())
+                    })?;
+                    let inverted_cond = HirExpr::Unary {
+                        op: HirUnaryOp::Not,
+                        expr: Box::new(cond),
+                        ty: NirType::Bool,
+                    };
+                    let nested_body = self.lower_block_ops_range(
+                        block,
+                        op_idx + 1,
+                        target_op_idx,
+                        terminator_index,
+                    )?;
+                    body.push(HirStmt::If {
+                        cond: inverted_cond,
+                        then_body: nested_body,
+                        else_body: Vec::new(),
+                    });
+                    op_idx = target_op_idx;
+                    continue;
                 }
-            } else if op.opcode == PcodeOpcode::Branch
-                && !op.inputs.is_empty()
-                && op.inputs[0].is_constant
-            {
-                if let Some(target_seq) =
-                    crate::nir::cfg::instruction_local_branch_target_seq(op, &op.inputs[0])
-                {
-                    let target_op_idx_opt = block.ops[op_idx + 1..end_idx]
-                        .iter()
-                        .position(|candidate| candidate.seq_num == target_seq)
-                        .map(|pos| op_idx + 1 + pos);
-                    if let Some(target_op_idx) = target_op_idx_opt {
-                        op_idx = target_op_idx;
-                        continue;
-                    }
+            } else if op.opcode == PcodeOpcode::Branch && !op.inputs.is_empty() {
+                if let Some(target_op_idx) = crate::nir::cfg::same_block_forward_branch_target_op_idx(
+                    block,
+                    op_idx,
+                    end_idx,
+                    op,
+                    &op.inputs[0],
+                ) {
+                    op_idx = target_op_idx;
+                    continue;
                 }
             }
 
@@ -850,6 +850,19 @@ impl<'a> PreviewBuilder<'a> {
             self.ensure_live_register_binding(&name, binding_size);
             self.bind_materialized_output_to_existing_name(op, output, &name, true);
             name
+        } else if let Some(name) =
+            self.same_block_prior_register_binding_name(block, op_idx, output)
+        {
+            // Reuse the prior same-block binding for register redefs (cmov default
+            // + overrides on EAX/RAX). Without this, each write to the primary
+            // return register gets a fresh temp and the cmov chain cannot compose.
+            self.bind_materialized_output_to_existing_name(
+                op,
+                output,
+                &name,
+                preserve_materialization,
+            );
+            name
         } else {
             let fallback_name = self
                 .ensure_temp_binding_for_output(op, output, preserve_materialization)
@@ -879,6 +892,43 @@ impl<'a> PreviewBuilder<'a> {
         }
         let lhs = HirLValue::Var(lhs_name);
         Ok(Some(HirStmt::Assign { lhs, rhs }))
+    }
+
+    /// Reuse a prior materialization of the same register in this block.
+    ///
+    /// Critical for x86 cmov: the default `eax = hi` and the guarded
+    /// `eax = value` / `eax = lo` overrides must share one C variable so
+    /// `return eax` sees the composed result.
+    fn same_block_prior_register_binding_name(
+        &self,
+        block: &crate::pcode::PcodeBasicBlock,
+        op_idx: usize,
+        output: &Varnode,
+    ) -> Option<String> {
+        if output.is_constant || !is_register_space_id(output.space_id) {
+            return None;
+        }
+        let output_key = VarnodeKey::from(output);
+        for prior_idx in (0..op_idx).rev() {
+            let prior_op = &block.ops[prior_idx];
+            let Some(prior_out) = prior_op.output.as_ref() else {
+                continue;
+            };
+            let prior_key = VarnodeKey::from(prior_out);
+            if prior_key != output_key
+                && !Self::varnode_key_may_alias_output(&prior_key, &output_key)
+                && !self.varnode_aliases_value(prior_out, output)
+            {
+                continue;
+            }
+            if let Some(name) = self
+                .materialized_vns
+                .get(&MaterializedVarnodeKey::new(prior_out, prior_op))
+            {
+                return Some(name.clone());
+            }
+        }
+        None
     }
 
     fn live_register_lhs_name_for_passthrough_join_store_producer(

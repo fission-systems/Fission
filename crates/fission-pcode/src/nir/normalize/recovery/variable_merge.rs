@@ -4,51 +4,61 @@ use std::collections::{HashMap, HashSet};
 
 fn collect_direct_copies(stmts: &[HirStmt]) -> std::collections::HashSet<(String, String)> {
     let mut copies = std::collections::HashSet::new();
-    fn visit(stmts: &[HirStmt], copies: &mut std::collections::HashSet<(String, String)>) {
+    // Only *unconditional* var copies establish merge identity. A copy inside
+    // `if`/`while`/switch (e.g. x86 cmov `if (cond) acc = src`) is a
+    // path-sensitive override: merging `acc` with `src` collapses distinct
+    // values (hi default vs lo source) and destroys clamp/min/max chains.
+    fn visit(
+        stmts: &[HirStmt],
+        copies: &mut std::collections::HashSet<(String, String)>,
+        under_control: bool,
+    ) {
         for stmt in stmts {
             match stmt {
                 HirStmt::Assign {
                     lhs: HirLValue::Var(lhs_name),
                     rhs: HirExpr::Var(rhs_name),
-                } => {
+                } if !under_control => {
                     copies.insert((lhs_name.clone(), rhs_name.clone()));
                     copies.insert((rhs_name.clone(), lhs_name.clone()));
                 }
-                HirStmt::Block(body)
-                | HirStmt::While { body, .. }
-                | HirStmt::DoWhile { body, .. } => {
-                    visit(body, copies);
+                HirStmt::Block(body) => {
+                    visit(body, copies, under_control);
+                }
+                HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
+                    visit(body, copies, true);
                 }
                 HirStmt::If {
                     then_body,
                     else_body,
                     ..
                 } => {
-                    visit(then_body, copies);
-                    visit(else_body, copies);
+                    visit(then_body, copies, true);
+                    visit(else_body, copies, true);
                 }
                 HirStmt::For {
                     init, update, body, ..
                 } => {
+                    // init runs once unconditionally; update/body are loop-controlled.
                     if let Some(init_stmt) = init {
-                        visit(std::slice::from_ref(init_stmt), copies);
+                        visit(std::slice::from_ref(init_stmt), copies, under_control);
                     }
                     if let Some(update_stmt) = update {
-                        visit(std::slice::from_ref(update_stmt), copies);
+                        visit(std::slice::from_ref(update_stmt), copies, true);
                     }
-                    visit(body, copies);
+                    visit(body, copies, true);
                 }
                 HirStmt::Switch { cases, default, .. } => {
                     for case in cases {
-                        visit(&case.body, copies);
+                        visit(&case.body, copies, true);
                     }
-                    visit(default, copies);
+                    visit(default, copies, true);
                 }
                 _ => {}
             }
         }
     }
-    visit(stmts, &mut copies);
+    visit(stmts, &mut copies, false);
     copies
 }
 

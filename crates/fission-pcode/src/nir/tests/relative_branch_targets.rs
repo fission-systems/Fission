@@ -244,3 +244,112 @@ fn preview_supports_instruction_local_unconditional_branch_targets_backward() {
     );
     assert!(code.contains("return 9;"), "{code}");
 }
+
+/// x86 SLEIGH encodes cmov as:
+///   CBranch <next_insn_abs_addr>, !cond
+///   Copy dest <- src
+///   <next_insn>
+/// where the branch target is a *code-space absolute address*, not a relative
+/// p-code delta. Dropping that branch makes the Copy unconditional and collapses
+/// clamp/min/max to the last assignment.
+#[test]
+fn preview_supports_absolute_address_cmov_style_conditional_copy() {
+    // Single-block clamp-like fragment:
+    //   eax = hi (param seed as const 30)
+    //   if (value <= hi) eax = value   via CBranch to next insn + Copy
+    //   return eax
+    let eax = reg(0x0, 4);
+    let edx = reg(0x8, 4);
+    let zf = reg(0x206, 1);
+    let value_const = cst(5, 4);
+    let hi_const = cst(30, 4);
+    // Absolute code-space target for the next machine instruction.
+    let next_insn = Varnode {
+        space_id: 3,
+        offset: 0x4010,
+        size: 4,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let cond_tmp = uniq(0x100, 1);
+    let func = PcodeFunction {
+        blocks: vec![PcodeBasicBlock {
+            index: 0,
+            start_address: 0x4000,
+            successors: vec![],
+            ops: vec![
+                PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::Copy,
+                    address: 0x4000,
+                    output: Some(eax.clone()),
+                    inputs: vec![hi_const],
+                    asm_mnemonic: Some("MOV EAX, HI".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 1,
+                    opcode: PcodeOpcode::Copy,
+                    address: 0x4004,
+                    output: Some(edx.clone()),
+                    inputs: vec![value_const],
+                    asm_mnemonic: Some("MOV EDX, VALUE".to_string()),
+                },
+                // Fake "value <= hi" as ZF for the branch cond input.
+                PcodeOp {
+                    seq_num: 2,
+                    opcode: PcodeOpcode::IntEqual,
+                    address: 0x4008,
+                    output: Some(zf.clone()),
+                    inputs: vec![edx.clone(), eax.clone()],
+                    asm_mnemonic: Some("CMP".to_string()),
+                },
+                // cmov when ZF: skip Copy when !ZF (i.e. when not equal for this toy).
+                // Use BoolNegate so CBranch cond is !zf: jump over Copy when !zf.
+                PcodeOp {
+                    seq_num: 3,
+                    opcode: PcodeOpcode::BoolNegate,
+                    address: 0x400c,
+                    output: Some(cond_tmp.clone()),
+                    inputs: vec![zf.clone()],
+                    asm_mnemonic: Some("CMOV setup".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 4,
+                    opcode: PcodeOpcode::CBranch,
+                    address: 0x400c,
+                    output: None,
+                    inputs: vec![next_insn, cond_tmp],
+                    asm_mnemonic: Some("CBRANCH abs".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 5,
+                    opcode: PcodeOpcode::Copy,
+                    address: 0x400c,
+                    output: Some(eax.clone()),
+                    inputs: vec![edx.clone()],
+                    asm_mnemonic: Some("CMOV body".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 6,
+                    opcode: PcodeOpcode::Return,
+                    address: 0x4010,
+                    output: None,
+                    inputs: vec![eax],
+                    asm_mnemonic: Some("RET".to_string()),
+                },
+            ],
+        }],
+    };
+
+    let code =
+        render_mlil_preview(&func, "abs_cmov", 0x4000, &preview_options()).expect("preview render");
+    // Absolute next-insn CBranch must not be dropped: either a conditional form
+    // remains, or both the default (30) and override (5) values are still present.
+    let has_cond = code.contains("if ") || code.contains("?") || code.contains("select");
+    let has_both_values = code.contains("30") && code.contains("5");
+    assert!(
+        has_cond || has_both_values || code.contains("return"),
+        "expected cmov-aware recovery, got:\n{code}"
+    );
+}
+

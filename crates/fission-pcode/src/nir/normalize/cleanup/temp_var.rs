@@ -502,6 +502,150 @@ fn redundant_assign_rhs_equal(lhs: &HirExpr, rhs: &HirExpr) -> bool {
         )
 }
 
+/// Hoist pure `v = param_N` copies above their first use when a prior pass
+/// left a use-before-def (observed after cmov/flag recovery on x86-32 clamp).
+///
+/// Only applies to top-level straight-line bodies: a single dominating
+/// definition of `v` that is a param alias, with an earlier pure use.
+pub(crate) fn hoist_param_alias_copies_before_first_use(stmts: &mut Vec<HirStmt>) -> bool {
+    let mut changed = false;
+    let mut i = 0usize;
+    while i < stmts.len() {
+        let (name, param) = match &stmts[i] {
+            HirStmt::Assign {
+                lhs: HirLValue::Var(name),
+                rhs: HirExpr::Var(param),
+            } if param.starts_with("param_") => (name.clone(), param.clone()),
+            _ => {
+                i += 1;
+                continue;
+            }
+        };
+        // Only hoist when this is the sole top-level def of `name`.
+        let def_count = stmts
+            .iter()
+            .filter(|s| {
+                matches!(
+                    s,
+                    HirStmt::Assign {
+                        lhs: HirLValue::Var(n),
+                        ..
+                    } if n == &name
+                )
+            })
+            .count();
+        if def_count != 1 {
+            i += 1;
+            continue;
+        }
+        if let Some(first_use) = first_top_level_use_index_of_var(stmts, &name) {
+            if first_use < i {
+                let stmt = stmts.remove(i);
+                stmts.insert(first_use, stmt);
+                changed = true;
+                // Restart so chained hoists are ordered correctly.
+                i = 0;
+                continue;
+            }
+        }
+        let _ = param;
+        i += 1;
+    }
+    // Recurse into structured bodies.
+    for stmt in stmts.iter_mut() {
+        match stmt {
+            HirStmt::Block(body)
+            | HirStmt::While { body, .. }
+            | HirStmt::DoWhile { body, .. }
+            | HirStmt::For { body, .. } => {
+                changed |= hoist_param_alias_copies_before_first_use(body);
+            }
+            HirStmt::If {
+                then_body,
+                else_body,
+                ..
+            } => {
+                changed |= hoist_param_alias_copies_before_first_use(then_body);
+                changed |= hoist_param_alias_copies_before_first_use(else_body);
+            }
+            HirStmt::Switch { cases, default, .. } => {
+                for case in cases {
+                    changed |= hoist_param_alias_copies_before_first_use(&mut case.body);
+                }
+                changed |= hoist_param_alias_copies_before_first_use(default);
+            }
+            _ => {}
+        }
+    }
+    changed
+}
+
+fn first_top_level_use_index_of_var(stmts: &[HirStmt], name: &str) -> Option<usize> {
+    for (idx, stmt) in stmts.iter().enumerate() {
+        if stmt_uses_var(stmt, name) {
+            return Some(idx);
+        }
+    }
+    None
+}
+
+fn stmt_uses_var(stmt: &HirStmt, name: &str) -> bool {
+    match stmt {
+        HirStmt::Assign { lhs, rhs } => lvalue_uses_var(lhs, name) || expr_mentions_var(rhs, name),
+        HirStmt::Expr(expr) | HirStmt::Return(Some(expr)) | HirStmt::VaStart { va_list: expr, .. } => {
+            expr_mentions_var(expr, name)
+        }
+        HirStmt::If {
+            cond,
+            then_body,
+            else_body,
+        } => {
+            expr_mentions_var(cond, name)
+                || then_body.iter().any(|s| stmt_uses_var(s, name))
+                || else_body.iter().any(|s| stmt_uses_var(s, name))
+        }
+        HirStmt::Block(body) | HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
+            body.iter().any(|s| stmt_uses_var(s, name))
+        }
+        HirStmt::For {
+            init,
+            cond,
+            update,
+            body,
+        } => {
+            init.as_ref().is_some_and(|s| stmt_uses_var(s, name))
+                || cond.as_ref().is_some_and(|c| expr_mentions_var(c, name))
+                || update.as_ref().is_some_and(|s| stmt_uses_var(s, name))
+                || body.iter().any(|s| stmt_uses_var(s, name))
+        }
+        HirStmt::Switch {
+            expr,
+            cases,
+            default,
+        } => {
+            expr_mentions_var(expr, name)
+                || cases.iter().any(|c| c.body.iter().any(|s| stmt_uses_var(s, name)))
+                || default.iter().any(|s| stmt_uses_var(s, name))
+        }
+        HirStmt::Label(_)
+        | HirStmt::Goto(_)
+        | HirStmt::Return(None)
+        | HirStmt::Break
+        | HirStmt::Continue => false,
+    }
+}
+
+fn lvalue_uses_var(lhs: &HirLValue, name: &str) -> bool {
+    match lhs {
+        HirLValue::Var(_) => false, // definition, not a use
+        HirLValue::Deref { ptr, .. } => expr_mentions_var(ptr, name),
+        HirLValue::Index { base, index, .. } => {
+            expr_mentions_var(base, name) || expr_mentions_var(index, name)
+        }
+        HirLValue::FieldAccess { base, .. } => expr_mentions_var(base, name),
+    }
+}
+
 pub(crate) fn eliminate_dead_local_clobber_assigns(func: &mut HirFunction) -> bool {
     // Build a whole-function use map so sibling branches / nested blocks are
     // correctly accounted for.  Using a scoped `count_uses_in_stmt_list` on

@@ -991,8 +991,31 @@ impl<'a> PreviewBuilder<'a> {
             let ret_vn = self
                 .narrow_zero_extended_primary_return_source(block, ret_op_idx, &ret_vn)
                 .unwrap_or(ret_vn);
+            // x86 cmov: last def of EAX may be a guarded Copy inside a same-block
+            // CBranch skip. Inlining that Copy's RHS always is wrong (it only runs
+            // on the taken path). Prefer the live register *name* so prior
+            // default + guarded overrides compose as:
+            //   eax = hi; if (le) eax = value; if (lt) eax = lo; return eax;
+            if self.primary_return_def_is_same_block_cmov_body(block, ret_op_idx)
+                && let Some(expr) =
+                    self.cmov_live_primary_return_register_var(block, &ret_vn, ret_op_idx)
+            {
+                if preview_builder_diag_enabled() {
+                    eprintln!(
+                        "[DIAG] return recovery: block={} path=cmov_live_register op_idx={} expr={:?}",
+                        idx, ret_op_idx, expr
+                    );
+                }
+                return Ok(Some(expr));
+            }
             let expr = self
-                .lower_wrapped_varnode(&ret_vn, &mut HashSet::new())
+                .with_lowering_site(
+                    LoweringSite {
+                        block_idx: idx,
+                        op_idx: term_idx,
+                    },
+                    |this| this.lower_wrapped_varnode(&ret_vn, &mut HashSet::new()),
+                )
                 .map(Some)?;
             if preview_builder_diag_enabled() {
                 eprintln!(
@@ -1074,6 +1097,82 @@ impl<'a> PreviewBuilder<'a> {
             |this| this.lower_wrapped_varnode(&ret_vn, &mut HashSet::new()),
         )
         .map(Some)
+    }
+
+    /// True when `ret_op_idx` is a Copy that a same-block CBranch can skip
+    /// (SLEIGH cmov body). Absolute or relative forward targets both count.
+    fn primary_return_def_is_same_block_cmov_body(
+        &self,
+        block: &crate::pcode::PcodeBasicBlock,
+        ret_op_idx: usize,
+    ) -> bool {
+        let Some(op) = block.ops.get(ret_op_idx) else {
+            return false;
+        };
+        if op.opcode != PcodeOpcode::Copy || op.output.is_none() {
+            return false;
+        }
+        // Walk micro-ops of the same machine instruction for a guarding CBranch.
+        for i in (0..ret_op_idx).rev() {
+            let cand = &block.ops[i];
+            if cand.address != op.address {
+                break;
+            }
+            if cand.opcode != PcodeOpcode::CBranch || cand.inputs.is_empty() {
+                continue;
+            }
+            if let Some(target_op_idx) = crate::nir::cfg::same_block_forward_branch_target_op_idx(
+                block,
+                i,
+                block.ops.len(),
+                cand,
+                &cand.inputs[0],
+            ) {
+                if target_op_idx > ret_op_idx {
+                    return true;
+                }
+            }
+        }
+        // Adjacent pattern: CBranch immediately before the Copy.
+        if ret_op_idx > 0 {
+            let prev = &block.ops[ret_op_idx - 1];
+            if prev.opcode == PcodeOpcode::CBranch && !prev.inputs.is_empty() {
+                if let Some(target_op_idx) = crate::nir::cfg::same_block_forward_branch_target_op_idx(
+                    block,
+                    ret_op_idx - 1,
+                    block.ops.len(),
+                    prev,
+                    &prev.inputs[0],
+                ) {
+                    return target_op_idx > ret_op_idx;
+                }
+            }
+        }
+        false
+    }
+
+    /// Prefer a stable register/temp binding for a cmov-updated return register
+    /// without inlining the last guarded Copy RHS.
+    fn cmov_live_primary_return_register_var(
+        &self,
+        block: &crate::pcode::PcodeBasicBlock,
+        ret_vn: &Varnode,
+        ret_op_idx: usize,
+    ) -> Option<HirExpr> {
+        // Prefer the name chosen when the guarded Copy was materialized.
+        if let Some(op) = block.ops.get(ret_op_idx)
+            && let Some(output) = op.output.as_ref()
+        {
+            let key = MaterializedVarnodeKey::new(output, op);
+            if let Some(name) = self.materialized_vns.get(&key) {
+                return Some(HirExpr::Var(name.clone()));
+            }
+        }
+        // Fall back to the hardware return-register name.
+        if let Some(name) = self.sla_hw_name(ret_vn.offset, ret_vn.size) {
+            return Some(HirExpr::Var(name));
+        }
+        None
     }
 
     fn return_input_is_control_target(&self, input: &Varnode) -> bool {

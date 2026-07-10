@@ -34,8 +34,9 @@ pub(crate) use loops_conds::{
 pub(crate) use temp_var::{
     coerce_ptr_typed_bitop_vars, collapse_trivial_assign_returns, elide_unused_popcount_assigns,
     eliminate_dead_local_clobber_assigns, eliminate_dead_temp_assigns,
-    eliminate_redundant_var_assigns, inline_single_use_temps, prune_unused_dead_local_bindings,
-    prune_unused_temp_bindings, rescue_undeclared_bindings,
+    eliminate_redundant_var_assigns, hoist_param_alias_copies_before_first_use,
+    inline_single_use_temps, prune_unused_dead_local_bindings, prune_unused_temp_bindings,
+    rescue_undeclared_bindings,
 };
 
 // Re-export utility functions used by other modules outside cleanup.

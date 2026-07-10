@@ -201,6 +201,55 @@ pub(super) fn instruction_local_branch_target_seq(op: &PcodeOp, vn: &Varnode) ->
     }
 }
 
+/// Resolve a forward branch that stays inside `block` to a later op index.
+///
+/// Two SLEIGH encodings appear for cmov / instruction-local control flow:
+/// 1. Relative p-code deltas in the constant space (`space_id == 0`, `is_constant`)
+/// 2. Absolute instruction addresses in the code space (e.g. x86 cmov: CBranch
+///    to the next instruction address, `is_constant == false`, non-zero offset)
+///
+/// Case (2) is common on x86 after epilogue-reordered cmov sequences and must
+/// not be dropped: otherwise the guarded Copy always executes and collapses
+/// clamps / min/max to the last unconditional assignment.
+pub(super) fn same_block_forward_branch_target_op_idx(
+    block: &crate::pcode::PcodeBasicBlock,
+    from_op_idx: usize,
+    end_idx: usize,
+    op: &PcodeOp,
+    target_vn: &Varnode,
+) -> Option<usize> {
+    if from_op_idx >= end_idx || from_op_idx >= block.ops.len() {
+        return None;
+    }
+    let search = &block.ops[from_op_idx + 1..end_idx.min(block.ops.len())];
+    if search.is_empty() {
+        return None;
+    }
+
+    if let Some(target_seq) = instruction_local_branch_target_seq(op, target_vn) {
+        if let Some(pos) = search
+            .iter()
+            .position(|candidate| candidate.seq_num == target_seq)
+        {
+            return Some(from_op_idx + 1 + pos);
+        }
+    }
+
+    let target_addr = branch_target_address(target_vn)?;
+    let from_addr = op.address;
+    // Only treat absolute targets as same-block skips when they land strictly
+    // after the current instruction address (cmov fall-through to the next
+    // machine instruction). Same-address relative micro-op skips stay on the
+    // seq-delta path above.
+    if target_addr <= from_addr {
+        return None;
+    }
+    search
+        .iter()
+        .position(|candidate| candidate.address == target_addr)
+        .map(|pos| from_op_idx + 1 + pos)
+}
+
 fn resolve_instruction_local_branch_target_index(
     pcode: &PcodeFunction,
     _block_idx: usize,
@@ -404,4 +453,58 @@ pub fn structuring_cfg_edges(pcode: &PcodeFunction) -> Vec<crate::cfg::AddressEd
     edges.sort_unstable();
     edges.dedup();
     edges
+}
+
+#[cfg(test)]
+mod same_block_forward_tests {
+    use super::*;
+    use crate::pcode::{PcodeBasicBlock, PcodeOp, PcodeOpcode, Varnode};
+
+    fn op(seq: u32, addr: u64, opcode: PcodeOpcode, inputs: Vec<Varnode>) -> PcodeOp {
+        PcodeOp {
+            seq_num: seq,
+            opcode,
+            address: addr,
+            output: None,
+            inputs,
+            asm_mnemonic: None,
+        }
+    }
+
+    #[test]
+    fn absolute_code_space_forward_target_resolves() {
+        let target = Varnode {
+            space_id: 3,
+            offset: 0x4010,
+            size: 4,
+            is_constant: false,
+            constant_val: 0,
+        };
+        let cond = Varnode {
+            space_id: 2,
+            offset: 1,
+            size: 1,
+            is_constant: false,
+            constant_val: 0,
+        };
+        let block = PcodeBasicBlock {
+            index: 0,
+            start_address: 0x4000,
+            successors: vec![],
+            ops: vec![
+                op(0, 0x4000, PcodeOpcode::Copy, vec![]),
+                op(1, 0x400c, PcodeOpcode::CBranch, vec![target.clone(), cond]),
+                op(2, 0x400c, PcodeOpcode::Copy, vec![]),
+                op(3, 0x4010, PcodeOpcode::Return, vec![]),
+            ],
+        };
+        let idx = same_block_forward_branch_target_op_idx(
+            &block,
+            1,
+            block.ops.len(),
+            &block.ops[1],
+            &target,
+        );
+        assert_eq!(idx, Some(3), "expected absolute next-insn target");
+    }
 }
