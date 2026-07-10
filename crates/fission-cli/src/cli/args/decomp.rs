@@ -41,6 +41,10 @@ pub struct DecompArgs {
     #[arg(long, value_name = "PROFILE")]
     pub profile: Option<String>,
 
+    /// Pseudocode layer: nir (semantic-faithful), hir (readable), both
+    #[arg(long = "layer", value_name = "LAYER", value_parser = ["nir", "hir", "both"])]
+    pub layer: Option<String>,
+
     /// Decompilation engine (auto|nir|rust-sleigh; mlil-preview is a deprecated alias, legacy is a hidden compat mode)
     #[arg(long, value_name = "ENGINE")]
     pub engine: Option<String>,

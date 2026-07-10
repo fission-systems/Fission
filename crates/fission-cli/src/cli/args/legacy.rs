@@ -221,6 +221,7 @@ pub fn normalize_legacy(cli: LegacyCliArgs) -> ParsedOneShotArgs {
         count: cli.count,
         compiler_id: cli.compiler_id,
         profile: cli.profile,
+        layer: None,
         engine: cli.engine,
         output: cli.output,
         json: cli.json,

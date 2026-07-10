@@ -48,7 +48,10 @@ pub use self::cspec::RegisterNamer;
 pub use self::normalize::{
     summarize_direct_tail_wrapper_from_ops, summarize_direct_tail_wrapper_from_pcode,
 };
-pub use self::render::render_contracted_wrapper_summary;
+pub use self::render::{
+    LayeredPseudocode, PrintProfile, PseudocodeLayer, render_contracted_wrapper_summary,
+};
+// take_last_layered_pseudocode defined below after render path
 
 pub fn test_refine_partitions(accesses: &[(i64, u32)]) -> Vec<(i64, u32)> {
     self::builder::test_refine_partitions(accesses)
@@ -243,7 +246,12 @@ pub fn render_mlil_preview_with_binary_and_context(
     }
     debug_log("print_start");
     let print_start = Instant::now();
-    let rendered = render_hir_function_with_global_decls(&hir, options);
+    // Always build dual NIR/HIR surfaces from one structured tree. Callers that
+    // only need a single string use `LayeredPseudocode::primary` / legacy
+    // `render_nir` which returns the NIR-faithful surface for oracle compat.
+    let layered = render_layered_pseudocode(&hir, options);
+    store_last_layered_pseudocode(layered.clone());
+    let rendered = layered.nir;
     record_ghidra_action_stage(&mut build_stats, GhidraActionConcept::PrintC);
     record_ghidra_clean_room_pipeline_complete(&mut build_stats);
     build_stats.render_duration_ms = print_start.elapsed().as_millis() as usize;
@@ -260,6 +268,23 @@ pub fn render_mlil_preview_with_binary_and_context(
     }
     debug_log("print_done");
     Ok(rendered)
+}
+
+thread_local! {
+    static LAST_LAYERED_PSEUDOCODE: std::cell::RefCell<Option<LayeredPseudocode>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+fn store_last_layered_pseudocode(layered: LayeredPseudocode) {
+    LAST_LAYERED_PSEUDOCODE.with(|slot| {
+        *slot.borrow_mut() = Some(layered);
+    });
+}
+
+/// Take the dual NIR/HIR strings produced by the most recent `render_nir*` call
+/// on this thread (observation / CLI layer selection).
+pub fn take_last_layered_pseudocode() -> Option<LayeredPseudocode> {
+    LAST_LAYERED_PSEUDOCODE.with(|slot| slot.borrow_mut().take())
 }
 
 #[derive(Debug, Clone, Copy)]

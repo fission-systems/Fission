@@ -37,6 +37,8 @@ pub struct OneShotArgs {
     pub count: usize,
     pub compiler_id: Option<String>,
     pub profile: Option<String>,
+    /// Pseudocode layer: `nir` | `hir` | `both` (see `fission_pcode::PseudocodeLayer`).
+    pub layer: Option<String>,
     pub engine: Option<String>,
     pub output: Option<PathBuf>,
     pub json: bool,
@@ -112,6 +114,7 @@ impl Default for OneShotArgs {
             count: 20,
             compiler_id: None,
             profile: None,
+            layer: None,
             engine: None,
             output: None,
             json: false,

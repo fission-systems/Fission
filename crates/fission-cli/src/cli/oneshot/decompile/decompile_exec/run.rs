@@ -2,7 +2,8 @@ use crate::cli::oneshot::debug_decomp::{
     attach_pcode_topology, debug_decomp_bundle_json, write_debug_decomp_bundle_file,
 };
 use super::super::decompile_render::{
-    DecompEntry, RenderedCode, decompile_code_with_profile, make_assembly_fallback,
+    DecompEntry, RenderedCode, attach_dual_layer_json_fields, decompile_code_with_profile,
+    filtered_layer_text, filtered_primary_json_code, make_assembly_fallback, parse_layer_arg,
     strip_inferred_structs, strip_warnings,
 };
 use super::super::decompile_targets::collect_target_functions;
@@ -131,6 +132,8 @@ fn render_with_rust_sleigh(
 
     Ok(RenderedCode {
         code: result.code,
+        code_nir: result.code_nir,
+        code_hir: result.code_hir,
         postprocess_sec: 0.0,
         engine_used: "rust_sleigh",
         fell_back: result.fell_back,
@@ -157,6 +160,7 @@ fn run_rust_sleigh_decompilation(
     let mut json_results = Vec::new();
     let mut total_decomp_secs = 0.0;
     let mut total_postprocess_secs = 0.0;
+    let layer = parse_layer_arg(cli.layer.as_deref());
 
     for func in functions {
         let start = std::time::Instant::now();
@@ -166,24 +170,35 @@ fn run_rust_sleigh_decompilation(
                 total_decomp_secs += decomp_sec;
                 total_postprocess_secs += rendered.postprocess_sec;
 
-                let mut filtered = rendered.code.clone();
-                if effective_no_warnings {
-                    filtered = strip_warnings(&filtered);
-                }
-                if cli.ghidra_compat {
-                    filtered = strip_inferred_structs(&filtered);
-                }
+                let filtered = filtered_layer_text(
+                    &rendered,
+                    layer,
+                    effective_no_warnings,
+                    cli.ghidra_compat,
+                );
 
                 if effective_json {
                     let mut entry = serde_json::json!({
                         "address": format!("0x{:x}", func.address),
                         "name": func.name,
                         "size": func.size,
-                        "code": filtered,
+                        "code": filtered_primary_json_code(
+                            &rendered,
+                            layer,
+                            effective_no_warnings,
+                            cli.ghidra_compat,
+                        ),
                         "engine_used": rendered.engine_used,
                         "fell_back": rendered.fell_back,
                         "fallback_reason": rendered.fallback_reason,
                     });
+                    attach_dual_layer_json_fields(
+                        &mut entry,
+                        &rendered,
+                        layer,
+                        effective_no_warnings,
+                        cli.ghidra_compat,
+                    );
                     if let Some(stats) = rendered.preview_build_stats {
                         entry["preview_build_stats"] = serde_json::json!(stats);
                     }
@@ -429,6 +444,7 @@ fn run_sequential_decompilation<'a>(
     let mut json_results = Vec::new();
     let mut total_decomp_secs = 0.0;
     let mut total_postprocess_secs = 0.0;
+    let layer = parse_layer_arg(cli.layer.as_deref());
     for func in functions {
         if cli.verbose {
             eprintln!("[*] Decompiling {} (0x{:x})...", func.name, func.address);
@@ -451,24 +467,35 @@ fn run_sequential_decompilation<'a>(
                 let decomp_sec = func_start.elapsed().as_secs_f64();
                 total_decomp_secs += decomp_sec;
                 total_postprocess_secs += postprocess_sec;
-                let mut filtered = rendered.code.clone();
-                if effective_no_warnings {
-                    filtered = strip_warnings(&filtered);
-                }
-                if cli.ghidra_compat {
-                    filtered = strip_inferred_structs(&filtered);
-                }
+                let filtered = filtered_layer_text(
+                    &rendered,
+                    layer,
+                    effective_no_warnings,
+                    cli.ghidra_compat,
+                );
 
                 if effective_json {
                     let mut entry = serde_json::json!({
                         "address": format!("0x{:x}", func.address),
                         "name": func.name,
                         "size": func.size,
-                        "code": filtered,
+                        "code": filtered_primary_json_code(
+                            &rendered,
+                            layer,
+                            effective_no_warnings,
+                            cli.ghidra_compat,
+                        ),
                         "engine_used": rendered.engine_used,
                         "fell_back": rendered.fell_back,
                         "fallback_reason": rendered.fallback_reason,
                     });
+                    attach_dual_layer_json_fields(
+                        &mut entry,
+                        &rendered,
+                        layer,
+                        effective_no_warnings,
+                        cli.ghidra_compat,
+                    );
                     if let Some(stats) = rendered.preview_build_stats {
                         entry["preview_build_stats"] = serde_json::json!(stats);
                     }
@@ -780,6 +807,8 @@ fn run_parallel_decompilation<'a>(
                         (
                             Ok(RenderedCode {
                                 code: fallback,
+                                code_nir: None,
+                                code_hir: None,
                                 postprocess_sec: 0.0,
                                 engine_used: NirEngineMode::Legacy.as_str(),
                                 fell_back: true,
@@ -874,6 +903,8 @@ fn run_parallel_decompilation<'a>(
                             (
                                 Ok(RenderedCode {
                                     code: fallback,
+                                    code_nir: None,
+                                    code_hir: None,
                                     postprocess_sec: 0.0,
                                     engine_used: NirEngineMode::Legacy.as_str(),
                                     fell_back: true,
@@ -920,6 +951,7 @@ fn run_parallel_decompilation<'a>(
     let mut json_results = Vec::new();
     let mut total_decomp_secs = 0.0;
     let mut total_postprocess_secs = 0.0;
+    let layer = parse_layer_arg(cli.layer.as_deref());
 
     for entry in all_entries {
         total_decomp_secs += entry.decomp_sec;
@@ -935,24 +967,35 @@ fn run_parallel_decompilation<'a>(
                         ..Default::default()
                     }
                 });
-                let mut filtered = rendered.code.clone();
-                if effective_no_warnings {
-                    filtered = strip_warnings(&filtered);
-                }
-                if cli.ghidra_compat {
-                    filtered = strip_inferred_structs(&filtered);
-                }
+                let filtered = filtered_layer_text(
+                    rendered,
+                    layer,
+                    effective_no_warnings,
+                    cli.ghidra_compat,
+                );
 
                 if effective_json {
                     let mut json_entry = serde_json::json!({
                         "address": format!("0x{:x}", entry.address),
                         "name": entry.name,
                         "size": entry.size,
-                        "code": filtered,
+                        "code": filtered_primary_json_code(
+                            rendered,
+                            layer,
+                            effective_no_warnings,
+                            cli.ghidra_compat,
+                        ),
                         "engine_used": rendered.engine_used,
                         "fell_back": rendered.fell_back,
                         "fallback_reason": rendered.fallback_reason,
                     });
+                    attach_dual_layer_json_fields(
+                        &mut json_entry,
+                        rendered,
+                        layer,
+                        effective_no_warnings,
+                        cli.ghidra_compat,
+                    );
                     if let Some(stats) = rendered.preview_build_stats {
                         json_entry["preview_build_stats"] = serde_json::json!(stats);
                     }

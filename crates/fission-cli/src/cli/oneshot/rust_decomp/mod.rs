@@ -32,21 +32,22 @@ pub(crate) struct FunctionRenderResult {
     pub debug_bundle: Option<serde_json::Value>,
 }
 
+struct RustSleighRender {
+    code: String,
+    code_nir: Option<String>,
+    code_hir: Option<String>,
+    fell_back: bool,
+    fallback_reason: Option<String>,
+    build_stats: Option<fission_decompiler::NirBuildStats>,
+    hint_stats: Option<fission_decompiler::NirHintStats>,
+    evidence: fission_decompiler::RustSleighPipelineEvidence,
+}
+
 fn render_with_rust_sleigh(
     binary: &LoadedBinary,
     func: &FunctionInfo,
     timeout_ms: Option<u64>,
-) -> Result<
-    (
-        String,
-        bool,
-        Option<String>,
-        Option<fission_decompiler::NirBuildStats>,
-        Option<fission_decompiler::NirHintStats>,
-        fission_decompiler::RustSleighPipelineEvidence,
-    ),
-    FissionError,
-> {
+) -> Result<RustSleighRender, FissionError> {
     let mut config = fission_decompiler::RustSleighDecompileConfig::cli_defaults();
     config.nir_timeout_ms = timeout_ms;
     let result = fission_decompiler::decompile_with_rust_sleigh(
@@ -59,14 +60,31 @@ fn render_with_rust_sleigh(
     )
     .map_err(FissionError::decompiler)?;
 
-    Ok((
-        result.code,
-        result.fell_back,
-        result.fallback_reason,
-        result.build_stats,
-        result.hint_stats,
-        result.evidence,
-    ))
+    Ok(RustSleighRender {
+        code: result.code,
+        code_nir: result.code_nir,
+        code_hir: result.code_hir,
+        fell_back: result.fell_back,
+        fallback_reason: result.fallback_reason,
+        build_stats: result.build_stats,
+        hint_stats: result.hint_stats,
+        evidence: result.evidence,
+    })
+}
+
+fn apply_output_filters(code: &str, config: RenderConfig) -> String {
+    let mut filtered = code.to_string();
+    if config.effective_no_warnings {
+        filtered = strip::strip_warnings(&filtered);
+    }
+    if config.ghidra_compat {
+        filtered = strip::strip_inferred_structs(&filtered);
+    }
+    filtered
+}
+
+fn filter_optional(code: Option<String>, config: RenderConfig) -> Option<String> {
+    code.map(|c| apply_output_filters(&c, config))
 }
 
 fn record_into_function_render_result(
@@ -104,6 +122,7 @@ pub(crate) fn make_internal_error_result(
     let asm_fallback = fallback.is_some();
     let record = CliRustDecompileRecord {
         func: func.clone(),
+        layer: config.layer,
         outcome: CliRustOutcome::WorkerInternalError {
             message,
             assembly_fallback_code: fallback,
@@ -130,38 +149,39 @@ pub(crate) fn render_one_function_inner(
     let start = std::time::Instant::now();
 
     match render_with_rust_sleigh(binary, func, config.timeout_ms) {
-        Ok((mut code, fell_back, fallback_reason, build_stats, hint_stats, pipeline_evidence)) => {
+        Ok(rendered) => {
             let decomp_sec = start.elapsed().as_secs_f64();
-
-            if config.effective_no_warnings {
-                code = strip::strip_warnings(&code);
-            }
-            if config.ghidra_compat {
-                code = strip::strip_inferred_structs(&code);
-            }
+            let code = apply_output_filters(&rendered.code, config);
+            // Dual surfaces from one IR build; fall back so JSON shape stays stable.
+            let code_nir =
+                filter_optional(rendered.code_nir, config).unwrap_or_else(|| code.clone());
+            let code_hir =
+                filter_optional(rendered.code_hir, config).unwrap_or_else(|| code.clone());
 
             let record = CliRustDecompileRecord {
                 func: func.clone(),
+                layer: config.layer,
                 outcome: CliRustOutcome::Success {
                     code,
-                    fell_back,
-                    fallback_reason,
-                    build_stats: build_stats.clone(),
-                    hint_stats: hint_stats.clone(),
+                    code_nir: Some(code_nir),
+                    code_hir: Some(code_hir),
+                    fell_back: rendered.fell_back,
+                    fallback_reason: rendered.fallback_reason,
+                    build_stats: rendered.build_stats.clone(),
+                    hint_stats: rendered.hint_stats.clone(),
                     decomp_sec,
                 },
             };
 
-            let hint_stats_ref = hint_stats.as_ref();
             let debug_bundle = debug_bundle_for_record(
                 binary,
                 func,
                 config,
-                build_stats.as_ref(),
-                hint_stats_ref,
-                Some(&pipeline_evidence),
+                rendered.build_stats.as_ref(),
+                rendered.hint_stats.as_ref(),
+                Some(&rendered.evidence),
                 false,
-                build_stats.is_none() && fell_back,
+                rendered.build_stats.is_none() && rendered.fell_back,
             );
 
             record_into_function_render_result(record, debug_bundle, config.benchmark)
@@ -178,6 +198,7 @@ pub(crate) fn render_one_function_inner(
             ) {
                 let record = CliRustDecompileRecord {
                     func: func.clone(),
+                    layer: config.layer,
                     outcome: CliRustOutcome::AssemblyFallback {
                         fallback_code,
                         original_error: error_text.clone(),
@@ -192,6 +213,7 @@ pub(crate) fn render_one_function_inner(
             } else {
                 let record = CliRustDecompileRecord {
                     func: func.clone(),
+                    layer: config.layer,
                     outcome: CliRustOutcome::HardError {
                         error_text,
                         decomp_sec,
@@ -249,6 +271,11 @@ fn run_with_functions(
     let cpu_start = capture_process_cpu_snapshot();
     let effective_no_header = cli.no_header || cli.ghidra_compat;
     let effective_json = cli.json || cli.benchmark;
+    let layer = cli
+        .layer
+        .as_deref()
+        .and_then(fission_decompiler::PseudocodeLayer::parse)
+        .unwrap_or(fission_decompiler::PseudocodeLayer::Nir);
     let config = RenderConfig {
         benchmark: cli.benchmark,
         ghidra_compat: cli.ghidra_compat,
@@ -257,6 +284,7 @@ fn run_with_functions(
         debug_decomp_bundle: cli.debug_decomp_bundle.is_some(),
         requested_address: cli.address,
         timeout_ms: cli.timeout_ms,
+        layer,
     };
     let stack_size_bytes = workers::resolve_decomp_stack_size_bytes();
     let available_parallelism = std::thread::available_parallelism()

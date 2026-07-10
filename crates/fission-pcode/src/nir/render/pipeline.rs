@@ -1,4 +1,9 @@
-use super::{print_hir_function, print_hir_function_with_global_names, print_type};
+use super::hir_presentation::apply_hir_presentation;
+use super::layer::{LayeredPseudocode, PrintProfile};
+use super::{
+    print_hir_function, print_hir_function_with_global_names, print_hir_function_with_profile,
+    print_type,
+};
 use crate::nir::{
     HirExpr, HirFunction, HirLValue, HirStmt, MlilPreviewOptions, NirBinding, NirBindingOrigin,
     NirType, expr_type,
@@ -9,11 +14,89 @@ pub(crate) fn render_hir_function_with_global_decls(
     hir: &HirFunction,
     options: &MlilPreviewOptions,
 ) -> String {
+    render_hir_function_with_profile(hir, options, PrintProfile::Nir)
+}
+
+/// Dual NIR/HIR presentation from one structured function tree.
+pub(crate) fn render_layered_pseudocode(
+    hir: &HirFunction,
+    options: &MlilPreviewOptions,
+) -> LayeredPseudocode {
+    let nir = render_hir_function_with_profile(hir, options, PrintProfile::Nir);
+    let mut hir_tree = hir.clone();
+    apply_hir_presentation(&mut hir_tree);
+    let hir_code = render_hir_function_with_profile(&hir_tree, options, PrintProfile::Hir);
+    LayeredPseudocode {
+        nir,
+        hir: hir_code,
+    }
+}
+
+#[cfg(test)]
+mod layered_tests {
+    use super::*;
+    use crate::nir::{HirExpr, HirStmt, NirBinding, NirBindingOrigin, NirType};
+
+    #[test]
+    fn layered_pseudocode_hir_drops_unused_home_local() {
+        let func = HirFunction {
+            name: "f".into(),
+            params: vec![],
+            locals: vec![
+                NirBinding {
+                    name: "home_0".into(),
+                    ty: NirType::Int {
+                        bits: 64,
+                        signed: false,
+                    },
+                    surface_type_name: None,
+                    origin: Some(NirBindingOrigin::Temp),
+                    initializer: None,
+                },
+                NirBinding {
+                    name: "x".into(),
+                    ty: NirType::Int {
+                        bits: 32,
+                        signed: true,
+                    },
+                    surface_type_name: None,
+                    origin: Some(NirBindingOrigin::Temp),
+                    initializer: None,
+                },
+            ],
+            return_type: NirType::Int {
+                bits: 32,
+                signed: true,
+            },
+            body: vec![HirStmt::Return(Some(HirExpr::Var("x".into())))],
+            ..Default::default()
+        };
+        let options = MlilPreviewOptions::default();
+        let layered = render_layered_pseudocode(&func, &options);
+        assert!(
+            layered.nir.contains("home_0"),
+            "NIR should keep mechanical locals:\n{}",
+            layered.nir
+        );
+        assert!(
+            !layered.hir.contains("home_0"),
+            "HIR should drop unused home scaffold:\n{}",
+            layered.hir
+        );
+        assert!(layered.hir.contains("x"));
+    }
+}
+
+fn render_hir_function_with_profile(
+    hir: &HirFunction,
+    options: &MlilPreviewOptions,
+    profile: PrintProfile,
+) -> String {
     let decls = collect_referenced_global_decls(hir, options);
     let aggregate_typedefs = collect_referenced_aggregate_type_sizes(hir, decls.values());
     let opaque_pcodeop_stubs = collect_opaque_pcodeop_stubs(hir);
     if decls.is_empty() && aggregate_typedefs.is_empty() && opaque_pcodeop_stubs.is_empty() {
-        return print_hir_function_with_global_names(hir, &options.global_names);
+        return print_hir_function_with_profile(hir, Some(&options.global_names), profile);
     }
 
     let mut rendered = String::new();
@@ -29,9 +112,10 @@ pub(crate) fn render_hir_function_with_global_decls(
         rendered.push_str(&format!("{} {};\n", print_type(&ty), name));
     }
     rendered.push('\n');
-    rendered.push_str(&print_hir_function_with_global_names(
+    rendered.push_str(&print_hir_function_with_profile(
         hir,
-        &options.global_names,
+        Some(&options.global_names),
+        profile,
     ));
     rendered
 }

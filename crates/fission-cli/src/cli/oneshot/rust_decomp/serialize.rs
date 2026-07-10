@@ -1,10 +1,35 @@
 use super::record::{CliRustDecompileRecord, CliRustOutcome};
+use fission_decompiler::{LayeredPseudocode, PseudocodeLayer};
+
+fn primary_json_code(
+    code: &str,
+    code_hir: Option<&str>,
+    layer: PseudocodeLayer,
+) -> String {
+    match layer {
+        PseudocodeLayer::Hir => code_hir.unwrap_or(code).to_string(),
+        _ => code.to_string(),
+    }
+}
+
+fn layered_text(
+    code: &str,
+    code_nir: Option<&str>,
+    code_hir: Option<&str>,
+    layer: PseudocodeLayer,
+) -> String {
+    let nir = code_nir.unwrap_or(code).to_string();
+    let hir = code_hir.unwrap_or(code).to_string();
+    LayeredPseudocode { nir, hir }.format_text(layer, true)
+}
 
 pub(crate) fn record_to_json(entry: &CliRustDecompileRecord, benchmark: bool) -> serde_json::Value {
     let addr_str = format!("0x{:x}", entry.func.address);
     match &entry.outcome {
         CliRustOutcome::Success {
             code,
+            code_nir,
+            code_hir,
             fell_back,
             fallback_reason,
             build_stats,
@@ -15,7 +40,10 @@ pub(crate) fn record_to_json(entry: &CliRustDecompileRecord, benchmark: bool) ->
                 "address": addr_str,
                 "name": entry.func.name,
                 "size": entry.func.size,
-                "code": code,
+                "code": primary_json_code(code, code_hir.as_deref(), entry.layer),
+                "code_nir": code_nir,
+                "code_hir": code_hir,
+                "layer": entry.layer.as_str(),
                 "engine_used": "rust_sleigh",
                 "fell_back": fell_back,
                 "fallback_reason": fallback_reason,
@@ -43,6 +71,9 @@ pub(crate) fn record_to_json(entry: &CliRustDecompileRecord, benchmark: bool) ->
                 "name": entry.func.name,
                 "size": entry.func.size,
                 "code": fallback_code,
+                "code_nir": serde_json::Value::Null,
+                "code_hir": serde_json::Value::Null,
+                "layer": entry.layer.as_str(),
                 "engine_used": "rust_sleigh",
                 "fell_back": true,
                 "fallback": "assembly",
@@ -67,6 +98,7 @@ pub(crate) fn record_to_json(entry: &CliRustDecompileRecord, benchmark: bool) ->
                 "fell_back": true,
                 "fallback_reason": format!("rust_sleigh: {}", error_text),
                 "error": error_text,
+                "layer": entry.layer.as_str(),
             });
             if benchmark {
                 obj["decomp_sec"] =
@@ -93,6 +125,7 @@ pub(crate) fn record_to_json(entry: &CliRustDecompileRecord, benchmark: bool) ->
                 "fell_back": true,
                 "fallback_reason": "rust_sleigh:worker_internal_error",
                 "error": message,
+                "layer": entry.layer.as_str(),
             });
             if let Some(code) = assembly_fallback_code {
                 obj["code"] = serde_json::json!(code);
@@ -111,7 +144,12 @@ pub(crate) fn record_to_json(entry: &CliRustDecompileRecord, benchmark: bool) ->
 
 pub(crate) fn record_plain_output(entry: &CliRustDecompileRecord) -> String {
     match &entry.outcome {
-        CliRustOutcome::Success { code, .. } => code.clone(),
+        CliRustOutcome::Success {
+            code,
+            code_nir,
+            code_hir,
+            ..
+        } => layered_text(code, code_nir.as_deref(), code_hir.as_deref(), entry.layer),
         CliRustOutcome::AssemblyFallback { fallback_code, .. } => fallback_code.clone(),
         CliRustOutcome::HardError { error_text, .. } => format!(
             "// Error decompiling {} (0x{:x}): {}",

@@ -2,7 +2,8 @@ use crate::cli::oneshot::debug_decomp::{
     attach_pcode_topology, debug_decomp_bundle_json, write_debug_decomp_bundle_file,
 };
 use super::super::decompile_render::{
-    attach_native_timing, decompile_code_with_profile, make_assembly_fallback,
+    attach_dual_layer_json_fields, attach_native_timing, decompile_code_with_profile,
+    filtered_layer_text, filtered_primary_json_code, make_assembly_fallback, parse_layer_arg,
     strip_inferred_structs, strip_warnings,
 };
 use super::super::*;
@@ -78,24 +79,38 @@ pub(crate) fn decompile_and_output(
                 }
             }
 
-            let mut filtered = rendered.code.clone();
-            if effective_no_warnings {
-                filtered = strip_warnings(&filtered);
-            }
-            if cli.ghidra_compat {
-                filtered = strip_inferred_structs(&filtered);
-            }
+            let layer = parse_layer_arg(cli.layer.as_deref());
+            let filtered = filtered_layer_text(
+                &rendered,
+                layer,
+                effective_no_warnings,
+                cli.ghidra_compat,
+            );
             if cli.json {
                 let mut obj = serde_json::json!({
                     "address": format!("0x{:x}", addr),
                     "name": name,
-                    "code": filtered,
+                    // Primary `code` stays NIR-faithful for benchmark/oracle compat
+                    // unless the user explicitly selects HIR-only.
+                    "code": filtered_primary_json_code(
+                        &rendered,
+                        layer,
+                        effective_no_warnings,
+                        cli.ghidra_compat,
+                    ),
                     "engine_used": rendered.engine_used,
                     "fell_back": rendered.fell_back,
                     "fallback_reason": rendered.fallback_reason,
                     "preview_build_stats": rendered.preview_build_stats,
                     "preview_hint_stats": rendered.preview_hint_stats,
                 });
+                attach_dual_layer_json_fields(
+                    &mut obj,
+                    &rendered,
+                    layer,
+                    effective_no_warnings,
+                    cli.ghidra_compat,
+                );
                 if cli.debug_decomp {
                     if let Some(bundle) = debug_bundle {
                         obj["debug_decomp"] = bundle;

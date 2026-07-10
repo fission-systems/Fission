@@ -91,8 +91,12 @@ pub(crate) fn probe_wrapper_contraction(
         }
     }
 
+    // Wrapper contraction bypasses the dual NIR/HIR render path; both surfaces
+    // are the same contracted summary (do not steal thread-local dual output).
     Ok(Some(RustSleighDecompileResult {
-        code,
+        code: code.clone(),
+        code_nir: Some(code.clone()),
+        code_hir: Some(code),
         fell_back: false,
         fallback_reason: None,
         build_stats: Some(build_stats),

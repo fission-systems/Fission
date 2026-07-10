@@ -770,6 +770,7 @@ fn normalize_canonical(cli: CliArgs) -> ParsedInvocation {
                     args.decomp_limit = decomp.limit;
                     args.include_nonuser_functions = decomp.include_nonuser_functions;
                     args.profile = decomp.profile;
+                    args.layer = decomp.layer;
                     args.engine = decomp.engine;
                     args.compiler_id = decomp.compiler_id;
                     args.timeout_ms = decomp.timeout_ms;

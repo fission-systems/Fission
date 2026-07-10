@@ -9,6 +9,8 @@ use std::collections::{HashMap, HashSet};
 const MAX_PRINT_STMT_DEPTH: usize = 512;
 const MAX_PRINT_EXPR_DEPTH: usize = 512;
 
+use super::layer::PrintProfile;
+
 /// Printing context: maps variable name → NirType for struct-member rendering.
 struct PrintCtx<'a> {
     /// variable name → declared type
@@ -17,10 +19,15 @@ struct PrintCtx<'a> {
     return_type: &'a NirType,
     inline_guard_goto: bool,
     global_names: Option<&'a HashMap<u64, String>>,
+    profile: PrintProfile,
 }
 
 impl<'a> PrintCtx<'a> {
     fn build(func: &'a HirFunction) -> Self {
+        Self::build_with_profile(func, PrintProfile::Nir)
+    }
+
+    fn build_with_profile(func: &'a HirFunction, profile: PrintProfile) -> Self {
         let mut var_types = HashMap::new();
         let mut pointer_decl_names = HashSet::new();
         for b in func.locals.iter().chain(func.params.iter()) {
@@ -39,6 +46,7 @@ impl<'a> PrintCtx<'a> {
             return_type: &func.return_type,
             inline_guard_goto: func.body.len() <= 6,
             global_names: None,
+            profile,
         }
     }
 
@@ -93,16 +101,23 @@ impl<'a> PrintCtx<'a> {
 }
 
 pub(in crate::nir) fn print_hir_function(func: &HirFunction) -> String {
-    let ctx = PrintCtx::build(func);
-    print_hir_function_impl(func, ctx)
+    print_hir_function_with_profile(func, None, PrintProfile::Nir)
 }
 
 pub(in crate::nir) fn print_hir_function_with_global_names(
     func: &HirFunction,
     global_names: &HashMap<u64, String>,
 ) -> String {
-    let mut ctx = PrintCtx::build(func);
-    ctx.global_names = Some(global_names);
+    print_hir_function_with_profile(func, Some(global_names), PrintProfile::Nir)
+}
+
+pub(in crate::nir) fn print_hir_function_with_profile(
+    func: &HirFunction,
+    global_names: Option<&HashMap<u64, String>>,
+    profile: PrintProfile,
+) -> String {
+    let mut ctx = PrintCtx::build_with_profile(func, profile);
+    ctx.global_names = global_names;
     print_hir_function_impl(func, ctx)
 }
 
@@ -714,6 +729,47 @@ fn callable_arg_type_name(arg: &HirExpr, ctx: Option<&PrintCtx<'_>>) -> String {
 
 // ── Context-aware printing (struct field access) ──────────────────────────────
 
+/// HIR-only: drop identity / pure widening casts that add noise without helping
+/// humans. NIR profile never calls this.
+fn try_elide_hir_cast(
+    ty: &NirType,
+    expr: &HirExpr,
+    parent_prec: u8,
+    depth: usize,
+    ctx: &PrintCtx<'_>,
+) -> Option<String> {
+    // (T)x where x already has type T (via var decl) → print x
+    if let HirExpr::Var(name) = expr {
+        if let Some(vt) = ctx.var_types.get(name.as_str()) {
+            if *vt == ty {
+                return Some(print_expr_prec_ctx(expr, parent_prec, depth + 1, ctx));
+            }
+        }
+    }
+    // (ulonglong)(uint)x / nested same-family integer casts → peel outer when
+    // outer is wider unsigned and inner is already an integer cast/var.
+    if let (
+        NirType::Int {
+            bits: outer_bits,
+            signed: false,
+        },
+        HirExpr::Cast {
+            ty:
+                NirType::Int {
+                    bits: inner_bits,
+                    signed: false,
+                },
+            expr: inner,
+        },
+    ) = (ty, expr)
+    {
+        if *outer_bits >= *inner_bits {
+            return Some(print_expr_prec_ctx(inner, parent_prec, depth + 1, ctx));
+        }
+    }
+    None
+}
+
 fn print_expr_with_ctx(expr: &HirExpr, ctx: &PrintCtx<'_>) -> String {
     print_expr_prec_ctx(expr, 0, 0, ctx)
 }
@@ -768,6 +824,12 @@ fn print_expr_prec_ctx(
         HirExpr::Cast { ty, expr } => {
             if let Some(pointer_diff) = print_pointer_diff_cast(ty, expr, depth, ctx) {
                 return pointer_diff;
+            }
+            // HIR presentation: elide no-op / same-family widening casts when safe.
+            if matches!(ctx.profile, PrintProfile::Hir) {
+                if let Some(elided) = try_elide_hir_cast(ty, expr, parent_prec, depth, ctx) {
+                    return elided;
+                }
             }
             // If casting from a pointer type to a non-pointer integer type (e.g. (uint)ptr),
             // insert an intermediate (ulonglong) cast to avoid invalid C (pointer-to-int truncation

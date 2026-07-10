@@ -91,6 +91,10 @@ pub(super) struct DecompEntry {
 
 pub(super) struct RenderedCode {
     pub(super) code: String,
+    /// NIR-faithful surface (when dual render is available).
+    pub(super) code_nir: Option<String>,
+    /// HIR-readable surface (when dual render is available).
+    pub(super) code_hir: Option<String>,
     pub(super) postprocess_sec: f64,
     pub(super) engine_used: &'static str,
     pub(super) fell_back: bool,
@@ -98,6 +102,89 @@ pub(super) struct RenderedCode {
     pub(super) preview_build_stats: Option<NirBuildStats>,
     pub(super) preview_hint_stats: Option<NirHintStats>,
     pub(super) rust_sleigh_evidence: Option<fission_decompiler::RustSleighPipelineEvidence>,
+}
+
+/// Select primary text from dual layers (`code` remains NIR-faithful fallback).
+pub(super) fn select_layer_text(
+    rendered: &RenderedCode,
+    layer: fission_pcode::PseudocodeLayer,
+) -> String {
+    let nir = rendered
+        .code_nir
+        .clone()
+        .unwrap_or_else(|| rendered.code.clone());
+    let hir = rendered
+        .code_hir
+        .clone()
+        .unwrap_or_else(|| rendered.code.clone());
+    let layered = fission_pcode::LayeredPseudocode { nir, hir };
+    layered.format_text(layer, true)
+}
+
+pub(super) fn parse_layer_arg(raw: Option<&str>) -> fission_pcode::PseudocodeLayer {
+    raw.and_then(fission_pcode::PseudocodeLayer::parse)
+        .unwrap_or(fission_pcode::PseudocodeLayer::Nir)
+}
+
+pub(super) fn apply_code_filters(code: &str, no_warnings: bool, ghidra_compat: bool) -> String {
+    let mut filtered = code.to_string();
+    if no_warnings {
+        filtered = strip_warnings(&filtered);
+    }
+    if ghidra_compat {
+        filtered = strip_inferred_structs(&filtered);
+    }
+    filtered
+}
+
+/// Text body for the selected layer after warning/compat filters.
+pub(super) fn filtered_layer_text(
+    rendered: &RenderedCode,
+    layer: fission_pcode::PseudocodeLayer,
+    no_warnings: bool,
+    ghidra_compat: bool,
+) -> String {
+    apply_code_filters(
+        &select_layer_text(rendered, layer),
+        no_warnings,
+        ghidra_compat,
+    )
+}
+
+/// Primary JSON `code` field: stays NIR-faithful unless the user selects HIR-only.
+pub(super) fn filtered_primary_json_code(
+    rendered: &RenderedCode,
+    layer: fission_pcode::PseudocodeLayer,
+    no_warnings: bool,
+    ghidra_compat: bool,
+) -> String {
+    let raw = match layer {
+        fission_pcode::PseudocodeLayer::Hir => rendered
+            .code_hir
+            .as_deref()
+            .unwrap_or(rendered.code.as_str()),
+        _ => rendered.code.as_str(),
+    };
+    apply_code_filters(raw, no_warnings, ghidra_compat)
+}
+
+/// Attach `layer` / `code_nir` / `code_hir` to a per-function JSON entry.
+pub(super) fn attach_dual_layer_json_fields(
+    entry: &mut serde_json::Value,
+    rendered: &RenderedCode,
+    layer: fission_pcode::PseudocodeLayer,
+    no_warnings: bool,
+    ghidra_compat: bool,
+) {
+    entry["layer"] = serde_json::json!(layer.as_str());
+    entry["code_nir"] = match &rendered.code_nir {
+        Some(nir) => serde_json::json!(apply_code_filters(nir, no_warnings, ghidra_compat)),
+        None => serde_json::Value::Null,
+    };
+    entry["code_hir"] = match &rendered.code_hir {
+        Some(hir) => serde_json::json!(apply_code_filters(hir, no_warnings, ghidra_compat)),
+        None => serde_json::Value::Null,
+    };
 }
 
 pub(super) fn write_output_bytes(cli: &OneShotArgs, body: &str) -> io::Result<()> {
@@ -142,6 +229,8 @@ pub(super) fn legacy_rendered_code(
     let (code, postprocess_sec) = render_legacy_code(address, binary, fact_store, result);
     RenderedCode {
         code,
+        code_nir: None,
+        code_hir: None,
         postprocess_sec,
         engine_used: NirEngineMode::Legacy.as_str(),
         fell_back: false,
@@ -171,6 +260,8 @@ pub(super) fn decompile_code_with_profile(
         .map_err(FissionError::decompiler)?;
         return Ok(RenderedCode {
             code: result.code,
+            code_nir: result.code_nir,
+            code_hir: result.code_hir,
             postprocess_sec: 0.0,
             engine_used: "rust_sleigh",
             fell_back: result.fell_back,
@@ -200,8 +291,11 @@ pub(super) fn decompile_code_with_profile(
     .map_err(FissionError::decompiler)?;
 
     if let Some(code) = preview.nir_code {
+        let layered = fission_pcode::take_last_layered_pseudocode();
         return Ok(RenderedCode {
             code,
+            code_nir: layered.as_ref().map(|l| l.nir.clone()),
+            code_hir: layered.as_ref().map(|l| l.hir.clone()),
             postprocess_sec: 0.0,
             engine_used: NirEngineMode::Nir.as_str(),
             fell_back: false,
@@ -242,8 +336,11 @@ pub(super) fn decompile_code_with_profile(
                 .map_err(FissionError::decompiler)?
                 {
                     if let Some(code) = selection.nir_code {
+                        let layered = fission_pcode::take_last_layered_pseudocode();
                         return Ok(RenderedCode {
                             code,
+                            code_nir: layered.as_ref().map(|l| l.nir.clone()),
+                            code_hir: layered.as_ref().map(|l| l.hir.clone()),
                             postprocess_sec: 0.0,
                             engine_used: NirEngineMode::Nir.as_str(),
                             fell_back: true,

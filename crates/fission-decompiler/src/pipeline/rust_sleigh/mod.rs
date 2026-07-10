@@ -12,7 +12,11 @@ use crate::{NirBuildStats, NirHintStats};
 
 #[derive(Debug, Clone)]
 pub struct RustSleighDecompileResult {
+    /// Primary code (NIR-faithful by default for oracle / backward compat).
     pub code: String,
+    /// Dual-layer surfaces when available (same IR build).
+    pub code_nir: Option<String>,
+    pub code_hir: Option<String>,
     pub fell_back: bool,
     pub fallback_reason: Option<String>,
     pub build_stats: Option<NirBuildStats>,
