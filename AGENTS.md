@@ -125,6 +125,26 @@ python3 benchmark/source_semantic_benchmark/run_source_semantic_benchmark.py --h
 
 Use this loop for source-semantic or pseudocode-quality work, especially when a concrete row/function motivated the change.
 
+### Mandatory external benchmark (fission-benchmark docker)
+
+Quality claims must run the **external** benchmark against a **local** Fission
+build, not only `fission_cli` one-shots or unit tests:
+
+- Compose base: `/Users/sjkim1127/fission-benchmark/docker-compose.yml`
+- Local overlay: `/Users/sjkim1127/fission-benchmark/docker-compose.local.yml`
+- Full procedure: [`docs/BENCHMARK_DOCKER.md`](docs/BENCHMARK_DOCKER.md)
+
+```bash
+cd /Users/sjkim1127/fission-benchmark
+export FISSION_ROOT=/Users/sjkim1127/Fission
+./scripts/prepare_local_fission.sh
+docker compose -f docker-compose.yml -f docker-compose.local.yml \
+  --profile local up -d --build fission
+# Then: python runner/runner.py --corpus dev --decompilers fission ...
+```
+
+Never promote local docker / local runner results to official latest or Pages.
+
 ## AI Overfit Firewall
 
 AI-assisted decompiler quality work must not leak benchmark identity into the
