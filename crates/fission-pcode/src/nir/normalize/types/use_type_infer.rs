@@ -38,6 +38,9 @@ enum UseConstraint {
     Signed { bits: u32 },
     /// Variable is used in an unsigned comparison; must be an unsigned integer.
     Unsigned { bits: u32 },
+    /// Variable is the lhs of a logical right-shift (INT_RIGHT / SHR). Stronger than
+    /// generic `Unsigned`: may demote a signed param so C `>>` stays logical.
+    LogicalShiftUnsigned { bits: u32 },
     /// Variable is used in a context that requires exactly this type.
     Exact(NirType),
 }
@@ -639,7 +642,7 @@ fn collect_constraints_expr(
                     if let HirExpr::Var(name) = lhs.as_ref() {
                         out.entry(name.clone())
                             .or_default()
-                            .push(UseConstraint::Unsigned { bits });
+                            .push(UseConstraint::LogicalShiftUnsigned { bits });
                     }
                 }
                 HirBinaryOp::Add
@@ -1796,7 +1799,8 @@ fn merge_constraint(binding: &mut NirBinding, constraint: &UseConstraint) -> boo
             };
             true
         }
-        (NirType::Unknown, UseConstraint::Unsigned { bits }) => {
+        (NirType::Unknown, UseConstraint::Unsigned { bits })
+        | (NirType::Unknown, UseConstraint::LogicalShiftUnsigned { bits }) => {
             binding.ty = NirType::Int {
                 bits: *bits,
                 signed: false,
@@ -1822,13 +1826,13 @@ fn merge_constraint(binding: &mut NirBinding, constraint: &UseConstraint) -> boo
                 signed: true,
                 bits: cur_bits,
             },
-            UseConstraint::Unsigned { bits: new_bits },
+            UseConstraint::LogicalShiftUnsigned { bits: new_bits },
         ) if cur_bits == new_bits
             && matches!(binding.origin, Some(NirBindingOrigin::ParamIndex(_))) =>
         {
-            // Demote signed params → unsigned when logical-shift / unsigned-compare
-            // evidence is present. INT_RIGHT (x86 SHR) must stay logical in C, or
-            // `count_bits(0xFFFFFFFF)` becomes an infinite signed arithmetic shift.
+            // Demote signed params → unsigned only for logical SHR (INT_RIGHT).
+            // Generic `Unsigned` must not undo signed promotion from signed
+            // comparisons / casted arithmetic (see signed_casted_arithmetic test).
             binding.ty = NirType::Int {
                 bits: *new_bits,
                 signed: false,
