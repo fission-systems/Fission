@@ -1067,13 +1067,13 @@ binding-order failures by themselves.</p>
 </tr>
 <tr>
 <td><code>saturating_add</code></td>
-<td>Improving</td>
-<td><strong>F1</strong> + primary-return keep + if-goto fuse Return + <strong>tail-cmov materialize</strong> (same-block forward terminator skip + primary-return HW name): m32 O2 recovers <code>eax = a+b</code>, <code>a</code> vs <code>sum</code> compare (not <code>eax &lt; eax</code>), underflow <code>eax = 2147483648</code> (INT_MIN bits), INT_MAX arm. Nesting/flag noise and signed print of INT_MIN still residual.</td>
+<td>Good</td>
+<td>m32/gcc O0+O2 <strong>5/5</strong>. Tail-cmov INT_MIN + primary-return HW name; printer shows <code>-2147483648</code>. Nesting/flag noise residual.</td>
 </tr>
 <tr>
 <td><code>classify_range</code></td>
-<td>Bad</td>
-<td>Flag soup; setnz/neg/cmovg not recovered as value classes</td>
+<td>Improving</td>
+<td><strong>m32 O2 5/5</strong> after xor+setcc partial-reg composition (<code>try_lower_zero_extended_partial_register</code> recognizes <code>xor reg,reg</code> and zero-before-setcc). High path folds to <code>(value != 10) + 2</code>. Low path still flag-noisy (setnz/neg/cmovg). gcc O2 residual 4/5.</td>
 </tr>
 </tbody>
 </table>
