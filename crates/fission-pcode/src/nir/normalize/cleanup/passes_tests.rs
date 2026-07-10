@@ -1543,3 +1543,41 @@ fn subvar_trim_eliminates_redundant_casts() {
         panic!("expected cast of y, got {:?}", rhs2);
     }
 }
+
+
+#[test]
+fn fuse_if_goto_allows_returns_in_segment() {
+    // if (c) goto L; return 1; L: return 0;
+    // → if (!c) { return 1; } L: return 0;
+    let mut stmts = vec![
+        HirStmt::If {
+            cond: HirExpr::Var("c".to_string()),
+            then_body: vec![HirStmt::Goto("L".to_string())],
+            else_body: vec![],
+        },
+        HirStmt::Return(Some(HirExpr::Const(1, int(32)))),
+        HirStmt::Label("L".to_string()),
+        HirStmt::Return(Some(HirExpr::Const(0, int(32)))),
+    ];
+    assert!(
+        fuse_single_predecessor_boundaries(&mut stmts),
+        "expected fuse: {stmts:?}"
+    );
+    assert!(
+        matches!(
+            &stmts[..],
+            [
+                HirStmt::If {
+                    then_body,
+                    else_body,
+                    ..
+                },
+                HirStmt::Label(l),
+                HirStmt::Return(Some(HirExpr::Const(0, _))),
+            ] if else_body.is_empty()
+                && matches!(then_body.as_slice(), [HirStmt::Return(Some(HirExpr::Const(1, _)))])
+                && l == "L"
+        ),
+        "unexpected shape: {stmts:?}"
+    );
+}

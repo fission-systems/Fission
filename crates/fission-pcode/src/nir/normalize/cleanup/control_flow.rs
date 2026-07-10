@@ -363,7 +363,12 @@ fn stmts_are_fuseable_linear_segment(stmts: &[HirStmt]) -> bool {
 
 fn stmt_is_fuseable_linear(stmt: &HirStmt) -> bool {
     match stmt {
-        HirStmt::Assign { .. } | HirStmt::Expr(_) | HirStmt::VaStart { .. } => true,
+        // Return is linear for if-goto inversion: the statements between
+        // `if (c) goto L;` and `L:` may include early returns (saturating_add).
+        HirStmt::Assign { .. }
+        | HirStmt::Expr(_)
+        | HirStmt::VaStart { .. }
+        | HirStmt::Return(_) => true,
         HirStmt::Block(body) => stmts_are_fuseable_linear_segment(body),
         HirStmt::If {
             then_body,
@@ -379,7 +384,6 @@ fn stmt_is_fuseable_linear(stmt: &HirStmt) -> bool {
         | HirStmt::For { .. }
         | HirStmt::Label(_)
         | HirStmt::Goto(_)
-        | HirStmt::Return(_)
         | HirStmt::Break
         | HirStmt::Continue => false,
     }

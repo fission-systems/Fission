@@ -38,7 +38,13 @@ ISA-agnostic: address/CFG shape only; no CC enum.
 
 ## 5. Follow-up order
 
-1. Keep `eax = a+b` dominating all uses of the primary return live-in (F1/F3).
-2. Then enable terminator-side cmov tail only with a focused sat golden check:
+1. Keep `eax = a+b` dominating all uses of the primary return live-in (F1/F3) —
+   partial via primary-return keep materialize (2026-07-10).
+2. **Do not** enable terminator-side cmov tail without a focused sat golden:
    - INT_MAX condition uses `a` and `sum` (not `eax < eax`)
    - INT_MIN appears under `b < 0`
+   - count_bits/clamp must not regress
+   Multiple attempts (global terminator reclassification; process-cmov-before-skip;
+   primary-return-only terminator special case) all regressed sat O2 binding
+   (`eax = param_2` overwrite / `eax <= eax`). Leave CFG helper only until a
+   non-regressing owner path is proven.
