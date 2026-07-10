@@ -12,5 +12,6 @@ Short, durable decisions complement [`docs/architecture/ARCHITECTURE.md`](../arc
 | [0006](0006-decompiler-quality-change-gate.md) | Decompiler quality change gate |
 | [0007](0007-ai-overfit-and-validation-firewall.md) | AI overfit and validation firewall |
 | [0008](0008-nir-substrate-and-owner-boundaries.md) | NIR substrate and owner boundaries |
+| [0009](0009-isa-agnostic-semantic-rules.md) | ISA-agnostic semantic rules (optimize on x86, implement common invariants) |
 
 New decisions: copy [`0000-template.md`](0000-template.md), bump the next number, link from this table.

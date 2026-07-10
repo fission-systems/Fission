@@ -51,6 +51,10 @@ Allowed production conditions are invariant-backed facts such as:
 - memory alias facts,
 - documented binary-format semantics.
 
+Prefer **ISA-agnostic statement of those facts** even when the motivating sample
+is x86/x86-32: put encoding and register *maps* in cspec/CC/SLEIGH, and keep
+loop/join/cmov-class *policy* shared ([ADR 0009](0009-isa-agnostic-semantic-rules.md)).
+
 The default implementation path is to extend the existing owner/pass. Add a new
 pass, helper, or metric only when the proposal shows that no existing owner
 already covers the invariant. A targeted test is required, but it is never enough

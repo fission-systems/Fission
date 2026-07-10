@@ -48,6 +48,15 @@ def-use fact, type constraint, calling-convention fact, memory alias fact, or
 documented binary-format rule.
 ```
 
+ISA-agnostic check ([ADR 0009](../adr/0009-isa-agnostic-semantic-rules.md)):
+
+- [ ] Production condition is not gated only on one calling convention / ISA enum
+      (for example `X86_32`) when the fact is really register/loop/join/CFG.
+- [ ] ISA-specific data lives in cspec / register namer / CC tables / SLEIGH, not
+      a forked copy of the control-structure rule.
+- [ ] Synthetic test states the CFG/dataflow shape without requiring a compiler
+      tuple or function name.
+
 Comparable coverage:
 
 - Similar shape 1:
