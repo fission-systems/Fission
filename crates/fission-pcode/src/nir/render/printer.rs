@@ -433,7 +433,7 @@ fn print_expr_prec(expr: &HirExpr, parent_prec: u8, depth: usize) -> String {
             }
         }
         HirExpr::Var(name) => (name.clone(), 120),
-        HirExpr::Const(value, _) => (value.to_string(), 120),
+        HirExpr::Const(value, ty) => (print_integer_const(*value, ty), 120),
         HirExpr::Cast { ty, expr } => {
             let inner = print_expr_prec(expr, 110, depth + 1);
             (format!("({}){}", print_type(ty), inner), 110)
@@ -643,6 +643,44 @@ fn print_binary_op(op: HirBinaryOp) -> &'static str {
     }
 }
 
+/// Format an integer constant for C pseudocode.
+///
+/// SLEIGH immediates often arrive as unsigned bit patterns (`0x80000000` →
+/// `2147483648` with `signed: false`). Prefer two's-complement decimal when the
+/// high bit is set so `INT_MIN` reads as `-2147483648` rather than a value that
+/// does not fit in signed `int`.
+fn print_integer_const(value: i64, ty: &NirType) -> String {
+    let NirType::Int { bits, signed } = ty else {
+        return value.to_string();
+    };
+    if !(1..=64).contains(bits) {
+        return value.to_string();
+    }
+    let bits = *bits as u32;
+    let mask = if bits == 64 {
+        u64::MAX
+    } else {
+        (1u64 << bits) - 1
+    };
+    let raw = (value as u64) & mask;
+    let sign_bit = 1u64 << (bits - 1);
+    if (raw & sign_bit) != 0 {
+        let signed_val = if bits == 64 {
+            raw as i64
+        } else {
+            (raw as i64) - (1i64 << bits)
+        };
+        // Prefer signed form for true signed types, and for classic high-bit
+        // immediates (INT_MIN) even when the NIR type is still unsigned.
+        if *signed || raw == sign_bit || value > 0 && value as u64 == raw {
+            if signed_val < 0 {
+                return signed_val.to_string();
+            }
+        }
+    }
+    value.to_string()
+}
+
 pub(in crate::nir) fn print_type(ty: &NirType) -> String {
     match ty {
         NirType::Unknown => "undefined".to_string(),
@@ -811,14 +849,14 @@ fn print_expr_prec_ctx(
             }
         }
         HirExpr::Var(name) => (name.clone(), 120),
-        HirExpr::Const(value, _) => {
+        HirExpr::Const(value, ty) => {
             let name = ctx
                 .global_names
                 .and_then(|names| names.get(&((*value) as u64)).cloned());
             if let Some(name) = name {
                 (name, 120)
             } else {
-                (value.to_string(), 120)
+                (print_integer_const(*value, ty), 120)
             }
         }
         HirExpr::Cast { ty, expr } => {

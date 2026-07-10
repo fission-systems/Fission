@@ -2312,6 +2312,11 @@ impl<'a> PreviewBuilder<'a> {
         let requested_start = vn.offset;
         let requested_end = requested_start.saturating_add(u64::from(vn.size));
         let mut zeroed_ranges = Vec::new();
+        // x86 `xor reg,reg; setcc low` zeros *before* the partial write. Reverse
+        // scan therefore sees the setcc first; keep it pending until an older
+        // clear covers the upper bytes (AArch64-style zero-*after*-partial still
+        // resolves immediately when the clear is already in `zeroed_ranges`).
+        let mut pending_partial_idx: Option<usize> = None;
 
         for idx in (0..scan_end).rev() {
             let op = &block.ops[idx];
@@ -2326,7 +2331,7 @@ impl<'a> PreviewBuilder<'a> {
                 continue;
             }
 
-            if Self::is_zero_copy(op) {
+            if Self::is_register_clear_def(op, output) {
                 zeroed_ranges.push((
                     output.offset.max(requested_start),
                     output
@@ -2334,31 +2339,83 @@ impl<'a> PreviewBuilder<'a> {
                         .saturating_add(u64::from(output.size))
                         .min(requested_end),
                 ));
+                if let Some(partial_idx) = pending_partial_idx {
+                    if let Some(expr) = self.try_finish_zero_extended_partial(
+                        block,
+                        site.block_idx,
+                        partial_idx,
+                        vn,
+                        requested_start,
+                        requested_end,
+                        &zeroed_ranges,
+                        visiting,
+                    )? {
+                        return Ok(Some(expr));
+                    }
+                }
                 continue;
             }
 
             if output.offset == requested_start && output.size < vn.size {
-                let upper_start = requested_start.saturating_add(u64::from(output.size));
-                if !Self::ranges_cover(upper_start, requested_end, &zeroed_ranges) {
-                    return Ok(None);
+                if let Some(expr) = self.try_finish_zero_extended_partial(
+                    block,
+                    site.block_idx,
+                    idx,
+                    vn,
+                    requested_start,
+                    requested_end,
+                    &zeroed_ranges,
+                    visiting,
+                )? {
+                    return Ok(Some(expr));
                 }
-                let expr = self.with_lowering_site(
-                    LoweringSite {
-                        block_idx: site.block_idx,
-                        op_idx: idx,
-                    },
-                    |this| this.lower_def_op(op, visiting),
-                )?;
-                return Ok(Some(HirExpr::Cast {
-                    ty: type_from_size(vn.size, false),
-                    expr: Box::new(expr),
-                }));
+                // Upper not covered yet — wait for an older clear (xor-before-setcc).
+                if pending_partial_idx.is_none() {
+                    pending_partial_idx = Some(idx);
+                }
+                continue;
             }
 
+            // Other overlapping def: cannot compose through it.
             return Ok(None);
         }
 
         Ok(None)
+    }
+
+    fn try_finish_zero_extended_partial(
+        &mut self,
+        block: &crate::pcode::PcodeBasicBlock,
+        block_idx: usize,
+        partial_idx: usize,
+        vn: &Varnode,
+        requested_start: u64,
+        requested_end: u64,
+        zeroed_ranges: &[(u64, u64)],
+        visiting: &mut HashSet<VarnodeKey>,
+    ) -> Result<Option<HirExpr>, MlilPreviewError> {
+        let op = &block.ops[partial_idx];
+        let Some(output) = op.output.as_ref() else {
+            return Ok(None);
+        };
+        if output.offset != requested_start || output.size >= vn.size {
+            return Ok(None);
+        }
+        let upper_start = requested_start.saturating_add(u64::from(output.size));
+        if !Self::ranges_cover(upper_start, requested_end, zeroed_ranges) {
+            return Ok(None);
+        }
+        let expr = self.with_lowering_site(
+            LoweringSite {
+                block_idx,
+                op_idx: partial_idx,
+            },
+            |this| this.lower_def_op(op, visiting),
+        )?;
+        Ok(Some(HirExpr::Cast {
+            ty: type_from_size(vn.size, false),
+            expr: Box::new(expr),
+        }))
     }
 
     fn is_zero_copy(op: &PcodeOp) -> bool {
@@ -2367,6 +2424,41 @@ impl<'a> PreviewBuilder<'a> {
                 .inputs
                 .first()
                 .is_some_and(|input| input.is_constant && input.constant_val == 0)
+    }
+
+    /// True when `op` definitively clears `output`'s storage (upper-byte zeroing
+    /// for partial-register composition).
+    ///
+    /// Covers:
+    /// - `mov reg, 0`
+    /// - `xor reg, reg` / `sub reg, reg` (x86 zeroing idioms used before setcc)
+    /// - `and reg, 0`
+    fn is_register_clear_def(op: &PcodeOp, output: &Varnode) -> bool {
+        if Self::is_zero_copy(op) {
+            return true;
+        }
+        if !is_register_space_id(output.space_id) {
+            return false;
+        }
+        match op.opcode {
+            PcodeOpcode::IntXor | PcodeOpcode::IntSub if op.inputs.len() >= 2 => {
+                let a = &op.inputs[0];
+                let b = &op.inputs[1];
+                !a.is_constant
+                    && !b.is_constant
+                    && a.space_id == output.space_id
+                    && b.space_id == output.space_id
+                    && a.offset == output.offset
+                    && b.offset == output.offset
+                    && a.size == output.size
+                    && b.size == output.size
+            }
+            PcodeOpcode::IntAnd if op.inputs.len() >= 2 => op
+                .inputs
+                .iter()
+                .any(|input| input.is_constant && input.constant_val == 0),
+            _ => false,
+        }
     }
 
     fn varnode_ranges_overlap(

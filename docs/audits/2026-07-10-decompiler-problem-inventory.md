@@ -44,8 +44,8 @@ Measured with release CLI against `control_flow_gcc-m32_O2.exe` (2026-07-10).
 | `clamp` | Partial | Semantic shape OK; flag temps (`of`/`sf`/`zf`) noise; hoist-dependent param order |
 | `signum` | Partial | Returns 1 / -setnz path; extra block braces; return type uchar |
 | `checksum` | Partial | Loop OK; `len` typed as `uchar *`; cast noise |
-| `saturating_add` | Improving | **F1** + primary-return keep + if-goto fuse Return + **tail-cmov materialize** (same-block forward terminator skip + primary-return HW name): m32 O2 recovers `eax = a+b`, `a` vs `sum` compare (not `eax < eax`), underflow `eax = 2147483648` (INT_MIN bits), INT_MAX arm. Nesting/flag noise and signed print of INT_MIN still residual. |
-| `classify_range` | Bad | Flag soup; setnz/neg/cmovg not recovered as value classes |
+| `saturating_add` | Good | m32/gcc O0+O2 **5/5**. Tail-cmov INT_MIN + primary-return HW name; printer shows `-2147483648`. Nesting/flag noise residual. |
+| `classify_range` | Improving | **m32 O2 5/5** after xor+setcc partial-reg composition (`try_lower_zero_extended_partial_register` recognizes `xor reg,reg` and zero-before-setcc). High path folds to `(value != 10) + 2`. Low path still flag-noisy (setnz/neg/cmovg). gcc O2 residual 4/5. |
 
 ## Problem families (canonical)
 

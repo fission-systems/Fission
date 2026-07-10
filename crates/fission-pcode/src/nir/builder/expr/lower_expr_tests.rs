@@ -212,6 +212,79 @@ fn same_block_partial_register_write_with_zeroed_upper_replaces_stale_wide_def()
     );
 }
 
+/// classify_range / setcc high path: `xor eax,eax; setnz al; add eax,2; ret`
+/// must compose to `return (!zf) + 2`, not constant-fold through the pre-setcc zero.
+#[test]
+fn x86_32_xor_setnz_add_composes_partial_into_full_return() {
+    use crate::nir::cspec::test_maps::apply_preview_cspec;
+    use crate::nir::support::CallingConvention;
+
+    let eax4 = register(0, 4);
+    let eax1 = register(0, 1);
+    let zf = register(0x206, 1);
+    let setnz_tmp = varnode(0x17c00); // unique; resize to 1 below
+    let setnz_tmp = Varnode {
+        size: 1,
+        ..setnz_tmp
+    };
+    let mut options = test_options();
+    options.pe_x64_only = false;
+    options.is_64bit = false;
+    options.pointer_size = 4;
+    options.format = "PE32".to_string();
+    options.image_base = 0x401000;
+    options.sections = vec![(0x401000, 0x402000)];
+    options.calling_convention = CallingConvention::X86_32;
+    apply_preview_cspec(&mut options);
+
+    // junk return address (epilogue-style RET)
+    let ret_addr = register(0x284, 4);
+    let pcode = pcode_function(vec![block_at(
+        0x1000,
+        0,
+        vec![
+            // xor eax, eax
+            op(
+                0,
+                PcodeOpcode::IntXor,
+                Some(eax4.clone()),
+                vec![eax4.clone(), eax4.clone()],
+            ),
+            // setnz al  (zf already live-in for the test)
+            op(
+                1,
+                PcodeOpcode::BoolNegate,
+                Some(setnz_tmp.clone()),
+                vec![zf.clone()],
+            ),
+            op(2, PcodeOpcode::Copy, Some(eax1), vec![setnz_tmp]),
+            // add eax, 2
+            op(
+                3,
+                PcodeOpcode::IntAdd,
+                Some(eax4.clone()),
+                vec![eax4.clone(), constant_sized(2, 4)],
+            ),
+            op(4, PcodeOpcode::Return, None, vec![ret_addr]),
+        ],
+    )]);
+
+    let code = render_mlil_preview(&pcode, "xor_setnz_add", 0x1000, &options).expect("render");
+    // Must not collapse to bare `return 2` (ignoring setnz).
+    assert!(
+        !code.lines().any(|l| l.trim() == "return 2;"),
+        "setnz low-byte must feed add/return, got:\n{code}"
+    );
+    assert!(
+        code.contains("return")
+            && (code.contains("+ 2")
+                || code.contains("+2")
+                || code.contains("+= 2")
+                || code.contains("eax")),
+        "expected composed setnz+add return, got:\n{code}"
+    );
+}
+
 #[test]
 fn partial_register_zero_extend_ignores_stale_virtual_lowering_site_bound() {
     let mut options = test_options();
