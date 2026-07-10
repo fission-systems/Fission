@@ -139,17 +139,11 @@ impl<'a> PreviewBuilder<'a> {
         block_idx: usize,
         output: &Varnode,
     ) -> Option<String> {
-        if !matches!(
-            self.options.calling_convention,
-            CallingConvention::WindowsX64
-                | CallingConvention::SystemVAmd64
-                | CallingConvention::X86_32
-        ) {
-            return None;
-        }
+        // Admit via ABI slot / primary return / register-space candidate only.
+        // Do not gate on CallingConvention enum (ADR 0009 / debt D2): the seed
+        // walk below is CFG + materialized names, not x86-specific policy.
         let is_param = self.abi_state().param_slot_for_varnode(output).is_some();
-        // x86-32 return / accumulator register is EAX (offset 0); same encoding as RAX.
-        let is_return_reg = is_register_space_id(output.space_id) && output.offset == 0x00;
+        let is_return_reg = self.register_namer().is_primary_return_register(output);
         let is_gpr = Self::is_loop_carried_register_update_candidate(output);
         if !is_param && !is_return_reg && !is_gpr {
             return None;

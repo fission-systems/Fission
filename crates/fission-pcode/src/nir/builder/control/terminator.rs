@@ -1032,6 +1032,24 @@ impl<'a> PreviewBuilder<'a> {
         {
             return Ok(Some(expr));
         }
+        // Epilogue-style multi-pred RET (e.g. x86-32 pop/leave + ret): Return's
+        // p-code input is the return address, not the ABI return register.
+        // Predecessor arms may write *different* values into the primary return
+        // register (sum vs INT_MIN cmov). Do not require equal lowered pred
+        // exprs — emit the live primary return binding at the join.
+        if self.uses_primary_return_registers()
+            && self.is_epilogue_style_return_join_block(idx)
+        {
+            if let Some(expr) = self.live_primary_return_register_expr(block, term_idx)? {
+                if preview_builder_diag_enabled() {
+                    eprintln!(
+                        "[DIAG] return recovery: block={} path=epilogue_join_live_primary expr={:?}",
+                        idx, expr
+                    );
+                }
+                return Ok(Some(expr));
+            }
+        }
         if self.uses_primary_return_registers()
             && !self.side_effect_consumes_primary_return_register_before(block, term_idx)
             && self

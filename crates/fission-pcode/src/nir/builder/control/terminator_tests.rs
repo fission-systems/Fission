@@ -710,6 +710,151 @@ fn x86_32_diamond_return_join_recovers_eax_despite_epilogue() {
     );
 }
 
+/// saturating_add-like: EAX holds the sum on the fallthrough arm and may be
+/// overwritten on the overflow arm; shared epilogue RET must still emit a
+/// non-empty `return` of the live primary return register.
+#[test]
+fn x86_32_epilogue_join_live_eax_when_pred_values_differ() {
+    let eax = Varnode {
+        space_id: RUST_SLEIGH_REGISTER_SPACE_ID,
+        offset: 0,
+        size: 4,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let ebp = Varnode {
+        space_id: RUST_SLEIGH_REGISTER_SPACE_ID,
+        offset: 20,
+        size: 4,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let cond = Varnode {
+        space_id: crate::nir::UNIQUE_SPACE_ID,
+        offset: 0x300,
+        size: 1,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let junk = Varnode {
+        space_id: RUST_SLEIGH_REGISTER_SPACE_ID,
+        offset: 0x284,
+        size: 4,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let pcode = PcodeFunction {
+        blocks: vec![
+            // entry: EAX = 42; if cond -> overflow arm else fallthrough join
+            PcodeBasicBlock {
+                index: 0,
+                start_address: 0x1000,
+                successors: vec![1, 2],
+                ops: vec![
+                    PcodeOp {
+                        seq_num: 0,
+                        opcode: PcodeOpcode::Copy,
+                        address: 0x1000,
+                        output: Some(eax.clone()),
+                        inputs: vec![Varnode::constant(42, 4)],
+                        asm_mnemonic: None,
+                    },
+                    PcodeOp {
+                        seq_num: 1,
+                        opcode: PcodeOpcode::CBranch,
+                        address: 0x1001,
+                        output: None,
+                        inputs: vec![Varnode::constant(0x1010, 4), cond],
+                        asm_mnemonic: None,
+                    },
+                ],
+            },
+            // overflow arm: EAX = INT_MIN; goto join
+            PcodeBasicBlock {
+                index: 1,
+                start_address: 0x1010,
+                successors: vec![2],
+                ops: vec![
+                    PcodeOp {
+                        seq_num: 2,
+                        opcode: PcodeOpcode::Copy,
+                        address: 0x1010,
+                        output: Some(eax.clone()),
+                        inputs: vec![Varnode::constant(i64::from(i32::MIN), 4)],
+                        asm_mnemonic: None,
+                    },
+                    PcodeOp {
+                        seq_num: 3,
+                        opcode: PcodeOpcode::Branch,
+                        address: 0x1011,
+                        output: None,
+                        inputs: vec![Varnode::constant(0x1020, 4)],
+                        asm_mnemonic: None,
+                    },
+                ],
+            },
+            // join: epilogue + RET (stack return address junk, not EAX)
+            PcodeBasicBlock {
+                index: 2,
+                start_address: 0x1020,
+                successors: Vec::new(),
+                ops: vec![
+                    PcodeOp {
+                        seq_num: 4,
+                        opcode: PcodeOpcode::Copy,
+                        address: 0x1020,
+                        output: Some(ebp),
+                        inputs: vec![Varnode::constant(0, 4)],
+                        asm_mnemonic: None,
+                    },
+                    PcodeOp {
+                        seq_num: 5,
+                        opcode: PcodeOpcode::Return,
+                        address: 0x1021,
+                        output: None,
+                        inputs: vec![junk],
+                        asm_mnemonic: None,
+                    },
+                ],
+            },
+        ],
+    };
+    let options = preview_options_with_cspec(MlilPreviewOptions {
+        pe_x64_only: false,
+        is_64bit: false,
+        is_big_endian: false,
+        pointer_size: 4,
+        format: "PE32".to_string(),
+        image_base: 0x1000,
+        sections: vec![(0x1000, 0x2000)],
+        region_linearize_structuring: false,
+        force_linear_structuring: false,
+        conservative_irreducible_fallback: false,
+        structuring_engine: StructuringEngineKind::GraphCollapseV1,
+        global_names: Default::default(),
+        global_sizes: Default::default(),
+        relocation_names: Default::default(),
+        calling_convention: CallingConvention::X86_32,
+        ..Default::default()
+    });
+
+    let code = render_mlil_preview(&pcode, "sat_add_ret", 0x1000, &options).expect("render");
+    // Must not emit bare `return;` — live primary return must appear.
+    assert!(
+        !code.contains("return;") || code.contains("return ") && !code.lines().any(|l| l.trim() == "return;"),
+        "empty return without value:\n{code}"
+    );
+    assert!(
+        code.contains("return 42")
+            || code.contains("return -2147483648")
+            || code.contains("return 0x80000000")
+            || code.contains("return eax")
+            || code.contains("return uVar")
+            || code.contains("return iVar"),
+        "expected live EAX return, got:\n{code}"
+    );
+}
+
 #[test]
 fn arm32_return_target_register_uses_r0_value_not_lr_target() {
     let lr = Varnode {
