@@ -681,6 +681,11 @@ impl<'a> PreviewBuilder<'a> {
         if replacement_plan.is_complete()
             && loop_carried_lhs_name.is_none()
             && merge_lhs_name.is_none()
+            // Primary return register writes must stay as bindings: SLEIGH Return
+            // inputs are control/stack targets, so same-block consumer analysis
+            // under-counts ABI live-out (saturating_add: `eax = a+b` must dominate
+            // epilogue `return eax`).
+            && !self.register_namer().is_primary_return_register(output)
         {
             self.trace_materialization_plan(
                 block_addr,
@@ -3218,6 +3223,11 @@ impl<'a> PreviewBuilder<'a> {
         output: &Varnode,
         rhs: &HirExpr,
     ) -> bool {
+        // ABI primary return storage is live-out past RET even when no same-block
+        // p-code op reads it (Return varnode is the return *address*).
+        if self.register_namer().is_primary_return_register(output) {
+            return false;
+        }
         let uses = self.output_use_sites_in_block(block, op_idx, output);
         uses.len() == 1
             && Self::expr_is_low_cost_builder_inline_candidate(rhs)

@@ -2320,3 +2320,158 @@ fn duplicate_start_join_preserves_register_addend_after_zero_extend() {
     assert!(code.contains(" / "), "{code}");
     assert!(!code.contains("{\n    }"), "{code}");
 }
+
+/// saturating_add shape: primary return reg gets a+b; must keep the binding even
+/// when the only same-block p-code consumer can inline the add into a compare.
+#[test]
+fn primary_return_add_is_materialized_despite_single_block_inline_consumer() {
+    use crate::nir::support::{CallingConvention, RUST_SLEIGH_REGISTER_SPACE_ID};
+    use crate::nir::types::{MlilPreviewOptions, StructuringEngineKind};
+    use crate::nir::{PreviewBuilder, render_mlil_preview};
+    use crate::pcode::{PcodeBasicBlock, PcodeFunction, PcodeOp, PcodeOpcode, Varnode};
+
+    let eax = Varnode {
+        space_id: RUST_SLEIGH_REGISTER_SPACE_ID,
+        offset: 0,
+        size: 4,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let ecx = Varnode {
+        space_id: RUST_SLEIGH_REGISTER_SPACE_ID,
+        offset: 4,
+        size: 4,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let edx = Varnode {
+        space_id: RUST_SLEIGH_REGISTER_SPACE_ID,
+        offset: 8,
+        size: 4,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let sum_tmp = Varnode {
+        space_id: crate::nir::UNIQUE_SPACE_ID,
+        offset: 0x6c00,
+        size: 4,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let sf = Varnode {
+        space_id: RUST_SLEIGH_REGISTER_SPACE_ID,
+        offset: 0x207,
+        size: 1,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let pcode = PcodeFunction {
+        blocks: vec![
+            PcodeBasicBlock {
+                index: 0,
+                start_address: 0x1000,
+                successors: vec![1],
+                ops: vec![
+                    PcodeOp {
+                        seq_num: 0,
+                        opcode: PcodeOpcode::Copy,
+                        address: 0x1000,
+                        output: Some(ecx.clone()),
+                        inputs: vec![Varnode::constant(3, 4)],
+                        asm_mnemonic: None,
+                    },
+                    PcodeOp {
+                        seq_num: 1,
+                        opcode: PcodeOpcode::Copy,
+                        address: 0x1001,
+                        output: Some(edx.clone()),
+                        inputs: vec![Varnode::constant(5, 4)],
+                        asm_mnemonic: None,
+                    },
+                    PcodeOp {
+                        seq_num: 2,
+                        opcode: PcodeOpcode::IntAdd,
+                        address: 0x1002,
+                        output: Some(sum_tmp.clone()),
+                        inputs: vec![ecx.clone(), edx.clone()],
+                        asm_mnemonic: None,
+                    },
+                    PcodeOp {
+                        seq_num: 3,
+                        opcode: PcodeOpcode::Copy,
+                        address: 0x1002,
+                        output: Some(eax.clone()),
+                        inputs: vec![sum_tmp],
+                        asm_mnemonic: None,
+                    },
+                    // Only same-block "consumer" of eax for replacement analysis is this cmp.
+                    PcodeOp {
+                        seq_num: 4,
+                        opcode: PcodeOpcode::IntSLess,
+                        address: 0x1003,
+                        output: Some(sf),
+                        inputs: vec![eax.clone(), ecx],
+                        asm_mnemonic: None,
+                    },
+                    PcodeOp {
+                        seq_num: 5,
+                        opcode: PcodeOpcode::Branch,
+                        address: 0x1004,
+                        output: None,
+                        inputs: vec![Varnode {
+                            space_id: 3,
+                            offset: 0x1010,
+                            size: 4,
+                            is_constant: false,
+                            constant_val: 0,
+                        }],
+                        asm_mnemonic: None,
+                    },
+                ],
+            },
+            PcodeBasicBlock {
+                index: 1,
+                start_address: 0x1010,
+                successors: vec![],
+                ops: vec![PcodeOp {
+                    seq_num: 6,
+                    opcode: PcodeOpcode::Return,
+                    address: 0x1010,
+                    output: None,
+                    inputs: vec![Varnode {
+                        space_id: RUST_SLEIGH_REGISTER_SPACE_ID,
+                        offset: 0x284,
+                        size: 4,
+                        is_constant: false,
+                        constant_val: 0,
+                    }],
+                    asm_mnemonic: None,
+                }],
+            },
+        ],
+    };
+    let mut options = MlilPreviewOptions {
+        pe_x64_only: false,
+        is_64bit: false,
+        pointer_size: 4,
+        format: "PE32".to_string(),
+        image_base: 0x1000,
+        sections: vec![(0x1000, 0x2000)],
+        calling_convention: CallingConvention::X86_32,
+        structuring_engine: StructuringEngineKind::GraphCollapseV1,
+        ..Default::default()
+    };
+    crate::nir::cspec::test_maps::apply_preview_cspec(&mut options);
+    let code = render_mlil_preview(&pcode, "sum_ret", 0x1000, &options).expect("render");
+    assert!(
+        code.contains("eax =") || code.contains("return 8") || code.contains("return 3 + 5"),
+        "expected sum materialization or constant fold of sum, got:\n{code}"
+    );
+    assert!(
+        !code.contains("return eax;")
+            || code.contains("eax =")
+            || code.contains("return 8")
+            || code.contains("return "),
+        "bare return eax without dominating sum def:\n{code}"
+    );
+}
