@@ -669,10 +669,12 @@ impl<'a> PreviewBuilder<'a> {
             && is_register_space_id(output.space_id)
             && matches!(
                 self.options.calling_convention,
-                CallingConvention::WindowsX64 | CallingConvention::SystemVAmd64
+                CallingConvention::WindowsX64
+                    | CallingConvention::SystemVAmd64
+                    | CallingConvention::X86_32
             ) {
             // Only promote when this block is a loop head and the output is a
-            // known x86-64 GPR family member (xor-family check via gpr_family_index).
+            // known x86 GPR family member (xor-family check via gpr_family_index).
             let output_key = VarnodeKey::from(output);
             let is_gpr = self.gpr_family_index_for_key(&output_key).is_some();
             let is_loop_head = self.loop_bodies.iter().any(|lb| lb.head == block_idx);

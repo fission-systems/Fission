@@ -141,11 +141,14 @@ impl<'a> PreviewBuilder<'a> {
     ) -> Option<String> {
         if !matches!(
             self.options.calling_convention,
-            CallingConvention::WindowsX64 | CallingConvention::SystemVAmd64
+            CallingConvention::WindowsX64
+                | CallingConvention::SystemVAmd64
+                | CallingConvention::X86_32
         ) {
             return None;
         }
         let is_param = self.abi_state().param_slot_for_varnode(output).is_some();
+        // x86-32 return / accumulator register is EAX (offset 0); same encoding as RAX.
         let is_return_reg = is_register_space_id(output.space_id) && output.offset == 0x00;
         let is_gpr = Self::is_loop_carried_register_update_candidate(output);
         if !is_param && !is_return_reg && !is_gpr {

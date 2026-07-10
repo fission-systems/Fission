@@ -407,11 +407,19 @@ fn loop_carried_register_update_does_not_promote_prior_defined_abi_scratch() {
         &rdx,
     );
 
-    assert_ne!(name.as_deref(), Some("param_2"));
-    assert!(
-        name.is_none(),
+    assert_ne!(
+        name.as_deref(),
+        Some("param_2"),
         "prior-defined ABI scratch should not be promoted to param_2: {name:?}"
     );
+    // Hardware register identity is allowed so self-reads keep loop-carried
+    // accumulation (`rdx = rdx + 1`) instead of folding the pre-loop constant.
+    if let Some(name) = name.as_deref() {
+        assert!(
+            matches!(name, "rdx" | "edx" | "rax" | "eax"),
+            "expected hardware register binding, got {name}"
+        );
+    }
 }
 
 #[test]
@@ -627,4 +635,186 @@ fn aarch64_loop_carried_register_update_reuses_wide_prior_for_w_gpr_update() {
             .any(|stmt| lhs_var(stmt) == Some(init_name)),
         "AArch64 W-register loop update should reuse the X-register initializer binding: {loop_body:?}"
     );
+}
+
+#[test]
+fn m32_popcount_loop_carries_add_and_shr() {
+    // Minimal x86-32 count_bits O2 shape:
+    //   entry: edx=0; eax=param seed; if eax==0 exit
+    //   loop:  ecx=eax; ecx&=1; edx+=ecx; eax>>=1; if eax!=0 loop
+    //   exit:  return edx
+    //
+    // Invariant: loop-carried IntAdd/IntRight must keep self-reads as the
+    // accumulator/induction binding (not Const(0) / fresh temp), so NIR stays
+    // `edx = edx + ecx` and `ind = ind >> 1`.
+    let eax = reg(0x0, 4);
+    let ecx = reg(0x4, 4);
+    let edx = reg(0x8, 4);
+    let zf = reg(0x206, 1);
+    let mut blocks = vec![
+        block_at(
+            0x1000,
+            0,
+            vec![
+                op(
+                    0,
+                    PcodeOpcode::IntXor,
+                    Some(edx.clone()),
+                    vec![edx.clone(), edx.clone()],
+                ),
+                // Seed EAX with a prior definition that is NOT a register ABI
+                // param (x86-32 stack args). Hardware-register fallback must
+                // still keep the IntRight self-update on EAX.
+                op(1, PcodeOpcode::Copy, Some(eax.clone()), vec![constant(0x55)]),
+                op(
+                    2,
+                    PcodeOpcode::IntEqual,
+                    Some(zf.clone()),
+                    vec![eax.clone(), constant(0)],
+                ),
+                op(
+                    3,
+                    PcodeOpcode::CBranch,
+                    None,
+                    vec![constant(0x1030), zf.clone()],
+                ),
+            ],
+        ),
+        block_at(
+            0x1010,
+            1,
+            vec![
+                op(4, PcodeOpcode::Copy, Some(ecx.clone()), vec![eax.clone()]),
+                op(
+                    5,
+                    PcodeOpcode::IntAnd,
+                    Some(ecx.clone()),
+                    vec![ecx.clone(), constant(1)],
+                ),
+                op(
+                    6,
+                    PcodeOpcode::IntAdd,
+                    Some(edx.clone()),
+                    vec![edx.clone(), ecx.clone()],
+                ),
+                op(
+                    7,
+                    PcodeOpcode::IntRight,
+                    Some(eax.clone()),
+                    vec![eax.clone(), constant(1)],
+                ),
+                op(
+                    8,
+                    PcodeOpcode::IntEqual,
+                    Some(zf.clone()),
+                    vec![eax.clone(), constant(0)],
+                ),
+                op(
+                    9,
+                    PcodeOpcode::BoolNegate,
+                    Some(varnode(0x50)),
+                    vec![zf.clone()],
+                ),
+                op(
+                    10,
+                    PcodeOpcode::CBranch,
+                    None,
+                    vec![constant(0x1010), varnode(0x50)],
+                ),
+            ],
+        ),
+        block_at(
+            0x1030,
+            2,
+            vec![
+                op(11, PcodeOpcode::Copy, Some(eax.clone()), vec![edx.clone()]),
+                op(12, PcodeOpcode::Return, None, vec![]),
+            ],
+        ),
+    ];
+    blocks[0].successors = vec![1, 2];
+    blocks[1].successors = vec![1, 2];
+    blocks[2].successors = vec![];
+    let pcode = pcode_function(blocks);
+    let mut options = test_options();
+    options.is_64bit = false;
+    options.pointer_size = 4;
+    options.pe_x64_only = false;
+    options.calling_convention = CallingConvention::X86_32;
+    let mut builder = PreviewBuilder::new(&pcode, &options, None);
+
+    let _entry = builder
+        .lower_block_stmts(&pcode.blocks[0])
+        .expect("entry");
+    let loop_body = builder
+        .lower_block_stmts(&pcode.blocks[1])
+        .expect("loop");
+
+    // IntAdd must keep both operands (edx + ecx), not collapse to ecx alone.
+    let add_stmt = loop_body.iter().find(|s| {
+        matches!(
+            s,
+            HirStmt::Assign {
+                rhs: HirExpr::Binary {
+                    op: HirBinaryOp::Add,
+                    ..
+                },
+                ..
+            }
+        )
+    });
+    assert!(
+        add_stmt.is_some(),
+        "expected loop-carried add assignment, got {loop_body:?}"
+    );
+    if let Some(HirStmt::Assign {
+        lhs: HirLValue::Var(acc),
+        rhs:
+            HirExpr::Binary {
+                lhs: a,
+                rhs: b,
+                ..
+            },
+        ..
+    }) = add_stmt
+    {
+        assert!(
+            matches!(a.as_ref(), HirExpr::Var(name) if name == acc)
+                && matches!(b.as_ref(), HirExpr::Var(_)),
+            "add should be self-update acc = acc + bit (not Const(0)+ecx), got {add_stmt:?}"
+        );
+    }
+
+    // IntRight must assign back into the loop-carried induction register.
+    let shr_stmt = loop_body.iter().find(|s| {
+        matches!(
+            s,
+            HirStmt::Assign {
+                rhs: HirExpr::Binary {
+                    op: HirBinaryOp::Shr | HirBinaryOp::Sar,
+                    ..
+                },
+                ..
+            }
+        )
+    });
+    assert!(
+        shr_stmt.is_some(),
+        "expected loop-carried shift assignment, got {loop_body:?}"
+    );
+    if let Some(HirStmt::Assign {
+        lhs: HirLValue::Var(ind),
+        rhs:
+            HirExpr::Binary {
+                lhs: a,
+                ..
+            },
+        ..
+    }) = shr_stmt
+    {
+        assert!(
+            matches!(a.as_ref(), HirExpr::Var(name) if name == ind),
+            "shift should be self-update ind = ind >> 1, got {shr_stmt:?}"
+        );
+    }
 }
