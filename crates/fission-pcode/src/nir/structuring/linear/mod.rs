@@ -1014,12 +1014,24 @@ impl<'a> PreviewBuilder<'a> {
         if defs.is_empty() {
             return false;
         }
-        join_block
+        // Include the join terminator itself: a Return's inputs are the live-in
+        // return value. Skipping the Return op made pure arms like
+        // `eax = 1; goto join; return eax` look like empty forwards and caused
+        // short-circuit OR recovery to drop the positive signum arm.
+        if join_block
             .ops
             .iter()
-            .take(join_term_idx)
+            .take(join_term_idx + 1)
             .flat_map(|op| op.inputs.iter())
             .any(|input| defs.iter().any(|def| Self::varnodes_overlap(def, input)))
+        {
+            return true;
+        }
+        // x86 epilogue joins often return via a stack-loaded address while the
+        // *value* is the ABI primary return register (EAX/RAX). Treat a def of
+        // that register in the forward arm as return-live-in as well.
+        let namer = self.register_namer();
+        defs.iter().any(|def| namer.is_primary_return_register(def))
     }
 
     fn varnodes_overlap(lhs: &Varnode, rhs: &Varnode) -> bool {

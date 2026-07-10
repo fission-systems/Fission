@@ -9,6 +9,7 @@ mod normalize_defuse;
 mod normalize_flag_recovery;
 mod normalize_slots;
 mod relative_branch_targets;
+mod signum_struct;
 mod clamp_dump;
 mod snapshot_printer;
 mod structuring_conditionals;
