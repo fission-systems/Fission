@@ -125,6 +125,10 @@
          <lastmod>2026-07-10</lastmod>
     </url>
     <url>
+         <loc>https://sjkim1127.github.io/Fission/audits/2026-07-10-decompiler-problem-inventory/</loc>
+         <lastmod>2026-07-10</lastmod>
+    </url>
+    <url>
          <loc>https://sjkim1127.github.io/Fission/audits/2026-07-10-isa-semantic-debt-inventory/</loc>
          <lastmod>2026-07-10</lastmod>
     </url>
@@ -234,6 +238,10 @@
     </url>
     <url>
          <loc>https://sjkim1127.github.io/Fission/proposals/2026-07-10-retire-hoist-param-alias/</loc>
+         <lastmod>2026-07-10</lastmod>
+    </url>
+    <url>
+         <loc>https://sjkim1127.github.io/Fission/proposals/2026-07-10-variable-merge-cooccur-barrier/</loc>
          <lastmod>2026-07-10</lastmod>
     </url>
     <url>

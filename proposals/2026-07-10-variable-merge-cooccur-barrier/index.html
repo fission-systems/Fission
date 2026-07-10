@@ -10,7 +10,7 @@
       
       
       
-        <link rel="canonical" href="https://sjkim1127.github.io/Fission/audits/">
+        <link rel="canonical" href="https://sjkim1127.github.io/Fission/proposals/2026-07-10-variable-merge-cooccur-barrier/">
       
       
       
@@ -18,19 +18,19 @@
         
       
       
-      <link rel="icon" href="../assets/images/favicon.png">
+      <link rel="icon" href="../../assets/images/favicon.png">
       <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
     
     
       
-        <title>Audit Reports - Fission</title>
+        <title>Decompiler Change Proposal: Disjoint merge respects co-occurrence (F1) - Fission</title>
       
     
     
-      <link rel="stylesheet" href="../assets/stylesheets/main.484c7ddc.min.css">
+      <link rel="stylesheet" href="../../assets/stylesheets/main.484c7ddc.min.css">
       
         
-        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
       
       
 
@@ -49,7 +49,7 @@
       
     
     
-    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
     
       
 
@@ -74,7 +74,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#audit-reports" class="md-skip">
+        <a href="#decompiler-change-proposal-disjoint-merge-respects-co-occurrence-f1" class="md-skip">
           Skip to content
         </a>
       
@@ -88,7 +88,7 @@
 
 <header class="md-header" data-md-component="header">
   <nav class="md-header__inner md-grid" aria-label="Header">
-    <a href=".." title="Fission" class="md-header__button md-logo" aria-label="Fission" data-md-component="logo">
+    <a href="../.." title="Fission" class="md-header__button md-logo" aria-label="Fission" data-md-component="logo">
       
   
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
@@ -108,7 +108,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Audit Reports
+              Decompiler Change Proposal: Disjoint merge respects co-occurrence (F1)
             
           </span>
         </div>
@@ -231,7 +231,7 @@
   
   
     <li class="md-tabs__item">
-      <a href=".." class="md-tabs__link">
+      <a href="../.." class="md-tabs__link">
         
   
   
@@ -250,7 +250,7 @@
   
   
     <li class="md-tabs__item">
-      <a href="../PROJECT_MAP/" class="md-tabs__link">
+      <a href="../../PROJECT_MAP/" class="md-tabs__link">
         
   
   
@@ -269,7 +269,7 @@
   
   
     <li class="md-tabs__item">
-      <a href="../CLI/" class="md-tabs__link">
+      <a href="../../CLI/" class="md-tabs__link">
         
   
   
@@ -288,7 +288,7 @@
   
   
     <li class="md-tabs__item">
-      <a href="../architecture/ARCHITECTURE/" class="md-tabs__link">
+      <a href="../../architecture/ARCHITECTURE/" class="md-tabs__link">
         
   
   
@@ -307,7 +307,7 @@
   
   
     <li class="md-tabs__item">
-      <a href="../QUALITY_METRICS/" class="md-tabs__link">
+      <a href="../../QUALITY_METRICS/" class="md-tabs__link">
         
   
   
@@ -326,7 +326,7 @@
   
   
     <li class="md-tabs__item">
-      <a href="../EVALUATION/" class="md-tabs__link">
+      <a href="../../EVALUATION/" class="md-tabs__link">
         
   
   
@@ -345,7 +345,7 @@
   
   
     <li class="md-tabs__item">
-      <a href="../contributing/" class="md-tabs__link">
+      <a href="../../contributing/" class="md-tabs__link">
         
   
   
@@ -366,7 +366,7 @@
     
     
       <li class="md-tabs__item">
-        <a href="../MALWARE_SAMPLE_POLICY/" class="md-tabs__link">
+        <a href="../../MALWARE_SAMPLE_POLICY/" class="md-tabs__link">
           
   
   
@@ -400,7 +400,7 @@
 
 <nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
   <label class="md-nav__title" for="__drawer">
-    <a href=".." title="Fission" class="md-nav__button md-logo" aria-label="Fission" data-md-component="logo">
+    <a href="../.." title="Fission" class="md-nav__button md-logo" aria-label="Fission" data-md-component="logo">
       
   
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
@@ -430,7 +430,7 @@
   
   
     <li class="md-nav__item">
-      <a href=".." class="md-nav__link">
+      <a href="../.." class="md-nav__link">
         
   
   
@@ -457,7 +457,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../PROJECT_MAP/" class="md-nav__link">
+      <a href="../../PROJECT_MAP/" class="md-nav__link">
         
   
   
@@ -484,7 +484,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../CLI/" class="md-nav__link">
+      <a href="../../CLI/" class="md-nav__link">
         
   
   
@@ -511,7 +511,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../architecture/ARCHITECTURE/" class="md-nav__link">
+      <a href="../../architecture/ARCHITECTURE/" class="md-nav__link">
         
   
   
@@ -538,7 +538,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../QUALITY_METRICS/" class="md-nav__link">
+      <a href="../../QUALITY_METRICS/" class="md-nav__link">
         
   
   
@@ -565,7 +565,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../EVALUATION/" class="md-nav__link">
+      <a href="../../EVALUATION/" class="md-nav__link">
         
   
   
@@ -592,7 +592,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../contributing/" class="md-nav__link">
+      <a href="../../contributing/" class="md-nav__link">
         
   
   
@@ -673,7 +673,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../MALWARE_SAMPLE_POLICY/" class="md-nav__link">
+      <a href="../../MALWARE_SAMPLE_POLICY/" class="md-nav__link">
         
   
   
@@ -701,7 +701,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../VERSIONING/" class="md-nav__link">
+      <a href="../../VERSIONING/" class="md-nav__link">
         
   
   
@@ -729,7 +729,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../RELEASE/" class="md-nav__link">
+      <a href="../../RELEASE/" class="md-nav__link">
         
   
   
@@ -777,6 +777,58 @@
     
   
   
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#1-baseline" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Baseline
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-owner" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Owner
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-invariant" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Invariant
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-validation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. Validation
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
 </nav>
                   </div>
                 </div>
@@ -795,56 +847,32 @@
   
 
 
-<h1 id="audit-reports">Audit Reports<a class="headerlink" href="#audit-reports" title="Permanent link">&para;</a></h1>
-<p>This directory stores generated or hand-curated architecture/process audit
-reports. Reports here are evidence for review, not production inputs.</p>
-<p>Expected report families:</p>
+<h1 id="decompiler-change-proposal-disjoint-merge-respects-co-occurrence-f1">Decompiler Change Proposal: Disjoint merge respects co-occurrence (F1)<a class="headerlink" href="#decompiler-change-proposal-disjoint-merge-respects-co-occurrence-f1" title="Permanent link">&para;</a></h1>
+<h2 id="1-baseline">1. Baseline<a class="headerlink" href="#1-baseline" title="Permanent link">&para;</a></h2>
 <ul>
-<li>benchmark smell scans,</li>
-<li>AI prompt leak scans,</li>
-<li>architecture isolation scans,</li>
-<li>ISA / semantic debt inventories (ADR 0009 backlog),</li>
-<li>six-month regression replay summaries,</li>
-<li>metric gaming / Goodhart checks.</li>
+<li>Family <strong>F1</strong> (binding collapse): m32 O2 <code>saturating_add</code></li>
+<li>Symptom: <code>eax = param_1; eax = param_2; if (eax + eax &lt; eax)</code> — a, b, and sum
+  forced onto one name</li>
+<li>Intermediate GT dump still had <code>ecx</code> and sum distinct before merge-type-loop</li>
 </ul>
-<table>
-<thead>
-<tr>
-<th>Report</th>
-<th>Notes</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><a href="2026-07-10-decompiler-problem-inventory/">2026-07-10-decompiler-problem-inventory.md</a></td>
-<td>Current quality problem families (F1–F6) and ROI ranking</td>
-</tr>
-<tr>
-<td><a href="2026-07-10-isa-semantic-debt-inventory/">2026-07-10-isa-semantic-debt-inventory.md</a></td>
-<td>P0 OK/DEBT/ENV table for NIR ISA gates and emergency passes</td>
-</tr>
-<tr>
-<td><a href="2026-07-04-arch-isolation-scan/">2026-07-04-arch-isolation-scan.md</a></td>
-<td>Noisy token scan of arch/register names in NIR</td>
-</tr>
-<tr>
-<td><a href="2026-07-04-benchmark-smell-scan/">2026-07-04-benchmark-smell-scan.md</a></td>
-<td>Benchmark smell scan</td>
-</tr>
-<tr>
-<td><a href="2026-07-04-metric-gaming/">2026-07-04-metric-gaming.md</a></td>
-<td>Metric gaming / Goodhart checks</td>
-</tr>
-<tr>
-<td><a href="2026-07-04-nir-boundary-scan/">2026-07-04-nir-boundary-scan.md</a></td>
-<td>NIR boundary scan</td>
-</tr>
-<tr>
-<td><a href="2026-07-04-regression-replay/">2026-07-04-regression-replay.md</a></td>
-<td>Regression replay summary</td>
-</tr>
-</tbody>
-</table>
+<h2 id="2-owner">2. Owner<a class="headerlink" href="#2-owner" title="Permanent link">&para;</a></h2>
+<ul>
+<li>[x] Normalize / <code>variable_merge</code> disjoint live-range step</li>
+<li>Copy-alias step already consults <code>collect_cooccurring_var_pairs</code>; disjoint
+  step did not</li>
+</ul>
+<h2 id="3-invariant">3. Invariant<a class="headerlink" href="#3-invariant" title="Permanent link">&para;</a></h2>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>Two locals that co-occur in the same expression (e.g. binary operands, or
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>def and use in one assign) must not be coalesced by speculative disjoint
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>live-range merge. Distinct hardware GPRs must not be coalesced into each
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>other by that step either (they name ABI/storage identity, not free temps).
+</span></code></pre></div>
+<h2 id="4-validation">4. Validation<a class="headerlink" href="#4-validation" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Synthetic HIR: <code>ecx = p1; edx = p2; eax = ecx + edx; return eax</code> survives
+  <code>apply_variable_merge_pass</code> with three distinct names</li>
+<li>Real: saturating_add no longer emits <code>eax + eax</code></li>
+</ul>
 
 
 
@@ -900,10 +928,10 @@ reports. Reports here are evidence for review, not production inputs.</p>
     
       
       
-      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.tabs", "navigation.sections", "navigation.expand", "navigation.top", "search.suggest", "search.highlight", "content.code.copy"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.tabs", "navigation.sections", "navigation.expand", "navigation.top", "search.suggest", "search.highlight", "content.code.copy"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
     
     
-      <script src="../assets/javascripts/bundle.79ae519e.min.js"></script>
+      <script src="../../assets/javascripts/bundle.79ae519e.min.js"></script>
       
     
   </body>
