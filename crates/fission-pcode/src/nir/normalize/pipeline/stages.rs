@@ -11,11 +11,11 @@ use super::super::arith::{
     apply_three_way_compare_pass,
 };
 use super::super::cleanup::{
-    apply_deindirect_pass, apply_expand_load_pass, apply_subvar_trim_pass, apply_switch_norm_pass,
-    canonicalize_minmax_conditional_returns, cast_elision_pass, elide_unused_popcount_assigns,
-    eliminate_dead_local_clobber_assigns, inline_loop_condition_trailing_temps,
-    normalize_dowhile_decrement_condition, prune_unused_dead_local_bindings,
-    prune_unused_temp_bindings, rescue_undeclared_bindings,
+    apply_byte_sum_index_trunc, apply_deindirect_pass, apply_expand_load_pass,
+    apply_subvar_trim_pass, apply_switch_norm_pass, canonicalize_minmax_conditional_returns,
+    cast_elision_pass, elide_unused_popcount_assigns, eliminate_dead_local_clobber_assigns,
+    inline_loop_condition_trailing_temps, normalize_dowhile_decrement_condition,
+    prune_unused_dead_local_bindings, prune_unused_temp_bindings, rescue_undeclared_bindings,
     simplify_empty_and_constant_ifs_recursive, single_pred_label_inline,
 };
 use super::super::global_opt::{
@@ -918,6 +918,14 @@ pub(crate) fn run_stage_cleanup(func: &mut HirFunction, diag: bool, perf: bool) 
     });
     // Subflow / bitmask pruning: optimize redundant bit-widths and bitmasks (subflow.cc).
     run_pass_logged(func, "subflow_pruning_final", perf, apply_subflow_pruning);
+    // Recover `movzx` low-byte after byte+byte sum identity copies (RC4 keystream index).
+    // Runs after subflow so we can re-introduce a necessary `& 0xff` that earlier waves dropped.
+    run_pass_logged(
+        func,
+        "byte_sum_index_trunc",
+        perf,
+        apply_byte_sum_index_trunc,
+    );
     apply_type_signature_fixed_point(func, diag, perf);
     // Residual CF/OF/SF/ZF/PF stores after late materialize/arith waves — drop if unused.
     run_pass_logged(func, "dead_flag_cleanup_final", perf, apply_dead_flag_cleanup_pass);

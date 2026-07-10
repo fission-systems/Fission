@@ -2477,7 +2477,49 @@ impl<'a> PreviewBuilder<'a> {
     ) -> Result<HirExpr, MlilPreviewError> {
         match op.opcode {
             PcodeOpcode::Copy => self.lower_varnode(&op.inputs[0], visiting),
-            PcodeOpcode::Cast | PcodeOpcode::IntZExt | PcodeOpcode::IntSExt => {
+            PcodeOpcode::IntZExt => {
+                // Zero-extend from a narrower source must first keep only the source
+                // width. Classic x86 `movzx r32/r64, r8` after a wider ADD (e.g. RC4
+                // keystream `(s[i]+s[j]) % 256`) is exactly this: the p-code is
+                // `INT_ZEXT edx <- al` after `INT_ADD eax, …`. If the low-byte
+                // truncation is lost, the sum is used as a pointer index and can
+                // go out of bounds of a 256-byte table.
+                let output = op
+                    .output
+                    .as_ref()
+                    .ok_or(MlilPreviewError::UnsupportedExprAddressMaterialization)?;
+                let input = op
+                    .inputs
+                    .first()
+                    .ok_or(MlilPreviewError::UnsupportedExprAddressMaterialization)?;
+                let expr = self.lower_varnode(input, visiting)?;
+                // Partial-register ZExt (`movzx r32, al` / `movzx r32, ax`) must keep a
+                // source-width truncation before widening. Prefer an explicit narrow cast
+                // plus AND mask so normalize cannot drop the low-byte lane when the parent
+                // was a wider ADD (RC4 keystream index: `(s[i]+s[j]) % 256`).
+                // Do not apply this to full-width 4→8 ZExt (ordinary zero-extend).
+                if input.size > 0 && input.size <= 2 && input.size < output.size {
+                    let narrow_ty = type_from_size(input.size, false);
+                    let out_ty = type_from_size(output.size, false);
+                    let bits = (input.size as u32).saturating_mul(8);
+                    let mask = (1i64 << bits) - 1;
+                    let truncated = HirExpr::Cast {
+                        ty: narrow_ty,
+                        expr: Box::new(expr),
+                    };
+                    return Ok(HirExpr::Binary {
+                        op: HirBinaryOp::And,
+                        lhs: Box::new(truncated),
+                        rhs: Box::new(HirExpr::Const(mask, out_ty.clone())),
+                        ty: out_ty,
+                    });
+                }
+                Ok(HirExpr::Cast {
+                    ty: type_from_size(output.size, false),
+                    expr: Box::new(expr),
+                })
+            }
+            PcodeOpcode::Cast | PcodeOpcode::IntSExt => {
                 let output = op
                     .output
                     .as_ref()

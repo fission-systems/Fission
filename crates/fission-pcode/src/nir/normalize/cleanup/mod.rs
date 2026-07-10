@@ -1,5 +1,6 @@
 //! Statement and function-level cleanup passes (labels, temps, casts).
 
+mod byte_sum_index;
 mod casts;
 mod condexe;
 mod control_flow;
@@ -38,6 +39,7 @@ pub(crate) use temp_var::{
 };
 
 // Re-export utility functions used by other modules outside cleanup.
+pub(crate) use byte_sum_index::apply_byte_sum_index_trunc;
 pub(crate) use condexe::{apply_condexe_folding_pass, apply_iblock_phi_elimination};
 pub(crate) use deindirect::apply_deindirect_pass;
 pub(crate) use expand_load::apply_expand_load_pass;

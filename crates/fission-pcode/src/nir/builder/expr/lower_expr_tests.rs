@@ -433,6 +433,245 @@ fn loop_exit_register_read_uses_predecessor_path_zero_seed() {
     );
 }
 
+/// RC4 keystream index pattern: `add EAX, ECX; movzx EDX, AL; … use EDX`.
+/// Truncation must apply to the *destination* register (EDX), not only when
+/// movzx rewrites EAX in place.
+#[test]
+fn movzx_al_into_edx_after_int_add_preserves_low_byte_truncation() {
+    let options = test_options();
+    // Register-space layout matches rust-sleigh x86-64 (RAX@0, RCX@8, RDX@0x10).
+    let eax = register(0, 4);
+    let al = register(0, 1);
+    let ecx = register(8, 4);
+    let edx = register(0x10, 4);
+
+    let pcode = pcode_function(vec![block_at(
+        0x1000,
+        0,
+        vec![
+            op(
+                0,
+                PcodeOpcode::Copy,
+                Some(eax.clone()),
+                vec![constant_sized(200, 4)],
+            ),
+            op(
+                1,
+                PcodeOpcode::Copy,
+                Some(ecx.clone()),
+                vec![constant_sized(100, 4)],
+            ),
+            // EAX = 200 + 100 = 300
+            op(
+                2,
+                PcodeOpcode::IntAdd,
+                Some(eax.clone()),
+                vec![eax, ecx],
+            ),
+            // movzx EDX, AL  →  EDX = 300 & 0xff == 44
+            op(3, PcodeOpcode::IntZExt, Some(edx.clone()), vec![al]),
+            // Move truncated value into the return register so ABI return is EDX's value.
+            op(4, PcodeOpcode::Copy, Some(register(0, 4)), vec![edx]),
+            op(5, PcodeOpcode::Return, None, vec![register(0, 4)]),
+        ],
+    )]);
+
+    let code = render_mlil_preview(&pcode, "movzx_al_edx_trunc", 0x1000, &options)
+        .expect("render movzx AL→EDX truncation");
+
+    assert!(
+        code.contains("= 44")
+            || code.contains("return 44")
+            || code.contains("return (uchar)300")
+            || code.contains("& 0xff")
+            || code.contains("& 255"),
+        "expected low-byte truncation of 200+100=300 → 44 via EDX:\n{code}"
+    );
+    assert!(
+        !code.contains("= 300") && !code.contains("return 300;") && !code.contains("return 0x12c;"),
+        "must not keep untruncated sum 300:\n{code}"
+    );
+}
+
+/// Exact RC4 keystream p-code shape:
+///   INT_ADD eax, ecx; INT_ZEXT rax <- eax; …flags…;
+///   INT_ZEXT edx <- al; INT_ZEXT rdx <- edx; INT_ADD rax, rdx
+#[test]
+fn rc4_keystream_movzx_sequence_truncates_index() {
+    let options = test_options();
+    let eax = register(0, 4);
+    let al = register(0, 1);
+    let rax = register(0, 8);
+    let ecx = register(8, 4);
+    let edx = register(0x10, 4);
+    let rdx = register(0x10, 8);
+    let base = register(0x30, 8);
+    let cf = register(0x200, 1); // flag-like unique-ish offset in reg space
+
+    let pcode = pcode_function(vec![block_at(
+        0x1000,
+        0,
+        vec![
+            op(0, PcodeOpcode::Copy, Some(eax.clone()), vec![constant_sized(200, 4)]),
+            op(1, PcodeOpcode::Copy, Some(ecx.clone()), vec![constant_sized(100, 4)]),
+            op(2, PcodeOpcode::Copy, Some(base.clone()), vec![constant(0x1000)]),
+            // INT_ADD eax, ecx
+            op(3, PcodeOpcode::IntAdd, Some(eax.clone()), vec![eax.clone(), ecx]),
+            // INT_ZEXT rax <- eax  (full-width widen after ADD)
+            op(4, PcodeOpcode::IntZExt, Some(rax.clone()), vec![eax.clone()]),
+            // flag noise: INT_AND unique = eax & 0xff for PF (must not steal data path)
+            op(
+                5,
+                PcodeOpcode::IntAnd,
+                Some(register(0x58300, 4)),
+                vec![eax.clone(), constant_sized(0xff, 4)],
+            ),
+            // movzx edx, al
+            op(6, PcodeOpcode::IntZExt, Some(edx.clone()), vec![al]),
+            // zext rdx <- edx
+            op(7, PcodeOpcode::IntZExt, Some(rdx.clone()), vec![edx]),
+            // rax = base + rdx  (should be 0x1000 + 44, not 0x1000 + 300)
+            op(8, PcodeOpcode::IntAdd, Some(rax.clone()), vec![base, rdx]),
+            // copy address into return reg
+            op(9, PcodeOpcode::Copy, Some(register(0, 8)), vec![rax]),
+            op(10, PcodeOpcode::Return, None, vec![register(0, 8)]),
+        ],
+    )]);
+
+    let code = render_mlil_preview(&pcode, "rc4_ks_idx", 0x1000, &options).expect("render");
+    // 0x1000 + (300 & 0xff) = 0x1000 + 44 = 4140, or `rdx = 44; return base + rdx`
+    assert!(
+        code.contains("4140")
+            || code.contains("0x102c")
+            || code.contains("= 44")
+            || (code.contains("0x1000")
+                && (code.contains("& 0xff")
+                    || code.contains("& 255")
+                    || code.contains("% 256")
+                    || code.contains("(uchar)"))),
+        "expected base+truncated index (4140) or rdx=44:\n{code}"
+    );
+    assert!(
+        !code.contains("4300") && !code.contains("0x10cc") && !code.contains("= 300"),
+        "must not add untruncated 300 to base (0x1000+300=4300):\n{code}"
+    );
+    let _ = cf;
+}
+
+/// Non-constant form: loads + add + movzx EDX,AL + pointer index (RC4 keystream).
+#[test]
+fn movzx_al_index_after_byte_loads_truncates_before_ptr_add() {
+    let options = test_options();
+    let eax = register(0, 4);
+    let al = register(0, 1);
+    let ecx = register(8, 4);
+    let edx = register(0x10, 4);
+    let rdx = register(0x10, 8);
+    let rax = register(0, 8);
+    let base = register(0x30, 8); // rsi-like holder for array base
+    let unique_byte = |off| Varnode {
+        space_id: UNIQUE_SPACE_ID,
+        offset: off,
+        size: 1,
+        is_constant: false,
+        constant_val: 0,
+    };
+
+    // base in RSI-like reg; two byte loads into EAX/ECX; add; movzx edx,al; add base,rdx; load; return
+    let pcode = pcode_function(vec![block_at(
+        0x1000,
+        0,
+        vec![
+            // base = param-like constant address 0x1000 (treated as pointer value)
+            op(
+                0,
+                PcodeOpcode::Copy,
+                Some(base.clone()),
+                vec![constant(0x1000)],
+            ),
+            // load byte -> EAX via zext of load
+            op(
+                1,
+                PcodeOpcode::Load,
+                Some(unique_byte(0x10)),
+                vec![constant_sized(3, 4), base.clone()],
+            ),
+            op(
+                2,
+                PcodeOpcode::IntZExt,
+                Some(eax.clone()),
+                vec![unique_byte(0x10)],
+            ),
+            // second load byte -> ECX
+            op(
+                3,
+                PcodeOpcode::Load,
+                Some(unique_byte(0x20)),
+                vec![
+                    constant_sized(3, 4),
+                    // base+1
+                    {
+                        // use IntAdd into unique then load - simplify: load from base again
+                        base.clone()
+                    },
+                ],
+            ),
+            op(
+                4,
+                PcodeOpcode::IntZExt,
+                Some(ecx.clone()),
+                vec![unique_byte(0x20)],
+            ),
+            // EAX = EAX + ECX
+            op(
+                5,
+                PcodeOpcode::IntAdd,
+                Some(eax.clone()),
+                vec![eax.clone(), ecx],
+            ),
+            // movzx EDX, AL
+            op(6, PcodeOpcode::IntZExt, Some(edx.clone()), vec![al]),
+            // RDX = zext EDX
+            op(7, PcodeOpcode::IntZExt, Some(rdx.clone()), vec![edx]),
+            // RAX = base + RDX
+            op(
+                8,
+                PcodeOpcode::IntAdd,
+                Some(rax.clone()),
+                vec![base, rdx],
+            ),
+            // load result byte and return as int
+            op(
+                9,
+                PcodeOpcode::Load,
+                Some(unique_byte(0x30)),
+                vec![constant_sized(3, 4), rax],
+            ),
+            op(
+                10,
+                PcodeOpcode::IntZExt,
+                Some(register(0, 4)),
+                vec![unique_byte(0x30)],
+            ),
+            op(11, PcodeOpcode::Return, None, vec![register(0, 4)]),
+        ],
+    )]);
+
+    let code = render_mlil_preview(&pcode, "movzx_index", 0x1000, &options)
+        .expect("render movzx index");
+
+    // Truncation must appear on the index path: (uchar), & 0xff, or % 256.
+    let has_trunc = code.contains("(uchar)")
+        || code.contains("& 0xff")
+        || code.contains("& 255")
+        || code.contains("% 256")
+        || code.contains("% 0x100");
+    assert!(
+        has_trunc,
+        "expected low-byte truncation on keystream-style index path:\n{code}"
+    );
+}
+
 #[test]
 fn join_register_update_read_stays_live_register_instead_of_abi_param() {
     let mut options = test_options();
