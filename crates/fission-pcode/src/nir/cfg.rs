@@ -244,10 +244,30 @@ pub(super) fn same_block_forward_branch_target_op_idx(
     if target_addr <= from_addr {
         return None;
     }
-    search
+    if let Some(pos) = search
         .iter()
         .position(|candidate| candidate.address == target_addr)
-        .map(|pos| from_op_idx + 1 + pos)
+    {
+        return Some(from_op_idx + 1 + pos);
+    }
+    // Tail-of-block cmov: SLEIGH often targets the *next basic block's* start
+    // address (epilogue / ret) while the guarded Copy still sits at the end of
+    // *this* block at the *same machine address* as the CBranch. Require:
+    // - remaining ops share `from_addr` (cmov micro-ops of one insn)
+    // - target is not an op address in this block
+    // - target is strictly after from_addr
+    //
+    // Example (saturating_add cmovl):
+    //   block_k @ 0x40169f: CBranch -> 0x4016a2; Copy eax <- INT_MIN
+    //   block_k+1 @ 0x4016a2: pop/ret
+    let limit = end_idx.min(block.ops.len());
+    if from_op_idx + 1 < limit
+        && search.iter().all(|candidate| candidate.address == from_addr)
+        && !block.ops.iter().any(|candidate| candidate.address == target_addr)
+    {
+        return Some(limit);
+    }
+    None
 }
 
 fn resolve_instruction_local_branch_target_index(
@@ -506,5 +526,60 @@ mod same_block_forward_tests {
             &target,
         );
         assert_eq!(idx, Some(3), "expected absolute next-insn target");
+    }
+
+    #[test]
+    fn absolute_tail_of_block_cmov_skip_resolves_to_block_end() {
+        let target = Varnode {
+            space_id: 3,
+            offset: 0x4016a2,
+            size: 4,
+            is_constant: false,
+            constant_val: 0,
+        };
+        let cond = Varnode {
+            space_id: 2,
+            offset: 1,
+            size: 1,
+            is_constant: false,
+            constant_val: 0,
+        };
+        let eax = Varnode {
+            space_id: 4,
+            offset: 0,
+            size: 4,
+            is_constant: false,
+            constant_val: 0,
+        };
+        let imm = Varnode::constant(i64::from(i32::MIN), 4);
+        let block = PcodeBasicBlock {
+            index: 3,
+            start_address: 0x401698,
+            successors: vec![4],
+            ops: vec![
+                op(0, 0x401698, PcodeOpcode::Copy, vec![]),
+                op(1, 0x40169f, PcodeOpcode::CBranch, vec![target.clone(), cond]),
+                PcodeOp {
+                    seq_num: 2,
+                    opcode: PcodeOpcode::Copy,
+                    address: 0x40169f,
+                    output: Some(eax),
+                    inputs: vec![imm],
+                    asm_mnemonic: None,
+                },
+            ],
+        };
+        let idx = same_block_forward_branch_target_op_idx(
+            &block,
+            1,
+            block.ops.len(),
+            &block.ops[1],
+            &target,
+        );
+        assert_eq!(
+            idx,
+            Some(block.ops.len()),
+            "tail cmov should skip remaining ops through block end"
+        );
     }
 }

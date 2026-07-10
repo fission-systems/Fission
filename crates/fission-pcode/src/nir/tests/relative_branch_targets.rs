@@ -353,3 +353,100 @@ fn preview_supports_absolute_address_cmov_style_conditional_copy() {
     );
 }
 
+/// saturating_add-style cmovl: CBranch targets the *next basic block* start
+/// while the guarded Copy remains in the current block tail.
+#[test]
+fn preview_tail_of_block_absolute_cmov_preserves_int_min_arm() {
+    let eax = reg(0x0, 4);
+    let ecx = reg(0x4, 4);
+    let sf = reg(0x207, 1);
+    let cond = uniq(0x200, 1);
+    let next_bb = Varnode {
+        space_id: 3,
+        offset: 0x1020,
+        size: 4,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let int_min = cst(i64::from(i32::MIN), 4);
+    // Live-in regs (no const seeds) so SCCP cannot fold the cmov away.
+    let func = PcodeFunction {
+        blocks: vec![
+            // cmov block at entry: compare live ecx/eax; conditional INT_MIN
+            PcodeBasicBlock {
+                index: 0,
+                start_address: 0x1010,
+                successors: vec![1],
+                ops: vec![
+                    PcodeOp {
+                        seq_num: 0,
+                        opcode: PcodeOpcode::IntSLess,
+                        address: 0x1010,
+                        output: Some(sf.clone()),
+                        inputs: vec![ecx, eax.clone()],
+                        asm_mnemonic: None,
+                    },
+                    PcodeOp {
+                        seq_num: 1,
+                        opcode: PcodeOpcode::BoolNegate,
+                        address: 0x1010,
+                        output: Some(cond.clone()),
+                        inputs: vec![sf],
+                        asm_mnemonic: None,
+                    },
+                    PcodeOp {
+                        seq_num: 2,
+                        opcode: PcodeOpcode::CBranch,
+                        address: 0x1010,
+                        output: None,
+                        inputs: vec![next_bb, cond],
+                        asm_mnemonic: None,
+                    },
+                    PcodeOp {
+                        seq_num: 3,
+                        opcode: PcodeOpcode::Copy,
+                        address: 0x1010,
+                        output: Some(eax.clone()),
+                        inputs: vec![int_min],
+                        asm_mnemonic: None,
+                    },
+                ],
+            },
+            // ret
+            PcodeBasicBlock {
+                index: 1,
+                start_address: 0x1020,
+                successors: vec![],
+                ops: vec![PcodeOp {
+                    seq_num: 4,
+                    opcode: PcodeOpcode::Return,
+                    address: 0x1020,
+                    output: None,
+                    inputs: vec![eax],
+                    asm_mnemonic: None,
+                }],
+            },
+        ],
+    };
+    let options = preview_options_for(CallingConvention::X86_32);
+    // Materialize owner: tail-of-block absolute CBranch must guard the Copy.
+    // (Full-pipeline print may still collapse trivial live-in cases; the
+    // invariant for saturating_add is the guarded materialize form.)
+    let mut builder = PreviewBuilder::new(&func, &options, None);
+    let stmts = builder
+        .lower_block_stmts(&func.blocks[0])
+        .expect("lower cmov block");
+    let has_if = stmts.iter().any(|s| matches!(s, HirStmt::If { .. }));
+    let dump = format!("{stmts:?}");
+    assert!(
+        has_if,
+        "materialize must wrap tail cmov body in if, got {dump}"
+    );
+    assert!(
+        dump.contains("2147483648")
+            || dump.contains("-2147483648")
+            || dump.contains("80000000"),
+        "guarded INT_MIN must appear in then-body, got {dump}"
+    );
+}
+

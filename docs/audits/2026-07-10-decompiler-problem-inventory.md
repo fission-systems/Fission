@@ -44,7 +44,7 @@ Measured with release CLI against `control_flow_gcc-m32_O2.exe` (2026-07-10).
 | `clamp` | Partial | Semantic shape OK; flag temps (`of`/`sf`/`zf`) noise; hoist-dependent param order |
 | `signum` | Partial | Returns 1 / -setnz path; extra block braces; return type uchar |
 | `checksum` | Partial | Loop OK; `len` typed as `uchar *`; cast noise |
-| `saturating_add` | Partial | **F1 binding collapse fixed 2026-07-10** (`ecx = a; eax = a+b; if (ecx <= eax)`). Residual: goto, weak INT_MIN cmov arm, nested dead `param_2 < 0` under positive branch |
+| `saturating_add` | Partial | **F1** stopped `eax+eax` collapse. Current main-shaped output: `ecx/edx` live, `if (ecx+edx < ecx) return INT_MAX`, but **`return eax` without `eax = sum`** (live primary return without dominating def). **INT_MIN cmovl** is a tail-of-block absolute CBranch (next BB start); helper added in `cfg.rs` (`same_block_forward` tail skip) — wiring via terminator classification still needs a non-regressing materialize change (attempt 2026-07-10 regressed INT_MAX to `eax < eax`). |
 | `classify_range` | Bad | Flag soup; setnz/neg/cmovg not recovered as value classes |
 
 ## Problem families (canonical)
