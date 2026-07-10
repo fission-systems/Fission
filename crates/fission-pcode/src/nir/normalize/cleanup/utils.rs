@@ -1,4 +1,6 @@
-use crate::nir::{HirBinaryOp, HirExpr, HirLValue, HirStmt, NirBinding, NirType};
+use crate::nir::{
+    HirBinaryOp, HirExpr, HirLValue, HirStmt, NirBinding, NirType, is_pure_intrinsic_call,
+};
 use std::collections::{HashMap, HashSet};
 
 pub(super) fn is_trivial_temp_name(name: &str) -> bool {
@@ -44,10 +46,6 @@ pub(crate) fn expr_has_side_effects(expr: &HirExpr) -> bool {
             }
         }
     }
-}
-
-pub(super) fn is_pure_intrinsic_call(target: &str) -> bool {
-    matches!(target, "__carry" | "__scarry" | "__sborrow" | "__popcount")
 }
 
 pub(super) fn is_low_cost_flag_intrinsic(target: &str) -> bool {

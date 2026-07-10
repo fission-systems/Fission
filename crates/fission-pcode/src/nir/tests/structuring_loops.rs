@@ -248,6 +248,196 @@ fn while_preview_lowers_multi_block_body() {
 }
 
 #[test]
+fn natural_while_with_preheader_after_body_layout() {
+    let init_ptr = uniq(0x423, 4);
+    let body_ptr = uniq(0x424, 4);
+    let cond = uniq(0x425, 1);
+    let predicate_value = uniq(0x426, 4);
+    let borrow = uniq(0x427, 1);
+    let popcount = uniq(0x428, 1);
+    let return_ptr = uniq(0x429, 4);
+    let return_value = uniq(0x42a, 4);
+    let func = PcodeFunction {
+        blocks: vec![
+            PcodeBasicBlock {
+                index: 0,
+                start_address: 0x4150,
+                successors: vec![],
+                ops: vec![
+                    PcodeOp {
+                        seq_num: 0,
+                        opcode: PcodeOpcode::IntAdd,
+                        address: 0x4150,
+                        output: Some(init_ptr.clone()),
+                        inputs: vec![reg(20, 4), cst(-4, 4)],
+                        asm_mnemonic: None,
+                    },
+                    PcodeOp {
+                        seq_num: 1,
+                        opcode: PcodeOpcode::Store,
+                        address: 0x4151,
+                        output: None,
+                        inputs: vec![cst(0, 4), init_ptr, cst(0, 4)],
+                        asm_mnemonic: None,
+                    },
+                    PcodeOp {
+                        seq_num: 2,
+                        opcode: PcodeOpcode::Branch,
+                        address: 0x4152,
+                        output: None,
+                        inputs: vec![cst(0x4170, 8)],
+                        asm_mnemonic: None,
+                    },
+                ],
+            },
+            PcodeBasicBlock {
+                index: 1,
+                start_address: 0x4160,
+                successors: vec![],
+                ops: vec![
+                    PcodeOp {
+                        seq_num: 3,
+                        opcode: PcodeOpcode::IntAdd,
+                        address: 0x4160,
+                        output: Some(body_ptr.clone()),
+                        inputs: vec![reg(20, 4), cst(-4, 4)],
+                        asm_mnemonic: None,
+                    },
+                    PcodeOp {
+                        seq_num: 4,
+                        opcode: PcodeOpcode::Copy,
+                        address: 0x4161,
+                        output: Some(reg(0, 4)),
+                        inputs: vec![reg(8, 4)],
+                        asm_mnemonic: None,
+                    },
+                    PcodeOp {
+                        seq_num: 5,
+                        opcode: PcodeOpcode::IntAnd,
+                        address: 0x4161,
+                        output: Some(reg(0, 4)),
+                        inputs: vec![reg(0, 4), cst(1, 4)],
+                        asm_mnemonic: None,
+                    },
+                    PcodeOp {
+                        seq_num: 6,
+                        opcode: PcodeOpcode::Store,
+                        address: 0x4161,
+                        output: None,
+                        inputs: vec![cst(0, 4), body_ptr, reg(0, 4)],
+                        asm_mnemonic: None,
+                    },
+                ],
+            },
+            PcodeBasicBlock {
+                index: 2,
+                start_address: 0x4170,
+                successors: vec![],
+                ops: vec![
+                    PcodeOp {
+                        seq_num: 7,
+                        opcode: PcodeOpcode::Copy,
+                        address: 0x4170,
+                        output: Some(predicate_value.clone()),
+                        inputs: vec![reg(0x08, 4)],
+                        asm_mnemonic: None,
+                    },
+                    PcodeOp {
+                        seq_num: 8,
+                        opcode: PcodeOpcode::IntSBorrow,
+                        address: 0x4170,
+                        output: Some(borrow),
+                        inputs: vec![predicate_value.clone(), cst(0, 4)],
+                        asm_mnemonic: None,
+                    },
+                    PcodeOp {
+                        seq_num: 9,
+                        opcode: PcodeOpcode::PopCount,
+                        address: 0x4170,
+                        output: Some(popcount),
+                        inputs: vec![predicate_value.clone()],
+                        asm_mnemonic: None,
+                    },
+                    PcodeOp {
+                        seq_num: 10,
+                        opcode: PcodeOpcode::IntNotEqual,
+                        address: 0x4170,
+                        output: Some(cond.clone()),
+                        inputs: vec![predicate_value, cst(0, 4)],
+                        asm_mnemonic: None,
+                    },
+                    PcodeOp {
+                        seq_num: 11,
+                        opcode: PcodeOpcode::CBranch,
+                        address: 0x4171,
+                        output: None,
+                        inputs: vec![cst(0x4160, 8), cond],
+                        asm_mnemonic: None,
+                    },
+                ],
+            },
+            PcodeBasicBlock {
+                index: 3,
+                start_address: 0x4180,
+                successors: vec![],
+                ops: vec![
+                    PcodeOp {
+                        seq_num: 12,
+                        opcode: PcodeOpcode::IntAdd,
+                        address: 0x4180,
+                        output: Some(return_ptr.clone()),
+                        inputs: vec![reg(20, 4), cst(-4, 4)],
+                        asm_mnemonic: None,
+                    },
+                    PcodeOp {
+                        seq_num: 13,
+                        opcode: PcodeOpcode::Load,
+                        address: 0x4181,
+                        output: Some(return_value.clone()),
+                        inputs: vec![cst(3, 4), return_ptr],
+                        asm_mnemonic: None,
+                    },
+                    PcodeOp {
+                        seq_num: 14,
+                        opcode: PcodeOpcode::Copy,
+                        address: 0x4182,
+                        output: Some(reg(0, 4)),
+                        inputs: vec![return_value],
+                        asm_mnemonic: None,
+                    },
+                    PcodeOp {
+                        seq_num: 15,
+                        opcode: PcodeOpcode::Return,
+                        address: 0x4183,
+                        output: None,
+                        inputs: vec![cst(0, 4)],
+                        asm_mnemonic: None,
+                    },
+                ],
+            },
+        ],
+    };
+
+    let code = render_mlil_preview(
+        &func,
+        "layout_independent_while",
+        0x4150,
+        &preview_options_for(CallingConvention::X86_32),
+    )
+    .expect("preview render");
+    assert!(code.contains("while ("), "expected natural while: {code}");
+    assert!(code.contains("local_4 ="), "expected loop body: {code}");
+    assert!(
+        code.contains("return local_4;"),
+        "expected exit return: {code}"
+    );
+    assert!(
+        !code.contains("goto block_4170;"),
+        "unexpected head goto: {code}"
+    );
+}
+
+#[test]
 fn do_while_preview_lowers_multi_block_body() {
     let cond = uniq(0x430, 1);
     let ptr1 = uniq(0x431, 8);

@@ -486,6 +486,7 @@ impl<'a> PreviewBuilder<'a> {
             || matches!(
                 self.options.calling_convention,
                 CallingConvention::Arm32
+                    | CallingConvention::X86_32
                     | CallingConvention::PowerPc32
                     | CallingConvention::LoongArch32
                     | CallingConvention::Mips32
@@ -943,9 +944,16 @@ impl<'a> PreviewBuilder<'a> {
             let ret_vn = self
                 .narrow_zero_extended_primary_return_source(block, ret_op_idx, &ret_vn)
                 .unwrap_or(ret_vn);
-            return self
+            let expr = self
                 .lower_wrapped_varnode(&ret_vn, &mut HashSet::new())
-                .map(Some);
+                .map(Some)?;
+            if preview_builder_diag_enabled() {
+                eprintln!(
+                    "[DIAG] return recovery: block={} path=local_primary_def op_idx={} source={:?} expr={:?}",
+                    idx, ret_op_idx, ret_vn, expr
+                );
+            }
+            return Ok(expr);
         }
         if self.uses_primary_return_registers()
             && (!self.side_effect_consumes_primary_return_register_before(block, term_idx)

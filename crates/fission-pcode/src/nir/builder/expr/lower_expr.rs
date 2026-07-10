@@ -718,6 +718,9 @@ impl<'a> PreviewBuilder<'a> {
             return None;
         }
         let site = self.current_lowering_site?;
+        if self.has_prior_local_def_for_varnode(vn, site) {
+            return None;
+        }
         let predecessor_idxs = self.predecessors.get(site.block_idx)?.clone();
 
         // Single predecessor path: check if predecessor is inside a loop, and we are exiting it.

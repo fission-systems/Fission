@@ -394,6 +394,12 @@ impl<'a> PreviewBuilder<'a> {
                 false_target,
             } = self.lower_block_terminator(idx)?
             else {
+                if diag {
+                    eprintln!(
+                        "[DIAG] try_lower_while reject: idx={} block=0x{:x} reason=non_conditional_head",
+                        idx, block_addr
+                    );
+                }
                 return Ok(None);
             };
             if budget.checkpoint("terminator_post") {
@@ -408,6 +414,14 @@ impl<'a> PreviewBuilder<'a> {
                 return Ok(None);
             }
             if !cond_prefix.iter().all(Self::is_trivial_structuring_stmt) {
+                if diag {
+                    eprintln!(
+                        "[DIAG] try_lower_while reject: idx={} block=0x{:x} reason=nontrivial_condition_prefix stmt_count={}",
+                        idx,
+                        block_addr,
+                        cond_prefix.len()
+                    );
+                }
                 return Ok(None);
             }
 
@@ -415,6 +429,12 @@ impl<'a> PreviewBuilder<'a> {
 
             // While loops should always have an exit target
             let Some(exit_idx) = loop_body.and_then(|lb| lb.exit_idx) else {
+                if diag {
+                    eprintln!(
+                        "[DIAG] try_lower_while reject: idx={} block=0x{:x} reason=missing_loop_exit loop_body={:?}",
+                        idx, block_addr, loop_body
+                    );
+                }
                 return Ok(None);
             };
 
@@ -430,6 +450,12 @@ impl<'a> PreviewBuilder<'a> {
                 (cond, body_addr)
             } else {
                 // If neither branch goes to the computed exit edge, this is not a strictly formed while loop tail
+                if diag {
+                    eprintln!(
+                        "[DIAG] try_lower_while reject: idx={} block=0x{:x} reason=exit_target_mismatch true=0x{:x} false={:?} exit=0x{:x}",
+                        idx, block_addr, true_target, false_target, exit_addr
+                    );
+                }
                 return Ok(None);
             };
 
@@ -446,12 +472,24 @@ impl<'a> PreviewBuilder<'a> {
                 Some(&mut budget),
             )?
             else {
+                if diag {
+                    eprintln!(
+                        "[DIAG] try_lower_while reject: idx={} block=0x{:x} reason=linear_body_rejected body_idx={}",
+                        idx, block_addr, body_idx
+                    );
+                }
                 return Ok(None);
             };
             if budget.checkpoint("body_post") {
                 return Ok(None);
             }
             if loop_join_idx != idx {
+                if diag {
+                    eprintln!(
+                        "[DIAG] try_lower_while reject: idx={} block=0x{:x} reason=linear_body_wrong_join actual={} expected={}",
+                        idx, block_addr, loop_join_idx, idx
+                    );
+                }
                 return Ok(None);
             }
             let continue_label = block_label(self.block_target_key(idx));

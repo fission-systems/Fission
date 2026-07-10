@@ -1744,38 +1744,9 @@ impl<'a> PreviewBuilder<'a> {
             HirStmt::Assign {
                 lhs: HirLValue::Var(_),
                 rhs,
-            } => !Self::expr_has_call(rhs),
-            HirStmt::Expr(expr) => !Self::expr_has_call(expr),
+            } => !expr_has_side_effecting_call(rhs),
+            HirStmt::Expr(expr) => !expr_has_side_effecting_call(expr),
             _ => false,
-        }
-    }
-
-    fn expr_has_call(expr: &HirExpr) -> bool {
-        match expr {
-            HirExpr::Call { .. } => true,
-            HirExpr::Cast { expr, .. } | HirExpr::Unary { expr, .. } => Self::expr_has_call(expr),
-            HirExpr::Binary { lhs, rhs, .. } => {
-                Self::expr_has_call(lhs) || Self::expr_has_call(rhs)
-            }
-            HirExpr::Load { ptr, .. } => Self::expr_has_call(ptr),
-            HirExpr::PtrOffset { base, .. } | HirExpr::FieldAccess { base, .. } => {
-                Self::expr_has_call(base)
-            }
-            HirExpr::Index { base, index, .. } => {
-                Self::expr_has_call(base) || Self::expr_has_call(index)
-            }
-            HirExpr::AggregateCopy { src, .. } => Self::expr_has_call(src),
-            HirExpr::Select {
-                cond,
-                then_expr,
-                else_expr,
-                ..
-            } => {
-                Self::expr_has_call(cond)
-                    || Self::expr_has_call(then_expr)
-                    || Self::expr_has_call(else_expr)
-            }
-            HirExpr::Var(_, ..) | HirExpr::AddressOfGlobal(_) | HirExpr::Const(_, ..) => false,
         }
     }
 
