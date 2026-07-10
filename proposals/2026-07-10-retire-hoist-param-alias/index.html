@@ -10,7 +10,7 @@
       
       
       
-        <link rel="canonical" href="https://sjkim1127.github.io/Fission/audits/2026-07-10-isa-semantic-debt-inventory/">
+        <link rel="canonical" href="https://sjkim1127.github.io/Fission/proposals/2026-07-10-retire-hoist-param-alias/">
       
       
       
@@ -23,7 +23,7 @@
     
     
       
-        <title>ISA Semantic Debt Inventory (P0) - Fission</title>
+        <title>Decompiler Change Proposal: Retire hoist_param_alias_copies (D1) - Fission</title>
       
     
     
@@ -74,7 +74,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#isa-semantic-debt-inventory-p0" class="md-skip">
+        <a href="#decompiler-change-proposal-retire-hoist_param_alias_copies-d1" class="md-skip">
           Skip to content
         </a>
       
@@ -108,7 +108,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              ISA Semantic Debt Inventory (P0)
+              Decompiler Change Proposal: Retire hoist_param_alias_copies (D1)
             
           </span>
         </div>
@@ -784,10 +784,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#status-legend" class="md-nav__link">
+  <a href="#investigation-result" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Status legend
+        Investigation result
       
     </span>
   </a>
@@ -795,10 +795,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#shared-helpers-ok-prefer-extending" class="md-nav__link">
+  <a href="#decision" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Shared helpers (OK — prefer extending)
+        Decision
       
     </span>
   </a>
@@ -806,82 +806,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#model-surfaces-allowed-keep-differences-here" class="md-nav__link">
+  <a href="#follow-up-not-this-change" class="md-nav__link">
     <span class="md-ellipsis">
       
-        MODEL surfaces (allowed — keep differences here)
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#debt-rows-semantic-cores-emergency" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        DEBT rows (semantic cores / emergency)
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="DEBT rows (semantic cores / emergency)">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#priority-for-p0-remediation" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Priority for P0 remediation
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#env-experimental-flags-do-not-grow-without-owners" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        ENV experimental flags (do not grow without owners)
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#what-is-not-debt-recent-quality-work" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        What is not debt (recent quality work)
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#review-checklist-when-editing-nir-semantics" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Review checklist (when editing NIR semantics)
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#related-docs" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Related docs
+        Follow-up (not this change)
       
     </span>
   </a>
@@ -908,279 +836,41 @@
   
 
 
-<h1 id="isa-semantic-debt-inventory-p0">ISA Semantic Debt Inventory (P0)<a class="headerlink" href="#isa-semantic-debt-inventory-p0" title="Permanent link">&para;</a></h1>
+<h1 id="decompiler-change-proposal-retire-hoist_param_alias_copies-d1">Decompiler Change Proposal: Retire <code>hoist_param_alias_copies</code> (D1)<a class="headerlink" href="#decompiler-change-proposal-retire-hoist_param_alias_copies-d1" title="Permanent link">&para;</a></h1>
+<p><strong>Status: aborted 2026-07-10 — hoist retained.</strong></p>
+<h2 id="investigation-result">Investigation result<a class="headerlink" href="#investigation-result" title="Permanent link">&para;</a></h2>
 <ul>
-<li><strong>Date:</strong> 2026-07-10</li>
-<li><strong>Scope:</strong> NIR semantic path under <code>crates/fission-pcode/src/nir/</code>
-  (builder/materialize, normalize, structuring)</li>
-<li><strong>Policy:</strong> <a href="../../adr/0009-isa-agnostic-semantic-rules/">ADR 0009</a></li>
-<li><strong>Method:</strong> Manual grep + owner review of <code>CallingConvention::*</code> gates,
-  emergency normalize passes, env-gated materialize features, and shared helpers
-  introduced by recent m32/cmov/signum quality work.</li>
-<li><strong>Non-goal:</strong> Big-bang rewrite. This table is the refactor backlog for
-  opportunistic cleanup when touching related owners.</li>
+<li>Synthetic clamp HIR (already-ordered <code>edx = param_1</code>) passes without hoist.</li>
+<li>Real <code>control_flow_gcc-m32_O2.exe</code> <code>_clamp</code> <strong>regresses</strong> without hoist:</li>
 </ul>
-<h2 id="status-legend">Status legend<a class="headerlink" href="#status-legend" title="Permanent link">&para;</a></h2>
-<table>
-<thead>
-<tr>
-<th>Status</th>
-<th>Meaning</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><strong>OK</strong></td>
-<td>Shared CFG / def-use / register-family invariant; extend, do not fork</td>
-</tr>
-<tr>
-<td><strong>MODEL</strong></td>
-<td>Allowed ISA surface (cspec, namer, CC slot tables, stack-param classification)</td>
-</tr>
-<tr>
-<td><strong>DEBT</strong></td>
-<td>Semantic meaning gated on ISA string/CC, or emergency cleanup papering over an earlier owner</td>
-</tr>
-<tr>
-<td><strong>ENV</strong></td>
-<td>Opt-in env flag; treat as experimental debt until default-on with an invariant owner</td>
-</tr>
-</tbody>
-</table>
-<h2 id="shared-helpers-ok-prefer-extending">Shared helpers (OK — prefer extending)<a class="headerlink" href="#shared-helpers-ok-prefer-extending" title="Permanent link">&para;</a></h2>
-<table>
-<thead>
-<tr>
-<th>Helper</th>
-<th>Owner path</th>
-<th>Invariant (ISA-agnostic statement)</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>Loop-carried register update detection</td>
-<td><code>builder/materialize/loop_carried/</code> (<code>shape.rs</code>, <code>binding.rs</code>, <code>seed.rs</code>)</td>
-<td>Register-space def that reads itself (or is live across a backedge) keeps a stable binding name; param/HW names preferred over fresh temps</td>
-</tr>
-<tr>
-<td>Same-block forward branch resolve</td>
-<td><code>nir/cfg.rs</code> → <code>same_block_forward_branch_target_op_idx</code></td>
-<td>CBranch target that lands later in the same block is a skip edge (relative seq <em>or</em> absolute code address), not an always-taken guarded Copy</td>
-</tr>
-<tr>
-<td>Return-join live-in guard</td>
-<td><code>structuring/linear/mod.rs</code> → <code>forwarding_block_defines_return_tail_live_in</code></td>
-<td>A single-successor “forward” arm that defines a join Return’s live-in (including primary return reg) is not a trivial empty forward</td>
-</tr>
-<tr>
-<td>Unconditional-only copy merge</td>
-<td><code>normalize/recovery/variable_merge.rs</code> → <code>collect_direct_copies</code></td>
-<td>Only top-level unconditional <code>v = w</code> establishes merge identity; path-sensitive cmov/if copies must not collapse clamp/min/max arms</td>
-</tr>
-<tr>
-<td>Loop-carried candidate shape</td>
-<td><code>loop_carried/shape.rs</code> → <code>is_loop_carried_register_update_candidate</code></td>
-<td>Register-space, non-constant, size ≥ 4 — no CC enum on the shape check</td>
-</tr>
-</tbody>
-</table>
-<p>These are the patterns ADR 0009 expects new quality work to extend.</p>
-<h2 id="model-surfaces-allowed-keep-differences-here">MODEL surfaces (allowed — keep differences here)<a class="headerlink" href="#model-surfaces-allowed-keep-differences-here" title="Permanent link">&para;</a></h2>
-<table>
-<thead>
-<tr>
-<th>Surface</th>
-<th>Owner path</th>
-<th>Notes</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>Register namer / primary return / param slots</td>
-<td><code>nir/cspec/register_model.rs</code>, <code>cspec/apply.rs</code></td>
-<td>CC tables map offsets → names and return/param sets</td>
-</tr>
-<tr>
-<td>Stack-parameter slot classification</td>
-<td><code>builder/memory/stack_slots.rs</code>, <code>nir/abi.rs</code></td>
-<td>Offset tables per CC are model data</td>
-</tr>
-<tr>
-<td>Stack push / call-arg recovery (x86-32 push idiom)</td>
-<td><code>builder/calls/call_recovery.rs</code></td>
-<td>Encoding decode into stack-arg list; <strong>policy</strong> of “call has N args” must stay CC-table driven</td>
-</tr>
-<tr>
-<td>Status-flag offset map (x86 EFLAGS bits)</td>
-<td><code>register_model.rs</code> hw_name_at 0x200..</td>
-<td>Naming model; consumers should ask “is flag register?” via namer/pspec, not hard-code offsets</td>
-</tr>
-</tbody>
-</table>
-<h2 id="debt-rows-semantic-cores-emergency">DEBT rows (semantic cores / emergency)<a class="headerlink" href="#debt-rows-semantic-cores-emergency" title="Permanent link">&para;</a></h2>
-<table>
-<thead>
-<tr>
-<th>ID</th>
-<th>Location</th>
-<th>Kind</th>
-<th>Issue</th>
-<th>Preferred fix direction</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>D1</td>
-<td><code>normalize/cleanup/temp_var.rs</code> → <code>hoist_param_alias_copies_before_first_use</code></td>
-<td>Emergency pass</td>
-<td>Still required (2026-07-10): synthetic clamp OK without hoist; <strong>real m32 O2 clamp regresses</strong> (edx use-before-def). Root: materialize does not emit dominating stack-param→reg alias for value reg before first compare</td>
-<td>Keep hoist until materialize emits entry stack-param aliases in load order; see <code>docs/proposals/2026-07-10-retire-hoist-param-alias.md</code> (aborted)</td>
-</tr>
-<tr>
-<td>D2</td>
-<td><code>builder/materialize/loop_carried/binding.rs</code> → <code>loop_header_external_seed_binding_name_for_update</code></td>
-<td>ISA admission gate</td>
-<td>~~Early <code>return None</code> unless x86 CCs~~ <strong>Fixed 2026-07-10:</strong> admit via param slot / <code>is_primary_return_register</code> / register-space candidate only</td>
-<td>Was: drop CC gate. Done in <code>docs/proposals/2026-07-10-loop-external-seed-cc-gate.md</code></td>
-</tr>
-<tr>
-<td>D3</td>
-<td><code>builder/materialize/no_consumer.rs</code> → <code>is_x86_status_flag_output</code></td>
-<td>Hard-coded offsets</td>
-<td>Suppress no-consumer pure flag defs using raw 0x200.. offsets</td>
-<td>Query cspec/pspec “flag group” or namer <code>is_flag_register</code>; keep pure-RHS check</td>
-</tr>
-<tr>
-<td>D4</td>
-<td><code>builder/expr/lower_expr.rs</code> → <code>stack_pointer_register_name</code></td>
-<td>CC-local name table</td>
-<td>X86_32 special-case ESP/EBP offsets before namer</td>
-<td>Prefer namer/cspec only; delete dual path once namer covers m32 frame regs</td>
-</tr>
-<tr>
-<td>D5</td>
-<td><code>builder/calls/call_recovery.rs</code> → <code>is_x86_32_esp</code> / push helpers</td>
-<td>Encoding helper with CC guard</td>
-<td>ESP detection hard-codes offset 0x10 + X86_32</td>
-<td>Generalize to “stack pointer varnode” from cspec; keep push-store scan as encoding decode</td>
-</tr>
-<tr>
-<td>D6</td>
-<td><code>normalize/recovery/flag_recovery.rs</code> → <code>is_x86_flag_variable</code></td>
-<td>Name-string ISA gate</td>
-<td>Flag recovery keyed on x86 flag name strings</td>
-<td>Prefer typed flag facts from materialize/cspec; name lists as fallback only</td>
-</tr>
-<tr>
-<td>D7</td>
-<td><code>normalize/idioms/prologue.rs</code> (and related)</td>
-<td>HW name lists</td>
-<td>Prologue recognition via raw rbx/rbp/… / ARM r4… lists</td>
-<td>Frame / callee-save sets from cspec; keep as MODEL if moved into tables</td>
-</tr>
-<tr>
-<td>D8</td>
-<td><code>builder/control/terminator.rs</code> (Arm32 branches)</td>
-<td>CC-forked control paths</td>
-<td>Multiple <code>calling_convention == Arm32</code> branches in terminator</td>
-<td>Shared join/return/live-in helpers with CC-supplied register sets (same pattern as recent x86 return-join work)</td>
-</tr>
-</tbody>
-</table>
-<h3 id="priority-for-p0-remediation">Priority for P0 remediation<a class="headerlink" href="#priority-for-p0-remediation" title="Permanent link">&para;</a></h3>
-<ol>
-<li><strong>D1</strong> — emergency pass; highest architectural cost if left permanent  </li>
-<li><strong>D2</strong> — one-line admission gate blocking non-x86 reuse of a good helper  </li>
-<li><strong>D3–D5</strong> — model leakage into materialize/call recovery (batch when touching namer/cspec)  </li>
-<li><strong>D6–D8</strong> — normalize/terminator cleanup when next quality cycle hits those owners  </li>
-</ol>
-<h2 id="env-experimental-flags-do-not-grow-without-owners">ENV experimental flags (do not grow without owners)<a class="headerlink" href="#env-experimental-flags-do-not-grow-without-owners" title="Permanent link">&para;</a></h2>
-<table>
-<thead>
-<tr>
-<th>Flag</th>
-<th>Path</th>
-<th>Role</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>FISSION_ENABLE_NO_CONSUMER_SUPPRESSION</code></td>
-<td><code>materialize/no_consumer.rs</code></td>
-<td>Gates broader no-consumer suppress path</td>
-</tr>
-<tr>
-<td><code>FISSION_ENABLE_PARITY_CHAIN_MATERIALIZATION</code></td>
-<td><code>materialize/same_block.rs</code></td>
-<td>Experimental parity-chain materialize</td>
-</tr>
-<tr>
-<td><code>FISSION_ENABLE_STACK_ADDR_FRAME_STABLE_REPLACEMENT</code></td>
-<td><code>materialize/same_block.rs</code></td>
-<td>Frame-stable stack-addr replacement</td>
-</tr>
-<tr>
-<td><code>FISSION_ENABLE_COPY_OVERWRITE_RESTART</code></td>
-<td><code>materialize/cross_block.rs</code></td>
-<td>Cross-block restart experiment</td>
-</tr>
-<tr>
-<td><code>FISSION_ENABLE_PREDICATE_REFRESH_RESTART</code></td>
-<td><code>materialize/cross_block.rs</code></td>
-<td>Predicate refresh restart</td>
-</tr>
-<tr>
-<td><code>FISSION_ENABLE_EXPLICIT_MERGE_BINDING</code></td>
-<td><code>materialize/cross_block.rs</code></td>
-<td>Explicit merge binding</td>
-</tr>
-<tr>
-<td><code>FISSION_ENABLE_BLOCKGRAPH_COLLAPSE</code> / <code>FISSION_ENABLE_MIR_BLOCKGRAPH</code></td>
-<td><code>structuring/driver/admission.rs</code></td>
-<td>Alternate structuring admission</td>
-</tr>
-<tr>
-<td><code>FISSION_ENABLE_WIDE_DEAD_ASSIGNMENT_RERUN_ADMISSION</code></td>
-<td><code>normalize/analysis/defuse.rs</code></td>
-<td>Dead-assign rerun admission</td>
-</tr>
-<tr>
-<td><code>FISSION_COLLAPSE_LOOP</code></td>
-<td><code>structuring/collapse_loop.rs</code></td>
-<td>Loop collapse opt-in</td>
-</tr>
-<tr>
-<td><code>FISSION_STRUCTURING_ENGINE</code></td>
-<td><code>types/options.rs</code></td>
-<td>Engine selection</td>
-</tr>
-</tbody>
-</table>
-<p>Debug-only (<code>FISSION_PREVIEW_DEBUG</code>, <code>FISSION_PREVIEW_DIAG</code>, <code>FISSION_PREVIEW_PERF</code>, …) are observability, not semantic debt.</p>
-<p><strong>Rule:</strong> New production defaults must not add <code>FISSION_ENABLE_*</code> knobs. Promote only after an invariant owner + tests; otherwise remove or leave off.</p>
-<h2 id="what-is-not-debt-recent-quality-work">What is <em>not</em> debt (recent quality work)<a class="headerlink" href="#what-is-not-debt-recent-quality-work" title="Permanent link">&para;</a></h2>
-<p>These were motivated by m32 rows but restated as common facts (ADR 0009 §3):</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>// without hoist (broken)
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>uVar2 = param_3;
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>ecx = param_2;
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>of = __sborrow(edx, uVar2);  // use-before-def
+</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>...
+</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>edx = param_1;               // late
+</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>
+</span><span id="__span-0-8"><a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>// with hoist (ok)
+</span><span id="__span-0-9"><a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>uVar2 = param_3;
+</span><span id="__span-0-10"><a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>ecx = param_2;
+</span><span id="__span-0-11"><a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>edx = param_1;
+</span><span id="__span-0-12"><a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a>of = __sborrow(edx, uVar2);
+</span></code></pre></div>
 <ul>
-<li>Absolute + relative same-block CBranch resolution for cmov chains  </li>
-<li>Loop-carried IntAdd/IntRight name stability  </li>
-<li>Conditional-copy merge barrier (cmov arms)  </li>
-<li>Return-arm live-in vs trivial-forward (signum-class diamonds)  </li>
-<li>Structuring has <strong>no</strong> <code>CallingConvention::</code> matches under <code>nir/structuring/</code> (good separation)</li>
+<li>Root owner remains <strong>builder/materialize</strong>: first stack load of the value
+  register is not emitted as a dominating <code>edx = param_1</code> before the first
+  compare that uses <code>edx</code>. Other stack params (<code>param_2</code>/<code>param_3</code>) do get
+  early aliases. Late reinjection of <code>edx = param_1</code> is what hoist reorders.</li>
 </ul>
-<h2 id="review-checklist-when-editing-nir-semantics">Review checklist (when editing NIR semantics)<a class="headerlink" href="#review-checklist-when-editing-nir-semantics" title="Permanent link">&para;</a></h2>
+<h2 id="decision">Decision<a class="headerlink" href="#decision" title="Permanent link">&para;</a></h2>
+<p>Keep <code>hoist_param_alias_copies</code> as temporary debt (ADR 0009 §6) until materialize
+emits dominating stack-param→register aliases for all loaded params in entry
+order. Do not delete the pass based on synthetic-only evidence.</p>
+<h2 id="follow-up-not-this-change">Follow-up (not this change)<a class="headerlink" href="#follow-up-not-this-change" title="Permanent link">&para;</a></h2>
 <ul>
-<li>[ ] Condition is CFG / dominance / def-use / register family / ABI <em>slot</em>, not <code>== X86_32</code> alone  </li>
-<li>[ ] Encoding decode (push, cmov absolute target, EFLAGS offset) ends in a shared fact  </li>
-<li>[ ] No new end-of-pipeline normalize pass if materialize/structuring can own the binding  </li>
-<li>[ ] Extend an <strong>OK</strong> helper above when the failure family matches  </li>
-<li>[ ] Update this table when a DEBT row is fixed or a new emergency pass is added  </li>
-</ul>
-<h2 id="related-docs">Related docs<a class="headerlink" href="#related-docs" title="Permanent link">&para;</a></h2>
-<ul>
-<li><a href="../../adr/0009-isa-agnostic-semantic-rules/">ADR 0009 — ISA-agnostic semantic rules</a>  </li>
-<li><a href="../../adr/0008-nir-substrate-and-owner-boundaries/">ADR 0008 — NIR substrate / owner boundaries</a>  </li>
-<li><a href="../../crates/fission-pcode/src/nir/AGENTS.md">NIR AGENTS.md</a>  </li>
-<li>Older token scan (noisy): <a href="../2026-07-04-arch-isolation-scan/">2026-07-04-arch-isolation-scan.md</a>  </li>
+<li>Materialize entry stack loads: when <code>Load</code>+<code>Copy</code> recovers <code>ParamIndex</code> into a
+  GP register, emit <code>reg = param_N</code> at the load site before any consumer.</li>
+<li>Then re-run real clamp without hoist; remove pass only if still clean.</li>
 </ul>
 
 
