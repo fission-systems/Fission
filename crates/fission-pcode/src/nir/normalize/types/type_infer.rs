@@ -927,6 +927,8 @@ fn zero_extended_return_candidate_type(
             }
         }
         HirExpr::Var(name) | HirExpr::AddressOfGlobal(name) => {
+            // Prefer multi-assign aggregation when available via defs map alone first;
+            // full body scan is applied in `collect_zero_extended_return_candidates_stmt`.
             let ty =
                 zero_extended_return_candidate_type_for_binding(name, defs, known_binding_types)?;
             match ty {
@@ -934,10 +936,30 @@ fn zero_extended_return_candidate_type(
                 _ => None,
             }
         }
+        HirExpr::Select {
+            then_expr,
+            else_expr,
+            ..
+        } => {
+            // Nested ternary return values (signum-style): combine arm candidates.
+            let then_ty =
+                zero_extended_return_candidate_type(then_expr, defs, known_binding_types)?;
+            let else_ty =
+                zero_extended_return_candidate_type(else_expr, defs, known_binding_types)?;
+            Some(prefer_narrow_return_candidate(Some(then_ty), else_ty))
+        }
         other => {
             // 64-bit integer constant whose u64 value fits in 32 bits:
             // treat as a zero-extended (or sign-extended) 32-bit return candidate.
             if let HirExpr::Const(value, NirType::Int { bits: 64, .. }) = other {
+                let v = *value as u64;
+                if v <= 0xFFFF_FFFF {
+                    let signed = v >= 0x8000_0000;
+                    return Some(NirType::Int { bits: 32, signed });
+                }
+            }
+            // Also accept unsigned-32 Const typed as u32 (printer still shows large decimals).
+            if let HirExpr::Const(value, NirType::Int { bits: 32, signed: false }) = other {
                 let v = *value as u64;
                 if v <= 0xFFFF_FFFF {
                     let signed = v >= 0x8000_0000;
@@ -975,13 +997,171 @@ fn zero_extended_return_candidate_type_for_binding(
                 if *bits < 64 {
                     best = Some(prefer_narrow_return_candidate(best, ty.clone()));
                 }
-                return best;
+                // First-def may be a wide u64 (Select/const temp). Keep scanning alias only;
+                // multi-assign aggregation happens in `aggregate_return_temp_candidates`.
+                return best.or_else(|| {
+                    // Wide Known(u64) alone is not a narrow candidate.
+                    None
+                });
             }
             Some(DefEntry::Known(_)) | None => return best,
             Some(DefEntry::Alias(src)) => {
                 current = src.clone();
             }
         }
+    }
+}
+
+/// Aggregate i32-compatible candidates across *all* assignments to a returned temp.
+/// First-def-only maps miss later `x = INT_MIN` / `x = -1` arms (signum/saturating_add).
+fn aggregate_return_temp_candidates(
+    name: &str,
+    stmts: &[HirStmt],
+    defs: &HashMap<String, DefEntry>,
+    known_binding_types: &HashMap<String, NirType>,
+) -> Option<NirType> {
+    aggregate_return_temp_candidates_guarded(
+        name,
+        stmts,
+        defs,
+        known_binding_types,
+        &mut HashSet::new(),
+    )
+}
+
+fn aggregate_return_temp_candidates_guarded(
+    name: &str,
+    stmts: &[HirStmt],
+    defs: &HashMap<String, DefEntry>,
+    known_binding_types: &HashMap<String, NirType>,
+    visiting: &mut HashSet<String>,
+) -> Option<NirType> {
+    if !visiting.insert(name.to_owned()) {
+        return None;
+    }
+    let mut rhss = Vec::new();
+    collect_var_assign_rhs(stmts, name, &mut rhss);
+    if rhss.is_empty() {
+        return zero_extended_return_candidate_type_for_binding(name, defs, known_binding_types);
+    }
+    // Multi-assign aggregation is only for return-join patterns that carry
+    // high-bit (signed) 32-bit constants or Select arms. Plain loop accumulators
+    // (x=0; x=x+c) must keep their wide type.
+    if !rhss.iter().any(|rhs| rhs_has_i32_sign_bit_evidence(rhs)) {
+        return zero_extended_return_candidate_type_for_binding(name, defs, known_binding_types);
+    }
+    let mut best = None;
+    for rhs in rhss {
+        let ty = match rhs {
+            HirExpr::Var(src) | HirExpr::AddressOfGlobal(src) => {
+                aggregate_return_temp_candidates_guarded(
+                    src,
+                    stmts,
+                    defs,
+                    known_binding_types,
+                    visiting,
+                )
+                .or_else(|| {
+                    zero_extended_return_candidate_type(rhs, defs, known_binding_types)
+                })
+                // Fall back: plain scalar temps assigned only small constants (e.g. local_4=0)
+                // still contribute an unsigned i32 arm so signed join temps can narrow.
+                .or_else(|| i32_compatible_const_leaf_type(rhs))
+                .or_else(|| {
+                    // Last resort for unsigned narrowable leaves without high-bit evidence.
+                    Some(NirType::Int {
+                        bits: 32,
+                        signed: false,
+                    })
+                })?
+            }
+            other => zero_extended_return_candidate_type(other, defs, known_binding_types)
+                .or_else(|| i32_compatible_const_leaf_type(other))?,
+        };
+        best = Some(prefer_narrow_return_candidate(best, ty));
+    }
+    best
+}
+
+fn i32_compatible_const_leaf_type(expr: &HirExpr) -> Option<NirType> {
+    match expr {
+        HirExpr::Const(value, NirType::Int { bits: 32 | 64, .. }) => {
+            let v = *value as u64;
+            if v <= 0xFFFF_FFFF {
+                Some(NirType::Int {
+                    bits: 32,
+                    signed: v >= 0x8000_0000,
+                })
+            } else {
+                None
+            }
+        }
+        HirExpr::Cast { expr, .. } => i32_compatible_const_leaf_type(expr),
+        _ => None,
+    }
+}
+
+fn rhs_has_i32_sign_bit_evidence(expr: &HirExpr) -> bool {
+    match expr {
+        HirExpr::Const(value, NirType::Int { bits: 32 | 64, .. }) => {
+            let v = *value as u64;
+            v <= 0xFFFF_FFFF && v >= 0x8000_0000
+        }
+        HirExpr::Select {
+            then_expr,
+            else_expr,
+            ..
+        } => {
+            rhs_has_i32_sign_bit_evidence(then_expr) || rhs_has_i32_sign_bit_evidence(else_expr)
+        }
+        HirExpr::Cast { expr, .. } | HirExpr::Unary { expr, .. } => {
+            rhs_has_i32_sign_bit_evidence(expr)
+        }
+        _ => false,
+    }
+}
+
+fn collect_var_assign_rhs<'a>(stmts: &'a [HirStmt], name: &str, out: &mut Vec<&'a HirExpr>) {
+    for stmt in stmts {
+        collect_var_assign_rhs_stmt(stmt, name, out);
+    }
+}
+
+fn collect_var_assign_rhs_stmt<'a>(stmt: &'a HirStmt, name: &str, out: &mut Vec<&'a HirExpr>) {
+    match stmt {
+        HirStmt::Assign {
+            lhs: HirLValue::Var(n),
+            rhs,
+        } if n == name => out.push(rhs),
+        HirStmt::Block(body) | HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
+            collect_var_assign_rhs(body, name, out)
+        }
+        HirStmt::If {
+            then_body,
+            else_body,
+            ..
+        } => {
+            collect_var_assign_rhs(then_body, name, out);
+            collect_var_assign_rhs(else_body, name, out);
+        }
+        HirStmt::Switch { cases, default, .. } => {
+            for case in cases {
+                collect_var_assign_rhs(&case.body, name, out);
+            }
+            collect_var_assign_rhs(default, name, out);
+        }
+        HirStmt::For {
+            init, update, body, ..
+        } => {
+            if let Some(i) = init {
+                collect_var_assign_rhs_stmt(i, name, out);
+            }
+            if let Some(u) = update {
+                collect_var_assign_rhs_stmt(u, name, out);
+            }
+            collect_var_assign_rhs(body, name, out);
+        }
+        _ => {}
     }
 }
 
@@ -1024,27 +1204,43 @@ fn prefer_narrow_return_candidate(current: Option<NirType>, candidate: NirType) 
 
 fn collect_zero_extended_return_candidates(
     stmts: &[HirStmt],
+    root_body: &[HirStmt],
     defs: &HashMap<String, DefEntry>,
     known_binding_types: &HashMap<String, NirType>,
     out: &mut Vec<NirType>,
 ) -> usize {
     let mut value_return_count = 0;
     for stmt in stmts {
-        value_return_count +=
-            collect_zero_extended_return_candidates_stmt(stmt, defs, known_binding_types, out);
+        value_return_count += collect_zero_extended_return_candidates_stmt(
+            stmt,
+            root_body,
+            defs,
+            known_binding_types,
+            out,
+        );
     }
     value_return_count
 }
 
 fn collect_zero_extended_return_candidates_stmt(
     stmt: &HirStmt,
+    root_body: &[HirStmt],
     defs: &HashMap<String, DefEntry>,
     known_binding_types: &HashMap<String, NirType>,
     out: &mut Vec<NirType>,
 ) -> usize {
     match stmt {
         HirStmt::Return(Some(expr)) => {
-            if let Some(ty) = zero_extended_return_candidate_type(expr, defs, known_binding_types) {
+            let ty = match expr {
+                HirExpr::Var(name) | HirExpr::AddressOfGlobal(name) => {
+                    aggregate_return_temp_candidates(name, root_body, defs, known_binding_types)
+                        .or_else(|| {
+                            zero_extended_return_candidate_type(expr, defs, known_binding_types)
+                        })
+                }
+                _ => zero_extended_return_candidate_type(expr, defs, known_binding_types),
+            };
+            if let Some(ty) = ty {
                 out.push(ty);
             }
             1
@@ -1054,17 +1250,33 @@ fn collect_zero_extended_return_candidates_stmt(
         | HirStmt::While { body: stmts, .. }
         | HirStmt::DoWhile { body: stmts, .. }
         | HirStmt::For { body: stmts, .. } => {
-            collect_zero_extended_return_candidates(stmts, defs, known_binding_types, out)
+            collect_zero_extended_return_candidates(
+                stmts,
+                root_body,
+                defs,
+                known_binding_types,
+                out,
+            )
         }
         HirStmt::If {
             then_body,
             else_body,
             ..
         } => {
-            let then_count =
-                collect_zero_extended_return_candidates(then_body, defs, known_binding_types, out);
-            let else_count =
-                collect_zero_extended_return_candidates(else_body, defs, known_binding_types, out);
+            let then_count = collect_zero_extended_return_candidates(
+                then_body,
+                root_body,
+                defs,
+                known_binding_types,
+                out,
+            );
+            let else_count = collect_zero_extended_return_candidates(
+                else_body,
+                root_body,
+                defs,
+                known_binding_types,
+                out,
+            );
             then_count + else_count
         }
         HirStmt::Switch { cases, default, .. } => {
@@ -1072,13 +1284,20 @@ fn collect_zero_extended_return_candidates_stmt(
             for case in cases {
                 value_return_count += collect_zero_extended_return_candidates(
                     &case.body,
+                    root_body,
                     defs,
                     known_binding_types,
                     out,
                 );
             }
             value_return_count
-                + collect_zero_extended_return_candidates(default, defs, known_binding_types, out)
+                + collect_zero_extended_return_candidates(
+                    default,
+                    root_body,
+                    defs,
+                    known_binding_types,
+                    out,
+                )
         }
         _ => 0,
     }
@@ -1183,6 +1402,7 @@ fn narrow_zero_extended_return_width(
     let mut candidates = Vec::new();
     let value_return_count = collect_zero_extended_return_candidates(
         &func.body,
+        &func.body,
         defs,
         known_binding_types,
         &mut candidates,
@@ -1211,14 +1431,197 @@ fn narrow_zero_extended_return_width(
     {
         return false;
     }
-
     let candidate = NirType::Int {
         bits: candidate_bits,
         signed: candidate_signed,
     };
     func.return_type = candidate.clone();
     strip_zero_extended_return_casts(&mut func.body, &candidate);
+    // Rewrite join-temp constants only for signed narrow (signum/INT_MIN paths).
+    // Unsigned zext narrow must not rewrite body temps (breaks loop-carried casts).
+    if candidate_signed {
+        rewrite_i32_compatible_constants_in_body(&mut func.body, &candidate);
+        narrow_returned_temp_bindings(func, &candidate);
+    }
     true
+}
+
+fn narrow_returned_temp_bindings(func: &mut HirFunction, narrowed_ty: &NirType) {
+    let mut returned = HashSet::new();
+    collect_returned_var_names(&func.body, &mut returned);
+    for binding in &mut func.locals {
+        if returned.contains(&binding.name) {
+            binding.ty = narrowed_ty.clone();
+        }
+    }
+}
+
+fn collect_returned_var_names(stmts: &[HirStmt], out: &mut HashSet<String>) {
+    for stmt in stmts {
+        match stmt {
+            HirStmt::Return(Some(HirExpr::Var(n) | HirExpr::AddressOfGlobal(n))) => {
+                out.insert(n.clone());
+            }
+            HirStmt::Block(body)
+            | HirStmt::While { body, .. }
+            | HirStmt::DoWhile { body, .. }
+            | HirStmt::For { body, .. } => collect_returned_var_names(body, out),
+            HirStmt::If {
+                then_body,
+                else_body,
+                ..
+            } => {
+                collect_returned_var_names(then_body, out);
+                collect_returned_var_names(else_body, out);
+            }
+            HirStmt::Switch { cases, default, .. } => {
+                for case in cases {
+                    collect_returned_var_names(&case.body, out);
+                }
+                collect_returned_var_names(default, out);
+            }
+            _ => {}
+        }
+    }
+}
+
+/// Rewrite 32-bit-compatible wide constants in expressions (Select/assign RHS)
+/// after the function return type was narrowed to signed/unsigned i32.
+fn rewrite_i32_compatible_constants_in_body(stmts: &mut [HirStmt], narrowed_ty: &NirType) -> bool {
+    let mut changed = false;
+    for stmt in stmts {
+        changed |= rewrite_i32_compatible_constants_in_stmt(stmt, narrowed_ty);
+    }
+    changed
+}
+
+fn rewrite_i32_compatible_constants_in_stmt(stmt: &mut HirStmt, narrowed_ty: &NirType) -> bool {
+    match stmt {
+        HirStmt::Assign { rhs, .. } => rewrite_i32_compatible_constants_in_expr(rhs, narrowed_ty),
+        HirStmt::Return(Some(expr)) => rewrite_i32_compatible_constants_in_expr(expr, narrowed_ty),
+        HirStmt::Expr(expr) => rewrite_i32_compatible_constants_in_expr(expr, narrowed_ty),
+        HirStmt::Block(body) | HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
+            rewrite_i32_compatible_constants_in_body(body, narrowed_ty)
+        }
+        HirStmt::If {
+            then_body,
+            else_body,
+            cond,
+            ..
+        } => {
+            rewrite_i32_compatible_constants_in_expr(cond, narrowed_ty)
+                | rewrite_i32_compatible_constants_in_body(then_body, narrowed_ty)
+                | rewrite_i32_compatible_constants_in_body(else_body, narrowed_ty)
+        }
+        HirStmt::Switch {
+            expr,
+            cases,
+            default,
+            ..
+        } => {
+            let mut changed = rewrite_i32_compatible_constants_in_expr(expr, narrowed_ty);
+            for case in cases {
+                changed |= rewrite_i32_compatible_constants_in_body(&mut case.body, narrowed_ty);
+            }
+            changed | rewrite_i32_compatible_constants_in_body(default, narrowed_ty)
+        }
+        HirStmt::For {
+            init, update, body, ..
+        } => {
+            let mut changed = false;
+            if let Some(i) = init {
+                changed |= rewrite_i32_compatible_constants_in_stmt(i, narrowed_ty);
+            }
+            if let Some(u) = update {
+                changed |= rewrite_i32_compatible_constants_in_stmt(u, narrowed_ty);
+            }
+            changed | rewrite_i32_compatible_constants_in_body(body, narrowed_ty)
+        }
+        _ => false,
+    }
+}
+
+fn rewrite_i32_compatible_constants_in_expr(expr: &mut HirExpr, narrowed_ty: &NirType) -> bool {
+    let NirType::Int {
+        bits: 32,
+        signed: narrow_signed,
+    } = narrowed_ty
+    else {
+        return false;
+    };
+    match expr {
+        HirExpr::Const(value, ty) => {
+            let width_ok = matches!(
+                ty,
+                NirType::Int {
+                    bits: 64 | 32,
+                    signed: false
+                }
+            );
+            if !width_ok {
+                return false;
+            }
+            let v = *value as u64;
+            if v > 0xFFFF_FFFF {
+                return false;
+            }
+            let u32_val = v as u32;
+            let new_v = if *narrow_signed {
+                (u32_val as i32) as i64
+            } else {
+                u32_val as i64
+            };
+            if *value == new_v && ty == narrowed_ty {
+                return false;
+            }
+            *value = new_v;
+            *ty = narrowed_ty.clone();
+            true
+        }
+        HirExpr::Select {
+            then_expr,
+            else_expr,
+            ty,
+            ..
+        } => {
+            let mut changed = rewrite_i32_compatible_constants_in_expr(then_expr, narrowed_ty)
+                | rewrite_i32_compatible_constants_in_expr(else_expr, narrowed_ty);
+            if matches!(
+                ty,
+                NirType::Int {
+                    bits: 64,
+                    signed: false
+                }
+            ) {
+                *ty = narrowed_ty.clone();
+                changed = true;
+            }
+            changed
+        }
+        HirExpr::Cast { expr: inner, ty } => {
+            let mut changed = rewrite_i32_compatible_constants_in_expr(inner, narrowed_ty);
+            if matches!(
+                ty,
+                NirType::Int {
+                    bits: 64,
+                    signed: false
+                }
+            ) {
+                // Prefer dropping the outer zext by rewriting type; caller may strip later.
+                *ty = narrowed_ty.clone();
+                changed = true;
+            }
+            changed
+        }
+        HirExpr::Unary { expr: inner, .. } => {
+            rewrite_i32_compatible_constants_in_expr(inner, narrowed_ty)
+        }
+        HirExpr::Binary { lhs, rhs, .. } => {
+            rewrite_i32_compatible_constants_in_expr(lhs, narrowed_ty)
+                | rewrite_i32_compatible_constants_in_expr(rhs, narrowed_ty)
+        }
+        _ => false,
+    }
 }
 
 fn strip_zero_extended_casts_to_declared_return_width(func: &mut HirFunction) -> bool {
@@ -2098,6 +2501,121 @@ mod tests {
             panic!("expected return const");
         };
         assert_eq!(*v, -1i64, "0xFFFFFFFF should become -1");
+        assert_eq!(*ty, i32_ty);
+    }
+
+    /// signum-style: single `return xVar` after `xVar = cond ? 1 : (cond2 ? 0 : 0xffffffff)`.
+    #[test]
+    fn narrows_select_join_temp_return_to_signed_i32() {
+        let u64_ty = NirType::Int {
+            bits: 64,
+            signed: false,
+        };
+        let i32_ty = NirType::Int {
+            bits: 32,
+            signed: true,
+        };
+        let mut func = HirFunction {
+            name: "signum_like".to_owned(),
+            int_param_offsets: Vec::new(),
+            params: vec![make_param(
+                "param_1",
+                NirType::Int {
+                    bits: 32,
+                    signed: true,
+                },
+            )],
+            locals: vec![make_binding("xVar8")],
+            return_type: u64_ty.clone(),
+            surface_return_type_name: None,
+            body: vec![
+                make_assign(
+                    "xVar8",
+                    HirExpr::Select {
+                        cond: Box::new(HirExpr::Var("c1".into())),
+                        then_expr: Box::new(HirExpr::Const(1, u64_ty.clone())),
+                        else_expr: Box::new(HirExpr::Select {
+                            cond: Box::new(HirExpr::Var("c2".into())),
+                            then_expr: Box::new(HirExpr::Const(0, u64_ty.clone())),
+                            else_expr: Box::new(HirExpr::Const(4294967295, u64_ty.clone())),
+                            ty: u64_ty.clone(),
+                        }),
+                        ty: u64_ty.clone(),
+                    },
+                ),
+                HirStmt::Return(Some(HirExpr::Var("xVar8".into()))),
+            ],
+            ..Default::default()
+        };
+        assert!(super::apply_type_inference_pass(&mut func));
+        assert_eq!(func.return_type, i32_ty);
+        let HirStmt::Assign { rhs, .. } = &func.body[0] else {
+            panic!("expected assign");
+        };
+        let printed = format!("{rhs:?}");
+        assert!(
+            printed.contains("-1") || matches!(rhs, HirExpr::Select { else_expr, .. }
+                if matches!(else_expr.as_ref(), HirExpr::Select { else_expr: e2, .. }
+                    if matches!(e2.as_ref(), HirExpr::Const(-1, _)))),
+            "expected -1 const in select arms, got {rhs:?}"
+        );
+    }
+
+    /// saturating_add-style: multi-assign join temp with INT_MIN bit pattern.
+    #[test]
+    fn narrows_multi_assign_return_temp_with_int_min() {
+        let u64_ty = NirType::Int {
+            bits: 64,
+            signed: false,
+        };
+        let i32_ty = NirType::Int {
+            bits: 32,
+            signed: true,
+        };
+        let mut func = HirFunction {
+            name: "saturating_like".to_owned(),
+            int_param_offsets: Vec::new(),
+            params: vec![],
+            locals: vec![make_binding("xVar39"), make_binding("local_4")],
+            return_type: u64_ty.clone(),
+            surface_return_type_name: None,
+            body: vec![
+                make_assign("local_4", HirExpr::Const(0, u64_ty.clone())),
+                HirStmt::If {
+                    cond: HirExpr::Var("overflow_pos".into()),
+                    then_body: vec![make_assign(
+                        "xVar39",
+                        HirExpr::Const(2147483647, u64_ty.clone()),
+                    )],
+                    else_body: vec![],
+                },
+                HirStmt::If {
+                    cond: HirExpr::Var("overflow_neg".into()),
+                    then_body: vec![make_assign(
+                        "xVar39",
+                        HirExpr::Const(2147483648u64 as i64, u64_ty.clone()),
+                    )],
+                    else_body: vec![],
+                },
+                make_assign("xVar39", HirExpr::Var("local_4".into())),
+                HirStmt::Return(Some(HirExpr::Var("xVar39".into()))),
+            ],
+            ..Default::default()
+        };
+        assert!(super::apply_type_inference_pass(&mut func));
+        assert_eq!(func.return_type, i32_ty);
+        // INT_MIN arm rewritten
+        let HirStmt::If { then_body, .. } = &func.body[2] else {
+            panic!("expected second if");
+        };
+        let HirStmt::Assign {
+            rhs: HirExpr::Const(v, ty),
+            ..
+        } = &then_body[0]
+        else {
+            panic!("expected const assign, got {:?}", then_body[0]);
+        };
+        assert_eq!(*v, i32::MIN as i64);
         assert_eq!(*ty, i32_ty);
     }
 }
