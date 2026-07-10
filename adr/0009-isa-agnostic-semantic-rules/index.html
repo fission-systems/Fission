@@ -10,7 +10,7 @@
       
       
       
-        <link rel="canonical" href="https://sjkim1127.github.io/Fission/adr/">
+        <link rel="canonical" href="https://sjkim1127.github.io/Fission/adr/0009-isa-agnostic-semantic-rules/">
       
       
       
@@ -18,19 +18,19 @@
         
       
       
-      <link rel="icon" href="../assets/images/favicon.png">
+      <link rel="icon" href="../../assets/images/favicon.png">
       <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
     
     
       
-        <title>Architecture Decision Records - Fission</title>
+        <title>ADR 0009: ISA-agnostic semantic rules - Fission</title>
       
     
     
-      <link rel="stylesheet" href="../assets/stylesheets/main.484c7ddc.min.css">
+      <link rel="stylesheet" href="../../assets/stylesheets/main.484c7ddc.min.css">
       
         
-        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
       
       
 
@@ -49,7 +49,7 @@
       
     
     
-    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
     
       
 
@@ -74,7 +74,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#architecture-decision-records" class="md-skip">
+        <a href="#adr-0009-isa-agnostic-semantic-rules" class="md-skip">
           Skip to content
         </a>
       
@@ -88,7 +88,7 @@
 
 <header class="md-header" data-md-component="header">
   <nav class="md-header__inner md-grid" aria-label="Header">
-    <a href=".." title="Fission" class="md-header__button md-logo" aria-label="Fission" data-md-component="logo">
+    <a href="../.." title="Fission" class="md-header__button md-logo" aria-label="Fission" data-md-component="logo">
       
   
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
@@ -108,7 +108,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Architecture Decision Records
+              ADR 0009: ISA-agnostic semantic rules
             
           </span>
         </div>
@@ -231,7 +231,7 @@
   
   
     <li class="md-tabs__item">
-      <a href=".." class="md-tabs__link">
+      <a href="../.." class="md-tabs__link">
         
   
   
@@ -250,7 +250,7 @@
   
   
     <li class="md-tabs__item">
-      <a href="../PROJECT_MAP/" class="md-tabs__link">
+      <a href="../../PROJECT_MAP/" class="md-tabs__link">
         
   
   
@@ -269,7 +269,7 @@
   
   
     <li class="md-tabs__item">
-      <a href="../CLI/" class="md-tabs__link">
+      <a href="../../CLI/" class="md-tabs__link">
         
   
   
@@ -288,7 +288,7 @@
   
   
     <li class="md-tabs__item">
-      <a href="../architecture/ARCHITECTURE/" class="md-tabs__link">
+      <a href="../../architecture/ARCHITECTURE/" class="md-tabs__link">
         
   
   
@@ -307,7 +307,7 @@
   
   
     <li class="md-tabs__item">
-      <a href="../QUALITY_METRICS/" class="md-tabs__link">
+      <a href="../../QUALITY_METRICS/" class="md-tabs__link">
         
   
   
@@ -326,7 +326,7 @@
   
   
     <li class="md-tabs__item">
-      <a href="../EVALUATION/" class="md-tabs__link">
+      <a href="../../EVALUATION/" class="md-tabs__link">
         
   
   
@@ -345,7 +345,7 @@
   
   
     <li class="md-tabs__item">
-      <a href="../contributing/" class="md-tabs__link">
+      <a href="../../contributing/" class="md-tabs__link">
         
   
   
@@ -366,7 +366,7 @@
     
     
       <li class="md-tabs__item">
-        <a href="../MALWARE_SAMPLE_POLICY/" class="md-tabs__link">
+        <a href="../../MALWARE_SAMPLE_POLICY/" class="md-tabs__link">
           
   
   
@@ -400,7 +400,7 @@
 
 <nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
   <label class="md-nav__title" for="__drawer">
-    <a href=".." title="Fission" class="md-nav__button md-logo" aria-label="Fission" data-md-component="logo">
+    <a href="../.." title="Fission" class="md-nav__button md-logo" aria-label="Fission" data-md-component="logo">
       
   
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
@@ -430,7 +430,7 @@
   
   
     <li class="md-nav__item">
-      <a href=".." class="md-nav__link">
+      <a href="../.." class="md-nav__link">
         
   
   
@@ -457,7 +457,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../PROJECT_MAP/" class="md-nav__link">
+      <a href="../../PROJECT_MAP/" class="md-nav__link">
         
   
   
@@ -484,7 +484,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../CLI/" class="md-nav__link">
+      <a href="../../CLI/" class="md-nav__link">
         
   
   
@@ -511,7 +511,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../architecture/ARCHITECTURE/" class="md-nav__link">
+      <a href="../../architecture/ARCHITECTURE/" class="md-nav__link">
         
   
   
@@ -538,7 +538,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../QUALITY_METRICS/" class="md-nav__link">
+      <a href="../../QUALITY_METRICS/" class="md-nav__link">
         
   
   
@@ -565,7 +565,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../EVALUATION/" class="md-nav__link">
+      <a href="../../EVALUATION/" class="md-nav__link">
         
   
   
@@ -592,7 +592,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../contributing/" class="md-nav__link">
+      <a href="../../contributing/" class="md-nav__link">
         
   
   
@@ -673,7 +673,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../MALWARE_SAMPLE_POLICY/" class="md-nav__link">
+      <a href="../../MALWARE_SAMPLE_POLICY/" class="md-nav__link">
         
   
   
@@ -701,7 +701,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../VERSIONING/" class="md-nav__link">
+      <a href="../../VERSIONING/" class="md-nav__link">
         
   
   
@@ -729,7 +729,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../RELEASE/" class="md-nav__link">
+      <a href="../../RELEASE/" class="md-nav__link">
         
   
   
@@ -777,6 +777,97 @@
     
   
   
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#context" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Context
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#decision" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Decision
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#consequences" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Consequences
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Consequences">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#positive" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Positive
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#accepted-costs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Accepted costs
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#follow-up" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Follow-up
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#non-goals" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Non-goals
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
 </nav>
                   </div>
                 </div>
@@ -795,55 +886,107 @@
   
 
 
-<h1 id="architecture-decision-records">Architecture Decision Records<a class="headerlink" href="#architecture-decision-records" title="Permanent link">&para;</a></h1>
-<p>Short, durable decisions complement <a href="../architecture/ARCHITECTURE/"><code>docs/architecture/ARCHITECTURE.md</code></a> and repo <code>AGENTS.md</code> files.</p>
-<table>
-<thead>
-<tr>
-<th>ADR</th>
-<th>Title</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><a href="0001-cli-first-external-surface/">0001</a></td>
-<td>CLI-first external surface</td>
-</tr>
-<tr>
-<td><a href="0002-fission-pcode-canonical-semantics/">0002</a></td>
-<td><code>fission-pcode</code> owns canonical semantics</td>
-</tr>
-<tr>
-<td><a href="0003-fail-closed-loader-policy/">0003</a></td>
-<td>Fail-closed loader policy</td>
-</tr>
-<tr>
-<td><a href="0004-die-as-detector-resource/">0004</a></td>
-<td>DIE as detector resource, not semantic oracle</td>
-</tr>
-<tr>
-<td><a href="0005-ghidra-reference-boundary/">0005</a></td>
-<td>Ghidra reference boundary / shipped semantics</td>
-</tr>
-<tr>
-<td><a href="0006-decompiler-quality-change-gate/">0006</a></td>
-<td>Decompiler quality change gate</td>
-</tr>
-<tr>
-<td><a href="0007-ai-overfit-and-validation-firewall/">0007</a></td>
-<td>AI overfit and validation firewall</td>
-</tr>
-<tr>
-<td><a href="0008-nir-substrate-and-owner-boundaries/">0008</a></td>
-<td>NIR substrate and owner boundaries</td>
-</tr>
-<tr>
-<td><a href="0009-isa-agnostic-semantic-rules/">0009</a></td>
-<td>ISA-agnostic semantic rules (optimize on x86, implement common invariants)</td>
-</tr>
-</tbody>
-</table>
-<p>New decisions: copy <a href="0000-template/"><code>0000-template.md</code></a>, bump the next number, link from this table.</p>
+<h1 id="adr-0009-isa-agnostic-semantic-rules">ADR 0009: ISA-agnostic semantic rules<a class="headerlink" href="#adr-0009-isa-agnostic-semantic-rules" title="Permanent link">&para;</a></h1>
+<p><strong>Status:</strong> Accepted<br />
+<strong>Last verified:</strong> 2026-07-10</p>
+<h2 id="context">Context<a class="headerlink" href="#context" title="Permanent link">&para;</a></h2>
+<p>Day-to-day quality work is correctly optimized for x86 / x86-64 sample binaries.
+That optimization target must not become a license to copy semantic rules per
+ISA. Fission is a Rust pipeline with explicit owners (builder/materialize,
+normalize, structuring, type/data recovery). Shared mutable program state is
+not available the way it is inside Ghidra's JVM, so each x86-32-only branch
+tends to become permanent debt: the same CFG/dataflow failure reappears on x64
+or ARM, and the pass graph grows without reducing rule count.</p>
+<p>Recent quality fixes (loop-carried register updates, same-block conditional
+moves, short-circuit diamond return arms, conditional copy merge barriers)
+succeeded when restated as register/CFG/def-use invariants, and failed the
+architecture test when phrased only as "m32 row" or "ebp+8" special cases.</p>
+<p>Related ADRs:</p>
+<ul>
+<li><a href="../0002-fission-pcode-canonical-semantics/">0002</a> — <code>fission-pcode</code> owns semantics</li>
+<li><a href="../0006-decompiler-quality-change-gate/">0006</a> — quality change gate / invariants</li>
+<li><a href="../0007-ai-overfit-and-validation-firewall/">0007</a> — no row identity in production</li>
+<li><a href="../0008-nir-substrate-and-owner-boundaries/">0008</a> — substrate vs owner layers</li>
+</ul>
+<h2 id="decision">Decision<a class="headerlink" href="#decision" title="Permanent link">&para;</a></h2>
+<ol>
+<li>
+<p><strong>Optimization target ≠ rule language.</strong><br />
+   Prefer measuring and fixing x86 / x86-64 first. Production semantic logic must
+   still be stated in ISA-agnostic terms: CFG, dominance, postdominance, SCC,
+   def-use, register families, calling-convention <em>slots</em>, memory alias, and
+   p-code op semantics.</p>
+</li>
+<li>
+<p><strong>ISA differences live in models and tables, not in control-structure cores.</strong><br />
+   Allowed ISA-specific surfaces:</p>
+</li>
+<li>SLEIGH / language id / <code>.sla</code> execution</li>
+<li>cspec / register namer / primary return and param register <em>sets</em></li>
+<li>calling-convention stack-parameter classification</li>
+<li>format loaders (PE/ELF/Mach-O) outside NIR semantics</li>
+</ol>
+<p>Not allowed as the primary condition for semantic behavior:
+   - <code>if calling_convention == X86_32</code> (or similar) wrapping join/loop/cmov logic
+   - hard-coded EBP/ESP offsets, register string names, or instruction mnemonics
+     as the only guard for a meaning-changing transform
+   - per-ISA copies of the same structuring or materialize rule</p>
+<ol>
+<li>
+<p><strong>Motivate with a row; implement a common invariant.</strong><br />
+   A motivating binary may be gcc-m32, but the production condition must be the
+   generalized fact (for example: a forward arm that defines the ABI primary
+   return register is not a trivial empty forward into a return join).</p>
+</li>
+<li>
+<p><strong>Tests follow the invariant, not the ISA label.</strong><br />
+   Prefer synthetic CFG / p-code fixtures without function names, addresses, or
+   compiler tuples in the assertion surface. An optional x86-shaped fixture is
+   fine when it only supplies register offsets via the normal namer/cspec path.</p>
+</li>
+<li>
+<p><strong>Default to extending shared helpers and owners.</strong><br />
+   Grow helpers such as loop-carried update detection, same-block forward branch
+   resolution, return-join live-in, and unconditional-copy merge barriers.
+   Do not add a new normalize pass to paper over an ISA-local miss when the owner
+   fact can be fixed once.</p>
+</li>
+<li>
+<p><strong>Emergency end-of-pipeline cleanups are temporary debt.</strong><br />
+   If a hoist/cleanup pass is added because an earlier stage dropped a pure
+   param alias or similar, the proposal must mark the root owner and a removal
+   path. Prefer fixing materialize/structuring over stacking ISA-shaped cleanups.</p>
+</li>
+</ol>
+<h2 id="consequences">Consequences<a class="headerlink" href="#consequences" title="Permanent link">&para;</a></h2>
+<h3 id="positive">Positive<a class="headerlink" href="#positive" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Rule count scales with <strong>invariant families</strong>, not ISA × compiler × row.</li>
+<li>Future ARM/MIPS/PPC work reuses register/loop/join cores and only supplies
+  models (cspec, CC, SLEIGH).</li>
+<li>Reviews have a clear reject reason: "this is x86-32 copy-paste, restate as a
+  common fact."</li>
+</ul>
+<h3 id="accepted-costs">Accepted costs<a class="headerlink" href="#accepted-costs" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Authors must spend a few sentences generalizing a motivating m32/x64 row.</li>
+<li>Some x86 encodings (absolute cmov targets, stack epilogue returns) still need
+  <em>interpretation</em> helpers; those helpers decode encodings into common facts,
+  they do not own separate semantic policies per ISA.</li>
+</ul>
+<h3 id="follow-up">Follow-up<a class="headerlink" href="#follow-up" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Keep <a href="../../Agents.md"><code>Agents.md</code></a> and NIR <code>AGENTS.md</code> aligned with this ADR.</li>
+<li>When touching quality proposals, the invariant section should name the common
+  fact first and the motivating ISA second.</li>
+</ul>
+<h2 id="non-goals">Non-goals<a class="headerlink" href="#non-goals" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Pausing x86 / x86-64 quality work until other ISAs are equal.</li>
+<li>Forbidding all mention of x86 in comments, tests, or proposals.</li>
+<li>Requiring every helper to run on every language id on day one (admission and
+  coverage may still be phased; the <em>rule statement</em> must still be general).</li>
+</ul>
 
 
 
@@ -899,10 +1042,10 @@
     
       
       
-      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.tabs", "navigation.sections", "navigation.expand", "navigation.top", "search.suggest", "search.highlight", "content.code.copy"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.tabs", "navigation.sections", "navigation.expand", "navigation.top", "search.suggest", "search.highlight", "content.code.copy"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
     
     
-      <script src="../assets/javascripts/bundle.79ae519e.min.js"></script>
+      <script src="../../assets/javascripts/bundle.79ae519e.min.js"></script>
       
     
   </body>

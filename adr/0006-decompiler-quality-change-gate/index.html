@@ -883,6 +883,9 @@ and record the chain:</p>
 <li>memory alias facts,</li>
 <li>documented binary-format semantics.</li>
 </ul>
+<p>Prefer <strong>ISA-agnostic statement of those facts</strong> even when the motivating sample
+is x86/x86-32: put encoding and register <em>maps</em> in cspec/CC/SLEIGH, and keep
+loop/join/cmov-class <em>policy</em> shared (<a href="../0009-isa-agnostic-semantic-rules/">ADR 0009</a>).</p>
 <p>The default implementation path is to extend the existing owner/pass. Add a new
 pass, helper, or metric only when the proposal shows that no existing owner
 already covers the invariant. A targeted test is required, but it is never enough
