@@ -24,8 +24,22 @@ pub(crate) fn collapse_trivial_assign_returns(
                     rhs,
                 },
                 HirStmt::Return(Some(HirExpr::Var(ret_name))),
-            ) if name == ret_name && is_trivial_temp_name(name) => {
-                if should_block_trivial_return_collapse(name, preserved_temps) {
+            ) if name == ret_name
+                && (is_trivial_temp_name(name) || is_abi_return_register_name(name)) =>
+            {
+                // Temps always collapse; ABI return regs (eax/rax) only when the
+                // RHS is a pure value (const / cast-of-const). Path-sensitive
+                // cmov arms keep `eax = INT_MIN; return eax` because the assign
+                // is not adjacent to the return at this level.
+                // Live-register HW bindings are often TempPreserved; still fold
+                // pure adjacent `eax = C; return eax` for readability.
+                let abi_pure = is_abi_return_register_name(name)
+                    && is_pure_return_collapse_rhs(rhs);
+                if is_abi_return_register_name(name) && !is_pure_return_collapse_rhs(rhs) {
+                    None
+                } else if !abi_pure
+                    && should_block_trivial_return_collapse(name, preserved_temps)
+                {
                     blocked += 1;
                     None
                 } else {

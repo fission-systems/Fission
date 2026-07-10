@@ -1581,3 +1581,42 @@ fn fuse_if_goto_allows_returns_in_segment() {
         "unexpected shape: {stmts:?}"
     );
 }
+
+#[test]
+fn collapse_trivial_assign_returns_folds_eax_const() {
+    use super::utils::is_abi_return_register_name;
+    assert!(is_abi_return_register_name("eax"));
+    let mut stmts = vec![
+        HirStmt::Assign {
+            lhs: HirLValue::Var("eax".to_string()),
+            rhs: HirExpr::Const(7, int(32)),
+        },
+        HirStmt::Return(Some(HirExpr::Var("eax".to_string()))),
+    ];
+    assert!(collapse_trivial_assign_returns(&mut stmts, &HashSet::new()));
+    assert_eq!(stmts.len(), 1);
+    assert!(matches!(
+        &stmts[0],
+        HirStmt::Return(Some(HirExpr::Const(7, _)))
+    ));
+}
+
+#[test]
+fn collapse_trivial_assign_returns_folds_eax_const_even_if_preserved() {
+    let mut stmts = vec![
+        HirStmt::Assign {
+            lhs: HirLValue::Var("eax".to_string()),
+            rhs: HirExpr::Const(7, int(32)),
+        },
+        HirStmt::Return(Some(HirExpr::Var("eax".to_string()))),
+    ];
+    assert!(collapse_trivial_assign_returns(
+        &mut stmts,
+        &HashSet::from(["eax"]),
+    ));
+    assert_eq!(stmts.len(), 1);
+    assert!(matches!(
+        &stmts[0],
+        HirStmt::Return(Some(HirExpr::Const(7, _)))
+    ));
+}

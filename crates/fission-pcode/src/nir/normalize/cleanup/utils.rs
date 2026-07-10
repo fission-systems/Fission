@@ -13,6 +13,28 @@ pub(super) fn is_trivial_temp_name(name: &str) -> bool {
         || name.starts_with("bVar")
 }
 
+/// ABI primary-return register surface names used by materialize HW binding.
+pub(super) fn is_abi_return_register_name(name: &str) -> bool {
+    matches!(
+        name,
+        "al" | "ax" | "eax" | "rax" | "r0" | "x0" | "v0" | "a0" | "w0"
+    )
+}
+
+/// RHS safe to fold through `reg = rhs; return reg` → `return rhs`.
+pub(super) fn is_pure_return_collapse_rhs(expr: &HirExpr) -> bool {
+    match expr {
+        HirExpr::Const(_, _) | HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) => true,
+        HirExpr::Cast { expr, .. } | HirExpr::Unary { expr, .. } => {
+            is_pure_return_collapse_rhs(expr)
+        }
+        HirExpr::Binary { lhs, rhs, .. } => {
+            is_pure_return_collapse_rhs(lhs) && is_pure_return_collapse_rhs(rhs)
+        }
+        _ => false,
+    }
+}
+
 pub(crate) fn expr_has_side_effects(expr: &HirExpr) -> bool {
     match expr {
         HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) | HirExpr::Const(_, _) => false,

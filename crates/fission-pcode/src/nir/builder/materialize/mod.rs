@@ -907,11 +907,15 @@ impl<'a> PreviewBuilder<'a> {
         } else if self.register_namer().is_primary_return_register(output)
             // ARM/AArch64 r0/x0 are both param and return; forcing the HW name
             // there collapses call-arg vs result identity. x86 eax/rax is
-            // return-only under the active CCs, which is the cmov-tail case.
+            // return-only under the active CCs.
             && !self
                 .register_namer()
                 .register_name_with_param_owned(output.offset, output.size)
                 .is_some_and(|(_, idx)| idx.is_some())
+            // Always prefer the ABI return register surface for non-param
+            // primary-return writes so sum/cmov arms share one name with
+            // `return eax`. Normalize folds adjacent `eax = C; return eax`
+            // via collapse_trivial_assign_returns (abi pure RHS).
             && let Some(name) = self.sla_hw_name(output.offset, output.size)
         {
             // Cross-block cmov tails (e.g. saturating_add underflow): the guarded

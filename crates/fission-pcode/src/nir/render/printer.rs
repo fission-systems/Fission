@@ -670,12 +670,12 @@ fn print_integer_const(value: i64, ty: &NirType) -> String {
         } else {
             (raw as i64) - (1i64 << bits)
         };
-        // Prefer signed form for true signed types, and for classic high-bit
-        // immediates (INT_MIN) even when the NIR type is still unsigned.
-        if *signed || raw == sign_bit || value > 0 && value as u64 == raw {
-            if signed_val < 0 {
-                return signed_val.to_string();
-            }
+        // Prefer signed form for true signed types, and for classic INT_MIN
+        // immediates (`0x80000000`) even when the NIR type is still unsigned.
+        // Do *not* rewrite other high-bit unsigned constants (e.g. carry masks
+        // like 0xFFFFFFFC) — those must stay decimal-unsigned for semantics.
+        if signed_val < 0 && (*signed || raw == sign_bit) {
+            return signed_val.to_string();
         }
     }
     value.to_string()

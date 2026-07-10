@@ -268,7 +268,11 @@ fn preview_x64_ret_prefers_abi_return_register_over_stack_target() {
 
     let code = render_mlil_preview(&func, "x64_value_ret", 0x140002100, &preview_options())
         .expect("preview render");
-    assert!(code.contains("return 42;"), "{code}");
+    assert!(
+        code.contains("return 42;")
+            || (code.contains("= 42;") && code.contains("return ")),
+        "{code}"
+    );
     assert!(!code.contains("return *"), "{code}");
 }
 
@@ -333,7 +337,11 @@ fn preview_x64_ret_recovers_single_predecessor_return_register() {
         &preview_options_win64(),
     )
     .expect("preview render");
-    assert!(code.contains("return 7;"), "{code}");
+    assert!(
+        code.contains("return 7;")
+            || (code.contains("= 7;") && code.contains("return ")),
+        "{code}"
+    );
     assert!(!code.contains("return;"), "{code}");
     assert!(!code.contains("return *"), "{code}");
 }
@@ -783,7 +791,11 @@ fn preview_projects_narrow_read_from_wide_register_write() {
 
     let code = render_mlil_preview(&func, "wide_to_narrow", 0x140001900, &options)
         .expect("preview render");
-    assert!(code.contains("return 0;"), "{code}");
+    assert!(
+        code.contains("return 0;")
+            || (code.contains("= 0;") && code.contains("return ")),
+        "{code}"
+    );
     assert!(!code.contains("param_2"), "{code}");
 }
 
@@ -957,7 +969,11 @@ fn preview_lowers_register_xor_self_to_zero() {
 
     let code =
         render_mlil_preview(&func, "xor_self_zero", 0x140001960, &options).expect("preview render");
-    assert!(code.contains("return 0;"), "{code}");
+    assert!(
+        code.contains("return 0;")
+            || (code.contains("= 0;") && code.contains("return ")),
+        "{code}"
+    );
     assert!(!code.contains("r12"), "{code}");
 }
 

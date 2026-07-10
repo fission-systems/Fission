@@ -1457,7 +1457,9 @@ fn cleanup_stmt_list_with_options_and_preserved(
         iterations += 1;
         let mut changed = false;
         let mut last_changed_pass = None;
-        if depth == 0 && collapse_trivial_assign_returns(stmts, preserved_temps) {
+        // Run at every nesting depth so Block-wrapped tails and if-arms also
+        // fold `reg = C; return reg` (ABI return regs included).
+        if collapse_trivial_assign_returns(stmts, preserved_temps) {
             changed = true;
             last_changed_pass = Some("collapse_trivial_assign_returns");
         }

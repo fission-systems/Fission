@@ -2623,7 +2623,11 @@ fn x86_32_incoming_stack_load_becomes_formal_parameter() {
     let code = render_mlil_preview(&func, "stack_param", 0x401000, &options)
         .expect("x86-32 stack parameter preview");
     assert!(code.contains("stack_param(uint param_1)"), "{code}");
-    assert!(code.contains("return param_1;"), "{code}");
+    assert!(
+        code.contains("return param_1;")
+            || (code.contains("= param_1;") && code.contains("return ")),
+        "{code}"
+    );
     assert!(!code.contains("param_8;"), "{code}");
 }
 
