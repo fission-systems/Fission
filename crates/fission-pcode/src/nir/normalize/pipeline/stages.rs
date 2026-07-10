@@ -36,7 +36,8 @@ use super::super::memory::{
     apply_union_resolve_pass, apply_zero_index_deref_pass,
 };
 use super::super::recovery::{
-    apply_break_continue_pass, apply_flag_recovery_pass, apply_for_loop_folding,
+    apply_break_continue_pass, apply_dead_flag_cleanup_pass, apply_flag_recovery_pass,
+    apply_for_loop_folding,
     apply_iv_recovery_pass, apply_variable_merge_pass, copy_propagation_pass, join_coalescing_pass,
 };
 use super::super::subvar_flow::apply_subvar_flow_pass;
@@ -918,6 +919,8 @@ pub(crate) fn run_stage_cleanup(func: &mut HirFunction, diag: bool, perf: bool) 
     // Subflow / bitmask pruning: optimize redundant bit-widths and bitmasks (subflow.cc).
     run_pass_logged(func, "subflow_pruning_final", perf, apply_subflow_pruning);
     apply_type_signature_fixed_point(func, diag, perf);
+    // Residual CF/OF/SF/ZF/PF stores after late materialize/arith waves — drop if unused.
+    run_pass_logged(func, "dead_flag_cleanup_final", perf, apply_dead_flag_cleanup_pass);
     run_pass_logged(
         func,
         "rescue_undeclared_bindings",

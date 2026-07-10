@@ -380,6 +380,70 @@ fn flag_recovery_jg_becomes_signed_gt() {
     );
 }
 
+// ── Dead flag cleanup even when no condition was rewritten ───────────────────
+
+#[test]
+fn dead_flag_assigns_removed_without_condition_rewrite() {
+    // Pure flag noise after a high-level condition: must not survive as
+    // undeclared `cf`/`of`/`sf`/`zf`/`pf` in C output.
+    let mut func = HirFunction {
+        name: "test_dead_flag_noise".to_string(),
+        int_param_offsets: Vec::new(),
+        params: vec![i32_binding("a"), i32_binding("b")],
+        locals: vec![],
+        return_type: NirType::Int {
+            bits: 32,
+            signed: true,
+        },
+        surface_return_type_name: None,
+        body: vec![
+            assign(
+                "of",
+                sborrow_call(var("a"), HirExpr::Const(0, i32_ty())),
+            ),
+            assign(
+                "sf",
+                b_binary(
+                    HirBinaryOp::SLt,
+                    var("a"),
+                    HirExpr::Const(0, i32_ty()),
+                ),
+            ),
+            assign(
+                "zf",
+                b_binary(HirBinaryOp::Eq, var("a"), HirExpr::Const(0, i32_ty())),
+            ),
+            HirStmt::If {
+                cond: b_binary(
+                    HirBinaryOp::SLe,
+                    var("a"),
+                    HirExpr::Const(0, i32_ty()),
+                ),
+                then_body: vec![HirStmt::Return(Some(var("b")))],
+                else_body: vec![HirStmt::Return(Some(var("a")))],
+            },
+        ],
+        ..Default::default()
+    };
+    normalize_hir_function(&mut func);
+    let code = print_hir_function(&func);
+    assert!(
+        !code.contains("of =") && !code.contains("sf =") && !code.contains("zf ="),
+        "dead flag assignments must be eliminated, got:\n{code}"
+    );
+    assert!(
+        code.contains("a <= 0") || code.contains("a <=") || code.contains("if "),
+        "high-level condition must remain, got:\n{code}"
+    );
+}
+
+fn i32_ty() -> NirType {
+    NirType::Int {
+        bits: 32,
+        signed: true,
+    }
+}
+
 // ── JB: cf  →  a < b (unsigned) ──────────────────────────────────────────────
 
 #[test]

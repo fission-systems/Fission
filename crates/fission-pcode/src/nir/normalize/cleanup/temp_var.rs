@@ -756,6 +756,10 @@ fn is_rescue_candidate_name(name: &str) -> bool {
     } else if name.starts_with("tmp_") {
         let suffix = &name[4..];
         !suffix.is_empty() && suffix.chars().all(|c| c.is_ascii_hexdigit())
+    } else if matches!(name, "cf" | "pf" | "af" | "zf" | "sf" | "of" | "df" | "if_") {
+        // Named EFLAGS bits (SLA 0x200 layout). Prefer dead-flag cleanup; if a
+        // live use remains, declare as Bool so the C harness compiles.
+        true
     } else if name.starts_with('r') || name.starts_with('e') {
         name != "reg" && name != "rsp" && name != "rbp" && name != "esp" && name != "ebp"
     } else {
@@ -787,7 +791,14 @@ pub(crate) fn rescue_undeclared_bindings(func: &mut HirFunction) -> bool {
         if !is_rescue_candidate_name(name.as_str()) {
             continue;
         }
-        let inferred_ty = infer_type_from_first_assign(&func.body, name);
+        let inferred_ty = if matches!(
+            name.as_str(),
+            "cf" | "pf" | "af" | "zf" | "sf" | "of" | "df" | "if_"
+        ) {
+            NirType::Bool
+        } else {
+            infer_type_from_first_assign(&func.body, name)
+        };
         func.locals.push(NirBinding {
             name: name.clone(),
             ty: inferred_ty,

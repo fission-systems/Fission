@@ -739,9 +739,10 @@ fn expr_has_flag_side_effects(expr: &HirExpr) -> bool {
 
 /// Apply the x86 EFLAGS condition-code recovery pass to `func`.
 ///
-/// Returns `true` if any branch condition was rewritten; the caller should
-/// follow up with `defuse_dead_assignment_pass` to remove now-dead flag
-/// assignments.
+/// Returns `true` if any branch condition was rewritten **or** dead flag
+/// assignments were removed. Always runs dead-flag cleanup: flag writes may
+/// be pure noise even when no condition was rewritten in this pass (e.g. the
+/// compare was already high-level while CF/OF/SF/ZF/PF stores remain).
 pub(crate) fn apply_flag_recovery_pass(func: &mut HirFunction) -> bool {
     let mut changed = false;
     let mut reaching_defs = HashMap::new();
@@ -751,11 +752,58 @@ pub(crate) fn apply_flag_recovery_pass(func: &mut HirFunction) -> bool {
     if !defs.is_empty() {
         recover_in_stmts(&mut func.body, &defs, &mut changed);
     }
-    if changed {
-        // Remove assignments to flag variables that are now dead after recovery.
-        remove_dead_flag_assigns(func);
+    // Always scrub dead flag stores — not only when a condition was rewritten.
+    // Leaving `cf = …; of = …;` without rvalue uses produces undeclared-ident
+    // compile errors once flags are named (SLA 0x200 layout).
+    let before = flag_assign_count(&func.body);
+    remove_dead_flag_assigns(func);
+    let after = flag_assign_count(&func.body);
+    changed || before != after
+}
+
+/// Late cleanup: drop unused flag assignments after other normalize waves may
+/// have left residual CF/OF/SF/ZF/PF stores.
+pub(crate) fn apply_dead_flag_cleanup_pass(func: &mut HirFunction) -> bool {
+    let before = flag_assign_count(&func.body);
+    remove_dead_flag_assigns(func);
+    flag_assign_count(&func.body) != before
+}
+
+fn flag_assign_count(stmts: &[HirStmt]) -> usize {
+    let mut n = 0;
+    count_flag_assigns(stmts, &mut n);
+    n
+}
+
+fn count_flag_assigns(stmts: &[HirStmt], n: &mut usize) {
+    for stmt in stmts {
+        match stmt {
+            HirStmt::Assign {
+                lhs: HirLValue::Var(name),
+                ..
+            } if is_flag_var(name) => *n += 1,
+            HirStmt::Block(body) => count_flag_assigns(body, n),
+            HirStmt::If {
+                then_body,
+                else_body,
+                ..
+            } => {
+                count_flag_assigns(then_body, n);
+                count_flag_assigns(else_body, n);
+            }
+            HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
+                count_flag_assigns(body, n)
+            }
+            HirStmt::For { body, .. } => count_flag_assigns(body, n),
+            HirStmt::Switch { cases, default, .. } => {
+                for case in cases {
+                    count_flag_assigns(&case.body, n);
+                }
+                count_flag_assigns(default, n);
+            }
+            _ => {}
+        }
     }
-    changed
 }
 
 // ── Helpers used by other passes ─────────────────────────────────────────────
