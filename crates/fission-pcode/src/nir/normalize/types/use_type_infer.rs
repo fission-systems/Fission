@@ -625,6 +625,23 @@ fn collect_constraints_expr(
                             .push(UseConstraint::Signed { bits });
                     }
                 }
+                // Logical right-shift (p-code INT_RIGHT / x86 SHR): lhs must be unsigned
+                // so C `>>` does not become an arithmetic shift on a signed `int`.
+                // Example: `count_bits(unsigned)` with `x >>= 1` must stay logical for
+                // `0xFFFFFFFF` (case: 32 ones), otherwise signed `int` loops forever.
+                //
+                // Do not also run `collect_arithmetic_result_constraints` with a signed
+                // result ty — that would re-push Signed and cancel the demotion.
+                HirBinaryOp::Shr => {
+                    let bits = nir_type_bits(ty)
+                        .or_else(|| expr_int_bits(lhs.as_ref(), known_binding_types))
+                        .unwrap_or(32);
+                    if let HirExpr::Var(name) = lhs.as_ref() {
+                        out.entry(name.clone())
+                            .or_default()
+                            .push(UseConstraint::Unsigned { bits });
+                    }
+                }
                 HirBinaryOp::Add
                 | HirBinaryOp::Sub
                 | HirBinaryOp::Mul
@@ -633,8 +650,7 @@ fn collect_constraints_expr(
                 | HirBinaryOp::And
                 | HirBinaryOp::Or
                 | HirBinaryOp::Xor
-                | HirBinaryOp::Shl
-                | HirBinaryOp::Shr => {
+                | HirBinaryOp::Shl => {
                     collect_arithmetic_result_constraints(lhs, rhs, ty, known_binding_types, out);
                 }
                 _ => {}
@@ -1801,6 +1817,24 @@ fn merge_constraint(binding: &mut NirBinding, constraint: &UseConstraint) -> boo
             };
             true
         }
+        (
+            NirType::Int {
+                signed: true,
+                bits: cur_bits,
+            },
+            UseConstraint::Unsigned { bits: new_bits },
+        ) if cur_bits == new_bits
+            && matches!(binding.origin, Some(NirBindingOrigin::ParamIndex(_))) =>
+        {
+            // Demote signed params → unsigned when logical-shift / unsigned-compare
+            // evidence is present. INT_RIGHT (x86 SHR) must stay logical in C, or
+            // `count_bits(0xFFFFFFFF)` becomes an infinite signed arithmetic shift.
+            binding.ty = NirType::Int {
+                bits: *new_bits,
+                signed: false,
+            };
+            true
+        }
         _ => false,
     }
 }
@@ -2287,6 +2321,59 @@ mod tests {
         assert_eq!(func.params[0].ty, signed_i32);
         assert_eq!(func.params[1].ty, signed_i32);
         assert_eq!(func.return_type, signed_i32);
+    }
+
+    #[test]
+    fn logical_shr_demotes_signed_param_to_unsigned() {
+        // count_bits-style: signed stack param used with INT_RIGHT must become uint
+        // so C `>>` is logical and `0xFFFFFFFF` terminates.
+        let i32_ty = NirType::Int {
+            bits: 32,
+            signed: true,
+        };
+        let body = vec![HirStmt::Assign {
+            lhs: HirLValue::Var("x".to_owned()),
+            rhs: HirExpr::Binary {
+                op: HirBinaryOp::Shr,
+                lhs: Box::new(HirExpr::Var("x".to_owned())),
+                rhs: Box::new(HirExpr::Const(
+                    1,
+                    NirType::Int {
+                        bits: 32,
+                        signed: false,
+                    },
+                )),
+                ty: i32_ty.clone(),
+            },
+        }];
+        let mut func = HirFunction {
+            name: "count_bits".to_owned(),
+            int_param_offsets: Vec::new(),
+            params: vec![make_typed_binding(
+                "x",
+                i32_ty,
+                NirBindingOrigin::ParamIndex(0),
+            )],
+            locals: vec![],
+            return_type: NirType::Int {
+                bits: 32,
+                signed: true,
+            },
+            surface_return_type_name: None,
+            body,
+            ..Default::default()
+        };
+        func.is_64bit = false;
+
+        assert!(super::apply_use_driven_type_infer_pass(&mut func));
+        assert_eq!(
+            func.params[0].ty,
+            NirType::Int {
+                bits: 32,
+                signed: false,
+            },
+            "logical SHR must force unsigned param typing"
+        );
     }
 
     #[test]
