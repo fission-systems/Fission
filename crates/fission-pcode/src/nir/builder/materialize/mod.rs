@@ -340,7 +340,11 @@ impl<'a> PreviewBuilder<'a> {
             return Ok(cached.clone());
         }
 
-        let terminator_index = self.block_terminator_index(block);
+        // Tail-of-block cmov (absolute CBranch + guarded body still in this BB)
+        // is not a materialize CFG terminator: it must lower via the same-block
+        // forward path. Keeping it as terminator bare-skips the guard and either
+        // drops or unconditionally applies INT_MIN/INT_MAX-style copies.
+        let terminator_index = self.materialize_block_terminator_index(block);
         let mut body = self.synthesize_explicit_merge_bindings_for_block(block)?;
         body.extend(self.lower_block_ops_range(block, 0, block.ops.len(), terminator_index)?);
 
@@ -361,9 +365,25 @@ impl<'a> PreviewBuilder<'a> {
         let mut op_idx = start_idx;
         while op_idx < end_idx {
             let op = &block.ops[op_idx];
+            // Bare-skip real CFG terminators, but keep same-block-forward CBranch
+            // tails (x86 cmov body after absolute CBranch to next BB). Those must
+            // lower as guarded skips; skipping them drops INT_MIN/INT_MAX arms or
+            // applies the guarded Copy unconditionally.
             if Some(op_idx) == terminator_index {
-                op_idx += 1;
-                continue;
+                let is_same_block_forward_cmov = op.opcode == PcodeOpcode::CBranch
+                    && op.inputs.len() >= 2
+                    && crate::nir::cfg::same_block_forward_branch_target_op_idx(
+                        block,
+                        op_idx,
+                        end_idx,
+                        op,
+                        &op.inputs[0],
+                    )
+                    .is_some_and(|target| target > op_idx + 1);
+                if !is_same_block_forward_cmov {
+                    op_idx += 1;
+                    continue;
+                }
             }
 
             // Handle intra-block control flow (e.g. from cmov).
@@ -389,12 +409,28 @@ impl<'a> PreviewBuilder<'a> {
                         expr: Box::new(cond),
                         ty: NirType::Bool,
                     };
+                    // Body range is after this CBranch; clear terminator so nested
+                    // lowering does not bare-skip an outer index.
                     let nested_body = self.lower_block_ops_range(
                         block,
                         op_idx + 1,
                         target_op_idx,
-                        terminator_index,
+                        None,
                     )?;
+                    if std::env::var_os("FISSION_PREVIEW_DIAG").is_some() {
+                        eprintln!(
+                            "[DIAG] same_block_cmov block=0x{:x} op_idx={} target={} body_stmts={} term_is={:?} end={}",
+                            block.start_address,
+                            op_idx,
+                            target_op_idx,
+                            nested_body.len(),
+                            terminator_index,
+                            end_idx
+                        );
+                        for (i, stmt) in nested_body.iter().enumerate() {
+                            eprintln!("[DIAG]   cmov_body[{i}]={stmt:?}");
+                        }
+                    }
                     body.push(HirStmt::If {
                         cond: inverted_cond,
                         then_body: nested_body,
@@ -861,6 +897,28 @@ impl<'a> PreviewBuilder<'a> {
             // Reuse the prior same-block binding for register redefs (cmov default
             // + overrides on EAX/RAX). Without this, each write to the primary
             // return register gets a fresh temp and the cmov chain cannot compose.
+            self.bind_materialized_output_to_existing_name(
+                op,
+                output,
+                &name,
+                preserve_materialization,
+            );
+            name
+        } else if self.register_namer().is_primary_return_register(output)
+            // ARM/AArch64 r0/x0 are both param and return; forcing the HW name
+            // there collapses call-arg vs result identity. x86 eax/rax is
+            // return-only under the active CCs, which is the cmov-tail case.
+            && !self
+                .register_namer()
+                .register_name_with_param_owned(output.offset, output.size)
+                .is_some_and(|(_, idx)| idx.is_some())
+            && let Some(name) = self.sla_hw_name(output.offset, output.size)
+        {
+            // Cross-block cmov tails (e.g. saturating_add underflow): the guarded
+            // Copy writes the ABI return register with no prior def in *this*
+            // block. A fresh uVar is dead after epilogue `return eax` recovery
+            // and is stripped by eliminate_dead_temp_assigns — keep the HW name.
+            self.ensure_live_register_binding(&name, output.size);
             self.bind_materialized_output_to_existing_name(
                 op,
                 output,
@@ -3684,6 +3742,45 @@ impl<'a> PreviewBuilder<'a> {
                     | PcodeOpcode::Return
             )
         })
+    }
+
+    /// Terminator index for statement materialization.
+    ///
+    /// Same-block-forward CBranch tails (cmov body after a branch to the next
+    /// machine instruction / next BB start) stay in the op stream so
+    /// `lower_block_ops_range` can emit `if (!cond) { body }`. Other consumers
+    /// of [`Self::block_terminator_index`] keep the raw control-flow op.
+    fn materialize_block_terminator_index(
+        &self,
+        block: &crate::pcode::PcodeBasicBlock,
+    ) -> Option<usize> {
+        let mut idx = self.block_terminator_index(block)?;
+        loop {
+            let op = block.ops.get(idx)?;
+            let is_tail_cmov = op.opcode == PcodeOpcode::CBranch
+                && op.inputs.len() >= 2
+                && crate::nir::cfg::same_block_forward_branch_target_op_idx(
+                    block,
+                    idx,
+                    block.ops.len(),
+                    op,
+                    &op.inputs[0],
+                )
+                .is_some_and(|target| target > idx + 1);
+            if !is_tail_cmov {
+                return Some(idx);
+            }
+            // Walk earlier for a real CFG terminator (branch/return).
+            idx = block.ops[..idx].iter().rposition(|candidate| {
+                matches!(
+                    candidate.opcode,
+                    PcodeOpcode::Branch
+                        | PcodeOpcode::CBranch
+                        | PcodeOpcode::BranchInd
+                        | PcodeOpcode::Return
+                )
+            })?;
+        }
     }
 }
 

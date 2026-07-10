@@ -36,15 +36,17 @@ ISA-agnostic: address/CFG shape only; no CC enum.
   without guarding INT_MAX/path quality — first attempt made `block_terminator_index`
   skip cmov guards and regressed saturating_add compare to `eax < eax`.
 
-## 5. Follow-up order
+## 5. Shipped path (2026-07-10 follow-up)
 
 1. Keep `eax = a+b` dominating all uses of the primary return live-in (F1/F3) —
-   partial via primary-return keep materialize (2026-07-10).
-2. **Do not** enable terminator-side cmov tail without a focused sat golden:
-   - INT_MAX condition uses `a` and `sum` (not `eax < eax`)
-   - INT_MIN appears under `b < 0`
-   - count_bits/clamp must not regress
-   Multiple attempts (global terminator reclassification; process-cmov-before-skip;
-   primary-return-only terminator special case) all regressed sat O2 binding
-   (`eax = param_2` overwrite / `eax <= eax`). Leave CFG helper only until a
-   non-regressing owner path is proven.
+   primary-return keep materialize + HW-name binding for return-reg writes.
+2. **Terminator-side cmov tail (materialize only):**
+   - `materialize_block_terminator_index` skips same-block-forward CBranch tails
+     so `lower_block_ops_range` emits `if (!cond) { body }` (raw
+     `block_terminator_index` unchanged for CFG consumers).
+   - Guarded Copy of the ABI primary return register reuses the HW name
+     (`eax`/`rax`), not a fresh `uVar` — temps were DCE'd and dropped INT_MIN.
+3. Focused goldens: `sat_o2_cmov_block_probe_materialize`,
+   `sat_o2_cmov_tail_renders_int_min_through_epilogue`; m32 O2 saturating_add
+   shows `eax = param_1 + param_2`, compare `a` vs `sum`, and
+   `eax = 2147483648` on the underflow arm.

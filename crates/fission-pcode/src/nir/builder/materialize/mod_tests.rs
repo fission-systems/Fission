@@ -2321,6 +2321,75 @@ fn duplicate_start_join_preserves_register_addend_after_zero_extend() {
     assert!(!code.contains("{\n    }"), "{code}");
 }
 
+
+#[test]
+fn sat_o2_cmov_block_probe_materialize() {
+    use crate::nir::support::{CallingConvention, RUST_SLEIGH_REGISTER_SPACE_ID};
+    use crate::nir::types::{MlilPreviewOptions, StructuringEngineKind, HirStmt};
+    use crate::nir::PreviewBuilder;
+    use crate::pcode::{PcodeBasicBlock, PcodeFunction, PcodeOp, PcodeOpcode, Varnode};
+
+    let eax = Varnode { space_id: RUST_SLEIGH_REGISTER_SPACE_ID, offset: 0, size: 4, is_constant: false, constant_val: 0 };
+    let ecx = Varnode { space_id: RUST_SLEIGH_REGISTER_SPACE_ID, offset: 4, size: 4, is_constant: false, constant_val: 0 };
+    let edx = Varnode { space_id: RUST_SLEIGH_REGISTER_SPACE_ID, offset: 8, size: 4, is_constant: false, constant_val: 0 };
+    let of = Varnode { space_id: RUST_SLEIGH_REGISTER_SPACE_ID, offset: 0x20b, size: 1, is_constant: false, constant_val: 0 };
+    let sf = Varnode { space_id: RUST_SLEIGH_REGISTER_SPACE_ID, offset: 0x207, size: 1, is_constant: false, constant_val: 0 };
+    let uniq_a = Varnode { space_id: crate::nir::UNIQUE_SPACE_ID, offset: 0x66a00, size: 4, is_constant: false, constant_val: 0 };
+    let uniq_b = Varnode { space_id: crate::nir::UNIQUE_SPACE_ID, offset: 0x64d00, size: 4, is_constant: false, constant_val: 0 };
+    let ne = Varnode { space_id: crate::nir::UNIQUE_SPACE_ID, offset: 0x18700, size: 1, is_constant: false, constant_val: 0 };
+    let neg = Varnode { space_id: crate::nir::UNIQUE_SPACE_ID, offset: 0x64e00, size: 1, is_constant: false, constant_val: 0 };
+    let next = Varnode { space_id: 3, offset: 0x4016a2, size: 4, is_constant: false, constant_val: 0 };
+
+    // Minimal: cmp ecx,eax; mov edx,INT_MIN; cmovl eax,edx  (as pcode)
+    let pcode = PcodeFunction {
+        blocks: vec![PcodeBasicBlock {
+            index: 0,
+            start_address: 0x401698,
+            successors: vec![1],
+            ops: vec![
+                PcodeOp { seq_num: 0, opcode: PcodeOpcode::Copy, address: 0x401698, output: Some(uniq_a.clone()), inputs: vec![ecx.clone()], asm_mnemonic: None },
+                PcodeOp { seq_num: 1, opcode: PcodeOpcode::IntSBorrow, address: 0x401698, output: Some(of.clone()), inputs: vec![uniq_a.clone(), eax.clone()], asm_mnemonic: None },
+                PcodeOp { seq_num: 2, opcode: PcodeOpcode::IntSLess, address: 0x401698, output: Some(sf.clone()), inputs: vec![Varnode { space_id: crate::nir::UNIQUE_SPACE_ID, offset: 0x66c00, size: 4, is_constant: false, constant_val: 0 }, Varnode::constant(0,4)], asm_mnemonic: None },
+                PcodeOp { seq_num: 3, opcode: PcodeOpcode::Copy, address: 0x40169a, output: Some(edx.clone()), inputs: vec![Varnode::constant(i64::from(i32::MIN), 4)], asm_mnemonic: None },
+                PcodeOp { seq_num: 4, opcode: PcodeOpcode::IntNotEqual, address: 0x40169f, output: Some(ne.clone()), inputs: vec![of, sf], asm_mnemonic: None },
+                PcodeOp { seq_num: 5, opcode: PcodeOpcode::Copy, address: 0x40169f, output: Some(uniq_b.clone()), inputs: vec![edx.clone()], asm_mnemonic: None },
+                PcodeOp { seq_num: 6, opcode: PcodeOpcode::BoolNegate, address: 0x40169f, output: Some(neg.clone()), inputs: vec![ne], asm_mnemonic: None },
+                PcodeOp { seq_num: 7, opcode: PcodeOpcode::CBranch, address: 0x40169f, output: None, inputs: vec![next, neg], asm_mnemonic: None },
+                PcodeOp { seq_num: 8, opcode: PcodeOpcode::Copy, address: 0x40169f, output: Some(eax), inputs: vec![uniq_b], asm_mnemonic: None },
+            ],
+        }],
+    };
+    let mut options = MlilPreviewOptions {
+        pe_x64_only: false, is_64bit: false, pointer_size: 4,
+        format: "PE32".to_string(), image_base: 0x401000,
+        sections: vec![(0x401000, 0x402000)],
+        calling_convention: CallingConvention::X86_32,
+        structuring_engine: StructuringEngineKind::GraphCollapseV1,
+        ..Default::default()
+    };
+    crate::nir::cspec::test_maps::apply_preview_cspec(&mut options);
+    let mut builder = PreviewBuilder::new(&pcode, &options, None);
+    // Raw CFG terminator remains the CBranch; materialize must still wrap the
+    // tail body so INT_MIN is not dropped or applied unconditionally.
+    assert_eq!(
+        builder.block_terminator_index(&pcode.blocks[0]),
+        Some(7),
+        "raw terminator stays CBranch"
+    );
+    let stmts = builder.lower_block_stmts(&pcode.blocks[0]).expect("lower");
+    let dump = format!("{stmts:?}");
+    assert!(
+        stmts.iter().any(|s| matches!(s, HirStmt::If { .. })),
+        "need if from terminator cmov, got {dump}"
+    );
+    assert!(
+        dump.contains("2147483648")
+            || dump.contains("-2147483648")
+            || dump.contains("80000000"),
+        "INT_MIN in guarded body: {dump}"
+    );
+}
+
 /// saturating_add shape: primary return reg gets a+b; must keep the binding even
 /// when the only same-block p-code consumer can inline the add into a compare.
 #[test]
@@ -2475,3 +2544,103 @@ fn primary_return_add_is_materialized_despite_single_block_inline_consumer() {
         "bare return eax without dominating sum def:\n{code}"
     );
 }
+
+
+
+/// Multi-block cmov tail: guarded INT_MIN must materialize onto the primary
+/// return register name (`eax`), not a dead temp, so epilogue `return eax` sees it.
+#[test]
+fn sat_o2_cmov_tail_renders_int_min_through_epilogue() {
+    use crate::nir::support::{CallingConvention, RUST_SLEIGH_REGISTER_SPACE_ID};
+    use crate::nir::types::{MlilPreviewOptions, StructuringEngineKind, HirStmt, HirLValue, HirExpr};
+    use crate::nir::PreviewBuilder;
+    use crate::pcode::{PcodeBasicBlock, PcodeFunction, PcodeOp, PcodeOpcode, Varnode};
+
+    let eax = Varnode { space_id: RUST_SLEIGH_REGISTER_SPACE_ID, offset: 0, size: 4, is_constant: false, constant_val: 0 };
+    let ecx = Varnode { space_id: RUST_SLEIGH_REGISTER_SPACE_ID, offset: 4, size: 4, is_constant: false, constant_val: 0 };
+    let edx = Varnode { space_id: RUST_SLEIGH_REGISTER_SPACE_ID, offset: 8, size: 4, is_constant: false, constant_val: 0 };
+    let of = Varnode { space_id: RUST_SLEIGH_REGISTER_SPACE_ID, offset: 0x20b, size: 1, is_constant: false, constant_val: 0 };
+    let sf = Varnode { space_id: RUST_SLEIGH_REGISTER_SPACE_ID, offset: 0x207, size: 1, is_constant: false, constant_val: 0 };
+    let uniq_a = Varnode { space_id: crate::nir::UNIQUE_SPACE_ID, offset: 0x66a00, size: 4, is_constant: false, constant_val: 0 };
+    let uniq_b = Varnode { space_id: crate::nir::UNIQUE_SPACE_ID, offset: 0x64d00, size: 4, is_constant: false, constant_val: 0 };
+    let uniq_sub = Varnode { space_id: crate::nir::UNIQUE_SPACE_ID, offset: 0x66c00, size: 4, is_constant: false, constant_val: 0 };
+    let ne = Varnode { space_id: crate::nir::UNIQUE_SPACE_ID, offset: 0x18700, size: 1, is_constant: false, constant_val: 0 };
+    let neg = Varnode { space_id: crate::nir::UNIQUE_SPACE_ID, offset: 0x64e00, size: 1, is_constant: false, constant_val: 0 };
+
+    let pcode = PcodeFunction {
+        blocks: vec![
+            PcodeBasicBlock {
+                index: 0,
+                start_address: 0x1000,
+                successors: vec![1],
+                ops: vec![
+                    PcodeOp { seq_num: 0, opcode: PcodeOpcode::IntAdd, address: 0x1000, output: Some(eax.clone()), inputs: vec![ecx.clone(), edx.clone()], asm_mnemonic: None },
+                    PcodeOp { seq_num: 1, opcode: PcodeOpcode::Branch, address: 0x1001, output: None, inputs: vec![Varnode::constant(0x1010, 4)], asm_mnemonic: None },
+                ],
+            },
+            PcodeBasicBlock {
+                index: 1,
+                start_address: 0x1010,
+                successors: vec![2],
+                ops: vec![
+                    PcodeOp { seq_num: 2, opcode: PcodeOpcode::Copy, address: 0x1010, output: Some(uniq_a.clone()), inputs: vec![ecx.clone()], asm_mnemonic: None },
+                    PcodeOp { seq_num: 3, opcode: PcodeOpcode::IntSBorrow, address: 0x1010, output: Some(of.clone()), inputs: vec![uniq_a.clone(), eax.clone()], asm_mnemonic: None },
+                    PcodeOp { seq_num: 4, opcode: PcodeOpcode::IntSub, address: 0x1010, output: Some(uniq_sub.clone()), inputs: vec![uniq_a.clone(), eax.clone()], asm_mnemonic: None },
+                    PcodeOp { seq_num: 5, opcode: PcodeOpcode::IntSLess, address: 0x1010, output: Some(sf.clone()), inputs: vec![uniq_sub, Varnode::constant(0,4)], asm_mnemonic: None },
+                    PcodeOp { seq_num: 6, opcode: PcodeOpcode::Copy, address: 0x1011, output: Some(edx.clone()), inputs: vec![Varnode::constant(i64::from(i32::MIN), 4)], asm_mnemonic: None },
+                    PcodeOp { seq_num: 7, opcode: PcodeOpcode::IntNotEqual, address: 0x1012, output: Some(ne.clone()), inputs: vec![of, sf], asm_mnemonic: None },
+                    PcodeOp { seq_num: 8, opcode: PcodeOpcode::Copy, address: 0x1012, output: Some(uniq_b.clone()), inputs: vec![edx.clone()], asm_mnemonic: None },
+                    PcodeOp { seq_num: 9, opcode: PcodeOpcode::BoolNegate, address: 0x1012, output: Some(neg.clone()), inputs: vec![ne], asm_mnemonic: None },
+                    PcodeOp { seq_num: 10, opcode: PcodeOpcode::CBranch, address: 0x1012, output: None, inputs: vec![Varnode { space_id: 3, offset: 0x1020, size: 4, is_constant: false, constant_val: 0 }, neg], asm_mnemonic: None },
+                    PcodeOp { seq_num: 11, opcode: PcodeOpcode::Copy, address: 0x1012, output: Some(eax.clone()), inputs: vec![uniq_b], asm_mnemonic: None },
+                ],
+            },
+            PcodeBasicBlock {
+                index: 2,
+                start_address: 0x1020,
+                successors: vec![],
+                ops: vec![
+                    PcodeOp { seq_num: 12, opcode: PcodeOpcode::Return, address: 0x1020, output: None, inputs: vec![Varnode { space_id: RUST_SLEIGH_REGISTER_SPACE_ID, offset: 0x284, size: 4, is_constant: false, constant_val: 0 }], asm_mnemonic: None },
+                ],
+            },
+        ],
+    };
+    let mut options = MlilPreviewOptions {
+        pe_x64_only: false, is_64bit: false, pointer_size: 4,
+        format: "PE32".to_string(), image_base: 0x1000,
+        sections: vec![(0x1000, 0x2000)],
+        calling_convention: CallingConvention::X86_32,
+        structuring_engine: StructuringEngineKind::GraphCollapseV1,
+        ..Default::default()
+    };
+    crate::nir::cspec::test_maps::apply_preview_cspec(&mut options);
+
+    // Seed live-in primary return binding as the sum (from predecessor block).
+    let mut builder = PreviewBuilder::new(&pcode, &options, None);
+    let _ = builder.lower_block_stmts(&pcode.blocks[0]).expect("entry");
+    let stmts = builder.lower_block_stmts(&pcode.blocks[1]).expect("cmov block");
+    let dump = format!("{stmts:?}");
+    assert!(
+        stmts.iter().any(|s| matches!(s, HirStmt::If { .. })),
+        "cmov block needs if, got {dump}"
+    );
+    let assigns_int_min_to_eax = stmts.iter().any(|s| match s {
+        HirStmt::If { then_body, .. } => then_body.iter().any(|inner| matches!(
+            inner,
+            HirStmt::Assign {
+                lhs: HirLValue::Var(name),
+                rhs: HirExpr::Const(v, _),
+            } if name == "eax" && (*v == i64::from(i32::MIN) as i64 || *v == 2147483648i64 || *v == -2147483648i64)
+        )),
+        HirStmt::Assign {
+            lhs: HirLValue::Var(name),
+            rhs: HirExpr::Const(v, _),
+        } if name == "eax" && (*v == i64::from(i32::MIN) as i64 || *v == 2147483648i64 || *v == -2147483648i64) => true,
+        _ => false,
+    });
+    assert!(
+        assigns_int_min_to_eax,
+        "INT_MIN must assign to eax (not a dead temp): {dump}"
+    );
+}
+
