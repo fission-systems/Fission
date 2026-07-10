@@ -44,7 +44,7 @@ Measured with release CLI against `control_flow_gcc-m32_O2.exe` (2026-07-10).
 | `clamp` | Partial | Semantic shape OK; flag temps (`of`/`sf`/`zf`) noise; hoist-dependent param order |
 | `signum` | Partial | Returns 1 / -setnz path; extra block braces; return type uchar |
 | `checksum` | Partial | Loop OK; `len` typed as `uchar *`; cast noise |
-| `saturating_add` | Improving | **F1** + **primary-return keep materialize (2026-07-10)**: `eax = ecx + param_2` dominates return. Local docker bench: **O0 5/5**, **O2 1/5** (runtime; INT_MIN cmovl tail still open — cfg helper ready, terminator wiring deferred). |
+| `saturating_add` | Improving | **F1** + primary-return keep + **if-goto fuse allows Return (2269bbbc)**: structured `if (0 < b)` (no goto). Docker @2269bbbc: **m32 O0 5/5**, **m32 O2 1/5**, **gcc O2 4/5**. INT_MIN cmovl still open (cfg helper ready; terminator wiring deferred after binding regressions). |
 | `classify_range` | Bad | Flag soup; setnz/neg/cmovg not recovered as value classes |
 
 ## Problem families (canonical)
