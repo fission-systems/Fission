@@ -207,6 +207,162 @@ fn apply_address_role_pointer_override_for_locals(func: &mut HirFunction) -> boo
     changed
 }
 
+/// When a local is equality-compared with a pointer-typed value, promote that
+/// local to the same pointer type.
+///
+/// A register can be reused for a computed end pointer and later compared with
+/// a cursor. Comparing with a known pointer is strong evidence that the peer is
+/// also a pointer of the same machine-word width.
+fn apply_pointer_compare_peer_override_for_locals(func: &mut HirFunction) -> bool {
+    let promote = pointer_compare_peer_promotions(func);
+    if promote.is_empty() {
+        return false;
+    }
+    let mut changed = false;
+    for binding in &mut func.locals {
+        if binding.surface_type_name.is_some() || matches!(binding.ty, NirType::Ptr(_)) {
+            continue;
+        }
+        if let Some(ptr_ty) = promote.get(&binding.name) {
+            binding.ty = ptr_ty.clone();
+            changed = true;
+        }
+    }
+    changed
+}
+
+pub(super) fn pointer_compare_peer_promotions(func: &HirFunction) -> HashMap<String, NirType> {
+    let types = collect_known_binding_types(func);
+    let mut promote: HashMap<String, NirType> = HashMap::new();
+    collect_pointer_compare_peer_promotions(&func.body, &types, &mut promote);
+    promote
+}
+
+fn collect_pointer_compare_peer_promotions(
+    stmts: &[HirStmt],
+    types: &HashMap<String, NirType>,
+    out: &mut HashMap<String, NirType>,
+) {
+    for stmt in stmts {
+        match stmt {
+            HirStmt::Block(body) | HirStmt::While { body, .. } => {
+                collect_pointer_compare_peer_promotions(body, types, out);
+            }
+            HirStmt::DoWhile { body, cond } => {
+                collect_pointer_compare_peer_promotions(body, types, out);
+                collect_pointer_compare_peer_promotions_expr(cond, types, out);
+            }
+            HirStmt::If {
+                cond,
+                then_body,
+                else_body,
+            } => {
+                collect_pointer_compare_peer_promotions_expr(cond, types, out);
+                collect_pointer_compare_peer_promotions(then_body, types, out);
+                collect_pointer_compare_peer_promotions(else_body, types, out);
+            }
+            HirStmt::For {
+                init,
+                cond,
+                update,
+                body,
+            } => {
+                if let Some(init) = init {
+                    collect_pointer_compare_peer_promotions(std::slice::from_ref(init), types, out);
+                }
+                if let Some(cond) = cond {
+                    collect_pointer_compare_peer_promotions_expr(cond, types, out);
+                }
+                if let Some(update) = update {
+                    collect_pointer_compare_peer_promotions(
+                        std::slice::from_ref(update),
+                        types,
+                        out,
+                    );
+                }
+                collect_pointer_compare_peer_promotions(body, types, out);
+            }
+            HirStmt::Switch {
+                expr,
+                cases,
+                default,
+            } => {
+                collect_pointer_compare_peer_promotions_expr(expr, types, out);
+                for case in cases {
+                    collect_pointer_compare_peer_promotions(&case.body, types, out);
+                }
+                collect_pointer_compare_peer_promotions(default, types, out);
+            }
+            HirStmt::Assign { rhs, .. } => {
+                collect_pointer_compare_peer_promotions_expr(rhs, types, out);
+            }
+            HirStmt::Expr(expr) | HirStmt::Return(Some(expr)) => {
+                collect_pointer_compare_peer_promotions_expr(expr, types, out);
+            }
+            _ => {}
+        }
+    }
+}
+
+fn collect_pointer_compare_peer_promotions_expr(
+    expr: &HirExpr,
+    types: &HashMap<String, NirType>,
+    out: &mut HashMap<String, NirType>,
+) {
+    match expr {
+        HirExpr::Binary {
+            op: HirBinaryOp::Eq | HirBinaryOp::Ne,
+            lhs,
+            rhs,
+            ..
+        } => {
+            let lhs_ptr = pointer_type_of_expr(lhs, types);
+            let rhs_ptr = pointer_type_of_expr(rhs, types);
+            if let (Some(ptr_ty), HirExpr::Var(name)) = (lhs_ptr.as_ref(), rhs.as_ref()) {
+                out.entry(name.clone()).or_insert_with(|| ptr_ty.clone());
+            }
+            if let (Some(ptr_ty), HirExpr::Var(name)) = (rhs_ptr.as_ref(), lhs.as_ref()) {
+                out.entry(name.clone()).or_insert_with(|| ptr_ty.clone());
+            }
+            collect_pointer_compare_peer_promotions_expr(lhs, types, out);
+            collect_pointer_compare_peer_promotions_expr(rhs, types, out);
+        }
+        HirExpr::Binary { lhs, rhs, .. } => {
+            collect_pointer_compare_peer_promotions_expr(lhs, types, out);
+            collect_pointer_compare_peer_promotions_expr(rhs, types, out);
+        }
+        HirExpr::Cast { expr, .. } | HirExpr::Unary { expr, .. } => {
+            collect_pointer_compare_peer_promotions_expr(expr, types, out);
+        }
+        HirExpr::Select {
+            cond,
+            then_expr,
+            else_expr,
+            ..
+        } => {
+            collect_pointer_compare_peer_promotions_expr(cond, types, out);
+            collect_pointer_compare_peer_promotions_expr(then_expr, types, out);
+            collect_pointer_compare_peer_promotions_expr(else_expr, types, out);
+        }
+        HirExpr::Call { args, .. } => {
+            for arg in args {
+                collect_pointer_compare_peer_promotions_expr(arg, types, out);
+            }
+        }
+        HirExpr::Load { ptr, .. }
+        | HirExpr::PtrOffset { base: ptr, .. }
+        | HirExpr::FieldAccess { base: ptr, .. }
+        | HirExpr::AggregateCopy { src: ptr, .. } => {
+            collect_pointer_compare_peer_promotions_expr(ptr, types, out);
+        }
+        HirExpr::Index { base, index, .. } => {
+            collect_pointer_compare_peer_promotions_expr(base, types, out);
+            collect_pointer_compare_peer_promotions_expr(index, types, out);
+        }
+        HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) | HirExpr::Const(_, _) => {}
+    }
+}
+
 fn zero_initializer_aliases(func: &HirFunction) -> HashSet<String> {
     func.locals
         .iter()
@@ -307,6 +463,179 @@ fn param_name_set(func: &HirFunction) -> HashSet<String> {
         .collect()
 }
 
+struct ParamPointerRoleContext<'a> {
+    defs: &'a HashMap<String, DefEntry>,
+    binding_types: &'a HashMap<String, NirType>,
+    params: &'a HashSet<String>,
+    address_params: &'a HashSet<String>,
+}
+
+/// Collect parameters that appear as the integer-offset side of a pointer add.
+///
+/// The pointer-base side must have independent address-use evidence. This keeps
+/// the classification fail-closed when both operands are merely pointer-sized.
+fn collect_param_pointer_offset_params_stmts(
+    stmts: &[HirStmt],
+    context: &ParamPointerRoleContext<'_>,
+    out: &mut HashSet<String>,
+) {
+    for stmt in stmts {
+        match stmt {
+            HirStmt::Assign { rhs, .. } | HirStmt::Expr(rhs) | HirStmt::Return(Some(rhs)) => {
+                collect_param_pointer_offset_params_expr(rhs, context, out);
+            }
+            HirStmt::Block(body) | HirStmt::While { body, .. } => {
+                collect_param_pointer_offset_params_stmts(body, context, out);
+            }
+            HirStmt::DoWhile { body, cond } => {
+                collect_param_pointer_offset_params_stmts(body, context, out);
+                collect_param_pointer_offset_params_expr(cond, context, out);
+            }
+            HirStmt::If {
+                cond,
+                then_body,
+                else_body,
+            } => {
+                collect_param_pointer_offset_params_expr(cond, context, out);
+                collect_param_pointer_offset_params_stmts(then_body, context, out);
+                collect_param_pointer_offset_params_stmts(else_body, context, out);
+            }
+            HirStmt::For {
+                init,
+                cond,
+                update,
+                body,
+            } => {
+                if let Some(init) = init {
+                    collect_param_pointer_offset_params_stmts(
+                        std::slice::from_ref(init),
+                        context,
+                        out,
+                    );
+                }
+                if let Some(cond) = cond {
+                    collect_param_pointer_offset_params_expr(cond, context, out);
+                }
+                if let Some(update) = update {
+                    collect_param_pointer_offset_params_stmts(
+                        std::slice::from_ref(update),
+                        context,
+                        out,
+                    );
+                }
+                collect_param_pointer_offset_params_stmts(body, context, out);
+            }
+            HirStmt::Switch {
+                expr,
+                cases,
+                default,
+            } => {
+                collect_param_pointer_offset_params_expr(expr, context, out);
+                for case in cases {
+                    collect_param_pointer_offset_params_stmts(&case.body, context, out);
+                }
+                collect_param_pointer_offset_params_stmts(default, context, out);
+            }
+            _ => {}
+        }
+    }
+}
+
+fn record_offset_param_from_expr(
+    expr: &HirExpr,
+    context: &ParamPointerRoleContext<'_>,
+    out: &mut HashSet<String>,
+) {
+    let mut cur = expr;
+    while let HirExpr::Cast { expr, .. } | HirExpr::Unary { expr, .. } = cur {
+        cur = expr.as_ref();
+    }
+    if let HirExpr::Var(name) = cur {
+        if let Some(param) =
+            resolve_alias_to_param(name, context.defs, context.params, &mut HashSet::new())
+        {
+            out.insert(param);
+        }
+    }
+}
+
+fn expr_is_pointer_base(expr: &HirExpr, context: &ParamPointerRoleContext<'_>) -> bool {
+    let mut cur = expr;
+    while let HirExpr::Cast { expr, .. } | HirExpr::Unary { expr, .. } = cur {
+        cur = expr.as_ref();
+    }
+    let HirExpr::Var(name) = cur else {
+        return false;
+    };
+    if !context.params.contains(name.as_str())
+        && matches!(
+            context.binding_types.get(name.as_str()),
+            Some(NirType::Ptr(_))
+        )
+    {
+        return true;
+    }
+    resolve_alias_to_param(name, context.defs, context.params, &mut HashSet::new())
+        .is_some_and(|param| context.address_params.contains(&param))
+}
+
+fn collect_param_pointer_offset_params_expr(
+    expr: &HirExpr,
+    context: &ParamPointerRoleContext<'_>,
+    out: &mut HashSet<String>,
+) {
+    match expr {
+        HirExpr::Binary {
+            op: HirBinaryOp::Add,
+            lhs,
+            rhs,
+            ..
+        } => {
+            if expr_is_pointer_base(lhs, context) {
+                record_offset_param_from_expr(rhs, context, out);
+            }
+            if expr_is_pointer_base(rhs, context) {
+                record_offset_param_from_expr(lhs, context, out);
+            }
+            collect_param_pointer_offset_params_expr(lhs, context, out);
+            collect_param_pointer_offset_params_expr(rhs, context, out);
+        }
+        HirExpr::Binary { lhs, rhs, .. } => {
+            collect_param_pointer_offset_params_expr(lhs, context, out);
+            collect_param_pointer_offset_params_expr(rhs, context, out);
+        }
+        HirExpr::Cast { expr, .. } | HirExpr::Unary { expr, .. } => {
+            collect_param_pointer_offset_params_expr(expr, context, out);
+        }
+        HirExpr::Select {
+            cond,
+            then_expr,
+            else_expr,
+            ..
+        } => {
+            collect_param_pointer_offset_params_expr(cond, context, out);
+            collect_param_pointer_offset_params_expr(then_expr, context, out);
+            collect_param_pointer_offset_params_expr(else_expr, context, out);
+        }
+        HirExpr::Call { args, .. } => {
+            for arg in args {
+                collect_param_pointer_offset_params_expr(arg, context, out);
+            }
+        }
+        HirExpr::Load { ptr, .. }
+        | HirExpr::PtrOffset { base: ptr, .. }
+        | HirExpr::FieldAccess { base: ptr, .. }
+        | HirExpr::AggregateCopy { src: ptr, .. } => {
+            collect_param_pointer_offset_params_expr(ptr, context, out);
+        }
+        HirExpr::Index { base, index, .. } => {
+            collect_param_pointer_offset_params_expr(base, context, out);
+            collect_param_pointer_offset_params_expr(index, context, out);
+        }
+        HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) | HirExpr::Const(_, _) => {}
+    }
+}
+
 fn resolve_alias_to_param(
     name: &str,
     defs: &HashMap<String, DefEntry>,
@@ -361,22 +690,13 @@ fn param_pointer_candidates_from_expr(
             rhs,
             ..
         } => {
-            let lhs_ptr = pointer_type_of_expr(lhs, binding_types);
-            let rhs_ptr = pointer_type_of_expr(rhs, binding_types);
-            if let Some(ptr_ty) = lhs_ptr.as_ref()
-                && let HirExpr::Var(rhs_name) = rhs.as_ref()
-                && let Some(param) =
-                    resolve_alias_to_param(rhs_name, defs, params, &mut HashSet::new())
-            {
-                out.entry(param).or_insert_with(|| ptr_ty.clone());
-            }
-            if let Some(ptr_ty) = rhs_ptr.as_ref()
-                && let HirExpr::Var(lhs_name) = lhs.as_ref()
-                && let Some(param) =
-                    resolve_alias_to_param(lhs_name, defs, params, &mut HashSet::new())
-            {
-                out.entry(param).or_insert_with(|| ptr_ty.clone());
-            }
+            // Pointer plus integer yields a pointer. Do not promote the peer
+            // operand merely because the other side has pointer evidence;
+            // recurse so nested address uses still contribute.
+            //
+            // Previously both sides were typed as the pointer when either side
+            // was pointer-typed, which forced `len: uchar *` and broke callers
+            // that pass an integer length.
             param_pointer_candidates_from_expr(lhs, defs, binding_types, params, out);
             param_pointer_candidates_from_expr(rhs, defs, binding_types, params, out);
         }
@@ -402,8 +722,12 @@ fn param_pointer_candidates_from_expr(
                 param_pointer_candidates_from_expr(arg, defs, binding_types, params, out);
             }
         }
-        HirExpr::Load { ptr, .. }
-        | HirExpr::PtrOffset { base: ptr, .. }
+        HirExpr::Load { ptr, ty } => {
+            // Param used as a load address is a pointer to the loaded type.
+            record_param_pointer_from_address_expr(ptr, ty, defs, binding_types, params, out);
+            param_pointer_candidates_from_expr(ptr, defs, binding_types, params, out);
+        }
+        HirExpr::PtrOffset { base: ptr, .. }
         | HirExpr::FieldAccess { base: ptr, .. }
         | HirExpr::AggregateCopy { src: ptr, .. } => {
             param_pointer_candidates_from_expr(ptr, defs, binding_types, params, out);
@@ -416,6 +740,114 @@ fn param_pointer_candidates_from_expr(
     }
 }
 
+fn record_param_pointer_from_address_expr(
+    addr: &HirExpr,
+    pointee: &NirType,
+    defs: &HashMap<String, DefEntry>,
+    binding_types: &HashMap<String, NirType>,
+    params: &HashSet<String>,
+    out: &mut HashMap<String, NirType>,
+) {
+    match addr {
+        HirExpr::Var(name) => {
+            let Some(param) = resolve_alias_to_param(name, defs, params, &mut HashSet::new())
+            else {
+                return;
+            };
+            out.entry(param)
+                .or_insert_with(|| NirType::Ptr(Box::new(pointee.clone())));
+        }
+        // Load *(base + index): the integer-offset side stays scalar; the other
+        // side (often a stack param buffer) is the pointer base.
+        HirExpr::Binary {
+            op: HirBinaryOp::Add,
+            lhs,
+            rhs,
+            ..
+        } => {
+            let lhs_ptr = pointer_type_of_expr(lhs, binding_types).is_some();
+            let rhs_ptr = pointer_type_of_expr(rhs, binding_types).is_some();
+            let lhs_int = expr_looks_integer_offset(lhs, binding_types);
+            let rhs_int = expr_looks_integer_offset(rhs, binding_types);
+            if rhs_int && !lhs_ptr {
+                record_param_pointer_from_address_expr(
+                    lhs,
+                    pointee,
+                    defs,
+                    binding_types,
+                    params,
+                    out,
+                );
+            }
+            if lhs_int && !rhs_ptr {
+                record_param_pointer_from_address_expr(
+                    rhs,
+                    pointee,
+                    defs,
+                    binding_types,
+                    params,
+                    out,
+                );
+            }
+            // Neither side known: prefer Var that aliases a param when the other
+            // is a non-param local (common: buf + i).
+            if !lhs_int && !rhs_int {
+                if matches!(rhs.as_ref(), HirExpr::Var(n) if !params.contains(n.as_str())) {
+                    record_param_pointer_from_address_expr(
+                        lhs,
+                        pointee,
+                        defs,
+                        binding_types,
+                        params,
+                        out,
+                    );
+                }
+                if matches!(lhs.as_ref(), HirExpr::Var(n) if !params.contains(n.as_str())) {
+                    record_param_pointer_from_address_expr(
+                        rhs,
+                        pointee,
+                        defs,
+                        binding_types,
+                        params,
+                        out,
+                    );
+                }
+            }
+        }
+        HirExpr::Cast { expr, .. } | HirExpr::Unary { expr, .. } => {
+            record_param_pointer_from_address_expr(expr, pointee, defs, binding_types, params, out);
+        }
+        _ => {}
+    }
+}
+
+fn expr_looks_integer_offset(expr: &HirExpr, binding_types: &HashMap<String, NirType>) -> bool {
+    match expr {
+        HirExpr::Const(_, _) => true,
+        HirExpr::Var(name) => matches!(
+            binding_types.get(name.as_str()),
+            Some(NirType::Int { .. } | NirType::Bool)
+        ),
+        HirExpr::Cast {
+            ty: NirType::Int { .. },
+            ..
+        } => true,
+        HirExpr::Cast { expr, .. } | HirExpr::Unary { expr, .. } => {
+            expr_looks_integer_offset(expr, binding_types)
+        }
+        HirExpr::Binary {
+            op: HirBinaryOp::Add | HirBinaryOp::Sub | HirBinaryOp::Mul | HirBinaryOp::Shl,
+            lhs,
+            rhs,
+            ..
+        } => {
+            expr_looks_integer_offset(lhs, binding_types)
+                || expr_looks_integer_offset(rhs, binding_types)
+        }
+        _ => false,
+    }
+}
+
 fn param_pointer_candidates_from_lvalue(
     lhs: &HirLValue,
     defs: &HashMap<String, DefEntry>,
@@ -425,7 +857,11 @@ fn param_pointer_candidates_from_lvalue(
 ) {
     match lhs {
         HirLValue::Var(_) => {}
-        HirLValue::Deref { ptr, .. } | HirLValue::FieldAccess { base: ptr, .. } => {
+        HirLValue::Deref { ptr, ty } => {
+            record_param_pointer_from_address_expr(ptr, ty, defs, binding_types, params, out);
+            param_pointer_candidates_from_expr(ptr, defs, binding_types, params, out);
+        }
+        HirLValue::FieldAccess { base: ptr, .. } => {
             param_pointer_candidates_from_expr(ptr, defs, binding_types, params, out);
         }
         HirLValue::Index { base, index, .. } => {
@@ -540,13 +976,77 @@ fn apply_address_contributor_param_pointer_types(
         &params,
         &mut candidates,
     );
+    let address_params: HashSet<String> = candidates.keys().cloned().collect();
+    let role_context = ParamPointerRoleContext {
+        defs,
+        binding_types,
+        params: &params,
+        address_params: &address_params,
+    };
+    // Parameters used as the integer side of pointer arithmetic stay scalar
+    // even when weaker propagation would otherwise classify them as pointers.
+    let mut offset_params = HashSet::new();
+    collect_param_pointer_offset_params_stmts(&func.body, &role_context, &mut offset_params);
     let mut changed = false;
     for param in &mut func.params {
+        if offset_params.contains(&param.name) {
+            continue;
+        }
         let Some(ptr_ty) = candidates.get(&param.name) else {
             continue;
         };
         if param.surface_type_name.is_none() && !matches!(param.ty, NirType::Ptr(_)) {
             param.ty = ptr_ty.clone();
+            changed = true;
+        }
+    }
+    changed |= demote_pointer_offset_params(func);
+    changed
+}
+
+/// Demote formal params that are used as integer offsets in pointer adds.
+///
+/// Runs as a late cleanup so later type passes cannot leave an offset parameter
+/// pointer-typed after register reuse.
+fn demote_pointer_offset_params(func: &mut HirFunction) -> bool {
+    let params = param_name_set(func);
+    if params.is_empty() {
+        return false;
+    }
+    let binding_types = collect_known_binding_types(func);
+    let mut defs: HashMap<String, DefEntry> = HashMap::new();
+    scan_def_types(&func.body, &mut defs);
+    let mut candidates = HashMap::new();
+    collect_param_pointer_candidates_stmts(
+        &func.body,
+        &defs,
+        &binding_types,
+        &params,
+        &mut candidates,
+    );
+    let address_params: HashSet<String> = candidates.keys().cloned().collect();
+    let role_context = ParamPointerRoleContext {
+        defs: &defs,
+        binding_types: &binding_types,
+        params: &params,
+        address_params: &address_params,
+    };
+    let mut offset_params = HashSet::new();
+    collect_param_pointer_offset_params_stmts(&func.body, &role_context, &mut offset_params);
+    if offset_params.is_empty() {
+        return false;
+    }
+    let scalar_bits = if func.is_64bit { 64 } else { 32 };
+    let mut changed = false;
+    for param in &mut func.params {
+        if !offset_params.contains(&param.name) {
+            continue;
+        }
+        if param.surface_type_name.is_none() && matches!(param.ty, NirType::Ptr(_)) {
+            param.ty = NirType::Int {
+                bits: scalar_bits,
+                signed: false,
+            };
             changed = true;
         }
     }
@@ -959,7 +1459,14 @@ fn zero_extended_return_candidate_type(
                 }
             }
             // Also accept unsigned-32 Const typed as u32 (printer still shows large decimals).
-            if let HirExpr::Const(value, NirType::Int { bits: 32, signed: false }) = other {
+            if let HirExpr::Const(
+                value,
+                NirType::Int {
+                    bits: 32,
+                    signed: false,
+                },
+            ) = other
+            {
                 let v = *value as u64;
                 if v <= 0xFFFF_FFFF {
                     let signed = v >= 0x8000_0000;
@@ -1061,9 +1568,7 @@ fn aggregate_return_temp_candidates_guarded(
                     known_binding_types,
                     visiting,
                 )
-                .or_else(|| {
-                    zero_extended_return_candidate_type(rhs, defs, known_binding_types)
-                })
+                .or_else(|| zero_extended_return_candidate_type(rhs, defs, known_binding_types))
                 // Fall back: plain scalar temps assigned only small constants (e.g. local_4=0)
                 // still contribute an unsigned i32 arm so signed join temps can narrow.
                 .or_else(|| i32_compatible_const_leaf_type(rhs))
@@ -1111,9 +1616,7 @@ fn rhs_has_i32_sign_bit_evidence(expr: &HirExpr) -> bool {
             then_expr,
             else_expr,
             ..
-        } => {
-            rhs_has_i32_sign_bit_evidence(then_expr) || rhs_has_i32_sign_bit_evidence(else_expr)
-        }
+        } => rhs_has_i32_sign_bit_evidence(then_expr) || rhs_has_i32_sign_bit_evidence(else_expr),
         HirExpr::Cast { expr, .. } | HirExpr::Unary { expr, .. } => {
             rhs_has_i32_sign_bit_evidence(expr)
         }
@@ -1249,15 +1752,13 @@ fn collect_zero_extended_return_candidates_stmt(
         HirStmt::Block(stmts)
         | HirStmt::While { body: stmts, .. }
         | HirStmt::DoWhile { body: stmts, .. }
-        | HirStmt::For { body: stmts, .. } => {
-            collect_zero_extended_return_candidates(
-                stmts,
-                root_body,
-                defs,
-                known_binding_types,
-                out,
-            )
-        }
+        | HirStmt::For { body: stmts, .. } => collect_zero_extended_return_candidates(
+            stmts,
+            root_body,
+            defs,
+            known_binding_types,
+            out,
+        ),
         HirStmt::If {
             then_body,
             else_body,
@@ -1701,6 +2202,7 @@ pub(crate) fn apply_type_inference_pass(func: &mut HirFunction) -> bool {
     changed |= strip_zero_extended_casts_to_declared_return_width(func);
     changed |= apply_scalar_role_override_for_pointer_locals(func);
     changed |= apply_address_role_pointer_override_for_locals(func);
+    changed |= apply_pointer_compare_peer_override_for_locals(func);
     changed |= rewrite_scalar_zero_alias_assignments(func);
     let address_binding_types = collect_known_binding_types(func);
     changed |= apply_address_contributor_param_pointer_types(func, &defs, &address_binding_types);
@@ -2035,34 +2537,39 @@ mod tests {
     }
 
     #[test]
-    fn address_contributor_alias_promotes_param_to_pointer() {
+    fn pointer_add_offset_param_stays_integer_not_pointer() {
+        // An offset parameter must remain integer even when the sum result is
+        // pointer-typed.
         let ptr_ty = NirType::Ptr(Box::new(NirType::Int {
             bits: 8,
             signed: false,
         }));
-        let u64_ty = NirType::Int {
-            bits: 64,
+        let u32_ty = NirType::Int {
+            bits: 32,
             signed: false,
         };
-        let mut ptr = make_binding("cursor");
-        ptr.ty = ptr_ty.clone();
-        let mut alias = make_binding("param_10");
-        alias.ty = u64_ty.clone();
+        let mut buf = make_binding("buf");
+        buf.ty = ptr_ty.clone();
+        let mut end = make_binding("end");
+        end.ty = ptr_ty.clone();
+        let mut len = make_binding("len");
+        len.ty = u32_ty.clone();
         let body = vec![
-            make_assign("param_10", HirExpr::Var("param_1".to_string())),
+            make_assign("buf", HirExpr::Var("param_1".to_string())),
+            make_assign("len", HirExpr::Var("param_2".to_string())),
             make_assign(
-                "cursor",
+                "end",
                 HirExpr::Binary {
                     op: HirBinaryOp::Add,
-                    lhs: Box::new(HirExpr::Var("cursor".to_string())),
-                    rhs: Box::new(HirExpr::Var("param_10".to_string())),
+                    lhs: Box::new(HirExpr::Var("buf".to_string())),
+                    rhs: Box::new(HirExpr::Var("len".to_string())),
                     ty: ptr_ty.clone(),
                 },
             ),
             make_assign(
                 "byte",
                 HirExpr::Load {
-                    ptr: Box::new(HirExpr::Var("cursor".to_string())),
+                    ptr: Box::new(HirExpr::Var("buf".to_string())),
                     ty: NirType::Int {
                         bits: 8,
                         signed: false,
@@ -2071,18 +2578,57 @@ mod tests {
             ),
         ];
         let mut func = make_func(
-            vec![ptr, alias, make_binding("byte")],
+            vec![buf, end, len, make_binding("byte")],
             body,
             NirType::Unknown,
         );
         func.params = vec![
-            make_param("param_1", u64_ty.clone()),
-            make_param("param_2", u64_ty.clone()),
+            make_param("param_1", u32_ty.clone()),
+            make_param("param_2", u32_ty.clone()),
         ];
+
+        let _ = super::apply_type_inference_pass(&mut func);
+        // buf param may become pointer via load of buf alias.
+        // len must not be promoted to pointer via the Add.
+        assert!(
+            !matches!(func.params[1].ty, NirType::Ptr(_)),
+            "len/param_2 must stay integer, got {:?}",
+            func.params[1].ty
+        );
+    }
+
+    #[test]
+    fn load_through_param_alias_promotes_param_to_pointer() {
+        let ptr_ty = NirType::Ptr(Box::new(NirType::Int {
+            bits: 8,
+            signed: false,
+        }));
+        let u32_ty = NirType::Int {
+            bits: 32,
+            signed: false,
+        };
+        let body = vec![
+            make_assign("p", HirExpr::Var("param_1".to_string())),
+            make_assign(
+                "byte",
+                HirExpr::Load {
+                    ptr: Box::new(HirExpr::Var("p".to_string())),
+                    ty: NirType::Int {
+                        bits: 8,
+                        signed: false,
+                    },
+                },
+            ),
+        ];
+        let mut func = make_func(
+            vec![make_binding("p"), make_binding("byte")],
+            body,
+            NirType::Unknown,
+        );
+        func.params = vec![make_param("param_1", u32_ty)];
 
         assert!(super::apply_type_inference_pass(&mut func));
         assert_eq!(func.params[0].ty, ptr_ty);
-        assert_eq!(func.params[1].ty, u64_ty);
     }
 
     #[test]
@@ -2554,7 +3100,8 @@ mod tests {
         };
         let printed = format!("{rhs:?}");
         assert!(
-            printed.contains("-1") || matches!(rhs, HirExpr::Select { else_expr, .. }
+            printed.contains("-1")
+                || matches!(rhs, HirExpr::Select { else_expr, .. }
                 if matches!(else_expr.as_ref(), HirExpr::Select { else_expr: e2, .. }
                     if matches!(e2.as_ref(), HirExpr::Const(-1, _)))),
             "expected -1 const in select arms, got {rhs:?}"
@@ -2617,5 +3164,73 @@ mod tests {
         };
         assert_eq!(*v, i32::MIN as i64);
         assert_eq!(*ty, i32_ty);
+    }
+    #[test]
+    fn demotes_len_param_used_as_pointer_add_offset() {
+        let ptr_ty = NirType::Ptr(Box::new(NirType::Int {
+            bits: 8,
+            signed: false,
+        }));
+        let u32_ty = NirType::Int {
+            bits: 32,
+            signed: false,
+        };
+        // Start with a mistaken pointer type on the offset parameter.
+        let mut buf = make_binding("edx");
+        buf.ty = ptr_ty.clone();
+        let mut end = make_binding("ecx");
+        end.ty = u32_ty.clone();
+        let body = vec![
+            make_assign("edx", HirExpr::Var("param_1".into())),
+            make_assign("ecx", HirExpr::Var("param_2".into())),
+            make_assign(
+                "ecx",
+                HirExpr::Binary {
+                    op: HirBinaryOp::Add,
+                    lhs: Box::new(HirExpr::Var("param_2".into())),
+                    rhs: Box::new(HirExpr::Cast {
+                        ty: NirType::Int {
+                            bits: 64,
+                            signed: false,
+                        },
+                        expr: Box::new(HirExpr::Var("edx".into())),
+                    }),
+                    ty: u32_ty.clone(),
+                },
+            ),
+            HirStmt::If {
+                cond: HirExpr::Binary {
+                    op: HirBinaryOp::Ne,
+                    lhs: Box::new(HirExpr::Var("ecx".into())),
+                    rhs: Box::new(HirExpr::Var("edx".into())),
+                    ty: NirType::Bool,
+                },
+                then_body: vec![],
+                else_body: vec![],
+            },
+            make_assign(
+                "byte",
+                HirExpr::Load {
+                    ptr: Box::new(HirExpr::Var("edx".into())),
+                    ty: NirType::Int {
+                        bits: 8,
+                        signed: false,
+                    },
+                },
+            ),
+        ];
+        let mut func = make_func(vec![buf, end, make_binding("byte")], body, NirType::Unknown);
+        func.is_64bit = false;
+        func.params = vec![
+            make_param("param_1", ptr_ty.clone()),
+            make_param("param_2", ptr_ty.clone()), // mistaken
+        ];
+        let _ = super::apply_type_inference_pass(&mut func);
+        assert!(
+            !matches!(func.params[1].ty, NirType::Ptr(_)),
+            "param_2/len demoted, got {:?}",
+            func.params[1].ty
+        );
+        assert!(matches!(func.params[0].ty, NirType::Ptr(_)));
     }
 }

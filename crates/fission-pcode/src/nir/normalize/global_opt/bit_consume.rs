@@ -73,8 +73,20 @@ pub(crate) fn apply_bit_consume_dead_code_pass(func: &mut HirFunction) -> bool {
     }
 
     // --- Phase 4: simplify the body ---
+    let type_map = func
+        .params
+        .iter()
+        .chain(func.locals.iter())
+        .map(|binding| (binding.name.clone(), binding.ty.clone()))
+        .collect();
     let mut any_changed = false;
-    simplify_stmts(&mut func.body, &consumed, &multi_def, &mut any_changed);
+    simplify_stmts(
+        &mut func.body,
+        &consumed,
+        &multi_def,
+        &type_map,
+        &mut any_changed,
+    );
     any_changed
 }
 
@@ -507,10 +519,11 @@ fn simplify_stmts(
     stmts: &mut Vec<HirStmt>,
     consumed: &HashMap<String, u64>,
     multi_def: &std::collections::HashSet<String>,
+    type_map: &HashMap<String, NirType>,
     any_changed: &mut bool,
 ) {
     for stmt in stmts.iter_mut() {
-        simplify_stmt(stmt, consumed, multi_def, any_changed);
+        simplify_stmt(stmt, consumed, multi_def, type_map, any_changed);
     }
 }
 
@@ -518,6 +531,7 @@ fn simplify_stmt(
     stmt: &mut HirStmt,
     consumed: &HashMap<String, u64>,
     multi_def: &std::collections::HashSet<String>,
+    type_map: &HashMap<String, NirType>,
     any_changed: &mut bool,
 ) {
     match stmt {
@@ -531,7 +545,7 @@ fn simplify_stmt(
                 return;
             }
             let out_consume = consumed.get(name.as_str()).copied().unwrap_or(0);
-            simplify_assign_rhs(rhs, out_consume, consumed, any_changed);
+            simplify_assign_rhs(rhs, out_consume, consumed, type_map, any_changed);
         }
         HirStmt::Assign { lhs, rhs } => {
             simplify_lvalue(lhs, consumed, any_changed);
@@ -542,7 +556,7 @@ fn simplify_stmt(
         }
         HirStmt::VaStart { va_list, .. } => simplify_expr(va_list, consumed, any_changed),
         HirStmt::Block(body) | HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
-            simplify_stmts(body, consumed, multi_def, any_changed);
+            simplify_stmts(body, consumed, multi_def, type_map, any_changed);
         }
         HirStmt::For {
             init,
@@ -551,15 +565,15 @@ fn simplify_stmt(
             body,
         } => {
             if let Some(i) = init {
-                simplify_stmt(i, consumed, multi_def, any_changed);
+                simplify_stmt(i, consumed, multi_def, type_map, any_changed);
             }
             if let Some(c) = cond {
                 simplify_expr(c, consumed, any_changed);
             }
             if let Some(u) = update {
-                simplify_stmt(u, consumed, multi_def, any_changed);
+                simplify_stmt(u, consumed, multi_def, type_map, any_changed);
             }
-            simplify_stmts(body, consumed, multi_def, any_changed);
+            simplify_stmts(body, consumed, multi_def, type_map, any_changed);
         }
         HirStmt::If {
             cond,
@@ -567,8 +581,8 @@ fn simplify_stmt(
             else_body,
         } => {
             simplify_expr(cond, consumed, any_changed);
-            simplify_stmts(then_body, consumed, multi_def, any_changed);
-            simplify_stmts(else_body, consumed, multi_def, any_changed);
+            simplify_stmts(then_body, consumed, multi_def, type_map, any_changed);
+            simplify_stmts(else_body, consumed, multi_def, type_map, any_changed);
         }
         HirStmt::Switch {
             expr,
@@ -577,9 +591,9 @@ fn simplify_stmt(
         } => {
             simplify_expr(expr, consumed, any_changed);
             for case in cases.iter_mut() {
-                simplify_stmts(&mut case.body, consumed, multi_def, any_changed);
+                simplify_stmts(&mut case.body, consumed, multi_def, type_map, any_changed);
             }
-            simplify_stmts(default, consumed, multi_def, any_changed);
+            simplify_stmts(default, consumed, multi_def, type_map, any_changed);
         }
         _ => {}
     }
@@ -590,6 +604,7 @@ fn simplify_assign_rhs(
     rhs: &mut HirExpr,
     out_consume: u64,
     consumed: &HashMap<String, u64>,
+    type_map: &HashMap<String, NirType>,
     any_changed: &mut bool,
 ) {
     // Rule 1: `x = y | C` where no consumed bit overlaps with C → `x = y`
@@ -629,10 +644,15 @@ fn simplify_assign_rhs(
     //  type of y is already narrow enough → we can replace with cast.
     // (Safe but conservative; subvar_flow handles the full case.)
 
-    // Rule 3: `x = ZEXT(y)` where consumed[x] fits within y's type bits → `x = y`
+    // Rule 3: a widening cast is redundant when consumers only need bits that
+    // already exist in the source. A narrowing cast always changes the value.
     if let HirExpr::Cast { ty, expr: inner } = rhs {
-        let narrow_mask = type_bitmask(&expr_type(inner));
-        if narrow_mask != 0 && (out_consume & !narrow_mask) == 0 {
+        let source_ty = expr_type_with_bindings(inner, type_map);
+        let can_remove = type_width(ty)
+            .zip(type_width(&source_ty))
+            .is_some_and(|(target_bits, source_bits)| target_bits >= source_bits);
+        let source_mask = type_bitmask(&source_ty);
+        if can_remove && source_mask != 0 && (out_consume & !source_mask) == 0 {
             // Consumer only needs bits within inner's natural width → remove cast
             let new_expr = *inner.clone();
             *rhs = new_expr;
@@ -713,5 +733,79 @@ fn type_bitmask(ty: &NirType) -> u64 {
             (1u64 << bits) - 1
         }
         _ => u64::MAX,
+    }
+}
+
+fn type_width(ty: &NirType) -> Option<u32> {
+    match ty {
+        NirType::Bool => Some(1),
+        NirType::Int { bits, .. } if *bits > 0 => Some(*bits),
+        _ => None,
+    }
+}
+
+fn expr_type_with_bindings(expr: &HirExpr, type_map: &HashMap<String, NirType>) -> NirType {
+    match expr {
+        HirExpr::Var(name) => type_map.get(name).cloned().unwrap_or(NirType::Unknown),
+        _ => expr_type(expr),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn uint(bits: u32) -> NirType {
+        NirType::Int {
+            bits,
+            signed: false,
+        }
+    }
+
+    #[test]
+    fn preserves_narrowing_cast_from_wide_binding() {
+        let mut func = HirFunction {
+            name: "narrow_lane".into(),
+            locals: vec![
+                NirBinding {
+                    name: "wide".into(),
+                    ty: uint(32),
+                    surface_type_name: None,
+                    origin: Some(NirBindingOrigin::Temp),
+                    initializer: None,
+                },
+                NirBinding {
+                    name: "narrowed".into(),
+                    ty: uint(32),
+                    surface_type_name: None,
+                    origin: Some(NirBindingOrigin::Temp),
+                    initializer: None,
+                },
+            ],
+            return_type: uint(32),
+            body: vec![
+                HirStmt::Assign {
+                    lhs: HirLValue::Var("narrowed".into()),
+                    rhs: HirExpr::Cast {
+                        ty: uint(8),
+                        expr: Box::new(HirExpr::Var("wide".into())),
+                    },
+                },
+                HirStmt::Return(Some(HirExpr::Var("narrowed".into()))),
+            ],
+            ..Default::default()
+        };
+
+        assert!(!apply_bit_consume_dead_code_pass(&mut func));
+        assert!(matches!(
+            &func.body[0],
+            HirStmt::Assign {
+                rhs: HirExpr::Cast {
+                    ty: NirType::Int { bits: 8, .. },
+                    ..
+                },
+                ..
+            }
+        ));
     }
 }

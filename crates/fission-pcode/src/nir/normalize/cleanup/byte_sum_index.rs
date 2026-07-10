@@ -1,9 +1,9 @@
 //! Recover low-byte truncation after a sum of two byte-ranged values.
 //!
-//! x86 `add eax, ecx; movzx edx, al` is the standard lowering of
-//! `(byte_a + byte_b) % 256`. When the `movzx` is lost as an identity copy
-//! (`w = v` after `v = a + b`), pointer indexes into 256-entry tables go OOB
-//! (e.g. RC4 keystream). This pass rewrites such copies to `w = v & 0xff`.
+//! A widening copy from the low lane of a byte sum represents
+//! `(byte_a + byte_b) mod 256`. If that lane boundary is lost and the copy is
+//! materialized as `w = v` after `v = a + b`, downstream indexing can use the
+//! unbounded sum. This pass restores the bit-vector operation as `w = v & 0xff`.
 
 use super::super::*;
 use std::collections::HashMap;
@@ -66,7 +66,7 @@ fn rewrite_stmt(
             // Pattern: w = v  where v's last def was a byte-sum.
             if let HirExpr::Var(src) = rhs {
                 if byte_sum_names.get(src).copied().unwrap_or(false) {
-                    let ty = last_def
+                    let source_ty = last_def
                         .get(src)
                         .and_then(|d| match d {
                             HirExpr::Binary { ty, .. } => Some(ty.clone()),
@@ -76,6 +76,7 @@ fn rewrite_stmt(
                             bits: 32,
                             signed: false,
                         });
+                    let ty = unsigned_mask_type(name, &source_ty, type_map);
                     *rhs = HirExpr::Binary {
                         op: HirBinaryOp::And,
                         lhs: Box::new(HirExpr::Var(src.clone())),
@@ -97,10 +98,15 @@ fn rewrite_stmt(
             byte_sum_names.insert(name.clone(), is_sum);
             last_def.insert(name.clone(), rhs.clone());
         }
-        HirStmt::Block(body)
-        | HirStmt::While { body, .. }
-        | HirStmt::DoWhile { body, .. } => {
-            rewrite_stmts(body, type_map, last_def, byte_ranged, byte_sum_names, changed);
+        HirStmt::Block(body) | HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
+            rewrite_stmts(
+                body,
+                type_map,
+                last_def,
+                byte_ranged,
+                byte_sum_names,
+                changed,
+            );
         }
         HirStmt::If {
             then_body,
@@ -130,7 +136,8 @@ fn rewrite_stmt(
                 changed,
             );
             last_def.retain(|k, v| {
-                then_def.get(k).is_some_and(|tv| tv == v) && else_def.get(k).is_some_and(|ev| ev == v)
+                then_def.get(k).is_some_and(|tv| tv == v)
+                    && else_def.get(k).is_some_and(|ev| ev == v)
             });
             byte_ranged.retain(|k, v| {
                 then_br.get(k).copied() == Some(*v) && else_br.get(k).copied() == Some(*v)
@@ -140,10 +147,7 @@ fn rewrite_stmt(
             });
         }
         HirStmt::For {
-            init,
-            update,
-            body,
-            ..
+            init, update, body, ..
         } => {
             if let Some(i) = init.as_mut() {
                 rewrite_stmt(i, type_map, last_def, byte_ranged, byte_sum_names, changed);
@@ -170,9 +174,7 @@ fn rewrite_stmt(
                 );
             }
         }
-        HirStmt::Switch {
-            cases, default, ..
-        } => {
+        HirStmt::Switch { cases, default, .. } => {
             for case in cases.iter_mut() {
                 let mut d = last_def.clone();
                 let mut b = byte_ranged.clone();
@@ -185,6 +187,30 @@ fn rewrite_stmt(
             rewrite_stmts(default, type_map, &mut d, &mut b, &mut s, changed);
         }
         _ => {}
+    }
+}
+
+fn unsigned_mask_type(
+    destination: &str,
+    source_ty: &NirType,
+    type_map: &HashMap<String, NirType>,
+) -> NirType {
+    let bits = type_map
+        .get(destination)
+        .and_then(int_type_width)
+        .or_else(|| int_type_width(source_ty))
+        .unwrap_or(32);
+    NirType::Int {
+        bits,
+        signed: false,
+    }
+}
+
+fn int_type_width(ty: &NirType) -> Option<u32> {
+    match ty {
+        NirType::Bool => Some(1),
+        NirType::Int { bits, .. } if *bits > 0 => Some(*bits),
+        _ => None,
     }
 }
 
@@ -288,6 +314,23 @@ mod tests {
         }
     }
 
+    fn i8_ty() -> NirType {
+        NirType::Int {
+            bits: 8,
+            signed: true,
+        }
+    }
+
+    fn binding(name: &str, ty: NirType) -> NirBinding {
+        NirBinding {
+            name: name.into(),
+            ty,
+            surface_type_name: None,
+            origin: Some(NirBindingOrigin::Temp),
+            initializer: None,
+        }
+    }
+
     #[test]
     fn recovers_truncation_after_byte_sum_copy() {
         let mut func = HirFunction {
@@ -341,5 +384,62 @@ mod tests {
             },
             _ => panic!("expected assign"),
         }
+    }
+
+    #[test]
+    fn recovered_mask_uses_unsigned_destination_width() {
+        let mut func = HirFunction {
+            name: "signed_byte_sum".into(),
+            params: vec![],
+            locals: vec![
+                binding("a", u8_ty()),
+                binding("b", u8_ty()),
+                binding("sum", i8_ty()),
+                binding("index", u32_ty()),
+            ],
+            return_type: u32_ty(),
+            body: vec![
+                HirStmt::Assign {
+                    lhs: HirLValue::Var("sum".into()),
+                    rhs: HirExpr::Binary {
+                        op: HirBinaryOp::Add,
+                        lhs: Box::new(HirExpr::Var("a".into())),
+                        rhs: Box::new(HirExpr::Var("b".into())),
+                        ty: i8_ty(),
+                    },
+                },
+                HirStmt::Assign {
+                    lhs: HirLValue::Var("index".into()),
+                    rhs: HirExpr::Var("sum".into()),
+                },
+            ],
+            ..Default::default()
+        };
+
+        assert!(apply_byte_sum_index_trunc(&mut func));
+        assert!(matches!(
+            &func.body[1],
+            HirStmt::Assign {
+                rhs: HirExpr::Binary {
+                    op: HirBinaryOp::And,
+                    rhs,
+                    ty: NirType::Int {
+                        bits: 32,
+                        signed: false,
+                    },
+                    ..
+                },
+                ..
+            } if matches!(
+                rhs.as_ref(),
+                HirExpr::Const(
+                    0xff,
+                    NirType::Int {
+                        bits: 32,
+                        signed: false,
+                    }
+                )
+            )
+        ));
     }
 }

@@ -386,16 +386,26 @@ fn collect_assignment_copy_constraints(
 ) {
     match lhs {
         HirLValue::Var(lhs_name) => {
+            // Reverse-propagate non-pointer types only. Propagating Ptr through
+            // a simple copy is unsafe when a register is later reused for an
+            // address value.
             if let Some(lhs_ty) = known_binding_types.get(lhs_name) {
                 if let HirExpr::Var(rhs_name) = rhs {
-                    out.entry(rhs_name.clone())
-                        .or_default()
-                        .push(copy_constraint_from_type(lhs_ty));
+                    if !matches!(lhs_ty, NirType::Ptr(_)) {
+                        out.entry(rhs_name.clone())
+                            .or_default()
+                            .push(copy_constraint_from_type(lhs_ty));
+                    }
                 }
             }
             if let Some(lhs_ty) = known_binding_types.get(lhs_name) {
                 if matches!(lhs_ty, NirType::Ptr(_)) {
-                    collect_pointer_assignment_base_constraints(rhs, lhs_ty, out);
+                    collect_pointer_assignment_base_constraints(
+                        rhs,
+                        lhs_ty,
+                        known_binding_types,
+                        out,
+                    );
                 }
             }
 
@@ -462,19 +472,31 @@ fn collect_assignment_copy_constraints(
 fn collect_pointer_assignment_base_constraints(
     rhs: &HirExpr,
     ptr_ty: &NirType,
+    known_binding_types: &HashMap<String, NirType>,
     out: &mut HashMap<String, Vec<UseConstraint>>,
 ) {
     let NirType::Ptr(pointee) = ptr_ty else {
         return;
     };
     match rhs {
-        HirExpr::Var(name) | HirExpr::AddressOfGlobal(name) => {
+        // Reverse a plain copy only while the source is unknown. A known source
+        // can belong to an earlier scalar role while the destination acquired
+        // its pointer type from a later register-reuse definition.
+        HirExpr::Var(name)
+            if matches!(known_binding_types.get(name), None | Some(NirType::Unknown)) =>
+        {
+            out.entry(name.clone())
+                .or_default()
+                .push(UseConstraint::Ptr(pointee.as_ref().clone()));
+        }
+        HirExpr::Var(_) => {}
+        HirExpr::AddressOfGlobal(name) => {
             out.entry(name.clone())
                 .or_default()
                 .push(UseConstraint::Ptr(pointee.as_ref().clone()));
         }
         HirExpr::Cast { expr, .. } => {
-            collect_pointer_assignment_base_constraints(expr, ptr_ty, out);
+            collect_pointer_assignment_base_constraints(expr, ptr_ty, known_binding_types, out);
         }
         HirExpr::Binary {
             op: HirBinaryOp::Add,
@@ -482,15 +504,19 @@ fn collect_pointer_assignment_base_constraints(
             rhs,
             ..
         } => {
-            if expr_is_pointer_offset_like(rhs.as_ref()) {
-                if let HirExpr::Var(name) = lhs.as_ref() {
+            // ptr + integer = pointer. Only promote a Var base when the other
+            // side is a *numeric* offset (const / const arithmetic).
+            // Do not treat an integer cast of a bare variable as an offset; it
+            // can be an integerized pointer base.
+            if expr_is_numeric_offset(rhs.as_ref()) {
+                if let HirExpr::Var(name) = strip_casts_unary(lhs.as_ref()) {
                     out.entry(name.clone())
                         .or_default()
                         .push(UseConstraint::Ptr(pointee.as_ref().clone()));
                 }
             }
-            if expr_is_pointer_offset_like(lhs.as_ref()) {
-                if let HirExpr::Var(name) = rhs.as_ref() {
+            if expr_is_numeric_offset(lhs.as_ref()) {
+                if let HirExpr::Var(name) = strip_casts_unary(rhs.as_ref()) {
                     out.entry(name.clone())
                         .or_default()
                         .push(UseConstraint::Ptr(pointee.as_ref().clone()));
@@ -512,8 +538,50 @@ fn collect_pointer_assignment_base_constraints(
     }
 }
 
+fn strip_casts_unary(expr: &HirExpr) -> &HirExpr {
+    let mut cur = expr;
+    while let HirExpr::Cast { expr, .. } | HirExpr::Unary { expr, .. } = cur {
+        cur = expr.as_ref();
+    }
+    cur
+}
+
+/// Integer offset in pointer arithmetic: const, index vars, scaled index.
+/// An integer cast of a bare variable is not sufficient offset evidence; it can
+/// be a pointer base forced through integer ALU.
+fn expr_is_numeric_offset(expr: &HirExpr) -> bool {
+    match expr {
+        HirExpr::Const(_, _) => true,
+        HirExpr::Var(_) => true,
+        HirExpr::Cast {
+            ty: NirType::Int { .. },
+            expr: inner,
+        } => match inner.as_ref() {
+            HirExpr::Const(_, _) => true,
+            HirExpr::Binary { .. } => expr_is_numeric_offset(inner),
+            // Bare var cast to int is ambiguous (often ptr-to-int for end calc).
+            HirExpr::Var(_) => false,
+            other => expr_is_numeric_offset(other),
+        },
+        HirExpr::Cast { expr, .. } | HirExpr::Unary { expr, .. } => expr_is_numeric_offset(expr),
+        HirExpr::Binary {
+            op:
+                HirBinaryOp::Add
+                | HirBinaryOp::Sub
+                | HirBinaryOp::Mul
+                | HirBinaryOp::Shl
+                | HirBinaryOp::Shr
+                | HirBinaryOp::Sar,
+            lhs,
+            rhs,
+            ..
+        } => expr_is_numeric_offset(lhs) && expr_is_numeric_offset(rhs),
+        _ => false,
+    }
+}
+
 fn expr_is_pointer_offset_like(expr: &HirExpr) -> bool {
-    !matches!(expr, HirExpr::Var(_))
+    expr_is_numeric_offset(expr)
 }
 
 fn copy_constraint_from_type(ty: &NirType) -> UseConstraint {
@@ -1846,6 +1914,7 @@ fn merge_constraint(binding: &mut NirBinding, constraint: &UseConstraint) -> boo
 fn restore_scalar_only_pointer_locals(func: &mut HirFunction) -> bool {
     let mut roles = HashMap::<String, BindingUseRole>::new();
     collect_binding_use_roles(&func.body, &mut roles);
+    let pointer_compare_peers = super::type_infer::pointer_compare_peer_promotions(func);
     let scalar_ty = NirType::Int {
         bits: if func.is_64bit { 64 } else { 32 },
         signed: false,
@@ -1858,7 +1927,10 @@ fn restore_scalar_only_pointer_locals(func: &mut HirFunction) -> bool {
         let Some(role) = roles.get(&binding.name) else {
             continue;
         };
-        if role.scalar_use && !role.address_use {
+        if role.scalar_use
+            && !role.address_use
+            && !pointer_compare_peers.contains_key(&binding.name)
+        {
             binding.ty = scalar_ty.clone();
             changed = true;
         }

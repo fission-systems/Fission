@@ -753,6 +753,163 @@ mod tests {
         });
         assert!(memory_fact_prefilter_allows_full(&func));
     }
+
+    #[test]
+    fn type_fixed_point_keeps_pointer_add_offset_parameter_scalar() {
+        let u8_ty = NirType::Int {
+            bits: 8,
+            signed: false,
+        };
+        let u64_ty = NirType::Int {
+            bits: 64,
+            signed: false,
+        };
+        let ptr_ty = NirType::Ptr(Box::new(u8_ty.clone()));
+        let binding = |name: &str, ty: NirType, origin| NirBinding {
+            name: name.to_string(),
+            ty,
+            surface_type_name: None,
+            origin: Some(origin),
+            initializer: None,
+        };
+        let mut func = empty_func();
+        func.params = vec![
+            binding("base", ptr_ty.clone(), NirBindingOrigin::ParamIndex(0)),
+            binding("offset", ptr_ty.clone(), NirBindingOrigin::ParamIndex(1)),
+        ];
+        func.locals = vec![
+            binding("end", ptr_ty.clone(), NirBindingOrigin::Temp),
+            binding("value", u8_ty.clone(), NirBindingOrigin::Temp),
+        ];
+        func.body = vec![
+            HirStmt::Assign {
+                lhs: HirLValue::Var("end".into()),
+                rhs: HirExpr::Binary {
+                    op: HirBinaryOp::Add,
+                    lhs: Box::new(HirExpr::Var("offset".into())),
+                    rhs: Box::new(HirExpr::Cast {
+                        ty: u64_ty.clone(),
+                        expr: Box::new(HirExpr::Var("base".into())),
+                    }),
+                    ty: u64_ty,
+                },
+            },
+            HirStmt::Assign {
+                lhs: HirLValue::Var("value".into()),
+                rhs: HirExpr::Load {
+                    ptr: Box::new(HirExpr::Var("base".into())),
+                    ty: u8_ty,
+                },
+            },
+            HirStmt::If {
+                cond: HirExpr::Binary {
+                    op: HirBinaryOp::Ne,
+                    lhs: Box::new(HirExpr::Var("end".into())),
+                    rhs: Box::new(HirExpr::Var("base".into())),
+                    ty: NirType::Bool,
+                },
+                then_body: Vec::new(),
+                else_body: Vec::new(),
+            },
+        ];
+
+        apply_type_signature_fixed_point(&mut func, false, false);
+
+        assert!(matches!(func.params[0].ty, NirType::Ptr(_)));
+        assert_eq!(
+            func.params[1].ty,
+            NirType::Int {
+                bits: 64,
+                signed: false,
+            }
+        );
+    }
+
+    #[test]
+    fn type_fixed_point_keeps_aliased_pointer_add_offset_parameter_scalar() {
+        let u8_ty = NirType::Int {
+            bits: 8,
+            signed: false,
+        };
+        let u64_ty = NirType::Int {
+            bits: 64,
+            signed: false,
+        };
+        let ptr_ty = NirType::Ptr(Box::new(u8_ty.clone()));
+        let binding = |name: &str, ty: NirType, origin| NirBinding {
+            name: name.to_string(),
+            ty,
+            surface_type_name: None,
+            origin: Some(origin),
+            initializer: None,
+        };
+        let mut func = empty_func();
+        func.params = vec![
+            binding("base", ptr_ty.clone(), NirBindingOrigin::ParamIndex(0)),
+            binding("offset", ptr_ty.clone(), NirBindingOrigin::ParamIndex(1)),
+        ];
+        func.locals = vec![
+            binding("cursor", ptr_ty.clone(), NirBindingOrigin::Temp),
+            binding("end", ptr_ty.clone(), NirBindingOrigin::Temp),
+            binding("value", u8_ty.clone(), NirBindingOrigin::Temp),
+        ];
+        func.body = vec![
+            HirStmt::Assign {
+                lhs: HirLValue::Var("end".into()),
+                rhs: HirExpr::Var("offset".into()),
+            },
+            HirStmt::If {
+                cond: HirExpr::Var("offset".into()),
+                then_body: vec![
+                    HirStmt::Assign {
+                        lhs: HirLValue::Var("cursor".into()),
+                        rhs: HirExpr::Var("base".into()),
+                    },
+                    HirStmt::Assign {
+                        lhs: HirLValue::Var("end".into()),
+                        rhs: HirExpr::Binary {
+                            op: HirBinaryOp::Add,
+                            lhs: Box::new(HirExpr::Var("offset".into())),
+                            rhs: Box::new(HirExpr::Cast {
+                                ty: u64_ty.clone(),
+                                expr: Box::new(HirExpr::Var("cursor".into())),
+                            }),
+                            ty: u64_ty,
+                        },
+                    },
+                    HirStmt::Assign {
+                        lhs: HirLValue::Var("value".into()),
+                        rhs: HirExpr::Load {
+                            ptr: Box::new(HirExpr::Var("cursor".into())),
+                            ty: u8_ty,
+                        },
+                    },
+                ],
+                else_body: Vec::new(),
+            },
+            HirStmt::If {
+                cond: HirExpr::Binary {
+                    op: HirBinaryOp::Ne,
+                    lhs: Box::new(HirExpr::Var("end".into())),
+                    rhs: Box::new(HirExpr::Var("cursor".into())),
+                    ty: NirType::Bool,
+                },
+                then_body: Vec::new(),
+                else_body: Vec::new(),
+            },
+        ];
+
+        apply_type_signature_fixed_point(&mut func, false, false);
+
+        assert!(matches!(func.params[0].ty, NirType::Ptr(_)));
+        assert_eq!(
+            func.params[1].ty,
+            NirType::Int {
+                bits: 64,
+                signed: false,
+            }
+        );
+    }
 }
 
 pub(crate) fn run_cleanup_block<F>(

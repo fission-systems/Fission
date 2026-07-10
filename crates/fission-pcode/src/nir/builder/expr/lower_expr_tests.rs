@@ -506,6 +506,66 @@ fn loop_exit_register_read_uses_predecessor_path_zero_seed() {
     );
 }
 
+/// Byte accumulator shape: 1-byte `add al, mem`; `movzx eax, al`.
+/// Must recompile as zero-extend (not `char al; eax = al & -1`).
+#[test]
+fn movzx_after_byte_add_zero_extends_unsigned() {
+    let options = test_options();
+    let eax = register(0, 4);
+    let al = register(0, 1);
+    let edx = register(0x10, 4);
+
+    let pcode = pcode_function(vec![block_at(
+        0x1000,
+        0,
+        vec![
+            op(
+                0,
+                PcodeOpcode::Copy,
+                Some(eax.clone()),
+                vec![constant_sized(0, 4)],
+            ),
+            // ADD AL, byte ptr [EDX]  (1-byte add into AL)
+            op(
+                1,
+                PcodeOpcode::Load,
+                Some(register(0x200, 1)),
+                vec![constant_sized(3, 4), edx.clone()],
+            ),
+            op(
+                2,
+                PcodeOpcode::IntAdd,
+                Some(al.clone()),
+                vec![al.clone(), register(0x200, 1)],
+            ),
+            // movzx EAX, AL
+            op(3, PcodeOpcode::IntZExt, Some(eax.clone()), vec![al]),
+            op(4, PcodeOpcode::Return, None, vec![eax]),
+        ],
+    )]);
+
+    let code = render_mlil_preview(&pcode, "byte_add_movzx", 0x1000, &options)
+        .expect("render byte add + movzx");
+
+    // Must not leave a signed char + identity-and that sign-extends on recompile.
+    assert!(
+        !code.contains("char al") || code.contains("uchar al") || code.contains("(uchar)"),
+        "byte accumulator should be unsigned or cast through uchar:\n{code}"
+    );
+    assert!(
+        !code.contains("& -1"),
+        "ZExt must not print as `x & -1` (sign-extends char on recompile):\n{code}"
+    );
+    assert!(
+        code.contains("& 0xff")
+            || code.contains("& 255")
+            || code.contains("(uchar)")
+            || code.contains("% 256")
+            || code.contains("%256"),
+        "expected zero-extend / low-byte keep of AL:\n{code}"
+    );
+}
+
 /// RC4 keystream index pattern: `add EAX, ECX; movzx EDX, AL; … use EDX`.
 /// Truncation must apply to the *destination* register (EDX), not only when
 /// movzx rewrites EAX in place.
@@ -556,6 +616,7 @@ fn movzx_al_into_edx_after_int_add_preserves_low_byte_truncation() {
         code.contains("= 44")
             || code.contains("return 44")
             || code.contains("return (uchar)300")
+            || code.contains("(uchar)rax")
             || code.contains("& 0xff")
             || code.contains("& 255"),
         "expected low-byte truncation of 200+100=300 → 44 via EDX:\n{code}"
@@ -617,6 +678,7 @@ fn rc4_keystream_movzx_sequence_truncates_index() {
         code.contains("4140")
             || code.contains("0x102c")
             || code.contains("= 44")
+            || code.contains("(uchar)rax")
             || (code.contains("0x1000")
                 && (code.contains("& 0xff")
                     || code.contains("& 255")
