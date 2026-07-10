@@ -1068,7 +1068,7 @@ binding-order failures by themselves.</p>
 <tr>
 <td><code>saturating_add</code></td>
 <td>Improving</td>
-<td><strong>F1</strong> + primary-return keep + <strong>if-goto fuse allows Return (2269bbbc)</strong>: structured <code>if (0 &lt; b)</code> (no goto). Docker @2269bbbc: <strong>m32 O0 5/5</strong>, <strong>m32 O2 1/5</strong>, <strong>gcc O2 4/5</strong>. INT_MIN cmovl still open (cfg helper ready; terminator wiring deferred after binding regressions).</td>
+<td><strong>F1</strong> + primary-return keep + if-goto fuse Return + <strong>tail-cmov materialize</strong> (same-block forward terminator skip + primary-return HW name): m32 O2 recovers <code>eax = a+b</code>, <code>a</code> vs <code>sum</code> compare (not <code>eax &lt; eax</code>), underflow <code>eax = 2147483648</code> (INT_MIN bits), INT_MAX arm. Nesting/flag noise and signed print of INT_MIN still residual.</td>
 </tr>
 <tr>
 <td><code>classify_range</code></td>

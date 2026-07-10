@@ -828,10 +828,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#5-follow-up-order" class="md-nav__link">
+  <a href="#5-shipped-path-2026-07-10-follow-up" class="md-nav__link">
     <span class="md-ellipsis">
       
-        5. Follow-up order
+        5. Shipped path (2026-07-10 follow-up)
       
     </span>
   </a>
@@ -891,18 +891,20 @@
   without guarding INT_MAX/path quality — first attempt made <code>block_terminator_index</code>
   skip cmov guards and regressed saturating_add compare to <code>eax &lt; eax</code>.</li>
 </ul>
-<h2 id="5-follow-up-order">5. Follow-up order<a class="headerlink" href="#5-follow-up-order" title="Permanent link">&para;</a></h2>
+<h2 id="5-shipped-path-2026-07-10-follow-up">5. Shipped path (2026-07-10 follow-up)<a class="headerlink" href="#5-shipped-path-2026-07-10-follow-up" title="Permanent link">&para;</a></h2>
 <ol>
 <li>Keep <code>eax = a+b</code> dominating all uses of the primary return live-in (F1/F3) —
-   partial via primary-return keep materialize (2026-07-10).</li>
-<li><strong>Do not</strong> enable terminator-side cmov tail without a focused sat golden:</li>
-<li>INT_MAX condition uses <code>a</code> and <code>sum</code> (not <code>eax &lt; eax</code>)</li>
-<li>INT_MIN appears under <code>b &lt; 0</code></li>
-<li>count_bits/clamp must not regress
-   Multiple attempts (global terminator reclassification; process-cmov-before-skip;
-   primary-return-only terminator special case) all regressed sat O2 binding
-   (<code>eax = param_2</code> overwrite / <code>eax &lt;= eax</code>). Leave CFG helper only until a
-   non-regressing owner path is proven.</li>
+   primary-return keep materialize + HW-name binding for return-reg writes.</li>
+<li><strong>Terminator-side cmov tail (materialize only):</strong></li>
+<li><code>materialize_block_terminator_index</code> skips same-block-forward CBranch tails
+     so <code>lower_block_ops_range</code> emits <code>if (!cond) { body }</code> (raw
+     <code>block_terminator_index</code> unchanged for CFG consumers).</li>
+<li>Guarded Copy of the ABI primary return register reuses the HW name
+     (<code>eax</code>/<code>rax</code>), not a fresh <code>uVar</code> — temps were DCE'd and dropped INT_MIN.</li>
+<li>Focused goldens: <code>sat_o2_cmov_block_probe_materialize</code>,
+   <code>sat_o2_cmov_tail_renders_int_min_through_epilogue</code>; m32 O2 saturating_add
+   shows <code>eax = param_1 + param_2</code>, compare <code>a</code> vs <code>sum</code>, and
+   <code>eax = 2147483648</code> on the underflow arm.</li>
 </ol>
 
 
