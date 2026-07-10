@@ -34,12 +34,30 @@ pub(crate) fn normalize_boolean_logic(expr: &HirExpr) -> Option<HirExpr> {
             Some((**lhs).clone())
         }
         HirExpr::Binary {
+            op: HirBinaryOp::Ne,
+            lhs,
+            rhs,
+            ..
+        } if is_zero_const(lhs.as_ref()) && matches!(expr_type(rhs), NirType::Bool) => {
+            // `0 != bool` → bool
+            Some((**rhs).clone())
+        }
+        HirExpr::Binary {
             op: HirBinaryOp::Eq,
             lhs,
             rhs,
             ..
         } if is_zero_const(rhs.as_ref()) && matches!(expr_type(lhs), NirType::Bool) => {
             Some(negate_expr((**lhs).clone()))
+        }
+        HirExpr::Binary {
+            op: HirBinaryOp::Eq,
+            lhs,
+            rhs,
+            ..
+        } if is_zero_const(lhs.as_ref()) && matches!(expr_type(rhs), NirType::Bool) => {
+            // `0 == (a < 0)` → `!(a < 0)` → further folds to `a >= 0`
+            Some(negate_expr((**rhs).clone()))
         }
         HirExpr::Unary {
             op: HirUnaryOp::Not,

@@ -268,6 +268,63 @@ fn flag_recovery_jge_sf_eq_of_becomes_sge() {
     );
 }
 
+// ── JLE: zf || sf != of  →  a <= b (signed) ─────────────────────────────────
+
+#[test]
+fn flag_recovery_jle_becomes_signed_le() {
+    // zf = (a == b), of = __sborrow(a, b), cond = zf || (sf != of)
+    // → if (a <= b) signed
+    let zf_def = b_binary(HirBinaryOp::Eq, var("a"), var("b"));
+    let diff = HirExpr::Binary {
+        op: HirBinaryOp::Sub,
+        lhs: Box::new(var("a")),
+        rhs: Box::new(var("b")),
+        ty: NirType::Int {
+            bits: 32,
+            signed: true,
+        },
+    };
+    let sf_def = b_binary(
+        HirBinaryOp::SLt,
+        diff,
+        HirExpr::Const(
+            0,
+            NirType::Int {
+                bits: 32,
+                signed: true,
+            },
+        ),
+    );
+    let of_def = sborrow_call(var("a"), var("b"));
+    let sf_ne_of = b_binary(HirBinaryOp::Ne, var("sf"), var("of"));
+    let cond = b_binary(HirBinaryOp::LogicalOr, var("zf"), sf_ne_of);
+    let mut func = make_flag_func(
+        vec![
+            assign("zf", zf_def),
+            assign("sf", sf_def),
+            assign("of", of_def),
+        ],
+        cond,
+        vec![flag_binding("zf"), flag_binding("sf"), flag_binding("of")],
+    );
+    normalize_hir_function(&mut func);
+    let code = print_hir_function(&func);
+    // a <= b signed may print as "a <= b", "!(b < a)", or an equivalent form.
+    let has_sle = code.contains("a <= b")
+        || code.contains("a <=(int) b")
+        || code.contains("(int)a <=")
+        || code.contains("!(b < a)")
+        || (code.contains("a < b") && code.contains("a == b"));
+    assert!(
+        has_sle,
+        "expected signed <= form after JLE flag recovery, got:\n{code}"
+    );
+    assert!(
+        !code.contains("sf") && !code.contains("of") && !code.contains("zf"),
+        "expected flags eliminated after JLE recovery, got:\n{code}"
+    );
+}
+
 // ── JG: !zf && sf == of  →  a > b (signed) ──────────────────────────────────
 
 #[test]

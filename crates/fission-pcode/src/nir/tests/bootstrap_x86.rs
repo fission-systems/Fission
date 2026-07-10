@@ -3194,5 +3194,7 @@ fn preview_leaves_non_exact_branch_shape_as_generic_value() {
     };
 
     let cond = lower_x86_cond_expr(&func);
-    assert_eq!(print_expr(&cond), "reg ^ reg");
+    // Non-exact Jcc shape (BoolXor of flag bits) stays generic — but the
+    // register-space flag bits must still keep distinct SLA names.
+    assert_eq!(print_expr(&cond), "zf ^ sf");
 }

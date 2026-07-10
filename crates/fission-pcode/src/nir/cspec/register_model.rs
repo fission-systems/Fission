@@ -10,7 +10,7 @@ use super::SlaRegisterMap;
 use super::apply::sleigh_languages_root;
 use super::ldefs::global_language_slaspec_index;
 use super::slaspec_parse::{ParsedRegister, parse_registers_from_slaspec};
-use crate::arch::x86::{X86_REG_BASE, unique_x86_register_name};
+use crate::arch::x86::{X86_REG_BASE, unique_x86_register_name, x86_register_space_flag_name};
 use crate::nir::{
     REGISTER_SPACE_ID, RUST_SLEIGH_ALT_REGISTER_SPACE_ID, RUST_SLEIGH_REGISTER_SPACE_ID,
     UNIQUE_SPACE_ID, Varnode, is_register_space_id,
@@ -322,6 +322,8 @@ impl RegisterNamer {
         {
             return self.hw_name_at(offset, 8);
         }
+        // SLA EFLAGS bits at 0x200.. (CF/ZF/SF/OF/…). Must be distinct names —
+        // never collapse to the shared `"reg"` fallback (destroys Jcc recovery).
         if matches!(
             self.abi,
             CallingConvention::WindowsX64
@@ -330,6 +332,10 @@ impl RegisterNamer {
         ) && size == 1
             && (0x200..0x280).contains(&offset)
         {
+            if let Some(name) = x86_register_space_flag_name(offset, size) {
+                return Some(name.to_string());
+            }
+            // Reserved flag slots (F1/F3/…) stay unnamed rather than sharing `"reg"`.
             return None;
         }
         if self.abi == CallingConvention::PowerPc64 && size == 4 {
@@ -788,6 +794,33 @@ mod tests {
                 "missing register at idx {i} offset 0x{off:x}"
             );
         }
+    }
+
+    #[test]
+    fn x64_namer_names_register_space_eflags_bits() {
+        use crate::nir::cspec::RegisterNamer;
+        use crate::nir::{CallingConvention, NirRenderOptions};
+
+        let options = NirRenderOptions {
+            calling_convention: CallingConvention::WindowsX64,
+            format: "PE".to_string(),
+            pe_x64_only: true,
+            is_64bit: true,
+            pointer_size: 8,
+            ..Default::default()
+        };
+        let namer = RegisterNamer::from_options(&options);
+        assert_eq!(namer.hw_name_at(0x200, 1).as_deref(), Some("cf"));
+        assert_eq!(namer.hw_name_at(0x206, 1).as_deref(), Some("zf"));
+        assert_eq!(namer.hw_name_at(0x207, 1).as_deref(), Some("sf"));
+        assert_eq!(namer.hw_name_at(0x20b, 1).as_deref(), Some("of"));
+        // Distinct names — never a shared fallback for known flag bits.
+        let names: Vec<_> = [0x200u64, 0x206, 0x207, 0x20b]
+            .iter()
+            .map(|o| namer.hw_name_at(*o, 1).expect("flag name"))
+            .collect();
+        let unique: std::collections::BTreeSet<_> = names.iter().cloned().collect();
+        assert_eq!(unique.len(), 4, "flags must not share a name: {names:?}");
     }
 
     #[test]

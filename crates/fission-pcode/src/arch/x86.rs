@@ -121,19 +121,9 @@ pub fn unique_x86_register_name(offset: u64, size: u32) -> Option<&'static str> 
         return None;
     }
 
-    // EFLAGS individual bits
+    // EFLAGS individual bits (UNIQUE-space layout used by some lifts)
     if offset >= X86_EFLAGS_BASE && offset < X86_EFLAGS_BASE + 0x100 && size == 1 {
-        return match offset - X86_EFLAGS_BASE {
-            0 => Some("cf"),
-            2 => Some("pf"),
-            4 => Some("af"),
-            6 => Some("zf"),
-            7 => Some("sf"),
-            9 => Some("if_"),
-            10 => Some("df"),
-            11 => Some("of"),
-            _ => None,
-        };
+        return x86_eflags_bit_name(offset - X86_EFLAGS_BASE);
     }
 
     // MXCSR
@@ -142,6 +132,35 @@ pub fn unique_x86_register_name(offset: u64, size: u32) -> Option<&'static str> 
     }
 
     None
+}
+
+/// Ghidra/SLA x86 **register-space** EFLAGS bit varnodes.
+///
+/// From `x86-64.slaspec`:
+/// `define register offset=0x200 size=1 [ CF F1 PF F3 AF F5 ZF SF TF IF DF OF ... ]`.
+///
+/// These must keep distinct names so NIR flag recovery can match Jcc patterns
+/// (`zf || (sf != of)` for JLE, etc.). Falling back to a shared temp like `reg`
+/// collapses every flag write onto one SSA name and destroys signed compares.
+pub fn x86_register_space_flag_name(offset: u64, size: u32) -> Option<&'static str> {
+    if size != 1 || !(0x200..0x210).contains(&offset) {
+        return None;
+    }
+    x86_eflags_bit_name(offset - 0x200)
+}
+
+fn x86_eflags_bit_name(bit_offset: u64) -> Option<&'static str> {
+    match bit_offset {
+        0 => Some("cf"),
+        2 => Some("pf"),
+        4 => Some("af"),
+        6 => Some("zf"),
+        7 => Some("sf"),
+        9 => Some("if_"),
+        10 => Some("df"),
+        11 => Some("of"),
+        _ => None,
+    }
 }
 
 #[cfg(test)]
@@ -207,6 +226,12 @@ mod tests {
             unique_x86_register_name(X86_EFLAGS_BASE + 11, 1),
             Some("of")
         );
+        // Register-space SLA layout must match UNIQUE bit names.
+        assert_eq!(x86_register_space_flag_name(0x200, 1), Some("cf"));
+        assert_eq!(x86_register_space_flag_name(0x206, 1), Some("zf"));
+        assert_eq!(x86_register_space_flag_name(0x207, 1), Some("sf"));
+        assert_eq!(x86_register_space_flag_name(0x20b, 1), Some("of"));
+        assert_eq!(x86_register_space_flag_name(0x201, 1), None); // F1 reserved
     }
 
     #[test]
