@@ -10,7 +10,7 @@
       
       
       
-        <link rel="canonical" href="https://sjkim1127.github.io/Fission/audits/2026-07-10-decompiler-problem-inventory/">
+        <link rel="canonical" href="https://sjkim1127.github.io/Fission/proposals/2026-07-10-cmov-tail-block-skip/">
       
       
       
@@ -23,7 +23,7 @@
     
     
       
-        <title>Decompiler Problem Inventory - Fission</title>
+        <title>Decompiler Change Proposal: Tail-of-block cmov skip - Fission</title>
       
     
     
@@ -74,7 +74,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#decompiler-problem-inventory" class="md-skip">
+        <a href="#decompiler-change-proposal-tail-of-block-cmov-skip" class="md-skip">
           Skip to content
         </a>
       
@@ -108,7 +108,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Decompiler Problem Inventory
+              Decompiler Change Proposal: Tail-of-block cmov skip
             
           </span>
         </div>
@@ -784,10 +784,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#executive-summary" class="md-nav__link">
+  <a href="#1-baseline" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Executive summary
+        1. Baseline
       
     </span>
   </a>
@@ -795,10 +795,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#priority-ranking-roi" class="md-nav__link">
+  <a href="#2-owner" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Priority ranking (ROI)
+        2. Owner
       
     </span>
   </a>
@@ -806,10 +806,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#what-is-not-the-main-problem-for-now" class="md-nav__link">
+  <a href="#3-invariant" class="md-nav__link">
     <span class="md-ellipsis">
       
-        What is not the main problem (for now)
+        3. Invariant
       
     </span>
   </a>
@@ -817,10 +817,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#concrete-residual-signals-m32-o2-control_flow" class="md-nav__link">
+  <a href="#4-validation" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Concrete residual signals (m32 O2 control_flow)
+        4. Validation
       
     </span>
   </a>
@@ -828,104 +828,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#problem-families-canonical" class="md-nav__link">
+  <a href="#5-follow-up-order" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Problem families (canonical)
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Problem families (canonical)">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#f1-binding-value-identity" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        F1 — Binding / value identity
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#f2-dominating-param-aliases" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        F2 — Dominating param aliases
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#f3-primary-return-at-joins" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        F3 — Primary return at joins
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#f4-relational-recovery-from-flagscmov" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        F4 — Relational recovery from flags/cmov
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#f5-structuring-legality-vs-readability" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        F5 — Structuring legality vs readability
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#f6-typerole" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        F6 — Type/role
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#improvement-plan-this-cycle" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Improvement plan (this cycle)
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#non-goals-this-cycle" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Non-goals this cycle
+        5. Follow-up order
       
     </span>
   </a>
@@ -952,173 +858,46 @@
   
 
 
-<h1 id="decompiler-problem-inventory">Decompiler Problem Inventory<a class="headerlink" href="#decompiler-problem-inventory" title="Permanent link">&para;</a></h1>
+<h1 id="decompiler-change-proposal-tail-of-block-cmov-skip">Decompiler Change Proposal: Tail-of-block cmov skip<a class="headerlink" href="#decompiler-change-proposal-tail-of-block-cmov-skip" title="Permanent link">&para;</a></h1>
+<h2 id="1-baseline">1. Baseline<a class="headerlink" href="#1-baseline" title="Permanent link">&para;</a></h2>
 <ul>
-<li><strong>Date:</strong> 2026-07-10</li>
-<li><strong>Scope:</strong> Shipped NIR/HIR decompile quality (x86/x86-64 primary)</li>
-<li><strong>Related:</strong> <a href="../../adr/0008-nir-substrate-and-owner-boundaries/">ADR 0008</a>,
-  <a href="../../adr/0009-isa-agnostic-semantic-rules/">ADR 0009</a>,
-  <a href="../2026-07-10-isa-semantic-debt-inventory/">ISA debt table</a></li>
+<li>Binary: <code>control_flow_gcc-m32_O2.exe</code></li>
+<li>Function: <code>saturating_add</code> @ <code>0x401680</code></li>
+<li>Missing: under/overflow arm <code>cmovl eax, 0x80000000</code> when <code>b &lt; 0</code></li>
+<li>Assembly: after <code>cmp</code>/<code>mov edx, INT_MIN</code>, SLEIGH emits absolute <code>CBranch</code>
+  to the next machine instruction (<code>ret</code> epilogue at <code>0x4016a2</code>), then a
+  guarded <code>Copy eax &lt;- INT_MIN</code> still in the <strong>current</strong> basic block</li>
 </ul>
-<h2 id="executive-summary">Executive summary<a class="headerlink" href="#executive-summary" title="Permanent link">&para;</a></h2>
-<p>Current quality gaps are dominated by <strong>intra-function NIR owner bugs</strong>
-(materialize, terminator, structuring, normalize), not by missing static
-FactStore depth or SMT solver coupling. Static/type facts and solver/emulator
-help later ceilings (API types, path validation); they do not fix cmov/return/
-binding-order failures by themselves.</p>
-<h2 id="priority-ranking-roi">Priority ranking (ROI)<a class="headerlink" href="#priority-ranking-roi" title="Permanent link">&para;</a></h2>
-<table>
-<thead>
-<tr>
-<th>Pri</th>
-<th>Theme</th>
-<th>Owner</th>
-<th>Why high ROI now</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>P0</td>
-<td>Distinct live values share one binding (param/sum/return collapse)</td>
-<td>materialize / variable_merge</td>
-<td>Wrong C that cannot compile or is semantically false</td>
-</tr>
-<tr>
-<td>P0</td>
-<td>Stack-param → reg alias does not dominate first use</td>
-<td>materialize (hoist is bandage)</td>
-<td>Use-before-def; D1 emergency pass</td>
-</tr>
-<tr>
-<td>P0</td>
-<td>Return value recovery on epilogue joins / cmov arms</td>
-<td>terminator</td>
-<td>Empty or wrong <code>return</code></td>
-</tr>
-<tr>
-<td>P1</td>
-<td>Flag/cmov chains not folded to relational values</td>
-<td>materialize + flag recovery</td>
-<td>classify_range / clamp noise</td>
-</tr>
-<tr>
-<td>P1</td>
-<td>Control structure (goto, nested if, switch-like)</td>
-<td>structuring</td>
-<td>saturating_add / classify_range readability</td>
-</tr>
-<tr>
-<td>P2</td>
-<td>Type/role (size_t vs pointer, signatures)</td>
-<td>type recovery + static facts</td>
-<td>checksum-style rows</td>
-</tr>
-<tr>
-<td>P3</td>
-<td>Broader static FactStore fixed-point</td>
-<td>fission-static + decompiler</td>
-<td>Real-world API ceilings</td>
-</tr>
-<tr>
-<td>P3</td>
-<td>Solver in decomp hot path</td>
-<td>—</td>
-<td>Prefer emulator/validation lane</td>
-</tr>
-</tbody>
-</table>
-<h2 id="what-is-not-the-main-problem-for-now">What is <em>not</em> the main problem (for now)<a class="headerlink" href="#what-is-not-the-main-problem-for-now" title="Permanent link">&para;</a></h2>
+<h2 id="2-owner">2. Owner<a class="headerlink" href="#2-owner" title="Permanent link">&para;</a></h2>
 <ul>
-<li>“We don’t depend on static enough” — partial only; static helps types/API, not
-  local binding/control facts.</li>
-<li>“We need SMT in the decompiler core” — wrong layer for most residual rows;
-  keep <code>fission-solver</code> with emulator / optional narrow queries.</li>
+<li>[x] <code>nir/cfg.rs</code> same-block forward resolution + materialize consumer</li>
+<li>Existing absolute same-block skip only finds targets <strong>inside</strong> the block;
+  here the target address is the <strong>next block start</strong>, so the skip was missed
+  and the guarded copy was dropped or always/never applied</li>
 </ul>
-<h2 id="concrete-residual-signals-m32-o2-control_flow">Concrete residual signals (m32 O2 control_flow)<a class="headerlink" href="#concrete-residual-signals-m32-o2-control_flow" title="Permanent link">&para;</a></h2>
-<p>Measured with release CLI against <code>control_flow_gcc-m32_O2.exe</code> (2026-07-10).</p>
-<table>
-<thead>
-<tr>
-<th>Function</th>
-<th>Status</th>
-<th>Top defects</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>count_bits</code></td>
-<td>Good</td>
-<td>Loop + return OK</td>
-</tr>
-<tr>
-<td><code>clamp</code></td>
-<td>Partial</td>
-<td>Semantic shape OK; flag temps (<code>of</code>/<code>sf</code>/<code>zf</code>) noise; hoist-dependent param order</td>
-</tr>
-<tr>
-<td><code>signum</code></td>
-<td>Partial</td>
-<td>Returns 1 / -setnz path; extra block braces; return type uchar</td>
-</tr>
-<tr>
-<td><code>checksum</code></td>
-<td>Partial</td>
-<td>Loop OK; <code>len</code> typed as <code>uchar *</code>; cast noise</td>
-</tr>
-<tr>
-<td><code>saturating_add</code></td>
-<td>Partial</td>
-<td><strong>F1</strong> stopped <code>eax+eax</code> collapse. Current main-shaped output: <code>ecx/edx</code> live, <code>if (ecx+edx &lt; ecx) return INT_MAX</code>, but <strong><code>return eax</code> without <code>eax = sum</code></strong> (live primary return without dominating def). <strong>INT_MIN cmovl</strong> is a tail-of-block absolute CBranch (next BB start); helper added in <code>cfg.rs</code> (<code>same_block_forward</code> tail skip) — wiring via terminator classification still needs a non-regressing materialize change (attempt 2026-07-10 regressed INT_MAX to <code>eax &lt; eax</code>).</td>
-</tr>
-<tr>
-<td><code>classify_range</code></td>
-<td>Bad</td>
-<td>Flag soup; setnz/neg/cmovg not recovered as value classes</td>
-</tr>
-</tbody>
-</table>
-<h2 id="problem-families-canonical">Problem families (canonical)<a class="headerlink" href="#problem-families-canonical" title="Permanent link">&para;</a></h2>
-<h3 id="f1-binding-value-identity">F1 — Binding / value identity<a class="headerlink" href="#f1-binding-value-identity" title="Permanent link">&para;</a></h3>
-<p><strong>Invariant:</strong> Distinct reaching definitions (params, sum, INT_MIN, INT_MAX) must
-not be force-merged into one name when path-sensitive or when storage is reused
-only by the ABI return register after a real intermediate value exists.</p>
-<p><strong>Evidence:</strong> saturating_add overwrites <code>eax</code> with both params then uses
-<code>eax + eax</code>.</p>
-<p><strong>Forbidden:</strong> Row-specific renames; “always keep eax” without def-use.</p>
-<h3 id="f2-dominating-param-aliases">F2 — Dominating param aliases<a class="headerlink" href="#f2-dominating-param-aliases" title="Permanent link">&para;</a></h3>
-<p><strong>Invariant:</strong> After recovering <code>stack_slot → param_N</code> into a register, the
-assignment <code>reg = param_N</code> dominates first use of <code>reg</code> in the emitted HIR.</p>
-<p><strong>Evidence:</strong> clamp without <code>hoist_param_alias</code> → use-before-def on <code>edx</code>.</p>
-<h3 id="f3-primary-return-at-joins">F3 — Primary return at joins<a class="headerlink" href="#f3-primary-return-at-joins" title="Permanent link">&para;</a></h3>
-<p><strong>Invariant:</strong> When RET’s p-code input is a return <em>address</em>, the returned
-expression is the live primary return register (or equal pred exprs when safe).</p>
-<p><strong>Evidence:</strong> epilogue multi-pred join (partially fixed 2026-07-10).</p>
-<h3 id="f4-relational-recovery-from-flagscmov">F4 — Relational recovery from flags/cmov<a class="headerlink" href="#f4-relational-recovery-from-flagscmov" title="Permanent link">&para;</a></h3>
-<p><strong>Invariant:</strong> Cmp+flag+cmov/setcc sequences lower to relational ops or select
-forms without mandatory dead flag stores in final HIR.</p>
-<p><strong>Evidence:</strong> classify_range, clamp LE arm still dumps <code>of</code>/<code>sf</code>/<code>zf</code>.</p>
-<h3 id="f5-structuring-legality-vs-readability">F5 — Structuring legality vs readability<a class="headerlink" href="#f5-structuring-legality-vs-readability" title="Permanent link">&para;</a></h3>
-<p><strong>Invariant:</strong> Acyclic diamonds and saturating branches become if/else without
-spurious goto when CFG postdom facts allow; switch-like chains prefer value
-ranges when legal.</p>
-<h3 id="f6-typerole">F6 — Type/role<a class="headerlink" href="#f6-typerole" title="Permanent link">&para;</a></h3>
-<p><strong>Invariant:</strong> Scalar accumulators and length parameters are not stuck as
-pointer types without address-producing uses.</p>
-<h2 id="improvement-plan-this-cycle">Improvement plan (this cycle)<a class="headerlink" href="#improvement-plan-this-cycle" title="Permanent link">&para;</a></h2>
+<h2 id="3-invariant">3. Invariant<a class="headerlink" href="#3-invariant" title="Permanent link">&para;</a></h2>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>When a CBranch target address is strictly after the current op address, does
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>not appear as any op address in the current block, and all remaining ops in the
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>current block have addresses &lt; that target, the branch is an instruction-local
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>skip of the block tail (cmov body). Resolve the exclusive end index to the
+</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>block end so materialize emits: if (!cond) { /* remaining ops */ }.
+</span></code></pre></div>
+<p>ISA-agnostic: address/CFG shape only; no CC enum.</p>
+<h2 id="4-validation">4. Validation<a class="headerlink" href="#4-validation" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Unit: cfg absolute tail-skip resolves to <code>block.ops.len()</code></li>
+<li>Unit: materialize <code>lower_block_stmts</code> wraps tail cmov body in <code>if</code> (synthetic)</li>
+<li>Real wiring: do <strong>not</strong> treat all same-block-forward CBranches as non-terminators
+  without guarding INT_MAX/path quality — first attempt made <code>block_terminator_index</code>
+  skip cmov guards and regressed saturating_add compare to <code>eax &lt; eax</code>.</li>
+</ul>
+<h2 id="5-follow-up-order">5. Follow-up order<a class="headerlink" href="#5-follow-up-order" title="Permanent link">&para;</a></h2>
 <ol>
-<li><strong>P0 F1:</strong> Fix saturating_add-class binding collapse (distinct live values on
-   return-reg timeline) — synthetic test + real decomp.</li>
-<li><strong>P0 F2:</strong> Materialize entry stack-param aliases in load order → retire hoist
-   when real clamp clean.</li>
-<li><strong>P1 F4/F5:</strong> classify_range / residual saturating control structure.</li>
-<li>Track debt D1/D3+ in ISA inventory; no new emergency passes without removal path.</li>
+<li>Keep <code>eax = a+b</code> dominating all uses of the primary return live-in (F1/F3).</li>
+<li>Then enable terminator-side cmov tail only with a focused sat golden check:</li>
+<li>INT_MAX condition uses <code>a</code> and <code>sum</code> (not <code>eax &lt; eax</code>)</li>
+<li>INT_MIN appears under <code>b &lt; 0</code></li>
 </ol>
-<h2 id="non-goals-this-cycle">Non-goals this cycle<a class="headerlink" href="#non-goals-this-cycle" title="Permanent link">&para;</a></h2>
-<ul>
-<li>Big-bang static FactStore rewrite</li>
-<li>SMT in normalize hot path</li>
-<li>New ISA breadth beyond x86/x86-64 measurement</li>
-</ul>
 
 
 
