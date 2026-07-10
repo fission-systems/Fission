@@ -28,6 +28,7 @@ impl<'a> PreviewBuilder<'a> {
             self.options.cspec_stack_arg_base,
             self.options.cspec_extrapop,
         )
+        .with_frame_pointer_established(self.entry_frame_pointer_established)
     }
 
     fn surface_call_carrier_name(&mut self, vn: &Varnode) -> Option<String> {

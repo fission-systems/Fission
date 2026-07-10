@@ -75,6 +75,7 @@ pub(crate) struct AbiState {
     pub(crate) cspec_stack_arg_base: Option<i64>,
     /// Return-address stack size from .cspec prototype (`extrapop`).
     pub(crate) cspec_extrapop: Option<i64>,
+    pub(crate) frame_pointer_established: bool,
 }
 
 impl AbiState {
@@ -92,6 +93,7 @@ impl AbiState {
             cspec_param_offsets: None,
             cspec_stack_arg_base: None,
             cspec_extrapop: None,
+            frame_pointer_established: false,
         }
     }
 
@@ -113,7 +115,13 @@ impl AbiState {
             cspec_param_offsets,
             cspec_stack_arg_base,
             cspec_extrapop,
+            frame_pointer_established: false,
         }
+    }
+
+    pub(crate) fn with_frame_pointer_established(mut self, established: bool) -> Self {
+        self.frame_pointer_established = established;
+        self
     }
 
     fn register_namer(&self) -> RegisterNamer {
@@ -202,11 +210,39 @@ impl AbiState {
         Some(((ghidra_offset - base) / i64::from(self.pointer_size)) as usize)
     }
 
+    fn incoming_stack_argument_index(&self, base: StackBase, offset: i64) -> Option<usize> {
+        if self.abi != CallingConvention::X86_32 || self.pointer_size == 0 {
+            return None;
+        }
+
+        let slot_size = i64::from(self.pointer_size);
+        let entry_arg_base = self.cspec_stack_arg_base.unwrap_or(slot_size);
+        let first_arg_offset = match base {
+            // EBP points below the saved frame pointer, so translate the cspec's
+            // entry-ESP-relative argument base across that saved word.
+            StackBase::Rbp if self.frame_pointer_established => {
+                entry_arg_base.checked_add(slot_size)?
+            }
+            StackBase::Rbp => return None,
+            // The tracked frame size is the distance from entry ESP to the current
+            // frame ESP, including a saved EBP when one exists.
+            StackBase::Rsp => self.stack_frame_size.checked_add(entry_arg_base)?,
+        };
+        let relative = offset.checked_sub(first_arg_offset)?;
+        if relative < 0 || relative % slot_size != 0 {
+            return None;
+        }
+        usize::try_from(relative / slot_size).ok()
+    }
+
     pub(crate) fn classify_stack_slot_origin(
         &self,
         base: StackBase,
         offset: i64,
     ) -> NirBindingOrigin {
+        if let Some(index) = self.incoming_stack_argument_index(base, offset) {
+            return NirBindingOrigin::ParamIndex(index);
+        }
         self.provider().classify_stack_slot_origin(
             self.is_64bit,
             self.stack_frame_size,

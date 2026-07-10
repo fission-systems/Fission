@@ -55,18 +55,35 @@ pub(super) fn collect_entry_register_param_aliases(
     aliases
 }
 
-pub(super) fn infer_entry_stack_frame_size(
+pub(super) fn infer_entry_stack_layout(
     pcode: &PcodeFunction,
     options: &MlilPreviewOptions,
-) -> i64 {
+) -> (i64, bool) {
     let Some(entry) = pcode.blocks.first() else {
-        return 0;
+        return (0, false);
     };
 
     let mut frame_size = 0_i64;
+    let mut frame_pointer_established = false;
     let mut seen_addrs = HashSet::new();
     let mut started = false;
+    let register_namer = RegisterNamer::from_options(options);
     for op in &entry.ops {
+        if matches!(op.opcode, PcodeOpcode::Copy)
+            && let (Some(output), Some(input)) = (op.output.as_ref(), op.inputs.first())
+            && is_register_varnode(output)
+            && is_register_varnode(input)
+        {
+            let output_name = register_namer.hw_name_at(output.offset, output.size);
+            let input_name = register_namer.hw_name_at(input.offset, input.size);
+            if matches!(
+                (output_name.as_deref(), input_name.as_deref()),
+                (Some("ebp"), Some("esp")) | (Some("rbp"), Some("rsp"))
+            ) {
+                frame_pointer_established = true;
+                started = true;
+            }
+        }
         if !seen_addrs.insert(op.address) {
             continue;
         }
@@ -91,6 +108,7 @@ pub(super) fn infer_entry_stack_frame_size(
             continue;
         }
         if asm.starts_with("MOV RBP,RSP") || asm.starts_with("MOV EBP,ESP") {
+            frame_pointer_established = true;
             started = true;
             continue;
         }
@@ -98,7 +116,7 @@ pub(super) fn infer_entry_stack_frame_size(
             break;
         }
     }
-    frame_size
+    (frame_size, frame_pointer_established)
 }
 
 fn parse_signed_asm_immediate(text: &str) -> Option<i64> {

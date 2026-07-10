@@ -583,6 +583,9 @@ impl<'a> PreviewBuilder<'a> {
         ty: NirType,
     ) -> Option<(String, NirType)> {
         let origin = self.classify_stack_slot_origin(base, offset);
+        if let NirBindingOrigin::ParamIndex(index) = origin {
+            return Some(self.ensure_incoming_stack_param_binding(index, ty));
+        }
         let kind_name = match origin {
             NirBindingOrigin::HomeSlot(home_offset) => format!("home_{home_offset:x}"),
             NirBindingOrigin::OutgoingArgSlot(arg_offset) => format!("arg_out_{arg_offset:x}"),
@@ -624,6 +627,38 @@ impl<'a> PreviewBuilder<'a> {
             entry.origin = origin;
         }
         Some((entry.name.clone(), entry.ty.clone()))
+    }
+
+    pub(in crate::nir::builder) fn ensure_incoming_stack_param_binding(
+        &mut self,
+        index: usize,
+        ty: NirType,
+    ) -> (String, NirType) {
+        let placeholder_ty = type_from_size(self.options.pointer_size, false);
+        for slot in 0..=index {
+            let slot_ty = if slot == index {
+                ty.clone()
+            } else {
+                placeholder_ty.clone()
+            };
+            self.params.entry(slot).or_insert_with(|| NirBinding {
+                name: format!("param_{}", slot + 1),
+                ty: slot_ty,
+                surface_type_name: None,
+                origin: Some(NirBindingOrigin::ParamIndex(slot)),
+                initializer: None,
+            });
+        }
+
+        let binding = self
+            .params
+            .get_mut(&index)
+            .expect("incoming stack parameter was inserted");
+        if binding.ty == NirType::Unknown || (binding.ty == placeholder_ty && ty != placeholder_ty)
+        {
+            binding.ty = ty;
+        }
+        (binding.name.clone(), binding.ty.clone())
     }
 
     pub(in crate::nir::builder) fn unique_stack_slot_binding_name(

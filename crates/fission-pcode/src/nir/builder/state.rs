@@ -50,6 +50,7 @@ pub(crate) struct PreviewBuilder<'a> {
     pub(crate) entry_arity: usize,
     pub(crate) suppress_entry_register_params: bool,
     pub(crate) stack_frame_size: i64,
+    pub(crate) entry_frame_pointer_established: bool,
     pub(crate) linear_exit_cache: BuilderCacheMap<usize, Option<LinearExit>>,
     pub(crate) linear_body_cache: BuilderCacheMap<LinearBodyCacheKey, LinearBodyCachedOutcome>,
     pub(crate) active_linear_body_keys: BuilderCacheSet<LinearBodyCacheKey>,

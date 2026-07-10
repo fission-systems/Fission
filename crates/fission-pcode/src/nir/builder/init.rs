@@ -80,7 +80,8 @@ impl<'a> PreviewBuilder<'a> {
         let mut register_param_aliases =
             entry_analysis::collect_entry_register_param_aliases(pcode, &register_namer);
         register_param_aliases.retain(|_, idx| *idx < entry_arity);
-        let stack_frame_size = entry_analysis::infer_entry_stack_frame_size(pcode, options);
+        let (stack_frame_size, entry_frame_pointer_established) =
+            entry_analysis::infer_entry_stack_layout(pcode, options);
         if preview_builder_diag_enabled() {
             let duplicate_starts = duplicate_block_start_count(pcode);
             if duplicate_starts > 0 {
@@ -132,6 +133,7 @@ impl<'a> PreviewBuilder<'a> {
             entry_arity,
             suppress_entry_register_params: false,
             stack_frame_size,
+            entry_frame_pointer_established,
             linear_exit_cache: BuilderCacheMap::default(),
             linear_body_cache: BuilderCacheMap::default(),
             active_linear_body_keys: BuilderCacheSet::default(),

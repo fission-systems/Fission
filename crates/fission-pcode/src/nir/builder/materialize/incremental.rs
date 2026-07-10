@@ -82,6 +82,10 @@ impl<'a> PreviewBuilder<'a> {
     fn register_refined_slot(&mut self, base: StackBase, offset: i64, size: u32) {
         let ty = type_from_size(size, false);
         let origin = self.classify_stack_slot_origin(base, offset);
+        if let NirBindingOrigin::ParamIndex(index) = origin {
+            self.ensure_incoming_stack_param_binding(index, ty);
+            return;
+        }
         let kind_name = match origin {
             NirBindingOrigin::HomeSlot(home_offset) => format!("home_{home_offset:x}"),
             NirBindingOrigin::OutgoingArgSlot(arg_offset) => format!("arg_out_{arg_offset:x}"),

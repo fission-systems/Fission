@@ -2540,6 +2540,94 @@ fn abi_state_recovers_win64_stack_arg_index_from_cspec() {
 }
 
 #[test]
+fn x86_32_incoming_stack_slots_follow_frame_base_and_cspec_layout() {
+    let framed =
+        abi_state_for(CallingConvention::X86_32, 0x14).with_frame_pointer_established(true);
+    assert_eq!(
+        framed.classify_stack_slot_origin(StackBase::Rbp, 0x08),
+        NirBindingOrigin::ParamIndex(0)
+    );
+    assert_eq!(
+        framed.classify_stack_slot_origin(StackBase::Rbp, 0x0c),
+        NirBindingOrigin::ParamIndex(1)
+    );
+    assert_eq!(
+        framed.classify_stack_slot_origin(StackBase::Rbp, 0x04),
+        NirBindingOrigin::StackOffset(0x04)
+    );
+    assert_eq!(
+        framed.classify_stack_slot_origin(StackBase::Rsp, 0x18),
+        NirBindingOrigin::ParamIndex(0)
+    );
+    assert_eq!(
+        framed.classify_stack_slot_origin(StackBase::Rsp, 0x1c),
+        NirBindingOrigin::ParamIndex(1)
+    );
+    assert_eq!(
+        framed.classify_stack_slot_origin(StackBase::Rsp, 0x14),
+        NirBindingOrigin::StackOffset(0x14)
+    );
+
+    let frameless = abi_state_for(CallingConvention::X86_32, 0x14);
+    assert_eq!(
+        frameless.classify_stack_slot_origin(StackBase::Rbp, 0x08),
+        NirBindingOrigin::StackOffset(0x08)
+    );
+
+    let win64 = abi_state_for(CallingConvention::WindowsX64, 0x14);
+    assert_ne!(
+        win64.classify_stack_slot_origin(StackBase::Rbp, 0x08),
+        NirBindingOrigin::ParamIndex(0)
+    );
+}
+
+#[test]
+fn x86_32_incoming_stack_load_becomes_formal_parameter() {
+    let options = preview_options_for(CallingConvention::X86_32);
+    let eax = reg(0x00, 4);
+    let stack_ptr = uniq(0x500, 4);
+    let func = PcodeFunction {
+        blocks: vec![PcodeBasicBlock {
+            index: 0,
+            start_address: 0x401000,
+            successors: vec![],
+            ops: vec![
+                PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::Copy,
+                    address: 0x400fff,
+                    output: Some(reg(0x14, 4)),
+                    inputs: vec![reg(0x10, 4)],
+                    asm_mnemonic: Some("COPY".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 1,
+                    opcode: PcodeOpcode::Load,
+                    address: 0x401000,
+                    output: Some(eax.clone()),
+                    inputs: vec![cst(3, 4), stack_ptr],
+                    asm_mnemonic: Some("MOV EAX,dword ptr [EBP + 0x8]".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 2,
+                    opcode: PcodeOpcode::Return,
+                    address: 0x401003,
+                    output: None,
+                    inputs: vec![cst(0, 4), eax],
+                    asm_mnemonic: Some("RET".to_string()),
+                },
+            ],
+        }],
+    };
+
+    let code = render_mlil_preview(&func, "stack_param", 0x401000, &options)
+        .expect("x86-32 stack parameter preview");
+    assert!(code.contains("stack_param(uint param_1)"), "{code}");
+    assert!(code.contains("return param_1;"), "{code}");
+    assert!(!code.contains("param_8;"), "{code}");
+}
+
+#[test]
 fn loongarch32_a_registers_are_param_slots() {
     let (name, idx) = reg_param(0x110, 4, CallingConvention::LoongArch32).unwrap();
     assert_eq!(name, "param_1");
