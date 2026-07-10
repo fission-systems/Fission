@@ -77,6 +77,7 @@ Read the nearest child file before editing those areas.
 5. Large refactors are acceptable when they reduce long-term complexity and tighten ownership.
 6. Do not hardcode repository-local resource paths in code; when `/Users/sjkim1127/Fission/utils` has reusable signatures, type info, benchmark support data, or other checked-in resources, route access through existing `PathConfig`, `PATHS`, `resource_roots`, or utility loaders instead of embedding absolute paths.
 7. Treat `/Users/sjkim1127/Fission/vendor` as a reference corpus only: consult it often for algorithms, invariants, and expected behavior, but keep Fission-owned Rust implementations dependency-free from that tree.
+8. **ISA-agnostic semantic rules** ([`docs/adr/0009-isa-agnostic-semantic-rules.md`](docs/adr/0009-isa-agnostic-semantic-rules.md)): optimize measurement on x86/x86-64, but implement register/loop/join/return/cmov-class logic as shared CFG and ABI-*slot* invariants. Put ISA differences in cspec, register namer, calling-convention tables, and SLEIGH — not as copy-pasted control-structure cores gated on `X86_32` / mnemonic / EBP offset alone.
 
 ## Anti-Patterns
 
@@ -88,6 +89,7 @@ Read the nearest child file before editing those areas.
 - Do not bypass `PathConfig`, `PATHS`, `resource_roots`, or related helpers by embedding `/Users/sjkim1127/Fission/utils` directly in implementation logic.
 - Do not link against, shell out to, bind to, or otherwise depend on `/Users/sjkim1127/Fission/vendor` code in production paths.
 - Do not claim success from one targeted test if crate-level regression remains.
+- Do not grow parallel x86-32 / x64 / ARM copies of the same materialize, loop-carried, join, or short-circuit rule; restate once as a common invariant and supply ISA data only through models (cspec/CC/SLEIGH).
 
 ## Build / Test Commands
 
@@ -209,11 +211,13 @@ Required principles:
 3. Default to zero new production dependencies.
 4. Prefer CFG, dominance, dataflow, fixed-point, and constraint-based reasoning over brittle pattern matching or temporary heuristics.
 5. Avoid overfitting to one ISA/compiler, while keeping x86/x86-64 as the current optimization target.
+   **Optimization target is not rule language:** motivate on m32/x64 rows, implement CFG/register/ABI-slot invariants that another ISA can reuse (ADR 0009).
 6. Consider Rust libraries only when a confirmed long-term bottleneck cannot be solved internally. Do not add C++ bindings.
 7. Prefer long-term maintainability and generalizable architecture over short-term output patches.
 8. Make proposals and implementations valid across multiple future quality cycles, with explicit observability and verification.
 9. Do not use estimates as evidence. Base claims on measured, reproducible data.
 10. The final success criterion is actual improvement in `benchmark/source_semantic_benchmark` semantic correctness and pseudocode quality.
+11. Prefer extending shared helpers (loop-carried update, same-block forward branch, return-join live-in, unconditional-copy merge) over new end-of-pipeline passes or ISA-local cleanups.
 
 Resource rules:
 
