@@ -550,6 +550,166 @@ fn x86_32_return_recovery_uses_stack_local_loaded_into_eax() {
     assert!(!code.contains("return local_0;"), "{code}");
 }
 
+/// x86-32 diamond like `signum`: arms set EAX to constants, shared RET block has
+/// epilogue noise (not a pure return join). Must still recover arm values.
+#[test]
+fn x86_32_diamond_return_join_recovers_eax_despite_epilogue() {
+    let eax = Varnode {
+        space_id: RUST_SLEIGH_REGISTER_SPACE_ID,
+        offset: 0,
+        size: 4,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let ebp = Varnode {
+        space_id: RUST_SLEIGH_REGISTER_SPACE_ID,
+        offset: 20,
+        size: 4,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let cond = Varnode {
+        space_id: crate::nir::UNIQUE_SPACE_ID,
+        offset: 0x300,
+        size: 1,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let junk = Varnode {
+        space_id: RUST_SLEIGH_REGISTER_SPACE_ID,
+        offset: 0x284,
+        size: 4,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let pcode = PcodeFunction {
+        blocks: vec![
+            // entry: if cond -> arm1 else arm0
+            PcodeBasicBlock {
+                index: 0,
+                start_address: 0x1000,
+                successors: vec![1, 2],
+                ops: vec![PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::CBranch,
+                    address: 0x1000,
+                    output: None,
+                    inputs: vec![Varnode::constant(0x1010, 4), cond],
+                    asm_mnemonic: None,
+                }],
+            },
+            // arm1: EAX = 1; goto join
+            PcodeBasicBlock {
+                index: 1,
+                start_address: 0x1010,
+                successors: vec![3],
+                ops: vec![
+                    PcodeOp {
+                        seq_num: 1,
+                        opcode: PcodeOpcode::Copy,
+                        address: 0x1010,
+                        output: Some(eax.clone()),
+                        inputs: vec![Varnode::constant(1, 4)],
+                        asm_mnemonic: None,
+                    },
+                    PcodeOp {
+                        seq_num: 2,
+                        opcode: PcodeOpcode::Branch,
+                        address: 0x1011,
+                        output: None,
+                        inputs: vec![Varnode::constant(0x1030, 4)],
+                        asm_mnemonic: None,
+                    },
+                ],
+            },
+            // arm0: EAX = 0; goto join
+            PcodeBasicBlock {
+                index: 2,
+                start_address: 0x1020,
+                successors: vec![3],
+                ops: vec![
+                    PcodeOp {
+                        seq_num: 3,
+                        opcode: PcodeOpcode::Copy,
+                        address: 0x1020,
+                        output: Some(eax.clone()),
+                        inputs: vec![Varnode::constant(0, 4)],
+                        asm_mnemonic: None,
+                    },
+                    PcodeOp {
+                        seq_num: 4,
+                        opcode: PcodeOpcode::Branch,
+                        address: 0x1021,
+                        output: None,
+                        inputs: vec![Varnode::constant(0x1030, 4)],
+                        asm_mnemonic: None,
+                    },
+                ],
+            },
+            // join: epilogue noise + RET with wrong return target (like pop/ret SLEIGH)
+            PcodeBasicBlock {
+                index: 3,
+                start_address: 0x1030,
+                successors: Vec::new(),
+                ops: vec![
+                    PcodeOp {
+                        seq_num: 5,
+                        opcode: PcodeOpcode::Copy,
+                        address: 0x1030,
+                        output: Some(ebp),
+                        inputs: vec![Varnode::constant(0, 4)],
+                        asm_mnemonic: None,
+                    },
+                    PcodeOp {
+                        seq_num: 6,
+                        opcode: PcodeOpcode::Return,
+                        address: 0x1031,
+                        output: None,
+                        inputs: vec![junk],
+                        asm_mnemonic: None,
+                    },
+                ],
+            },
+        ],
+    };
+    let options = preview_options_with_cspec(MlilPreviewOptions {
+        pe_x64_only: false,
+        is_64bit: false,
+        is_big_endian: false,
+        pointer_size: 4,
+        format: "PE32".to_string(),
+        image_base: 0x1000,
+        sections: vec![(0x1000, 0x2000)],
+        region_linearize_structuring: false,
+        force_linear_structuring: false,
+        conservative_irreducible_fallback: false,
+        structuring_engine: StructuringEngineKind::GraphCollapseV1,
+        global_names: Default::default(),
+        global_sizes: Default::default(),
+        relocation_names: Default::default(),
+        calling_convention: CallingConvention::X86_32,
+        ..Default::default()
+    });
+
+    let code = render_mlil_preview(&pcode, "diamond_ret", 0x1000, &options).expect("render");
+    assert!(
+        code.contains("return 1") || code.contains("return 0"),
+        "expected diamond arms to recover EAX constants, got:\n{code}"
+    );
+    // Must not collapse to empty body with bare register return only.
+    let body_lines: Vec<_> = code
+        .lines()
+        .filter(|l| {
+            let t = l.trim();
+            !t.is_empty() && !t.starts_with("int ") && t != "{" && t != "}"
+        })
+        .collect();
+    assert!(
+        body_lines.len() > 1 || code.contains("?"),
+        "expected non-trivial body (if/select), got:\n{code}"
+    );
+}
+
 #[test]
 fn arm32_return_target_register_uses_r0_value_not_lr_target() {
     let lr = Varnode {

@@ -584,6 +584,40 @@ impl<'a> PreviewBuilder<'a> {
         })
     }
 
+    /// x86-32 shared RET block after a diamond: epilogue may restore the frame
+    /// (pop ebp / leave) without defining the primary return register. The
+    /// return value lives in predecessor arms (mov eax, imm / mov eax, reg).
+    fn is_epilogue_style_return_join_block(&self, idx: usize) -> bool {
+        let pcode_idx = self.pcode_block_idx(idx);
+        let Some(block) = self.pcode.blocks.get(pcode_idx) else {
+            return false;
+        };
+        let Some(term_idx) = self.block_terminator_index(block) else {
+            return false;
+        };
+        if block.ops[term_idx].opcode != PcodeOpcode::Return {
+            return false;
+        }
+        // Join must not redefine the primary return register — value comes from preds.
+        if self
+            .last_primary_return_def_after_barrier(block, term_idx)
+            .is_some()
+        {
+            return false;
+        }
+        // At least two predecessors (diamond / multi-arm join).
+        let pred_count = self
+            .predecessors
+            .get(idx)
+            .map(|p| p.iter().filter(|p| **p != idx).count())
+            .unwrap_or(0);
+        if pred_count < 2 {
+            return false;
+        }
+        // Ops before RET must not store through the return register (real work).
+        !self.side_effect_consumes_primary_return_register_before(block, term_idx)
+    }
+
     fn return_join_source_register(&self, return_idx: usize) -> Option<Varnode> {
         let pcode_idx = self.pcode_block_idx(return_idx);
         let block = self.pcode.blocks.get(pcode_idx)?;
@@ -757,9 +791,22 @@ impl<'a> PreviewBuilder<'a> {
                 )
                 .map(Some);
         }
-        if !self.options.is_64bit
-            || !self.is_pure_return_join_block(return_idx)
-            || !self.return_join_has_primary_return_evidence(return_idx)
+        // Multi-pred return join: predecessors define the primary return register
+        // (EAX on x86-32 / RAX on x64) and a shared exit block ends in RET.
+        //
+        // - 64-bit: keep the pure-join requirement (existing behavior).
+        // - 32-bit: pure join OR epilogue-style join (pop/leave noise). Do not open
+        //   join recovery for arbitrary impure exits — that eats natural while
+        //   loops (count_bits) by treating the loop exit as a return diamond.
+        if !self.return_join_has_primary_return_evidence(return_idx) {
+            return Ok(None);
+        }
+        if self.options.is_64bit {
+            if !self.is_pure_return_join_block(return_idx) {
+                return Ok(None);
+            }
+        } else if !self.is_pure_return_join_block(return_idx)
+            && !self.is_epilogue_style_return_join_block(return_idx)
         {
             return Ok(None);
         }
