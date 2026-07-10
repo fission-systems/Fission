@@ -10,7 +10,7 @@
       
       
       
-        <link rel="canonical" href="https://sjkim1127.github.io/Fission/proposals/2026-07-10-cmov-tail-block-skip/">
+        <link rel="canonical" href="https://sjkim1127.github.io/Fission/proposals/2026-07-10-fuse-if-goto-return/">
       
       
       
@@ -23,7 +23,7 @@
     
     
       
-        <title>Decompiler Change Proposal: Tail-of-block cmov skip - Fission</title>
+        <title>Decompiler Change Proposal: Fuse if-goto with return-bearing segments - Fission</title>
       
     
     
@@ -74,7 +74,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#decompiler-change-proposal-tail-of-block-cmov-skip" class="md-skip">
+        <a href="#decompiler-change-proposal-fuse-if-goto-with-return-bearing-segments" class="md-skip">
           Skip to content
         </a>
       
@@ -108,7 +108,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Decompiler Change Proposal: Tail-of-block cmov skip
+              Decompiler Change Proposal: Fuse if-goto with return-bearing segments
             
           </span>
         </div>
@@ -827,17 +827,6 @@
   
 </li>
       
-        <li class="md-nav__item">
-  <a href="#5-follow-up-order" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        5. Follow-up order
-      
-    </span>
-  </a>
-  
-</li>
-      
     </ul>
   
 </nav>
@@ -858,52 +847,28 @@
   
 
 
-<h1 id="decompiler-change-proposal-tail-of-block-cmov-skip">Decompiler Change Proposal: Tail-of-block cmov skip<a class="headerlink" href="#decompiler-change-proposal-tail-of-block-cmov-skip" title="Permanent link">&para;</a></h1>
+<h1 id="decompiler-change-proposal-fuse-if-goto-with-return-bearing-segments">Decompiler Change Proposal: Fuse if-goto with return-bearing segments<a class="headerlink" href="#decompiler-change-proposal-fuse-if-goto-with-return-bearing-segments" title="Permanent link">&para;</a></h1>
 <h2 id="1-baseline">1. Baseline<a class="headerlink" href="#1-baseline" title="Permanent link">&para;</a></h2>
 <ul>
-<li>Binary: <code>control_flow_gcc-m32_O2.exe</code></li>
-<li>Function: <code>saturating_add</code> @ <code>0x401680</code></li>
-<li>Missing: under/overflow arm <code>cmovl eax, 0x80000000</code> when <code>b &lt; 0</code></li>
-<li>Assembly: after <code>cmp</code>/<code>mov edx, INT_MIN</code>, SLEIGH emits absolute <code>CBranch</code>
-  to the next machine instruction (<code>ret</code> epilogue at <code>0x4016a2</code>), then a
-  guarded <code>Copy eax &lt;- INT_MIN</code> still in the <strong>current</strong> basic block</li>
+<li>saturating_add O2: <code>if (param_2 &lt;= 0) goto L; … return INT_MAX; L: return eax</code></li>
+<li>Fuse pass refused the segment because <code>Return</code> was not "fuseable linear"</li>
 </ul>
 <h2 id="2-owner">2. Owner<a class="headerlink" href="#2-owner" title="Permanent link">&para;</a></h2>
 <ul>
-<li>[x] <code>nir/cfg.rs</code> same-block forward resolution + materialize consumer</li>
-<li>Existing absolute same-block skip only finds targets <strong>inside</strong> the block;
-  here the target address is the <strong>next block start</strong>, so the skip was missed
-  and the guarded copy was dropped or always/never applied</li>
+<li>[x] Normalize cleanup <code>fuse_single_predecessor_boundaries</code> /
+  <code>stmt_is_fuseable_linear</code></li>
 </ul>
 <h2 id="3-invariant">3. Invariant<a class="headerlink" href="#3-invariant" title="Permanent link">&para;</a></h2>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>When a CBranch target address is strictly after the current op address, does
-</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>not appear as any op address in the current block, and all remaining ops in the
-</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>current block have addresses &lt; that target, the branch is an instruction-local
-</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>skip of the block tail (cmov body). Resolve the exclusive end index to the
-</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>block end so materialize emits: if (!cond) { /* remaining ops */ }.
+<div class="language-text highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>Statements between `if (c) goto L;` and label `L` may include Return (and other
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>straight-line ops). Early returns do not make the segment non-linear for the
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>purpose of if-goto inversion into `if (!c) { segment }`.
 </span></code></pre></div>
-<p>ISA-agnostic: address/CFG shape only; no CC enum.</p>
 <h2 id="4-validation">4. Validation<a class="headerlink" href="#4-validation" title="Permanent link">&para;</a></h2>
 <ul>
-<li>Unit: cfg absolute tail-skip resolves to <code>block.ops.len()</code></li>
-<li>Unit: materialize <code>lower_block_stmts</code> wraps tail cmov body in <code>if</code> (synthetic)</li>
-<li>Real wiring: do <strong>not</strong> treat all same-block-forward CBranches as non-terminators
-  without guarding INT_MAX/path quality — first attempt made <code>block_terminator_index</code>
-  skip cmov guards and regressed saturating_add compare to <code>eax &lt; eax</code>.</li>
+<li>Unit: <code>fuse_if_goto_allows_returns_in_segment</code></li>
+<li>Real: saturating_add O2 loses bare <code>goto</code> before label when segment fuses</li>
+<li>Docker: docs/BENCHMARK_DOCKER.md local loop</li>
 </ul>
-<h2 id="5-follow-up-order">5. Follow-up order<a class="headerlink" href="#5-follow-up-order" title="Permanent link">&para;</a></h2>
-<ol>
-<li>Keep <code>eax = a+b</code> dominating all uses of the primary return live-in (F1/F3) —
-   partial via primary-return keep materialize (2026-07-10).</li>
-<li><strong>Do not</strong> enable terminator-side cmov tail without a focused sat golden:</li>
-<li>INT_MAX condition uses <code>a</code> and <code>sum</code> (not <code>eax &lt; eax</code>)</li>
-<li>INT_MIN appears under <code>b &lt; 0</code></li>
-<li>count_bits/clamp must not regress
-   Multiple attempts (global terminator reclassification; process-cmov-before-skip;
-   primary-return-only terminator special case) all regressed sat O2 binding
-   (<code>eax = param_2</code> overwrite / <code>eax &lt;= eax</code>). Leave CFG helper only until a
-   non-regressing owner path is proven.</li>
-</ol>
 
 
 
