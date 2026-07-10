@@ -89,6 +89,9 @@ Related ADRs:
 - Keep [`Agents.md`](../../Agents.md) and NIR `AGENTS.md` aligned with this ADR.
 - When touching quality proposals, the invariant section should name the common
   fact first and the motivating ISA second.
+- Track concrete DEBT/OK rows in
+  [`docs/audits/2026-07-10-isa-semantic-debt-inventory.md`](../audits/2026-07-10-isa-semantic-debt-inventory.md)
+  (P0 inventory; extend when fixing or adding emergency passes).
 
 ## Non-goals
 

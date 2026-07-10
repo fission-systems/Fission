@@ -48,7 +48,7 @@ nir/
 - Keep semantics in NIR/structuring layers, not static postprocess or UI surfaces.
 - Treat AI suggestions, benchmark rows, Ghidra diffs, and validation-pool signals as evidence only. Production changes must enter this tree as owner-native invariants over p-code semantics, CFG facts, def-use, types, calling convention, or alias facts.
 - Before adding a new pass/helper, ask whether the invariant belongs in shared analysis. Repeated special cases should become dataflow, def-use, type-constraint, calling-convention, CFG, or alias facts instead of another narrow rule.
-- **ISA-agnostic semantic rules** ([`docs/adr/0009-isa-agnostic-semantic-rules.md`](../../../../docs/adr/0009-isa-agnostic-semantic-rules.md)): keep x86/x86-64 as the measurement focus, but write materialize/structuring/normalize *meaning* in terms of register families, loop-carried updates, join live-in, same-block forward skips, and ABI slots. Decode x86 encodings into those facts; do not fork a parallel m32 control-structure policy.
+- **ISA-agnostic semantic rules** ([`docs/adr/0009-isa-agnostic-semantic-rules.md`](../../../../docs/adr/0009-isa-agnostic-semantic-rules.md)): keep x86/x86-64 as the measurement focus, but write materialize/structuring/normalize *meaning* in terms of register families, loop-carried updates, join live-in, same-block forward skips, and ABI slots. Decode x86 encodings into those facts; do not fork a parallel m32 control-structure policy. Concrete OK/DEBT/ENV inventory: [`docs/audits/2026-07-10-isa-semantic-debt-inventory.md`](../../../../docs/audits/2026-07-10-isa-semantic-debt-inventory.md).
 
 ## Anti-Patterns
 
