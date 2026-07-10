@@ -782,6 +782,8 @@ pub(crate) fn apply_variable_merge_pass(func: &mut HirFunction) -> bool {
         .map(|binding| binding.name.clone())
         .collect();
     let copy_merge_barriers = collect_copy_merge_barrier_vars(&func.body, stack_state_vars);
+    // Pairs that appear together in one expression (e.g. `eax = ecx + edx`) must
+    // never be unified — applies to both copy-alias and disjoint live-range merge.
     let copy_merge_blocked_pairs = collect_cooccurring_var_pairs(&func.body);
     let copy_aliases = transitive_copy_aliases(
         &direct_copies,
@@ -891,6 +893,22 @@ pub(crate) fn apply_variable_merge_pass(func: &mut HirFunction) -> bool {
                 if off1 != off2 {
                     continue;
                 }
+            }
+
+            // Same barrier as copy-alias merge: co-occurring names are not the
+            // same value (saturating_add: a, b, and sum must stay distinct).
+            if copy_merge_blocked_pairs.contains(&sorted_var_pair(&b1_name, &b2_name)) {
+                continue;
+            }
+            // Distinct architectural GPRs are storage identities, not free
+            // temps. Coalescing ecx→eax via imprecise live ranges collapses
+            // multi-register sequences into `eax + eax`.
+            if is_hardware_register_variable(&b1_name)
+                && is_hardware_register_variable(&b2_name)
+                && !is_sp_or_bp_name(&b1_name)
+                && !is_sp_or_bp_name(&b2_name)
+            {
+                continue;
             }
 
             let disjoint = end1 < start2 || end2 < start1;
@@ -1181,6 +1199,13 @@ fn name_priority(name: &str) -> usize {
         return 2;
     }
     3 // highest priority: meaningful recovered symbols
+}
+
+fn is_sp_or_bp_name(name: &str) -> bool {
+    matches!(
+        name.to_lowercase().as_str(),
+        "rsp" | "rbp" | "esp" | "ebp" | "sp" | "bp"
+    )
 }
 
 fn is_hardware_register_variable(name: &str) -> bool {
@@ -2065,5 +2090,97 @@ mod tests {
         // Should NOT merge because temp_2 starts inside the loop, and no direct copy links them.
         assert!(!changed1);
         assert_eq!(func.locals.len(), 2);
+    }
+
+    /// saturating_add / multi-register arithmetic: co-occurring GPRs must not
+    /// collapse into one name (`eax + eax`).
+    #[test]
+    fn variable_merge_preserves_cooccurring_hw_gprs_in_add() {
+        let i32_ty = NirType::Int {
+            bits: 32,
+            signed: true,
+        };
+        let bind = |name: &str| NirBinding {
+            name: name.to_string(),
+            ty: i32_ty.clone(),
+            surface_type_name: None,
+            origin: Some(NirBindingOrigin::TempPreserved),
+            initializer: None,
+        };
+        let mut func = HirFunction {
+            name: "sat_like".to_string(),
+            params: vec![
+                NirBinding {
+                    name: "param_1".to_string(),
+                    ty: i32_ty.clone(),
+                    surface_type_name: None,
+                    origin: Some(NirBindingOrigin::ParamIndex(0)),
+                    initializer: None,
+                },
+                NirBinding {
+                    name: "param_2".to_string(),
+                    ty: i32_ty.clone(),
+                    surface_type_name: None,
+                    origin: Some(NirBindingOrigin::ParamIndex(1)),
+                    initializer: None,
+                },
+            ],
+            locals: vec![bind("ecx"), bind("edx"), bind("eax")],
+            body: vec![
+                HirStmt::Assign {
+                    lhs: HirLValue::Var("ecx".to_string()),
+                    rhs: HirExpr::Var("param_1".to_string()),
+                },
+                HirStmt::Assign {
+                    lhs: HirLValue::Var("edx".to_string()),
+                    rhs: HirExpr::Var("param_2".to_string()),
+                },
+                HirStmt::Assign {
+                    lhs: HirLValue::Var("eax".to_string()),
+                    rhs: HirExpr::Binary {
+                        op: HirBinaryOp::Add,
+                        lhs: Box::new(HirExpr::Var("ecx".to_string())),
+                        rhs: Box::new(HirExpr::Var("edx".to_string())),
+                        ty: i32_ty.clone(),
+                    },
+                },
+                HirStmt::If {
+                    cond: HirExpr::Binary {
+                        op: HirBinaryOp::SLt,
+                        lhs: Box::new(HirExpr::Var("eax".to_string())),
+                        rhs: Box::new(HirExpr::Var("ecx".to_string())),
+                        ty: NirType::Bool,
+                    },
+                    then_body: vec![HirStmt::Return(Some(HirExpr::Const(
+                        2147483647,
+                        i32_ty.clone(),
+                    )))],
+                    else_body: vec![],
+                },
+                HirStmt::Return(Some(HirExpr::Var("eax".to_string()))),
+            ],
+            return_type: i32_ty,
+            ..Default::default()
+        };
+
+        let _ = apply_variable_merge_pass(&mut func);
+        let code = crate::nir::print_hir_function(&func);
+        assert!(
+            !code.contains("eax + eax") && !code.contains("eax+eax"),
+            "co-occurring GPRs collapsed:\n{code}"
+        );
+        // Prefer keeping distinct param sources or distinct regs.
+        let has_distinct_add = code.contains("ecx") && code.contains("edx")
+            || code.contains("param_1") && code.contains("param_2");
+        assert!(
+            has_distinct_add || code.contains("+"),
+            "expected multi-register sum form:\n{code}"
+        );
+        assert!(
+            !(code.contains("eax = param_1")
+                && code.contains("eax = param_2")
+                && code.matches("eax = param").count() >= 2),
+            "both params forced onto eax:\n{code}"
+        );
     }
 }
