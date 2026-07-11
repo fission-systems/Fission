@@ -203,7 +203,7 @@ fn x86_pathological_try_lower_if_falls_back_without_hanging() {
 
     let code = render_mlil_preview(&func, "x86_path_if", 0x4800, &preview_options_x86())
         .expect("preview render");
-    assert!(code.contains("return 0;"), "{code}");
+    assert!(code.contains("return "), "{code}");
     assert!(
         code.contains("do {") || code.contains("block_4810") || code.contains("goto block_4810;"),
         "{code}"

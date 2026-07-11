@@ -2003,15 +2003,25 @@ fn same_instruction_callother_does_not_steal_arm_call_args_or_result() {
         .lower_block_stmts(&block)
         .expect("lower ARM call block");
 
+    let call_result = stmts.iter().find_map(|stmt| match stmt {
+        HirStmt::Assign {
+            lhs: HirLValue::Var(result),
+            rhs: HirExpr::Call { args, .. },
+        } if matches!(args.as_slice(), [HirExpr::Const(7, _)]) => Some(result.as_str()),
+        _ => None,
+    });
+    let call_result =
+        call_result.unwrap_or_else(|| panic!("missing call with r0 argument: {stmts:?}"));
     assert!(
-        matches!(
-            &stmts[0],
+        stmts.iter().any(|stmt| matches!(
+            stmt,
             HirStmt::Assign {
-                rhs: HirExpr::Call { args, .. },
+                rhs: HirExpr::Binary { lhs, rhs, .. },
                 ..
-            } if matches!(args.as_slice(), [HirExpr::Const(7, _)])
-        ),
-        "{stmts:?}"
+            } if matches!(lhs.as_ref(), HirExpr::Var(name) if name == call_result)
+                || matches!(rhs.as_ref(), HirExpr::Var(name) if name == call_result)
+        )),
+        "call result was not used by the following instruction: {stmts:?}"
     );
 }
 
@@ -2053,15 +2063,18 @@ fn lower_block_stmts_uses_block_index_for_duplicate_start_addresses() {
     assert!(
         matches!(
             stmts.as_slice(),
-            [HirStmt::Assign {
-                rhs: HirExpr::Cast {
-                    expr,
-                    ..
+            [
+                HirStmt::Assign {
+                    lhs: HirLValue::Var(def),
+                    rhs: HirExpr::Const(7, _),
                 },
-            ..
-        }] if matches!(expr.as_ref(), HirExpr::Const(7, _))
+                HirStmt::Assign {
+                    lhs: HirLValue::Deref { .. },
+                    rhs: HirExpr::Cast { expr, .. },
+                },
+            ] if matches!(expr.as_ref(), HirExpr::Var(used) if used == def)
         ),
-        "{stmts:?}"
+        "duplicate-address block did not retain its own definition: {stmts:?}"
     );
 }
 
@@ -2643,4 +2656,3 @@ fn sat_o2_cmov_tail_renders_int_min_through_epilogue() {
         "INT_MIN must assign to eax (not a dead temp): {dump}"
     );
 }
-

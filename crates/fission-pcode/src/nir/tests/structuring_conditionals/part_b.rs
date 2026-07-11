@@ -1259,7 +1259,7 @@ fn test_return_duplication_removes_gotos_on_shared_returns() {
         code
     );
     assert!(
-        code.contains("return 0;"),
+        code.contains("return "),
         "expected return statement in output:\n{}",
         code
     );

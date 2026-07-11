@@ -353,18 +353,20 @@ fn normalize_rewrites_two_way_branch_with_fallthrough_target_to_one_way_branch()
         body,
         vec![
             HirStmt::If {
-                cond: HirExpr::Var("reg".to_string()),
-                then_body: vec![HirStmt::Goto("block_exit".to_string())],
+                cond: HirExpr::Unary {
+                    op: HirUnaryOp::Not,
+                    expr: Box::new(HirExpr::Var("reg".to_string())),
+                    ty: NirType::Bool,
+                },
+                then_body: vec![HirStmt::Return(Some(HirExpr::Const(
+                    0,
+                    NirType::Int {
+                        bits: 32,
+                        signed: false,
+                    },
+                )))],
                 else_body: Vec::new(),
             },
-            HirStmt::Return(Some(HirExpr::Const(
-                0,
-                NirType::Int {
-                    bits: 32,
-                    signed: false,
-                },
-            ))),
-            HirStmt::Label("block_exit".to_string()),
             HirStmt::Return(Some(HirExpr::Const(
                 1,
                 NirType::Int {
