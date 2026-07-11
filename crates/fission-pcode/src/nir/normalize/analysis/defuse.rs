@@ -16,7 +16,7 @@ use crate::nir::normalize::analysis::expr_key::pure_expr_key;
 use crate::nir::normalize::pipeline::normalize_expr;
 use crate::nir::normalize::wave_stats;
 use crate::nir::support::{expr_type, next_temp_name};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 const WIDE_DEAD_ASSIGNMENT_RERUN_STMT_LIMIT: usize = 220;
 const WIDE_DEAD_ASSIGNMENT_RERUN_LOCAL_LIMIT: usize = 160;
@@ -172,6 +172,144 @@ impl DefUseMap {
                 self.count_expr(then_expr);
                 self.count_expr(else_expr);
             }
+        }
+    }
+}
+
+/// Conservative dependency graph across every definition of an HIR binding.
+///
+/// Unlike first-definition type maps, this graph retains contributors from
+/// later redefinitions. Consumers can walk from an address binding back to a
+/// constrained root set without depending on variable naming conventions.
+pub(crate) struct DefinitionDependencyMap {
+    dependencies: HashMap<String, HashSet<String>>,
+}
+
+impl DefinitionDependencyMap {
+    pub(crate) fn build(stmts: &[HirStmt]) -> Self {
+        let mut map = Self {
+            dependencies: HashMap::new(),
+        };
+        map.collect_stmts(stmts);
+        map
+    }
+
+    pub(crate) fn roots_reaching(&self, name: &str, roots: &HashSet<String>) -> HashSet<String> {
+        let mut reached = HashSet::new();
+        let mut visited = HashSet::new();
+        self.collect_roots(name, roots, &mut visited, &mut reached);
+        reached
+    }
+
+    fn collect_roots(
+        &self,
+        name: &str,
+        roots: &HashSet<String>,
+        visited: &mut HashSet<String>,
+        reached: &mut HashSet<String>,
+    ) {
+        if !visited.insert(name.to_string()) {
+            return;
+        }
+        if roots.contains(name) {
+            reached.insert(name.to_string());
+            return;
+        }
+        if let Some(dependencies) = self.dependencies.get(name) {
+            for dependency in dependencies {
+                self.collect_roots(dependency, roots, visited, reached);
+            }
+        }
+    }
+
+    fn collect_stmts(&mut self, stmts: &[HirStmt]) {
+        for stmt in stmts {
+            self.collect_stmt(stmt);
+        }
+    }
+
+    fn collect_stmt(&mut self, stmt: &HirStmt) {
+        match stmt {
+            HirStmt::Assign {
+                lhs: HirLValue::Var(name),
+                rhs,
+            } => {
+                let dependencies = self.dependencies.entry(name.clone()).or_default();
+                collect_expr_vars(rhs, dependencies);
+            }
+            HirStmt::Assign { .. }
+            | HirStmt::Expr(_)
+            | HirStmt::Return(_)
+            | HirStmt::VaStart { .. }
+            | HirStmt::Label(_)
+            | HirStmt::Goto(_)
+            | HirStmt::Break
+            | HirStmt::Continue => {}
+            HirStmt::Block(body) | HirStmt::While { body, .. } => self.collect_stmts(body),
+            HirStmt::DoWhile { body, .. } => self.collect_stmts(body),
+            HirStmt::If {
+                then_body,
+                else_body,
+                ..
+            } => {
+                self.collect_stmts(then_body);
+                self.collect_stmts(else_body);
+            }
+            HirStmt::For {
+                init, update, body, ..
+            } => {
+                if let Some(init) = init {
+                    self.collect_stmt(init);
+                }
+                self.collect_stmts(body);
+                if let Some(update) = update {
+                    self.collect_stmt(update);
+                }
+            }
+            HirStmt::Switch { cases, default, .. } => {
+                for case in cases {
+                    self.collect_stmts(&case.body);
+                }
+                self.collect_stmts(default);
+            }
+        }
+    }
+}
+
+fn collect_expr_vars(expr: &HirExpr, out: &mut HashSet<String>) {
+    match expr {
+        HirExpr::Var(name) => {
+            out.insert(name.clone());
+        }
+        HirExpr::AddressOfGlobal(_) | HirExpr::Const(_, _) => {}
+        HirExpr::Cast { expr, .. }
+        | HirExpr::Unary { expr, .. }
+        | HirExpr::Load { ptr: expr, .. }
+        | HirExpr::PtrOffset { base: expr, .. }
+        | HirExpr::FieldAccess { base: expr, .. }
+        | HirExpr::AggregateCopy { src: expr, .. } => collect_expr_vars(expr, out),
+        HirExpr::Binary { lhs, rhs, .. } => {
+            collect_expr_vars(lhs, out);
+            collect_expr_vars(rhs, out);
+        }
+        HirExpr::Call { args, .. } => {
+            for arg in args {
+                collect_expr_vars(arg, out);
+            }
+        }
+        HirExpr::Index { base, index, .. } => {
+            collect_expr_vars(base, out);
+            collect_expr_vars(index, out);
+        }
+        HirExpr::Select {
+            cond,
+            then_expr,
+            else_expr,
+            ..
+        } => {
+            collect_expr_vars(cond, out);
+            collect_expr_vars(then_expr, out);
+            collect_expr_vars(else_expr, out);
         }
     }
 }
@@ -916,6 +1054,40 @@ mod tests {
             callee_observed_max_arity: Default::default(),
             callee_summaries: Default::default(),
         }
+    }
+
+    #[test]
+    fn definition_dependencies_keep_later_address_contributors() {
+        let uint = NirType::Int {
+            bits: 64,
+            signed: false,
+        };
+        let body = vec![
+            HirStmt::Assign {
+                lhs: HirLValue::Var("base_alias".into()),
+                rhs: HirExpr::Var("base_param".into()),
+            },
+            HirStmt::Assign {
+                lhs: HirLValue::Var("cursor".into()),
+                rhs: HirExpr::Var("index".into()),
+            },
+            HirStmt::Assign {
+                lhs: HirLValue::Var("cursor".into()),
+                rhs: HirExpr::Binary {
+                    op: HirBinaryOp::Add,
+                    lhs: Box::new(HirExpr::Var("cursor".into())),
+                    rhs: Box::new(HirExpr::Var("base_alias".into())),
+                    ty: uint,
+                },
+            },
+        ];
+        let dependencies = DefinitionDependencyMap::build(&body);
+        let roots = HashSet::from(["base_param".to_string(), "limit_param".to_string()]);
+
+        assert_eq!(
+            dependencies.roots_reaching("cursor", &roots),
+            HashSet::from(["base_param".to_string()])
+        );
     }
 
     #[test]

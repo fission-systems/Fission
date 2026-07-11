@@ -1,3 +1,4 @@
+use super::super::analysis::defuse::DefinitionDependencyMap;
 /// Intra-function type inference pass.
 ///
 /// Ghidra's `ActionInferTypes::propagateOneType` follows data-flow edges in the
@@ -554,7 +555,9 @@ fn record_offset_param_from_expr(
         if let Some(param) =
             resolve_alias_to_param(name, context.defs, context.params, &mut HashSet::new())
         {
-            out.insert(param);
+            if !context.address_params.contains(&param) {
+                out.insert(param);
+            }
         }
     }
 }
@@ -676,11 +679,16 @@ fn pointer_type_of_expr(
     }
 }
 
+struct ParamPointerCandidateContext<'a> {
+    defs: &'a HashMap<String, DefEntry>,
+    dependencies: &'a DefinitionDependencyMap,
+    binding_types: &'a HashMap<String, NirType>,
+    params: &'a HashSet<String>,
+}
+
 fn param_pointer_candidates_from_expr(
     expr: &HirExpr,
-    defs: &HashMap<String, DefEntry>,
-    binding_types: &HashMap<String, NirType>,
-    params: &HashSet<String>,
+    context: &ParamPointerCandidateContext<'_>,
     out: &mut HashMap<String, NirType>,
 ) {
     match expr {
@@ -697,15 +705,15 @@ fn param_pointer_candidates_from_expr(
             // Previously both sides were typed as the pointer when either side
             // was pointer-typed, which forced `len: uchar *` and broke callers
             // that pass an integer length.
-            param_pointer_candidates_from_expr(lhs, defs, binding_types, params, out);
-            param_pointer_candidates_from_expr(rhs, defs, binding_types, params, out);
+            param_pointer_candidates_from_expr(lhs, context, out);
+            param_pointer_candidates_from_expr(rhs, context, out);
         }
         HirExpr::Binary { lhs, rhs, .. } => {
-            param_pointer_candidates_from_expr(lhs, defs, binding_types, params, out);
-            param_pointer_candidates_from_expr(rhs, defs, binding_types, params, out);
+            param_pointer_candidates_from_expr(lhs, context, out);
+            param_pointer_candidates_from_expr(rhs, context, out);
         }
         HirExpr::Cast { expr, .. } | HirExpr::Unary { expr, .. } => {
-            param_pointer_candidates_from_expr(expr, defs, binding_types, params, out);
+            param_pointer_candidates_from_expr(expr, context, out);
         }
         HirExpr::Select {
             cond,
@@ -713,28 +721,28 @@ fn param_pointer_candidates_from_expr(
             else_expr,
             ..
         } => {
-            param_pointer_candidates_from_expr(cond, defs, binding_types, params, out);
-            param_pointer_candidates_from_expr(then_expr, defs, binding_types, params, out);
-            param_pointer_candidates_from_expr(else_expr, defs, binding_types, params, out);
+            param_pointer_candidates_from_expr(cond, context, out);
+            param_pointer_candidates_from_expr(then_expr, context, out);
+            param_pointer_candidates_from_expr(else_expr, context, out);
         }
         HirExpr::Call { args, .. } => {
             for arg in args {
-                param_pointer_candidates_from_expr(arg, defs, binding_types, params, out);
+                param_pointer_candidates_from_expr(arg, context, out);
             }
         }
         HirExpr::Load { ptr, ty } => {
             // Param used as a load address is a pointer to the loaded type.
-            record_param_pointer_from_address_expr(ptr, ty, defs, binding_types, params, out);
-            param_pointer_candidates_from_expr(ptr, defs, binding_types, params, out);
+            record_param_pointer_from_address_expr(ptr, ty, context, out);
+            param_pointer_candidates_from_expr(ptr, context, out);
         }
         HirExpr::PtrOffset { base: ptr, .. }
         | HirExpr::FieldAccess { base: ptr, .. }
         | HirExpr::AggregateCopy { src: ptr, .. } => {
-            param_pointer_candidates_from_expr(ptr, defs, binding_types, params, out);
+            param_pointer_candidates_from_expr(ptr, context, out);
         }
         HirExpr::Index { base, index, .. } => {
-            param_pointer_candidates_from_expr(base, defs, binding_types, params, out);
-            param_pointer_candidates_from_expr(index, defs, binding_types, params, out);
+            param_pointer_candidates_from_expr(base, context, out);
+            param_pointer_candidates_from_expr(index, context, out);
         }
         HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) | HirExpr::Const(_, _) => {}
     }
@@ -743,19 +751,15 @@ fn param_pointer_candidates_from_expr(
 fn record_param_pointer_from_address_expr(
     addr: &HirExpr,
     pointee: &NirType,
-    defs: &HashMap<String, DefEntry>,
-    binding_types: &HashMap<String, NirType>,
-    params: &HashSet<String>,
+    context: &ParamPointerCandidateContext<'_>,
     out: &mut HashMap<String, NirType>,
 ) {
     match addr {
         HirExpr::Var(name) => {
-            let Some(param) = resolve_alias_to_param(name, defs, params, &mut HashSet::new())
-            else {
-                return;
-            };
-            out.entry(param)
-                .or_insert_with(|| NirType::Ptr(Box::new(pointee.clone())));
+            for param in context.dependencies.roots_reaching(name, context.params) {
+                out.entry(param)
+                    .or_insert_with(|| NirType::Ptr(Box::new(pointee.clone())));
+            }
         }
         // Load *(base + index): the integer-offset side stays scalar; the other
         // side (often a stack param buffer) is the pointer base.
@@ -765,57 +769,29 @@ fn record_param_pointer_from_address_expr(
             rhs,
             ..
         } => {
-            let lhs_ptr = pointer_type_of_expr(lhs, binding_types).is_some();
-            let rhs_ptr = pointer_type_of_expr(rhs, binding_types).is_some();
-            let lhs_int = expr_looks_integer_offset(lhs, binding_types);
-            let rhs_int = expr_looks_integer_offset(rhs, binding_types);
+            let lhs_ptr = pointer_type_of_expr(lhs, context.binding_types).is_some();
+            let rhs_ptr = pointer_type_of_expr(rhs, context.binding_types).is_some();
+            let lhs_int = expr_looks_integer_offset(lhs, context.binding_types);
+            let rhs_int = expr_looks_integer_offset(rhs, context.binding_types);
             if rhs_int && !lhs_ptr {
-                record_param_pointer_from_address_expr(
-                    lhs,
-                    pointee,
-                    defs,
-                    binding_types,
-                    params,
-                    out,
-                );
+                record_param_pointer_from_address_expr(lhs, pointee, context, out);
             }
             if lhs_int && !rhs_ptr {
-                record_param_pointer_from_address_expr(
-                    rhs,
-                    pointee,
-                    defs,
-                    binding_types,
-                    params,
-                    out,
-                );
+                record_param_pointer_from_address_expr(rhs, pointee, context, out);
             }
             // Neither side known: prefer Var that aliases a param when the other
             // is a non-param local (common: buf + i).
             if !lhs_int && !rhs_int {
-                if matches!(rhs.as_ref(), HirExpr::Var(n) if !params.contains(n.as_str())) {
-                    record_param_pointer_from_address_expr(
-                        lhs,
-                        pointee,
-                        defs,
-                        binding_types,
-                        params,
-                        out,
-                    );
+                if matches!(rhs.as_ref(), HirExpr::Var(n) if !context.params.contains(n.as_str())) {
+                    record_param_pointer_from_address_expr(lhs, pointee, context, out);
                 }
-                if matches!(lhs.as_ref(), HirExpr::Var(n) if !params.contains(n.as_str())) {
-                    record_param_pointer_from_address_expr(
-                        rhs,
-                        pointee,
-                        defs,
-                        binding_types,
-                        params,
-                        out,
-                    );
+                if matches!(lhs.as_ref(), HirExpr::Var(n) if !context.params.contains(n.as_str())) {
+                    record_param_pointer_from_address_expr(rhs, pointee, context, out);
                 }
             }
         }
         HirExpr::Cast { expr, .. } | HirExpr::Unary { expr, .. } => {
-            record_param_pointer_from_address_expr(expr, pointee, defs, binding_types, params, out);
+            record_param_pointer_from_address_expr(expr, pointee, context, out);
         }
         _ => {}
     }
@@ -850,63 +826,57 @@ fn expr_looks_integer_offset(expr: &HirExpr, binding_types: &HashMap<String, Nir
 
 fn param_pointer_candidates_from_lvalue(
     lhs: &HirLValue,
-    defs: &HashMap<String, DefEntry>,
-    binding_types: &HashMap<String, NirType>,
-    params: &HashSet<String>,
+    context: &ParamPointerCandidateContext<'_>,
     out: &mut HashMap<String, NirType>,
 ) {
     match lhs {
         HirLValue::Var(_) => {}
         HirLValue::Deref { ptr, ty } => {
-            record_param_pointer_from_address_expr(ptr, ty, defs, binding_types, params, out);
-            param_pointer_candidates_from_expr(ptr, defs, binding_types, params, out);
+            record_param_pointer_from_address_expr(ptr, ty, context, out);
+            param_pointer_candidates_from_expr(ptr, context, out);
         }
         HirLValue::FieldAccess { base: ptr, .. } => {
-            param_pointer_candidates_from_expr(ptr, defs, binding_types, params, out);
+            param_pointer_candidates_from_expr(ptr, context, out);
         }
         HirLValue::Index { base, index, .. } => {
-            param_pointer_candidates_from_expr(base, defs, binding_types, params, out);
-            param_pointer_candidates_from_expr(index, defs, binding_types, params, out);
+            param_pointer_candidates_from_expr(base, context, out);
+            param_pointer_candidates_from_expr(index, context, out);
         }
     }
 }
 
 fn collect_param_pointer_candidates_stmts(
     stmts: &[HirStmt],
-    defs: &HashMap<String, DefEntry>,
-    binding_types: &HashMap<String, NirType>,
-    params: &HashSet<String>,
+    context: &ParamPointerCandidateContext<'_>,
     out: &mut HashMap<String, NirType>,
 ) {
     for stmt in stmts {
-        collect_param_pointer_candidates_stmt(stmt, defs, binding_types, params, out);
+        collect_param_pointer_candidates_stmt(stmt, context, out);
     }
 }
 
 fn collect_param_pointer_candidates_stmt(
     stmt: &HirStmt,
-    defs: &HashMap<String, DefEntry>,
-    binding_types: &HashMap<String, NirType>,
-    params: &HashSet<String>,
+    context: &ParamPointerCandidateContext<'_>,
     out: &mut HashMap<String, NirType>,
 ) {
     match stmt {
         HirStmt::Assign { lhs, rhs } => {
-            param_pointer_candidates_from_lvalue(lhs, defs, binding_types, params, out);
-            param_pointer_candidates_from_expr(rhs, defs, binding_types, params, out);
+            param_pointer_candidates_from_lvalue(lhs, context, out);
+            param_pointer_candidates_from_expr(rhs, context, out);
         }
         HirStmt::Expr(expr) | HirStmt::Return(Some(expr)) => {
-            param_pointer_candidates_from_expr(expr, defs, binding_types, params, out);
+            param_pointer_candidates_from_expr(expr, context, out);
         }
         HirStmt::VaStart { va_list, .. } => {
-            param_pointer_candidates_from_expr(va_list, defs, binding_types, params, out);
+            param_pointer_candidates_from_expr(va_list, context, out);
         }
         HirStmt::Block(stmts) | HirStmt::While { body: stmts, .. } => {
-            collect_param_pointer_candidates_stmts(stmts, defs, binding_types, params, out);
+            collect_param_pointer_candidates_stmts(stmts, context, out);
         }
         HirStmt::DoWhile { body, cond } => {
-            collect_param_pointer_candidates_stmts(body, defs, binding_types, params, out);
-            param_pointer_candidates_from_expr(cond, defs, binding_types, params, out);
+            collect_param_pointer_candidates_stmts(body, context, out);
+            param_pointer_candidates_from_expr(cond, context, out);
         }
         HirStmt::For {
             init,
@@ -915,41 +885,35 @@ fn collect_param_pointer_candidates_stmt(
             body,
         } => {
             if let Some(init) = init {
-                collect_param_pointer_candidates_stmt(init, defs, binding_types, params, out);
+                collect_param_pointer_candidates_stmt(init, context, out);
             }
             if let Some(cond) = cond {
-                param_pointer_candidates_from_expr(cond, defs, binding_types, params, out);
+                param_pointer_candidates_from_expr(cond, context, out);
             }
             if let Some(update) = update {
-                collect_param_pointer_candidates_stmt(update, defs, binding_types, params, out);
+                collect_param_pointer_candidates_stmt(update, context, out);
             }
-            collect_param_pointer_candidates_stmts(body, defs, binding_types, params, out);
+            collect_param_pointer_candidates_stmts(body, context, out);
         }
         HirStmt::If {
             cond,
             then_body,
             else_body,
         } => {
-            param_pointer_candidates_from_expr(cond, defs, binding_types, params, out);
-            collect_param_pointer_candidates_stmts(then_body, defs, binding_types, params, out);
-            collect_param_pointer_candidates_stmts(else_body, defs, binding_types, params, out);
+            param_pointer_candidates_from_expr(cond, context, out);
+            collect_param_pointer_candidates_stmts(then_body, context, out);
+            collect_param_pointer_candidates_stmts(else_body, context, out);
         }
         HirStmt::Switch {
             expr,
             cases,
             default,
         } => {
-            param_pointer_candidates_from_expr(expr, defs, binding_types, params, out);
+            param_pointer_candidates_from_expr(expr, context, out);
             for case in cases {
-                collect_param_pointer_candidates_stmts(
-                    &case.body,
-                    defs,
-                    binding_types,
-                    params,
-                    out,
-                );
+                collect_param_pointer_candidates_stmts(&case.body, context, out);
             }
-            collect_param_pointer_candidates_stmts(default, defs, binding_types, params, out);
+            collect_param_pointer_candidates_stmts(default, context, out);
         }
         HirStmt::Return(None)
         | HirStmt::Label(_)
@@ -962,6 +926,7 @@ fn collect_param_pointer_candidates_stmt(
 fn apply_address_contributor_param_pointer_types(
     func: &mut HirFunction,
     defs: &HashMap<String, DefEntry>,
+    dependencies: &DefinitionDependencyMap,
     binding_types: &HashMap<String, NirType>,
 ) -> bool {
     let params = param_name_set(func);
@@ -969,13 +934,13 @@ fn apply_address_contributor_param_pointer_types(
         return false;
     }
     let mut candidates = HashMap::new();
-    collect_param_pointer_candidates_stmts(
-        &func.body,
+    let candidate_context = ParamPointerCandidateContext {
         defs,
+        dependencies,
         binding_types,
-        &params,
-        &mut candidates,
-    );
+        params: &params,
+    };
+    collect_param_pointer_candidates_stmts(&func.body, &candidate_context, &mut candidates);
     let address_params: HashSet<String> = candidates.keys().cloned().collect();
     let role_context = ParamPointerRoleContext {
         defs,
@@ -1016,14 +981,15 @@ fn demote_pointer_offset_params(func: &mut HirFunction) -> bool {
     let binding_types = collect_known_binding_types(func);
     let mut defs: HashMap<String, DefEntry> = HashMap::new();
     scan_def_types(&func.body, &mut defs);
+    let dependencies = DefinitionDependencyMap::build(&func.body);
     let mut candidates = HashMap::new();
-    collect_param_pointer_candidates_stmts(
-        &func.body,
-        &defs,
-        &binding_types,
-        &params,
-        &mut candidates,
-    );
+    let candidate_context = ParamPointerCandidateContext {
+        defs: &defs,
+        dependencies: &dependencies,
+        binding_types: &binding_types,
+        params: &params,
+    };
+    collect_param_pointer_candidates_stmts(&func.body, &candidate_context, &mut candidates);
     let address_params: HashSet<String> = candidates.keys().cloned().collect();
     let role_context = ParamPointerRoleContext {
         defs: &defs,
@@ -2153,6 +2119,7 @@ pub(crate) fn apply_type_inference_pass(func: &mut HirFunction) -> bool {
     // Build the owned def map (no lifetime ties to func).
     let mut defs: HashMap<String, DefEntry> = HashMap::new();
     scan_def_types(&func.body, &mut defs);
+    let dependencies = DefinitionDependencyMap::build(&func.body);
     let mut known_binding_types = collect_known_binding_types(func);
     let mut changed = false;
 
@@ -2205,7 +2172,12 @@ pub(crate) fn apply_type_inference_pass(func: &mut HirFunction) -> bool {
     changed |= apply_pointer_compare_peer_override_for_locals(func);
     changed |= rewrite_scalar_zero_alias_assignments(func);
     let address_binding_types = collect_known_binding_types(func);
-    changed |= apply_address_contributor_param_pointer_types(func, &defs, &address_binding_types);
+    changed |= apply_address_contributor_param_pointer_types(
+        func,
+        &defs,
+        &dependencies,
+        &address_binding_types,
+    );
 
     changed
 }
@@ -2632,6 +2604,60 @@ mod tests {
     }
 
     #[test]
+    fn load_after_cursor_redefinition_promotes_base_parameter_only() {
+        let u64_ty = NirType::Int {
+            bits: 64,
+            signed: false,
+        };
+        let u8_ty = NirType::Int {
+            bits: 8,
+            signed: false,
+        };
+        let body = vec![
+            make_assign("base_alias", HirExpr::Var("base_param".into())),
+            make_assign("cursor", HirExpr::Var("index".into())),
+            make_assign(
+                "cursor",
+                HirExpr::Binary {
+                    op: HirBinaryOp::Add,
+                    lhs: Box::new(HirExpr::Var("cursor".into())),
+                    rhs: Box::new(HirExpr::Var("base_alias".into())),
+                    ty: u64_ty.clone(),
+                },
+            ),
+            make_assign(
+                "value",
+                HirExpr::Load {
+                    ptr: Box::new(HirExpr::Var("cursor".into())),
+                    ty: u8_ty.clone(),
+                },
+            ),
+        ];
+        let mut cursor = make_binding("cursor");
+        cursor.ty = u64_ty.clone();
+        let mut index = make_binding("index");
+        index.ty = u64_ty.clone();
+        let mut func = make_func(
+            vec![
+                make_binding("base_alias"),
+                cursor,
+                index,
+                make_binding("value"),
+            ],
+            body,
+            NirType::Unknown,
+        );
+        func.params = vec![
+            make_param("base_param", u64_ty.clone()),
+            make_param("limit_param", u64_ty.clone()),
+        ];
+
+        assert!(super::apply_type_inference_pass(&mut func));
+        assert_eq!(func.params[0].ty, NirType::Ptr(Box::new(u8_ty)));
+        assert_eq!(func.params[1].ty, u64_ty);
+    }
+
+    #[test]
     fn scalar_comparison_alias_does_not_promote_param_to_pointer() {
         let u64_ty = NirType::Int {
             bits: 64,
@@ -2657,6 +2683,7 @@ mod tests {
         let mut func = make_func(vec![limit, idx], body, NirType::Unknown);
         func.params = vec![make_param("param_1", u64_ty.clone())];
         let binding_types = super::collect_known_binding_types(&func);
+        let dependencies = super::DefinitionDependencyMap::build(&func.body);
 
         assert!(!super::apply_address_contributor_param_pointer_types(
             &mut func,
@@ -2664,6 +2691,7 @@ mod tests {
                 "limit".to_string(),
                 super::DefEntry::Alias("param_1".to_string())
             )]),
+            &dependencies,
             &binding_types,
         ));
         assert_eq!(func.params[0].ty, u64_ty);
