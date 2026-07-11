@@ -201,6 +201,27 @@ impl DefinitionDependencyMap {
         reached
     }
 
+    pub(crate) fn nodes_reaching_roots(
+        &self,
+        name: &str,
+        roots: &HashSet<String>,
+    ) -> HashSet<String> {
+        let mut reached = HashSet::new();
+        let mut visiting = HashSet::new();
+        self.collect_path_nodes(name, roots, &mut visiting, &mut reached);
+        reached
+    }
+
+    pub(crate) fn address_contributors(
+        &self,
+        stmts: &[HirStmt],
+        pointer_roots: &HashSet<String>,
+    ) -> HashMap<String, NirType> {
+        let mut contributors = HashMap::new();
+        collect_address_contributors_stmts(self, stmts, pointer_roots, &mut contributors);
+        contributors
+    }
+
     fn collect_roots(
         &self,
         name: &str,
@@ -220,6 +241,33 @@ impl DefinitionDependencyMap {
                 self.collect_roots(dependency, roots, visited, reached);
             }
         }
+    }
+
+    fn collect_path_nodes(
+        &self,
+        name: &str,
+        roots: &HashSet<String>,
+        visiting: &mut HashSet<String>,
+        reached: &mut HashSet<String>,
+    ) -> bool {
+        if roots.contains(name) {
+            reached.insert(name.to_string());
+            return true;
+        }
+        if !visiting.insert(name.to_string()) {
+            return false;
+        }
+        let mut reaches_root = false;
+        if let Some(dependencies) = self.dependencies.get(name) {
+            for dependency in dependencies {
+                reaches_root |= self.collect_path_nodes(dependency, roots, visiting, reached);
+            }
+        }
+        visiting.remove(name);
+        if reaches_root {
+            reached.insert(name.to_string());
+        }
+        reaches_root
     }
 
     fn collect_stmts(&mut self, stmts: &[HirStmt]) {
@@ -310,6 +358,189 @@ fn collect_expr_vars(expr: &HirExpr, out: &mut HashSet<String>) {
             collect_expr_vars(cond, out);
             collect_expr_vars(then_expr, out);
             collect_expr_vars(else_expr, out);
+        }
+    }
+}
+
+fn collect_address_contributors_stmts(
+    dependencies: &DefinitionDependencyMap,
+    stmts: &[HirStmt],
+    pointer_roots: &HashSet<String>,
+    out: &mut HashMap<String, NirType>,
+) {
+    for stmt in stmts {
+        match stmt {
+            HirStmt::Assign { lhs, rhs } => {
+                collect_address_contributors_lvalue(dependencies, lhs, pointer_roots, out);
+                collect_address_contributors_expr(dependencies, rhs, pointer_roots, out);
+            }
+            HirStmt::VaStart { va_list, .. } => {
+                collect_address_contributors_expr(dependencies, va_list, pointer_roots, out);
+            }
+            HirStmt::Expr(expr) | HirStmt::Return(Some(expr)) => {
+                collect_address_contributors_expr(dependencies, expr, pointer_roots, out);
+            }
+            HirStmt::Block(body) | HirStmt::While { body, .. } => {
+                collect_address_contributors_stmts(dependencies, body, pointer_roots, out);
+            }
+            HirStmt::DoWhile { body, cond } => {
+                collect_address_contributors_stmts(dependencies, body, pointer_roots, out);
+                collect_address_contributors_expr(dependencies, cond, pointer_roots, out);
+            }
+            HirStmt::If {
+                cond,
+                then_body,
+                else_body,
+            } => {
+                collect_address_contributors_expr(dependencies, cond, pointer_roots, out);
+                collect_address_contributors_stmts(dependencies, then_body, pointer_roots, out);
+                collect_address_contributors_stmts(dependencies, else_body, pointer_roots, out);
+            }
+            HirStmt::For {
+                init,
+                cond,
+                update,
+                body,
+            } => {
+                if let Some(init) = init {
+                    collect_address_contributors_stmts(
+                        dependencies,
+                        std::slice::from_ref(init.as_ref()),
+                        pointer_roots,
+                        out,
+                    );
+                }
+                if let Some(cond) = cond {
+                    collect_address_contributors_expr(dependencies, cond, pointer_roots, out);
+                }
+                if let Some(update) = update {
+                    collect_address_contributors_stmts(
+                        dependencies,
+                        std::slice::from_ref(update.as_ref()),
+                        pointer_roots,
+                        out,
+                    );
+                }
+                collect_address_contributors_stmts(dependencies, body, pointer_roots, out);
+            }
+            HirStmt::Switch {
+                expr,
+                cases,
+                default,
+            } => {
+                collect_address_contributors_expr(dependencies, expr, pointer_roots, out);
+                for case in cases {
+                    collect_address_contributors_stmts(
+                        dependencies,
+                        &case.body,
+                        pointer_roots,
+                        out,
+                    );
+                }
+                collect_address_contributors_stmts(dependencies, default, pointer_roots, out);
+            }
+            HirStmt::Return(None)
+            | HirStmt::Label(_)
+            | HirStmt::Goto(_)
+            | HirStmt::Break
+            | HirStmt::Continue => {}
+        }
+    }
+}
+
+fn collect_address_contributors_lvalue(
+    dependencies: &DefinitionDependencyMap,
+    lhs: &HirLValue,
+    pointer_roots: &HashSet<String>,
+    out: &mut HashMap<String, NirType>,
+) {
+    match lhs {
+        HirLValue::Var(_) => {}
+        HirLValue::Deref { ptr, ty } => {
+            record_address_contributors(dependencies, ptr, ty, pointer_roots, out);
+            collect_address_contributors_expr(dependencies, ptr, pointer_roots, out);
+        }
+        HirLValue::Index {
+            base,
+            index,
+            elem_ty,
+        } => {
+            record_address_contributors(dependencies, base, elem_ty, pointer_roots, out);
+            collect_address_contributors_expr(dependencies, base, pointer_roots, out);
+            collect_address_contributors_expr(dependencies, index, pointer_roots, out);
+        }
+        HirLValue::FieldAccess { base, ty, .. } => {
+            record_address_contributors(dependencies, base, ty, pointer_roots, out);
+            collect_address_contributors_expr(dependencies, base, pointer_roots, out);
+        }
+    }
+}
+
+fn collect_address_contributors_expr(
+    dependencies: &DefinitionDependencyMap,
+    expr: &HirExpr,
+    pointer_roots: &HashSet<String>,
+    out: &mut HashMap<String, NirType>,
+) {
+    match expr {
+        HirExpr::Load { ptr, ty } => {
+            record_address_contributors(dependencies, ptr, ty, pointer_roots, out);
+            collect_address_contributors_expr(dependencies, ptr, pointer_roots, out);
+        }
+        HirExpr::Index {
+            base,
+            index,
+            elem_ty,
+        } => {
+            record_address_contributors(dependencies, base, elem_ty, pointer_roots, out);
+            collect_address_contributors_expr(dependencies, base, pointer_roots, out);
+            collect_address_contributors_expr(dependencies, index, pointer_roots, out);
+        }
+        HirExpr::FieldAccess { base, ty, .. } => {
+            record_address_contributors(dependencies, base, ty, pointer_roots, out);
+            collect_address_contributors_expr(dependencies, base, pointer_roots, out);
+        }
+        HirExpr::Cast { expr, .. }
+        | HirExpr::Unary { expr, .. }
+        | HirExpr::PtrOffset { base: expr, .. }
+        | HirExpr::AggregateCopy { src: expr, .. } => {
+            collect_address_contributors_expr(dependencies, expr, pointer_roots, out);
+        }
+        HirExpr::Binary { lhs, rhs, .. } => {
+            collect_address_contributors_expr(dependencies, lhs, pointer_roots, out);
+            collect_address_contributors_expr(dependencies, rhs, pointer_roots, out);
+        }
+        HirExpr::Call { args, .. } => {
+            for arg in args {
+                collect_address_contributors_expr(dependencies, arg, pointer_roots, out);
+            }
+        }
+        HirExpr::Select {
+            cond,
+            then_expr,
+            else_expr,
+            ..
+        } => {
+            collect_address_contributors_expr(dependencies, cond, pointer_roots, out);
+            collect_address_contributors_expr(dependencies, then_expr, pointer_roots, out);
+            collect_address_contributors_expr(dependencies, else_expr, pointer_roots, out);
+        }
+        HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) | HirExpr::Const(_, _) => {}
+    }
+}
+
+fn record_address_contributors(
+    dependencies: &DefinitionDependencyMap,
+    address: &HirExpr,
+    pointee: &NirType,
+    pointer_roots: &HashSet<String>,
+    out: &mut HashMap<String, NirType>,
+) {
+    let mut address_names = HashSet::new();
+    collect_expr_vars(address, &mut address_names);
+    for name in address_names {
+        for contributor in dependencies.nodes_reaching_roots(&name, pointer_roots) {
+            out.entry(contributor).or_insert_with(|| pointee.clone());
         }
     }
 }
@@ -1080,6 +1311,16 @@ mod tests {
                     ty: uint,
                 },
             },
+            HirStmt::Assign {
+                lhs: HirLValue::Var("value".into()),
+                rhs: HirExpr::Load {
+                    ptr: Box::new(HirExpr::Var("cursor".into())),
+                    ty: NirType::Int {
+                        bits: 8,
+                        signed: false,
+                    },
+                },
+            },
         ];
         let dependencies = DefinitionDependencyMap::build(&body);
         let roots = HashSet::from(["base_param".to_string(), "limit_param".to_string()]);
@@ -1088,6 +1329,11 @@ mod tests {
             dependencies.roots_reaching("cursor", &roots),
             HashSet::from(["base_param".to_string()])
         );
+        let contributors = dependencies.address_contributors(&body, &roots);
+        assert!(contributors.contains_key("cursor"));
+        assert!(contributors.contains_key("base_alias"));
+        assert!(contributors.contains_key("base_param"));
+        assert!(!contributors.contains_key("index"));
     }
 
     #[test]

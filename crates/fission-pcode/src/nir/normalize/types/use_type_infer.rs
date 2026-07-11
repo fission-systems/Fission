@@ -1915,6 +1915,7 @@ fn restore_scalar_only_pointer_locals(func: &mut HirFunction) -> bool {
     let mut roles = HashMap::<String, BindingUseRole>::new();
     collect_binding_use_roles(&func.body, &mut roles);
     let pointer_compare_peers = super::type_infer::pointer_compare_peer_promotions(func);
+    let transitive_address_locals = super::type_infer::transitive_address_pointer_locals(func);
     let scalar_ty = NirType::Int {
         bits: if func.is_64bit { 64 } else { 32 },
         signed: false,
@@ -1930,6 +1931,7 @@ fn restore_scalar_only_pointer_locals(func: &mut HirFunction) -> bool {
         if role.scalar_use
             && !role.address_use
             && !pointer_compare_peers.contains_key(&binding.name)
+            && !transitive_address_locals.contains_key(&binding.name)
         {
             binding.ty = scalar_ty.clone();
             changed = true;

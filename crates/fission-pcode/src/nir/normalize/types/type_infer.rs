@@ -208,6 +208,50 @@ fn apply_address_role_pointer_override_for_locals(func: &mut HirFunction) -> boo
     changed
 }
 
+pub(super) fn transitive_address_pointer_locals(func: &HirFunction) -> HashMap<String, NirType> {
+    let pointer_roots: HashSet<String> = func
+        .params
+        .iter()
+        .filter(|binding| matches!(binding.ty, NirType::Ptr(_)))
+        .map(|binding| binding.name.clone())
+        .collect();
+    if pointer_roots.is_empty() {
+        return HashMap::new();
+    }
+    let local_names: HashSet<&str> = func
+        .locals
+        .iter()
+        .map(|binding| binding.name.as_str())
+        .collect();
+    let dependencies = DefinitionDependencyMap::build(&func.body);
+    dependencies
+        .address_contributors(&func.body, &pointer_roots)
+        .into_iter()
+        .filter(|(name, _)| local_names.contains(name.as_str()))
+        .map(|(name, pointee)| (name, NirType::Ptr(Box::new(pointee))))
+        .collect()
+}
+
+fn apply_transitive_address_pointer_override_for_locals(func: &mut HirFunction) -> bool {
+    let contributors = transitive_address_pointer_locals(func);
+    if contributors.is_empty() {
+        return false;
+    }
+    let mut changed = false;
+    for binding in &mut func.locals {
+        if binding.surface_type_name.is_some() {
+            continue;
+        }
+        if let Some(pointer_ty) = contributors.get(&binding.name)
+            && binding.ty != *pointer_ty
+        {
+            binding.ty = pointer_ty.clone();
+            changed = true;
+        }
+    }
+    changed
+}
+
 /// When a local is equality-compared with a pointer-typed value, promote that
 /// local to the same pointer type.
 ///
@@ -2178,6 +2222,7 @@ pub(crate) fn apply_type_inference_pass(func: &mut HirFunction) -> bool {
         &dependencies,
         &address_binding_types,
     );
+    changed |= apply_transitive_address_pointer_override_for_locals(func);
 
     changed
 }
@@ -2655,6 +2700,9 @@ mod tests {
         assert!(super::apply_type_inference_pass(&mut func));
         assert_eq!(func.params[0].ty, NirType::Ptr(Box::new(u8_ty)));
         assert_eq!(func.params[1].ty, u64_ty);
+        assert!(matches!(func.locals[0].ty, NirType::Ptr(_)));
+        assert!(matches!(func.locals[1].ty, NirType::Ptr(_)));
+        assert!(matches!(func.locals[2].ty, NirType::Int { .. }));
     }
 
     #[test]
