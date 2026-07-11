@@ -1,6 +1,6 @@
 use super::super::*;
 use crate::nir::support::expr_type;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 struct SimpleAssign {
     lhs: String,
@@ -489,6 +489,410 @@ fn rewrite_stmts(
     }
 }
 
+fn narrow_scalar_assignment(expr: &HirExpr) -> Option<(NirType, HirExpr)> {
+    let scalar_expr = match expr {
+        HirExpr::Cast {
+            ty: NirType::Ptr(_),
+            expr: inner,
+        } => inner.as_ref(),
+        other => other,
+    };
+    let scalar_ty = expr_type(scalar_expr);
+    match scalar_ty {
+        NirType::Bool => Some((NirType::Bool, scalar_expr.clone())),
+        NirType::Int { bits, .. } if bits <= 16 => Some((scalar_ty, scalar_expr.clone())),
+        _ => None,
+    }
+}
+
+fn stmt_defines_name(stmt: &HirStmt, name: &str) -> bool {
+    matches!(
+        stmt,
+        HirStmt::Assign {
+            lhs: HirLValue::Var(lhs),
+            ..
+        } if lhs == name
+    )
+}
+
+fn expr_reads_name(expr: &HirExpr, name: &str) -> bool {
+    match expr {
+        HirExpr::Var(var) => var == name,
+        HirExpr::AddressOfGlobal(_) | HirExpr::Const(_, _) => false,
+        HirExpr::Cast { expr, .. }
+        | HirExpr::Unary { expr, .. }
+        | HirExpr::Load { ptr: expr, .. }
+        | HirExpr::PtrOffset { base: expr, .. }
+        | HirExpr::FieldAccess { base: expr, .. }
+        | HirExpr::AggregateCopy { src: expr, .. } => expr_reads_name(expr, name),
+        HirExpr::Binary { lhs, rhs, .. } => {
+            expr_reads_name(lhs, name) || expr_reads_name(rhs, name)
+        }
+        HirExpr::Call { args, .. } => args.iter().any(|arg| expr_reads_name(arg, name)),
+        HirExpr::Index { base, index, .. } => {
+            expr_reads_name(base, name) || expr_reads_name(index, name)
+        }
+        HirExpr::Select {
+            cond,
+            then_expr,
+            else_expr,
+            ..
+        } => {
+            expr_reads_name(cond, name)
+                || expr_reads_name(then_expr, name)
+                || expr_reads_name(else_expr, name)
+        }
+    }
+}
+
+fn lvalue_reads_name(lhs: &HirLValue, name: &str) -> bool {
+    match lhs {
+        HirLValue::Var(_) => false,
+        HirLValue::Deref { ptr, .. } => expr_reads_name(ptr, name),
+        HirLValue::Index { base, index, .. } => {
+            expr_reads_name(base, name) || expr_reads_name(index, name)
+        }
+        HirLValue::FieldAccess { base, .. } => expr_reads_name(base, name),
+    }
+}
+
+fn stmt_reads_name(stmt: &HirStmt, name: &str) -> bool {
+    match stmt {
+        HirStmt::Assign { lhs, rhs } => lvalue_reads_name(lhs, name) || expr_reads_name(rhs, name),
+        HirStmt::Expr(expr) | HirStmt::Return(Some(expr)) => expr_reads_name(expr, name),
+        HirStmt::VaStart { va_list, .. } => expr_reads_name(va_list, name),
+        HirStmt::Return(None)
+        | HirStmt::Label(_)
+        | HirStmt::Goto(_)
+        | HirStmt::Break
+        | HirStmt::Continue => false,
+        HirStmt::Block(_)
+        | HirStmt::If { .. }
+        | HirStmt::While { .. }
+        | HirStmt::DoWhile { .. }
+        | HirStmt::For { .. }
+        | HirStmt::Switch { .. } => false,
+    }
+}
+
+fn stmt_reads_name_deep(stmt: &HirStmt, name: &str) -> bool {
+    match stmt {
+        HirStmt::Assign { lhs, rhs } => lvalue_reads_name(lhs, name) || expr_reads_name(rhs, name),
+        HirStmt::Expr(expr) | HirStmt::Return(Some(expr)) => expr_reads_name(expr, name),
+        HirStmt::VaStart { va_list, .. } => expr_reads_name(va_list, name),
+        HirStmt::Block(body) | HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
+            body.iter().any(|stmt| stmt_reads_name_deep(stmt, name))
+        }
+        HirStmt::If {
+            cond,
+            then_body,
+            else_body,
+        } => {
+            expr_reads_name(cond, name)
+                || then_body
+                    .iter()
+                    .any(|stmt| stmt_reads_name_deep(stmt, name))
+                || else_body
+                    .iter()
+                    .any(|stmt| stmt_reads_name_deep(stmt, name))
+        }
+        HirStmt::For {
+            init,
+            cond,
+            update,
+            body,
+        } => {
+            init.as_deref()
+                .is_some_and(|stmt| stmt_reads_name_deep(stmt, name))
+                || cond
+                    .as_ref()
+                    .is_some_and(|expr| expr_reads_name(expr, name))
+                || update
+                    .as_deref()
+                    .is_some_and(|stmt| stmt_reads_name_deep(stmt, name))
+                || body.iter().any(|stmt| stmt_reads_name_deep(stmt, name))
+        }
+        HirStmt::Switch {
+            expr,
+            cases,
+            default,
+        } => {
+            expr_reads_name(expr, name)
+                || cases.iter().any(|case| {
+                    case.body
+                        .iter()
+                        .any(|stmt| stmt_reads_name_deep(stmt, name))
+                })
+                || default.iter().any(|stmt| stmt_reads_name_deep(stmt, name))
+        }
+        HirStmt::Return(None)
+        | HirStmt::Label(_)
+        | HirStmt::Goto(_)
+        | HirStmt::Break
+        | HirStmt::Continue => false,
+    }
+}
+
+fn expr_reads_name_as_address(expr: &HirExpr, name: &str) -> bool {
+    match expr {
+        HirExpr::Load { ptr, .. }
+        | HirExpr::PtrOffset { base: ptr, .. }
+        | HirExpr::FieldAccess { base: ptr, .. } => {
+            expr_reads_name(ptr, name) || expr_reads_name_as_address(ptr, name)
+        }
+        HirExpr::Index { base, index, .. } => {
+            expr_reads_name(base, name)
+                || expr_reads_name_as_address(base, name)
+                || expr_reads_name_as_address(index, name)
+        }
+        HirExpr::Cast { expr, .. } | HirExpr::Unary { expr, .. } => {
+            expr_reads_name_as_address(expr, name)
+        }
+        HirExpr::Binary { lhs, rhs, .. } => {
+            expr_reads_name_as_address(lhs, name) || expr_reads_name_as_address(rhs, name)
+        }
+        HirExpr::Call { args, .. } => args.iter().any(|arg| expr_reads_name_as_address(arg, name)),
+        HirExpr::AggregateCopy { src, .. } => expr_reads_name(src, name),
+        HirExpr::Select {
+            cond,
+            then_expr,
+            else_expr,
+            ..
+        } => {
+            expr_reads_name_as_address(cond, name)
+                || expr_reads_name_as_address(then_expr, name)
+                || expr_reads_name_as_address(else_expr, name)
+        }
+        HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) | HirExpr::Const(_, _) => false,
+    }
+}
+
+fn stmt_reads_name_as_address(stmt: &HirStmt, name: &str) -> bool {
+    match stmt {
+        HirStmt::Assign { lhs, rhs } => {
+            let lhs_address = match lhs {
+                HirLValue::Var(_) => false,
+                HirLValue::Deref { ptr, .. } => expr_reads_name(ptr, name),
+                HirLValue::Index { base, .. } => expr_reads_name(base, name),
+                HirLValue::FieldAccess { base, .. } => expr_reads_name(base, name),
+            };
+            lhs_address || expr_reads_name_as_address(rhs, name)
+        }
+        HirStmt::Expr(expr) | HirStmt::Return(Some(expr)) => expr_reads_name_as_address(expr, name),
+        HirStmt::VaStart { va_list, .. } => expr_reads_name_as_address(va_list, name),
+        _ => false,
+    }
+}
+
+fn is_linear_phase_stmt(stmt: &HirStmt) -> bool {
+    matches!(
+        stmt,
+        HirStmt::Assign { .. } | HirStmt::Expr(_) | HirStmt::Return(_) | HirStmt::VaStart { .. }
+    )
+}
+
+fn rename_expr_var(expr: &mut HirExpr, old: &str, new: &str) {
+    match expr {
+        HirExpr::Var(name) if name == old => *name = new.to_string(),
+        HirExpr::Cast { expr, .. }
+        | HirExpr::Unary { expr, .. }
+        | HirExpr::Load { ptr: expr, .. }
+        | HirExpr::PtrOffset { base: expr, .. }
+        | HirExpr::FieldAccess { base: expr, .. }
+        | HirExpr::AggregateCopy { src: expr, .. } => rename_expr_var(expr, old, new),
+        HirExpr::Binary { lhs, rhs, .. } => {
+            rename_expr_var(lhs, old, new);
+            rename_expr_var(rhs, old, new);
+        }
+        HirExpr::Call { args, .. } => {
+            for arg in args {
+                rename_expr_var(arg, old, new);
+            }
+        }
+        HirExpr::Index { base, index, .. } => {
+            rename_expr_var(base, old, new);
+            rename_expr_var(index, old, new);
+        }
+        HirExpr::Select {
+            cond,
+            then_expr,
+            else_expr,
+            ..
+        } => {
+            rename_expr_var(cond, old, new);
+            rename_expr_var(then_expr, old, new);
+            rename_expr_var(else_expr, old, new);
+        }
+        HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) | HirExpr::Const(_, _) => {}
+    }
+}
+
+fn rename_stmt_reads(stmt: &mut HirStmt, old: &str, new: &str) {
+    match stmt {
+        HirStmt::Assign { lhs, rhs } => {
+            match lhs {
+                HirLValue::Var(_) => {}
+                HirLValue::Deref { ptr, .. } => rename_expr_var(ptr, old, new),
+                HirLValue::Index { base, index, .. } => {
+                    rename_expr_var(base, old, new);
+                    rename_expr_var(index, old, new);
+                }
+                HirLValue::FieldAccess { base, .. } => rename_expr_var(base, old, new),
+            }
+            rename_expr_var(rhs, old, new);
+        }
+        HirStmt::Expr(expr) | HirStmt::Return(Some(expr)) => rename_expr_var(expr, old, new),
+        HirStmt::VaStart { va_list, .. } => rename_expr_var(va_list, old, new),
+        _ => {}
+    }
+}
+
+fn fresh_phase_name(base: &str, used_names: &mut HashSet<String>) -> String {
+    let stem = format!("{base}_value");
+    if used_names.insert(stem.clone()) {
+        return stem;
+    }
+    let mut suffix = 2usize;
+    loop {
+        let candidate = format!("{stem}_{suffix}");
+        if used_names.insert(candidate.clone()) {
+            return candidate;
+        }
+        suffix += 1;
+    }
+}
+
+fn split_scalar_role_phases(
+    stmts: &mut [HirStmt],
+    pointer_locals: &HashSet<String>,
+    used_names: &mut HashSet<String>,
+    new_bindings: &mut Vec<NirBinding>,
+) -> bool {
+    let mut changed = false;
+    for stmt in stmts.iter_mut() {
+        match stmt {
+            HirStmt::Block(body) | HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
+                changed |= split_scalar_role_phases(body, pointer_locals, used_names, new_bindings);
+            }
+            HirStmt::If {
+                then_body,
+                else_body,
+                ..
+            } => {
+                changed |=
+                    split_scalar_role_phases(then_body, pointer_locals, used_names, new_bindings);
+                changed |=
+                    split_scalar_role_phases(else_body, pointer_locals, used_names, new_bindings);
+            }
+            HirStmt::For {
+                init, update, body, ..
+            } => {
+                if let Some(init) = init {
+                    changed |= split_scalar_role_phases(
+                        std::slice::from_mut(init.as_mut()),
+                        pointer_locals,
+                        used_names,
+                        new_bindings,
+                    );
+                }
+                changed |= split_scalar_role_phases(body, pointer_locals, used_names, new_bindings);
+                if let Some(update) = update {
+                    changed |= split_scalar_role_phases(
+                        std::slice::from_mut(update.as_mut()),
+                        pointer_locals,
+                        used_names,
+                        new_bindings,
+                    );
+                }
+            }
+            HirStmt::Switch { cases, default, .. } => {
+                for case in cases {
+                    changed |= split_scalar_role_phases(
+                        &mut case.body,
+                        pointer_locals,
+                        used_names,
+                        new_bindings,
+                    );
+                }
+                changed |=
+                    split_scalar_role_phases(default, pointer_locals, used_names, new_bindings);
+            }
+            _ => {}
+        }
+    }
+
+    let mut index = 0usize;
+    while index < stmts.len() {
+        let candidate = match &stmts[index] {
+            HirStmt::Assign {
+                lhs: HirLValue::Var(name),
+                rhs,
+            } if pointer_locals.contains(name)
+                && stmts[..index]
+                    .iter()
+                    .any(|prior| stmt_defines_name(prior, name)) =>
+            {
+                narrow_scalar_assignment(rhs).map(|(ty, scalar_rhs)| (name.clone(), ty, scalar_rhs))
+            }
+            _ => None,
+        };
+        let Some((old_name, scalar_ty, scalar_rhs)) = candidate else {
+            index += 1;
+            continue;
+        };
+        let next_definition = stmts[index + 1..]
+            .iter()
+            .position(|stmt| stmt_defines_name(stmt, &old_name))
+            .map_or(stmts.len(), |offset| index + 1 + offset);
+        let control_boundary = stmts[index + 1..]
+            .iter()
+            .position(|stmt| !is_linear_phase_stmt(stmt))
+            .map_or(stmts.len(), |offset| index + 1 + offset);
+        let end = next_definition.min(control_boundary);
+        if control_boundary < next_definition
+            && stmts[control_boundary..next_definition]
+                .iter()
+                .any(|stmt| stmt_reads_name_deep(stmt, &old_name))
+        {
+            index += 1;
+            continue;
+        }
+        let suffix = &stmts[index + 1..end];
+        if suffix.is_empty()
+            || !suffix.iter().any(|stmt| stmt_reads_name(stmt, &old_name))
+            || suffix
+                .iter()
+                .any(|stmt| stmt_reads_name_as_address(stmt, &old_name))
+        {
+            index += 1;
+            continue;
+        }
+
+        let new_name = fresh_phase_name(&old_name, used_names);
+        if let HirStmt::Assign {
+            lhs: HirLValue::Var(lhs),
+            rhs,
+        } = &mut stmts[index]
+        {
+            *lhs = new_name.clone();
+            *rhs = scalar_rhs;
+        }
+        for stmt in &mut stmts[index + 1..end] {
+            rename_stmt_reads(stmt, &old_name, &new_name);
+        }
+        new_bindings.push(NirBinding {
+            name: new_name,
+            ty: scalar_ty,
+            surface_type_name: None,
+            origin: Some(NirBindingOrigin::TempPreserved),
+            initializer: None,
+        });
+        changed = true;
+        index = end;
+    }
+    changed
+}
+
 pub(crate) fn apply_split_flow_pass(func: &mut HirFunction) -> bool {
     let mut type_map = HashMap::new();
     for binding in func.params.iter().chain(func.locals.iter()) {
@@ -599,5 +1003,249 @@ pub(crate) fn apply_split_flow_pass(func: &mut HirFunction) -> bool {
         }
     }
 
+    let pointer_locals: HashSet<String> = func
+        .locals
+        .iter()
+        .filter(|binding| matches!(binding.ty, NirType::Ptr(_)))
+        .map(|binding| binding.name.clone())
+        .collect();
+    let mut used_names: HashSet<String> = func
+        .params
+        .iter()
+        .chain(func.locals.iter())
+        .map(|binding| binding.name.clone())
+        .collect();
+    let mut new_bindings = Vec::new();
+    changed |= split_scalar_role_phases(
+        &mut func.body,
+        &pointer_locals,
+        &mut used_names,
+        &mut new_bindings,
+    );
+    func.locals.extend(new_bindings);
+
     changed
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn uint(bits: u32) -> NirType {
+        NirType::Int {
+            bits,
+            signed: false,
+        }
+    }
+
+    fn binding(name: &str, ty: NirType) -> NirBinding {
+        NirBinding {
+            name: name.into(),
+            ty,
+            surface_type_name: None,
+            origin: Some(NirBindingOrigin::Temp),
+            initializer: None,
+        }
+    }
+
+    fn narrow_pointer_cast(value: &str, pointer_ty: &NirType) -> HirExpr {
+        HirExpr::Cast {
+            ty: pointer_ty.clone(),
+            expr: Box::new(HirExpr::Cast {
+                ty: uint(8),
+                expr: Box::new(HirExpr::Var(value.into())),
+            }),
+        }
+    }
+
+    #[test]
+    fn splits_narrow_scalar_phase_from_pointer_storage() {
+        let pointer_ty = NirType::Ptr(Box::new(uint(8)));
+        let mut func = HirFunction {
+            name: "phase_split".into(),
+            locals: vec![
+                binding("slot", pointer_ty.clone()),
+                binding("base", pointer_ty.clone()),
+                binding("value", uint(32)),
+                binding("acc", uint(32)),
+            ],
+            body: vec![
+                HirStmt::Assign {
+                    lhs: HirLValue::Var("slot".into()),
+                    rhs: HirExpr::Var("base".into()),
+                },
+                HirStmt::Assign {
+                    lhs: HirLValue::Var("slot".into()),
+                    rhs: narrow_pointer_cast("value", &pointer_ty),
+                },
+                HirStmt::Assign {
+                    lhs: HirLValue::Var("acc".into()),
+                    rhs: HirExpr::Binary {
+                        op: HirBinaryOp::Add,
+                        lhs: Box::new(HirExpr::Var("acc".into())),
+                        rhs: Box::new(HirExpr::Var("slot".into())),
+                        ty: uint(32),
+                    },
+                },
+            ],
+            ..Default::default()
+        };
+
+        assert!(apply_split_flow_pass(&mut func));
+        assert!(func.locals.iter().any(|binding| {
+            binding.name == "slot_value"
+                && binding.ty == uint(8)
+                && binding.origin == Some(NirBindingOrigin::TempPreserved)
+        }));
+        assert!(matches!(
+            &func.body[1],
+            HirStmt::Assign {
+                lhs: HirLValue::Var(name),
+                rhs: HirExpr::Cast {
+                    ty: NirType::Int { bits: 8, .. },
+                    ..
+                },
+            } if name == "slot_value"
+        ));
+        assert!(matches!(
+            &func.body[2],
+            HirStmt::Assign {
+                rhs: HirExpr::Binary { rhs, .. },
+                ..
+            } if matches!(rhs.as_ref(), HirExpr::Var(name) if name == "slot_value")
+        ));
+    }
+
+    #[test]
+    fn splits_direct_narrow_assignment_to_pointer_storage() {
+        let pointer_ty = NirType::Ptr(Box::new(uint(8)));
+        let mut func = HirFunction {
+            name: "direct_phase_split".into(),
+            locals: vec![
+                binding("slot", pointer_ty),
+                binding("base", NirType::Ptr(Box::new(uint(8)))),
+                binding("value", uint(32)),
+                binding("acc", uint(32)),
+            ],
+            body: vec![
+                HirStmt::Assign {
+                    lhs: HirLValue::Var("slot".into()),
+                    rhs: HirExpr::Var("base".into()),
+                },
+                HirStmt::Assign {
+                    lhs: HirLValue::Var("slot".into()),
+                    rhs: HirExpr::Cast {
+                        ty: uint(8),
+                        expr: Box::new(HirExpr::Var("value".into())),
+                    },
+                },
+                HirStmt::Assign {
+                    lhs: HirLValue::Var("acc".into()),
+                    rhs: HirExpr::Binary {
+                        op: HirBinaryOp::Add,
+                        lhs: Box::new(HirExpr::Var("acc".into())),
+                        rhs: Box::new(HirExpr::Var("slot".into())),
+                        ty: uint(32),
+                    },
+                },
+            ],
+            ..Default::default()
+        };
+
+        assert!(apply_split_flow_pass(&mut func));
+        assert!(func
+            .locals
+            .iter()
+            .any(|binding| binding.name == "slot_value"));
+        assert!(matches!(
+            &func.body[2],
+            HirStmt::Assign {
+                rhs: HirExpr::Binary { rhs, .. },
+                ..
+            } if matches!(rhs.as_ref(), HirExpr::Var(name) if name == "slot_value")
+        ));
+    }
+
+    #[test]
+    fn splits_scalar_phase_that_ends_before_label_boundary() {
+        let pointer_ty = NirType::Ptr(Box::new(uint(8)));
+        let mut func = HirFunction {
+            name: "label_phase_split".into(),
+            locals: vec![
+                binding("slot", pointer_ty),
+                binding("base", NirType::Ptr(Box::new(uint(8)))),
+                binding("value", uint(32)),
+                binding("acc", uint(32)),
+            ],
+            body: vec![
+                HirStmt::Assign {
+                    lhs: HirLValue::Var("slot".into()),
+                    rhs: HirExpr::Var("base".into()),
+                },
+                HirStmt::Assign {
+                    lhs: HirLValue::Var("slot".into()),
+                    rhs: HirExpr::Cast {
+                        ty: uint(8),
+                        expr: Box::new(HirExpr::Var("value".into())),
+                    },
+                },
+                HirStmt::Assign {
+                    lhs: HirLValue::Var("acc".into()),
+                    rhs: HirExpr::Binary {
+                        op: HirBinaryOp::Add,
+                        lhs: Box::new(HirExpr::Var("acc".into())),
+                        rhs: Box::new(HirExpr::Var("slot".into())),
+                        ty: uint(32),
+                    },
+                },
+                HirStmt::Label("next".into()),
+                HirStmt::Return(Some(HirExpr::Var("acc".into()))),
+            ],
+            ..Default::default()
+        };
+
+        assert!(apply_split_flow_pass(&mut func));
+        assert!(func
+            .locals
+            .iter()
+            .any(|binding| binding.name == "slot_value"));
+    }
+
+    #[test]
+    fn keeps_pointer_phase_when_suffix_uses_value_as_address() {
+        let pointer_ty = NirType::Ptr(Box::new(uint(8)));
+        let mut func = HirFunction {
+            name: "phase_no_split".into(),
+            locals: vec![
+                binding("slot", pointer_ty.clone()),
+                binding("base", pointer_ty.clone()),
+                binding("value", uint(32)),
+                binding("loaded", uint(8)),
+            ],
+            body: vec![
+                HirStmt::Assign {
+                    lhs: HirLValue::Var("slot".into()),
+                    rhs: HirExpr::Var("base".into()),
+                },
+                HirStmt::Assign {
+                    lhs: HirLValue::Var("slot".into()),
+                    rhs: narrow_pointer_cast("value", &pointer_ty),
+                },
+                HirStmt::Assign {
+                    lhs: HirLValue::Var("loaded".into()),
+                    rhs: HirExpr::Load {
+                        ptr: Box::new(HirExpr::Var("slot".into())),
+                        ty: uint(8),
+                    },
+                },
+            ],
+            ..Default::default()
+        };
+
+        assert!(!apply_split_flow_pass(&mut func));
+        assert!(!func
+            .locals
+            .iter()
+            .any(|binding| binding.name == "slot_value"));
+    }
 }
