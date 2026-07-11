@@ -282,6 +282,13 @@ impl<'a> PreviewBuilder<'a> {
                     if matches!(rule, CollapseRule::Sequence | CollapseRule::Unstructured) {
                         continue;
                     }
+                    let rule_started = diag.then(std::time::Instant::now);
+                    if diag {
+                        eprintln!(
+                            "[DIAG] structuring rule start: rule={} block={idx}",
+                            rule.name()
+                        );
+                    }
                     let res = match rule {
                         CollapseRule::Switch => self.try_lower_switch(idx),
                         CollapseRule::ForLoop => self.try_lower_for(idx),
@@ -316,6 +323,18 @@ impl<'a> PreviewBuilder<'a> {
                         }
                         _ => Ok(None),
                     };
+                    if let Some(started) = rule_started {
+                        eprintln!(
+                            "[DIAG] structuring rule finish: rule={} block={idx} elapsed_ms={:.3} outcome={}",
+                            rule.name(),
+                            started.elapsed().as_secs_f64() * 1000.0,
+                            match &res {
+                                Ok(Some(_)) => "candidate",
+                                Ok(None) => "none",
+                                Err(_) => "error",
+                            }
+                        );
+                    }
 
                     self.consider_structured_candidate(
                         rule,

@@ -345,8 +345,27 @@ impl<'a> PreviewBuilder<'a> {
         // forward path. Keeping it as terminator bare-skips the guard and either
         // drops or unconditionally applies INT_MIN/INT_MAX-style copies.
         let terminator_index = self.materialize_block_terminator_index(block);
+        let diag = std::env::var_os("FISSION_PREVIEW_DIAG").is_some();
+        let stage_started = diag.then(std::time::Instant::now);
         let mut body = self.synthesize_explicit_merge_bindings_for_block(block)?;
+        if let Some(started) = stage_started {
+            eprintln!(
+                "[DIAG] lower_block_stmts merge: block={} ops={} elapsed_ms={:.3}",
+                block_idx,
+                block.ops.len(),
+                started.elapsed().as_secs_f64() * 1000.0
+            );
+        }
+        let stage_started = diag.then(std::time::Instant::now);
         body.extend(self.lower_block_ops_range(block, 0, block.ops.len(), terminator_index)?);
+        if let Some(started) = stage_started {
+            eprintln!(
+                "[DIAG] lower_block_stmts ops: block={} ops={} elapsed_ms={:.3}",
+                block_idx,
+                block.ops.len(),
+                started.elapsed().as_secs_f64() * 1000.0
+            );
+        }
 
         self.lowered_block_stmts_cache
             .insert(block_idx, body.clone());
@@ -1339,38 +1358,16 @@ impl<'a> PreviewBuilder<'a> {
         output: &Varnode,
         rhs: &HirExpr,
     ) -> Option<String> {
-        // Allow the 32-bit primary return register (EAX in x86-64) in addition to full-width
-        // registers. See the corresponding guard in merge_binding_name_for_direct_successor_accumulator.
-        let is_32bit_return_reg = self.options.is_64bit
-            && output.size == 4
-            && self.register_namer().is_primary_return_register(output);
-        if output.is_constant
-            || !is_register_space_id(output.space_id)
-            || (output.size != self.options.pointer_size && !is_32bit_return_reg)
+        if !self.is_conditional_loop_exit_accumulator_shape_candidate(block, output)
             || !Self::rhs_is_safe_scalar_live_register_merge(rhs)
-            || !matches!(
-                self.options.calling_convention,
-                CallingConvention::WindowsX64 | CallingConvention::SystemVAmd64
-            )
         {
             return None;
         }
         let Some((live_name, family_idx)) = self.canonical_x86_gpr64_name_for_value(output) else {
             return None;
         };
-        if live_name == "rsp" || self.abi_state().param_slot_for_name(live_name).is_some() {
-            self.trace_direct_successor_accumulator_merge_rejected(
-                block.start_address,
-                output,
-                "stack_pointer_or_abi_param",
-            );
-            return None;
-        }
         let block_idx = self.lowering_block_index(block);
         let succs = self.successors.get(block_idx)?.clone();
-        if succs.len() != 2 {
-            return None;
-        }
         let read_succs = succs
             .iter()
             .copied()
@@ -1519,6 +1516,91 @@ impl<'a> PreviewBuilder<'a> {
             &binding.name,
         );
         Some(binding.name)
+    }
+
+    fn is_conditional_loop_exit_accumulator_shape_candidate(
+        &self,
+        block: &crate::pcode::PcodeBasicBlock,
+        output: &Varnode,
+    ) -> bool {
+        // This proof is intentionally expression-free. Callers use it before
+        // lowering an output's RHS so non-candidates cannot trigger expensive
+        // recursive materialization during speculative join recovery.
+        let is_32bit_return_reg = self.options.is_64bit
+            && output.size == 4
+            && self.register_namer().is_primary_return_register(output);
+        if output.is_constant
+            || !is_register_space_id(output.space_id)
+            || (output.size != self.options.pointer_size && !is_32bit_return_reg)
+            || !matches!(
+                self.options.calling_convention,
+                CallingConvention::WindowsX64 | CallingConvention::SystemVAmd64
+            )
+        {
+            return false;
+        }
+        let Some((live_name, _)) = self.canonical_x86_gpr64_name_for_value(output) else {
+            return false;
+        };
+        if live_name == "rsp" || self.abi_state().param_slot_for_name(live_name).is_some() {
+            return false;
+        }
+        let block_idx = self.lowering_block_index(block);
+        self.successors
+            .get(block_idx)
+            .is_some_and(|successors| successors.len() == 2)
+    }
+
+    fn is_conditional_loop_exit_accumulator_site_candidate(
+        &self,
+        block: &crate::pcode::PcodeBasicBlock,
+        op_idx: usize,
+        output: &Varnode,
+    ) -> bool {
+        if !self.is_conditional_loop_exit_accumulator_shape_candidate(block, output)
+            || self.last_redefinition_index_before_terminator(block, output) != Some(op_idx)
+            || !Self::output_def_is_safe_direct_successor_merge(&block.ops[op_idx])
+            || self.has_call_between_ops(block, op_idx + 1, block.ops.len())
+        {
+            return false;
+        }
+
+        let block_idx = self.lowering_block_index(block);
+        let Some(successors) = self.successors.get(block_idx) else {
+            return false;
+        };
+        let read_successors = successors
+            .iter()
+            .copied()
+            .filter(|successor_idx| {
+                self.pcode
+                    .blocks
+                    .get(*successor_idx)
+                    .is_some_and(|successor| {
+                        self.block_reads_merge_input_before_redefinition(successor, output)
+                    })
+            })
+            .collect::<Vec<_>>();
+        let [read_successor_idx] = read_successors.as_slice() else {
+            return false;
+        };
+        let Some(non_read_successor_idx) = successors
+            .iter()
+            .copied()
+            .find(|successor_idx| successor_idx != read_successor_idx)
+        else {
+            return false;
+        };
+        self.loop_bodies.iter().any(|loop_body| {
+            loop_body.head == non_read_successor_idx
+                && !loop_body.body.contains(read_successor_idx)
+                && (loop_body.all_exits.contains(read_successor_idx)
+                    || loop_body.exit_idx == Some(*read_successor_idx)
+                    || successors.contains(read_successor_idx))
+                && !self.loop_body_has_side_entry_or_irreducible_edge(loop_body)
+                && (loop_body.body.contains(&block_idx)
+                    || successors.contains(&loop_body.head))
+        })
     }
 
     fn current_site_matches_block_op(&self, block_idx: usize, op_idx: usize) -> bool {

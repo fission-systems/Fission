@@ -641,57 +641,94 @@ impl<'a> PreviewBuilder<'a> {
         &mut self,
         start_idx: usize,
     ) -> Result<Option<(Vec<HirStmt>, HirExpr, usize, usize)>, MlilPreviewError> {
+        let diag = structuring_diag_enabled();
         let mut idx = start_idx;
         let mut visited = HashSet::new();
-        let mut body = Vec::new();
-
-        loop {
+        let mut path = Vec::new();
+        let (cond_idx, exit_idx) = loop {
+            if self.sese_region_proof_budget_exceeded() {
+                return Ok(None);
+            }
             if !visited.insert(idx) {
                 return Ok(None);
             }
+            path.push(idx);
 
-            let block = self.pcode_block(idx).clone();
-            body.extend(self.lower_block_stmts(&block)?);
-            match self.lower_block_terminator(idx)? {
-                LoweredTerminator::Cond {
-                    cond,
-                    true_target,
-                    false_target,
-                } => {
-                    if self.region_has_external_entry(&visited, start_idx) {
-                        return Ok(None);
-                    }
-                    let start_addr = self.block_target_key(start_idx);
-                    if true_target == start_addr {
-                        let Some(exit_addr) = false_target else {
-                            return Ok(None);
-                        };
-                        let exit_idx = self
-                            .find_block_index_by_address(exit_addr)
-                            .ok_or(MlilPreviewError::UnsupportedCfgPhiJoin)?;
-                        return Ok(Some((body, cond, idx, exit_idx)));
-                    }
-                    if false_target == Some(start_addr) {
-                        let exit_idx = self
-                            .find_block_index_by_address(true_target)
-                            .ok_or(MlilPreviewError::UnsupportedCfgPhiJoin)?;
-                        return Ok(Some((body, negate_expr(cond), idx, exit_idx)));
-                    }
+            let successors = self.successors.get(idx).cloned().unwrap_or_default();
+            if successors.len() == 2 && successors.contains(&start_idx) {
+                if self.region_has_external_entry(&visited, start_idx) {
                     return Ok(None);
                 }
-                LoweredTerminator::Fallthrough(Some(target)) | LoweredTerminator::Goto(target) => {
-                    let Some(next_idx) = self.find_block_index_by_address(target) else {
-                        return Ok(None);
-                    };
-                    if self.can_inline_linear_successor(idx, next_idx, &visited) {
-                        idx = next_idx;
-                        continue;
-                    }
+                let Some(exit_idx) = successors
+                    .into_iter()
+                    .find(|successor| *successor != start_idx)
+                else {
                     return Ok(None);
-                }
-                _ => return Ok(None),
+                };
+                break (idx, exit_idx);
             }
+            let [next_idx] = successors.as_slice() else {
+                return Ok(None);
+            };
+            if !self.can_inline_linear_successor(idx, *next_idx, &visited) {
+                return Ok(None);
+            }
+            idx = *next_idx;
+        };
+
+        if diag {
+            eprintln!(
+                "[DIAG] lower_do_while_region: cfg proof start={} latch={} exit={} blocks={}",
+                start_idx,
+                cond_idx,
+                exit_idx,
+                path.len()
+            );
         }
+
+        let mut body = Vec::new();
+        for (path_pos, block_idx) in path.iter().copied().enumerate() {
+            if self.sese_region_proof_budget_exceeded() {
+                return Ok(None);
+            }
+            let block = self.pcode_block(block_idx).clone();
+            body.extend(self.lower_block_stmts(&block)?);
+            let terminator = self.lower_block_terminator(block_idx)?;
+            if block_idx != cond_idx {
+                let Some(expected_next) = path.get(path_pos + 1).copied() else {
+                    return Ok(None);
+                };
+                let target = match terminator {
+                    LoweredTerminator::Fallthrough(Some(target))
+                    | LoweredTerminator::Goto(target) => target,
+                    _ => return Ok(None),
+                };
+                if self.find_block_index_by_address(target) != Some(expected_next) {
+                    return Ok(None);
+                }
+                continue;
+            }
+
+            let LoweredTerminator::Cond {
+                cond,
+                true_target,
+                false_target,
+            } = terminator
+            else {
+                return Ok(None);
+            };
+            let start_addr = self.block_target_key(start_idx);
+            let exit_addr = self.block_target_key(exit_idx);
+            if true_target == start_addr && false_target == Some(exit_addr) {
+                return Ok(Some((body, cond, cond_idx, exit_idx)));
+            }
+            if false_target == Some(start_addr) && true_target == exit_addr {
+                return Ok(Some((body, negate_expr(cond), cond_idx, exit_idx)));
+            }
+            return Ok(None);
+        }
+
+        Ok(None)
     }
 
     pub(super) fn try_lower_multiblock_dowhile(
@@ -840,10 +877,13 @@ impl<'a> PreviewBuilder<'a> {
             return Ok(None);
         };
 
-        // Head must have no non-trivial statements of its own (pure condition test)
+        // A for-loop head contributes only its condition to the resulting HIR.
+        // Prove from raw p-code that lowering the discarded prefix cannot emit
+        // a side effect or nested control-flow statement. Materializing the
+        // entire head merely to perform this rejection is prohibitively costly
+        // for unrolled arithmetic loops and cannot improve the candidate.
         let head_block = self.pcode_block(idx).clone();
-        let head_stmts = self.lower_block_stmts(&head_block)?;
-        if !head_stmts.iter().all(Self::is_trivial_structuring_stmt) {
+        if !Self::for_condition_head_has_only_discardable_pure_ops(&head_block) {
             return Ok(None);
         }
 
@@ -936,6 +976,36 @@ impl<'a> PreviewBuilder<'a> {
             },
             exit_idx,
         )))
+    }
+
+    fn for_condition_head_has_only_discardable_pure_ops(
+        block: &crate::pcode::PcodeBasicBlock,
+    ) -> bool {
+        let terminator_idx = block.ops.iter().rposition(|op| {
+            matches!(
+                op.opcode,
+                PcodeOpcode::Branch
+                    | PcodeOpcode::CBranch
+                    | PcodeOpcode::BranchInd
+                    | PcodeOpcode::Return
+            )
+        });
+        block.ops.iter().enumerate().all(|(op_idx, op)| {
+            if Some(op_idx) == terminator_idx {
+                return op.opcode == PcodeOpcode::CBranch;
+            }
+            !matches!(
+                op.opcode,
+                PcodeOpcode::Store
+                    | PcodeOpcode::Call
+                    | PcodeOpcode::CallInd
+                    | PcodeOpcode::CallOther
+                    | PcodeOpcode::Branch
+                    | PcodeOpcode::CBranch
+                    | PcodeOpcode::BranchInd
+                    | PcodeOpcode::Return
+            )
+        })
     }
 
     // -----------------------------------------------------------------------

@@ -1145,7 +1145,17 @@ impl<'a> PreviewBuilder<'a> {
         let Some(predecessor_idxs) = self.predecessors.get(block_idx).cloned() else {
             return Ok(Vec::new());
         };
+        let diag = std::env::var_os("FISSION_PREVIEW_DIAG").is_some();
+        let stage_started = diag.then(std::time::Instant::now);
         self.ensure_conditional_loop_exit_accumulator_bindings_for_block(&predecessor_idxs)?;
+        if let Some(started) = stage_started {
+            eprintln!(
+                "[DIAG] merge synthesis accumulator proof: block={} predecessors={} elapsed_ms={:.3}",
+                block_idx,
+                predecessor_idxs.len(),
+                started.elapsed().as_secs_f64() * 1000.0
+            );
+        }
         let allow_fallback_intrinsic = Self::explicit_merge_binding_enabled();
 
         struct PendingMergeBinding {
@@ -1157,6 +1167,8 @@ impl<'a> PreviewBuilder<'a> {
             incoming_by_pred: HashMap<u64, HirExpr>,
         }
 
+        let scan_started = diag.then(std::time::Instant::now);
+        let mut lowered_candidate_count = 0usize;
         let mut pending: HashMap<VarnodeKey, PendingMergeBinding> = HashMap::new();
         for pred_idx in predecessor_idxs {
             let Some(pred_block) = self.pcode.blocks.get(pred_idx) else {
@@ -1166,6 +1178,22 @@ impl<'a> PreviewBuilder<'a> {
                 let Some(output) = &op.output else {
                     continue;
                 };
+                if !matches!(
+                    Self::classify_merge_binding_candidate_incoming_kind(op),
+                    MergeBindingCandidateIncomingKind::VarOrConst
+                        | MergeBindingCandidateIncomingKind::Arithmetic
+                ) {
+                    continue;
+                }
+                let Some((consumer_block_idx, _, _, _)) =
+                    self.first_output_use_site_outside_block_by_index(pred_idx, op_idx, output)
+                else {
+                    continue;
+                };
+                if consumer_block_idx != block_idx {
+                    continue;
+                }
+                lowered_candidate_count += 1;
                 let Some(rhs) = self.with_lowering_site(
                     LoweringSite {
                         block_idx: pred_idx,
@@ -1202,6 +1230,15 @@ impl<'a> PreviewBuilder<'a> {
                     .incoming_by_pred
                     .insert(pred_block.start_address, rhs.clone());
             }
+        }
+        if let Some(started) = scan_started {
+            eprintln!(
+                "[DIAG] merge synthesis explicit scan: block={} candidates={} pending={} elapsed_ms={:.3}",
+                block_idx,
+                lowered_candidate_count,
+                pending.len(),
+                started.elapsed().as_secs_f64() * 1000.0
+            );
         }
 
         let mut entries = pending.into_iter().collect::<Vec<_>>();
@@ -1275,9 +1312,12 @@ impl<'a> PreviewBuilder<'a> {
                 let Some(output) = op.output.as_ref() else {
                     continue;
                 };
-                if output.is_constant
-                    || !is_register_space_id(output.space_id)
-                    || output.size != self.options.pointer_size
+                if output.size != self.options.pointer_size
+                    || !self.is_conditional_loop_exit_accumulator_site_candidate(
+                        &pred_block,
+                        op_idx,
+                        output,
+                    )
                 {
                     continue;
                 }
