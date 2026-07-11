@@ -1911,7 +1911,21 @@ fn merge_constraint(binding: &mut NirBinding, constraint: &UseConstraint) -> boo
     }
 }
 
-fn restore_scalar_only_pointer_locals(func: &mut HirFunction) -> bool {
+fn has_exact_scalar_constraint(constraints: Option<&Vec<UseConstraint>>) -> bool {
+    constraints.is_some_and(|constraints| {
+        constraints.iter().any(|constraint| {
+            matches!(
+                constraint,
+                UseConstraint::Exact(NirType::Int { .. } | NirType::Bool)
+            )
+        })
+    })
+}
+
+fn restore_scalar_only_pointer_locals(
+    func: &mut HirFunction,
+    constraints: &HashMap<String, Vec<UseConstraint>>,
+) -> bool {
     let mut roles = HashMap::<String, BindingUseRole>::new();
     collect_binding_use_roles(&func.body, &mut roles);
     let pointer_compare_peers = super::type_infer::pointer_compare_peer_promotions(func);
@@ -1922,14 +1936,18 @@ fn restore_scalar_only_pointer_locals(func: &mut HirFunction) -> bool {
     };
     let mut changed = false;
     for binding in &mut func.locals {
-        if binding.surface_type_name.is_some() || !matches!(binding.ty, NirType::Ptr(_)) {
+        if !matches!(binding.ty, NirType::Ptr(_)) {
             continue;
         }
-        let Some(role) = roles.get(&binding.name) else {
+        let role = roles.get(&binding.name);
+        if binding.surface_type_name.is_some() {
             continue;
-        };
-        if role.scalar_use
-            && !role.address_use
+        }
+        let scalar_evidence = role.is_some_and(|role| role.scalar_use)
+            || has_exact_scalar_constraint(constraints.get(&binding.name));
+        let address_use = role.is_some_and(|role| role.address_use);
+        if scalar_evidence
+            && !address_use
             && !pointer_compare_peers.contains_key(&binding.name)
             && !transitive_address_locals.contains_key(&binding.name)
         {
@@ -1992,7 +2010,7 @@ pub(crate) fn apply_use_driven_type_infer_pass(func: &mut HirFunction) -> bool {
         round_changed |= promote_return_signedness_from_returns(func);
         round_changed |= narrow_integer_params_from_wrapping_return_uses(func);
         round_changed |= promote_store_value_only_unsigned_params(func);
-        round_changed |= restore_scalar_only_pointer_locals(func);
+        round_changed |= restore_scalar_only_pointer_locals(func, &constraints);
         round_changed |= narrow_byte_index_accumulators(func);
         if !round_changed {
             break;
@@ -2212,6 +2230,33 @@ mod tests {
         let x = func.locals.iter().find(|local| local.name == "x").unwrap();
         assert_eq!(x.ty, u64_ty);
         assert!(!super::apply_use_driven_type_infer_pass(&mut func));
+    }
+
+    #[test]
+    fn exact_scalar_return_constraint_demotes_non_address_pointer_local() {
+        let u8_ty = NirType::Int {
+            bits: 8,
+            signed: false,
+        };
+        let u64_ty = NirType::Int {
+            bits: 64,
+            signed: false,
+        };
+        let byte_ptr_ty = NirType::Ptr(Box::new(u8_ty));
+        let body = vec![HirStmt::Return(Some(HirExpr::Var("acc".to_owned())))];
+        let mut func = make_func(
+            vec![make_typed_binding(
+                "acc",
+                byte_ptr_ty,
+                NirBindingOrigin::StackOffset(-4),
+            )],
+            body,
+            u64_ty.clone(),
+        );
+
+        super::apply_use_driven_type_infer_pass(&mut func);
+
+        assert_eq!(func.locals[0].ty, u64_ty);
     }
 
     /// Deref store lhs: *p = val → p: Ptr(val_ty)
