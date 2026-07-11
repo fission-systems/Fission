@@ -2,282 +2,294 @@
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
     <url>
          <loc>https://sjkim1127.github.io/Fission/</loc>
-         <lastmod>2026-07-10</lastmod>
+         <lastmod>2026-07-11</lastmod>
     </url>
     <url>
          <loc>https://sjkim1127.github.io/Fission/BENCHMARK_DOCKER/</loc>
-         <lastmod>2026-07-10</lastmod>
+         <lastmod>2026-07-11</lastmod>
     </url>
     <url>
          <loc>https://sjkim1127.github.io/Fission/CLI/</loc>
-         <lastmod>2026-07-10</lastmod>
+         <lastmod>2026-07-11</lastmod>
     </url>
     <url>
          <loc>https://sjkim1127.github.io/Fission/EVALUATION/</loc>
-         <lastmod>2026-07-10</lastmod>
+         <lastmod>2026-07-11</lastmod>
     </url>
     <url>
          <loc>https://sjkim1127.github.io/Fission/MALWARE_SAMPLE_POLICY/</loc>
-         <lastmod>2026-07-10</lastmod>
+         <lastmod>2026-07-11</lastmod>
     </url>
     <url>
          <loc>https://sjkim1127.github.io/Fission/PROJECT_MAP/</loc>
-         <lastmod>2026-07-10</lastmod>
+         <lastmod>2026-07-11</lastmod>
     </url>
     <url>
          <loc>https://sjkim1127.github.io/Fission/QUALITY_METRICS/</loc>
-         <lastmod>2026-07-10</lastmod>
+         <lastmod>2026-07-11</lastmod>
     </url>
     <url>
          <loc>https://sjkim1127.github.io/Fission/RELEASE/</loc>
-         <lastmod>2026-07-10</lastmod>
+         <lastmod>2026-07-11</lastmod>
     </url>
     <url>
          <loc>https://sjkim1127.github.io/Fission/VERSIONING/</loc>
-         <lastmod>2026-07-10</lastmod>
+         <lastmod>2026-07-11</lastmod>
     </url>
     <url>
          <loc>https://sjkim1127.github.io/Fission/contributing/</loc>
-         <lastmod>2026-07-10</lastmod>
+         <lastmod>2026-07-11</lastmod>
     </url>
     <url>
          <loc>https://sjkim1127.github.io/Fission/adr/</loc>
-         <lastmod>2026-07-10</lastmod>
+         <lastmod>2026-07-11</lastmod>
     </url>
     <url>
          <loc>https://sjkim1127.github.io/Fission/adr/0000-template/</loc>
-         <lastmod>2026-07-10</lastmod>
+         <lastmod>2026-07-11</lastmod>
     </url>
     <url>
          <loc>https://sjkim1127.github.io/Fission/adr/0001-cli-first-external-surface/</loc>
-         <lastmod>2026-07-10</lastmod>
+         <lastmod>2026-07-11</lastmod>
     </url>
     <url>
          <loc>https://sjkim1127.github.io/Fission/adr/0002-fission-pcode-canonical-semantics/</loc>
-         <lastmod>2026-07-10</lastmod>
+         <lastmod>2026-07-11</lastmod>
     </url>
     <url>
          <loc>https://sjkim1127.github.io/Fission/adr/0003-fail-closed-loader-policy/</loc>
-         <lastmod>2026-07-10</lastmod>
+         <lastmod>2026-07-11</lastmod>
     </url>
     <url>
          <loc>https://sjkim1127.github.io/Fission/adr/0004-die-as-detector-resource/</loc>
-         <lastmod>2026-07-10</lastmod>
+         <lastmod>2026-07-11</lastmod>
     </url>
     <url>
          <loc>https://sjkim1127.github.io/Fission/adr/0005-ghidra-reference-boundary/</loc>
-         <lastmod>2026-07-10</lastmod>
+         <lastmod>2026-07-11</lastmod>
     </url>
     <url>
          <loc>https://sjkim1127.github.io/Fission/adr/0006-decompiler-quality-change-gate/</loc>
-         <lastmod>2026-07-10</lastmod>
+         <lastmod>2026-07-11</lastmod>
     </url>
     <url>
          <loc>https://sjkim1127.github.io/Fission/adr/0007-ai-overfit-and-validation-firewall/</loc>
-         <lastmod>2026-07-10</lastmod>
+         <lastmod>2026-07-11</lastmod>
     </url>
     <url>
          <loc>https://sjkim1127.github.io/Fission/adr/0008-nir-substrate-and-owner-boundaries/</loc>
-         <lastmod>2026-07-10</lastmod>
+         <lastmod>2026-07-11</lastmod>
     </url>
     <url>
          <loc>https://sjkim1127.github.io/Fission/adr/0009-isa-agnostic-semantic-rules/</loc>
-         <lastmod>2026-07-10</lastmod>
+         <lastmod>2026-07-11</lastmod>
     </url>
     <url>
          <loc>https://sjkim1127.github.io/Fission/architecture/ARCHITECTURE/</loc>
-         <lastmod>2026-07-10</lastmod>
+         <lastmod>2026-07-11</lastmod>
     </url>
     <url>
          <loc>https://sjkim1127.github.io/Fission/architecture/DECOMPILER_ACTIONS/</loc>
-         <lastmod>2026-07-10</lastmod>
+         <lastmod>2026-07-11</lastmod>
     </url>
     <url>
          <loc>https://sjkim1127.github.io/Fission/architecture/DIAGRAMS/</loc>
-         <lastmod>2026-07-10</lastmod>
+         <lastmod>2026-07-11</lastmod>
     </url>
     <url>
          <loc>https://sjkim1127.github.io/Fission/architecture/GHIDRA_PARITY_GAP_AUDIT/</loc>
-         <lastmod>2026-07-10</lastmod>
+         <lastmod>2026-07-11</lastmod>
     </url>
     <url>
          <loc>https://sjkim1127.github.io/Fission/architecture/XREF_INDEX/</loc>
-         <lastmod>2026-07-10</lastmod>
+         <lastmod>2026-07-11</lastmod>
     </url>
     <url>
          <loc>https://sjkim1127.github.io/Fission/audits/</loc>
-         <lastmod>2026-07-10</lastmod>
+         <lastmod>2026-07-11</lastmod>
     </url>
     <url>
          <loc>https://sjkim1127.github.io/Fission/audits/2026-07-04-arch-isolation-scan/</loc>
-         <lastmod>2026-07-10</lastmod>
+         <lastmod>2026-07-11</lastmod>
     </url>
     <url>
          <loc>https://sjkim1127.github.io/Fission/audits/2026-07-04-benchmark-smell-scan/</loc>
-         <lastmod>2026-07-10</lastmod>
+         <lastmod>2026-07-11</lastmod>
     </url>
     <url>
          <loc>https://sjkim1127.github.io/Fission/audits/2026-07-04-metric-gaming/</loc>
-         <lastmod>2026-07-10</lastmod>
+         <lastmod>2026-07-11</lastmod>
     </url>
     <url>
          <loc>https://sjkim1127.github.io/Fission/audits/2026-07-04-nir-boundary-scan/</loc>
-         <lastmod>2026-07-10</lastmod>
+         <lastmod>2026-07-11</lastmod>
     </url>
     <url>
          <loc>https://sjkim1127.github.io/Fission/audits/2026-07-04-regression-replay/</loc>
-         <lastmod>2026-07-10</lastmod>
+         <lastmod>2026-07-11</lastmod>
     </url>
     <url>
          <loc>https://sjkim1127.github.io/Fission/audits/2026-07-10-decompiler-problem-inventory/</loc>
-         <lastmod>2026-07-10</lastmod>
+         <lastmod>2026-07-11</lastmod>
     </url>
     <url>
          <loc>https://sjkim1127.github.io/Fission/audits/2026-07-10-isa-semantic-debt-inventory/</loc>
-         <lastmod>2026-07-10</lastmod>
+         <lastmod>2026-07-11</lastmod>
     </url>
     <url>
          <loc>https://sjkim1127.github.io/Fission/changelog/Legacy/20260421_Changelog/</loc>
-         <lastmod>2026-07-10</lastmod>
+         <lastmod>2026-07-11</lastmod>
     </url>
     <url>
          <loc>https://sjkim1127.github.io/Fission/changelog/Legacy/20260422_Changelog/</loc>
-         <lastmod>2026-07-10</lastmod>
+         <lastmod>2026-07-11</lastmod>
     </url>
     <url>
          <loc>https://sjkim1127.github.io/Fission/changelog/Legacy/20260423_Changelog/</loc>
-         <lastmod>2026-07-10</lastmod>
+         <lastmod>2026-07-11</lastmod>
     </url>
     <url>
          <loc>https://sjkim1127.github.io/Fission/changelog/Legacy/20260424_Changelog/</loc>
-         <lastmod>2026-07-10</lastmod>
+         <lastmod>2026-07-11</lastmod>
     </url>
     <url>
          <loc>https://sjkim1127.github.io/Fission/changelog/Legacy/20260425_Changelog/</loc>
-         <lastmod>2026-07-10</lastmod>
+         <lastmod>2026-07-11</lastmod>
     </url>
     <url>
          <loc>https://sjkim1127.github.io/Fission/changelog/Legacy/20260426_Changelog/</loc>
-         <lastmod>2026-07-10</lastmod>
+         <lastmod>2026-07-11</lastmod>
     </url>
     <url>
          <loc>https://sjkim1127.github.io/Fission/changelog/Legacy/20260428_Changelog/</loc>
-         <lastmod>2026-07-10</lastmod>
+         <lastmod>2026-07-11</lastmod>
     </url>
     <url>
          <loc>https://sjkim1127.github.io/Fission/changelog/Legacy/20260429_Changelog/</loc>
-         <lastmod>2026-07-10</lastmod>
+         <lastmod>2026-07-11</lastmod>
     </url>
     <url>
          <loc>https://sjkim1127.github.io/Fission/changelog/Legacy/20260430_Changelog/</loc>
-         <lastmod>2026-07-10</lastmod>
+         <lastmod>2026-07-11</lastmod>
     </url>
     <url>
          <loc>https://sjkim1127.github.io/Fission/changelog/Legacy/20260501_Changelog/</loc>
-         <lastmod>2026-07-10</lastmod>
+         <lastmod>2026-07-11</lastmod>
     </url>
     <url>
          <loc>https://sjkim1127.github.io/Fission/changelog/Legacy/20260502_Changelog/</loc>
-         <lastmod>2026-07-10</lastmod>
+         <lastmod>2026-07-11</lastmod>
     </url>
     <url>
          <loc>https://sjkim1127.github.io/Fission/changelog/Legacy/20260503_Changelog/</loc>
-         <lastmod>2026-07-10</lastmod>
+         <lastmod>2026-07-11</lastmod>
     </url>
     <url>
          <loc>https://sjkim1127.github.io/Fission/changelog/Legacy/20260506_Changelog/</loc>
-         <lastmod>2026-07-10</lastmod>
+         <lastmod>2026-07-11</lastmod>
     </url>
     <url>
          <loc>https://sjkim1127.github.io/Fission/changelog/Legacy/CHANGELOG/</loc>
-         <lastmod>2026-07-10</lastmod>
+         <lastmod>2026-07-11</lastmod>
     </url>
     <url>
          <loc>https://sjkim1127.github.io/Fission/changelog/new/</loc>
-         <lastmod>2026-07-10</lastmod>
+         <lastmod>2026-07-11</lastmod>
     </url>
     <url>
          <loc>https://sjkim1127.github.io/Fission/contributing/LABELS/</loc>
-         <lastmod>2026-07-10</lastmod>
+         <lastmod>2026-07-11</lastmod>
     </url>
     <url>
          <loc>https://sjkim1127.github.io/Fission/onboarding/ADDING_A_LOADER_TEST/</loc>
-         <lastmod>2026-07-10</lastmod>
+         <lastmod>2026-07-11</lastmod>
     </url>
     <url>
          <loc>https://sjkim1127.github.io/Fission/onboarding/DEBUGGING_A_DECOMP_FAILURE/</loc>
-         <lastmod>2026-07-10</lastmod>
+         <lastmod>2026-07-11</lastmod>
     </url>
     <url>
          <loc>https://sjkim1127.github.io/Fission/onboarding/FIRST_30_MINUTES/</loc>
-         <lastmod>2026-07-10</lastmod>
+         <lastmod>2026-07-11</lastmod>
     </url>
     <url>
          <loc>https://sjkim1127.github.io/Fission/plans/emulator-jit-only-roadmap/</loc>
-         <lastmod>2026-07-10</lastmod>
+         <lastmod>2026-07-11</lastmod>
     </url>
     <url>
          <loc>https://sjkim1127.github.io/Fission/plans/native-jit-emulator/</loc>
-         <lastmod>2026-07-10</lastmod>
+         <lastmod>2026-07-11</lastmod>
     </url>
     <url>
          <loc>https://sjkim1127.github.io/Fission/proposals/2026-07-03-fission-0.1.2-decompiler-quality/</loc>
-         <lastmod>2026-07-10</lastmod>
+         <lastmod>2026-07-11</lastmod>
     </url>
     <url>
          <loc>https://sjkim1127.github.io/Fission/proposals/2026-07-10-cmov-tail-block-skip/</loc>
-         <lastmod>2026-07-10</lastmod>
+         <lastmod>2026-07-11</lastmod>
     </url>
     <url>
          <loc>https://sjkim1127.github.io/Fission/proposals/2026-07-10-dead-flag-cleanup-compile/</loc>
-         <lastmod>2026-07-10</lastmod>
+         <lastmod>2026-07-11</lastmod>
     </url>
     <url>
          <loc>https://sjkim1127.github.io/Fission/proposals/2026-07-10-epilogue-return-join-live-eax/</loc>
-         <lastmod>2026-07-10</lastmod>
+         <lastmod>2026-07-11</lastmod>
     </url>
     <url>
          <loc>https://sjkim1127.github.io/Fission/proposals/2026-07-10-fuse-if-goto-return/</loc>
-         <lastmod>2026-07-10</lastmod>
+         <lastmod>2026-07-11</lastmod>
     </url>
     <url>
          <loc>https://sjkim1127.github.io/Fission/proposals/2026-07-10-loop-external-seed-cc-gate/</loc>
-         <lastmod>2026-07-10</lastmod>
+         <lastmod>2026-07-11</lastmod>
     </url>
     <url>
          <loc>https://sjkim1127.github.io/Fission/proposals/2026-07-10-natural-while-head-recovery/</loc>
-         <lastmod>2026-07-10</lastmod>
+         <lastmod>2026-07-11</lastmod>
     </url>
     <url>
          <loc>https://sjkim1127.github.io/Fission/proposals/2026-07-10-primary-return-keep-materialize/</loc>
-         <lastmod>2026-07-10</lastmod>
+         <lastmod>2026-07-11</lastmod>
     </url>
     <url>
          <loc>https://sjkim1127.github.io/Fission/proposals/2026-07-10-retire-hoist-param-alias/</loc>
-         <lastmod>2026-07-10</lastmod>
+         <lastmod>2026-07-11</lastmod>
     </url>
     <url>
          <loc>https://sjkim1127.github.io/Fission/proposals/2026-07-10-variable-merge-cooccur-barrier/</loc>
-         <lastmod>2026-07-10</lastmod>
+         <lastmod>2026-07-11</lastmod>
     </url>
     <url>
          <loc>https://sjkim1127.github.io/Fission/proposals/2026-07-10-x86-32-cmov-clamp/</loc>
-         <lastmod>2026-07-10</lastmod>
+         <lastmod>2026-07-11</lastmod>
     </url>
     <url>
          <loc>https://sjkim1127.github.io/Fission/proposals/2026-07-10-x86-32-loop-carried-self-update/</loc>
-         <lastmod>2026-07-10</lastmod>
+         <lastmod>2026-07-11</lastmod>
     </url>
     <url>
          <loc>https://sjkim1127.github.io/Fission/proposals/2026-07-10-x86-32-stack-parameters/</loc>
-         <lastmod>2026-07-10</lastmod>
+         <lastmod>2026-07-11</lastmod>
     </url>
     <url>
          <loc>https://sjkim1127.github.io/Fission/proposals/2026-07-10-x86-register-space-flag-names/</loc>
-         <lastmod>2026-07-10</lastmod>
+         <lastmod>2026-07-11</lastmod>
+    </url>
+    <url>
+         <loc>https://sjkim1127.github.io/Fission/proposals/2026-07-11-partial-register-zero-extension/</loc>
+         <lastmod>2026-07-11</lastmod>
+    </url>
+    <url>
+         <loc>https://sjkim1127.github.io/Fission/proposals/2026-07-11-pointer-arithmetic-role-constraints/</loc>
+         <lastmod>2026-07-11</lastmod>
+    </url>
+    <url>
+         <loc>https://sjkim1127.github.io/Fission/proposals/2026-07-11-unsigned-low-byte-mask/</loc>
+         <lastmod>2026-07-11</lastmod>
     </url>
     <url>
          <loc>https://sjkim1127.github.io/Fission/roadmap/RUST_DECOMPILER_ROADMAP/</loc>
-         <lastmod>2026-07-10</lastmod>
+         <lastmod>2026-07-11</lastmod>
     </url>
 </urlset>
