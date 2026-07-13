@@ -339,7 +339,11 @@ struct ListArgs {
     binary: PathBuf,
 
     /// Function discovery profile (conservative|balanced|aggressive)
-    #[arg(long = "function-discovery-profile", value_enum)]
+    #[arg(
+        long = "function-discovery-profile",
+        value_enum,
+        default_value = "conservative"
+    )]
     function_discovery_profile: Option<FunctionDiscoveryProfileArg>,
 
     /// Include validated executable thunks and other non-user function units
@@ -1086,6 +1090,10 @@ mod tests {
         assert!(parsed.args.list);
         assert!(parsed.args.json);
         assert!(parsed.args.include_nonuser_functions);
+        assert_eq!(
+            parsed.args.function_discovery_profile,
+            Some(FunctionDiscoveryProfileArg::Conservative)
+        );
     }
 
     #[test]
@@ -1208,6 +1216,27 @@ mod tests {
         assert!(parsed.args.ghidra_compat);
         assert!(parsed.args.benchmark);
         assert!(parsed.args.json);
+        assert_eq!(
+            parsed.args.function_discovery_profile,
+            Some(FunctionDiscoveryProfileArg::Conservative)
+        );
+    }
+
+    #[test]
+    fn canonical_decomp_can_override_discovery_profile() {
+        let parsed = parse_canonical(&[
+            "fission_cli",
+            "decomp",
+            "bin.exe",
+            "--addr",
+            "0x1400",
+            "--function-discovery-profile",
+            "balanced",
+        ]);
+        assert_eq!(
+            parsed.args.function_discovery_profile,
+            Some(FunctionDiscoveryProfileArg::Balanced)
+        );
     }
 
     #[test]

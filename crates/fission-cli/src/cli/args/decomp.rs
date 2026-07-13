@@ -58,7 +58,12 @@ pub struct DecompArgs {
     pub timeout_ms: Option<u64>,
 
     /// Function discovery profile (conservative|balanced|aggressive)
-    #[arg(long, value_enum, value_name = "PROFILE")]
+    #[arg(
+        long,
+        value_enum,
+        value_name = "PROFILE",
+        default_value = "conservative"
+    )]
     pub function_discovery_profile: Option<FunctionDiscoveryProfileArg>,
 
     /// Output in JSON format
