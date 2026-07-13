@@ -924,6 +924,7 @@ impl<'a> PreviewBuilder<'a> {
             );
             name
         } else if self.register_namer().is_primary_return_register(output)
+            && !Self::output_has_consumed_interval_before_redefinition(block, op_idx, output)
             // ARM/AArch64 r0/x0 are both param and return; forcing the HW name
             // there collapses call-arg vs result identity. x86 eax/rax is
             // return-only under the active CCs.
@@ -994,6 +995,9 @@ impl<'a> PreviewBuilder<'a> {
         if output.is_constant || !is_register_space_id(output.space_id) {
             return None;
         }
+        if Self::output_has_consumed_interval_before_redefinition(block, op_idx, output) {
+            return None;
+        }
         let output_key = VarnodeKey::from(output);
         for prior_idx in (0..op_idx).rev() {
             let prior_op = &block.ops[prior_idx];
@@ -1015,6 +1019,15 @@ impl<'a> PreviewBuilder<'a> {
             }
         }
         None
+    }
+
+    fn output_has_consumed_interval_before_redefinition(
+        block: &crate::pcode::PcodeBasicBlock,
+        op_idx: usize,
+        output: &Varnode,
+    ) -> bool {
+        !Self::collect_output_use_sites_in_block(block, op_idx, output).is_empty()
+            && Self::first_output_redefinition_in_block(block, op_idx, output).is_some()
     }
 
     fn live_register_lhs_name_for_passthrough_join_store_producer(

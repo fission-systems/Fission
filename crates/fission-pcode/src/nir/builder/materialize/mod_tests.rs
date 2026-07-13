@@ -32,6 +32,35 @@ fn call_result_observation_accepts_partial_return_register_reads() {
 }
 
 #[test]
+fn same_block_register_binding_splits_consumed_live_intervals() {
+    let rax = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0, 8);
+    let saved = register(RUST_SLEIGH_UNIQUE_SPACE_ID, 0x100, 8);
+    let block = block(vec![
+        op(1, PcodeOpcode::Copy, Some(rax.clone()), vec![constant(1)]),
+        op(2, PcodeOpcode::Copy, Some(rax.clone()), vec![constant(2)]),
+        op(
+            3,
+            PcodeOpcode::IntAdd,
+            Some(saved),
+            vec![rax.clone(), constant(4)],
+        ),
+        op(4, PcodeOpcode::Copy, Some(rax.clone()), vec![constant(3)]),
+    ]);
+    let pcode = pcode_function(vec![block.clone()]);
+    let options = crate::nir::builder::materialize::test_support::test_options();
+    let mut builder = PreviewBuilder::new(&pcode, &options, None);
+    builder.materialized_vns.insert(
+        MaterializedVarnodeKey::new(&rax, &block.ops[0]),
+        "prior_value".to_string(),
+    );
+
+    assert_eq!(
+        builder.same_block_prior_register_binding_name(&block, 1, &rax),
+        None
+    );
+}
+
+#[test]
 fn predecessor_assignment_accepts_predicate_merge_consumers() {
     let pcode = pcode_function(vec![block(Vec::new())]);
     let options = crate::nir::builder::materialize::test_support::test_options();

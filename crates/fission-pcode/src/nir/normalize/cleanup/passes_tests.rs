@@ -802,6 +802,41 @@ fn inline_single_use_temps_keeps_same_linear_segment_inline() {
 }
 
 #[test]
+fn inline_single_use_temps_preserves_rhs_across_dependency_redefinition() {
+    let mut stmts = vec![
+        HirStmt::Assign {
+            lhs: HirLValue::Var("xVar0".to_string()),
+            rhs: HirExpr::Binary {
+                op: HirBinaryOp::Mul,
+                lhs: Box::new(HirExpr::Var("address_reg".to_string())),
+                rhs: Box::new(HirExpr::Const(4, int(64))),
+                ty: int(64),
+            },
+        },
+        HirStmt::Assign {
+            lhs: HirLValue::Var("address_reg".to_string()),
+            rhs: HirExpr::Var("base".to_string()),
+        },
+        HirStmt::Assign {
+            lhs: HirLValue::Var("address_reg".to_string()),
+            rhs: HirExpr::Binary {
+                op: HirBinaryOp::Add,
+                lhs: Box::new(HirExpr::Var("address_reg".to_string())),
+                rhs: Box::new(HirExpr::Var("xVar0".to_string())),
+                ty: int(64),
+            },
+        },
+    ];
+
+    assert!(!inline_single_use_temps(&mut stmts, &HashSet::new()));
+    assert_eq!(stmts.len(), 3);
+    let HirStmt::Assign { rhs, .. } = &stmts[2] else {
+        panic!("expected address assignment");
+    };
+    assert!(expr_contains_var(rhs, "xVar0"));
+}
+
+#[test]
 fn inline_single_use_temps_inlines_flag_intrinsic_into_predicate() {
     let mut stmts = vec![
         HirStmt::Assign {

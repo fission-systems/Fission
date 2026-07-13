@@ -617,6 +617,7 @@ fn movzx_al_into_edx_after_int_add_preserves_low_byte_truncation() {
             || code.contains("return 44")
             || code.contains("return (uchar)300")
             || code.contains("(uchar)rax")
+            || code.contains("rdx = (uchar)")
             || code.contains("& 0xff")
             || code.contains("& 255"),
         "expected low-byte truncation of 200+100=300 → 44 via EDX:\n{code}"
@@ -679,6 +680,7 @@ fn rc4_keystream_movzx_sequence_truncates_index() {
             || code.contains("0x102c")
             || code.contains("= 44")
             || code.contains("(uchar)rax")
+            || code.contains("rdx = (uchar)")
             || (code.contains("0x1000")
                 && (code.contains("& 0xff")
                     || code.contains("& 255")

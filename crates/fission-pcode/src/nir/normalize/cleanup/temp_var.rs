@@ -197,6 +197,9 @@ fn find_inline_forward_target(
             return Some(scan_idx);
         }
         if uses == 0 {
+            if stmt_redefines_expr_dependency(stmt, &stmts[def_idx]) {
+                return None;
+            }
             if stmt_blocks_linear_inline_scan(stmt) {
                 return None;
             }
@@ -212,6 +215,20 @@ fn find_inline_forward_target(
         return None;
     }
     None
+}
+
+fn stmt_redefines_expr_dependency(stmt: &HirStmt, defining_stmt: &HirStmt) -> bool {
+    let HirStmt::Assign {
+        lhs: HirLValue::Var(defined_name),
+        ..
+    } = stmt
+    else {
+        return false;
+    };
+    let HirStmt::Assign { rhs, .. } = defining_stmt else {
+        return false;
+    };
+    expr_mentions_var(rhs, defined_name)
 }
 
 fn stmt_blocks_linear_inline_scan(stmt: &HirStmt) -> bool {
