@@ -36,4 +36,8 @@ jobs:
         run: |
           cargo install cargo-audit --locked
           # --deny warnings: treat advisory warnings as errors
-          cargo audit --deny warnings
+          # cranelift-jit 0.133.1 pins memmap2 0.2.x but only calls map_anon;
+          # RUSTSEC-2026-0186 affects advise_range/flush_range APIs that are not
+          # referenced by Cranelift. Remove this exception when Cranelift moves
+          # to memmap2 >= 0.9.11.
+          cargo audit --deny warnings --ignore RUSTSEC-2026-0186
