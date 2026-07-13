@@ -1,9 +1,19 @@
 use fission_loader::loader::LoadedBinary;
-use fission_loader::loader::function_view::canonical_functions_sorted;
+use fission_loader::loader::function_view::{
+    canonical_functions_sorted, discovered_functions_sorted,
+};
 use std::io::{self, Write};
 
-pub(super) fn print_function_list(binary: &LoadedBinary, json: bool) -> io::Result<()> {
-    let functions = canonical_functions_sorted(binary);
+pub(super) fn print_function_list(
+    binary: &LoadedBinary,
+    json: bool,
+    include_nonuser_functions: bool,
+) -> io::Result<()> {
+    let functions = if include_nonuser_functions {
+        discovered_functions_sorted(binary)
+    } else {
+        canonical_functions_sorted(binary)
+    };
     let mut stdout = io::stdout().lock();
     if json {
         let funcs: Vec<serde_json::Value> = functions

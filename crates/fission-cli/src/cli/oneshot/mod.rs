@@ -136,9 +136,7 @@ fn run() -> Result<()> {
                 .context("failed to create tokio runtime for AI subcommand")?;
             rt.block_on(crate::cli::ai::run_ai(inv))
         }
-        ParsedInvocation::Sandbox(args) => {
-            run_sandbox(args)
-        }
+        ParsedInvocation::Sandbox(args) => run_sandbox(args),
         ParsedInvocation::OneShot(parsed) => run_oneshot_inner(parsed),
     }
 }
@@ -183,9 +181,7 @@ fn run_sandbox(args: crate::cli::args::SandboxArgs) -> Result<()> {
         let right = fission_emulator::SemanticReplaySnapshot::read_json_file(&paths[1])
             .with_context(|| format!("read SRD right {}", paths[1].display()))?;
         let delta = fission_emulator::SemanticReplayDelta::diff(&left, &right);
-        let json = delta
-            .to_json_pretty()
-            .context("serialize SRD delta")?;
+        let json = delta.to_json_pretty().context("serialize SRD delta")?;
         if let Some(out) = &args.srd_diff_out {
             std::fs::write(out, &json)
                 .with_context(|| format!("write SRD delta to {}", out.display()))?;
@@ -206,11 +202,11 @@ fn run_sandbox(args: crate::cli::args::SandboxArgs) -> Result<()> {
     fission_core::logging::init_with_options(logging_options);
 
     tracing::info!("Starting sandbox for {}", binary_path.display());
-    
+
     // Parse binary using fission-loader
     let binary = fission_loader::loader::LoadedBinary::from_file(binary_path)
         .with_context(|| format!("failed to read binary at {}", binary_path.display()))?;
-        
+
     let mut state = fission_emulator::MachineState::new();
 
     // Load binary sections into emulator RAM (format-aware)
@@ -231,23 +227,31 @@ fn run_sandbox(args: crate::cli::args::SandboxArgs) -> Result<()> {
     }
 
     // Initialize Sleigh Frontend
-    let load_spec = binary.load_spec().with_context(|| "Binary lacks load_spec")?;
-    let frontends = fission_sleigh::runtime::RuntimeSleighFrontend::new_candidate_frontends_for_load_spec(load_spec)
+    let load_spec = binary
+        .load_spec()
+        .with_context(|| "Binary lacks load_spec")?;
+    let frontends =
+        fission_sleigh::runtime::RuntimeSleighFrontend::new_candidate_frontends_for_load_spec(
+            load_spec,
+        )
         .with_context(|| "Failed to create Sleigh frontend candidates")?;
-    let sleigh = frontends.into_iter().next().with_context(|| "No suitable Sleigh frontend found")?;
-    
+    let sleigh = frontends
+        .into_iter()
+        .next()
+        .with_context(|| "No suitable Sleigh frontend found")?;
+
     // Derive ArchInfo from Sleigh Language ID + binary format
     let lang_id = load_spec.pair.language_id.as_str();
     let arch = fission_emulator::ArchInfo::from_language_id(lang_id, Some(&binary))
         .with_context(|| format!("Unsupported architecture: {}", lang_id))?;
-    
+
     // Choose OS environment based on binary format
     let os: Box<dyn fission_emulator::OsEnvironment> = match binary.format.as_str() {
-        "PE"  => Box::new(fission_emulator::WindowsEnv::new()),
+        "PE" => Box::new(fission_emulator::WindowsEnv::new()),
         "ELF" | "ELF64" => Box::new(fission_emulator::LinuxEnv::new()),
-        fmt   => anyhow::bail!("Unsupported binary format for sandbox: {}", fmt),
+        fmt => anyhow::bail!("Unsupported binary format for sandbox: {}", fmt),
     };
-    
+
     // Create Emulator and Run
     let mut emu = fission_emulator::core::Emulator::new(state, binary, sleigh, arch, os)?
         .with_max_inst(args.max_inst)
@@ -264,13 +268,14 @@ fn run_sandbox(args: crate::cli::args::SandboxArgs) -> Result<()> {
     // Setup Ctrl+C handler
     ctrlc::set_handler(move || {
         fission_emulator::core::IS_INTERRUPTED.store(true, std::sync::atomic::Ordering::Relaxed);
-    }).unwrap_or_else(|e| tracing::warn!("Failed to set Ctrl+C handler: {}", e));
-    
+    })
+    .unwrap_or_else(|e| tracing::warn!("Failed to set Ctrl+C handler: {}", e));
+
     if let Some(trigger) = args.snapshot_at {
         tracing::info!("Configured snapshot trigger at 0x{:X}", trigger);
         emu.snapshot_triggers.push(trigger);
     }
-    
+
     if let Some(snapshot_path) = args.restore_snapshot {
         tracing::info!("Restoring snapshot from {}", snapshot_path.display());
         let snapshot = fission_emulator::EmulatorSnapshot::load_from_disk(&snapshot_path)?;
@@ -281,7 +286,7 @@ fn run_sandbox(args: crate::cli::args::SandboxArgs) -> Result<()> {
     }
 
     tracing::info!("Starting Emulator Execution Loop at PC=0x{:X}", emu.pc);
-    
+
     if args.sym_explore {
         let mut sym_runner = fission_emulator::sym::SymbolicExecutor::new(emu);
         sym_runner.explore()?;
@@ -296,7 +301,7 @@ fn run_sandbox(args: crate::cli::args::SandboxArgs) -> Result<()> {
         tracing::info!("PC after seek: 0x{:X}", emu.pc);
         // We could also dump registers here if requested, but for now we just seek.
     }
-    
+
     if let Some(trace_path) = args.dump_trace {
         tracing::info!("Dumping execution trace to {}", trace_path.display());
         let f = std::fs::File::create(&trace_path)
@@ -467,7 +472,11 @@ fn execute_command(cli: &OneShotArgs) -> Result<()> {
     }
 
     if cli.list {
-        return Ok(print_function_list(&binary, cli.json)?);
+        return Ok(print_function_list(
+            &binary,
+            cli.json,
+            cli.include_nonuser_functions,
+        )?);
     }
 
     if cli.preview_candidate_inventory {

@@ -57,14 +57,22 @@ fn dedupe_exact_functions<'a>(functions: Vec<&'a FunctionInfo>) -> Vec<&'a Funct
     deduped
 }
 
-fn should_filter_internal_candidate(func: &FunctionInfo, covering_end: u64) -> bool {
+fn should_filter_internal_candidate(
+    func: &FunctionInfo,
+    covering_end: u64,
+    include_executable_thunks: bool,
+) -> bool {
     if func.is_import
-        || (func.is_thunk_like && !func.is_export)
         || matches!(
             func.kind.as_deref(),
-            Some("undefined_external" | "import" | "import_thunk" | "debug_symbol")
+            Some("undefined_external" | "import" | "debug_symbol")
         )
     {
+        return true;
+    }
+    let is_hidden_thunk = (func.is_thunk_like && !func.is_export)
+        || matches!(func.kind.as_deref(), Some("import_thunk"));
+    if is_hidden_thunk && !include_executable_thunks {
         return true;
     }
     if func.is_export || func.address >= covering_end {
@@ -86,13 +94,16 @@ pub fn is_runtime_wrapper_zero_size(func: &FunctionInfo) -> bool {
 /// This excludes true imports, undefined externals, import thunks, debug-only
 /// symbols, and covered generic internal labels. It does not hide zero-size
 /// runtime wrappers; batch decompile seed selection applies that final policy.
-pub fn canonical_functions_sorted(binary: &LoadedBinary) -> Vec<&FunctionInfo> {
+fn filtered_functions_sorted(
+    binary: &LoadedBinary,
+    include_executable_thunks: bool,
+) -> Vec<&FunctionInfo> {
     let deduped = dedupe_exact_functions(binary.functions_sorted());
     let mut filtered = Vec::with_capacity(deduped.len());
     let mut covering_end = 0u64;
 
     for func in deduped {
-        if should_filter_internal_candidate(func, covering_end) {
+        if should_filter_internal_candidate(func, covering_end, include_executable_thunks) {
             continue;
         }
         if !func.is_import && func.size > 0 {
@@ -102,6 +113,19 @@ pub fn canonical_functions_sorted(binary: &LoadedBinary) -> Vec<&FunctionInfo> {
     }
 
     filtered
+}
+
+pub fn canonical_functions_sorted(binary: &LoadedBinary) -> Vec<&FunctionInfo> {
+    filtered_functions_sorted(binary, false)
+}
+
+/// Return the complete executable function inventory for analysis tooling.
+///
+/// Unlike [`canonical_functions_sorted`], this retains validated executable
+/// thunks while still excluding import-table entries, undefined externals,
+/// debug-only symbols, and covered generic labels.
+pub fn discovered_functions_sorted(binary: &LoadedBinary) -> Vec<&FunctionInfo> {
+    filtered_functions_sorted(binary, true)
 }
 
 pub fn canonical_imports_sorted(binary: &LoadedBinary) -> Vec<&FunctionInfo> {
@@ -220,6 +244,34 @@ mod tests {
         assert_eq!(functions[0].name, "real_function");
         assert_eq!(canonical_imports_sorted(&binary).len(), 2);
         assert_eq!(canonical_exports_sorted(&binary).len(), 0);
+    }
+
+    #[test]
+    fn discovered_functions_include_executable_thunks_but_not_import_entries() {
+        let mut import = func(
+            "KERNEL32!ExitProcess",
+            0x5000,
+            0,
+            Some("import"),
+            Some("pe-import-table"),
+        );
+        import.is_import = true;
+
+        let mut thunk = func(
+            "ExitProcess",
+            0x1010,
+            6,
+            Some("validated_symbol"),
+            Some("pe-coff-untyped-executable-symbol"),
+        );
+        thunk.is_thunk_like = true;
+
+        let binary = test_binary(vec![import, thunk]);
+
+        assert!(canonical_functions_sorted(&binary).is_empty());
+        let discovered = discovered_functions_sorted(&binary);
+        assert_eq!(discovered.len(), 1);
+        assert_eq!(discovered[0].name, "ExitProcess");
     }
 
     #[test]

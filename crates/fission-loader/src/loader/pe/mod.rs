@@ -176,6 +176,7 @@ impl PeLoader {
         };
 
         let mut functions_info = Vec::new();
+        let mut function_candidates = Vec::new();
         let mut iat_symbols = std::collections::HashMap::new();
         let mut global_symbols = std::collections::HashMap::new();
 
@@ -296,6 +297,14 @@ impl PeLoader {
                 image_base,
             ) {
                 cfg_label_leaders = leaders;
+            }
+
+            if let Ok(candidates) = coff::parse_coff_function_candidates(
+                &loader,
+                file_header.pointer_to_symbol_table,
+                file_header.number_of_symbols,
+            ) {
+                function_candidates = candidates;
             }
         }
         tracing::debug!(
@@ -482,7 +491,10 @@ impl PeLoader {
             builder = builder.rich_header_records(records);
         }
 
-        let res = builder.build();
+        let mut res = builder.build()?;
+        function_candidates
+            .retain(|candidate| !res.function_addr_index.contains_key(&candidate.address));
+        res.function_candidates = function_candidates;
         tracing::debug!(
             "[PE Profiler] LoadedBinaryBuilder::build took: {:?}",
             build_started.elapsed()
@@ -491,7 +503,7 @@ impl PeLoader {
             "[PE Profiler] TOTAL PeLoader::parse took: {:?}",
             main_started.elapsed()
         );
-        res
+        Ok(res)
     }
 }
 

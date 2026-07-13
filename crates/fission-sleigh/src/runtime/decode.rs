@@ -47,6 +47,46 @@ impl RuntimeSleighFrontend {
         }
     }
 
+    pub fn decode_instruction_and_lift_with_context_override(
+        &self,
+        bytes: &[u8],
+        address: u64,
+        context_override: Option<PackedContextOverride>,
+    ) -> Result<(
+        DecodedInstruction,
+        Vec<PcodeOp>,
+        u64,
+        RuntimeExecutionDetails,
+    )> {
+        if bytes.is_empty() {
+            return Err(RuntimeSleighError::DecodeNoMatch {
+                language: self.entry.entry_id.clone(),
+                address,
+            }
+            .into());
+        }
+        match self.status {
+            RuntimeFrontendStatus::RegisteredCompileOnly => {
+                Err(RuntimeSleighError::UnsupportedGeneratedSemantic {
+                    language: self.entry.entry_id.clone(),
+                    status: self.status,
+                }
+                .into())
+            }
+            RuntimeFrontendStatus::ExecutableCandidate => {
+                engine::decode_instruction_and_lift_with_details(
+                    &self.entry,
+                    self.compiled.as_ref().ok_or_else(|| {
+                        anyhow!("missing compiled frontend for {}", self.entry.entry_id)
+                    })?,
+                    bytes,
+                    address,
+                    context_override,
+                )
+            }
+        }
+    }
+
     pub fn decode_and_lift_with_len(
         &self,
         bytes: &[u8],

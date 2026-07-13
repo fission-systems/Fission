@@ -342,6 +342,10 @@ struct ListArgs {
     #[arg(long = "function-discovery-profile", value_enum)]
     function_discovery_profile: Option<FunctionDiscoveryProfileArg>,
 
+    /// Include validated executable thunks and other non-user function units
+    #[arg(long)]
+    include_nonuser_functions: bool,
+
     #[command(flatten)]
     common: CommonBinaryOutputArgs,
 }
@@ -708,6 +712,7 @@ fn normalize_canonical(cli: CliArgs) -> ParsedInvocation {
                     args.json = list.common.json;
                     args.verbose = list.common.verbose;
                     args.function_discovery_profile = list.function_discovery_profile;
+                    args.include_nonuser_functions = list.include_nonuser_functions;
                     args
                 }
                 CliCommand::Disasm(disasm) => {
@@ -1064,9 +1069,16 @@ mod tests {
 
     #[test]
     fn canonical_list_parsing_maps_to_list_command() {
-        let parsed = parse_canonical(&["fission_cli", "list", "bin.exe", "--json"]);
+        let parsed = parse_canonical(&[
+            "fission_cli",
+            "list",
+            "bin.exe",
+            "--include-nonuser-functions",
+            "--json",
+        ]);
         assert!(parsed.args.list);
         assert!(parsed.args.json);
+        assert!(parsed.args.include_nonuser_functions);
     }
 
     #[test]

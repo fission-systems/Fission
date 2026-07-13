@@ -676,6 +676,7 @@ impl RuntimeSleighFrontend {
         }
 
         let mut decoded = BTreeMap::<u64, Vec<PcodeOp>>::new();
+        let mut decoded_instruction_records = BTreeMap::<u64, DecodedInstruction>::new();
         let mut decoded_contexts = BTreeMap::<u64, PackedContextOverride>::new();
         let mut instruction_lengths = BTreeMap::<u64, u64>::new();
         let mut template_sources = BTreeMap::<u64, String>::new();
@@ -726,8 +727,12 @@ impl RuntimeSleighFrontend {
             };
             let remaining = &bytes[offset..];
 
-            let (mut ins_ops, decoded_len, details) = self
-                .decode_and_lift_with_context_override(remaining, current, context_override)
+            let (instruction, mut ins_ops, decoded_len, details) = self
+                .decode_instruction_and_lift_with_context_override(
+                    remaining,
+                    current,
+                    context_override,
+                )
                 .map_err(|err| anyhow!("decode failed at 0x{:x}: {:#}", current, err))?;
 
             if decoded_len == 0 {
@@ -756,6 +761,7 @@ impl RuntimeSleighFrontend {
             }
 
             decoded_contexts.insert(current, current_override_val);
+            decoded_instruction_records.insert(current, instruction);
             instruction_lengths.insert(current, decoded_len);
 
             let terminal = ins_ops
@@ -927,6 +933,7 @@ impl RuntimeSleighFrontend {
         }
 
         decoded.retain(|addr, _| reachable.contains(addr));
+        decoded_instruction_records.retain(|addr, _| reachable.contains(addr));
         inferred_indirect_edges.retain(|addr, _| reachable.contains(addr));
         template_sources.retain(|addr, _| reachable.contains(addr));
         instruction_lengths.retain(|addr, _| reachable.contains(addr));
@@ -988,6 +995,7 @@ impl RuntimeSleighFrontend {
 
         Ok(DecodedPcodeFunction {
             function,
+            instructions: decoded_instruction_records.into_values().collect(),
             decoded_instructions: instruction_count,
             stop_reason,
             template_source_counts,

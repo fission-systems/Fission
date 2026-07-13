@@ -75,6 +75,26 @@ pub(crate) fn decode_and_lift_with_context_override(
     address: u64,
     context_override: Option<PackedContextOverride>,
 ) -> Result<(Vec<PcodeOp>, u64, RuntimeExecutionDetails)> {
+    let (_, ops, decoded_length, details) = decode_instruction_and_lift_with_context_override(
+        compiled,
+        bytes,
+        address,
+        context_override,
+    )?;
+    Ok((ops, decoded_length, details))
+}
+
+pub(crate) fn decode_instruction_and_lift_with_context_override(
+    compiled: &CompiledFrontend,
+    bytes: &[u8],
+    address: u64,
+    context_override: Option<PackedContextOverride>,
+) -> Result<(
+    DecodedInstruction,
+    Vec<PcodeOp>,
+    u64,
+    RuntimeExecutionDetails,
+)> {
     clear_bind_cache();
     let mut ctx = CompiledInstructionContext::parse(bytes, address)?;
     ctx.context_register = compiled.default_context;
@@ -88,6 +108,16 @@ pub(crate) fn decode_and_lift_with_context_override(
     let mut first_error: Option<anyhow::Error> = None;
 
     for selection in candidates {
+        if crate::runtime::diagnostics::terminal_reselect_trace_enabled() {
+            eprintln!(
+                "[decode-instruction] ctor={} mnemonic={} source={} ctx=0x{:016x} known=0x{:016x}",
+                selection.constructor_index,
+                selection.constructor.mnemonic,
+                selection.constructor.source,
+                ctx.context_register,
+                ctx.context_known_mask,
+            );
+        }
         if !selection.constructor.runtime_ready {
             let err = unsupported_constructor_error(compiled, selection.constructor);
             if first_error.is_none() {
@@ -128,7 +158,9 @@ pub(crate) fn decode_and_lift_with_context_override(
             Ok((ops, mut details)) => {
                 details.pending_context_commits = pending_context_commits;
                 details.userops = compiled.userops.clone();
-                return Ok((ops, decoded_length, details));
+                let instruction =
+                    decoded_instruction_from_state(compiled, address, bytes, &ctx, decoded)?;
+                return Ok((instruction, ops, decoded_length, details));
             }
             Err(err) => {
                 if first_error.is_none() {
@@ -158,13 +190,13 @@ pub(crate) fn decode_instruction_with_context(
     address: u64,
     context_override: Option<PackedContextOverride>,
 ) -> Result<DecodedInstruction> {
-    let mut ctx = CompiledInstructionContext::parse(bytes, address)?;
-    ctx.context_register = compiled.default_context;
-    ctx.context_known_mask = compiled.default_context_known_mask;
-    if let Some(context_override) = context_override {
-        context_override.apply_to(&mut ctx.context_register, &mut ctx.context_known_mask);
-    }
-    decode_instruction_inner(compiled, bytes, address, ctx)
+    let (instruction, _, _, _) = decode_instruction_and_lift_with_context_override(
+        compiled,
+        bytes,
+        address,
+        context_override,
+    )?;
+    Ok(instruction)
 }
 
 pub(crate) fn decode_instruction(
@@ -172,83 +204,7 @@ pub(crate) fn decode_instruction(
     bytes: &[u8],
     address: u64,
 ) -> Result<DecodedInstruction> {
-    let mut ctx = CompiledInstructionContext::parse(bytes, address)?;
-    ctx.context_register = compiled.default_context;
-    ctx.context_known_mask = compiled.default_context_known_mask;
-    decode_instruction_inner(compiled, bytes, address, ctx)
-}
-
-fn decode_instruction_inner(
-    compiled: &CompiledFrontend,
-    bytes: &[u8],
-    address: u64,
-    ctx: CompiledInstructionContext<'_>,
-) -> Result<DecodedInstruction> {
-    clear_bind_cache();
-    let strategy = RuntimeDecodeStrategy::for_table();
-    let candidates = candidate_selections(compiled, &ctx, address)?;
-    let mut first_error: Option<anyhow::Error> = None;
-
-    for selection in candidates {
-        if crate::runtime::diagnostics::terminal_reselect_trace_enabled() {
-            eprintln!(
-                "[decode-instruction] ctor={} mnemonic={} source={} ctx=0x{:016x} known=0x{:016x}",
-                selection.constructor_index,
-                selection.constructor.mnemonic,
-                selection.constructor.source,
-                ctx.context_register,
-                ctx.context_known_mask,
-            );
-        }
-        if !selection.constructor.runtime_ready {
-            let err = unsupported_constructor_error(compiled, selection.constructor);
-            if first_error.is_none() {
-                first_error = Some(err.into());
-            }
-            continue;
-        }
-
-        let strategy = RuntimeDecodeStrategy::for_table();
-        let decoded = match bind_instruction(compiled, strategy, &ctx, selection.clone()) {
-            Ok(decoded) => decoded,
-            Err(err) => {
-                if first_error.is_none() {
-                    first_error = Some(typed_template_resolution_error(compiled, err));
-                }
-                continue;
-            }
-        };
-
-        match emit_pcode_for_state(
-            compiled,
-            address,
-            bytes,
-            address,
-            &decoded,
-            FlowEmitOptions {
-                instruction_context_register: ctx.context_register,
-                instruction_context_known_mask: ctx.context_known_mask,
-                ..Default::default()
-            },
-        ) {
-            Ok(_) => {
-                return decoded_instruction_from_state(compiled, address, bytes, &ctx, decoded);
-            }
-            Err(err) => {
-                if first_error.is_none() {
-                    first_error = Some(err);
-                }
-            }
-        }
-    }
-
-    return Err(first_error.unwrap_or_else(|| {
-        RuntimeSleighError::DecodeNoMatch {
-            language: compiled.entry_id.clone(),
-            address,
-        }
-        .into()
-    }));
+    decode_instruction_with_context(compiled, bytes, address, None)
 }
 
 fn typed_template_resolution_error(

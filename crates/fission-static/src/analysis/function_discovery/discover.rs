@@ -1,4 +1,4 @@
-use fission_loader::{FunctionInfo, LoadedBinary};
+use fission_loader::{FunctionCandidateInfo, FunctionInfo, LoadedBinary};
 use fission_signatures::load_ghidra_patterns;
 use fission_sleigh::runtime::DecodedFlowKind;
 use fission_sleigh::runtime::{RuntimeFrontendStatus, RuntimeSleighFrontend};
@@ -159,6 +159,34 @@ pub fn discover_functions_with_runtime(
         candidates.len()
     );
     candidates = valid_call_targets.clone();
+
+    let known_function_addresses: std::collections::HashSet<u64> = binary
+        .functions
+        .iter()
+        .map(|function| function.address)
+        .collect();
+    let valid_symbol_seeds: Vec<FunctionCandidateInfo> = binary
+        .function_candidates
+        .par_iter()
+        .filter(|seed| !known_function_addresses.contains(&seed.address))
+        .filter_map(|seed| {
+            let mut local_cache = std::collections::HashMap::new();
+            let (valid_routine, _) = validate_subroutine_candidate(
+                binary,
+                &frontend,
+                seed.address,
+                1,
+                4000,
+                true,
+                &known_function_addresses,
+                &mut local_cache,
+                Some(&all_references),
+            );
+            (valid_routine || is_terminal_import_thunk(binary, &frontend, seed.address))
+                .then(|| seed.clone())
+        })
+        .collect();
+    candidates.extend(valid_symbol_seeds.iter().map(|seed| seed.address));
 
     if profile != FunctionDiscoveryProfile::Conservative {
         let mut tracker = InstructionBoundaryTracker::build(binary, &frontend, &tracker_seeds);
@@ -353,6 +381,12 @@ pub fn discover_functions_with_runtime(
     candidates.sort_unstable();
     candidates.dedup();
 
+    let valid_symbol_seed_by_address: std::collections::HashMap<u64, FunctionCandidateInfo> =
+        valid_symbol_seeds
+            .into_iter()
+            .map(|seed| (seed.address, seed))
+            .collect();
+
     let mut accepted = Vec::new();
     for target in candidates {
         if binary.function_addr_index.contains_key(&target) {
@@ -369,13 +403,23 @@ pub fn discover_functions_with_runtime(
     report.accepted_function_count = accepted.len();
     if !accepted.is_empty() {
         for address in accepted {
+            let seed = valid_symbol_seed_by_address.get(&address);
+            let is_thunk_like =
+                seed.is_some() && is_terminal_import_thunk(binary, &frontend, address);
             binary.functions.push(FunctionInfo {
-                name: format!("sub_{address:x}"),
+                name: seed
+                    .map(|seed| seed.name.clone())
+                    .unwrap_or_else(|| format!("sub_{address:x}")),
                 address,
                 size: 0,
                 is_export: false,
                 is_import: false,
-                ..Default::default()
+                origin: seed.map(|seed| seed.origin.clone()),
+                kind: seed.map(|_| "validated_symbol".to_string()),
+                source_section: seed.and_then(|seed| seed.source_section.clone()),
+                external_library: None,
+                is_thunk_like,
+                thunk_target: None,
             });
         }
         binary.functions.sort_by_key(|function| function.address);
@@ -384,6 +428,41 @@ pub fn discover_functions_with_runtime(
     }
 
     report
+}
+
+fn is_terminal_import_thunk(
+    binary: &LoadedBinary,
+    frontend: &RuntimeSleighFrontend,
+    address: u64,
+) -> bool {
+    let Some(bytes) = binary.view_bytes(address, 15) else {
+        return false;
+    };
+    let Ok(decoded) = frontend.decode_window(bytes, address, 1) else {
+        return false;
+    };
+    let Some(instruction) = decoded.first() else {
+        return false;
+    };
+    if instruction.flow_kind != DecodedFlowKind::Jump
+        && !instruction.mnemonic.eq_ignore_ascii_case("jmp")
+    {
+        return false;
+    }
+
+    instruction
+        .direct_target
+        .into_iter()
+        .chain(
+            instruction
+                .references
+                .iter()
+                .map(|reference| reference.target),
+        )
+        .map(|target| {
+            crate::analysis::function_discovery::targets::normalize_target(binary, target)
+        })
+        .any(|target| binary.iat_symbols.contains_key(&target))
 }
 
 fn collect_section_targets(

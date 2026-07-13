@@ -45,6 +45,27 @@ fn direct_control_target_with_symbolic_internal_label(op: &PcodeOp) -> Option<u6
     })
 }
 
+fn direct_call_target(op: &PcodeOp) -> Option<u64> {
+    if op.opcode != PcodeOpcode::Call {
+        return None;
+    }
+    let target = op.inputs.first()?;
+    if target.offset != 0 {
+        Some(target.offset)
+    } else if target.is_constant && target.constant_val >= 0 {
+        Some(target.constant_val as u64)
+    } else {
+        None
+    }
+}
+
+fn internal_direct_call_target(ops_at: &[&PcodeOp], reachable: &BTreeSet<u64>) -> Option<u64> {
+    ops_at
+        .iter()
+        .find_map(|op| direct_call_target(op))
+        .filter(|target| reachable.contains(target))
+}
+
 fn relative_pcode_target_seq(op: &PcodeOp, vn: &Varnode) -> Option<u32> {
     if vn.space_id != 0 || !vn.is_constant {
         return None;
@@ -448,6 +469,17 @@ pub fn build_instruction_cfg_snapshot(
             continue;
         };
 
+        if let Some(target) = internal_direct_call_target(ops_at, &reachable) {
+            leaders.insert(target);
+            if !noreturn.contains(&addr) {
+                if let Some(fallthrough) = instruction_fallthrough(addr, instruction_lengths) {
+                    if reachable.contains(&fallthrough) {
+                        leaders.insert(fallthrough);
+                    }
+                }
+            }
+        }
+
         let Some(term) =
             instruction_cfg_control_terminator(ops_at, ops, &op_seq_to_idx, instruction_lengths)
         else {
@@ -521,6 +553,22 @@ pub fn build_instruction_cfg_snapshot(
 
         let mut successors = Vec::new();
         if let Some(ops_at) = ops_by_addr.get(&last_addr) {
+            let internal_call_target = internal_direct_call_target(ops_at, &reachable);
+            if let Some(target) = internal_call_target {
+                if let Some(dst) = leader_for_target(target, &block_starts, &reachable) {
+                    successors.push(dst);
+                }
+                if !noreturn.contains(&last_addr) {
+                    if let Some(fallthrough) =
+                        instruction_fallthrough(last_addr, instruction_lengths)
+                    {
+                        if let Some(dst) = leader_for_target(fallthrough, &block_starts, &reachable)
+                        {
+                            successors.push(dst);
+                        }
+                    }
+                }
+            }
             if let Some(term) =
                 instruction_cfg_control_terminator(ops_at, ops, &op_seq_to_idx, instruction_lengths)
             {
@@ -615,7 +663,7 @@ pub fn build_instruction_cfg_snapshot(
                         }
                     }
                 }
-            } else if !noreturn.contains(&last_addr) {
+            } else if internal_call_target.is_none() && !noreturn.contains(&last_addr) {
                 if let Some(fallthrough) = instruction_fallthrough(last_addr, instruction_lengths) {
                     if let Some(dst) = leader_for_target(fallthrough, &block_starts, &reachable) {
                         successors.push(dst);
@@ -724,5 +772,104 @@ mod instruction_cfg_tests {
             .edges
             .iter()
             .any(|edge| edge.from == entry && edge.to == nop));
+    }
+
+    #[test]
+    fn instruction_cfg_splits_internal_calls_into_target_and_fallthrough_edges() {
+        let entry = 0x1000u64;
+        let fallthrough = 0x1005u64;
+        let reachable = vec![entry, fallthrough];
+        let lengths = BTreeMap::from([(entry, 5), (fallthrough, 1)]);
+        let ops = vec![
+            PcodeOp {
+                seq_num: 0,
+                opcode: PcodeOpcode::Call,
+                address: entry,
+                output: None,
+                inputs: vec![Varnode {
+                    space_id: 1,
+                    offset: entry,
+                    size: 8,
+                    is_constant: false,
+                    constant_val: 0,
+                }],
+                asm_mnemonic: None,
+            },
+            PcodeOp {
+                seq_num: 0,
+                opcode: PcodeOpcode::Return,
+                address: fallthrough,
+                output: None,
+                inputs: vec![],
+                asm_mnemonic: None,
+            },
+        ];
+
+        let snapshot = build_instruction_cfg_snapshot(
+            entry,
+            &reachable,
+            &lengths,
+            &ops,
+            &BTreeSet::new(),
+            &BTreeMap::new(),
+            &InstructionCfgHints::default(),
+            true,
+        );
+
+        assert_eq!(snapshot.block_starts, vec![entry, fallthrough]);
+        assert!(snapshot
+            .edges
+            .iter()
+            .any(|edge| edge.from == entry && edge.to == entry));
+        assert!(snapshot
+            .edges
+            .iter()
+            .any(|edge| edge.from == entry && edge.to == fallthrough));
+    }
+
+    #[test]
+    fn instruction_cfg_keeps_external_calls_inside_the_current_block() {
+        let entry = 0x1000u64;
+        let fallthrough = 0x1005u64;
+        let reachable = vec![entry, fallthrough];
+        let lengths = BTreeMap::from([(entry, 5), (fallthrough, 1)]);
+        let ops = vec![
+            PcodeOp {
+                seq_num: 0,
+                opcode: PcodeOpcode::Call,
+                address: entry,
+                output: None,
+                inputs: vec![Varnode {
+                    space_id: 1,
+                    offset: 0x2000,
+                    size: 8,
+                    is_constant: false,
+                    constant_val: 0,
+                }],
+                asm_mnemonic: None,
+            },
+            PcodeOp {
+                seq_num: 0,
+                opcode: PcodeOpcode::Return,
+                address: fallthrough,
+                output: None,
+                inputs: vec![],
+                asm_mnemonic: None,
+            },
+        ];
+
+        let snapshot = build_instruction_cfg_snapshot(
+            entry,
+            &reachable,
+            &lengths,
+            &ops,
+            &BTreeSet::new(),
+            &BTreeMap::new(),
+            &InstructionCfgHints::default(),
+            true,
+        );
+
+        assert_eq!(snapshot.block_starts, vec![entry]);
+        assert!(snapshot.edges.is_empty());
     }
 }

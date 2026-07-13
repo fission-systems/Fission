@@ -232,6 +232,16 @@ pub type PdbParamInfo = DwarfParamInfo;
 pub type PdbLocalVar = DwarfLocalVar;
 pub type PdbFunctionInfo = DwarfFunctionInfo;
 
+/// Loader evidence for an address that may be a function entry but still
+/// requires instruction-level validation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FunctionCandidateInfo {
+    pub address: u64,
+    pub name: String,
+    pub origin: String,
+    pub source_section: Option<String>,
+}
+
 #[derive(Debug, Clone, Archive, Deserialize, Serialize)]
 #[archive(check_bytes)]
 pub struct PdbDebugInfo {
@@ -344,6 +354,9 @@ pub struct LoadedBinary {
     /// Go compiler version string detected from the `.go.buildinfo` section (e.g. `"go1.22.3"`).
     /// Not serialized — populated by `GoAnalyzer::detect_go_version` during post-load.
     pub go_version: Option<String>,
+    /// Ambiguous loader-derived function entries awaiting SLEIGH/static proof.
+    /// Not serialized because they are inexpensive format facts rebuilt on load.
+    pub function_candidates: Vec<FunctionCandidateInfo>,
 }
 
 impl LoadedBinary {
@@ -355,6 +368,7 @@ impl LoadedBinary {
             pdb_functions: std::collections::HashMap::new(),
             identity_report: None,
             go_version: None,
+            function_candidates: Vec::new(),
         }
     }
 

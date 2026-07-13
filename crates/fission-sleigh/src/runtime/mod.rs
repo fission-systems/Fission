@@ -56,7 +56,12 @@ pub fn register_map_for_load_spec(
     let map = library
         .register_map
         .into_iter()
-        .map(|(name, varnode)| (name, (varnode.space.index as u64, varnode.offset, varnode.size)))
+        .map(|(name, varnode)| {
+            (
+                name,
+                (varnode.space.index as u64, varnode.offset, varnode.size),
+            )
+        })
         .collect();
 
     Some(map)
@@ -182,6 +187,8 @@ pub enum DecodeStopReason {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DecodedPcodeFunction {
     pub function: PcodeFunction,
+    /// Decoded instructions that contributed to the reachable function graph.
+    pub instructions: Vec<DecodedInstruction>,
     pub decoded_instructions: usize,
     pub stop_reason: DecodeStopReason,
     pub template_source_counts: BTreeMap<String, usize>,
@@ -672,6 +679,15 @@ mod tests {
             .expect("branch target after fallthrough ret should lift");
 
         assert_eq!(lifted.decoded_instructions, 6);
+        assert_eq!(lifted.instructions.len(), lifted.decoded_instructions);
+        assert_eq!(
+            lifted
+                .instructions
+                .iter()
+                .map(|instruction| instruction.address)
+                .collect::<Vec<_>>(),
+            vec![0x1000, 0x1002, 0x1004, 0x1006, 0x1007, 0x100c]
+        );
         assert!(
             lifted
                 .function
@@ -691,6 +707,39 @@ mod tests {
                 .count(),
             2
         );
+    }
+
+    #[test]
+    fn runtime_function_instructions_exclude_unreachable_alignment_bytes() {
+        let frontend =
+            RuntimeSleighFrontend::new_for_language("x86-64").expect("x86-64 runtime frontend");
+        let bytes = [
+            0x85, 0xd2, // test EDX,EDX
+            0x7e, 0x04, // jle 0x1008
+            0x31, 0xc0, // xor EAX,EAX
+            0xc3, // ret
+            0x90, // unreachable alignment nop
+            0xb8, 0x01, 0x00, 0x00, 0x00, // mov EAX,1
+            0xc3, // ret
+        ];
+
+        let lifted = frontend
+            .lift_raw_pcode_function_with_decode_contract(
+                &bytes,
+                0x1000,
+                DecodeContract::strict_function(16),
+            )
+            .expect("reachable instructions should exclude alignment padding");
+
+        assert_eq!(
+            lifted
+                .instructions
+                .iter()
+                .map(|instruction| instruction.address)
+                .collect::<Vec<_>>(),
+            vec![0x1000, 0x1002, 0x1004, 0x1006, 0x1008, 0x100d]
+        );
+        assert!(!lifted.reachable_instruction_addresses.contains(&0x1007));
     }
 
     #[test]

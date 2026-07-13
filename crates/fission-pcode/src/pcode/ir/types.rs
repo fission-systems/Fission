@@ -69,7 +69,19 @@ pub enum PcodeOpcode {
     FloatNeg,
     FloatAbs,
     FloatSqrt,
+    #[serde(
+        rename = "Int2Float",
+        alias = "FloatInt2Float",
+        alias = "FLOAT_INT2FLOAT",
+        alias = "INT2FLOAT"
+    )]
     FloatInt2Float,
+    #[serde(
+        rename = "Float2Float",
+        alias = "FloatFloat2Float",
+        alias = "FLOAT_FLOAT2FLOAT",
+        alias = "FLOAT2FLOAT"
+    )]
     FloatFloat2Float,
     FloatTrunc,
     FloatCeil,
@@ -407,7 +419,7 @@ impl Varnode {
     pub fn constant(val: i64, size: u32) -> Self {
         Self {
             space_id: 0,
-            offset: val as u64,
+            offset: truncate_to_varnode_width(val as u64, size),
             size,
             is_constant: true,
             constant_val: val,
@@ -429,14 +441,25 @@ impl Varnode {
         if !self.is_constant {
             return false;
         }
-        let mask = match self.size {
-            1 => 0xFF,
-            2 => 0xFFFF,
-            4 => 0xFFFF_FFFF,
-            8 => -1i64,
+        let Some(bits) = self.size.checked_mul(8) else {
+            return false;
+        };
+        let mask = match bits {
+            1..=63 => (1u64 << bits) - 1,
+            64 => u64::MAX,
             _ => return false,
         };
-        self.constant_val == mask
+        self.offset == mask
+    }
+}
+
+fn truncate_to_varnode_width(value: u64, size: u32) -> u64 {
+    let Some(bits) = size.checked_mul(8) else {
+        return value;
+    };
+    match bits {
+        1..=63 => value & ((1u64 << bits) - 1),
+        _ => value,
     }
 }
 
@@ -1239,6 +1262,48 @@ mod tests {
         let one = Varnode::constant(1, 4);
         assert!(one.is_one());
         assert!(!one.is_zero());
+    }
+
+    #[test]
+    fn constant_offsets_are_truncated_to_the_declared_varnode_width() {
+        let byte = Varnode::constant(-4, 1);
+        let word = Varnode::constant(-4, 2);
+        let dword = Varnode::constant(-4, 4);
+        let qword = Varnode::constant(-4, 8);
+
+        assert_eq!(byte.offset, 0xfc);
+        assert_eq!(word.offset, 0xfffc);
+        assert_eq!(dword.offset, 0xffff_fffc);
+        assert_eq!(qword.offset, 0xffff_ffff_ffff_fffc);
+        assert_eq!(dword.constant_val, -4);
+    }
+
+    #[test]
+    fn all_ones_uses_the_unsigned_varnode_width() {
+        assert!(Varnode::constant(-1, 1).is_all_ones());
+        assert!(Varnode::constant(-1, 4).is_all_ones());
+        assert!(Varnode::constant(-1, 8).is_all_ones());
+        assert!(!Varnode::constant(-2, 4).is_all_ones());
+    }
+
+    #[test]
+    fn floating_conversion_opcodes_serialize_with_public_pcode_mnemonics() {
+        assert_eq!(
+            serde_json::to_string(&PcodeOpcode::FloatInt2Float).unwrap(),
+            "\"Int2Float\""
+        );
+        assert_eq!(
+            serde_json::to_string(&PcodeOpcode::FloatFloat2Float).unwrap(),
+            "\"Float2Float\""
+        );
+        assert_eq!(
+            serde_json::from_str::<PcodeOpcode>("\"FloatInt2Float\"").unwrap(),
+            PcodeOpcode::FloatInt2Float
+        );
+        assert_eq!(
+            serde_json::from_str::<PcodeOpcode>("\"FLOAT2FLOAT\"").unwrap(),
+            PcodeOpcode::FloatFloat2Float
+        );
     }
 
     fn op(opcode: PcodeOpcode, output: Option<Varnode>, inputs: Vec<Varnode>) -> PcodeOp {

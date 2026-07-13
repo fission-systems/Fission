@@ -71,4 +71,4 @@ pub use loader::identity::{
     BinaryIdentityReport, IdentityScanLimits, analyze as analyze_binary_identity,
 };
 pub use loader::pe::detect_pe_is_64bit;
-pub use loader::{FunctionInfo, LoadedBinary, SectionInfo};
+pub use loader::{FunctionCandidateInfo, FunctionInfo, LoadedBinary, SectionInfo};

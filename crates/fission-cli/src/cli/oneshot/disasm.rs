@@ -1,14 +1,13 @@
 use fission_core::{DISASM_READ_WINDOW, PAGE_SIZE};
 use fission_loader::loader::LoadedBinary;
-use fission_sleigh::runtime::{DecodedFlowKind, DecodedInstruction, RuntimeSleighFrontend};
+use fission_sleigh::runtime::{DecodedInstruction, RuntimeSleighFrontend};
 use std::io::{self, Write};
 
 fn collect_function_instructions(
     binary: &LoadedBinary,
-    data: &[u8],
+    _data: &[u8],
     addr: u64,
 ) -> io::Result<(String, u64, bool, Vec<(u64, String, String)>)> {
-    let frontend = runtime_frontend_for_binary(binary)?;
     let func = binary.function_at(addr).ok_or_else(|| {
         io::Error::new(
             io::ErrorKind::NotFound,
@@ -16,8 +15,6 @@ fn collect_function_instructions(
         )
     })?;
     let func_start = func.address;
-    let address_state = frontend.normalize_low_bit_code_address(func_start);
-    let decode_start = address_state.address;
     let mut func_size = func.size;
     let needs_boundary_detection = func_size == 0;
 
@@ -35,55 +32,20 @@ fn collect_function_instructions(
         }
     }
 
-    let section = binary.section_containing_for_execution(decode_start);
-
-    let (bytes, base) = if let Some(sec) = section {
-        let offset = (decode_start - sec.virtual_address) as usize;
-        let file_offset = sec.file_offset as usize + offset;
-        let remaining = (sec.virtual_size as usize).saturating_sub(offset);
-        let len = remaining
-            .min(func_size as usize)
-            .min(data.len().saturating_sub(file_offset));
-
-        if file_offset + len <= data.len() {
-            (&data[file_offset..file_offset + len], decode_start)
-        } else {
-            return Err(io::Error::new(
-                io::ErrorKind::UnexpectedEof,
-                format!("Function at 0x{decode_start:x} is outside file bounds"),
-            ));
-        }
-    } else {
-        return Err(io::Error::new(
-            io::ErrorKind::NotFound,
-            format!("Function at 0x{decode_start:x} not in any section"),
-        ));
-    };
-
-    let mut instructions = Vec::new();
-    let func_end = decode_start + func_size;
-    let decoded = frontend
-        .decode_window_with_context_override(
-            bytes,
-            base,
-            usize::MAX,
-            address_state.context_override,
-        )
-        .map_err(to_io_error)?;
-
-    for instr in decoded {
-        if instr.address >= func_end {
-            break;
-        }
-        instructions.push((
-            instr.address,
-            format_instruction_bytes(&instr),
-            instr.instruction_text(),
-        ));
-        if needs_boundary_detection && instr.flow_kind == DecodedFlowKind::Return {
-            break;
-        }
-    }
+    let max_bytes = usize::try_from(func_size).unwrap_or(PAGE_SIZE).max(1);
+    let (_, lifted) =
+        super::raw_pcode::lift_raw_pcode(binary, func_start, max_bytes, max_bytes, false)?;
+    let instructions = lifted
+        .instructions
+        .iter()
+        .map(|instruction| {
+            (
+                instruction.address,
+                format_instruction_bytes(instruction),
+                instruction.instruction_text(),
+            )
+        })
+        .collect();
 
     Ok((
         func.name.clone(),

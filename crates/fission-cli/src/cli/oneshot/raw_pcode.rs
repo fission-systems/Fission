@@ -1,6 +1,8 @@
 use fission_decompiler::{PcodeFunction, PcodeOp, Varnode};
 use fission_loader::loader::LoadedBinary;
-use fission_sleigh::runtime::{DecodeContract, DecodeStopReason, RuntimeSleighFrontend};
+use fission_sleigh::runtime::{
+    DecodeContract, DecodeStopReason, DecodedPcodeFunction, RuntimeSleighFrontend,
+};
 use fission_static::analysis::control_flow_facts::decode_memory_context_for;
 use std::collections::BTreeMap;
 use std::io::{self, Write};
@@ -14,34 +16,13 @@ pub(super) fn emit_raw_pcode(
     json: bool,
 ) -> io::Result<()> {
     let mut stdout = io::stdout().lock();
-    let frontend = runtime_frontend_for_binary(binary)?;
-    let address_state = frontend.normalize_low_bit_code_address(addr);
-    let decode_addr = address_state.address;
-    let max_bytes = binary
-        .available_execution_bytes(decode_addr)
-        .map(|available| max_bytes.min(available).max(1))
-        .unwrap_or(max_bytes.max(1));
-    let bytes = binary.view_bytes(decode_addr, max_bytes).ok_or_else(|| {
-        io::Error::new(
-            io::ErrorKind::NotFound,
-            format!("unable to read bytes at 0x{decode_addr:x}"),
-        )
-    })?;
-    let contract = if continue_past_indirect {
-        DecodeContract::decomp_function(instruction_limit)
-    } else {
-        DecodeContract::strict_function(instruction_limit)
-    };
-    let memory_context = decode_memory_context_for(binary, decode_addr, max_bytes);
-    let lifted = frontend
-        .lift_raw_pcode_function_with_context_and_memory_context(
-            bytes,
-            decode_addr,
-            contract,
-            &memory_context,
-            address_state.context_override,
-        )
-        .map_err(to_io_error)?;
+    let (decode_addr, lifted) = lift_raw_pcode(
+        binary,
+        addr,
+        max_bytes,
+        instruction_limit,
+        continue_past_indirect,
+    )?;
 
     if json {
         let result = serde_json::json!({
@@ -74,6 +55,44 @@ pub(super) fn emit_raw_pcode(
         )?;
     }
     Ok(())
+}
+
+pub(super) fn lift_raw_pcode(
+    binary: &LoadedBinary,
+    addr: u64,
+    max_bytes: usize,
+    instruction_limit: usize,
+    continue_past_indirect: bool,
+) -> io::Result<(u64, DecodedPcodeFunction)> {
+    let frontend = runtime_frontend_for_binary(binary)?;
+    let address_state = frontend.normalize_low_bit_code_address(addr);
+    let decode_addr = address_state.address;
+    let max_bytes = binary
+        .available_execution_bytes(decode_addr)
+        .map(|available| max_bytes.min(available).max(1))
+        .unwrap_or(max_bytes.max(1));
+    let bytes = binary.view_bytes(decode_addr, max_bytes).ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::NotFound,
+            format!("unable to read bytes at 0x{decode_addr:x}"),
+        )
+    })?;
+    let contract = if continue_past_indirect {
+        DecodeContract::decomp_function(instruction_limit)
+    } else {
+        DecodeContract::strict_function(instruction_limit)
+    };
+    let memory_context = decode_memory_context_for(binary, decode_addr, max_bytes);
+    let lifted = frontend
+        .lift_raw_pcode_function_with_context_and_memory_context(
+            bytes,
+            decode_addr,
+            contract,
+            &memory_context,
+            address_state.context_override,
+        )
+        .map_err(to_io_error)?;
+    Ok((decode_addr, lifted))
 }
 
 fn runtime_frontend_for_binary(binary: &LoadedBinary) -> io::Result<RuntimeSleighFrontend> {
@@ -159,7 +178,7 @@ fn format_varnode(vn: &Varnode) -> String {
     }
 }
 
-fn decode_stop_reason_label(reason: DecodeStopReason) -> &'static str {
+pub(super) fn decode_stop_reason_label(reason: DecodeStopReason) -> &'static str {
     match reason {
         DecodeStopReason::TerminalControlFlow => "terminal_control_flow",
         DecodeStopReason::InputExhausted => "input_exhausted",

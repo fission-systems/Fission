@@ -1,4 +1,4 @@
-use fission_loader::loader::{DataBuffer, LoadedBinaryBuilder, SectionInfo};
+use fission_loader::loader::{DataBuffer, FunctionCandidateInfo, LoadedBinaryBuilder, SectionInfo};
 use fission_sleigh::runtime::{DecodedInstruction, DecodedReference};
 use std::sync::{Mutex, OnceLock};
 
@@ -36,6 +36,55 @@ fn pe64_executable_shell() -> fission_loader::LoadedBinary {
         })
         .build()
         .expect("synthetic binary")
+}
+
+fn pe64_symbol_seed_shell() -> fission_loader::LoadedBinary {
+    let mut bytes = vec![0xcc; 0x1000];
+    bytes[0x100] = 0xc3; // RET
+    bytes[0x120..0x130].fill(0xff); // executable-section data, not a routine
+    bytes[0x140..0x146].copy_from_slice(&[0xff, 0x25, 0xba, 0x01, 0x00, 0x00]);
+
+    let mut binary =
+        LoadedBinaryBuilder::new("symbol-seeds.bin".to_string(), DataBuffer::Heap(bytes))
+            .format("PE")
+            .image_base(0x400000)
+            .entry_point(0x401000)
+            .arch_spec("x86:LE:64:default")
+            .is_64bit(true)
+            .add_section(SectionInfo {
+                name: ".text".to_string(),
+                virtual_address: 0x401000,
+                virtual_size: 0x1000,
+                file_offset: 0,
+                file_size: 0x1000,
+                is_executable: true,
+                is_readable: true,
+                is_writable: false,
+            })
+            .add_iat_symbol(0x401300, "example.dll!target".to_string())
+            .build()
+            .expect("synthetic binary");
+    binary.function_candidates = vec![
+        FunctionCandidateInfo {
+            address: 0x401100,
+            name: "return_seed".to_string(),
+            origin: "synthetic-symbol".to_string(),
+            source_section: Some(".text".to_string()),
+        },
+        FunctionCandidateInfo {
+            address: 0x401120,
+            name: "data_seed".to_string(),
+            origin: "synthetic-symbol".to_string(),
+            source_section: Some(".text".to_string()),
+        },
+        FunctionCandidateInfo {
+            address: 0x401140,
+            name: "import_seed".to_string(),
+            origin: "synthetic-symbol".to_string(),
+            source_section: Some(".text".to_string()),
+        },
+    ];
+    binary
 }
 
 const SAMPLE_RIP_TARGET: u64 = 0x401800;
@@ -220,4 +269,29 @@ fn function_discovery_fails_closed_for_unsupported_runtime() {
     assert!(report.unsupported_runtime);
     assert_eq!(report.accepted_function_count, 0);
     assert!(binary.functions.is_empty());
+}
+
+#[test]
+fn function_discovery_promotes_only_sleigh_validated_symbol_seeds() {
+    let _guard = sleigh_runtime_discovery_lock();
+    let mut binary = pe64_symbol_seed_shell();
+
+    let report =
+        discover_functions_with_runtime(&mut binary, FunctionDiscoveryProfile::Conservative);
+
+    assert!(!report.unsupported_runtime);
+    assert!(binary.function_addr_index.contains_key(&0x401100));
+    assert!(binary.function_addr_index.contains_key(&0x401140));
+    assert!(!binary.function_addr_index.contains_key(&0x401120));
+    assert_eq!(
+        binary
+            .function_at(0x401100)
+            .map(|function| function.name.as_str()),
+        Some("return_seed")
+    );
+    assert!(
+        binary
+            .function_at(0x401140)
+            .is_some_and(|function| function.is_thunk_like)
+    );
 }
