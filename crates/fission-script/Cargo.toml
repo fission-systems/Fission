@@ -1,6 +1,6 @@
 [package]
 name = "fission-script"
-version = "0.1.0"
+version = "0.1.2"
 edition = "2024"
 authors = ["Fission Dev Team"]
 description = "Rust-native embedded scripting (Rhai) for read-only binary automation"

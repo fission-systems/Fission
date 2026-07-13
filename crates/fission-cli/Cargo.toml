@@ -1,6 +1,6 @@
 [package]
 name = "fission-cli"
-version = "0.1.0"
+version = "0.1.2"
 edition = "2024"
 build = "build.rs"
 authors = ["Fission Dev Team"]

@@ -1,6 +1,6 @@
 [package]
 name = "fission-ttd"
-version = "0.1.0"
+version = "0.1.2"
 edition = "2024"
 authors = ["Fission Dev Team"]
 description = "Fission time-travel debugging snapshots and recorder primitives"

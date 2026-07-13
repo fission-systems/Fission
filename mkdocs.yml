@@ -71,3 +71,5 @@ nav:
     - Malware Sample Policy: MALWARE_SAMPLE_POLICY.md
     - Versioning: VERSIONING.md
     - Release: RELEASE.md
+  - Release Notes:
+    - Fission 0.1.2: changelog/v0.1.2.md
