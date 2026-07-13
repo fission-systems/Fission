@@ -324,7 +324,7 @@ impl DefinitionDependencyMap {
     }
 }
 
-fn collect_expr_vars(expr: &HirExpr, out: &mut HashSet<String>) {
+pub(crate) fn collect_expr_vars(expr: &HirExpr, out: &mut HashSet<String>) {
     match expr {
         HirExpr::Var(name) => {
             out.insert(name.clone());

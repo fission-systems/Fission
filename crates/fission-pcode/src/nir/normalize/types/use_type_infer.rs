@@ -508,14 +508,14 @@ fn collect_pointer_assignment_base_constraints(
             // side is a *numeric* offset (const / const arithmetic).
             // Do not treat an integer cast of a bare variable as an offset; it
             // can be an integerized pointer base.
-            if expr_is_numeric_offset(rhs.as_ref()) {
+            if expr_is_numeric_offset_with_types(rhs.as_ref(), known_binding_types) {
                 if let HirExpr::Var(name) = strip_casts_unary(lhs.as_ref()) {
                     out.entry(name.clone())
                         .or_default()
                         .push(UseConstraint::Ptr(pointee.as_ref().clone()));
                 }
             }
-            if expr_is_numeric_offset(lhs.as_ref()) {
+            if expr_is_numeric_offset_with_types(lhs.as_ref(), known_binding_types) {
                 if let HirExpr::Var(name) = strip_casts_unary(rhs.as_ref()) {
                     out.entry(name.clone())
                         .or_default()
@@ -580,6 +580,47 @@ fn expr_is_numeric_offset(expr: &HirExpr) -> bool {
     }
 }
 
+fn expr_is_numeric_offset_with_types(
+    expr: &HirExpr,
+    known_binding_types: &HashMap<String, NirType>,
+) -> bool {
+    match expr {
+        HirExpr::Var(name) => !matches!(
+            known_binding_types.get(name),
+            Some(NirType::Ptr(_))
+        ),
+        HirExpr::Cast {
+            ty: NirType::Int { .. },
+            expr: inner,
+        } => match inner.as_ref() {
+            HirExpr::Var(name) => matches!(
+                known_binding_types.get(name),
+                Some(NirType::Int { .. } | NirType::Bool)
+            ),
+            _ => expr_is_numeric_offset_with_types(inner, known_binding_types),
+        },
+        HirExpr::Cast { expr, .. } | HirExpr::Unary { expr, .. } => {
+            expr_is_numeric_offset_with_types(expr, known_binding_types)
+        }
+        HirExpr::Binary {
+            op:
+                HirBinaryOp::Add
+                | HirBinaryOp::Sub
+                | HirBinaryOp::Mul
+                | HirBinaryOp::Shl
+                | HirBinaryOp::Shr
+                | HirBinaryOp::Sar,
+            lhs,
+            rhs,
+            ..
+        } => {
+            expr_is_numeric_offset_with_types(lhs, known_binding_types)
+                && expr_is_numeric_offset_with_types(rhs, known_binding_types)
+        }
+        _ => expr_is_numeric_offset(expr),
+    }
+}
+
 fn expr_is_pointer_offset_like(expr: &HirExpr) -> bool {
     expr_is_numeric_offset(expr)
 }
@@ -588,6 +629,100 @@ fn copy_constraint_from_type(ty: &NirType) -> UseConstraint {
     match ty {
         NirType::Ptr(pointee) => UseConstraint::Ptr(pointee.as_ref().clone()),
         _ => UseConstraint::Exact(ty.clone()),
+    }
+}
+
+fn collect_copy_alias_sources(stmts: &[HirStmt], out: &mut HashMap<String, HashSet<String>>) {
+    for stmt in stmts {
+        match stmt {
+            HirStmt::Assign {
+                lhs: HirLValue::Var(name),
+                rhs,
+            } => {
+                let mut source = rhs;
+                while let HirExpr::Cast { expr, .. } | HirExpr::Unary { expr, .. } = source {
+                    source = expr.as_ref();
+                }
+                if let HirExpr::Var(source_name) = source {
+                    out.entry(name.clone())
+                        .or_default()
+                        .insert(source_name.clone());
+                }
+            }
+            HirStmt::Block(body) | HirStmt::While { body, .. } => {
+                collect_copy_alias_sources(body, out);
+            }
+            HirStmt::DoWhile { body, .. } => collect_copy_alias_sources(body, out),
+            HirStmt::If {
+                then_body,
+                else_body,
+                ..
+            } => {
+                collect_copy_alias_sources(then_body, out);
+                collect_copy_alias_sources(else_body, out);
+            }
+            HirStmt::For {
+                init, update, body, ..
+            } => {
+                if let Some(init) = init {
+                    collect_copy_alias_sources(std::slice::from_ref(init), out);
+                }
+                if let Some(update) = update {
+                    collect_copy_alias_sources(std::slice::from_ref(update), out);
+                }
+                collect_copy_alias_sources(body, out);
+            }
+            HirStmt::Switch { cases, default, .. } => {
+                for case in cases {
+                    collect_copy_alias_sources(&case.body, out);
+                }
+                collect_copy_alias_sources(default, out);
+            }
+            HirStmt::Assign { .. }
+            | HirStmt::Expr(_)
+            | HirStmt::Return(_)
+            | HirStmt::VaStart { .. }
+            | HirStmt::Label(_)
+            | HirStmt::Goto(_)
+            | HirStmt::Break
+            | HirStmt::Continue => {}
+        }
+    }
+}
+
+fn propagate_logical_shift_constraints_through_aliases(
+    stmts: &[HirStmt],
+    constraints: &mut HashMap<String, Vec<UseConstraint>>,
+) {
+    let mut aliases = HashMap::new();
+    collect_copy_alias_sources(stmts, &mut aliases);
+    if aliases.is_empty() {
+        return;
+    }
+
+    let mut work = Vec::new();
+    for (name, items) in constraints.iter() {
+        for item in items {
+            if let UseConstraint::LogicalShiftUnsigned { bits } = item {
+                work.push((name.clone(), *bits));
+            }
+        }
+    }
+    let mut seen = HashSet::new();
+    while let Some((name, bits)) = work.pop() {
+        if !seen.insert((name.clone(), bits)) {
+            continue;
+        }
+        let Some(sources) = aliases.get(&name) else {
+            continue;
+        };
+        for source in sources {
+            constraints
+                .entry(source.clone())
+                .or_default()
+                .push(UseConstraint::LogicalShiftUnsigned { bits });
+            work.push((source.clone(), bits));
+        }
     }
 }
 
@@ -1895,10 +2030,9 @@ fn merge_constraint(binding: &mut NirBinding, constraint: &UseConstraint) -> boo
                 bits: cur_bits,
             },
             UseConstraint::LogicalShiftUnsigned { bits: new_bits },
-        ) if cur_bits == new_bits
-            && matches!(binding.origin, Some(NirBindingOrigin::ParamIndex(_))) =>
+        ) if cur_bits == new_bits =>
         {
-            // Demote signed params → unsigned only for logical SHR (INT_RIGHT).
+            // Demote signed scalars → unsigned only for logical SHR (INT_RIGHT).
             // Generic `Unsigned` must not undo signed promotion from signed
             // comparisons / casted arithmetic (see signed_casted_arithmetic test).
             binding.ty = NirType::Int {
@@ -1993,6 +2127,7 @@ pub(crate) fn apply_use_driven_type_infer_pass(func: &mut HirFunction) -> bool {
             &known_binding_types,
             &mut constraints,
         );
+        propagate_logical_shift_constraints_through_aliases(&func.body, &mut constraints);
 
         let mut round_changed = false;
         for binding in func.locals.iter_mut().chain(func.params.iter_mut()) {
@@ -2184,6 +2319,48 @@ mod tests {
             .find(|local| local.name == "idx")
             .unwrap();
         assert_eq!(idx.ty, u32_ty);
+    }
+
+    #[test]
+    fn pointer_result_does_not_promote_known_integer_offset_param() {
+        let u32_ty = NirType::Int {
+            bits: 32,
+            signed: false,
+        };
+        let u64_ty = NirType::Int {
+            bits: 64,
+            signed: false,
+        };
+        let ptr_ty = NirType::Ptr(Box::new(u32_ty));
+        let body = vec![HirStmt::Assign {
+            lhs: HirLValue::Var("end".to_owned()),
+            rhs: HirExpr::Binary {
+                op: HirBinaryOp::Add,
+                lhs: Box::new(HirExpr::Var("base".to_owned())),
+                rhs: Box::new(HirExpr::Cast {
+                    ty: u64_ty.clone(),
+                    expr: Box::new(HirExpr::Var("count".to_owned())),
+                }),
+                ty: ptr_ty.clone(),
+            },
+        }];
+        let mut func = make_func(
+            vec![make_typed_binding(
+                "end",
+                ptr_ty.clone(),
+                NirBindingOrigin::TempPreserved,
+            )],
+            body,
+            NirType::Unknown,
+        );
+        func.params = vec![
+            make_typed_binding("base", ptr_ty.clone(), NirBindingOrigin::ParamIndex(0)),
+            make_typed_binding("count", u64_ty.clone(), NirBindingOrigin::ParamIndex(1)),
+        ];
+
+        super::apply_use_driven_type_infer_pass(&mut func);
+        assert_eq!(func.params[0].ty, ptr_ty);
+        assert_eq!(func.params[1].ty, u64_ty);
     }
 
     #[test]
@@ -2497,6 +2674,53 @@ mod tests {
             },
             "logical SHR must force unsigned param typing"
         );
+    }
+
+    #[test]
+    fn logical_shr_unsigned_constraint_reaches_param_through_copy_alias() {
+        let i64_ty = NirType::Int {
+            bits: 64,
+            signed: true,
+        };
+        let u64_ty = NirType::Int {
+            bits: 64,
+            signed: false,
+        };
+        let body = vec![
+            HirStmt::Assign {
+                lhs: HirLValue::Var("shifted".into()),
+                rhs: HirExpr::Var("count".into()),
+            },
+            HirStmt::Assign {
+                lhs: HirLValue::Var("shifted".into()),
+                rhs: HirExpr::Binary {
+                    op: HirBinaryOp::Shr,
+                    lhs: Box::new(HirExpr::Var("shifted".into())),
+                    rhs: Box::new(HirExpr::Const(1, u64_ty.clone())),
+                    ty: i64_ty.clone(),
+                },
+            },
+        ];
+        let mut func = HirFunction {
+            name: "test".into(),
+            params: vec![make_typed_binding(
+                "count",
+                i64_ty.clone(),
+                NirBindingOrigin::ParamIndex(0),
+            )],
+            locals: vec![make_typed_binding(
+                "shifted",
+                i64_ty,
+                NirBindingOrigin::Temp,
+            )],
+            return_type: NirType::Unknown,
+            body,
+            ..Default::default()
+        };
+
+        assert!(super::apply_use_driven_type_infer_pass(&mut func));
+        assert_eq!(func.params[0].ty, u64_ty);
+        assert_eq!(func.locals[0].ty, func.params[0].ty);
     }
 
     #[test]
