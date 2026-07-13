@@ -203,6 +203,8 @@ __pycache__/
 # benchmark/ — being redesigned; local-only until new infra is ready
 # New design goal: multi-decompiler comparison benchmark (vs Ghidra, IDA, Binary Ninja, RetDec)
 /benchmark/*
+!/benchmark/config/
+!/benchmark/config/gate_policy.toml
 !/benchmark/patch_validation_pool/
 !/benchmark/patch_validation_pool/**
 # vendor/ — reference code only, not committed to GitHub

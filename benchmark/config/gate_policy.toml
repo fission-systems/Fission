@@ -1,0 +1,19 @@
+[gate]
+# Allow individual row regressions (true/false)
+allow_row_regression = false
+
+[thresholds]
+max_structuring_delta = 0
+max_irreducible_scc_delta = 0
+max_irreducible_header_delta = 0
+min_abi_delta = 0
+min_variadic_delta = 0
+min_call_signature_delta = 0
+min_security_delta = 0
+
+[safety]
+allowed_dominant_families = [
+    "follow_failure",
+    "loop_exit",
+    "region_legality"
+]
