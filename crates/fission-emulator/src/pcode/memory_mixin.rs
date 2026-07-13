@@ -1,5 +1,5 @@
 use crate::pcode::state::MachineState;
-use fission_solver::{SymExpr, SymNodeId, solver::Solver, ast::Sort};
+use fission_solver::{solver::Solver, SymExpr, SymNodeId};
 use anyhow::Result;
 
 /// angr-style memory mixin for handling symbolic pointers.

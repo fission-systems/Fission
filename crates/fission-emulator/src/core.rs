@@ -552,7 +552,7 @@ impl Emulator {
                 // Find the closest snapshot at or before target_step
                 self.ttd.snapshots().into_iter()
                     .filter(|s| s.step_index <= target_step)
-                    .last()
+                    .next_back()
             })
             .cloned();
 
@@ -1036,4 +1036,3 @@ impl Emulator {
         Ok(())
     }
 }
-

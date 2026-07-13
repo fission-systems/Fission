@@ -152,7 +152,7 @@ impl OsEnvironment for LinuxEnv {
                     .next()
                     .unwrap_or(name)
                     .split('!')
-                    .last()
+                    .next_back()
                     .unwrap_or(name)
                     .to_string();
                 table.entries.push((addr, bare));

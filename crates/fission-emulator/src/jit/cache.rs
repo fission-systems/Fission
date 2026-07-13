@@ -91,7 +91,7 @@ impl JitCache {
     pub fn invalidate_page(&self, page_addr: u64) {
         let mut ptb = self.page_to_blocks.write().unwrap();
         let mut blks = self.blocks.write().unwrap();
-        let table = self.chain_table.write().unwrap();
+        let table = self.chain_table.read().unwrap();
 
         if let Some(pcs) = ptb.remove(&page_addr) {
             let mut removed_hosts = Vec::new();

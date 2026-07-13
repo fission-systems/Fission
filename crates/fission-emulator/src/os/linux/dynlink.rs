@@ -688,7 +688,7 @@ pub fn build_plt_lazy_table(
                 .next()
                 .unwrap_or(name)
                 .split('!')
-                .last()
+                .next_back()
                 .unwrap_or(name)
                 .to_string();
             (addr, bare)

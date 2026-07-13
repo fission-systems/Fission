@@ -3,6 +3,7 @@ name = "fission-emulator"
 version = "0.1.0"
 edition = "2024"
 authors = ["Fission Dev Team"]
+license = "AGPL-3.0-or-later"
 description = "Fission P-Code Execution Engine and OS HLE"
 
 [features]

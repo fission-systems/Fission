@@ -3,6 +3,11 @@
 //! These are the only bridge from compiled guest blocks into `Emulator` state.
 //! There is no interpreter fallback path.
 
+// Cranelift invokes these through C-compatible function pointers. Keeping the
+// exported callbacks safe avoids propagating an unsafe ABI through the JIT,
+// while each raw-pointer access remains contained in an explicit unsafe block.
+#![allow(clippy::not_unsafe_ptr_arg_deref)]
+
 use crate::core::Emulator;
 use crate::jit::float_ops::{float_binop, float_unop};
 use crate::os::env::{HleResult, OsEnvironment};

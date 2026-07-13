@@ -858,7 +858,7 @@ fn render_session_history(frame: &mut Frame, app: &App, area: Rect) {
                 .iter()
                 .enumerate()
                 .take(30)
-                .map(|(i, (path, title))| {
+                .map(|(i, (_path, title))| {
                     let (prefix, style) = if i == state.selected_idx {
                         ("> ", Style::default().fg(Color::Black).bg(C_ACCENT))
                     } else {

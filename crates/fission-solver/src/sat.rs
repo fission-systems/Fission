@@ -539,7 +539,7 @@ impl SatSolver {
 
         for i in 0..ls { index_map[i] = Some(i); }
 
-        for (meta_i, orig_idx) in self.learned_meta.iter().enumerate().map(|(i, m)| (i, ls + i)) {
+        for (meta_i, orig_idx) in self.learned_meta.iter().enumerate().map(|(i, _)| (i, ls + i)) {
             if to_keep.contains(&orig_idx) {
                 let new_idx = new_clauses.len();
                 index_map[orig_idx] = Some(new_idx);
@@ -659,7 +659,7 @@ impl SatSolver {
                     
                     if let crate::theory::TheoryStatus::Lemmas(lemmas) = th.check(&assignments) {
                         // Theory produced new clauses (lazy constraints or conflicts)
-                        for mut lits in lemmas {
+                        for lits in lemmas {
                             if lits.is_empty() {
                                 return false; // Trivially UNSAT
                             }
@@ -685,8 +685,6 @@ impl SatSolver {
                                 
                                 // Check if this new clause is conflicting under the current trail
                                 // A clause is conflicting if ALL its literals are False.
-                                let is_conflicting = lits.iter().all(|&l| self.assigns[l.var() as usize] == LBool::False && self.phase[l.var() as usize] != LBool::Undef);
-                                // Wait, phase is just phase saving, we should check assigns
                                 let is_conflicting = lits.iter().all(|&l| self.assigns[l.var() as usize] == (if l.0 < 0 { LBool::True } else { LBool::False }));
                                 
                                 if is_conflicting {
