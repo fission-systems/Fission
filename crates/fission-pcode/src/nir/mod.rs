@@ -29,7 +29,10 @@ mod types;
 mod var_rename;
 mod vsa;
 
-pub(crate) use self::abi::*;
+pub(crate) use self::abi::{
+    AbiKind, AbiState, CarrierAssignment, CarrierResource, GenericAbiProvider,
+    WindowsX64AbiProvider,
+};
 pub use self::abstract_location::{AbstractStackSlot, ParamSlotIndex};
 pub(crate) use self::action_pipeline::STRUCTURING_TIME_CEILING_SECS;
 
