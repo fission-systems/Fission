@@ -28,9 +28,11 @@ mod pipeline;
 mod probe;
 mod render_finish;
 
-pub use pipeline::decompile_with_rust_sleigh;
+pub use pipeline::{decompile_with_rust_sleigh, decompile_with_rust_sleigh_with_facts};
 pub(crate) use render_finish::apply_spec_overrides;
-pub use render_finish::select_nir_output_from_prebuilt_pcode;
+pub use render_finish::{
+    select_nir_output_from_prebuilt_pcode, select_nir_output_from_prebuilt_pcode_with_facts,
+};
 
 use fission_loader::loader::LoadedBinary;
 

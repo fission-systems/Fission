@@ -29,6 +29,7 @@ pub(crate) fn decompile_and_output(
         binary,
         addr,
         name,
+        None,
         cli.timeout_ms,
         cli.verbose,
     ) {

@@ -440,6 +440,7 @@ fn run_sequential_decompilation<'a>(
     effective_json: bool,
     debug_bundle_sink: Option<&mut Vec<serde_json::Value>>,
 ) -> (String, Vec<serde_json::Value>, f64, f64) {
+    let shared_facts = FactStore::from_binary(binary);
     let mut all_output = String::new();
     let mut json_results = Vec::new();
     let mut total_decomp_secs = 0.0;
@@ -459,6 +460,7 @@ fn run_sequential_decompilation<'a>(
             binary,
             func.address,
             &func.name,
+            Some(&shared_facts),
             cli.timeout_ms,
             cli.verbose,
         ) {
@@ -767,6 +769,7 @@ fn run_parallel_decompilation<'a>(
     effective_json: bool,
     debug_bundle_sink: Option<&mut Vec<serde_json::Value>>,
 ) -> (String, Vec<serde_json::Value>, f64, f64) {
+    let shared_facts = FactStore::from_binary(binary);
     let (compiler_id, _) = resolve_compiler_id(binary, cli.compiler_id.as_deref());
     let config = fission_core::config::Config::default();
     let gdt_path_owned = fission_core::PATHS
@@ -790,6 +793,7 @@ fn run_parallel_decompilation<'a>(
                 binary,
                 func.address,
                 &func.name,
+                Some(&shared_facts),
                 cli.timeout_ms,
                 false,
             );
@@ -886,6 +890,7 @@ fn run_parallel_decompilation<'a>(
                     binary,
                     func.address,
                     &func.name,
+                    Some(&shared_facts),
                     cli.timeout_ms,
                     false,
                 );

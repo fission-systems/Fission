@@ -19,6 +19,7 @@ native_decomp = []
 
 [dependencies]
 fission-core = { path = "../fission-core" }
+fission-analysis-db = { path = "../fission-analysis-db" }
 fission-loader = { path = "../fission-loader" }
 fission-pcode = { path = "../fission-pcode" }
 fission-signatures = { path = "../fission-signatures" }

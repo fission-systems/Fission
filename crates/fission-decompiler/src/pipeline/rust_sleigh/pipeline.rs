@@ -8,10 +8,32 @@ use crate::rust_sleigh::{
     RustSleighDecompileConfig, RustSleighDecompileResult, RustSleighPipelineEvidence,
 };
 use fission_loader::loader::LoadedBinary;
+use fission_static::analysis::decomp::facts::FactStore;
 use std::time::Instant;
 
 pub fn decompile_with_rust_sleigh(
     binary: &LoadedBinary,
+    address: u64,
+    name: &str,
+    config: &RustSleighDecompileConfig,
+    max_function_size: Option<u32>,
+    max_instructions: Option<u32>,
+) -> Result<RustSleighDecompileResult, String> {
+    let facts = FactStore::from_binary(binary);
+    decompile_with_rust_sleigh_with_facts(
+        binary,
+        &facts,
+        address,
+        name,
+        config,
+        max_function_size,
+        max_instructions,
+    )
+}
+
+pub fn decompile_with_rust_sleigh_with_facts(
+    binary: &LoadedBinary,
+    facts: &FactStore,
     address: u64,
     name: &str,
     config: &RustSleighDecompileConfig,
@@ -105,6 +127,7 @@ pub fn decompile_with_rust_sleigh(
 
     match finish_rust_sleigh_render(
         binary,
+        facts,
         entry_address,
         name,
         config,
@@ -157,6 +180,7 @@ pub fn decompile_with_rust_sleigh(
 
             finish_rust_sleigh_render(
                 binary,
+                facts,
                 entry_address,
                 name,
                 config,

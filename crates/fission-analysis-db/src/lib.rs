@@ -175,6 +175,28 @@ pub struct ProgramSnapshot {
 }
 
 impl ProgramSnapshot {
+    pub fn empty() -> Self {
+        Self {
+            schema: PROGRAM_SNAPSHOT_SCHEMA,
+            binary: BinaryMetadata {
+                content_hash: String::new(),
+                format: String::new(),
+                bitness: 0,
+                image_base: 0,
+                entry_point: 0,
+                processor: None,
+                endian: None,
+                abi: None,
+                language_id: None,
+                compiler_spec_id: None,
+            },
+            memory_blocks: Vec::new(),
+            functions: Vec::new(),
+            symbols: Vec::new(),
+            relocations: Vec::new(),
+        }
+    }
+
     pub fn from_loaded_binary(binary: &LoadedBinary) -> Self {
         let memory_blocks = build_memory_blocks(&binary.sections);
         let functions = build_functions(&binary.functions, &memory_blocks);
@@ -216,6 +238,18 @@ impl ProgramSnapshot {
         self.memory_blocks.iter().find(|block| {
             address >= block.start && address < block.start.saturating_add(block.size)
         })
+    }
+
+    pub fn symbols_at(&self, address: u64) -> impl Iterator<Item = &SymbolRecord> {
+        self.symbols
+            .iter()
+            .filter(move |symbol| symbol.address == address)
+    }
+}
+
+impl Default for ProgramSnapshot {
+    fn default() -> Self {
+        Self::empty()
     }
 }
 

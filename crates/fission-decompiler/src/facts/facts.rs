@@ -6,6 +6,7 @@ use crate::{
     NirRenderOptions, NirTypeContext, PcodeFunction, PcodeOpcode, RegisterNamer,
     infer_entry_register_param_arity,
 };
+use fission_analysis_db::SymbolKind;
 use fission_core::PATHS;
 use fission_core::core::ghidra_no_return::{
     binary_format_to_ghidra_format, ghidra_no_return_index,
@@ -76,19 +77,28 @@ pub(crate) fn build_nir_type_context(
 ) -> NirTypeContext {
     let mut index = CallTargetIndex::default();
     let mut iat_index = CallTargetIndex::default();
+    let program = fact_store.program();
 
-    for func in binary.imports() {
-        if func.address == 0 || func.name.is_empty() {
+    for function in program
+        .functions
+        .iter()
+        .filter(|function| function.is_import)
+    {
+        if function.entry == 0 || function.name.is_empty() {
             continue;
         }
-        iat_index.add(func.address, &func.name, CandidateClass::Import);
+        iat_index.add(function.entry, &function.name, CandidateClass::Import);
     }
 
-    for (resolved_address, name) in &binary.inner().iat_symbols {
-        if *resolved_address == 0 || name.is_empty() {
+    for symbol in program
+        .symbols
+        .iter()
+        .filter(|symbol| symbol.kind == SymbolKind::Import)
+    {
+        if symbol.address == 0 || symbol.name.is_empty() {
             continue;
         }
-        iat_index.add(*resolved_address, name, CandidateClass::Import);
+        iat_index.add(symbol.address, &symbol.name, CandidateClass::Import);
     }
 
     for (resolved_address, fact) in fact_store.iter_resolved_name_facts() {
@@ -101,35 +111,43 @@ pub(crate) fn build_nir_type_context(
         index.add(resolved_address, &fact.name, CandidateClass::Fact);
     }
 
-    for func in &binary.functions {
-        if func.name.is_empty() {
+    for function in &program.functions {
+        if function.name.is_empty() {
             continue;
         }
-        if func.is_import {
+        if function.is_import {
             continue;
         }
-        let class = if func.is_export && func.is_thunk_like {
+        let class = if function.is_export && function.is_thunk {
             CandidateClass::ExportThunk
-        } else if func.is_export {
+        } else if function.is_export {
             CandidateClass::Export
         } else {
             CandidateClass::Direct
         };
-        index.add(func.address, &func.name, class);
-        if func.is_export
-            && func.is_thunk_like
-            && let Some(thunk_target) = func.thunk_target
+        index.add(function.entry, &function.name, class);
+        if function.is_export
+            && function.is_thunk
+            && let Some(thunk_target) = function.thunk_target
             && thunk_target != 0
         {
-            index.add(thunk_target, &func.name, CandidateClass::ExportThunkTarget);
+            index.add(
+                thunk_target,
+                &function.name,
+                CandidateClass::ExportThunkTarget,
+            );
         }
     }
 
-    for (resolved_address, name) in &binary.inner().global_symbols {
-        if name.is_empty() {
+    for symbol in program
+        .symbols
+        .iter()
+        .filter(|symbol| symbol.kind == SymbolKind::Data)
+    {
+        if symbol.name.is_empty() {
             continue;
         }
-        index.add(*resolved_address, name, CandidateClass::Global);
+        index.add(symbol.address, &symbol.name, CandidateClass::Global);
     }
     let resolved_index = index.finish();
     let resolved_iat_index = iat_index.finish();
@@ -710,7 +728,15 @@ fn addr_within_function_bounds(
 }
 
 fn build_nir_function_hints(fact_store: &FactStore, address: u64) -> Option<NirFunctionHints> {
-    let debug = fact_store.preferred_debug_function(address)?;
+    let debug_hints = fact_store
+        .preferred_debug_function(address)
+        .and_then(nir_hints_from_debug_function);
+    merge_nir_function_hints(debug_hints, fact_store.structuring_hints(address))
+}
+
+fn nir_hints_from_debug_function(
+    debug: &fission_loader::loader::types::DwarfFunctionInfo,
+) -> Option<NirFunctionHints> {
     let param_names = debug
         .params
         .iter()
@@ -769,6 +795,60 @@ fn build_nir_function_hints(fact_store: &FactStore, address: u64) -> Option<NirF
             return_type_name,
         })
     }
+}
+
+fn merge_nir_function_hints(
+    debug: Option<NirFunctionHints>,
+    structural: Option<&NirFunctionHints>,
+) -> Option<NirFunctionHints> {
+    let mut merged = debug.unwrap_or_default();
+    let Some(structural) = structural else {
+        return (!nir_function_hints_are_empty(&merged)).then_some(merged);
+    };
+
+    if merged.param_names.len() < structural.param_names.len() {
+        merged
+            .param_names
+            .resize(structural.param_names.len(), String::new());
+    }
+    for (index, name) in structural.param_names.iter().enumerate() {
+        if merged.param_names[index].is_empty() && !name.is_empty() {
+            merged.param_names[index] = name.clone();
+        }
+    }
+    for (index, type_name) in &structural.param_type_names {
+        merged
+            .param_type_names
+            .entry(*index)
+            .or_insert_with(|| type_name.clone());
+    }
+    for (offset, name) in &structural.stack_local_names {
+        merged
+            .stack_local_names
+            .entry(*offset)
+            .or_insert_with(|| name.clone());
+    }
+    for (offset, type_name) in &structural.stack_local_type_names {
+        merged
+            .stack_local_type_names
+            .entry(*offset)
+            .or_insert_with(|| type_name.clone());
+    }
+    if merged.return_type_name.is_none() {
+        merged
+            .return_type_name
+            .clone_from(&structural.return_type_name);
+    }
+
+    (!nir_function_hints_are_empty(&merged)).then_some(merged)
+}
+
+fn nir_function_hints_are_empty(hints: &NirFunctionHints) -> bool {
+    hints.param_names.iter().all(String::is_empty)
+        && hints.param_type_names.is_empty()
+        && hints.stack_local_names.is_empty()
+        && hints.stack_local_type_names.is_empty()
+        && hints.return_type_name.is_none()
 }
 
 pub(crate) fn sanitize_nir_symbol_name(name: &str) -> String {
@@ -858,7 +938,8 @@ fn resolve_nir_struct_name(type_name: &str, structures: &WindowsStructures) -> O
 #[cfg(test)]
 mod tests {
     use super::{
-        build_nir_call_param_rules, resolve_nir_struct_name, summarize_preview_callee_effects,
+        build_nir_call_param_rules, merge_nir_function_hints, resolve_nir_struct_name,
+        summarize_preview_callee_effects,
     };
     use crate::{
         CallEdgeKind, CallTargetProvenance, CallTargetRef, PcodeBasicBlock, PcodeFunction, PcodeOp,
@@ -866,6 +947,28 @@ mod tests {
     };
     use fission_signatures::win_types::WindowsStructures;
     use std::collections::HashMap;
+
+    #[test]
+    fn debug_hints_keep_precedence_over_structuring_overlay() {
+        let debug = crate::NirFunctionHints {
+            param_names: vec!["debug_name".into()],
+            param_type_names: HashMap::from([(0, "int".into())]),
+            return_type_name: Some("int".into()),
+            ..Default::default()
+        };
+        let structural = crate::NirFunctionHints {
+            param_names: vec!["structural_name".into(), "second".into()],
+            param_type_names: HashMap::from([(0, "uint32_t".into()), (1, "char *".into())]),
+            return_type_name: Some("uint32_t".into()),
+            ..Default::default()
+        };
+
+        let merged = merge_nir_function_hints(Some(debug), Some(&structural)).unwrap();
+        assert_eq!(merged.param_names, ["debug_name", "second"]);
+        assert_eq!(merged.param_type_names[&0], "int");
+        assert_eq!(merged.param_type_names[&1], "char *");
+        assert_eq!(merged.return_type_name.as_deref(), Some("int"));
+    }
 
     // -------------------------------------------------------------------------
     // GDT pattern matching: resolve_nir_struct_name

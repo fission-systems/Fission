@@ -2378,6 +2378,7 @@ dependencies = [
 name = "fission-decompiler"
 version = "0.1.2"
 dependencies = [
+ "fission-analysis-db",
  "fission-core",
  "fission-loader",
  "fission-pcode",
@@ -2597,6 +2598,7 @@ dependencies = [
  "criterion",
  "crossbeam-channel",
  "dirs",
+ "fission-analysis-db",
  "fission-core",
  "fission-loader",
  "fission-pcode",

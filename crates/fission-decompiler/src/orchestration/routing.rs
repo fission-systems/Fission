@@ -43,6 +43,7 @@ pub fn native_failure_routing_decision(error: &str) -> NirRoutingDecision {
 fn render_selection_from_json(
     pcode_json: &str,
     binary: &LoadedBinary,
+    fact_store: &FactStore,
     type_context: NirTypeContext,
     address: u64,
     name: &str,
@@ -74,11 +75,8 @@ fn render_selection_from_json(
             if err.contains("not a function (orphan block detected)") {
                 return Ok(NirRoutingResolver::nir_skipped(&err));
             }
-            // On error the caller-supplied type_context has been consumed; we cannot
-            // reuse it. try_structuring_recovery rebuilds a fresh context internally.
-            // (Phase 3 will eliminate this by passing &mut DecompContext through.)
-            if let Some(selection) = try_structuring_recovery_with_facts_rebuild(
-                pcode_json, binary, address, name, timeout_ms, &err,
+            if let Some(selection) = try_structuring_recovery_with_facts(
+                pcode_json, binary, fact_store, address, name, timeout_ms, &err,
             )? {
                 Ok(selection)
             } else {
@@ -88,23 +86,18 @@ fn render_selection_from_json(
     }
 }
 
-/// Structuring recovery that rebuilds type context from facts.
-///
-/// Called only when the main render path fails. In Phase 3 this will accept a
-/// `&mut DecompContext` instead of rebuilding from scratch.
-fn try_structuring_recovery_with_facts_rebuild(
+/// Structuring recovery over the same immutable program view and overlays used
+/// by the main render attempt.
+fn try_structuring_recovery_with_facts(
     pcode_json: &str,
     binary: &LoadedBinary,
+    fact_store: &FactStore,
     address: u64,
     name: &str,
     timeout_ms: Option<u64>,
     err: &str,
 ) -> Result<Option<NirSelection>, String> {
-    // Rebuild a fresh FactStore for the recovery path.
-    // This is a temporary overhead that Phase 2 will eliminate by threading
-    // &mut DecompContext through the entire pipeline.
-    let fact_store = FactStore::from_binary(binary);
-    let type_context = build_nir_type_context_from_facts(binary, &fact_store, address);
+    let type_context = build_nir_type_context_from_facts(binary, fact_store, address);
     try_structuring_recovery(
         pcode_json,
         binary,
@@ -158,11 +151,8 @@ fn render_selection_from_pcode(
             if err.contains("not a function (orphan block detected)") {
                 return Ok(NirRoutingResolver::nir_skipped(&err));
             }
-            // Recovery path: rebuild context from facts.
-            // Phase 3 eliminates this rebuild via &mut DecompContext threading.
-            let fact_store = FactStore::from_binary(binary);
             let recovery_decomp_ctx =
-                crate::context::DecompContext::from_facts(binary, fact_store, address);
+                crate::context::DecompContext::from_facts(binary, fact_store.clone(), address);
             let recovery_options = crate::render::nir_options_with_recovery(binary, false, false);
             if let Some(selection) = try_structuring_recovery_from_pcode(
                 pcode,
@@ -235,6 +225,7 @@ pub fn select_nir_output_with_facts<S: NirSource>(
             render_selection_from_json(
                 &pcode_json,
                 binary,
+                fact_store,
                 type_context,
                 address,
                 name,

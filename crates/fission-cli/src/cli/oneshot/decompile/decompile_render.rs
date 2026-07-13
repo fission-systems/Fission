@@ -248,15 +248,21 @@ pub(super) fn decompile_code_with_profile(
     binary: &LoadedBinary,
     address: u64,
     name: &str,
+    shared_facts: Option<&FactStore>,
     timeout_ms: Option<u64>,
     _verbose: bool,
 ) -> Result<RenderedCode, FissionError> {
     if matches!(engine_mode, EngineMode::RustSleigh) {
         let mut config = fission_decompiler::RustSleighDecompileConfig::cli_defaults();
         config.nir_timeout_ms = timeout_ms;
-        let result = fission_decompiler::decompile_with_rust_sleigh(
-            binary, address, name, &config, None, None,
-        )
+        let result = match shared_facts {
+            Some(facts) => fission_decompiler::decompile_with_rust_sleigh_with_facts(
+                binary, facts, address, name, &config, None, None,
+            ),
+            None => fission_decompiler::decompile_with_rust_sleigh(
+                binary, address, name, &config, None, None,
+            ),
+        }
         .map_err(FissionError::decompiler)?;
         return Ok(RenderedCode {
             code: result.code,
@@ -272,7 +278,9 @@ pub(super) fn decompile_code_with_profile(
         });
     }
 
-    let mut fact_store = FactStore::from_binary(binary);
+    let mut fact_store = shared_facts
+        .cloned()
+        .unwrap_or_else(|| FactStore::from_binary(binary));
     let preview_mode = match engine_mode {
         EngineMode::Legacy => NirEngineMode::Legacy,
         EngineMode::Nir => NirEngineMode::Nir,

@@ -1,3 +1,4 @@
+use fission_analysis_db::{FactSource, ProgramSnapshot, SymbolKind};
 use fission_loader::loader::LoadedBinary;
 use fission_loader::loader::types::{
     DwarfFunctionInfo, InferredFieldInfo, InferredTypeInfo, PdbFunctionInfo,
@@ -7,6 +8,7 @@ use fission_signatures::{
     dissect_x86_function_to_fid_units,
 };
 use std::collections::HashMap;
+use std::sync::Arc;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum FactProvenance {
@@ -41,6 +43,7 @@ pub struct FunctionFacts {
     pub type_facts: Vec<TypeFact>,
     pub dwarf_info: Option<DwarfFunctionInfo>,
     pub pdb_info: Option<PdbFunctionInfo>,
+    pub structuring_hints: Option<fission_pcode::nir::NirFunctionHints>,
     pub calling_convention: Option<fission_core::CallingConvention>,
 }
 
@@ -74,48 +77,76 @@ impl FunctionFacts {
     }
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct FactStore {
+    program: Arc<ProgramSnapshot>,
     name_facts: HashMap<u64, Vec<NameFact>>,
     native_type_facts: HashMap<u64, Vec<InferredTypeInfo>>,
-    loader_type_facts: Vec<InferredTypeInfo>,
-    dwarf_functions: HashMap<u64, DwarfFunctionInfo>,
-    pdb_functions: HashMap<u64, PdbFunctionInfo>,
+    loader_type_facts: Arc<Vec<InferredTypeInfo>>,
+    dwarf_functions: Arc<HashMap<u64, DwarfFunctionInfo>>,
+    pdb_functions: Arc<HashMap<u64, PdbFunctionInfo>>,
+    structuring_hints: HashMap<u64, fission_pcode::nir::NirFunctionHints>,
     pub calling_conventions: HashMap<u64, fission_core::CallingConvention>,
+}
+
+impl Default for FactStore {
+    fn default() -> Self {
+        Self {
+            program: Arc::new(ProgramSnapshot::default()),
+            name_facts: HashMap::new(),
+            native_type_facts: HashMap::new(),
+            loader_type_facts: Arc::new(Vec::new()),
+            dwarf_functions: Arc::new(HashMap::new()),
+            pdb_functions: Arc::new(HashMap::new()),
+            structuring_hints: HashMap::new(),
+            calling_conventions: HashMap::new(),
+        }
+    }
 }
 
 impl FactStore {
     pub fn from_binary(binary: &LoadedBinary) -> Self {
+        Self::from_program(
+            binary,
+            Arc::new(ProgramSnapshot::from_loaded_binary(binary)),
+        )
+    }
+
+    pub fn from_program(binary: &LoadedBinary, program: Arc<ProgramSnapshot>) -> Self {
         let mut store = Self {
+            program: Arc::clone(&program),
             name_facts: HashMap::new(),
             native_type_facts: HashMap::new(),
-            loader_type_facts: binary.inferred_types.clone(),
-            dwarf_functions: binary.dwarf_functions.clone(),
-            pdb_functions: binary.pdb_functions.clone(),
+            loader_type_facts: Arc::new(binary.inferred_types.clone()),
+            dwarf_functions: Arc::new(binary.dwarf_functions.clone()),
+            pdb_functions: Arc::new(binary.pdb_functions.clone()),
+            structuring_hints: HashMap::new(),
             calling_conventions: HashMap::new(),
         };
 
-        for func in &binary.functions {
-            if func.name.trim().is_empty() {
+        for function in &program.functions {
+            if function.name.trim().is_empty() {
                 continue;
             }
-            let provenance = if func.is_import || func.is_export {
+            let provenance = if function.is_import || function.is_export {
                 FactProvenance::ImportExport
+            } else if function.provenance.source == FactSource::DebugInfo {
+                FactProvenance::DebugInfo
             } else {
                 FactProvenance::BinarySymbol
             };
-            store.ingest_name_fact(func.address, func.name.clone(), provenance);
+            store.ingest_name_fact(function.entry, function.name.clone(), provenance);
         }
 
-        for (addr, name) in &binary.inner().iat_symbols {
-            if !name.trim().is_empty() {
-                store.ingest_name_fact(*addr, name.clone(), FactProvenance::ImportExport);
-            }
-        }
-
-        for (addr, name) in &binary.inner().global_symbols {
-            if !name.trim().is_empty() {
-                store.ingest_name_fact(*addr, name.clone(), FactProvenance::BinarySymbol);
+        for symbol in &program.symbols {
+            if !symbol.name.trim().is_empty() {
+                let provenance = match symbol.kind {
+                    SymbolKind::Import | SymbolKind::Export => FactProvenance::ImportExport,
+                    SymbolKind::Function | SymbolKind::Data | SymbolKind::RelocationTarget => {
+                        FactProvenance::BinarySymbol
+                    }
+                };
+                store.ingest_name_fact(symbol.address, symbol.name.clone(), provenance);
             }
         }
 
@@ -181,12 +212,20 @@ impl FactStore {
                         size: user_struct.size,
                         metadata_address: 0,
                     };
-                    store.loader_type_facts.push(info);
+                    Arc::make_mut(&mut store.loader_type_facts).push(info);
                 }
             }
         }
 
         store
+    }
+
+    pub fn program(&self) -> &ProgramSnapshot {
+        &self.program
+    }
+
+    pub fn program_arc(&self) -> Arc<ProgramSnapshot> {
+        Arc::clone(&self.program)
     }
 
     /// Run exact Ghidra-style FID matching when sufficient decoded instruction
@@ -329,12 +368,12 @@ impl FactStore {
                 .get(&address)
                 .cloned()
                 .unwrap_or_default(),
-            self.loader_type_facts.clone(),
+            self.loader_type_facts.as_ref().clone(),
         )
     }
 
     pub fn loader_type_facts(&self) -> &[InferredTypeInfo] {
-        &self.loader_type_facts
+        self.loader_type_facts.as_slice()
     }
 
     pub fn dwarf_function(&self, address: u64) -> Option<&DwarfFunctionInfo> {
@@ -353,12 +392,9 @@ impl FactStore {
 
     /// Record function-level hints discovered during structuring or normalize.
     ///
-    /// Called by NIR structuring passes (Phase 3+) when they discover parameter
-    /// count, local variable layout, or return type information from the CFG
-    /// structure. The recorded hints are stored as a synthetic `DwarfFunctionInfo`
-    /// under `FactProvenance::DebugInfo` provenance, so that the next normalize
-    /// round's `build_nir_type_context` call will pick them up via
-    /// `preferred_debug_function`.
+    /// Called by NIR structuring passes when they discover parameter count,
+    /// local layout, or return information from the CFG. Analysis-produced
+    /// hints stay in their own overlay and never impersonate DWARF/PDB records.
     ///
     /// ## Invariant
     /// Only call this when the hints represent a structural invariant (e.g.
@@ -369,39 +405,14 @@ impl FactStore {
         address: u64,
         hints: fission_pcode::nir::NirFunctionHints,
     ) {
-        use fission_loader::loader::types::{DwarfLocation, DwarfParamInfo};
-        // Synthesize a DwarfFunctionInfo from the structuring hints.
-        // Only overwrite if new hints have more information than existing DWARF/PDB.
-        let existing_param_count = self
-            .preferred_debug_function(address)
-            .map(|f| f.params.len())
-            .unwrap_or(0);
-        let new_param_count = hints.param_names.len();
-        if new_param_count <= existing_param_count {
-            // Don't overwrite higher-quality debug info with structuring hints.
-            return;
-        }
-        let params = hints
-            .param_names
-            .iter()
-            .enumerate()
-            .map(|(i, name)| DwarfParamInfo {
-                name: name.clone(),
-                type_name: hints.param_type_names.get(&i).cloned().unwrap_or_default(),
-                location: DwarfLocation::Unknown,
-            })
-            .collect();
-        let synthesized = fission_loader::loader::types::DwarfFunctionInfo {
-            address,
-            name: self.resolved_name(address).unwrap_or("").to_string(),
-            return_type: hints.return_type_name,
-            params,
-            local_vars: vec![],
-            size: 0,
-        };
-        // Store as synthetic DWARF. `preferred_debug_function` returns DWARF over PDB,
-        // so this will be picked up on the next `build_nir_type_context` call.
-        self.dwarf_functions.insert(address, synthesized);
+        self.structuring_hints
+            .entry(address)
+            .and_modify(|current| merge_structuring_hints(current, &hints))
+            .or_insert(hints);
+    }
+
+    pub fn structuring_hints(&self, address: u64) -> Option<&fission_pcode::nir::NirFunctionHints> {
+        self.structuring_hints.get(&address)
     }
 
     pub fn function_facts_snapshot(&self, address: u64) -> FunctionFacts {
@@ -428,8 +439,48 @@ impl FactStore {
             type_facts,
             dwarf_info: self.dwarf_functions.get(&address).cloned(),
             pdb_info: self.pdb_functions.get(&address).cloned(),
+            structuring_hints: self.structuring_hints.get(&address).cloned(),
             calling_convention: self.calling_conventions.get(&address).cloned(),
         }
+    }
+}
+
+fn merge_structuring_hints(
+    current: &mut fission_pcode::nir::NirFunctionHints,
+    incoming: &fission_pcode::nir::NirFunctionHints,
+) {
+    if current.param_names.len() < incoming.param_names.len() {
+        current
+            .param_names
+            .resize(incoming.param_names.len(), String::new());
+    }
+    for (index, name) in incoming.param_names.iter().enumerate() {
+        if current.param_names[index].is_empty() && !name.is_empty() {
+            current.param_names[index] = name.clone();
+        }
+    }
+    for (index, type_name) in &incoming.param_type_names {
+        current
+            .param_type_names
+            .entry(*index)
+            .or_insert_with(|| type_name.clone());
+    }
+    for (offset, name) in &incoming.stack_local_names {
+        current
+            .stack_local_names
+            .entry(*offset)
+            .or_insert_with(|| name.clone());
+    }
+    for (offset, type_name) in &incoming.stack_local_type_names {
+        current
+            .stack_local_type_names
+            .entry(*offset)
+            .or_insert_with(|| type_name.clone());
+    }
+    if current.return_type_name.is_none() {
+        current
+            .return_type_name
+            .clone_from(&incoming.return_type_name);
     }
 }
 
@@ -583,7 +634,11 @@ mod tests {
     #[test]
     fn metadata_type_fields_win_over_loader_fields() {
         let mut store = FactStore {
-            loader_type_facts: vec![inferred_type("Widget", 0, vec![("loader_field", 4)])],
+            loader_type_facts: Arc::new(vec![inferred_type(
+                "Widget",
+                0,
+                vec![("loader_field", 4)],
+            )]),
             ..FactStore::default()
         };
         store.ingest_native_function_types(
@@ -605,7 +660,7 @@ mod tests {
             FactProvenance::WeakAutogenerated,
         );
         store.ingest_name_fact(0x401000, "KnownName".into(), FactProvenance::BinarySymbol);
-        store.dwarf_functions.insert(
+        Arc::make_mut(&mut store.dwarf_functions).insert(
             0x401000,
             DwarfFunctionInfo {
                 address: 0x401000,
@@ -628,7 +683,7 @@ mod tests {
     #[test]
     fn snapshot_counts_native_and_loader_type_facts_separately() {
         let mut store = FactStore {
-            loader_type_facts: vec![inferred_type("LoaderType", 0, vec![])],
+            loader_type_facts: Arc::new(vec![inferred_type("LoaderType", 0, vec![])]),
             ..FactStore::default()
         };
         store.ingest_native_function_types(
@@ -644,7 +699,7 @@ mod tests {
     #[test]
     fn snapshot_counts_dwarf_type_facts_from_function_info() {
         let mut store = FactStore::default();
-        store.dwarf_functions.insert(
+        Arc::make_mut(&mut store.dwarf_functions).insert(
             0x401000,
             DwarfFunctionInfo {
                 address: 0x401000,
@@ -667,6 +722,83 @@ mod tests {
         let snapshot = store.function_facts_snapshot(0x401000);
         assert_eq!(snapshot.dwarf_type_fact_count(), 3);
         assert_eq!(snapshot.pdb_type_fact_count(), 0);
+    }
+
+    #[test]
+    fn fact_stores_share_the_same_program_snapshot() {
+        use fission_loader::{FunctionInfo, loader::DataBuffer};
+
+        let binary = fission_loader::loader::LoadedBinaryBuilder::new(
+            "fixture.exe".into(),
+            DataBuffer::Heap(vec![]),
+        )
+        .add_function(FunctionInfo {
+            name: "known_function".into(),
+            address: 0x401000,
+            size: 8,
+            ..FunctionInfo::default()
+        })
+        .build()
+        .expect("build fixture");
+        let program = Arc::new(ProgramSnapshot::from_loaded_binary(&binary));
+        let first = FactStore::from_program(&binary, Arc::clone(&program));
+        let second = FactStore::from_program(&binary, Arc::clone(&program));
+        let first_program = first.program_arc();
+        let second_program = second.program_arc();
+
+        assert!(Arc::ptr_eq(&first_program, &second_program));
+        assert_eq!(first.resolved_name(0x401000), Some("known_function"));
+    }
+
+    #[test]
+    fn structuring_hints_do_not_replace_debug_metadata() {
+        let mut store = FactStore::default();
+        Arc::make_mut(&mut store.dwarf_functions).insert(
+            0x401000,
+            DwarfFunctionInfo {
+                address: 0x401000,
+                name: "debug_name".into(),
+                return_type: Some("int".into()),
+                params: vec![DwarfParamInfo {
+                    name: "debug_param".into(),
+                    type_name: "int".into(),
+                    location: DwarfLocation::Unknown,
+                }],
+                local_vars: Vec::new(),
+                size: 0,
+            },
+        );
+        store.record_structuring_hints(
+            0x401000,
+            fission_pcode::nir::NirFunctionHints {
+                param_names: vec!["structural_0".into(), "structural_1".into()],
+                return_type_name: Some("uint32_t".into()),
+                ..Default::default()
+            },
+        );
+        store.record_structuring_hints(
+            0x401000,
+            fission_pcode::nir::NirFunctionHints {
+                stack_local_names: HashMap::from([(-8, "recovered_local".into())]),
+                ..Default::default()
+            },
+        );
+
+        assert_eq!(
+            store.preferred_debug_function(0x401000).unwrap().params[0].name,
+            "debug_param"
+        );
+        assert_eq!(
+            store.structuring_hints(0x401000).unwrap().param_names,
+            ["structural_0", "structural_1"]
+        );
+        assert_eq!(
+            store.structuring_hints(0x401000).unwrap().stack_local_names[&-8],
+            "recovered_local"
+        );
+        let snapshot = store.function_facts_snapshot(0x401000);
+        assert!(snapshot.dwarf_info.is_some());
+        assert!(snapshot.structuring_hints.is_some());
     }
 
     #[test]

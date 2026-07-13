@@ -93,6 +93,7 @@ pub(crate) fn apply_spec_overrides(binary: &LoadedBinary, options: &mut NirRende
 
 pub(crate) fn finish_rust_sleigh_render(
     binary: &LoadedBinary,
+    fact_store: &FactStore,
     entry_address: u64,
     name: &str,
     config: &RustSleighDecompileConfig,
@@ -106,9 +107,10 @@ pub(crate) fn finish_rust_sleigh_render(
     options.userops = userops;
     apply_spec_overrides(binary, &mut options);
 
-    let selection = select_nir_output_from_prebuilt_pcode(
+    let selection = select_nir_output_from_prebuilt_pcode_with_facts(
         pcode,
         binary,
+        fact_store,
         entry_address,
         name,
         config.nir_mode,
@@ -178,13 +180,29 @@ pub fn select_nir_output_from_prebuilt_pcode(
     timeout_ms: Option<u64>,
     options: NirRenderOptions,
 ) -> Result<NirSelection, String> {
-    // Phase 1: build FactStore once and call select_nir_output_from_pcode_with_facts
-    // directly, bypassing the DecompileRequest → decompile_prebuilt_pcode indirection
-    // which caused `options` to be cloned in `resolved_render_options()`.
-    //
-    // Phase 2 will refactor `finish_rust_sleigh_render` to pass a pre-built
-    // `DecompContext` so that `FactStore::from_binary` is also eliminated here.
     let fact_store = FactStore::from_binary(binary);
+    select_nir_output_from_prebuilt_pcode_with_facts(
+        pcode,
+        binary,
+        &fact_store,
+        address,
+        name,
+        mode,
+        timeout_ms,
+        options,
+    )
+}
+
+pub fn select_nir_output_from_prebuilt_pcode_with_facts(
+    pcode: &PcodeFunction,
+    binary: &LoadedBinary,
+    fact_store: &FactStore,
+    address: u64,
+    name: &str,
+    mode: NirEngineMode,
+    timeout_ms: Option<u64>,
+    options: NirRenderOptions,
+) -> Result<NirSelection, String> {
     crate::routing::select_nir_output_from_pcode_with_facts(
         pcode,
         binary,
