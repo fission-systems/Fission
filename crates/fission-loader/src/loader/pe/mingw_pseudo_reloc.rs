@@ -36,12 +36,7 @@ where
     let mut facts = MingwPseudoRelocFacts::default();
     let list_va = global_symbols
         .iter()
-        .find_map(|(addr, name)| (name == PSEUDO_RELOC_LIST_SYMBOL).then_some(*addr))
-        .or_else(|| {
-            global_symbols
-                .iter()
-                .find_map(|(addr, name)| name.contains("PSEUDO_RELOC_LIST").then_some(*addr))
-        });
+        .find_map(|(addr, name)| is_pseudo_reloc_list_symbol(name).then_some(*addr));
 
     let Some(list_symbol_va) = list_va else {
         if let Some((addr, _)) = global_symbols
@@ -107,6 +102,11 @@ where
     facts.relocation_use_sites.sort_unstable();
     facts.relocation_use_sites.dedup();
     facts
+}
+
+fn is_pseudo_reloc_list_symbol(name: &str) -> bool {
+    name == PSEUDO_RELOC_LIST_SYMBOL
+        || name.trim_start_matches('_') == "RUNTIME_PSEUDO_RELOC_LIST__"
 }
 
 pub(super) fn mingw_pseudo_reloc_entries(use_sites: &[u64]) -> Vec<RelocationEntry> {
@@ -198,5 +198,18 @@ mod tests {
         let facts = scan_mingw_pseudo_relocs(image_base, true, &globals, &view, true);
         assert!(facts.relocation_use_sites.contains(&use_site));
         assert!(facts.cfg_label_leaders.contains(&list_start));
+    }
+
+    #[test]
+    fn refptr_symbol_is_not_treated_as_pseudo_reloc_list() {
+        let image_base = 0x1400_0000;
+        let refptr = image_base + 0x4000;
+        let mut globals = std::collections::HashMap::new();
+        globals.insert(refptr, "_refptr___RUNTIME_PSEUDO_RELOC_LIST__".to_string());
+
+        let view = |_addr: u64, len: usize| Some(vec![0; len]);
+        let facts = scan_mingw_pseudo_relocs(image_base, true, &globals, &view, true);
+        assert!(facts.relocation_use_sites.is_empty());
+        assert!(facts.cfg_label_leaders.is_empty());
     }
 }

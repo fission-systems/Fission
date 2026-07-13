@@ -4,7 +4,7 @@
 //! into a deterministic snapshot with stable table IDs and explicit
 //! provenance. It intentionally contains no binary parser or NIR pass.
 
-use fission_loader::{FunctionInfo, LoadedBinary, SectionInfo};
+use fission_loader::{FunctionInfo, LoadedBinary};
 use serde::Serialize;
 use std::collections::BTreeMap;
 
@@ -198,7 +198,7 @@ impl ProgramSnapshot {
     }
 
     pub fn from_loaded_binary(binary: &LoadedBinary) -> Self {
-        let memory_blocks = build_memory_blocks(&binary.sections);
+        let memory_blocks = build_memory_blocks(binary);
         let functions = build_functions(&binary.functions, &memory_blocks);
         let symbols = build_symbols(binary, &functions);
         let relocations = build_relocations(binary, &symbols);
@@ -253,41 +253,88 @@ impl Default for ProgramSnapshot {
     }
 }
 
-fn build_memory_blocks(sections: &[SectionInfo]) -> Vec<MemoryBlock> {
-    let mut sorted = sections.to_vec();
+fn build_memory_blocks(binary: &LoadedBinary) -> Vec<MemoryBlock> {
+    let mut sorted = binary.sections.clone();
     sorted.sort_by(|left, right| {
         left.virtual_address
             .cmp(&right.virtual_address)
             .then_with(|| left.name.cmp(&right.name))
             .then_with(|| left.file_offset.cmp(&right.file_offset))
     });
-    sorted
-        .into_iter()
-        .enumerate()
-        .map(|(index, section)| MemoryBlock {
-            id: MemoryBlockId(index as u32),
-            name: section.name,
-            start: section.virtual_address,
-            size: section.virtual_size.max(section.file_size),
-            virtual_size: section.virtual_size,
-            file_offset: section.file_offset,
-            file_size: section.file_size,
-            permissions: Permissions {
-                read: section.is_readable,
-                write: section.is_writable,
-                execute: section.is_executable,
-            },
-            provenance: Provenance {
-                source: FactSource::SectionTable,
-                confidence: FactConfidence::Proven,
-                detail: None,
-            },
-        })
-        .collect()
+
+    let mut blocks = Vec::with_capacity(sorted.len() + 1);
+    if is_pe_format(&binary.format) {
+        let first_section_start = sorted.first().map(|section| section.virtual_address);
+        let first_raw_offset = sorted
+            .iter()
+            .filter_map(|section| (section.file_offset != 0).then_some(section.file_offset))
+            .min();
+        if let (Some(section_start), Some(raw_size)) = (first_section_start, first_raw_offset) {
+            let address_gap = section_start.saturating_sub(binary.image_base);
+            if binary.image_base != 0 && raw_size != 0 && raw_size <= address_gap {
+                blocks.push(MemoryBlock {
+                    id: MemoryBlockId(0),
+                    name: "Headers".into(),
+                    start: binary.image_base,
+                    size: raw_size,
+                    virtual_size: raw_size,
+                    file_offset: 0,
+                    file_size: raw_size,
+                    permissions: Permissions {
+                        read: true,
+                        write: false,
+                        execute: false,
+                    },
+                    provenance: Provenance {
+                        source: FactSource::Loader,
+                        confidence: FactConfidence::Proven,
+                        detail: Some("PE mapped headers".into()),
+                    },
+                });
+            }
+        }
+    }
+
+    blocks.extend(sorted.into_iter().map(|section| MemoryBlock {
+        id: MemoryBlockId(0),
+        name: section.name,
+        start: section.virtual_address,
+        size: section.virtual_size.max(section.file_size),
+        virtual_size: section.virtual_size,
+        file_offset: section.file_offset,
+        file_size: section.file_size,
+        permissions: Permissions {
+            read: section.is_readable,
+            write: section.is_writable,
+            execute: section.is_executable,
+        },
+        provenance: Provenance {
+            source: FactSource::SectionTable,
+            confidence: FactConfidence::Proven,
+            detail: None,
+        },
+    }));
+    for (index, block) in blocks.iter_mut().enumerate() {
+        block.id = MemoryBlockId(index as u32);
+    }
+    blocks
+}
+
+fn is_pe_format(format: &str) -> bool {
+    let normalized = format.trim().to_ascii_lowercase();
+    normalized == "pe" || normalized == "portable executable"
 }
 
 fn build_functions(functions: &[FunctionInfo], blocks: &[MemoryBlock]) -> Vec<FunctionRecord> {
     let mut sorted = functions.to_vec();
+    sorted.retain(|function| {
+        !function.is_import
+            || blocks.iter().any(|block| {
+                block.permissions.execute
+                    && function.address >= block.start
+                    && function.address < block.start.saturating_add(block.size)
+            })
+    });
     sorted.sort_by(|left, right| {
         left.address
             .cmp(&right.address)
@@ -492,6 +539,7 @@ fn confidence_for_source(source: FactSource) -> FactConfidence {
 mod tests {
     use super::*;
     use fission_loader::loader::{DataBuffer, LoadedBinaryBuilder, RelocationEntry};
+    use fission_loader::SectionInfo;
 
     fn fixture(reverse: bool) -> LoadedBinary {
         let functions = vec![
@@ -572,5 +620,77 @@ mod tests {
         assert_eq!(first.memory_block, Some(MemoryBlockId(0)));
         assert_eq!(snapshot.relocations.len(), 1);
         assert!(snapshot.relocations[0].symbol.is_some());
+    }
+
+    #[test]
+    fn non_executable_import_slots_are_symbols_not_functions() {
+        let binary = LoadedBinaryBuilder::new("imports.exe".into(), DataBuffer::Heap(vec![0; 16]))
+            .format("PE")
+            .image_base(0x1000)
+            .is_64bit(true)
+            .add_section(SectionInfo {
+                name: ".idata".into(),
+                virtual_address: 0x3000,
+                virtual_size: 0x100,
+                file_offset: 0,
+                file_size: 0x100,
+                is_executable: false,
+                is_readable: true,
+                is_writable: true,
+            })
+            .add_function(FunctionInfo {
+                name: "example.dll!imported".into(),
+                address: 0x3010,
+                is_import: true,
+                kind: Some("import".into()),
+                ..FunctionInfo::default()
+            })
+            .add_iat_symbol(0x3010, "example.dll!imported".into())
+            .build()
+            .expect("fixture should build");
+
+        let snapshot = ProgramSnapshot::from_loaded_binary(&binary);
+        assert!(snapshot.functions.is_empty());
+        assert!(snapshot
+            .symbols
+            .iter()
+            .any(|symbol| { symbol.address == 0x3010 && symbol.kind == SymbolKind::Import }));
+    }
+
+    #[test]
+    fn pe_snapshot_maps_file_headers_before_first_section() {
+        let binary = LoadedBinaryBuilder::new("headers.exe".into(), DataBuffer::Heap(vec![0; 16]))
+            .format("PE")
+            .image_base(0x140000000)
+            .is_64bit(true)
+            .add_section(SectionInfo {
+                name: ".text".into(),
+                virtual_address: 0x140001000,
+                virtual_size: 0x1000,
+                file_offset: 0x600,
+                file_size: 0x800,
+                is_executable: true,
+                is_readable: true,
+                is_writable: false,
+            })
+            .build()
+            .expect("fixture should build");
+
+        let snapshot = ProgramSnapshot::from_loaded_binary(&binary);
+        let headers = &snapshot.memory_blocks[0];
+        assert_eq!(headers.name, "Headers");
+        assert_eq!(headers.start, 0x140000000);
+        assert_eq!(headers.size, 0x600);
+        assert_eq!(headers.file_size, 0x600);
+        assert_eq!(
+            headers.permissions,
+            Permissions {
+                read: true,
+                write: false,
+                execute: false,
+            }
+        );
+        assert_eq!(headers.provenance.source, FactSource::Loader);
+        assert_eq!(snapshot.memory_blocks[1].name, ".text");
     }
 }

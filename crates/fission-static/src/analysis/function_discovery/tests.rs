@@ -289,9 +289,10 @@ fn function_discovery_promotes_only_sleigh_validated_symbol_seeds() {
             .map(|function| function.name.as_str()),
         Some("return_seed")
     );
-    assert!(
-        binary
-            .function_at(0x401140)
-            .is_some_and(|function| function.is_thunk_like)
-    );
+    let thunk = binary.function_at(0x401140).expect("import thunk");
+    assert!(thunk.is_thunk_like);
+    assert_eq!(thunk.name, "target");
+    assert_eq!(thunk.kind.as_deref(), Some("import_thunk"));
+    assert_eq!(thunk.thunk_target, Some(0x401300));
+    assert_eq!(thunk.external_library.as_deref(), Some("example.dll"));
 }

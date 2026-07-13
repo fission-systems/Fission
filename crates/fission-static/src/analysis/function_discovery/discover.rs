@@ -182,8 +182,9 @@ pub fn discover_functions_with_runtime(
                 &mut local_cache,
                 Some(&all_references),
             );
-            (valid_routine || is_terminal_import_thunk(binary, &frontend, seed.address))
-                .then(|| seed.clone())
+            (valid_routine
+                || terminal_import_thunk_target(binary, &frontend, seed.address).is_some())
+            .then(|| seed.clone())
         })
         .collect();
     candidates.extend(valid_symbol_seeds.iter().map(|seed| seed.address));
@@ -404,22 +405,35 @@ pub fn discover_functions_with_runtime(
     if !accepted.is_empty() {
         for address in accepted {
             let seed = valid_symbol_seed_by_address.get(&address);
-            let is_thunk_like =
-                seed.is_some() && is_terminal_import_thunk(binary, &frontend, address);
+            let thunk_target = terminal_import_thunk_target(binary, &frontend, address);
+            let import_identity = thunk_target
+                .and_then(|target| binary.iat_symbols.get(&target))
+                .map(|name| split_import_identity(name));
+            let is_thunk_like = thunk_target.is_some();
             binary.functions.push(FunctionInfo {
-                name: seed
-                    .map(|seed| seed.name.clone())
+                name: import_identity
+                    .as_ref()
+                    .map(|(_, name)| name.clone())
+                    .or_else(|| seed.map(|seed| seed.name.clone()))
                     .unwrap_or_else(|| format!("sub_{address:x}")),
                 address,
                 size: 0,
                 is_export: false,
                 is_import: false,
-                origin: seed.map(|seed| seed.origin.clone()),
-                kind: seed.map(|_| "validated_symbol".to_string()),
+                origin: if is_thunk_like {
+                    Some("sleigh-import-thunk".to_string())
+                } else {
+                    seed.map(|seed| seed.origin.clone())
+                },
+                kind: if is_thunk_like {
+                    Some("import_thunk".to_string())
+                } else {
+                    seed.map(|_| "validated_symbol".to_string())
+                },
                 source_section: seed.and_then(|seed| seed.source_section.clone()),
-                external_library: None,
+                external_library: import_identity.and_then(|(library, _)| library),
                 is_thunk_like,
-                thunk_target: None,
+                thunk_target,
             });
         }
         binary.functions.sort_by_key(|function| function.address);
@@ -430,24 +444,24 @@ pub fn discover_functions_with_runtime(
     report
 }
 
-fn is_terminal_import_thunk(
+fn terminal_import_thunk_target(
     binary: &LoadedBinary,
     frontend: &RuntimeSleighFrontend,
     address: u64,
-) -> bool {
+) -> Option<u64> {
     let Some(bytes) = binary.view_bytes(address, 15) else {
-        return false;
+        return None;
     };
     let Ok(decoded) = frontend.decode_window(bytes, address, 1) else {
-        return false;
+        return None;
     };
     let Some(instruction) = decoded.first() else {
-        return false;
+        return None;
     };
     if instruction.flow_kind != DecodedFlowKind::Jump
         && !instruction.mnemonic.eq_ignore_ascii_case("jmp")
     {
-        return false;
+        return None;
     }
 
     instruction
@@ -462,7 +476,16 @@ fn is_terminal_import_thunk(
         .map(|target| {
             crate::analysis::function_discovery::targets::normalize_target(binary, target)
         })
-        .any(|target| binary.iat_symbols.contains_key(&target))
+        .find(|target| binary.iat_symbols.contains_key(target))
+}
+
+fn split_import_identity(name: &str) -> (Option<String>, String) {
+    match name.split_once('!') {
+        Some((library, symbol)) if !symbol.is_empty() => {
+            (Some(library.to_string()), symbol.to_string())
+        }
+        _ => (None, name.to_string()),
+    }
 }
 
 fn collect_section_targets(
