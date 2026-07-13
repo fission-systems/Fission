@@ -1087,6 +1087,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#post-release-verification" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Post-release verification
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#known-limitations" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1337,6 +1348,17 @@
     <span class="md-ellipsis">
       
         Benchmark interpretation
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#post-release-verification" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Post-release verification
       
     </span>
   </a>
@@ -1694,6 +1716,31 @@ of 0.1.2 improvement. Its layered Fission-to-Ghidra parity report recorded:</p>
 ranking and do not establish semantic equivalence. The benchmark repository is
 pinned to <code>v0.1.2</code> after release assets are published, then rerun so 0.1.2 receives
 its own provenance-linked measurements.</p>
+<h2 id="post-release-verification">Post-release verification<a class="headerlink" href="#post-release-verification" title="Permanent link">&para;</a></h2>
+<p>After the release assets were published, the Fission benchmark default was pinned
+to <code>v0.1.2</code> and the push smoke workflow was rerun against the release-backed
+container. The workflow verified the container version before measurement and
+reported <code>FISSION_RUN_VALID=true</code>.</p>
+<p>The strict Fission-to-Ghidra parity smoke covered 20 selected subjects and
+reported:</p>
+<ul>
+<li>assembly parity: 20/20 matched, 100% coverage;</li>
+<li>p-code parity: 20/20 matched, with opcode, loose-full, and strict-full rates
+  all at 100%;</li>
+<li>CFG parity: 20/20 matched, 100% coverage;</li>
+<li>function discovery: 4/4 inventory rows matched; and</li>
+<li>IR invariant diagnostics: 20/20 matched.</li>
+</ul>
+<p>The conservative reliability aggregate contained 84 usable telemetry rows with
+100% coverage, no fetch errors, and a 100% headline match rate. The accompanying
+multi-decompiler smoke contained 90 rows across nine tools and passed its run
+validity and dashboard-data gates.</p>
+<p>This was a bounded push smoke (<code>benchmark_limit=10</code>, one compiler variant, and
+<code>parity_limit=20</code>), not the full official corpus. It is release-consumer and
+regression evidence only; it must not be substituted for a full semantic,
+holdout, or cross-architecture evaluation.</p>
+<p>Workflow evidence:</p>
+<p><a href="https://github.com/sjkim1127/fission-benchmark/actions/runs/29253009983">https://github.com/sjkim1127/fission-benchmark/actions/runs/29253009983</a></p>
 <h2 id="known-limitations">Known limitations<a class="headerlink" href="#known-limitations" title="Permanent link">&para;</a></h2>
 <ul>
 <li>Decompiler semantic correctness remains incomplete, particularly on complex
@@ -1715,12 +1762,15 @@ its own provenance-linked measurements.</p>
 <p>Tag-driven CD publishes:</p>
 <ul>
 <li><code>fission-linux-x64.tar.gz</code></li>
+<li><code>fission-linux-x64.sha256</code></li>
 <li><code>fission-macos-arm64.tar.gz</code></li>
+<li><code>fission-macos-arm64.sha256</code></li>
 <li><code>fission-windows-x64.zip</code></li>
+<li><code>fission-windows-x64.sha256</code></li>
 <li><code>fission_cli-x86_64-unknown-linux-gnu</code></li>
-<li><code>checksums.txt</code></li>
+<li><code>fission_cli-x86_64-unknown-linux-gnu.sha256</code></li>
 </ul>
-<p>Verify downloads with <code>checksums.txt</code> before use.</p>
+<p>Verify each download with its corresponding <code>.sha256</code> asset before use.</p>
 <h2 id="full-comparison">Full comparison<a class="headerlink" href="#full-comparison" title="Permanent link">&para;</a></h2>
 <p>See the complete commit and file comparison:</p>
 <p><a href="https://github.com/sjkim1127/Fission/compare/v0.1.1...v0.1.2">https://github.com/sjkim1127/Fission/compare/v0.1.1...v0.1.2</a></p>
