@@ -1,0 +1,1789 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="A cross-platform, Rust-powered reverse engineering and decompilation framework.">
+      
+      
+      
+        <link rel="canonical" href="https://sjkim1127.github.io/Fission/changelog/v0.1.2/">
+      
+      
+        <link rel="prev" href="../../RELEASE/">
+      
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>Fission 0.1.2 - Fission</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#fission-v012" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="Fission" class="md-header__button md-logo" aria-label="Fission" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Fission
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Fission 0.1.2
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m14.3 16-.7-2h-3.2l-.7 2H7.8L11 7h2l3.2 9zM20 8.69V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12zm-9.15 3.96h2.3L12 9z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_2" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to system preference"  type="radio" name="__palette" id="__palette_2">
+    
+      <label class="md-header__button md-icon" title="Switch to system preference" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/sjkim1127/Fission" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    sjkim1127/Fission
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../.." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../PROJECT_MAP/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Project Map
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../CLI/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  CLI Guide
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../architecture/ARCHITECTURE/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Architecture
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../QUALITY_METRICS/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Quality Metrics
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../EVALUATION/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Evaluation
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../contributing/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Contributing
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../MALWARE_SAMPLE_POLICY/" class="md-tabs__link">
+          
+  
+  
+  Developer Policies
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="./" class="md-tabs__link">
+          
+  
+  
+  Release Notes
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="Fission" class="md-nav__button md-logo" aria-label="Fission" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Fission
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/sjkim1127/Fission" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    sjkim1127/Fission
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../PROJECT_MAP/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Project Map
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../CLI/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI Guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../architecture/ARCHITECTURE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../QUALITY_METRICS/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quality Metrics
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../EVALUATION/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Evaluation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../contributing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contributing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_8" >
+        
+          
+          <label class="md-nav__link" for="__nav_8" id="__nav_8_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Developer Policies
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_8_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_8">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Developer Policies
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../MALWARE_SAMPLE_POLICY/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Malware Sample Policy
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../VERSIONING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Versioning
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../RELEASE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Release
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_9" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_9" id="__nav_9_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Release Notes
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_9_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_9">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Release Notes
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fission 0.1.2
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fission 0.1.2
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#release-summary" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Release summary
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#decompiler-semantic-recovery" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Decompiler semantic recovery
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Decompiler semantic recovery">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#variable-identity-and-storage-roles" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Variable identity and storage roles
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#returns-conditions-and-loops" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Returns, conditions, and loops
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#x86-recovery-details" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        x86 recovery details
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#sleigh-and-ghidra-p-code-parity" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        SLEIGH and Ghidra p-code parity
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#nir-and-hir-presentation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        NIR and HIR presentation
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#experimental-native-sandbox-and-emulator" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Experimental native sandbox and emulator
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#experimental-native-solver" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Experimental native solver
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#loader-and-dynamic-analysis-changes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Loader and dynamic-analysis changes
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#architecture-and-anti-overfit-guardrails" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Architecture and anti-overfit guardrails
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#automation-ci-and-security" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Automation, CI, and security
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#cli-surface" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        CLI surface
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#compatibility-and-migration-notes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Compatibility and migration notes
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#validation-evidence" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Validation evidence
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#benchmark-interpretation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Benchmark interpretation
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#known-limitations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Known limitations
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#release-assets" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Release assets
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#full-comparison" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Full comparison
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#release-summary" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Release summary
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#decompiler-semantic-recovery" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Decompiler semantic recovery
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Decompiler semantic recovery">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#variable-identity-and-storage-roles" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Variable identity and storage roles
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#returns-conditions-and-loops" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Returns, conditions, and loops
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#x86-recovery-details" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        x86 recovery details
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#sleigh-and-ghidra-p-code-parity" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        SLEIGH and Ghidra p-code parity
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#nir-and-hir-presentation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        NIR and HIR presentation
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#experimental-native-sandbox-and-emulator" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Experimental native sandbox and emulator
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#experimental-native-solver" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Experimental native solver
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#loader-and-dynamic-analysis-changes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Loader and dynamic-analysis changes
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#architecture-and-anti-overfit-guardrails" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Architecture and anti-overfit guardrails
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#automation-ci-and-security" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Automation, CI, and security
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#cli-surface" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        CLI surface
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#compatibility-and-migration-notes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Compatibility and migration notes
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#validation-evidence" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Validation evidence
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#benchmark-interpretation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Benchmark interpretation
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#known-limitations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Known limitations
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#release-assets" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Release assets
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#full-comparison" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Full comparison
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="fission-v012">Fission v0.1.2<a class="headerlink" href="#fission-v012" title="Permanent link">&para;</a></h1>
+<p>Fission 0.1.2 is a decompiler-quality, SLEIGH parity, and execution-foundation
+release. Compared with 0.1.1, it substantially expands semantic recovery in the
+NIR pipeline, tightens raw p-code agreement with Ghidra, introduces dual NIR/HIR
+rendering, and adds experimental native emulation and solver foundations.</p>
+<p>This is a large patch release during Fission's pre-1.0 development period. The
+documented CLI remains the primary supported interface, but output produced by
+the decompiler can change as recovery and structuring improve. The new sandbox,
+symbolic execution, and native solver surfaces are experimental.</p>
+<h2 id="release-summary">Release summary<a class="headerlink" href="#release-summary" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Area</th>
+<th>v0.1.1</th>
+<th>v0.1.2</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Decompiler feedback</td>
+<td><code>DecompContext</code> and fact feedback foundation</td>
+<td>Broader variable, type, return, loop, and conditional recovery built on that foundation</td>
+</tr>
+<tr>
+<td>P-code parity</td>
+<td>Initial native SLEIGH pipeline</td>
+<td>Ghidra-aligned branch targets, <code>inst_next</code>, USEROP indexing, and conversion semantics</td>
+</tr>
+<tr>
+<td>Output layers</td>
+<td>Single primary pseudocode path</td>
+<td>Explicit NIR/HIR presentation selection with <code>decomp --layer</code></td>
+</tr>
+<tr>
+<td>CFG structuring</td>
+<td>Iterative structuring feedback</td>
+<td>Additional diamond, natural-loop, epilogue-return, short-circuit, and tail-CMOV recovery</td>
+</tr>
+<tr>
+<td>Type recovery</td>
+<td>Initial fact propagation</td>
+<td>Storage-role separation, reaching definitions, partial-register handling, and scalar/address constraints</td>
+</tr>
+<tr>
+<td>Execution</td>
+<td>Debugger-oriented dynamic layer</td>
+<td>Experimental JIT-only user-mode p-code sandbox with Linux/Windows HLE</td>
+</tr>
+<tr>
+<td>Constraint solving</td>
+<td>No native solver crate</td>
+<td>Experimental AIG/CNF, CDCL SAT, bit-vector, array, and path-feasibility foundations</td>
+</tr>
+<tr>
+<td>Change governance</td>
+<td>Pass-gate architecture</td>
+<td>ADR-backed anti-overfit, ISA-neutral ownership, validation-pool, and audit policies</td>
+</tr>
+<tr>
+<td>CI posture</td>
+<td>Standard lint/test/release lanes</td>
+<td>Exact parity and zero-tolerance regression gates, changed-file formatting ratchet, stronger security policy</td>
+</tr>
+<tr>
+<td>Package version</td>
+<td>Release tag <code>v0.1.1</code>; workspace packages still reported <code>0.1.0</code></td>
+<td>Release tag, all workspace packages, and <code>fission_cli --version</code> report <code>0.1.2</code></td>
+</tr>
+</tbody>
+</table>
+<p>The implementation range contains 98 non-merge commits and, before the release
+metadata update, changes 315 files with approximately 41,110 insertions and
+2,113 deletions. Much of that growth is isolated in the new experimental
+emulator and solver crates rather than the core decompiler path.</p>
+<h2 id="decompiler-semantic-recovery">Decompiler semantic recovery<a class="headerlink" href="#decompiler-semantic-recovery" title="Permanent link">&para;</a></h2>
+<h3 id="variable-identity-and-storage-roles">Variable identity and storage roles<a class="headerlink" href="#variable-identity-and-storage-roles" title="Permanent link">&para;</a></h3>
+<p>0.1.2 makes variable recovery less dependent on a single physical register or
+stack storage identity. Important changes include:</p>
+<ul>
+<li>preventing variable merge from collapsing simultaneously live general-purpose
+  registers;</li>
+<li>splitting incompatible storage roles across program phases, such as a pointer
+  cursor, loaded byte, loop index, and scalar accumulator sharing one machine
+  location over time;</li>
+<li>tracking address contributors through redefinitions instead of losing pointer
+  evidence at the most recent assignment;</li>
+<li>preserving transitive address-local widths and exact scalar-local constraints;</li>
+<li>improving RC4-style byte-state recovery and unsigned low-byte truncation;</li>
+<li>recovering RC4 byte-sum indices formed through zero extension and arithmetic;</li>
+<li>keeping primary return materializations when the ABI return register remains
+  live at function exit; and</li>
+<li>narrowing signed 32-bit return values recovered through join temporaries and
+  select expressions.</li>
+</ul>
+<p>These are general data-flow and type constraints. Production behavior does not
+branch on benchmark function names, binary identities, or fixed addresses.</p>
+<h3 id="returns-conditions-and-loops">Returns, conditions, and loops<a class="headerlink" href="#returns-conditions-and-loops" title="Permanent link">&para;</a></h3>
+<p>The structuring and materialization pipeline now handles more common optimized
+and unoptimized control-flow shapes:</p>
+<ul>
+<li>clamp-like conditional returns whose comparisons previously disappeared;</li>
+<li>x86-32 diamond returns joined through a shared epilogue;</li>
+<li>natural-loop returns and loop-carried self-updates;</li>
+<li>x86-32 conditional-move clamp forms;</li>
+<li>short-circuit diamonds whose return-value arm must remain materialized;</li>
+<li>tail-of-block absolute conditional-move skips;</li>
+<li>return-bearing segments in if/goto fusion;</li>
+<li>epilogue joins where the external condition-code seed is not a valid ownership
+  barrier; and</li>
+<li>signed <code>INT_MIN</code> presentation and partial-register <code>xor</code> plus <code>setcc</code>
+  composition.</li>
+</ul>
+<p>The work is deliberately shape-based. It uses CFG, dominance, liveness,
+definition/use, ABI, and type facts rather than recognizing named corpus rows.</p>
+<h3 id="x86-recovery-details">x86 recovery details<a class="headerlink" href="#x86-recovery-details" title="Permanent link">&para;</a></h3>
+<ul>
+<li>x86 register-space EFLAGS bits receive stable names for Jcc recovery.</li>
+<li>dead EFLAGS assignments are removed when they cannot affect observable output.</li>
+<li>x86-32 stack parameters are recovered from calling-convention and stack facts.</li>
+<li>logical right-shift parameters are typed as unsigned only in the logical-shift
+  context.</li>
+<li>partial-register zero extension and low-byte masks feed type recovery without
+  forcing a whole-register identity merge.</li>
+</ul>
+<h2 id="sleigh-and-ghidra-p-code-parity">SLEIGH and Ghidra p-code parity<a class="headerlink" href="#sleigh-and-ghidra-p-code-parity" title="Permanent link">&para;</a></h2>
+<p>0.1.2 includes a focused parity slice for Fission's native SLEIGH runtime.</p>
+<ul>
+<li><code>inst_next</code> is resolved with a two-pass decode/lift strategy so RIP-relative
+  forms with trailing immediates use the correct next-instruction address.</li>
+<li>Relative p-code <code>BRANCH</code> targets are interpreted relative to the current
+  p-code operation where required.</li>
+<li>USEROP indices are dense and stable across compiled specifications.</li>
+<li>Size-aware flag operations preserve operand-width semantics.</li>
+<li>Floating-point conversion operation names and lowering are aligned with the
+  shared p-code contract used by parity tooling.</li>
+<li>Runtime decode, template walking, function lifting, and raw p-code serialization
+  were updated together so CLI telemetry and internal execution see the same IR.</li>
+</ul>
+<p>Ghidra is used as a structural reference for assembly, p-code, CFG, and function
+inventory diagnostics. Fission does not attempt to reproduce Ghidra's C syntax
+or presentation quirks, and parity metrics are not semantic-correctness scores.</p>
+<h2 id="nir-and-hir-presentation">NIR and HIR presentation<a class="headerlink" href="#nir-and-hir-presentation" title="Permanent link">&para;</a></h2>
+<p>The CLI now exposes explicit decompiler presentation layers:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>fission_cli<span class="w"> </span>decomp<span class="w"> </span>program.exe<span class="w"> </span>--addr<span class="w"> </span>0x140001000<span class="w"> </span>--layer<span class="w"> </span>nir
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>fission_cli<span class="w"> </span>decomp<span class="w"> </span>program.exe<span class="w"> </span>--addr<span class="w"> </span>0x140001000<span class="w"> </span>--layer<span class="w"> </span>hir
+</span></code></pre></div>
+<ul>
+<li>NIR presentation keeps lower-level storage and data-flow evidence useful for
+  decompiler diagnosis.</li>
+<li>HIR presentation applies higher-level rendering intended for human inspection.</li>
+<li>JSON output records the selected layer so automation does not need to infer it
+  from formatting.</li>
+<li>Printer changes include improved signed constants, return expressions, type
+  spelling, and structured control-flow rendering.</li>
+</ul>
+<p>Consumers that compare pseudocode text byte-for-byte should expect snapshot
+updates. Prefer JSON fields and semantic tests for stable automation.</p>
+<h2 id="experimental-native-sandbox-and-emulator">Experimental native sandbox and emulator<a class="headerlink" href="#experimental-native-sandbox-and-emulator" title="Permanent link">&para;</a></h2>
+<p>0.1.2 introduces <code>fission-emulator</code> and connects it to the CLI through the
+experimental <code>sandbox</code> command. This work is an execution foundation, not a
+claim of general binary compatibility.</p>
+<p>Implemented foundations include:</p>
+<ul>
+<li>a JIT-only p-code execution path based on Cranelift;</li>
+<li>page-based memory, register-space mapping, loader integration, and execution
+  budgets;</li>
+<li>PE mapping and selected Windows x64 HLE procedures;</li>
+<li>ELF mapping, selected Linux syscalls, dynamic-linker scaffolding, relocations,
+  and selected libc HLE procedures;</li>
+<li>architecture and calling-convention descriptions separated from OS behavior;</li>
+<li>copy-on-write symbolic memory and taint propagation;</li>
+<li>snapshots, time-travel state integration, and Semantic Replay Diff telemetry;</li>
+<li>exploration techniques, a SimulationManager-style state set, path-feasibility
+  pruning, and deterministic instruction limits; and</li>
+<li>structured metrics for unimplemented operations, exits, HLE calls, and budget
+  exhaustion.</li>
+</ul>
+<p>The included ELF and PE fixtures are small smoke and diagnostic programs. Real
+programs can still stop on unsupported p-code, syscalls, relocations, floating
+point behavior, dynamic linking, or OS APIs. Sandbox output and command-line
+options may change in subsequent 0.x releases.</p>
+<h2 id="experimental-native-solver">Experimental native solver<a class="headerlink" href="#experimental-native-solver" title="Permanent link">&para;</a></h2>
+<p>The new <code>fission-solver</code> crate provides foundations used by symbolic execution:</p>
+<ul>
+<li>expression AST simplification;</li>
+<li>AIG construction and bit blasting;</li>
+<li>CNF generation;</li>
+<li>CDCL SAT solving with watched propagation, VSIDS, phase saving, assumptions,
+  and model extraction;</li>
+<li>initial bit-vector and array-theory support; and</li>
+<li>incremental path queries and CEGAR-oriented memory reasoning.</li>
+</ul>
+<p>This is not yet a drop-in replacement for mature SMT solvers. Theory coverage,
+floating-point semantics, diagnostics, and performance remain under active
+development. The APIs are experimental and are not covered by the stable CLI
+contract.</p>
+<h2 id="loader-and-dynamic-analysis-changes">Loader and dynamic-analysis changes<a class="headerlink" href="#loader-and-dynamic-analysis-changes" title="Permanent link">&para;</a></h2>
+<ul>
+<li>ELF loading now exposes additional mapping and dynamic-linking information
+  needed by the emulator.</li>
+<li>PE/COFF loading exposes imports and image facts used by Windows HLE.</li>
+<li>Function views preserve more precise boundaries for downstream static and
+  emulation consumers.</li>
+<li>The dynamic debugger can select an emulator backend while retaining the
+  platform debugger abstraction.</li>
+<li>TTD snapshots can carry additional execution state required for deterministic
+  replay.</li>
+</ul>
+<h2 id="architecture-and-anti-overfit-guardrails">Architecture and anti-overfit guardrails<a class="headerlink" href="#architecture-and-anti-overfit-guardrails" title="Permanent link">&para;</a></h2>
+<p>0.1.2 adds process and module-level controls intended to keep decompiler fixes
+general:</p>
+<ul>
+<li>ADR 0006 requires an owner proof, invariant proof, and validation matrix before
+  semantic quality changes.</li>
+<li>ADR 0007 prevents benchmark identifiers from entering AI review prompts and
+  defines an unseen patch-validation pool.</li>
+<li>ADR 0008 narrows <code>fission-pcode</code> toward an IR and semantic substrate, with
+  explicit analysis, normalization, and structuring ownership boundaries.</li>
+<li>ADR 0009 requires ISA-neutral semantic rules unless architecture-specific facts
+  are supplied through the architecture abstraction.</li>
+<li><code>SKILL.md</code> packages the decompiler improvement workflow for use in other AI
+  development environments.</li>
+<li>Audit scripts scan for benchmark smells, prompt leaks, architecture-isolation
+  violations, NIR boundary violations, regression risk, and metric gaming.</li>
+<li>Gate policy is versioned in TOML rather than hidden in CI conditionals.</li>
+</ul>
+<p>These controls do not prove that every recovery rule is universally correct.
+They make the evidence and ownership required for each rule reviewable.</p>
+<h2 id="automation-ci-and-security">Automation, CI, and security<a class="headerlink" href="#automation-ci-and-security" title="Permanent link">&para;</a></h2>
+<ul>
+<li>CI now enforces zero-tolerance regression and exact-match parity lanes where
+  the corresponding contract is designated exact.</li>
+<li>Changed Rust files are checked by a formatting ratchet without requiring an
+  unrelated repository-wide rewrite.</li>
+<li>Automation quality policy is separated from report rendering and loaded from a
+  versioned configuration file.</li>
+<li>Fast-gate jobs cover lint, security, architecture policy, and targeted test
+  surfaces before release tagging is allowed.</li>
+<li>Cargo advisory policy was updated for the Cranelift/memmap dependency context;
+  the exception is narrowly scoped and documented rather than globally ignored.</li>
+<li>Release tags are still created only by the <code>Release Tag (CI green)</code> workflow
+  after the selected commit has a successful Fast Gate run.</li>
+</ul>
+<h2 id="cli-surface">CLI surface<a class="headerlink" href="#cli-surface" title="Permanent link">&para;</a></h2>
+<p>The release CLI includes the following top-level command families:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>info, list, disasm, raw-pcode, pcode-stages, nir-stats,
+</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>pcode-topology, decomp, strings, xrefs, callgraph, inventory,
+</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>resources, script, debug, sandbox, ai
+</span></code></pre></div>
+<p><code>sandbox</code> and its symbolic/exploration features are experimental. Existing
+metadata, listing, disassembly, p-code, decompilation, resource, and automation
+commands remain the primary release surface.</p>
+<h2 id="compatibility-and-migration-notes">Compatibility and migration notes<a class="headerlink" href="#compatibility-and-migration-notes" title="Permanent link">&para;</a></h2>
+<ul>
+<li>The executable name remains <code>fission_cli</code>.</li>
+<li>Release archives continue to bundle required signatures, Ghidra-derived data,
+  and SLEIGH resources under the existing layout.</li>
+<li><code>fission_cli --version</code> now reports <code>0.1.2</code>; 0.1.1 archives could report the
+  older workspace package version despite the release tag.</li>
+<li>Decompiled pseudocode is expected to differ because variable identity, types,
+  returns, and control flow have changed.</li>
+<li>Tools parsing human-readable pseudocode should migrate to JSON output where a
+  machine-readable mode exists.</li>
+<li>The new NIR/HIR layer selector should be set explicitly in snapshot-based
+  automation.</li>
+<li>No compatibility guarantee is made yet for Rust APIs in <code>fission-emulator</code> or
+  <code>fission-solver</code>.</li>
+</ul>
+<h2 id="validation-evidence">Validation evidence<a class="headerlink" href="#validation-evidence" title="Permanent link">&para;</a></h2>
+<p>The release candidate is validated through the repository release gate, which
+includes:</p>
+<ul>
+<li>workspace metadata and locked dependency resolution;</li>
+<li><code>cargo check</code> for the release CLI and affected semantic crates;</li>
+<li>the <code>fission-pcode</code> nextest suite;</li>
+<li>automation policy tests;</li>
+<li>lint, formatting, architecture-policy, and security checks; and</li>
+<li>cross-platform CLI builds performed by tag-driven CD for Linux x86-64, macOS
+  arm64, and Windows x86-64.</li>
+</ul>
+<p>The CD workflow also runs <code>fission_cli --version</code>, packages resource data,
+produces SHA-256 checksums, and performs a Linux benchmark-consumer smoke check.</p>
+<h2 id="benchmark-interpretation">Benchmark interpretation<a class="headerlink" href="#benchmark-interpretation" title="Permanent link">&para;</a></h2>
+<p>The last checked 0.1.1 benchmark envelope is a diagnostic baseline, not evidence
+of 0.1.2 improvement. Its layered Fission-to-Ghidra parity report recorded:</p>
+<ul>
+<li>assembly comparable-row match: 79.2% (95/120), 100% coverage;</li>
+<li>p-code opcode-sequence agreement: 96.7%;</li>
+<li>p-code loose and strict full-row agreement: 66.7%;</li>
+<li>CFG block-start Jaccard: 98.8% and edge Jaccard: 96.8%, while exact CFG set
+  agreement remained 7.8%; and</li>
+<li>function-inventory presence recall: 94.6%, with exact set agreement at 50.0%.</li>
+</ul>
+<p>Those values identify the remaining work; they are not a multi-decompiler quality
+ranking and do not establish semantic equivalence. The benchmark repository is
+pinned to <code>v0.1.2</code> after release assets are published, then rerun so 0.1.2 receives
+its own provenance-linked measurements.</p>
+<h2 id="known-limitations">Known limitations<a class="headerlink" href="#known-limitations" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Decompiler semantic correctness remains incomplete, particularly on complex
+  aliasing, optimized data flow, indirect control flow, and broad multi-ISA
+  corpora.</li>
+<li>Exact CFG and function-inventory parity with Ghidra is not yet reached.</li>
+<li>Raw p-code full equality can differ even when opcode sequences agree because
+  varnodes, address spaces, and function-discovery policies remain stricter.</li>
+<li>The emulator supports selected user-mode paths and HLE procedures, not a full
+  operating system or complete ISA/OS matrix.</li>
+<li>The solver has incomplete theory coverage and is intended for controlled path
+  queries rather than unrestricted SMT workloads.</li>
+<li>Readability proxy metrics remain unvalidated until the planned human
+  comprehension study; they are not a release-quality score.</li>
+<li>Benchmark semantic results remain separate from structural parity and source
+  similarity.</li>
+</ul>
+<h2 id="release-assets">Release assets<a class="headerlink" href="#release-assets" title="Permanent link">&para;</a></h2>
+<p>Tag-driven CD publishes:</p>
+<ul>
+<li><code>fission-linux-x64.tar.gz</code></li>
+<li><code>fission-macos-arm64.tar.gz</code></li>
+<li><code>fission-windows-x64.zip</code></li>
+<li><code>fission_cli-x86_64-unknown-linux-gnu</code></li>
+<li><code>checksums.txt</code></li>
+</ul>
+<p>Verify downloads with <code>checksums.txt</code> before use.</p>
+<h2 id="full-comparison">Full comparison<a class="headerlink" href="#full-comparison" title="Permanent link">&para;</a></h2>
+<p>See the complete commit and file comparison:</p>
+<p><a href="https://github.com/sjkim1127/Fission/compare/v0.1.1...v0.1.2">https://github.com/sjkim1127/Fission/compare/v0.1.1...v0.1.2</a></p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.tabs", "navigation.sections", "navigation.expand", "navigation.top", "search.suggest", "search.highlight", "content.code.copy"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>
