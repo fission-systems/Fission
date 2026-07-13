@@ -40,6 +40,14 @@ fn scan_def_types(stmts: &[HirStmt], defs: &mut HashMap<String, DefEntry>) {
 enum DefEntry {
     Known(NirType),
     Alias(String),
+    TypedAlias {
+        source: String,
+        ty: NirType,
+    },
+    Derived {
+        sources: HashSet<String>,
+        ty: NirType,
+    },
 }
 
 fn scan_def_types_stmt(stmt: &HirStmt, defs: &mut HashMap<String, DefEntry>) {
@@ -54,9 +62,24 @@ fn scan_def_types_stmt(stmt: &HirStmt, defs: &mut HashMap<String, DefEntry>) {
             }
             let entry = match rhs {
                 HirExpr::Var(src) => DefEntry::Alias(src.clone()),
+                HirExpr::Cast { ty, expr } if matches!(expr.as_ref(), HirExpr::Var(_)) => {
+                    let HirExpr::Var(source) = expr.as_ref() else {
+                        unreachable!();
+                    };
+                    DefEntry::TypedAlias {
+                        source: source.clone(),
+                        ty: ty.clone(),
+                    }
+                }
                 other => {
                     let ty = expr_type(other);
-                    DefEntry::Known(ty)
+                    let mut sources = HashSet::new();
+                    collect_value_provenance_vars(other, &mut sources);
+                    if sources.is_empty() {
+                        DefEntry::Known(ty)
+                    } else {
+                        DefEntry::Derived { sources, ty }
+                    }
                 }
             };
             defs.insert(name.clone(), entry);
@@ -92,6 +115,41 @@ fn scan_def_types_stmt(stmt: &HirStmt, defs: &mut HashMap<String, DefEntry>) {
     }
 }
 
+fn collect_value_provenance_vars(expr: &HirExpr, out: &mut HashSet<String>) {
+    match expr {
+        HirExpr::Var(name) => {
+            out.insert(name.clone());
+        }
+        HirExpr::Cast { expr, .. }
+        | HirExpr::Unary { expr, .. }
+        | HirExpr::PtrOffset { base: expr, .. }
+        | HirExpr::AggregateCopy { src: expr, .. } => {
+            collect_value_provenance_vars(expr, out);
+        }
+        HirExpr::Binary { lhs, rhs, .. } => {
+            collect_value_provenance_vars(lhs, out);
+            collect_value_provenance_vars(rhs, out);
+        }
+        HirExpr::Select {
+            cond,
+            then_expr,
+            else_expr,
+            ..
+        } => {
+            collect_value_provenance_vars(cond, out);
+            collect_value_provenance_vars(then_expr, out);
+            collect_value_provenance_vars(else_expr, out);
+        }
+        // The loaded value does not inherit the scalar role of its address.
+        HirExpr::Load { .. }
+        | HirExpr::Index { .. }
+        | HirExpr::FieldAccess { .. }
+        | HirExpr::Call { .. }
+        | HirExpr::AddressOfGlobal(_)
+        | HirExpr::Const(_, _) => {}
+    }
+}
+
 /// Infer the type of a named binding by following its definition chain.
 ///
 /// Returns `NirType::Unknown` when:
@@ -121,6 +179,16 @@ fn infer_type_for_binding(
             let src = src.clone();
             infer_type_for_binding(&src, defs, known_binding_types, visited)
         }
+        Some(DefEntry::TypedAlias { ty, .. }) if *ty != NirType::Unknown => ty.clone(),
+        Some(DefEntry::TypedAlias { source, .. }) => {
+            let source = source.clone();
+            infer_type_for_binding(&source, defs, known_binding_types, visited)
+        }
+        Some(DefEntry::Derived { ty, .. }) if *ty != NirType::Unknown => ty.clone(),
+        Some(DefEntry::Derived { .. }) => known_binding_types
+            .get(name)
+            .cloned()
+            .unwrap_or(NirType::Unknown),
     }
 }
 
@@ -510,25 +578,39 @@ fn param_name_set(func: &HirFunction) -> HashSet<String> {
 
 struct ParamPointerRoleContext<'a> {
     defs: &'a HashMap<String, DefEntry>,
-    dependencies: &'a DefinitionDependencyMap,
     binding_types: &'a HashMap<String, NirType>,
     params: &'a HashSet<String>,
     address_params: &'a HashSet<String>,
     strong_scalar_params: &'a HashSet<String>,
 }
 
-fn collect_strong_scalar_param_roots_stmts(
-    stmts: &[HirStmt],
-    dependencies: &DefinitionDependencyMap,
-    binding_types: &HashMap<String, NirType>,
+#[derive(Default)]
+struct StrongScalarParamRoots {
+    all: HashSet<String>,
+    shifts: HashSet<String>,
+}
+
+fn extend_first_def_param_roots(
+    names: impl IntoIterator<Item = String>,
+    defs: &HashMap<String, DefEntry>,
     params: &HashSet<String>,
     out: &mut HashSet<String>,
 ) {
+    for name in names {
+        collect_first_def_param_roots(&name, defs, params, &mut HashSet::new(), out);
+    }
+}
+
+fn collect_strong_scalar_param_roots_stmts(
+    stmts: &[HirStmt],
+    dependencies: &HashMap<String, DefEntry>,
+    binding_types: &HashMap<String, NirType>,
+    params: &HashSet<String>,
+    out: &mut StrongScalarParamRoots,
+) {
     for stmt in stmts {
         match stmt {
-            HirStmt::Assign { rhs, .. }
-            | HirStmt::Expr(rhs)
-            | HirStmt::Return(Some(rhs)) => {
+            HirStmt::Assign { rhs, .. } | HirStmt::Expr(rhs) | HirStmt::Return(Some(rhs)) => {
                 collect_strong_scalar_param_roots_expr(
                     rhs,
                     dependencies,
@@ -679,23 +761,25 @@ fn collect_strong_scalar_param_roots_stmts(
 
 fn collect_strong_scalar_param_roots_expr(
     expr: &HirExpr,
-    dependencies: &DefinitionDependencyMap,
+    dependencies: &HashMap<String, DefEntry>,
     binding_types: &HashMap<String, NirType>,
     params: &HashSet<String>,
-    out: &mut HashSet<String>,
+    out: &mut StrongScalarParamRoots,
 ) {
     match expr {
         HirExpr::Binary { op, lhs, rhs, .. } => {
-            if matches!(
-                op,
-                HirBinaryOp::Shl | HirBinaryOp::Shr | HirBinaryOp::Sar
-            ) {
+            if matches!(op, HirBinaryOp::Shl | HirBinaryOp::Shr | HirBinaryOp::Sar) {
                 let mut names = HashSet::new();
-                collect_expr_vars(lhs, &mut names);
-                collect_expr_vars(rhs, &mut names);
-                for name in names {
-                    out.extend(dependencies.roots_reaching(&name, params));
+                if !expr_has_first_def_pointer_type(lhs, dependencies) {
+                    collect_expr_vars(lhs, &mut names);
                 }
+                if !expr_has_first_def_pointer_type(rhs, dependencies) {
+                    collect_expr_vars(rhs, &mut names);
+                }
+                let mut roots = HashSet::new();
+                extend_first_def_param_roots(names, dependencies, params, &mut roots);
+                out.all.extend(roots.iter().cloned());
+                out.shifts.extend(roots);
             }
             if matches!(
                 op,
@@ -708,35 +792,23 @@ fn collect_strong_scalar_param_roots_expr(
                     | HirBinaryOp::SGt
                     | HirBinaryOp::SGe
             ) {
-                if expr_looks_integer_offset(lhs, binding_types) {
+                if expr_looks_integer_offset(lhs, binding_types)
+                    && !expr_has_first_def_pointer_type(rhs, dependencies)
+                {
                     let mut names = HashSet::new();
                     collect_expr_vars(rhs, &mut names);
-                    for name in names {
-                        out.extend(dependencies.roots_reaching(&name, params));
-                    }
+                    extend_first_def_param_roots(names, dependencies, params, &mut out.all);
                 }
-                if expr_looks_integer_offset(rhs, binding_types) {
+                if expr_looks_integer_offset(rhs, binding_types)
+                    && !expr_has_first_def_pointer_type(lhs, dependencies)
+                {
                     let mut names = HashSet::new();
                     collect_expr_vars(lhs, &mut names);
-                    for name in names {
-                        out.extend(dependencies.roots_reaching(&name, params));
-                    }
+                    extend_first_def_param_roots(names, dependencies, params, &mut out.all);
                 }
             }
-            collect_strong_scalar_param_roots_expr(
-                lhs,
-                dependencies,
-                binding_types,
-                params,
-                out,
-            );
-            collect_strong_scalar_param_roots_expr(
-                rhs,
-                dependencies,
-                binding_types,
-                params,
-                out,
-            );
+            collect_strong_scalar_param_roots_expr(lhs, dependencies, binding_types, params, out);
+            collect_strong_scalar_param_roots_expr(rhs, dependencies, binding_types, params, out);
         }
         HirExpr::Cast { expr, .. }
         | HirExpr::Unary { expr, .. }
@@ -744,29 +816,11 @@ fn collect_strong_scalar_param_roots_expr(
         | HirExpr::PtrOffset { base: expr, .. }
         | HirExpr::FieldAccess { base: expr, .. }
         | HirExpr::AggregateCopy { src: expr, .. } => {
-            collect_strong_scalar_param_roots_expr(
-                expr,
-                dependencies,
-                binding_types,
-                params,
-                out,
-            );
+            collect_strong_scalar_param_roots_expr(expr, dependencies, binding_types, params, out);
         }
         HirExpr::Index { base, index, .. } => {
-            collect_strong_scalar_param_roots_expr(
-                base,
-                dependencies,
-                binding_types,
-                params,
-                out,
-            );
-            collect_strong_scalar_param_roots_expr(
-                index,
-                dependencies,
-                binding_types,
-                params,
-                out,
-            );
+            collect_strong_scalar_param_roots_expr(base, dependencies, binding_types, params, out);
+            collect_strong_scalar_param_roots_expr(index, dependencies, binding_types, params, out);
         }
         HirExpr::Select {
             cond,
@@ -774,13 +828,7 @@ fn collect_strong_scalar_param_roots_expr(
             else_expr,
             ..
         } => {
-            collect_strong_scalar_param_roots_expr(
-                cond,
-                dependencies,
-                binding_types,
-                params,
-                out,
-            );
+            collect_strong_scalar_param_roots_expr(cond, dependencies, binding_types, params, out);
             collect_strong_scalar_param_roots_expr(
                 then_expr,
                 dependencies,
@@ -887,6 +935,9 @@ fn record_offset_param_from_expr(
     context: &ParamPointerRoleContext<'_>,
     out: &mut HashSet<String>,
 ) {
+    if expr_has_first_def_pointer_type(expr, context.defs) {
+        return;
+    }
     let mut cur = expr;
     while let HirExpr::Cast { expr, .. } | HirExpr::Unary { expr, .. } = cur {
         cur = expr.as_ref();
@@ -894,12 +945,14 @@ fn record_offset_param_from_expr(
     let mut names = HashSet::new();
     collect_expr_vars(cur, &mut names);
     for name in names {
-        let mut roots = context.dependencies.roots_reaching(&name, context.params);
-        if let Some(param) =
-            resolve_alias_to_param(&name, context.defs, context.params, &mut HashSet::new())
-        {
-            roots.insert(param);
-        }
+        let mut roots = HashSet::new();
+        collect_first_def_param_roots(
+            &name,
+            context.defs,
+            context.params,
+            &mut HashSet::new(),
+            &mut roots,
+        );
         for param in roots {
             if !context.address_params.contains(&param)
                 || context.strong_scalar_params.contains(&param)
@@ -1001,7 +1054,76 @@ fn resolve_alias_to_param(
     }
     match defs.get(name) {
         Some(DefEntry::Alias(src)) => resolve_alias_to_param(src, defs, params, visited),
+        Some(DefEntry::TypedAlias { source, .. }) => {
+            resolve_alias_to_param(source, defs, params, visited)
+        }
         _ => None,
+    }
+}
+
+fn expr_has_first_def_pointer_type(expr: &HirExpr, defs: &HashMap<String, DefEntry>) -> bool {
+    fn binding_has_pointer_type(
+        name: &str,
+        defs: &HashMap<String, DefEntry>,
+        visited: &mut HashSet<String>,
+    ) -> bool {
+        if !visited.insert(name.to_string()) {
+            return false;
+        }
+        match defs.get(name) {
+            Some(DefEntry::Known(NirType::Ptr(_)))
+            | Some(DefEntry::TypedAlias {
+                ty: NirType::Ptr(_),
+                ..
+            })
+            | Some(DefEntry::Derived {
+                ty: NirType::Ptr(_),
+                ..
+            }) => true,
+            Some(DefEntry::Alias(source)) | Some(DefEntry::TypedAlias { source, .. }) => {
+                binding_has_pointer_type(source, defs, visited)
+            }
+            _ => false,
+        }
+    }
+
+    match expr {
+        HirExpr::Var(name) => binding_has_pointer_type(name, defs, &mut HashSet::new()),
+        HirExpr::Cast {
+            ty: NirType::Ptr(_),
+            ..
+        } => true,
+        HirExpr::Cast { expr, .. } | HirExpr::Unary { expr, .. } => {
+            expr_has_first_def_pointer_type(expr, defs)
+        }
+        _ => false,
+    }
+}
+
+fn collect_first_def_param_roots(
+    name: &str,
+    defs: &HashMap<String, DefEntry>,
+    params: &HashSet<String>,
+    visited: &mut HashSet<String>,
+    out: &mut HashSet<String>,
+) {
+    if !visited.insert(name.to_string()) {
+        return;
+    }
+    if params.contains(name) {
+        out.insert(name.to_string());
+        return;
+    }
+    match defs.get(name) {
+        Some(DefEntry::Alias(source)) | Some(DefEntry::TypedAlias { source, .. }) => {
+            collect_first_def_param_roots(source, defs, params, visited, out);
+        }
+        Some(DefEntry::Derived { sources, .. }) => {
+            for source in sources {
+                collect_first_def_param_roots(source, defs, params, visited, out);
+            }
+        }
+        Some(DefEntry::Known(_)) | None => {}
     }
 }
 
@@ -1104,7 +1226,21 @@ fn record_param_pointer_from_address_expr(
 ) {
     match addr {
         HirExpr::Var(name) => {
-            for param in context.dependencies.roots_reaching(name, context.params) {
+            let mut roots = HashSet::new();
+            collect_first_def_param_roots(
+                name,
+                context.defs,
+                context.params,
+                &mut HashSet::new(),
+                &mut roots,
+            );
+            if roots.is_empty() {
+                let fallback = context.dependencies.roots_reaching(name, context.params);
+                if fallback.len() == 1 {
+                    roots.extend(fallback);
+                }
+            }
+            for param in roots {
                 out.entry(param)
                     .or_insert_with(|| NirType::Ptr(Box::new(pointee.clone())));
             }
@@ -1290,17 +1426,18 @@ fn apply_address_contributor_param_pointer_types(
     };
     collect_param_pointer_candidates_stmts(&func.body, &candidate_context, &mut candidates);
     let address_params: HashSet<String> = candidates.keys().cloned().collect();
-    let mut strong_scalar_params = HashSet::new();
+    let mut strong_scalar_roots = StrongScalarParamRoots::default();
     collect_strong_scalar_param_roots_stmts(
         &func.body,
-        dependencies,
+        defs,
         binding_types,
         &params,
-        &mut strong_scalar_params,
+        &mut strong_scalar_roots,
     );
+    let strong_scalar_params = strong_scalar_roots.all;
+    let shift_scalar_params = strong_scalar_roots.shifts;
     let role_context = ParamPointerRoleContext {
         defs,
-        dependencies,
         binding_types,
         params: &params,
         address_params: &address_params,
@@ -1308,8 +1445,15 @@ fn apply_address_contributor_param_pointer_types(
     };
     // Parameters used as the integer side of pointer arithmetic stay scalar
     // even when weaker propagation would otherwise classify them as pointers.
+    let mut offset_params = HashSet::new();
+    collect_param_pointer_offset_params_stmts(&func.body, &role_context, &mut offset_params);
     let mut scalar_params = strong_scalar_params.clone();
-    collect_param_pointer_offset_params_stmts(&func.body, &role_context, &mut scalar_params);
+    scalar_params.extend(offset_params.iter().cloned());
+    for address_param in &address_params {
+        if !shift_scalar_params.contains(address_param) {
+            scalar_params.remove(address_param);
+        }
+    }
     let mut changed = false;
     for param in &mut func.params {
         if scalar_params.contains(&param.name) {
@@ -1349,24 +1493,32 @@ fn demote_pointer_offset_params(func: &mut HirFunction) -> bool {
     };
     collect_param_pointer_candidates_stmts(&func.body, &candidate_context, &mut candidates);
     let address_params: HashSet<String> = candidates.keys().cloned().collect();
-    let mut strong_scalar_params = HashSet::new();
+    let mut strong_scalar_roots = StrongScalarParamRoots::default();
     collect_strong_scalar_param_roots_stmts(
         &func.body,
-        &dependencies,
+        &defs,
         &binding_types,
         &params,
-        &mut strong_scalar_params,
+        &mut strong_scalar_roots,
     );
+    let strong_scalar_params = strong_scalar_roots.all;
+    let shift_scalar_params = strong_scalar_roots.shifts;
     let role_context = ParamPointerRoleContext {
         defs: &defs,
-        dependencies: &dependencies,
         binding_types: &binding_types,
         params: &params,
         address_params: &address_params,
         strong_scalar_params: &strong_scalar_params,
     };
+    let mut offset_params = HashSet::new();
+    collect_param_pointer_offset_params_stmts(&func.body, &role_context, &mut offset_params);
     let mut scalar_params = strong_scalar_params.clone();
-    collect_param_pointer_offset_params_stmts(&func.body, &role_context, &mut scalar_params);
+    scalar_params.extend(offset_params);
+    for address_param in &address_params {
+        if !shift_scalar_params.contains(address_param) {
+            scalar_params.remove(address_param);
+        }
+    }
     if scalar_params.is_empty() {
         return false;
     }
@@ -1391,11 +1543,10 @@ fn collect_word_load_pointer_names(expr: &HirExpr, out: &mut HashMap<String, u32
     match expr {
         HirExpr::Load {
             ptr,
-            ty:
-                NirType::Int {
-                    bits,
-                    signed: false,
-                },
+            ty: NirType::Int {
+                bits,
+                signed: false,
+            },
         } if *bits > 8 => {
             let mut names = HashSet::new();
             collect_expr_vars(ptr, &mut names);
@@ -1446,9 +1597,7 @@ fn collect_signed_neutral_load_contexts_stmts(
 ) {
     for stmt in stmts {
         match stmt {
-            HirStmt::Assign { rhs, .. }
-            | HirStmt::Expr(rhs)
-            | HirStmt::Return(Some(rhs)) => {
+            HirStmt::Assign { rhs, .. } | HirStmt::Expr(rhs) | HirStmt::Return(Some(rhs)) => {
                 collect_signed_neutral_load_contexts_expr(rhs, candidates, blockers);
             }
             HirStmt::Block(body) | HirStmt::While { body, .. } => {
@@ -1499,11 +1648,7 @@ fn collect_signed_neutral_load_contexts_stmts(
             } => {
                 collect_signed_neutral_load_contexts_expr(expr, candidates, blockers);
                 for case in cases {
-                    collect_signed_neutral_load_contexts_stmts(
-                        &case.body,
-                        candidates,
-                        blockers,
-                    );
+                    collect_signed_neutral_load_contexts_stmts(&case.body, candidates, blockers);
                 }
                 collect_signed_neutral_load_contexts_stmts(default, candidates, blockers);
             }
@@ -2103,6 +2248,22 @@ fn zero_extended_return_candidate_type_for_binding(
             Some(DefEntry::Known(_)) | None => return best,
             Some(DefEntry::Alias(src)) => {
                 current = src.clone();
+            }
+            Some(DefEntry::TypedAlias { source, ty }) => {
+                if let NirType::Int { bits, .. } = ty
+                    && *bits < 64
+                {
+                    best = Some(prefer_narrow_return_candidate(best, ty.clone()));
+                }
+                current = source.clone();
+            }
+            Some(DefEntry::Derived { ty, .. }) => {
+                if let NirType::Int { bits, .. } = ty
+                    && *bits < 64
+                {
+                    best = Some(prefer_narrow_return_candidate(best, ty.clone()));
+                }
+                return best;
             }
         }
     }
@@ -3312,7 +3473,6 @@ mod tests {
         func.params = vec![make_param("param_1", u64_ty.clone())];
         let binding_types = super::collect_known_binding_types(&func);
         let dependencies = super::DefinitionDependencyMap::build(&func.body);
-
         assert!(!super::apply_address_contributor_param_pointer_types(
             &mut func,
             &HashMap::from([(
@@ -4092,6 +4252,56 @@ mod tests {
                 typed_local("address", ptr_ty.clone()),
                 typed_local("index", u64_ty.clone()),
                 typed_local("acc", u64_ty),
+            ],
+            body,
+            NirType::Unknown,
+        );
+        func.params = vec![make_param("input", ptr_ty)];
+
+        let _ = super::apply_type_inference_pass(&mut func);
+        assert!(matches!(func.params[0].ty, NirType::Ptr(_)));
+    }
+
+    #[test]
+    fn loaded_scalar_shift_does_not_demote_address_parameter() {
+        let u8_ty = NirType::Int {
+            bits: 8,
+            signed: false,
+        };
+        let u32_ty = NirType::Int {
+            bits: 32,
+            signed: false,
+        };
+        let ptr_ty = NirType::Ptr(Box::new(u8_ty.clone()));
+        let typed_local = |name: &str, ty: NirType| {
+            let mut binding = make_binding(name);
+            binding.ty = ty;
+            binding
+        };
+        let body = vec![
+            make_assign("cursor", HirExpr::Var("input".into())),
+            make_assign(
+                "loaded",
+                HirExpr::Load {
+                    ptr: Box::new(HirExpr::Var("cursor".into())),
+                    ty: u8_ty,
+                },
+            ),
+            make_assign(
+                "shifted",
+                HirExpr::Binary {
+                    op: HirBinaryOp::Shr,
+                    lhs: Box::new(HirExpr::Var("loaded".into())),
+                    rhs: Box::new(HirExpr::Const(1, u32_ty.clone())),
+                    ty: u32_ty.clone(),
+                },
+            ),
+        ];
+        let mut func = make_func(
+            vec![
+                typed_local("cursor", ptr_ty.clone()),
+                typed_local("loaded", u32_ty.clone()),
+                typed_local("shifted", u32_ty),
             ],
             body,
             NirType::Unknown,

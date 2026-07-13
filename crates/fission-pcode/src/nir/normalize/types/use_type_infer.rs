@@ -1,3 +1,4 @@
+use super::super::analysis::defuse::DefinitionDependencyMap;
 /// Use-driven backward type propagation pass.
 ///
 /// `apply_type_inference_pass` (type_infer.rs) propagates types forward from
@@ -585,10 +586,7 @@ fn expr_is_numeric_offset_with_types(
     known_binding_types: &HashMap<String, NirType>,
 ) -> bool {
     match expr {
-        HirExpr::Var(name) => !matches!(
-            known_binding_types.get(name),
-            Some(NirType::Ptr(_))
-        ),
+        HirExpr::Var(name) => !matches!(known_binding_types.get(name), Some(NirType::Ptr(_))),
         HirExpr::Cast {
             ty: NirType::Int { .. },
             expr: inner,
@@ -2030,8 +2028,7 @@ fn merge_constraint(binding: &mut NirBinding, constraint: &UseConstraint) -> boo
                 bits: cur_bits,
             },
             UseConstraint::LogicalShiftUnsigned { bits: new_bits },
-        ) if cur_bits == new_bits =>
-        {
+        ) if cur_bits == new_bits => {
             // Demote signed scalars → unsigned only for logical SHR (INT_RIGHT).
             // Generic `Unsigned` must not undo signed promotion from signed
             // comparisons / casted arithmetic (see signed_casted_arithmetic test).
@@ -2096,7 +2093,19 @@ fn should_skip_pointer_constraint_for_scalar_local(
     binding: &NirBinding,
     constraint: &UseConstraint,
     roles: &HashMap<String, BindingUseRole>,
+    address_contributors: &HashMap<String, NirType>,
 ) -> bool {
+    if address_contributors.contains_key(&binding.name)
+        && matches!(
+            constraint,
+            UseConstraint::Signed { .. }
+                | UseConstraint::Unsigned { .. }
+                | UseConstraint::LogicalShiftUnsigned { .. }
+                | UseConstraint::Exact(NirType::Int { .. } | NirType::Bool)
+        )
+    {
+        return true;
+    }
     if !matches!(constraint, UseConstraint::Ptr(_))
         || matches!(binding.origin, Some(NirBindingOrigin::ParamIndex(_)))
         || binding.surface_type_name.is_some()
@@ -2115,11 +2124,20 @@ fn should_skip_pointer_constraint_for_scalar_local(
 /// binding type changed.
 pub(crate) fn apply_use_driven_type_infer_pass(func: &mut HirFunction) -> bool {
     let before = type_state_signature(func);
+    let dependencies = DefinitionDependencyMap::build(&func.body);
     // Iterate to convergence (alias chains may require multiple rounds).
     for _ in 0..4 {
         let mut constraints: HashMap<String, Vec<UseConstraint>> = HashMap::new();
         let mut roles = HashMap::<String, BindingUseRole>::new();
         let known_binding_types = collect_known_binding_types(func);
+        let pointer_roots = func
+            .params
+            .iter()
+            .filter_map(|binding| {
+                matches!(binding.ty, NirType::Ptr(_)).then_some(binding.name.clone())
+            })
+            .collect();
+        let address_contributors = dependencies.address_contributors(&func.body, &pointer_roots);
         collect_binding_use_roles(&func.body, &mut roles);
         collect_constraints(
             &func.body,
@@ -2133,8 +2151,12 @@ pub(crate) fn apply_use_driven_type_infer_pass(func: &mut HirFunction) -> bool {
         for binding in func.locals.iter_mut().chain(func.params.iter_mut()) {
             if let Some(constraints_for) = constraints.get(&binding.name) {
                 for constraint in constraints_for {
-                    if should_skip_pointer_constraint_for_scalar_local(binding, constraint, &roles)
-                    {
+                    if should_skip_pointer_constraint_for_scalar_local(
+                        binding,
+                        constraint,
+                        &roles,
+                        &address_contributors,
+                    ) {
                         continue;
                     }
                     round_changed |= merge_constraint(binding, constraint);
@@ -2361,6 +2383,56 @@ mod tests {
         super::apply_use_driven_type_infer_pass(&mut func);
         assert_eq!(func.params[0].ty, ptr_ty);
         assert_eq!(func.params[1].ty, u64_ty);
+    }
+
+    #[test]
+    fn transitive_address_evidence_blocks_stale_scalar_copy_constraint() {
+        let u8_ty = NirType::Int {
+            bits: 8,
+            signed: false,
+        };
+        let u64_ty = NirType::Int {
+            bits: 64,
+            signed: false,
+        };
+        let ptr_ty = NirType::Ptr(Box::new(u8_ty.clone()));
+        let body = vec![
+            HirStmt::Assign {
+                lhs: HirLValue::Var("alias".to_owned()),
+                rhs: HirExpr::Var("input".to_owned()),
+            },
+            HirStmt::Assign {
+                lhs: HirLValue::Var("cursor".to_owned()),
+                rhs: HirExpr::Cast {
+                    ty: ptr_ty.clone(),
+                    expr: Box::new(HirExpr::Var("alias".to_owned())),
+                },
+            },
+            HirStmt::Assign {
+                lhs: HirLValue::Var("value".to_owned()),
+                rhs: HirExpr::Load {
+                    ptr: Box::new(HirExpr::Var("cursor".to_owned())),
+                    ty: u8_ty,
+                },
+            },
+        ];
+        let mut func = make_func(
+            vec![
+                make_typed_binding("alias", u64_ty, NirBindingOrigin::TempPreserved),
+                make_typed_binding("cursor", ptr_ty.clone(), NirBindingOrigin::TempPreserved),
+                make_binding("value"),
+            ],
+            body,
+            NirType::Unknown,
+        );
+        func.params = vec![make_typed_binding(
+            "input",
+            ptr_ty.clone(),
+            NirBindingOrigin::ParamIndex(0),
+        )];
+
+        super::apply_use_driven_type_infer_pass(&mut func);
+        assert_eq!(func.params[0].ty, ptr_ty);
     }
 
     #[test]
