@@ -29,6 +29,7 @@ allocator-jemallocator = ["dep:jemallocator"]
 fission-core = { path = "../fission-core" }
 fission-script = { path = "../fission-script" }
 fission-loader = { path = "../fission-loader" }
+fission-analysis-db = { path = "../fission-analysis-db" }
 fission-static = { path = "../fission-static" }
 fission-decompiler = { path = "../fission-decompiler" }
 fission-sleigh = { path = "../fission-sleigh" }

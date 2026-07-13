@@ -36,7 +36,7 @@ use decompile::{
 };
 use disasm::{disassemble, disassemble_function};
 use functions::print_function_list;
-use inventory::emit_function_facts_inventory;
+use inventory::{emit_function_facts_inventory, emit_program_metadata};
 use nir_stats::emit_nir_stats;
 use pcode_stages::emit_pcode_stages;
 use pcode_topology::emit_pcode_topology;
@@ -505,6 +505,10 @@ fn execute_command(cli: &OneShotArgs) -> Result<()> {
 
     if cli.emit_function_facts_inventory {
         return Ok(emit_function_facts_inventory(cli, &binary, &binary_data)?);
+    }
+
+    if cli.emit_program_metadata {
+        return emit_program_metadata(cli, &binary);
     }
 
     if let Some(min_len) = cli.strings {

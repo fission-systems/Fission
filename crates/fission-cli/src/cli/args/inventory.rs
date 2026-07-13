@@ -14,10 +14,27 @@ pub struct InventoryArgs {
 
 #[derive(Subcommand, Debug)]
 pub enum InventoryCommand {
+    /// Emit the typed whole-program metadata snapshot as JSON
+    ProgramMetadata(InventoryProgramMetadataArgs),
     /// Emit whole-binary function facts inventory as JSONL plus summary JSON
     FunctionFacts(InventoryFunctionFactsArgs),
     /// Emit preview candidate inventory and batch scans
     PreviewCandidates(InventoryPreviewCandidatesArgs),
+}
+
+#[derive(Args, Debug)]
+#[command(
+    long_about = "Emit Fission's canonical typed program metadata snapshot.\n\nThe snapshot contains deterministic memory-block, function, symbol, and relocation tables with provenance. It is intended for analysis tooling and direct reference comparison.",
+    after_help = "Examples:\n  fission_cli inventory program-metadata app.exe\n  fission_cli inventory program-metadata app.exe --output metadata.json"
+)]
+pub struct InventoryProgramMetadataArgs {
+    /// Path to the binary file to analyze
+    #[arg(required = true)]
+    pub binary: PathBuf,
+
+    /// Write JSON to a file instead of stdout
+    #[arg(short, long, value_name = "FILE")]
+    pub output: Option<PathBuf>,
 }
 
 #[derive(Args, Debug)]

@@ -249,6 +249,7 @@ pub fn normalize_legacy(cli: LegacyCliArgs) -> ParsedOneShotArgs {
         resume_from: cli.resume_from,
         quiet_batch_errors: cli.quiet_batch_errors,
         emit_function_facts_inventory: cli.emit_function_facts_inventory,
+        emit_program_metadata: false,
         xrefs_cmd: false,
         xref_no_disassembly: false,
         xref_function: None,

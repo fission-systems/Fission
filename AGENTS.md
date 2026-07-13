@@ -26,6 +26,7 @@ Fission/
 │   ├── fission-static/       # Static facts, native preparation, analysis services
 │   ├── fission-automation/   # Quality lanes, deltas, go/stop signals, artifacts
 │   ├── fission-loader/       # Binary parsing, symbols, sections, strings
+│   ├── fission-analysis-db/  # Typed immutable program metadata snapshots
 │   ├── fission-signatures/   # FID/signature data and lookup
 │   ├── fission-cli/          # CLI surface
 │   ├── fission-tui/          # Terminal UI (ratatui-based AI chat)
@@ -63,6 +64,7 @@ Read the nearest child file before editing those areas.
 | Runtime resource paths (signatures, DiE, FID, patterns, typeinfo) | `crates/fission-core/src/core/path_config.rs`, `resource_roots.rs` | `PATHS` / `PathConfig::detect`; overrides: CLI `--resource-root`, `FISSION_RESOURCE_ROOT`; operator docs: `docs/CLI.md` § *Runtime resource bundle* |
 | Checked-in utility resources | `/Users/sjkim1127/Fission/utils` | Prefer existing resource/path config and utility loaders over hardcoded paths; use this tree when reusable signatures, type info, benchmark support data, or other checked-in resources already cover the need |
 | Loader identity / binary provenance hints | `crates/fission-loader/src/loader/identity/` | Evidence-backed `BinaryIdentityReport` on `LoadedBinary`; not an IR/decompiler repair layer |
+| Canonical program metadata view | `crates/fission-analysis-db/` | Deterministic IDs and provenance for memory blocks, functions, symbols, and relocations; read-only downstream contract |
 | Binary loaders (PE, ELF, Mach-O, TE, COFF, etc.) | `crates/fission-loader/src/loader/` | Format-specific byte parsing, section mapping, relocation, and symbol resolution |
 | Static facts and binary-derived analysis services | `crates/fission-static/src/analysis/` | Xrefs, discovery, patches, strings; fact extraction — not decompiler orchestration |
 | Decomp-facing facts / native prep surface | `crates/fission-static/src/analysis/decomp/` | `FactStore` and related helpers consumed by `fission-decompiler` |
@@ -78,6 +80,7 @@ Read the nearest child file before editing those areas.
 6. Do not hardcode repository-local resource paths in code; when `/Users/sjkim1127/Fission/utils` has reusable signatures, type info, benchmark support data, or other checked-in resources, route access through existing `PathConfig`, `PATHS`, `resource_roots`, or utility loaders instead of embedding absolute paths.
 7. Treat `/Users/sjkim1127/Fission/vendor` as a reference corpus only: consult it often for algorithms, invariants, and expected behavior, but keep Fission-owned Rust implementations dependency-free from that tree.
 8. **ISA-agnostic semantic rules** ([`docs/adr/0009-isa-agnostic-semantic-rules.md`](docs/adr/0009-isa-agnostic-semantic-rules.md)): optimize measurement on x86/x86-64, but implement register/loop/join/return/cmov-class logic as shared CFG and ABI-*slot* invariants. Put ISA differences in cspec, register namer, calling-convention tables, and SLEIGH — not as copy-pasted control-structure cores gated on `X86_32` / mnemonic / EBP offset alone.
+9. **Program metadata ownership** ([`docs/adr/0010-typed-program-metadata-substrate.md`](docs/adr/0010-typed-program-metadata-substrate.md)): loader facts flow into the immutable `fission-analysis-db` snapshot. Do not add new parallel program-fact maps to `fission-pcode`, CLI, or UI layers.
 
 ## Anti-Patterns
 

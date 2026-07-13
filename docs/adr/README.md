@@ -13,5 +13,6 @@ Short, durable decisions complement [`docs/architecture/ARCHITECTURE.md`](../arc
 | [0007](0007-ai-overfit-and-validation-firewall.md) | AI overfit and validation firewall |
 | [0008](0008-nir-substrate-and-owner-boundaries.md) | NIR substrate and owner boundaries |
 | [0009](0009-isa-agnostic-semantic-rules.md) | ISA-agnostic semantic rules (optimize on x86, implement common invariants) |
+| [0010](0010-typed-program-metadata-substrate.md) | Typed immutable program metadata substrate |
 
 New decisions: copy [`0000-template.md`](0000-template.md), bump the next number, link from this table.

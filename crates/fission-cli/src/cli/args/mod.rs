@@ -816,6 +816,13 @@ fn normalize_canonical(cli: CliArgs) -> ParsedInvocation {
                     args
                 }
                 CliCommand::Inventory(inventory) => match inventory.command {
+                    InventoryCommand::ProgramMetadata(metadata) => {
+                        let mut args = OneShotArgs::with_binary(metadata.binary);
+                        args.emit_program_metadata = true;
+                        args.output = metadata.output;
+                        args.json = true;
+                        args
+                    }
                     InventoryCommand::FunctionFacts(facts) => {
                         let mut args = OneShotArgs::with_binary(facts.binary);
                         args.emit_function_facts_inventory = true;
@@ -1282,6 +1289,21 @@ mod tests {
             Some(PathBuf::from("summary.json"))
         );
         assert!(!parsed.args.include_nonuser_functions);
+    }
+
+    #[test]
+    fn canonical_inventory_program_metadata_maps_to_snapshot_surface() {
+        let parsed = parse_canonical(&[
+            "fission_cli",
+            "inventory",
+            "program-metadata",
+            "bin.exe",
+            "--output",
+            "metadata.json",
+        ]);
+        assert!(parsed.args.emit_program_metadata);
+        assert!(parsed.args.json);
+        assert_eq!(parsed.args.output, Some(PathBuf::from("metadata.json")));
     }
 
     #[test]

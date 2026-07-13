@@ -64,6 +64,8 @@ pub struct OneShotArgs {
     pub resume_from: Option<PathBuf>,
     pub quiet_batch_errors: bool,
     pub emit_function_facts_inventory: bool,
+    /// Emit the canonical typed program metadata snapshot.
+    pub emit_program_metadata: bool,
     /// Canonical `xrefs` subcommand (merged loader + optional disassembly layer).
     pub xrefs_cmd: bool,
     /// Loader seeds only (`xrefs --no-disassembly`).
@@ -140,6 +142,7 @@ impl Default for OneShotArgs {
             resume_from: None,
             quiet_batch_errors: false,
             emit_function_facts_inventory: false,
+            emit_program_metadata: false,
             xrefs_cmd: false,
             xref_no_disassembly: false,
             xref_function: None,

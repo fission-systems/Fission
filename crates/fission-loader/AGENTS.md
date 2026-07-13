@@ -55,6 +55,7 @@ All binary loads must traverse the canonical loader pipeline:
 3. **Relocations Database**: Relocation logic must be decoupled and mapped into `RelocationsDb` for fast static analysis lookups by virtual address.
 4. **Virtual Type Mapping**: Map binary structural headers and sections as inferred virtual types during finalization. This allows symbol annotation and downstream recovery layers to parse headers naturally.
 5. **Deterministic Sections**: Ensure section offsets, alignment, and raw data mapping match target platform conventions exactly (e.g., TE stripped-headers file offset adjustment: `PointerToRawData - StrippedSize + sizeof(EFI_TE_IMAGE_HEADER)`).
+6. **Analysis Snapshot Boundary**: `LoadedBinary` is the loader fact payload. Cross-layer typed IDs, provenance normalization, and program-wide references belong to `fission-analysis-db`; do not make the loader own downstream analysis state.
 
 ## Anti-Patterns
 

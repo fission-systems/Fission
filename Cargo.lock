@@ -2299,6 +2299,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "fission-analysis-db"
+version = "0.1.2"
+dependencies = [
+ "fission-loader",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "fission-automation"
 version = "0.1.2"
 dependencies = [
@@ -2324,6 +2333,7 @@ dependencies = [
  "clap",
  "ctrlc",
  "fission-ai",
+ "fission-analysis-db",
  "fission-core",
  "fission-decompiler",
  "fission-dynamic",

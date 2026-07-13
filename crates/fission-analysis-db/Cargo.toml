@@ -1,0 +1,16 @@
+[package]
+name = "fission-analysis-db"
+version = "0.1.2"
+edition = "2024"
+authors = ["Fission Dev Team"]
+description = "Typed immutable program metadata snapshots for Fission analysis"
+repository = "https://github.com/sjkim1127/Fission"
+license = "AGPL-3.0-or-later"
+readme = "../../README.md"
+
+[dependencies]
+fission-loader = { path = "../fission-loader" }
+serde = { version = "1.0", features = ["derive"] }
+
+[dev-dependencies]
+serde_json = "1.0"

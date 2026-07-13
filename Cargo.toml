@@ -5,6 +5,7 @@ members = [
     "crates/fission-automation",
     "crates/fission-core",
     "crates/fission-loader",
+    "crates/fission-analysis-db",
     "crates/fission-pcode",
     "crates/fission-decompiler",
     "crates/fission-signatures",
