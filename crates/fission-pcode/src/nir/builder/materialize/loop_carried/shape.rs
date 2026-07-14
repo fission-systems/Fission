@@ -24,7 +24,12 @@ impl<'a> PreviewBuilder<'a> {
     pub(in crate::nir::builder) fn is_loop_carried_register_update_candidate(
         output: &Varnode,
     ) -> bool {
-        !output.is_constant && is_register_space_id(output.space_id) && output.size >= 4
+        // Include partial GPR lanes (AL/AX and equivalents). A size>=4-only gate
+        // drops byte accumulators (`add al, [mem]; movzx eax, al` loops): without a
+        // carried binding the self-read of AL folds to the pre-loop zero and the
+        // update collapses to `al = *mem` (last-byte-only checksum).
+        // Exact carried proof still requires self-read + kill-free backedge reach.
+        !output.is_constant && is_register_space_id(output.space_id) && output.size >= 1
     }
 
     pub(in crate::nir::builder) fn prove_loop_carried_register_update(

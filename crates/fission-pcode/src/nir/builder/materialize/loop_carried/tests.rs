@@ -590,6 +590,131 @@ fn loop_carried_proof_accepts_exact_self_loop_definition() {
     assert_eq!(proof.loop_head(), 0);
 }
 
+/// Byte accumulator loop: `xor eax,eax; L: add al,[ptr]; movzx eax,al; ptr++; jnz L`.
+/// The size-1 `al` self-update must be loop-carried so the add is not folded to
+/// a plain load (last-byte-only collapse).
+#[test]
+fn loop_carried_byte_accumulator_with_movzx_preserves_add() {
+    // x86 register layout: EAX@0 size4, AL@0 size1, EDX@0x10 size4
+    let eax = reg(0x0, 4);
+    let al = reg(0x0, 1);
+    let edx = reg(0x10, 4);
+    let loaded = varnode(0x170);
+    let mut blocks = vec![
+        block_at(
+            0x1000,
+            0,
+            vec![
+                // xor eax,eax seed
+                op(0, PcodeOpcode::Copy, Some(eax.clone()), vec![constant(0)]),
+                op(1, PcodeOpcode::Branch, None, vec![constant(0x1010)]),
+            ],
+        ),
+        block_at(
+            0x1010,
+            1,
+            vec![
+                // load byte
+                op(
+                    2,
+                    PcodeOpcode::Load,
+                    Some(loaded.clone()),
+                    vec![constant(3), edx.clone()],
+                ),
+                // add al, loaded
+                op(
+                    3,
+                    PcodeOpcode::IntAdd,
+                    Some(al.clone()),
+                    vec![al.clone(), loaded],
+                ),
+                // movzx eax, al (value-preserving widen — must not kill carried al)
+                op(4, PcodeOpcode::IntZExt, Some(eax.clone()), vec![al.clone()]),
+                // ptr++
+                op(
+                    5,
+                    PcodeOpcode::IntAdd,
+                    Some(edx.clone()),
+                    vec![edx.clone(), constant(1)],
+                ),
+                op(6, PcodeOpcode::Branch, None, vec![constant(0x1010)]),
+            ],
+        ),
+        // Exit successor so the latch is a proper loop tail (not an infinite SCC only).
+        block_at(
+            0x1020,
+            2,
+            vec![op(7, PcodeOpcode::Return, None, vec![eax.clone()])],
+        ),
+    ];
+    blocks[0].successors = vec![1];
+    blocks[1].successors = vec![1, 2];
+    let pcode = pcode_function(blocks);
+    let options = test_options();
+    let builder = PreviewBuilder::new(&pcode, &options, None);
+
+    assert!(
+        PreviewBuilder::is_loop_carried_register_update_candidate(&al),
+        "size-1 AL must be a loop-carried candidate"
+    );
+    assert!(
+        !builder.loop_bodies.is_empty(),
+        "synthetic CFG must identify a loop body"
+    );
+    // op_idx is the in-block vector index (Load=0, IntAdd=1, ZExt=2, …), not seq_num.
+    let proof = builder
+        .prove_loop_carried_register_update(1, 1, &al)
+        .expect("byte self-add with passthrough movzx must prove loop-carried");
+    assert_eq!(proof.definition_site(), (1, 1));
+
+    let code = crate::nir::render_mlil_preview(&pcode, "byte_accum", 0x1000, &options)
+        .expect("render byte accumulator");
+    // Must keep a self-update / accumulate form — not `al = *mem` alone.
+    let collapsed_to_load_only = code.lines().any(|l| {
+        let t = l.trim();
+        t.starts_with("al = *") && !t.contains('+')
+    });
+    assert!(
+        !collapsed_to_load_only,
+        "must not collapse to bare `al = *mem` without add:\n{code}"
+    );
+    assert!(
+        code.contains('+') || code.contains("+= "),
+        "expected AL/byte accumulation in loop body:\n{code}"
+    );
+}
+
+/// Size-1 self-loop with trailing ZExt must still prove carried (ZExt is
+/// value-preserving and must not kill the narrow definition).
+#[test]
+fn loop_carried_proof_accepts_byte_self_add_before_zext() {
+    let eax = reg(0x0, 4);
+    let al = reg(0x0, 1);
+    let mut blocks = vec![block_at(
+        0x1000,
+        0,
+        vec![
+            op(
+                0,
+                PcodeOpcode::IntAdd,
+                Some(al.clone()),
+                vec![al.clone(), constant(1)],
+            ),
+            op(1, PcodeOpcode::IntZExt, Some(eax), vec![al.clone()]),
+            op(2, PcodeOpcode::Branch, None, vec![constant(0x1000)]),
+        ],
+    )];
+    blocks[0].successors = vec![0];
+    let pcode = pcode_function(blocks);
+    let options = test_options();
+    let builder = PreviewBuilder::new(&pcode, &options, None);
+
+    let proof = builder
+        .prove_loop_carried_register_update(0, 0, &al)
+        .expect("size-1 self-add before ZExt should prove loop-carried");
+    assert_eq!(proof.definition_site(), (0, 0));
+}
+
 #[test]
 fn loop_carried_backedge_update_reuses_external_header_seed_binding() {
     let rdx = reg(0x10, 8);
