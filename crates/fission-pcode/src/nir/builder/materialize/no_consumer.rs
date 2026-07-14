@@ -9,7 +9,7 @@ impl<'a> PreviewBuilder<'a> {
         )
     }
 
-    fn is_x86_status_flag_output(output: &Varnode) -> bool {
+    pub(in crate::nir::builder) fn is_x86_status_flag_output(output: &Varnode) -> bool {
         is_register_varnode(output)
             && output.size == 1
             && matches!(

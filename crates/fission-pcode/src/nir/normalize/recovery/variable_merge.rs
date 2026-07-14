@@ -821,6 +821,10 @@ pub(crate) fn apply_variable_merge_pass(func: &mut HirFunction) -> bool {
     let mut disjoint_renames = Vec::new();
     let mut disjoint_merged = vec![false; func.locals.len()];
     let mut current_locals = func.locals.clone();
+    let mut merge_members = current_locals
+        .iter()
+        .map(|binding| HashSet::from([binding.name.clone()]))
+        .collect::<Vec<_>>();
 
     for i in 0..current_locals.len() {
         if disjoint_merged[i] {
@@ -835,9 +839,9 @@ pub(crate) fn apply_variable_merge_pass(func: &mut HirFunction) -> bool {
         if copy_merge_barriers.contains(&b1_name) {
             continue;
         }
-        let Some(&(start1, end1)) = live_ranges.ranges.get(&b1_name) else {
+        if !live_ranges.ranges.contains_key(&b1_name) {
             continue;
-        };
+        }
 
         if !is_eligible_for_speculative_merge(&current_locals[i]) {
             continue;
@@ -863,8 +867,14 @@ pub(crate) fn apply_variable_merge_pass(func: &mut HirFunction) -> bool {
             let Some(&(start2, end2)) = live_ranges.ranges.get(&b2_name) else {
                 continue;
             };
+            let Some(&(start1, end1)) = live_ranges.ranges.get(&b1_name) else {
+                break;
+            };
 
-            // Disjoint Domain Restriction: At least one variable must be a hardware temporary
+            // Disjoint Domain Restriction: at least one variable must be a
+            // synthetic temporary. Architectural register bindings are never
+            // candidates here; their identity may only be shared by an
+            // explicit materialize/def-use join proof.
             let is_temp1 =
                 current_locals[i].is_temp_like() || name_priority(&current_locals[i].name) <= 1;
             let is_temp2 =
@@ -897,7 +907,11 @@ pub(crate) fn apply_variable_merge_pass(func: &mut HirFunction) -> bool {
 
             // Same barrier as copy-alias merge: co-occurring names are not the
             // same value (saturating_add: a, b, and sum must stay distinct).
-            if copy_merge_blocked_pairs.contains(&sorted_var_pair(&b1_name, &b2_name)) {
+            if merge_members[i].iter().any(|left| {
+                merge_members[j]
+                    .iter()
+                    .any(|right| copy_merge_blocked_pairs.contains(&sorted_var_pair(left, right)))
+            }) {
                 continue;
             }
             // Distinct architectural GPRs are storage identities, not free
@@ -970,8 +984,14 @@ pub(crate) fn apply_variable_merge_pass(func: &mut HirFunction) -> bool {
                     .ranges
                     .insert(keep_name, (k_start.min(m_start), k_end.max(m_end)));
 
+                let merged_members = merge_members[merge_idx].clone();
+                merge_members[keep_idx].extend(merged_members);
+
                 disjoint_merged[merge_idx] = true;
                 changed = true;
+                if merge_idx == i {
+                    break;
+                }
             }
         }
     }
@@ -1239,16 +1259,10 @@ fn is_hardware_register_variable(name: &str) -> bool {
 
 fn is_eligible_for_speculative_merge(binding: &NirBinding) -> bool {
     if is_hardware_register_variable(&binding.name) {
-        // Permit speculative merging for hardware registers if they represent
-        // temporary variables (Temp or TempPreserved) and are not stack/frame pointers.
-        let name_lower = binding.name.to_lowercase();
-        let is_sp_or_bp = matches!(
-            name_lower.as_str(),
-            "rsp" | "rbp" | "esp" | "ebp" | "sp" | "bp"
-        );
-        if !is_sp_or_bp && binding.is_temp_like() {
-            return true;
-        }
+        // A hardware name carries architectural storage identity even when its
+        // binding origin is TempPreserved. Reusing it for a disjoint synthetic
+        // range recreates the register-role collapse that materialization's
+        // reaching-definition proofs intentionally prevented.
         return false;
     }
     // Symbolic Priority Preservation: Exclude variables with priority >= 2
@@ -2182,5 +2196,102 @@ mod tests {
                 && code.matches("eax = param").count() >= 2),
             "both params forced onto eax:\n{code}"
         );
+    }
+
+    #[test]
+    fn speculative_merge_cannot_reuse_hw_register_for_disjoint_temp_range() {
+        let i32_ty = NirType::Int {
+            bits: 32,
+            signed: true,
+        };
+        let mut func = HirFunction {
+            name: "definition_scoped_registers".to_string(),
+            locals: vec![
+                NirBinding {
+                    name: "edx".to_string(),
+                    ty: i32_ty.clone(),
+                    surface_type_name: None,
+                    origin: Some(NirBindingOrigin::TempPreserved),
+                    initializer: None,
+                },
+                NirBinding {
+                    name: "uVar1".to_string(),
+                    ty: i32_ty.clone(),
+                    surface_type_name: None,
+                    origin: Some(NirBindingOrigin::Temp),
+                    initializer: None,
+                },
+            ],
+            body: vec![
+                HirStmt::Assign {
+                    lhs: HirLValue::Var("edx".to_string()),
+                    rhs: HirExpr::Const(1, i32_ty.clone()),
+                },
+                HirStmt::Expr(HirExpr::Var("edx".to_string())),
+                HirStmt::Assign {
+                    lhs: HirLValue::Var("uVar1".to_string()),
+                    rhs: HirExpr::Const(2, i32_ty.clone()),
+                },
+                HirStmt::Return(Some(HirExpr::Var("uVar1".to_string()))),
+            ],
+            return_type: i32_ty,
+            ..Default::default()
+        };
+
+        assert!(!apply_variable_merge_pass(&mut func));
+        assert!(func.locals.iter().any(|binding| binding.name == "edx"));
+        assert!(func.locals.iter().any(|binding| binding.name == "uVar1"));
+    }
+
+    #[test]
+    fn speculative_merge_respects_blocked_pairs_across_transitive_groups() {
+        let i32_ty = NirType::Int {
+            bits: 32,
+            signed: true,
+        };
+        let binding = |name: &str| NirBinding {
+            name: name.to_string(),
+            ty: i32_ty.clone(),
+            surface_type_name: None,
+            origin: Some(NirBindingOrigin::Temp),
+            initializer: None,
+        };
+        let mut func = HirFunction {
+            name: "transitive_live_ranges".to_string(),
+            locals: vec![
+                binding("temp_early"),
+                binding("temp_left"),
+                binding("temp_right"),
+            ],
+            body: vec![
+                HirStmt::Assign {
+                    lhs: HirLValue::Var("temp_early".to_string()),
+                    rhs: HirExpr::Const(0, i32_ty.clone()),
+                },
+                HirStmt::Expr(HirExpr::Var("temp_early".to_string())),
+                HirStmt::Assign {
+                    lhs: HirLValue::Var("temp_left".to_string()),
+                    rhs: HirExpr::Const(7, i32_ty.clone()),
+                },
+                HirStmt::Assign {
+                    lhs: HirLValue::Var("temp_right".to_string()),
+                    rhs: HirExpr::Const(3, i32_ty.clone()),
+                },
+                HirStmt::Return(Some(HirExpr::Binary {
+                    op: HirBinaryOp::Sub,
+                    lhs: Box::new(HirExpr::Var("temp_left".to_string())),
+                    rhs: Box::new(HirExpr::Var("temp_right".to_string())),
+                    ty: i32_ty.clone(),
+                })),
+            ],
+            return_type: i32_ty,
+            ..Default::default()
+        };
+
+        assert!(apply_variable_merge_pass(&mut func));
+        let HirStmt::Return(Some(HirExpr::Binary { lhs, rhs, .. })) = &func.body[4] else {
+            panic!("expected binary return");
+        };
+        assert_ne!(lhs, rhs, "co-occurring group members were merged");
     }
 }

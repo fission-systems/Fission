@@ -280,8 +280,9 @@ impl<'a> PreviewBuilder<'a> {
         terminator_index: Option<usize>,
         output: &Varnode,
     ) -> Option<CopyOverwriteRestartProof> {
+        let restart_op_idx = Self::first_output_redefinition_in_block(block, op_idx, output)?.0;
         let (consumer_block_addr, _consumer_op_seq, provenance) =
-            self.describe_cross_block_consumer_provenance(block, op_idx, output)?;
+            self.describe_cross_block_consumer_provenance(block, restart_op_idx, output)?;
         if !matches!(
             provenance.relation,
             CrossBlockConsumerRelation::SuccessorBlock
@@ -324,8 +325,9 @@ impl<'a> PreviewBuilder<'a> {
         terminator_index: Option<usize>,
         output: &Varnode,
     ) -> Option<PredicateOverwriteRefreshProof> {
+        let restart_op_idx = Self::first_output_redefinition_in_block(block, op_idx, output)?.0;
         let (consumer_block_addr, _consumer_op_seq, provenance) =
-            self.describe_cross_block_consumer_provenance(block, op_idx, output)?;
+            self.describe_cross_block_consumer_provenance(block, restart_op_idx, output)?;
         if provenance.relation != CrossBlockConsumerRelation::PostDominatorBlock
             || provenance.consumer_is_multiequal
             || provenance.relation == CrossBlockConsumerRelation::LoopBackedge
@@ -443,50 +445,7 @@ impl<'a> PreviewBuilder<'a> {
         def_op_idx: usize,
         output: &Varnode,
     ) -> Option<(usize, u64, usize, u32)> {
-        let key = VarnodeKey::from(output);
-        self.pcode
-            .blocks
-            .iter()
-            .enumerate()
-            .filter(|(candidate_block_idx, _)| {
-                *candidate_block_idx != current_block_idx
-                    || self.block_can_reach(current_block_idx, current_block_idx, usize::MAX)
-            })
-            .filter(|(candidate_block_idx, _)| {
-                self.block_can_reach(current_block_idx, *candidate_block_idx, usize::MAX)
-            })
-            .find_map(|(block_idx, block)| {
-                for (idx, candidate) in block.ops.iter().enumerate() {
-                    if block_idx == current_block_idx {
-                        if idx >= def_op_idx {
-                            if idx > def_op_idx
-                                && candidate
-                                    .output
-                                    .as_ref()
-                                    .is_some_and(|out| Self::varnode_matches_key(out, &key))
-                            {
-                                return None;
-                            }
-                            continue;
-                        }
-                    }
-                    if candidate
-                        .inputs
-                        .iter()
-                        .any(|input| Self::varnode_matches_key(input, &key))
-                    {
-                        return Some((block_idx, block.start_address, idx, candidate.seq_num));
-                    }
-                    if candidate
-                        .output
-                        .as_ref()
-                        .is_some_and(|out| Self::varnode_matches_key(out, &key))
-                    {
-                        return None;
-                    }
-                }
-                None
-            })
+        self.first_reaching_output_use_after_block_exit(current_block_idx, def_op_idx, output)
     }
 
     fn classify_missing_merge_binding_relation(
@@ -1333,6 +1292,7 @@ impl<'a> PreviewBuilder<'a> {
                 };
                 let _ = self.merge_binding_name_for_conditional_loop_exit_accumulator(
                     &pred_block,
+                    op_idx,
                     output,
                     &rhs,
                 );
@@ -2560,8 +2520,11 @@ impl<'a> PreviewBuilder<'a> {
             return None;
         }
         let redef_op = block.ops.get(redef.redef_op_idx)?;
-        let (consumer_block_addr, _, _) =
-            self.first_output_use_site_outside_block(block.start_address, op_idx, output)?;
+        let (consumer_block_addr, _, _) = self.first_output_use_site_outside_block(
+            block.start_address,
+            redef.redef_op_idx,
+            output,
+        )?;
         let consumer_block_idx = self.address_to_index.get(&consumer_block_addr).copied()?;
         let consumer_block = self.pcode.blocks.get(consumer_block_idx)?;
         let (_consumer_idx, consumer_op) =
@@ -2609,8 +2572,11 @@ impl<'a> PreviewBuilder<'a> {
             return None;
         }
         let redef_op = block.ops.get(redef.redef_op_idx)?;
-        let (consumer_block_addr, _, _) =
-            self.first_output_use_site_outside_block(block.start_address, op_idx, output)?;
+        let (consumer_block_addr, _, _) = self.first_output_use_site_outside_block(
+            block.start_address,
+            redef.redef_op_idx,
+            output,
+        )?;
         let consumer_block_idx = self.address_to_index.get(&consumer_block_addr).copied()?;
         let consumer_block = self.pcode.blocks.get(consumer_block_idx)?;
         let (_consumer_idx, consumer_op) =

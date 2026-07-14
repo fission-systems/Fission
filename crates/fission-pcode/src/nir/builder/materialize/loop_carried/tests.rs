@@ -525,6 +525,72 @@ fn loop_carried_register_update_reuses_wide_prior_for_gpr32_update() {
 }
 
 #[test]
+fn loop_carried_proof_rejects_register_phase_killed_before_backedge() {
+    let edx = reg(0x8, 4);
+    let observed = varnode(0x180);
+    let mut blocks = vec![block_at(
+        0x1000,
+        0,
+        vec![
+            op(0, PcodeOpcode::Copy, Some(observed), vec![edx.clone()]),
+            op(
+                1,
+                PcodeOpcode::IntAdd,
+                Some(edx.clone()),
+                vec![edx.clone(), constant(1)],
+            ),
+            op(2, PcodeOpcode::Copy, Some(edx.clone()), vec![constant(7)]),
+            op(3, PcodeOpcode::Branch, None, vec![constant(0x1000)]),
+        ],
+    )];
+    blocks[0].successors = vec![0];
+    let pcode = pcode_function(blocks);
+    let options = test_options();
+    let builder = PreviewBuilder::new(&pcode, &options, None);
+
+    assert!(
+        builder
+            .prove_loop_carried_register_update(0, 1, &edx)
+            .is_none(),
+        "a register phase killed before the latch must not receive a stable loop binding"
+    );
+    assert!(
+        builder
+            .prove_loop_carried_register_update(0, 2, &edx)
+            .is_none(),
+        "a later phase whose input was already killed must not inherit the prior iteration"
+    );
+}
+
+#[test]
+fn loop_carried_proof_accepts_exact_self_loop_definition() {
+    let edx = reg(0x8, 4);
+    let mut blocks = vec![block_at(
+        0x1000,
+        0,
+        vec![
+            op(
+                0,
+                PcodeOpcode::IntAdd,
+                Some(edx.clone()),
+                vec![edx.clone(), constant(1)],
+            ),
+            op(1, PcodeOpcode::Branch, None, vec![constant(0x1000)]),
+        ],
+    )];
+    blocks[0].successors = vec![0];
+    let pcode = pcode_function(blocks);
+    let options = test_options();
+    let builder = PreviewBuilder::new(&pcode, &options, None);
+
+    let proof = builder
+        .prove_loop_carried_register_update(0, 0, &edx)
+        .expect("self-reading latch definition should have a carried proof");
+    assert_eq!(proof.definition_site(), (0, 0));
+    assert_eq!(proof.loop_head(), 0);
+}
+
+#[test]
 fn loop_carried_backedge_update_reuses_external_header_seed_binding() {
     let rdx = reg(0x10, 8);
     let edx = reg(0x10, 4);
@@ -665,7 +731,12 @@ fn m32_popcount_loop_carries_add_and_shr() {
                 // Seed EAX with a prior definition that is NOT a register ABI
                 // param (x86-32 stack args). Hardware-register fallback must
                 // still keep the IntRight self-update on EAX.
-                op(1, PcodeOpcode::Copy, Some(eax.clone()), vec![constant(0x55)]),
+                op(
+                    1,
+                    PcodeOpcode::Copy,
+                    Some(eax.clone()),
+                    vec![constant(0x55)],
+                ),
                 op(
                     2,
                     PcodeOpcode::IntEqual,
@@ -743,12 +814,8 @@ fn m32_popcount_loop_carries_add_and_shr() {
     options.calling_convention = CallingConvention::X86_32;
     let mut builder = PreviewBuilder::new(&pcode, &options, None);
 
-    let _entry = builder
-        .lower_block_stmts(&pcode.blocks[0])
-        .expect("entry");
-    let loop_body = builder
-        .lower_block_stmts(&pcode.blocks[1])
-        .expect("loop");
+    let _entry = builder.lower_block_stmts(&pcode.blocks[0]).expect("entry");
+    let loop_body = builder.lower_block_stmts(&pcode.blocks[1]).expect("loop");
 
     // IntAdd must keep both operands (edx + ecx), not collapse to ecx alone.
     let add_stmt = loop_body.iter().find(|s| {
@@ -769,12 +836,7 @@ fn m32_popcount_loop_carries_add_and_shr() {
     );
     if let Some(HirStmt::Assign {
         lhs: HirLValue::Var(acc),
-        rhs:
-            HirExpr::Binary {
-                lhs: a,
-                rhs: b,
-                ..
-            },
+        rhs: HirExpr::Binary { lhs: a, rhs: b, .. },
         ..
     }) = add_stmt
     {
@@ -804,11 +866,7 @@ fn m32_popcount_loop_carries_add_and_shr() {
     );
     if let Some(HirStmt::Assign {
         lhs: HirLValue::Var(ind),
-        rhs:
-            HirExpr::Binary {
-                lhs: a,
-                ..
-            },
+        rhs: HirExpr::Binary { lhs: a, .. },
         ..
     }) = shr_stmt
     {

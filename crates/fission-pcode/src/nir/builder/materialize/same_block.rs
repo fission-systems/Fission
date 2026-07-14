@@ -904,51 +904,11 @@ impl<'a> PreviewBuilder<'a> {
         op_idx: usize,
         output: &Varnode,
     ) -> bool {
-        let key = VarnodeKey::from(output);
         let Some(block_idx) = self.address_to_index.get(&block.start_address).copied() else {
             return false;
         };
-        for (candidate_block_idx, candidate_block) in self.pcode.blocks.iter().enumerate() {
-            if candidate_block_idx == block_idx {
-                continue;
-            }
-            if !self.block_can_reach(block_idx, candidate_block_idx, usize::MAX) {
-                continue;
-            }
-            for candidate in &candidate_block.ops {
-                if candidate
-                    .inputs
-                    .iter()
-                    .any(|input| Self::varnode_matches_key(input, &key))
-                {
-                    return true;
-                }
-                if candidate
-                    .output
-                    .as_ref()
-                    .is_some_and(|output| Self::varnode_matches_key(output, &key))
-                {
-                    break;
-                }
-            }
-        }
-        for candidate in block.ops.iter().skip(op_idx + 1) {
-            if candidate
-                .output
-                .as_ref()
-                .is_some_and(|output| Self::varnode_matches_key(output, &key))
-            {
-                break;
-            }
-            if candidate
-                .inputs
-                .iter()
-                .any(|input| Self::varnode_matches_key(input, &key))
-            {
-                return false;
-            }
-        }
-        false
+        self.first_reaching_output_use_after_block_exit(block_idx, op_idx, output)
+            .is_some()
     }
 
     pub(super) fn classify_alias_unsafe_hazard(

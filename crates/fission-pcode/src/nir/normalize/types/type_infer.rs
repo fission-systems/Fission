@@ -1235,7 +1235,9 @@ fn record_param_pointer_from_address_expr(
                 &mut roots,
             );
             if roots.is_empty() {
-                let fallback = context.dependencies.roots_reaching(name, context.params);
+                let fallback = context
+                    .dependencies
+                    .address_roots_reaching(name, context.params);
                 if fallback.len() == 1 {
                     roots.extend(fallback);
                 }
@@ -1453,6 +1455,16 @@ fn apply_address_contributor_param_pointer_types(
         if !shift_scalar_params.contains(address_param) {
             scalar_params.remove(address_param);
         }
+    }
+    if std::env::var_os("FISSION_PREVIEW_DIAG").is_some() {
+        let mut address_params: Vec<_> = address_params.iter().cloned().collect();
+        let mut scalar_params: Vec<_> = scalar_params.iter().cloned().collect();
+        address_params.sort_unstable();
+        scalar_params.sort_unstable();
+        eprintln!(
+            "[DIAG] param_pointer_roles fn={} address={address_params:?} scalar={scalar_params:?}",
+            func.name
+        );
     }
     let mut changed = false;
     for param in &mut func.params {
@@ -3387,6 +3399,198 @@ mod tests {
 
         assert!(super::apply_type_inference_pass(&mut func));
         assert_eq!(func.params[0].ty, ptr_ty);
+    }
+
+    #[test]
+    fn casted_cursor_load_keeps_parameter_pointer_despite_end_pointer_add() {
+        let u8_ty = NirType::Int {
+            bits: 8,
+            signed: false,
+        };
+        let u32_ty = NirType::Int {
+            bits: 32,
+            signed: false,
+        };
+        let ptr_ty = NirType::Ptr(Box::new(u8_ty.clone()));
+        let body = vec![
+            make_assign("cursor_word", HirExpr::Var("buffer_param".to_string())),
+            make_assign(
+                "end_word",
+                HirExpr::Binary {
+                    op: HirBinaryOp::Add,
+                    lhs: Box::new(HirExpr::Var("buffer_param".to_string())),
+                    rhs: Box::new(HirExpr::Var("length_param".to_string())),
+                    ty: u32_ty.clone(),
+                },
+            ),
+            make_assign(
+                "cursor",
+                HirExpr::Cast {
+                    ty: ptr_ty.clone(),
+                    expr: Box::new(HirExpr::Var("cursor_word".to_string())),
+                },
+            ),
+            make_assign(
+                "byte",
+                HirExpr::Load {
+                    ptr: Box::new(HirExpr::Var("cursor".to_string())),
+                    ty: u8_ty,
+                },
+            ),
+        ];
+        let mut cursor = make_binding("cursor");
+        cursor.ty = ptr_ty.clone();
+        let mut func = make_func(
+            vec![
+                make_binding("cursor_word"),
+                make_binding("end_word"),
+                cursor,
+                make_binding("byte"),
+            ],
+            body,
+            NirType::Unknown,
+        );
+        func.params = vec![
+            make_param("buffer_param", u32_ty.clone()),
+            make_param("length_param", u32_ty.clone()),
+        ];
+
+        assert!(super::apply_type_inference_pass(&mut func));
+        assert_eq!(func.params[0].ty, ptr_ty);
+        assert_eq!(func.params[1].ty, u32_ty);
+    }
+
+    #[test]
+    fn pointer_word_roundtrip_preserves_cursor_and_end_sentinel_roles() {
+        let u8_ty = NirType::Int {
+            bits: 8,
+            signed: false,
+        };
+        let u32_ty = NirType::Int {
+            bits: 32,
+            signed: false,
+        };
+        let ptr_ty = NirType::Ptr(Box::new(u8_ty.clone()));
+        let body = vec![
+            make_assign(
+                "end_word",
+                HirExpr::Binary {
+                    op: HirBinaryOp::Add,
+                    lhs: Box::new(HirExpr::Var("buffer".to_string())),
+                    rhs: Box::new(HirExpr::Var("length".to_string())),
+                    ty: u32_ty.clone(),
+                },
+            ),
+            make_assign("cursor", HirExpr::Var("buffer".to_string())),
+            make_assign(
+                "cursor_word",
+                HirExpr::Cast {
+                    ty: u32_ty.clone(),
+                    expr: Box::new(HirExpr::Var("cursor".to_string())),
+                },
+            ),
+            make_assign(
+                "cursor_word",
+                HirExpr::Binary {
+                    op: HirBinaryOp::Add,
+                    lhs: Box::new(HirExpr::Var("cursor_word".to_string())),
+                    rhs: Box::new(HirExpr::Const(1, u32_ty.clone())),
+                    ty: u32_ty.clone(),
+                },
+            ),
+            make_assign(
+                "cursor",
+                HirExpr::Cast {
+                    ty: ptr_ty.clone(),
+                    expr: Box::new(HirExpr::Var("cursor_word".to_string())),
+                },
+            ),
+            HirStmt::Assign {
+                lhs: HirLValue::Deref {
+                    ptr: Box::new(HirExpr::Var("cursor".to_string())),
+                    ty: u8_ty,
+                },
+                rhs: HirExpr::Const(0, u32_ty.clone()),
+            },
+            HirStmt::DoWhile {
+                body: Vec::new(),
+                cond: HirExpr::Binary {
+                    op: HirBinaryOp::Ne,
+                    lhs: Box::new(HirExpr::Var("end_word".to_string())),
+                    rhs: Box::new(HirExpr::Var("cursor_word".to_string())),
+                    ty: NirType::Bool,
+                },
+            },
+        ];
+        let mut cursor = make_binding("cursor");
+        cursor.ty = ptr_ty.clone();
+        let mut cursor_word = make_binding("cursor_word");
+        cursor_word.ty = u32_ty.clone();
+        let mut end_word = make_binding("end_word");
+        end_word.ty = u32_ty.clone();
+        let mut func = make_func(vec![cursor, cursor_word, end_word], body, NirType::Unknown);
+        func.params = vec![
+            make_param("buffer", ptr_ty.clone()),
+            make_param("length", u32_ty),
+        ];
+
+        for _ in 0..3 {
+            super::apply_type_inference_pass(&mut func);
+        }
+
+        assert_eq!(func.locals[0].ty, ptr_ty);
+        assert!(matches!(func.locals[1].ty, NirType::Ptr(_)));
+        assert!(matches!(func.locals[2].ty, NirType::Ptr(_)));
+    }
+
+    #[test]
+    fn reused_load_and_cursor_binding_keeps_definition_scoped_address_root() {
+        let u8_ty = NirType::Int {
+            bits: 8,
+            signed: false,
+        };
+        let u32_ty = NirType::Int {
+            bits: 32,
+            signed: false,
+        };
+        let ptr_ty = NirType::Ptr(Box::new(u8_ty.clone()));
+        let body = vec![
+            make_assign(
+                "shared",
+                HirExpr::Cast {
+                    ty: ptr_ty.clone(),
+                    expr: Box::new(HirExpr::Load {
+                        ptr: Box::new(HirExpr::Var("state_param".to_string())),
+                        ty: u8_ty.clone(),
+                    }),
+                },
+            ),
+            make_assign(
+                "shared",
+                HirExpr::Cast {
+                    ty: ptr_ty.clone(),
+                    expr: Box::new(HirExpr::Var("buffer_param".to_string())),
+                },
+            ),
+            make_assign(
+                "byte",
+                HirExpr::Load {
+                    ptr: Box::new(HirExpr::Var("shared".to_string())),
+                    ty: u8_ty,
+                },
+            ),
+        ];
+        let mut shared = make_binding("shared");
+        shared.ty = ptr_ty.clone();
+        let mut func = make_func(vec![shared, make_binding("byte")], body, NirType::Unknown);
+        func.params = vec![
+            make_param("state_param", u32_ty.clone()),
+            make_param("buffer_param", u32_ty),
+        ];
+
+        assert!(super::apply_type_inference_pass(&mut func));
+        assert_eq!(func.params[0].ty, ptr_ty);
+        assert!(matches!(func.params[1].ty, NirType::Ptr(_)));
     }
 
     #[test]

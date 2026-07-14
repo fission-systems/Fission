@@ -1,3 +1,4 @@
+use super::shape::LoopCarriedDefinitionProof;
 use super::*;
 use std::collections::BTreeSet;
 
@@ -5,7 +6,13 @@ impl<'a> PreviewBuilder<'a> {
     pub(in crate::nir::builder) fn prior_materialized_loop_carried_output_name(
         &self,
         output: &Varnode,
+        proof: LoopCarriedDefinitionProof,
     ) -> Option<String> {
+        debug_assert_eq!(
+            Some(proof.definition_site()),
+            self.current_lowering_site
+                .map(|site| (site.block_idx, site.op_idx))
+        );
         let (site, op) = self.lookup_def_site(output)?;
         if Some(site) == self.current_lowering_site {
             return None;
@@ -65,6 +72,7 @@ impl<'a> PreviewBuilder<'a> {
                             }
                         }
                     }
+                    return None;
                 }
             }
         }
@@ -299,6 +307,7 @@ impl<'a> PreviewBuilder<'a> {
         &self,
         op: &PcodeOp,
         output: &Varnode,
+        proof: LoopCarriedDefinitionProof,
     ) -> Option<String> {
         let output_key = VarnodeKey::from(output);
         for input in &op.inputs {
@@ -307,7 +316,7 @@ impl<'a> PreviewBuilder<'a> {
             }
             let input_key = VarnodeKey::from(input);
             if Self::varnode_key_may_alias_output(&input_key, &output_key) {
-                if let Some(name) = self.prior_materialized_loop_carried_output_name(input) {
+                if let Some(name) = self.prior_materialized_loop_carried_output_name(input, proof) {
                     return Some(name);
                 }
             }

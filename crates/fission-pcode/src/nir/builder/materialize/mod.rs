@@ -13,6 +13,12 @@ mod trace;
 
 pub(in crate::nir::builder) use self::contracts::MaterializeOwnerRepartition;
 use self::contracts::*;
+use self::scans::DefinitionReachesReturnProof;
+
+struct SameBlockRegisterJoinProof {
+    binding_name: String,
+    prior_op_idx: usize,
+}
 
 impl<'a> PreviewBuilder<'a> {
     fn collect_var_names_in_expr(expr: &HirExpr, vars: &mut HashSet<String>) {
@@ -409,13 +415,15 @@ impl<'a> PreviewBuilder<'a> {
             // Targets may be relative p-code deltas *or* absolute next-instruction
             // addresses (x86 SLEIGH cmov); both must lower as guarded skips.
             if op.opcode == PcodeOpcode::CBranch && op.inputs.len() >= 2 {
-                if let Some(target_op_idx) = crate::nir::cfg::same_block_forward_branch_target_op_idx(
-                    block,
-                    op_idx,
-                    end_idx,
-                    op,
-                    &op.inputs[0],
-                ) {
+                if let Some(target_op_idx) =
+                    crate::nir::cfg::same_block_forward_branch_target_op_idx(
+                        block,
+                        op_idx,
+                        end_idx,
+                        op,
+                        &op.inputs[0],
+                    )
+                {
                     // Scope condition lowering to this op so reused unique temps
                     // (x86 cmov BoolNegate slots) resolve to the *prior* def, not a
                     // later cmov in the same block.
@@ -430,12 +438,8 @@ impl<'a> PreviewBuilder<'a> {
                     };
                     // Body range is after this CBranch; clear terminator so nested
                     // lowering does not bare-skip an outer index.
-                    let nested_body = self.lower_block_ops_range(
-                        block,
-                        op_idx + 1,
-                        target_op_idx,
-                        None,
-                    )?;
+                    let nested_body =
+                        self.lower_block_ops_range(block, op_idx + 1, target_op_idx, None)?;
                     if std::env::var_os("FISSION_PREVIEW_DIAG").is_some() {
                         eprintln!(
                             "[DIAG] same_block_cmov block=0x{:x} op_idx={} target={} body_stmts={} term_is={:?} end={}",
@@ -459,13 +463,15 @@ impl<'a> PreviewBuilder<'a> {
                     continue;
                 }
             } else if op.opcode == PcodeOpcode::Branch && !op.inputs.is_empty() {
-                if let Some(target_op_idx) = crate::nir::cfg::same_block_forward_branch_target_op_idx(
-                    block,
-                    op_idx,
-                    end_idx,
-                    op,
-                    &op.inputs[0],
-                ) {
+                if let Some(target_op_idx) =
+                    crate::nir::cfg::same_block_forward_branch_target_op_idx(
+                        block,
+                        op_idx,
+                        end_idx,
+                        op,
+                        &op.inputs[0],
+                    )
+                {
                     op_idx = target_op_idx;
                     continue;
                 }
@@ -727,20 +733,28 @@ impl<'a> PreviewBuilder<'a> {
         let replacement_plan =
             self.build_replacement_value_plan(block, op_idx, terminator_index, output, &rhs);
         let direct_successor_merge_lhs_name =
-            self.merge_binding_name_for_direct_successor_accumulator(block, output, &rhs);
+            self.merge_binding_name_for_direct_successor_accumulator(block, op_idx, output, &rhs);
         let merge_lhs_name = if loop_carried_lhs_name.is_none() {
             self.merge_binding_name_for_materialized_output(block, op_idx, output, &rhs)
         } else {
             None
         };
+        let primary_return_live_out_name = block_idx_for_rhs
+            .and_then(|block_idx| {
+                self.prove_definition_reaches_return(block_idx, op_idx, output)
+                    .map(|proof| (block_idx, proof))
+            })
+            .and_then(|(block_idx, proof)| {
+                self.primary_return_name_from_live_out_proof(output, block_idx, op_idx, proof)
+            });
         if replacement_plan.is_complete()
             && loop_carried_lhs_name.is_none()
             && merge_lhs_name.is_none()
-            // Primary return register writes must stay as bindings: SLEIGH Return
-            // inputs are control/stack targets, so same-block consumer analysis
-            // under-counts ABI live-out (saturating_add: `eax = a+b` must dominate
-            // epilogue `return eax`).
-            && !self.register_namer().is_primary_return_register(output)
+            // SLEIGH Return inputs are control/stack targets, so same-block
+            // consumer analysis under-counts ABI live-out. Preserve the
+            // binding only when this exact definition has a kill-free path to
+            // a machine return; unrelated register roles may still be inlined.
+            && primary_return_live_out_name.is_none()
         {
             self.trace_materialization_plan(
                 block_addr,
@@ -923,7 +937,7 @@ impl<'a> PreviewBuilder<'a> {
                 preserve_materialization,
             );
             name
-        } else if self.register_namer().is_primary_return_register(output)
+        } else if primary_return_live_out_name.is_some()
             && !Self::output_has_consumed_interval_before_redefinition(block, op_idx, output)
             // ARM/AArch64 r0/x0 are both param and return; forcing the HW name
             // there collapses call-arg vs result identity. x86 eax/rax is
@@ -936,7 +950,7 @@ impl<'a> PreviewBuilder<'a> {
             // primary-return writes so sum/cmov arms share one name with
             // `return eax`. Normalize folds adjacent `eax = C; return eax`
             // via collapse_trivial_assign_returns (abi pure RHS).
-            && let Some(name) = self.sla_hw_name(output.offset, output.size)
+            && let Some(name) = primary_return_live_out_name
         {
             // Cross-block cmov tails (e.g. saturating_add underflow): the guarded
             // Copy writes the ABI return register with no prior def in *this*
@@ -992,10 +1006,42 @@ impl<'a> PreviewBuilder<'a> {
         op_idx: usize,
         output: &Varnode,
     ) -> Option<String> {
+        let proof = self.prove_same_block_register_join(block, op_idx, output)?;
+        debug_assert!(proof.prior_op_idx < op_idx);
+        Some(proof.binding_name)
+    }
+
+    fn primary_return_name_from_live_out_proof(
+        &self,
+        output: &Varnode,
+        definition_block_idx: usize,
+        definition_op_idx: usize,
+        proof: DefinitionReachesReturnProof,
+    ) -> Option<String> {
+        if !self.register_namer().is_primary_return_register(output)
+            || proof.definition_site() != (definition_block_idx, definition_op_idx)
+        {
+            return None;
+        }
+        self.sla_hw_name(output.offset, output.size)
+    }
+
+    fn prove_same_block_register_join(
+        &self,
+        block: &crate::pcode::PcodeBasicBlock,
+        op_idx: usize,
+        output: &Varnode,
+    ) -> Option<SameBlockRegisterJoinProof> {
         if output.is_constant || !is_register_space_id(output.space_id) {
             return None;
         }
-        if Self::output_has_consumed_interval_before_redefinition(block, op_idx, output) {
+        let current_definition_reads_prior_value = block.ops[op_idx]
+            .inputs
+            .iter()
+            .any(|input| self.varnode_aliases_value(input, output));
+        if Self::output_has_consumed_interval_before_redefinition(block, op_idx, output)
+            && !current_definition_reads_prior_value
+        {
             return None;
         }
         let output_key = VarnodeKey::from(output);
@@ -1011,12 +1057,14 @@ impl<'a> PreviewBuilder<'a> {
             {
                 continue;
             }
-            if let Some(name) = self
+            let name = self
                 .materialized_vns
                 .get(&MaterializedVarnodeKey::new(prior_out, prior_op))
-            {
-                return Some(name.clone());
-            }
+                .cloned()?;
+            return Some(SameBlockRegisterJoinProof {
+                binding_name: name,
+                prior_op_idx: prior_idx,
+            });
         }
         None
     }
@@ -1043,7 +1091,7 @@ impl<'a> PreviewBuilder<'a> {
         {
             return None;
         }
-        for (_, consumer_op) in self.output_use_sites_in_block(block, op_idx, output) {
+        for (consumer_idx, consumer_op) in self.output_use_sites_in_block(block, op_idx, output) {
             if !matches!(
                 consumer_op.opcode,
                 PcodeOpcode::Copy | PcodeOpcode::IntZExt | PcodeOpcode::Cast
@@ -1063,7 +1111,7 @@ impl<'a> PreviewBuilder<'a> {
             let consumer_rhs = HirExpr::Var("producer".to_string());
             let Some((name, binding_size)) = self.live_register_lhs_name_for_safe_missing_merge(
                 block,
-                op_idx,
+                consumer_idx,
                 consumer_op,
                 consumer_output,
                 &consumer_rhs,
@@ -1113,6 +1161,19 @@ impl<'a> PreviewBuilder<'a> {
         if !live_register_join && !live_register_loop_carried {
             return None;
         }
+        let definition_block_idx = self.lowering_block_index(block);
+        let merge_block_idx = self.address_to_index.get(&proof.merge_block).copied()?;
+        let reach_proof = self.prove_definition_reaches_block_entry(
+            definition_block_idx,
+            op_idx,
+            output,
+            merge_block_idx,
+        )?;
+        debug_assert_eq!(
+            reach_proof.definition_site(),
+            (definition_block_idx, op_idx)
+        );
+        debug_assert_eq!(reach_proof.target_block(), merge_block_idx);
         let output_key = VarnodeKey::from(output);
         if !live_register_loop_carried {
             self.gpr_family_index_for_key(&output_key)?;
@@ -1180,12 +1241,19 @@ impl<'a> PreviewBuilder<'a> {
         let block_idx = self.lowering_block_index(block);
         let key = VarnodeKey::from(output);
         for succ_idx in self.successors.get(block_idx)? {
+            let Some(reach_proof) =
+                self.prove_definition_reaches_block_entry(block_idx, op_idx, output, *succ_idx)
+            else {
+                continue;
+            };
+            debug_assert_eq!(reach_proof.definition_site(), (block_idx, op_idx));
+            debug_assert_eq!(reach_proof.target_block(), *succ_idx);
             if let Some(name) = self.explicit_merge_bindings.get(&(*succ_idx, key.clone())) {
                 return Some(name.clone());
             }
         }
         if let Some(name) =
-            self.merge_binding_name_for_direct_successor_accumulator(block, output, rhs)
+            self.merge_binding_name_for_direct_successor_accumulator(block, op_idx, output, rhs)
         {
             return Some(name);
         }
@@ -1197,6 +1265,10 @@ impl<'a> PreviewBuilder<'a> {
         }
         let (merge_idx, merge_addr, _, _) =
             self.first_output_use_site_outside_block_by_index(block_idx, op_idx, output)?;
+        let reach_proof =
+            self.prove_definition_reaches_block_entry(block_idx, op_idx, output, merge_idx)?;
+        debug_assert_eq!(reach_proof.definition_site(), (block_idx, op_idx));
+        debug_assert_eq!(reach_proof.target_block(), merge_idx);
         if merge_addr == proof.merge_block
             && let Some(name) = self.explicit_merge_bindings.get(&(merge_idx, key.clone()))
         {
@@ -1228,6 +1300,7 @@ impl<'a> PreviewBuilder<'a> {
     fn merge_binding_name_for_direct_successor_accumulator(
         &mut self,
         block: &crate::pcode::PcodeBasicBlock,
+        op_idx: usize,
         output: &Varnode,
         rhs: &HirExpr,
     ) -> Option<String> {
@@ -1267,9 +1340,9 @@ impl<'a> PreviewBuilder<'a> {
         }
         let block_idx = self.lowering_block_index(block);
         let Some(succ_idx) = self.single_successor_index(block_idx) else {
-            if let Some(name) =
-                self.merge_binding_name_for_conditional_loop_exit_accumulator(block, output, rhs)
-            {
+            if let Some(name) = self.merge_binding_name_for_conditional_loop_exit_accumulator(
+                block, op_idx, output, rhs,
+            ) {
                 return Some(name);
             }
             self.trace_direct_successor_accumulator_merge_rejected(
@@ -1279,6 +1352,10 @@ impl<'a> PreviewBuilder<'a> {
             );
             return None;
         };
+        let reach_proof =
+            self.prove_definition_reaches_block_entry(block_idx, op_idx, output, succ_idx)?;
+        debug_assert_eq!(reach_proof.definition_site(), (block_idx, op_idx));
+        debug_assert_eq!(reach_proof.target_block(), succ_idx);
         // The 32-bit return-register exception is ONLY valid for the conditional-exit
         // (multi-successor) path handled by merge_binding_name_for_conditional_loop_exit_accumulator.
         // For single-successor blocks (self-loops, simple backedge loops) the loop_carried
@@ -1368,6 +1445,7 @@ impl<'a> PreviewBuilder<'a> {
     fn merge_binding_name_for_conditional_loop_exit_accumulator(
         &mut self,
         block: &crate::pcode::PcodeBasicBlock,
+        op_idx: usize,
         output: &Varnode,
         rhs: &HirExpr,
     ) -> Option<String> {
@@ -1398,6 +1476,10 @@ impl<'a> PreviewBuilder<'a> {
             );
             return None;
         };
+        let reach_proof =
+            self.prove_definition_reaches_block_entry(block_idx, op_idx, output, *read_succ_idx)?;
+        debug_assert_eq!(reach_proof.definition_site(), (block_idx, op_idx));
+        debug_assert_eq!(reach_proof.target_block(), *read_succ_idx);
         let non_read_succ_idx = succs
             .iter()
             .copied()
@@ -1611,8 +1693,7 @@ impl<'a> PreviewBuilder<'a> {
                     || loop_body.exit_idx == Some(*read_successor_idx)
                     || successors.contains(read_successor_idx))
                 && !self.loop_body_has_side_entry_or_irreducible_edge(loop_body)
-                && (loop_body.body.contains(&block_idx)
-                    || successors.contains(&loop_body.head))
+                && (loop_body.body.contains(&block_idx) || successors.contains(&loop_body.head))
         })
     }
 

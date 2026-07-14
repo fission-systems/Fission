@@ -186,6 +186,66 @@ pub(crate) struct DefinitionDependencyMap {
     address_dependencies: HashMap<String, HashSet<String>>,
 }
 
+/// Proof that a dependency node has a path to one of a fixed set of roots.
+///
+/// Computing the reverse closure first makes the query stable for loop-carried
+/// definitions. A recursive DFS cannot soundly reject a back-edge before it
+/// has seen a root reached through another edge of the same SCC.
+struct RootReachabilityProof<'a> {
+    dependencies: &'a HashMap<String, HashSet<String>>,
+    can_reach_roots: HashSet<String>,
+}
+
+impl<'a> RootReachabilityProof<'a> {
+    fn build(dependencies: &'a HashMap<String, HashSet<String>>, roots: &HashSet<String>) -> Self {
+        let mut reverse_dependencies: HashMap<String, HashSet<String>> = HashMap::new();
+        for (dependent, sources) in dependencies {
+            for source in sources {
+                reverse_dependencies
+                    .entry(source.clone())
+                    .or_default()
+                    .insert(dependent.clone());
+            }
+        }
+
+        let mut can_reach_roots = roots.clone();
+        let mut worklist: Vec<String> = roots.iter().cloned().collect();
+        while let Some(source) = worklist.pop() {
+            let Some(dependents) = reverse_dependencies.get(&source) else {
+                continue;
+            };
+            for dependent in dependents {
+                if can_reach_roots.insert(dependent.clone()) {
+                    worklist.push(dependent.clone());
+                }
+            }
+        }
+
+        Self {
+            dependencies,
+            can_reach_roots,
+        }
+    }
+
+    fn nodes_reaching_from(&self, name: &str) -> HashSet<String> {
+        if !self.can_reach_roots.contains(name) {
+            return HashSet::new();
+        }
+
+        let mut reached = HashSet::new();
+        let mut worklist = vec![name.to_string()];
+        while let Some(candidate) = worklist.pop() {
+            if !self.can_reach_roots.contains(&candidate) || !reached.insert(candidate.clone()) {
+                continue;
+            }
+            if let Some(sources) = self.dependencies.get(&candidate) {
+                worklist.extend(sources.iter().cloned());
+            }
+        }
+        reached
+    }
+}
+
 impl DefinitionDependencyMap {
     pub(crate) fn build(stmts: &[HirStmt]) -> Self {
         let mut map = Self {
@@ -203,15 +263,23 @@ impl DefinitionDependencyMap {
         reached
     }
 
+    pub(crate) fn address_roots_reaching(
+        &self,
+        name: &str,
+        roots: &HashSet<String>,
+    ) -> HashSet<String> {
+        self.address_nodes_reaching_roots(name, roots)
+            .into_iter()
+            .filter(|candidate| roots.contains(candidate))
+            .collect()
+    }
+
     pub(crate) fn nodes_reaching_roots(
         &self,
         name: &str,
         roots: &HashSet<String>,
     ) -> HashSet<String> {
-        let mut reached = HashSet::new();
-        let mut visiting = HashSet::new();
-        self.collect_path_nodes(name, roots, &mut visiting, &mut reached);
-        reached
+        RootReachabilityProof::build(&self.dependencies, roots).nodes_reaching_from(name)
     }
 
     pub(crate) fn address_contributors(
@@ -225,16 +293,7 @@ impl DefinitionDependencyMap {
     }
 
     fn address_nodes_reaching_roots(&self, name: &str, roots: &HashSet<String>) -> HashSet<String> {
-        let mut reached = HashSet::new();
-        let mut visiting = HashSet::new();
-        Self::collect_path_nodes_from(
-            &self.address_dependencies,
-            name,
-            roots,
-            &mut visiting,
-            &mut reached,
-        );
-        reached
+        RootReachabilityProof::build(&self.address_dependencies, roots).nodes_reaching_from(name)
     }
 
     fn collect_roots(
@@ -256,49 +315,6 @@ impl DefinitionDependencyMap {
                 self.collect_roots(dependency, roots, visited, reached);
             }
         }
-    }
-
-    fn collect_path_nodes(
-        &self,
-        name: &str,
-        roots: &HashSet<String>,
-        visiting: &mut HashSet<String>,
-        reached: &mut HashSet<String>,
-    ) -> bool {
-        Self::collect_path_nodes_from(&self.dependencies, name, roots, visiting, reached)
-    }
-
-    fn collect_path_nodes_from(
-        dependencies_by_name: &HashMap<String, HashSet<String>>,
-        name: &str,
-        roots: &HashSet<String>,
-        visiting: &mut HashSet<String>,
-        reached: &mut HashSet<String>,
-    ) -> bool {
-        if roots.contains(name) {
-            reached.insert(name.to_string());
-            return true;
-        }
-        if !visiting.insert(name.to_string()) {
-            return false;
-        }
-        let mut reaches_root = false;
-        if let Some(dependencies) = dependencies_by_name.get(name) {
-            for dependency in dependencies {
-                reaches_root |= Self::collect_path_nodes_from(
-                    dependencies_by_name,
-                    dependency,
-                    roots,
-                    visiting,
-                    reached,
-                );
-            }
-        }
-        visiting.remove(name);
-        if reaches_root {
-            reached.insert(name.to_string());
-        }
-        reaches_root
     }
 
     fn collect_stmts(&mut self, stmts: &[HirStmt]) {
@@ -1403,6 +1419,51 @@ mod tests {
         assert!(contributors.contains_key("base_alias"));
         assert!(contributors.contains_key("base_param"));
         assert!(!contributors.contains_key("index"));
+    }
+
+    #[test]
+    fn root_reachability_proof_keeps_loop_carried_scc_members() {
+        let uint = NirType::Int {
+            bits: 32,
+            signed: false,
+        };
+        let body = vec![
+            HirStmt::Assign {
+                lhs: HirLValue::Var("cursor".into()),
+                rhs: HirExpr::Var("buffer_param".into()),
+            },
+            HirStmt::Assign {
+                lhs: HirLValue::Var("cursor_word".into()),
+                rhs: HirExpr::Var("cursor".into()),
+            },
+            HirStmt::Assign {
+                lhs: HirLValue::Var("cursor_word".into()),
+                rhs: HirExpr::Binary {
+                    op: HirBinaryOp::Add,
+                    lhs: Box::new(HirExpr::Var("cursor_word".into())),
+                    rhs: Box::new(HirExpr::Const(1, uint)),
+                    ty: NirType::Int {
+                        bits: 32,
+                        signed: false,
+                    },
+                },
+            },
+            HirStmt::Assign {
+                lhs: HirLValue::Var("cursor".into()),
+                rhs: HirExpr::Var("cursor_word".into()),
+            },
+        ];
+        let dependencies = DefinitionDependencyMap::build(&body);
+        let roots = HashSet::from(["buffer_param".to_string()]);
+
+        assert_eq!(
+            dependencies.nodes_reaching_roots("cursor", &roots),
+            HashSet::from([
+                "buffer_param".to_string(),
+                "cursor".to_string(),
+                "cursor_word".to_string(),
+            ])
+        );
     }
 
     #[test]

@@ -20,31 +20,22 @@ impl<'a> PreviewBuilder<'a> {
     ) -> Option<String> {
         let is_candidate = Self::is_loop_carried_register_update_candidate(output);
         let block_idx = self.address_to_index.get(&block.start_address).copied();
-        let is_update = block_idx.is_some_and(|b_idx| {
-            self.output_is_loop_carried_register_update(b_idx, op_idx, op, output)
-        });
 
         if !is_candidate {
             return None;
         }
         let block_idx = block_idx?;
-        if !is_update {
-            return None;
-        }
-        let loop_head = self
-            .loop_bodies
-            .iter()
-            .filter(|body| body.body.contains(&block_idx))
-            .min_by_key(|body| body.body.len())
-            .map(|body| body.head)?;
+        let proof = self.prove_loop_carried_register_update(block_idx, op_idx, output)?;
+        debug_assert_eq!(proof.definition_site(), (block_idx, op_idx));
+        let loop_head = proof.loop_head();
 
         if let Some(name) = self.loop_header_explicit_merge_binding_name(loop_head, output) {
             return Some(name);
         }
-        if let Some(name) = self.prior_materialized_loop_carried_output_name(output) {
+        if let Some(name) = self.prior_materialized_loop_carried_output_name(output, proof) {
             return Some(name);
         }
-        if let Some(name) = self.prior_materialized_loop_carried_input_name(op, output) {
+        if let Some(name) = self.prior_materialized_loop_carried_input_name(op, output, proof) {
             return Some(name);
         }
         if let Some(name) =
@@ -107,23 +98,12 @@ impl<'a> PreviewBuilder<'a> {
         if !Self::op_reads_varnode_key(input_def, &output_key) {
             return None;
         }
-        if !self.loop_bodies.iter().any(|loop_body| {
-            loop_body.body.contains(&block_idx)
-                && self.loop_update_reaches_backedge_tail(block_idx, loop_body)
-                && (Self::op_reads_varnode_key(input_def, &output_key)
-                    || self.loop_reads_varnode_before_update(
-                        loop_body,
-                        block_idx,
-                        input_def_idx,
-                        &output_key,
-                    ))
-        }) {
-            return None;
-        }
-        if let Some(name) = self.prior_materialized_loop_carried_output_name(output) {
+        let proof = self.prove_loop_carried_register_update(block_idx, op_idx, output)?;
+        debug_assert_eq!(proof.definition_site(), (block_idx, op_idx));
+        if let Some(name) = self.prior_materialized_loop_carried_output_name(output, proof) {
             return Some(name);
         }
-        if let Some(name) = self.prior_materialized_loop_carried_input_name(op, output) {
+        if let Some(name) = self.prior_materialized_loop_carried_input_name(op, output, proof) {
             return Some(name);
         }
         if let Some(name) =
@@ -269,10 +249,7 @@ impl<'a> PreviewBuilder<'a> {
         }
         match op.opcode {
             PcodeOpcode::Load => self.stack_param_name_from_load_op(op),
-            PcodeOpcode::Copy
-            | PcodeOpcode::Cast
-            | PcodeOpcode::IntZExt
-            | PcodeOpcode::IntSExt => {
+            PcodeOpcode::Copy | PcodeOpcode::Cast | PcodeOpcode::IntZExt | PcodeOpcode::IntSExt => {
                 let input = op.inputs.first()?;
                 let (_, src_op) = self.lookup_def_site(input)?;
                 if src_op.opcode == PcodeOpcode::Load {

@@ -34,6 +34,7 @@
 /// 4. Return `true` if any substitution was made (caller re-runs cleanup passes).
 use super::super::*;
 use crate::nir::normalize::analysis::defuse::DefUseMap;
+use crate::nir::normalize::analysis::liveness::LivenessTransfer;
 use crate::nir::normalize::cleanup::expr_has_side_effects;
 use std::collections::{HashMap, HashSet};
 
@@ -644,9 +645,9 @@ fn build_flag_cfg(stmts: &[HirStmt]) -> Vec<FlagBasicBlock> {
 }
 
 fn flag_uses(stmt: &HirStmt) -> HashSet<String> {
-    DefUseMap::build(std::slice::from_ref(stmt))
-        .use_count
-        .into_keys()
+    LivenessTransfer::for_stmt(stmt)
+        .uses_before_definition()
+        .map(str::to_string)
         .filter(|name| is_flag_var(name))
         .collect()
 }
@@ -774,14 +775,24 @@ fn remove_globally_unused_flags(
 }
 
 /// Remove pure x86 flag definitions using CFG liveness for unstructured HIR
-/// plus a conservative whole-function fallback for nested structured bodies.
+/// plus structured liveness summaries for nested bodies.
 fn remove_dead_flag_assigns(func: &mut HirFunction) {
     let dead_sites = dead_flag_definition_sites(&func.body);
     let mut changed = false;
     remove_dead_sites(&mut func.body, &dead_sites, &mut changed);
 
-    let uses = DefUseMap::build(&func.body);
-    remove_globally_unused_flags(&mut func.body, &uses.use_count, &mut changed);
+    // Flag definitions form dependency chains (for example CF feeds ZF/PF).
+    // Removing the terminal dead definition can expose its predecessors, so
+    // recompute uses until no more pure flag definitions become dead.
+    loop {
+        let uses = DefUseMap::build(&func.body);
+        let mut round_changed = false;
+        remove_globally_unused_flags(&mut func.body, &uses.use_count, &mut round_changed);
+        changed |= round_changed;
+        if !round_changed {
+            break;
+        }
+    }
 
     let uses = DefUseMap::build(&func.body);
     let mut assigned = HashMap::new();
@@ -1000,6 +1011,57 @@ mod tests {
                 rhs,
             } if name == "cf" && rhs == &live_rhs
         ));
+    }
+
+    #[test]
+    fn dead_flag_cleanup_removes_entry_definition_hidden_by_loop_definition() {
+        let live_rhs = eq(var("current_value"), var("current_limit"));
+        let mut func = HirFunction {
+            body: vec![
+                assign("cf", eq(var("entry_stack"), int(16))),
+                HirStmt::While {
+                    cond: int(1),
+                    body: vec![
+                        assign("cf", live_rhs.clone()),
+                        HirStmt::If {
+                            cond: var("cf"),
+                            then_body: Vec::new(),
+                            else_body: Vec::new(),
+                        },
+                    ],
+                },
+            ],
+            ..HirFunction::default()
+        };
+
+        assert!(apply_dead_flag_cleanup_pass(&mut func));
+        assert_eq!(flag_assign_count(&func.body), 1);
+        assert!(matches!(
+            &func.body[0],
+            HirStmt::While { body, .. }
+                if matches!(
+                    &body[0],
+                    HirStmt::Assign {
+                        lhs: HirLValue::Var(name),
+                        rhs,
+                    } if name == "cf" && rhs == &live_rhs
+                )
+        ));
+    }
+
+    #[test]
+    fn dead_flag_cleanup_reaches_fixed_point_across_flag_dependencies() {
+        let mut func = HirFunction {
+            body: vec![
+                assign("cf", eq(var("entry_stack"), int(16))),
+                assign("zf", not(var("cf"))),
+                assign("pf", var("zf")),
+            ],
+            ..HirFunction::default()
+        };
+
+        assert!(apply_dead_flag_cleanup_pass(&mut func));
+        assert_eq!(flag_assign_count(&func.body), 0);
     }
 
     #[test]

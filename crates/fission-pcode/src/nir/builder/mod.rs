@@ -607,6 +607,8 @@ impl<'a> PreviewBuilder<'a> {
                     .unwrap_or_else(|| "reg".to_string());
                 if !self.params.values().any(|b| b.name == candidate)
                     && !self.locals.values().any(|s| s.name == candidate)
+                    && (Self::is_x86_status_flag_output(output)
+                        || !self.temps.contains_key(&candidate))
                 {
                     name = Some(candidate);
                 }

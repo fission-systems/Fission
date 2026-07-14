@@ -106,13 +106,19 @@ fn var_name_through_cast(expr: &HirExpr) -> Option<&str> {
 }
 
 fn is_entry_stack_slot_scaffold_store(stmt: &HirStmt) -> bool {
-    matches!(
-        stmt,
+    entry_stack_slot_scaffold_name(stmt).is_some()
+}
+
+fn entry_stack_slot_scaffold_name(stmt: &HirStmt) -> Option<&str> {
+    match stmt {
         HirStmt::Assign {
             lhs: HirLValue::Var(lhs),
             rhs,
-        } if looks_like_stack_slot_name(lhs) && var_name_through_cast(rhs).is_some()
-    )
+        } if looks_like_stack_slot_name(lhs) && var_name_through_cast(rhs).is_some() => {
+            Some(lhs.as_str())
+        }
+        _ => None,
+    }
 }
 
 fn is_entry_stack_slot_callee_saved_store(stmt: &HirStmt) -> bool {
@@ -135,31 +141,77 @@ pub(crate) fn remove_entry_stack_scaffold_stores(func: &mut HirFunction) -> bool
     remove_entry_stack_scaffold_stores_from_body(&mut func.body)
 }
 
-fn remove_entry_stack_scaffold_stores_from_body(body: &mut Vec<HirStmt>) -> bool {
-    let remove_count = body
-        .iter()
-        .take_while(|stmt| {
-            is_entry_stack_scaffold_store(stmt)
-                || is_entry_stack_slot_scaffold_store(stmt)
-                || is_entry_stack_scaffold_alias_binding(stmt).is_some()
-        })
-        .count();
-    if remove_count > 0 {
-        let prefix = &body[..remove_count];
-        let suffix = &body[remove_count..];
+struct EntryStackScaffoldRemovalPlan {
+    prefix_len: usize,
+    remove_indices: HashSet<usize>,
+}
+
+impl EntryStackScaffoldRemovalPlan {
+    fn prove(body: &[HirStmt]) -> Option<Self> {
+        let prefix_len = body
+            .iter()
+            .take_while(|stmt| {
+                is_entry_stack_scaffold_store(stmt)
+                    || is_entry_stack_slot_scaffold_store(stmt)
+                    || is_entry_stack_scaffold_alias_binding(stmt).is_some()
+            })
+            .count();
+        if prefix_len == 0 {
+            return None;
+        }
+
+        let prefix = &body[..prefix_len];
+        let suffix = &body[prefix_len..];
         let has_scaffold_evidence = prefix.iter().any(is_entry_stack_scaffold_store)
             || prefix.iter().any(is_entry_stack_slot_callee_saved_store);
         if !has_scaffold_evidence {
-            return false;
+            return None;
         }
         let alias_escapes_prefix = prefix
             .iter()
             .filter_map(is_entry_stack_scaffold_alias_binding)
             .any(|alias| count_ptr_var_rvalue_uses(suffix, alias) > 0);
         if alias_escapes_prefix {
+            return None;
+        }
+
+        let remove_indices = prefix
+            .iter()
+            .enumerate()
+            .filter_map(|(index, stmt)| {
+                if let Some(slot) = entry_stack_slot_scaffold_name(stmt) {
+                    // A stack-looking binding read by the function body is a
+                    // semantic home/local initializer, not removable ABI noise.
+                    return (count_ptr_var_rvalue_uses(suffix, slot) == 0).then_some(index);
+                }
+                Some(index)
+            })
+            .collect();
+
+        Some(Self {
+            prefix_len,
+            remove_indices,
+        })
+    }
+
+    fn apply(self, body: &mut Vec<HirStmt>) -> bool {
+        if self.remove_indices.is_empty() {
             return false;
         }
-        body.drain(0..remove_count);
+        let mut index = 0;
+        body.retain(|_| {
+            let keep = index >= self.prefix_len || !self.remove_indices.contains(&index);
+            index += 1;
+            keep
+        });
+        true
+    }
+}
+
+fn remove_entry_stack_scaffold_stores_from_body(body: &mut Vec<HirStmt>) -> bool {
+    if let Some(plan) = EntryStackScaffoldRemovalPlan::prove(body)
+        && plan.apply(body)
+    {
         return true;
     }
 
@@ -1088,6 +1140,36 @@ mod tests {
 
         assert!(remove_entry_stack_scaffold_stores(&mut func));
         assert_eq!(func.body, vec![HirStmt::Return(None)]);
+    }
+
+    #[test]
+    fn keeps_live_stack_slot_initializers_after_callee_saved_prefix() {
+        let mut func = HirFunction {
+            name: "test".to_owned(),
+            int_param_offsets: Vec::new(),
+            body: vec![
+                HirStmt::Assign {
+                    lhs: HirLValue::Var("home_0".to_owned()),
+                    rhs: HirExpr::Var("r15".to_owned()),
+                },
+                HirStmt::Assign {
+                    lhs: HirLValue::Var("local_8".to_owned()),
+                    rhs: HirExpr::Var("param_1".to_owned()),
+                },
+                HirStmt::Return(Some(HirExpr::Var("local_8".to_owned()))),
+            ],
+            ..Default::default()
+        };
+
+        assert!(remove_entry_stack_scaffold_stores(&mut func));
+        assert_eq!(func.body.len(), 2);
+        assert!(matches!(
+            &func.body[0],
+            HirStmt::Assign {
+                lhs: HirLValue::Var(lhs),
+                rhs: HirExpr::Var(rhs),
+            } if lhs == "local_8" && rhs == "param_1"
+        ));
     }
 
     #[test]

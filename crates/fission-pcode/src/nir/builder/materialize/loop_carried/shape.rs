@@ -1,4 +1,24 @@
 use super::*;
+use std::collections::{HashSet, VecDeque};
+
+/// Evidence that one exact register definition, rather than merely the
+/// register name, carries a value across a loop backedge.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(in crate::nir::builder) struct LoopCarriedDefinitionProof {
+    loop_head: usize,
+    definition_block: usize,
+    definition_op: usize,
+}
+
+impl LoopCarriedDefinitionProof {
+    pub(super) fn loop_head(self) -> usize {
+        self.loop_head
+    }
+
+    pub(super) fn definition_site(self) -> (usize, usize) {
+        (self.definition_block, self.definition_op)
+    }
+}
 
 impl<'a> PreviewBuilder<'a> {
     pub(in crate::nir::builder) fn is_loop_carried_register_update_candidate(
@@ -7,25 +27,130 @@ impl<'a> PreviewBuilder<'a> {
         !output.is_constant && is_register_space_id(output.space_id) && output.size >= 4
     }
 
-    pub(in crate::nir::builder) fn output_is_loop_carried_register_update(
+    pub(in crate::nir::builder) fn prove_loop_carried_register_update(
         &self,
         block_idx: usize,
         op_idx: usize,
-        op: &PcodeOp,
         output: &Varnode,
-    ) -> bool {
+    ) -> Option<LoopCarriedDefinitionProof> {
         let output_key = VarnodeKey::from(output);
-        self.loop_bodies.iter().any(|loop_body| {
-            loop_body.body.contains(&block_idx)
-                && self.loop_update_reaches_backedge_tail(block_idx, loop_body)
-                && (Self::op_reads_varnode_key(op, &output_key)
-                    || self.loop_reads_varnode_before_update(
+        self.loop_bodies
+            .iter()
+            .filter(|loop_body| loop_body.body.contains(&block_idx))
+            .filter(|loop_body| {
+                self.loop_entry_value_reaches_definition(loop_body, block_idx, op_idx, &output_key)
+                    && self.definition_reaches_loop_backedge(
                         loop_body,
                         block_idx,
                         op_idx,
                         &output_key,
-                    ))
-        })
+                    )
+            })
+            .min_by_key(|loop_body| loop_body.body.len())
+            .map(|loop_body| LoopCarriedDefinitionProof {
+                loop_head: loop_body.head,
+                definition_block: block_idx,
+                definition_op: op_idx,
+            })
+    }
+
+    fn definition_reaches_loop_backedge(
+        &self,
+        loop_body: &crate::nir::structuring::loop_analysis::LoopBody,
+        definition_block_idx: usize,
+        definition_op_idx: usize,
+        output_key: &VarnodeKey,
+    ) -> bool {
+        let Some(definition_block) = self.pcode.blocks.get(definition_block_idx) else {
+            return false;
+        };
+        if definition_block
+            .ops
+            .iter()
+            .skip(definition_op_idx + 1)
+            .any(|op| Self::op_kills_varnode_definition(op, output_key))
+        {
+            return false;
+        }
+
+        let mut queue = VecDeque::new();
+        queue.extend(
+            self.successors
+                .get(definition_block_idx)
+                .into_iter()
+                .flatten()
+                .copied(),
+        );
+        let mut visited = HashSet::new();
+        while let Some(block_idx) = queue.pop_front() {
+            if block_idx == loop_body.head {
+                return true;
+            }
+            if !loop_body.body.contains(&block_idx) || !visited.insert(block_idx) {
+                continue;
+            }
+            let Some(block) = self.pcode.blocks.get(block_idx) else {
+                continue;
+            };
+            if block
+                .ops
+                .iter()
+                .any(|op| Self::op_kills_varnode_definition(op, output_key))
+            {
+                continue;
+            }
+            queue.extend(
+                self.successors
+                    .get(block_idx)
+                    .into_iter()
+                    .flatten()
+                    .copied(),
+            );
+        }
+        false
+    }
+
+    fn loop_entry_value_reaches_definition(
+        &self,
+        loop_body: &crate::nir::structuring::loop_analysis::LoopBody,
+        definition_block_idx: usize,
+        definition_op_idx: usize,
+        output_key: &VarnodeKey,
+    ) -> bool {
+        let mut queue = VecDeque::from([(loop_body.head, false)]);
+        let mut visited = HashSet::new();
+        while let Some((block_idx, mut observed_read)) = queue.pop_front() {
+            if !loop_body.body.contains(&block_idx) || !visited.insert((block_idx, observed_read)) {
+                continue;
+            }
+            let Some(block) = self.pcode.blocks.get(block_idx) else {
+                continue;
+            };
+            let mut killed = false;
+            for (op_idx, op) in block.ops.iter().enumerate() {
+                if block_idx == definition_block_idx && op_idx == definition_op_idx {
+                    return observed_read || Self::op_reads_varnode_key(op, output_key);
+                }
+                observed_read |= Self::op_reads_varnode_key(op, output_key);
+                if Self::op_kills_varnode_definition(op, output_key) {
+                    killed = true;
+                    break;
+                }
+            }
+            if killed {
+                continue;
+            }
+            queue.extend(
+                self.successors
+                    .get(block_idx)
+                    .into_iter()
+                    .flatten()
+                    .copied()
+                    .filter(|successor| *successor != loop_body.head)
+                    .map(|successor| (successor, observed_read)),
+            );
+        }
+        false
     }
 
     pub(in crate::nir::builder) fn loop_update_reaches_backedge_tail(
