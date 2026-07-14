@@ -31,7 +31,9 @@ jobs:
       os: ubuntu-latest
       crates: ""
       profile: debug
-      exclude_crates: "fission-static"
+      # fission-static: separate job. fission-dioxus: needs GUI/sys libs (libxdo,
+      # webkit) not present on default runners — not part of decompiler release gate.
+      exclude_crates: "fission-static,fission-dioxus"
 
   test-linux-static:
     name: 🧪 Tests (fission-static)
