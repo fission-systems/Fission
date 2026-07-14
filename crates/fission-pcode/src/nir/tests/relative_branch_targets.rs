@@ -358,3 +358,174 @@ fn preview_supports_absolute_address_cmov_style_conditional_copy() {
 // Materialize terminator wiring is tracked in
 // docs/proposals/2026-07-10-cmov-tail-block-skip.md.
 
+/// Dual same-block absolute cmov chain (x64 clamp O2 shape):
+///   eax = lo
+///   if (value <= hi) hi = value     // cmovle into param reg R8
+///   if (value >= lo) eax = hi       // cmovge into return
+///   return eax
+/// Both CBranch targets are absolute next-instruction addresses inside one
+/// block. Losing the first branch collapses to max(lo, value) and drops hi.
+#[test]
+fn preview_dual_absolute_cmov_clamp_chain_keeps_hi_bound() {
+    // Win64: RCX=0x8 value, RDX=0x10 lo, R8=0x80 hi, RAX=0 return
+    let eax = reg(0x0, 4);
+    let ecx = reg(0x8, 4);
+    let edx = reg(0x10, 4);
+    let r8d = reg(0x80, 4);
+    let zf = reg(0x206, 1);
+    let le_tmp = uniq(0x25f00, 1);
+    let ge_tmp = uniq(0x25c00, 1);
+    let skip_le = uniq(0x7b700, 1);
+    let skip_ge = uniq(0x7b701, 1);
+    let src_le = uniq(0x7b600, 4);
+    let src_ge = uniq(0x7b601, 4);
+    let abs_after_cmovle = Varnode {
+        space_id: 3,
+        offset: 0x4010,
+        size: 8,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let abs_after_cmovge = Varnode {
+        space_id: 3,
+        offset: 0x4020,
+        size: 8,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let ret_addr = reg(0x288, 8);
+
+    let func = PcodeFunction {
+        blocks: vec![PcodeBasicBlock {
+            index: 0,
+            start_address: 0x4000,
+            successors: vec![],
+            ops: vec![
+                // mov eax, edx  (lo seed)
+                PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::Copy,
+                    address: 0x4000,
+                    output: Some(eax.clone()),
+                    inputs: vec![edx.clone()],
+                    asm_mnemonic: Some("MOV EAX,EDX".into()),
+                },
+                // toy: le_tmp = (ecx == r8d) stands in for value<=hi
+                PcodeOp {
+                    seq_num: 1,
+                    opcode: PcodeOpcode::IntEqual,
+                    address: 0x4004,
+                    output: Some(le_tmp.clone()),
+                    inputs: vec![ecx.clone(), r8d.clone()],
+                    asm_mnemonic: Some("CMP ECX,R8D".into()),
+                },
+                // cmovle r8d, ecx: skip body when !le
+                PcodeOp {
+                    seq_num: 2,
+                    opcode: PcodeOpcode::Copy,
+                    address: 0x4008,
+                    output: Some(src_le.clone()),
+                    inputs: vec![ecx.clone()],
+                    asm_mnemonic: Some("CMOVLE prep".into()),
+                },
+                PcodeOp {
+                    seq_num: 3,
+                    opcode: PcodeOpcode::BoolNegate,
+                    address: 0x4008,
+                    output: Some(skip_le.clone()),
+                    inputs: vec![le_tmp],
+                    asm_mnemonic: Some("CMOVLE".into()),
+                },
+                PcodeOp {
+                    seq_num: 4,
+                    opcode: PcodeOpcode::CBranch,
+                    address: 0x4008,
+                    output: None,
+                    inputs: vec![abs_after_cmovle, skip_le],
+                    asm_mnemonic: Some("CMOVLE skip".into()),
+                },
+                PcodeOp {
+                    seq_num: 5,
+                    opcode: PcodeOpcode::Copy,
+                    address: 0x4008,
+                    output: Some(r8d.clone()),
+                    inputs: vec![src_le],
+                    asm_mnemonic: Some("CMOVLE body".into()),
+                },
+                // toy: ge_tmp = (ecx == edx) stands in for value>=lo
+                PcodeOp {
+                    seq_num: 6,
+                    opcode: PcodeOpcode::IntEqual,
+                    address: 0x4010,
+                    output: Some(ge_tmp.clone()),
+                    inputs: vec![ecx.clone(), edx.clone()],
+                    asm_mnemonic: Some("CMP ECX,EDX".into()),
+                },
+                // cmovge eax, r8d
+                PcodeOp {
+                    seq_num: 7,
+                    opcode: PcodeOpcode::Copy,
+                    address: 0x4018,
+                    output: Some(src_ge.clone()),
+                    inputs: vec![r8d.clone()],
+                    asm_mnemonic: Some("CMOVGE prep".into()),
+                },
+                PcodeOp {
+                    seq_num: 8,
+                    opcode: PcodeOpcode::BoolNegate,
+                    address: 0x4018,
+                    output: Some(skip_ge.clone()),
+                    inputs: vec![ge_tmp],
+                    asm_mnemonic: Some("CMOVGE".into()),
+                },
+                PcodeOp {
+                    seq_num: 9,
+                    opcode: PcodeOpcode::CBranch,
+                    address: 0x4018,
+                    output: None,
+                    inputs: vec![abs_after_cmovge, skip_ge],
+                    asm_mnemonic: Some("CMOVGE skip".into()),
+                },
+                PcodeOp {
+                    seq_num: 10,
+                    opcode: PcodeOpcode::Copy,
+                    address: 0x4018,
+                    output: Some(eax.clone()),
+                    inputs: vec![src_ge],
+                    asm_mnemonic: Some("CMOVGE body".into()),
+                },
+                PcodeOp {
+                    seq_num: 11,
+                    opcode: PcodeOpcode::Return,
+                    address: 0x4020,
+                    output: None,
+                    inputs: vec![ret_addr],
+                    asm_mnemonic: Some("RET".into()),
+                },
+            ],
+        }],
+    };
+
+    let code = render_mlil_preview(&func, "dual_cmov_clamp", 0x4000, &preview_options())
+        .expect("preview render");
+    eprintln!("dual_cmov_clamp:\n{code}");
+
+    // Must not collapse to pure max(lo, value) ignoring hi (param_3 / r8).
+    let collapsed_max_only = code.contains("param_2")
+        && code.contains("param_1")
+        && !code.contains("param_3")
+        && !code.contains("r8");
+    assert!(
+        !collapsed_max_only,
+        "lost hi-bound cmov (param_3/r8) — collapsed to max(lo,value):\n{code}"
+    );
+    // Prefer both bounds or a two-stage select/if chain.
+    let mentions_hi = code.contains("param_3") || code.contains("r8");
+    let has_structure = code.contains("if") || code.contains('?');
+    assert!(
+        mentions_hi || (has_structure && code.matches("if").count() + code.matches('?').count() >= 2),
+        "expected dual-bound clamp recovery, got:\n{code}"
+    );
+    let _ = (eax, ecx, edx, r8d, zf);
+}
+

@@ -3466,6 +3466,13 @@ impl<'a> PreviewBuilder<'a> {
         if self.register_namer().is_primary_return_register(output) {
             return false;
         }
+        // Guarded cmov body (strictly between same-block-forward CBranch and its
+        // skip target) is conditional. Complete replacement would make later
+        // uses always see the taken-path RHS (x64 clamp: cmovle into R8 then
+        // cmovge from R8 collapsed to max(lo, value)).
+        if Self::op_is_inside_same_block_forward_cmov_body(block, op_idx) {
+            return false;
+        }
         let uses = self.output_use_sites_in_block(block, op_idx, output);
         uses.len() == 1
             && Self::expr_is_low_cost_builder_inline_candidate(rhs)
@@ -3474,6 +3481,36 @@ impl<'a> PreviewBuilder<'a> {
             } else {
                 Self::use_opcode_allows_single_use_builder_inline(uses[0].1.opcode)
             }
+    }
+
+    /// True when `op_idx` is strictly inside a same-block-forward CBranch skip
+    /// range (the guarded cmov / instruction-local body).
+    fn op_is_inside_same_block_forward_cmov_body(
+        block: &crate::pcode::PcodeBasicBlock,
+        op_idx: usize,
+    ) -> bool {
+        if op_idx == 0 || op_idx >= block.ops.len() {
+            return false;
+        }
+        for branch_idx in 0..op_idx {
+            let op = &block.ops[branch_idx];
+            if op.opcode != PcodeOpcode::CBranch || op.inputs.len() < 2 {
+                continue;
+            }
+            let Some(target) = crate::nir::cfg::same_block_forward_branch_target_op_idx(
+                block,
+                branch_idx,
+                block.ops.len(),
+                op,
+                &op.inputs[0],
+            ) else {
+                continue;
+            };
+            if branch_idx < op_idx && op_idx < target {
+                return true;
+            }
+        }
+        false
     }
 
     fn build_replacement_value_plan(
@@ -3487,6 +3524,14 @@ impl<'a> PreviewBuilder<'a> {
         self.telemetry
             .materialization
             .replacement_plan_candidate_count += 1;
+        // Guarded cmov body must keep a materialization binding; complete plans
+        // would unconditionalize the taken-path value for later uses.
+        if Self::op_is_inside_same_block_forward_cmov_body(block, op_idx) {
+            return ReplacementValuePlan::incomplete(
+                ReplacementReadClass::SameBlockData,
+                MaterializationRejectionReason::ConsumerRequiresStableRepresentative,
+            );
+        }
         let legacy_inline_candidate =
             self.output_replacement_is_complete(block, op_idx, output, rhs);
         if Self::parity_chain_materialization_enabled()
