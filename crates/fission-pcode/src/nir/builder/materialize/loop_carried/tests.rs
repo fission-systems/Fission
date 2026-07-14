@@ -757,12 +757,7 @@ fn loop_carried_stack_param_seed_preferred_over_anonymous_merge_temp() {
                     Some(zf.clone()),
                     vec![eax.clone(), constant(0)],
                 ),
-                op(
-                    9,
-                    PcodeOpcode::BoolNegate,
-                    Some(varnode(0x50)),
-                    vec![zf],
-                ),
+                op(9, PcodeOpcode::BoolNegate, Some(varnode(0x50)), vec![zf]),
                 op(
                     10,
                     PcodeOpcode::CBranch,
