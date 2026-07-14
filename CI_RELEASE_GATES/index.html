@@ -937,6 +937,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#l1-job-split-main-push-vs-extended" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        L1 job split (main push vs extended)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#escape-hatches" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1012,7 +1023,7 @@
 <td><strong>L1 Heavy</strong></td>
 <td><a href="../.github/workflows/ci-heavy.yml"><code>ci-heavy.yml</code></a></td>
 <td>Every <code>main</code> push + nightly + dispatch</td>
-<td>Full tests, heavy platforms, NIR-check, Miri, MSRV, …</td>
+<td><strong>Push:</strong> release-critical crates, platforms, NIR-check, MSRV. <strong>Nightly/dispatch:</strong> also full workspace tests, Miri, coverage</td>
 </tr>
 <tr>
 <td><strong>L2 Release E2E</strong></td>
@@ -1070,6 +1081,26 @@
    <a href="../RELEASE/"><code>docs/RELEASE.md</code></a>.</li>
 </ol>
 <p>Optional: run <strong>Release E2E Gate</strong> alone (dispatch) to pre-validate a SHA without tagging.</p>
+<h2 id="l1-job-split-main-push-vs-extended">L1 job split (main push vs extended)<a class="headerlink" href="#l1-job-split-main-push-vs-extended" title="Permanent link">&para;</a></h2>
+<p>On <strong><code>push</code> to <code>main</code></strong>, Heavy runs the <strong>release-critical</strong> set only (so a green
+L1 is achievable and meaningful for decompiler releases):</p>
+<ul>
+<li>Linux: <code>fission-core</code>, <code>loader</code>, <code>pcode</code>, <code>decompiler</code>, <code>automation</code>, <code>cli</code>,
+  <code>analysis-db</code>, <code>signatures</code>, plus <code>fission-static</code></li>
+<li>Windows release tests (pcode/decompiler/automation)</li>
+<li>macOS release CLI build</li>
+<li>Automation NIR-check (<code>--no-update-latest</code>)</li>
+<li>MSRV</li>
+</ul>
+<p>On <strong>nightly schedule</strong> or <strong>workflow_dispatch</strong>, Heavy also runs:</p>
+<ul>
+<li>Full Linux workspace tests (excluding GUI <code>fission-dioxus</code>)</li>
+<li>Miri (soft environmental issues may still fail until isolation is fixed)</li>
+<li>Coverage (non-blocking)</li>
+</ul>
+<p><code>release-tag.yml</code> requires any successful <code>ci-heavy.yml</code> run on the SHA, so a
+green <strong>main-push</strong> Heavy is sufficient to tag (nightly extended failures do
+not block once that SHA already has a green push Heavy).</p>
 <h2 id="escape-hatches">Escape hatches<a class="headerlink" href="#escape-hatches" title="Permanent link">&para;</a></h2>
 <ul>
 <li><strong>Emergency hot-fix tag without waiting for heavy:</strong> not supported by the
