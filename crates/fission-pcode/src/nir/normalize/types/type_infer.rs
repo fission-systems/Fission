@@ -2374,6 +2374,11 @@ fn rhs_has_i32_sign_bit_evidence(expr: &HirExpr) -> bool {
             let v = *value as u64;
             v <= 0xFFFF_FFFF && v >= 0x8000_0000
         }
+        // `neg` of setnz (signum ≤0 path) yields -1 / 0 in full EAX — signed i32.
+        HirExpr::Unary {
+            op: HirUnaryOp::Neg,
+            ..
+        } => true,
         HirExpr::Select {
             then_expr,
             else_expr,
@@ -2431,6 +2436,17 @@ fn collect_var_assign_rhs_stmt<'a>(stmt: &'a HirStmt, name: &str, out: &mut Vec<
 }
 
 fn prefer_narrow_return_candidate(current: Option<NirType>, candidate: NirType) -> NirType {
+    /// ABI integer returns live in a full machine register (32-bit on x86-32,
+    /// low 32 of RAX on x64). Prefer 32-bit over both 64-bit zext wrappers and
+    /// 8/16-bit setcc lanes.
+    fn abi_int_rank(bits: u32) -> u8 {
+        match bits {
+            32 => 0,
+            16 | 8 => 1,
+            64 => 2,
+            _ => 3,
+        }
+    }
     match (current, candidate) {
         (
             Some(NirType::Int {
@@ -2446,23 +2462,33 @@ fn prefer_narrow_return_candidate(current: Option<NirType>, candidate: NirType) 
             signed: current_signed || candidate_signed,
         },
         (
-            Some(
-                current @ NirType::Int {
-                    bits: current_bits, ..
-                },
-            ),
-            candidate @ NirType::Int {
+            Some(NirType::Int {
+                bits: current_bits,
+                signed: current_signed,
+            }),
+            NirType::Int {
                 bits: candidate_bits,
-                ..
+                signed: candidate_signed,
             },
         ) => {
-            if candidate_bits < current_bits {
-                candidate
+            let signed = current_signed || candidate_signed;
+            if abi_int_rank(candidate_bits) < abi_int_rank(current_bits) {
+                NirType::Int {
+                    bits: candidate_bits.max(32),
+                    signed: signed || candidate_bits < 32,
+                }
             } else {
-                current
+                NirType::Int {
+                    bits: current_bits.max(if current_bits < 32 { 32 } else { current_bits }),
+                    signed: signed || current_bits < 32,
+                }
             }
         }
         (Some(current), _) => current,
+        (None, NirType::Int { bits, signed }) if bits < 32 => NirType::Int {
+            bits: 32,
+            signed: signed || bits <= 8,
+        },
         (None, candidate) => candidate,
     }
 }
@@ -2683,20 +2709,26 @@ fn narrow_zero_extended_return_width(
     let candidate_signed = candidates
         .iter()
         .any(|ty| matches!(ty, NirType::Int { signed: true, .. }));
-    if candidate_bits > *return_bits
+    // setcc/movzx alone can look like an 8-bit return, but x86 ABI integer
+    // returns stay in EAX. signum: `setnz al; movzx eax,al; neg eax` must not
+    // become `uchar` or `-1` recompiles as `255`.
+    // Only allow narrowing 64→32 (implicit EAX zext); never shrink below 32.
+    let effective_bits = candidate_bits.max(32);
+    if effective_bits > *return_bits
         || candidates.iter().any(|ty| {
             !matches!(
                 ty,
                 NirType::Int { bits, .. } if *bits == candidate_bits
             )
         })
-        || (candidate_bits == *return_bits && !candidate_signed)
+        || (effective_bits == *return_bits && !candidate_signed && candidate_bits >= 32)
     {
         return false;
     }
+    // Sub-32 evidence still contributes signedness, but the ABI width is 32.
     let candidate = NirType::Int {
-        bits: candidate_bits,
-        signed: candidate_signed,
+        bits: effective_bits,
+        signed: candidate_signed || candidate_bits < 32,
     };
     func.return_type = candidate.clone();
     strip_zero_extended_return_casts(&mut func.body, &candidate);
@@ -2715,6 +2747,84 @@ fn narrow_returned_temp_bindings(func: &mut HirFunction, narrowed_ty: &NirType) 
     for binding in &mut func.locals {
         if returned.contains(&binding.name) {
             binding.ty = narrowed_ty.clone();
+        }
+    }
+}
+
+/// Lift sub-32 integer return types to ABI-width 32-bit integers.
+///
+/// setcc/movzx evidence can leave `return_type = uchar`, which makes `return -1`
+/// recompile as `255` (signum ≤0 path: setnz; movzx; neg).
+fn promote_sub32_abi_return_width(
+    func: &mut HirFunction,
+    defs: &HashMap<String, DefEntry>,
+    known_binding_types: &HashMap<String, NirType>,
+) -> bool {
+    if func.surface_return_type_name.is_some() {
+        return false;
+    }
+    let NirType::Int {
+        bits,
+        signed: was_signed,
+    } = &func.return_type
+    else {
+        return false;
+    };
+    if *bits >= 32 {
+        return false;
+    }
+    let mut rhss = Vec::new();
+    collect_all_return_exprs(&func.body, &mut rhss);
+    let signed_evidence = rhss.iter().any(|e| rhs_has_i32_sign_bit_evidence(e))
+        || rhss.iter().any(|e| match e {
+            HirExpr::Var(name) | HirExpr::AddressOfGlobal(name) => {
+                let mut assign_rhss = Vec::new();
+                collect_var_assign_rhs(&func.body, name, &mut assign_rhss);
+                assign_rhss
+                    .iter()
+                    .any(|rhs| rhs_has_i32_sign_bit_evidence(rhs))
+            }
+            _ => false,
+        });
+    let _ = (defs, known_binding_types);
+    // setcc-derived uchar is almost always a zero/sign-extended machine-word
+    // return; promote to signed i32 when Neg/-1 evidence exists, else unsigned i32.
+    let promoted = NirType::Int {
+        bits: 32,
+        signed: *was_signed || signed_evidence || *bits <= 8,
+    };
+    if func.return_type == promoted {
+        return false;
+    }
+    func.return_type = promoted.clone();
+    // Keep returned temps at the promoted width so `return x` is not truncated.
+    narrow_returned_temp_bindings(func, &promoted);
+    true
+}
+
+fn collect_all_return_exprs<'a>(stmts: &'a [HirStmt], out: &mut Vec<&'a HirExpr>) {
+    for stmt in stmts {
+        match stmt {
+            HirStmt::Return(Some(expr)) => out.push(expr),
+            HirStmt::Block(body)
+            | HirStmt::While { body, .. }
+            | HirStmt::DoWhile { body, .. }
+            | HirStmt::For { body, .. } => collect_all_return_exprs(body, out),
+            HirStmt::If {
+                then_body,
+                else_body,
+                ..
+            } => {
+                collect_all_return_exprs(then_body, out);
+                collect_all_return_exprs(else_body, out);
+            }
+            HirStmt::Switch { cases, default, .. } => {
+                for case in cases {
+                    collect_all_return_exprs(&case.body, out);
+                }
+                collect_all_return_exprs(default, out);
+            }
+            _ => {}
         }
     }
 }
@@ -2962,6 +3072,7 @@ pub(crate) fn apply_type_inference_pass(func: &mut HirFunction) -> bool {
     changed |= func.return_type != prev_return_type;
 
     changed |= narrow_zero_extended_return_width(func, &defs, &known_binding_types);
+    changed |= promote_sub32_abi_return_width(func, &defs, &known_binding_types);
     changed |= strip_zero_extended_casts_to_declared_return_width(func);
     changed |= apply_scalar_role_override_for_pointer_locals(func);
     changed |= apply_address_role_pointer_override_for_locals(func);
@@ -4071,6 +4182,70 @@ mod tests {
     }
 
     /// signum-style: single `return xVar` after `xVar = cond ? 1 : (cond2 ? 0 : 0xffffffff)`.
+    /// signum O2: setnz→neg returns -1/0; must not declare `uchar` return or
+    /// recompilation truncates `-1` to `255`.
+    #[test]
+    fn promotes_uchar_return_after_setnz_neg_to_signed_i32() {
+        let u8_ty = NirType::Int {
+            bits: 8,
+            signed: false,
+        };
+        let i32_ty = NirType::Int {
+            bits: 32,
+            signed: true,
+        };
+        let mut func = HirFunction {
+            name: "signum_setnz_neg".to_owned(),
+            int_param_offsets: Vec::new(),
+            params: vec![make_param(
+                "param_1",
+                NirType::Int {
+                    bits: 32,
+                    signed: true,
+                },
+            )],
+            locals: vec![NirBinding {
+                name: "uVar2".to_owned(),
+                ty: u8_ty.clone(),
+                surface_type_name: None,
+                origin: None,
+                initializer: None,
+            }],
+            // Wrong narrow from setcc lane.
+            return_type: u8_ty.clone(),
+            surface_return_type_name: None,
+            body: vec![
+                make_assign(
+                    "uVar2",
+                    HirExpr::Unary {
+                        op: HirUnaryOp::Not,
+                        expr: Box::new(HirExpr::Var("zf".into())),
+                        ty: u8_ty.clone(),
+                    },
+                ),
+                make_assign(
+                    "uVar2",
+                    HirExpr::Unary {
+                        op: HirUnaryOp::Neg,
+                        expr: Box::new(HirExpr::Var("uVar2".into())),
+                        ty: i32_ty.clone(),
+                    },
+                ),
+                HirStmt::If {
+                    cond: HirExpr::Var("cond".into()),
+                    then_body: vec![HirStmt::Return(Some(HirExpr::Var("uVar2".into())))],
+                    else_body: vec![HirStmt::Return(Some(HirExpr::Const(1, i32_ty.clone())))],
+                },
+            ],
+            ..Default::default()
+        };
+        assert!(super::apply_type_inference_pass(&mut func));
+        assert_eq!(
+            func.return_type, i32_ty,
+            "setnz+neg return must stay signed int, not uchar"
+        );
+    }
+
     #[test]
     fn narrows_select_join_temp_return_to_signed_i32() {
         let u64_ty = NirType::Int {
