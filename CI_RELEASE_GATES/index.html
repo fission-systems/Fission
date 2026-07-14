@@ -10,13 +10,9 @@
       
       
       
-        <link rel="canonical" href="https://sjkim1127.github.io/Fission/VERSIONING/">
+        <link rel="canonical" href="https://sjkim1127.github.io/Fission/CI_RELEASE_GATES/">
       
       
-        <link rel="prev" href="../MALWARE_SAMPLE_POLICY/">
-      
-      
-        <link rel="next" href="../RELEASE/">
       
       
         
@@ -27,7 +23,7 @@
     
     
       
-        <title>Versioning - Fission</title>
+        <title>CI / CD release gates (conservative) - Fission</title>
       
     
     
@@ -78,7 +74,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#versioning-policy" class="md-skip">
+        <a href="#ci-cd-release-gates-conservative" class="md-skip">
           Skip to content
         </a>
       
@@ -112,7 +108,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Versioning
+              CI / CD release gates (conservative)
             
           </span>
         </div>
@@ -366,12 +362,10 @@
   
   
   
-    
-  
   
     
     
-      <li class="md-tabs__item md-tabs__item--active">
+      <li class="md-tabs__item">
         <a href="../MALWARE_SAMPLE_POLICY/" class="md-tabs__link">
           
   
@@ -642,31 +636,28 @@
       
   
   
-    
   
   
-  
     
     
     
     
-      
-        
-        
       
       
         
       
     
     
-    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--nested">
       
         
-        
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_8" checked>
         
           
-          <label class="md-nav__link" for="__nav_8" id="__nav_8_label" tabindex="">
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_8" >
+        
+          
+          <label class="md-nav__link" for="__nav_8" id="__nav_8_label" tabindex="0">
             
   
   
@@ -684,7 +675,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_8_label" aria-expanded="true">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_8_label" aria-expanded="false">
           <label class="md-nav__title" for="__nav_8">
             <span class="md-nav__icon md-icon"></span>
             
@@ -727,37 +718,10 @@
                 
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Versioning
-  
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../VERSIONING/" class="md-nav__link">
         
   
   
@@ -773,70 +737,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#semantic-versioning" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Semantic versioning
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#tags-and-github-releases" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Tags and GitHub Releases
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#branches" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Branches
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#pre-releases" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Pre-releases
-      
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -993,10 +893,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#semantic-versioning" class="md-nav__link">
+  <a href="#design-principles" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Semantic versioning
+        Design principles
       
     </span>
   </a>
@@ -1004,10 +904,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#tags-and-github-releases" class="md-nav__link">
+  <a href="#layers" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Tags and GitHub Releases
+        Layers
       
     </span>
   </a>
@@ -1015,10 +915,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#branches" class="md-nav__link">
+  <a href="#what-release-e2e-covers-and-does-not" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Branches
+        What Release E2E covers (and does not)
       
     </span>
   </a>
@@ -1026,10 +926,32 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#pre-releases" class="md-nav__link">
+  <a href="#operator-runbook-tag-a-release" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Pre-releases
+        Operator runbook (tag a release)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#escape-hatches" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Escape hatches
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#related-files" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Related files
       
     </span>
   </a>
@@ -1056,33 +978,114 @@
   
 
 
-<h1 id="versioning-policy">Versioning policy<a class="headerlink" href="#versioning-policy" title="Permanent link">&para;</a></h1>
-<p><strong>Last verified:</strong> 2026-05-02</p>
-<h2 id="semantic-versioning">Semantic versioning<a class="headerlink" href="#semantic-versioning" title="Permanent link">&para;</a></h2>
-<p>Fission follows <strong>SemVer</strong> (<code>MAJOR.MINOR.PATCH</code>), including during <strong><code>0.y.z</code></strong>:</p>
+<h1 id="ci-cd-release-gates-conservative">CI / CD release gates (conservative)<a class="headerlink" href="#ci-cd-release-gates-conservative" title="Permanent link">&para;</a></h1>
+<p><strong>Last updated:</strong> 2026-07-15</p>
+<p>This document is the policy source for how Fission promotes a git commit to a
+<strong>SemVer tag</strong> and a <strong>GitHub Release</strong>. It aligns automation with
+<a href="../RELEASE/"><code>docs/RELEASE.md</code></a> and <a href="../VERSIONING/"><code>docs/VERSIONING.md</code></a>.</p>
+<h2 id="design-principles">Design principles<a class="headerlink" href="#design-principles" title="Permanent link">&para;</a></h2>
+<ol>
+<li><strong>No auto-tag on every <code>main</code> push.</strong> Tags are intentional promotions.</li>
+<li><strong>Layered gates:</strong> fast feedback on PR/push; thick checks before tag/CD.</li>
+<li><strong>Semantic quality ≠ official benchmark ranking.</strong> Release E2E is go/stop on
+   fixed fixtures; it must not publish to Pages / <code>results/latest.json</code>.</li>
+<li><strong>Documented gates must be machine-enforced</strong> where practical.</li>
+</ol>
+<h2 id="layers">Layers<a class="headerlink" href="#layers" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Layer</th>
+<th>Workflow</th>
+<th>When</th>
+<th>Role</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>L0 Fast Gate</strong></td>
+<td><a href="../.github/workflows/ci.yml"><code>ci.yml</code></a></td>
+<td>PR + every <code>main</code> push</td>
+<td>Lint, security, core tests, CLI smoke, NIR regression gate, multi-OS</td>
+</tr>
+<tr>
+<td><strong>L1 Heavy</strong></td>
+<td><a href="../.github/workflows/ci-heavy.yml"><code>ci-heavy.yml</code></a></td>
+<td>Every <code>main</code> push + nightly + dispatch</td>
+<td>Full tests, heavy platforms, NIR-check, Miri, MSRV, …</td>
+</tr>
+<tr>
+<td><strong>L2 Release E2E</strong></td>
+<td><a href="../.github/workflows/release-e2e.yml"><code>release-e2e.yml</code></a></td>
+<td>Before tag (and optional dispatch)</td>
+<td>Release-profile CLI + fixed PE smoke + raw-pcode + multi-function decomp</td>
+</tr>
+<tr>
+<td><strong>Tag</strong></td>
+<td><a href="../.github/workflows/release-tag.yml"><code>release-tag.yml</code></a></td>
+<td>Manual <code>workflow_dispatch</code> only</td>
+<td>Requires L0 + L1 green on the SHA, runs L2, then creates/pushes tag</td>
+</tr>
+<tr>
+<td><strong>L3 CD</strong></td>
+<td><a href="../.github/workflows/cd.yml"><code>cd.yml</code></a></td>
+<td>Tag push <code>v*.*.*</code> / <code>X.Y.Z</code></td>
+<td>Multi-platform release binaries → GitHub Release</td>
+</tr>
+</tbody>
+</table>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>main push ──► L0 Fast Gate ──► L1 Heavy (async)
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>                    │
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>                    ▼
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>     Actions → &quot;Release Tag (CI green)&quot;
+</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>                    │
+</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>                    ├─ verify L0 success (push event, that SHA)
+</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>                    ├─ verify L1 success (that SHA; any event)
+</span><span id="__span-0-8"><a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>                    ├─ run L2 Release E2E on that SHA
+</span><span id="__span-0-9"><a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>                    └─ annotated tag push ──► L3 CD Release
+</span></code></pre></div>
+<h2 id="what-release-e2e-covers-and-does-not">What Release E2E covers (and does not)<a class="headerlink" href="#what-release-e2e-covers-and-does-not" title="Permanent link">&para;</a></h2>
+<p><strong>Covers (blocking for tag):</strong></p>
 <ul>
-<li><strong><code>MAJOR</code></strong> (including <code>0</code> → <code>1</code>): Breaking changes to documented CLI contracts, artifact JSON schemas promised as stable in <a href="../EVALUATION/"><code>docs/EVALUATION.md</code></a>, or installation/layout guarantees described in release notes.</li>
-<li><strong><code>MINOR</code></strong>: Backward-compatible CLI additions, new optional flags, additive JSON fields (clients must tolerate unknown keys), performance improvements without contract breaks.</li>
-<li><strong><code>PATCH</code></strong>: Bug fixes and internal refactors that do not change outward contracts.</li>
+<li><code>cargo build -p fission-cli --locked --release</code></li>
+<li>MinGW-built PE fixture from <a href="../.github/fixtures/test_functions.c"><code>.github/fixtures/test_functions.c</code></a></li>
+<li><code>info</code>, <code>list --json</code>, <code>decomp --json</code> (validated), <code>raw-pcode</code> at a listed address</li>
+<li>Decompile several listed functions (multi-addr smoke)</li>
+<li>Fast automation NIR-check lane with <code>--no-update-latest</code> (no baseline promotion)</li>
 </ul>
-<p>While in <code>0.x</code>, <strong>minor releases may still introduce significant behavior changes</strong> if they are flagged in release notes and evaluation docs; patch releases should remain low-risk.</p>
-<h2 id="tags-and-github-releases">Tags and GitHub Releases<a class="headerlink" href="#tags-and-github-releases" title="Permanent link">&para;</a></h2>
+<p><strong>Does not cover:</strong></p>
 <ul>
-<li>Release tags match <strong><code>vMAJOR.MINOR.PATCH</code></strong> (for example <code>v0.4.2</code>).</li>
-<li><strong>Do not auto-tag every <code>main</code> push.</strong> Tags are intentional promotions after
-  layered gates (Fast Gate + Heavy + Release E2E). See
-  <a href="../CI_RELEASE_GATES/"><code>docs/CI_RELEASE_GATES.md</code></a>.</li>
-<li>Preferred path: Actions → <strong>Release Tag (CI green)</strong>
-  (<a href="../.github/workflows/release-tag.yml"><code>release-tag.yml</code></a>).</li>
-<li>Continuous delivery builds from tag pushes per <a href="../.github/workflows/cd.yml"><code>.github/workflows/cd.yml</code></a>.</li>
+<li>Full fission-benchmark docker corpus or Pages promotion</li>
+<li>Official semantic leaderboard / <code>release_promotion_allowed</code> dashboard claims
+  (still manual / evaluation path in <a href="../RELEASE/"><code>docs/RELEASE.md</code></a> § quality)</li>
 </ul>
-<h2 id="branches">Branches<a class="headerlink" href="#branches" title="Permanent link">&para;</a></h2>
+<h2 id="operator-runbook-tag-a-release">Operator runbook (tag a release)<a class="headerlink" href="#operator-runbook-tag-a-release" title="Permanent link">&para;</a></h2>
+<ol>
+<li>Land changes on <code>main</code>; wait for <strong>CI Fast Gate</strong> and <strong>CI Heavy Validation</strong>
+   green on that commit.</li>
+<li>Actions → <strong>Release Tag (CI green)</strong> → set <code>tag</code> (<code>v0.1.3</code>) and <code>ref</code> (<code>main</code> or SHA).</li>
+<li>Workflow verifies L0+L1, runs L2, pushes the tag.</li>
+<li><strong>CD Release</strong> builds Linux/macOS/Windows assets automatically.</li>
+<li>Edit GitHub Release notes; complete remaining checklist in
+   <a href="../RELEASE/"><code>docs/RELEASE.md</code></a>.</li>
+</ol>
+<p>Optional: run <strong>Release E2E Gate</strong> alone (dispatch) to pre-validate a SHA without tagging.</p>
+<h2 id="escape-hatches">Escape hatches<a class="headerlink" href="#escape-hatches" title="Permanent link">&para;</a></h2>
 <ul>
-<li><strong><code>main</code></strong> is the integration branch; tags are cut from commits that pass merge gates described in <a href="../CONTRIBUTING.md"><code>CONTRIBUTING.md</code></a>.</li>
-<li>Long-lived release branches are <strong>optional</strong>; if adopted later, document them here and in <a href="../RELEASE/"><code>docs/RELEASE.md</code></a>.</li>
+<li><strong>Emergency hot-fix tag without waiting for heavy:</strong> not supported by the
+  default gate. Prefer fixing heavy or using a documented exception in release
+  notes only after an explicit ops decision (temporary workflow input may be
+  added later; default remains full gates).</li>
+<li><strong>Local docker benchmark</strong> remains a quality-loop tool; never promotes to
+  official latest (see <a href="../BENCHMARK_DOCKER/"><code>docs/BENCHMARK_DOCKER.md</code></a>).</li>
 </ul>
-<h2 id="pre-releases">Pre-releases<a class="headerlink" href="#pre-releases" title="Permanent link">&para;</a></h2>
-<p>If you need <code>-alpha</code> / <code>-beta</code> suffixes, prefer <strong>GitHub prerelease</strong> toggles plus clear notes; keep tag names consistent with tooling expectations in <code>cd.yml</code>.</p>
+<h2 id="related-files">Related files<a class="headerlink" href="#related-files" title="Permanent link">&para;</a></h2>
+<ul>
+<li><a href="../.github/CI_CD_GUIDE.md"><code>.github/CI_CD_GUIDE.md</code></a> — operator overview</li>
+<li><a href="../.github/workflows/release-tag.yml"><code>.github/workflows/release-tag.yml</code></a></li>
+<li><a href="../.github/workflows/release-e2e.yml"><code>.github/workflows/release-e2e.yml</code></a></li>
+<li><a href="../.github/workflows/cd.yml"><code>.github/workflows/cd.yml</code></a></li>
+</ul>
 
 
 

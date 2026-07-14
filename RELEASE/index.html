@@ -1167,13 +1167,16 @@
 
 
 <h1 id="release-checklist">Release checklist<a class="headerlink" href="#release-checklist" title="Permanent link">&para;</a></h1>
-<p><strong>Last verified:</strong> 2026-05-02</p>
+<p><strong>Last verified:</strong> 2026-07-15</p>
 <p>This checklist closes the loop between <strong>tag-driven CD</strong> (<a href="../.github/workflows/cd.yml"><code>.github/workflows/cd.yml</code></a>) and <strong>documented expectations</strong> for external evaluators (<a href="../EVALUATION/"><code>docs/EVALUATION.md</code></a>). A release is “ready” when the items below are satisfied for the tagged commit.</p>
+<p><strong>Gate policy (L0–L3):</strong> <a href="../CI_RELEASE_GATES/"><code>docs/CI_RELEASE_GATES.md</code></a>.</p>
 <h2 id="minimum-release-gate">Minimum release gate<a class="headerlink" href="#minimum-release-gate" title="Permanent link">&para;</a></h2>
 <p>A tagged release is eligible when:</p>
 <ul>
-<li><a href="../.github/workflows/ci.yml"><code>.github/workflows/ci.yml</code></a> passes on the tagged commit.</li>
-<li><a href="../.github/workflows/ci-heavy.yml"><code>.github/workflows/ci-heavy.yml</code></a> passes on the tagged commit <strong>or</strong> on the latest <code>main</code> commit immediately preceding the tag.</li>
+<li><strong>L0</strong> <a href="../.github/workflows/ci.yml"><code>.github/workflows/ci.yml</code></a> has a successful <strong>push</strong> run on the tagged commit.</li>
+<li><strong>L1</strong> <a href="../.github/workflows/ci-heavy.yml"><code>.github/workflows/ci-heavy.yml</code></a> has a successful run on that same commit (main push, nightly, or dispatch).</li>
+<li><strong>L2</strong> <a href="../.github/workflows/release-e2e.yml"><code>.github/workflows/release-e2e.yml</code></a> succeeds on that commit (enforced by <a href="../.github/workflows/release-tag.yml">release-tag.yml</a> before the tag is created).</li>
+<li>Prefer creating tags only via Actions → <strong>Release Tag (CI green)</strong> so the above are machine-checked and the tag points at the verified SHA.</li>
 <li><a href="../.github/workflows/cd.yml"><code>cd.yml</code></a> publishes all expected <strong><code>fission-cli</code></strong> assets:</li>
 <li><code>fission-linux-x64</code></li>
 <li><code>fission-macos-arm64</code></li>
