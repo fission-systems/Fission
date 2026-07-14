@@ -220,4 +220,5 @@ jobs:
           fi
           echo "✅ All CI checks passed!"
           echo ""
-          echo "ℹ️  Heavy CI (nightly) runs Miri, coverage, MSRV, and full benchmark validation."
+          echo "ℹ️  L1 Heavy CI runs on main push + nightly (Miri, coverage, MSRV, NIR-check, …)."
+          echo "ℹ️  Releases require L0+L1 green and L2 Release E2E — see docs/CI_RELEASE_GATES.md."

@@ -1,0 +1,141 @@
+# L2 Release E2E Gate — fixed PE fixture + release-profile CLI smoke.
+# Does NOT publish benchmark rankings or update automation "latest" baselines.
+#
+# Triggers:
+#   - workflow_dispatch (pre-validate a ref without tagging)
+#   - workflow_call (used by release-tag.yml before creating a tag)
+name: Release E2E Gate
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Branch, tag, or full SHA to validate (default: main)"
+        required: false
+        default: "main"
+        type: string
+  workflow_call:
+    inputs:
+      ref:
+        description: "Branch, tag, or full SHA to validate (empty = caller default SHA)"
+        required: false
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-e2e-${{ github.workflow }}-${{ inputs.ref || github.sha }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  FISSION_SLEIGH_SPEC_DIR: ${{ github.workspace }}/utils/sleigh-specs
+
+jobs:
+  release-e2e:
+    name: 🔒 Release E2E (Linux · release CLI)
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    steps:
+      - name: Resolve checkout ref
+        id: resolve
+        shell: bash
+        run: |
+          set -euo pipefail
+          REF="${{ inputs.ref }}"
+          if [ -z "${REF}" ]; then
+            REF="${{ github.sha }}"
+          fi
+          echo "ref=${REF}" >> "${GITHUB_OUTPUT}"
+          echo "Validating ref: ${REF}"
+
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ steps.resolve.outputs.ref }}
+          lfs: false
+
+      - name: Setup Utils
+        uses: ./.github/actions/setup-utils
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: release-e2e
+
+      - name: Install MinGW-w64 (PE fixture)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-mingw-w64-x86-64
+          command -v x86_64-w64-mingw32-gcc
+
+      - name: Build PE smoke fixture
+        run: |
+          set -euo pipefail
+          OUT="/tmp/fission-release-e2e/test_functions.exe"
+          mkdir -p "$(dirname "${OUT}")"
+          x86_64-w64-mingw32-gcc -O2 -g -m64 -static \
+            .github/fixtures/test_functions.c \
+            -o "${OUT}"
+          test -s "${OUT}"
+          echo "BIN=${OUT}" >> "${GITHUB_ENV}"
+
+      - name: Build fission_cli (release)
+        run: cargo build -p fission-cli --locked --release
+
+      - name: CLI version + resource smoke
+        run: |
+          set -euo pipefail
+          CLI="./target/release/fission_cli"
+          "${CLI}" --version
+          "${CLI}" resources status || true
+
+      - name: PE info / list / decomp / raw-pcode
+        run: |
+          set -euo pipefail
+          CLI="./target/release/fission_cli"
+          BIN="${BIN}"
+          "${CLI}" info "${BIN}"
+          "${CLI}" list "${BIN}" --json | tee /tmp/release_e2e_list.json
+          ADDR="$(python3 .github/scripts/pick_pe_smoke_decomp_addr.py < /tmp/release_e2e_list.json)"
+          echo "primary decomp addr: ${ADDR}"
+          OUT="$("${CLI}" decomp "${BIN}" --addr "${ADDR}" --profile speed --timeout-ms 180000 --json)"
+          echo "${OUT}" | python3 .github/scripts/check_decomp_output.py
+          "${CLI}" raw-pcode "${BIN}" --addr "${ADDR}" | head -n 40
+          echo "raw_pcode_ok"
+
+      - name: Multi-function decomp smoke
+        run: |
+          set -euo pipefail
+          CLI="./target/release/fission_cli"
+          BIN="${BIN}"
+          python3 .github/scripts/release_e2e_multi_decomp.py \
+            --cli "${CLI}" \
+            --binary "${BIN}" \
+            --list-json /tmp/release_e2e_list.json \
+            --max-functions 5 \
+            --timeout-ms 180000
+
+      - name: NIR-check fast (no latest promotion)
+        run: |
+          set -euo pipefail
+          # Compact go/stop signal for release. Never update automation latest.
+          cargo run -p fission-automation --release -- nir-check \
+            --lane nir \
+            --no-build \
+            --no-update-latest \
+            --fail-on-stop \
+            --fission-bin target/release/fission_cli \
+            --run-profile fast \
+            --functions-limit 8
+      - name: Upload E2E logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-e2e-${{ github.run_id }}
+          path: |
+            /tmp/release_e2e_list.json
+            /tmp/release_e2e_*.log
+          if-no-files-found: ignore

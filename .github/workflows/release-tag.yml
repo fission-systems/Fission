@@ -1,7 +1,11 @@
-# Create a Git tag only after CI Fast Gate (ci.yml) has completed successfully for
-# the target commit (push event). Pushing the tag triggers CD Release (.github/workflows/cd.yml).
+# Create a Git tag only after conservative release gates pass for the target commit:
+#   L0 — CI Fast Gate (ci.yml) successful push run on that SHA
+#   L1 — CI Heavy Validation (ci-heavy.yml) successful run on that SHA
+#   L2 — Release E2E Gate (runs in this workflow on that SHA)
+# Pushing the tag triggers CD Release (.github/workflows/cd.yml).
 #
-# Use: Actions → "Release Tag (CI green)" → Run workflow → set `tag` (e.g. v0.1.1) → optional `ref` (default main).
+# Policy: docs/CI_RELEASE_GATES.md
+# Use: Actions → "Release Tag (CI green)" → tag (e.g. v0.1.1) → optional ref (default main).
 name: Release Tag (CI green)
 
 on:
@@ -26,13 +30,13 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  verify-ci-green:
-    name: Verify CI Fast Gate (push) is green
+  verify-gates:
+    name: Verify L0 Fast Gate + L1 Heavy (target SHA)
     runs-on: ubuntu-latest
     outputs:
       target_sha: ${{ steps.gate.outputs.sha }}
     steps:
-      - name: Resolve ref and check ci.yml runs
+      - name: Resolve ref and check ci.yml + ci-heavy.yml
         id: gate
         uses: actions/github-script@v9
         with:
@@ -47,43 +51,75 @@ jobs:
             core.setOutput("sha", sha);
             core.info(`Resolved ${ref} → ${sha}`);
 
-            const { data: runsData } = await github.rest.actions.listWorkflowRunsForRepo({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              workflow_id: "ci.yml",
-              head_sha: sha,
-              event: "push",
-              per_page: 100,
-            });
+            async function hasSuccessfulRun(workflowId, eventFilter) {
+              const { data: runsData } = await github.rest.actions.listWorkflowRunsForRepo({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                workflow_id: workflowId,
+                head_sha: sha,
+                per_page: 100,
+              });
+              const runs = runsData.workflow_runs || [];
+              const ok = runs.some((r) => {
+                if (r.status !== "completed" || r.conclusion !== "success") return false;
+                if (eventFilter && r.event !== eventFilter) return false;
+                return true;
+              });
+              core.info(
+                `${workflowId}: examined ${runs.length} run(s)` +
+                  (eventFilter ? ` (event=${eventFilter})` : "") +
+                  ` → ${ok ? "OK" : "MISSING"}`,
+              );
+              return ok;
+            }
 
-            const ok = runsData.workflow_runs.some(
-              (r) => r.status === "completed" && r.conclusion === "success",
-            );
-
-            if (!ok) {
+            // L0: Fast Gate must be a successful *push* run (main integration).
+            const fastOk = await hasSuccessfulRun("ci.yml", "push");
+            if (!fastOk) {
               core.setFailed(
                 `No successful completed push run of workflow ci.yml for commit ${sha}. ` +
-                  "Wait until \"CI Fast Gate\" finishes green for this commit on the default branch workflow, then retry.",
+                  'Wait until "CI Fast Gate" finishes green for this commit, then retry.',
               );
               return;
             }
-            core.info("CI Fast Gate (ci.yml, push) succeeded for this commit.");
+            core.info("L0 CI Fast Gate (ci.yml, push) succeeded for this commit.");
+
+            // L1: Heavy may be push / schedule / workflow_dispatch — any success on SHA.
+            const heavyOk = await hasSuccessfulRun("ci-heavy.yml", null);
+            if (!heavyOk) {
+              core.setFailed(
+                `No successful completed run of workflow ci-heavy.yml for commit ${sha}. ` +
+                  'Wait for "CI Heavy Validation" on this SHA (main push or manual dispatch), then retry. ' +
+                  "See docs/CI_RELEASE_GATES.md.",
+              );
+              return;
+            }
+            core.info("L1 CI Heavy Validation (ci-heavy.yml) succeeded for this commit.");
+
+  release-e2e:
+    name: L2 Release E2E
+    needs: verify-gates
+    uses: ./.github/workflows/release-e2e.yml
+    with:
+      ref: ${{ needs.verify-gates.outputs.target_sha }}
 
   push-tag:
     name: Create and push tag
-    needs: verify-ci-green
+    needs: [verify-gates, release-e2e]
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
       - uses: actions/checkout@v7
-
         with:
+          # Tag the verified SHA only — never an arbitrary checkout tip.
+          ref: ${{ needs.verify-gates.outputs.target_sha }}
           lfs: false
-
+          fetch-depth: 0
 
       - name: Setup Utils
         uses: ./.github/actions/setup-utils
+
       - name: Validate tag name
         env:
           TAG: ${{ inputs.tag }}
@@ -104,12 +140,19 @@ jobs:
 
       - name: Create annotated tag and push
         shell: bash
+        env:
+          TARGET_SHA: ${{ needs.verify-gates.outputs.target_sha }}
         run: |
           set -euo pipefail
           t="$(echo -n "${{ inputs.tag }}" | xargs)"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git fetch origin --tags --quiet || true
+          HEAD_SHA="$(git rev-parse HEAD)"
+          if [[ "${HEAD_SHA}" != "${TARGET_SHA}" ]]; then
+            echo "error: checkout HEAD ${HEAD_SHA} != verified SHA ${TARGET_SHA}"
+            exit 1
+          fi
           if git rev-parse "refs/tags/${t}" >/dev/null 2>&1; then
             echo "error: tag ${t} already exists locally"
             exit 1
@@ -118,5 +161,6 @@ jobs:
             echo "error: tag ${t} already exists on origin"
             exit 1
           fi
-          git tag -a "${t}" -m "Release ${t}"
+          git tag -a "${t}" "${TARGET_SHA}" -m "Release ${t}"
           git push origin "refs/tags/${t}"
+          echo "Tagged ${TARGET_SHA} as ${t} (L0+L1 verified, L2 E2E green)."

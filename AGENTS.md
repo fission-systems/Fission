@@ -122,7 +122,8 @@ python3 benchmark/source_semantic_benchmark/run_source_semantic_benchmark.py --h
 - If telemetry/reporting changes: also run `cargo check -p fission-automation`.
 - If benchmark/reporting changes: validate under `benchmark/source_semantic_benchmark/` and keep artifacts under `benchmark/artifacts/`.
 - Use `.github/workflows/ci.yml` and `ci-heavy.yml` as CI source of truth.
-- Ship Git **release tags** via `.github/workflows/release-tag.yml` (`Release Tag (CI green)`): it only tags a commit after `ci.yml` has a successful **push** run for that SHA, then `cd.yml` builds assets.
+- Release gate policy: [`docs/CI_RELEASE_GATES.md`](docs/CI_RELEASE_GATES.md) (L0 Fast / L1 Heavy / L2 Release E2E / L3 CD).
+- Ship Git **release tags** via `.github/workflows/release-tag.yml` (`Release Tag (CI green)`): tags a commit only after **ci.yml push** + **ci-heavy** success on that SHA and **release-e2e** green; then `cd.yml` builds assets. Do not auto-tag every `main` push.
 
 ## Decompiler Quality Loop
 

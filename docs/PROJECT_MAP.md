@@ -34,12 +34,13 @@ Declared in root [`Cargo.toml`](../Cargo.toml) `workspace.members`:
 | [`scripts/`](../scripts) | Benchmark/test helpers (`scripts/benchmark`, `scripts/test`, `scripts/corpus`, …) |
 | [`utils/`](../utils) | Checked-in specs/data (see [`utils/MANIFEST.md`](../utils/MANIFEST.md)) |
 | [`vendor/`](../vendor) | Third-party reference trees (see [`vendor/MANIFEST.md`](../vendor/MANIFEST.md), [`THIRD_PARTY.md`](../THIRD_PARTY.md)) |
-| [`.github/workflows/`](../.github/workflows) | CI/CD workflows (`ci.yml`, `ci-heavy.yml`, `cd.yml`, `reusable-*.yml`) |
+| [`.github/workflows/`](../.github/workflows) | CI/CD: `ci.yml` (L0), `ci-heavy.yml` (L1), `release-e2e.yml` (L2), `release-tag.yml`, `cd.yml` (L3), `reusable-*.yml` |
 
 ## Where to read next
 
 - Contributor rules: [`AGENTS.md`](../AGENTS.md), [`CONTRIBUTING.md`](../CONTRIBUTING.md)
 - Third-party provenance: [`THIRD_PARTY.md`](../THIRD_PARTY.md)
+- Release gates (conservative L0–L3): [`docs/CI_RELEASE_GATES.md`](CI_RELEASE_GATES.md)
 - Release expectations: [`docs/RELEASE.md`](RELEASE.md), [`docs/VERSIONING.md`](VERSIONING.md)
 - Trend metrics (JSON contracts): [`docs/QUALITY_METRICS.md`](QUALITY_METRICS.md)
 - Issue labels (taxonomy): [`docs/contributing/LABELS.md`](contributing/LABELS.md)

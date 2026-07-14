@@ -33,13 +33,17 @@ Fission's CI/CD pipeline is designed with **standardization**, **reusability**, 
 │  Main Workflows                         │
 │  (.github/workflows/)                   │
 │                                         │
-│  - ci.yml (Fast Gate)                  │
-│  - ci-heavy.yml (Heavy Validation)     │
-│  - cd.yml (Release)                    │
+│  - ci.yml (Fast Gate · L0)             │
+│  - ci-heavy.yml (Heavy · L1)           │
+│  - release-e2e.yml (Release E2E · L2)  │
+│  - release-tag.yml (tag after L0–L2)   │
+│  - cd.yml (CD Release · L3)            │
 │  - ci-cd-monitor.yml (Status)          │
 │  - fuzz.yml (Fuzzing)                  │
 └─────────────────────────────────────────┘
 ```
+
+**Release gate policy (conservative):** [`docs/CI_RELEASE_GATES.md`](../docs/CI_RELEASE_GATES.md).
 
 ---
 
@@ -105,8 +109,8 @@ git push
 ### 2. Heavy Validation (ci-heavy.yml) 🔵
 
 **When is it triggered?**
-- After merge to main
-- Daily at 02:30 UTC (nightly)
+- Every push to `main` (L1 release gate signal)
+- Daily at 02:30 UTC (nightly safety net)
 - Manual trigger
 
 **Runtime:** ~90 minutes
@@ -151,10 +155,21 @@ cargo test --all
 
 ---
 
-### 3. Release (cd.yml) 🟡
+### 3. Release Tag + E2E (release-tag.yml · release-e2e.yml) 🟠
+
+**Preferred path (conservative):**
+
+1. Wait for **CI Fast Gate** and **CI Heavy** green on the target `main` commit.
+2. Actions → **Release Tag (CI green)** → set `tag` / `ref`.
+3. Workflow verifies L0+L1, runs **Release E2E** (release CLI + PE smoke + multi-decomp + fast NIR-check without latest promotion), then pushes an annotated tag on the **verified SHA**.
+4. Tag push starts **CD Release** (`cd.yml`).
+
+Do **not** auto-tag every `main` push. See [`docs/CI_RELEASE_GATES.md`](../docs/CI_RELEASE_GATES.md).
+
+### 4. Release / CD (cd.yml) 🟡
 
 **When is it triggered?**
-- Push of `v*.*.*` tag
+- Push of `v*.*.*` tag (or bare `X.Y.Z`)
 
 **Runtime:** ~45 minutes
 
@@ -171,16 +186,18 @@ cargo test --all
 - [ ] SHA256 checksums generated
 - [ ] Uploaded to GitHub Release
 
-**How to release:**
-```bash
-# 1. Create version tag
-git tag v0.2.0
-git push origin v0.2.0
-
-# 2. GitHub Actions builds automatically
+**How to release (preferred):**
+```text
+Actions → "Release Tag (CI green)" → tag=v0.2.0 ref=main
+# → verifies L0+L1, runs L2 E2E, pushes tag → CD builds
 # → Release page: https://github.com/sjkim1127/Fission/releases
+# → Write release notes (web UI)
+```
 
-# 3. Write release notes (web UI)
+**Manual tag (not recommended; bypasses L2 unless you run Release E2E first):**
+```bash
+git tag v0.2.0 <green-sha>
+git push origin v0.2.0
 ```
 
 ---

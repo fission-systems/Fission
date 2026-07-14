@@ -1,7 +1,11 @@
 name: CI Heavy Validation
 
 on:
-  # Nightly at 02:30 UTC — does not run on every push; Fast Gate (ci.yml) covers that.
+  # L1 release gate: run on every main push so release-tag can require a green
+  # heavy run for that SHA (see docs/CI_RELEASE_GATES.md). Nightly remains as a
+  # scheduled safety net; Fast Gate (ci.yml) still owns PR latency.
+  push:
+    branches: ["main"]
   schedule:
     - cron: "30 2 * * *"
   workflow_dispatch:

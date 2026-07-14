@@ -1,15 +1,19 @@
 # Release checklist
 
-**Last verified:** 2026-05-02
+**Last verified:** 2026-07-15
 
 This checklist closes the loop between **tag-driven CD** ([`.github/workflows/cd.yml`](../.github/workflows/cd.yml)) and **documented expectations** for external evaluators ([`docs/EVALUATION.md`](EVALUATION.md)). A release is “ready” when the items below are satisfied for the tagged commit.
+
+**Gate policy (L0–L3):** [`docs/CI_RELEASE_GATES.md`](CI_RELEASE_GATES.md).
 
 ## Minimum release gate
 
 A tagged release is eligible when:
 
-- [`.github/workflows/ci.yml`](../.github/workflows/ci.yml) passes on the tagged commit.
-- [`.github/workflows/ci-heavy.yml`](../.github/workflows/ci-heavy.yml) passes on the tagged commit **or** on the latest `main` commit immediately preceding the tag.
+- **L0** [`.github/workflows/ci.yml`](../.github/workflows/ci.yml) has a successful **push** run on the tagged commit.
+- **L1** [`.github/workflows/ci-heavy.yml`](../.github/workflows/ci-heavy.yml) has a successful run on that same commit (main push, nightly, or dispatch).
+- **L2** [`.github/workflows/release-e2e.yml`](../.github/workflows/release-e2e.yml) succeeds on that commit (enforced by [release-tag.yml](../.github/workflows/release-tag.yml) before the tag is created).
+- Prefer creating tags only via Actions → **Release Tag (CI green)** so the above are machine-checked and the tag points at the verified SHA.
 - [`cd.yml`](../.github/workflows/cd.yml) publishes all expected **`fission-cli`** assets:
   - `fission-linux-x64`
   - `fission-macos-arm64`

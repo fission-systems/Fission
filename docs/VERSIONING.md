@@ -15,6 +15,11 @@ While in `0.x`, **minor releases may still introduce significant behavior change
 ## Tags and GitHub Releases
 
 - Release tags match **`vMAJOR.MINOR.PATCH`** (for example `v0.4.2`).
+- **Do not auto-tag every `main` push.** Tags are intentional promotions after
+  layered gates (Fast Gate + Heavy + Release E2E). See
+  [`docs/CI_RELEASE_GATES.md`](CI_RELEASE_GATES.md).
+- Preferred path: Actions → **Release Tag (CI green)**
+  ([`release-tag.yml`](../.github/workflows/release-tag.yml)).
 - Continuous delivery builds from tag pushes per [`.github/workflows/cd.yml`](../.github/workflows/cd.yml).
 
 ## Branches
