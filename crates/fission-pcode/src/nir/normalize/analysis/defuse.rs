@@ -183,12 +183,14 @@ impl DefUseMap {
 /// constrained root set without depending on variable naming conventions.
 pub(crate) struct DefinitionDependencyMap {
     dependencies: HashMap<String, HashSet<String>>,
+    address_dependencies: HashMap<String, HashSet<String>>,
 }
 
 impl DefinitionDependencyMap {
     pub(crate) fn build(stmts: &[HirStmt]) -> Self {
         let mut map = Self {
             dependencies: HashMap::new(),
+            address_dependencies: HashMap::new(),
         };
         map.collect_stmts(stmts);
         map
@@ -222,6 +224,19 @@ impl DefinitionDependencyMap {
         contributors
     }
 
+    fn address_nodes_reaching_roots(&self, name: &str, roots: &HashSet<String>) -> HashSet<String> {
+        let mut reached = HashSet::new();
+        let mut visiting = HashSet::new();
+        Self::collect_path_nodes_from(
+            &self.address_dependencies,
+            name,
+            roots,
+            &mut visiting,
+            &mut reached,
+        );
+        reached
+    }
+
     fn collect_roots(
         &self,
         name: &str,
@@ -250,6 +265,16 @@ impl DefinitionDependencyMap {
         visiting: &mut HashSet<String>,
         reached: &mut HashSet<String>,
     ) -> bool {
+        Self::collect_path_nodes_from(&self.dependencies, name, roots, visiting, reached)
+    }
+
+    fn collect_path_nodes_from(
+        dependencies_by_name: &HashMap<String, HashSet<String>>,
+        name: &str,
+        roots: &HashSet<String>,
+        visiting: &mut HashSet<String>,
+        reached: &mut HashSet<String>,
+    ) -> bool {
         if roots.contains(name) {
             reached.insert(name.to_string());
             return true;
@@ -258,9 +283,15 @@ impl DefinitionDependencyMap {
             return false;
         }
         let mut reaches_root = false;
-        if let Some(dependencies) = self.dependencies.get(name) {
+        if let Some(dependencies) = dependencies_by_name.get(name) {
             for dependency in dependencies {
-                reaches_root |= self.collect_path_nodes(dependency, roots, visiting, reached);
+                reaches_root |= Self::collect_path_nodes_from(
+                    dependencies_by_name,
+                    dependency,
+                    roots,
+                    visiting,
+                    reached,
+                );
             }
         }
         visiting.remove(name);
@@ -284,6 +315,9 @@ impl DefinitionDependencyMap {
             } => {
                 let dependencies = self.dependencies.entry(name.clone()).or_default();
                 collect_expr_vars(rhs, dependencies);
+                let address_dependencies =
+                    self.address_dependencies.entry(name.clone()).or_default();
+                collect_address_provenance_vars(rhs, address_dependencies);
             }
             HirStmt::Assign { .. }
             | HirStmt::Expr(_)
@@ -321,6 +355,41 @@ impl DefinitionDependencyMap {
                 self.collect_stmts(default);
             }
         }
+    }
+}
+
+/// Collect dependencies that can preserve pointer identity through a value
+/// definition. Memory reads and call returns are provenance barriers: their
+/// result does not inherit pointer identity from the address or arguments used
+/// to produce it.
+fn collect_address_provenance_vars(expr: &HirExpr, out: &mut HashSet<String>) {
+    match expr {
+        HirExpr::Var(name) => {
+            out.insert(name.clone());
+        }
+        HirExpr::Cast { expr, .. } | HirExpr::Unary { expr, .. } => {
+            collect_address_provenance_vars(expr, out);
+        }
+        HirExpr::PtrOffset { base, .. } => collect_address_provenance_vars(base, out),
+        HirExpr::Binary { lhs, rhs, .. } => {
+            collect_address_provenance_vars(lhs, out);
+            collect_address_provenance_vars(rhs, out);
+        }
+        HirExpr::Select {
+            then_expr,
+            else_expr,
+            ..
+        } => {
+            collect_address_provenance_vars(then_expr, out);
+            collect_address_provenance_vars(else_expr, out);
+        }
+        HirExpr::Load { .. }
+        | HirExpr::Call { .. }
+        | HirExpr::Index { .. }
+        | HirExpr::FieldAccess { .. }
+        | HirExpr::AggregateCopy { .. }
+        | HirExpr::AddressOfGlobal(_)
+        | HirExpr::Const(_, _) => {}
     }
 }
 
@@ -537,9 +606,9 @@ fn record_address_contributors(
     out: &mut HashMap<String, NirType>,
 ) {
     let mut address_names = HashSet::new();
-    collect_expr_vars(address, &mut address_names);
+    collect_address_provenance_vars(address, &mut address_names);
     for name in address_names {
-        for contributor in dependencies.nodes_reaching_roots(&name, pointer_roots) {
+        for contributor in dependencies.address_nodes_reaching_roots(&name, pointer_roots) {
             out.entry(contributor).or_insert_with(|| pointee.clone());
         }
     }
@@ -1334,6 +1403,57 @@ mod tests {
         assert!(contributors.contains_key("base_alias"));
         assert!(contributors.contains_key("base_param"));
         assert!(!contributors.contains_key("index"));
+    }
+
+    #[test]
+    fn memory_load_value_does_not_inherit_address_provenance() {
+        let uint = NirType::Int {
+            bits: 64,
+            signed: false,
+        };
+        let byte = NirType::Int {
+            bits: 8,
+            signed: false,
+        };
+        let add = |lhs: &str, rhs: &str| HirExpr::Binary {
+            op: HirBinaryOp::Add,
+            lhs: Box::new(HirExpr::Var(lhs.to_string())),
+            rhs: Box::new(HirExpr::Var(rhs.to_string())),
+            ty: uint.clone(),
+        };
+        let body = vec![
+            HirStmt::Assign {
+                lhs: HirLValue::Var("base_alias".into()),
+                rhs: HirExpr::Var("base_param".into()),
+            },
+            HirStmt::Assign {
+                lhs: HirLValue::Var("loaded_value".into()),
+                rhs: HirExpr::Load {
+                    ptr: Box::new(add("base_alias", "index")),
+                    ty: byte.clone(),
+                },
+            },
+            HirStmt::Assign {
+                lhs: HirLValue::Var("accumulator".into()),
+                rhs: add("accumulator", "loaded_value"),
+            },
+            HirStmt::Assign {
+                lhs: HirLValue::Var("result".into()),
+                rhs: HirExpr::Load {
+                    ptr: Box::new(add("base_alias", "accumulator")),
+                    ty: byte,
+                },
+            },
+        ];
+        let dependencies = DefinitionDependencyMap::build(&body);
+        let roots = HashSet::from(["base_param".to_string()]);
+        let contributors = dependencies.address_contributors(&body, &roots);
+
+        assert!(contributors.contains_key("base_param"));
+        assert!(contributors.contains_key("base_alias"));
+        assert!(!contributors.contains_key("index"));
+        assert!(!contributors.contains_key("loaded_value"));
+        assert!(!contributors.contains_key("accumulator"));
     }
 
     #[test]

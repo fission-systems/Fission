@@ -2,7 +2,7 @@ use crate::cli::args::OneShotArgs;
 use anyhow::{Context, Result};
 use fission_analysis_db::ProgramSnapshot;
 use fission_loader::LoadedBinary;
-use fission_static::analysis::{discover_functions_with_runtime, FunctionDiscoveryProfile};
+use fission_static::analysis::{FunctionDiscoveryProfile, discover_functions_with_runtime};
 use std::fs;
 
 pub(crate) fn emit_program_metadata(cli: &OneShotArgs, binary: &LoadedBinary) -> Result<()> {

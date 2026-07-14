@@ -204,18 +204,18 @@ pub(super) fn integrity_report(snapshot: &ProgramSnapshot) -> SnapshotIntegrityR
             relocation.address,
             u64::from(relocation.size),
         );
-        if let Some(symbol_id) = relocation.symbol {
-            if !snapshot.symbols.iter().any(|row| row.id == symbol_id) {
-                report
-                    .issues
-                    .push(SnapshotIntegrityIssue::DanglingReference {
-                        table: SnapshotTable::Relocations,
-                        index,
-                        field: "symbol".to_string(),
-                        target_table: SnapshotTable::Symbols,
-                        target_id: symbol_id.0,
-                    });
-            }
+        if let Some(symbol_id) = relocation.symbol
+            && !snapshot.symbols.iter().any(|row| row.id == symbol_id)
+        {
+            report
+                .issues
+                .push(SnapshotIntegrityIssue::DanglingReference {
+                    table: SnapshotTable::Relocations,
+                    index,
+                    field: "symbol".to_string(),
+                    target_table: SnapshotTable::Symbols,
+                    target_id: symbol_id.0,
+                });
         }
     }
 

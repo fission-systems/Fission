@@ -454,8 +454,10 @@ fn build_functions(functions: &[FunctionInfo], blocks: &[MemoryBlock]) -> Vec<Fu
 }
 
 fn build_symbols(binary: &LoadedBinary, functions: &[FunctionRecord]) -> Vec<SymbolRecord> {
-    let mut rows: BTreeMap<(u64, SymbolKind, String), (Option<u64>, Option<String>, FactSource)> =
-        BTreeMap::new();
+    type SymbolKey = (u64, SymbolKind, String);
+    type SymbolFacts = (Option<u64>, Option<String>, FactSource);
+
+    let mut rows: BTreeMap<SymbolKey, SymbolFacts> = BTreeMap::new();
 
     for function in functions {
         if function.name.is_empty() {
@@ -618,8 +620,8 @@ fn confidence_for_source(source: FactSource) -> FactConfidence {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use fission_loader::loader::{DataBuffer, LoadedBinaryBuilder, RelocationEntry};
     use fission_loader::SectionInfo;
+    use fission_loader::loader::{DataBuffer, LoadedBinaryBuilder, RelocationEntry};
 
     fn fixture(reverse: bool) -> LoadedBinary {
         let functions = vec![
@@ -824,10 +826,12 @@ mod tests {
 
         let snapshot = ProgramSnapshot::from_loaded_binary(&binary);
         assert!(snapshot.functions.is_empty());
-        assert!(snapshot
-            .symbols
-            .iter()
-            .any(|symbol| { symbol.address == 0x3010 && symbol.kind == SymbolKind::Import }));
+        assert!(
+            snapshot
+                .symbols
+                .iter()
+                .any(|symbol| { symbol.address == 0x3010 && symbol.kind == SymbolKind::Import })
+        );
     }
 
     #[test]
