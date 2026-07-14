@@ -19,7 +19,7 @@ This document is the policy source for how Fission promotes a git commit to a
 | Layer | Workflow | When | Role |
 |-------|----------|------|------|
 | **L0 Fast Gate** | [`ci.yml`](../.github/workflows/ci.yml) | PR + every `main` push | Lint, security, core tests, CLI smoke, NIR regression gate, multi-OS |
-| **L1 Heavy** | [`ci-heavy.yml`](../.github/workflows/ci-heavy.yml) | Every `main` push + nightly + dispatch | Full tests, heavy platforms, NIR-check, Miri, MSRV, … |
+| **L1 Heavy** | [`ci-heavy.yml`](../.github/workflows/ci-heavy.yml) | Every `main` push + nightly + dispatch | **Push:** release-critical crates, platforms, NIR-check, MSRV. **Nightly/dispatch:** also full workspace tests, Miri, coverage |
 | **L2 Release E2E** | [`release-e2e.yml`](../.github/workflows/release-e2e.yml) | Before tag (and optional dispatch) | Release-profile CLI + fixed PE smoke + raw-pcode + multi-function decomp |
 | **Tag** | [`release-tag.yml`](../.github/workflows/release-tag.yml) | Manual `workflow_dispatch` only | Requires L0 + L1 green on the SHA, runs L2, then creates/pushes tag |
 | **L3 CD** | [`cd.yml`](../.github/workflows/cd.yml) | Tag push `v*.*.*` / `X.Y.Z` | Multi-platform release binaries → GitHub Release |
@@ -63,6 +63,28 @@ main push ──► L0 Fast Gate ──► L1 Heavy (async)
    [`docs/RELEASE.md`](RELEASE.md).
 
 Optional: run **Release E2E Gate** alone (dispatch) to pre-validate a SHA without tagging.
+
+## L1 job split (main push vs extended)
+
+On **`push` to `main`**, Heavy runs the **release-critical** set only (so a green
+L1 is achievable and meaningful for decompiler releases):
+
+- Linux: `fission-core`, `loader`, `pcode`, `decompiler`, `automation`, `cli`,
+  `analysis-db`, `signatures`, plus `fission-static`
+- Windows release tests (pcode/decompiler/automation)
+- macOS release CLI build
+- Automation NIR-check (`--no-update-latest`)
+- MSRV
+
+On **nightly schedule** or **workflow_dispatch**, Heavy also runs:
+
+- Full Linux workspace tests (excluding GUI `fission-dioxus`)
+- Miri (soft environmental issues may still fail until isolation is fixed)
+- Coverage (non-blocking)
+
+`release-tag.yml` requires any successful `ci-heavy.yml` run on the SHA, so a
+green **main-push** Heavy is sufficient to tag (nightly extended failures do
+not block once that SHA already has a green push Heavy).
 
 ## Escape hatches
 

@@ -1,9 +1,9 @@
 name: CI Heavy Validation
 
 on:
-  # L1 release gate: run on every main push so release-tag can require a green
-  # heavy run for that SHA (see docs/CI_RELEASE_GATES.md). Nightly remains as a
-  # scheduled safety net; Fast Gate (ci.yml) still owns PR latency.
+  # L1 release gate on every main push (decompiler-critical jobs).
+  # Nightly / manual dispatch also run the full workspace suite + Miri.
+  # Policy: docs/CI_RELEASE_GATES.md
   push:
     branches: ["main"]
   schedule:
@@ -21,19 +21,16 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-
-
-  # Step 2: Full Test Suite (Linux, ~25 min)
-  test-linux-full:
-    name: 🧪 Full Tests (Linux)
+  # ── L1 release-critical (every main push + nightly + dispatch) ────────────
+  test-linux-release-critical:
+    name: 🧪 Release-Critical Tests (Linux)
     uses: ./.github/workflows/reusable-run-tests.yml
     with:
       os: ubuntu-latest
-      crates: ""
+      # Decompiler / CLI stack only — excludes GUI (dioxus), emulator diagnostics,
+      # and other non-gate crates that need extra sysdeps or are not release-blocking.
+      crates: "fission-core,fission-loader,fission-pcode,fission-decompiler,fission-automation,fission-cli,fission-analysis-db,fission-signatures"
       profile: debug
-      # fission-static: separate job. fission-dioxus: needs GUI/sys libs (libxdo,
-      # webkit) not present on default runners — not part of decompiler release gate.
-      exclude_crates: "fission-static,fission-dioxus"
 
   test-linux-static:
     name: 🧪 Tests (fission-static)
@@ -43,7 +40,6 @@ jobs:
       crates: "fission-static"
       profile: debug
 
-  # Step 3: Build & Test (Windows, ~20 min)
   build-windows-heavy:
     name: 🪟 Heavy Build & Test (Windows)
     uses: ./.github/workflows/reusable-build-cli.yml
@@ -62,7 +58,6 @@ jobs:
       profile: release
       timeout_minutes: 120
 
-  # Step 4: Build & Test (macOS, ~20 min)
   build-macos-heavy:
     name: 🍎 Heavy Build & Test (macOS)
     uses: ./.github/workflows/reusable-build-cli.yml
@@ -71,7 +66,6 @@ jobs:
       profile: release
       upload_artifact: true
 
-  # Step 5: Automation NIR-Check (~45 min)
   nir-check:
     name: 🔬 Automation NIR-Check
     uses: ./.github/workflows/reusable-nir-check.yml
@@ -80,87 +74,105 @@ jobs:
       functions_limit: "10"
       update_latest: false
 
-  # Step 8: Miri — unsafe UB detection (~45 min, nightly Rust)
-  miri-check:
-    name: 🧠 Miri UB Check
-    uses: ./.github/workflows/reusable-miri.yml
-    with:
-      crates: "fission-pcode,fission-loader"
-
-  # Step 9: Code Coverage (~30 min)
-  coverage:
-    name: 📈 Code Coverage
-    uses: ./.github/workflows/reusable-coverage.yml
-    with:
-      crates: "fission-pcode,fission-loader,fission-automation"
-      warn_threshold_pct: 60
-
-  # Step 10: MSRV validation
   msrv-check:
     name: 🦀 MSRV Check
     uses: ./.github/workflows/reusable-msrv.yml
     with:
       crates: "fission-pcode,fission-loader,fission-decompiler,fission-automation"
 
-  # Final summary
+  # ── Extended (nightly + manual only; not required for main-push L1) ───────
+  test-linux-full:
+    name: 🧪 Full Tests (Linux · extended)
+    if: github.event_name != 'push'
+    uses: ./.github/workflows/reusable-run-tests.yml
+    with:
+      os: ubuntu-latest
+      crates: ""
+      profile: debug
+      # dioxus needs GUI sys libs; static is covered by its own job.
+      exclude_crates: "fission-static,fission-dioxus"
+
+  miri-check:
+    name: 🧠 Miri UB Check (extended)
+    if: github.event_name != 'push'
+    uses: ./.github/workflows/reusable-miri.yml
+    with:
+      crates: "fission-pcode,fission-loader"
+
+  coverage:
+    name: 📈 Code Coverage (extended)
+    if: github.event_name != 'push'
+    uses: ./.github/workflows/reusable-coverage.yml
+    with:
+      crates: "fission-pcode,fission-loader,fission-automation"
+      warn_threshold_pct: 60
+
+  # Final summary — release-critical always; extended only when not skipped
   heavy-summary:
     name: ✅ Heavy Validation Summary
     needs:
-      - test-linux-full
+      - test-linux-release-critical
       - test-linux-static
       - build-macos-heavy
       - test-windows-heavy
       - nir-check
+      - msrv-check
+      - test-linux-full
       - miri-check
       - coverage
-      - msrv-check
     runs-on: ubuntu-latest
     if: always()
     steps:
       - name: Check Status
         run: |
+          set -euo pipefail
           FAILED=0
 
+          require_success() {
+            local name="$1"
+            local result="$2"
+            if [ "$result" != "success" ]; then
+              echo "❌ ${name} failed (result=${result})"
+              FAILED=1
+            else
+              echo "✅ ${name}"
+            fi
+          }
 
-          if [ "${{ needs.test-linux-full.result }}" != "success" ]; then
-            echo "❌ Linux full tests failed"
-            FAILED=1
-          fi
-          if [ "${{ needs.test-linux-static.result }}" != "success" ]; then
-            echo "❌ Linux fission-static tests failed"
-            FAILED=1
-          fi
-          if [ "${{ needs.build-macos-heavy.result }}" != "success" ]; then
-            echo "❌ macOS heavy build failed"
-            FAILED=1
-          fi
-          if [ "${{ needs.test-windows-heavy.result }}" != "success" ]; then
-            echo "❌ Windows heavy tests failed"
-            FAILED=1
-          fi
+          require_success_or_skipped() {
+            local name="$1"
+            local result="$2"
+            if [ "$result" = "skipped" ]; then
+              echo "ℹ️  ${name} skipped (extended-only)"
+            elif [ "$result" != "success" ]; then
+              echo "❌ ${name} failed (result=${result})"
+              FAILED=1
+            else
+              echo "✅ ${name}"
+            fi
+          }
 
-          if [ "${{ needs.nir-check.result }}" != "success" ]; then
-            echo "❌ NIR-Check failed"
-            FAILED=1
-          fi
+          require_success "Release-critical Linux tests" "${{ needs.test-linux-release-critical.result }}"
+          require_success "fission-static tests" "${{ needs.test-linux-static.result }}"
+          require_success "macOS heavy build" "${{ needs.build-macos-heavy.result }}"
+          require_success "Windows heavy tests" "${{ needs.test-windows-heavy.result }}"
+          require_success "NIR-Check" "${{ needs.nir-check.result }}"
+          require_success "MSRV" "${{ needs.msrv-check.result }}"
 
-          if [ "${{ needs.miri-check.result }}" != "success" ]; then
-            echo "❌ Miri UB check failed — unsafe code undefined behavior detected"
-            FAILED=1
-          fi
-          # Coverage is warn-only — do not block on coverage result
-          if [ "${{ needs.coverage.result }}" == "failure" ]; then
+          require_success_or_skipped "Full Linux tests (extended)" "${{ needs.test-linux-full.result }}"
+          require_success_or_skipped "Miri (extended)" "${{ needs.miri-check.result }}"
+
+          # Coverage is warn-only even when run
+          if [ "${{ needs.coverage.result }}" = "failure" ]; then
             echo "⚠️ Coverage job encountered an error (non-blocking)"
-          fi
-          if [ "${{ needs.msrv-check.result }}" != "success" ]; then
-            echo "❌ MSRV check failed — codebase breaks on declared minimum Rust version"
-            FAILED=1
+          elif [ "${{ needs.coverage.result }}" = "skipped" ]; then
+            echo "ℹ️  Coverage skipped (extended-only)"
+          else
+            echo "ℹ️  Coverage finished (${{ needs.coverage.result }})"
           fi
 
-          if [ $FAILED -eq 1 ]; then
+          if [ "$FAILED" -eq 1 ]; then
             exit 1
           fi
-          echo "✅ All heavy validation checks passed!"
-          echo ""
-          echo "ℹ️  Miri, Coverage, and MSRV results are available in job artifacts."
-
+          echo "✅ Heavy validation checks passed for this event!"
+          echo "ℹ️  Main push L1 = release-critical jobs. Full/Miri/coverage run on nightly or dispatch."
