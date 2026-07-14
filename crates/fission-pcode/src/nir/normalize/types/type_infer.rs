@@ -2802,6 +2802,69 @@ fn promote_sub32_abi_return_width(
     true
 }
 
+/// When the ABI return is already ≥32-bit but a returned join temp stayed as
+/// setcc/uchar (e.g. `int f(){ uchar x = !zf; x = -x; return x; }`), widen those
+/// temps so recompilation does not truncate `-1` to `255`.
+fn promote_narrow_returned_temps_for_abi_return(func: &mut HirFunction) -> bool {
+    if func.surface_return_type_name.is_some() {
+        return false;
+    }
+    let NirType::Int {
+        bits: ret_bits,
+        signed: _,
+    } = func.return_type.clone()
+    else {
+        return false;
+    };
+    if ret_bits < 32 {
+        return false;
+    }
+    let mut returned = HashSet::new();
+    collect_returned_var_names(&func.body, &mut returned);
+    if returned.is_empty() {
+        return false;
+    }
+    let mut rhss = Vec::new();
+    collect_all_return_exprs(&func.body, &mut rhss);
+    let mut sign_ev = rhss.iter().any(|e| rhs_has_i32_sign_bit_evidence(e));
+    if !sign_ev {
+        for name in &returned {
+            let mut assign_rhss = Vec::new();
+            collect_var_assign_rhs(&func.body, name, &mut assign_rhss);
+            if assign_rhss
+                .iter()
+                .any(|rhs| rhs_has_i32_sign_bit_evidence(rhs))
+            {
+                sign_ev = true;
+                break;
+            }
+        }
+    }
+    if !sign_ev {
+        return false;
+    }
+    // Sign-bit evidence ⇒ signed machine-word temp (matches ABI return width).
+    let promoted = NirType::Int {
+        bits: ret_bits,
+        signed: true,
+    };
+    let mut changed = false;
+    for binding in &mut func.locals {
+        if !returned.contains(&binding.name) {
+            continue;
+        }
+        let NirType::Int { bits, .. } = &binding.ty else {
+            continue;
+        };
+        if *bits >= ret_bits {
+            continue;
+        }
+        binding.ty = promoted.clone();
+        changed = true;
+    }
+    changed
+}
+
 fn collect_all_return_exprs<'a>(stmts: &'a [HirStmt], out: &mut Vec<&'a HirExpr>) {
     for stmt in stmts {
         match stmt {
@@ -3073,6 +3136,7 @@ pub(crate) fn apply_type_inference_pass(func: &mut HirFunction) -> bool {
 
     changed |= narrow_zero_extended_return_width(func, &defs, &known_binding_types);
     changed |= promote_sub32_abi_return_width(func, &defs, &known_binding_types);
+    changed |= promote_narrow_returned_temps_for_abi_return(func);
     changed |= strip_zero_extended_casts_to_declared_return_width(func);
     changed |= apply_scalar_role_override_for_pointer_locals(func);
     changed |= apply_address_role_pointer_override_for_locals(func);
@@ -4243,6 +4307,70 @@ mod tests {
         assert_eq!(
             func.return_type, i32_ty,
             "setnz+neg return must stay signed int, not uchar"
+        );
+        assert_eq!(
+            func.locals[0].ty, i32_ty,
+            "returned setnz+neg temp must widen with the ABI return"
+        );
+    }
+
+    /// Return type already i32, but join temp stayed uchar after setnz+neg
+    /// (x64 signum O2 after partial-reg compose). Recompilation truncates -1.
+    #[test]
+    fn promotes_uchar_return_temp_when_return_already_i32() {
+        let u8_ty = NirType::Int {
+            bits: 8,
+            signed: false,
+        };
+        let i32_ty = NirType::Int {
+            bits: 32,
+            signed: true,
+        };
+        let mut func = HirFunction {
+            name: "signum_temp_width".to_owned(),
+            int_param_offsets: Vec::new(),
+            params: vec![make_param(
+                "param_1",
+                NirType::Int {
+                    bits: 32,
+                    signed: true,
+                },
+            )],
+            locals: vec![NirBinding {
+                name: "xVar8".to_owned(),
+                ty: u8_ty.clone(),
+                surface_type_name: None,
+                origin: None,
+                initializer: None,
+            }],
+            return_type: i32_ty.clone(),
+            surface_return_type_name: None,
+            body: vec![
+                make_assign(
+                    "xVar8",
+                    HirExpr::Unary {
+                        op: HirUnaryOp::Not,
+                        expr: Box::new(HirExpr::Var("zf".into())),
+                        ty: u8_ty.clone(),
+                    },
+                ),
+                make_assign(
+                    "xVar8",
+                    HirExpr::Unary {
+                        op: HirUnaryOp::Neg,
+                        expr: Box::new(HirExpr::Var("xVar8".into())),
+                        ty: i32_ty.clone(),
+                    },
+                ),
+                HirStmt::Return(Some(HirExpr::Var("xVar8".into()))),
+            ],
+            ..Default::default()
+        };
+        assert!(super::apply_type_inference_pass(&mut func));
+        assert_eq!(func.return_type, i32_ty);
+        assert_eq!(
+            func.locals[0].ty, i32_ty,
+            "uchar join temp with Neg must widen to match int return"
         );
     }
 

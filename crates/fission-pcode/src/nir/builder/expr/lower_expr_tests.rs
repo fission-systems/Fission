@@ -285,6 +285,175 @@ fn x86_32_xor_setnz_add_composes_partial_into_full_return() {
     );
 }
 
+/// x64 signum O2 shape: after `xor eax,eax` SLEIGH emits `IntZExt rax←eax`.
+/// That zext must not block composing a later `setnz al` into full EAX for
+/// `neg eax` (Int2Comp). Otherwise Int2Comp reads the pre-setnz zero and the
+/// cmovg default path loses -1.
+#[test]
+fn x64_xor_zext_setnz_neg_composes_partial_into_full_return() {
+    use crate::nir::cspec::test_maps::apply_preview_cspec;
+
+    let eax4 = register(0, 4);
+    let eax1 = register(0, 1);
+    let rax8 = register(0, 8);
+    let zf = register(0x206, 1);
+    let setnz_tmp = Varnode {
+        size: 1,
+        ..varnode(0x17c00)
+    };
+    // Default options are PE/Windows x64 (matches gcc -O2 PE signum shape).
+    let mut options = test_options();
+    apply_preview_cspec(&mut options);
+
+    let ret_addr = register(0x288, 8);
+    let pcode = pcode_function(vec![block_at(
+        0x1000,
+        0,
+        vec![
+            // xor eax, eax
+            op(
+                0,
+                PcodeOpcode::IntXor,
+                Some(eax4.clone()),
+                vec![eax4.clone(), eax4.clone()],
+            ),
+            // SLEIGH: IntZExt rax ← eax (blocks naive reverse scan)
+            op(
+                1,
+                PcodeOpcode::IntZExt,
+                Some(rax8.clone()),
+                vec![eax4.clone()],
+            ),
+            // setnz al
+            op(
+                2,
+                PcodeOpcode::BoolNegate,
+                Some(setnz_tmp.clone()),
+                vec![zf.clone()],
+            ),
+            op(3, PcodeOpcode::Copy, Some(eax1), vec![setnz_tmp]),
+            // neg eax
+            op(
+                4,
+                PcodeOpcode::Int2Comp,
+                Some(eax4.clone()),
+                vec![eax4.clone()],
+            ),
+            op(5, PcodeOpcode::Return, None, vec![ret_addr]),
+        ],
+    )]);
+
+    let code = render_mlil_preview(&pcode, "xor_zext_setnz_neg", 0x1000, &options).expect("render");
+    eprintln!("xor_zext_setnz_neg:\n{code}");
+    // Must not collapse to `return 0` (Int2Comp of stale xor zero).
+    assert!(
+        !code.lines().any(|l| {
+            let t = l.trim();
+            t == "return 0;" || t == "return 0x0;"
+        }),
+        "setnz low-byte must feed Int2Comp/return, got:\n{code}"
+    );
+    // Expect a negated setcc / bool form, not a constant zero.
+    let has_neg = code.contains("-")
+        || code.contains("neg")
+        || code.contains("!zf")
+        || code.contains("! zf")
+        || code.contains("== 0")
+        || code.contains("!= 0");
+    assert!(
+        code.contains("return") && has_neg,
+        "expected composed setnz+neg return, got:\n{code}"
+    );
+}
+
+/// checksum O2 loop shape: `add al, [mem]; movzx eax, al` must stay a single
+/// truncated accumulator update — not re-add the loaded byte after zext.
+#[test]
+fn x64_byte_add_movzx_does_not_double_add_load() {
+    use crate::nir::cspec::test_maps::apply_preview_cspec;
+
+    let eax4 = register(0, 4);
+    let eax1 = register(0, 1);
+    let rax8 = register(0, 8);
+    let rcx = register(8, 8);
+    let mut options = test_options();
+    apply_preview_cspec(&mut options);
+
+    let ret_addr = register(0x288, 8);
+    let loaded = Varnode {
+        size: 1,
+        ..varnode(0x23b00)
+    };
+    let pcode = pcode_function(vec![block_at(
+        0x1000,
+        0,
+        vec![
+            // xor eax,eax ; zext rax
+            op(
+                0,
+                PcodeOpcode::IntXor,
+                Some(eax4.clone()),
+                vec![eax4.clone(), eax4.clone()],
+            ),
+            op(
+                1,
+                PcodeOpcode::IntZExt,
+                Some(rax8.clone()),
+                vec![eax4.clone()],
+            ),
+            // load byte
+            op(
+                2,
+                PcodeOpcode::Load,
+                Some(loaded.clone()),
+                vec![constant_sized(3, 4), rcx],
+            ),
+            // add al, loaded
+            op(
+                3,
+                PcodeOpcode::IntAdd,
+                Some(eax1.clone()),
+                vec![eax1.clone(), loaded],
+            ),
+            // movzx eax, al ; zext rax
+            op(4, PcodeOpcode::IntZExt, Some(eax4.clone()), vec![eax1]),
+            op(
+                5,
+                PcodeOpcode::IntZExt,
+                Some(rax8.clone()),
+                vec![eax4.clone()],
+            ),
+            op(6, PcodeOpcode::Return, None, vec![ret_addr]),
+        ],
+    )]);
+
+    let code = render_mlil_preview(&pcode, "byte_add_movzx", 0x1000, &options).expect("render");
+    eprintln!("byte_add_movzx:\n{code}");
+    // One add of the load is correct: `x = (uchar)x + *p` then optional cast.
+    // Bad residual (pre-guard): a second `x = (uchar)x + *p` / `return x + *p`.
+    let plus_assigns = code
+        .lines()
+        .filter(|l| {
+            let t = l.trim();
+            t.contains("+=") || (t.contains('+') && t.contains('=') && !t.contains("=="))
+        })
+        .count();
+    assert!(
+        plus_assigns == 1,
+        "expected exactly one add of the loaded byte, got {plus_assigns}:\n{code}"
+    );
+    assert!(
+        !code.contains("return") || {
+            let ret_line = code
+                .lines()
+                .find(|l| l.trim().starts_with("return"))
+                .unwrap_or("");
+            !ret_line.contains('+')
+        },
+        "return must not re-add the load after movzx:\n{code}"
+    );
+}
+
 #[test]
 fn partial_register_zero_extend_ignores_stale_virtual_lowering_site_bound() {
     let mut options = test_options();
@@ -595,12 +764,7 @@ fn movzx_al_into_edx_after_int_add_preserves_low_byte_truncation() {
                 vec![constant_sized(100, 4)],
             ),
             // EAX = 200 + 100 = 300
-            op(
-                2,
-                PcodeOpcode::IntAdd,
-                Some(eax.clone()),
-                vec![eax, ecx],
-            ),
+            op(2, PcodeOpcode::IntAdd, Some(eax.clone()), vec![eax, ecx]),
             // movzx EDX, AL  →  EDX = 300 & 0xff == 44
             op(3, PcodeOpcode::IntZExt, Some(edx.clone()), vec![al]),
             // Move truncated value into the return register so ABI return is EDX's value.
@@ -647,13 +811,38 @@ fn rc4_keystream_movzx_sequence_truncates_index() {
         0x1000,
         0,
         vec![
-            op(0, PcodeOpcode::Copy, Some(eax.clone()), vec![constant_sized(200, 4)]),
-            op(1, PcodeOpcode::Copy, Some(ecx.clone()), vec![constant_sized(100, 4)]),
-            op(2, PcodeOpcode::Copy, Some(base.clone()), vec![constant(0x1000)]),
+            op(
+                0,
+                PcodeOpcode::Copy,
+                Some(eax.clone()),
+                vec![constant_sized(200, 4)],
+            ),
+            op(
+                1,
+                PcodeOpcode::Copy,
+                Some(ecx.clone()),
+                vec![constant_sized(100, 4)],
+            ),
+            op(
+                2,
+                PcodeOpcode::Copy,
+                Some(base.clone()),
+                vec![constant(0x1000)],
+            ),
             // INT_ADD eax, ecx
-            op(3, PcodeOpcode::IntAdd, Some(eax.clone()), vec![eax.clone(), ecx]),
+            op(
+                3,
+                PcodeOpcode::IntAdd,
+                Some(eax.clone()),
+                vec![eax.clone(), ecx],
+            ),
             // INT_ZEXT rax <- eax  (full-width widen after ADD)
-            op(4, PcodeOpcode::IntZExt, Some(rax.clone()), vec![eax.clone()]),
+            op(
+                4,
+                PcodeOpcode::IntZExt,
+                Some(rax.clone()),
+                vec![eax.clone()],
+            ),
             // flag noise: INT_AND unique = eax & 0xff for PF (must not steal data path)
             op(
                 5,
@@ -674,18 +863,24 @@ fn rc4_keystream_movzx_sequence_truncates_index() {
     )]);
 
     let code = render_mlil_preview(&pcode, "rc4_ks_idx", 0x1000, &options).expect("render");
-    // 0x1000 + (300 & 0xff) = 0x1000 + 44 = 4140, or `rdx = 44; return base + rdx`
+    // 0x1000 + (300 & 0xff) = 0x1000 + 44 = 4140, or `rdx = 44; return base + rdx`,
+    // or `4096 + (uchar)sum` (decimal base with byte cast — still truncates).
+    let has_trunc = code.contains("4140")
+        || code.contains("0x102c")
+        || code.contains("= 44")
+        || code.contains("(uchar)rax")
+        || code.contains("rdx = (uchar)")
+        || code.contains("(uchar)")
+        || code.contains("& 0xff")
+        || code.contains("& 255")
+        || code.contains("% 256");
+    let has_base = code.contains("0x1000") || code.contains("4096");
     assert!(
-        code.contains("4140")
-            || code.contains("0x102c")
-            || code.contains("= 44")
-            || code.contains("(uchar)rax")
-            || code.contains("rdx = (uchar)")
-            || (code.contains("0x1000")
-                && (code.contains("& 0xff")
-                    || code.contains("& 255")
-                    || code.contains("% 256")
-                    || code.contains("(uchar)"))),
+        has_trunc
+            && (has_base
+                || code.contains("4140")
+                || code.contains("0x102c")
+                || code.contains("= 44")),
         "expected base+truncated index (4140) or rdx=44:\n{code}"
     );
     assert!(
@@ -771,12 +966,7 @@ fn movzx_al_index_after_byte_loads_truncates_before_ptr_add() {
             // RDX = zext EDX
             op(7, PcodeOpcode::IntZExt, Some(rdx.clone()), vec![edx]),
             // RAX = base + RDX
-            op(
-                8,
-                PcodeOpcode::IntAdd,
-                Some(rax.clone()),
-                vec![base, rdx],
-            ),
+            op(8, PcodeOpcode::IntAdd, Some(rax.clone()), vec![base, rdx]),
             // load result byte and return as int
             op(
                 9,
@@ -794,8 +984,8 @@ fn movzx_al_index_after_byte_loads_truncates_before_ptr_add() {
         ],
     )]);
 
-    let code = render_mlil_preview(&pcode, "movzx_index", 0x1000, &options)
-        .expect("render movzx index");
+    let code =
+        render_mlil_preview(&pcode, "movzx_index", 0x1000, &options).expect("render movzx index");
 
     // Truncation must appear on the index path: (uchar), & 0xff, or % 256.
     let has_trunc = code.contains("(uchar)")

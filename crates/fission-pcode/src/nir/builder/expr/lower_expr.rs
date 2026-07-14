@@ -2356,6 +2356,48 @@ impl<'a> PreviewBuilder<'a> {
                 continue;
             }
 
+            // Same-register low→wide IntZExt. Two roles:
+            // 1) After `xor eax,eax`, SLEIGH emits `IntZExt rax ← eax`. That
+            //    only zeros above EAX and must not block composing a later
+            //    `setnz al` with the xor clear when reading EAX.
+            // 2) `movzx eax, al` is value-defining for the requested width
+            //    (input narrower than the read). Treat as a real def — do not
+            //    skip (checksum byte accumulator: add al; movzx eax,al).
+            if Self::is_same_register_low_zext(op, output) {
+                let input = &op.inputs[0];
+                let low_end = output.offset.saturating_add(u64::from(input.size));
+                let out_end = output.offset.saturating_add(u64::from(output.size));
+                // Upper bytes introduced by the zext are zero.
+                let z_start = low_end.max(requested_start);
+                let z_end = out_end.min(requested_end);
+                if z_start < z_end {
+                    zeroed_ranges.push((z_start, z_end));
+                }
+                // Transparent only when the zext input already covers the full
+                // requested width (extension is strictly above what we read).
+                let input_covers_request =
+                    input.offset <= requested_start && low_end >= requested_end;
+                if input_covers_request {
+                    if let Some(partial_idx) = pending_partial_idx {
+                        if let Some(expr) = self.try_finish_zero_extended_partial(
+                            block,
+                            site.block_idx,
+                            partial_idx,
+                            vn,
+                            requested_start,
+                            requested_end,
+                            &zeroed_ranges,
+                            visiting,
+                        )? {
+                            return Ok(Some(expr));
+                        }
+                    }
+                    continue;
+                }
+                // Value-defining movzx into/within the requested range: stop.
+                return Ok(None);
+            }
+
             if output.offset == requested_start && output.size < vn.size {
                 if let Some(expr) = self.try_finish_zero_extended_partial(
                     block,
@@ -2459,6 +2501,22 @@ impl<'a> PreviewBuilder<'a> {
                 .any(|input| input.is_constant && input.constant_val == 0),
             _ => false,
         }
+    }
+
+    /// `IntZExt wide ← low` on the same register family (same space + offset,
+    /// low.size < wide.size). Low lane is copied; upper bytes become zero.
+    fn is_same_register_low_zext(op: &PcodeOp, output: &Varnode) -> bool {
+        if op.opcode != PcodeOpcode::IntZExt || op.inputs.len() != 1 {
+            return false;
+        }
+        if !is_register_space_id(output.space_id) {
+            return false;
+        }
+        let input = &op.inputs[0];
+        !input.is_constant
+            && input.space_id == output.space_id
+            && input.offset == output.offset
+            && input.size < output.size
     }
 
     fn varnode_ranges_overlap(
