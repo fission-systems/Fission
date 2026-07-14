@@ -33,7 +33,9 @@
 /// 3. Reconstruct the high-level expression using the flag definitions.
 /// 4. Return `true` if any substitution was made (caller re-runs cleanup passes).
 use super::super::*;
-use std::collections::HashMap;
+use crate::nir::normalize::analysis::defuse::DefUseMap;
+use crate::nir::normalize::cleanup::expr_has_side_effects;
+use std::collections::{HashMap, HashSet};
 
 /// x86 EFLAGS variable names produced by `arch::x86::unique_x86_register_name`.
 const FLAG_NAMES: &[&str] = &["cf", "pf", "af", "zf", "sf", "of"];
@@ -66,7 +68,17 @@ fn count_flag_defs(stmts: &[HirStmt], counts: &mut HashMap<String, usize>) {
             HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
                 count_flag_defs(body, counts)
             }
-            HirStmt::For { body, .. } => count_flag_defs(body, counts),
+            HirStmt::For {
+                init, update, body, ..
+            } => {
+                if let Some(init) = init {
+                    count_flag_defs(std::slice::from_ref(init.as_ref()), counts);
+                }
+                count_flag_defs(body, counts);
+                if let Some(update) = update {
+                    count_flag_defs(std::slice::from_ref(update.as_ref()), counts);
+                }
+            }
             HirStmt::Switch { cases, default, .. } => {
                 for case in cases {
                     count_flag_defs(&case.body, counts);
@@ -512,227 +524,273 @@ fn recover_in_stmts_box_with_reaching_defs(
 
 // ── Dead flag assignment elimination ─────────────────────────────────────────
 
-/// Remove assignments to x86 flag variables that have zero rvalue uses in the
-/// function body.  Unlike `defuse_dead_assignment_pass`, this also handles
-/// non-Temp-origin bindings (flag variables are named registers, not temps).
-fn remove_dead_flag_assigns(func: &mut HirFunction) {
-    // Build a use-count map for the whole body.
-    let mut uses: HashMap<String, usize> = HashMap::new();
-    count_uses_in_stmts(&func.body, &mut uses);
-
-    // Remove top-level and nested assignments to flag variables with 0 uses.
-    let mut dummy = false;
-    remove_dead_flags_in_stmts(&mut func.body, &uses, &mut dummy);
-
-    // Prune flag variable bindings that are now unreferenced.
-    func.locals
-        .retain(|b| !is_flag_var(&b.name) || uses.get(&b.name).copied().unwrap_or(0) > 0);
+#[derive(Debug)]
+struct FlagBasicBlock {
+    start: usize,
+    end: usize,
+    successors: Vec<usize>,
 }
 
-fn count_uses_in_stmts(stmts: &[HirStmt], uses: &mut HashMap<String, usize>) {
-    for stmt in stmts {
-        count_uses_in_stmt(stmt, uses);
-    }
-}
-
-fn count_uses_in_stmt(stmt: &HirStmt, uses: &mut HashMap<String, usize>) {
+fn collect_goto_targets(stmt: &HirStmt, targets: &mut HashSet<String>) {
     match stmt {
-        HirStmt::Assign { lhs, rhs } => {
-            // LHS write is NOT a use; only ptr/index sub-expressions are uses.
-            match lhs {
-                HirLValue::Deref { ptr, .. } => count_uses_in_expr(ptr, uses),
-                HirLValue::Index { base, index, .. } => {
-                    count_uses_in_expr(base, uses);
-                    count_uses_in_expr(index, uses);
-                }
-                HirLValue::Var(_) => {}
-                HirLValue::FieldAccess { base, .. } => {
-                    count_uses_in_expr(base, uses);
-                }
-            }
-            count_uses_in_expr(rhs, uses);
+        HirStmt::Goto(label) => {
+            targets.insert(label.clone());
         }
-        HirStmt::Expr(e) | HirStmt::Return(Some(e)) => count_uses_in_expr(e, uses),
-        HirStmt::If {
-            cond,
-            then_body,
-            else_body,
-        } => {
-            count_uses_in_expr(cond, uses);
-            count_uses_in_stmts(then_body, uses);
-            count_uses_in_stmts(else_body, uses);
-        }
-        HirStmt::While { cond, body } => {
-            count_uses_in_expr(cond, uses);
-            count_uses_in_stmts(body, uses);
-        }
-        HirStmt::DoWhile { body, cond } => {
-            count_uses_in_stmts(body, uses);
-            count_uses_in_expr(cond, uses);
-        }
-        HirStmt::For {
-            init,
-            cond,
-            update,
-            body,
-        } => {
-            if let Some(i) = init {
-                count_uses_in_stmt(i, uses);
-            }
-            if let Some(c) = cond {
-                count_uses_in_expr(c, uses);
-            }
-            if let Some(u) = update {
-                count_uses_in_stmt(u, uses);
-            }
-            count_uses_in_stmts(body, uses);
-        }
-        HirStmt::Block(body) => count_uses_in_stmts(body, uses),
-        HirStmt::Switch {
-            expr,
-            cases,
-            default,
-        } => {
-            count_uses_in_expr(expr, uses);
-            for case in cases {
-                count_uses_in_stmts(&case.body, uses);
-            }
-            count_uses_in_stmts(default, uses);
-        }
-        _ => {}
-    }
-}
-
-fn count_uses_in_expr(expr: &HirExpr, uses: &mut HashMap<String, usize>) {
-    match expr {
-        HirExpr::Var(name) | HirExpr::AddressOfGlobal(name) => {
-            *uses.entry(name.clone()).or_default() += 1;
-        }
-        HirExpr::Const(_, _) => {}
-        HirExpr::Cast { expr: inner, .. }
-        | HirExpr::Unary { expr: inner, .. }
-        | HirExpr::Load { ptr: inner, .. }
-        | HirExpr::PtrOffset { base: inner, .. }
-        | HirExpr::AggregateCopy { src: inner, .. }
-        | HirExpr::FieldAccess { base: inner, .. } => count_uses_in_expr(inner, uses),
-        HirExpr::Binary { lhs, rhs, .. } => {
-            count_uses_in_expr(lhs, uses);
-            count_uses_in_expr(rhs, uses);
-        }
-        HirExpr::Call { args, .. } => {
-            for a in args {
-                count_uses_in_expr(a, uses);
+        HirStmt::Block(body) => {
+            for stmt in body {
+                collect_goto_targets(stmt, targets);
             }
         }
-        HirExpr::Index { base, index, .. } => {
-            count_uses_in_expr(base, uses);
-            count_uses_in_expr(index, uses);
-        }
-        HirExpr::Select {
-            cond,
-            then_expr,
-            else_expr,
-            ..
-        } => {
-            count_uses_in_expr(cond, uses);
-            count_uses_in_expr(then_expr, uses);
-            count_uses_in_expr(else_expr, uses);
-        }
-    }
-}
-
-fn remove_dead_flags_in_stmts(
-    stmts: &mut Vec<HirStmt>,
-    uses: &HashMap<String, usize>,
-    changed: &mut bool,
-) {
-    // Recurse into nested bodies first.
-    for stmt in stmts.iter_mut() {
-        remove_dead_flags_in_nested(stmt, uses, changed);
-    }
-    // Then remove flat-level dead flag assignments.
-    stmts.retain(|stmt| {
-        if let HirStmt::Assign {
-            lhs: HirLValue::Var(name),
-            rhs,
-        } = stmt
-        {
-            if is_flag_var(name) && uses.get(name.as_str()).copied().unwrap_or(0) == 0 {
-                // Only remove if the RHS has no side effects.
-                if !expr_has_flag_side_effects(rhs) {
-                    *changed = true;
-                    return false;
-                }
-            }
-        }
-        true
-    });
-}
-
-fn remove_dead_flags_in_nested(
-    stmt: &mut HirStmt,
-    uses: &HashMap<String, usize>,
-    changed: &mut bool,
-) {
-    match stmt {
-        HirStmt::Block(body) => remove_dead_flags_in_stmts(body, uses, changed),
         HirStmt::If {
             then_body,
             else_body,
             ..
         } => {
-            remove_dead_flags_in_stmts(then_body, uses, changed);
-            remove_dead_flags_in_stmts(else_body, uses, changed);
+            for stmt in then_body.iter().chain(else_body) {
+                collect_goto_targets(stmt, targets);
+            }
         }
         HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
-            remove_dead_flags_in_stmts(body, uses, changed);
+            for stmt in body {
+                collect_goto_targets(stmt, targets);
+            }
         }
         HirStmt::For {
             init, update, body, ..
         } => {
-            if let Some(i) = init {
-                remove_dead_flags_in_nested(i, uses, changed);
+            if let Some(init) = init {
+                collect_goto_targets(init, targets);
             }
-            if let Some(u) = update {
-                remove_dead_flags_in_nested(u, uses, changed);
+            for stmt in body {
+                collect_goto_targets(stmt, targets);
             }
-            remove_dead_flags_in_stmts(body, uses, changed);
+            if let Some(update) = update {
+                collect_goto_targets(update, targets);
+            }
         }
         HirStmt::Switch { cases, default, .. } => {
-            for case in cases.iter_mut() {
-                remove_dead_flags_in_stmts(&mut case.body, uses, changed);
+            for case in cases {
+                for stmt in &case.body {
+                    collect_goto_targets(stmt, targets);
+                }
             }
-            remove_dead_flags_in_stmts(default, uses, changed);
+            for stmt in default {
+                collect_goto_targets(stmt, targets);
+            }
         }
         _ => {}
     }
 }
 
-/// Conservative side-effect check for flag assignment RHS.
-/// We allow removal if the RHS is a comparison, call to __sborrow/__scarry/__carry,
-/// or a simple arithmetic expression with no observable side effects.
-fn expr_has_flag_side_effects(expr: &HirExpr) -> bool {
-    match expr {
-        HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) | HirExpr::Const(_, _) => false,
-        HirExpr::Cast { expr: inner, .. } | HirExpr::Unary { expr: inner, .. } => {
-            expr_has_flag_side_effects(inner)
+fn build_flag_cfg(stmts: &[HirStmt]) -> Vec<FlagBasicBlock> {
+    if stmts.is_empty() {
+        return Vec::new();
+    }
+
+    let mut starts = vec![0];
+    for (index, stmt) in stmts.iter().enumerate() {
+        if index != 0 && matches!(stmt, HirStmt::Label(_)) {
+            starts.push(index);
         }
-        HirExpr::Binary { lhs, rhs, .. } => {
-            expr_has_flag_side_effects(lhs) || expr_has_flag_side_effects(rhs)
+        if index + 1 < stmts.len() && matches!(stmt, HirStmt::Goto(_) | HirStmt::Return(_)) {
+            starts.push(index + 1);
         }
-        HirExpr::Call { target, args, .. } => {
-            if matches!(
-                target.as_str(),
-                "__sborrow" | "__scarry" | "__carry" | "__popcount"
-            ) {
-                args.iter().any(expr_has_flag_side_effects)
-            } else {
-                true // unknown calls have side effects
+    }
+    starts.sort_unstable();
+    starts.dedup();
+
+    let mut blocks: Vec<FlagBasicBlock> = starts
+        .iter()
+        .enumerate()
+        .map(|(index, start)| FlagBasicBlock {
+            start: *start,
+            end: starts.get(index + 1).copied().unwrap_or(stmts.len()),
+            successors: Vec::new(),
+        })
+        .collect();
+
+    let mut label_blocks = HashMap::new();
+    for (block_index, block) in blocks.iter().enumerate() {
+        for stmt in &stmts[block.start..block.end] {
+            if let HirStmt::Label(label) = stmt {
+                label_blocks.insert(label.clone(), block_index);
             }
         }
-        // Loads, pointer arithmetic, etc. — conservative
-        _ => true,
     }
+
+    for block_index in 0..blocks.len() {
+        let start = blocks[block_index].start;
+        let end = blocks[block_index].end;
+        let mut targets = HashSet::new();
+        for stmt in &stmts[start..end] {
+            collect_goto_targets(stmt, &mut targets);
+        }
+        let mut successors: Vec<usize> = targets
+            .into_iter()
+            .filter_map(|target| label_blocks.get(&target).copied())
+            .collect();
+
+        let terminal = &stmts[end - 1];
+        if !matches!(terminal, HirStmt::Goto(_) | HirStmt::Return(_))
+            && block_index + 1 < blocks.len()
+        {
+            successors.push(block_index + 1);
+        }
+        successors.sort_unstable();
+        successors.dedup();
+        blocks[block_index].successors = successors;
+    }
+    blocks
+}
+
+fn flag_uses(stmt: &HirStmt) -> HashSet<String> {
+    DefUseMap::build(std::slice::from_ref(stmt))
+        .use_count
+        .into_keys()
+        .filter(|name| is_flag_var(name))
+        .collect()
+}
+
+fn flag_definition(stmt: &HirStmt) -> Option<(&str, &HirExpr)> {
+    match stmt {
+        HirStmt::Assign {
+            lhs: HirLValue::Var(name),
+            rhs,
+        } if is_flag_var(name) => Some((name, rhs)),
+        _ => None,
+    }
+}
+
+fn transfer_flag_block(
+    block: &FlagBasicBlock,
+    stmt_uses: &[HashSet<String>],
+    stmts: &[HirStmt],
+    live_out: &HashSet<String>,
+) -> HashSet<String> {
+    let mut live = live_out.clone();
+    for index in (block.start..block.end).rev() {
+        if let Some((name, _)) = flag_definition(&stmts[index]) {
+            live.remove(name);
+        }
+        live.extend(stmt_uses[index].iter().cloned());
+    }
+    live
+}
+
+/// Find pure top-level flag definitions that are dead under the label/goto CFG.
+///
+/// Nested structured statements are summarized conservatively as uses and are
+/// cleaned only when the flag has no use anywhere. This avoids inventing a
+/// second structured-CFG engine inside normalization.
+fn dead_flag_definition_sites(stmts: &[HirStmt]) -> HashSet<usize> {
+    let blocks = build_flag_cfg(stmts);
+    if blocks.is_empty() {
+        return HashSet::new();
+    }
+
+    let stmt_uses: Vec<HashSet<String>> = stmts.iter().map(flag_uses).collect();
+    let mut live_in = vec![HashSet::new(); blocks.len()];
+    loop {
+        let mut changed = false;
+        for block_index in (0..blocks.len()).rev() {
+            let mut live_out = HashSet::new();
+            for successor in &blocks[block_index].successors {
+                live_out.extend(live_in[*successor].iter().cloned());
+            }
+            let next = transfer_flag_block(&blocks[block_index], &stmt_uses, stmts, &live_out);
+            if next != live_in[block_index] {
+                live_in[block_index] = next;
+                changed = true;
+            }
+        }
+        if !changed {
+            break;
+        }
+    }
+
+    let mut dead = HashSet::new();
+    for block in &blocks {
+        let mut live = HashSet::new();
+        for successor in &block.successors {
+            live.extend(live_in[*successor].iter().cloned());
+        }
+        for index in (block.start..block.end).rev() {
+            if let Some((name, rhs)) = flag_definition(&stmts[index]) {
+                if !live.contains(name) && !expr_has_side_effects(rhs) {
+                    dead.insert(std::ptr::from_ref(&stmts[index]) as usize);
+                }
+                live.remove(name);
+            }
+            live.extend(stmt_uses[index].iter().cloned());
+        }
+    }
+    dead
+}
+
+fn remove_dead_sites(stmts: &mut Vec<HirStmt>, dead_sites: &HashSet<usize>, changed: &mut bool) {
+    stmts.retain(|stmt| {
+        let remove = dead_sites.contains(&(std::ptr::from_ref(stmt) as usize));
+        *changed |= remove;
+        !remove
+    });
+}
+
+fn remove_globally_unused_flags(
+    stmts: &mut Vec<HirStmt>,
+    uses: &HashMap<String, usize>,
+    changed: &mut bool,
+) {
+    for stmt in stmts.iter_mut() {
+        match stmt {
+            HirStmt::Block(body) => remove_globally_unused_flags(body, uses, changed),
+            HirStmt::If {
+                then_body,
+                else_body,
+                ..
+            } => {
+                remove_globally_unused_flags(then_body, uses, changed);
+                remove_globally_unused_flags(else_body, uses, changed);
+            }
+            HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
+                remove_globally_unused_flags(body, uses, changed);
+            }
+            HirStmt::For { body, .. } => remove_globally_unused_flags(body, uses, changed),
+            HirStmt::Switch { cases, default, .. } => {
+                for case in cases {
+                    remove_globally_unused_flags(&mut case.body, uses, changed);
+                }
+                remove_globally_unused_flags(default, uses, changed);
+            }
+            _ => {}
+        }
+    }
+    stmts.retain(|stmt| {
+        let remove = flag_definition(stmt).is_some_and(|(name, rhs)| {
+            uses.get(name).copied().unwrap_or(0) == 0 && !expr_has_side_effects(rhs)
+        });
+        *changed |= remove;
+        !remove
+    });
+}
+
+/// Remove pure x86 flag definitions using CFG liveness for unstructured HIR
+/// plus a conservative whole-function fallback for nested structured bodies.
+fn remove_dead_flag_assigns(func: &mut HirFunction) {
+    let dead_sites = dead_flag_definition_sites(&func.body);
+    let mut changed = false;
+    remove_dead_sites(&mut func.body, &dead_sites, &mut changed);
+
+    let uses = DefUseMap::build(&func.body);
+    remove_globally_unused_flags(&mut func.body, &uses.use_count, &mut changed);
+
+    let uses = DefUseMap::build(&func.body);
+    let mut assigned = HashMap::new();
+    count_flag_defs(&func.body, &mut assigned);
+    func.locals.retain(|binding| {
+        !is_flag_var(&binding.name)
+            || uses.use_count.get(&binding.name).copied().unwrap_or(0) > 0
+            || assigned.contains_key(&binding.name)
+    });
 }
 
 // ── Public entry point ────────────────────────────────────────────────────────
@@ -794,7 +852,17 @@ fn count_flag_assigns(stmts: &[HirStmt], n: &mut usize) {
             HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
                 count_flag_assigns(body, n)
             }
-            HirStmt::For { body, .. } => count_flag_assigns(body, n),
+            HirStmt::For {
+                init, update, body, ..
+            } => {
+                if let Some(init) = init {
+                    count_flag_assigns(std::slice::from_ref(init.as_ref()), n);
+                }
+                count_flag_assigns(body, n);
+                if let Some(update) = update {
+                    count_flag_assigns(std::slice::from_ref(update.as_ref()), n);
+                }
+            }
             HirStmt::Switch { cases, default, .. } => {
                 for case in cases {
                     count_flag_assigns(&case.body, n);
@@ -904,7 +972,121 @@ mod tests {
             ..HirFunction::default()
         };
 
-        assert!(!apply_flag_recovery_pass(&mut func));
+        // The label still blocks expression substitution. The pass reports a
+        // change only because the definition after the condition is dead.
+        assert!(apply_flag_recovery_pass(&mut func));
         assert_eq!(first_if_cond(&func), &not(var("zf")));
+        assert_eq!(flag_assign_count(&func.body), 1);
+    }
+
+    #[test]
+    fn dead_flag_cleanup_removes_only_overwritten_definition() {
+        let live_rhs = eq(var("current_value"), var("current_limit"));
+        let mut func = HirFunction {
+            body: vec![
+                assign("cf", eq(var("stale_value"), var("stale_limit"))),
+                assign("cf", live_rhs.clone()),
+                HirStmt::Return(Some(var("cf"))),
+            ],
+            ..HirFunction::default()
+        };
+
+        assert!(apply_dead_flag_cleanup_pass(&mut func));
+        assert_eq!(flag_assign_count(&func.body), 1);
+        assert!(matches!(
+            &func.body[0],
+            HirStmt::Assign {
+                lhs: HirLValue::Var(name),
+                rhs,
+            } if name == "cf" && rhs == &live_rhs
+        ));
+    }
+
+    #[test]
+    fn dead_flag_cleanup_keeps_definitions_from_both_branch_predecessors() {
+        let mut func = HirFunction {
+            body: vec![
+                HirStmt::If {
+                    cond: var("selector"),
+                    then_body: vec![assign("cf", eq(var("left"), var("limit")))],
+                    else_body: vec![assign("cf", eq(var("right"), var("limit")))],
+                },
+                HirStmt::Return(Some(var("cf"))),
+            ],
+            ..HirFunction::default()
+        };
+
+        assert!(!apply_dead_flag_cleanup_pass(&mut func));
+        assert_eq!(flag_assign_count(&func.body), 2);
+    }
+
+    #[test]
+    fn dead_flag_cleanup_keeps_definitions_at_label_cfg_join() {
+        let mut func = HirFunction {
+            body: vec![
+                HirStmt::If {
+                    cond: var("selector"),
+                    then_body: vec![HirStmt::Goto("left_path".to_string())],
+                    else_body: vec![HirStmt::Goto("right_path".to_string())],
+                },
+                HirStmt::Label("left_path".to_string()),
+                assign("cf", eq(var("left"), var("limit"))),
+                HirStmt::Goto("join".to_string()),
+                HirStmt::Label("right_path".to_string()),
+                assign("cf", eq(var("right"), var("limit"))),
+                HirStmt::Goto("join".to_string()),
+                HirStmt::Label("join".to_string()),
+                HirStmt::Return(Some(var("cf"))),
+            ],
+            ..HirFunction::default()
+        };
+
+        assert!(!apply_dead_flag_cleanup_pass(&mut func));
+        assert_eq!(flag_assign_count(&func.body), 2);
+    }
+
+    #[test]
+    fn dead_flag_cleanup_follows_goto_edges_and_definition_kills() {
+        let live_rhs = eq(var("live_value"), var("live_limit"));
+        let mut func = HirFunction {
+            body: vec![
+                assign("cf", eq(var("stale_value"), var("stale_limit"))),
+                HirStmt::Goto("redefine_flag".to_string()),
+                HirStmt::Label("redefine_flag".to_string()),
+                assign("cf", live_rhs.clone()),
+                HirStmt::Goto("use_flag".to_string()),
+                HirStmt::Label("use_flag".to_string()),
+                HirStmt::Return(Some(var("cf"))),
+            ],
+            ..HirFunction::default()
+        };
+
+        assert!(apply_dead_flag_cleanup_pass(&mut func));
+        assert_eq!(flag_assign_count(&func.body), 1);
+        assert!(func.body.iter().any(|stmt| matches!(
+            stmt,
+            HirStmt::Assign {
+                lhs: HirLValue::Var(name),
+                rhs,
+            } if name == "cf" && rhs == &live_rhs
+        )));
+    }
+
+    #[test]
+    fn dead_flag_cleanup_retains_effectful_dead_definition() {
+        let mut func = HirFunction {
+            body: vec![assign(
+                "cf",
+                HirExpr::Call {
+                    target: "observe_machine_state".to_string(),
+                    args: Vec::new(),
+                    ty: NirType::Bool,
+                },
+            )],
+            ..HirFunction::default()
+        };
+
+        assert!(!apply_dead_flag_cleanup_pass(&mut func));
+        assert_eq!(flag_assign_count(&func.body), 1);
     }
 }

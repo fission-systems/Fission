@@ -8,6 +8,11 @@ use fission_loader::{FunctionInfo, LoadedBinary};
 use serde::Serialize;
 use std::collections::BTreeMap;
 
+mod integrity;
+pub use integrity::{
+    FactInventory, SnapshotIntegrityIssue, SnapshotIntegrityReport, SnapshotTable,
+};
+
 pub const PROGRAM_SNAPSHOT_SCHEMA: &str = "fission-program-snapshot-v1";
 
 macro_rules! typed_id {
@@ -23,7 +28,7 @@ typed_id!(FunctionId);
 typed_id!(SymbolId);
 typed_id!(RelocationId);
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum FactConfidence {
     Proven,
@@ -32,7 +37,7 @@ pub enum FactConfidence {
     Low,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum FactSource {
     Loader,
@@ -227,16 +232,59 @@ impl ProgramSnapshot {
         }
     }
 
+    pub fn try_from_loaded_binary(binary: &LoadedBinary) -> Result<Self, SnapshotIntegrityReport> {
+        let snapshot = Self::from_loaded_binary(binary);
+        let report = snapshot.integrity_report();
+        if report.is_valid() {
+            Ok(snapshot)
+        } else {
+            Err(report)
+        }
+    }
+
     pub fn function_at(&self, entry: u64) -> Option<&FunctionRecord> {
+        let index = self
+            .functions
+            .partition_point(|function| function.entry < entry);
         self.functions
-            .binary_search_by_key(&entry, |function| function.entry)
-            .ok()
-            .and_then(|index| self.functions.get(index))
+            .get(index)
+            .filter(|function| function.entry == entry)
+    }
+
+    pub fn functions_at(&self, entry: u64) -> impl Iterator<Item = &FunctionRecord> {
+        self.functions
+            .iter()
+            .skip_while(move |function| function.entry < entry)
+            .take_while(move |function| function.entry == entry)
+    }
+
+    /// Return the most specific function range containing `address`.
+    ///
+    /// Exact entries win. For overlapping non-zero ranges, the smallest range
+    /// wins and stable IDs break ties, keeping the query deterministic.
+    pub fn function_containing(&self, address: u64) -> Option<&FunctionRecord> {
+        self.function_at(address).or_else(|| {
+            self.functions
+                .iter()
+                .filter(|function| {
+                    function.size != 0
+                        && function.entry < address
+                        && function
+                            .entry
+                            .checked_add(function.size)
+                            .is_some_and(|end| address < end)
+                })
+                .min_by_key(|function| (function.size, function.entry, function.id))
+        })
     }
 
     pub fn memory_block_containing(&self, address: u64) -> Option<&MemoryBlock> {
         self.memory_blocks.iter().find(|block| {
-            address >= block.start && address < block.start.saturating_add(block.size)
+            address >= block.start
+                && block
+                    .start
+                    .checked_add(block.size)
+                    .is_some_and(|end| address < end)
         })
     }
 
@@ -244,6 +292,38 @@ impl ProgramSnapshot {
         self.symbols
             .iter()
             .filter(move |symbol| symbol.address == address)
+    }
+
+    pub fn relocations_at(&self, address: u64) -> impl Iterator<Item = &RelocationRecord> {
+        self.relocations
+            .iter()
+            .skip_while(move |relocation| relocation.address < address)
+            .take_while(move |relocation| relocation.address == address)
+    }
+
+    pub fn memory_blocks_overlapping(
+        &self,
+        start: u64,
+        end: u64,
+    ) -> impl Iterator<Item = &MemoryBlock> {
+        self.memory_blocks.iter().filter(move |block| {
+            start < end
+                && block.start < end
+                && block
+                    .start
+                    .checked_add(block.size)
+                    .is_some_and(|block_end| start < block_end)
+        })
+    }
+
+    pub fn fact_inventory(&self) -> FactInventory {
+        integrity::fact_inventory(self)
+    }
+
+    /// Validate the immutable snapshot contract without consulting parser or
+    /// decompiler state. Consumers can fail closed before caching these facts.
+    pub fn integrity_report(&self) -> SnapshotIntegrityReport {
+        integrity::integrity_report(self)
     }
 }
 
@@ -620,6 +700,99 @@ mod tests {
         assert_eq!(first.memory_block, Some(MemoryBlockId(0)));
         assert_eq!(snapshot.relocations.len(), 1);
         assert!(snapshot.relocations[0].symbol.is_some());
+    }
+
+    #[test]
+    fn snapshot_integrity_and_inventory_cover_all_fact_tables() {
+        let snapshot = ProgramSnapshot::try_from_loaded_binary(&fixture(false))
+            .expect("fixture snapshot should satisfy the canonical contract");
+        let report = snapshot.integrity_report();
+        assert!(report.is_valid(), "{:#?}", report.issues);
+
+        let inventory = snapshot.fact_inventory();
+        assert_eq!(inventory.total, 7);
+        assert_eq!(inventory.memory_blocks, 1);
+        assert_eq!(inventory.functions, 2);
+        assert_eq!(inventory.symbols, 3);
+        assert_eq!(inventory.relocations, 1);
+        assert_eq!(
+            inventory.by_source.get(&FactSource::StaticDiscovery),
+            Some(&2)
+        );
+        assert_eq!(
+            inventory.by_confidence.get(&FactConfidence::Medium),
+            Some(&2)
+        );
+    }
+
+    #[test]
+    fn snapshot_range_queries_are_deterministic() {
+        let snapshot = ProgramSnapshot::from_loaded_binary(&fixture(false));
+        assert_eq!(snapshot.functions_at(0x1000).count(), 1);
+        assert_eq!(
+            snapshot
+                .function_containing(0x1008)
+                .map(|row| row.name.as_str()),
+            Some("first")
+        );
+        assert_eq!(
+            snapshot
+                .function_containing(0x1012)
+                .map(|row| row.name.as_str()),
+            Some("second")
+        );
+        assert_eq!(snapshot.relocations_at(0x1020).count(), 1);
+        assert_eq!(
+            snapshot.memory_blocks_overlapping(0x1010, 0x1030).count(),
+            1
+        );
+        assert_eq!(
+            snapshot.memory_blocks_overlapping(0x1030, 0x1030).count(),
+            0
+        );
+    }
+
+    #[test]
+    fn snapshot_integrity_reports_corrupt_ids_links_and_ranges() {
+        let mut snapshot = ProgramSnapshot::from_loaded_binary(&fixture(false));
+        snapshot.functions[0].id = FunctionId(9);
+        snapshot.functions[0].memory_block = Some(MemoryBlockId(9));
+        snapshot.relocations[0].symbol = Some(SymbolId(9));
+        snapshot.memory_blocks[0].start = u64::MAX - 1;
+        snapshot.memory_blocks[0].size = 8;
+
+        let report = snapshot.integrity_report();
+        assert!(!report.is_valid());
+        assert!(report.issues.iter().any(|issue| matches!(
+            issue,
+            SnapshotIntegrityIssue::InvalidTableId {
+                table: SnapshotTable::Functions,
+                ..
+            }
+        )));
+        assert!(report.issues.iter().any(|issue| matches!(
+            issue,
+            SnapshotIntegrityIssue::AddressRangeOverflow {
+                table: SnapshotTable::MemoryBlocks,
+                ..
+            }
+        )));
+        assert!(report.issues.iter().any(|issue| matches!(
+            issue,
+            SnapshotIntegrityIssue::DanglingReference {
+                table: SnapshotTable::Functions,
+                target_table: SnapshotTable::MemoryBlocks,
+                ..
+            }
+        )));
+        assert!(report.issues.iter().any(|issue| matches!(
+            issue,
+            SnapshotIntegrityIssue::DanglingReference {
+                table: SnapshotTable::Relocations,
+                target_table: SnapshotTable::Symbols,
+                ..
+            }
+        )));
     }
 
     #[test]
