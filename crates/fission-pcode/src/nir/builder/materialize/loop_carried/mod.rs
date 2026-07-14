@@ -29,6 +29,82 @@ impl<'a> PreviewBuilder<'a> {
         debug_assert_eq!(proof.definition_site(), (block_idx, op_idx));
         let loop_head = proof.loop_head();
 
+        // Non-anonymous merge / prior bindings keep their stable names first
+        // (e.g. cursor register `edx` seeded from a pointer param must stay `edx`,
+        // not be rewritten to `param_1++` while `*edx` still reads `edx`).
+        if let Some(name) = self.loop_header_explicit_merge_binding_name(loop_head, output) {
+            if !Self::is_anonymous_temp_binding_name(&name) {
+                return Some(name);
+            }
+            // Anonymous merge temps lose to stack-param / hardware identity below.
+        }
+        if let Some(name) = self.prior_materialized_loop_carried_output_name(output, proof) {
+            if !Self::is_anonymous_temp_binding_name(&name) {
+                return Some(name);
+            }
+        }
+        if let Some(name) = self.prior_materialized_loop_carried_input_name(op, output, proof) {
+            if !Self::is_anonymous_temp_binding_name(&name) {
+                return Some(name);
+            }
+        }
+        if let Some(name) =
+            self.loop_header_external_seed_binding_name_for_update(block_idx, output)
+        {
+            if !Self::is_anonymous_temp_binding_name(&name) {
+                return Some(name);
+            }
+        }
+        if let Some(name) = self.prior_materialized_same_register_output_name(output) {
+            if !Self::is_anonymous_temp_binding_name(&name) {
+                return Some(name);
+            }
+        }
+        if let Some(name) = self.prior_materialized_local_wide_alias_name(block_idx, op_idx, output)
+        {
+            if !Self::is_anonymous_temp_binding_name(&name) {
+                return Some(name);
+            }
+        }
+        if self.abi_state().param_slot_for_varnode(output).is_some()
+            && !self.loop_carried_output_has_prior_definition(output)
+        {
+            return self.register_param(output);
+        }
+        // Resolve stack-param seed vs hardware name when both exist:
+        // - Primary return *full* register (x86 EAX holding a scalar stack arg
+        //   that is also the induction, e.g. count_bits `shr`): prefer `param_N`
+        //   so the entry test and `>>=` share one binding (anonymous `uVar` loses).
+        // - Other GPRs (checksum cursor `edx++` seeded from a pointer param):
+        //   prefer the hardware name so we do not emit `param_1++` while
+        //   `*edx` still reads a distinct copy.
+        // Partial primary-return lanes (AL): prefer an existing wide same-family
+        // binding (xor-zero on EAX as `uVar1`/`eax`) over bare `al`, so the
+        // accumulator reuses the zero seed (`sum += *p` not bare `al += *p`).
+        if output.size < 4 && self.register_namer().is_primary_return_register(output) {
+            if let Some(wide) =
+                self.prior_materialized_local_wide_alias_name(block_idx, op_idx, output)
+            {
+                return Some(wide);
+            }
+            if let Some(wide) = self.wide_primary_return_materialized_name(output) {
+                return Some(wide);
+            }
+        }
+        let stack_seed = self.loop_carried_stack_param_seed_name(block_idx, output);
+        let hw_name = self.loop_carried_hardware_register_name(output);
+        let prefer_stack_over_hw =
+            output.size >= 4 && self.register_namer().is_primary_return_register(output);
+        match (stack_seed, hw_name) {
+            (Some(stack), Some(hw)) if stack != hw && prefer_stack_over_hw => {
+                return Some(stack);
+            }
+            (Some(_), Some(hw)) if !prefer_stack_over_hw => return Some(hw),
+            (Some(stack), _) => return Some(stack),
+            (None, Some(hw)) => return Some(hw),
+            (None, None) => {}
+        }
+        // Last resort: keep anonymous merge/prior temp if that is all we have.
         if let Some(name) = self.loop_header_explicit_merge_binding_name(loop_head, output) {
             return Some(name);
         }
@@ -38,35 +114,45 @@ impl<'a> PreviewBuilder<'a> {
         if let Some(name) = self.prior_materialized_loop_carried_input_name(op, output, proof) {
             return Some(name);
         }
-        if let Some(name) =
-            self.loop_header_external_seed_binding_name_for_update(block_idx, output)
-        {
-            return Some(name);
-        }
-        if let Some(name) = self.prior_materialized_same_register_output_name(output) {
-            return Some(name);
-        }
-        if let Some(name) = self.prior_materialized_local_wide_alias_name(block_idx, op_idx, output)
-        {
-            return Some(name);
-        }
-        if self.abi_state().param_slot_for_varnode(output).is_some()
-            && !self.loop_carried_output_has_prior_definition(output)
-        {
-            return self.register_param(output);
-        }
-        // Confirmed loop-carried update without a prior materialized seed still needs a
-        // stable identity. Without it, RHS self-reads inline the pre-loop def
-        // (e.g. xor-zero → Const(0) so `edx = edx + ecx` becomes `edx = ecx`) and
-        // stack-loaded induction registers get a fresh temp instead of `param_N`
-        // (so `shr` never writes back into the value the next iteration reads).
-        if let Some(name) = self.loop_carried_stack_param_seed_name(block_idx, output) {
-            return Some(name);
-        }
-        if let Some(name) = self.loop_carried_hardware_register_name(output) {
-            return Some(name);
-        }
         None
+    }
+
+    fn is_anonymous_temp_binding_name(name: &str) -> bool {
+        name.starts_with("uVar")
+            || name.starts_with("xVar")
+            || name.starts_with("iVar")
+            || name.starts_with("bVar")
+            || name.starts_with("tmp_")
+    }
+
+    /// Find a materialized name for a wider view of the primary return register
+    /// (e.g. EAX after `xor eax,eax` when materializing an AL self-update).
+    fn wide_primary_return_materialized_name(&self, output: &Varnode) -> Option<String> {
+        if output.size >= 4 || !self.register_namer().is_primary_return_register(output) {
+            return None;
+        }
+        let mut best: Option<(u32, String)> = None;
+        for (key, name) in &self.materialized_vns {
+            let vn = &key.varnode;
+            if vn.is_constant || !is_register_space_id(vn.space_id) {
+                continue;
+            }
+            if vn.space_id != output.space_id || vn.offset != output.offset {
+                continue;
+            }
+            if vn.size <= output.size {
+                continue;
+            }
+            // Same storage family as the primary return (offset match + register space).
+            if name.starts_with("param_") {
+                continue;
+            }
+            match &best {
+                Some((sz, _)) if *sz >= vn.size => {}
+                _ => best = Some((vn.size, name.clone())),
+            }
+        }
+        best.map(|(_, name)| name)
     }
 
     pub(super) fn loop_carried_passthrough_output_binding_name(
@@ -101,33 +187,49 @@ impl<'a> PreviewBuilder<'a> {
         let proof = self.prove_loop_carried_register_update(block_idx, op_idx, output)?;
         debug_assert_eq!(proof.definition_site(), (block_idx, op_idx));
         if let Some(name) = self.prior_materialized_loop_carried_output_name(output, proof) {
-            return Some(name);
+            if !Self::is_anonymous_temp_binding_name(&name) {
+                return Some(name);
+            }
         }
         if let Some(name) = self.prior_materialized_loop_carried_input_name(op, output, proof) {
-            return Some(name);
+            if !Self::is_anonymous_temp_binding_name(&name) {
+                return Some(name);
+            }
         }
         if let Some(name) =
             self.loop_header_external_seed_binding_name_for_update(block_idx, output)
         {
-            return Some(name);
+            if !Self::is_anonymous_temp_binding_name(&name) {
+                return Some(name);
+            }
         }
         if let Some(name) = self.prior_materialized_same_register_output_name(output) {
-            return Some(name);
+            if !Self::is_anonymous_temp_binding_name(&name) {
+                return Some(name);
+            }
         }
         if let Some(name) = self.prior_materialized_local_wide_alias_name(block_idx, op_idx, output)
         {
-            return Some(name);
+            if !Self::is_anonymous_temp_binding_name(&name) {
+                return Some(name);
+            }
         }
         if self.abi_state().param_slot_for_varnode(output).is_some()
             && !self.loop_carried_output_has_prior_definition(output)
         {
             return self.register_param(output);
         }
-        if let Some(name) = self.loop_carried_stack_param_seed_name(block_idx, output) {
-            return Some(name);
-        }
-        if let Some(name) = self.loop_carried_hardware_register_name(output) {
-            return Some(name);
+        let stack_seed = self.loop_carried_stack_param_seed_name(block_idx, output);
+        let hw_name = self.loop_carried_hardware_register_name(output);
+        let prefer_stack_over_hw = self.register_namer().is_primary_return_register(output);
+        match (stack_seed, hw_name) {
+            (Some(stack), Some(hw)) if stack != hw && prefer_stack_over_hw => {
+                return Some(stack);
+            }
+            (Some(_), Some(hw)) if !prefer_stack_over_hw => return Some(hw),
+            (Some(stack), _) => return Some(stack),
+            (None, Some(hw)) => return Some(hw),
+            (None, None) => {}
         }
         None
     }

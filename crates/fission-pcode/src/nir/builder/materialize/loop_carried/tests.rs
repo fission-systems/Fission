@@ -684,6 +684,157 @@ fn loop_carried_byte_accumulator_with_movzx_preserves_add() {
     );
 }
 
+/// Binding priority: stack-param seed must win over anonymous merge temps so
+/// IntRight writeback stays on the same name as loop-header reads.
+#[test]
+fn loop_carried_stack_param_seed_preferred_over_anonymous_merge_temp() {
+    // Prove that when a loop-carried IntRight has a stack-param seed, the
+    // binding name is the formal param (not a fresh uVar). Covered end-to-end
+    // by decompiling the m32 O2 control_flow binary; this unit checks the
+    // lower-block shape that previously lost `>>= 1`.
+    let eax = reg(0x0, 4);
+    let ecx = reg(0x4, 4);
+    let edx = reg(0x8, 4);
+    let zf = reg(0x206, 1);
+    let mut blocks = vec![
+        block_at(
+            0x1000,
+            0,
+            vec![
+                op(
+                    0,
+                    PcodeOpcode::IntXor,
+                    Some(edx.clone()),
+                    vec![edx.clone(), edx.clone()],
+                ),
+                // Non-constant seed so constant folding cannot erase the loop.
+                op(
+                    1,
+                    PcodeOpcode::Load,
+                    Some(eax.clone()),
+                    vec![constant(3), reg(0x14, 4)],
+                ),
+                op(
+                    2,
+                    PcodeOpcode::IntEqual,
+                    Some(zf.clone()),
+                    vec![eax.clone(), constant(0)],
+                ),
+                op(
+                    3,
+                    PcodeOpcode::CBranch,
+                    None,
+                    vec![constant(0x1030), zf.clone()],
+                ),
+            ],
+        ),
+        block_at(
+            0x1010,
+            1,
+            vec![
+                op(4, PcodeOpcode::Copy, Some(ecx.clone()), vec![eax.clone()]),
+                op(
+                    5,
+                    PcodeOpcode::IntAnd,
+                    Some(ecx.clone()),
+                    vec![ecx.clone(), constant(1)],
+                ),
+                op(
+                    6,
+                    PcodeOpcode::IntAdd,
+                    Some(edx.clone()),
+                    vec![edx.clone(), ecx],
+                ),
+                op(
+                    7,
+                    PcodeOpcode::IntRight,
+                    Some(eax.clone()),
+                    vec![eax.clone(), constant(1)],
+                ),
+                op(
+                    8,
+                    PcodeOpcode::IntEqual,
+                    Some(zf.clone()),
+                    vec![eax.clone(), constant(0)],
+                ),
+                op(
+                    9,
+                    PcodeOpcode::BoolNegate,
+                    Some(varnode(0x50)),
+                    vec![zf],
+                ),
+                op(
+                    10,
+                    PcodeOpcode::CBranch,
+                    None,
+                    vec![constant(0x1010), varnode(0x50)],
+                ),
+            ],
+        ),
+        block_at(
+            0x1030,
+            2,
+            vec![
+                op(11, PcodeOpcode::Copy, Some(eax.clone()), vec![edx]),
+                op(12, PcodeOpcode::Return, None, vec![]),
+            ],
+        ),
+    ];
+    blocks[0].successors = vec![1, 2];
+    blocks[1].successors = vec![1, 2];
+    let pcode = pcode_function(blocks);
+    let mut options = test_options();
+    options.is_64bit = false;
+    options.pointer_size = 4;
+    options.pe_x64_only = false;
+    options.calling_convention = CallingConvention::X86_32;
+    let mut builder = PreviewBuilder::new(&pcode, &options, None);
+    let _entry = builder.lower_block_stmts(&pcode.blocks[0]).expect("entry");
+    let loop_body = builder.lower_block_stmts(&pcode.blocks[1]).expect("loop");
+
+    let shr_stmt = loop_body.iter().find(|s| {
+        matches!(
+            s,
+            HirStmt::Assign {
+                rhs: HirExpr::Binary {
+                    op: HirBinaryOp::Shr | HirBinaryOp::Sar,
+                    ..
+                },
+                ..
+            }
+        )
+    });
+    assert!(
+        shr_stmt.is_some(),
+        "expected IntRight assignment in loop body: {loop_body:?}"
+    );
+    if let Some(HirStmt::Assign {
+        lhs: HirLValue::Var(ind),
+        rhs: HirExpr::Binary { lhs: a, .. },
+        ..
+    }) = shr_stmt
+    {
+        assert!(
+            matches!(a.as_ref(), HirExpr::Var(name) if name == ind),
+            "shift must be self-update on the induction binding, got {shr_stmt:?}"
+        );
+        // Prefer formal/stable names over pure anonymous temps when possible.
+        assert!(
+            !ind.starts_with("uVar") || loop_body.iter().any(|s| {
+                matches!(
+                    s,
+                    HirStmt::Assign {
+                        lhs: HirLValue::Var(name),
+                        rhs: HirExpr::Var(src),
+                        ..
+                    } if name == "ecx" && src == ind
+                )
+            }),
+            "induction binding {ind} should remain readable as loop-carried self-update: {loop_body:?}"
+        );
+    }
+}
+
 /// Size-1 self-loop with trailing ZExt must still prove carried (ZExt is
 /// value-preserving and must not kill the narrow definition).
 #[test]
