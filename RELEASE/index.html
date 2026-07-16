@@ -1178,9 +1178,10 @@
 <li><strong>L2</strong> <a href="../.github/workflows/release-e2e.yml"><code>.github/workflows/release-e2e.yml</code></a> succeeds on that commit (enforced by <a href="../.github/workflows/release-tag.yml">release-tag.yml</a> before the tag is created).</li>
 <li>Prefer creating tags only via Actions → <strong>Release Tag (CI green)</strong> so the above are machine-checked and the tag points at the verified SHA.</li>
 <li><a href="../.github/workflows/cd.yml"><code>cd.yml</code></a> publishes all expected <strong><code>fission-cli</code></strong> assets:</li>
-<li><code>fission-linux-x64</code></li>
-<li><code>fission-macos-arm64</code></li>
-<li><code>fission-windows-x64</code></li>
+<li><code>fission-linux-x64</code> / <code>fission-macos-arm64</code> / <code>fission-windows-x64</code> (each archive includes a verified <code>utils/</code> tree)</li>
+<li><strong><code>fission-utils.tar.gz</code></strong> (+ <code>.sha256</code>, inventory) — standalone resource bundle on the same tag</li>
+<li>Linux benchmark CLI: <code>fission_cli-x86_64-unknown-linux-gnu</code> (binary-only convenience asset)</li>
+<li>Optional: refresh long-lived CI pin via Actions → <strong>Publish Utils Assets</strong> (<code>assets-v1</code>, see <a href="../CI_RELEASE_GATES/"><code>docs/CI_RELEASE_GATES.md</code></a> § Resource bundle)</li>
 <li>The <strong>30-minute</strong> evaluation path in <a href="../EVALUATION/"><code>docs/EVALUATION.md</code></a> passes on at least <strong>one</strong> Windows x64 sample binary.</li>
 <li>If corpus-wide quality is claimed, attach or link <code>benchmark_compact_summary.json</code> and confirm:</li>
 <li><code>release_promotion_allowed</code> is <code>true</code>, <strong>or</strong></li>

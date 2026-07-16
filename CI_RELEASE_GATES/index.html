@@ -959,6 +959,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#resource-bundle-utils-assets" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Resource bundle (utils/) assets
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#related-files" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1041,7 +1052,7 @@
 <td><strong>L3 CD</strong></td>
 <td><a href="../.github/workflows/cd.yml"><code>cd.yml</code></a></td>
 <td>Tag push <code>v*.*.*</code> / <code>X.Y.Z</code></td>
-<td>Multi-platform release binaries → GitHub Release</td>
+<td>Multi-platform CLI archives (each includes <code>utils/</code>) + standalone <strong><code>fission-utils.tar.gz</code></strong> → GitHub Release</td>
 </tr>
 </tbody>
 </table>
@@ -1110,12 +1121,49 @@ not block once that SHA already has a green push Heavy).</p>
 <li><strong>Local docker benchmark</strong> remains a quality-loop tool; never promotes to
   official latest (see <a href="../BENCHMARK_DOCKER/"><code>docs/BENCHMARK_DOCKER.md</code></a>).</li>
 </ul>
+<h2 id="resource-bundle-utils-assets">Resource bundle (<code>utils/</code>) assets<a class="headerlink" href="#resource-bundle-utils-assets" title="Permanent link">&para;</a></h2>
+<p>Runtime data lives under <a href="../utils/"><code>utils/</code></a> (Sleigh specs, signatures, ghidra-data).
+It is <strong>not</strong> pure Rust source — many files are Git LFS.</p>
+<table>
+<thead>
+<tr>
+<th>Asset</th>
+<th>How it is published</th>
+<th>Who uses it</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Inside platform archives</strong> (<code>fission-linux-x64.tar.gz</code>, …)</td>
+<td><code>cd.yml</code> copies a verified <code>utils/</code> into each OS package</td>
+<td>End-user installs that unpack the full release</td>
+</tr>
+<tr>
+<td><strong><code>fission-utils.tar.gz</code> on the SemVer release</strong></td>
+<td><code>cd.yml</code> job <code>publish-utils-bundle</code> (once per tag)</td>
+<td>Offline installs; pin utils to the same version as the CLI</td>
+</tr>
+<tr>
+<td><strong><code>fission-utils.tar.gz</code> on <code>assets-v*</code></strong></td>
+<td><a href="../.github/workflows/publish-utils-assets.yml"><code>publish-utils-assets.yml</code></a> (manual)</td>
+<td>CI <a href="../.github/actions/setup-utils"><code>.github/actions/setup-utils</code></a> default pin (<code>assets-v1</code>)</td>
+</tr>
+</tbody>
+</table>
+<p>Rules:</p>
+<ol>
+<li>Platform packages <strong>fail the release</strong> if <code>utils/sleigh-specs</code> is missing/incomplete.</li>
+<li>Prefer <strong>version-matched</strong> <code>fission-utils.tar.gz</code> on the same <code>vX.Y.Z</code> release for production installs.</li>
+<li>Bump or refresh <code>assets-v1</code> only when CI/bootstrap should pick up new specs for all branches (not every SemVer).</li>
+</ol>
 <h2 id="related-files">Related files<a class="headerlink" href="#related-files" title="Permanent link">&para;</a></h2>
 <ul>
 <li><a href="../.github/CI_CD_GUIDE.md"><code>.github/CI_CD_GUIDE.md</code></a> — operator overview</li>
 <li><a href="../.github/workflows/release-tag.yml"><code>.github/workflows/release-tag.yml</code></a></li>
 <li><a href="../.github/workflows/release-e2e.yml"><code>.github/workflows/release-e2e.yml</code></a></li>
 <li><a href="../.github/workflows/cd.yml"><code>.github/workflows/cd.yml</code></a></li>
+<li><a href="../.github/workflows/publish-utils-assets.yml"><code>.github/workflows/publish-utils-assets.yml</code></a></li>
+<li><a href="../utils/MANIFEST.md"><code>utils/MANIFEST.md</code></a></li>
 </ul>
 
 
