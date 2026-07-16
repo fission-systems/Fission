@@ -134,15 +134,32 @@ jobs:
               -o "${LANE_BIN}"
           fi
           test -s "${LANE_BIN}"
-          # Compact go/stop signal for release. Never update automation latest.
+          # Compact NIR smoke for release. Never update automation latest.
+          # Do not use --fail-on-stop: CI has no committed latest/ baseline for
+          # this lane, so the gate is stop_no_baseline even when all rows
+          # succeed (Heavy reusable-nir-check omits fail-on-stop for the same
+          # reason). Fail only when the process itself returns non-zero or
+          # the log shows nir_failure > 0.
+          set +e
           cargo run -p fission-automation --release -- nir-check \
             --lane nir \
             --no-build \
             --no-update-latest \
-            --fail-on-stop \
             --fission-bin target/release/fission_cli \
             --run-profile fast \
-            --functions-limit 8
+            --functions-limit 8 \
+            2>&1 | tee /tmp/release_e2e_nir_check.log
+          RC=${PIPESTATUS[0]}
+          set -e
+          if [ "${RC}" -ne 0 ]; then
+            echo "nir-check exited ${RC}"
+            exit "${RC}"
+          fi
+          if rg -q 'nir_failure=[1-9]' /tmp/release_e2e_nir_check.log; then
+            echo "nir-check reported nir_failure > 0"
+            exit 1
+          fi
+          echo "nir-check smoke ok (process success, nir_failure=0)"
       - name: Upload E2E logs
         if: always()
         uses: actions/upload-artifact@v4
