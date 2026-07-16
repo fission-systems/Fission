@@ -1,0 +1,92 @@
+# Publish / refresh the standalone utils resource bundle used by CI setup-utils
+# and external installs. Prefer attaching fission-utils.tar.gz to SemVer releases
+# via cd.yml; use this workflow to update the long-lived assets-v* pin.
+#
+# Default assets_tag: assets-v1 (matches .github/actions/setup-utils).
+name: Publish Utils Assets
+
+on:
+  workflow_dispatch:
+    inputs:
+      assets_tag:
+        description: "Release tag to create/update (e.g. assets-v1 or assets-v2)"
+        required: true
+        default: "assets-v1"
+        type: string
+      ref:
+        description: "Git ref to package utils from (branch or SHA)"
+        required: false
+        default: "main"
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: publish-utils-${{ inputs.assets_tag }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Package and upload fission-utils
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref }}
+          lfs: true
+          fetch-depth: 1
+
+      - name: Pull LFS objects for utils
+        shell: bash
+        run: |
+          set -euo pipefail
+          git lfs pull --include="utils/**" || true
+
+      - name: Setup Utils (fill gaps from existing assets pin if needed)
+        uses: ./.github/actions/setup-utils
+        with:
+          # Bootstrap from the long-lived pin when the ref's LFS tree is incomplete.
+          assets_tag: assets-v1
+
+      - name: Package
+        shell: bash
+        run: |
+          set -euo pipefail
+          slaspec_count=$(find utils/sleigh-specs -name "*.slaspec" 2>/dev/null | wc -l | tr -d ' ')
+          echo "slaspec_count=${slaspec_count}"
+          test "${slaspec_count}" -gt 10
+          tar -czf fission-utils.tar.gz utils
+          shasum -a 256 fission-utils.tar.gz > fission-utils.tar.gz.sha256
+          {
+            echo "assets_tag=${{ inputs.assets_tag }}"
+            echo "source_ref=${{ inputs.ref }}"
+            echo "source_sha=$(git rev-parse HEAD)"
+            echo "slaspec_count=${slaspec_count}"
+            du -sh utils utils/* 2>/dev/null || true
+          } | tee fission-utils.inventory.txt
+          ls -lh fission-utils.tar.gz
+
+      - name: Create or update GitHub Release assets
+        uses: softprops/action-gh-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ inputs.assets_tag }}
+          name: Resource assets (${{ inputs.assets_tag }})
+          body: |
+            Standalone **utils/** resource bundle for Fission CI and installs.
+
+            - Asset: `fission-utils.tar.gz`
+            - Layout: top-level `utils/` (sleigh-specs, signatures, ghidra-data, …)
+            - Consumed by `.github/actions/setup-utils` and optional offline installs
+
+            Source ref: `${{ inputs.ref }}`
+          files: |
+            fission-utils.tar.gz
+            fission-utils.tar.gz.sha256
+            fission-utils.inventory.txt
+          draft: false
+          prerelease: false
+          make_latest: false

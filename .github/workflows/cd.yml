@@ -98,6 +98,7 @@ jobs:
       - name: Prepare Package Directory
         shell: bash
         run: |
+          set -euo pipefail
           mkdir -p release_pkg
           cp target/${{ matrix.target }}/release/${{ matrix.artifact_name }} release_pkg/
           
@@ -110,10 +111,16 @@ jobs:
             echo "ℹ️  No ghidra resource directory found; skipping copy"
           fi
           
-          # Copy utils resources (LFS assets)
-          if [ -d utils ]; then
-            cp -r utils release_pkg/
+          # Runtime resource bundle (sleigh / signatures / ghidra-data).
+          # Populated by setup-utils (assets-v* download) and/or LFS checkout.
+          if [ ! -d utils/sleigh-specs ]; then
+            echo "❌ utils/sleigh-specs missing — cannot ship a usable resource bundle"
+            exit 1
           fi
+          slaspec_count=$(find utils/sleigh-specs -name "*.slaspec" 2>/dev/null | wc -l | tr -d ' ')
+          echo "Packaging utils/ (.slaspec count=${slaspec_count})"
+          test "${slaspec_count}" -gt 10
+          cp -a utils release_pkg/
 
       - name: Create benchmark raw CLI asset (Linux)
         if: runner.os == 'Linux'
@@ -176,10 +183,63 @@ jobs:
           draft: false
           prerelease: false
 
+  # Standalone utils/ resource bundle on the same SemVer release (once, Linux).
+  # Consumers and CI setup-utils can pin either assets-v* or this versioned asset.
+  publish-utils-bundle:
+    name: 📦 Publish fission-utils bundle
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # Do not depend on matrix builds — packaging is platform-independent.
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          lfs: true
+          submodules: recursive
+
+      - name: Setup Utils
+        uses: ./.github/actions/setup-utils
+
+      - name: Package fission-utils.tar.gz
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -d utils/sleigh-specs
+          slaspec_count=$(find utils/sleigh-specs -name "*.slaspec" 2>/dev/null | wc -l | tr -d ' ')
+          echo "utils .slaspec count: ${slaspec_count}"
+          test "${slaspec_count}" -gt 10
+
+          # Archive top-level `utils/` so setup-utils can:
+          #   tar -xzf fission-utils.tar.gz -C utils --strip-components=1
+          tar -czf fission-utils.tar.gz utils
+          shasum -a 256 fission-utils.tar.gz > fission-utils.tar.gz.sha256
+          ls -lh fission-utils.tar.gz
+          cat fission-utils.tar.gz.sha256
+
+          # Inventory for release notes / debugging
+          {
+            echo "fission-utils bundle inventory"
+            echo "slaspec_count=${slaspec_count}"
+            du -sh utils utils/* 2>/dev/null || true
+            find utils -type f | wc -l | awk '{print "file_count="$1}'
+          } | tee fission-utils.inventory.txt
+
+      - name: Upload utils assets to GitHub Release
+        uses: softprops/action-gh-release@v1
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          files: |
+            fission-utils.tar.gz
+            fission-utils.tar.gz.sha256
+            fission-utils.inventory.txt
+          draft: false
+          prerelease: false
+
   # Release validation job
   release-summary:
     name: ✅ Release Summary
-    needs: build-and-release
+    needs: [build-and-release, publish-utils-bundle]
     runs-on: ubuntu-latest
     if: always()
     steps:
@@ -189,8 +249,16 @@ jobs:
             echo "❌ Release build failed"
             exit 1
           fi
+          if [ "${{ needs.publish-utils-bundle.result }}" != "success" ]; then
+            echo "❌ Utils bundle publish failed"
+            exit 1
+          fi
           echo "✅ Release artifacts created successfully!"
           echo ""
           echo "Tag: ${{ github.ref_name }}"
+          echo "Assets include:"
+          echo "  - fission-linux-x64 / macos-arm64 / windows-x64 (CLI + utils inside archive)"
+          echo "  - fission-utils.tar.gz (standalone resource bundle)"
+          echo "  - fission_cli-x86_64-unknown-linux-gnu (Linux CLI only, for benchmark consumers)"
           echo "Release assets will be available at:"
           echo "https://github.com/${{ github.repository }}/releases/tag/${{ github.ref_name }}"

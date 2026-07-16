@@ -15,9 +15,10 @@ A tagged release is eligible when:
 - **L2** [`.github/workflows/release-e2e.yml`](../.github/workflows/release-e2e.yml) succeeds on that commit (enforced by [release-tag.yml](../.github/workflows/release-tag.yml) before the tag is created).
 - Prefer creating tags only via Actions → **Release Tag (CI green)** so the above are machine-checked and the tag points at the verified SHA.
 - [`cd.yml`](../.github/workflows/cd.yml) publishes all expected **`fission-cli`** assets:
-  - `fission-linux-x64`
-  - `fission-macos-arm64`
-  - `fission-windows-x64`
+  - `fission-linux-x64` / `fission-macos-arm64` / `fission-windows-x64` (each archive includes a verified `utils/` tree)
+  - **`fission-utils.tar.gz`** (+ `.sha256`, inventory) — standalone resource bundle on the same tag
+  - Linux benchmark CLI: `fission_cli-x86_64-unknown-linux-gnu` (binary-only convenience asset)
+- Optional: refresh long-lived CI pin via Actions → **Publish Utils Assets** (`assets-v1`, see [`docs/CI_RELEASE_GATES.md`](CI_RELEASE_GATES.md) § Resource bundle)
 - The **30-minute** evaluation path in [`docs/EVALUATION.md`](EVALUATION.md) passes on at least **one** Windows x64 sample binary.
 - If corpus-wide quality is claimed, attach or link `benchmark_compact_summary.json` and confirm:
   - `release_promotion_allowed` is `true`, **or**
