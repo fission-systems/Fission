@@ -76,3 +76,20 @@ Standing rule for AI-assisted and human quality cycles:
 4. Report both CLI one-shot and runner/oracle movement.
 
 Also linked from root `Agents.md` (Decompiler Quality Loop).
+
+## Quality extensions (non-ranking)
+
+The external runner now also records **diagnostic** axes that never feed semantic
+ranking:
+
+| Extension | Meaning |
+|-----------|---------|
+| Bare-compile | Minimal-header `gcc -c` on decompiled C |
+| Readability axis | goto / temp density / flag-soup proxies |
+| Tracks / ISA / format | realworld · multi_isa · pe/elf pivots + timeout taxonomy |
+
+Dashboard: `fission-benchmark` route **`/quality`**. Official ranking remains
+**semantic pass rate** under the `original_binary` oracle only.
+
+Corpus growth: `corpus/dev/source/advanced_patterns.c` (list / struct / indirect
+call / stride) with wrappers in `runner/test_wrappers.py`.
