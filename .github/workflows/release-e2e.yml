@@ -162,7 +162,7 @@ jobs:
           echo "nir-check smoke ok (process success, nir_failure=0)"
       - name: Upload E2E logs
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: release-e2e-${{ github.run_id }}
           path: |
