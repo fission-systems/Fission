@@ -121,6 +121,19 @@ jobs:
       - name: NIR-check fast (no latest promotion)
         run: |
           set -euo pipefail
+          # Lane manifest expects this path (see sentinel_sets.toml). Heavy
+          # reusable-nir-check builds the same MinGW fixture there; release-e2e
+          # previously only built under /tmp and nir-check failed missing path.
+          LANE_BIN="${{ github.workspace }}/benchmark/binary/x86-64/window/small/binary/c/test_functions.exe"
+          mkdir -p "$(dirname "${LANE_BIN}")"
+          if [ -n "${BIN:-}" ] && [ -s "${BIN}" ]; then
+            cp -f "${BIN}" "${LANE_BIN}"
+          else
+            x86_64-w64-mingw32-gcc -O2 -g -m64 -static \
+              .github/fixtures/test_functions.c \
+              -o "${LANE_BIN}"
+          fi
+          test -s "${LANE_BIN}"
           # Compact go/stop signal for release. Never update automation latest.
           cargo run -p fission-automation --release -- nir-check \
             --lane nir \
