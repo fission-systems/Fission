@@ -383,6 +383,36 @@ impl<'a> PreviewBuilder<'a> {
         self.recover_call_args_from_block_with_mode(block, call_idx, true)
     }
 
+    /// For CallInd, the register family that holds the callee pointer must not
+    /// also appear as a recovered ABI argument (win64 `call r8` writes r8 and
+    /// r8 is also param slot 2).
+    fn callind_target_param_slot_index(
+        &self,
+        block: &crate::pcode::PcodeBasicBlock,
+        call_idx: usize,
+    ) -> Option<usize> {
+        let op = block.ops.get(call_idx)?;
+        if op.opcode != PcodeOpcode::CallInd {
+            return None;
+        }
+        let mut cursor = op.inputs.first()?.clone();
+        // Follow a short copy/zext chain to a register-space carrier.
+        for _ in 0..6 {
+            if is_register_space_id(cursor.space_id) {
+                return self.param_index_for_varnode(&cursor, true);
+            }
+            let (_site, def_op) = self.lookup_def_site(&cursor)?;
+            if !matches!(
+                def_op.opcode,
+                PcodeOpcode::Copy | PcodeOpcode::IntZExt | PcodeOpcode::IntSExt | PcodeOpcode::Cast
+            ) {
+                return None;
+            }
+            cursor = def_op.inputs.first()?.clone();
+        }
+        None
+    }
+
     fn recover_call_args_from_block_with_mode(
         &mut self,
         block: &crate::pcode::PcodeBasicBlock,
@@ -406,6 +436,7 @@ impl<'a> PreviewBuilder<'a> {
         let param_slots = abi.effective_param_reg_slots();
         let param_count = param_slots.len();
         let mut recovered: Vec<Option<HirExpr>> = vec![None; param_count];
+        let skip_param = self.callind_target_param_slot_index(block, call_idx);
         let scan_end = call_idx.min(block.ops.len());
         let call_address = block.ops.get(call_idx).map(|op| op.address);
         let has_same_instruction_callother_marker = block.ops[..scan_end].iter().any(|prev| {
@@ -439,6 +470,9 @@ impl<'a> PreviewBuilder<'a> {
             let Some(param_index) = self.param_index_for_varnode(output, true) else {
                 continue;
             };
+            if skip_param == Some(param_index) {
+                continue;
+            }
             if param_index >= recovered.len() || recovered[param_index].is_some() {
                 continue;
             }
@@ -503,6 +537,9 @@ impl<'a> PreviewBuilder<'a> {
         let assignments = self.call_arg_carrier_assignments(block, call_idx, &abi);
         for assignment in assignments {
             let param_index = assignment.resource.slot;
+            if skip_param == Some(param_index) {
+                continue;
+            }
             if recovered[param_index].is_some() {
                 continue;
             }

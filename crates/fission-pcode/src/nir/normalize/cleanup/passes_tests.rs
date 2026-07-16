@@ -1459,7 +1459,10 @@ fn printer_renders_callind_opaque_as_pointer_call() {
     };
 
     let rendered = print_expr(&expr);
-    assert_eq!(rendered, "(*(fn_ptr))(arg1, arg2)");
+    assert_eq!(
+        rendered,
+        "((unsigned long long (*)())(fn_ptr))(arg1, arg2)"
+    );
 }
 
 #[test]

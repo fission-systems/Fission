@@ -1057,3 +1057,47 @@ fn join_register_update_read_stays_live_register_instead_of_abi_param() {
 
     assert_eq!(lowered, HirExpr::Var("w0".to_string()));
 }
+
+/// x64 `call r8` after loading args into rcx/rdx: CallInd through a register
+/// must print as `(*(fp))(…)` (not an undeclared symbol) and bind the result
+/// into the return path.
+#[test]
+fn x64_register_callind_emits_function_pointer_call() {
+    use crate::nir::cspec::test_maps::apply_preview_cspec;
+
+    // Win64: RCX=arg0, RDX=arg1, R8=function pointer for `call r8`.
+    let rcx = register(0x8, 8);
+    let rdx = register(0x10, 8);
+    let r8 = register(0x80, 8);
+    let eax = register(0, 4);
+    let ret_addr = register(0x288, 8);
+    let mut options = test_options();
+    apply_preview_cspec(&mut options);
+
+    let pcode = pcode_function(vec![block_at(
+        0x1000,
+        0,
+        vec![
+            // arg0 = 3, arg1 = 4; call target is r8 (no constant fold path).
+            op(0, PcodeOpcode::Copy, Some(eax.clone()), vec![constant_sized(3, 4)]),
+            op(1, PcodeOpcode::IntZExt, Some(rcx.clone()), vec![eax.clone()]),
+            op(2, PcodeOpcode::Copy, Some(eax.clone()), vec![constant_sized(4, 4)]),
+            op(3, PcodeOpcode::IntZExt, Some(rdx.clone()), vec![eax.clone()]),
+            op(4, PcodeOpcode::CallInd, None, vec![r8]),
+            op(5, PcodeOpcode::Return, None, vec![ret_addr]),
+        ],
+    )]);
+
+    let code =
+        render_mlil_preview(&pcode, "reg_callind", 0x1000, &options).expect("render");
+    eprintln!("reg_callind:\n{code}");
+    assert!(
+        code.contains("(*)()") || code.contains("(*") || code.contains("*)("),
+        "expected function-pointer call form, got:\n{code}"
+    );
+    assert!(
+        !code.contains("sub_"),
+        "must not invent sub_XXXX for a live register fp:\n{code}"
+    );
+    assert!(code.contains("return"), "expected a return:\n{code}");
+}

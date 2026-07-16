@@ -497,7 +497,23 @@ fn print_expr_prec(expr: &HirExpr, parent_prec: u8, depth: usize) -> String {
                     .map(|arg| print_expr_prec(arg, 0, depth + 1))
                     .collect::<Vec<_>>()
                     .join(", ");
-                (format!("(*({fn_ptr}))({remaining_args})"), 120)
+                // Cast scalar/unknown function-pointer carriers to a callable
+                // type so `(*(ulonglong)fp)(...)` is valid C (register CallInd).
+                let ret_ty = match ty {
+                    NirType::Unknown => "unsigned long long".to_string(),
+                    other => {
+                        let printed = print_type(other);
+                        if printed.is_empty() || printed == "void" {
+                            "unsigned long long".to_string()
+                        } else {
+                            printed
+                        }
+                    }
+                };
+                (
+                    format!("(({ret_ty} (*)())({fn_ptr}))({remaining_args})"),
+                    120,
+                )
             } else {
                 let target = print_callable_target(target, args, ty, None);
                 let args = args
@@ -942,7 +958,21 @@ fn print_expr_prec_ctx(
                     .map(|arg| print_expr_prec_ctx(arg, 0, depth + 1, ctx))
                     .collect::<Vec<_>>()
                     .join(", ");
-                (format!("(*({fn_ptr}))({remaining_args})"), 120)
+                let ret_ty = match ty {
+                    NirType::Unknown => "unsigned long long".to_string(),
+                    other => {
+                        let printed = print_type(other);
+                        if printed.is_empty() || printed == "void" {
+                            "unsigned long long".to_string()
+                        } else {
+                            printed
+                        }
+                    }
+                };
+                (
+                    format!("(({ret_ty} (*)())({fn_ptr}))({remaining_args})"),
+                    120,
+                )
             } else {
                 let target = print_callable_target(target, args, ty, Some(ctx));
                 let args = args

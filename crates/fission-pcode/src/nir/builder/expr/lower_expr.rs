@@ -1123,7 +1123,12 @@ impl<'a> PreviewBuilder<'a> {
                         {
                             name
                         } else {
-                            name
+                            // Register/stack function pointer (e.g. `call r8`).
+                            // Do not treat the temp/reg name as a C function
+                            // symbol — printer special-cases the opaque target
+                            // as `(*(fp))(args)`.
+                            let _ = name;
+                            "__fission_callind_opaque".to_string()
                         }
                     }
                     Ok(HirExpr::Var(name)) => self
@@ -1154,10 +1159,16 @@ impl<'a> PreviewBuilder<'a> {
                             {
                                 name
                             } else {
-                                print_expr(&other)
+                                // Memory-indirect function pointer without IAT
+                                // resolution: keep opaque so printer uses
+                                // `(*(load))(args)`.
+                                let _ = other;
+                                "__fission_callind_opaque".to_string()
                             }
                         } else {
-                            print_expr(&other)
+                            // Non-var expression target (cast/ptr): opaque call.
+                            let _ = other;
+                            "__fission_callind_opaque".to_string()
                         }
                     }
                     Ok(other) => print_expr(&other),
@@ -1240,6 +1251,9 @@ impl<'a> PreviewBuilder<'a> {
         if target == "__fission_callind_opaque" {
             if let Some(target_vn) = op.inputs.first() {
                 if let Ok(target_expr) = self.lower_varnode(target_vn, visiting) {
+                    // Drop recovered ABI args that are the call-target carrier
+                    // itself (e.g. win64 `call r8` also wrote r8 as param slot 2).
+                    args.retain(|arg| !Self::call_arg_is_callind_target_carrier(arg, &target_expr));
                     args.insert(0, target_expr);
                 }
             }
@@ -1253,6 +1267,27 @@ impl<'a> PreviewBuilder<'a> {
                 .map(|out| type_from_size(out.size, false))
                 .unwrap_or(NirType::Unknown),
         })
+    }
+
+    /// True when a recovered call argument expression is the same surface as
+    /// the CallInd target (function pointer used as both target and "arg").
+    fn call_arg_is_callind_target_carrier(arg: &HirExpr, target: &HirExpr) -> bool {
+        match (arg, target) {
+            (HirExpr::Var(a), HirExpr::Var(b)) => a == b,
+            (
+                HirExpr::Cast {
+                    expr: a_inner, ..
+                },
+                _,
+            ) => Self::call_arg_is_callind_target_carrier(a_inner, target),
+            (
+                _,
+                HirExpr::Cast {
+                    expr: t_inner, ..
+                },
+            ) => Self::call_arg_is_callind_target_carrier(arg, t_inner),
+            _ => false,
+        }
     }
 
     fn lower_callother(

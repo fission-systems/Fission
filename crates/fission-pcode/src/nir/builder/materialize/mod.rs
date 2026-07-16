@@ -283,6 +283,7 @@ impl<'a> PreviewBuilder<'a> {
         if ret_regs.is_empty() {
             return false;
         }
+        let mut redefined = false;
         for candidate in block.ops.iter().skip(op_idx + 1) {
             if candidate.inputs.iter().any(|input| {
                 ret_regs
@@ -296,10 +297,21 @@ impl<'a> PreviewBuilder<'a> {
                     .iter()
                     .any(|ret_reg| self.varnode_aliases_value(ret_reg, output))
             {
-                return false;
+                redefined = true;
+                break;
             }
         }
-        false
+        if redefined {
+            return false;
+        }
+        // CallInd often has no p-code use of RAX before an epilogue Return
+        // (return address on the stack). The ABI still leaves the primary
+        // return register live-out — materialize `ret = (*(fp))(…)` so return
+        // recovery can read the call-result binding.
+        matches!(
+            block.ops.get(op_idx).map(|op| op.opcode),
+            Some(PcodeOpcode::CallInd)
+        )
     }
 
     fn ensure_call_result_binding(&mut self, site: LoweringSite, op: &PcodeOp) -> String {
@@ -322,6 +334,14 @@ impl<'a> PreviewBuilder<'a> {
                 )
                 .name;
         };
+        // Prefer the ABI return surface (rax / r3 / …) so epilogue recovery and
+        // CallInd result share one name. Temps (`xVarN`) break `return` join and
+        // force undeclared-symbol noise when the call is a function pointer.
+        if let Some(name) = self.sla_hw_name(ret_reg.offset, ret_reg.size) {
+            self.ensure_live_register_binding(&name, ret_reg.size);
+            self.call_result_bindings.insert(site, name.clone());
+            return name;
+        }
         let name = self.next_unused_temp_binding_name(&type_from_size(ret_reg.size, false));
         self.temps.insert(
             name.clone(),
@@ -655,6 +675,11 @@ impl<'a> PreviewBuilder<'a> {
             return Ok(None);
         }
         if self.output_is_stack_pointer_register(output) {
+            return Ok(None);
+        }
+        // Stack-adjust flag soup (`sub rsp, N` sets ZF/CF/…): never program
+        // predicates. Materializing them yields undeclared `rsp` compares.
+        if self.flag_def_is_stack_pointer_only(op, output) {
             return Ok(None);
         }
         if self.output_used_only_by_single_store(block, op_idx, output) {
@@ -3488,6 +3513,35 @@ impl<'a> PreviewBuilder<'a> {
     fn output_is_stack_pointer_register(&self, output: &Varnode) -> bool {
         self.stack_pointer_register_name(output)
             .is_some_and(|name| matches!(name.as_str(), "rsp" | "esp" | "sp"))
+    }
+
+    /// True when `op` defines a condition flag from stack-pointer arithmetic only
+    /// (prologue/epilogue `sub/add rsp` flag noise).
+    fn flag_def_is_stack_pointer_only(&self, op: &PcodeOp, output: &Varnode) -> bool {
+        if !is_register_space_id(output.space_id) {
+            return false;
+        }
+        // x86 flag-bank offsets used by SLEIGH (CF/PF/AF/ZF/SF/OF-class).
+        let is_flag = matches!(
+            output.offset,
+            0x200 | 0x201 | 0x202 | 0x206 | 0x207 | 0x20b
+        ) && output.size <= 1;
+        if !is_flag {
+            return false;
+        }
+        let mut saw_stack = false;
+        for input in &op.inputs {
+            if input.is_constant {
+                continue;
+            }
+            if self.output_is_stack_pointer_register(input) {
+                saw_stack = true;
+                continue;
+            }
+            // Any non-const, non-stack input means a real data predicate.
+            return false;
+        }
+        saw_stack
     }
 
     fn is_predicate_passthrough_to_terminator(op: &PcodeOp) -> bool {
