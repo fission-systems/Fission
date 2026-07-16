@@ -10,9 +10,13 @@
       
       
       
-        <link rel="canonical" href="https://sjkim1127.github.io/Fission/proposals/2026-07-14-partial-reg-zext-transparent-compose/">
+        <link rel="canonical" href="https://sjkim1127.github.io/Fission/changelog/v0.1.3/">
       
       
+        <link rel="prev" href="../../RELEASE/">
+      
+      
+        <link rel="next" href="../v0.1.2/">
       
       
         
@@ -23,7 +27,7 @@
     
     
       
-        <title>Decompiler Change Proposal: Transparent same-register IntZExt in partial compose - Fission</title>
+        <title>Fission 0.1.3 - Fission</title>
       
     
     
@@ -74,7 +78,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#decompiler-change-proposal-transparent-same-register-intzext-in-partial-compose" class="md-skip">
+        <a href="#fission-v013" class="md-skip">
           Skip to content
         </a>
       
@@ -108,7 +112,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Decompiler Change Proposal: Transparent same-register IntZExt in partial compose
+              Fission 0.1.3
             
           </span>
         </div>
@@ -382,11 +386,13 @@
   
   
   
+    
+  
   
     
     
-      <li class="md-tabs__item">
-        <a href="../../changelog/v0.1.3/" class="md-tabs__link">
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="./" class="md-tabs__link">
           
   
   
@@ -781,28 +787,31 @@
       
   
   
+    
   
   
+  
     
     
     
     
+      
+        
+        
       
       
         
       
     
     
-    <li class="md-nav__item md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
       
         
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_9" checked>
         
           
-        
-        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_9" >
-        
-          
-          <label class="md-nav__link" for="__nav_9" id="__nav_9_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_9" id="__nav_9_label" tabindex="">
             
   
   
@@ -820,7 +829,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_9_label" aria-expanded="false">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_9_label" aria-expanded="true">
           <label class="md-nav__title" for="__nav_9">
             <span class="md-nav__icon md-icon"></span>
             
@@ -835,10 +844,37 @@
                 
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../../changelog/v0.1.3/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fission 0.1.3
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   
@@ -854,6 +890,142 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#release-summary" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Release summary
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#decompiler-quality" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Decompiler quality
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Decompiler quality">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#callind-and-branchind-function-pointers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        CallInd and BranchInd (function pointers)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#x86-32-cdecl-callind-branchind" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        x86-32 cdecl CallInd / BranchInd
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#conditions-and-related-recovery" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Conditions and related recovery
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#typed-program-metadata" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Typed program metadata
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#ci-cd-and-packaging" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        CI / CD and packaging
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#validation-notes-local-quality-loop" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Validation notes (local quality loop)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#package-and-tooling-versions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Package and tooling versions
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#upgrade-notes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Upgrade notes
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -866,7 +1038,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../changelog/v0.1.2/" class="md-nav__link">
+      <a href="../v0.1.2/" class="md-nav__link">
         
   
   
@@ -921,10 +1093,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#1-baseline-row-anchor" class="md-nav__link">
+  <a href="#release-summary" class="md-nav__link">
     <span class="md-ellipsis">
       
-        1. Baseline Row Anchor
+        Release summary
       
     </span>
   </a>
@@ -932,10 +1104,71 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#2-owner-proof" class="md-nav__link">
+  <a href="#decompiler-quality" class="md-nav__link">
     <span class="md-ellipsis">
       
-        2. Owner Proof
+        Decompiler quality
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Decompiler quality">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#callind-and-branchind-function-pointers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        CallInd and BranchInd (function pointers)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#x86-32-cdecl-callind-branchind" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        x86-32 cdecl CallInd / BranchInd
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#conditions-and-related-recovery" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Conditions and related recovery
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#typed-program-metadata" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Typed program metadata
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#ci-cd-and-packaging" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        CI / CD and packaging
       
     </span>
   </a>
@@ -943,10 +1176,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#3-invariant-proof" class="md-nav__link">
+  <a href="#validation-notes-local-quality-loop" class="md-nav__link">
     <span class="md-ellipsis">
       
-        3. Invariant Proof
+        Validation notes (local quality loop)
       
     </span>
   </a>
@@ -954,10 +1187,21 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#4-validation" class="md-nav__link">
+  <a href="#package-and-tooling-versions" class="md-nav__link">
     <span class="md-ellipsis">
       
-        4. Validation
+        Package and tooling versions
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#upgrade-notes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Upgrade notes
       
     </span>
   </a>
@@ -984,46 +1228,165 @@
   
 
 
-<h1 id="decompiler-change-proposal-transparent-same-register-intzext-in-partial-compose">Decompiler Change Proposal: Transparent same-register IntZExt in partial compose<a class="headerlink" href="#decompiler-change-proposal-transparent-same-register-intzext-in-partial-compose" title="Permanent link">&para;</a></h1>
-<h2 id="1-baseline-row-anchor">1. Baseline Row Anchor<a class="headerlink" href="#1-baseline-row-anchor" title="Permanent link">&para;</a></h2>
+<h1 id="fission-v013">Fission v0.1.3<a class="headerlink" href="#fission-v013" title="Permanent link">&para;</a></h1>
+<p>Fission 0.1.3 is a decompiler-quality and release-operations patch. Compared
+with 0.1.2, it improves register and stack function-pointer call recovery on
+x86/x64 and x86-32, tightens return and condition handling around CallInd and
+BranchInd, lands the typed program-metadata substrate, and hardens the
+conservative release-tag gates used to publish SemVer assets.</p>
+<p>This remains a pre-1.0 patch: the documented CLI is the primary interface, and
+pseudocode can continue to improve as recovery rules tighten.</p>
+<h2 id="release-summary">Release summary<a class="headerlink" href="#release-summary" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Area</th>
+<th>v0.1.2</th>
+<th>v0.1.3</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Function-pointer calls</td>
+<td>Register CallInd often opaque / incomplete</td>
+<td>Opaque cast-callable form for register CallInd; ABI arg recovery</td>
+</tr>
+<tr>
+<td>Tail calls</td>
+<td>BranchInd fp tails mostly ARM-oriented</td>
+<td>x86/x64 <code>jmp reg</code> tail-call recovery with staged arg peel</td>
+</tr>
+<tr>
+<td>x86-32 cdecl</td>
+<td>Stack arg / return binding gaps</td>
+<td>ESP-staged args, frame restage, EAX call-result binding, stack-param freeze</td>
+</tr>
+<tr>
+<td>Return join</td>
+<td>Pre-call EAX arg could win over call result</td>
+<td>Diamond join prefers live call-result binding</td>
+</tr>
+<tr>
+<td>Null-check conditions</td>
+<td><code>test reg</code> after redef could surface wrong param</td>
+<td>Flag-test peel stops at tested register; freeze Copy source at def site</td>
+</tr>
+<tr>
+<td>Program metadata</td>
+<td>Loader facts only</td>
+<td>Typed <code>fission-analysis-db</code> substrate wired into decompiler preflight</td>
+</tr>
+<tr>
+<td>CI / release</td>
+<td>Standard lanes</td>
+<td>L0 Fast + L1 Heavy on main, L2 Release E2E before tag, L3 CD with utils bundle</td>
+</tr>
+<tr>
+<td>Package version</td>
+<td><code>0.1.2</code></td>
+<td><code>0.1.3</code> (all workspace packages + <code>fission_cli --version</code>)</td>
+</tr>
+</tbody>
+</table>
+<h2 id="decompiler-quality">Decompiler quality<a class="headerlink" href="#decompiler-quality" title="Permanent link">&para;</a></h2>
+<h3 id="callind-and-branchind-function-pointers">CallInd and BranchInd (function pointers)<a class="headerlink" href="#callind-and-branchind-function-pointers" title="Permanent link">&para;</a></h3>
 <ul>
-<li>Binary: dev-corpus <code>control_flow</code> gcc -O2 (x64)</li>
-<li>Function: <code>signum</code> @ <code>0x140001560</code></li>
-<li>Failure: semantic <strong>3/5</strong> (negative inputs return 0 instead of -1)</li>
-<li>Bad shape:
-  <div class="language-c highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="n">xVar9</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="o">!</span><span class="n">zf</span><span class="p">;</span>
-</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="n">xVar9</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span><span class="w">   </span><span class="c1">// Int2Comp of stale full EAX (xor zero), ignoring setnz AL</span>
-</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="p">...</span>
-</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="o">!</span><span class="n">uVar</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">xVar9</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">1</span><span class="p">;</span><span class="w"> </span><span class="p">}</span><span class="w">  </span><span class="c1">// cmovg</span>
-</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="k">return</span><span class="w"> </span><span class="n">xVar9</span><span class="p">;</span><span class="w">              </span><span class="c1">// only 0 or 1</span>
-</span></code></pre></div></li>
-<li>Asm (correct): <code>xor eax,eax; mov edx,1; test ecx,ecx; setnz al; neg eax; test ecx,ecx; cmovg eax,edx; ret</code></li>
+<li>Lower register-held CallInd as cast function-pointer calls rather than bare
+  symbols or undeclared targets.</li>
+<li>Prefer call-result bindings over pre-call argument writes to EAX/RAX at
+  diamond joins (null → 0, non-null → <code>(*(fp))(…)</code>).</li>
+<li>Recover x86/x64 BranchInd through a register-held function pointer as a tail
+  call with ABI argument recovery from the BranchInd block and a single
+  predecessor when needed.</li>
+<li>When prefer_source recovers tail-call args, peel same-block Copy/ZExt so
+  staged values (<code>mov ecx, edx; zext rcx</code>) surface as the source param, not the
+  destination ABI slot.</li>
 </ul>
-<h2 id="2-owner-proof">2. Owner Proof<a class="headerlink" href="#2-owner-proof" title="Permanent link">&para;</a></h2>
+<h3 id="x86-32-cdecl-callind-branchind">x86-32 cdecl CallInd / BranchInd<a class="headerlink" href="#x86-32-cdecl-callind-branchind" title="Permanent link">&para;</a></h3>
 <ul>
-<li>[x] Builder/materialize: <code>try_lower_zero_extended_partial_register</code> in <code>lower_expr.rs</code></li>
-<li>Raw p-code is correct: setnz AL then <code>Int2Comp EAX</code></li>
-<li>After <code>xor EAX</code>, SLEIGH emits <code>IntZExt RAX ← EAX</code>. Reverse scan for composing
-  setnz AL into full EAX hits that IntZExt as an overlapping non-clear def and
-  aborts, so Int2Comp still reads the pre-setnz zero.</li>
+<li>Include X86_32 in call-result register recovery so CallInd materializes
+  <code>eax = (*(fp))(…)</code> and returns bind that result.</li>
+<li>Recover cdecl arguments staged as Stores to <code>[esp+k]</code> (k ≥ 0) before CallInd,
+  not only push-below-ESP forms; suppress those stores as call-arg setup
+  (avoids undeclared <code>local_0</code> from staging).</li>
+<li>Recover frame restage Stores to <code>[ebp+8+4*i]</code> before BranchInd/CallInd for
+  O2-style tail calls; suppress param reassignment materialization.</li>
+<li>Freeze staged-store RHS to the <strong>incoming stack-param surface</strong> reached by
+  the Copy/Load chain at the staging site so later EAX reloads of the call
+  target do not rewrite earlier args (<code>param_2</code> stays <code>param_2</code>).</li>
 </ul>
-<h2 id="3-invariant-proof">3. Invariant Proof<a class="headerlink" href="#3-invariant-proof" title="Permanent link">&para;</a></h2>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>INT_ZEXT of a same-space, same-offset low subregister into a wider register
-</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>preserves the low lane and zeros the newly introduced upper bytes. It must not
-</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>block composing a later low-lane write with an older register clear (xor/sub
-</span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>idiom). Upper bytes introduced by the zext count as zeroed ranges for the
-</span><span id="__span-1-5"><a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>requested read width.
-</span></code></pre></div>
-<p>ISA-agnostic: space/offset/size + IntZExt opcode only; no CC/function gates.</p>
-<h2 id="4-validation">4. Validation<a class="headerlink" href="#4-validation" title="Permanent link">&para;</a></h2>
+<h3 id="conditions-and-related-recovery">Conditions and related recovery<a class="headerlink" href="#conditions-and-related-recovery" title="Permanent link">&para;</a></h3>
 <ul>
-<li>Unit: <code>x64_xor_zext_setnz_neg_composes_partial_into_full_return</code></li>
-<li>Existing: <code>x86_32_xor_setnz_add_composes_partial_into_full_return</code> (no zext)</li>
-<li>Type follow-up: <code>promotes_uchar_return_temp_when_return_already_i32</code> — after
-  compose restores <code>x = -x</code>, returned uchar temps must widen to ABI i32 so
-  recompilation does not truncate <code>-1</code> → <code>255</code></li>
-<li>Host decomp signum @ 0x140001560: neg path yields -1/0 before cmovg; <code>int xVar</code></li>
-<li>Docker local: all signum variants; no regression checksum/count_bits m32/x64</li>
+<li>For x86 branch predicates from <code>test reg</code>, peel unique temps to the tested
+  register but do not continue through register-to-register Copy (avoids
+  <code>mov rax, rcx; mov ecx, edx; test rax</code> becoming a null-check on <code>param_2</code>).</li>
+<li>Lower tested values for branch predicates with Copy sources frozen at the
+  defining site.</li>
+<li>Additional loop-carried, cmov, setnz/neg, and flag-recovery CFG fixes landed
+  between 0.1.2 and 0.1.3 and are covered by crate nextest.</li>
+</ul>
+<h3 id="typed-program-metadata">Typed program metadata<a class="headerlink" href="#typed-program-metadata" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Add and wire <code>fission-analysis-db</code> as the immutable typed program-metadata
+  snapshot consumed by decompilation preflight (ADR-aligned ownership).</li>
+</ul>
+<h2 id="ci-cd-and-packaging">CI / CD and packaging<a class="headerlink" href="#ci-cd-and-packaging" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Conservative release gates: no auto-tag on every main push; <strong>Release Tag
+  (CI green)</strong> requires L0 Fast (push) + L1 Heavy on the SHA, then L2 Release
+  E2E, then annotated tag → L3 CD.</li>
+<li>Heavy main-push runs the release-critical crate set (extended suite on
+  nightly/dispatch only).</li>
+<li>CD publishes platform CLI archives (each with verified <code>utils/</code>) and a
+  standalone <code>fission-utils.tar.gz</code> on the SemVer release.</li>
+</ul>
+<h2 id="validation-notes-local-quality-loop">Validation notes (local quality loop)<a class="headerlink" href="#validation-notes-local-quality-loop" title="Permanent link">&para;</a></h2>
+<p>Local fission-benchmark docker against a local Fission build (not official
+Pages / <code>results/latest.json</code>) measured semantic recovery for
+<code>advanced_patterns</code> / <code>apply_binop</code>:</p>
+<table>
+<thead>
+<tr>
+<th>Compiler variant</th>
+<th>Status after 0.1.3 work</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>gcc -O0</td>
+<td>6/6</td>
+</tr>
+<tr>
+<td>gcc -O2</td>
+<td>6/6</td>
+</tr>
+<tr>
+<td>gcc-m32 -O0</td>
+<td>6/6</td>
+</tr>
+<tr>
+<td>gcc-m32 -O2</td>
+<td>6/6</td>
+</tr>
+</tbody>
+</table>
+<p>Host semantic harness for m32 <code>uint</code> formals widens pointer-carrying formals
+for host recompilation (arm64 cannot use <code>-m32</code>); that adaptation lives in the
+fission-benchmark runner and does not change decompiler surface types.</p>
+<h2 id="package-and-tooling-versions">Package and tooling versions<a class="headerlink" href="#package-and-tooling-versions" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Release tag: <code>v0.1.3</code></li>
+<li>All workspace crate versions: <code>0.1.3</code></li>
+<li><code>fission_cli --version</code> reports <code>0.1.3</code></li>
+</ul>
+<h2 id="upgrade-notes">Upgrade notes<a class="headerlink" href="#upgrade-notes" title="Permanent link">&para;</a></h2>
+<ul>
+<li>No intentional CLI contract break relative to 0.1.2.</li>
+<li>Pseudocode for function-pointer and x86-32 stack-call patterns may change
+  shape (more cast-callable calls, fewer opaque branchind/local_0 artifacts).</li>
+<li>Operators installing from GitHub Release should pin matching
+  <code>fission-utils.tar.gz</code> from the same SemVer tag when using the standalone
+  resource bundle.</li>
 </ul>
 
 
