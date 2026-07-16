@@ -855,6 +855,177 @@ fn x86_32_epilogue_join_live_eax_when_pred_values_differ() {
     );
 }
 
+/// x64 saturating_add cmovl class (materialize owner): SLEIGH freezes the sum
+/// with `IntZExt rax ← eax` *before* a same-block CBranch/cmov body rewrites
+/// EAX to INT_MIN. The cmov body must assign the ABI surface `rax`, not a dead
+/// temp, so epilogue `return rax` sees the underflow arm.
+#[test]
+fn x64_eax_int_min_arm_shares_rax_return_surface() {
+    use crate::nir::cspec::test_maps::apply_preview_cspec;
+    use crate::nir::types::HirStmt;
+    use crate::nir::PreviewBuilder;
+
+    let eax4 = Varnode {
+        space_id: RUST_SLEIGH_REGISTER_SPACE_ID,
+        offset: 0,
+        size: 4,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let rax8 = Varnode {
+        space_id: RUST_SLEIGH_REGISTER_SPACE_ID,
+        offset: 0,
+        size: 8,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let of = Varnode {
+        space_id: RUST_SLEIGH_REGISTER_SPACE_ID,
+        offset: 0x20b,
+        size: 1,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let sf = Varnode {
+        space_id: RUST_SLEIGH_REGISTER_SPACE_ID,
+        offset: 0x207,
+        size: 1,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let ne = Varnode {
+        space_id: crate::nir::UNIQUE_SPACE_ID,
+        offset: 0x25a00,
+        size: 1,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let neg = Varnode {
+        space_id: crate::nir::UNIQUE_SPACE_ID,
+        offset: 0x7b700,
+        size: 1,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let int_min_tmp = Varnode {
+        space_id: crate::nir::UNIQUE_SPACE_ID,
+        offset: 0x7b600,
+        size: 4,
+        is_constant: false,
+        constant_val: 0,
+    };
+    // Same-block shape from control_flow gcc -O2 saturating_add block_3:
+    //   zext rax←eax; mov imm; of!=sf; cbranch skip; eax = INT_MIN
+    let pcode = PcodeFunction {
+        blocks: vec![PcodeBasicBlock {
+            index: 0,
+            start_address: 0x1400015ef,
+            successors: vec![1],
+            ops: vec![
+                PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::Copy,
+                    address: 0x1400015ef,
+                    output: Some(eax4.clone()),
+                    inputs: vec![Varnode::constant(42, 4)],
+                    asm_mnemonic: None,
+                },
+                PcodeOp {
+                    seq_num: 1,
+                    opcode: PcodeOpcode::IntZExt,
+                    address: 0x1400015f6,
+                    output: Some(rax8.clone()),
+                    inputs: vec![eax4.clone()],
+                    asm_mnemonic: None,
+                },
+                PcodeOp {
+                    seq_num: 2,
+                    opcode: PcodeOpcode::Copy,
+                    address: 0x1400015f6,
+                    output: Some(int_min_tmp.clone()),
+                    inputs: vec![Varnode::constant(i64::from(i32::MIN), 4)],
+                    asm_mnemonic: None,
+                },
+                PcodeOp {
+                    seq_num: 3,
+                    opcode: PcodeOpcode::IntNotEqual,
+                    address: 0x1400015f6,
+                    output: Some(ne.clone()),
+                    inputs: vec![of, sf],
+                    asm_mnemonic: None,
+                },
+                PcodeOp {
+                    seq_num: 4,
+                    opcode: PcodeOpcode::BoolNegate,
+                    address: 0x1400015f6,
+                    output: Some(neg.clone()),
+                    inputs: vec![ne],
+                    asm_mnemonic: None,
+                },
+                PcodeOp {
+                    seq_num: 5,
+                    opcode: PcodeOpcode::CBranch,
+                    address: 0x1400015f6,
+                    output: None,
+                    inputs: vec![
+                        Varnode {
+                            space_id: 3,
+                            offset: 0x1400015f9,
+                            size: 8,
+                            is_constant: false,
+                            constant_val: 0,
+                        },
+                        neg,
+                    ],
+                    asm_mnemonic: None,
+                },
+                PcodeOp {
+                    seq_num: 6,
+                    opcode: PcodeOpcode::Copy,
+                    address: 0x1400015f6,
+                    output: Some(eax4),
+                    inputs: vec![int_min_tmp],
+                    asm_mnemonic: None,
+                },
+            ],
+        }],
+    };
+    let mut options = MlilPreviewOptions {
+        pe_x64_only: true,
+        is_64bit: true,
+        pointer_size: 8,
+        format: "PE".to_string(),
+        image_base: 0x1400_0000,
+        sections: vec![(0x1400_1000, 0x1400_2000)],
+        calling_convention: CallingConvention::WindowsX64,
+        ..Default::default()
+    };
+    apply_preview_cspec(&mut options);
+
+    let mut builder = PreviewBuilder::new(&pcode, &options, None);
+    let stmts = builder
+        .lower_block_stmts(&pcode.blocks[0])
+        .expect("lower cmov block");
+    let dump = format!("{stmts:?}");
+    eprintln!("x64_eax_intmin_materialize:\n{dump}");
+    assert!(
+        stmts.iter().any(|s| matches!(s, HirStmt::If { .. })),
+        "cmov body must be guarded by if, got {dump}"
+    );
+    let has_int_min =
+        dump.contains("2147483648") || dump.contains("-2147483648") || dump.contains("80000000");
+    assert!(
+        has_int_min,
+        "INT_MIN constant must appear in cmov body: {dump}"
+    );
+    // Must bind to the ABI surface, not an anonymous temp (xVar/uVar).
+    assert!(
+        dump.contains("Var(\"rax\")")
+            && (dump.contains("2147483648") || dump.contains("-2147483648")),
+        "INT_MIN must assign to rax (not a dead temp): {dump}"
+    );
+}
+
 #[test]
 fn arm32_return_target_register_uses_r0_value_not_lr_target() {
     let lr = Varnode {

@@ -925,11 +925,28 @@ impl<'a> PreviewBuilder<'a> {
             self.bind_materialized_output_to_existing_name(op, output, &name, true);
             name
         } else if let Some(name) =
+            self.full_width_primary_return_surface_name(block, op_idx, op, output)
+        {
+            // x64 SLEIGH freeze before same-block cmov: IntZExt rax ← eax must
+            // use the HW surface so cmovl into EAX and epilogue `return rax`
+            // share one name. Freeze without a following cmov body keeps normal
+            // binding (RC4 index: freeze then movzx al for truncation).
+            self.ensure_live_register_binding(&name, self.options.pointer_size);
+            self.bind_materialized_output_to_existing_name(
+                op,
+                output,
+                &name,
+                preserve_materialization,
+            );
+            name
+        } else if let Some(name) =
             self.same_block_prior_register_binding_name(block, op_idx, output)
         {
             // Reuse the prior same-block binding for register redefs (cmov default
             // + overrides on EAX/RAX). Without this, each write to the primary
             // return register gets a fresh temp and the cmov chain cannot compose.
+            // When the prior is a full-width primary-return surface (rax) and this
+            // write is EAX, alias join already returns that name.
             self.bind_materialized_output_to_existing_name(
                 op,
                 output,
@@ -948,8 +965,8 @@ impl<'a> PreviewBuilder<'a> {
                 .is_some_and(|(_, idx)| idx.is_some())
             // Always prefer the ABI return register surface for non-param
             // primary-return writes so sum/cmov arms share one name with
-            // `return eax`. Normalize folds adjacent `eax = C; return eax`
-            // via collapse_trivial_assign_returns (abi pure RHS).
+            // `return eax`/`return rax`. Normalize folds adjacent
+            // `eax = C; return eax` via collapse_trivial_assign_returns.
             && let Some(name) = primary_return_live_out_name
         {
             // Cross-block cmov tails (e.g. saturating_add underflow): the guarded
@@ -1023,7 +1040,93 @@ impl<'a> PreviewBuilder<'a> {
         {
             return None;
         }
+        // Size-exact HW name (eax for size-4). On x64, full-width RAX writes use
+        // `full_width_primary_return_surface_name` so cmov can family-join onto
+        // `rax`; forcing every live-out EAX onto `rax` collapses
+        // `mov eax, imm; zext rax` into identity `rax = rax` and blocks
+        // `return 7` narrowing.
         self.sla_hw_name(output.offset, output.size)
+    }
+
+    /// x64 SLEIGH freeze of the primary return low half into the full register,
+    /// only when a later same-block cmov body rewrites the return family.
+    ///
+    /// Shape: `IntZExt`/`IntSExt` writing pointer-size primary return from a
+    /// narrower same-offset input (`IntZExt rax ← eax`), and a later op inside
+    /// a same-block-forward CBranch skip that writes the primary return family
+    /// (cmovl into EAX). That freeze must bind as `rax` so the cmov body
+    /// family-joins onto the surface used by epilogue `return rax`.
+    ///
+    /// Not applied when there is no following cmov body (RC4 index: freeze then
+    /// `movzx al` for truncation must keep temp/low-byte identity).
+    fn full_width_primary_return_surface_name(
+        &self,
+        block: &crate::pcode::PcodeBasicBlock,
+        op_idx: usize,
+        op: &PcodeOp,
+        output: &Varnode,
+    ) -> Option<String> {
+        if !self.options.is_64bit || self.options.pointer_size < 8 {
+            return None;
+        }
+        if output.is_constant
+            || !is_register_space_id(output.space_id)
+            || output.size != self.options.pointer_size
+            || !self.register_namer().is_primary_return_register(output)
+        {
+            return None;
+        }
+        if !matches!(op.opcode, PcodeOpcode::IntZExt | PcodeOpcode::IntSExt) {
+            return None;
+        }
+        let input = op.inputs.first()?;
+        if input.is_constant
+            || !is_register_space_id(input.space_id)
+            || input.offset != output.offset
+            || input.size >= output.size
+            || !self.register_namer().is_primary_return_register(input)
+        {
+            return None;
+        }
+        if self
+            .register_namer()
+            .register_name_with_param_owned(output.offset, output.size)
+            .is_some_and(|(_, idx)| idx.is_some())
+        {
+            return None;
+        }
+        if !self.later_same_block_cmov_writes_primary_return_family(block, op_idx, output) {
+            return None;
+        }
+        self.sla_hw_name(output.offset, self.options.pointer_size)
+            .or_else(|| self.sla_hw_name(output.offset, output.size))
+    }
+
+    /// True when some later op in this block is inside a same-block-forward
+    /// cmov body and writes the primary-return register family of `output`.
+    fn later_same_block_cmov_writes_primary_return_family(
+        &self,
+        block: &crate::pcode::PcodeBasicBlock,
+        op_idx: usize,
+        output: &Varnode,
+    ) -> bool {
+        if !self.register_namer().is_primary_return_register(output) {
+            return false;
+        }
+        for later_idx in (op_idx + 1)..block.ops.len() {
+            if !Self::op_is_inside_same_block_forward_cmov_body(block, later_idx) {
+                continue;
+            }
+            let Some(later_out) = block.ops[later_idx].output.as_ref() else {
+                continue;
+            };
+            if self.register_namer().is_primary_return_register(later_out)
+                && later_out.offset == output.offset
+            {
+                return true;
+            }
+        }
+        false
     }
 
     fn prove_same_block_register_join(
