@@ -1274,18 +1274,12 @@ impl<'a> PreviewBuilder<'a> {
     fn call_arg_is_callind_target_carrier(arg: &HirExpr, target: &HirExpr) -> bool {
         match (arg, target) {
             (HirExpr::Var(a), HirExpr::Var(b)) => a == b,
-            (
-                HirExpr::Cast {
-                    expr: a_inner, ..
-                },
-                _,
-            ) => Self::call_arg_is_callind_target_carrier(a_inner, target),
-            (
-                _,
-                HirExpr::Cast {
-                    expr: t_inner, ..
-                },
-            ) => Self::call_arg_is_callind_target_carrier(arg, t_inner),
+            (HirExpr::Cast { expr: a_inner, .. }, _) => {
+                Self::call_arg_is_callind_target_carrier(a_inner, target)
+            }
+            (_, HirExpr::Cast { expr: t_inner, .. }) => {
+                Self::call_arg_is_callind_target_carrier(arg, t_inner)
+            }
             _ => false,
         }
     }
@@ -2315,9 +2309,36 @@ impl<'a> PreviewBuilder<'a> {
         let term_idx = self
             .block_terminator_index(&pred_block)
             .unwrap_or(pred_block.ops.len());
+        // CallInd/Call leave the ABI return value in the primary return register
+        // without a p-code write. Prefer the materialize-time call-result binding
+        // over a pre-call EAX/RAX write that only staged arguments
+        // (apply_binop: `rax = (*(fp))(a,b)` then join must not re-read `a`).
+        if self.register_namer().is_primary_return_register(vn)
+            && let Some(name) =
+                self.live_call_result_binding_in_block_for_return_register(vn, pred_idx, term_idx)
+        {
+            return Ok(Some(HirExpr::Var(name)));
+        }
         let Some(def_idx) = self.last_alias_def_in_block(&pred_block, term_idx, vn) else {
             return Ok(None);
         };
+        // If a Call/CallInd occurs after the last register write, that call is the
+        // true producer of the return value (p-code does not model ABI out regs).
+        if self.register_namer().is_primary_return_register(vn)
+            && pred_block.ops[def_idx + 1..term_idx.min(pred_block.ops.len())]
+                .iter()
+                .any(|op| {
+                    op.output.is_none()
+                        && matches!(
+                            op.opcode,
+                            PcodeOpcode::Call | PcodeOpcode::CallInd | PcodeOpcode::CallOther
+                        )
+                })
+            && let Some(name) =
+                self.live_call_result_binding_in_block_for_return_register(vn, pred_idx, term_idx)
+        {
+            return Ok(Some(HirExpr::Var(name)));
+        }
         let op = pred_block.ops[def_idx].clone();
         let expr = self.with_lowering_site(
             LoweringSite {

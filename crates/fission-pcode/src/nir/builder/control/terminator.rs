@@ -98,19 +98,28 @@ impl<'a> PreviewBuilder<'a> {
         term_idx: usize,
         target_expr: &HirExpr,
     ) -> HirExpr {
-        let target = if let HirExpr::Var(target_name) = target_expr {
+        // Prefer opaque CallInd-style rendering for register/param fps so the
+        // printer emits a cast callable. Known symbols keep direct names.
+        let resolved_symbol = if let HirExpr::Var(target_name) = target_expr {
             self.resolve_address_like_call_target_name(target_name)
-                .unwrap_or_else(|| format!("((code *){})", print_expr(target_expr)))
         } else {
-            format!("((code *){})", print_expr(target_expr))
+            None
         };
-        let args = if self.pcode.blocks.len() <= 2 {
-            self.recover_tail_call_args(block_idx, block, term_idx)
-        } else {
-            Vec::new()
-        };
+        // Always recover args from the BranchInd block (and single-pred chain);
+        // multi-block diamonds still stage args in the arm that holds BranchInd
+        // (x64 O2 apply_binop: 3 blocks, args live in the tail-call arm).
+        let mut args = self.recover_tail_call_args(block_idx, block, term_idx);
+        if let Some(target) = resolved_symbol {
+            return HirExpr::Call {
+                target,
+                args,
+                ty: NirType::Unknown,
+            };
+        }
+        // Unresolved fp: opaque form — printer casts to callable.
+        args.insert(0, target_expr.clone());
         HirExpr::Call {
-            target,
+            target: "__fission_callind_opaque".to_string(),
             args,
             ty: NirType::Unknown,
         }
@@ -143,10 +152,20 @@ impl<'a> PreviewBuilder<'a> {
         term_idx: usize,
         switch_var: &Varnode,
     ) -> Option<HirExpr> {
-        if !matches!(
+        // x86/x64: `jmp rax` / `jmp r8` tail-calls through a register-held
+        // function pointer (gcc -O2 apply_binop). ARM keeps the existing mask
+        // and source recovery; x86 uses the same copy-chain → param/reg path.
+        let allow_x86_fp_tail = matches!(
+            self.options.calling_convention,
+            CallingConvention::WindowsX64
+                | CallingConvention::SystemVAmd64
+                | CallingConvention::X86_32
+        );
+        let allow_arm = matches!(
             self.options.calling_convention,
             CallingConvention::AArch64 | CallingConvention::Arm32
-        ) {
+        );
+        if !allow_x86_fp_tail && !allow_arm {
             return None;
         }
         let (_, op) = self.lookup_def_site(switch_var)?;
@@ -170,7 +189,18 @@ impl<'a> PreviewBuilder<'a> {
                 .lower_wrapped_varnode(&source, &mut HashSet::new())
                 .ok();
         }
-        self.recover_branchind_callable_source_expr(block_idx, term_idx, switch_var, 0)
+        if let Some(expr) =
+            self.recover_branchind_callable_source_expr(block_idx, term_idx, switch_var, 0)
+        {
+            return Some(expr);
+        }
+        // x86: register target with no further param alias — still a callable fp.
+        if allow_x86_fp_tail && is_register_varnode(switch_var) {
+            return self
+                .lower_wrapped_varnode(switch_var, &mut HashSet::new())
+                .ok();
+        }
+        None
     }
 
     fn recover_branchind_callable_source_expr(
@@ -1037,9 +1067,7 @@ impl<'a> PreviewBuilder<'a> {
         // Predecessor arms may write *different* values into the primary return
         // register (sum vs INT_MIN cmov). Do not require equal lowered pred
         // exprs — emit the live primary return binding at the join.
-        if self.uses_primary_return_registers()
-            && self.is_epilogue_style_return_join_block(idx)
-        {
+        if self.uses_primary_return_registers() && self.is_epilogue_style_return_join_block(idx) {
             if let Some(expr) = self.live_primary_return_register_expr(block, term_idx)? {
                 if preview_builder_diag_enabled() {
                     eprintln!(
@@ -1155,13 +1183,15 @@ impl<'a> PreviewBuilder<'a> {
         if ret_op_idx > 0 {
             let prev = &block.ops[ret_op_idx - 1];
             if prev.opcode == PcodeOpcode::CBranch && !prev.inputs.is_empty() {
-                if let Some(target_op_idx) = crate::nir::cfg::same_block_forward_branch_target_op_idx(
-                    block,
-                    ret_op_idx - 1,
-                    block.ops.len(),
-                    prev,
-                    &prev.inputs[0],
-                ) {
+                if let Some(target_op_idx) =
+                    crate::nir::cfg::same_block_forward_branch_target_op_idx(
+                        block,
+                        ret_op_idx - 1,
+                        block.ops.len(),
+                        prev,
+                        &prev.inputs[0],
+                    )
+                {
                     return target_op_idx > ret_op_idx;
                 }
             }

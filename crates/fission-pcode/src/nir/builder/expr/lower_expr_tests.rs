@@ -1079,17 +1079,36 @@ fn x64_register_callind_emits_function_pointer_call() {
         0,
         vec![
             // arg0 = 3, arg1 = 4; call target is r8 (no constant fold path).
-            op(0, PcodeOpcode::Copy, Some(eax.clone()), vec![constant_sized(3, 4)]),
-            op(1, PcodeOpcode::IntZExt, Some(rcx.clone()), vec![eax.clone()]),
-            op(2, PcodeOpcode::Copy, Some(eax.clone()), vec![constant_sized(4, 4)]),
-            op(3, PcodeOpcode::IntZExt, Some(rdx.clone()), vec![eax.clone()]),
+            op(
+                0,
+                PcodeOpcode::Copy,
+                Some(eax.clone()),
+                vec![constant_sized(3, 4)],
+            ),
+            op(
+                1,
+                PcodeOpcode::IntZExt,
+                Some(rcx.clone()),
+                vec![eax.clone()],
+            ),
+            op(
+                2,
+                PcodeOpcode::Copy,
+                Some(eax.clone()),
+                vec![constant_sized(4, 4)],
+            ),
+            op(
+                3,
+                PcodeOpcode::IntZExt,
+                Some(rdx.clone()),
+                vec![eax.clone()],
+            ),
             op(4, PcodeOpcode::CallInd, None, vec![r8]),
             op(5, PcodeOpcode::Return, None, vec![ret_addr]),
         ],
     )]);
 
-    let code =
-        render_mlil_preview(&pcode, "reg_callind", 0x1000, &options).expect("render");
+    let code = render_mlil_preview(&pcode, "reg_callind", 0x1000, &options).expect("render");
     eprintln!("reg_callind:\n{code}");
     assert!(
         code.contains("(*)()") || code.contains("(*") || code.contains("*)("),
@@ -1100,4 +1119,209 @@ fn x64_register_callind_emits_function_pointer_call() {
         "must not invent sub_XXXX for a live register fp:\n{code}"
     );
     assert!(code.contains("return"), "expected a return:\n{code}");
+}
+
+/// Diamond: null → eax=0; non-null → CallInd result in rax. Join return must
+/// prefer the call-result binding over the pre-call arg write to EAX.
+#[test]
+fn x64_callind_diamond_return_uses_call_result() {
+    use crate::nir::cspec::test_maps::apply_preview_cspec;
+
+    let rcx = register(0x8, 8);
+    let rdx = register(0x10, 8);
+    let r8 = register(0x80, 8);
+    let eax = register(0, 4);
+    let rax = register(0, 8);
+    let ret_addr = register(0x288, 8);
+    let zf = register(0x206, 1);
+    let mut options = test_options();
+    apply_preview_cspec(&mut options);
+
+    let mut blocks = vec![
+        // 0: test fp; branch
+        block_at(
+            0x1000,
+            0,
+            vec![
+                op(
+                    0,
+                    PcodeOpcode::IntEqual,
+                    Some(zf.clone()),
+                    vec![rcx.clone(), constant(0)],
+                ),
+                op(
+                    1,
+                    PcodeOpcode::CBranch,
+                    None,
+                    vec![constant(0x1020), zf.clone()],
+                ),
+            ],
+        ),
+        // 1: non-null: set args, CallInd r8 (fp in r8)
+        block_at(
+            0x1010,
+            1,
+            vec![
+                op(2, PcodeOpcode::Copy, Some(r8.clone()), vec![rcx.clone()]),
+                op(
+                    3,
+                    PcodeOpcode::Copy,
+                    Some(eax.clone()),
+                    vec![constant_sized(3, 4)],
+                ),
+                op(
+                    4,
+                    PcodeOpcode::IntZExt,
+                    Some(rcx.clone()),
+                    vec![eax.clone()],
+                ),
+                op(
+                    5,
+                    PcodeOpcode::Copy,
+                    Some(eax.clone()),
+                    vec![constant_sized(4, 4)],
+                ),
+                op(
+                    6,
+                    PcodeOpcode::IntZExt,
+                    Some(rdx.clone()),
+                    vec![eax.clone()],
+                ),
+                op(7, PcodeOpcode::CallInd, None, vec![r8]),
+                op(8, PcodeOpcode::Branch, None, vec![constant(0x1030)]),
+            ],
+        ),
+        // 2: null: eax = 0
+        block_at(
+            0x1020,
+            2,
+            vec![
+                op(
+                    9,
+                    PcodeOpcode::Copy,
+                    Some(eax.clone()),
+                    vec![constant_sized(0, 4)],
+                ),
+                op(
+                    10,
+                    PcodeOpcode::IntZExt,
+                    Some(rax.clone()),
+                    vec![eax.clone()],
+                ),
+                op(11, PcodeOpcode::Branch, None, vec![constant(0x1030)]),
+            ],
+        ),
+        // 3: return
+        block_at(
+            0x1030,
+            3,
+            vec![op(12, PcodeOpcode::Return, None, vec![ret_addr])],
+        ),
+    ];
+    blocks[0].successors = vec![1, 2];
+    blocks[1].successors = vec![3];
+    blocks[2].successors = vec![3];
+    let pcode = pcode_function(blocks);
+    let code = render_mlil_preview(&pcode, "callind_join", 0x1000, &options).expect("render");
+    eprintln!("callind_join:\n{code}");
+    // Must not return the staged argument (3) as the call result path.
+    assert!(
+        !code.contains("return 3") && !code.contains("return 0x3"),
+        "must not return staged arg as call result:\n{code}"
+    );
+    assert!(
+        code.contains("(*)()") || code.contains("(*"),
+        "expected fp call form:\n{code}"
+    );
+}
+
+/// x64 O2 shape: test fp; jmp rax (BranchInd tail-call) with args in rcx/rdx.
+/// Matches gcc-O2 apply_binop: `mov rax,rcx; mov ecx,edx; …; mov edx,r8d; jmp rax`.
+#[test]
+fn x64_branchind_register_fp_tail_call() {
+    use crate::nir::cspec::test_maps::apply_preview_cspec;
+
+    let rcx = register(0x8, 8);
+    let ecx = register(0x8, 4);
+    let rdx = register(0x10, 8);
+    let edx = register(0x10, 4);
+    let r8 = register(0x80, 8);
+    let r8d = register(0x80, 4);
+    let rax = register(0, 8);
+    let eax = register(0, 4);
+    let zf = register(0x206, 1);
+    let ret_addr = register(0x288, 8);
+    let mut options = test_options();
+    apply_preview_cspec(&mut options);
+
+    let mut blocks = vec![
+        block_at(
+            0x1000,
+            0,
+            vec![
+                // rax = fp (rcx); stage arg0 into ecx from edx (do not clobber rax via eax)
+                op(0, PcodeOpcode::Copy, Some(rax.clone()), vec![rcx.clone()]),
+                op(1, PcodeOpcode::Copy, Some(ecx.clone()), vec![edx.clone()]),
+                op(
+                    2,
+                    PcodeOpcode::IntZExt,
+                    Some(rcx.clone()),
+                    vec![ecx.clone()],
+                ),
+                op(
+                    3,
+                    PcodeOpcode::IntEqual,
+                    Some(zf.clone()),
+                    vec![rax.clone(), constant(0)],
+                ),
+                op(4, PcodeOpcode::CBranch, None, vec![constant(0x1020), zf]),
+            ],
+        ),
+        block_at(
+            0x1010,
+            1,
+            vec![
+                op(5, PcodeOpcode::Copy, Some(edx.clone()), vec![r8d.clone()]),
+                op(6, PcodeOpcode::IntZExt, Some(rdx.clone()), vec![edx]),
+                op(7, PcodeOpcode::BranchInd, None, vec![rax]),
+            ],
+        ),
+        block_at(
+            0x1020,
+            2,
+            vec![
+                op(8, PcodeOpcode::Copy, Some(eax), vec![constant_sized(0, 4)]),
+                op(9, PcodeOpcode::Return, None, vec![ret_addr]),
+            ],
+        ),
+    ];
+    blocks[0].successors = vec![1, 2];
+    let pcode = pcode_function(blocks);
+    let code = render_mlil_preview(&pcode, "tail_fp", 0x1000, &options).expect("render");
+    eprintln!("tail_fp:\n{code}");
+    assert!(
+        !code.contains("__fission_branchind"),
+        "must not leave opaque branchind:\n{code}"
+    );
+    assert!(
+        code.contains("(*)()") || code.contains("(*"),
+        "expected fp tail-call form:\n{code}"
+    );
+    // Args must be the staged sources (param_2, param_3), not the ABI slot
+    // names of the destinations (param_1 / overwritten rcx).
+    assert!(
+        code.contains("(param_2") || code.contains(", param_2") || code.contains("(param_2,"),
+        "expected first staged arg param_2:\n{code}"
+    );
+    assert!(
+        code.contains("param_3)"),
+        "expected second staged arg param_3:\n{code}"
+    );
+    // Target is original rcx (param_1).
+    assert!(
+        code.contains("(*)())(param_1)")
+            || code.contains("(*)(param_1)")
+            || code.contains(")(param_1))("),
+        "expected call through param_1 fp:\n{code}"
+    );
 }

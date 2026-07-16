@@ -3522,10 +3522,8 @@ impl<'a> PreviewBuilder<'a> {
             return false;
         }
         // x86 flag-bank offsets used by SLEIGH (CF/PF/AF/ZF/SF/OF-class).
-        let is_flag = matches!(
-            output.offset,
-            0x200 | 0x201 | 0x202 | 0x206 | 0x207 | 0x20b
-        ) && output.size <= 1;
+        let is_flag = matches!(output.offset, 0x200 | 0x201 | 0x202 | 0x206 | 0x207 | 0x20b)
+            && output.size <= 1;
         if !is_flag {
             return false;
         }

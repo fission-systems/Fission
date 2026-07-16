@@ -413,6 +413,80 @@ impl<'a> PreviewBuilder<'a> {
         None
     }
 
+    /// Peel same-block Copy/ZExt/SExt/Cast so tail-call arg recovery sees the
+    /// staged source register, not the ABI slot being written.
+    ///
+    /// Example (x64 O2 `jmp rax` after `mov ecx, edx; movsxd rcx, ecx`):
+    /// prefer_source on the zext alone surfaces `ecx`/`param_1`; peeling reaches
+    /// `edx`/`param_2`.
+    ///
+    /// Walks `scan_block.ops` locally (not `lookup_def_site`) so a wider zext of
+    /// the same register family is not treated as the seed's own definition.
+    fn peel_prefer_source_arg_varnode(
+        &self,
+        scan_block: &crate::pcode::PcodeBasicBlock,
+        before_op_idx: usize,
+        seed: &Varnode,
+    ) -> Varnode {
+        let mut cursor = seed.clone();
+        let mut limit = before_op_idx.min(scan_block.ops.len());
+        for _ in 0..6 {
+            let mut found: Option<(usize, Varnode)> = None;
+            for prev_idx in (0..limit).rev() {
+                let prev = &scan_block.ops[prev_idx];
+                let Some(output) = prev.output.as_ref() else {
+                    continue;
+                };
+                if !Self::varnode_covers_or_aliases_register(output, &cursor) {
+                    continue;
+                }
+                if !matches!(
+                    prev.opcode,
+                    PcodeOpcode::Copy
+                        | PcodeOpcode::IntZExt
+                        | PcodeOpcode::IntSExt
+                        | PcodeOpcode::Cast
+                ) {
+                    break;
+                }
+                let Some(input) = prev.inputs.first() else {
+                    break;
+                };
+                found = Some((prev_idx, input.clone()));
+                break;
+            }
+            let Some((def_idx, next)) = found else {
+                break;
+            };
+            cursor = next;
+            limit = def_idx;
+            if cursor.is_constant {
+                break;
+            }
+        }
+        cursor
+    }
+
+    /// True when `def` writes the same register family that `vn` reads
+    /// (exact key or overlapping low/high view of the same offset bank).
+    fn varnode_covers_or_aliases_register(def: &Varnode, vn: &Varnode) -> bool {
+        if !is_register_varnode(def) || !is_register_varnode(vn) {
+            return false;
+        }
+        if def.offset == vn.offset && def.size == vn.size {
+            return true;
+        }
+        // Same base offset family: e.g. rcx (8) covers ecx (4) at offset 0x8.
+        if def.offset == vn.offset && def.size >= vn.size {
+            return true;
+        }
+        // Partial write into a wider view: ecx write feeds later rcx read.
+        if vn.offset == def.offset && vn.size >= def.size {
+            return true;
+        }
+        false
+    }
+
     fn recover_call_args_from_block_with_mode(
         &mut self,
         block: &crate::pcode::PcodeBasicBlock,
@@ -437,6 +511,15 @@ impl<'a> PreviewBuilder<'a> {
         let param_count = param_slots.len();
         let mut recovered: Vec<Option<HirExpr>> = vec![None; param_count];
         let skip_param = self.callind_target_param_slot_index(block, call_idx);
+        // Also skip BranchInd target register if it aliases a param slot (rare).
+        let skip_param = skip_param.or_else(|| {
+            let op = block.ops.get(call_idx)?;
+            if op.opcode != PcodeOpcode::BranchInd {
+                return None;
+            }
+            let target = op.inputs.first()?;
+            self.param_index_for_varnode(target, true)
+        });
         let scan_end = call_idx.min(block.ops.len());
         let call_address = block.ops.get(call_idx).map(|op| op.address);
         let has_same_instruction_callother_marker = block.ops[..scan_end].iter().any(|prev| {
@@ -445,93 +528,119 @@ impl<'a> PreviewBuilder<'a> {
                 && Some(prev.address) == call_address
         });
 
-        for prev_idx in (0..scan_end).rev() {
-            let prev = &block.ops[prev_idx];
-            if prev.opcode.is_control_flow() {
-                if prev.opcode == PcodeOpcode::CallOther
-                    && prev.output.is_none()
-                    && Some(prev.address) == call_address
+        // Scan current block, then (for BranchInd/CallInd tail arms) a single
+        // predecessor so args staged before the null-check arm are recovered
+        // (x64 O2: rcx/rdx set in parent, jmp in child).
+        let mut scan_blocks: Vec<(&crate::pcode::PcodeBasicBlock, usize)> = vec![(block, scan_end)];
+        if matches!(
+            block.ops.get(call_idx).map(|op| op.opcode),
+            Some(PcodeOpcode::BranchInd | PcodeOpcode::CallInd)
+        ) {
+            if let Some(&block_idx) = self.address_to_index.get(&block.start_address)
+                && let Some(preds) = self.predecessors.get(block_idx)
+                && let [pred_idx] = preds.as_slice()
+                && let Some(pred_block) = self.pcode.blocks.get(*pred_idx)
+            {
+                scan_blocks.push((pred_block, pred_block.ops.len()));
+            }
+        }
+
+        for (scan_block, scan_limit) in scan_blocks {
+            for prev_idx in (0..scan_limit).rev() {
+                let prev = &scan_block.ops[prev_idx];
+                if prev.opcode.is_control_flow() {
+                    if prev.opcode == PcodeOpcode::CallOther
+                        && prev.output.is_none()
+                        && Some(prev.address) == call_address
+                    {
+                        continue;
+                    }
+                    if self.call_is_terminal_branchind_artifact(scan_block, prev_idx) {
+                        continue;
+                    }
+                    // Only hard-stop control-flow inside the *call* block.
+                    if std::ptr::eq(scan_block, block) {
+                        break;
+                    }
+                    continue;
+                }
+                let Some(output) = &prev.output else {
+                    continue;
+                };
+                if prefer_source_values
+                    && self.op_is_terminal_branchind_target_artifact(scan_block, prev_idx)
                 {
                     continue;
                 }
-                if self.call_is_terminal_branchind_artifact(block, prev_idx) {
+                let Some(param_index) = self.param_index_for_varnode(output, true) else {
+                    continue;
+                };
+                if skip_param == Some(param_index) {
                     continue;
                 }
-                break;
-            }
-            let Some(output) = &prev.output else {
-                continue;
-            };
-            if prefer_source_values
-                && self.op_is_terminal_branchind_target_artifact(block, prev_idx)
-            {
-                continue;
-            }
-            let Some(param_index) = self.param_index_for_varnode(output, true) else {
-                continue;
-            };
-            if skip_param == Some(param_index) {
-                continue;
-            }
-            if param_index >= recovered.len() || recovered[param_index].is_some() {
-                continue;
-            }
-
-            let direct_rhs = if prefer_source_values
-                || self.options.calling_convention != CallingConvention::Arm32
-                || !has_same_instruction_callother_marker
-            {
-                None
-            } else {
-                self.try_lower_materialized_output_rhs(block.start_address, prev)?
-            };
-            let source = if prefer_source_values {
-                prev.inputs.first().unwrap_or(output)
-            } else {
-                output
-            };
-            let expr = if let Some(expr) = direct_rhs {
-                expr
-            } else if prefer_source_values
-                && let Some(name) = self.surface_call_carrier_name(source)
-            {
-                HirExpr::Var(name)
-            } else {
-                match self.lower_varnode(source, &mut HashSet::new()) {
-                    Ok(expr) => expr,
-                    Err(MlilPreviewError::UnsupportedPattern("opcode"))
-                        if self.surface_call_carrier_name(output).is_some() =>
-                    {
-                        HirExpr::Var(
-                            self.surface_call_carrier_name(output)
-                                .expect("surface carrier exists after guard"),
-                        )
-                    }
-                    Err(err) => {
-                        self.debug_lowering_error(
-                            "call_arg_recovery",
-                            block.start_address,
-                            u64::from(prev.seq_num),
-                            prev.opcode,
-                            &err,
-                        );
-                        if matches!(err, MlilPreviewError::UnsupportedPattern("opcode")) {
-                            self.record_unsupported_inventory_event(
-                                "call_recovery",
-                                Some(output),
-                                Some(prev),
-                                Some(prev.opcode),
-                                Some(block.start_address),
-                                Some(u64::from(prev.seq_num)),
-                                false,
-                                "call_arg_recovery_lowering_failed",
-                            );
-                        }
-                        continue;
-                    }
+                if param_index >= recovered.len() || recovered[param_index].is_some() {
+                    continue;
                 }
-            };
-            recovered[param_index] = Some(self.normalize_recovered_call_arg(expr));
+
+                let direct_rhs = if prefer_source_values
+                    || self.options.calling_convention != CallingConvention::Arm32
+                    || !has_same_instruction_callother_marker
+                {
+                    None
+                } else {
+                    self.try_lower_materialized_output_rhs(scan_block.start_address, prev)?
+                };
+                let source = if prefer_source_values {
+                    let seed = prev.inputs.first().unwrap_or(output);
+                    // Clone so we can peel without borrowing `prev` across the
+                    // subsequent lower/surface calls.
+                    self.peel_prefer_source_arg_varnode(scan_block, prev_idx, seed)
+                } else {
+                    output.clone()
+                };
+                let expr = if let Some(expr) = direct_rhs {
+                    expr
+                } else if prefer_source_values
+                    && let Some(name) = self.surface_call_carrier_name(&source)
+                {
+                    HirExpr::Var(name)
+                } else {
+                    match self.lower_varnode(&source, &mut HashSet::new()) {
+                        Ok(expr) => expr,
+                        Err(MlilPreviewError::UnsupportedPattern("opcode"))
+                            if self.surface_call_carrier_name(output).is_some() =>
+                        {
+                            HirExpr::Var(
+                                self.surface_call_carrier_name(output)
+                                    .expect("surface carrier exists after guard"),
+                            )
+                        }
+                        Err(err) => {
+                            self.debug_lowering_error(
+                                "call_arg_recovery",
+                                scan_block.start_address,
+                                u64::from(prev.seq_num),
+                                prev.opcode,
+                                &err,
+                            );
+                            if matches!(err, MlilPreviewError::UnsupportedPattern("opcode")) {
+                                self.record_unsupported_inventory_event(
+                                    "call_recovery",
+                                    Some(output),
+                                    Some(prev),
+                                    Some(prev.opcode),
+                                    Some(scan_block.start_address),
+                                    Some(u64::from(prev.seq_num)),
+                                    false,
+                                    "call_arg_recovery_lowering_failed",
+                                );
+                            }
+                            continue;
+                        }
+                    }
+                };
+                recovered[param_index] = Some(self.normalize_recovered_call_arg(expr));
+            }
         }
 
         let assignments = self.call_arg_carrier_assignments(block, call_idx, &abi);
