@@ -33,13 +33,11 @@ pub(crate) fn collapse_trivial_assign_returns(
                 // is not adjacent to the return at this level.
                 // Live-register HW bindings are often TempPreserved; still fold
                 // pure adjacent `eax = C; return eax` for readability.
-                let abi_pure = is_abi_return_register_name(name)
-                    && is_pure_return_collapse_rhs(rhs);
+                let abi_pure =
+                    is_abi_return_register_name(name) && is_pure_return_collapse_rhs(rhs);
                 if is_abi_return_register_name(name) && !is_pure_return_collapse_rhs(rhs) {
                     None
-                } else if !abi_pure
-                    && should_block_trivial_return_collapse(name, preserved_temps)
-                {
+                } else if !abi_pure && should_block_trivial_return_collapse(name, preserved_temps) {
                     blocked += 1;
                     None
                 } else {
@@ -623,9 +621,9 @@ fn first_top_level_use_index_of_var(stmts: &[HirStmt], name: &str) -> Option<usi
 fn stmt_uses_var(stmt: &HirStmt, name: &str) -> bool {
     match stmt {
         HirStmt::Assign { lhs, rhs } => lvalue_uses_var(lhs, name) || expr_mentions_var(rhs, name),
-        HirStmt::Expr(expr) | HirStmt::Return(Some(expr)) | HirStmt::VaStart { va_list: expr, .. } => {
-            expr_mentions_var(expr, name)
-        }
+        HirStmt::Expr(expr)
+        | HirStmt::Return(Some(expr))
+        | HirStmt::VaStart { va_list: expr, .. } => expr_mentions_var(expr, name),
         HirStmt::If {
             cond,
             then_body,
@@ -655,7 +653,9 @@ fn stmt_uses_var(stmt: &HirStmt, name: &str) -> bool {
             default,
         } => {
             expr_mentions_var(expr, name)
-                || cases.iter().any(|c| c.body.iter().any(|s| stmt_uses_var(s, name)))
+                || cases
+                    .iter()
+                    .any(|c| c.body.iter().any(|s| stmt_uses_var(s, name)))
                 || default.iter().any(|s| stmt_uses_var(s, name))
         }
         HirStmt::Label(_)
@@ -930,6 +930,10 @@ fn is_rescue_candidate_name(name: &str) -> bool {
         !suffix.is_empty() && suffix.chars().all(|c| c.is_ascii_digit())
     } else if name.starts_with("tmp_") {
         let suffix = &name[4..];
+        !suffix.is_empty() && suffix.chars().all(|c| c.is_ascii_hexdigit())
+    } else if let Some(suffix) = name.strip_prefix("local_") {
+        // Stack-home surface names (`local_0`, `local_4`, `local_1c`) from
+        // materialize. Used but undeclared → compile_error in semantic harness.
         !suffix.is_empty() && suffix.chars().all(|c| c.is_ascii_hexdigit())
     } else if matches!(name, "cf" | "pf" | "af" | "zf" | "sf" | "of" | "df" | "if_") {
         // Named EFLAGS bits (SLA 0x200 layout). Prefer dead-flag cleanup; if a

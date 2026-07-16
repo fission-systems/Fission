@@ -304,7 +304,105 @@ impl<'a> PreviewBuilder<'a> {
             current_push_address = Some(prev.address);
         }
 
+        if out.is_empty() {
+            // cdecl tail-call restage: Stores to [ebp+8+4*i] before BranchInd/CallInd
+            // (gcc-m32 -O2 apply_binop) rewrite the frame's param slots in place.
+            out = self.recover_x86_32_frame_restaged_args_from_block(block, call_idx)?;
+        }
+
         self.debug_call_recovery(&format!("x86_32_stack_args={}", out.len()));
+        Ok(out)
+    }
+
+    /// Recover stack args from frame-pointer-relative Stores into the incoming
+    /// parameter region (`[ebp+8]`, `[ebp+c]`, …) used by cdecl tail-call
+    /// restaging before `jmp reg` / `CallInd`.
+    fn recover_x86_32_frame_restaged_args_from_block(
+        &mut self,
+        block: &crate::pcode::PcodeBasicBlock,
+        call_idx: usize,
+    ) -> Result<Vec<HirExpr>, MlilPreviewError> {
+        const MAX_STACK_ARGS: usize = 32;
+        let abi = self.abi_state();
+        let scan_end = call_idx.min(block.ops.len());
+        let call_address = block.ops.get(call_idx).map(|op| op.address);
+        let mut recovered = std::collections::BTreeMap::<usize, HirExpr>::new();
+
+        let mut scan_blocks: Vec<(&crate::pcode::PcodeBasicBlock, usize)> = vec![(block, scan_end)];
+        if matches!(
+            block.ops.get(call_idx).map(|op| op.opcode),
+            Some(PcodeOpcode::BranchInd | PcodeOpcode::CallInd)
+        ) {
+            if let Some(&block_idx) = self.address_to_index.get(&block.start_address)
+                && let Some(preds) = self.predecessors.get(block_idx)
+                && let [pred_idx] = preds.as_slice()
+                && let Some(pred_block) = self.pcode.blocks.get(*pred_idx)
+            {
+                scan_blocks.push((pred_block, pred_block.ops.len()));
+            }
+        }
+
+        for (scan_block, scan_limit) in scan_blocks {
+            for prev_idx in (0..scan_limit).rev() {
+                if recovered.len() >= MAX_STACK_ARGS {
+                    break;
+                }
+                let prev = &scan_block.ops[prev_idx];
+                if Some(prev.address) == call_address {
+                    continue;
+                }
+                if prev.opcode.is_control_flow() {
+                    if prev.opcode == PcodeOpcode::CallOther
+                        && prev.output.is_none()
+                        && Some(prev.address) == call_address
+                    {
+                        continue;
+                    }
+                    if self.call_is_terminal_branchind_artifact(scan_block, prev_idx) {
+                        continue;
+                    }
+                    if std::ptr::eq(scan_block, block) {
+                        break;
+                    }
+                    continue;
+                }
+                if prev.opcode != PcodeOpcode::Store || prev.inputs.len() < 3 {
+                    continue;
+                }
+                let site = LoweringSite {
+                    block_idx: scan_block.index as usize,
+                    op_idx: prev_idx,
+                };
+                let stack_address = self.with_lowering_site(site, |this| {
+                    this.resolve_call_store_stack_address(scan_block, prev_idx)
+                });
+                let Some((base, offset)) = stack_address else {
+                    continue;
+                };
+                let Some(stack_index) = abi.incoming_stack_argument_index(base, offset) else {
+                    continue;
+                };
+                if recovered.contains_key(&stack_index) {
+                    continue;
+                }
+                let value = self.with_lowering_site(site, |this| {
+                    this.lower_varnode(prev.inputs.last().expect("store rhs"), &mut HashSet::new())
+                })?;
+                recovered.insert(stack_index, self.normalize_recovered_call_arg(value));
+            }
+        }
+
+        let mut out = Vec::new();
+        for idx in 0.. {
+            let Some(expr) = recovered.remove(&idx) else {
+                break;
+            };
+            out.push(expr);
+            if out.len() >= MAX_STACK_ARGS {
+                break;
+            }
+        }
+        self.debug_call_recovery(&format!("x86_32_frame_restage_args={}", out.len()));
         Ok(out)
     }
 
@@ -342,22 +440,82 @@ impl<'a> PreviewBuilder<'a> {
         let Some(op) = block.ops.get(op_idx) else {
             return false;
         };
-        if !self.x86_32_stack_call_args_enabled() || !self.x86_32_stack_push_store(op) {
+        if !self.x86_32_stack_call_args_enabled() {
             return false;
         }
-        for candidate in block.ops.iter().skip(op_idx + 1) {
-            if candidate.address == op.address && self.x86_32_stack_push_update(candidate) {
-                continue;
+        // ESP push stores before Call/CallInd.
+        if self.x86_32_stack_push_store(op) {
+            for candidate in block.ops.iter().skip(op_idx + 1) {
+                if candidate.address == op.address && self.x86_32_stack_push_update(candidate) {
+                    continue;
+                }
+                if self.x86_32_stack_push_update(candidate)
+                    || self.x86_32_stack_push_store(candidate)
+                {
+                    continue;
+                }
+                return matches!(
+                    candidate.opcode,
+                    PcodeOpcode::Call | PcodeOpcode::CallInd | PcodeOpcode::CallOther
+                );
             }
-            if self.x86_32_stack_push_update(candidate) || self.x86_32_stack_push_store(candidate) {
-                continue;
-            }
-            return matches!(
-                candidate.opcode,
-                PcodeOpcode::Call | PcodeOpcode::CallInd | PcodeOpcode::CallOther
-            );
+            return false;
+        }
+        // cdecl tail-call restage: Stores into [ebp+8+4*i] before BranchInd/CallInd
+        // must not materialize as param reassignments (they only set up callee args).
+        if op.opcode == PcodeOpcode::Store
+            && self.x86_32_store_is_frame_param_restage(block, op_idx)
+        {
+            return true;
         }
         false
+    }
+
+    fn x86_32_store_is_frame_param_restage(
+        &self,
+        block: &crate::pcode::PcodeBasicBlock,
+        op_idx: usize,
+    ) -> bool {
+        let Some(op) = block.ops.get(op_idx) else {
+            return false;
+        };
+        if op.opcode != PcodeOpcode::Store || op.inputs.len() < 3 {
+            return false;
+        }
+        let Some((base, offset)) = self.resolve_stack_address_from_memory_op(op).or_else(|| {
+            // Same-instruction IntAdd ebp, imm → unique then Store via unique.
+            let ptr = op.inputs.get(1)?;
+            let store_addr = op.address;
+            for prev_idx in (0..op_idx).rev() {
+                let prev = &block.ops[prev_idx];
+                if prev.address != store_addr {
+                    break;
+                }
+                if prev.output.as_ref() != Some(ptr) {
+                    continue;
+                }
+                if matches!(prev.opcode, PcodeOpcode::IntAdd | PcodeOpcode::PtrAdd) {
+                    return resolve_add_op_stack_address(self, prev);
+                }
+            }
+            self.resolve_stack_address(ptr)
+        }) else {
+            return false;
+        };
+        if self
+            .abi_state()
+            .incoming_stack_argument_index(base, offset)
+            .is_none()
+        {
+            return false;
+        }
+        // Require a later CallInd/BranchInd in this block (tail-call restage).
+        block.ops.iter().skip(op_idx + 1).any(|candidate| {
+            matches!(
+                candidate.opcode,
+                PcodeOpcode::CallInd | PcodeOpcode::BranchInd | PcodeOpcode::Call
+            )
+        })
     }
 
     fn is_x86_32_esp(&self, vn: &Varnode) -> bool {

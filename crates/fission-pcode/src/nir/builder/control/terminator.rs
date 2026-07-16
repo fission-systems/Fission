@@ -2386,41 +2386,72 @@ impl<'a> PreviewBuilder<'a> {
         }
     }
 
+    /// Lower a register used as a `test`/`cmp`-class flag input, freezing
+    /// Copy/Cast/ZExt sources at their defining site.
+    ///
+    /// Without this, `mov rax, rcx; mov ecx, edx; test rax, rax` peels RAX→RCX
+    /// and then reads the **redefined** RCX (param_2) instead of the snapshot
+    /// captured into RAX (param_1).
+    fn lower_flag_tested_value(
+        &mut self,
+        vn: &Varnode,
+        visiting: &mut HashSet<VarnodeKey>,
+    ) -> Result<HirExpr, MlilPreviewError> {
+        if is_register_varnode(vn)
+            && let Some((site, op)) = self.lookup_def_site(vn)
+            && matches!(
+                op.opcode,
+                PcodeOpcode::Copy | PcodeOpcode::Cast | PcodeOpcode::IntZExt | PcodeOpcode::IntSExt
+            )
+            && op.inputs.len() == 1
+        {
+            let src = op.inputs[0].clone();
+            return self
+                .with_lowering_site(site, |this| this.lower_wrapped_varnode(&src, visiting));
+        }
+        self.lower_wrapped_varnode(vn, visiting)
+    }
+
     fn lower_x86_branch_predicate(
         &mut self,
         predicate: X86BranchPredicate,
     ) -> Result<HirExpr, MlilPreviewError> {
         let mut visiting = HashSet::new();
+        // Tested values (EqZero/NeZero/…) freeze Copy sources; compare operands
+        // still use ordinary lowering so both sides stay live-SSA consistent.
+        let lower_tested = |this: &mut Self, vn: &Varnode, visiting: &mut HashSet<VarnodeKey>| {
+            this.lower_flag_tested_value(vn, visiting)
+        };
         let lower = |this: &mut Self, vn: &Varnode, visiting: &mut HashSet<VarnodeKey>| {
             this.lower_wrapped_varnode(vn, visiting)
         };
         Ok(match predicate {
             X86BranchPredicate::EqZero(value) => {
-                let value = lower(self, &value, &mut visiting)?;
+                let value = lower_tested(self, &value, &mut visiting)?;
                 bool_binary(HirBinaryOp::Eq, value.clone(), zero_like(&value))
             }
             X86BranchPredicate::NeZero(value) => {
-                let value = lower(self, &value, &mut visiting)?;
+                let value = lower_tested(self, &value, &mut visiting)?;
                 bool_binary(HirBinaryOp::Ne, value.clone(), zero_like(&value))
             }
             X86BranchPredicate::SLtZero(value) => {
-                let value = lower(self, &value, &mut visiting)?;
+                let value = lower_tested(self, &value, &mut visiting)?;
                 bool_binary(HirBinaryOp::SLt, value.clone(), zero_like(&value))
             }
             X86BranchPredicate::SLeZero(value) => {
-                let value = lower(self, &value, &mut visiting)?;
+                let value = lower_tested(self, &value, &mut visiting)?;
                 bool_binary(HirBinaryOp::SLe, value.clone(), zero_like(&value))
             }
             X86BranchPredicate::SGtZero(value) => {
-                let value = lower(self, &value, &mut visiting)?;
+                let value = lower_tested(self, &value, &mut visiting)?;
                 bool_binary(HirBinaryOp::SLt, zero_like(&value), value)
             }
             X86BranchPredicate::SGeZero(value) => {
-                let value = lower(self, &value, &mut visiting)?;
+                let value = lower_tested(self, &value, &mut visiting)?;
                 bool_binary(HirBinaryOp::SLe, zero_like(&value), value)
             }
             X86BranchPredicate::MaskEqZero { value, mask } => {
-                let value = lower(self, &value, &mut visiting)?;
+                let value = lower_tested(self, &value, &mut visiting)?;
                 let mask = lower(self, &mask, &mut visiting)?;
                 let masked = HirExpr::Binary {
                     op: HirBinaryOp::And,
@@ -2431,7 +2462,7 @@ impl<'a> PreviewBuilder<'a> {
                 bool_binary(HirBinaryOp::Eq, masked.clone(), zero_like(&masked))
             }
             X86BranchPredicate::MaskNeZero { value, mask } => {
-                let value = lower(self, &value, &mut visiting)?;
+                let value = lower_tested(self, &value, &mut visiting)?;
                 let mask = lower(self, &mask, &mut visiting)?;
                 let masked = HirExpr::Binary {
                     op: HirBinaryOp::And,
@@ -3762,14 +3793,43 @@ impl<'a> PreviewBuilder<'a> {
         None
     }
 
+    /// Peel unique/temp Copy chains but stop at the first register.
+    ///
+    /// Full `peel_passthrough` would continue `rax ← rcx` and then read a
+    /// later redefinition of `rcx` when lowering `test rax` after
+    /// `mov rax,rcx; mov ecx,edx`.
+    fn peel_to_register_or_value(&self, vn: &Varnode) -> Varnode {
+        let mut current = vn.clone();
+        for _ in 0..PASSTHROUGH_PEEL_MAX_STEPS {
+            if is_register_varnode(&current) {
+                return current;
+            }
+            let Some((_, op)) = self.lookup_def_site(&current) else {
+                break;
+            };
+            match op.opcode {
+                PcodeOpcode::Copy
+                | PcodeOpcode::Cast
+                | PcodeOpcode::IntZExt
+                | PcodeOpcode::IntSExt
+                    if op.inputs.len() == 1 =>
+                {
+                    current = op.inputs[0].clone();
+                }
+                _ => break,
+            }
+        }
+        current
+    }
+
     fn classify_test_input(&self, source: &Varnode) -> Option<(Varnode, Option<Varnode>)> {
         let peeled = self.peel_passthrough_varnode(source);
         let (_, op) = self.lookup_def_site(&peeled)?;
         if op.opcode != PcodeOpcode::IntAnd || op.inputs.len() != 2 {
             return None;
         }
-        let lhs = self.peel_passthrough_varnode(&op.inputs[0]);
-        let rhs = self.peel_passthrough_varnode(&op.inputs[1]);
+        let lhs = self.peel_to_register_or_value(&op.inputs[0]);
+        let rhs = self.peel_to_register_or_value(&op.inputs[1]);
         if lhs == rhs {
             return Some((lhs, None));
         }

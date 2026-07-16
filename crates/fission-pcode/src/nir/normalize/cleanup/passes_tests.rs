@@ -1459,10 +1459,7 @@ fn printer_renders_callind_opaque_as_pointer_call() {
     };
 
     let rendered = print_expr(&expr);
-    assert_eq!(
-        rendered,
-        "((unsigned long long (*)())(fn_ptr))(arg1, arg2)"
-    );
+    assert_eq!(rendered, "((unsigned long long (*)())(fn_ptr))(arg1, arg2)");
 }
 
 #[test]
@@ -1582,7 +1579,6 @@ fn subvar_trim_eliminates_redundant_casts() {
     }
 }
 
-
 #[test]
 fn fuse_if_goto_allows_returns_in_segment() {
     // if (c) goto L; return 1; L: return 0;
@@ -1657,4 +1653,27 @@ fn collapse_trivial_assign_returns_folds_eax_const_even_if_preserved() {
         &stmts[0],
         HirStmt::Return(Some(HirExpr::Const(7, _)))
     ));
+}
+
+#[test]
+fn rescue_undeclared_bindings_declares_stack_local_names() {
+    let mut func = HirFunction {
+        name: "f".to_string(),
+        int_param_offsets: Vec::new(),
+        locals: vec![],
+        body: vec![
+            HirStmt::Assign {
+                lhs: HirLValue::Var("local_0".to_string()),
+                rhs: HirExpr::Var("param_2".to_string()),
+            },
+            HirStmt::Return(Some(HirExpr::Var("local_0".to_string()))),
+        ],
+        ..Default::default()
+    };
+    assert!(rescue_undeclared_bindings(&mut func));
+    assert!(
+        func.locals.iter().any(|b| b.name == "local_0"),
+        "local_0 must be declared: {:?}",
+        func.locals
+    );
 }

@@ -1236,7 +1236,7 @@ fn x64_callind_diamond_return_uses_call_result() {
 }
 
 /// x64 O2 shape: test fp; jmp rax (BranchInd tail-call) with args in rcx/rdx.
-/// Matches gcc-O2 apply_binop: `mov rax,rcx; mov ecx,edx; …; mov edx,r8d; jmp rax`.
+/// Matches gcc-O2 apply_binop: `mov rax,rcx; mov ecx,edx; test rax; mov edx,r8d; jmp rax`.
 #[test]
 fn x64_branchind_register_fp_tail_call() {
     use crate::nir::cspec::test_maps::apply_preview_cspec;
@@ -1251,6 +1251,14 @@ fn x64_branchind_register_fp_tail_call() {
     let eax = register(0, 4);
     let zf = register(0x206, 1);
     let ret_addr = register(0x288, 8);
+    // SLEIGH test-reg temp (unique space) holding `rax & rax`.
+    let test_tmp = Varnode {
+        space_id: UNIQUE_SPACE_ID,
+        offset: 0xe0500,
+        size: 8,
+        is_constant: false,
+        constant_val: 0,
+    };
     let mut options = test_options();
     apply_preview_cspec(&mut options);
 
@@ -1268,30 +1276,37 @@ fn x64_branchind_register_fp_tail_call() {
                     Some(rcx.clone()),
                     vec![ecx.clone()],
                 ),
+                // real SLEIGH: TEST r/m64 → IntAnd tmp,reg,reg; IntEqual ZF,tmp,0
                 op(
                     3,
+                    PcodeOpcode::IntAnd,
+                    Some(test_tmp.clone()),
+                    vec![rax.clone(), rax.clone()],
+                ),
+                op(
+                    4,
                     PcodeOpcode::IntEqual,
                     Some(zf.clone()),
-                    vec![rax.clone(), constant(0)],
+                    vec![test_tmp, constant(0)],
                 ),
-                op(4, PcodeOpcode::CBranch, None, vec![constant(0x1020), zf]),
+                op(5, PcodeOpcode::CBranch, None, vec![constant(0x1020), zf]),
             ],
         ),
         block_at(
             0x1010,
             1,
             vec![
-                op(5, PcodeOpcode::Copy, Some(edx.clone()), vec![r8d.clone()]),
-                op(6, PcodeOpcode::IntZExt, Some(rdx.clone()), vec![edx]),
-                op(7, PcodeOpcode::BranchInd, None, vec![rax]),
+                op(6, PcodeOpcode::Copy, Some(edx.clone()), vec![r8d.clone()]),
+                op(7, PcodeOpcode::IntZExt, Some(rdx.clone()), vec![edx]),
+                op(8, PcodeOpcode::BranchInd, None, vec![rax]),
             ],
         ),
         block_at(
             0x1020,
             2,
             vec![
-                op(8, PcodeOpcode::Copy, Some(eax), vec![constant_sized(0, 4)]),
-                op(9, PcodeOpcode::Return, None, vec![ret_addr]),
+                op(9, PcodeOpcode::Copy, Some(eax), vec![constant_sized(0, 4)]),
+                op(10, PcodeOpcode::Return, None, vec![ret_addr]),
             ],
         ),
     ];
@@ -1306,6 +1321,18 @@ fn x64_branchind_register_fp_tail_call() {
     assert!(
         code.contains("(*)()") || code.contains("(*"),
         "expected fp tail-call form:\n{code}"
+    );
+    // Null-check must be on the fp (param_1), not the staged arg (param_2).
+    assert!(
+        code.contains("if (param_1)")
+            || code.contains("if(param_1)")
+            || code.contains("if (!param_1)")
+            || code.contains("if(!param_1)"),
+        "expected null-check on param_1 fp after rcx clobber:\n{code}"
+    );
+    assert!(
+        !code.contains("if (param_2)") && !code.contains("if(param_2)"),
+        "must not null-check staged arg param_2:\n{code}"
     );
     // Args must be the staged sources (param_2, param_3), not the ABI slot
     // names of the destinations (param_1 / overwritten rcx).

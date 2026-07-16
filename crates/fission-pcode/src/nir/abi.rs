@@ -210,7 +210,11 @@ impl AbiState {
         Some(((ghidra_offset - base) / i64::from(self.pointer_size)) as usize)
     }
 
-    fn incoming_stack_argument_index(&self, base: StackBase, offset: i64) -> Option<usize> {
+    pub(crate) fn incoming_stack_argument_index(
+        &self,
+        base: StackBase,
+        offset: i64,
+    ) -> Option<usize> {
         if self.abi != CallingConvention::X86_32 || self.pointer_size == 0 {
             return None;
         }
