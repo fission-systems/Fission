@@ -201,7 +201,8 @@ impl<'a> PreviewBuilder<'a> {
         if !self.options.is_64bit
             && !matches!(
                 self.options.calling_convention,
-                CallingConvention::Arm32
+                CallingConvention::X86_32
+                    | CallingConvention::Arm32
                     | CallingConvention::PowerPc32
                     | CallingConvention::LoongArch32
                     | CallingConvention::Mips32

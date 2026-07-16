@@ -257,9 +257,18 @@ impl<'a> PreviewBuilder<'a> {
     ) -> Result<Vec<HirExpr>, MlilPreviewError> {
         const MAX_STACK_ARGS: usize = 32;
 
+        // Prefer ESP-staged [esp+k] (k≥0) for CallInd/Call: gcc -O0 writes
+        // args at [esp]/[esp+4] then pushes retaddr. Push-style reverse scan
+        // would see only the [esp] store and stop before [esp+4].
+        let mut out = self.recover_x86_32_esp_staged_args_from_block(block, call_idx)?;
+        if !out.is_empty() {
+            self.debug_call_recovery(&format!("x86_32_stack_args={}", out.len()));
+            return Ok(out);
+        }
+
         let scan_end = call_idx.min(block.ops.len());
         let call_address = block.ops.get(call_idx).map(|op| op.address);
-        let mut out = Vec::new();
+        out = Vec::new();
         let mut current_push_address = None;
         for prev_idx in (0..scan_end).rev() {
             if out.len() >= MAX_STACK_ARGS {
@@ -311,6 +320,109 @@ impl<'a> PreviewBuilder<'a> {
         }
 
         self.debug_call_recovery(&format!("x86_32_stack_args={}", out.len()));
+        Ok(out)
+    }
+
+    /// Lower a staged store RHS, freezing Copy sources at their defining site
+    /// so later EAX reloads (fp for CallInd) do not rewrite earlier staged args.
+    fn lower_x86_32_staged_store_value(
+        &mut self,
+        rhs: &Varnode,
+    ) -> Result<HirExpr, MlilPreviewError> {
+        if let Some((def_site, def_op)) = self.lookup_def_site(rhs)
+            && matches!(
+                def_op.opcode,
+                PcodeOpcode::Copy | PcodeOpcode::Cast | PcodeOpcode::IntZExt | PcodeOpcode::IntSExt
+            )
+            && def_op.inputs.len() == 1
+        {
+            let src = def_op.inputs[0].clone();
+            return self.with_lowering_site(def_site, |this| {
+                this.lower_varnode(&src, &mut HashSet::new())
+            });
+        }
+        self.lower_varnode(rhs, &mut HashSet::new())
+    }
+
+    /// Recover cdecl args staged as `mov [esp+k], val` (k ≥ 0) before CallInd.
+    /// Distinct from push-below-ESP (`offset < 0`) and from frame restage (`[ebp+8]`).
+    fn recover_x86_32_esp_staged_args_from_block(
+        &mut self,
+        block: &crate::pcode::PcodeBasicBlock,
+        call_idx: usize,
+    ) -> Result<Vec<HirExpr>, MlilPreviewError> {
+        const MAX_STACK_ARGS: usize = 32;
+        let ptr_size = i64::from(self.options.pointer_size);
+        if ptr_size <= 0 {
+            return Ok(Vec::new());
+        }
+        let scan_end = call_idx.min(block.ops.len());
+        let call_address = block.ops.get(call_idx).map(|op| op.address);
+        let mut recovered = std::collections::BTreeMap::<usize, HirExpr>::new();
+
+        for prev_idx in (0..scan_end).rev() {
+            if recovered.len() >= MAX_STACK_ARGS {
+                break;
+            }
+            let prev = &block.ops[prev_idx];
+            // Call instruction may share address with retaddr push — skip those ops.
+            if Some(prev.address) == call_address {
+                continue;
+            }
+            if prev.opcode.is_control_flow() {
+                if prev.opcode == PcodeOpcode::CallOther
+                    && prev.output.is_none()
+                    && Some(prev.address) == call_address
+                {
+                    continue;
+                }
+                if self.call_is_terminal_branchind_artifact(block, prev_idx) {
+                    continue;
+                }
+                break;
+            }
+            if prev.opcode != PcodeOpcode::Store || prev.inputs.len() < 3 {
+                continue;
+            }
+            let site = LoweringSite {
+                block_idx: block.index as usize,
+                op_idx: prev_idx,
+            };
+            let stack_address = self.with_lowering_site(site, |this| {
+                this.resolve_call_store_stack_address(block, prev_idx)
+            });
+            let Some((StackBase::Rsp, offset)) = stack_address else {
+                continue;
+            };
+            // Staged args sit at [esp+0], [esp+4], … before the retaddr push.
+            if offset < 0 || offset % ptr_size != 0 {
+                continue;
+            }
+            let rhs = prev.inputs.last().expect("store rhs");
+            // Retaddr-style absolute constants are not call arguments.
+            if rhs.is_constant && const_offset(rhs).is_some_and(|v| v > 0x1000) {
+                continue;
+            }
+            let stack_index = (offset / ptr_size) as usize;
+            if recovered.contains_key(&stack_index) {
+                continue;
+            }
+            let value =
+                self.with_lowering_site(site, |this| this.lower_x86_32_staged_store_value(rhs))?;
+            recovered.insert(stack_index, self.normalize_recovered_call_arg(value));
+        }
+
+        let mut out = Vec::new();
+        for idx in 0.. {
+            let Some(expr) = recovered.remove(&idx) else {
+                break;
+            };
+            out.push(expr);
+            if out.len() >= MAX_STACK_ARGS {
+                break;
+            }
+        }
+        self.debug_call_recovery(&format!("x86_32_esp_staged_args={}", out.len()));
         Ok(out)
     }
 
@@ -443,7 +555,15 @@ impl<'a> PreviewBuilder<'a> {
         if !self.x86_32_stack_call_args_enabled() {
             return false;
         }
-        // ESP push stores before Call/CallInd.
+        // cdecl CallInd staging first: Stores to [esp+k] (k ≥ 0). Checked
+        // before push-style scan so intermediate Copy/ZExt to the CallInd
+        // target does not reject a legitimate staged arg store.
+        if op.opcode == PcodeOpcode::Store
+            && self.x86_32_store_is_esp_staged_call_arg(block, op_idx)
+        {
+            return true;
+        }
+        // ESP push stores before Call/CallInd (offset < 0 or bare ESP push).
         if self.x86_32_stack_push_store(op) {
             for candidate in block.ops.iter().skip(op_idx + 1) {
                 if candidate.address == op.address && self.x86_32_stack_push_update(candidate) {
@@ -454,10 +574,26 @@ impl<'a> PreviewBuilder<'a> {
                 {
                     continue;
                 }
-                return matches!(
+                if matches!(
                     candidate.opcode,
                     PcodeOpcode::Call | PcodeOpcode::CallInd | PcodeOpcode::CallOther
-                );
+                ) {
+                    return true;
+                }
+                // Allow pure call-setup ops between push and call (target Copy, etc.).
+                if matches!(
+                    candidate.opcode,
+                    PcodeOpcode::Copy
+                        | PcodeOpcode::Cast
+                        | PcodeOpcode::IntZExt
+                        | PcodeOpcode::IntSExt
+                        | PcodeOpcode::IntAdd
+                        | PcodeOpcode::IntSub
+                        | PcodeOpcode::Load
+                ) {
+                    continue;
+                }
+                return false;
             }
             return false;
         }
@@ -469,6 +605,54 @@ impl<'a> PreviewBuilder<'a> {
             return true;
         }
         false
+    }
+
+    fn x86_32_store_is_esp_staged_call_arg(
+        &self,
+        block: &crate::pcode::PcodeBasicBlock,
+        op_idx: usize,
+    ) -> bool {
+        let Some(op) = block.ops.get(op_idx) else {
+            return false;
+        };
+        if op.opcode != PcodeOpcode::Store || op.inputs.len() < 3 {
+            return false;
+        }
+        let Some((StackBase::Rsp, offset)) =
+            self.resolve_stack_address_from_memory_op(op).or_else(|| {
+                let ptr = op.inputs.get(1)?;
+                let store_addr = op.address;
+                for prev_idx in (0..op_idx).rev() {
+                    let prev = &block.ops[prev_idx];
+                    if prev.address != store_addr {
+                        break;
+                    }
+                    if prev.output.as_ref() != Some(ptr) {
+                        continue;
+                    }
+                    if matches!(prev.opcode, PcodeOpcode::IntAdd | PcodeOpcode::PtrAdd) {
+                        return resolve_add_op_stack_address(self, prev);
+                    }
+                }
+                self.resolve_stack_address(ptr)
+            })
+        else {
+            return false;
+        };
+        let ptr_size = i64::from(self.options.pointer_size);
+        if ptr_size <= 0 || offset < 0 || offset % ptr_size != 0 {
+            return false;
+        }
+        let rhs = op.inputs.last().expect("store rhs");
+        if rhs.is_constant && const_offset(rhs).is_some_and(|v| v > 0x1000) {
+            return false;
+        }
+        block.ops.iter().skip(op_idx + 1).any(|candidate| {
+            matches!(
+                candidate.opcode,
+                PcodeOpcode::CallInd | PcodeOpcode::Call | PcodeOpcode::BranchInd
+            )
+        })
     }
 
     fn x86_32_store_is_frame_param_restage(

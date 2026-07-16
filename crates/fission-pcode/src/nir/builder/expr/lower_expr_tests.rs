@@ -1352,3 +1352,133 @@ fn x64_branchind_register_fp_tail_call() {
         "expected call through param_1 fp:\n{code}"
     );
 }
+
+/// m32-O0 shape: stage cdecl args at [esp]/[esp+4], CallInd through unique fp,
+/// then return EAX which must bind the call result.
+#[test]
+fn x86_32_callind_esp_staged_args_and_eax_result() {
+    use crate::nir::cspec::test_maps::apply_preview_cspec;
+    use crate::nir::support::CallingConvention;
+
+    let eax = register(0x0, 4);
+    let esp = register(0x10, 4);
+    let mut options = test_options();
+    options.calling_convention = CallingConvention::X86_32;
+    options.is_64bit = false;
+    options.pointer_size = 4;
+    options.format = "PE32".to_string();
+    options.pe_x64_only = false;
+    apply_preview_cspec(&mut options);
+
+    let tmp_ptr = Varnode {
+        space_id: UNIQUE_SPACE_ID,
+        offset: 0x7600,
+        size: 4,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let tmp_val = Varnode {
+        space_id: UNIQUE_SPACE_ID,
+        offset: 0xa300,
+        size: 4,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let target = Varnode {
+        space_id: UNIQUE_SPACE_ID,
+        offset: 0x63500,
+        size: 4,
+        is_constant: false,
+        constant_val: 0,
+    };
+    // Same instruction address for micro-ops (real SLEIGH), distinct across insns.
+    let ops = vec![
+        // insn 0x1010: mov [esp+4], 4
+        PcodeOp {
+            seq_num: 0,
+            opcode: PcodeOpcode::IntAdd,
+            address: 0x1010,
+            output: Some(tmp_ptr.clone()),
+            inputs: vec![esp.clone(), constant_sized(4, 4)],
+            asm_mnemonic: None,
+        },
+        PcodeOp {
+            seq_num: 1,
+            opcode: PcodeOpcode::Copy,
+            address: 0x1010,
+            output: Some(tmp_val.clone()),
+            inputs: vec![constant_sized(4, 4)],
+            asm_mnemonic: None,
+        },
+        PcodeOp {
+            seq_num: 2,
+            opcode: PcodeOpcode::Store,
+            address: 0x1010,
+            output: None,
+            inputs: vec![constant_sized(3, 4), tmp_ptr.clone(), tmp_val.clone()],
+            asm_mnemonic: None,
+        },
+        // insn 0x1020: mov [esp], 3
+        PcodeOp {
+            seq_num: 3,
+            opcode: PcodeOpcode::Copy,
+            address: 0x1020,
+            output: Some(tmp_val.clone()),
+            inputs: vec![constant_sized(3, 4)],
+            asm_mnemonic: None,
+        },
+        PcodeOp {
+            seq_num: 4,
+            opcode: PcodeOpcode::Store,
+            address: 0x1020,
+            output: None,
+            inputs: vec![constant_sized(3, 4), esp.clone(), tmp_val.clone()],
+            asm_mnemonic: None,
+        },
+        // insn 0x1030: callind eax (target unique ← eax)
+        PcodeOp {
+            seq_num: 5,
+            opcode: PcodeOpcode::Copy,
+            address: 0x1030,
+            output: Some(target.clone()),
+            inputs: vec![eax.clone()],
+            asm_mnemonic: None,
+        },
+        PcodeOp {
+            seq_num: 6,
+            opcode: PcodeOpcode::CallInd,
+            address: 0x1030,
+            output: None,
+            inputs: vec![target],
+            asm_mnemonic: None,
+        },
+        // insn 0x1040: ret
+        PcodeOp {
+            seq_num: 7,
+            opcode: PcodeOpcode::Return,
+            address: 0x1040,
+            output: None,
+            inputs: vec![register(0x288, 4)],
+            asm_mnemonic: None,
+        },
+    ];
+    let pcode = pcode_function(vec![block_at(0x1000, 0, ops)]);
+    let code = render_mlil_preview(&pcode, "callind32", 0x1000, &options).expect("render");
+    eprintln!("callind32:\n{code}");
+    assert!(
+        code.contains("(*)()") || code.contains("(*"),
+        "expected fp call form:\n{code}"
+    );
+    assert!(
+        code.contains("3") && code.contains("4"),
+        "expected staged stack args 3,4:\n{code}"
+    );
+    assert!(
+        code.contains("eax =") || code.contains("return ((") || code.contains("return eax"),
+        "expected call result bound into eax or returned:\n{code}"
+    );
+    assert!(
+        !code.contains("local_0 ="),
+        "esp staged stores must not materialize as local_0:\n{code}"
+    );
+}
