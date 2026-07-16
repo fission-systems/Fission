@@ -936,6 +936,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#quality-extensions-non-ranking" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Quality extensions (non-ranking)
+      
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1063,6 +1074,35 @@ use the <strong>local</strong> profile and must <strong>never</strong> be publis
 <li>Report both CLI one-shot and runner/oracle movement.</li>
 </ol>
 <p>Also linked from root <code>Agents.md</code> (Decompiler Quality Loop).</p>
+<h2 id="quality-extensions-non-ranking">Quality extensions (non-ranking)<a class="headerlink" href="#quality-extensions-non-ranking" title="Permanent link">&para;</a></h2>
+<p>The external runner now also records <strong>diagnostic</strong> axes that never feed semantic
+ranking:</p>
+<table>
+<thead>
+<tr>
+<th>Extension</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Bare-compile</td>
+<td>Minimal-header <code>gcc -c</code> on decompiled C</td>
+</tr>
+<tr>
+<td>Readability axis</td>
+<td>goto / temp density / flag-soup proxies</td>
+</tr>
+<tr>
+<td>Tracks / ISA / format</td>
+<td>realworld · multi_isa · pe/elf pivots + timeout taxonomy</td>
+</tr>
+</tbody>
+</table>
+<p>Dashboard: <code>fission-benchmark</code> route <strong><code>/quality</code></strong>. Official ranking remains
+<strong>semantic pass rate</strong> under the <code>original_binary</code> oracle only.</p>
+<p>Corpus growth: <code>corpus/dev/source/advanced_patterns.c</code> (list / struct / indirect
+call / stride) with wrappers in <code>runner/test_wrappers.py</code>.</p>
 
 
 
