@@ -1482,3 +1482,208 @@ fn x86_32_callind_esp_staged_args_and_eax_result() {
         "esp staged stores must not materialize as local_0:\n{code}"
     );
 }
+
+/// m32-O0 residual: stage via EAX from [ebp+c]/[ebp+10], then reload EAX with
+/// the fp from [ebp+8] before CallInd. Args must stay param_2/param_3, not
+/// rewrite through live EAX to param_1.
+#[test]
+fn x86_32_callind_staged_args_prefer_stack_param_not_live_eax() {
+    use crate::nir::cspec::test_maps::apply_preview_cspec;
+    use crate::nir::support::CallingConvention;
+
+    let eax = register(0x0, 4);
+    let esp = register(0x10, 4);
+    let ebp = register(0x14, 4);
+    let mut options = test_options();
+    options.calling_convention = CallingConvention::X86_32;
+    options.is_64bit = false;
+    options.pointer_size = 4;
+    options.format = "PE32".to_string();
+    options.pe_x64_only = false;
+    apply_preview_cspec(&mut options);
+
+    let addr = |off| Varnode {
+        space_id: UNIQUE_SPACE_ID,
+        offset: off,
+        size: 4,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let tmp_addr = addr(0x6600);
+    let tmp_load = addr(0x17200);
+    let tmp_val = addr(0xa300);
+    let tmp_ptr = addr(0x7600);
+    let target = addr(0x63500);
+    let space = constant_sized(3, 4);
+
+    let ops = vec![
+        // prologue: mov ebp, esp → frame pointer established
+        PcodeOp {
+            seq_num: 0,
+            opcode: PcodeOpcode::Copy,
+            address: 0x1000,
+            output: Some(ebp.clone()),
+            inputs: vec![esp.clone()],
+            asm_mnemonic: Some("MOV EBP,ESP".into()),
+        },
+        // mov eax, [ebp+0x10] ; mov [esp+4], eax   → arg1 = param_3
+        PcodeOp {
+            seq_num: 1,
+            opcode: PcodeOpcode::IntAdd,
+            address: 0x1010,
+            output: Some(tmp_addr.clone()),
+            inputs: vec![ebp.clone(), constant_sized(0x10, 4)],
+            asm_mnemonic: None,
+        },
+        PcodeOp {
+            seq_num: 2,
+            opcode: PcodeOpcode::Load,
+            address: 0x1010,
+            output: Some(tmp_load.clone()),
+            inputs: vec![space.clone(), tmp_addr.clone()],
+            asm_mnemonic: None,
+        },
+        PcodeOp {
+            seq_num: 3,
+            opcode: PcodeOpcode::Copy,
+            address: 0x1010,
+            output: Some(eax.clone()),
+            inputs: vec![tmp_load.clone()],
+            asm_mnemonic: None,
+        },
+        PcodeOp {
+            seq_num: 4,
+            opcode: PcodeOpcode::IntAdd,
+            address: 0x1014,
+            output: Some(tmp_ptr.clone()),
+            inputs: vec![esp.clone(), constant_sized(4, 4)],
+            asm_mnemonic: None,
+        },
+        PcodeOp {
+            seq_num: 5,
+            opcode: PcodeOpcode::Copy,
+            address: 0x1014,
+            output: Some(tmp_val.clone()),
+            inputs: vec![eax.clone()],
+            asm_mnemonic: None,
+        },
+        PcodeOp {
+            seq_num: 6,
+            opcode: PcodeOpcode::Store,
+            address: 0x1014,
+            output: None,
+            inputs: vec![space.clone(), tmp_ptr.clone(), tmp_val.clone()],
+            asm_mnemonic: None,
+        },
+        // mov eax, [ebp+0xc] ; mov [esp], eax   → arg0 = param_2
+        PcodeOp {
+            seq_num: 7,
+            opcode: PcodeOpcode::IntAdd,
+            address: 0x1020,
+            output: Some(tmp_addr.clone()),
+            inputs: vec![ebp.clone(), constant_sized(0xc, 4)],
+            asm_mnemonic: None,
+        },
+        PcodeOp {
+            seq_num: 8,
+            opcode: PcodeOpcode::Load,
+            address: 0x1020,
+            output: Some(tmp_load.clone()),
+            inputs: vec![space.clone(), tmp_addr.clone()],
+            asm_mnemonic: None,
+        },
+        PcodeOp {
+            seq_num: 9,
+            opcode: PcodeOpcode::Copy,
+            address: 0x1020,
+            output: Some(eax.clone()),
+            inputs: vec![tmp_load.clone()],
+            asm_mnemonic: None,
+        },
+        PcodeOp {
+            seq_num: 10,
+            opcode: PcodeOpcode::Copy,
+            address: 0x1024,
+            output: Some(tmp_val.clone()),
+            inputs: vec![eax.clone()],
+            asm_mnemonic: None,
+        },
+        PcodeOp {
+            seq_num: 11,
+            opcode: PcodeOpcode::Store,
+            address: 0x1024,
+            output: None,
+            inputs: vec![space.clone(), esp.clone(), tmp_val.clone()],
+            asm_mnemonic: None,
+        },
+        // mov eax, [ebp+8] ; call eax   → fp = param_1
+        PcodeOp {
+            seq_num: 12,
+            opcode: PcodeOpcode::IntAdd,
+            address: 0x1030,
+            output: Some(tmp_addr.clone()),
+            inputs: vec![ebp.clone(), constant_sized(0x8, 4)],
+            asm_mnemonic: None,
+        },
+        PcodeOp {
+            seq_num: 13,
+            opcode: PcodeOpcode::Load,
+            address: 0x1030,
+            output: Some(tmp_load.clone()),
+            inputs: vec![space.clone(), tmp_addr.clone()],
+            asm_mnemonic: None,
+        },
+        PcodeOp {
+            seq_num: 14,
+            opcode: PcodeOpcode::Copy,
+            address: 0x1030,
+            output: Some(eax.clone()),
+            inputs: vec![tmp_load.clone()],
+            asm_mnemonic: None,
+        },
+        PcodeOp {
+            seq_num: 15,
+            opcode: PcodeOpcode::Copy,
+            address: 0x1034,
+            output: Some(target.clone()),
+            inputs: vec![eax.clone()],
+            asm_mnemonic: None,
+        },
+        PcodeOp {
+            seq_num: 16,
+            opcode: PcodeOpcode::CallInd,
+            address: 0x1034,
+            output: None,
+            inputs: vec![target],
+            asm_mnemonic: None,
+        },
+        PcodeOp {
+            seq_num: 17,
+            opcode: PcodeOpcode::Return,
+            address: 0x1040,
+            output: None,
+            inputs: vec![register(0x288, 4)],
+            asm_mnemonic: None,
+        },
+    ];
+    let pcode = pcode_function(vec![block_at(0x1000, 0, ops)]);
+    let code = render_mlil_preview(&pcode, "callind32_params", 0x1000, &options).expect("render");
+    eprintln!("callind32_params:\n{code}");
+    assert!(
+        code.contains("(*)()") || code.contains("(*"),
+        "expected fp call form:\n{code}"
+    );
+    // Frozen stack-param surface: arg0=param_2, arg1=param_3 (not live EAX/param_1).
+    assert!(
+        code.contains("(param_2, param_3)")
+            || code.contains("(param_2,param_3)")
+            || (code.contains("param_2")
+                && code.contains("param_3)")
+                && !code.contains("(param_1, param_3)")),
+        "expected staged args param_2,param_3:\n{code}"
+    );
+    assert!(
+        !code.contains("(param_1, param_3)") && !code.contains("(param_1,param_3)"),
+        "must not rewrite arg0 to param_1 after EAX reload:\n{code}"
+    );
+}

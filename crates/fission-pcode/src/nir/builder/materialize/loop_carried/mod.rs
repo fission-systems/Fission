@@ -303,7 +303,13 @@ impl<'a> PreviewBuilder<'a> {
         }
     }
 
-    fn stack_param_name_reaching_register(&mut self, output: &Varnode) -> Option<String> {
+    /// Walk a short Copy/ZExt chain to an incoming stack-parameter Load.
+    /// Used by loop-carried seeds and by x86_32 CallInd staged-arg recovery so
+    /// later redefs of EAX cannot rewrite a frozen param snapshot.
+    pub(in crate::nir::builder) fn stack_param_name_reaching_register(
+        &mut self,
+        output: &Varnode,
+    ) -> Option<String> {
         // Walk a short chain of register-defining ops outside the current site to
         // find a stack-parameter load that feeds this register at function entry.
         let mut current = output.clone();
@@ -364,7 +370,10 @@ impl<'a> PreviewBuilder<'a> {
         }
     }
 
-    fn stack_param_name_from_load_op(&mut self, op: &PcodeOp) -> Option<String> {
+    pub(in crate::nir::builder) fn stack_param_name_from_load_op(
+        &mut self,
+        op: &PcodeOp,
+    ) -> Option<String> {
         if op.opcode != PcodeOpcode::Load || op.inputs.len() < 2 {
             return None;
         }

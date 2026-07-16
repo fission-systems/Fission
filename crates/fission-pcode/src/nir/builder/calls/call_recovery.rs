@@ -323,8 +323,13 @@ impl<'a> PreviewBuilder<'a> {
         Ok(out)
     }
 
-    /// Lower a staged store RHS, freezing Copy sources at their defining site
-    /// so later EAX reloads (fp for CallInd) do not rewrite earlier staged args.
+    /// Lower a staged store RHS to a frozen value for cdecl CallInd args.
+    ///
+    /// gcc-m32 -O0 stages via `mov eax, [ebp+c]; mov [esp], eax` then reloads
+    /// `eax` with the function pointer. Naively lowering through live EAX (or a
+    /// temp alias of EAX) lets normalize rewrite arg0 to `param_1`. Prefer the
+    /// incoming stack-parameter surface reached by the Copy/Load chain at the
+    /// defining site.
     fn lower_x86_32_staged_store_value(
         &mut self,
         rhs: &Varnode,
@@ -338,10 +343,49 @@ impl<'a> PreviewBuilder<'a> {
         {
             let src = def_op.inputs[0].clone();
             return self.with_lowering_site(def_site, |this| {
+                if let Some(name) = this.try_x86_32_stack_param_snapshot(&src) {
+                    return Ok(HirExpr::Var(name));
+                }
                 this.lower_varnode(&src, &mut HashSet::new())
             });
         }
+        if let Some(name) = self.try_x86_32_stack_param_snapshot(rhs) {
+            return Ok(HirExpr::Var(name));
+        }
         self.lower_varnode(rhs, &mut HashSet::new())
+    }
+
+    /// If `vn` is (or Copy-reaches) a Load from an incoming stack param slot,
+    /// return that formal's surface name (`param_N`).
+    fn try_x86_32_stack_param_snapshot(&mut self, vn: &Varnode) -> Option<String> {
+        if !self.x86_32_stack_call_args_enabled() {
+            return None;
+        }
+        if is_register_varnode(vn) {
+            return self.stack_param_name_reaching_register(vn);
+        }
+        // Unique temp that is a direct Load from [ebp+k], or Copy of such a load.
+        if let Some((_, op)) = self.lookup_def_site(vn) {
+            if op.opcode == PcodeOpcode::Load {
+                return self.stack_param_name_from_load_op(op);
+            }
+            if matches!(
+                op.opcode,
+                PcodeOpcode::Copy | PcodeOpcode::Cast | PcodeOpcode::IntZExt | PcodeOpcode::IntSExt
+            ) && op.inputs.len() == 1
+            {
+                let input = op.inputs.first()?.clone();
+                if is_register_varnode(&input) {
+                    return self.stack_param_name_reaching_register(&input);
+                }
+                if let Some((_, src_op)) = self.lookup_def_site(&input)
+                    && src_op.opcode == PcodeOpcode::Load
+                {
+                    return self.stack_param_name_from_load_op(src_op);
+                }
+            }
+        }
+        None
     }
 
     /// Recover cdecl args staged as `mov [esp+k], val` (k ≥ 0) before CallInd.
