@@ -184,3 +184,26 @@ jobs:
             --repo "${{ github.repository }}" \
             -f "tag=${TAG}"
           echo "Queued. Track: gh run list --workflow 'CD Release' --limit 3"
+
+      # Cross-repo: optional PAT with actions:write on fission-benchmark.
+      # Without the secret, operators run the gh commands printed below.
+      - name: Trigger fission-benchmark Publish Images (optional)
+        env:
+          GH_TOKEN: ${{ secrets.FISSION_BENCHMARK_DISPATCH_TOKEN }}
+          TAG: ${{ steps.tag.outputs.tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -z "${GH_TOKEN:-}" ]]; then
+            echo "FISSION_BENCHMARK_DISPATCH_TOKEN not set — skip auto benchmark."
+            echo "Operator commands after CD assets are live:"
+            echo "  gh workflow run \"Publish Images\" --repo sjkim1127/fission-benchmark \\"
+            echo "    -f services=fission -f fission_version=${TAG}"
+            echo "  # Publish Images chains official Benchmark & Deploy via gh CLI."
+            exit 0
+          fi
+          echo "Dispatching fission-benchmark Publish Images for ${TAG}"
+          gh workflow run "Publish Images" \
+            --repo sjkim1127/fission-benchmark \
+            -f "services=fission" \
+            -f "fission_version=${TAG}"

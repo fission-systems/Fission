@@ -75,6 +75,26 @@ Manual CD re-run for an existing tag:
 gh workflow run "CD Release" -f tag=v0.1.4
 ```
 
+Official benchmark bake (after release assets exist):
+
+```bash
+# Preferred: bake GHCR then auto-chain official Benchmark & Deploy
+gh workflow run "Publish Images" --repo sjkim1127/fission-benchmark \
+  -f services=fission -f fission_version=v0.1.4
+
+# Or repository_dispatch (Publish Images only; chains benchmark itself):
+gh api repos/sjkim1127/fission-benchmark/dispatches --input - <<'EOF'
+{
+  "event_type": "fission-release",
+  "client_payload": { "fission_version": "v0.1.4" }
+}
+EOF
+```
+
+Optional: set repo secret `FISSION_BENCHMARK_DISPATCH_TOKEN` (PAT with
+`actions:write` on `fission-benchmark`) so **Release Tag** auto-runs the bake
+after CD is queued.
+
 Optional: run **Release E2E Gate** alone (dispatch) to pre-validate a SHA without tagging.
 
 ## L1 job split (main push vs extended)
