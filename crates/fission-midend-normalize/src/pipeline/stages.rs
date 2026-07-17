@@ -39,15 +39,14 @@ use super::super::memory::{
 };
 use super::super::recovery::{
     apply_break_continue_pass, apply_dead_flag_cleanup_pass, apply_flag_recovery_pass,
-    apply_for_loop_folding,
-    apply_iv_recovery_pass, apply_variable_merge_pass, copy_propagation_pass, join_coalescing_pass,
+    apply_for_loop_folding, apply_iv_recovery_pass, apply_variable_merge_pass,
+    copy_propagation_pass, join_coalescing_pass,
 };
 use super::super::subvar_flow::apply_subvar_flow_pass;
 use super::super::types::{
     apply_entry_param_promotion_pass, apply_interproc_callsite_arity_pass,
     apply_variadic_stack_region_pass,
 };
-use fission_midend_core::wave_stats;
 use super::run::{
     apply_type_signature_fixed_point, body_contains_popcount_call, body_has_loopish_shapes,
     cleanup_func_stmt_list, contains_call_stmts, hir_shape, is_large_hir_function,
@@ -57,6 +56,7 @@ use super::run::{
 use fission_midend_core::action_pipeline::PassBudget;
 use fission_midend_core::ir::HirFunction;
 use fission_midend_core::vsa::apply_jump_resolver_pass;
+use fission_midend_core::wave_stats;
 use std::time::Instant;
 use tracing::debug_span;
 
@@ -930,13 +930,15 @@ pub fn run_stage_cleanup(func: &mut HirFunction, diag: bool, perf: bool) {
     );
     apply_type_signature_fixed_point(func, diag, perf);
     // Residual CF/OF/SF/ZF/PF stores after late materialize/arith waves — drop if unused.
-    run_pass_logged(func, "dead_flag_cleanup_final", perf, apply_dead_flag_cleanup_pass);
     run_pass_logged(
         func,
-        "hoist_param_alias_copies",
+        "dead_flag_cleanup_final",
         perf,
-        |f| hoist_param_alias_copies_before_first_use(&mut f.body),
+        apply_dead_flag_cleanup_pass,
     );
+    run_pass_logged(func, "hoist_param_alias_copies", perf, |f| {
+        hoist_param_alias_copies_before_first_use(&mut f.body)
+    });
     run_pass_logged(
         func,
         "rescue_undeclared_bindings",
@@ -955,5 +957,10 @@ pub fn run_stage_cleanup(func: &mut HirFunction, diag: bool, perf: bool) {
     // Drop temps left only by the pre-collapse wide dividend assign.
     run_pass_logged(func, "eliminate_dead_temp_after_cdq", perf, |f| {
         eliminate_dead_temp_assigns(&mut f.body, &std::collections::HashSet::new())
+    });
+    // Collapse may leave pure temps with zero uses; final prune already ran
+    // before CDQ, so re-prune trivial unused bindings (e.g. residual xVar).
+    run_pass_logged(func, "prune_unused_temp_after_cdq", perf, |f| {
+        prune_unused_temp_bindings(f) | prune_unused_dead_local_bindings(f)
     });
 }
