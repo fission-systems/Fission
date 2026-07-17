@@ -1,8 +1,8 @@
 //! NIR/HIR pipeline after P-code lifting: preview builder, normalization,
 //! structuring, rendering, and telemetry wired through [`types::NirBuildStats`].
 //!
-//! Typical stage order: [`builder`] → [`normalize`] → [`structuring`] → [`printer`].
-//! Directory guide: `crates/fission-pcode/src/nir/AGENTS.md`.
+//! Typical stage order: [`builder`] → [`normalize`] → [`structuring`] →
+//! [`crate::render`]. Directory guide: `crates/fission-pcode/src/nir/AGENTS.md`.
 
 use crate::pcode::{PcodeFunction, PcodeOp, PcodeOpcode, Varnode};
 use fission_loader::loader::LoadedBinary;
@@ -18,7 +18,6 @@ pub mod cspec;
 mod normalize;
 pub(crate) mod pass;
 mod piece;
-mod render;
 mod stats;
 mod structuring;
 mod support;
@@ -42,7 +41,14 @@ pub use self::telemetry::{
     take_last_preview_hint_stats,
 };
 pub use self::types::*;
-use self::{action_pipeline::*, builder::*, cfg::*, normalize::*, render::*, structuring::*};
+use self::{action_pipeline::*, builder::*, cfg::*, normalize::*, structuring::*};
+// Presentation/print surface lives at crate root `render` (ADR 0011 Phase 1).
+// `pub(crate)` so tests and owners can keep using `crate::nir::print_*`.
+pub(crate) use crate::render::{
+    print_expr, print_hir_function, print_hir_function_with_global_names,
+    print_hir_function_with_profile, print_stmt, print_type, recover_global_symbol_accesses,
+    render_hir_function_with_global_decls, render_layered_pseudocode,
+};
 pub use fission_core::CallingConvention;
 
 pub use self::abi::infer_entry_register_param_arity;
@@ -51,9 +57,11 @@ pub use self::cspec::RegisterNamer;
 pub use self::normalize::{
     summarize_direct_tail_wrapper_from_ops, summarize_direct_tail_wrapper_from_pcode,
 };
-pub use self::render::{
+pub use crate::render::{
     LayeredPseudocode, PrintProfile, PseudocodeLayer, render_contracted_wrapper_summary,
 };
+// Compat path: historical `crate::nir::render::…` imports.
+pub use crate::render as render;
 // take_last_layered_pseudocode defined below after render path
 
 pub fn test_refine_partitions(accesses: &[(i64, u32)]) -> Vec<(i64, u32)> {

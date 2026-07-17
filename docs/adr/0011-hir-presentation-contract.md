@@ -11,7 +11,7 @@ Fission emits dual pseudocode surfaces from one structured tree:
 - **HIR** — human-readable presentation (dashboard readability, operator UX)
 
 Early HIR work lived only as ad-hoc polish in
-`crates/fission-pcode/src/nir/render/hir_presentation.rs`. That improved real
+`crates/fission-pcode/src/render/hir_presentation.rs`. That improved real
 O0 rows (`add_ints`, `count_bits`, `apply_binop`, …) but left no durable contract
 for:
 
@@ -129,8 +129,7 @@ change and ADR 0006 applies.
 
 **Follow-up**
 
-- `crates/fission-pcode/src/nir/render/AGENTS.md` implements the operator
-  checklist.
+- `crates/fission-pcode/src/render/AGENTS.md` implements the operator checklist.
 - Regression tests enforce single-eval of calls and NIR isolation from
   presentation.
 
@@ -141,4 +140,5 @@ change and ADR 0006 applies.
 - [ADR 0007](0007-ai-overfit-and-validation-firewall.md) — overfit firewall
 - [ADR 0008](0008-nir-substrate-and-owner-boundaries.md) — substrate vs owners
 - Repo policy: root `Agents.md` § NIR vs HIR
-- Implementation: `crates/fission-pcode/src/nir/render/hir_presentation.rs`
+- Implementation: `crates/fission-pcode/src/render/` (`hir_presentation.rs`, `printer.rs`, …)
+- Module boundary: presentation is crate-root `render`, not nested under `nir/` (Phase 1 of dual-layer ownership)

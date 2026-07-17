@@ -1,7 +1,8 @@
 //! Fission P-code — intermediate representation and optimizer.
 //!
 //! Pipeline stages and conventions live under [`crate::nir`] with directory guides in
-//! `crates/fission-pcode/src/nir/AGENTS.md` and child `*/AGENTS.md` files.
+//! `crates/fission-pcode/src/nir/AGENTS.md`. Dual-layer print/presentation owns
+//! [`crate::render`] (`src/render/AGENTS.md`, ADR 0011).
 
 // CI runs `cargo clippy ... -D warnings`; `-D warnings` cannot be selectively reversed via `-A clippy::*`
 // on the command line for all lint kinds, so suppress Clippy for this crate until policy is tightened again.
@@ -18,6 +19,8 @@ pub(crate) mod fast_hash;
 pub mod nir;
 mod pcode;
 pub mod prelude;
+/// Dual-layer C presentation (NIR/HIR print surfaces). Owner: ADR 0008 / 0011.
+pub mod render;
 
 // Re-export main P-code types
 pub use pcode::*;

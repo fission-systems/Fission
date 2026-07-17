@@ -7,7 +7,10 @@
 //! - Structural invariants only — no function/address/binary special cases.
 //! - Semantic recovery stays in normalize/structuring.
 
-use super::super::*;
+use super::{
+    HirBinaryOp, HirExpr, HirFunction, HirLValue, HirStmt, HirUnaryOp, NirBinding,
+    NirBindingOrigin, NirType,
+};
 use std::collections::{HashMap, HashSet};
 
 /// Apply HIR-facing presentation polish in place.
@@ -2300,7 +2303,7 @@ fn collect_used_names_expr(expr: &HirExpr, out: &mut HashSet<String>) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::nir::render::pipeline::render_layered_pseudocode;
+    use crate::render::render_layered_pseudocode;
     use crate::nir::MlilPreviewOptions;
 
     fn int_ty(bits: u32, signed: bool) -> NirType {

@@ -1,15 +1,16 @@
-//! Pseudocode rendering from structured HIR/NIR (`render_nir`, layout helpers).
+//! Pseudocode rendering from structured IR (`render_nir`, layout helpers).
 //!
 //! Downstream of semantics; avoid fixing structuring failures by tweaking format-only paths.
-//! Policy: `crates/fission-pcode/src/nir/AGENTS.md`.
+//! Policy: `crates/fission-pcode/src/render/AGENTS.md`, ADR 0011.
 
-use super::*;
+use super::{
+    HirBinaryOp, HirExpr, HirFunction, HirLValue, HirStmt, HirUnaryOp, NirBinding, NirBindingOrigin,
+    NirType, PrintProfile, expr_type,
+};
 use std::collections::{HashMap, HashSet};
 
 const MAX_PRINT_STMT_DEPTH: usize = 512;
 const MAX_PRINT_EXPR_DEPTH: usize = 512;
-
-use super::layer::PrintProfile;
 
 /// Printing context: maps variable name → NirType for struct-member rendering.
 struct PrintCtx<'a> {
@@ -100,18 +101,18 @@ impl<'a> PrintCtx<'a> {
     }
 }
 
-pub(in crate::nir) fn print_hir_function(func: &HirFunction) -> String {
+pub(crate) fn print_hir_function(func: &HirFunction) -> String {
     print_hir_function_with_profile(func, None, PrintProfile::Nir)
 }
 
-pub(in crate::nir) fn print_hir_function_with_global_names(
+pub(crate) fn print_hir_function_with_global_names(
     func: &HirFunction,
     global_names: &HashMap<u64, String>,
 ) -> String {
     print_hir_function_with_profile(func, Some(global_names), PrintProfile::Nir)
 }
 
-pub(in crate::nir) fn print_hir_function_with_profile(
+pub(crate) fn print_hir_function_with_profile(
     func: &HirFunction,
     global_names: Option<&HashMap<u64, String>>,
     profile: PrintProfile,
@@ -172,7 +173,7 @@ fn print_binding_type(binding: &NirBinding) -> String {
         .unwrap_or_else(|| print_type(&binding.ty))
 }
 
-pub(in crate::nir) fn print_stmt(stmt: &HirStmt) -> String {
+pub(crate) fn print_stmt(stmt: &HirStmt) -> String {
     match stmt {
         HirStmt::Assign { lhs, rhs } => {
             format!(
@@ -191,7 +192,7 @@ pub(in crate::nir) fn print_stmt(stmt: &HirStmt) -> String {
         ),
         HirStmt::Expr(expr) => format!("{};", print_expr(expr_fallback(expr, 0))),
         HirStmt::Label(label) => format!("{}:", label),
-        HirStmt::Goto(label) if label == crate::nir::structuring::SWITCH_FALLTHROUGH_SENTINEL => {
+        HirStmt::Goto(label) if label == crate::render::SWITCH_FALLTHROUGH_SENTINEL => {
             "/* fallthrough */".to_string()
         }
         HirStmt::Goto(label) => format!("goto {};", label),
@@ -416,7 +417,7 @@ fn print_lvalue(lhs: &HirLValue, depth: usize) -> String {
     }
 }
 
-pub(in crate::nir) fn print_expr(expr: &HirExpr) -> String {
+pub(crate) fn print_expr(expr: &HirExpr) -> String {
     print_expr_prec(expr, 0, 0)
 }
 
@@ -697,7 +698,7 @@ fn print_integer_const(value: i64, ty: &NirType) -> String {
     value.to_string()
 }
 
-pub(in crate::nir) fn print_type(ty: &NirType) -> String {
+pub(crate) fn print_type(ty: &NirType) -> String {
     match ty {
         NirType::Unknown => "undefined".to_string(),
         NirType::Bool => "bool".to_string(),
@@ -1298,7 +1299,7 @@ fn print_stmt_ctx(stmt: &HirStmt, ctx: &PrintCtx<'_>) -> String {
         HirStmt::Break => "break;".to_string(),
         HirStmt::Continue => "continue;".to_string(),
         HirStmt::Label(label) => format!("{}:", label),
-        HirStmt::Goto(label) if label == crate::nir::structuring::SWITCH_FALLTHROUGH_SENTINEL => {
+        HirStmt::Goto(label) if label == crate::render::SWITCH_FALLTHROUGH_SENTINEL => {
             "/* fallthrough */".to_string()
         }
         HirStmt::Goto(label) => format!("goto {};", label),

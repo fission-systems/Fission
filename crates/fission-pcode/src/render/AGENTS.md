@@ -1,8 +1,10 @@
-# NIR render / HIR presentation guide
+# Render / HIR presentation guide
 
-Scope: `crates/fission-pcode/src/nir/render/`
+Scope: `crates/fission-pcode/src/render/`
 
-Canonical policy: [`docs/adr/0011-hir-presentation-contract.md`](../../../../docs/adr/0011-hir-presentation-contract.md).
+Canonical policy: [`docs/adr/0011-hir-presentation-contract.md`](../../../docs/adr/0011-hir-presentation-contract.md).
+
+Phase 1 layout (ADR 0008 / 0011): presentation lives at **crate root** `render/`, not under `nir/`. Structured IR types remain in `nir/`; this module only consumes them.
 
 ## Layout
 
@@ -12,6 +14,19 @@ Canonical policy: [`docs/adr/0011-hir-presentation-contract.md`](../../../../doc
 | `pipeline.rs` | `render_layered_pseudocode` — NIR from raw tree, HIR from **clone** + presentation |
 | `hir_presentation.rs` | Readability-only tree polish (`apply_hir_presentation`) |
 | `printer.rs` | C print; `PrintProfile::Hir` cast sugar only |
+
+## Dependency direction
+
+```text
+nir (builder / normalize / structuring / types)
+        │
+        ▼  consume structured tree
+     render (print + HIR presentation)
+```
+
+- Do **not** call normalize/structuring from here.
+- `nir` orchestration may call `render` for dual-layer output (crate-local).
+- Prefer `crate::render::…`. Compat alias: `crate::nir::render` re-exports this module.
 
 ## Rules (do)
 

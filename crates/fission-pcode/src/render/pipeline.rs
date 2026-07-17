@@ -1,12 +1,9 @@
 use super::hir_presentation::apply_hir_presentation;
 use super::layer::{LayeredPseudocode, PrintProfile};
 use super::{
-    print_hir_function, print_hir_function_with_global_names, print_hir_function_with_profile,
-    print_type,
-};
-use crate::nir::{
     HirExpr, HirFunction, HirLValue, HirStmt, MlilPreviewOptions, NirBinding, NirBindingOrigin,
-    NirType, expr_type,
+    NirType, expr_type, print_hir_function, print_hir_function_with_global_names,
+    print_hir_function_with_profile, print_type,
 };
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
