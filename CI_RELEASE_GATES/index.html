@@ -1134,10 +1134,16 @@ L1 is achievable and meaningful for decompiler releases):</p>
 </ul>
 <p><strong>L0 performance notes (2026-07-17):</strong></p>
 <ul>
-<li>Path filter skips multi-minute jobs for pure <code>docs/</code> / <code>wiki/</code> / markdown.</li>
+<li>Path-filter <strong>lanes</strong>: <code>docs</code> | <code>scripts</code> | <code>ci</code> | <code>rust</code></li>
+<li><code>docs</code> — short-circuit green</li>
+<li><code>scripts</code> — pass-gate + Python/shell syntax only</li>
+<li><code>ci</code> — pass-gate + workflow YAML parse (+ security if <code>deny.toml</code>/dependabot)</li>
+<li><code>rust</code> — full Linux Fast Gate (multi-OS on <code>main</code> push)</li>
 <li>PR Fast Gate no longer runs macOS/Windows matrices (covered on <code>main</code> L0 + L1).</li>
 <li><code>reusable-run-tests</code> runs multi-package nextest in <strong>one</strong> cargo process and
   skips webkit/GTK sysdeps unless GUI packages are required.</li>
+<li><strong>sccache</strong> (GitHub Actions backend) on lint / test / CLI build reusables via
+  <a href="../.github/actions/setup-sccache"><code>.github/actions/setup-sccache</code></a>.</li>
 </ul>
 <p>On <strong>nightly schedule</strong> or <strong>workflow_dispatch</strong>, Heavy also runs:</p>
 <ul>
