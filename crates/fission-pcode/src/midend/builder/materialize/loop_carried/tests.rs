@@ -1147,3 +1147,174 @@ fn m32_popcount_loop_carries_add_and_shr() {
         );
     }
 }
+
+/// Measured pattern: `sum_array` gcc-m32 -O2 (CI 29594922653 / local remeasure).
+///
+/// Assembly: `eax = base; L: sum += *[eax]; eax += 4; cmp eax, end; jnz L`
+/// Load address, pointer update, and exit compare must share one loop-carried
+/// cursor binding — not a frozen preheader copy for the load.
+///
+/// Currently **fails** under materialize: load=`uVar0` (preheader seed) while
+/// stride update=`eax` (hw name). Tracked in
+/// `docs/proposals/2026-07-17-sum-array-loop-cursor.md`.
+#[test]
+#[ignore = "sum_array m32-O2 loop cursor split: see docs/proposals/2026-07-17-sum-array-loop-cursor.md"]
+fn loop_pointer_scan_load_and_add_share_cursor_binding() {
+    let eax = reg(0x0, 4); // EAX on x86_32
+    let edx = reg(0x8, 4); // EDX accumulator
+    let tmp = varnode(0x40);
+    let cond = varnode(0x41);
+    let mut blocks = vec![
+        // Preheader: seed cursor and sum.
+        block_at(
+            0x1000,
+            0,
+            vec![
+                op(
+                    0,
+                    PcodeOpcode::Copy,
+                    Some(eax.clone()),
+                    vec![constant(0x1000)], // stand-in for param base
+                ),
+                op(
+                    1,
+                    PcodeOpcode::Copy,
+                    Some(edx.clone()),
+                    vec![constant(0)],
+                ),
+                op(2, PcodeOpcode::Branch, None, vec![constant(0x1010)]),
+            ],
+        ),
+        // Loop body.
+        block_at(
+            0x1010,
+            1,
+            vec![
+                op(
+                    3,
+                    PcodeOpcode::Load,
+                    Some(tmp.clone()),
+                    vec![constant(0), eax.clone()], // space, ptr
+                ),
+                op(
+                    4,
+                    PcodeOpcode::IntAdd,
+                    Some(edx.clone()),
+                    vec![edx.clone(), tmp.clone()],
+                ),
+                op(
+                    5,
+                    PcodeOpcode::IntAdd,
+                    Some(eax.clone()),
+                    vec![eax.clone(), constant(4)],
+                ),
+                op(
+                    6,
+                    PcodeOpcode::IntNotEqual,
+                    Some(cond.clone()),
+                    vec![eax.clone(), constant(0x2000)],
+                ),
+                op(
+                    7,
+                    PcodeOpcode::CBranch,
+                    None,
+                    vec![constant(0x1010), cond.clone()],
+                ),
+            ],
+        ),
+        block_at(0x1020, 2, vec![op(8, PcodeOpcode::Return, None, vec![])]),
+    ];
+    blocks[0].successors = vec![1];
+    blocks[1].successors = vec![1, 2];
+    let pcode = pcode_function(blocks);
+    let mut options = test_options();
+    options.is_64bit = false;
+    options.pointer_size = 4;
+    options.pe_x64_only = false;
+    options.calling_convention = CallingConvention::X86_32;
+    let mut builder = PreviewBuilder::new(&pcode, &options, None);
+
+    let preheader = builder
+        .lower_block_stmts(&pcode.blocks[0])
+        .expect("preheader");
+    let cursor_init = lhs_var(&preheader[0]).expect("cursor init name");
+    let loop_body = builder
+        .lower_block_stmts(&pcode.blocks[1])
+        .expect("loop body");
+
+    // Find load: edx += *cursor  or  tmp = *cursor
+    let load_ptr_name = loop_body.iter().find_map(|stmt| match stmt {
+        HirStmt::Assign {
+            rhs: HirExpr::Load { ptr, .. },
+            ..
+        } => expr_var(ptr).map(|s| s.to_string()),
+        HirStmt::Assign {
+            rhs:
+                HirExpr::Binary {
+                    op: HirBinaryOp::Add,
+                    lhs,
+                    rhs,
+                    ..
+                },
+            ..
+        } => {
+            // sum = sum + *ptr form
+            match (lhs.as_ref(), rhs.as_ref()) {
+                (HirExpr::Load { ptr, .. }, _) | (_, HirExpr::Load { ptr, .. }) => {
+                    expr_var(ptr).map(|s| s.to_string())
+                }
+                _ => None,
+            }
+        }
+        _ => None,
+    });
+    assert!(
+        load_ptr_name.is_some(),
+        "expected load through cursor in loop body: {loop_body:?}"
+    );
+    let load_ptr = load_ptr_name.unwrap();
+
+    // Find pointer stride update: cursor = cursor + 4
+    let update = loop_body.iter().find(|stmt| {
+        matches!(
+            stmt,
+            HirStmt::Assign {
+                lhs: HirLValue::Var(_),
+                rhs: HirExpr::Binary {
+                    op: HirBinaryOp::Add,
+                    lhs: a,
+                    rhs: b,
+                    ..
+                },
+                ..
+            } if matches!(b.as_ref(), HirExpr::Const(4, _))
+                || matches!(a.as_ref(), HirExpr::Const(4, _))
+        )
+    });
+    assert!(
+        update.is_some(),
+        "expected cursor += 4 update: {loop_body:?}"
+    );
+    let update_name = lhs_var(update.unwrap()).expect("update lhs");
+
+    assert_eq!(
+        load_ptr.as_str(),
+        update_name,
+        "load pointer and stride update must share one loop-carried cursor \
+         (measured sum_array m32-O2 bug: frozen base vs unbound eax). \
+         load={load_ptr:?} update={update_name:?} preheader_init={cursor_init:?} body={loop_body:?}"
+    );
+    // Prefer reusing the preheader seed name when it is the same register identity.
+    assert!(
+        load_ptr == cursor_init
+            || loop_body.iter().any(|s| matches!(
+                s,
+                HirStmt::Assign {
+                    lhs: HirLValue::Var(name),
+                    rhs: HirExpr::Var(src),
+                    ..
+                } if name.as_str() == load_ptr.as_str() && src.as_str() == cursor_init
+            )),
+        "cursor should be seeded from preheader init {cursor_init:?}: {loop_body:?}"
+    );
+}
