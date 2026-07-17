@@ -3015,6 +3015,38 @@ impl<'a> PreviewBuilder<'a> {
                 .ok_or(MlilPreviewError::UnsupportedExprVarnodeLowering)?;
             return Ok(HirExpr::Const(0, type_from_size(output.size, false)));
         }
+        // x86 CDQ + IDIV: dividend is Piece(sign_fill(L), L). Use signed L alone.
+        if matches!(op.opcode, PcodeOpcode::IntSRem | PcodeOpcode::IntSDiv)
+            && let Some(low) = self.try_cdq_signed_dividend_low(&op.inputs[0])
+        {
+            let lhs = self.lower_varnode(&low, visiting)?;
+            let rhs = self.lower_varnode(&op.inputs[1], visiting)?;
+            let output = op
+                .output
+                .as_ref()
+                .ok_or(MlilPreviewError::UnsupportedExprVarnodeLowering)?;
+            // Remainder/quotient lane is the machine width of the low half (EAX),
+            // not the 64-bit piece — match signed C `%` / `/` on that width.
+            let bits = low.size.saturating_mul(8).max(output.size.saturating_mul(8));
+            let ty = NirType::Int {
+                bits,
+                signed: true,
+            };
+            let lhs = HirExpr::Cast {
+                ty: ty.clone(),
+                expr: Box::new(lhs),
+            };
+            let rhs = HirExpr::Cast {
+                ty: ty.clone(),
+                expr: Box::new(rhs),
+            };
+            return Ok(HirExpr::Binary {
+                op: map_binary_op(op.opcode)?,
+                lhs: Box::new(lhs),
+                rhs: Box::new(rhs),
+                ty,
+            });
+        }
         let lhs = self.lower_varnode(&op.inputs[0], visiting)?;
         let rhs = self.lower_varnode(&op.inputs[1], visiting)?;
         let output = op
@@ -3040,6 +3072,90 @@ impl<'a> PreviewBuilder<'a> {
             rhs: Box::new(rhs),
             ty,
         })
+    }
+
+    /// CDQ-class dividend: `Piece(H, L)` where `H` is arithmetic sign-fill of `L`,
+    /// or a direct `IntSExt(L)`. Returns `L` so SRem/SDiv lower as C signed `%`/`/`.
+    fn try_cdq_signed_dividend_low(&self, dividend: &Varnode) -> Option<Varnode> {
+        let (_, def) = self.lookup_def_site(dividend)?;
+        match def.opcode {
+            PcodeOpcode::IntSExt => def.inputs.first().cloned(),
+            PcodeOpcode::Piece if def.inputs.len() >= 2 => {
+                let high = &def.inputs[0];
+                let low = &def.inputs[1];
+                if self.varnode_is_sign_fill_of(high, low) {
+                    Some(low.clone())
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        }
+    }
+
+    fn varnode_is_sign_fill_of(&self, high: &Varnode, low: &Varnode) -> bool {
+        let Some((_, hop)) = self.lookup_def_site(high) else {
+            return false;
+        };
+        match hop.opcode {
+            PcodeOpcode::IntSRight | PcodeOpcode::IntRight => {
+                let Some(base) = hop.inputs.first() else {
+                    return false;
+                };
+                if !self.varnode_related_to_cdq_low(base, low) {
+                    return false;
+                }
+                let Some(shift) = hop.inputs.get(1) else {
+                    return false;
+                };
+                let shift_amt = if shift.is_constant {
+                    shift.constant_val as i64
+                } else {
+                    return false;
+                };
+                // CDQ: SAR L, 31  or SAR (sext L), 32  (word-width shift).
+                let bits = i64::from(low.size.saturating_mul(8));
+                shift_amt == bits - 1 || shift_amt == bits || shift_amt == 31 || shift_amt == 63
+            }
+            PcodeOpcode::IntSExt | PcodeOpcode::IntZExt | PcodeOpcode::Copy | PcodeOpcode::Cast => {
+                hop.inputs
+                    .first()
+                    .is_some_and(|base| self.varnode_related_to_cdq_low(base, low))
+            }
+            _ => false,
+        }
+    }
+
+    /// `base` is `low`, an alias, or a short ZExt/SExt/Copy chain from `low`.
+    fn varnode_related_to_cdq_low(&self, base: &Varnode, low: &Varnode) -> bool {
+        if self.varnode_aliases_value(base, low) || VarnodeKey::from(base) == VarnodeKey::from(low)
+        {
+            return true;
+        }
+        let mut current = base.clone();
+        for _ in 0..4 {
+            let Some((_, op)) = self.lookup_def_site(&current) else {
+                return false;
+            };
+            match op.opcode {
+                PcodeOpcode::IntSExt
+                | PcodeOpcode::IntZExt
+                | PcodeOpcode::Copy
+                | PcodeOpcode::Cast => {
+                    let Some(input) = op.inputs.first() else {
+                        return false;
+                    };
+                    if self.varnode_aliases_value(input, low)
+                        || VarnodeKey::from(input) == VarnodeKey::from(low)
+                    {
+                        return true;
+                    }
+                    current = input.clone();
+                }
+                _ => return false,
+            }
+        }
+        false
     }
 }
 

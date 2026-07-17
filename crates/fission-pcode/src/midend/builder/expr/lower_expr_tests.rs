@@ -1693,3 +1693,66 @@ fn x86_32_callind_staged_args_prefer_stack_param_not_live_eax() {
         "must not rewrite arg0 to param_1 after EAX reload:\n{code}"
     );
 }
+
+/// x86 CDQ + IDIV remainder: Piece(sign_fill, low) then IntSRem → low % div (signed).
+#[test]
+fn cdq_piece_int_srem_uses_low_half_only() {
+    use crate::midend::cspec::test_maps::apply_preview_cspec;
+    use crate::PcodeFunction;
+
+    let eax = register(0x0, 4);
+    let edx = register(0x8, 4);
+    let wide = varnode(0x500);
+    let mut wide = wide;
+    wide.size = 8;
+    let mut rem = varnode(0x508);
+    rem.size = 4;
+    let divisor = register(0x10, 4);
+    let mut options = crate::midend::MlilPreviewOptions::default();
+    options.is_64bit = true;
+    options.pointer_size = 8;
+    apply_preview_cspec(&mut options);
+
+    let block = block_at(
+        0x1000,
+        0,
+        vec![
+            op(
+                0,
+                PcodeOpcode::IntSRight,
+                Some(edx.clone()),
+                vec![eax.clone(), constant_sized(31, 4)],
+            ),
+            op(
+                1,
+                PcodeOpcode::Piece,
+                Some(wide.clone()),
+                vec![edx.clone(), eax.clone()],
+            ),
+            op(
+                2,
+                PcodeOpcode::IntSRem,
+                Some(rem.clone()),
+                vec![wide, divisor],
+            ),
+            op(
+                3,
+                PcodeOpcode::Return,
+                None,
+                vec![constant(0), rem],
+            ),
+        ],
+    );
+    let pcode = PcodeFunction {
+        blocks: vec![block],
+    };
+    let code = render_mlil_preview(&pcode, "srem_cdq", 0x1000, &options).expect("preview");
+    assert!(
+        code.contains('%'),
+        "expected remainder form:\n{code}"
+    );
+    assert!(
+        !code.contains("<< 32") && !code.contains("<<32"),
+        "CDQ piece dividend must collapse:\n{code}"
+    );
+}

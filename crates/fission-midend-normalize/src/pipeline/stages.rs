@@ -14,8 +14,8 @@ use super::super::cleanup::{
     apply_byte_sum_index_trunc, apply_deindirect_pass, apply_expand_load_pass,
     apply_subvar_trim_pass, apply_switch_norm_pass, canonicalize_minmax_conditional_returns,
     cast_elision_pass, elide_unused_popcount_assigns, eliminate_dead_local_clobber_assigns,
-    eliminate_redundant_var_assigns, hoist_param_alias_copies_before_first_use,
-    inline_loop_condition_trailing_temps,
+    eliminate_dead_temp_assigns, eliminate_redundant_var_assigns,
+    hoist_param_alias_copies_before_first_use, inline_loop_condition_trailing_temps,
     normalize_dowhile_decrement_condition, prune_unused_dead_local_bindings,
     prune_unused_temp_bindings, rescue_undeclared_bindings,
     simplify_empty_and_constant_ifs_recursive, single_pred_label_inline,
@@ -947,5 +947,13 @@ pub fn run_stage_cleanup(func: &mut HirFunction, diag: bool, perf: bool) {
     // rewrites after the main cleanup fixed-point loop.
     run_pass_logged(func, "eliminate_redundant_var_assigns_final", perf, |f| {
         eliminate_redundant_var_assigns(&mut f.body)
+    });
+    // CDQ/IDIV wide-piece remainder: `t = (hi<<32)|lo; x = t % d` → signed `lo % d`.
+    run_pass_logged(func, "collapse_cdq_signed_mod", perf, |f| {
+        crate::arith::collapse_cdq_signed_mod_in_stmts(&mut f.body)
+    });
+    // Drop temps left only by the pre-collapse wide dividend assign.
+    run_pass_logged(func, "eliminate_dead_temp_after_cdq", perf, |f| {
+        eliminate_dead_temp_assigns(&mut f.body, &std::collections::HashSet::new())
     });
 }

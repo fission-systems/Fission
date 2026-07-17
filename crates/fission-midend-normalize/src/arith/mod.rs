@@ -29,8 +29,8 @@ pub use concat_subpiece::{
 };
 pub use conditional_move::apply_conditional_move_pass;
 pub use div_mod::{
-    recognize_compiler_runtime_division, recognize_magic_number_division,
-    recognize_mod_div_power_of_two,
+    collapse_cdq_signed_mod_in_stmts, recognize_compiler_runtime_division,
+    recognize_magic_number_division, recognize_mod_div_power_of_two,
 };
 pub use double_precision::apply_double_precision_reconstruction_pass;
 pub use flags_cond::{
