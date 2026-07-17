@@ -1843,3 +1843,101 @@ fn cdq_sext_subpiece_or_int_srem_uses_low_half_only() {
         "CDQ Or/Shl dividend must collapse:\n{code}"
     );
 }
+
+/// Real SLEIGH path: register edx high half + Copy of wide before SRem.
+#[test]
+fn cdq_or_via_copy_of_wide_still_collapses_srem() {
+    use crate::PcodeFunction;
+    use crate::midend::cspec::test_maps::apply_preview_cspec;
+
+    let eax = register(0x0, 4);
+    let edx = register(0x8, 4);
+    let mut sext = varnode(0x610);
+    sext.size = 8;
+    let mut hi_z = varnode(0x618);
+    hi_z.size = 8;
+    let mut lo_z = varnode(0x620);
+    lo_z.size = 8;
+    let mut shifted = varnode(0x628);
+    shifted.size = 8;
+    let mut wide = varnode(0x630);
+    wide.size = 8;
+    let mut wide_copy = varnode(0x638);
+    wide_copy.size = 8;
+    let mut rem = varnode(0x640);
+    rem.size = 8;
+    let mut div_sext = varnode(0x648);
+    div_sext.size = 8;
+    let divisor = register(0x10, 4);
+
+    let mut options = crate::midend::MlilPreviewOptions::default();
+    options.is_64bit = true;
+    options.pointer_size = 8;
+    apply_preview_cspec(&mut options);
+
+    let block = block_at(
+        0x1000,
+        0,
+        vec![
+            op(
+                0,
+                PcodeOpcode::IntSExt,
+                Some(sext.clone()),
+                vec![eax.clone()],
+            ),
+            op(
+                1,
+                PcodeOpcode::SubPiece,
+                Some(edx.clone()),
+                vec![sext, constant_sized(4, 4)],
+            ),
+            op(
+                2,
+                PcodeOpcode::IntZExt,
+                Some(hi_z.clone()),
+                vec![edx.clone()],
+            ),
+            op(
+                3,
+                PcodeOpcode::IntLeft,
+                Some(shifted.clone()),
+                vec![hi_z, constant_sized(0x20, 4)],
+            ),
+            op(
+                4,
+                PcodeOpcode::IntZExt,
+                Some(lo_z.clone()),
+                vec![eax.clone()],
+            ),
+            op(
+                5,
+                PcodeOpcode::IntOr,
+                Some(wide.clone()),
+                vec![shifted, lo_z],
+            ),
+            op(6, PcodeOpcode::Copy, Some(wide_copy.clone()), vec![wide]),
+            op(
+                7,
+                PcodeOpcode::IntSExt,
+                Some(div_sext.clone()),
+                vec![divisor],
+            ),
+            op(
+                8,
+                PcodeOpcode::IntSRem,
+                Some(rem.clone()),
+                vec![wide_copy, div_sext],
+            ),
+            op(9, PcodeOpcode::Return, None, vec![constant(0), rem]),
+        ],
+    );
+    let pcode = PcodeFunction {
+        blocks: vec![block],
+    };
+    let code = render_mlil_preview(&pcode, "srem_cdq_copy", 0x1000, &options).expect("preview");
+    assert!(code.contains('%'), "expected remainder form:\n{code}");
+    assert!(
+        !code.contains("<< 32") && !code.contains("<<32") && !code.contains('|'),
+        "Copy-of-wide CDQ dividend must collapse:\n{code}"
+    );
+}

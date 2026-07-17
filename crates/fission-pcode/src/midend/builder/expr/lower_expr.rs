@@ -3084,35 +3084,51 @@ impl<'a> PreviewBuilder<'a> {
     ///
     /// Returns `L` so SRem/SDiv lower as C signed `%`/`/` on that half-width.
     fn try_cdq_signed_dividend_low(&self, dividend: &Varnode) -> Option<Varnode> {
-        let (_, def) = self.lookup_def_site(dividend)?;
-        match def.opcode {
-            PcodeOpcode::IntSExt => def.inputs.first().cloned(),
-            PcodeOpcode::Piece if def.inputs.len() >= 2 => {
-                let high = &def.inputs[0];
-                let low = &def.inputs[1];
-                if self.varnode_is_sign_fill_of(high, low) {
-                    Some(low.clone())
-                } else {
-                    None
+        // Peel Copy/Cast wrappers on the dividend itself (some templates stage
+        // the wide Or into a unique via Copy before SRem).
+        let mut current = dividend.clone();
+        for _ in 0..6 {
+            let (_, def) = self.lookup_def_site(&current)?;
+            match def.opcode {
+                PcodeOpcode::Copy | PcodeOpcode::Cast => {
+                    current = def.inputs.first()?.clone();
+                    continue;
                 }
+                PcodeOpcode::IntSExt => return def.inputs.first().cloned(),
+                PcodeOpcode::Piece if def.inputs.len() >= 2 => {
+                    let high = &def.inputs[0];
+                    let low = &def.inputs[1];
+                    return if self.varnode_is_sign_fill_of(high, low) {
+                        Some(low.clone())
+                    } else {
+                        None
+                    };
+                }
+                // SLEIGH idiv form: (ZExt(hi) << 32) | ZExt(lo) via IntOr/IntLeft.
+                PcodeOpcode::IntOr if def.inputs.len() >= 2 => {
+                    return self
+                        .try_cdq_low_from_or_shl_dividend(&def.inputs[0], &def.inputs[1])
+                        .or_else(|| {
+                            self.try_cdq_low_from_or_shl_dividend(&def.inputs[1], &def.inputs[0])
+                        });
+                }
+                _ => return None,
             }
-            // SLEIGH idiv form: (ZExt(hi) << 32) | ZExt(lo) built via IntOr/IntLeft.
-            PcodeOpcode::IntOr if def.inputs.len() >= 2 => self
-                .try_cdq_low_from_or_shl_dividend(&def.inputs[0], &def.inputs[1])
-                .or_else(|| self.try_cdq_low_from_or_shl_dividend(&def.inputs[1], &def.inputs[0])),
-            _ => None,
         }
+        None
     }
 
     /// Match `shifted_high | low_ext` where `shifted_high` is `IntLeft(H, k)`
-    /// with `k` equal to the low half width in bits, and `H` is CDQ sign-fill of
-    /// the core of `low_ext`.
+    /// (after peeling ZExt/Copy on the left arm) with `k` equal to the low half
+    /// width in bits, and `H` is CDQ sign-fill of the core of `low_ext`.
     fn try_cdq_low_from_or_shl_dividend(
         &self,
         shifted_high: &Varnode,
         low_ext: &Varnode,
     ) -> Option<Varnode> {
-        let (_, left_def) = self.lookup_def_site(shifted_high)?;
+        // High arm may be ZExt/Copy of the IntLeft result in some SLEIGH paths.
+        let left_vn = self.peel_cdq_width_ext(shifted_high)?;
+        let (_, left_def) = self.lookup_def_site(&left_vn)?;
         if left_def.opcode != PcodeOpcode::IntLeft || left_def.inputs.len() < 2 {
             return None;
         }
@@ -3134,7 +3150,7 @@ impl<'a> PreviewBuilder<'a> {
         Some(low)
     }
 
-    /// Peel ZExt / Copy / Cast wrappers (width promotion of the low half).
+    /// Peel ZExt / Copy / Cast wrappers (width promotion of the low/high half).
     fn peel_cdq_width_ext(&self, vn: &Varnode) -> Option<Varnode> {
         let mut current = vn.clone();
         for _ in 0..6 {
