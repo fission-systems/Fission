@@ -16,7 +16,7 @@
 
 // Structured-IR and option types used by printer / presentation submodules.
 // Keep this bridge explicit so render does not depend on normalize/structuring.
-pub(crate) use crate::nir::{
+pub(crate) use crate::midend::{
     HirBinaryOp, HirExpr, HirFunction, HirLValue, HirStmt, HirUnaryOp, MlilPreviewOptions,
     NirBinding, NirBindingOrigin, NirType, SWITCH_FALLTHROUGH_SENTINEL, expr_type,
 };

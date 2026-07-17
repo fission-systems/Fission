@@ -50,8 +50,8 @@ jobs:
             -e 'func_name\.contains' \
             -e 'function_name.*==\|==.*function_name' \
             -e 'addr\s*==\s*0x[0-9a-fA-F]' \
-            crates/fission-pcode/src/nir/structuring/ \
-            crates/fission-pcode/src/nir/normalize/ 2>/dev/null || true)
+            crates/fission-pcode/src/midend/structuring/ \
+            crates/fission-pcode/src/midend/normalize/ 2>/dev/null || true)
           if [ -n "$PATTERN_HITS" ]; then
             echo "❌ Function/address-specific pattern detected in NIR pipeline:"
             echo "$PATTERN_HITS"
@@ -65,16 +65,16 @@ jobs:
       - name: Verify MAX_STRUCTURING_PASSES constant is declared
         run: |
           set -euo pipefail
-          if ! grep -q 'MAX_STRUCTURING_PASSES' crates/fission-pcode/src/nir/pass/manager.rs; then
-            echo "❌ MAX_STRUCTURING_PASSES constant missing from nir/pass/manager.rs"
+          if ! grep -q 'MAX_STRUCTURING_PASSES' crates/fission-pcode/src/midend/pass/manager.rs; then
+            echo "❌ MAX_STRUCTURING_PASSES constant missing from midend/pass/manager.rs"
             echo "The pass count cap is required by the anti-overfitting architecture."
             exit 1
           fi
-          CAP=$(grep 'MAX_STRUCTURING_PASSES.*usize.*=' crates/fission-pcode/src/nir/pass/manager.rs \
+          CAP=$(grep 'MAX_STRUCTURING_PASSES.*usize.*=' crates/fission-pcode/src/midend/pass/manager.rs \
                 | grep -oE '[0-9]+' | head -1)
           echo "✅ MAX_STRUCTURING_PASSES = ${CAP} (current cap)."
 
-      - name: Owner boundary scan (ADR 0008 / 0011)
+      - name: Owner boundary scan (ADR 0008 / 0011 / 0012)
         run: |
           set -euo pipefail
           chmod +x scripts/check/owner_boundaries.sh
@@ -86,16 +86,16 @@ jobs:
           set -euo pipefail
           git fetch origin ${{ github.base_ref }} --depth=1
           CHANGED=$(git diff origin/${{ github.base_ref }}...HEAD --name-only)
-          if echo "$CHANGED" | grep -q -e "^crates/fission-pcode/src/nir/" -e "^crates/fission-pcode/src/render/"; then
+          if echo "$CHANGED" | grep -q -e "^crates/fission-pcode/src/midend/" -e "^crates/fission-pcode/src/render/"; then
             if echo "$CHANGED" | grep -q -e "^crates/fission-pcode/tests/" -e "^crates/fission-pcode/.*test"; then
               echo "✅ Targeted tests included."
             elif git diff origin/${{ github.base_ref }}...HEAD -- \
-                crates/fission-pcode/src/nir/ crates/fission-pcode/src/render/ \
+                crates/fission-pcode/src/midend/ crates/fission-pcode/src/render/ \
                 | grep -q "+.*#\[test\]"; then
               echo "✅ Inline tests added."
             else
               echo "❌ Targeted test missing for NIR/render changes."
-              echo "Any change to crates/fission-pcode/src/nir/ or src/render/ must include targeted tests."
+              echo "Any change to crates/fission-pcode/src/midend/ or src/render/ must include targeted tests."
               exit 1
             fi
           else

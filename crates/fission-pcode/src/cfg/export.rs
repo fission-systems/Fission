@@ -77,7 +77,7 @@ impl AddressCfgSnapshot {
     }
 
     fn from_structuring_edges(model: &str, func: &PcodeFunction) -> Self {
-        let edges = crate::nir::structuring_cfg_edges(func);
+        let edges = crate::midend::structuring_cfg_edges(func);
         let mut snapshot = Self {
             model: model.to_string(),
             function_address: func

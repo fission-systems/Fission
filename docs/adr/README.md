@@ -15,5 +15,6 @@ Short, durable decisions complement [`docs/architecture/ARCHITECTURE.md`](../arc
 | [0009](0009-isa-agnostic-semantic-rules.md) | ISA-agnostic semantic rules (optimize on x86, implement common invariants) |
 | [0010](0010-typed-program-metadata-substrate.md) | Typed immutable program metadata substrate |
 | [0011](0011-hir-presentation-contract.md) | HIR presentation contract (readability vs NIR oracle) |
+| [0012](0012-midend-rename-and-crate-extraction.md) | Midend rename + normalize/structuring crate extraction roadmap |
 
 New decisions: copy [`0000-template.md`](0000-template.md), bump the next number, link from this table.

@@ -40,8 +40,8 @@ Fission/
 
 ## Child AGENTS
 
-- `crates/fission-pcode/src/nir/AGENTS.md`
-- `crates/fission-pcode/src/nir/structuring/AGENTS.md`
+- `crates/fission-pcode/src/midend/AGENTS.md`
+- `crates/fission-pcode/src/midend/structuring/AGENTS.md`
 - `crates/fission-automation/AGENTS.md`
 - `crates/fission-cli/AGENTS.md`
 - `crates/fission-loader/AGENTS.md`
@@ -52,8 +52,8 @@ Read the nearest child file before editing those areas.
 
 | Task | Location | Notes |
 |---|---|---|
-| NIR structuring / canonicalization | `crates/fission-pcode/src/nir/structuring/` | Core algorithmic decompiler work lives here |
-| NIR telemetry contract | `crates/fission-pcode/src/nir/types.rs` | `NirBuildStats` is canonical |
+| NIR structuring / canonicalization | `crates/fission-pcode/src/midend/structuring/` | Core algorithmic decompiler work lives here |
+| NIR telemetry contract | `crates/fission-pcode/src/midend/types.rs` | `NirBuildStats` is canonical |
 | Decompilation orchestration / Rust-Sleigh | `crates/fission-decompiler/` | Routing, workers, type-context assembly; consumes `fission-pcode` + `fission-static` facts |
 | Quality lanes / automation summaries | `crates/fission-automation/` | `nir-check`, reports; must stay aligned with `NirBuildStats` |
 | Automation summaries / deltas (implementation) | `crates/fission-automation/src/report/` | Markdown/JSON pipeline; must stay aligned with `NirBuildStats` |

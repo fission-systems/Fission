@@ -38,7 +38,7 @@ pub(crate) fn render_layered_pseudocode(
 #[cfg(test)]
 mod layered_tests {
     use super::*;
-    use crate::nir::{HirExpr, HirStmt, NirBinding, NirBindingOrigin, NirType};
+    use crate::midend::{HirExpr, HirStmt, NirBinding, NirBindingOrigin, NirType};
 
     #[test]
     fn layered_pseudocode_hir_drops_unused_home_local() {
@@ -935,7 +935,7 @@ fn merge_global_decl_type(decls: &mut BTreeMap<String, NirType>, name: &str, ty:
 #[cfg(test)]
 mod global_decl_tests {
     use super::*;
-    use crate::nir::{CallingConvention, StructuringEngineKind};
+    use crate::midend::{CallingConvention, StructuringEngineKind};
 
     fn preview_options_with_global(name: &str) -> MlilPreviewOptions {
         let mut global_names = HashMap::new();

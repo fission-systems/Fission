@@ -2304,7 +2304,7 @@ fn collect_used_names_expr(expr: &HirExpr, out: &mut HashSet<String>) {
 mod tests {
     use super::*;
     use crate::render::render_layered_pseudocode;
-    use crate::nir::MlilPreviewOptions;
+    use crate::midend::MlilPreviewOptions;
 
     fn int_ty(bits: u32, signed: bool) -> NirType {
         NirType::Int { bits, signed }
@@ -2483,7 +2483,7 @@ mod tests {
         // Seed copy may fold into self-update: param_10 = param_1 >> 1; return param_10
         // or further collapse to return param_1 >> 1. Multi-def path must not
         // rewrite the mutated home as a pure alias of param_1 across the shift.
-        let code = crate::nir::print_hir_function(&func);
+        let code = crate::midend::print_hir_function(&func);
         assert!(
             code.contains(">>") || code.contains("param_10"),
             "shift should remain: {code}"
@@ -2777,7 +2777,7 @@ mod tests {
             ..Default::default()
         };
         apply_hir_presentation(&mut func);
-        let code = crate::nir::print_hir_function(&func);
+        let code = crate::midend::print_hir_function(&func);
         assert!(
             !code.contains("while (1)") && !code.contains("break"),
             "should fold while(1)/break:\n{code}"
@@ -2854,7 +2854,7 @@ mod tests {
             ..Default::default()
         };
         apply_hir_presentation(&mut func);
-        let code = crate::nir::print_hir_function(&func);
+        let code = crate::midend::print_hir_function(&func);
         assert!(!code.contains("rax"), "rax join temp should fold:\n{code}");
         assert!(
             code.matches("param_1").count() <= 2,
@@ -2921,7 +2921,7 @@ mod tests {
         };
 
         apply_hir_presentation(&mut func);
-        let code = crate::nir::print_hir_function(&func);
+        let code = crate::midend::print_hir_function(&func);
         assert!(
             !code.contains("__popcount") && !code.contains("uVar1") && !code.contains("xVar2"),
             "dead popcount chain should drop:\n{code}"
@@ -3163,7 +3163,7 @@ mod tests {
             "presentation must not re-execute call; body={:?}",
             func.body
         );
-        let code = crate::nir::print_hir_function(&func);
+        let code = crate::midend::print_hir_function(&func);
         assert_eq!(
             code.matches("side_effect").count(),
             1,
@@ -3194,7 +3194,7 @@ mod tests {
         };
         apply_hir_presentation(&mut func);
         assert_eq!(count_calls_in_stmts(&func.body), 1);
-        let code = crate::nir::print_hir_function(&func);
+        let code = crate::midend::print_hir_function(&func);
         assert!(
             code.contains("return") && code.matches("once(").count() == 1,
             "single-use call may fold into return once:\n{code}"

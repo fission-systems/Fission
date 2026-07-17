@@ -1,0 +1,9 @@
+---
+source: crates/fission-pcode/src/midend/tests/snapshot_printer.rs
+assertion_line: 32
+expression: print_hir_function(&func)
+---
+int f_snapshot(void)
+{
+    return 0;
+}

@@ -1,8 +1,12 @@
 //! Fission P-code — intermediate representation and optimizer.
 //!
-//! Pipeline stages and conventions live under [`crate::nir`] with directory guides in
-//! `crates/fission-pcode/src/nir/AGENTS.md`. Dual-layer print/presentation owns
-//! [`crate::render`] (`src/render/AGENTS.md`, ADR 0011).
+//! Pipeline stages live under [`crate::midend`] (builder → normalize → structure)
+//! with guides in `crates/fission-pcode/src/midend/AGENTS.md`. Dual-layer
+//! print/presentation owns [`crate::render`] (`src/render/AGENTS.md`, ADR 0011).
+//!
+//! **Re-export period (ADR 0012):** [`crate::nir`] remains an alias of
+//! [`crate::midend`] so existing `fission_pcode::nir::…` call sites keep working.
+//! Prefer `midend` in new code.
 
 // CI runs `cargo clippy ... -D warnings`; `-D warnings` cannot be selectively reversed via `-A clippy::*`
 // on the command line for all lint kinds, so suppress Clippy for this crate until policy is tightened again.
@@ -16,7 +20,10 @@
 pub mod arch;
 pub mod cfg;
 pub(crate) mod fast_hash;
-pub mod nir;
+/// Post-lift midend (structured IR, normalize, structuring, orchestration).
+pub mod midend;
+/// Historical module path for the midend. Prefer [`midend`].
+pub use midend as nir;
 mod pcode;
 pub mod prelude;
 /// Dual-layer C presentation (NIR/HIR print surfaces). Owner: ADR 0008 / 0011.
@@ -25,8 +32,8 @@ pub mod render;
 // Re-export main P-code types
 pub use pcode::*;
 
-// Re-export optimizer
-pub use nir::{
+// Re-export midend surface (public names historically exported via `nir`).
+pub use midend::{
     AdmissionClass, CallEdgeKind, CallEffectSummarySource, CallSummary, CallTargetProvenance,
     CallTargetRef, CallingConvention, FormatFamily, HirExpr, HirFunction, HirStmt,
     IndirectControlClassification, LayeredPseudocode, MlilPreviewError, MlilPreviewOptions,
