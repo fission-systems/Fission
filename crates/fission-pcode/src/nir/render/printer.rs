@@ -800,6 +800,32 @@ fn try_elide_hir_cast(
             }
         }
     }
+    // (T)const when const already typed as T
+    if let HirExpr::Const(_, cty) = expr {
+        if cty == ty {
+            return Some(print_expr_prec_ctx(expr, parent_prec, depth + 1, ctx));
+        }
+    }
+    // (T)(T)x → peel one layer
+    if let HirExpr::Cast {
+        ty: inner_ty,
+        expr: inner,
+    } = expr
+    {
+        if inner_ty == ty {
+            return try_elide_hir_cast(ty, inner, parent_prec, depth, ctx).or_else(|| {
+                Some(print_expr_prec_ctx(
+                    &HirExpr::Cast {
+                        ty: ty.clone(),
+                        expr: inner.clone(),
+                    },
+                    parent_prec,
+                    depth,
+                    ctx,
+                ))
+            });
+        }
+    }
     // (ulonglong)(uint)x / nested same-family integer casts → peel outer when
     // outer is wider unsigned and inner is already an integer cast/var.
     if let (

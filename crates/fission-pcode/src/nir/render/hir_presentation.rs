@@ -9,7 +9,7 @@ use std::collections::{HashMap, HashSet};
 
 /// Apply HIR-facing presentation polish in place.
 pub(crate) fn apply_hir_presentation(func: &mut HirFunction) {
-    for _ in 0..12 {
+    for _ in 0..14 {
         let mut changed = false;
         changed |= flatten_redundant_blocks(&mut func.body);
         changed |= propagate_pure_var_aliases(func);
@@ -19,6 +19,8 @@ pub(crate) fn apply_hir_presentation(func: &mut HirFunction) {
         changed |= collapse_trivial_assign_returns(&mut func.body);
         // O0-style `if (c) goto L; body; L:` → structured if/else for readability.
         changed |= recover_if_else_from_gotos(&mut func.body);
+        // O0 while: `goto Lcond; Lbody: …; Lcond: if (c) goto Lbody;`
+        changed |= recover_while_from_gotos(&mut func.body);
         changed |= prune_unreachable_after_total_return(&mut func.body);
         changed |= inline_single_use_pure_assigns(func);
         changed |= eliminate_pure_dead_assigns(func);
@@ -27,10 +29,24 @@ pub(crate) fn apply_hir_presentation(func: &mut HirFunction) {
             break;
         }
     }
+    simplify_presentation_casts(func);
     drop_unused_presentation_locals(func);
 }
 
 // ── Pure expression helpers ──────────────────────────────────────────────────
+
+fn is_presentation_pure_intrinsic(target: &str) -> bool {
+    matches!(
+        target,
+        "__popcount"
+            | "__popcount64"
+            | "__lzcnt"
+            | "__carry"
+            | "__scarry"
+            | "__sborrow"
+            | "__parity"
+    )
+}
 
 fn expr_is_presentation_pure(expr: &HirExpr) -> bool {
     match expr {
@@ -49,8 +65,11 @@ fn expr_is_presentation_pure(expr: &HirExpr) -> bool {
                 && expr_is_presentation_pure(then_expr)
                 && expr_is_presentation_pure(else_expr)
         }
-        // Loads, calls, aggregate copies, and field/index may alias memory —
-        // keep them out of presentation inlining/propagation.
+        // Pure flag/parity intrinsics are safe to inline or drop when unused.
+        HirExpr::Call { target, args, .. } if is_presentation_pure_intrinsic(target) => {
+            args.iter().all(expr_is_presentation_pure)
+        }
+        // Loads, real calls, aggregate copies, and field/index may alias memory.
         HirExpr::Call { .. }
         | HirExpr::Load { .. }
         | HirExpr::AggregateCopy { .. }
@@ -1054,6 +1073,309 @@ fn body_is_goto_recoverable(stmts: &[HirStmt]) -> bool {
     !stmts.iter().any(|s| matches!(s, HirStmt::Label(_)))
 }
 
+/// Recover `while (cond) { body }` from O0 jump-to-condition loops:
+/// ```text
+/// goto Lcond;
+/// Lbody:
+///   body…
+/// Lcond:
+///   if (cond) goto Lbody;
+/// ```
+fn recover_while_from_gotos(stmts: &mut Vec<HirStmt>) -> bool {
+    let mut changed = false;
+    for stmt in stmts.iter_mut() {
+        match stmt {
+            HirStmt::Block(b)
+            | HirStmt::While { body: b, .. }
+            | HirStmt::DoWhile { body: b, .. }
+            | HirStmt::For { body: b, .. } => {
+                changed |= recover_while_from_gotos(b);
+            }
+            HirStmt::If {
+                then_body,
+                else_body,
+                ..
+            } => {
+                changed |= recover_while_from_gotos(then_body);
+                changed |= recover_while_from_gotos(else_body);
+            }
+            HirStmt::Switch { cases, default, .. } => {
+                for case in cases {
+                    changed |= recover_while_from_gotos(&mut case.body);
+                }
+                changed |= recover_while_from_gotos(default);
+            }
+            _ => {}
+        }
+    }
+
+    let mut i = 0;
+    while i < stmts.len() {
+        if try_recover_while_at(stmts, i) {
+            changed = true;
+            continue;
+        }
+        i += 1;
+    }
+    changed
+}
+
+fn try_recover_while_at(stmts: &mut Vec<HirStmt>, i: usize) -> bool {
+    let HirStmt::Goto(lcond) = &stmts[i] else {
+        return false;
+    };
+    let lcond = lcond.clone();
+
+    let Some(c_idx) = stmts
+        .iter()
+        .enumerate()
+        .skip(i + 1)
+        .find_map(|(idx, s)| match s {
+            HirStmt::Label(l) if l == &lcond => Some(idx),
+            _ => None,
+        })
+    else {
+        return false;
+    };
+
+    if c_idx + 1 >= stmts.len() {
+        return false;
+    }
+
+    let body_region = &stmts[i + 1..c_idx];
+    // Body must start with Lbody label targeted by the condition if.
+    let Some(HirStmt::Label(lbody)) = body_region.first() else {
+        return false;
+    };
+    let lbody = lbody.clone();
+
+    let Some((cond, target)) = if_is_single_goto(&stmts[c_idx + 1]) else {
+        return false;
+    };
+    if target != lbody {
+        return false;
+    }
+    let cond = cond.clone();
+
+    // Only this loop's back-edge should target Lbody (plus nothing else in range).
+    // Allow gotos to Lbody only from the condition if we are about to remove.
+    let goto_lbody = count_goto_refs(stmts, &lbody);
+    // The condition if contributes 1; any other ref blocks recovery.
+    if goto_lbody != 1 {
+        return false;
+    }
+
+    let mut body: Vec<HirStmt> = body_region[1..].to_vec();
+    if stmts_have_label(&body, &lcond) || stmts_have_label(&body, &lbody) {
+        return false;
+    }
+    // No other labels inside body (would break linear while).
+    if body.iter().any(|s| matches!(s, HirStmt::Label(_))) {
+        return false;
+    }
+
+    // `goto Lcond` inside body → continue (recheck condition).
+    rewrite_goto_to_continue(&mut body, &lcond);
+
+    let mut rebuilt = Vec::with_capacity(stmts.len());
+    rebuilt.extend_from_slice(&stmts[..i]);
+    rebuilt.push(HirStmt::While { cond, body });
+    // Skip: goto Lcond, Lbody.., Label(Lcond), if (cond) goto Lbody
+    rebuilt.extend_from_slice(&stmts[c_idx + 2..]);
+    *stmts = rebuilt;
+    true
+}
+
+fn rewrite_goto_to_continue(stmts: &mut [HirStmt], label: &str) {
+    for stmt in stmts.iter_mut() {
+        match stmt {
+            HirStmt::Goto(l) if l == label => {
+                *stmt = HirStmt::Continue;
+            }
+            HirStmt::Block(b)
+            | HirStmt::While { body: b, .. }
+            | HirStmt::DoWhile { body: b, .. }
+            | HirStmt::For { body: b, .. } => rewrite_goto_to_continue(b, label),
+            HirStmt::If {
+                then_body,
+                else_body,
+                ..
+            } => {
+                rewrite_goto_to_continue(then_body, label);
+                rewrite_goto_to_continue(else_body, label);
+            }
+            HirStmt::Switch { cases, default, .. } => {
+                for case in cases {
+                    rewrite_goto_to_continue(&mut case.body, label);
+                }
+                rewrite_goto_to_continue(default, label);
+            }
+            _ => {}
+        }
+    }
+}
+
+/// Peel redundant integer casts in the presentation tree (HIR only).
+fn simplify_presentation_casts(func: &mut HirFunction) {
+    let mut var_types: HashMap<String, NirType> = HashMap::new();
+    for b in func.params.iter().chain(func.locals.iter()) {
+        var_types.insert(b.name.clone(), b.ty.clone());
+    }
+    simplify_casts_in_stmts(&mut func.body, &var_types);
+}
+
+fn simplify_casts_in_stmts(stmts: &mut [HirStmt], var_types: &HashMap<String, NirType>) {
+    for stmt in stmts.iter_mut() {
+        simplify_casts_in_stmt(stmt, var_types);
+    }
+}
+
+fn simplify_casts_in_stmt(stmt: &mut HirStmt, var_types: &HashMap<String, NirType>) {
+    match stmt {
+        HirStmt::Assign { lhs, rhs } => {
+            simplify_casts_in_lvalue(lhs, var_types);
+            simplify_casts_in_expr(rhs, var_types);
+        }
+        HirStmt::Expr(e) | HirStmt::Return(Some(e)) | HirStmt::VaStart { va_list: e, .. } => {
+            simplify_casts_in_expr(e, var_types)
+        }
+        HirStmt::Block(b) => simplify_casts_in_stmts(b, var_types),
+        HirStmt::While { cond, body } | HirStmt::DoWhile { body, cond } => {
+            simplify_casts_in_expr(cond, var_types);
+            simplify_casts_in_stmts(body, var_types);
+        }
+        HirStmt::If {
+            cond,
+            then_body,
+            else_body,
+        } => {
+            simplify_casts_in_expr(cond, var_types);
+            simplify_casts_in_stmts(then_body, var_types);
+            simplify_casts_in_stmts(else_body, var_types);
+        }
+        HirStmt::For {
+            init,
+            cond,
+            update,
+            body,
+        } => {
+            if let Some(i) = init {
+                simplify_casts_in_stmt(i, var_types);
+            }
+            if let Some(c) = cond {
+                simplify_casts_in_expr(c, var_types);
+            }
+            if let Some(u) = update {
+                simplify_casts_in_stmt(u, var_types);
+            }
+            simplify_casts_in_stmts(body, var_types);
+        }
+        HirStmt::Switch {
+            expr,
+            cases,
+            default,
+        } => {
+            simplify_casts_in_expr(expr, var_types);
+            for case in cases {
+                simplify_casts_in_stmts(&mut case.body, var_types);
+            }
+            simplify_casts_in_stmts(default, var_types);
+        }
+        _ => {}
+    }
+}
+
+fn simplify_casts_in_lvalue(lhs: &mut HirLValue, var_types: &HashMap<String, NirType>) {
+    match lhs {
+        HirLValue::Var(_) => {}
+        HirLValue::Deref { ptr, .. } => simplify_casts_in_expr(ptr, var_types),
+        HirLValue::Index { base, index, .. } => {
+            simplify_casts_in_expr(base, var_types);
+            simplify_casts_in_expr(index, var_types);
+        }
+        HirLValue::FieldAccess { base, .. } => simplify_casts_in_expr(base, var_types),
+    }
+}
+
+fn simplify_casts_in_expr(expr: &mut HirExpr, var_types: &HashMap<String, NirType>) {
+    match expr {
+        HirExpr::Cast { ty, expr: inner } => {
+            simplify_casts_in_expr(inner, var_types);
+            // Peel (T)(T)x
+            if let HirExpr::Cast {
+                ty: inner_ty,
+                expr: deeper,
+            } = inner.as_ref()
+            {
+                if inner_ty == ty {
+                    *inner = deeper.clone();
+                    simplify_casts_in_expr(expr, var_types);
+                    return;
+                }
+                // Peel outer wider unsigned over inner unsigned int cast family:
+                // (ulonglong)(uint)x → (ulonglong)x when only width sugar.
+                if let (
+                    NirType::Int {
+                        bits: outer_bits,
+                        signed: false,
+                    },
+                    NirType::Int {
+                        bits: inner_bits,
+                        signed: false,
+                    },
+                ) = (&*ty, inner_ty)
+                {
+                    if outer_bits >= inner_bits {
+                        *inner = deeper.clone();
+                    }
+                }
+            }
+            // (T)v when v is declared as T → v
+            if let HirExpr::Var(name) = inner.as_ref() {
+                if var_types.get(name.as_str()).is_some_and(|vt| vt == &*ty) {
+                    *expr = HirExpr::Var(name.clone());
+                    return;
+                }
+            }
+            // (T)const when const already carries T
+            if let HirExpr::Const(v, cty) = inner.as_ref() {
+                if cty == &*ty {
+                    *expr = HirExpr::Const(*v, ty.clone());
+                }
+            }
+        }
+        HirExpr::Unary { expr: e, .. } => simplify_casts_in_expr(e, var_types),
+        HirExpr::Binary { lhs, rhs, .. } => {
+            simplify_casts_in_expr(lhs, var_types);
+            simplify_casts_in_expr(rhs, var_types);
+        }
+        HirExpr::Select {
+            cond,
+            then_expr,
+            else_expr,
+            ..
+        } => {
+            simplify_casts_in_expr(cond, var_types);
+            simplify_casts_in_expr(then_expr, var_types);
+            simplify_casts_in_expr(else_expr, var_types);
+        }
+        HirExpr::Call { args, .. } => {
+            for a in args {
+                simplify_casts_in_expr(a, var_types);
+            }
+        }
+        HirExpr::Load { ptr, .. }
+        | HirExpr::PtrOffset { base: ptr, .. }
+        | HirExpr::FieldAccess { base: ptr, .. }
+        | HirExpr::AggregateCopy { src: ptr, .. } => simplify_casts_in_expr(ptr, var_types),
+        HirExpr::Index { base, index, .. } => {
+            simplify_casts_in_expr(base, var_types);
+            simplify_casts_in_expr(index, var_types);
+        }
+        HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) | HirExpr::Const(_, _) => {}
+    }
+}
+
 /// Recover structured if/else from O0 `if (c) goto` / label shapes.
 fn recover_if_else_from_gotos(stmts: &mut Vec<HirStmt>) -> bool {
     let mut changed = false;
@@ -1522,6 +1844,7 @@ fn eliminate_pure_dead_in_stmts(stmts: &mut Vec<HirStmt>, formal: &HashSet<&str>
             && use_counts.get(name.as_str()).copied().unwrap_or(0) == 0
             && expr_is_presentation_pure(rhs) =>
         {
+            // Includes flag (zf/sf/…) and pure-intrinsic temps once unused.
             changed = true;
             false
         }
@@ -1991,6 +2314,199 @@ mod tests {
             "HIR should be structured if/else:\n{}",
             layered.hir
         );
+    }
+
+    #[test]
+    fn hir_presentation_recovers_count_bits_while_loop() {
+        // goto Lcond; Lbody: …; Lcond: if (x) goto Lbody;
+        let func = HirFunction {
+            name: "count_bits".into(),
+            params: vec![NirBinding {
+                name: "param_1".into(),
+                ty: int_ty(32, false),
+                surface_type_name: None,
+                origin: Some(NirBindingOrigin::ParamIndex(0)),
+                initializer: None,
+            }],
+            locals: vec![
+                NirBinding {
+                    name: "param_10".into(),
+                    ty: int_ty(32, false),
+                    surface_type_name: None,
+                    origin: Some(NirBindingOrigin::Temp),
+                    initializer: None,
+                },
+                local("local_4"),
+                local("uVar7"),
+            ],
+            return_type: int_ty(32, true),
+            body: vec![
+                HirStmt::Assign {
+                    lhs: HirLValue::Var("param_10".into()),
+                    rhs: HirExpr::Var("param_1".into()),
+                },
+                HirStmt::Assign {
+                    lhs: HirLValue::Var("local_4".into()),
+                    rhs: HirExpr::Const(0, int_ty(32, true)),
+                },
+                HirStmt::Goto("Lcond".into()),
+                HirStmt::Label("Lbody".into()),
+                HirStmt::Assign {
+                    lhs: HirLValue::Var("uVar7".into()),
+                    rhs: HirExpr::Var("param_10".into()),
+                },
+                HirStmt::Assign {
+                    lhs: HirLValue::Var("uVar7".into()),
+                    rhs: HirExpr::Binary {
+                        op: HirBinaryOp::And,
+                        lhs: Box::new(HirExpr::Var("uVar7".into())),
+                        rhs: Box::new(HirExpr::Const(1, int_ty(32, true))),
+                        ty: int_ty(32, true),
+                    },
+                },
+                HirStmt::Assign {
+                    lhs: HirLValue::Var("local_4".into()),
+                    rhs: HirExpr::Binary {
+                        op: HirBinaryOp::Add,
+                        lhs: Box::new(HirExpr::Var("local_4".into())),
+                        rhs: Box::new(HirExpr::Var("uVar7".into())),
+                        ty: int_ty(32, true),
+                    },
+                },
+                HirStmt::Assign {
+                    lhs: HirLValue::Var("param_10".into()),
+                    rhs: HirExpr::Binary {
+                        op: HirBinaryOp::Shr,
+                        lhs: Box::new(HirExpr::Var("param_10".into())),
+                        rhs: Box::new(HirExpr::Const(1, int_ty(32, false))),
+                        ty: int_ty(32, false),
+                    },
+                },
+                HirStmt::Label("Lcond".into()),
+                HirStmt::If {
+                    cond: HirExpr::Var("param_10".into()),
+                    then_body: vec![HirStmt::Goto("Lbody".into())],
+                    else_body: vec![],
+                },
+                HirStmt::Return(Some(HirExpr::Var("local_4".into()))),
+            ],
+            ..Default::default()
+        };
+
+        let layered = render_layered_pseudocode(&func, &MlilPreviewOptions::default());
+        assert!(
+            layered.nir.contains("goto") || layered.nir.contains("Lcond"),
+            "NIR keeps goto loop:\n{}",
+            layered.nir
+        );
+        assert!(
+            !layered.hir.contains("goto"),
+            "HIR should drop gotos:\n{}",
+            layered.hir
+        );
+        assert!(
+            layered.hir.contains("while"),
+            "HIR should recover while:\n{}",
+            layered.hir
+        );
+        assert!(
+            !layered.hir.contains("uVar7"),
+            "HIR should fold bit temp:\n{}",
+            layered.hir
+        );
+    }
+
+    #[test]
+    fn hir_presentation_drops_dead_flag_and_popcount_noise() {
+        let mut func = HirFunction {
+            name: "flag_noise".into(),
+            params: vec![param("param_1")],
+            locals: vec![local("zf"), local("xVar2"), local("uVar1"), local("result")],
+            return_type: int_ty(32, true),
+            body: vec![
+                // Dead parity chain (never read).
+                HirStmt::Assign {
+                    lhs: HirLValue::Var("uVar1".into()),
+                    rhs: HirExpr::Binary {
+                        op: HirBinaryOp::And,
+                        lhs: Box::new(HirExpr::Var("param_1".into())),
+                        rhs: Box::new(HirExpr::Const(255, int_ty(32, false))),
+                        ty: int_ty(32, false),
+                    },
+                },
+                HirStmt::Assign {
+                    lhs: HirLValue::Var("xVar2".into()),
+                    rhs: HirExpr::Call {
+                        target: "__popcount".into(),
+                        args: vec![HirExpr::Var("uVar1".into())],
+                        ty: int_ty(8, false),
+                    },
+                },
+                // Live flag used once in return — should inline.
+                HirStmt::Assign {
+                    lhs: HirLValue::Var("zf".into()),
+                    rhs: HirExpr::Binary {
+                        op: HirBinaryOp::Eq,
+                        lhs: Box::new(HirExpr::Var("param_1".into())),
+                        rhs: Box::new(HirExpr::Const(0, int_ty(32, true))),
+                        ty: NirType::Bool,
+                    },
+                },
+                HirStmt::Assign {
+                    lhs: HirLValue::Var("result".into()),
+                    rhs: HirExpr::Select {
+                        cond: Box::new(HirExpr::Unary {
+                            op: HirUnaryOp::Not,
+                            expr: Box::new(HirExpr::Var("zf".into())),
+                            ty: NirType::Bool,
+                        }),
+                        then_expr: Box::new(HirExpr::Const(1, int_ty(32, true))),
+                        else_expr: Box::new(HirExpr::Const(0, int_ty(32, true))),
+                        ty: int_ty(32, true),
+                    },
+                },
+                HirStmt::Return(Some(HirExpr::Var("result".into()))),
+            ],
+            ..Default::default()
+        };
+
+        apply_hir_presentation(&mut func);
+        let code = crate::nir::print_hir_function(&func);
+        assert!(
+            !code.contains("__popcount") && !code.contains("uVar1") && !code.contains("xVar2"),
+            "dead popcount chain should drop:\n{code}"
+        );
+        assert!(
+            !code.contains("zf"),
+            "single-use flag should inline away:\n{code}"
+        );
+        assert!(
+            code.contains("param_1") && code.contains("return"),
+            "result should remain meaningful:\n{code}"
+        );
+    }
+
+    #[test]
+    fn hir_presentation_peels_identity_casts() {
+        let mut func = HirFunction {
+            name: "casts".into(),
+            params: vec![param("param_1")],
+            locals: vec![],
+            return_type: int_ty(32, true),
+            body: vec![HirStmt::Return(Some(HirExpr::Cast {
+                ty: int_ty(32, true),
+                expr: Box::new(HirExpr::Cast {
+                    ty: int_ty(32, true),
+                    expr: Box::new(HirExpr::Var("param_1".into())),
+                }),
+            }))],
+            ..Default::default()
+        };
+        apply_hir_presentation(&mut func);
+        match &func.body[0] {
+            HirStmt::Return(Some(HirExpr::Var(n))) if n == "param_1" => {}
+            other => panic!("expected return param_1 after cast peel, got {other:?}"),
+        }
     }
 
     #[test]
