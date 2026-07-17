@@ -67,6 +67,8 @@ pub(crate) fn pcode_output_type_from_size(opcode: PcodeOpcode, size: u32) -> Nir
                 | PcodeOpcode::IntSRem
                 | PcodeOpcode::IntSLess
                 | PcodeOpcode::IntSLessEqual
+                | PcodeOpcode::IntSExt
+                | PcodeOpcode::IntSRight
         ),
     )
 }
@@ -140,12 +142,17 @@ pub(crate) fn is_materializable_output_opcode(opcode: PcodeOpcode) -> bool {
     )
 }
 
-
 pub(crate) fn next_temp_name(ty: &NirType, next_id: &mut u32) -> String {
     let prefix = match ty {
         NirType::Bool => "bVar",
-        NirType::Int { bits: 32, signed: true } => "iVar",
-        NirType::Int { bits: 32, signed: false } => "uVar",
+        NirType::Int {
+            bits: 32,
+            signed: true,
+        } => "iVar",
+        NirType::Int {
+            bits: 32,
+            signed: false,
+        } => "uVar",
         _ => "xVar",
     };
     let name = format!("{prefix}{}", *next_id);

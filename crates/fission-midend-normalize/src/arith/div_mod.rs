@@ -257,14 +257,13 @@ fn extract_cdq_low_from_wide_dividend(expr: &HirExpr) -> Option<HirExpr> {
 }
 
 fn expr_is_sign_fill_of(hi: &HirExpr, low: &HirExpr, shift_amt: i64) -> bool {
-    // Prefer arithmetic SAR. Accept Shr only when the shift *base type* is a
-    // signed int (SLEIGH SubPiece of IntSExt residual often lowers as >> of a
-    // signed longlong of the low half). Reject pure logical high-half of an
-    // unsigned chain (see logical_shr_is_not_cdq_sign_fill / bare_copy test).
+    // Only arithmetic SAR is CDQ-class sign-fill. Logical Shr is not (negative
+    // low logical high ≠ sign bits). Materialize emits Sar for SubPiece of
+    // signed IntSExt; residual must match that and reject bare Shr.
     let hi = strip_casts(hi);
     match hi {
         HirExpr::Binary {
-            op: bin_op @ (HirBinaryOp::Sar | HirBinaryOp::Shr),
+            op: HirBinaryOp::Sar,
             lhs,
             rhs: shift,
             ..
@@ -279,28 +278,7 @@ fn expr_is_sign_fill_of(hi: &HirExpr, low: &HirExpr, shift_amt: i64) -> bool {
                     HirExpr::Cast { expr, .. } if strip_casts(expr.as_ref()) == *low
                 );
             let shift_ok = *s == shift_amt || *s == shift_amt - 1 || *s == 31 || *s == 63;
-            if !base_ok || !shift_ok {
-                return false;
-            }
-            if matches!(bin_op, HirBinaryOp::Sar) {
-                return true;
-            }
-            // Shr residual: require signed-typed base (CDQ-class signed fill).
-            matches!(expr_type(lhs.as_ref()), NirType::Int { signed: true, .. })
-                || matches!(
-                    lhs.as_ref(),
-                    HirExpr::Cast {
-                        ty: NirType::Int { signed: true, .. },
-                        ..
-                    }
-                )
-                || matches!(
-                    &base,
-                    HirExpr::Cast {
-                        ty: NirType::Int { signed: true, .. },
-                        ..
-                    }
-                )
+            base_ok && shift_ok
         }
         _ => false,
     }

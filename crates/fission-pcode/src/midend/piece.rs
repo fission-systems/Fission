@@ -91,10 +91,18 @@ impl<'a> PreviewBuilder<'a> {
             .ok_or(MlilPreviewError::UnsupportedExprPieceShape)?;
         let base = self.lower_varnode(&op.inputs[0], visiting)?;
         let base_expr_signed = matches!(expr_type(&base), NirType::Int { signed: true, .. });
-        let base_def_signed = self
-            .lookup_def_site(&op.inputs[0])
-            .map(|(_, def)| pcode_output_type_from_size(def.opcode, op.inputs[0].size))
-            .is_some_and(|ty| matches!(ty, NirType::Int { signed: true, .. }));
+        let base_def_signed = self.lookup_def_site(&op.inputs[0]).is_some_and(|(_, def)| {
+            matches!(
+                def.opcode,
+                PcodeOpcode::IntSExt
+                    | PcodeOpcode::IntSRight
+                    | PcodeOpcode::IntSDiv
+                    | PcodeOpcode::IntSRem
+            ) || matches!(
+                pcode_output_type_from_size(def.opcode, op.inputs[0].size),
+                NirType::Int { signed: true, .. }
+            )
+        });
         let output_signed = base_expr_signed || base_def_signed;
         let output_ty = type_from_size(output.size, output_signed);
         let byte_offset =
@@ -102,8 +110,16 @@ impl<'a> PreviewBuilder<'a> {
         let shifted = if byte_offset == 0 {
             base
         } else {
+            // High half of a signed base (e.g. SubPiece(IntSExt(L), |L|) CDQ)
+            // is arithmetic sign-fill — use Sar. Logical Shr would mis-model
+            // negative lows and block CDQ residual matching.
+            let shift_op = if output_signed {
+                HirBinaryOp::Sar
+            } else {
+                HirBinaryOp::Shr
+            };
             HirExpr::Binary {
-                op: HirBinaryOp::Shr,
+                op: shift_op,
                 lhs: Box::new(base),
                 rhs: Box::new(HirExpr::Const(
                     byte_offset * 8,
