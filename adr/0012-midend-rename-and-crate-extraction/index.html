@@ -1122,9 +1122,9 @@ names should track the midend vocabulary.</p>
 </tr>
 <tr>
 <td>D</td>
-<td><code>fission-midend-core</code> + move</td>
-<td><strong>Physical move complete</strong> for <code>ir/</code>, <code>action_pipeline/</code>, <code>wave_stats</code>, <code>labels</code>, and <code>NirBuildStats</code> merge helpers. <code>fission-pcode</code> re-exports them and depends on core (dependency inverted).</td>
-<td><strong>In progress</strong> (substrate done; normalize/structuring source still in pcode)</td>
+<td>Owner extraction</td>
+<td><strong>core</strong> owns ir/action_pipeline/wave_stats/helpers/vsa; <strong>normalize</strong> owns full normalize source; <strong>structuring</strong> owns pure free-function modules (cfg facts, cleanup, regions, irreducible, loop_analysis). PreviewBuilder-bound structuring remains in pcode.</td>
+<td><strong>In progress</strong></td>
 </tr>
 <tr>
 <td>E</td>
@@ -1163,7 +1163,10 @@ before crates).</p>
 <li>P-code adapters: <code>seed_nir_render_options</code>, <code>nir_admission_facts_from_pcode</code>,
      <code>indirect_control_classification_from_pcode</code> remain in <code>fission-pcode</code>.</li>
 <li>Cspec helpers that formerly were inherent methods on <code>NirRenderOptions</code> are free functions.</li>
-<li><strong>Normalize/structuring source move:</strong> blocked on decoupling <code>support</code> /
+<li>~~Normalize source move to <code>fission-midend-normalize</code>.~~ <strong>Done</strong></li>
+<li>~~Pure structuring free-function modules to <code>fission-midend-structuring</code>.~~ <strong>Done</strong> (partial)</li>
+<li><strong>Remaining:</strong> lift PreviewBuilder-bound structuring (collapse/guarded-tail/linear/conditionals/switch) to free functions + host trait.</li>
+<li><strong>Was:</strong> Normalize/structuring source move: blocked on decoupling <code>support</code> /
    <code>var_rename</code> / <code>vsa</code> (normalize) and <code>PreviewBuilder</code> method blocks
    (structuring). Facades + decompiler/static deps on core/facades established.</li>
 <li>After owner source moves, drop deep re-exports from <code>fission-pcode</code> where
