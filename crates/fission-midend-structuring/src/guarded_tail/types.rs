@@ -232,6 +232,20 @@ pub enum SuffixTailRejection {
     SuffixHasLoopOrSwitchCrossing { stmt_idx: usize },
     SuffixAliasRedirectUnresolved { stmt_idx: usize, label: String },
 }
+
+impl SuffixTailRejection {
+    pub fn stmt_idx(&self) -> usize {
+        match self {
+            Self::SuffixHasSideEffect { stmt_idx }
+            | Self::SuffixHasNestedOrNonlocalRef { stmt_idx }
+            | Self::SuffixHasLoopOrSwitchCrossing { stmt_idx } => *stmt_idx,
+            Self::SuffixHasNonTerminalGoto { stmt_idx, .. }
+            | Self::SuffixHasLabelCrossing { stmt_idx, .. }
+            | Self::SuffixHasExternalEntry { stmt_idx, .. }
+            | Self::SuffixAliasRedirectUnresolved { stmt_idx, .. } => *stmt_idx,
+        }
+    }
+}
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SuffixExternalEntryBudget {
     pub raw_refs: usize,

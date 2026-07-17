@@ -659,6 +659,9 @@ impl<'a> StructuringHost for PreviewBuilder<'a> {
                 s.discovery_seen_guarded_tail_like_shape_count += amount;
             }
             C::guarded_tail_candidate_count => s.guarded_tail_candidate_count += amount,
+            C::guarded_tail_rejected_side_effectful_callee_count => {
+                s.guarded_tail_rejected_side_effectful_callee_count += amount;
+            }
             C::guarded_tail_exported_binding_count => {
                 s.guarded_tail_exported_binding_count += amount;
             }
@@ -734,7 +737,7 @@ impl<'a> StructuringHost for PreviewBuilder<'a> {
         referenced: &std::collections::HashMap<String, usize>,
         trace_enabled: bool,
     ) -> Option<(String, usize)> {
-        gt_find_earliest_owned_join_label_with_diag(
+        fission_midend_structuring::guarded_tail::find_earliest_owned_join_label_with_diag(
             self,
             body,
             anchor_idx,
@@ -742,6 +745,30 @@ impl<'a> StructuringHost for PreviewBuilder<'a> {
             referenced,
             trace_enabled,
         )
+    }
+
+    fn suffix_call_uses_preview_unsafe_callee(&self, stmt: &HirStmt) -> Option<String> {
+        PreviewBuilder::suffix_call_uses_preview_unsafe_callee_impl(self, stmt)
+    }
+
+    fn trace_suffix_unknown_call_provenance(&self, stmt_idx: usize, stmt: &HirStmt) {
+        PreviewBuilder::trace_suffix_unknown_call_provenance_impl(self, stmt_idx, stmt)
+    }
+
+    fn has_same_start_address_peer(&self, idx: usize) -> bool {
+        let block_start = PreviewBuilder::block_start_address(self, idx);
+        let pcode_idx = PreviewBuilder::pcode_block_idx(self, idx);
+        self.pcode.blocks.iter().enumerate().any(|(peer_idx, block)| {
+            peer_idx != pcode_idx && block.start_address == block_start
+        })
+    }
+
+    fn emit_unsupported_control_surface(
+        &mut self,
+        evidence: fission_midend_core::ir::UnsupportedControlEvidence,
+        target_expr: Option<HirExpr>,
+    ) -> HirStmt {
+        PreviewBuilder::emit_unsupported_control_surface(self, evidence, target_expr)
     }
 }
 
@@ -765,19 +792,3 @@ fn gt_record_guarded_tail_blockgraph_proof(
     builder.record_guarded_tail_blockgraph_proof_impl(candidate_idx, witness, legality_reason)
 }
 
-fn gt_find_earliest_owned_join_label_with_diag(
-    builder: &mut PreviewBuilder<'_>,
-    body: &[HirStmt],
-    anchor_idx: usize,
-    terminal_label_idx: usize,
-    referenced: &std::collections::HashMap<String, usize>,
-    trace_enabled: bool,
-) -> Option<(String, usize)> {
-    builder.find_earliest_owned_join_label_with_diag_impl(
-        body,
-        anchor_idx,
-        terminal_label_idx,
-        referenced,
-        trace_enabled,
-    )
-}

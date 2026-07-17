@@ -376,10 +376,6 @@ fn multi_block_preview_lowers_switch_chain_after_upper_bound_guard() {
 }
 
 #[test]
-// Pre-existing hang: mixed-selector chain can burn the full SESE collapse budget
-// without completing render under default nextest timeout. Keep ignored until the
-// switch rejection path fails fast without multi-minute overlay thrash.
-#[ignore = "pre-existing hang on mixed-selector switch chain"]
 fn multi_block_preview_rejects_switch_chain_with_mixed_selector_family() {
     let cond0 = uniq(0x550, 1);
     let cond1 = uniq(0x551, 1);

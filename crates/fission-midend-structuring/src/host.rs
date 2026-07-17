@@ -305,6 +305,20 @@ pub trait StructuringHost {
         trace_enabled: bool,
     ) -> Option<(String, usize)>;
 
+    /// Residual: preview callee-analysis summary for unsafe suffix call reject.
+    fn suffix_call_uses_preview_unsafe_callee(&self, stmt: &HirStmt) -> Option<String>;
+    /// Residual: optional GT-TRACE provenance dump for unknown suffix calls.
+    fn trace_suffix_unknown_call_provenance(&self, stmt_idx: usize, stmt: &HirStmt);
+
+    /// True when another p-code block shares this virtual block's start address.
+    fn has_same_start_address_peer(&self, idx: usize) -> bool;
+    /// Emit residual unsupported control as HIR (call/return surface polish).
+    fn emit_unsupported_control_surface(
+        &mut self,
+        evidence: fission_midend_core::ir::UnsupportedControlEvidence,
+        target_expr: Option<HirExpr>,
+    ) -> HirStmt;
+
     // ── Derived CFG helpers ────────────────────────────────────────────────
     fn analyze_cfg_scc(&self) -> SccAnalysis {
         self.cfg_facts().scc().clone()

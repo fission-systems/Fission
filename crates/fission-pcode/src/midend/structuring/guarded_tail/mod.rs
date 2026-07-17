@@ -15,12 +15,15 @@ mod suffix_window;
 
 // Types owned by fission-midend-structuring (ADR 0012 residual conversion).
 pub(super) use fission_midend_structuring::guarded_tail::types::{
-    AliasOwnershipLegalityReason, AliasOwnershipProof, GuardedTailCanonicalizationFailure,
-    GuardedTailExecutionPlan, GuardedTailExecutionRejection, GuardedTailExportedBinding,
-    GuardedTailReadKind, GuardedTailReplacementCache, GuardedTailReplacementRead,
-    GuardedTailSyntheticMerge, GuardedTailTrial, GuardedTailVerification,
-    GuardedTailWitnessRejection, NestedBeforeAliasWitness, NestedBeforeOwnershipClass,
-    PromotionGateRejection, PromotionShapeRejection, RegionShapeWitness,
+    AliasOwnershipLegalityReason, AliasOwnershipProof, ExternalEntryRefKind,
+    GuardedTailCanonicalizationFailure, GuardedTailExecutionPlan, GuardedTailExecutionRejection,
+    GuardedTailExportedBinding, GuardedTailReadKind, GuardedTailReplacementCache,
+    GuardedTailReplacementRead, GuardedTailSyntheticMerge, GuardedTailTrial,
+    GuardedTailVerification, GuardedTailWitnessRejection, NestedBeforeAliasWitness,
+    NestedBeforeOwnershipClass, NestedBoundaryPairTrace, NestedBoundaryRefTrace,
+    NestedEntryBoundaryContext, NestedSuffixShapeKind, PromotionGateRejection,
+    PromotionShapeRejection, RegionShapeWitness, SuffixCallEffectShapeKind,
+    SuffixExternalEntryBudget, SuffixSideEffectShapeKind, SuffixTailRejection,
     guarded_tail_call_target_is_known_pure_helper,
 };
 

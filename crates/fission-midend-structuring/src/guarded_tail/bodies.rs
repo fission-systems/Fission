@@ -25,6 +25,7 @@ use std::collections::{HashMap, HashSet};
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[allow(non_camel_case_types)]
 pub enum StructuringCounter {
+    guarded_tail_rejected_side_effectful_callee_count,
     canonicalization_failed_alias_not_fallthrough_nested_after_label_count,
     canonicalization_failed_alias_not_fallthrough_top_level_after_label_count,
     canonicalized_guarded_tail_shape_count,

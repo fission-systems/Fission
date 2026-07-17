@@ -2404,3 +2404,999 @@ pub fn top_level_label_definition_count_for_owned_tail(body: &[HirStmt], label: 
             .filter(|stmt| matches!(stmt, HirStmt::Label(candidate) if candidate == label))
             .count()
     }
+
+pub fn call_target_is_control_effect(target: &str) -> bool {
+        let lowered = target.to_ascii_lowercase();
+        matches!(
+            lowered.as_str(),
+            "abort"
+                | "exit"
+                | "_exit"
+                | "panic"
+                | "__assert_fail"
+                | "longjmp"
+                | "_longjmp"
+                | "raiseexception"
+                | "__cxa_throw"
+        )
+    }
+
+pub fn call_target_is_known_pure_helper(target: &str) -> bool {
+        guarded_tail_call_target_is_known_pure_helper(target)
+    }
+
+pub fn call_target_is_memory_mutating(target: &str) -> bool {
+        let lowered = target.to_ascii_lowercase();
+        matches!(
+            lowered.as_str(),
+            "memcpy"
+                | "memmove"
+                | "memset"
+                | "strcpy"
+                | "strncpy"
+                | "strcat"
+                | "strncat"
+                | "wcscpy"
+                | "wcsncpy"
+                | "wmemcpy"
+                | "wmemmove"
+                | "wmemset"
+        )
+    }
+
+pub fn candidate_window_can_shrink_to_label(
+        body: &[HirStmt],
+        anchor_idx: usize,
+        candidate_label: &str,
+        candidate_label_idx: usize,
+        terminal_label_idx: usize,
+        referenced: &HashMap<String, usize>,
+    ) -> Result<(), SuffixTailRejection> {
+        if candidate_label_idx >= terminal_label_idx {
+            return Err(SuffixTailRejection::SuffixHasLabelCrossing {
+                stmt_idx: candidate_label_idx,
+                label: candidate_label.to_string(),
+            });
+        }
+        let suffix_result = suffix_is_nonowned_terminal_tail(
+            body,
+            anchor_idx,
+            candidate_label,
+            candidate_label_idx,
+            terminal_label_idx,
+            referenced,
+        );
+        if !has_non_ignorable_payload(&body[anchor_idx + 1..candidate_label_idx]) {
+            return match suffix_result {
+                Err(SuffixTailRejection::SuffixHasExternalEntry { .. }) => suffix_result,
+                _ => Err(SuffixTailRejection::SuffixHasLabelCrossing {
+                    stmt_idx: candidate_label_idx,
+                    label: candidate_label.to_string(),
+                }),
+            };
+        }
+        suffix_result
+    }
+
+pub fn classify_nested_suffix_shape(
+        stmt: &HirStmt,
+        body: &[HirStmt],
+        current_label_idx: usize,
+        terminal_label_idx: usize,
+        next_label: &str,
+    ) -> NestedSuffixShapeKind {
+        let Some(HirStmt::Label(terminal_label)) = body.get(terminal_label_idx) else {
+            return NestedSuffixShapeKind::NestedUnknown;
+        };
+        match stmt {
+            HirStmt::If {
+                cond,
+                then_body,
+                else_body,
+            } => {
+                let then_target = single_goto_target(then_body);
+                let else_target = single_goto_target(else_body);
+                if then_body.len() > 1 || else_body.len() > 1 {
+                    return NestedSuffixShapeKind::NestedMultiStmtBranch;
+                }
+                if then_target.is_some() && else_target.is_some() {
+                    return NestedSuffixShapeKind::NestedBothBranches;
+                }
+                if let Some(target) = then_target {
+                    if target == terminal_label {
+                        return NestedSuffixShapeKind::NestedCrossesTerminalJoin;
+                    }
+                    if target != next_label {
+                        return NestedSuffixShapeKind::NestedNonlocalTarget;
+                    }
+                    if !suffix_window_has_terminal_guard_family_match(
+                        body,
+                        current_label_idx,
+                        terminal_label_idx,
+                        cond,
+                    ) {
+                        return NestedSuffixShapeKind::NestedGuardFamilyMismatch;
+                    }
+                    return NestedSuffixShapeKind::NestedSingleGotoThen;
+                }
+                if let Some(target) = else_target {
+                    if target == terminal_label {
+                        return NestedSuffixShapeKind::NestedCrossesTerminalJoin;
+                    }
+                    if target != next_label {
+                        return NestedSuffixShapeKind::NestedNonlocalTarget;
+                    }
+                    if !suffix_window_has_terminal_guard_family_match(
+                        body,
+                        current_label_idx,
+                        terminal_label_idx,
+                        cond,
+                    ) {
+                        return NestedSuffixShapeKind::NestedGuardFamilyMismatch;
+                    }
+                    return NestedSuffixShapeKind::NestedSingleGotoElse;
+                }
+                NestedSuffixShapeKind::NestedUnknown
+            }
+            HirStmt::Block(inner) if !inner.is_empty() => NestedSuffixShapeKind::NestedUnknown,
+            _ => NestedSuffixShapeKind::NestedUnknown,
+        }
+    }
+
+pub fn classify_suffix_call_effect_shape(stmt: &HirStmt) -> SuffixCallEffectShapeKind {
+        match stmt {
+            HirStmt::Assign {
+                lhs: HirLValue::Var(_),
+                rhs: HirExpr::Call { target, args, .. },
+            }
+            | HirStmt::Expr(HirExpr::Call { target, args, .. }) => {
+                if call_target_is_control_effect(target) {
+                    return SuffixCallEffectShapeKind::ControlEffectCall;
+                }
+                if call_target_is_memory_mutating(target) {
+                    return SuffixCallEffectShapeKind::MemoryMutatingCall;
+                }
+                if call_target_is_known_pure_helper(target)
+                    && args.iter().all(expr_is_pure_value)
+                {
+                    return SuffixCallEffectShapeKind::PureKnownHelperCall;
+                }
+                match stmt {
+                    HirStmt::Assign { .. } => SuffixCallEffectShapeKind::ReturnValueAssignedLocal,
+                    HirStmt::Expr(HirExpr::Call { ty, .. }) if matches!(ty, NirType::Unknown) => {
+                        SuffixCallEffectShapeKind::VoidUnknownCall
+                    }
+                    HirStmt::Expr(HirExpr::Call { .. }) => {
+                        SuffixCallEffectShapeKind::ReturnValueIgnoredCall
+                    }
+                    _ => SuffixCallEffectShapeKind::UnknownCallEffect,
+                }
+            }
+            HirStmt::Assign { .. } | HirStmt::Expr(_) | HirStmt::VaStart { .. } => {
+                SuffixCallEffectShapeKind::UnknownCallEffect
+            }
+            _ => SuffixCallEffectShapeKind::UnknownCallEffect,
+        }
+    }
+
+pub fn classify_suffix_side_effect_shape(stmt: &HirStmt) -> SuffixSideEffectShapeKind {
+        match stmt {
+            HirStmt::Assign {
+                lhs: HirLValue::Deref { .. } | HirLValue::Index { .. },
+                ..
+            } => SuffixSideEffectShapeKind::MemoryWrite,
+            HirStmt::Assign {
+                lhs: HirLValue::Var(_),
+                rhs,
+            } if suffix_expr_contains_call(rhs) => {
+                SuffixSideEffectShapeKind::CallExprSideEffect
+            }
+            HirStmt::Assign {
+                lhs: HirLValue::Var(_),
+                rhs,
+            } if expr_is_pure_value(rhs) => match rhs {
+                HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) => {
+                    SuffixSideEffectShapeKind::PureTempAssign
+                }
+                _ => SuffixSideEffectShapeKind::PureRegisterAssign,
+            },
+            HirStmt::Assign {
+                lhs: HirLValue::Var(_),
+                rhs: HirExpr::Load { ptr, .. },
+            } if expr_is_pure_value(ptr) => SuffixSideEffectShapeKind::MemoryReadOnlyAssign,
+            HirStmt::Assign {
+                lhs: HirLValue::Var(_),
+                rhs,
+            } if expr_contains_load(rhs) => SuffixSideEffectShapeKind::VolatileOrUnknownLoad,
+            HirStmt::Assign {
+                lhs: HirLValue::Var(name),
+                rhs,
+            } if expr_contains_var(rhs, name)
+                || matches!(rhs, HirExpr::AggregateCopy { .. }) =>
+            {
+                SuffixSideEffectShapeKind::CompoundAssignOrPhiLike
+            }
+            HirStmt::Expr(HirExpr::Call { .. }) | HirStmt::VaStart { .. } => {
+                SuffixSideEffectShapeKind::CallExprSideEffect
+            }
+            HirStmt::Expr(HirExpr::Load { .. }) => SuffixSideEffectShapeKind::VolatileOrUnknownLoad,
+            HirStmt::Expr(expr) if suffix_expr_contains_call(expr) => {
+                SuffixSideEffectShapeKind::CallExprSideEffect
+            }
+            HirStmt::Expr(expr) if expr_contains_load(expr) => {
+                SuffixSideEffectShapeKind::VolatileOrUnknownLoad
+            }
+            HirStmt::Assign { .. } => SuffixSideEffectShapeKind::UnknownSideEffect,
+            _ => SuffixSideEffectShapeKind::UnknownSideEffect,
+        }
+    }
+
+pub fn classify_suffix_stmt(
+        stmt: &HirStmt,
+        body: &[HirStmt],
+        stmt_idx: usize,
+        current_label_idx: usize,
+        terminal_label_idx: usize,
+        next_label: &str,
+    ) -> Result<(), SuffixTailRejection> {
+        if is_ignorable_discovery_stmt(stmt)
+            || matches!(stmt, HirStmt::Block(inner) if inner.is_empty())
+        {
+            return Ok(());
+        }
+        if stmt_is_pure_value_expr(stmt) || stmt_is_pure_value_assign(stmt) {
+            return Ok(());
+        }
+        if let HirStmt::Goto(target) = stmt {
+            if target == next_label
+                || stmt_is_sink_safe_return_goto_for_owned_tail(stmt, body)
+            {
+                return Ok(());
+            }
+            let next_stmt_label_idx = (stmt_idx + 1..body.len())
+                .find(|pos| matches!(body[*pos], HirStmt::Label(_)))
+                .unwrap_or(body.len());
+            for trailing_idx in stmt_idx + 1..next_stmt_label_idx {
+                let trailing = &body[trailing_idx];
+                if is_ignorable_discovery_stmt(trailing)
+                    || matches!(trailing, HirStmt::Block(inner) if inner.is_empty())
+                {
+                    continue;
+                }
+                if suffix_stmt_has_nested_or_nonlocal_ref(trailing) {
+                    return Err(SuffixTailRejection::SuffixHasNestedOrNonlocalRef { stmt_idx });
+                }
+                if !stmt_is_pure_value_expr(trailing)
+                    && !stmt_is_pure_value_assign(trailing)
+                    && !matches!(trailing, HirStmt::Goto(target) if target == next_label)
+                {
+                    return Err(SuffixTailRejection::SuffixHasSideEffect { stmt_idx });
+                }
+            }
+            let label_count = top_level_label_definition_count_for_owned_tail(body, target);
+            if label_count == 0 {
+                let terminal_label = body
+                    .get(terminal_label_idx)
+                    .and_then(|stmt| match stmt {
+                        HirStmt::Label(label) => Some(label.as_str()),
+                        _ => None,
+                    })
+                    .unwrap_or("");
+                return Err(if next_label == terminal_label {
+                    SuffixTailRejection::SuffixAliasRedirectUnresolved {
+                        stmt_idx,
+                        label: target.clone(),
+                    }
+                } else {
+                    SuffixTailRejection::SuffixHasNonTerminalGoto {
+                        stmt_idx,
+                        target: target.clone(),
+                    }
+                });
+            }
+            if label_count != 1 {
+                return Err(SuffixTailRejection::SuffixAliasRedirectUnresolved {
+                    stmt_idx,
+                    label: target.clone(),
+                });
+            }
+            if resolve_suffix_redirect_to_terminal(body, target, next_label) {
+                return Ok(());
+            }
+            return Err(SuffixTailRejection::SuffixHasNonTerminalGoto {
+                stmt_idx,
+                target: target.clone(),
+            });
+        }
+        if matches!(
+            stmt,
+            HirStmt::Switch { .. }
+                | HirStmt::While { .. }
+                | HirStmt::DoWhile { .. }
+                | HirStmt::For { .. }
+                | HirStmt::Break
+                | HirStmt::Continue
+        ) {
+            return Err(SuffixTailRejection::SuffixHasLoopOrSwitchCrossing { stmt_idx });
+        }
+        if suffix_stmt_has_nested_or_nonlocal_ref(stmt) {
+            let kind = classify_nested_suffix_shape(
+                stmt,
+                body,
+                current_label_idx,
+                terminal_label_idx,
+                next_label,
+            );
+            if kind == NestedSuffixShapeKind::NestedCrossesTerminalJoin
+                && nested_terminal_join_tail_is_guard_family_owned_safe(
+                    body,
+                    stmt_idx,
+                    current_label_idx,
+                    terminal_label_idx,
+                )
+            {
+                if guarded_tail_diag_enabled() {
+                    eprintln!(
+                        "[GT-TRACE] nested-terminal-join-tail-internalized stmt_idx={} kind={:?} stmt={:?}",
+                        stmt_idx, kind, stmt
+                    );
+                }
+                return Ok(());
+            }
+            if guarded_tail_diag_enabled() {
+                eprintln!(
+                    "[GT-TRACE] nested-suffix-shape stmt_idx={} kind={:?} stmt={:?}",
+                    stmt_idx, kind, stmt
+                );
+            }
+            return Err(SuffixTailRejection::SuffixHasNestedOrNonlocalRef { stmt_idx });
+        }
+        let side_effect_kind = classify_suffix_side_effect_shape(stmt);
+        if side_effect_kind == SuffixSideEffectShapeKind::MemoryReadOnlyAssign
+            && suffix_memory_read_only_assign_is_owned_safe(
+                body,
+                stmt_idx,
+                terminal_label_idx,
+            )
+        {
+            if guarded_tail_diag_enabled() {
+                eprintln!(
+                    "[GT-TRACE] suffix-memory-readonly-assign-internalized stmt_idx={} kind={:?} stmt={:?}",
+                    stmt_idx, side_effect_kind, stmt
+                );
+            }
+            return Ok(());
+        }
+        if side_effect_kind == SuffixSideEffectShapeKind::CallExprSideEffect {
+            let call_kind = classify_suffix_call_effect_shape(stmt);
+            if call_kind == SuffixCallEffectShapeKind::PureKnownHelperCall
+                && suffix_known_pure_helper_call_is_owned_safe(
+                    body,
+                    stmt_idx,
+                    terminal_label_idx,
+                )
+            {
+                if guarded_tail_diag_enabled() {
+                    eprintln!(
+                        "[GT-TRACE] suffix-known-pure-helper-call-internalized stmt_idx={} kind={:?} stmt={:?}",
+                        stmt_idx, call_kind, stmt
+                    );
+                }
+                return Ok(());
+            }
+        }
+        if guarded_tail_diag_enabled() {
+            if side_effect_kind == SuffixSideEffectShapeKind::CallExprSideEffect {
+                let call_kind = classify_suffix_call_effect_shape(stmt);
+                eprintln!(
+                    "[GT-TRACE] suffix-call-effect-shape stmt_idx={} kind={:?} stmt={:?}",
+                    stmt_idx, call_kind, stmt
+                );
+                if matches!(
+                    call_kind,
+                    SuffixCallEffectShapeKind::VoidUnknownCall
+                        | SuffixCallEffectShapeKind::ReturnValueAssignedLocal
+                        | SuffixCallEffectShapeKind::ReturnValueIgnoredCall
+                        | SuffixCallEffectShapeKind::UnknownCallEffect
+                ) {}
+            }
+            eprintln!(
+                "[GT-TRACE] suffix-side-effect-shape stmt_idx={} kind={:?} stmt={:?}",
+                stmt_idx, side_effect_kind, stmt
+            );
+        }
+        Err(SuffixTailRejection::SuffixHasSideEffect { stmt_idx })
+    }
+
+pub fn compute_suffix_external_entry_budget(
+        body: &[HirStmt],
+        label: &str,
+        anchor_idx: usize,
+        current_label_idx: usize,
+        terminal_label_idx: usize,
+        raw_refs: usize,
+        rewrites: usize,
+    ) -> SuffixExternalEntryBudget {
+        let internal_candidate_refs =
+            count_candidate_internal_top_level_refs_in_suffix_window(
+                body,
+                label,
+                anchor_idx,
+                terminal_label_idx,
+            );
+        let suffix_safe_refs = count_suffix_safe_self_terminal_refs_in_suffix_window(
+            body,
+            label,
+            anchor_idx,
+            terminal_label_idx,
+        )
+        .min(internal_candidate_refs);
+        let guard_family_internalized_refs =
+            count_internalized_guard_family_nested_conditional_entries(
+                body,
+                label,
+                anchor_idx,
+                current_label_idx,
+                terminal_label_idx,
+            );
+        let paired_nested_boundary_refs = count_internalized_paired_nested_boundary_refs(
+            body,
+            label,
+            anchor_idx,
+            current_label_idx,
+            terminal_label_idx,
+            raw_refs,
+        );
+        let internal_top_level_refs = internal_candidate_refs.saturating_sub(suffix_safe_refs);
+        let effective_external_refs = raw_refs
+            .saturating_sub(internal_top_level_refs)
+            .saturating_sub(suffix_safe_refs);
+        let effective_external_refs =
+            effective_external_refs.saturating_sub(guard_family_internalized_refs);
+        let effective_external_refs =
+            effective_external_refs.saturating_sub(paired_nested_boundary_refs);
+        let allowed_external_refs = usize::from(rewrites == 0);
+
+        SuffixExternalEntryBudget {
+            raw_refs,
+            internal_top_level_refs,
+            suffix_safe_refs,
+            guard_family_internalized_refs,
+            paired_nested_boundary_refs,
+            effective_external_refs,
+            allowed_external_refs,
+        }
+    }
+
+pub fn expr_contains_load(expr: &HirExpr) -> bool {
+        match expr {
+            HirExpr::Load { .. } => true,
+            HirExpr::Cast { expr, .. }
+            | HirExpr::Unary { expr, .. }
+            | HirExpr::AggregateCopy { src: expr, .. } => expr_contains_load(expr),
+            HirExpr::Binary { lhs, rhs, .. } => {
+                expr_contains_load(lhs) || expr_contains_load(rhs)
+            }
+            HirExpr::Call { args, .. } => args.iter().any(expr_contains_load),
+            HirExpr::PtrOffset { base, .. } | HirExpr::FieldAccess { base, .. } => {
+                expr_contains_load(base)
+            }
+            HirExpr::Index { base, index, .. } => {
+                expr_contains_load(base) || expr_contains_load(index)
+            }
+            HirExpr::Select {
+                cond,
+                then_expr,
+                else_expr,
+                ..
+            } => {
+                expr_contains_load(cond)
+                    || expr_contains_load(then_expr)
+                    || expr_contains_load(else_expr)
+            }
+            HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) | HirExpr::Const(_, _) => false,
+        }
+    }
+
+pub fn find_earliest_owned_join_label(
+        body: &[HirStmt],
+        anchor_idx: usize,
+        terminal_label_idx: usize,
+        referenced: &HashMap<String, usize>,
+        trace_enabled: bool,
+    ) -> Option<(String, usize)> {
+        if anchor_idx + 1 >= terminal_label_idx {
+            return None;
+        }
+
+        for candidate_label_idx in anchor_idx + 1..terminal_label_idx {
+            let HirStmt::Label(candidate_label) = &body[candidate_label_idx] else {
+                continue;
+            };
+            let has_payload = has_non_ignorable_payload(&body[anchor_idx + 1..candidate_label_idx]);
+            let suffix_result = candidate_window_can_shrink_to_label(
+                body,
+                anchor_idx,
+                candidate_label,
+                candidate_label_idx,
+                terminal_label_idx,
+                referenced,
+            );
+            let suffix_safe = suffix_result.is_ok();
+            if guarded_tail_diag_enabled() {
+                eprintln!(
+                    "[DIAG] owned-join candidate anchor={} label={} label_idx={} terminal_idx={} payload_before={} suffix_safe={}",
+                    anchor_idx,
+                    candidate_label,
+                    candidate_label_idx,
+                    terminal_label_idx,
+                    has_payload,
+                    suffix_safe
+                );
+            }
+            if trace_enabled
+                && anchor_idx == 35
+                && let Err(reason) = &suffix_result
+                && let Some(stmt) = body.get(reason.stmt_idx())
+            {
+                eprintln!(
+                    "[GT-TRACE] candidate={} join_label={} early_label={} first_fail={:?} stmt_idx={} first_fail_stmt={:?}",
+                    anchor_idx,
+                    match body.get(terminal_label_idx) {
+                        Some(HirStmt::Label(label)) => label.as_str(),
+                        _ => "<missing-terminal-label>",
+                    },
+                    candidate_label,
+                    reason,
+                    reason.stmt_idx(),
+                    stmt
+                );
+            }
+            if has_payload && suffix_safe {
+                return Some((candidate_label.clone(), candidate_label_idx));
+            }
+        }
+
+        None
+    }
+
+pub fn nested_terminal_join_tail_is_guard_family_owned_safe(
+        body: &[HirStmt],
+        stmt_idx: usize,
+        current_label_idx: usize,
+        terminal_label_idx: usize,
+    ) -> bool {
+        let Some(HirStmt::Label(terminal_label)) = body.get(terminal_label_idx) else {
+            return false;
+        };
+        let Some(stmt) = body.get(stmt_idx) else {
+            return false;
+        };
+        let Some(entry_cond) = stmt_is_single_branch_if_to_label(stmt, terminal_label) else {
+            return false;
+        };
+        let matched_cond = find_terminal_guard_family_match_excluding(
+            body,
+            current_label_idx,
+            terminal_label_idx,
+            entry_cond,
+            Some(stmt_idx),
+        );
+        let result = matched_cond.is_some();
+        if guarded_tail_diag_enabled() {
+            eprintln!(
+                "[GT-TRACE] nested-terminal-join-proof stmt_idx={} terminal_label={} entry_cond={:?} matched_cond={:?} result={}",
+                stmt_idx, terminal_label, entry_cond, matched_cond, result
+            );
+        }
+        result
+    }
+
+pub fn resolve_suffix_redirect_to_terminal(
+        body: &[HirStmt],
+        target_label: &str,
+        next_label: &str,
+    ) -> bool {
+        if target_label == next_label {
+            return true;
+        }
+        if top_level_label_definition_count_for_owned_tail(body, target_label) != 1 {
+            return false;
+        }
+        let Some(mut current_idx) = body
+            .iter()
+            .position(|stmt| matches!(stmt, HirStmt::Label(label) if label == target_label))
+        else {
+            return false;
+        };
+        let mut current = target_label.to_string();
+        let mut seen = HashSet::new();
+
+        while current != next_label {
+            if !seen.insert(current.clone()) {
+                return false;
+            }
+
+            let next_label_idx = (current_idx + 1..body.len())
+                .find(|pos| matches!(body[*pos], HirStmt::Label(_)))
+                .unwrap_or(body.len());
+
+            let mut terminal_return = false;
+            let mut terminal_goto = None::<String>;
+            for stmt in &body[current_idx + 1..next_label_idx] {
+                match stmt {
+                    HirStmt::Goto(target) => terminal_goto = Some(target.clone()),
+                    HirStmt::Return(_) => terminal_return = true,
+                    stmt if is_ignorable_discovery_stmt(stmt) => {}
+                    stmt if stmt_is_pure_value_expr(stmt) => {}
+                    stmt if stmt_is_pure_value_assign(stmt) => {}
+                    HirStmt::Block(inner) if inner.is_empty() => {}
+                    _ => return false,
+                }
+            }
+
+            if terminal_return {
+                return true;
+            }
+            let Some(next_target) = terminal_goto else {
+                return false;
+            };
+            if next_target == next_label {
+                return true;
+            }
+            let Some(next_idx) = body
+                .iter()
+                .position(|stmt| matches!(stmt, HirStmt::Label(label) if label == &next_target))
+            else {
+                return false;
+            };
+            current = next_target;
+            current_idx = next_idx;
+        }
+
+        true
+    }
+
+pub fn stmt_is_sink_safe_return_goto_for_owned_tail(stmt: &HirStmt, body: &[HirStmt]) -> bool {
+        let HirStmt::Goto(target) = stmt else {
+            return false;
+        };
+        if top_level_label_definition_count_for_owned_tail(body, target) != 1 {
+            return false;
+        }
+        matches!(
+            resolve_terminal_tail_exit_stmt(body, target),
+            Some(HirStmt::Return(_))
+        )
+    }
+
+pub fn stmt_reads_binding_only_in_owned_safe_context(stmt: &HirStmt, name: &str) -> bool {
+        match stmt {
+            HirStmt::Assign { lhs, rhs } => {
+                if lvalue_contains_var(lhs, name) {
+                    return false;
+                }
+                !expr_contains_var(rhs, name) || expr_is_pure_value(rhs)
+            }
+            HirStmt::Expr(expr) => {
+                !expr_contains_var(expr, name) || expr_is_pure_value(expr)
+            }
+            HirStmt::If {
+                cond,
+                then_body,
+                else_body,
+            } => {
+                (!expr_contains_var(cond, name) || expr_is_pure_value(cond))
+                    && then_body
+                        .iter()
+                        .all(|stmt| stmt_reads_binding_only_in_owned_safe_context(stmt, name))
+                    && else_body
+                        .iter()
+                        .all(|stmt| stmt_reads_binding_only_in_owned_safe_context(stmt, name))
+            }
+            HirStmt::Block(stmts) => stmts
+                .iter()
+                .all(|stmt| stmt_reads_binding_only_in_owned_safe_context(stmt, name)),
+            HirStmt::VaStart { va_list, .. } => !expr_contains_var(va_list, name),
+            HirStmt::Switch {
+                expr,
+                cases,
+                default,
+            } => {
+                !expr_contains_var(expr, name)
+                    && cases.iter().all(|case| {
+                        case.body.iter().all(|stmt| {
+                            stmt_reads_binding_only_in_owned_safe_context(stmt, name)
+                        })
+                    })
+                    && default
+                        .iter()
+                        .all(|stmt| stmt_reads_binding_only_in_owned_safe_context(stmt, name))
+            }
+            HirStmt::While { cond, body } | HirStmt::DoWhile { cond, body } => {
+                !expr_contains_var(cond, name)
+                    && body
+                        .iter()
+                        .all(|stmt| stmt_reads_binding_only_in_owned_safe_context(stmt, name))
+            }
+            HirStmt::For {
+                init,
+                cond,
+                update,
+                body,
+            } => {
+                init.iter()
+                    .all(|stmt| stmt_reads_binding_only_in_owned_safe_context(stmt, name))
+                    && cond
+                        .as_ref()
+                        .is_none_or(|expr| !expr_contains_var(expr, name))
+                    && update
+                        .iter()
+                        .all(|stmt| stmt_reads_binding_only_in_owned_safe_context(stmt, name))
+                    && body
+                        .iter()
+                        .all(|stmt| stmt_reads_binding_only_in_owned_safe_context(stmt, name))
+            }
+            HirStmt::Return(Some(expr)) => !expr_contains_var(expr, name),
+            HirStmt::Label(_)
+            | HirStmt::Goto(_)
+            | HirStmt::Return(None)
+            | HirStmt::Break
+            | HirStmt::Continue => true,
+        }
+    }
+
+pub fn suffix_call_expr(stmt: &HirStmt) -> Option<(&str, &[HirExpr], bool)> {
+        match stmt {
+            HirStmt::Assign {
+                lhs: HirLValue::Var(_),
+                rhs: HirExpr::Call { target, args, .. },
+            } => Some((target.as_str(), args.as_slice(), true)),
+            HirStmt::Expr(HirExpr::Call { target, args, .. }) => {
+                Some((target.as_str(), args.as_slice(), false))
+            }
+            _ => None,
+        }
+    }
+
+pub fn suffix_is_nonowned_terminal_tail(
+        body: &[HirStmt],
+        anchor_idx: usize,
+        start_label: &str,
+        start_label_idx: usize,
+        terminal_label_idx: usize,
+        referenced: &HashMap<String, usize>,
+    ) -> Result<(), SuffixTailRejection> {
+        if start_label_idx >= terminal_label_idx {
+            return Err(SuffixTailRejection::SuffixHasLabelCrossing {
+                stmt_idx: start_label_idx,
+                label: start_label.to_string(),
+            });
+        }
+
+        let mut current_label = start_label.to_string();
+        let mut current_label_idx = start_label_idx;
+        let mut rewrites = 0usize;
+        let mut seen = HashSet::new();
+
+        while current_label_idx < terminal_label_idx {
+            if !seen.insert(current_label.clone()) {
+                return Err(SuffixTailRejection::SuffixAliasRedirectUnresolved {
+                    stmt_idx: current_label_idx,
+                    label: current_label,
+                });
+            }
+
+            let raw_refs = referenced.get(&current_label).copied().unwrap_or(0);
+            let budget = compute_suffix_external_entry_budget(
+                body,
+                &current_label,
+                anchor_idx,
+                current_label_idx,
+                terminal_label_idx,
+                raw_refs,
+                rewrites,
+            );
+            if guarded_tail_diag_enabled() {
+                eprintln!(
+                    "[GT-TRACE] suffix-budget label={} raw_refs={} internal_refs={} suffix_safe_refs={} guard_family_internalized_refs={} paired_nested_boundary_refs={} effective_external={} allowed_external={}",
+                    current_label,
+                    budget.raw_refs,
+                    budget.internal_top_level_refs,
+                    budget.suffix_safe_refs,
+                    budget.guard_family_internalized_refs,
+                    budget.paired_nested_boundary_refs,
+                    budget.effective_external_refs,
+                    budget.allowed_external_refs,
+                );
+            }
+            if budget.effective_external_refs > budget.allowed_external_refs {
+                if guarded_tail_diag_enabled()
+                    && let Some((kind, ref_stmt_idx)) = classify_external_entry_ref_kind(
+                        body,
+                        &current_label,
+                        anchor_idx,
+                        terminal_label_idx,
+                    )
+                    && let Some(ref_stmt) = body.get(ref_stmt_idx)
+                {
+                    eprintln!(
+                        "[GT-TRACE] suffix-external-entry label={} external_entry_kind={:?} ref_stmt_idx={} ref_stmt={:?}",
+                        current_label, kind, ref_stmt_idx, ref_stmt
+                    );
+                }
+                return Err(SuffixTailRejection::SuffixHasExternalEntry {
+                    stmt_idx: current_label_idx,
+                    label: current_label,
+                });
+            }
+
+            let Some(next_label_idx) = (current_label_idx + 1..body.len())
+                .find(|pos| matches!(body[*pos], HirStmt::Label(_)))
+            else {
+                return Err(SuffixTailRejection::SuffixHasLabelCrossing {
+                    stmt_idx: current_label_idx,
+                    label: current_label,
+                });
+            };
+            if next_label_idx > terminal_label_idx {
+                return Err(SuffixTailRejection::SuffixHasLabelCrossing {
+                    stmt_idx: next_label_idx,
+                    label: current_label,
+                });
+            }
+            let HirStmt::Label(terminal_label) = &body[terminal_label_idx] else {
+                unreachable!();
+            };
+            let HirStmt::Label(next_label) = &body[next_label_idx] else {
+                unreachable!();
+            };
+            for (offset, stmt) in body[current_label_idx + 1..next_label_idx]
+                .iter()
+                .enumerate()
+            {
+                let stmt_idx = current_label_idx + 1 + offset;
+                if matches!(stmt, HirStmt::Goto(target) if target == terminal_label)
+                    && suffix_stmt_is_terminal_join_owned_safe(
+                        body,
+                        stmt_idx,
+                        next_label_idx,
+                        terminal_label,
+                    )
+                {
+                    continue;
+                }
+                if rewrites == 0
+                    && next_label_idx == terminal_label_idx
+                    && !is_ignorable_discovery_stmt(stmt)
+                    && !matches!(stmt, HirStmt::Block(inner) if inner.is_empty())
+                {
+                    return Err(SuffixTailRejection::SuffixHasSideEffect { stmt_idx });
+                }
+                classify_suffix_stmt(
+                    stmt,
+                    body,
+                    stmt_idx,
+                    current_label_idx,
+                    terminal_label_idx,
+                    next_label,
+                )?;
+            }
+
+            current_label = next_label.clone();
+            current_label_idx = next_label_idx;
+            rewrites += 1;
+        }
+
+        Ok(())
+    }
+
+pub fn suffix_known_pure_helper_call_is_owned_safe(
+        body: &[HirStmt],
+        stmt_idx: usize,
+        terminal_label_idx: usize,
+    ) -> bool {
+        let Some(HirStmt::Assign {
+            lhs: HirLValue::Var(binding_name),
+            rhs: HirExpr::Call { target, args, .. },
+        }) = body.get(stmt_idx)
+        else {
+            return false;
+        };
+
+        let args_pure = args.iter().all(expr_is_pure_value);
+        let target_known_pure = call_target_is_known_pure_helper(target);
+        let no_redefine = body[stmt_idx + 1..]
+            .iter()
+            .map(|stmt| count_var_defs_stmt(stmt, binding_name))
+            .sum::<usize>()
+            == 0;
+        let pre_terminal_owned_safe = body[stmt_idx + 1..terminal_label_idx]
+            .iter()
+            .all(|stmt| stmt_reads_binding_only_in_owned_safe_context(stmt, binding_name));
+        let no_terminal_escape = body[terminal_label_idx..]
+            .iter()
+            .all(|stmt| count_var_reads_stmt(stmt, binding_name) == 0);
+        let result = target_known_pure
+            && args_pure
+            && no_redefine
+            && pre_terminal_owned_safe
+            && no_terminal_escape;
+
+        if guarded_tail_diag_enabled() && target_known_pure && args_pure {
+            eprintln!(
+                "[GT-TRACE] known-pure-helper-proof stmt_idx={} target={} args_pure={} no_redefine={} pre_terminal_owned_safe={} no_terminal_escape={} result={}",
+                stmt_idx,
+                target,
+                args_pure,
+                no_redefine,
+                pre_terminal_owned_safe,
+                no_terminal_escape,
+                result
+            );
+        }
+
+        result
+    }
+
+pub fn suffix_memory_read_only_assign_is_owned_safe(
+        body: &[HirStmt],
+        stmt_idx: usize,
+        terminal_label_idx: usize,
+    ) -> bool {
+        let Some(HirStmt::Assign {
+            lhs: HirLValue::Var(binding_name),
+            rhs: HirExpr::Load { ptr, ty },
+        }) = body.get(stmt_idx)
+        else {
+            return false;
+        };
+
+        if !expr_is_pure_value(ptr) || matches!(ty, NirType::Unknown) {
+            return false;
+        }
+
+        if body[stmt_idx + 1..]
+            .iter()
+            .map(|stmt| count_var_defs_stmt(stmt, binding_name))
+            .sum::<usize>()
+            > 0
+        {
+            return false;
+        }
+
+        if body[stmt_idx + 1..terminal_label_idx]
+            .iter()
+            .any(|stmt| !stmt_reads_binding_only_in_owned_safe_context(stmt, binding_name))
+        {
+            return false;
+        }
+
+        body[terminal_label_idx..]
+            .iter()
+            .all(|stmt| count_var_reads_stmt(stmt, binding_name) == 0)
+    }
+
+pub fn suffix_stmt_has_nested_or_nonlocal_ref(stmt: &HirStmt) -> bool {
+        match stmt {
+            HirStmt::If { .. } => true,
+            HirStmt::Block(inner) => !inner.is_empty(),
+            _ => false,
+        }
+    }
+
+pub fn suffix_window_has_terminal_guard_family_match(
+        body: &[HirStmt],
+        current_label_idx: usize,
+        terminal_label_idx: usize,
+        entry_cond: &HirExpr,
+    ) -> bool {
+        find_terminal_guard_family_match_excluding(
+            body,
+            current_label_idx,
+            terminal_label_idx,
+            entry_cond,
+            None,
+        )
+        .is_some()
+    }
