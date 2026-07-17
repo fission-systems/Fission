@@ -1066,7 +1066,7 @@
 <li><strong>HIR</strong> — human-readable presentation (dashboard readability, operator UX)</li>
 </ul>
 <p>Early HIR work lived only as ad-hoc polish in
-<code>crates/fission-pcode/src/nir/render/hir_presentation.rs</code>. That improved real
+<code>crates/fission-pcode/src/render/hir_presentation.rs</code>. That improved real
 O0 rows (<code>add_ints</code>, <code>count_bits</code>, <code>apply_binop</code>, …) but left no durable contract
 for:</p>
 <ul>
@@ -1193,8 +1193,7 @@ change and ADR 0006 applies.</p>
 </ul>
 <p><strong>Follow-up</strong></p>
 <ul>
-<li><code>crates/fission-pcode/src/nir/render/AGENTS.md</code> implements the operator
-  checklist.</li>
+<li><code>crates/fission-pcode/src/render/AGENTS.md</code> implements the operator checklist.</li>
 <li>Regression tests enforce single-eval of calls and NIR isolation from
   presentation.</li>
 </ul>
@@ -1205,7 +1204,8 @@ change and ADR 0006 applies.</p>
 <li><a href="../0007-ai-overfit-and-validation-firewall/">ADR 0007</a> — overfit firewall</li>
 <li><a href="../0008-nir-substrate-and-owner-boundaries/">ADR 0008</a> — substrate vs owners</li>
 <li>Repo policy: root <code>Agents.md</code> § NIR vs HIR</li>
-<li>Implementation: <code>crates/fission-pcode/src/nir/render/hir_presentation.rs</code></li>
+<li>Implementation: <code>crates/fission-pcode/src/render/</code> (<code>hir_presentation.rs</code>, <code>printer.rs</code>, …)</li>
+<li>Module boundary: presentation is crate-root <code>render</code>, not nested under <code>nir/</code> (Phase 1 of dual-layer ownership)</li>
 </ul>
 
 
