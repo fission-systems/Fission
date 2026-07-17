@@ -1157,6 +1157,22 @@
 <p>Manual CD re-run for an existing tag:</p>
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>gh<span class="w"> </span>workflow<span class="w"> </span>run<span class="w"> </span><span class="s2">&quot;CD Release&quot;</span><span class="w"> </span>-f<span class="w"> </span><span class="nv">tag</span><span class="o">=</span>v0.1.4
 </span></code></pre></div>
+<p>Official benchmark bake (after release assets exist):</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="c1"># Preferred: bake GHCR then auto-chain official Benchmark &amp; Deploy</span>
+</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>gh<span class="w"> </span>workflow<span class="w"> </span>run<span class="w"> </span><span class="s2">&quot;Publish Images&quot;</span><span class="w"> </span>--repo<span class="w"> </span>sjkim1127/fission-benchmark<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="w">  </span>-f<span class="w"> </span><span class="nv">services</span><span class="o">=</span>fission<span class="w"> </span>-f<span class="w"> </span><span class="nv">fission_version</span><span class="o">=</span>v0.1.4
+</span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>
+</span><span id="__span-2-5"><a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="c1"># Or repository_dispatch (Publish Images only; chains benchmark itself):</span>
+</span><span id="__span-2-6"><a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>gh<span class="w"> </span>api<span class="w"> </span>repos/sjkim1127/fission-benchmark/dispatches<span class="w"> </span>--input<span class="w"> </span>-<span class="w"> </span><span class="s">&lt;&lt;&#39;EOF&#39;</span>
+</span><span id="__span-2-7"><a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="s">{</span>
+</span><span id="__span-2-8"><a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="s">  &quot;event_type&quot;: &quot;fission-release&quot;,</span>
+</span><span id="__span-2-9"><a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="s">  &quot;client_payload&quot;: { &quot;fission_version&quot;: &quot;v0.1.4&quot; }</span>
+</span><span id="__span-2-10"><a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="s">}</span>
+</span><span id="__span-2-11"><a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a><span class="s">EOF</span>
+</span></code></pre></div>
+<p>Optional: set repo secret <code>FISSION_BENCHMARK_DISPATCH_TOKEN</code> (PAT with
+<code>actions:write</code> on <code>fission-benchmark</code>) so <strong>Release Tag</strong> auto-runs the bake
+after CD is queued.</p>
 <p>Optional: run <strong>Release E2E Gate</strong> alone (dispatch) to pre-validate a SHA without tagging.</p>
 <h2 id="l1-job-split-main-push-vs-extended">L1 job split (main push vs extended)<a class="headerlink" href="#l1-job-split-main-push-vs-extended" title="Permanent link">&para;</a></h2>
 <p>On <strong><code>push</code> to <code>main</code></strong>, Heavy runs the <strong>release-critical</strong> set only (so a green
