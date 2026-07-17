@@ -1175,8 +1175,9 @@ before crates).</p>
    (SESE, build_sese_region_body, normalize_hir_function, admission gate,
    try_repair_orphan_gotos, build_linear_multiblock_body).
    Deleted pure thin <code>structuring/graph.rs</code> shim; removed dead PreviewBuilder
-   inherent thin wraps for loops/conditionals/switch/orphan (re-export only +
-   p-code residual on for-loop head).</li>
+   inherent thin wraps for loops/conditionals/switch/orphan/linear test path
+   (tests call free-fns; linear residual is p-code-only; host switch_recovery
+   free-fn direct).</li>
 </ol>
 
 
