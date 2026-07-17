@@ -1115,12 +1115,15 @@
 <div class="language-text highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>main push ──► L0 Fast Gate ──► L1 Heavy (async)
 </span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>                    │
 </span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>                    ▼
-</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>     Actions → &quot;Release Tag (CI green)&quot;
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>     Actions / gh workflow run &quot;Release Tag (CI green)&quot;
 </span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>                    │
 </span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>                    ├─ verify L0 success (push event, that SHA)
 </span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>                    ├─ verify L1 success (that SHA; any event)
 </span><span id="__span-0-8"><a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>                    ├─ run L2 Release E2E on that SHA
-</span><span id="__span-0-9"><a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>                    └─ annotated tag push ──► L3 CD Release
+</span><span id="__span-0-9"><a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>                    ├─ annotated tag push
+</span><span id="__span-0-10"><a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>                    └─ gh workflow run &quot;CD Release&quot; -f tag=vX.Y.Z  ──► L3 CD
+</span><span id="__span-0-11"><a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>                       (GITHUB_TOKEN tag pushes do not re-fire on.push CD;
+</span><span id="__span-0-12"><a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a>                        workflow_dispatch is the reliable path)
 </span></code></pre></div>
 <h2 id="what-release-e2e-covers-and-does-not">What Release E2E covers (and does not)<a class="headerlink" href="#what-release-e2e-covers-and-does-not" title="Permanent link">&para;</a></h2>
 <p><strong>Covers (blocking for tag):</strong></p>
@@ -1141,12 +1144,19 @@
 <ol>
 <li>Land changes on <code>main</code>; wait for <strong>CI Fast Gate</strong> and <strong>CI Heavy Validation</strong>
    green on that commit.</li>
-<li>Actions → <strong>Release Tag (CI green)</strong> → set <code>tag</code> (<code>v0.1.4</code>) and <code>ref</code> (<code>main</code> or SHA).</li>
-<li>Workflow verifies L0+L1, runs L2, pushes the tag.</li>
+<li>Actions → <strong>Release Tag (CI green)</strong> → set <code>tag</code> (<code>v0.1.4</code>) and <code>ref</code> (<code>main</code> or SHA),
+   or CLI:
+   <code>gh workflow run "Release Tag (CI green)" -f tag=v0.1.4 -f ref=main</code></li>
+<li>Workflow verifies L0+L1, runs L2, pushes the annotated tag, then runs
+   <code>gh workflow run "CD Release" -f tag=v0.1.4</code> (same-repo <code>workflow_dispatch</code>
+   is allowed to chain with <code>GITHUB_TOKEN</code>; bare tag push from the token is not).</li>
 <li><strong>CD Release</strong> builds Linux/macOS/Windows assets automatically.</li>
 <li>Edit GitHub Release notes; complete remaining checklist in
    <a href="../RELEASE/"><code>docs/RELEASE.md</code></a>.</li>
 </ol>
+<p>Manual CD re-run for an existing tag:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>gh<span class="w"> </span>workflow<span class="w"> </span>run<span class="w"> </span><span class="s2">&quot;CD Release&quot;</span><span class="w"> </span>-f<span class="w"> </span><span class="nv">tag</span><span class="o">=</span>v0.1.4
+</span></code></pre></div>
 <p>Optional: run <strong>Release E2E Gate</strong> alone (dispatch) to pre-validate a SHA without tagging.</p>
 <h2 id="l1-job-split-main-push-vs-extended">L1 job split (main push vs extended)<a class="headerlink" href="#l1-job-split-main-push-vs-extended" title="Permanent link">&para;</a></h2>
 <p>On <strong><code>push</code> to <code>main</code></strong>, Heavy runs the <strong>release-critical</strong> set only (so a green
