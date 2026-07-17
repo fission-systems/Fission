@@ -1172,8 +1172,11 @@ before crates).</p>
    in midend crates; pcode keeps host + thin wraps.</li>
 <li><strong>In progress (2026-07-17):</strong> drop deep re-exports / dual CollapseRule maps;
    orchestrate and <code>pass/structuring</code> call <code>fission_midend_*</code> free-fns directly
-   (SESE, build_sese_region_body, normalize_hir_function, admission gate).
-   Deleted pure thin <code>structuring/graph.rs</code> shim (re-export from owner crate).</li>
+   (SESE, build_sese_region_body, normalize_hir_function, admission gate,
+   try_repair_orphan_gotos, build_linear_multiblock_body).
+   Deleted pure thin <code>structuring/graph.rs</code> shim; removed dead PreviewBuilder
+   inherent thin wraps for loops/conditionals/switch/orphan (re-export only +
+   p-code residual on for-loop head).</li>
 </ol>
 
 
