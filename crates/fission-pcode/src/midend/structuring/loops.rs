@@ -1147,7 +1147,7 @@ impl<'a> PreviewBuilder<'a> {
             macro_rules! try_reducer {
                 ($call:expr) => {{
                     if let Some((stmt, skip_to)) =
-                        Self::capture_structuring_failure($call, &mut last_structuring_failure)?
+                        capture_structuring_failure($call, &mut last_structuring_failure)?
                     {
                         if is_valid_skip(skip_to)
                             && self.accept_structured_region(idx, skip_to, &targeted)

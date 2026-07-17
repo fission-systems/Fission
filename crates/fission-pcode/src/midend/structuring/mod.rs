@@ -7,12 +7,14 @@ pub(super) use super::support::*;
 use super::*;
 
 pub(crate) mod cfg_analysis;
+mod host_impl;
 
 // Pure free-function owners: fission-midend-structuring
 pub use fission_midend_structuring::cleanup;
 pub use fission_midend_structuring::irreducible;
 pub use fission_midend_structuring::loop_analysis;
 pub use fission_midend_structuring::regions;
+pub use fission_midend_structuring::StructuringHost;
 pub(crate) mod collapse_driver;
 pub(crate) mod collapse_loop;
 mod conditionals;
@@ -37,7 +39,7 @@ pub(crate) use driver::{
     collapse::{ACTIVE_COLLAPSE_RULES, CollapseCandidate, CollapseRule},
     discover_guarded_tail_candidates_for_stats, structuring_diag_enabled,
 };
-pub(crate) use graph::{
+pub(crate) use graph::{capture_structuring_failure, 
     StructureEdgeFlags, StructureGraph, StructureNode, StructureNodeKind, surface_structure_graph,
 };
 pub(crate) use linear::LinearBodyCachedOutcome;

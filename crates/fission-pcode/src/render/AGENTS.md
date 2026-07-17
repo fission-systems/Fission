@@ -4,6 +4,7 @@ Scope: `crates/fission-pcode/src/render/`
 
 Canonical policy:
 - [`docs/adr/0011-hir-presentation-contract.md`](../../../docs/adr/0011-hir-presentation-contract.md)
+- [`docs/adr/0013-print-expr-vs-dual-layer-printer.md`](../../../docs/adr/0013-print-expr-vs-dual-layer-printer.md) — midend-core diagnostic `print_expr` is **not** this surface
 - [`docs/adr/0008-nir-substrate-and-owner-boundaries.md`](../../../docs/adr/0008-nir-substrate-and-owner-boundaries.md)
 
 ## Layout

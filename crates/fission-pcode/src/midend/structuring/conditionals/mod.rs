@@ -15,7 +15,13 @@ struct PlainIfCandidate {
 }
 
 impl<'a> PreviewBuilder<'a> {
-    fn log_try_lower_if_reject(&self, diag: bool, idx: usize, block_addr: u64, reason: &str) {
+    pub(crate) fn log_try_lower_if_reject(
+        &self,
+        diag: bool,
+        idx: usize,
+        block_addr: u64,
+        reason: &str,
+    ) {
         if diag {
             eprintln!(
                 "[DIAG] try_lower_if {}: idx={} block=0x{:x}",

@@ -46,7 +46,7 @@ Removed intermediate aliases that no longer had callers:
 | B | `fission-midend-normalize` | Facade re-export of normalize surface | **Expanded** (`normalize_hir_function`, wave stats, API sigs) |
 | C | `fission-midend-structuring` | Facade re-export of structuring surface | **Expanded** (owner + shared IR types) |
 | D0 | Decouple reverse edges | `wave_stats` at midend root; all callers use `midend::wave_stats`; reverse `is_known_api_signature` via midend root | **Done** |
-| D | Owner extraction | **core** owns ir/action_pipeline/wave_stats/helpers/vsa; **normalize** owns full normalize source; **structuring** owns pure free-function modules (cfg facts, cleanup, regions, irreducible, loop_analysis). PreviewBuilder-bound structuring remains in pcode. | **In progress** |
+| D | Owner extraction | **core** owns ir/action_pipeline/wave_stats/helpers/vsa; **normalize** owns full normalize source; **structuring** owns pure free-function modules + `StructuringHost` + graph/admission/CfgFactCache/compute_follow_blocks. PreviewBuilder-bound residual (collapse/guarded-tail/linear/switch/loops) remains in pcode behind host trait. | **In progress** |
 | E | Drop `fission_pcode::nir` alias | After workspace migration | **Done** |
 
 Facade crates **do not** move source yet. They establish stable dependency

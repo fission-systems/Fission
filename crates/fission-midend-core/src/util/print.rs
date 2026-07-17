@@ -1,5 +1,12 @@
-//! Deterministic expression rendering for normalize keys / diagnostics.
-//! Not a full dual-layer C printer (that remains in fission-pcode render).
+//! Deterministic expression rendering for normalize **keys** / **diagnostics**.
+//!
+//! # Not the dual-layer C printer
+//!
+//! Human-readable NIR/HIR C presentation lives in `fission-pcode` `render/`
+//! ([ADR 0011](../../../../../docs/adr/0011-hir-presentation-contract.md),
+//! [ADR 0013](../../../../../docs/adr/0013-print-expr-vs-dual-layer-printer.md)).
+//! This helper exists so midend-normalize/structuring can format expressions
+//! without depending on the render crate (and without creating crate cycles).
 
 use crate::ir::{HirBinaryOp, HirExpr, HirLValue, HirUnaryOp};
 

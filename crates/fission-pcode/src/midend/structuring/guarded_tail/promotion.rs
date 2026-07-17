@@ -23,7 +23,7 @@ impl<'a> PreviewBuilder<'a> {
         u64::from_str_radix(hex, 16).ok()
     }
 
-    pub(super) fn guarded_tail_trace_enabled_for_current_fn(&self) -> bool {
+    pub(crate) fn guarded_tail_trace_enabled_for_current_fn(&self) -> bool {
         let Some(target) = Self::guarded_tail_trace_target_addr() else {
             return false;
         };

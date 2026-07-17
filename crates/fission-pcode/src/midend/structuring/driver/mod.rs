@@ -136,7 +136,7 @@ impl<'a> PreviewBuilder<'a> {
         result: Result<Option<(HirStmt, usize)>, MlilPreviewError>,
     ) -> Result<(), MlilPreviewError> {
         if let Some((stmt, skip_to)) =
-            Self::capture_structuring_failure(result, last_structuring_failure)?
+            capture_structuring_failure(result, last_structuring_failure)?
         {
             let accepted = if matches!(rule, CollapseRule::Switch) {
                 let region: HashSet<usize> = (start_idx..skip_to).collect();
