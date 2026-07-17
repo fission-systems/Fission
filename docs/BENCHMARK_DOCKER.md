@@ -19,6 +19,26 @@ use the **local** profile and must **never** be published as official latest.
 | Prepare local CLI bundle | `scripts/prepare_local_fission.sh` in the benchmark repo |
 | Fission monorepo | `/Users/sjkim1127/Fission` (override with `FISSION_ROOT`) |
 
+## Local CLI observe (before / after text — not the oracle)
+
+For a **single-function** NIR/HIR text + structural metric delta while iterating
+in the monorepo, use:
+
+```bash
+python3 scripts/quality/local_decomp_observe.py baseline \
+  --binary /path/to/sample.exe --addr 0x... \
+  --source /path/to/file.c --source-symbol optional_name \
+  --label my-case
+# … fix + cargo build -p fission-cli --release …
+python3 scripts/quality/local_decomp_observe.py after --session my-case
+python3 scripts/quality/local_decomp_observe.py show --session my-case
+```
+
+Details: [`scripts/quality/README.md`](../scripts/quality/README.md).  
+This is **local observation only** (gitignored under
+`benchmark/artifacts/local_observe/`). It does **not** replace the docker
+semantic oracle / ranking below.
+
 ## Local quality loop (required for semantic fixes)
 
 ```bash
