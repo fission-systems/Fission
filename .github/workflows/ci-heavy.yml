@@ -12,6 +12,7 @@ on:
 
 permissions:
   contents: read
+  actions: write
 
 concurrency:
   group: ci-heavy-${{ github.workflow }}-${{ github.ref }}

@@ -42,6 +42,9 @@ jobs:
         with:
           targets: ${{ inputs.target || '' }}
 
+      - name: Setup sccache
+        uses: ./.github/actions/setup-sccache
+
       - name: Cache Rust Build
         uses: Swatinem/rust-cache@v2
         with:
@@ -51,6 +54,11 @@ jobs:
       - name: Build fission-cli (${{ inputs.profile }})
         run: |
           cargo build -p fission-cli --locked ${{ inputs.profile == 'release' && '--release' || '' }} ${{ inputs.target && format('--target {0}', inputs.target) || '' }} --verbose
+
+      - name: sccache stats
+        if: always()
+        shell: bash
+        run: sccache --show-stats || true
 
       - name: Locate Binary
         id: locate

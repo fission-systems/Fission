@@ -37,6 +37,9 @@ jobs:
         with:
           components: clippy,rustfmt
 
+      - name: Setup sccache
+        uses: ./.github/actions/setup-sccache
+
       - name: Cache Rust Build
         uses: Swatinem/rust-cache@v2
         with:
@@ -59,3 +62,8 @@ jobs:
             done
           fi
           cargo clippy --workspace "${exclude_flags[@]}" --locked -- -D warnings -A clippy::style -A clippy::complexity
+
+      - name: sccache stats
+        if: always()
+        shell: bash
+        run: sccache --show-stats || true

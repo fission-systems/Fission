@@ -59,33 +59,25 @@ Fission's CI/CD pipeline is designed with **standardization**, **reusability**, 
 - Main branch push
 - Manual trigger
 
-**Runtime:** ~15–25 minutes on **PRs** (Linux-first); ~40 minutes on **main** push (adds macOS/Windows).
+**Runtime:** depends on path-filter **lane** (see below).
 
-**Validation steps:**
+| Lane | Typical trigger | Jobs | Runtime (order of) |
+|------|-----------------|------|--------------------|
+| `docs` | `docs/`, `wiki/`, `*.md` only | summary short-circuit | ~1 min |
+| `scripts` | `scripts/**` only | pass-gate + script syntax | ~2–4 min |
+| `ci` | `.github/**` / deny meta only | pass-gate + YAML parse (+ security if deny) | ~2–5 min |
+| `rust` (PR) | crates/utils/Cargo | Linux tests + smoke + NIR + lint | ~15–25 min |
+| `rust` (main) | same | + macOS/Windows | ~35–45 min |
+
+**Validation steps (rust lane):**
 ```
-✓ Path filter (docs/wiki-only short-circuit)
-✓ Security Check
-  ├─ cargo deny (CVE, licenses, sources)
-  └─ cargo audit (known vulnerabilities)
-
-✓ Lint & Format
-  ├─ rustfmt check
-  └─ clippy (0 warnings)
-
-✓ Core + midend Tests (Linux, single nextest multi -p)
-  ├─ fission-midend-{core,normalize,structuring}
-  ├─ fission-pcode
-  ├─ fission-automation
-  └─ fission-loader
-
-✓ CLI smoke (Linux, after core tests)
-  ├─ `fission_cli` on PE sample — `info`, `list --json`, `decomp --json`
-  └─ MinGW APT deps cached via `awalsh128/cache-apt-pkgs-action` in `reusable-cli-smoke.yml`
-
-✓ Platform Builds (main push / dispatch; **skipped on PR** for speed)
-  ├─ Windows tests (after release CLI build)
-  └─ macOS tests (after release CLI build)
-  (PR multi-OS coverage: L1 Heavy on merge to main)
+✓ Path filter (lane selection)
+✓ Security Check (cargo deny + audit)
+✓ Lint & Format (rustfmt + clippy, sccache)
+✓ Pass-gate / owner-boundary scripts
+✓ Core + midend Tests (Linux, single nextest multi -p, sccache)
+✓ CLI smoke + NIR regression gate
+✓ Multi-OS (main push only)
 ```
 
 **Success criteria:**

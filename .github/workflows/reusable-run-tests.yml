@@ -60,6 +60,9 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Setup sccache
+        uses: ./.github/actions/setup-sccache
+
       - name: Cache Rust Build
         uses: Swatinem/rust-cache@v2
         with:
@@ -170,3 +173,8 @@ jobs:
         run: |
           cargo test --doc --workspace --locked \
             ${{ inputs.profile == 'release' && '--release' || '' }} || true
+
+      - name: sccache stats
+        if: always()
+        shell: bash
+        run: sccache --show-stats || true
