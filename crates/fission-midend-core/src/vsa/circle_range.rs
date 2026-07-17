@@ -19,7 +19,9 @@
 /// - Balakrishnan & Reps "Analyzing Memory Accesses in x86 Executables"
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct CircleRange {
+/// Wrapping interval abstract domain (mod 2^n). Public because solver/transfer
+/// surfaces return this type from crate-public APIs.
+pub struct CircleRange {
     /// Inclusive lower bound (mod 2^bits).
     lo: u64,
     /// Exclusive upper bound (mod 2^bits).  When `lo == hi` AND `is_top`,
