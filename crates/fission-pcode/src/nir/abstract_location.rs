@@ -3,12 +3,12 @@
 //! Lifting attaches stack variables to integer offsets in the builder’s frame model.
 //! [`AbstractStackSlot`] is the canonical key for “same stack region” decisions used by
 //! alias checks and type hints—without encoding a specific CPU register as the frame base
-//! (that remains in the lifter / [`crate::nir::types::NirBindingOrigin`]).
+//! (that remains in the lifter / [`crate::nir::ir::NirBindingOrigin`]).
 //!
 //! Parameter slots use [`ParamSlotIndex`] keyed by [`fission_core::CallingConvention`]
 //! ordering via [`CallingConvention::param_offsets`](fission_core::CallingConvention::param_offsets).
 
-use crate::nir::types::NirBindingOrigin;
+use crate::nir::ir::NirBindingOrigin;
 
 /// Byte-identified region of the stack frame at a fixed offset from the builder’s model.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

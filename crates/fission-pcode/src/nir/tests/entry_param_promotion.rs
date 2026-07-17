@@ -2,7 +2,7 @@
 
 use super::*;
 use crate::nir::normalize::normalize_hir_function;
-use crate::nir::types::{
+use crate::nir::ir::{
     HirExpr, HirFunction, HirLValue, HirStmt, NirBinding, NirBindingOrigin, NirType,
 };
 use fission_core::CallingConvention;

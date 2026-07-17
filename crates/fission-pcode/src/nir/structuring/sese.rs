@@ -5,7 +5,7 @@ use crate::nir::structuring::cfg_analysis::{DomTree, PostDomTree};
 use crate::nir::structuring::graph::StructureNode;
 use crate::nir::structuring::regions::{RegionKind, RegionProof};
 use crate::nir::support::MlilPreviewError;
-use crate::nir::types::HirStmt;
+use crate::nir::ir::HirStmt;
 use std::collections::HashSet;
 
 #[derive(Debug, Clone, PartialEq, Eq)]

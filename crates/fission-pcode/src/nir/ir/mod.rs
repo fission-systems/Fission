@@ -1,7 +1,10 @@
-//! Shared HIR/NIR surface types and canonical build telemetry ([`NirBuildStats`]).
+//! Structured IR substrate: `Hir*` surface types and canonical telemetry
+//! ([`NirBuildStats`]).
 //!
-//! New counters or schema changes must stay aligned with automation/reporting lanes.
-//! Overview: `crates/fission-pcode/src/nir/AGENTS.md` (`types.rs` row).
+//! This is the shared midend tree language (not the HIR *print layer* —
+//! that lives in [`crate::render`]). New counters or schema changes must
+//! stay aligned with automation/reporting lanes.
+//! Overview: `crates/fission-pcode/src/nir/AGENTS.md`.
 
 use fission_loader::loader::LoadedBinary;
 use indexmap::IndexMap;

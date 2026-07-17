@@ -1,6 +1,6 @@
 use crate::nir::builder::*;
 use crate::nir::support::*;
-use crate::nir::types::*;
+use crate::nir::ir::*;
 use crate::pcode::*;
 use std::collections::HashSet;
 

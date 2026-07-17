@@ -4,7 +4,7 @@ Scope: `crates/fission-pcode/src/nir/builder/`
 
 ## Role
 
-Lift P-code blocks into HIR under `PreviewBuilder`: control flow, calls, memory, and unsupported surfaces. Telemetry for this stage flows into `NirBuildStats` (`nir/types.rs`); do not invent parallel counters.
+Lift P-code blocks into HIR under `PreviewBuilder`: control flow, calls, memory, and unsupported surfaces. Telemetry for this stage flows into `NirBuildStats` (`nir/ir/build_stats.rs`); do not invent parallel counters.
 
 ## Indirect control surfaces
 

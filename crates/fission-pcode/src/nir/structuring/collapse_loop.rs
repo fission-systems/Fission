@@ -70,8 +70,8 @@ impl<'a> PreviewBuilder<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::nir::types::MlilPreviewOptions;
-    use crate::nir::types::StructuringEngineKind;
+    use crate::nir::ir::MlilPreviewOptions;
+    use crate::nir::ir::StructuringEngineKind;
     use crate::pcode::PcodeFunction;
 
     #[test]

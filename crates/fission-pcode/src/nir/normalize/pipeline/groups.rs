@@ -9,7 +9,7 @@ use super::stages::{
 use crate::nir::action_pipeline::{
     GhidraActionConcept, Pass, PassCtx, PassOutcome, Pipeline, group,
 };
-use crate::nir::types::HirFunction;
+use crate::nir::ir::HirFunction;
 use std::time::Instant;
 
 struct CanonicalStagePass {

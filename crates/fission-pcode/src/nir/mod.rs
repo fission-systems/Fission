@@ -28,7 +28,8 @@ mod support;
 mod telemetry;
 #[cfg(test)]
 mod tests;
-mod types;
+/// Structured IR substrate (`Hir*`, options, `NirBuildStats`).
+pub mod ir;
 mod var_rename;
 mod vsa;
 
@@ -45,7 +46,9 @@ pub use self::telemetry::{
     take_last_nir_build_stats, take_last_nir_hint_stats, take_last_preview_build_stats,
     take_last_preview_hint_stats,
 };
-pub use self::types::*;
+pub use self::ir::*;
+// Compat path: historical `crate::nir::ir::…` imports.
+pub use self::ir as types;
 use self::{action_pipeline::*, builder::*, cfg::*, normalize::*, structuring::*};
 
 // Presentation/print surface lives at crate root `render` (ADR 0011).

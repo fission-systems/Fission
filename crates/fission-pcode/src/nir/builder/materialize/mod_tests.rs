@@ -2551,7 +2551,7 @@ fn duplicate_start_join_preserves_register_addend_after_zero_extend() {
 fn sat_o2_cmov_block_probe_materialize() {
     use crate::nir::PreviewBuilder;
     use crate::nir::support::{CallingConvention, RUST_SLEIGH_REGISTER_SPACE_ID};
-    use crate::nir::types::{HirStmt, MlilPreviewOptions, StructuringEngineKind};
+    use crate::nir::ir::{HirStmt, MlilPreviewOptions, StructuringEngineKind};
     use crate::pcode::{PcodeBasicBlock, PcodeFunction, PcodeOp, PcodeOpcode, Varnode};
 
     let eax = Varnode {
@@ -2753,7 +2753,7 @@ fn sat_o2_cmov_block_probe_materialize() {
 #[test]
 fn primary_return_add_is_materialized_despite_single_block_inline_consumer() {
     use crate::nir::support::{CallingConvention, RUST_SLEIGH_REGISTER_SPACE_ID};
-    use crate::nir::types::{MlilPreviewOptions, StructuringEngineKind};
+    use crate::nir::ir::{MlilPreviewOptions, StructuringEngineKind};
     use crate::nir::{PreviewBuilder, render_mlil_preview};
     use crate::pcode::{PcodeBasicBlock, PcodeFunction, PcodeOp, PcodeOpcode, Varnode};
 
@@ -2909,7 +2909,7 @@ fn primary_return_add_is_materialized_despite_single_block_inline_consumer() {
 fn sat_o2_cmov_tail_renders_int_min_through_epilogue() {
     use crate::nir::PreviewBuilder;
     use crate::nir::support::{CallingConvention, RUST_SLEIGH_REGISTER_SPACE_ID};
-    use crate::nir::types::{
+    use crate::nir::ir::{
         HirExpr, HirLValue, HirStmt, MlilPreviewOptions, StructuringEngineKind,
     };
     use crate::pcode::{PcodeBasicBlock, PcodeFunction, PcodeOp, PcodeOpcode, Varnode};

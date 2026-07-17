@@ -566,7 +566,7 @@ impl<'a> PreviewBuilder<'a> {
             return;
         };
 
-        let target_addr = crate::nir::types::parse_call_target_address(target);
+        let target_addr = crate::nir::ir::parse_call_target_address(target);
         let import = crate::nir::normalize::is_known_api_signature(target);
         let internal = !import && target_addr.is_some();
         let summary_available = import

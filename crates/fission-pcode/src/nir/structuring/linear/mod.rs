@@ -210,7 +210,7 @@ impl<'a> PreviewBuilder<'a> {
                             .recovered_cases
                             .iter()
                             .filter(|(_, target)| Some(*target) != default_target)
-                            .map(|(value, target)| crate::nir::types::HirSwitchCase {
+                            .map(|(value, target)| crate::nir::ir::HirSwitchCase {
                                 values: vec![*value],
                                 body: vec![HirStmt::Goto(block_label(*target))],
                             })
@@ -220,7 +220,7 @@ impl<'a> PreviewBuilder<'a> {
                             .into_iter()
                             .filter(|target| Some(*target) != default_target)
                             .enumerate()
-                            .map(|(i, t)| crate::nir::types::HirSwitchCase {
+                            .map(|(i, t)| crate::nir::ir::HirSwitchCase {
                                 values: vec![min_val + i as i64],
                                 body: vec![HirStmt::Goto(block_label(t))],
                             })

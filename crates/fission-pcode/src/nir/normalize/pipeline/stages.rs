@@ -54,7 +54,7 @@ use super::run::{
     run_cleanup_family_passes, run_pass_logged, sccp_admission_summary,
 };
 use crate::nir::action_pipeline::PassBudget;
-use crate::nir::types::HirFunction;
+use crate::nir::ir::HirFunction;
 use crate::nir::vsa::apply_jump_resolver_pass;
 use std::time::Instant;
 use tracing::debug_span;

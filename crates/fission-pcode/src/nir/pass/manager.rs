@@ -148,7 +148,7 @@ impl PassManager {
 mod tests {
     use super::*;
     use crate::nir::builder::PreviewBuilder;
-    use crate::nir::types::MlilPreviewOptions;
+    use crate::nir::ir::MlilPreviewOptions;
     use crate::pcode::{PcodeBasicBlock, PcodeFunction};
     use std::cell::RefCell;
     use std::rc::Rc;

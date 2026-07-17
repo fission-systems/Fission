@@ -132,7 +132,7 @@ mod tests {
     use super::super::super::cleanup::{has_orphan_goto_labels, orphan_goto_labels};
     use crate::PcodeFunction;
     use crate::nir::PreviewBuilder;
-    use crate::nir::types::{HirStmt, MlilPreviewOptions, StructuringEngineKind};
+    use crate::nir::ir::{HirStmt, MlilPreviewOptions, StructuringEngineKind};
 
     #[test]
     fn try_repair_orphan_gotos_returns_none_for_unknown_label() {

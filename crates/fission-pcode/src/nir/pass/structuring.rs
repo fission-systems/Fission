@@ -5,7 +5,7 @@ use crate::nir::structuring::driver::{
 };
 use crate::nir::structuring::irreducible::{compute_fas_virtual_gotos, compute_node_splits};
 use crate::nir::structuring::structuring_diag_enabled;
-use crate::nir::types::{HirStmt, MlilPreviewError};
+use crate::nir::ir::{HirStmt, MlilPreviewError};
 
 fn apply_blockgraph_collapse_admission_gate(
     admission: StructuringAdmissionReason,

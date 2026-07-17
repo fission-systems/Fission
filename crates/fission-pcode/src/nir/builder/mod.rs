@@ -295,7 +295,7 @@ impl<'a> PreviewBuilder<'a> {
                         }
                         let cases = case_values
                             .into_iter()
-                            .map(|(value, target)| crate::nir::types::HirSwitchCase {
+                            .map(|(value, target)| crate::nir::ir::HirSwitchCase {
                                 values: vec![value],
                                 body: vec![HirStmt::Goto(block_label(target))],
                             })

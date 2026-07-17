@@ -1,5 +1,5 @@
-//! Counters for normalize-only “quality wave” passes (merged into [`crate::nir::types::NirBuildStats`]).
-use crate::nir::types::NirBuildStats;
+//! Counters for normalize-only “quality wave” passes (merged into [`crate::nir::ir::NirBuildStats`]).
+use crate::nir::ir::NirBuildStats;
 use std::cell::RefCell;
 
 thread_local! {

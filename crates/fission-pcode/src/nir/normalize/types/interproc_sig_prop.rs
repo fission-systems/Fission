@@ -8,7 +8,7 @@
 //! in a session-scoped pass with a fact store / provenance layer; keep arity here as a cheap
 //! monotone lower bound per function.
 
-use crate::nir::types::{
+use crate::nir::ir::{
     CallEdgeKind, CallEffectSummary, CallSummary, CallTargetProvenance, CallTargetRef, HirExpr,
     HirFunction, HirStmt, MemoryEffectRegion, NirType, PrototypeSummary, SummarySoundness,
     WrapperClass, parse_call_target_address,
@@ -358,7 +358,7 @@ pub(crate) fn apply_interproc_callsite_arity_pass(func: &mut HirFunction) -> boo
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::nir::types::NirBinding;
+    use crate::nir::ir::NirBinding;
     use fission_core::CallingConvention;
 
     fn empty_binding(name: &str) -> NirBinding {

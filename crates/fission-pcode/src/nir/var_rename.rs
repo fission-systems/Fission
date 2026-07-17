@@ -1,6 +1,6 @@
 //! Variable renaming helpers shared by normalize passes and preview type hints.
 
-use crate::nir::types::{HirExpr, HirLValue, HirStmt};
+use crate::nir::ir::{HirExpr, HirLValue, HirStmt};
 
 pub(crate) fn rename_vars_in_stmts(body: &mut [HirStmt], renames: &[(String, String)]) {
     for stmt in body {

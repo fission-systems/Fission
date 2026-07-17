@@ -2,7 +2,7 @@ use crate::nir::builder::PreviewBuilder;
 use crate::nir::structuring::irreducible::NodeSplitResult;
 use crate::nir::structuring::loop_analysis::LoopBody;
 use crate::nir::support::StackSlot;
-use crate::nir::types::{HirStmt, NirBinding};
+use crate::nir::ir::{HirStmt, NirBinding};
 use std::collections::BTreeMap;
 
 pub(crate) struct NirFunc<'a, 'b> {

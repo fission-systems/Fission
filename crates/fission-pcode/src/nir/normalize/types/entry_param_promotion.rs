@@ -4,7 +4,7 @@
 //! Conservatively only renames when the RHS is a plain (or cast-wrapped) hardware register
 //! for a parameter slot and the assignment appears in the leading linear prefix of the body.
 
-use crate::nir::types::{
+use crate::nir::ir::{
     HirExpr, HirFunction, HirLValue, HirStmt, NirBinding, NirBindingOrigin, NirType,
 };
 use crate::nir::var_rename::rename_vars_in_stmts;
@@ -278,7 +278,7 @@ fn promote_direct_param_register_reads(func: &mut HirFunction) -> usize {
     promotions
 }
 
-fn sort_params_by_index(params: &mut [crate::nir::types::NirBinding]) {
+fn sort_params_by_index(params: &mut [crate::nir::ir::NirBinding]) {
     params.sort_by_key(|b| {
         b.name
             .strip_prefix("param_")

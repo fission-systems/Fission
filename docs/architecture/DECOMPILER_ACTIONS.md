@@ -10,7 +10,7 @@ Related code:
 - Canonical pass sequence: [`crates/fission-pcode/src/nir/normalize/pipeline/run.rs`](../crates/fission-pcode/src/nir/normalize/pipeline/run.rs) (`run_canonical_normalize_passes`)
 - ActionGroup registry (Ghidra order, migration target): `build_normalize_pipeline` in `groups.rs`
 - Structuring collapse: [`crates/fission-pcode/src/nir/structuring/collapse_driver.rs`](../crates/fission-pcode/src/nir/structuring/collapse_driver.rs)
-- Telemetry: [`crates/fission-pcode/src/nir/types/build_stats.rs`](../crates/fission-pcode/src/nir/types/build_stats.rs)
+- Telemetry: [`crates/fission-pcode/src/nir/ir/build_stats.rs`](../crates/fission-pcode/src/nir/ir/build_stats.rs)
 
 ## Stage Map
 

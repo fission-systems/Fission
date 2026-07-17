@@ -50,11 +50,11 @@ Defined in Rust (`crates/fission-automation/src/report/snapshot.rs`). Trend-mind
 | `binaries[]` | Per-binary snapshots (`binary`, success counters, recovery maps) |
 | `aggregate` | Rollup mirrors binary keys + `diagnosis_bucket_counts`, `nir_block_signature_counts` |
 
-Each `BinarySnapshot` / `AggregateSnapshot` embeds `nir_build_stats_totals`, which **must** match the canonical [`NirBuildStats`](../crates/fission-pcode/src/nir/types.rs) JSON shape (guard tests live in `snapshot.rs`).
+Each `BinarySnapshot` / `AggregateSnapshot` embeds `nir_build_stats_totals`, which **must** match the canonical [`NirBuildStats`](../crates/fission-pcode/src/nir/ir/build_stats.rs) JSON shape (guard tests live in `snapshot.rs`).
 
 ### Embedded `NirBuildStats`
 
-Counters cover timing (`build_duration_ms`, `normalize_duration_ms`, …), pcode validation (`invalid_pcode_shape_count`, …), Ghidra-parity stage mirrors (`ghidra_action_*`), BlockGraph collapse admission (`blockgraph_collapse_*`), structuring outcomes (`structuring_*`, `region_linearize_*`, …). **Extend counters only in `types.rs`**, then thread through automation aggregates—never fork a parallel telemetry struct.
+Counters cover timing (`build_duration_ms`, `normalize_duration_ms`, …), pcode validation (`invalid_pcode_shape_count`, …), Ghidra-parity stage mirrors (`ghidra_action_*`), BlockGraph collapse admission (`blockgraph_collapse_*`), structuring outcomes (`structuring_*`, `region_linearize_*`, …). **Extend counters only in `nir/ir/build_stats.rs`**, then thread through automation aggregates—never fork a parallel telemetry struct.
 
 ## Loader identity (`BinaryIdentityReport`)
 

@@ -33,7 +33,7 @@ pub(super) fn normalize_hir_function(func: &mut HirFunction) {
     pipeline::normalize_hir_function(func);
 }
 
-pub(super) fn take_normalize_wave_stats() -> crate::nir::types::NirBuildStats {
+pub(super) fn take_normalize_wave_stats() -> crate::nir::ir::NirBuildStats {
     wave_stats::take_normalize_wave_stats()
 }
 

@@ -804,7 +804,7 @@ mod tests {
         apply_blockgraph_collapse_admission_gate, decide_structuring_admission,
     };
     use crate::PcodeFunction;
-    use crate::nir::types::{
+    use crate::nir::ir::{
         HirExpr, HirStmt, HirSwitchCase, MlilPreviewOptions, NirType, StructuringEngineKind,
     };
     use crate::nir::{CollapseCandidate, CollapseRule, RegionKind, RegionProof, StructureNode};

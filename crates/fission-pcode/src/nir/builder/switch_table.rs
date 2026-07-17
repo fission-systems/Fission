@@ -415,7 +415,7 @@ fn extract_const_address(expr: &HirExpr) -> Option<u64> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::nir::types::{NirRenderOptions, StructuringEngineKind};
+    use crate::nir::ir::{NirRenderOptions, StructuringEngineKind};
 
     fn options_with_section(start: u64, end: u64) -> NirRenderOptions {
         NirRenderOptions {

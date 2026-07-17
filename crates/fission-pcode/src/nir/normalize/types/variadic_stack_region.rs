@@ -7,7 +7,7 @@
 //! arguments and the final argument is provably derived from a recovered home
 //! slot.
 
-use crate::nir::types::{HirExpr, HirFunction, HirStmt, NirBindingOrigin};
+use crate::nir::ir::{HirExpr, HirFunction, HirStmt, NirBindingOrigin};
 use fission_core::CallingConvention;
 use std::collections::{BTreeSet, HashMap};
 

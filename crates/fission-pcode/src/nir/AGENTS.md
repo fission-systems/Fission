@@ -17,12 +17,14 @@ structuring, and render/printer.
 
 ```text
 nir/
+├── ir/             # Structured IR substrate (Hir*, options, NirBuildStats)
 ├── builder/        # Preview/NIR lowering from p-code (see builder/AGENTS.md)
 ├── normalize/      # HIR normalization passes (see normalize/AGENTS.md)
 ├── structuring/    # CFG-driven reconstruction to higher-level HIR
+├── orchestrate.rs  # render_mlil_preview* / render_nir* entrypoints
+├── labels.rs       # Shared sentinels (fallthrough, …)
 ├── tests/          # Synthetic NIR/structuring integration tests
-├── mod.rs          # PreviewBuilder state + top-level pipeline
-├── types.rs        # Structured IR types (Hir*) + NirBuildStats
+├── mod.rs          # Re-exports + owner wiring
 └── (print lives in crate-root `src/render/`)
 ```
 
@@ -34,8 +36,9 @@ nir/
 | Normalize group registry | `normalize/pipeline/groups.rs` | Ghidra-ordered ActionGroups; production driver via `run_normalize_pipeline` |
 | Canonical stage functions | `normalize/pipeline/stages.rs` | Shared pass sequence for each ActionGroup (1:1 parity) |
 | Pipeline helpers | `normalize/pipeline/run.rs` | `run_pass_logged`, cleanup families, admission summaries |
-| Telemetry fields | `types.rs` | `NirBuildStats` is canonical |
-| PreviewBuilder state | `mod.rs`, `builder/mod.rs` | Keep builder state/projection aligned |
+| Telemetry fields | `ir/build_stats.rs` (`NirBuildStats`) | Canonical; prefer `crate::nir::ir::…` (compat: `crate::nir::types`) |
+| Structured IR types | `ir/` (`hir.rs`, `procedure.rs`, …) | Shared midend tree — not the HIR print layer |
+| PreviewBuilder state | `builder/mod.rs` | Keep builder state/projection aligned |
 | Structuring rules | `structuring/` | Read child AGENT there first |
 | Output formatting | crate-root `src/render/` (`printer`, `presentation/`) | Dual-layer print; see [`render/AGENTS.md`](../render/AGENTS.md), [ADR 0011](../../../../docs/adr/0011-hir-presentation-contract.md) |
 | Shared label sentinels | `labels.rs` | Fallthrough and similar markers shared by structuring + render |
@@ -45,7 +48,7 @@ nir/
 
 ## Conventions
 
-- Add new quality counters in `types.rs` first, then wire through builder snapshot/projection.
+- Add new quality counters in `ir/build_stats.rs` first, then wire through builder snapshot/projection.
 - Prefer typed helpers and deterministic ordering; many tests depend on stable output.
 - Keep semantics in NIR/structuring layers, not static postprocess or UI surfaces.
 - Treat AI suggestions, benchmark rows, Ghidra diffs, and validation-pool signals as evidence only. Production changes must enter this tree as owner-native invariants over p-code semantics, CFG facts, def-use, types, calling convention, or alias facts.

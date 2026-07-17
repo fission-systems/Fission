@@ -923,7 +923,7 @@ fn remove_dead_callee_assigns_from_stmts(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::nir::types::NirBinding;
+    use crate::nir::ir::NirBinding;
 
     fn u64_ty() -> NirType {
         NirType::Int {

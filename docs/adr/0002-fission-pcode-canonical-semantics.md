@@ -15,7 +15,7 @@ Fix incorrect behavior **here**, not in downstream UI layers ([`AGENTS.md`](../.
 
 ## Consequences
 
-- Telemetry keyed by [`NirBuildStats`](../../crates/fission-pcode/src/nir/types.rs) is authoritative; automation rolls it up ([`crates/fission-automation/AGENTS.md`](../../crates/fission-automation/AGENTS.md)).
+- Telemetry keyed by [`NirBuildStats`](../../crates/fission-pcode/src/nir/ir/build_stats.rs) is authoritative; automation rolls it up ([`crates/fission-automation/AGENTS.md`](../../crates/fission-automation/AGENTS.md)).
 - Printer tweaks that mask semantic bugs are rejected unless accompanied by pcode fixes.
 
 ## Rename note (2026-05)

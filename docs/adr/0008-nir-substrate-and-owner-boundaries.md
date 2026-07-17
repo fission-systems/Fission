@@ -49,6 +49,8 @@ Module dependency direction is now part of the design:
 
 - Dual-layer print lives at crate-root `src/render/` (not nested under `nir/`).
 - HIR polish is `render/presentation/`; shared sentinels in `nir/labels.rs`.
+- Structured IR substrate is `nir/ir/` (compat alias `nir::types`).
+- Preview entrypoints live in `nir/orchestrate.rs`.
 - Smoke scan: `scripts/check/owner_boundaries.sh`.
 
 Existing cross-edges are migration debt, not precedent. They should be retired

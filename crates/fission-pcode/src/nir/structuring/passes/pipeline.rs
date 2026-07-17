@@ -20,7 +20,7 @@
 use crate::nir::action_pipeline::{
     GhidraActionConcept, Pass, PassCtx, PassOutcome, Pipeline, Repeat, group,
 };
-use crate::nir::types::HirFunction;
+use crate::nir::ir::HirFunction;
 
 /// A no-op structuring pass placeholder.
 ///

@@ -29,7 +29,7 @@ Symptoms: absurd pcode volume or decode aborts.
 Symptoms: empty bodies, chaotic control flow, telemetry explosions.
 
 - Inspect embedded counters via automation summaries (`nir_build_stats_totals`, [`docs/QUALITY_METRICS.md`](../QUALITY_METRICS.md)).
-- Canonical counters live in [`crates/fission-pcode/src/nir/types.rs`](../../crates/fission-pcode/src/nir/types.rs).
+- Canonical counters live in [`crates/fission-pcode/src/nir/ir/build_stats.rs`](../../crates/fission-pcode/src/nir/ir/build_stats.rs).
 
 ## 5. Structuring / normalization
 

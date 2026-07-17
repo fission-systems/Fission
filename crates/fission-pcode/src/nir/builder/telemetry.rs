@@ -3,7 +3,7 @@
 //! This is intentionally crate-private. The public telemetry contract remains
 //! the flat `NirBuildStats` shape emitted by `builder::stats`.
 
-use crate::nir::types::PreviewBuildStats;
+use crate::nir::ir::PreviewBuildStats;
 
 #[derive(Debug, Default)]
 pub(crate) struct BuilderTelemetry {

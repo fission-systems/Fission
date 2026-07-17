@@ -1,4 +1,4 @@
-use crate::nir::types::{
+use crate::nir::ir::{
     ArgForwardingRelation, CallEdgeKind, CallTargetProvenance, CallTargetRef, HirExpr, HirFunction,
     HirLValue, HirStmt, ProcedureCallShape, ProcedureControlEffect, ProcedureMemoryEffect,
     ProcedureReturnShape, ProcedureStackEffect, ProcedureSummary, SummarySoundness, WrapperClass,
@@ -228,7 +228,7 @@ pub(crate) fn summary_soundness_for_wrapper(summary: &ProcedureSummary) -> Summa
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::nir::types::{HirExpr, HirFunction, HirStmt, NirBinding, NirType};
+    use crate::nir::ir::{HirExpr, HirFunction, HirStmt, NirBinding, NirType};
     use crate::pcode::{PcodeBasicBlock, PcodeOp, Varnode};
     use fission_core::CallingConvention;
 
