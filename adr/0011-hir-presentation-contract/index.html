@@ -999,6 +999,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#7-structural-presentation-firewall-runtime" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7. Structural presentation firewall (runtime)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#6-metrics" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1167,10 +1178,48 @@ counts, purity, label/goto shape, truthiness equivalence (<code>!p</code> vs <co
    and HIR in the PR—not an expected mockup alone.</li>
 <li>Confirm NIR string / <code>code_nir</code> still carries mechanical form the change did
    not intend to alter.</li>
+<li>Structural presentation firewall (see §7) must stay green: new passes that
+   break use-def / call-count checks must either fix the pass or be rejected.</li>
 </ol>
 <p>Full ADR 0006 proposal is <strong>not</strong> required for pure presentation edits. If a
 change must alter normalize/structuring to “make HIR nice,” it is a semantic
 change and ADR 0006 applies.</p>
+<h3 id="7-structural-presentation-firewall-runtime">7. Structural presentation firewall (runtime)<a class="headerlink" href="#7-structural-presentation-firewall-runtime" title="Permanent link">&para;</a></h3>
+<p>After the fixed-point polish, <code>apply_hir_presentation</code> runs a structural
+checker (<code>render/presentation/invariants.rs</code>) against the pre-polish tree:</p>
+<table>
+<thead>
+<tr>
+<th>Check</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>use_without_def</code></td>
+<td>Non-param local used but never assigned (classic over-DCE)</td>
+</tr>
+<tr>
+<td><code>call_count_increased</code></td>
+<td>Real call sites increased (multi-eval risk)</td>
+</tr>
+<tr>
+<td><code>load_count_increased</code></td>
+<td>Load sites increased (multi-eval risk)</td>
+</tr>
+<tr>
+<td><code>empty_if_shell</code></td>
+<td><code>if</code> with effectively empty then <strong>and</strong> else</td>
+</tr>
+</tbody>
+</table>
+<p>On any violation, presentation <strong>restores the pre-polish tree</strong> (HIR falls back
+to the mechanical form) rather than shipping a broken polish. This is the HIR
+analogue of NIR’s crate-level regression net: not a semantic oracle, but a
+hard stop on observationally invalid rewrites.</p>
+<p>Dead pure-assign elimination must use <strong>whole-function</strong> use counts. Nested
+subtree-local use maps are forbidden (they treat <code>if { x = e; } return x;</code> as
+dead <code>x</code>).</p>
 <h3 id="6-metrics">6. Metrics<a class="headerlink" href="#6-metrics" title="Permanent link">&para;</a></h3>
 <ul>
 <li>Optional readability proxies may track HIR (<code>goto</code> count, <code>while (1)</code>, residual
