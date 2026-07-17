@@ -92,7 +92,7 @@ pub use loops::{
     try_lower_infloop_with_break, try_lower_multiblock_dowhile, try_lower_multiblock_infloop,
     try_lower_while,
 };
-pub use sese_driver::{ACTIVE_COLLAPSE_RULES, CollapseRule, IDEAL_COLLAPSE_RULES, apply_collapse_rule};
+pub use sese_driver::{ACTIVE_COLLAPSE_RULES, CollapseCandidate, CollapseRule, IDEAL_COLLAPSE_RULES, apply_collapse_rule, build_sese_region_body, reconstruct_sese_final_body};
 pub use switch::{
     SWITCH_CHAIN_PARSE_BUDGET_MAX, canonicalize_switch_target, try_lower_switch,
 };

@@ -26,9 +26,8 @@ Free-function owners live in `fission-midend-structuring` and take
 | Guarded-tail canonicalize/execute bodies | `fission-midend-structuring::guarded_tail::bodies` | free fns + residual host hooks |
 | Driver admission / region scaffold pure helpers | `fission-midend-structuring::driver_pure` | free fns |
 | Collapse-rule dispatch (SESE tier-1) | `fission-midend-structuring::sese_driver` | free `apply_collapse_rule` |
-| SESE final reconstruction | `fission-midend-structuring::sese_driver` | free `reconstruct_sese_final_body` |
-| `build_sese_region_body` collapse loop | residual on `PreviewBuilder` | uses free collapse dispatch + final free scan |
-| Guarded-tail suffix-window with-diag | `fission-midend-structuring::guarded_tail::suffix_window` | free with-diag; residual callee analysis on host |
+| SESE collapse loop + final scan | `fission-midend-structuring::sese_driver` | free `build_sese_region_body` / `reconstruct_sese_final_body` |
+| Guarded-tail suffix pure + with-diag | `fission-midend-structuring::guarded_tail::{pure_hir,suffix_window}` | free; residual callee analysis on host |
 
 Prefer new work as `fn try_lower_*(host: &mut impl StructuringHost, ...)`.
 

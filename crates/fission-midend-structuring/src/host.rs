@@ -189,6 +189,10 @@ pub trait StructuringHost {
     // ── Telemetry ──────────────────────────────────────────────────────────
     fn bump_region_proof_candidate(&mut self);
     fn bump_region_proof_completed(&mut self);
+    /// Record a completed structured-region candidate (proof telemetry).
+    fn record_region_candidate(&mut self, proof: &crate::regions::RegionProof);
+    /// Record that a structured candidate was selected for collapse insertion.
+    fn record_selected_region(&mut self, node: &crate::graph::StructureNode);
     fn bump_guarded_tail_candidate(&mut self);
     fn bump_promotion_candidate(&mut self);
     fn bump_promotion_rejected_by_shape(&mut self);

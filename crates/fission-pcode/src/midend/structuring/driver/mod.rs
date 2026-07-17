@@ -44,7 +44,7 @@ impl<'a> PreviewBuilder<'a> {
         ))
     }
 
-    fn record_region_candidate(&mut self, proof: &RegionProof) {
+    pub(crate) fn record_region_candidate_impl(&mut self, proof: &RegionProof) {
         self.telemetry.structuring.region_proof_candidate_count += 1;
         if proof.proof_complete {
             self.telemetry.structuring.region_proof_completed_count += 1;
@@ -56,7 +56,7 @@ impl<'a> PreviewBuilder<'a> {
         }
     }
 
-    fn record_selected_region(&mut self, node: &StructureNode) {
+    pub(crate) fn record_selected_region_impl(&mut self, node: &StructureNode) {
         if matches!(
             node.kind,
             StructureNodeKind::Region(RegionKind::Conditional)
@@ -74,34 +74,22 @@ impl<'a> PreviewBuilder<'a> {
         candidates: &mut Vec<CollapseCandidate>,
         result: Result<Option<(HirStmt, usize)>, MlilPreviewError>,
     ) -> Result<(), MlilPreviewError> {
-        if let Some((stmt, skip_to)) =
-            capture_structuring_failure(result, last_structuring_failure)?
-        {
-            let accepted = if matches!(rule, CollapseRule::Switch) {
-                let region: HashSet<usize> = (start_idx..skip_to).collect();
-                !self.region_has_external_entry(&region, start_idx)
-            } else {
-                self.accept_structured_region(start_idx, skip_to, targeted)
-            };
-            if accepted {
-                let Some(proof) = self.build_region_proof(start_idx, skip_to, &stmt) else {
-                    return Ok(());
-                };
-                self.record_region_candidate(&proof);
-                candidates.push(CollapseCandidate {
-                    rule,
-                    node: StructureNode::region(usize::MAX, stmt, skip_to, proof),
-                });
-            }
-        }
-        Ok(())
+        fission_midend_structuring::sese_driver::consider_structured_candidate(
+            self,
+            rule,
+            start_idx,
+            targeted,
+            last_structuring_failure,
+            candidates,
+            result,
+        )
     }
 
     fn select_structured_candidate(
         &self,
         candidates: Vec<CollapseCandidate>,
     ) -> Option<CollapseCandidate> {
-        candidates.into_iter().next()
+        fission_midend_structuring::sese_driver::select_structured_candidate(candidates)
     }
 
     pub(super) fn promote_guarded_tail_regions_until_stable(&mut self, body: &mut Vec<HirStmt>) {
@@ -124,221 +112,9 @@ impl<'a> PreviewBuilder<'a> {
         exit: usize,
         child_map: crate::fast_hash::FastMap<usize, (Vec<HirStmt>, usize, RegionProof)>,
     ) -> Result<Vec<HirStmt>, MlilPreviewError> {
-        let diag = structuring_diag_enabled();
-        if self.sese_region_proof_budget_exceeded() {
-            if diag {
-                eprintln!(
-                    "[DIAG] build_sese_region_body: aborting structuring entry due to {}ms proof ceiling",
-                    SESE_REGION_PROOF_BUDGET_MS as usize
-                );
-            }
-            return Err(MlilPreviewError::UnsupportedCfgRegionShape);
-        }
-        let targeted = self.collect_jump_targets()?;
-        let mut emitted_labels = HashSet::new();
-
-        let follow_blocks = self.compute_follow_blocks();
-
-        let mut active_child_map = child_map;
-        active_child_map.retain(|&k, &mut (_, exit, _)| exit > k);
-        let mut progress = true;
-        let mut tier1_failures = std::collections::HashMap::new();
-        let mut collapse_iterations = 0;
-
-        // Tier 1 & Tier 2 Collapsing Loop
-        while progress {
-            if self.sese_region_proof_budget_exceeded() {
-                if diag {
-                    eprintln!(
-                        "[DIAG] build_sese_region_body: aborting collapse loop due to {}ms proof ceiling",
-                        SESE_REGION_PROOF_BUDGET_MS as usize
-                    );
-                }
-                return Err(MlilPreviewError::UnsupportedCfgRegionShape);
-            }
-            progress = false;
-            collapse_iterations += 1;
-            if collapse_iterations > 100 {
-                if diag {
-                    eprintln!(
-                        "[DIAG] build_sese_region_body collapsing loop: tripped budget at {} iterations",
-                        collapse_iterations
-                    );
-                }
-                break;
-            }
-
-            // Tier 1: Try to match only standard IDEAL rules across the entire range
-            let mut idx = entry;
-            while idx < exit {
-                if let Some((_, child_exit, _)) = active_child_map.get(&idx) {
-                    idx = *child_exit;
-                    continue;
-                }
-
-                let block_key = self.block_target_key(idx);
-                let block_start = self.block_start_address(idx);
-                let has_same_start_peer =
-                    self.pcode
-                        .blocks
-                        .iter()
-                        .enumerate()
-                        .any(|(peer_idx, block)| {
-                            peer_idx != self.pcode_block_idx(idx)
-                                && block.start_address == block_start
-                        });
-                let is_orphan_unreachable = idx != 0
-                    && self.predecessors[idx].is_empty()
-                    && !targeted.contains(&block_key)
-                    && !has_same_start_peer;
-                if is_orphan_unreachable {
-                    idx += 1;
-                    continue;
-                }
-
-                let mut ideal_candidates = Vec::new();
-                let follow = follow_blocks.get(idx).copied().flatten();
-                let mut last_structuring_failure = None;
-
-                for rule in ACTIVE_COLLAPSE_RULES {
-                    if matches!(rule, CollapseRule::Sequence | CollapseRule::Unstructured) {
-                        continue;
-                    }
-                    let rule_started = diag.then(std::time::Instant::now);
-                    if diag {
-                        eprintln!(
-                            "[DIAG] structuring rule start: rule={} block={idx}",
-                            rule.name()
-                        );
-                    }
-                    // Graph overlay: free-function collapse-rule dispatch (ADR 0012).
-                    let res = fission_midend_structuring::sese_driver::apply_collapse_rule(
-                        self, rule, idx, follow,
-                    );
-                    if let Some(started) = rule_started {
-                        eprintln!(
-                            "[DIAG] structuring rule finish: rule={} block={idx} elapsed_ms={:.3} outcome={}",
-                            rule.name(),
-                            started.elapsed().as_secs_f64() * 1000.0,
-                            match &res {
-                                Ok(Some(_)) => "candidate",
-                                Ok(None) => "none",
-                                Err(_) => "error",
-                            }
-                        );
-                    }
-
-                    self.consider_structured_candidate(
-                        rule,
-                        idx,
-                        &targeted,
-                        &mut last_structuring_failure,
-                        &mut ideal_candidates,
-                        res,
-                    )?;
-                }
-                if let Some(ref err) = last_structuring_failure {
-                    tier1_failures.insert(idx, err.clone());
-                }
-
-                if let Some(best) = self.select_structured_candidate(ideal_candidates) {
-                    let skip_to = best.node.skip_to;
-                    if skip_to <= idx {
-                        if diag {
-                            eprintln!(
-                                "[DIAG] select_structured_candidate returned non-advancing skip_to: {} <= {}",
-                                skip_to, idx
-                            );
-                        }
-                        idx += 1;
-                        continue;
-                    }
-                    let proof = best.node.proof.unwrap();
-                    active_child_map.insert(idx, (best.node.statements, skip_to, proof));
-                    progress = true;
-                    break;
-                }
-
-                idx += 1;
-            }
-
-            if progress {
-                continue;
-            }
-
-            // Tier 2: Deferred Linearization Fallback
-            let mut idx = entry;
-            while idx < exit {
-                if let Some((_, child_exit, _)) = active_child_map.get(&idx) {
-                    idx = *child_exit;
-                    continue;
-                }
-
-                let block_key = self.block_target_key(idx);
-                let block_start = self.block_start_address(idx);
-                let has_same_start_peer =
-                    self.pcode
-                        .blocks
-                        .iter()
-                        .enumerate()
-                        .any(|(peer_idx, block)| {
-                            peer_idx != self.pcode_block_idx(idx)
-                                && block.start_address == block_start
-                        });
-                let is_orphan_unreachable = idx != 0
-                    && self.predecessors[idx].is_empty()
-                    && !targeted.contains(&block_key)
-                    && !has_same_start_peer;
-                if is_orphan_unreachable {
-                    idx += 1;
-                    continue;
-                }
-
-                let last_structuring_failure = tier1_failures.remove(&idx);
-
-                if let Some(err) = last_structuring_failure {
-                    let mut temp_emitted_labels = emitted_labels.clone();
-                    if let Some((recovered_body, skip_to)) = self
-                        .try_recover_region_linearized_body(
-                            idx,
-                            &err,
-                            &targeted,
-                            &mut temp_emitted_labels,
-                        )?
-                    {
-                        emitted_labels = temp_emitted_labels;
-                        let dummy_proof =
-                            RegionProof::structured(RegionKind::Sequence, idx, skip_to, None);
-                        active_child_map.insert(idx, (recovered_body, skip_to, dummy_proof));
-                        progress = true;
-                        break;
-                    }
-                }
-
-                idx += 1;
-            }
-
-            if !progress && super::collapse_loop::collapse_loop_admission_enabled() {
-                if self.try_virtualize_one_bad_edge(entry, exit)? {
-                    if diag {
-                        eprintln!(
-                            "[DIAG] build_sese_region_body: virtualized bad edge, continuing collapse loop"
-                        );
-                    }
-                    progress = true;
-                }
-            }
-        }
-
-        // Final reconstruction: free-function owner (ADR 0012).
-        let child_map_std: std::collections::HashMap<_, _> = active_child_map.into_iter().collect();
-        fission_midend_structuring::sese_driver::reconstruct_sese_final_body(
-            self,
-            entry,
-            exit,
-            &child_map_std,
-            &targeted,
-            diag,
+        let child_map_std: std::collections::HashMap<_, _> = child_map.into_iter().collect();
+        fission_midend_structuring::sese_driver::build_sese_region_body(
+            self, entry, exit, child_map_std,
         )
     }
 

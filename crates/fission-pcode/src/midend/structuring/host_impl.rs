@@ -385,6 +385,13 @@ impl<'a> StructuringHost for PreviewBuilder<'a> {
     fn bump_region_proof_completed(&mut self) {
         self.telemetry.structuring.region_proof_completed_count += 1;
     }
+    fn record_region_candidate(&mut self, proof: &fission_midend_structuring::regions::RegionProof) {
+        PreviewBuilder::record_region_candidate_impl(self, proof)
+    }
+    fn record_selected_region(&mut self, node: &fission_midend_structuring::StructureNode) {
+        PreviewBuilder::record_selected_region_impl(self, node)
+    }
+
     fn bump_guarded_tail_candidate(&mut self) {
         self.telemetry.structuring.guarded_tail_candidate_count += 1;
     }

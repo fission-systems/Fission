@@ -9,43 +9,19 @@ use fission_midend_structuring::guarded_tail::{
 
 impl<'a> PreviewBuilder<'a> {
     fn suffix_call_expr(stmt: &HirStmt) -> Option<(&str, &[HirExpr], bool)> {
-        match stmt {
-            HirStmt::Assign {
-                lhs: HirLValue::Var(_),
-                rhs: HirExpr::Call { target, args, .. },
-            } => Some((target.as_str(), args.as_slice(), true)),
-            HirStmt::Expr(HirExpr::Call { target, args, .. }) => {
-                Some((target.as_str(), args.as_slice(), false))
-            }
-            _ => None,
-        }
+        fission_midend_structuring::guarded_tail::pure_hir::suffix_call_expr(stmt)
     }
 
     fn top_level_label_definition_count_for_owned_tail(body: &[HirStmt], label: &str) -> usize {
-        body.iter()
-            .filter(|stmt| matches!(stmt, HirStmt::Label(candidate) if candidate == label))
-            .count()
+        fission_midend_structuring::guarded_tail::pure_hir::top_level_label_definition_count_for_owned_tail(body, label)
     }
 
     fn stmt_is_sink_safe_return_goto_for_owned_tail(stmt: &HirStmt, body: &[HirStmt]) -> bool {
-        let HirStmt::Goto(target) = stmt else {
-            return false;
-        };
-        if Self::top_level_label_definition_count_for_owned_tail(body, target) != 1 {
-            return false;
-        }
-        matches!(
-            Self::resolve_terminal_tail_exit_stmt(body, target),
-            Some(HirStmt::Return(_))
-        )
+        fission_midend_structuring::guarded_tail::pure_hir::stmt_is_sink_safe_return_goto_for_owned_tail(stmt, body)
     }
 
     fn suffix_stmt_has_nested_or_nonlocal_ref(stmt: &HirStmt) -> bool {
-        match stmt {
-            HirStmt::If { .. } => true,
-            HirStmt::Block(inner) => !inner.is_empty(),
-            _ => false,
-        }
+        fission_midend_structuring::guarded_tail::pure_hir::suffix_stmt_has_nested_or_nonlocal_ref(stmt)
     }
 
     fn classify_nested_suffix_shape(
@@ -55,324 +31,39 @@ impl<'a> PreviewBuilder<'a> {
         terminal_label_idx: usize,
         next_label: &str,
     ) -> NestedSuffixShapeKind {
-        let Some(HirStmt::Label(terminal_label)) = body.get(terminal_label_idx) else {
-            return NestedSuffixShapeKind::NestedUnknown;
-        };
-        match stmt {
-            HirStmt::If {
-                cond,
-                then_body,
-                else_body,
-            } => {
-                let then_target = single_goto_target(then_body);
-                let else_target = single_goto_target(else_body);
-                if then_body.len() > 1 || else_body.len() > 1 {
-                    return NestedSuffixShapeKind::NestedMultiStmtBranch;
-                }
-                if then_target.is_some() && else_target.is_some() {
-                    return NestedSuffixShapeKind::NestedBothBranches;
-                }
-                if let Some(target) = then_target {
-                    if target == terminal_label {
-                        return NestedSuffixShapeKind::NestedCrossesTerminalJoin;
-                    }
-                    if target != next_label {
-                        return NestedSuffixShapeKind::NestedNonlocalTarget;
-                    }
-                    if !Self::suffix_window_has_terminal_guard_family_match(
-                        body,
-                        current_label_idx,
-                        terminal_label_idx,
-                        cond,
-                    ) {
-                        return NestedSuffixShapeKind::NestedGuardFamilyMismatch;
-                    }
-                    return NestedSuffixShapeKind::NestedSingleGotoThen;
-                }
-                if let Some(target) = else_target {
-                    if target == terminal_label {
-                        return NestedSuffixShapeKind::NestedCrossesTerminalJoin;
-                    }
-                    if target != next_label {
-                        return NestedSuffixShapeKind::NestedNonlocalTarget;
-                    }
-                    if !Self::suffix_window_has_terminal_guard_family_match(
-                        body,
-                        current_label_idx,
-                        terminal_label_idx,
-                        cond,
-                    ) {
-                        return NestedSuffixShapeKind::NestedGuardFamilyMismatch;
-                    }
-                    return NestedSuffixShapeKind::NestedSingleGotoElse;
-                }
-                NestedSuffixShapeKind::NestedUnknown
-            }
-            HirStmt::Block(inner) if !inner.is_empty() => NestedSuffixShapeKind::NestedUnknown,
-            _ => NestedSuffixShapeKind::NestedUnknown,
-        }
+        fission_midend_structuring::guarded_tail::pure_hir::classify_nested_suffix_shape(stmt, body, current_label_idx, terminal_label_idx, next_label)
     }
 
     fn expr_contains_load(expr: &HirExpr) -> bool {
-        match expr {
-            HirExpr::Load { .. } => true,
-            HirExpr::Cast { expr, .. }
-            | HirExpr::Unary { expr, .. }
-            | HirExpr::AggregateCopy { src: expr, .. } => Self::expr_contains_load(expr),
-            HirExpr::Binary { lhs, rhs, .. } => {
-                Self::expr_contains_load(lhs) || Self::expr_contains_load(rhs)
-            }
-            HirExpr::Call { args, .. } => args.iter().any(Self::expr_contains_load),
-            HirExpr::PtrOffset { base, .. } | HirExpr::FieldAccess { base, .. } => {
-                Self::expr_contains_load(base)
-            }
-            HirExpr::Index { base, index, .. } => {
-                Self::expr_contains_load(base) || Self::expr_contains_load(index)
-            }
-            HirExpr::Select {
-                cond,
-                then_expr,
-                else_expr,
-                ..
-            } => {
-                Self::expr_contains_load(cond)
-                    || Self::expr_contains_load(then_expr)
-                    || Self::expr_contains_load(else_expr)
-            }
-            HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) | HirExpr::Const(_, _) => false,
-        }
+        fission_midend_structuring::guarded_tail::pure_hir::expr_contains_load(expr)
     }
 
     pub(super) fn suffix_expr_contains_call(expr: &HirExpr) -> bool {
-        match expr {
-            HirExpr::Call { .. } => true,
-            HirExpr::Cast { expr, .. }
-            | HirExpr::Unary { expr, .. }
-            | HirExpr::AggregateCopy { src: expr, .. } => Self::suffix_expr_contains_call(expr),
-            HirExpr::Binary { lhs, rhs, .. } => {
-                Self::suffix_expr_contains_call(lhs) || Self::suffix_expr_contains_call(rhs)
-            }
-            HirExpr::Load { ptr, .. }
-            | HirExpr::PtrOffset { base: ptr, .. }
-            | HirExpr::FieldAccess { base: ptr, .. } => Self::suffix_expr_contains_call(ptr),
-            HirExpr::Index { base, index, .. } => {
-                Self::suffix_expr_contains_call(base) || Self::suffix_expr_contains_call(index)
-            }
-            HirExpr::Select {
-                cond,
-                then_expr,
-                else_expr,
-                ..
-            } => {
-                Self::suffix_expr_contains_call(cond)
-                    || Self::suffix_expr_contains_call(then_expr)
-                    || Self::suffix_expr_contains_call(else_expr)
-            }
-            HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) | HirExpr::Const(_, _) => false,
-        }
+        fission_midend_structuring::guarded_tail::pure_hir::suffix_expr_contains_call(expr)
     }
 
     fn classify_suffix_side_effect_shape(stmt: &HirStmt) -> SuffixSideEffectShapeKind {
-        match stmt {
-            HirStmt::Assign {
-                lhs: HirLValue::Deref { .. } | HirLValue::Index { .. },
-                ..
-            } => SuffixSideEffectShapeKind::MemoryWrite,
-            HirStmt::Assign {
-                lhs: HirLValue::Var(_),
-                rhs,
-            } if Self::suffix_expr_contains_call(rhs) => {
-                SuffixSideEffectShapeKind::CallExprSideEffect
-            }
-            HirStmt::Assign {
-                lhs: HirLValue::Var(_),
-                rhs,
-            } if Self::expr_is_pure_value(rhs) => match rhs {
-                HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) => {
-                    SuffixSideEffectShapeKind::PureTempAssign
-                }
-                _ => SuffixSideEffectShapeKind::PureRegisterAssign,
-            },
-            HirStmt::Assign {
-                lhs: HirLValue::Var(_),
-                rhs: HirExpr::Load { ptr, .. },
-            } if Self::expr_is_pure_value(ptr) => SuffixSideEffectShapeKind::MemoryReadOnlyAssign,
-            HirStmt::Assign {
-                lhs: HirLValue::Var(_),
-                rhs,
-            } if Self::expr_contains_load(rhs) => SuffixSideEffectShapeKind::VolatileOrUnknownLoad,
-            HirStmt::Assign {
-                lhs: HirLValue::Var(name),
-                rhs,
-            } if Self::expr_contains_var(rhs, name)
-                || matches!(rhs, HirExpr::AggregateCopy { .. }) =>
-            {
-                SuffixSideEffectShapeKind::CompoundAssignOrPhiLike
-            }
-            HirStmt::Expr(HirExpr::Call { .. }) | HirStmt::VaStart { .. } => {
-                SuffixSideEffectShapeKind::CallExprSideEffect
-            }
-            HirStmt::Expr(HirExpr::Load { .. }) => SuffixSideEffectShapeKind::VolatileOrUnknownLoad,
-            HirStmt::Expr(expr) if Self::suffix_expr_contains_call(expr) => {
-                SuffixSideEffectShapeKind::CallExprSideEffect
-            }
-            HirStmt::Expr(expr) if Self::expr_contains_load(expr) => {
-                SuffixSideEffectShapeKind::VolatileOrUnknownLoad
-            }
-            HirStmt::Assign { .. } => SuffixSideEffectShapeKind::UnknownSideEffect,
-            _ => SuffixSideEffectShapeKind::UnknownSideEffect,
-        }
+        fission_midend_structuring::guarded_tail::pure_hir::classify_suffix_side_effect_shape(stmt)
     }
 
     fn call_target_is_known_pure_helper(target: &str) -> bool {
-        guarded_tail_call_target_is_known_pure_helper(target)
+        fission_midend_structuring::guarded_tail::pure_hir::call_target_is_known_pure_helper(target)
     }
 
     fn call_target_is_memory_mutating(target: &str) -> bool {
-        let lowered = target.to_ascii_lowercase();
-        matches!(
-            lowered.as_str(),
-            "memcpy"
-                | "memmove"
-                | "memset"
-                | "strcpy"
-                | "strncpy"
-                | "strcat"
-                | "strncat"
-                | "wcscpy"
-                | "wcsncpy"
-                | "wmemcpy"
-                | "wmemmove"
-                | "wmemset"
-        )
+        fission_midend_structuring::guarded_tail::pure_hir::call_target_is_memory_mutating(target)
     }
 
     fn call_target_is_control_effect(target: &str) -> bool {
-        let lowered = target.to_ascii_lowercase();
-        matches!(
-            lowered.as_str(),
-            "abort"
-                | "exit"
-                | "_exit"
-                | "panic"
-                | "__assert_fail"
-                | "longjmp"
-                | "_longjmp"
-                | "raiseexception"
-                | "__cxa_throw"
-        )
+        fission_midend_structuring::guarded_tail::pure_hir::call_target_is_control_effect(target)
     }
 
     fn classify_suffix_call_effect_shape(stmt: &HirStmt) -> SuffixCallEffectShapeKind {
-        match stmt {
-            HirStmt::Assign {
-                lhs: HirLValue::Var(_),
-                rhs: HirExpr::Call { target, args, .. },
-            }
-            | HirStmt::Expr(HirExpr::Call { target, args, .. }) => {
-                if Self::call_target_is_control_effect(target) {
-                    return SuffixCallEffectShapeKind::ControlEffectCall;
-                }
-                if Self::call_target_is_memory_mutating(target) {
-                    return SuffixCallEffectShapeKind::MemoryMutatingCall;
-                }
-                if Self::call_target_is_known_pure_helper(target)
-                    && args.iter().all(Self::expr_is_pure_value)
-                {
-                    return SuffixCallEffectShapeKind::PureKnownHelperCall;
-                }
-                match stmt {
-                    HirStmt::Assign { .. } => SuffixCallEffectShapeKind::ReturnValueAssignedLocal,
-                    HirStmt::Expr(HirExpr::Call { ty, .. }) if matches!(ty, NirType::Unknown) => {
-                        SuffixCallEffectShapeKind::VoidUnknownCall
-                    }
-                    HirStmt::Expr(HirExpr::Call { .. }) => {
-                        SuffixCallEffectShapeKind::ReturnValueIgnoredCall
-                    }
-                    _ => SuffixCallEffectShapeKind::UnknownCallEffect,
-                }
-            }
-            HirStmt::Assign { .. } | HirStmt::Expr(_) | HirStmt::VaStart { .. } => {
-                SuffixCallEffectShapeKind::UnknownCallEffect
-            }
-            _ => SuffixCallEffectShapeKind::UnknownCallEffect,
-        }
+        fission_midend_structuring::guarded_tail::pure_hir::classify_suffix_call_effect_shape(stmt)
     }
 
     fn stmt_reads_binding_only_in_owned_safe_context(stmt: &HirStmt, name: &str) -> bool {
-        match stmt {
-            HirStmt::Assign { lhs, rhs } => {
-                if Self::lvalue_contains_var(lhs, name) {
-                    return false;
-                }
-                !Self::expr_contains_var(rhs, name) || Self::expr_is_pure_value(rhs)
-            }
-            HirStmt::Expr(expr) => {
-                !Self::expr_contains_var(expr, name) || Self::expr_is_pure_value(expr)
-            }
-            HirStmt::If {
-                cond,
-                then_body,
-                else_body,
-            } => {
-                (!Self::expr_contains_var(cond, name) || Self::expr_is_pure_value(cond))
-                    && then_body
-                        .iter()
-                        .all(|stmt| Self::stmt_reads_binding_only_in_owned_safe_context(stmt, name))
-                    && else_body
-                        .iter()
-                        .all(|stmt| Self::stmt_reads_binding_only_in_owned_safe_context(stmt, name))
-            }
-            HirStmt::Block(stmts) => stmts
-                .iter()
-                .all(|stmt| Self::stmt_reads_binding_only_in_owned_safe_context(stmt, name)),
-            HirStmt::VaStart { va_list, .. } => !Self::expr_contains_var(va_list, name),
-            HirStmt::Switch {
-                expr,
-                cases,
-                default,
-            } => {
-                !Self::expr_contains_var(expr, name)
-                    && cases.iter().all(|case| {
-                        case.body.iter().all(|stmt| {
-                            Self::stmt_reads_binding_only_in_owned_safe_context(stmt, name)
-                        })
-                    })
-                    && default
-                        .iter()
-                        .all(|stmt| Self::stmt_reads_binding_only_in_owned_safe_context(stmt, name))
-            }
-            HirStmt::While { cond, body } | HirStmt::DoWhile { cond, body } => {
-                !Self::expr_contains_var(cond, name)
-                    && body
-                        .iter()
-                        .all(|stmt| Self::stmt_reads_binding_only_in_owned_safe_context(stmt, name))
-            }
-            HirStmt::For {
-                init,
-                cond,
-                update,
-                body,
-            } => {
-                init.iter()
-                    .all(|stmt| Self::stmt_reads_binding_only_in_owned_safe_context(stmt, name))
-                    && cond
-                        .as_ref()
-                        .is_none_or(|expr| !Self::expr_contains_var(expr, name))
-                    && update
-                        .iter()
-                        .all(|stmt| Self::stmt_reads_binding_only_in_owned_safe_context(stmt, name))
-                    && body
-                        .iter()
-                        .all(|stmt| Self::stmt_reads_binding_only_in_owned_safe_context(stmt, name))
-            }
-            HirStmt::Return(Some(expr)) => !Self::expr_contains_var(expr, name),
-            HirStmt::Label(_)
-            | HirStmt::Goto(_)
-            | HirStmt::Return(None)
-            | HirStmt::Break
-            | HirStmt::Continue => true,
-        }
+        fission_midend_structuring::guarded_tail::pure_hir::stmt_reads_binding_only_in_owned_safe_context(stmt, name)
     }
 
     fn suffix_memory_read_only_assign_is_owned_safe(
@@ -380,37 +71,7 @@ impl<'a> PreviewBuilder<'a> {
         stmt_idx: usize,
         terminal_label_idx: usize,
     ) -> bool {
-        let Some(HirStmt::Assign {
-            lhs: HirLValue::Var(binding_name),
-            rhs: HirExpr::Load { ptr, ty },
-        }) = body.get(stmt_idx)
-        else {
-            return false;
-        };
-
-        if !Self::expr_is_pure_value(ptr) || matches!(ty, NirType::Unknown) {
-            return false;
-        }
-
-        if body[stmt_idx + 1..]
-            .iter()
-            .map(|stmt| Self::count_var_defs_stmt(stmt, binding_name))
-            .sum::<usize>()
-            > 0
-        {
-            return false;
-        }
-
-        if body[stmt_idx + 1..terminal_label_idx]
-            .iter()
-            .any(|stmt| !Self::stmt_reads_binding_only_in_owned_safe_context(stmt, binding_name))
-        {
-            return false;
-        }
-
-        body[terminal_label_idx..]
-            .iter()
-            .all(|stmt| Self::count_var_reads_stmt(stmt, binding_name) == 0)
+        fission_midend_structuring::guarded_tail::pure_hir::suffix_memory_read_only_assign_is_owned_safe(body, stmt_idx, terminal_label_idx)
     }
 
     fn suffix_known_pure_helper_call_is_owned_safe(
@@ -418,47 +79,7 @@ impl<'a> PreviewBuilder<'a> {
         stmt_idx: usize,
         terminal_label_idx: usize,
     ) -> bool {
-        let Some(HirStmt::Assign {
-            lhs: HirLValue::Var(binding_name),
-            rhs: HirExpr::Call { target, args, .. },
-        }) = body.get(stmt_idx)
-        else {
-            return false;
-        };
-
-        let args_pure = args.iter().all(Self::expr_is_pure_value);
-        let target_known_pure = Self::call_target_is_known_pure_helper(target);
-        let no_redefine = body[stmt_idx + 1..]
-            .iter()
-            .map(|stmt| Self::count_var_defs_stmt(stmt, binding_name))
-            .sum::<usize>()
-            == 0;
-        let pre_terminal_owned_safe = body[stmt_idx + 1..terminal_label_idx]
-            .iter()
-            .all(|stmt| Self::stmt_reads_binding_only_in_owned_safe_context(stmt, binding_name));
-        let no_terminal_escape = body[terminal_label_idx..]
-            .iter()
-            .all(|stmt| Self::count_var_reads_stmt(stmt, binding_name) == 0);
-        let result = target_known_pure
-            && args_pure
-            && no_redefine
-            && pre_terminal_owned_safe
-            && no_terminal_escape;
-
-        if Self::guarded_tail_diag_enabled() && target_known_pure && args_pure {
-            eprintln!(
-                "[GT-TRACE] known-pure-helper-proof stmt_idx={} target={} args_pure={} no_redefine={} pre_terminal_owned_safe={} no_terminal_escape={} result={}",
-                stmt_idx,
-                target,
-                args_pure,
-                no_redefine,
-                pre_terminal_owned_safe,
-                no_terminal_escape,
-                result
-            );
-        }
-
-        result
+        fission_midend_structuring::guarded_tail::pure_hir::suffix_known_pure_helper_call_is_owned_safe(body, stmt_idx, terminal_label_idx)
     }
 
     pub(crate) fn trace_suffix_unknown_call_provenance_impl(&self, stmt_idx: usize, stmt: &HirStmt) {
@@ -542,64 +163,7 @@ impl<'a> PreviewBuilder<'a> {
         target_label: &str,
         next_label: &str,
     ) -> bool {
-        if target_label == next_label {
-            return true;
-        }
-        if Self::top_level_label_definition_count_for_owned_tail(body, target_label) != 1 {
-            return false;
-        }
-        let Some(mut current_idx) = body
-            .iter()
-            .position(|stmt| matches!(stmt, HirStmt::Label(label) if label == target_label))
-        else {
-            return false;
-        };
-        let mut current = target_label.to_string();
-        let mut seen = HashSet::new();
-
-        while current != next_label {
-            if !seen.insert(current.clone()) {
-                return false;
-            }
-
-            let next_label_idx = (current_idx + 1..body.len())
-                .find(|pos| matches!(body[*pos], HirStmt::Label(_)))
-                .unwrap_or(body.len());
-
-            let mut terminal_return = false;
-            let mut terminal_goto = None::<String>;
-            for stmt in &body[current_idx + 1..next_label_idx] {
-                match stmt {
-                    HirStmt::Goto(target) => terminal_goto = Some(target.clone()),
-                    HirStmt::Return(_) => terminal_return = true,
-                    stmt if is_ignorable_discovery_stmt(stmt) => {}
-                    stmt if Self::stmt_is_pure_value_expr(stmt) => {}
-                    stmt if Self::stmt_is_pure_value_assign(stmt) => {}
-                    HirStmt::Block(inner) if inner.is_empty() => {}
-                    _ => return false,
-                }
-            }
-
-            if terminal_return {
-                return true;
-            }
-            let Some(next_target) = terminal_goto else {
-                return false;
-            };
-            if next_target == next_label {
-                return true;
-            }
-            let Some(next_idx) = body
-                .iter()
-                .position(|stmt| matches!(stmt, HirStmt::Label(label) if label == &next_target))
-            else {
-                return false;
-            };
-            current = next_target;
-            current_idx = next_idx;
-        }
-
-        true
+        fission_midend_structuring::guarded_tail::pure_hir::resolve_suffix_redirect_to_terminal(body, target_label, next_label)
     }
 
     fn classify_suffix_stmt(
@@ -610,173 +174,7 @@ impl<'a> PreviewBuilder<'a> {
         terminal_label_idx: usize,
         next_label: &str,
     ) -> Result<(), SuffixTailRejection> {
-        if is_ignorable_discovery_stmt(stmt)
-            || matches!(stmt, HirStmt::Block(inner) if inner.is_empty())
-        {
-            return Ok(());
-        }
-        if Self::stmt_is_pure_value_expr(stmt) || Self::stmt_is_pure_value_assign(stmt) {
-            return Ok(());
-        }
-        if let HirStmt::Goto(target) = stmt {
-            if target == next_label
-                || Self::stmt_is_sink_safe_return_goto_for_owned_tail(stmt, body)
-            {
-                return Ok(());
-            }
-            let next_stmt_label_idx = (stmt_idx + 1..body.len())
-                .find(|pos| matches!(body[*pos], HirStmt::Label(_)))
-                .unwrap_or(body.len());
-            for trailing_idx in stmt_idx + 1..next_stmt_label_idx {
-                let trailing = &body[trailing_idx];
-                if is_ignorable_discovery_stmt(trailing)
-                    || matches!(trailing, HirStmt::Block(inner) if inner.is_empty())
-                {
-                    continue;
-                }
-                if Self::suffix_stmt_has_nested_or_nonlocal_ref(trailing) {
-                    return Err(SuffixTailRejection::SuffixHasNestedOrNonlocalRef { stmt_idx });
-                }
-                if !Self::stmt_is_pure_value_expr(trailing)
-                    && !Self::stmt_is_pure_value_assign(trailing)
-                    && !matches!(trailing, HirStmt::Goto(target) if target == next_label)
-                {
-                    return Err(SuffixTailRejection::SuffixHasSideEffect { stmt_idx });
-                }
-            }
-            let label_count = Self::top_level_label_definition_count_for_owned_tail(body, target);
-            if label_count == 0 {
-                let terminal_label = body
-                    .get(terminal_label_idx)
-                    .and_then(|stmt| match stmt {
-                        HirStmt::Label(label) => Some(label.as_str()),
-                        _ => None,
-                    })
-                    .unwrap_or("");
-                return Err(if next_label == terminal_label {
-                    SuffixTailRejection::SuffixAliasRedirectUnresolved {
-                        stmt_idx,
-                        label: target.clone(),
-                    }
-                } else {
-                    SuffixTailRejection::SuffixHasNonTerminalGoto {
-                        stmt_idx,
-                        target: target.clone(),
-                    }
-                });
-            }
-            if label_count != 1 {
-                return Err(SuffixTailRejection::SuffixAliasRedirectUnresolved {
-                    stmt_idx,
-                    label: target.clone(),
-                });
-            }
-            if Self::resolve_suffix_redirect_to_terminal(body, target, next_label) {
-                return Ok(());
-            }
-            return Err(SuffixTailRejection::SuffixHasNonTerminalGoto {
-                stmt_idx,
-                target: target.clone(),
-            });
-        }
-        if matches!(
-            stmt,
-            HirStmt::Switch { .. }
-                | HirStmt::While { .. }
-                | HirStmt::DoWhile { .. }
-                | HirStmt::For { .. }
-                | HirStmt::Break
-                | HirStmt::Continue
-        ) {
-            return Err(SuffixTailRejection::SuffixHasLoopOrSwitchCrossing { stmt_idx });
-        }
-        if Self::suffix_stmt_has_nested_or_nonlocal_ref(stmt) {
-            let kind = Self::classify_nested_suffix_shape(
-                stmt,
-                body,
-                current_label_idx,
-                terminal_label_idx,
-                next_label,
-            );
-            if kind == NestedSuffixShapeKind::NestedCrossesTerminalJoin
-                && Self::nested_terminal_join_tail_is_guard_family_owned_safe(
-                    body,
-                    stmt_idx,
-                    current_label_idx,
-                    terminal_label_idx,
-                )
-            {
-                if Self::guarded_tail_diag_enabled() {
-                    eprintln!(
-                        "[GT-TRACE] nested-terminal-join-tail-internalized stmt_idx={} kind={:?} stmt={:?}",
-                        stmt_idx, kind, stmt
-                    );
-                }
-                return Ok(());
-            }
-            if Self::guarded_tail_diag_enabled() {
-                eprintln!(
-                    "[GT-TRACE] nested-suffix-shape stmt_idx={} kind={:?} stmt={:?}",
-                    stmt_idx, kind, stmt
-                );
-            }
-            return Err(SuffixTailRejection::SuffixHasNestedOrNonlocalRef { stmt_idx });
-        }
-        let side_effect_kind = Self::classify_suffix_side_effect_shape(stmt);
-        if side_effect_kind == SuffixSideEffectShapeKind::MemoryReadOnlyAssign
-            && Self::suffix_memory_read_only_assign_is_owned_safe(
-                body,
-                stmt_idx,
-                terminal_label_idx,
-            )
-        {
-            if Self::guarded_tail_diag_enabled() {
-                eprintln!(
-                    "[GT-TRACE] suffix-memory-readonly-assign-internalized stmt_idx={} kind={:?} stmt={:?}",
-                    stmt_idx, side_effect_kind, stmt
-                );
-            }
-            return Ok(());
-        }
-        if side_effect_kind == SuffixSideEffectShapeKind::CallExprSideEffect {
-            let call_kind = Self::classify_suffix_call_effect_shape(stmt);
-            if call_kind == SuffixCallEffectShapeKind::PureKnownHelperCall
-                && Self::suffix_known_pure_helper_call_is_owned_safe(
-                    body,
-                    stmt_idx,
-                    terminal_label_idx,
-                )
-            {
-                if Self::guarded_tail_diag_enabled() {
-                    eprintln!(
-                        "[GT-TRACE] suffix-known-pure-helper-call-internalized stmt_idx={} kind={:?} stmt={:?}",
-                        stmt_idx, call_kind, stmt
-                    );
-                }
-                return Ok(());
-            }
-        }
-        if Self::guarded_tail_diag_enabled() {
-            if side_effect_kind == SuffixSideEffectShapeKind::CallExprSideEffect {
-                let call_kind = Self::classify_suffix_call_effect_shape(stmt);
-                eprintln!(
-                    "[GT-TRACE] suffix-call-effect-shape stmt_idx={} kind={:?} stmt={:?}",
-                    stmt_idx, call_kind, stmt
-                );
-                if matches!(
-                    call_kind,
-                    SuffixCallEffectShapeKind::VoidUnknownCall
-                        | SuffixCallEffectShapeKind::ReturnValueAssignedLocal
-                        | SuffixCallEffectShapeKind::ReturnValueIgnoredCall
-                        | SuffixCallEffectShapeKind::UnknownCallEffect
-                ) {}
-            }
-            eprintln!(
-                "[GT-TRACE] suffix-side-effect-shape stmt_idx={} kind={:?} stmt={:?}",
-                stmt_idx, side_effect_kind, stmt
-            );
-        }
-        Err(SuffixTailRejection::SuffixHasSideEffect { stmt_idx })
+        fission_midend_structuring::guarded_tail::pure_hir::classify_suffix_stmt(stmt, body, stmt_idx, current_label_idx, terminal_label_idx, next_label)
     }
 
     fn classify_suffix_stmt_with_diag(
@@ -797,45 +195,7 @@ impl<'a> PreviewBuilder<'a> {
         next_label_idx: usize,
         terminal_label: &str,
     ) -> bool {
-        let HirStmt::Goto(target) = &body[stmt_idx] else {
-            return false;
-        };
-        if target != terminal_label {
-            return false;
-        }
-        if Self::top_level_label_definition_count_for_owned_tail(body, terminal_label) != 1 {
-            return false;
-        }
-
-        for trailing_stmt in &body[stmt_idx + 1..next_label_idx] {
-            if is_ignorable_discovery_stmt(trailing_stmt)
-                || matches!(trailing_stmt, HirStmt::Block(inner) if inner.is_empty())
-                || Self::stmt_is_pure_value_expr(trailing_stmt)
-                || Self::stmt_is_pure_value_assign(trailing_stmt)
-            {
-                continue;
-            }
-
-            match trailing_stmt {
-                HirStmt::Goto(target) if target == terminal_label => continue,
-                HirStmt::Break
-                | HirStmt::Continue
-                | HirStmt::Switch { .. }
-                | HirStmt::While { .. }
-                | HirStmt::DoWhile { .. }
-                | HirStmt::For { .. }
-                | HirStmt::If { .. }
-                | HirStmt::Block(_)
-                | HirStmt::VaStart { .. }
-                | HirStmt::Assign { .. }
-                | HirStmt::Expr(_)
-                | HirStmt::Return(_)
-                | HirStmt::Label(_) => return false,
-                HirStmt::Goto(_) => return false,
-            }
-        }
-
-        true
+        fission_midend_structuring::guarded_tail::pure_hir::suffix_stmt_is_terminal_join_owned_safe(body, stmt_idx, next_label_idx, terminal_label)
     }
 
     fn count_candidate_internal_top_level_refs_in_suffix_window(
@@ -844,13 +204,7 @@ impl<'a> PreviewBuilder<'a> {
         anchor_idx: usize,
         terminal_label_idx: usize,
     ) -> usize {
-        if anchor_idx + 1 >= terminal_label_idx {
-            return 0;
-        }
-        body[anchor_idx + 1..terminal_label_idx]
-            .iter()
-            .filter(|stmt| matches!(stmt, HirStmt::Goto(target) if target == label))
-            .count()
+        fission_midend_structuring::guarded_tail::pure_hir::count_candidate_internal_top_level_refs_in_suffix_window(body, label, anchor_idx, terminal_label_idx)
     }
 
     fn count_suffix_safe_self_terminal_refs_in_suffix_window(
@@ -859,29 +213,7 @@ impl<'a> PreviewBuilder<'a> {
         anchor_idx: usize,
         terminal_label_idx: usize,
     ) -> usize {
-        if anchor_idx + 1 >= terminal_label_idx {
-            return 0;
-        }
-
-        let mut count = 0usize;
-        for stmt_idx in anchor_idx + 1..terminal_label_idx {
-            if !matches!(body.get(stmt_idx), Some(HirStmt::Goto(target)) if target == label) {
-                continue;
-            }
-            let Some(next_label_idx) =
-                (stmt_idx + 1..body.len()).find(|pos| matches!(body[*pos], HirStmt::Label(_)))
-            else {
-                continue;
-            };
-            if next_label_idx > terminal_label_idx {
-                continue;
-            }
-            if Self::suffix_stmt_is_terminal_join_owned_safe(body, stmt_idx, next_label_idx, label)
-            {
-                count += 1;
-            }
-        }
-        count
+        fission_midend_structuring::guarded_tail::pure_hir::count_suffix_safe_self_terminal_refs_in_suffix_window(body, label, anchor_idx, terminal_label_idx)
     }
 
     fn compute_suffix_external_entry_budget(
@@ -893,144 +225,29 @@ impl<'a> PreviewBuilder<'a> {
         raw_refs: usize,
         rewrites: usize,
     ) -> SuffixExternalEntryBudget {
-        let internal_candidate_refs =
-            Self::count_candidate_internal_top_level_refs_in_suffix_window(
-                body,
-                label,
-                anchor_idx,
-                terminal_label_idx,
-            );
-        let suffix_safe_refs = Self::count_suffix_safe_self_terminal_refs_in_suffix_window(
-            body,
-            label,
-            anchor_idx,
-            terminal_label_idx,
-        )
-        .min(internal_candidate_refs);
-        let guard_family_internalized_refs =
-            Self::count_internalized_guard_family_nested_conditional_entries(
-                body,
-                label,
-                anchor_idx,
-                current_label_idx,
-                terminal_label_idx,
-            );
-        let paired_nested_boundary_refs = Self::count_internalized_paired_nested_boundary_refs(
-            body,
-            label,
-            anchor_idx,
-            current_label_idx,
-            terminal_label_idx,
-            raw_refs,
-        );
-        let internal_top_level_refs = internal_candidate_refs.saturating_sub(suffix_safe_refs);
-        let effective_external_refs = raw_refs
-            .saturating_sub(internal_top_level_refs)
-            .saturating_sub(suffix_safe_refs);
-        let effective_external_refs =
-            effective_external_refs.saturating_sub(guard_family_internalized_refs);
-        let effective_external_refs =
-            effective_external_refs.saturating_sub(paired_nested_boundary_refs);
-        let allowed_external_refs = usize::from(rewrites == 0);
-
-        SuffixExternalEntryBudget {
-            raw_refs,
-            internal_top_level_refs,
-            suffix_safe_refs,
-            guard_family_internalized_refs,
-            paired_nested_boundary_refs,
-            effective_external_refs,
-            allowed_external_refs,
-        }
+        fission_midend_structuring::guarded_tail::pure_hir::compute_suffix_external_entry_budget(body, label, anchor_idx, current_label_idx, terminal_label_idx, raw_refs, rewrites)
     }
 
     fn stmt_is_single_goto_then_if_to_label<'b>(
         stmt: &'b HirStmt,
         label: &str,
     ) -> Option<&'b HirExpr> {
-        let HirStmt::If {
-            cond,
-            then_body,
-            else_body,
-        } = stmt
-        else {
-            return None;
-        };
-        if !else_body.is_empty() {
-            return None;
-        }
-        matches!(single_goto_target(then_body), Some(target) if target == label).then_some(cond)
+        fission_midend_structuring::guarded_tail::pure_hir::stmt_is_single_goto_then_if_to_label(stmt, label)
     }
 
     pub(super) fn stmt_is_single_branch_if_to_label<'b>(
         stmt: &'b HirStmt,
         label: &str,
     ) -> Option<&'b HirExpr> {
-        let HirStmt::If {
-            cond,
-            then_body,
-            else_body,
-        } = stmt
-        else {
-            return None;
-        };
-        if matches!(single_goto_target(then_body), Some(target) if target == label)
-            && else_body.is_empty()
-        {
-            return Some(cond);
-        }
-        if matches!(single_goto_target(else_body), Some(target) if target == label)
-            && then_body.is_empty()
-        {
-            return Some(cond);
-        }
-        None
+        fission_midend_structuring::guarded_tail::pure_hir::stmt_is_single_branch_if_to_label(stmt, label)
     }
 
     pub(super) fn exprs_share_guard_family(lhs: &HirExpr, rhs: &HirExpr) -> bool {
-        if lhs == rhs {
-            return true;
-        }
-        if let HirExpr::Unary {
-            op: HirUnaryOp::Not,
-            expr,
-            ..
-        } = lhs
-            && expr.as_ref() == rhs
-        {
-            return true;
-        }
-        if let HirExpr::Unary {
-            op: HirUnaryOp::Not,
-            expr,
-            ..
-        } = rhs
-            && expr.as_ref() == lhs
-        {
-            return true;
-        }
-        false
+        fission_midend_structuring::guarded_tail::pure_hir::exprs_share_guard_family(lhs, rhs)
     }
 
     fn guard_family_match_reason(lhs: &HirExpr, rhs: &HirExpr) -> &'static str {
-        if lhs == rhs {
-            return "ExactExpr";
-        }
-        match lhs {
-            HirExpr::Unary {
-                op: HirUnaryOp::Not,
-                expr,
-                ..
-            } if expr.as_ref() == rhs => "EntryNegatesCandidate",
-            _ => match rhs {
-                HirExpr::Unary {
-                    op: HirUnaryOp::Not,
-                    expr,
-                    ..
-                } if expr.as_ref() == lhs => "CandidateNegatesEntry",
-                _ => "NoGuardFamilyRelation",
-            },
-        }
+        fission_midend_structuring::guarded_tail::pure_hir::guard_family_match_reason(lhs, rhs)
     }
 
     fn find_terminal_guard_family_match_excluding(
@@ -1040,53 +257,7 @@ impl<'a> PreviewBuilder<'a> {
         entry_cond: &HirExpr,
         excluded_stmt_idx: Option<usize>,
     ) -> Option<HirExpr> {
-        let Some(HirStmt::Label(terminal_label)) = body.get(terminal_label_idx) else {
-            return None;
-        };
-        if current_label_idx + 1 >= terminal_label_idx {
-            return None;
-        }
-        if Self::guarded_tail_diag_enabled() {
-            eprintln!(
-                "[GT-TRACE] guard-family-match-scan entry_cond={:?} terminal_label={} excluded_stmt_idx={:?}",
-                entry_cond, terminal_label, excluded_stmt_idx
-            );
-        }
-
-        let mut candidate_count = 0usize;
-        for (offset, stmt) in body[current_label_idx + 1..terminal_label_idx]
-            .iter()
-            .enumerate()
-        {
-            let absolute_idx = current_label_idx + 1 + offset;
-            if excluded_stmt_idx == Some(absolute_idx) {
-                continue;
-            }
-            let Some(suffix_cond) = Self::stmt_is_single_branch_if_to_label(stmt, terminal_label)
-            else {
-                continue;
-            };
-            candidate_count += 1;
-            let shares = Self::exprs_share_guard_family(entry_cond, suffix_cond);
-            let reason = Self::guard_family_match_reason(entry_cond, suffix_cond);
-            if Self::guarded_tail_diag_enabled() {
-                eprintln!(
-                    "[GT-TRACE] guard-family-match-candidate stmt_idx={} suffix_cond={:?} shares={} reason={}",
-                    absolute_idx, suffix_cond, shares, reason
-                );
-            }
-            if shares {
-                return Some(suffix_cond.clone());
-            }
-        }
-
-        if Self::guarded_tail_diag_enabled() {
-            eprintln!(
-                "[GT-TRACE] guard-family-match-miss entry_cond={:?} terminal_label={} candidate_count={}",
-                entry_cond, terminal_label, candidate_count
-            );
-        }
-        None
+        fission_midend_structuring::guarded_tail::pure_hir::find_terminal_guard_family_match_excluding(body, current_label_idx, terminal_label_idx, entry_cond, excluded_stmt_idx)
     }
 
     fn suffix_window_has_terminal_guard_family_match(
@@ -1095,14 +266,7 @@ impl<'a> PreviewBuilder<'a> {
         terminal_label_idx: usize,
         entry_cond: &HirExpr,
     ) -> bool {
-        Self::find_terminal_guard_family_match_excluding(
-            body,
-            current_label_idx,
-            terminal_label_idx,
-            entry_cond,
-            None,
-        )
-        .is_some()
+        fission_midend_structuring::guarded_tail::pure_hir::suffix_window_has_terminal_guard_family_match(body, current_label_idx, terminal_label_idx, entry_cond)
     }
 
     fn nested_terminal_join_tail_is_guard_family_owned_safe(
@@ -1111,30 +275,7 @@ impl<'a> PreviewBuilder<'a> {
         current_label_idx: usize,
         terminal_label_idx: usize,
     ) -> bool {
-        let Some(HirStmt::Label(terminal_label)) = body.get(terminal_label_idx) else {
-            return false;
-        };
-        let Some(stmt) = body.get(stmt_idx) else {
-            return false;
-        };
-        let Some(entry_cond) = Self::stmt_is_single_branch_if_to_label(stmt, terminal_label) else {
-            return false;
-        };
-        let matched_cond = Self::find_terminal_guard_family_match_excluding(
-            body,
-            current_label_idx,
-            terminal_label_idx,
-            entry_cond,
-            Some(stmt_idx),
-        );
-        let result = matched_cond.is_some();
-        if Self::guarded_tail_diag_enabled() {
-            eprintln!(
-                "[GT-TRACE] nested-terminal-join-proof stmt_idx={} terminal_label={} entry_cond={:?} matched_cond={:?} result={}",
-                stmt_idx, terminal_label, entry_cond, matched_cond, result
-            );
-        }
-        result
+        fission_midend_structuring::guarded_tail::pure_hir::nested_terminal_join_tail_is_guard_family_owned_safe(body, stmt_idx, current_label_idx, terminal_label_idx)
     }
 
     fn nested_conditional_entry_is_guard_family_internal(
@@ -1145,78 +286,7 @@ impl<'a> PreviewBuilder<'a> {
         terminal_label_idx: usize,
         stmt_idx: usize,
     ) -> bool {
-        if stmt_idx <= anchor_idx || stmt_idx >= current_label_idx {
-            return false;
-        }
-        let Some(stmt) = body.get(stmt_idx) else {
-            return false;
-        };
-        let Some(entry_cond) = Self::stmt_is_single_goto_then_if_to_label(stmt, label) else {
-            return false;
-        };
-        let matched_cond = Self::find_terminal_guard_family_match_excluding(
-            body,
-            current_label_idx,
-            terminal_label_idx,
-            entry_cond,
-            None,
-        );
-        let result = matched_cond.is_some();
-        if Self::guarded_tail_diag_enabled() {
-            eprintln!(
-                "[GT-TRACE] nested-entry-guard-family-proof label={} ref_stmt_idx={} entry_cond={:?} matched_cond={:?} result={}",
-                label, stmt_idx, entry_cond, matched_cond, result
-            );
-            if !result {
-                let boundary = Self::nested_entry_boundary_context(
-                    body,
-                    label,
-                    anchor_idx,
-                    current_label_idx,
-                    terminal_label_idx,
-                );
-                eprintln!(
-                    "[GT-TRACE] nested-entry-boundary label={} label_idx={:?} in_current_suffix_window={} raw_refs={} internal_candidate_refs={} suffix_safe_refs={} external_pre_guard_internalization={} external_entry_kind={:?} external_ref_stmt_idx={:?}",
-                    label,
-                    boundary.label_idx,
-                    boundary.label_in_current_suffix_window,
-                    boundary.raw_refs,
-                    boundary.internal_candidate_refs,
-                    boundary.suffix_safe_refs,
-                    boundary.external_pre_guard_internalization,
-                    boundary.external_entry_kind,
-                    boundary.external_entry_ref_stmt_idx,
-                );
-                let boundary_refs = Self::collect_nested_boundary_ref_traces(
-                    body,
-                    label,
-                    anchor_idx,
-                    terminal_label_idx,
-                );
-                for boundary_ref in &boundary_refs {
-                    if let Some(stmt) = body.get(boundary_ref.stmt_idx) {
-                        eprintln!(
-                            "[GT-TRACE] nested-boundary-ref label={} ref_idx={} kind={:?} cond={:?} stmt={:?}",
-                            label,
-                            boundary_ref.stmt_idx,
-                            boundary_ref.kind,
-                            boundary_ref.cond,
-                            stmt
-                        );
-                    }
-                }
-                let pair_trace = Self::build_nested_boundary_pair_trace(&boundary_refs);
-                eprintln!(
-                    "[GT-TRACE] nested-boundary-pair label={} count={} same_guard_family={} relation_reason={:?} conds={:?}",
-                    label,
-                    pair_trace.ref_count,
-                    pair_trace.same_guard_family,
-                    pair_trace.relation_reason,
-                    pair_trace.conds,
-                );
-            }
-        }
-        result
+        fission_midend_structuring::guarded_tail::pure_hir::nested_conditional_entry_is_guard_family_internal(body, label, anchor_idx, current_label_idx, terminal_label_idx, stmt_idx)
     }
 
     fn nested_entry_boundary_context(
@@ -1226,48 +296,7 @@ impl<'a> PreviewBuilder<'a> {
         current_label_idx: usize,
         terminal_label_idx: usize,
     ) -> NestedEntryBoundaryContext {
-        let referenced = collect_referenced_label_counts(body);
-        let raw_refs = referenced.get(label).copied().unwrap_or(0);
-        let label_idx = body
-            .iter()
-            .position(|stmt| matches!(stmt, HirStmt::Label(candidate) if candidate == label));
-        let label_in_current_suffix_window =
-            label_idx.is_some_and(|idx| idx >= current_label_idx && idx < terminal_label_idx);
-        let internal_candidate_refs =
-            Self::count_candidate_internal_top_level_refs_in_suffix_window(
-                body,
-                label,
-                anchor_idx,
-                terminal_label_idx,
-            );
-        let suffix_safe_refs = Self::count_suffix_safe_self_terminal_refs_in_suffix_window(
-            body,
-            label,
-            anchor_idx,
-            terminal_label_idx,
-        )
-        .min(internal_candidate_refs);
-        let (external_entry_kind, external_entry_ref_stmt_idx) =
-            match Self::classify_external_entry_ref_kind(
-                body,
-                label,
-                anchor_idx,
-                terminal_label_idx,
-            ) {
-                Some((kind, stmt_idx)) => (Some(kind), Some(stmt_idx)),
-                None => (None, None),
-            };
-
-        NestedEntryBoundaryContext {
-            label_idx,
-            label_in_current_suffix_window,
-            raw_refs,
-            internal_candidate_refs,
-            suffix_safe_refs,
-            external_pre_guard_internalization: raw_refs.saturating_sub(internal_candidate_refs),
-            external_entry_kind,
-            external_entry_ref_stmt_idx,
-        }
+        fission_midend_structuring::guarded_tail::pure_hir::nested_entry_boundary_context(body, label, anchor_idx, current_label_idx, terminal_label_idx)
     }
 
     fn collect_nested_boundary_ref_traces(
@@ -1276,54 +305,13 @@ impl<'a> PreviewBuilder<'a> {
         anchor_idx: usize,
         terminal_label_idx: usize,
     ) -> Vec<NestedBoundaryRefTrace> {
-        let mut refs = Vec::new();
-        for (stmt_idx, stmt) in body.iter().enumerate() {
-            if Self::stmt_contains_goto_label(stmt, label) == 0 {
-                continue;
-            }
-            if stmt_idx > anchor_idx
-                && stmt_idx < terminal_label_idx
-                && matches!(stmt, HirStmt::Goto(target) if target == label)
-            {
-                continue;
-            }
-            refs.push(NestedBoundaryRefTrace {
-                stmt_idx,
-                kind: Self::classify_external_entry_ref_kind_for_stmt(stmt, label),
-                cond: Self::stmt_is_single_branch_if_to_label(stmt, label).cloned(),
-            });
-        }
-        refs
+        fission_midend_structuring::guarded_tail::pure_hir::collect_nested_boundary_ref_traces(body, label, anchor_idx, terminal_label_idx)
     }
 
     fn build_nested_boundary_pair_trace(
         refs: &[NestedBoundaryRefTrace],
     ) -> NestedBoundaryPairTrace {
-        let conds = refs
-            .iter()
-            .filter_map(|entry| entry.cond.clone())
-            .collect::<Vec<_>>();
-        let pair = refs.len() == 2
-            && refs
-                .iter()
-                .all(|entry| entry.kind == ExternalEntryRefKind::NestedConditionalGoto)
-            && conds.len() == 2;
-        let (same_guard_family, relation_reason) = if pair {
-            let reason = Self::guard_family_match_reason(&conds[0], &conds[1]);
-            (
-                Self::exprs_share_guard_family(&conds[0], &conds[1]),
-                Some(reason),
-            )
-        } else {
-            (false, None)
-        };
-
-        NestedBoundaryPairTrace {
-            ref_count: refs.len(),
-            same_guard_family,
-            relation_reason,
-            conds,
-        }
+        fission_midend_structuring::guarded_tail::pure_hir::build_nested_boundary_pair_trace(refs)
     }
 
     pub(super) fn count_internalized_paired_nested_boundary_refs(
@@ -1334,48 +322,7 @@ impl<'a> PreviewBuilder<'a> {
         terminal_label_idx: usize,
         raw_refs: usize,
     ) -> usize {
-        if raw_refs != 2 {
-            return 0;
-        }
-        let label_idx = body
-            .iter()
-            .position(|stmt| matches!(stmt, HirStmt::Label(candidate) if candidate == label));
-        if !label_idx.is_some_and(|idx| idx >= current_label_idx && idx < terminal_label_idx) {
-            return 0;
-        }
-        if Self::count_internalized_guard_family_nested_conditional_entries(
-            body,
-            label,
-            anchor_idx,
-            current_label_idx,
-            terminal_label_idx,
-        ) > 0
-        {
-            return 0;
-        }
-
-        let refs =
-            Self::collect_nested_boundary_ref_traces(body, label, anchor_idx, terminal_label_idx);
-        let pair_trace = Self::build_nested_boundary_pair_trace(&refs);
-        if pair_trace.ref_count != 2
-            || !pair_trace.same_guard_family
-            || pair_trace.relation_reason != Some("ExactExpr")
-            || !refs
-                .iter()
-                .all(|entry| entry.kind == ExternalEntryRefKind::NestedConditionalGoto)
-        {
-            return 0;
-        }
-
-        if Self::guarded_tail_diag_enabled() {
-            eprintln!(
-                "[GT-TRACE] paired-nested-boundary-internalized label={} refs={:?} relation={}",
-                label,
-                refs.iter().map(|entry| entry.stmt_idx).collect::<Vec<_>>(),
-                pair_trace.relation_reason.unwrap_or("Unknown"),
-            );
-        }
-        2
+        fission_midend_structuring::guarded_tail::pure_hir::count_internalized_paired_nested_boundary_refs(body, label, anchor_idx, current_label_idx, terminal_label_idx, raw_refs)
     }
 
     pub(super) fn count_internalized_guard_family_nested_conditional_entries(
@@ -1385,70 +332,14 @@ impl<'a> PreviewBuilder<'a> {
         current_label_idx: usize,
         terminal_label_idx: usize,
     ) -> usize {
-        if anchor_idx + 1 >= current_label_idx {
-            return 0;
-        }
-
-        let mut count = 0usize;
-        for stmt_idx in anchor_idx + 1..current_label_idx {
-            let internalized = Self::nested_conditional_entry_is_guard_family_internal(
-                body,
-                label,
-                anchor_idx,
-                current_label_idx,
-                terminal_label_idx,
-                stmt_idx,
-            );
-            if Self::guarded_tail_diag_enabled()
-                && let Some(cond) = body
-                    .get(stmt_idx)
-                    .and_then(|stmt| Self::stmt_is_single_goto_then_if_to_label(stmt, label))
-            {
-                eprintln!(
-                    "[GT-TRACE] nested-entry-probe label={} cond={:?} ref_stmt_idx={} internalized={}",
-                    label, cond, stmt_idx, internalized
-                );
-            }
-            if !internalized {
-                continue;
-            }
-            count += 1;
-            if Self::guarded_tail_diag_enabled()
-                && let Some(cond) = body
-                    .get(stmt_idx)
-                    .and_then(|stmt| Self::stmt_is_single_goto_then_if_to_label(stmt, label))
-            {
-                eprintln!(
-                    "[GT-TRACE] nested-entry-internalized label={} cond={:?} ref_stmt_idx={}",
-                    label, cond, stmt_idx
-                );
-            }
-        }
-        count
+        fission_midend_structuring::guarded_tail::pure_hir::count_internalized_guard_family_nested_conditional_entries(body, label, anchor_idx, current_label_idx, terminal_label_idx)
     }
 
     fn classify_external_entry_ref_kind_for_stmt(
         stmt: &HirStmt,
         label: &str,
     ) -> ExternalEntryRefKind {
-        match stmt {
-            HirStmt::Goto(target) if target == label => ExternalEntryRefKind::TopLevelExternalGoto,
-            HirStmt::If { .. } if Self::stmt_contains_goto_label(stmt, label) > 0 => {
-                ExternalEntryRefKind::NestedConditionalGoto
-            }
-            HirStmt::Switch { .. }
-            | HirStmt::While { .. }
-            | HirStmt::DoWhile { .. }
-            | HirStmt::For { .. }
-                if Self::stmt_contains_goto_label(stmt, label) > 0 =>
-            {
-                ExternalEntryRefKind::LoopSwitchDerived
-            }
-            HirStmt::Block(_) if Self::stmt_contains_goto_label(stmt, label) > 0 => {
-                ExternalEntryRefKind::AliasRedirectDerived
-            }
-            _ => ExternalEntryRefKind::UnknownExternalEntry,
-        }
+        fission_midend_structuring::guarded_tail::pure_hir::classify_external_entry_ref_kind_for_stmt(stmt, label)
     }
 
     fn classify_external_entry_ref_kind(
@@ -1457,25 +348,7 @@ impl<'a> PreviewBuilder<'a> {
         anchor_idx: usize,
         terminal_label_idx: usize,
     ) -> Option<(ExternalEntryRefKind, usize)> {
-        for (stmt_idx, stmt) in body.iter().enumerate() {
-            if Self::stmt_contains_goto_label(stmt, label) == 0 {
-                continue;
-            }
-            if stmt_idx == anchor_idx {
-                continue;
-            }
-            if stmt_idx > anchor_idx
-                && stmt_idx < terminal_label_idx
-                && matches!(stmt, HirStmt::Goto(target) if target == label)
-            {
-                continue;
-            }
-            return Some((
-                Self::classify_external_entry_ref_kind_for_stmt(stmt, label),
-                stmt_idx,
-            ));
-        }
-        None
+        fission_midend_structuring::guarded_tail::pure_hir::classify_external_entry_ref_kind(body, label, anchor_idx, terminal_label_idx)
     }
 
     fn suffix_is_nonowned_terminal_tail(
@@ -1486,128 +359,7 @@ impl<'a> PreviewBuilder<'a> {
         terminal_label_idx: usize,
         referenced: &HashMap<String, usize>,
     ) -> Result<(), SuffixTailRejection> {
-        if start_label_idx >= terminal_label_idx {
-            return Err(SuffixTailRejection::SuffixHasLabelCrossing {
-                stmt_idx: start_label_idx,
-                label: start_label.to_string(),
-            });
-        }
-
-        let mut current_label = start_label.to_string();
-        let mut current_label_idx = start_label_idx;
-        let mut rewrites = 0usize;
-        let mut seen = HashSet::new();
-
-        while current_label_idx < terminal_label_idx {
-            if !seen.insert(current_label.clone()) {
-                return Err(SuffixTailRejection::SuffixAliasRedirectUnresolved {
-                    stmt_idx: current_label_idx,
-                    label: current_label,
-                });
-            }
-
-            let raw_refs = referenced.get(&current_label).copied().unwrap_or(0);
-            let budget = Self::compute_suffix_external_entry_budget(
-                body,
-                &current_label,
-                anchor_idx,
-                current_label_idx,
-                terminal_label_idx,
-                raw_refs,
-                rewrites,
-            );
-            if Self::guarded_tail_diag_enabled() {
-                eprintln!(
-                    "[GT-TRACE] suffix-budget label={} raw_refs={} internal_refs={} suffix_safe_refs={} guard_family_internalized_refs={} paired_nested_boundary_refs={} effective_external={} allowed_external={}",
-                    current_label,
-                    budget.raw_refs,
-                    budget.internal_top_level_refs,
-                    budget.suffix_safe_refs,
-                    budget.guard_family_internalized_refs,
-                    budget.paired_nested_boundary_refs,
-                    budget.effective_external_refs,
-                    budget.allowed_external_refs,
-                );
-            }
-            if budget.effective_external_refs > budget.allowed_external_refs {
-                if Self::guarded_tail_diag_enabled()
-                    && let Some((kind, ref_stmt_idx)) = Self::classify_external_entry_ref_kind(
-                        body,
-                        &current_label,
-                        anchor_idx,
-                        terminal_label_idx,
-                    )
-                    && let Some(ref_stmt) = body.get(ref_stmt_idx)
-                {
-                    eprintln!(
-                        "[GT-TRACE] suffix-external-entry label={} external_entry_kind={:?} ref_stmt_idx={} ref_stmt={:?}",
-                        current_label, kind, ref_stmt_idx, ref_stmt
-                    );
-                }
-                return Err(SuffixTailRejection::SuffixHasExternalEntry {
-                    stmt_idx: current_label_idx,
-                    label: current_label,
-                });
-            }
-
-            let Some(next_label_idx) = (current_label_idx + 1..body.len())
-                .find(|pos| matches!(body[*pos], HirStmt::Label(_)))
-            else {
-                return Err(SuffixTailRejection::SuffixHasLabelCrossing {
-                    stmt_idx: current_label_idx,
-                    label: current_label,
-                });
-            };
-            if next_label_idx > terminal_label_idx {
-                return Err(SuffixTailRejection::SuffixHasLabelCrossing {
-                    stmt_idx: next_label_idx,
-                    label: current_label,
-                });
-            }
-            let HirStmt::Label(terminal_label) = &body[terminal_label_idx] else {
-                unreachable!();
-            };
-            let HirStmt::Label(next_label) = &body[next_label_idx] else {
-                unreachable!();
-            };
-            for (offset, stmt) in body[current_label_idx + 1..next_label_idx]
-                .iter()
-                .enumerate()
-            {
-                let stmt_idx = current_label_idx + 1 + offset;
-                if matches!(stmt, HirStmt::Goto(target) if target == terminal_label)
-                    && Self::suffix_stmt_is_terminal_join_owned_safe(
-                        body,
-                        stmt_idx,
-                        next_label_idx,
-                        terminal_label,
-                    )
-                {
-                    continue;
-                }
-                if rewrites == 0
-                    && next_label_idx == terminal_label_idx
-                    && !is_ignorable_discovery_stmt(stmt)
-                    && !matches!(stmt, HirStmt::Block(inner) if inner.is_empty())
-                {
-                    return Err(SuffixTailRejection::SuffixHasSideEffect { stmt_idx });
-                }
-                Self::classify_suffix_stmt(
-                    stmt,
-                    body,
-                    stmt_idx,
-                    current_label_idx,
-                    terminal_label_idx,
-                    next_label,
-                )?;
-            }
-
-            current_label = next_label.clone();
-            current_label_idx = next_label_idx;
-            rewrites += 1;
-        }
-
-        Ok(())
+        fission_midend_structuring::guarded_tail::pure_hir::suffix_is_nonowned_terminal_tail(body, anchor_idx, start_label, start_label_idx, terminal_label_idx, referenced)
     }
 
     fn suffix_is_nonowned_terminal_tail_with_diag(
@@ -1630,30 +382,7 @@ impl<'a> PreviewBuilder<'a> {
         terminal_label_idx: usize,
         referenced: &HashMap<String, usize>,
     ) -> Result<(), SuffixTailRejection> {
-        if candidate_label_idx >= terminal_label_idx {
-            return Err(SuffixTailRejection::SuffixHasLabelCrossing {
-                stmt_idx: candidate_label_idx,
-                label: candidate_label.to_string(),
-            });
-        }
-        let suffix_result = Self::suffix_is_nonowned_terminal_tail(
-            body,
-            anchor_idx,
-            candidate_label,
-            candidate_label_idx,
-            terminal_label_idx,
-            referenced,
-        );
-        if !has_non_ignorable_payload(&body[anchor_idx + 1..candidate_label_idx]) {
-            return match suffix_result {
-                Err(SuffixTailRejection::SuffixHasExternalEntry { .. }) => suffix_result,
-                _ => Err(SuffixTailRejection::SuffixHasLabelCrossing {
-                    stmt_idx: candidate_label_idx,
-                    label: candidate_label.to_string(),
-                }),
-            };
-        }
-        suffix_result
+        fission_midend_structuring::guarded_tail::pure_hir::candidate_window_can_shrink_to_label(body, anchor_idx, candidate_label, candidate_label_idx, terminal_label_idx, referenced)
     }
 
     fn candidate_window_can_shrink_to_label_with_diag(
@@ -1675,59 +404,7 @@ impl<'a> PreviewBuilder<'a> {
         referenced: &HashMap<String, usize>,
         trace_enabled: bool,
     ) -> Option<(String, usize)> {
-        if anchor_idx + 1 >= terminal_label_idx {
-            return None;
-        }
-
-        for candidate_label_idx in anchor_idx + 1..terminal_label_idx {
-            let HirStmt::Label(candidate_label) = &body[candidate_label_idx] else {
-                continue;
-            };
-            let has_payload = has_non_ignorable_payload(&body[anchor_idx + 1..candidate_label_idx]);
-            let suffix_result = Self::candidate_window_can_shrink_to_label(
-                body,
-                anchor_idx,
-                candidate_label,
-                candidate_label_idx,
-                terminal_label_idx,
-                referenced,
-            );
-            let suffix_safe = suffix_result.is_ok();
-            if Self::guarded_tail_diag_enabled() {
-                eprintln!(
-                    "[DIAG] owned-join candidate anchor={} label={} label_idx={} terminal_idx={} payload_before={} suffix_safe={}",
-                    anchor_idx,
-                    candidate_label,
-                    candidate_label_idx,
-                    terminal_label_idx,
-                    has_payload,
-                    suffix_safe
-                );
-            }
-            if trace_enabled
-                && anchor_idx == 35
-                && let Err(reason) = &suffix_result
-                && let Some(stmt) = body.get(reason.stmt_idx())
-            {
-                eprintln!(
-                    "[GT-TRACE] candidate={} join_label={} early_label={} first_fail={:?} stmt_idx={} first_fail_stmt={:?}",
-                    anchor_idx,
-                    match body.get(terminal_label_idx) {
-                        Some(HirStmt::Label(label)) => label.as_str(),
-                        _ => "<missing-terminal-label>",
-                    },
-                    candidate_label,
-                    reason,
-                    reason.stmt_idx(),
-                    stmt
-                );
-            }
-            if has_payload && suffix_safe {
-                return Some((candidate_label.clone(), candidate_label_idx));
-            }
-        }
-
-        None
+        fission_midend_structuring::guarded_tail::pure_hir::find_earliest_owned_join_label(body, anchor_idx, terminal_label_idx, referenced, trace_enabled)
     }
 
     pub(crate) fn find_earliest_owned_join_label_with_diag_impl(
