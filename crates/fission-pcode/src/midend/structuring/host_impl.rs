@@ -135,7 +135,7 @@ impl<'a> StructuringHost for PreviewBuilder<'a> {
         start_idx: usize,
         exit: LinearExit,
     ) -> Result<Option<(Vec<HirStmt>, usize)>, MlilPreviewError> {
-        PreviewBuilder::lower_linear_body(self, start_idx, exit)
+        fission_midend_structuring::lower_linear_body(self, start_idx, exit)
     }
     fn lower_linear_body_with_budget(
         &mut self,
@@ -143,27 +143,58 @@ impl<'a> StructuringHost for PreviewBuilder<'a> {
         exit: LinearExit,
         budget: Option<&mut IfLoweringBudget>,
     ) -> Result<Option<(Vec<HirStmt>, usize)>, MlilPreviewError> {
-        PreviewBuilder::lower_linear_body_with_budget(self, start_idx, exit, budget)
+        fission_midend_structuring::lower_linear_body_with_budget(self, start_idx, exit, budget)
     }
     fn linear_exit(&mut self, idx: usize) -> Result<Option<LinearExit>, MlilPreviewError> {
-        PreviewBuilder::linear_exit(self, idx)
+        fission_midend_structuring::linear_exit(self, idx)
     }
     fn linear_exit_with_budget(
         &mut self,
         idx: usize,
         budget: Option<&mut IfLoweringBudget>,
     ) -> Result<Option<LinearExit>, MlilPreviewError> {
-        PreviewBuilder::linear_exit_with_budget(self, idx, budget)
+        fission_midend_structuring::linear_exit_with_budget(self, idx, budget)
     }
     fn shared_linear_exit(
         &mut self,
         lhs_idx: usize,
         rhs_idx: usize,
     ) -> Result<Option<LinearExit>, MlilPreviewError> {
-        PreviewBuilder::shared_linear_exit(self, lhs_idx, rhs_idx)
+        fission_midend_structuring::shared_linear_exit(self, lhs_idx, rhs_idx)
     }
     fn has_linear_body_cache(&self, start_idx: usize, exit: LinearExit) -> bool {
-        PreviewBuilder::has_linear_body_cache(self, start_idx, exit)
+        fission_midend_structuring::has_linear_body_cache(self, start_idx, exit)
+    }
+    fn linear_body_cache_get(
+        &self,
+        key: &LinearBodyCacheKey,
+    ) -> Option<LinearBodyCachedOutcome> {
+        self.linear_body_cache.get(key).cloned()
+    }
+    fn linear_body_cache_insert(
+        &mut self,
+        key: LinearBodyCacheKey,
+        value: LinearBodyCachedOutcome,
+    ) {
+        self.linear_body_cache.insert(key, value);
+    }
+    fn linear_body_active_insert(&mut self, key: LinearBodyCacheKey) -> bool {
+        self.active_linear_body_keys.insert(key)
+    }
+    fn linear_body_active_remove(&mut self, key: &LinearBodyCacheKey) {
+        self.active_linear_body_keys.remove(key);
+    }
+    fn conditional_tail_active_insert(&mut self, key: ConditionalTailKey) -> bool {
+        self.active_conditional_tail_keys.insert(key)
+    }
+    fn conditional_tail_active_remove(&mut self, key: &ConditionalTailKey) {
+        self.active_conditional_tail_keys.remove(key);
+    }
+    fn linear_exit_cache_get(&self, idx: usize) -> Option<Option<LinearExit>> {
+        self.linear_exit_cache.get(&idx).cloned()
+    }
+    fn linear_exit_cache_insert(&mut self, idx: usize, exit: Option<LinearExit>) {
+        self.linear_exit_cache.insert(idx, exit);
     }
     fn can_inline_linear_successor(
         &self,
@@ -171,19 +202,58 @@ impl<'a> StructuringHost for PreviewBuilder<'a> {
         next_idx: usize,
         visited: &std::collections::HashSet<usize>,
     ) -> bool {
-        PreviewBuilder::can_inline_linear_successor(self, from_idx, next_idx, visited)
+        fission_midend_structuring::can_inline_linear_successor(self, from_idx, next_idx, visited)
+    }
+    fn can_inline_linear_successor_for_region(
+        &self,
+        from_idx: usize,
+        next_idx: usize,
+        visited: &std::collections::HashSet<usize>,
+        exit: LinearExit,
+    ) -> bool {
+        fission_midend_structuring::can_inline_linear_successor_for_region(
+            self, from_idx, next_idx, visited, exit,
+        )
     }
     fn is_trivial_forwarding_block(&self, idx: usize, next_idx: usize) -> bool {
         PreviewBuilder::is_trivial_forwarding_block(self, idx, next_idx)
     }
+    fn is_trivial_linear_tail(&self, idx: usize) -> bool {
+        PreviewBuilder::is_trivial_linear_tail(self, idx)
+    }
     fn forwarding_block_defines_return_tail_live_in(&self, idx: usize, join_idx: usize) -> bool {
         PreviewBuilder::forwarding_block_defines_return_tail_live_in(self, idx, join_idx)
+    }
+    fn record_conditional_tail_mismatch_subtype(
+        &mut self,
+        subtype: fission_midend_structuring::ConditionalTailMismatchSubtype,
+    ) {
+        PreviewBuilder::record_conditional_tail_mismatch_subtype(self, subtype)
+    }
+    fn record_conditional_tail_mismatch_sample(
+        &self,
+        origin_idx: usize,
+        true_idx: Option<usize>,
+        false_idx: Option<usize>,
+        exit: LinearExit,
+        subtype: fission_midend_structuring::ConditionalTailMismatchSubtype,
+        stage: &str,
+    ) {
+        PreviewBuilder::record_conditional_tail_mismatch_sample(
+            self, origin_idx, true_idx, false_idx, exit, subtype, stage,
+        )
+    }
+    fn bump_rule_block_if_no_exit(&mut self) {
+        self.telemetry.structuring.rule_block_if_no_exit_count += 1;
+        self.telemetry
+            .structuring
+            .rule_block_if_no_exit_accepted_count += 1;
     }
     fn shared_exit_for_indices(
         &mut self,
         indices: &[usize],
     ) -> Result<Option<LinearExit>, MlilPreviewError> {
-        PreviewBuilder::shared_exit_for_indices(self, indices)
+        fission_midend_structuring::shared_exit_for_indices(self, indices)
     }
     fn collect_jump_targets(&mut self) -> Result<std::collections::HashSet<u64>, MlilPreviewError> {
         PreviewBuilder::collect_jump_targets(self)
@@ -250,7 +320,7 @@ impl<'a> StructuringHost for PreviewBuilder<'a> {
         exit: LinearExit,
         budget: Option<&mut IfLoweringBudget>,
     ) -> Result<LinearBodyLoweringOutcome, MlilPreviewError> {
-        PreviewBuilder::lower_linear_body_for_region_recovery_detailed(
+        fission_midend_structuring::lower_linear_body_for_region_recovery_detailed(
             self, start_idx, exit, budget,
         )
     }

@@ -17,8 +17,12 @@ Free-function owners live in `fission-midend-structuring` and take
 | Loops (`try_lower_while/for/…`, subgraph) | `fission-midend-structuring::loops` | host free fns; thin wrappers here |
 | Switch (`try_lower_switch`, compare-chain) | `fission-midend-structuring::switch` | host free fns; thin wrappers here |
 | LinearExit / LoweredTerminator / budget / outcomes | `fission-midend-structuring::linear_types` | re-exported via support |
-| Region linear recovery | `fission-midend-structuring::linear_recovery` | free fns; core `lower_linear_body` still host |
-| Linear body pipeline, guarded_tail, driver | residual methods on `PreviewBuilder` | convert next |
+| Region linear recovery | `fission-midend-structuring::linear_recovery` | free fns |
+| Linear body (`lower_linear_body*`, exits, cond tails) | `fission-midend-structuring::linear_body` | free fns; cache via host |
+| Multiblock linear fallback + p-code trivial ops | residual on `PreviewBuilder` | host-owned |
+| Guarded-tail pure HIR rewrites | `fission-midend-structuring::guarded_tail_pure` | free fns |
+| Driver admission / region scaffold pure helpers | `fission-midend-structuring::driver_pure` | free fns |
+| Guarded-tail promote/execute, SESE driver body | residual methods on `PreviewBuilder` | convert next |
 
 Prefer new work as `fn try_lower_*(host: &mut impl StructuringHost, ...)`.
 

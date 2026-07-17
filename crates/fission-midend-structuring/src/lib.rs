@@ -21,9 +21,12 @@ pub mod cleanup;
 pub mod collapse_loop;
 pub mod conditionals;
 pub mod graph;
+pub mod guarded_tail_pure;
+pub mod driver_pure;
 pub mod helpers;
 pub mod host;
 pub mod irreducible;
+pub mod linear_body;
 pub mod linear_recovery;
 pub mod linear_types;
 pub mod loop_analysis;
@@ -57,6 +60,20 @@ pub use linear_types::{
 pub use linear_recovery::{
     SESE_REGION_PROOF_BUDGET_MS, build_linear_sese_child_fallback,
     region_linearized_exit_candidates_algorithmic, try_recover_region_linearized_body,
+};
+pub use guarded_tail_pure::{
+    count_var_defs_stmt, count_var_reads_stmt, expr_contains_var, replace_var_in_expr,
+    replace_var_in_stmt,
+};
+pub use driver_pure::{
+    apply_blockgraph_collapse_admission_gate, is_switch_scaffold_stmt, region_kind_for_stmt,
+    region_selector_or_condition, switch_stmt_has_scaffold_only_arms,
+};
+pub use linear_body::{
+    can_inline_linear_successor, can_inline_linear_successor_for_region, has_linear_body_cache,
+    linear_exit, linear_exit_with_budget, lower_conditional_tail, lower_linear_body,
+    lower_linear_body_for_region_recovery_detailed, lower_linear_body_with_budget,
+    shared_exit_for_indices, shared_linear_exit,
 };
 pub use conditionals::{
     is_trivial_structuring_stmt, try_lower_if, try_lower_if_else, try_lower_return_chain_arm,

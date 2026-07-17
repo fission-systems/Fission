@@ -8,86 +8,25 @@ pub use admission::*;
 pub(crate) mod collapse;
 mod orphan_repair;
 
-fn apply_blockgraph_collapse_admission_gate(
-    admission: StructuringAdmissionReason,
-    enabled: bool,
-) -> StructuringAdmissionReason {
-    if enabled && matches!(admission, StructuringAdmissionReason::IrreducibleBudget) {
-        StructuringAdmissionReason::GraphCollapse
-    } else {
-        admission
-    }
-}
+pub(crate) use fission_midend_structuring::apply_blockgraph_collapse_admission_gate;
 
 impl<'a> PreviewBuilder<'a> {
     #[cfg(test)]
     fn is_switch_scaffold_stmt(stmt: &HirStmt) -> bool {
-        match stmt {
-            HirStmt::Goto(_) => true,
-            HirStmt::Block(body) => body.iter().all(Self::is_switch_scaffold_stmt),
-            HirStmt::Label(_)
-            | HirStmt::Assign { .. }
-            | HirStmt::Expr(_)
-            | HirStmt::VaStart { .. }
-            | HirStmt::If { .. }
-            | HirStmt::Switch { .. }
-            | HirStmt::While { .. }
-            | HirStmt::DoWhile { .. }
-            | HirStmt::For { .. }
-            | HirStmt::Return(_)
-            | HirStmt::Break
-            | HirStmt::Continue => false,
-        }
+        fission_midend_structuring::is_switch_scaffold_stmt(stmt)
     }
 
     #[cfg(test)]
     fn switch_stmt_has_scaffold_only_arms(stmt: &HirStmt) -> bool {
-        let HirStmt::Switch { cases, default, .. } = stmt else {
-            return false;
-        };
-        !cases.is_empty()
-            && cases
-                .iter()
-                .all(|case| case.body.iter().all(Self::is_switch_scaffold_stmt))
-            && default.iter().all(Self::is_switch_scaffold_stmt)
+        fission_midend_structuring::switch_stmt_has_scaffold_only_arms(stmt)
     }
 
     fn region_kind_for_stmt(stmt: &HirStmt) -> Option<RegionKind> {
-        match stmt {
-            HirStmt::Switch { .. } => Some(RegionKind::Switch),
-            HirStmt::If { .. } => Some(RegionKind::Conditional),
-            HirStmt::While { .. } | HirStmt::DoWhile { .. } | HirStmt::For { .. } => {
-                Some(RegionKind::Loop)
-            }
-            HirStmt::Block(_) => Some(RegionKind::Sequence),
-            HirStmt::Assign { .. }
-            | HirStmt::Expr(_)
-            | HirStmt::VaStart { .. }
-            | HirStmt::Label(_)
-            | HirStmt::Goto(_)
-            | HirStmt::Return(_)
-            | HirStmt::Break
-            | HirStmt::Continue => None,
-        }
+        fission_midend_structuring::region_kind_for_stmt(stmt)
     }
 
     fn region_selector_or_condition(stmt: &HirStmt) -> Option<String> {
-        match stmt {
-            HirStmt::Switch { expr, .. } => Some(print_expr(expr)),
-            HirStmt::If { cond, .. }
-            | HirStmt::While { cond, .. }
-            | HirStmt::DoWhile { cond, .. } => Some(print_expr(cond)),
-            HirStmt::For { cond, .. } => cond.as_ref().map(print_expr),
-            HirStmt::Block(_)
-            | HirStmt::Assign { .. }
-            | HirStmt::Expr(_)
-            | HirStmt::VaStart { .. }
-            | HirStmt::Label(_)
-            | HirStmt::Goto(_)
-            | HirStmt::Return(_)
-            | HirStmt::Break
-            | HirStmt::Continue => None,
-        }
+        fission_midend_structuring::region_selector_or_condition(stmt)
     }
 
     fn build_region_proof(
