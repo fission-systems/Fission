@@ -11,4 +11,5 @@ keywords = ["decompiler", "normalize", "midend"]
 categories = ["development-tools"]
 
 [dependencies]
+fission-midend-core = { path = "../fission-midend-core" }
 fission-pcode = { path = "../fission-pcode" }

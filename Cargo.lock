@@ -2492,9 +2492,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "fission-midend-core"
+version = "0.1.3"
+dependencies = [
+ "fission-pcode",
+]
+
+[[package]]
 name = "fission-midend-normalize"
 version = "0.1.3"
 dependencies = [
+ "fission-midend-core",
  "fission-pcode",
 ]
 
@@ -2502,6 +2510,7 @@ dependencies = [
 name = "fission-midend-structuring"
 version = "0.1.3"
 dependencies = [
+ "fission-midend-core",
  "fission-pcode",
 ]
 

@@ -1,6 +1,6 @@
 //! Ghidra-ordered normalize action groups and pipeline driver.
 
-use super::super::wave_stats;
+use crate::midend::wave_stats;
 use super::stages::{
     run_stage_block_structure_1, run_stage_cleanup, run_stage_deadcode_dynamic,
     run_stage_heritage_value_recovery, run_stage_memory_recovery, run_stage_merge,

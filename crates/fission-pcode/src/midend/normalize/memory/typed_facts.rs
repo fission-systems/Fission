@@ -2,7 +2,7 @@ use super::super::*;
 use super::partition::{
     MemoryAccessKind, MemoryEscapeClass, collect_partitioned_memory_accesses, type_byte_size,
 };
-use crate::midend::normalize::wave_stats::{
+use crate::midend::wave_stats::{
     add_object_root_fact_promotions, add_surface_fact_promotions, add_typed_fact_conflicts,
     add_typed_fact_evidences,
 };

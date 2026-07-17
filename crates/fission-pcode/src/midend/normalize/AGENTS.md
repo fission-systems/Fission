@@ -15,9 +15,9 @@ Scope: `crates/fission-pcode/src/midend/normalize/`
 | `memory/` | Slots, aggregate fields, pointer-arithmetic recovery |
 | `idioms/` | Bitstream, branch hoist, callee-save prologue cleanup |
 | `pipeline/` | `normalize_hir_function` orchestration (`run.rs`) |
-| `wave_stats.rs` | Normalize wave telemetry into `NirBuildStats` |
 
-Legacy flat modules at crate root of `normalize/`: `wave_stats.rs` only; other passes live under the directories above.
+Shared quality-wave counters live at midend root (`../wave_stats.rs`), not under
+normalize. Import via `crate::midend::wave_stats` (ADR 0012 Phase D0).
 
 ## Pass ownership (avoid duplicate policy)
 
@@ -33,6 +33,6 @@ Legacy flat modules at crate root of `normalize/`: `wave_stats.rs` only; other p
 ## Conventions
 
 - Orchestration lives in `pipeline/`; behavior changes belong in the owning pass directory.
-- `NirBuildStats` fields remain defined only in `nir/ir/build_stats.rs` (compat path `nir::types`).
+- `NirBuildStats` fields remain defined only in `midend/ir/build_stats.rs`.
 - New normalize behavior must enter through the ActionGroup/pass registry and an existing owner directory. Repeated special cases should be promoted into shared def-use, type-constraint, alias, or CFG facts before adding another narrow pass.
 - Normalize/type recovery may consume substrate and action-pipeline facts, but must not reach into builder internals, structuring promotion policy, or render/printer output.

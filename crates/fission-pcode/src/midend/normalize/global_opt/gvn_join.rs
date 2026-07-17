@@ -9,7 +9,7 @@
 use super::super::analysis::expr_key::pure_expr_key;
 use super::super::analysis::preservation::preserved_binding_origin;
 use super::super::cleanup::expr_has_side_effects;
-use super::super::wave_stats;
+use crate::midend::wave_stats;
 use super::super::*;
 use crate::midend::support::expr_type;
 

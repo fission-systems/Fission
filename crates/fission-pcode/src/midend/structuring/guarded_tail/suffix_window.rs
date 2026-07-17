@@ -567,7 +567,7 @@ impl<'a> PreviewBuilder<'a> {
         };
 
         let target_addr = crate::midend::ir::parse_call_target_address(target);
-        let import = crate::midend::normalize::is_known_api_signature(target);
+        let import = crate::midend::is_known_api_signature(target);
         let internal = !import && target_addr.is_some();
         let summary_available = import
             || Self::call_target_is_known_pure_helper(target)

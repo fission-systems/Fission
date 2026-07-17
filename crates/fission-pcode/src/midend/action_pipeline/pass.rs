@@ -94,7 +94,7 @@ pub(crate) fn run_pass_logged<P: Pass + ?Sized>(ctx: &mut PassCtx<'_>, pass: &P)
     let elapsed_ms = start.elapsed().as_secs_f64() * 1000.0;
     let changed = outcome.changed();
 
-    crate::midend::normalize::wave_stats::add_pass_metric(
+    crate::midend::wave_stats::add_pass_metric(
         pass_name,
         elapsed_ms,
         changed,

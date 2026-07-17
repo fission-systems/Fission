@@ -4,8 +4,9 @@
 //!
 //! Implementation still lives in [`fission_pcode::midend::normalize`]. This
 //! crate is the stable dependency name for normalize-facing callers while the
-//! physical code move waits on a shared midend-core split (action_pipeline /
-//! vsa reverse edges).
+//! physical code move waits on midend-core (`ir` + `action_pipeline` +
+//! `wave_stats`; ADR 0012 Phase D). Reverse `wave_stats` edges are already
+//! off the normalize path (Phase D0).
 //!
 //! Prefer this crate over deep `fission-pcode` paths for normalize entrypoints.
 
@@ -19,5 +20,5 @@ pub use fission_pcode::midend::normalize::{
 /// Owner module re-export (grows as normalize API is stabilized for extraction).
 pub use fission_pcode::midend::normalize as owner;
 
-/// Shared structured-IR types needed by normalize callers.
-pub use fission_pcode::midend::{HirFunction, HirStmt, NirBuildStats};
+/// Shared structured-IR types (via midend-core substrate facade).
+pub use fission_midend_core::{HirFunction, HirStmt, NirBuildStats};

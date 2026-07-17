@@ -11,8 +11,8 @@
 /// Owner module re-export.
 pub use fission_pcode::midend::structuring as owner;
 
-/// Shared structured-IR types needed by structuring callers.
-pub use fission_pcode::midend::{HirFunction, HirStmt, NirBuildStats};
+/// Shared structured-IR types (via midend-core substrate facade).
+pub use fission_midend_core::{HirFunction, HirStmt, NirBuildStats};
 
 /// Switch fallthrough sentinel used by structuring and print.
-pub use fission_pcode::midend::SWITCH_FALLTHROUGH_SENTINEL;
+pub use fission_midend_core::SWITCH_FALLTHROUGH_SENTINEL;

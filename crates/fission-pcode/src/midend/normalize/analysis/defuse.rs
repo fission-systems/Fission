@@ -14,7 +14,7 @@ use super::super::cleanup::{expr_has_side_effects, prune_unused_temp_bindings};
 use super::super::*;
 use crate::midend::normalize::analysis::expr_key::pure_expr_key;
 use crate::midend::normalize::pipeline::normalize_expr;
-use crate::midend::normalize::wave_stats;
+use crate::midend::wave_stats;
 use crate::midend::support::{expr_type, next_temp_name};
 use std::collections::{HashMap, HashSet};
 

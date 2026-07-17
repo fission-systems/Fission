@@ -1,4 +1,4 @@
-use super::super::wave_stats::{
+use crate::midend::wave_stats::{
     add_call_prototype_exact_api_arity_pruned, add_call_prototype_signature_missing,
     add_call_prototype_unknown_target_kept, add_call_prototype_wrapper_resolved,
     add_call_signature_refinements, add_surface_fact_promotions, add_typed_fact_conflicts,
@@ -1023,7 +1023,7 @@ fn collect_callsites_expr(
 
 #[cfg(test)]
 mod tests {
-    use super::super::super::wave_stats::{reset_normalize_wave_stats, take_normalize_wave_stats};
+    use crate::midend::wave_stats::{reset_normalize_wave_stats, take_normalize_wave_stats};
     use super::*;
     use fission_core::CallingConvention;
 

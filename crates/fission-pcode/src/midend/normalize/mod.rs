@@ -19,9 +19,6 @@ mod subvar_flow;
 mod types;
 pub(crate) use rule_normalizer::apply_rule_normalization;
 
-/// Re-export shared midend wave counters (compat path for older normalize::wave_stats imports).
-pub(crate) use super::wave_stats;
-
 pub use types::is_known_api_signature;
 pub use types::{summarize_direct_tail_wrapper_from_ops, summarize_direct_tail_wrapper_from_pcode};
 

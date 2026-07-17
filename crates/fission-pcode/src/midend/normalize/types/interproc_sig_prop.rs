@@ -15,7 +15,7 @@ use crate::midend::ir::{
 };
 use indexmap::IndexMap;
 
-use super::super::wave_stats::{
+use crate::midend::wave_stats::{
     add_call_effect_summary_refinements, add_interproc_constraint_rounds,
     add_prototype_summary_refinements, add_prototype_summary_rounds, add_wrapper_summary_folds,
 };

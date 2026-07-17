@@ -14,7 +14,7 @@
 /// - Ghidra `rangeutil.hh`: `CircleRange`, `ValueSetSolver`
 use super::solver::solve;
 use super::transfer::{RangeEnv, eval_expr};
-use crate::midend::normalize::wave_stats::{
+use crate::midend::wave_stats::{
     add_dispatcher_shape_recoveries, add_indirect_target_set_refinements,
 };
 use crate::midend::{HirFunction, HirStmt};

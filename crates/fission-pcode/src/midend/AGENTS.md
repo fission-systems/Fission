@@ -44,7 +44,9 @@ midend/
 | Shared label sentinels | `labels.rs` | Fallthrough and similar markers shared by structuring + render |
 | Quality-wave counters | `wave_stats.rs` | Shared by normalize / structuring / vsa (not normalize-private) |
 | Preview orchestration | `orchestrate.rs` | `render_mlil_preview*` / `render_nir*` entrypoints only |
+| Midend-core facade crate | `fission-midend-core` | Shared IR / labels substrate (ADR 0012 D) |
 | Normalize facade crate | `fission-midend-normalize` | Prefer for normalize entrypoints (ADR 0012) |
+| Structuring facade crate | `fission-midend-structuring` | Prefer for structuring entrypoints (ADR 0012) |
 | Synthetic regression tests | `tests/` | Prefer adding targeted NIR tests here |
 | Normalize pass layout | `normalize/AGENTS.md` | Directory map for `arith/`, `pipeline/`, etc. |
 

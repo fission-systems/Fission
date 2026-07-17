@@ -27,7 +27,7 @@ use super::super::analysis::preservation::{
 /// *same* set of variables and renames join-point uses to the shared variable.
 /// This models the classical SSA out-of-SSA transformation for 2-way joins.
 use super::super::cleanup::{prune_unused_dead_local_bindings, prune_unused_temp_bindings};
-use super::super::wave_stats;
+use crate::midend::wave_stats;
 use super::super::*;
 use std::collections::{HashMap, HashSet};
 

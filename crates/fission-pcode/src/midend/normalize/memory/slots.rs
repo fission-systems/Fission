@@ -3,7 +3,7 @@ use super::super::pipeline::normalize_expr;
 use super::super::*;
 use super::partition::{collect_partitioned_memory_accesses, type_byte_size};
 use super::typed_facts::collect_typed_fact_inventory;
-use crate::midend::normalize::wave_stats::add_surface_binding_promotions;
+use crate::midend::wave_stats::add_surface_binding_promotions;
 use std::collections::{HashMap, HashSet};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]

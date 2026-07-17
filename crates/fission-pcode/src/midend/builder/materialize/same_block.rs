@@ -1881,7 +1881,7 @@ impl<'a> PreviewBuilder<'a> {
         let writes_memory = effect_summary.and_then(|summary| summary.writes_memory);
         let may_call_unknown = effect_summary.and_then(|summary| summary.may_call_unknown);
         let may_exit = effect_summary.and_then(|summary| summary.may_exit);
-        let import_call = crate::midend::normalize::is_known_api_signature(call_target);
+        let import_call = crate::midend::is_known_api_signature(call_target);
         let internal_target = crate::midend::ir::parse_call_target_address(call_target).is_some();
         let defining_opcode = block.ops.get(op_idx).map(|op| op.opcode);
         let preview_unsafe = effect_source == Some(CallEffectSummarySource::PreviewCalleeAnalysis)

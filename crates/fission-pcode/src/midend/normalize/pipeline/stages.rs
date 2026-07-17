@@ -46,7 +46,7 @@ use super::super::types::{
     apply_entry_param_promotion_pass, apply_interproc_callsite_arity_pass,
     apply_variadic_stack_region_pass,
 };
-use super::super::wave_stats;
+use crate::midend::wave_stats;
 use super::run::{
     apply_type_signature_fixed_point, body_contains_popcount_call, body_has_loopish_shapes,
     cleanup_func_stmt_list, contains_call_stmts, hir_shape, is_large_hir_function,

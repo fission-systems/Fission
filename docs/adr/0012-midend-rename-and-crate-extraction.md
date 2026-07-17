@@ -45,8 +45,8 @@ Removed intermediate aliases that no longer had callers:
 | A | *(in-tree)* | `midend` rename + public owner modules | **Done** |
 | B | `fission-midend-normalize` | Facade re-export of normalize surface | **Expanded** (`normalize_hir_function`, wave stats, API sigs) |
 | C | `fission-midend-structuring` | Facade re-export of structuring surface | **Expanded** (owner + shared IR types) |
-| D0 | Decouple reverse edges | `wave_stats` at midend root; callers migrate off `normalize::wave_stats` | **In progress** |
-| D | Move implementation | Code leaves `fission-pcode` into facades (needs midend-core for action_pipeline/vsa) | Future |
+| D0 | Decouple reverse edges | `wave_stats` at midend root; all callers use `midend::wave_stats`; reverse `is_known_api_signature` via midend root | **Done** |
+| D | `fission-midend-core` + move | Shared substrate facade scaffolded; physical `ir`/`action_pipeline`/`wave_stats` move still future | **Scaffolded** |
 | E | Drop `fission_pcode::nir` alias | After workspace migration | **Done** |
 
 Facade crates **do not** move source yet. They establish stable dependency
@@ -73,6 +73,12 @@ before crates).
 
 ## Follow-ups
 
-1. Migrate `fission-decompiler` / `fission-static` imports to `midend`.
-2. Promote facade crates from re-export to owned source trees.
-3. Remove `pub use midend as nir` when greps are clean.
+1. ~~Migrate `fission-decompiler` / `fission-static` imports to `midend`.~~ **Done**
+2. ~~Remove `pub use midend as nir` when greps are clean.~~ **Done** (Phase E)
+3. ~~Scaffold `fission-midend-core` and route facade IR types through it.~~ **Done**
+4. **Physical midend-core move:** lift `ir/`, `action_pipeline/`, and
+   `wave_stats` out of `fission-pcode` into `fission-midend-core` (break
+   pcode→core cycle by inverting ownership; keep builder/vsa in pcode or
+   co-extract as needed).
+5. Promote normalize/structuring facades from re-export to owned source trees;
+   then have decompiler/static depend on facades for owner entrypoints.

@@ -63,7 +63,7 @@ use super::super::types::{
     apply_interproc_callsite_arity_pass, apply_type_constraint_propagation,
     apply_type_inference_pass, apply_use_driven_type_infer_pass, apply_variadic_stack_region_pass,
 };
-use super::super::wave_stats;
+use crate::midend::wave_stats;
 use super::super::*;
 use crate::midend::action_pipeline::{
     EARLY_CLEANUP_BLOCK_BLOCK_LIMIT, EARLY_CLEANUP_BLOCK_STMT_LIMIT, PassBudget,
@@ -1067,7 +1067,7 @@ where
     let (after_stmts, after_locals) = hir_shape(func);
     let elapsed_ms = start.elapsed().as_secs_f64() * 1000.0;
 
-    super::super::wave_stats::add_pass_metric(
+    crate::midend::wave_stats::add_pass_metric(
         pass_name,
         elapsed_ms,
         changed,

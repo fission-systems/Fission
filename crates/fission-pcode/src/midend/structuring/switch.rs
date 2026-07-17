@@ -1,5 +1,5 @@
 use super::*;
-use crate::midend::normalize::wave_stats;
+use crate::midend::wave_stats;
 
 impl<'a> PreviewBuilder<'a> {
     pub(super) fn try_lower_switch(

@@ -11,7 +11,7 @@ use crate::midend::var_rename::rename_vars_in_stmts;
 use crate::midend::{AbiState, CallingConvention};
 use std::collections::{BTreeSet, HashSet};
 
-use super::super::wave_stats::add_entry_param_promotions;
+use crate::midend::wave_stats::add_entry_param_promotions;
 
 fn abi_pointer_size(is_64bit: bool, abi: CallingConvention) -> u32 {
     if is_64bit

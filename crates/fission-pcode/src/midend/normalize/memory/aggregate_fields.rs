@@ -34,7 +34,7 @@ use super::typed_facts::{
     inferred_aggregate_size as inferred_size_from_facts,
     should_infer_aggregate as should_infer_aggregate_from_facts,
 };
-use crate::midend::normalize::wave_stats::{
+use crate::midend::wave_stats::{
     add_object_root_recoveries, add_object_shape_recoveries, add_surface_binding_promotions,
     add_typed_object_shape_refinements,
 };

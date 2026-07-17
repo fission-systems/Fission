@@ -1,15 +1,15 @@
 [package]
-name = "fission-midend-structuring"
+name = "fission-midend-core"
 version = "0.1.3"
 edition = "2024"
 authors = ["Fission Dev Team"]
-description = "Midend structuring owner facade (extraction scaffold; impl still in fission-pcode)"
+description = "Midend shared substrate facade (IR + labels; extraction scaffold)"
 repository = "https://github.com/sjkim1127/Fission"
 license = "AGPL-3.0-or-later"
 readme = "../../README.md"
-keywords = ["decompiler", "structuring", "midend", "cfg"]
+keywords = ["decompiler", "midend", "ir"]
 categories = ["development-tools"]
 
 [dependencies]
-fission-midend-core = { path = "../fission-midend-core" }
+# Temporary re-export host until ir/ + action_pipeline + wave_stats move here (ADR 0012 D).
 fission-pcode = { path = "../fission-pcode" }

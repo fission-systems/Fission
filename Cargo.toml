@@ -7,6 +7,7 @@ members = [
     "crates/fission-loader",
     "crates/fission-analysis-db",
     "crates/fission-pcode",
+    "crates/fission-midend-core",
     "crates/fission-midend-normalize",
     "crates/fission-midend-structuring",
     "crates/fission-decompiler",

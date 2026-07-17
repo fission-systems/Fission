@@ -3,7 +3,7 @@ use super::super::analysis::preservation::{
     should_block_trivial_return_collapse, should_keep_unused_temp_binding,
     should_skip_inline_for_preserved_temp,
 };
-use super::super::wave_stats;
+use crate::midend::wave_stats;
 use super::super::*;
 use super::utils::*;
 use std::collections::{HashMap, HashSet};
