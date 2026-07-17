@@ -15,17 +15,21 @@ The first guarded scope is the core semantic layer: builder, materialize,
 normalize, structuring, and type/data recovery. UI, printer-only, benchmark, and
 dashboard changes can report quality, but they do not count as semantic fixes.
 Readability-only HIR presentation is governed separately by
-[ADR 0011](0011-hir-presentation-contract.md) (lighter gate; no oracle swap).
+[ADR 0011](0011-hir-presentation-contract.md) (clone-only; no oracle swap) but
+**still requires measured evidence** for any quality claim (repo root Agents.md
+Core Rule 10: measurement-only). Synthetic fixtures alone are not a quality claim.
 
 ## Decision
 
-Every semantic decompiler-quality change must pass a pre-implementation proposal
-gate before production code is added. Use
+Every decompiler-quality change (semantic **or** claimed readability) must pass
+a pre-implementation proposal gate before production code is added as a quality
+fix. Use
 [`docs/templates/DECOMPILER_CHANGE_PROPOSAL.md`](../templates/DECOMPILER_CHANGE_PROPOSAL.md)
 and record the chain:
 
-1. **Row anchor:** the binary, function, address, current output, semantic case
-   count, and failure category that motivated the work.
+1. **Row anchor (measured):** the binary, function, address, current output,
+   semantic case count, and failure category that motivated the work — from a
+   real decomp/benchmark run, not a hand-built IR fixture alone.
 2. **Owner proof:** evidence that the bug belongs to SLEIGH/raw p-code,
    builder/materialize, normalize, structuring, type/data recovery, printer, or
    benchmark/automation.
