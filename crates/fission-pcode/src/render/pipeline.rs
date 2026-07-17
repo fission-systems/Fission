@@ -1,4 +1,4 @@
-use super::hir_presentation::apply_hir_presentation;
+use super::presentation::apply_hir_presentation;
 use super::layer::{LayeredPseudocode, PrintProfile};
 use super::{
     HirExpr, HirFunction, HirLValue, HirStmt, MlilPreviewOptions, NirBinding, NirBindingOrigin,

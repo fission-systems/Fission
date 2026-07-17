@@ -1,7 +1,7 @@
 # ADR 0008: NIR substrate and owner boundaries
 
 **Status:** Accepted
-**Last verified:** 2026-07-04
+**Last verified:** 2026-07-17
 
 ## Context
 
@@ -44,6 +44,12 @@ Module dependency direction is now part of the design:
   expression semantics through normalize or builder helpers;
 - render/printer consumes structured HIR only and must not perform semantic
   recovery.
+
+**Physical progress (in-crate, not yet multi-crate):**
+
+- Dual-layer print lives at crate-root `src/render/` (not nested under `nir/`).
+- HIR polish is `render/presentation/`; shared sentinels in `nir/labels.rs`.
+- Smoke scan: `scripts/check/owner_boundaries.sh`.
 
 Existing cross-edges are migration debt, not precedent. They should be retired
 by moving shared facts into substrate modules such as CFG, def-use, type

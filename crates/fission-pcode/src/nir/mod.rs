@@ -17,6 +17,7 @@ mod cfg;
 pub mod cspec;
 mod normalize;
 pub(crate) mod pass;
+mod labels;
 mod piece;
 mod stats;
 mod structuring;
@@ -34,6 +35,7 @@ pub(crate) use self::abi::{
 };
 pub use self::abstract_location::{AbstractStackSlot, ParamSlotIndex};
 pub(crate) use self::action_pipeline::STRUCTURING_TIME_CEILING_SECS;
+pub(crate) use self::labels::SWITCH_FALLTHROUGH_SENTINEL;
 
 pub(super) use self::support::*;
 pub use self::telemetry::{
@@ -60,7 +62,7 @@ pub use self::normalize::{
 pub use crate::render::{
     LayeredPseudocode, PrintProfile, PseudocodeLayer, render_contracted_wrapper_summary,
 };
-// Compat path: historical `crate::nir::render::…` imports.
+// Compat alias: historical module path under nir (prefer crate::render).
 pub use crate::render as render;
 // take_last_layered_pseudocode defined below after render path
 

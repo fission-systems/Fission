@@ -636,7 +636,7 @@ pub(super) fn merge_equivalent_switch_cases(cases: &mut Vec<HirSwitchCase>) {
 
 /// The sentinel label used to mark a switch-case fallthrough edge.
 /// The printer recognises this label and renders it as `/* fallthrough */`.
-pub(crate) const SWITCH_FALLTHROUGH_SENTINEL: &str = "__fallthrough";
+pub(crate) use crate::nir::SWITCH_FALLTHROUGH_SENTINEL;
 
 /// Detect consecutive switch cases where case `i` ends with a `Goto` targeting
 /// the label at the start of case `i+1` (i.e. a C-style fallthrough), and replace

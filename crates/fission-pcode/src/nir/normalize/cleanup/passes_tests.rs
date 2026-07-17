@@ -1446,7 +1446,7 @@ fn deindirect_resolves_iat_load_to_symbol() {
 
 #[test]
 fn printer_renders_callind_opaque_as_pointer_call() {
-    use crate::nir::render::print_expr;
+    use crate::render::print_expr;
 
     let expr = HirExpr::Call {
         target: "__fission_callind_opaque".to_string(),

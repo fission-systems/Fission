@@ -2,70 +2,65 @@
 
 Scope: `crates/fission-pcode/src/render/`
 
-Canonical policy: [`docs/adr/0011-hir-presentation-contract.md`](../../../docs/adr/0011-hir-presentation-contract.md).
-
-Phase 1 layout (ADR 0008 / 0011): presentation lives at **crate root** `render/`, not under `nir/`. Structured IR types remain in `nir/`; this module only consumes them.
+Canonical policy:
+- [`docs/adr/0011-hir-presentation-contract.md`](../../../docs/adr/0011-hir-presentation-contract.md)
+- [`docs/adr/0008-nir-substrate-and-owner-boundaries.md`](../../../docs/adr/0008-nir-substrate-and-owner-boundaries.md)
 
 ## Layout
 
-| File | Role |
+```text
+render/
+├── mod.rs           # owner surface + type bridge from nir
+├── layer.rs         # PseudocodeLayer, PrintProfile, LayeredPseudocode
+├── printer.rs       # C print (shared walk; profile sugar)
+├── presentation/    # HIR-only tree polish (apply_hir_presentation)
+│   └── mod.rs
+└── pipeline.rs      # layered render + global-name recovery helpers
+```
+
+| Path | Role |
 |------|------|
-| `layer.rs` | `PseudocodeLayer`, `PrintProfile`, `LayeredPseudocode` |
-| `pipeline.rs` | `render_layered_pseudocode` — NIR from raw tree, HIR from **clone** + presentation |
-| `hir_presentation.rs` | Readability-only tree polish (`apply_hir_presentation`) |
-| `printer.rs` | C print; `PrintProfile::Hir` cast sugar only |
+| `layer` | Dual-surface contracts |
+| `printer` | NIR/HIR text emission |
+| `presentation` | Readability-only tree polish before HIR print |
+| `pipeline` | `render_layered_pseudocode` orchestration |
+
+**Do not rename this module to `hir`.** It owns both NIR and HIR print surfaces.
 
 ## Dependency direction
 
 ```text
-nir (builder / normalize / structuring / types)
-        │
-        ▼  consume structured tree
-     render (print + HIR presentation)
+nir (types / builder / normalize / structuring / labels)
+        │ consume structured tree + shared sentinels only
+        ▼
+     render
 ```
 
-- Do **not** call normalize/structuring from here.
-- `nir` orchestration may call `render` for dual-layer output (crate-local).
-- Prefer `crate::render::…`. Compat alias: `crate::nir::render` re-exports this module.
+- Prefer `crate::render::…`. Compat alias `crate::nir::render` remains temporarily.
+- Shared sentinels (e.g. switch fallthrough) live in `nir/labels.rs`, not duplicated here.
+- Boundary scan: `scripts/check/owner_boundaries.sh`
 
 ## Rules (do)
 
-1. Clone before `apply_hir_presentation`; never polish the tree used for NIR print.
-2. Keep semantic recovery in normalize/structuring; keep sugar here.
-3. Prefer structural invariants (def counts, purity, goto/label shape, truthiness).
-4. Preserve **single evaluation** of calls/loads when folding `x = e; return x` or selects.
-5. Add a focused `hir_presentation` / `layered_*` test for every new transform.
-6. When a real binary motivated the change, verify with  
-   `fission_cli decomp <bin> --addr … --layer both --no-header --no-warnings`  
-   and report **actual** NIR/HIR in the PR.
+1. Clone before presentation polish; never polish the tree used for NIR print.
+2. Keep semantic recovery in normalize/structuring.
+3. Structural invariants only (def counts, purity, goto/label shape, truthiness).
+4. Preserve single evaluation of calls/loads.
+5. Focused tests under `presentation` / `pipeline` for every new transform.
+6. Real-binary verification with `fission_cli decomp --layer both` when motivated by a PE row.
 
 ## Rules (don’t)
 
-1. Don’t branch on function name, address, binary path, or corpus row id.
-2. Don’t alias-fold multi-def / loop-carried names.
-3. Don’t inline multi-use calls/loads (would re-execute side effects).
-4. Don’t drop required widening casts (e.g. wide mul).
-5. Don’t retarget semantic oracle / primary benchmark `code` to HIR.
-6. Don’t require full ADR 0006 proposal for pure presentation edits—but if you
-   must change normalize/structuring for “readability,” ADR 0006 applies.
+1. No function/address/binary/corpus special cases.
+2. No multi-def alias fold; no multi-use call/load inline.
+3. No required widening-cast peel.
+4. No semantic oracle / primary benchmark `code` retarget to HIR.
+5. No `nir::normalize` / `nir::structuring` imports from render.
 
-## Validation checklist
+## Validation
 
 ```bash
-# Focused
-cargo nextest run -p fission-pcode -- hir_presentation layered
-
-# Crate
+scripts/check/owner_boundaries.sh
+cargo nextest run -p fission-pcode -- presentation layered hir_presentation
 cargo nextest run -p fission-pcode
-
-# Real surface (example O0 rows)
-cargo build -p fission-cli --release
-./target/release/fission_cli decomp \
-  /path/to/advanced_patterns_gcc_O0.exe --addr 0x140001532 \
-  --layer both --no-header --no-warnings
 ```
-
-## Pass list owner
-
-`apply_hir_presentation` documents the fixed-point order. Extend an existing
-helper before inventing a parallel end pass.
