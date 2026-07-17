@@ -10,7 +10,7 @@
       
       
       
-        <link rel="canonical" href="https://sjkim1127.github.io/Fission/proposals/2026-07-17-sum-array-loop-cursor/">
+        <link rel="canonical" href="https://sjkim1127.github.io/Fission/proposals/2026-07-18-call-result-successor-observe/">
       
       
       
@@ -23,7 +23,7 @@
     
     
       
-        <title>Decompiler change proposal: loop pointer cursor (sum_array) - Fission</title>
+        <title>Decompiler change proposal: call-result observation across successors - Fission</title>
       
     
     
@@ -74,7 +74,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#decompiler-change-proposal-loop-pointer-cursor-sum_array" class="md-skip">
+        <a href="#decompiler-change-proposal-call-result-observation-across-successors" class="md-skip">
           Skip to content
         </a>
       
@@ -108,7 +108,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Decompiler change proposal: loop pointer cursor (sum_array)
+              Decompiler change proposal: call-result observation across successors
             
           </span>
         </div>
@@ -961,10 +961,10 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#assembly-ground-truth" class="md-nav__link">
+  <a href="#assembly-pattern-ground-truth" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Assembly (ground truth)
+        Assembly pattern (ground truth)
       
     </span>
   </a>
@@ -1043,10 +1043,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#6-next-implementation-step" class="md-nav__link">
+  <a href="#6-implementation-step" class="md-nav__link">
     <span class="md-ellipsis">
       
-        6. Next implementation step
+        6. Implementation step
       
     </span>
   </a>
@@ -1073,9 +1073,9 @@
   
 
 
-<h1 id="decompiler-change-proposal-loop-pointer-cursor-sum_array">Decompiler change proposal: loop pointer cursor (sum_array)<a class="headerlink" href="#decompiler-change-proposal-loop-pointer-cursor-sum_array" title="Permanent link">&para;</a></h1>
-<p><strong>Date:</strong> 2026-07-17<br />
-<strong>Status:</strong> implemented (local remeasure + nextest green; official ranking pending)<br />
+<h1 id="decompiler-change-proposal-call-result-observation-across-successors">Decompiler change proposal: call-result observation across successors<a class="headerlink" href="#decompiler-change-proposal-call-result-observation-across-successors" title="Permanent link">&para;</a></h1>
+<p><strong>Date:</strong> 2026-07-18<br />
+<strong>Status:</strong> implemented (local remeasure + nextest green; official oracle pending)<br />
 <strong>Gate:</strong> ADR 0006 + Agents.md Core Rule 10 (measurement-only)</p>
 <h2 id="1-row-anchor-measured">1. Row anchor (measured)<a class="headerlink" href="#1-row-anchor-measured" title="Permanent link">&para;</a></h2>
 <table>
@@ -1088,55 +1088,43 @@
 <tbody>
 <tr>
 <td>Source</td>
-<td><code>fission-benchmark/corpus/dev/source/c/data_structures.c</code> <code>sum_array</code></td>
+<td><code>fission-benchmark/corpus/dev/source/c/math.c</code> recursive integer function</td>
 </tr>
 <tr>
 <td>Binary</td>
-<td><code>data_structures_gcc-m32_O2.exe</code></td>
+<td><code>math_gcc_O0.exe</code> (PE x64)</td>
 </tr>
 <tr>
 <td>Address</td>
-<td><code>0x4015b0</code> (<code>_sum_array</code>)</td>
+<td><code>0x140001530</code></td>
 </tr>
 <tr>
-<td>Oracle</td>
-<td>PE wine semantic wrapper</td>
-</tr>
-<tr>
-<td>Evidence run</td>
-<td>CI artifact <code>29594922653</code> <code>results/dev_latest.json</code></td>
-</tr>
-<tr>
-<td>Status</td>
-<td><code>fail_category=timeout</code>, <code>semantic_score=0.0</code>, <code>gotos=1</code> (HIR path)</td>
+<td>Evidence</td>
+<td><code>results/dev_latest.json</code> smoke matrix (fission): <code>semantic_score=0.5</code>, <code>cases=3/6</code>, <code>fail_category=assertion_fail</code></td>
 </tr>
 <tr>
 <td>Local remeasure</td>
-<td><code>fission_cli decomp … --layer both</code> @ commit workspace <code>main</code></td>
+<td><code>fission_cli decomp … --addr 0x140001530 --layer both</code></td>
 </tr>
 </tbody>
 </table>
-<h3 id="assembly-ground-truth">Assembly (ground truth)<a class="headerlink" href="#assembly-ground-truth" title="Permanent link">&para;</a></h3>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>mov eax, [ebp+8]      ; cursor = items
-</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>lea ecx, [eax+4*edx]  ; end = items + len
-</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>xor edx, edx          ; sum = 0
-</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>L:
-</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>  add edx, [eax]      ; sum += *cursor
-</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>  add eax, 4          ; cursor += 4
-</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>  cmp eax, ecx
-</span><span id="__span-0-8"><a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>  jnz L
+<h3 id="assembly-pattern-ground-truth">Assembly pattern (ground truth)<a class="headerlink" href="#assembly-pattern-ground-truth" title="Permanent link">&para;</a></h3>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>call  &lt;self&gt;
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>mov   ebx, eax          ; save first return
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>… reload arg …
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>call  &lt;self&gt;
+</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>add   eax, ebx          ; second return + first return
 </span></code></pre></div>
 <h3 id="current-nir-local">Current NIR (local)<a class="headerlink" href="#current-nir-local" title="Permanent link">&para;</a></h3>
-<div class="language-c highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="n">uVar1</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">param_1</span><span class="p">;</span>
-</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="n">ecx</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">uVar1</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">param_2</span><span class="p">;</span>
-</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="n">edx</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span>
-</span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="k">do</span><span class="w"> </span><span class="p">{</span>
-</span><span id="__span-1-5"><a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="w">    </span><span class="n">edx</span><span class="w"> </span><span class="o">+=</span><span class="w"> </span><span class="o">*</span><span class="n">uVar1</span><span class="p">;</span><span class="w">   </span><span class="c1">// BUG: frozen base, never advances</span>
-</span><span id="__span-1-6"><a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="w">    </span><span class="n">eax</span><span class="w"> </span><span class="o">+=</span><span class="w"> </span><span class="mi">4</span><span class="p">;</span><span class="w">        </span><span class="c1">// BUG: eax not seeded to param_1 / not same as load base</span>
-</span><span id="__span-1-7"><a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="p">}</span><span class="w"> </span><span class="k">while</span><span class="w"> </span><span class="p">(</span><span class="n">eax</span><span class="w"> </span><span class="o">!=</span><span class="w"> </span><span class="n">ecx</span><span class="p">);</span>
+<div class="language-c highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="n">uVar1</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">n</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="mi">1</span><span class="p">;</span>
+</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="n">fibonacci</span><span class="p">((</span><span class="n">ulonglong</span><span class="p">)</span><span class="n">uVar1</span><span class="p">);</span><span class="w">   </span><span class="c1">// result discarded</span>
+</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="n">rbx</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">uVar1</span><span class="p">;</span><span class="w">                   </span><span class="c1">// pre-call arg, not return</span>
+</span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="n">uVar7</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">n</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="mi">2</span><span class="p">;</span>
+</span><span id="__span-1-5"><a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="n">fibonacci</span><span class="p">((</span><span class="n">ulonglong</span><span class="p">)</span><span class="n">uVar7</span><span class="p">);</span><span class="w">   </span><span class="c1">// result discarded</span>
+</span><span id="__span-1-6"><a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="n">rax</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">uVar7</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">rbx</span><span class="p">;</span><span class="w">             </span><span class="c1">// wrong: args, not returns</span>
 </span></code></pre></div>
 <h3 id="failure-mode">Failure mode<a class="headerlink" href="#failure-mode" title="Permanent link">&para;</a></h3>
-<p>Infinite loop / wrong loads → oracle <strong>timeout</strong> (measured), not adapter_error.</p>
+<p>Semantic oracle assertion_fail (3/6 cases) — measured, not adapter_error.</p>
 <h2 id="2-owner-proof">2. Owner proof<a class="headerlink" href="#2-owner-proof" title="Permanent link">&para;</a></h2>
 <table>
 <thead>
@@ -1148,52 +1136,43 @@
 <tbody>
 <tr>
 <td>SLEIGH / raw p-code</td>
-<td>Unlikely — disasm is a textbook load/add/cmp loop on EAX</td>
+<td>OK — CALL is block terminator; next BB uses EAX</td>
 </tr>
 <tr>
-<td><strong>Materialize / loop-carried</strong></td>
-<td><strong>Primary</strong> — load address not bound to loop-carried EAX MultiEqual; preheader copy used for load</td>
+<td><strong>Materialize <code>call_result_is_observed</code></strong></td>
+<td><strong>Primary</strong> — only scans same-block ops after CALL; terminator CALL never sees successor <code>mov ebx, eax</code></td>
 </tr>
 <tr>
-<td>Structuring</td>
-<td>Secondary (do-while shape OK)</td>
+<td>live_call_result binding (cross-block read)</td>
+<td>Already correct <strong>if</strong> binding is recorded</td>
 </tr>
 <tr>
-<td>HIR presentation</td>
-<td><strong>Worsens</strong> local HIR: drops <code>uVar1</code>/<code>ecx</code> defs, leaves <code>eax</code>/<code>ecx</code> use-without-def</td>
-</tr>
-<tr>
-<td>Printer</td>
+<td>Structuring / HIR / printer</td>
 <td>Not owner</td>
 </tr>
 </tbody>
 </table>
 <h2 id="3-invariant-isa-agnostic">3. Invariant (ISA-agnostic)<a class="headerlink" href="#3-invariant-isa-agnostic" title="Permanent link">&para;</a></h2>
-<p>For a natural loop body that:</p>
-<ol>
-<li><strong>Loads</strong> through address expression <em>A</em>,</li>
-<li><strong>Updates</strong> a register/slot <em>R</em> by a constant stride (or scaled pointer step),</li>
-<li><strong>Compares</strong> <em>R</em> to a loop-invariant end pointer,</li>
-<li>Where preheader defines <em>R₀</em> as the same base used to form the end pointer,</li>
-</ol>
-<p>then the load address <em>A</em>, the update of <em>R</em>, and the compare of <em>R</em> must refer to the <strong>same loop-carried binding</strong> (phi of <em>R</em>), not a frozen preheader copy of the base that is never updated in the body.</p>
-<p>Forbidden: load from frozen <code>uVar = base</code> while updating a distinct unbound <code>eax</code> used only in the exit compare.</p>
+<p>When a <code>Call</code> / <code>CallInd</code> does not redefine the ABI primary return register later in the same block, and a successor block <strong>uses</strong> that return register (or a subregister alias) as an input <strong>before</strong> redefining it, the call result is <strong>observed</strong>.</p>
+<p>Then materialize must bind the call as an assignment to the call-result binding (not a bare expression), so successor reads resolve via existing live-call-result logic.</p>
+<p>Forbidden: discard call results and reuse pre-call argument temps that still occupy the same storage family.</p>
 <h2 id="4-validation-matrix">4. Validation matrix<a class="headerlink" href="#4-validation-matrix" title="Permanent link">&para;</a></h2>
 <ol>
-<li>Synthetic pcode/HIR test: m32-style pointer scan loop → single cursor for load+add+cmp.</li>
-<li><code>cargo nextest run -p fission-pcode</code> (loop_carried / materialize filters).</li>
-<li>Local remeasure: <code>fission_cli decomp data_structures_gcc-m32_O2.exe --addr 0x4015b0 --layer both</code>.</li>
-<li>Focused benchmark row: <code>sum_array</code> gcc-m32 -O2 semantic score (timeout → pass).</li>
-<li>Regression: other loop-carried tests; smoke if available.</li>
+<li>Unit: same-block observe still true; clobber-before-use still false.</li>
+<li>Unit: CALL as last op + successor <code>Copy(EBX, EAX)</code> → observed true.</li>
+<li>Synthetic lower: two recursive-style calls → results summed, not arg temps.</li>
+<li><code>cargo nextest run -p fission-pcode</code> (full crate regression).</li>
+<li>Local remeasure at anchor address + <code>local_decomp_observe</code> session.</li>
+<li>Official semantic oracle (docker) still required for quality claim close-out.</li>
 </ol>
 <h2 id="5-non-goals">5. Non-goals<a class="headerlink" href="#5-non-goals" title="Permanent link">&para;</a></h2>
 <ul>
-<li>HIR <code>while→for</code> sugar without this semantic fix.</li>
-<li>Binary/address special cases.</li>
-<li>Changing oracle timeouts to hide infinite loops.</li>
+<li>Printer-only patches.</li>
+<li>Function/address special cases.</li>
+<li>Changing oracle cases to hide wrong results.</li>
 </ul>
-<h2 id="6-next-implementation-step">6. Next implementation step<a class="headerlink" href="#6-next-implementation-step" title="Permanent link">&para;</a></h2>
-<p>Inspect MultiEqual / loop-carried materialize for EAX in the loop body LOAD path; ensure LOAD uses the phi binding that INT_ADD updates.</p>
+<h2 id="6-implementation-step">6. Implementation step<a class="headerlink" href="#6-implementation-step" title="Permanent link">&para;</a></h2>
+<p>Extend <code>call_result_is_observed</code> with a successor-block use-before-redef scan after the existing same-block scan.</p>
 
 
 
